@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -6,6 +7,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, platformColor } from '@/theme/tokens';
 import { ALL_LISTINGS } from '@/data/listings';
 import { platform } from '@/data/platforms';
+import { useApp } from '@/store';
+import { useI18n, tPrice } from '@/i18n';
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
@@ -15,14 +18,22 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(
 export default function Browser() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { t, locale } = useI18n();
+  const { trackOpen, findListing } = useApp();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const listing = ALL_LISTINGS.find((l) => l.id === Number(id));
+  // Prefer the live (Supabase-hydrated) catalog; fall back to the bundled seed.
+  const listing = findListing(Number(id)) ?? ALL_LISTINGS.find((l) => l.id === Number(id));
+
+  // Log the CPC click-through once per open. (PRD §13)
+  useEffect(() => {
+    if (listing) trackOpen(listing);
+  }, [listing?.id]);
 
   if (!listing) {
     return (
       <View style={[s.center, { paddingTop: insets.top }]}>
-        <Text>Listing not found.</Text>
-        <Pressable onPress={() => router.back()}><Text style={{ color: colors.primary, marginTop: 8 }}>Done</Text></Pressable>
+        <Text>{t('Listing not found.')}</Text>
+        <Pressable onPress={() => router.back()}><Text style={{ color: colors.primary, marginTop: 8 }}>{t('Done')}</Text></Pressable>
       </View>
     );
   }
@@ -32,12 +43,17 @@ export default function Browser() {
   const ref = 800000 + (listing.id % 1000 + 1) * 1374 + listing.city.length * 13;
   const path = `/${slug(listing.type)}-for-${listing.deal.toLowerCase()}/${slug(listing.city)}-${slug(listing.district)}/${ref}`;
   const baths = Math.max(1, listing.beds - 1);
+  // Verb phrasing differs by language: English keeps the source's "for rent" form; Arabic uses the
+  // localized verb that already carries its preposition.
+  const verb = locale === 'ar' ? t(listing.deal === 'Rent' ? 'to rent' : 'to buy') : listing.deal.toLowerCase();
+  const bedsStr = listing.beds > 0 ? t(' with {n} bedrooms', { n: listing.beds }) : '';
+  const roadStr = listing.road ? t(' on {road}', { road: t(listing.road) }) : '';
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {/* Safari-style chrome */}
       <View style={[s.urlBar, { paddingTop: insets.top + 6 }]}>
-        <Pressable onPress={() => router.back()}><Text style={s.done}>Done</Text></Pressable>
+        <Pressable onPress={() => router.back()}><Text style={s.done}>{t('Done')}</Text></Pressable>
         <View style={s.urlPill}>
           <Ionicons name="lock-closed" size={10} color={colors.body} />
           <Text style={s.domain} numberOfLines={1}>{plat.domain}</Text>
@@ -59,36 +75,37 @@ export default function Browser() {
         <View style={s.heroWrap}>
           <Image source={{ uri: listing.photo }} style={s.hero} contentFit="cover" transition={150} />
           <View style={[s.dealBadge]}>
-            <Text style={[s.dealText, { color }]}>For {listing.deal}</Text>
+            <Text style={[s.dealText, { color }]}>{t('For ' + listing.deal)}</Text>
           </View>
           <View style={s.countBadge}><Text style={s.countText}>1 / 12</Text></View>
         </View>
 
         <View style={{ padding: 16, gap: 12 }}>
-          <Text style={[s.price, { color }]}>{listing.price}</Text>
-          <Text style={s.title}>{listing.type} for {listing.deal.toLowerCase()} in {listing.district}</Text>
-          <Text style={s.loc}>{[listing.city, listing.district, listing.road].filter(Boolean).join(' · ')}</Text>
+          <Text style={[s.price, { color }]}>{tPrice(listing.price)}</Text>
+          <Text style={s.title}>{t('{type} for {verb} in {district}', { type: t(listing.type), verb, district: t(listing.district) })}</Text>
+          <Text style={s.loc}>{[t(listing.city), t(listing.district), listing.road].filter(Boolean).join(' · ')}</Text>
 
           <View style={s.specsGrid}>
-            <Spec k="Area" v={`${listing.area} m²`} />
-            {listing.beds > 0 && <Spec k="Beds" v={String(listing.beds)} />}
-            {listing.beds > 0 && <Spec k="Baths" v={String(baths)} />}
-            <Spec k="Type" v={listing.type} />
+            <Spec k={t('Area')} v={`${listing.area} ${t('m²')}`} />
+            {listing.beds > 0 && <Spec k={t('Beds')} v={String(listing.beds)} />}
+            {listing.beds > 0 && <Spec k={t('Baths')} v={String(baths)} />}
+            <Spec k={t('Type')} v={t(listing.type)} />
           </View>
 
-          <Text style={s.sec}>Description</Text>
+          <Text style={s.sec}>{t('Description')}</Text>
           <Text style={s.desc}>
-            {listing.type} available for {listing.deal.toLowerCase()} in {listing.district}, {listing.city}. Spanning {listing.area} m²
-            {listing.beds > 0 ? ` with ${listing.beds} bedrooms` : ''}, this property offers a prime location
-            {listing.road ? ` on ${listing.road}` : ''} with easy access to schools, mosques and main roads. Listed directly on {listing.source}. Contact the advertiser for viewing and full details.
+            {t(
+              '{type} available for {verb} in {district}, {city}. Spanning {area} m²{beds}, this property offers a prime location{road} with easy access to schools, mosques and main roads. Listed directly on {source}. Contact the advertiser for viewing and full details.',
+              { type: t(listing.type), verb, district: t(listing.district), city: t(listing.city), area: listing.area, beds: bedsStr, road: roadStr, source: listing.source },
+            )}
           </Text>
 
-          <Text style={s.refLine}>Reference: EZ-{ref} · Listed {listing.listed} · via {listing.source}</Text>
+          <Text style={s.refLine}>{t('Reference: EZ-{ref} · Listed {listed} · via {source}', { ref, listed: t(listing.listed), source: listing.source })}</Text>
 
           {/* Third-party + neutrality disclaimer — a compliance control. (PRD §10.1) */}
           <View style={s.disclaimer}>
             <Text style={s.disclaimerText}>
-              Listing provided by {listing.source}. Ezhalah does not own or verify this listing — confirm all details directly with the source before any decision.
+              {t('Listing provided by {source}. Ezhalah does not own or verify this listing — confirm all details directly with the source before any decision.', { source: listing.source })}
             </Text>
           </View>
         </View>
@@ -98,11 +115,11 @@ export default function Browser() {
       <View style={[s.foot, { paddingBottom: insets.bottom + 8 }]}>
         <Pressable style={[s.action, { backgroundColor: color }]}>
           <Ionicons name="call" size={16} color="#fff" />
-          <Text style={s.actionText}>Call</Text>
+          <Text style={s.actionText}>{t('Call')}</Text>
         </Pressable>
         <Pressable style={[s.action, { backgroundColor: colors.whatsApp }]}>
           <Ionicons name="logo-whatsapp" size={16} color="#fff" />
-          <Text style={s.actionText}>WhatsApp</Text>
+          <Text style={s.actionText}>{t('WhatsApp')}</Text>
         </Pressable>
       </View>
     </View>
