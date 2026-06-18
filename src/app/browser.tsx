@@ -1,16 +1,13 @@
 import { useEffect } from 'react';
-import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
+import { Linking, Platform, StyleSheet, Text, View, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { colors, radius, platformColor } from '@/theme/tokens';
+import { colors, radius } from '@/theme/tokens';
 import { ALL_LISTINGS } from '@/data/listings';
 import { platform } from '@/data/platforms';
 import { useApp } from '@/store';
-import { useI18n, tPrice } from '@/i18n';
-
-const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+import { useI18n } from '@/i18n';
 
 // Full-screen mock of the source platform's listing page. Every tap routes a qualified visitor
 // out to the partner — Ezhalah never intermediates. (PRD §5.5, §1) Production: a real WebView to
@@ -18,7 +15,7 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(
 export default function Browser() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const { trackOpen, findListing } = useApp();
   const { id } = useLocalSearchParams<{ id: string }>();
   // Prefer the live (Supabase-hydrated) catalog; fall back to the bundled seed.
@@ -39,89 +36,103 @@ export default function Browser() {
   }
 
   const plat = platform(listing.source);
-  const color = platformColor(listing.source);
-  const ref = 800000 + (listing.id % 1000 + 1) * 1374 + listing.city.length * 13;
-  const path = `/${slug(listing.type)}-for-${listing.deal.toLowerCase()}/${slug(listing.city)}-${slug(listing.district)}/${ref}`;
-  const baths = Math.max(1, listing.beds - 1);
-  // Verb phrasing differs by language: English keeps the source's "for rent" form; Arabic uses the
-  // localized verb that already carries its preposition.
-  const verb = locale === 'ar' ? t(listing.deal === 'Rent' ? 'to rent' : 'to buy') : listing.deal.toLowerCase();
-  const bedsStr = listing.beds > 0 ? t(' with {n} bedrooms', { n: listing.beds }) : '';
-  const roadStr = listing.road ? t(' on {road}', { road: t(listing.road) }) : '';
+  const sourceUrl = listing.source_url;
+  // For real listings we render an in-app iframe of the partner page so the user never
+  // leaves Ezhalah. Native (iOS/Android) doesn't have an HTML iframe — we hand off to the
+  // system browser there via Linking. (user request: open inside our app, not Safari.)
+  const inAppIframe = !!sourceUrl && Platform.OS === 'web';
 
+  // Pretty URL pill (kept for native fallback only — the web iframe view drops the URL bar
+  // entirely so the user sees a clean modal of the partner page).
+  const displayUrl = sourceUrl ? sourceUrl.replace(/^https?:\/\//, '').slice(0, 80) : plat.domain;
+
+  // WEB: the listing opens as a CARD floating over the app — dim backdrop, rounded modal,
+  // small floating close button at top-right. The app's UI stays visible behind it. The
+  // modal itself is wide enough that Aqar serves its desktop layout (no phone zoom). (user
+  // request: keep the app background visible; no URL bar; not zoomed-in.)
+  if (inAppIframe) {
+    return (
+      <>
+        {/* Dimmed backdrop over the app — tapping it closes the modal. */}
+        {(() => {
+          const D: any = 'div';
+          return (
+            <D
+              onClick={() => router.back()}
+              style={{ position: 'fixed', inset: 0, background: 'rgba(8,18,12,0.55)', zIndex: 9998 }}
+            />
+          );
+        })()}
+        {/* Centered modal card */}
+        {(() => {
+          const Card: any = 'div';
+          const Frame: any = 'iframe';
+          return (
+            <Card
+              style={{
+                position: 'fixed',
+                top: '4%', left: '4%', right: '4%', bottom: '4%',
+                background: '#fff', borderRadius: 18, overflow: 'hidden',
+                boxShadow: '0 18px 50px rgba(8,18,12,0.35)',
+                zIndex: 9999, display: 'flex', flexDirection: 'column',
+              }}
+            >
+              {/* Floating close button — sits OVER the iframe content in the corner. */}
+              <Pressable
+                onPress={() => router.back()}
+                style={({ hovered }: any) => ({
+                  position: 'absolute' as any, top: 12, right: 12, zIndex: 10,
+                  width: 32, height: 32, borderRadius: 16,
+                  alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: hovered ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.92)',
+                  borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)',
+                })}
+              >
+                <Ionicons name="close" size={18} color={colors.ink} />
+              </Pressable>
+              <Frame
+                src={sourceUrl}
+                style={{ flex: 1, width: '100%', height: '100%', border: 0, background: '#fff' }}
+              />
+            </Card>
+          );
+        })()}
+      </>
+    );
+  }
+
+  // Native fallback (iOS/Android, no HTML iframe): tap-to-open hand-off card.
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      {/* Safari-style chrome */}
       <View style={[s.urlBar, { paddingTop: insets.top + 6 }]}>
         <Pressable onPress={() => router.back()}><Text style={s.done}>{t('Done')}</Text></Pressable>
         <View style={s.urlPill}>
           <Ionicons name="lock-closed" size={10} color={colors.body} />
-          <Text style={s.domain} numberOfLines={1}>{plat.domain}</Text>
+          <Text style={s.domain} numberOfLines={1}>{displayUrl}</Text>
         </View>
-        <Ionicons name="reload" size={16} color={colors.muted} />
+        {sourceUrl ? (
+          <Pressable onPress={() => Linking.openURL(sourceUrl)} hitSlop={8}>
+            <Ionicons name="open-outline" size={18} color={colors.muted} />
+          </Pressable>
+        ) : (
+          <Ionicons name="reload" size={16} color={colors.muted} />
+        )}
       </View>
-      <Text style={s.path} numberOfLines={1}>{path}</Text>
-
-      <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
-        {/* Partner header */}
-        <View style={[s.phead, { backgroundColor: color }]}>
-          <Text style={s.brand}>{plat.brand}</Text>
-          <View style={{ gap: 3 }}>
-            {[0, 1, 2].map((i) => <View key={i} style={s.burger} />)}
-          </View>
+      {sourceUrl ? (
+        <View style={[s.center, { paddingHorizontal: 24 }]}>
+          <Ionicons name="open-outline" size={36} color={colors.primary} style={{ marginBottom: 10 }} />
+          <Text style={s.title}>{t('Open this listing')}</Text>
+          <Text style={[s.desc, { textAlign: 'center', marginTop: 6 }]} numberOfLines={3}>{displayUrl}</Text>
+          <Pressable onPress={() => Linking.openURL(sourceUrl)} style={[s.action, { backgroundColor: colors.primary, marginTop: 16 }]}>
+            <Ionicons name="arrow-forward" size={16} color="#fff" />
+            <Text style={s.actionText}>{t('Open listing')}</Text>
+          </Pressable>
         </View>
-
-        {/* Hero */}
-        <View style={s.heroWrap}>
-          <Image source={{ uri: listing.photo }} style={s.hero} contentFit="cover" transition={150} />
-          <View style={[s.dealBadge]}>
-            <Text style={[s.dealText, { color }]}>{t('For ' + listing.deal)}</Text>
-          </View>
-          <View style={s.countBadge}><Text style={s.countText}>1 / 12</Text></View>
+      ) : (
+        <View style={[s.center, { paddingHorizontal: 24 }]}>
+          <Text>{t('Listing not found.')}</Text>
         </View>
-
-        <View style={{ padding: 16, gap: 12 }}>
-          <Text style={[s.price, { color }]}>{tPrice(listing.price)}</Text>
-          <Text style={s.title}>{t('{type} for {verb} in {district}', { type: t(listing.type), verb, district: t(listing.district) })}</Text>
-          <Text style={s.loc}>{[t(listing.city), t(listing.district), listing.road].filter(Boolean).join(' · ')}</Text>
-
-          <View style={s.specsGrid}>
-            <Spec k={t('Area')} v={`${listing.area} ${t('m²')}`} />
-            {listing.beds > 0 && <Spec k={t('Beds')} v={String(listing.beds)} />}
-            {listing.beds > 0 && <Spec k={t('Baths')} v={String(baths)} />}
-            <Spec k={t('Type')} v={t(listing.type)} />
-          </View>
-
-          <Text style={s.sec}>{t('Description')}</Text>
-          <Text style={s.desc}>
-            {t(
-              '{type} available for {verb} in {district}, {city}. Spanning {area} m²{beds}, this property offers a prime location{road} with easy access to schools, mosques and main roads. Listed directly on {source}. Contact the advertiser for viewing and full details.',
-              { type: t(listing.type), verb, district: t(listing.district), city: t(listing.city), area: listing.area, beds: bedsStr, road: roadStr, source: listing.source },
-            )}
-          </Text>
-
-          <Text style={s.refLine}>{t('Reference: EZ-{ref} · Listed {listed} · via {source}', { ref, listed: t(listing.listed), source: listing.source })}</Text>
-
-          {/* Third-party + neutrality disclaimer — a compliance control. (PRD §10.1) */}
-          <View style={s.disclaimer}>
-            <Text style={s.disclaimerText}>
-              {t('Listing provided by {source}. Ezhalah does not own or verify this listing — confirm all details directly with the source before any decision.', { source: listing.source })}
-            </Text>
-          </View>
-        </View>
-      </ScrollView>
-
-      {/* Contact actions — route to the partner, no intermediation */}
-      <View style={[s.foot, { paddingBottom: insets.bottom + 8 }]}>
-        <Pressable style={[s.action, { backgroundColor: color }]}>
-          <Ionicons name="call" size={16} color="#fff" />
-          <Text style={s.actionText}>{t('Call')}</Text>
-        </Pressable>
-        <Pressable style={[s.action, { backgroundColor: colors.whatsApp }]}>
-          <Ionicons name="logo-whatsapp" size={16} color="#fff" />
-          <Text style={s.actionText}>{t('WhatsApp')}</Text>
-        </Pressable>
-      </View>
+      )}
     </View>
   );
 }

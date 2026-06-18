@@ -1,6 +1,9 @@
 import type { Category, Deal } from './taxonomy';
+import type { LocationResolution } from './locations';
+import { detailFor, priceBandRange } from './taxonomy';
 import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
 import { supports } from './platforms';
+import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale } from '@/i18n';
 
 // A parsed search. Every field optional — empty fields broaden, never dead-end. (PRD §6.1)
 export type SearchQuery = {
@@ -10,20 +13,354 @@ export type SearchQuery = {
   type: string | null;
   detail: string | null; // bedrooms value or size band
   priceInput: string; // raw digits
+  priceBand: string | null; // selected preset price band ("SAR 75k–150k"); overrides priceInput
+  // When the AI agent searches without knowing rent vs buy (it already used its question), it shows
+  // BOTH — the deal filter is skipped and the summary reads "Rent or Buy". (user request.)
+  bothDeals?: boolean;
+  // The agent already converted a daily/weekly/monthly/quarterly rent the user stated INTO an annual
+  // figure (rent is always compared annually). When set, priceInput is the ANNUAL cap — the client
+  // must NOT re-apply its monthly-magnitude ×12 guess. (user request.)
+  priceIsAnnual?: boolean;
+  // Filter-side rent period the user picked: 'monthly' or 'annual'. Drives the budget-field label
+  // ("Monthly Rent Budget" vs "Yearly Rent Budget") and tells the search engine whether the typed
+  // number is a monthly figure (×12 for the annual compare) or already a yearly one. Buy ignores
+  // this. Default 'annual'. (user request: Filter rent toggle, no calculator on the user's side.)
+  rentPeriod?: 'monthly' | 'annual';
+  // What the filter's AI-assisted location resolver understood from a free-typed location (district /
+  // city / area nickname / landmark / geography). Drives the Search Summary's location lines so the
+  // user sees exactly what Ezhalah matched. Absent on the agent path (Gemini resolves there). (user request.)
+  locationMatch?: LocationResolution;
+  // The user's ORIGINAL foreign-currency budget, e.g. "USD 100,000" — shown alongside the SAR figure
+  // in the Budget line for transparency ("USD 100,000 (≈ SAR 375,000)"). Empty when SAR. (user request.)
+  priceOriginal?: string;
+  // An OBJECTIVE order the user explicitly asked for (e.g. "cheapest first", "biggest", "newest").
+  // Absent → default freshness ranking. Strictly factual sorts only — never "best"/"popular" (that
+  // would breach non-advisory neutrality). (user training decision.)
+  sort?: SortKey;
+  // How many listings the user explicitly asked to see (1–25). Absent → the default grid.
+  // Drives how many cards the chat reveals up front. (user training decision.)
+  count?: number;
 };
 
+// The objective sort keys the agent/UI may request. NEVER a quality/popularity ordering.
+export type SortKey =
+  | 'newest' | 'oldest'
+  | 'price_asc' | 'price_desc'
+  | 'area_asc' | 'area_desc'
+  | 'ppm_asc' | 'ppm_desc'
+  | 'beds_desc';
+
+// Defaults are Rent + Residential so a bare Search (nothing else chosen) returns residential
+// rentals nationwide — the filter only narrows from there, it's never required. (PRD §6.1)
 export const emptyQuery = (): SearchQuery => ({
   deal: 'Rent',
   location: '',
-  category: null,
+  category: 'Residential',
   type: null,
   detail: null,
   priceInput: '',
+  priceBand: null,
+  rentPeriod: 'annual',
 });
 
 export const locationPhrase = (q: SearchQuery) => q.location.trim() || 'Saudi Arabia';
+const placeText = (q: SearchQuery) => (q.location.trim() ? tPlace(q.location.trim()) : t('Saudi Arabia'));
+const verbText = (q: SearchQuery) => t(q.bothDeals ? 'to rent or buy' : q.deal === 'Rent' ? 'to rent' : 'to buy');
+const whatText = (q: SearchQuery) => tWord(q.type ?? q.category ?? 'Property');
+
+// A short human label for a query, used in search history. "Villa to rent in Riyadh", etc.
+export function queryLabel(q: SearchQuery): string {
+  return t('{what} {verb} in {place}', { what: whatText(q), verb: verbText(q), place: placeText(q) });
+}
+
+// The "show your work" budget note: how a typed amount was interpreted. A small Rent figure is read
+// as a MONTHLY rent and multiplied ×12 to a yearly cap; a small Buy figure is read as a price PER m²
+// and multiplied by the chosen size to a total. Returns '' when there's no usable amount. Used by
+// both the filter subheading and the AI-agent chat reply so every path explains the math the same
+// way and always presents the ANNUAL rent / TOTAL price. (PRD §6.2)
+export function priceCalcNote(q: SearchQuery): string {
+  if (q.priceBand) return '';
+  const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10) || 0;
+  if (!amount) return '';
+  const sar = t('SAR');
+  const sizeNum = fixedSize(q);
+  if (q.deal === 'Rent') {
+    if (amount < 200) return '';
+    // The agent already annualized a stated period (day/week/month/quarter) → treat as annual.
+    if (!q.priceIsAnnual && amount <= 25_000) {
+      return t("You entered {a}/month × 12 = {b}/year, so I'm searching up to {b}. ", { a: `${sar} ${grouped(amount)}`, b: `${sar} ${grouped(amount * 12)}` });
+    }
+    return t("I'm searching up to {a}/year. ", { a: `${sar} ${grouped(amount)}` });
+  }
+  if (amount < 100) return '';
+  if (amount <= 50_000) {
+    // A small Buy figure reads as a price PER m². With a known fixed size we multiply to a single
+    // total and show the math; otherwise we match each listing against its OWN area (a villa with
+    // 5+ bedrooms gives no area to multiply, so we compare per-listing instead). (PRD §6.2)
+    return sizeNum
+      ? t("You entered {a}/m² × {size} m² = {total}, so I'm searching up to {total}. ", { a: `${sar} ${grouped(amount)}`, size: sizeNum, total: `${sar} ${grouped(amount * sizeNum)}` })
+      : t("You entered {a}/m², so for each listing I do {a}/m² × its area and keep the ones within budget. ", { a: `${sar} ${grouped(amount)}` });
+  }
+  return t("I'm searching up to {a}. ", { a: `${sar} ${grouped(amount)}` });
+}
+
+// The fixed area (m²) to multiply a per-m² Buy price by — ONLY when the chosen detail is an exact,
+// free-typed size. A size band ("300–600 m²") or a bedroom count ("5+") is NOT a single area, so we
+// return 0 and let the search compare each listing against its own area instead. This is what keeps
+// "villa with 5+ bedrooms at SAR 1,000/m²" from misreading 5 bedrooms as 5 m². (PRD §6.2)
+function fixedSize(q: SearchQuery): number {
+  if (!q.detail) return 0;
+  if (q.type && detailFor(q.type).isBedrooms) return 0; // detail is bedrooms, not an area
+  const clean = q.detail.replace(/,/g, '');
+  return /^\d+$/.test(clean) ? parseInt(clean, 10) || 0 : 0;
+}
+
+// Filter search → Ezhalah chat. Builds the natural-language user bubble + the result subheading,
+// mirroring the prototype's runFilterSearch (ezhalah-mobile.jsx §runFilterSearch). Results render
+// inline in the chat — there is no separate results page. The price echo shows the math (e.g.
+// monthly → annual) so the user sees how the budget was interpreted (PRD §6.2).
+export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
+  const verb = verbText(q);
+  const place = placeText(q);
+  const hasCity = !!q.location.trim();
+  const sar = t('SAR');
+
+  const whatPhrase = q.type
+    ? tWord(q.type)
+    : q.category
+      ? t('{cat} property', { cat: tWord(q.category) })
+      : t('a property');
+
+  let detailPhrase = '';
+  if (q.detail && q.type) {
+    if (detailFor(q.type).isBedrooms) {
+      detailPhrase = t(q.detail === '1' ? ' with {n} bedroom' : ' with {n} bedrooms', { n: q.detail });
+    } else if (/m²/.test(q.detail)) {
+      // A size band already carries the unit ("100–300 m²") — localize it, don't append m² again.
+      detailPhrase = t(' around {n}', { n: tDetailOption(q.detail) });
+    } else {
+      // A free-typed exact size (digits only) — add the unit.
+      detailPhrase = t(' around {n} m²', { n: q.detail });
+    }
+  }
+
+  const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10) || 0;
+  let pricePhrase = '';
+  let tooLow = false;
+  let tooLowAmount = '';
+  if (q.priceBand) {
+    // A preset price band is its own complete phrase — no monthly→annual / per-m² math.
+    pricePhrase = t(' for {a}', { a: tPriceTab(q.priceBand) });
+  } else if (amount) {
+    if (q.deal === 'Rent') {
+      if (amount < 200 && !q.priceIsAnnual) {
+        tooLow = true;
+        tooLowAmount = t('{a}/month', { a: `${sar} ${grouped(amount)}` });
+      } else if (!q.priceIsAnnual && amount <= 25_000) {
+        pricePhrase = t(' for {a}/month', { a: `${sar} ${grouped(amount)}` });
+      } else {
+        pricePhrase = t(' for up to {a}/year', { a: `${sar} ${grouped(amount)}` });
+      }
+    } else {
+      if (amount < 100) {
+        tooLow = true;
+        tooLowAmount = `${sar} ${grouped(amount)}`;
+      } else if (amount <= 50_000) {
+        pricePhrase = t(' at {a}/m²', { a: `${sar} ${grouped(amount)}` });
+      } else {
+        pricePhrase = t(' for up to {a}', { a: `${sar} ${grouped(amount)}` });
+      }
+    }
+  }
+  // The "show the math" note (monthly→annual, per-m²×size→total). Shared with the AI-agent chat path
+  // so a free-text budget gets the same explanation a filter search does. (PRD §6.2)
+  const calcNote = tooLow ? '' : priceCalcNote(q);
+
+  const bubble = t("I'm looking for {what}{detail} {verb} in {place}{price}", {
+    what: whatPhrase,
+    detail: detailPhrase,
+    verb,
+    place,
+    price: tooLow ? '' : pricePhrase,
+  });
+
+  const subWhat = q.type
+    ? tWord(q.type)
+    : q.category
+      ? t('{cat} properties', { cat: tWord(q.category) })
+      : t('properties');
+  const subPlace = hasCity ? t('in {place}', { place }) : t('across Saudi Arabia');
+  const sub = tooLow
+    ? t("I couldn't find anything at {amount}, but here are some similar to what you're looking for:", { amount: tooLowAmount })
+    : t('{calc}Here are {what} {verb} {place} that match what you’re looking for.', { calc: calcNote, what: subWhat, verb, place: subPlace });
+
+  return { bubble, sub };
+}
 
 export const grouped = (n: number) => n.toLocaleString('en-US');
+
+// Price Intelligence for the Search Summary panel: render the budget the SAME way the engine actually
+// filters (priceFilter), but spell out the math so the user can verify it before results. Filter Mode
+// never blindly trusts the typed number — a small Rent figure is read as MONTHLY rent and shown with
+// its annual equivalent (×12); a small Buy figure is read as a price PER m² and, when an exact size is
+// known, multiplied to a calculated total. An explicit annual (agent-converted) or a preset band is
+// shown verbatim. Returns the bullet text(s) WITHOUT the leading "• ". (user spec: Filter Price Intelligence.)
+function budgetLines(q: SearchQuery): string[] {
+  const sar = t('SAR');
+  // If the user gave a foreign currency, lead with their original figure so both are visible:
+  // "Your budget: USD 100,000" then the SAR line(s) used for the actual search. (user request.)
+  const orig = q.priceOriginal ? [`${t('Your budget')}: ${q.priceOriginal}`] : [];
+  if (q.priceBand) return [...orig, `${t('Budget')}: ${tPriceTab(q.priceBand)}`];
+  const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10) || 0;
+  if (!amount) return orig;
+
+  if (q.deal === 'Rent') {
+    if (amount < 200 && !q.priceIsAnnual) return orig; // unrealistic — engine broadens, nothing to show
+    const yearly = `${t('Budget')}: ${t('{a}/year', { a: `${sar} ${grouped(amount)}` })}`;
+    // Agent already annualized, or the figure is too large to be a monthly rent → show it as annual.
+    if (q.priceIsAnnual || amount > 25_000) return [...orig, yearly];
+    // Otherwise read it as a monthly rent and show the ×12 annual equivalent (most platforms store annual).
+    return [
+      ...orig,
+      `${t('Monthly Rent')}: ${t('{a}/month', { a: `${sar} ${grouped(amount)}` })}`,
+      `${t('Annual Equivalent')}: ${t('{a}/year', { a: `${sar} ${grouped(amount * 12)}` })}`,
+    ];
+  }
+
+  // Buy
+  if (amount < 100) return orig; // unrealistic
+  if (amount <= 50_000) {
+    // A small Buy figure is a price PER m². With a known exact size we multiply to a calculated total
+    // (the existing Size line above already states the area, so we don't repeat it here).
+    const size = fixedSize(q);
+    if (size > 0) {
+      return [
+        ...orig,
+        `${t('Price Per m²')}: ${sar} ${grouped(amount)}`,
+        `${t('Calculated Total')}: ${sar} ${grouped(amount * size)}`,
+      ];
+    }
+    return [...orig, `${t('Price Per m²')}: ${t('{a}/m²', { a: `${sar} ${grouped(amount)}` })}`];
+  }
+  return [...orig, `${t('Budget')}: ${sar} ${grouped(amount)}`];
+}
+
+// The location line(s) for the Search Summary. When the filter's AI resolver understood a free-typed
+// location, spell out the match so the user sees exactly what Ezhalah picked — a corrected spelling
+// ("Al Malka" → Al Malqa), the districts an area nickname covers ("North Riyadh" → …), or a landmark
+// and its nearby districts/cities ("Near KFUPM" → Dhahran / Khobar / Dammam). Falls back to the plain
+// City line when there's no resolution. Returns bullet text WITHOUT the leading "• ". (user request.)
+function locationLines(q: SearchQuery): string[] {
+  const lm = q.locationMatch;
+  if (!lm || lm.kind === 'none') {
+    return q.location.trim() ? [`${t('City')}: ${tPlace(q.location.trim())}`] : [];
+  }
+  const join = (xs: string[]) => xs.join(getLocale() === 'ar' ? '، ' : ', ');
+  const cityLabel = lm.city ? tPlace(lm.city) : '';
+  // Reassure the user when we corrected a typo'd place name.
+  const simp = (s: string) => s.toLowerCase().replace(/[^a-zء-ي]/gu, '');
+  const out: string[] = [];
+  if ((lm.kind === 'district' || lm.kind === 'city') && simp(lm.raw) && simp(lm.raw) !== simp(lm.label)) {
+    out.push(`${t('You typed')}: ${lm.raw}`);
+  }
+  switch (lm.kind) {
+    case 'city':
+      out.push(`${t('City')}: ${tPlace(lm.label)}`);
+      break;
+    case 'region':
+      out.push(`${t('Region')}: ${lm.label}`);
+      break;
+    case 'district':
+      if (cityLabel) out.push(`${t('City')}: ${cityLabel}`);
+      out.push(`${t('Neighborhood')}: ${lm.label}`);
+      break;
+    case 'area':
+      // The nickname phrase ("North Riyadh") is already echoed in the request bubble; here we show the
+      // city it maps to and the districts it covers.
+      if (cityLabel) out.push(`${t('City')}: ${cityLabel}`);
+      if (lm.districts.length) out.push(`${t('Districts')}: ${join(lm.districts)}`);
+      break;
+    case 'landmark':
+      out.push(`${t('Landmark')}: ${lm.landmark ?? lm.label}`);
+      if (lm.districts.length) out.push(`${t('Nearby Districts')}: ${join(lm.districts)}`);
+      if (lm.cities.length) out.push(`${t('Nearby Cities')}: ${join(lm.cities.map((c) => tPlace(c)))}`);
+      else if (cityLabel) out.push(`${t('City')}: ${cityLabel}`);
+      break;
+    case 'geography':
+    case 'lifestyle':
+      if (cityLabel) out.push(`${t('City')}: ${cityLabel}`);
+      if (lm.districts.length) out.push(`${t('Districts')}: ${join(lm.districts)}`);
+      break;
+  }
+  return out;
+}
+
+// Structured "Search Summary" panel shown right before the search runs, so the user sees EXACTLY what
+// Ezhalah understood and can spot a mistake before results (user spec: Search Understanding Panel).
+// Only fields that were actually identified are included. District / lifestyle / landmark / property-age
+// aren't captured in the query yet (they need the richer scraped listing schema), so they're omitted.
+export function searchSummary(q: SearchQuery): string {
+  const lines: string[] = [];
+  // English keeps the canonical capitalized type ("Villa", "Rest House"); Arabic uses the translation.
+  // If the user didn't pick a SPECIFIC type, fall back to the CATEGORY they have selected (Residential/
+  // Commercial — always one or the other), so a default-button "Search" still shows what they chose.
+  // (user request: "if user just clicks search by default, it shows what the button clicked at.")
+  if (q.type) lines.push(`• ${t('Property Type')}: ${getLocale() === 'ar' ? tWord(q.type) : q.type}`);
+  else if (q.category) lines.push(`• ${t('Property Type')}: ${t(q.category)}`);
+  lines.push(`• ${t('Transaction Type')}: ${q.bothDeals ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}`);
+  // Always show a location line. If nothing was typed/inferred, the search covers the whole Kingdom,
+  // so the summary says "City: Saudi Arabia". (user request: empty region → Saudi Arabia.)
+  const locLines = locationLines(q);
+  if (locLines.length) for (const l of locLines) lines.push(`• ${l}`);
+  else lines.push(`• ${t('City')}: ${t('Saudi Arabia')}`);
+  for (const b of budgetLines(q)) lines.push(`• ${b}`);
+  if (q.detail) {
+    // Label by VALUE, not by type: a home's detail may be a BEDROOM count OR a SIZE (the user's
+    // choice). A bedroom-shaped value (1–4 or "5+") → Bedrooms; a size band ("100–300 m²") or any
+    // larger number → Size. This keeps "house, 3 beds" → Bedrooms 3 and "house, 1500 m²" → Size 1500.
+    if (/m²/.test(q.detail)) lines.push(`• ${t('Size')}: ${tDetailOption(q.detail)}`);
+    else if (/^([1-4]|5\+?)$/.test(q.detail)) lines.push(`• ${t('Bedrooms')}: ${q.detail}`);
+    else lines.push(`• ${t('Size')}: ${q.detail} ${t('m²')}`);
+  }
+  return `${t('Search Summary')}\n${lines.join('\n')}`;
+}
+
+// A compact, dot-separated one-liner of what the user asked for — shown right before scraping as a
+// "Looking for: Villa · Rent · Riyadh · SAR 5,000 · 3 beds" confirmation. Empty fields are skipped so
+// a vague query stays short. Western digits throughout (PRD rule). (user request: short summary.)
+export function querySummaryLine(q: SearchQuery): string {
+  const parts: string[] = [];
+  if (q.type) parts.push(tWord(q.type));
+  else if (q.category) parts.push(tWord(q.category));
+  parts.push(t(q.deal === 'Rent' ? 'Rent' : 'Buy'));
+  if (q.location.trim()) parts.push(tPlace(q.location.trim()));
+  if (q.priceBand) {
+    parts.push(tPriceTab(q.priceBand));
+  } else {
+    const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10) || 0;
+    if (amount) parts.push(`${t('SAR')} ${grouped(amount)}`);
+  }
+  if (q.detail) {
+    if (/m²/.test(q.detail)) parts.push(tDetailOption(q.detail));
+    else if (/^([1-4]|5\+?)$/.test(q.detail)) parts.push(t('{n} beds', { n: q.detail }));
+    else parts.push(t('{n} m²', { n: q.detail }));
+  }
+  return parts.join(' · ');
+}
+
+// Numbers are always shown in Western/Latin digits (PRD rule), but the user may type the
+// amount in Arabic-Indic (٠-٩) or Persian (۰-۹) digits. Fold those onto 0-9, then keep only
+// the digits — so a price typed in either script normalizes to the same Latin value.
+export function toLatinDigits(input: string): string {
+  let out = '';
+  for (const ch of input) {
+    const code = ch.charCodeAt(0);
+    if (code >= 0x0660 && code <= 0x0669) out += String(code - 0x0660); // Arabic-Indic
+    else if (code >= 0x06f0 && code <= 0x06f9) out += String(code - 0x06f0); // Persian
+    else out += ch;
+  }
+  return (out.match(/\d/g) ?? []).join('');
+}
 
 // Magnitude-based price interpretation. (PRD §6.2) Returns null when no price entered.
 export type Price =
@@ -33,40 +370,47 @@ export type Price =
   | { kind: 'totalBuy'; echo: string }
   | { kind: 'unrealistic'; echo: string };
 
-export function interpretPrice(rawDigits: string, deal: Deal, sizeM2?: number): Price | null {
+export function interpretPrice(rawDigits: string, deal: Deal, sizeM2?: number, isAnnual?: boolean): Price | null {
   const digits = (rawDigits.match(/\d/g) ?? []).join('');
   if (!digits) return null;
   const amount = parseInt(digits, 10);
+  const sar = t('SAR');
   if (!amount || amount < 100) {
-    return { kind: 'unrealistic', echo: "I couldn't find anything at that price — but here are some similar." };
+    return { kind: 'unrealistic', echo: t("I couldn't find anything at that price — but here are some similar.") };
   }
   if (deal === 'Rent') {
-    if (amount <= 25_000) {
+    // The agent already annualized a stated period → it's an annual figure, no monthly guess.
+    if (!isAnnual && amount <= 25_000) {
       const annual = amount * 12;
-      return { kind: 'monthlyRent', echo: `SAR ${grouped(amount)}/mo → SAR ${grouped(annual)}/yr` };
+      return { kind: 'monthlyRent', echo: t('{a}/mo → {b}/yr', { a: `${sar} ${grouped(amount)}`, b: `${sar} ${grouped(annual)}` }) };
     }
-    return { kind: 'annualRent', echo: `SAR ${grouped(amount)}/yr` };
+    return { kind: 'annualRent', echo: t('{a}/yr', { a: `${sar} ${grouped(amount)}` }) };
   }
   // Buy
   if (amount <= 50_000) {
     const size = sizeM2 ?? 0;
     if (size > 0) {
-      return { kind: 'perMeterBuy', echo: `SAR ${grouped(amount)}/m² × ${size} m² → SAR ${grouped(amount * size)}` };
+      return { kind: 'perMeterBuy', echo: t('{a}/m² × {size} m² → {total}', { a: `${sar} ${grouped(amount)}`, size, total: `${sar} ${grouped(amount * size)}` }) };
     }
-    return { kind: 'perMeterBuy', echo: `SAR ${grouped(amount)}/m²` };
+    return { kind: 'perMeterBuy', echo: t('{a}/m²', { a: `${sar} ${grouped(amount)}` }) };
   }
-  return { kind: 'totalBuy', echo: `SAR ${grouped(amount)}` };
+  return { kind: 'totalBuy', echo: `${sar} ${grouped(amount)}` };
 }
 
-export type SearchResult = { heading: string; notes: string[]; listings: Listing[] };
+export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number };
 
 function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   const t = q.type?.toLowerCase();
   if (t) {
     if (t.includes('villa')) return pools.villa;
-    if (t.includes('apartment') || t === 'floor' || t === 'room') return pools.apartment;
+    if (t === 'room') return pools.room; // 1-bedroom, room-market priced — not apartment prices
+    if (t.includes('apartment') || t === 'floor') return pools.apartment;
     if (t.includes('land') || t === 'warehouse' || t === 'factory') return pools.land;
   }
+  // "Rent or Buy" (deal unknown) with no specific type → draw from BOTH the rent and buy mixes so the
+  // results can actually contain each (runSearch then keeps both). Otherwise the rent-only mix would
+  // never surface a Buy listing for a "Both" search. (bothDeals correctness.)
+  if (q.bothDeals) return [...pools.mixRent, ...pools.mixBuy];
   if (q.deal === 'Buy') {
     const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10);
     if (amount > 50_000 && amount <= 700_000) return pools.budget;
@@ -77,30 +421,189 @@ function pickPool(q: SearchQuery, pools: Pools): Listing[] {
 
 const RECENCY = Object.fromEntries(LISTED_SEQ.map((s, i) => [s, i])) as Record<string, number>;
 
+// Display prices are pre-formatted ("SAR 95,000/year", "SAR 2.9M") — pull out a comparable SAR value.
+function listingPriceValue(price: string): number {
+  const m = price.match(/([\d.,]+)\s*([MK]?)/i);
+  if (!m) return NaN;
+  const num = parseFloat(m[1].replace(/,/g, ''));
+  const suffix = m[2].toUpperCase();
+  if (suffix === 'M') return num * 1_000_000;
+  if (suffix === 'K') return num * 1_000;
+  return num;
+}
+
+// A predicate deciding whether a listing fits the query's budget — or null when there's no usable
+// price filter (broaden). Mirrors interpretPrice's magnitude logic and handles three Buy modes:
+//   • a fixed total ceiling (large Buy figure, or per-m² × a known exact size);
+//   • a per-m² price with NO fixed size → compare each listing by its OWN area (total ÷ area ≤ rate),
+//     which is what lets "villa at SAR 1,000/m²" filter correctly without an entered area;
+//   • Rent → annual ceiling (monthly ×12, or a large figure as-is). (PRD §6.2)
+function priceFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
+  if (q.priceBand) {
+    const r = priceBandRange(q.priceBand);
+    if (r) return (l) => withinValue(l.price, r.min, r.max);
+  }
+  const digits = (q.priceInput.match(/\d/g) ?? []).join('');
+  if (!digits) return null;
+  const amount = parseInt(digits, 10);
+  if (!amount || amount < 100) return null;
+  if (q.deal === 'Rent') {
+    // Don't assume a small figure is a MONTHLY rent (×12) when we're showing BOTH rent & buy — the
+    // same cap is applied to Buy listings too, so a rent×12 ceiling would wrongly exclude them.
+    // If the user explicitly picked the rent period in the Filter, USE IT — monthly → ×12, annual →
+    // as-is. Otherwise (AI agent path) fall back to the magnitude heuristic. (user request.)
+    const explicitMonthly = q.rentPeriod === 'monthly';
+    const explicitAnnual = q.rentPeriod === 'annual';
+    const cap = explicitMonthly ? amount * 12
+      : explicitAnnual ? amount
+      : (!q.priceIsAnnual && !q.bothDeals && amount <= 25_000 ? amount * 12 : amount);
+    return (l) => withinValue(l.price, 0, cap);
+  }
+  // Buy
+  if (amount <= 50_000) {
+    const size = fixedSize(q);
+    if (size > 0) return (l) => withinValue(l.price, 0, amount * size);
+    // per-m² with no fixed size → evaluate each listing against its own area
+    return (l) => {
+      const v = listingPriceValue(l.price);
+      return !Number.isNaN(v) && l.area > 0 && v / l.area <= amount;
+    };
+  }
+  return (l) => withinValue(l.price, 0, amount);
+}
+
+function withinValue(price: string, min: number, max: number): boolean {
+  const v = listingPriceValue(price);
+  return !Number.isNaN(v) && v >= min && v <= max;
+}
+
+// Parse a detail value into an area range in m² — or null when it's a bedroom count (not a size).
+// A size BAND ("Under 300 m²", "300–600 m²", "1,000+ m²") → its explicit range; a single exact size
+// ("200", "139 m²") → ±15% tolerance, since exact areas are rarely available. (user request: filter
+// by size, accept any unit, ±10–15% tolerance.)
+function parseSizeRange(detail: string): { min: number; max: number } | null {
+  const d = detail.replace(/,/g, '').trim();
+  if (/^([1-4]|5\+?)$/.test(d)) return null; // a bedroom count, not a size
+  const nums = (d.match(/\d+/g) ?? []).map((x) => parseInt(x, 10)).filter((n) => isFinite(n) && n > 0);
+  if (nums.length === 0) return null;
+  if (nums.length >= 2) return { min: Math.min(nums[0], nums[1]), max: Math.max(nums[0], nums[1]) };
+  const n = nums[0];
+  if (/under|less|below|أقل|أصغر|<|۰?دون/i.test(d)) return { min: 0, max: n };
+  if (/\+|plus|more|أكثر|فأكثر|>/i.test(d)) return { min: n, max: Infinity };
+  return { min: Math.round(n * 0.85), max: Math.round(n * 1.15) }; // exact size → ±15%
+}
+
+// Area predicate: keep listings whose size falls in the requested m² range. Null when there's no size
+// to filter on (bedroom count, or no detail). The user can give the size in any unit — the agent/app
+// converts to m² before it reaches here. (user request: area is a first-class filter.)
+function sizeFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
+  if (!q.detail) return null;
+  const r = parseSizeRange(q.detail);
+  if (!r) return null;
+  return (l) => l.area > 0 && l.area >= r.min && l.area <= r.max;
+}
+
 // "Ezhalah!" is reserved for when listings are shown. (PRD §7.3)
 function heading(q: SearchQuery): string {
-  const what = q.type ?? q.category ?? 'property';
-  const verb = q.deal === 'Rent' ? 'to rent' : 'to buy';
-  return `Ezhalah! Here are ${what.toLowerCase()}s ${verb} in ${locationPhrase(q)}.`;
+  return t('Ezhalah! Here are {what} listings {verb} in {place}.', {
+    what: whatText(q),
+    verb: verbText(q),
+    place: placeText(q),
+  });
 }
 
 function notes(q: SearchQuery): string[] {
   const out: string[] = [];
-  if (!q.location.trim()) out.push('Searching all of Saudi Arabia — add a city to narrow it down.');
-  if (!q.type && !q.category) out.push('Showing a mix of property types.');
-  const size = q.detail ? parseInt((q.detail.match(/\d/g) ?? []).join(''), 10) || undefined : undefined;
-  const p = interpretPrice(q.priceInput, q.deal, size);
-  if (p) out.push(p.kind === 'unrealistic' ? p.echo : `Price: ${p.echo}`);
+  if (!q.location.trim()) out.push(t('Searching all of Saudi Arabia — add a city to narrow it down.'));
+  if (!q.type && !q.category) out.push(t('Showing a mix of property types.'));
+  if (q.priceBand) {
+    out.push(t('Price: {echo}', { echo: tPriceTab(q.priceBand) }));
+    return out;
+  }
+  // Use the SAME fixed-size rule the price filter uses (fixedSize returns 0 for a bedroom count), so a
+  // "villa, 3 beds, SAR 1,000/m²" never misreads 3 bedrooms as 3 m² in the echoed math. (audit bug #1.)
+  const size = fixedSize(q) || undefined;
+  const p = interpretPrice(q.priceInput, q.deal, size, q.priceIsAnnual);
+  if (p) out.push(p.kind === 'unrealistic' ? p.echo : t('Price: {echo}', { echo: p.echo }));
   return out;
 }
 
-// Runs the search and enforces the hard rules: source eligibility per deal (Gathern never in Buy),
+// Runs the search and enforces the hard rules: source eligibility per deal (allowsRent/allowsBuy),
 // recency ranking, top 5. (PRD §5.5, §8.1, §11 guardrails)
+// A short, neutral note shown above results explaining the objective order applied. Pure fact,
+// no judgement words. Keys are i18n strings (translated by t()).
+const SORT_NOTE: Record<SortKey, string> = {
+  newest: 'Sorted by newest first.',
+  oldest: 'Sorted by oldest first.',
+  price_asc: 'Sorted by price, lowest first.',
+  price_desc: 'Sorted by price, highest first.',
+  area_asc: 'Sorted by area, smallest first.',
+  area_desc: 'Sorted by area, largest first.',
+  ppm_asc: 'Sorted by price per m², lowest first.',
+  ppm_desc: 'Sorted by price per m², highest first.',
+  beds_desc: 'Sorted by bedrooms, most first.',
+};
+
+// Digits-only value of a listing's display price ("SAR 1,200,000/yr" → 1200000). Used only for
+// OBJECTIVE sorting — never to judge a listing.
+const priceOf = (l: Listing): number => parseInt((l.price.match(/\d/g) ?? []).join(''), 10) || 0;
+
+// Re-order the (already filtered) listings by an OBJECTIVE key the user asked for. Returns a NEW
+// array; default freshness order is untouched when no sort is set. Strictly factual — there is no
+// "best"/"popular" branch, by design (non-advisory). (user training decision.)
+function sortListings(list: Listing[], sort: SortKey): Listing[] {
+  const out = [...list];
+  const recency = (l: Listing) => RECENCY[l.listed] ?? 99; // 0 = newest
+  const ppm = (l: Listing) => (l.area > 0 ? priceOf(l) / l.area : Infinity);
+  switch (sort) {
+    case 'newest':    out.sort((a, b) => recency(a) - recency(b)); break;
+    case 'oldest':    out.sort((a, b) => recency(b) - recency(a)); break;
+    case 'price_asc': out.sort((a, b) => priceOf(a) - priceOf(b)); break;
+    case 'price_desc':out.sort((a, b) => priceOf(b) - priceOf(a)); break;
+    case 'area_asc':  out.sort((a, b) => a.area - b.area); break;
+    case 'area_desc': out.sort((a, b) => b.area - a.area); break;
+    case 'ppm_asc':   out.sort((a, b) => ppm(a) - ppm(b)); break;
+    case 'ppm_desc':  out.sort((a, b) => ppm(b) - ppm(a)); break;
+    case 'beds_desc': out.sort((a, b) => b.beds - a.beds); break;
+  }
+  return out;
+}
+
 export function runSearch(q: SearchQuery, pools: Pools = POOLS): SearchResult {
-  const listings = pickPool(q, pools)
-    .filter((l) => l.deal === q.deal)
+  const eligible = pickPool(q, pools)
+    // bothDeals (agent searched without knowing rent/buy) → show BOTH; otherwise filter to the deal.
+    .filter((l) => q.bothDeals || l.deal === q.deal)
     .filter((l) => supports(l.source, q.deal))
-    .sort((a, b) => (RECENCY[a.listed] ?? 99) - (RECENCY[b.listed] ?? 99))
-    .slice(0, 5);
-  return { heading: heading(q), notes: notes(q), listings };
+    .sort((a, b) => (RECENCY[a.listed] ?? 99) - (RECENCY[b.listed] ?? 99));
+
+  const ns = notes(q);
+  let listings = eligible;
+  // Apply the price filter, but never dead-end: if nothing fits, show the closest options and say so.
+  const fits = priceFilter(q);
+  if (fits != null) {
+    const within = listings.filter(fits);
+    if (within.length > 0) listings = within;
+    else ns.push(t('Nothing within your budget right now — showing the closest options above it.'));
+  }
+  // Apply the size filter (area ±15% / band), also never dead-ending. (user request: filter by size.)
+  const sizeFits = sizeFilter(q);
+  if (sizeFits != null) {
+    const within = listings.filter(sizeFits);
+    if (within.length > 0) listings = within;
+    else ns.push(t('No exact size match — showing the closest sizes available.'));
+  }
+
+  // Re-order by the user's explicit OBJECTIVE sort, if any (else keep freshness order). Done AFTER
+  // filtering so the sort applies to the matches the user actually sees. (user training decision.)
+  let sortNote: string | undefined;
+  if (q.sort) {
+    listings = sortListings(listings, q.sort);
+    sortNote = t(SORT_NOTE[q.sort]);
+  }
+
+  // Return up to 15 matches (the requested-quantity cap): the chat shows the first `count` the user
+  // asked for (or the default 4-card 2×2 grid) and reveals the rest 4 at a time via "Show more", so
+  // additional listings are never blocked. (user training decision.)
+  const count = q.count && q.count >= 1 ? Math.min(q.count, 25) : undefined;
+  return { heading: heading(q), notes: ns, listings: listings.slice(0, 25), sortNote, count };
 }

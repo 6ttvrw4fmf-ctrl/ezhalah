@@ -6,6 +6,8 @@ export const colors = {
   dark: '#1d4a37', // dark green
   tint: '#eef6f0', // light-green tint
   tintFill: '#e9f4ec', // agent box fill
+  userBubble: '#d7eede', // user chat bubble — light green
+  userBubbleText: '#1d4a37', // user chat bubble text — dark green (legible on light green)
   tintLine: '#d8ebdd', // tint border
   ink: '#15201b', // primary text
   body: '#34403a', // body text
@@ -13,6 +15,12 @@ export const colors = {
   mutedBlue: '#6b7a86', // hero subtitle
   line: '#e2e8e4', // hairline
   fieldLine: '#e7ebe8', // field/card border
+  pickLine: '#dde6e0', // pick-box border (unselected)
+  chipFill: '#eef6f0', // start-here suggestion chip fill
+  chipLine: '#d6e8db', // start-here chip border
+  chipIcon: '#16432f', // chip icon glyph
+  exFill: '#1d4a37', // ai-empty example chip fill (dark green)
+  exIcon: '#79c79c', // ai-empty example chip icon
   paper: '#fbfbfa', // screen background
   surface: '#ffffff', // cards / sheets
   segTrack: '#f1f3f1', // segmented-control track
@@ -26,7 +34,6 @@ export const colors = {
 export const platformColors: Record<string, string> = {
   Aqar: '#1f7a3d',
   Bayut: '#16a35a',
-  Gathern: '#e0533d',
   'Property Finder': '#ef5350',
   Wasalt: '#0f7b6c',
   Aldarim: '#8a5a2b',

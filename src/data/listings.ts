@@ -15,6 +15,34 @@ export type Listing = {
   source: string; // platform name
   listed: string; // human recency
   photo: string;
+  // Real URL on the source platform — when present, the in-app browser redirects the
+  // user OUT to this page. Absent for the bundled mock catalog (synthetic preview only).
+  source_url?: string;
+  // Rich extras for the new residential card design — all optional. Mock listings don't carry them;
+  // real Aqar listings populate them from the rich `aqar_residential_listings` table. (user request.)
+  ad_number?: string;
+  bathrooms?: number;
+  master_bedrooms?: number;
+  halls?: number;
+  photos?: string[];
+  rent_now_pay_later?: boolean;
+  rent_now_pay_later_monthly?: number | null;
+  features?: {
+    parking?: boolean;
+    elevator?: boolean;
+    kitchen?: boolean;
+    maid_room?: boolean;
+    master_bedrooms?: boolean;
+    halls?: boolean;
+    air_conditioner?: boolean;
+    water_supply?: boolean;
+    electricity?: boolean;
+    sanitation?: boolean;
+    private_entrance?: boolean;
+    optical_fibers?: boolean;
+    laundry_room?: boolean;
+    balcony_terrace?: boolean;
+  };
 };
 
 export const LISTED_SEQ = ['today', '2 days ago', '2 months ago', '8 months ago', '1 year ago'];
@@ -85,7 +113,7 @@ export const POOLS = {
     [
       ['Villa', 'Rent', 'Riyadh', 'Al Malqa', 'SAR 120,000/year', 320, 6, 'Bayut'],
       ['Apartment', 'Rent', 'Jeddah', 'Al Shati', 'SAR 55,000/year', 150, 3, 'Aqar'],
-      ['Chalet', 'Rent', 'Riyadh', 'Al Narjis', 'SAR 70,000/year', 200, 4, 'Gathern'],
+      ['Chalet', 'Rent', 'Riyadh', 'Al Narjis', 'SAR 70,000/year', 200, 4, 'Property Finder'],
       ['Apartment', 'Rent', 'Khobar', 'Al Olaya', 'SAR 48,000/year', 130, 2, 'Property Finder'],
       ['Villa', 'Rent', 'Riyadh', 'Hittin', 'SAR 140,000/year', 380, 6, 'Wasalt'],
     ],
@@ -105,6 +133,21 @@ export const POOLS = {
     ['https://images.unsplash.com/photo-1512917774080-9991f1c4c750', 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688', 'https://images.unsplash.com/photo-1416879595882-3373a0480b5b', 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6', 'https://images.unsplash.com/photo-1613490493576-7fde63acd811'],
     6000,
   ),
+  // A single room is, by definition, 1 bedroom — and priced at the real market rate for rooms
+  // (a furnished room runs far cheaper than a whole apartment, roughly SAR 12k–30k/year), NOT the
+  // apartment prices it used to inherit. Small areas, beds always 1. (user request.)
+  room: pool(
+    [
+      ['Room', 'Rent', 'Riyadh', 'Al Narjis', 'SAR 18,000/year', 24, 1, 'Aqar'],
+      ['Room', 'Rent', 'Riyadh', 'Al Malqa', 'SAR 24,000/year', 28, 1, 'Bayut'],
+      ['Room', 'Rent', 'Jeddah', 'Al Salamah', 'SAR 14,000/year', 20, 1, 'Property Finder'],
+      ['Room', 'Rent', 'Khobar', 'Al Olaya', 'SAR 16,000/year', 22, 1, 'Wasalt'],
+      ['Room', 'Rent', 'Riyadh', 'Al Sahafah', 'SAR 12,000/year', 16, 1, 'Aldarim'],
+    ],
+    ['King Salman Road', 'Prince Turki Al Awwal Road', 'Al Madinah Road', 'Prince Faisal Bin Fahd Road', 'As Sahafah Road'],
+    ['https://images.unsplash.com/photo-1505693416388-ac5ce068fe85', 'https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af', 'https://images.unsplash.com/photo-1560185007-cde436f6a4d0', 'https://images.unsplash.com/photo-1598928506311-c55ded91a20c', 'https://images.unsplash.com/photo-1505691938895-1758d7feb511'],
+    7000,
+  ),
 };
 
 export const ALL_LISTINGS: Listing[] = Object.values(POOLS).flat();
@@ -115,15 +158,44 @@ export type Pools = Record<PoolKey, Listing[]>;
 // The listing id encodes its pool (1xxx villa, 2xxx apartment, …) so a flat set fetched from the
 // backend regroups into the same curated pools the search logic expects.
 const POOL_BY_BASE: Record<number, PoolKey> = {
-  1: 'villa', 2: 'apartment', 3: 'land', 4: 'budget', 5: 'mixRent', 6: 'mixBuy',
+  1: 'villa', 2: 'apartment', 3: 'land', 4: 'budget', 5: 'mixRent', 6: 'mixBuy', 7: 'room',
 };
 
+// Bucket the freshly-fetched rows into the pools the search engine speaks. We now bucket
+// by the listing's own `type` field (real data from the scraper) instead of the old magic
+// id-encoded scheme — those id ranges only made sense for the curated mock catalogue.
+// Each row goes into multiple pools (per-type AND per-deal AND budget if cheap) so it's
+// discoverable however the engine searches.
 export function buildPools(rows: Listing[]): Pools {
-  const out: Pools = { villa: [], apartment: [], land: [], budget: [], mixRent: [], mixBuy: [] };
+  const out: Pools = { villa: [], apartment: [], land: [], budget: [], mixRent: [], mixBuy: [], room: [] };
+  const TYPE_TO_POOL: Record<string, PoolKey> = {
+    Villa: 'villa',
+    Apartment: 'apartment',
+    House: 'apartment',
+    Floor: 'apartment',
+    Building: 'apartment',
+    'Rest House': 'apartment',
+    Chalet: 'apartment',
+    Camp: 'apartment',
+    'Residential Land': 'land',
+    'Commercial Land': 'land',
+    Room: 'room',
+  };
+  // Crude "is this cheap?" heuristic — the search engine uses `budget` as its low-price bucket.
+  const BUDGET_THRESHOLD_SAR = 40_000;
+  const priceAmount = (p: string): number => parseInt((p.match(/\d/g) ?? []).join(''), 10) || 0;
   for (const l of rows) {
-    const key = POOL_BY_BASE[Math.floor(l.id / 1000)];
-    if (key) out[key].push(l);
+    const typePool = TYPE_TO_POOL[l.type];
+    if (typePool) out[typePool].push(l);
+    // Every listing also feeds the per-deal "mix" pool the engine pulls from.
+    if (l.deal === 'Rent') out.mixRent.push(l);
+    else out.mixBuy.push(l);
+    if (priceAmount(l.price) <= BUDGET_THRESHOLD_SAR && priceAmount(l.price) > 0) out.budget.push(l);
   }
-  for (const key of Object.keys(out) as PoolKey[]) out[key].sort((a, b) => a.id - b.id);
+  // No fake fallback: Ezhalah is a pure aggregator now — empty pools stay empty so the user
+  // sees "no exact matches" instead of stale mock listings. (user request: real listings only.)
+  for (const key of Object.keys(out) as PoolKey[]) {
+    out[key].sort((a, b) => b.id - a.id); // newest first
+  }
   return out;
 }

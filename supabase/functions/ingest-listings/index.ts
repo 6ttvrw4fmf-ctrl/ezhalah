@@ -11,7 +11,6 @@
 //
 // Hard rules enforced here (mirror the client guardrails):
 //   • `deal` is only ever 'Rent' | 'Buy' (DB check constraint).
-//   • Gathern is rent-only — never emitted into a Buy row.
 //   • `source` must be a known platform (FK → platforms.name).
 //
 // Auth: this is an admin endpoint. verify_jwt is disabled at deploy time and we
@@ -200,8 +199,6 @@ async function buildRows(): Promise<Row[]> {
   (Object.keys(pools) as PoolKey[]).forEach((key) => {
     pools[key].forEach((r, i) => {
       r.id = POOL_BASE[key] * 1000 + i;
-      // Hard guardrail: Gathern is rent-only (defensive — Bayut is both).
-      if (r.source === "Gathern" && r.deal === "Buy") return;
       rows.push(r);
     });
   });
