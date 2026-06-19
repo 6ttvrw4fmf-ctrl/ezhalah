@@ -14,7 +14,10 @@ Usage examples (from the ezhalah-app/ folder with the venv active):
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Make the scrapers/ folder importable when running with `python -m`.
@@ -27,28 +30,53 @@ from scrapers.aqar.enrich_residential import enrich_residential
 from scrapers.common import db
 
 
+# How many listing pages to enrich CONCURRENTLY. 6 workers + the 0.3s per-host start-spacing in
+# http.py gives ~3 listings/sec (~6–8× the old sequential 2s-per-listing pace). Dial with the
+# SCRAPE_WORKERS env var; pair a higher value with a smaller SCRAPE_MIN_INTERVAL to push harder, or
+# lower both if Aqar starts rate-limiting (429s).
+WORKERS = int(os.environ.get("SCRAPE_WORKERS", "6"))
+
+
 def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int, max_listings: int) -> tuple[int, int]:
-    print(f"\n── {type_key.upper():<10} {deal_key.upper():<4} {city_key.upper():<8} (pages≤{max_pages}, limit≤{max_listings})")
-    seen = 0
-    upserted = 0
+    print(f"\n── {type_key.upper():<10} {deal_key.upper():<4} {city_key.upper():<8} "
+          f"(pages≤{max_pages}, limit≤{max_listings}, workers={WORKERS})")
+    # Discovery is cheap (paginated search HTML) — collect the listing URLs first, then enrich them
+    # in parallel. Discover is a generator with its own throttle, so this part stays polite too.
     try:
-        for url in D.discover(type_key, deal_key, city_key, max_pages=max_pages, max_listings=max_listings):
-            seen += 1
-            row = enrich_residential(url, type_slug=type_key, deal_slug=deal_key)
-            if not row:
-                print(f"   [{seen}] ✗ skipped — {url[-50:]}")
-                continue
-            try:
-                db.upsert_aqar_residential(row)
-                upserted += 1
-                print(f"   [{seen}] ✓ ad_number={row['ad_number']} | {row.get('property_type')} | {row.get('city')} | "
-                      f"price_y={row.get('price_annual')} price_t={row.get('price_total')} "
-                      f"area={row.get('area_m2')}m² beds={row.get('bedrooms')}")
-            except Exception as e:
-                print(f"   [{seen}] ✗ upsert failed: {str(e)[:120]}")
+        urls = list(D.discover(type_key, deal_key, city_key, max_pages=max_pages, max_listings=max_listings))
     except KeyError:
         print(f"   (no Aqar slug for {type_key}/{deal_key} — skipping)")
-    return seen, upserted
+        return 0, 0
+
+    seen = len(urls)
+    counter = {"done": 0, "upserted": 0}
+    lock = threading.Lock()
+
+    def work(idx_url: tuple[int, str]) -> None:
+        i, url = idx_url
+        row = enrich_residential(url, type_slug=type_key, deal_slug=deal_key)
+        if not row:
+            with lock:
+                counter["done"] += 1
+                print(f"   [{counter['done']}/{seen}] ✗ skipped — {url[-50:]}")
+            return
+        try:
+            db.upsert_aqar_residential(row)
+            with lock:
+                counter["done"] += 1
+                counter["upserted"] += 1
+                print(f"   [{counter['done']}/{seen}] ✓ ad={row['ad_number']} | {row.get('property_type')} | "
+                      f"{row.get('city')} | price_y={row.get('price_annual')} price_t={row.get('price_total')} "
+                      f"area={row.get('area_m2')}m² beds={row.get('bedrooms')}")
+        except Exception as e:
+            with lock:
+                counter["done"] += 1
+                print(f"   [{counter['done']}/{seen}] ✗ upsert failed: {str(e)[:120]}")
+
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        list(pool.map(work, enumerate(urls)))
+
+    return seen, counter["upserted"]
 
 
 def main() -> int:

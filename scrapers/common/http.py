@@ -10,39 +10,47 @@ needing a real browser. We only reach for Playwright when even that fails.
 """
 from __future__ import annotations
 
+import os
 import random
+import threading
 import time
-from typing import Optional
 from urllib.parse import urlsplit
 
 from curl_cffi import requests as cc
 
 
-# Polite throttle: at most one request every MIN_INTERVAL seconds PER HOST. Avoids
-# hammering any one site even when many scrapers run in parallel.
-MIN_INTERVAL = 2.0  # seconds
+# Polite throttle: request STARTS are spaced at least MIN_INTERVAL seconds apart PER HOST. Unlike
+# the old "sleep 2s after each request" model, this only spaces the *starts*, so many workers can
+# have requests in flight at once — that's what lets the concurrent scraper run ~6–8× faster while
+# still not bursting the host. Override with SCRAPE_MIN_INTERVAL (e.g. 0.5 to be gentler, 0.2 to
+# push harder). Default 0.3s ≈ ~3 request-starts/sec.
+MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 _last_hit: dict[str, float] = {}
+_throttle_lock = threading.Lock()
 
 
 def _throttle(url: str) -> None:
     host = urlsplit(url).netloc
-    now = time.monotonic()
-    last = _last_hit.get(host, 0.0)
-    wait = (last + MIN_INTERVAL) - now
-    if wait > 0:
-        time.sleep(wait + random.uniform(0.0, 0.4))  # small jitter
-    _last_hit[host] = time.monotonic()
+    # Reserve the next time-slot under a lock so concurrent threads never collide on the same host.
+    with _throttle_lock:
+        now = time.monotonic()
+        target = max(now, _last_hit.get(host, 0.0) + MIN_INTERVAL)
+        _last_hit[host] = target
+    sleep_for = target - time.monotonic()
+    if sleep_for > 0:
+        time.sleep(sleep_for + random.uniform(0.0, 0.08))  # tiny jitter
 
 
-# Reuse a single curl_cffi session — keeps TLS state warm and is much faster.
-_session: Optional[cc.Session] = None
+# Each worker thread gets its OWN curl_cffi session — sessions aren't guaranteed thread-safe, so a
+# shared one would corrupt under concurrency. Thread-local keeps each warm + isolated.
+_local = threading.local()
 
 
 def session() -> cc.Session:
-    global _session
-    if _session is None:
-        _session = cc.Session(impersonate="chrome124")
-        _session.headers.update(
+    s = getattr(_local, "session", None)
+    if s is None:
+        s = cc.Session(impersonate="chrome124")
+        s.headers.update(
             {
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
@@ -50,7 +58,8 @@ def session() -> cc.Session:
                 "Cache-Control": "no-cache",
             }
         )
-    return _session
+        _local.session = s
+    return s
 
 
 def get(url: str, *, max_retries: int = 3, timeout: int = 25) -> Optional[cc.Response]:
