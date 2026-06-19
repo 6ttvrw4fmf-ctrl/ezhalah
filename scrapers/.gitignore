@@ -1,0 +1,14 @@
+# Python runtime artifacts and the local virtual env.
+.venv/
+__pycache__/
+*.pyc
+
+# Secrets — keep `.env` out of git. `.env.example` IS committed.
+.env
+
+# Playwright caches.
+.playwright/
+
+# Scraper outputs that we keep on disk during dev (raw HTML snapshots, etc.).
+out/
+*.log

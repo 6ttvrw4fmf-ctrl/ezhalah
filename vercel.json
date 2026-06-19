@@ -5,9 +5,6 @@
   "framework": null,
   "cleanUrls": true,
   "trailingSlash": false,
-  "rewrites": [
-    { "source": "/_next/:path*", "destination": "/api/proxy?asset=/_next/:path*" }
-  ],
   "headers": [
     {
       "source": "/((?!_expo/).*)",
