@@ -536,6 +536,7 @@ const AR: Record<string, string> = {
   'month':                             'شهر',
   'Features':                          'المميزات',
   'View on AQAR':                      'عرض على عقار',
+  'Open on AQAR':                      'افتح على عقار',
   'This listing is hosted on AQAR. Open it there to contact the advertiser.':
     'هذا الإعلان مستضاف على عقار. افتحه هناك للتواصل مع المعلن.',
   '+{n} More Features':                '{n}+ خاصيات إضافية',

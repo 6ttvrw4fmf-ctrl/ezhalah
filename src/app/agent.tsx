@@ -19,7 +19,6 @@ import HeroBackground from '@/components/HeroBackground';
 import ShareSheet from '@/components/ShareSheet';
 import { ResultCard, PopIn } from '@/components/ResultCard';
 import { parseQuery, respond } from '@/data/agent';
-import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, type SearchQuery, type SearchResult } from '@/data/search';
 import type { Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
@@ -266,7 +265,7 @@ export default function Agent() {
     replay?: string;
     fresh?: string;
   }>();
-  const { user, runQuery, gated, pendingMessage, setPendingMessage, recordChatTurn, trackOpen } = useApp();
+  const { user, runQuery, gated, pendingMessage, setPendingMessage, recordChatTurn } = useApp();
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
@@ -921,7 +920,7 @@ export default function Agent() {
                             listing={l}
                             variant="compact"
                             rank={i + 1}
-                            onOpen={() => { trackOpen(l); void openListing(l); }}
+                            onOpen={() => router.push({ pathname: '/browser', params: { id: String(l.id) } })}
                           />
                         ))}
                       </View>
