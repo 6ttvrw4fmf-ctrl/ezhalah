@@ -48,13 +48,17 @@ RESIDENTIAL_TYPES = (
     "building", "rest_house", "chalet", "camp", "land",
 )
 
+# Aqar's city URL slug must match its OWN city label exactly, or the page falls back to a national
+# mix (we saw "mecca" → 4 listings because /مكة isn't a recognized filter; /مكة-المكرمة is). The holy
+# cities + a few others need their FULL official names. Verified against sa.aqar.fm. (user-reported:
+# Mecca/Medina/Taif barely scraped.)
 CITY_AR = {
     "riyadh":  "الرياض",
     "jeddah":  "جدة",
     "khobar":  "الخبر",
     "dammam":  "الدمام",
-    "mecca":   "مكة",
-    "medina":  "المدينة",
+    "mecca":   "مكة-المكرمة",
+    "medina":  "المدينة-المنورة",
     "hofuf":   "الهفوف",
     "taif":    "الطائف",
     "abha":    "أبها",
