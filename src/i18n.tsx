@@ -353,6 +353,9 @@ const AR: Record<string, string> = {
     'ما فيه نتائج في هذي المدينة — لكن نفس البحث له نتائج في مدن ثانية بالمملكة. تبيني أوسّع البحث للسعودية كلها؟',
   'Nothing matches that exact combination right now. Want me to broaden the search and try again?':
     'ما فيه نتائج تطابق هذي المواصفات بالضبط حالياً. تبيني أوسّع البحث وأعيد المحاولة؟',
+  'Loading listing…': 'يجري تحميل الإعلان…',
+  "Couldn't load the preview here.": 'تعذّر تحميل المعاينة هنا.',
+  'Reload': 'إعادة تحميل',
   'Loading listings — please try again in a few seconds.':
     'يجري تحميل الإعلانات — حاول مرة ثانية بعد لحظات.',
 

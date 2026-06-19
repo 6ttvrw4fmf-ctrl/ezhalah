@@ -26,6 +26,20 @@ export default function Browser() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [listing, setListing] = useState<Listing | undefined>(undefined);
   const [resolving, setResolving] = useState(true);
+  // The proxied Aqar page fetches ~170KB of CSS/JS through our proxy, so it styles itself a beat
+  // after the HTML appears. We cover the iframe with a spinner until it fully loads (iframe onLoad,
+  // or a safety timeout) so the user never sees the raw unstyled flash. (user-reported.)
+  const [frameLoaded, setFrameLoaded] = useState(false);
+  const [frameError, setFrameError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  // If the proxied page doesn't load within ~12s, treat it as a failure and show a graceful in-app
+  // fallback (Reload / Open on AQAR) instead of Chrome's bare "couldn't load" page. Proxying a live
+  // site is intermittently flaky, so we never leave the user stuck. (user-reported.)
+  useEffect(() => {
+    if (frameLoaded || frameError) return;
+    const tmr = setTimeout(() => { if (!frameLoaded) setFrameError(true); }, 12000);
+    return () => clearTimeout(tmr);
+  }, [frameLoaded, frameError, reloadKey]);
 
   useEffect(() => {
     let alive = true;
@@ -115,10 +129,43 @@ export default function Browser() {
               {/* The real Aqar page, proxied so it can be framed. sandbox WITHOUT allow-top-navigation
                   blocks any framebusting script from yanking the user out of Ezhalah. */}
               <Frame
+                key={reloadKey}
                 src={proxyUrl}
+                onLoad={() => setFrameLoaded(true)}
+                onError={() => setFrameError(true)}
                 sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
                 style={{ flex: 1, width: '100%', height: '100%', border: 0, background: '#fff' }}
               />
+              {/* Spinner overlay until the proxied page is fully loaded + styled — hides the raw flash. */}
+              {!frameLoaded && !frameError ? (
+                <View style={s.frameLoading} pointerEvents="none">
+                  <ActivityIndicator size="large" color={colors.primary} />
+                  <Text style={s.frameLoadingText}>{t('Loading listing…')}</Text>
+                </View>
+              ) : null}
+              {/* Graceful failure (proxy hiccup) — our own retry + Open-on-AQAR, never Chrome's error. */}
+              {frameError ? (
+                <View style={s.frameLoading}>
+                  <Ionicons name="cloud-offline-outline" size={40} color={colors.muted} />
+                  <Text style={[s.frameLoadingText, { fontSize: 15 }]}>{t("Couldn't load the preview here.")}</Text>
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}>
+                    <Pressable
+                      onPress={() => { setFrameError(false); setFrameLoaded(false); setReloadKey((k) => k + 1); }}
+                      style={s.retryBtn}
+                    >
+                      <Ionicons name="refresh" size={15} color="#fff" />
+                      <Text style={s.retryBtnText}>{t('Reload')}</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => { if (typeof window !== 'undefined') window.open(realUrl, '_blank', 'noopener,noreferrer'); }}
+                      style={s.retryBtnOutline}
+                    >
+                      <Ionicons name="open-outline" size={15} color={colors.primary} />
+                      <Text style={s.retryBtnOutlineText}>{t('Open on AQAR')}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
             </Card>
           </Overlay>
         );
@@ -129,4 +176,10 @@ export default function Browser() {
 
 const s = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.paper },
+  frameLoading: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff', gap: 12 },
+  frameLoadingText: { fontSize: 13.5, color: colors.muted, fontWeight: '600' },
+  retryBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.primary, borderRadius: 11, paddingVertical: 10, paddingHorizontal: 16 },
+  retryBtnText: { color: '#fff', fontSize: 13.5, fontWeight: '700' },
+  retryBtnOutline: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint, borderRadius: 11, paddingVertical: 10, paddingHorizontal: 16 },
+  retryBtnOutlineText: { color: colors.primary, fontSize: 13.5, fontWeight: '700' },
 });

@@ -59,6 +59,11 @@ export default async function handler(req, res) {
     if (!contentType.includes('text/html')) {
       const buf = Buffer.from(await upstream.arrayBuffer());
       res.setHeader('content-type', contentType);
+      // /_next/* assets are content-hashed (immutable) → cache hard so Vercel's CDN serves repeat
+      // loads WITHOUT re-hitting this function. This is the key reliability win: a listing page pulls
+      // ~20 assets; without caching they all hammer the function every open and some intermittently
+      // fail. With immutable caching, the second+ open is near-instant and never overloads us.
+      res.setHeader('cache-control', 'public, max-age=31536000, immutable');
       res.status(upstream.status).send(buf);
       return;
     }
