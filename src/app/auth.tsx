@@ -56,6 +56,21 @@ export default function Auth() {
     ],
   };
 
+  // Eagle logo "blink": a subtle two-blink on open — opacity briefly dips then restores, twice,
+  // shortly after the page settles. Runs ONCE (not a loop) so it's a gentle wink, never distracting.
+  // (user request: subtle blink animation on the eagle logo when the login page opens.)
+  const blink = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const dip = () =>
+      Animated.sequence([
+        Animated.timing(blink, { toValue: 0.25, duration: 95, easing: Easing.in(Easing.quad), useNativeDriver: Platform.OS !== 'web' }),
+        Animated.timing(blink, { toValue: 1, duration: 130, easing: Easing.out(Easing.quad), useNativeDriver: Platform.OS !== 'web' }),
+      ]);
+    const anim = Animated.sequence([Animated.delay(650), dip(), Animated.delay(140), dip()]);
+    anim.start();
+    return () => anim.stop();
+  }, [blink]);
+
   const [cc, setCc] = useState<Country>(COUNTRIES[0]);
   const [ccOpen, setCcOpen] = useState(false);
   const [phone, setPhone] = useState('');
@@ -229,15 +244,19 @@ export default function Auth() {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={s.center} keyboardShouldPersistTaps="handled">
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={s.center} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={s.col}>
           {/* ── main ───────────────────────────────────────────────── */}
           {step === 'main' && (
             <>
               <View style={s.brandWrap}>
-                <RNImage source={LOGO} style={s.logo} resizeMode="cover" />
-                <Text style={s.brand}>{t('EZHALAH')}</Text>
-                <Text style={s.tag}>{t('Aqar, Bayut, Property Finder and more — all in one search.')}</Text>
+                <Animated.View style={[s.logoRing, { opacity: blink }]}>
+                  <RNImage source={LOGO} style={s.logoImg} resizeMode="cover" />
+                </Animated.View>
+                <Text style={s.heroTitle}>{t('Looking for a property? Ezhalah.')}</Text>
+                <Text style={s.heroSub}>
+                  {t('Ezhalah brings property listings from the various Saudi real-estate platforms together in one place.')}
+                </Text>
               </View>
 
               <Pressable
@@ -481,13 +500,26 @@ const s = StyleSheet.create({
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
   },
-  center: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 28 },
+  // Content flows from the TOP (justifyContent flex-start) so the page scrolls freely instead of
+  // locking vertically-centered — the user can scroll the sign-in screen naturally. flexGrow keeps it
+  // filling the viewport when the content is short. (user request: "let the user scroll, don't make
+  // it stick.") Extra top/bottom padding gives breathing room.
+  center: { flexGrow: 1, alignItems: 'center', justifyContent: 'flex-start', paddingHorizontal: 24, paddingTop: 40, paddingBottom: 48 },
   col: { width: '100%', maxWidth: MAX_W },
 
-  brandWrap: { alignItems: 'center', marginBottom: 28, marginTop: 20 },
-  logo: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', ...cardShadow },
-  brand: { fontSize: 22, fontWeight: '700', letterSpacing: 4, color: colors.ink, marginTop: 12 },
-  tag: { fontSize: 13, color: '#5d6f64', textAlign: 'center', marginTop: 12, paddingHorizontal: 20, lineHeight: 19, maxWidth: 280 },
+  // Centered hero: logo, then title, then subtitle — generous, balanced spacing on both desktop &
+  // mobile. The whole block is centered via the parent `center` style + alignItems center here.
+  brandWrap: { alignItems: 'center', alignSelf: 'center', marginBottom: 30, marginTop: 8, width: '100%' },
+  // The eagle mark sits in a soft green ring with a tinted halo + shadow so it reads as a deliberate
+  // logo, not a floating square. Slightly larger (78) for presence; perfectly centered.
+  logoRing: {
+    width: 78, height: 78, borderRadius: 39, backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+    borderWidth: 3, borderColor: '#ffffff', ...cardShadow,
+  },
+  logoImg: { width: '100%', height: '100%' },
+  heroTitle: { fontSize: 23, fontWeight: '800', color: colors.ink, marginTop: 20, textAlign: 'center', letterSpacing: -0.2, paddingHorizontal: 12 },
+  heroSub: { fontSize: 13.5, color: '#5d6f64', textAlign: 'center', marginTop: 10, paddingHorizontal: 18, lineHeight: 21, maxWidth: 340 },
 
   oauth: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: 50, borderRadius: 13, marginTop: 11 },
   google: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#dfe3e0' },

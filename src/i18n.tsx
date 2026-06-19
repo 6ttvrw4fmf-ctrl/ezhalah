@@ -341,6 +341,20 @@ const AR: Record<string, string> = {
     'تعرض إزهله إعلانات من منصات خارجية. نحن لا نوصي بأي إعلان ولا نتحقق منه ولا نملكه — والقرار لك.',
   'Ezhalah! ': 'إزهله! ',
   'No exact matches — try broadening your search.': 'لا توجد نتائج مطابقة تماماً — حاول توسيع نطاق بحثك.',
+  'No listings within that budget — there are matches above it. Want me to remove the budget?':
+    'ما فيه إعلانات داخل ميزانيتك — لكن فيه خيارات فوقها. تبيني أشيل الميزانية؟',
+  'No matches in that specific area — but I can find some elsewhere in the same city. Want me to widen the area?':
+    'ما لقيت نتائج في الحي المحدد — لكن فيه خيارات في أحياء ثانية بنفس المدينة. تبيني أوسّع المنطقة؟',
+  'No matches with that exact size/bedroom count — close options exist if I drop it. Want me to?':
+    'ما لقيت نتائج بنفس عدد الغرف أو المساحة — لكن فيه خيارات قريبة لو أشيل الشرط. تبيني أسوي؟',
+  'No matches for that property type here — other types are available. Want me to broaden the type?':
+    'ما فيه إعلانات بنفس نوع العقار في المنطقة — لكن فيه أنواع ثانية متاحة. تبيني أوسّع النوع؟',
+  'No matches in that city — but the same search has results elsewhere in Saudi Arabia. Want me to broaden it Kingdom-wide?':
+    'ما فيه نتائج في هذي المدينة — لكن نفس البحث له نتائج في مدن ثانية بالمملكة. تبيني أوسّع البحث للسعودية كلها؟',
+  'Nothing matches that exact combination right now. Want me to broaden the search and try again?':
+    'ما فيه نتائج تطابق هذي المواصفات بالضبط حالياً. تبيني أوسّع البحث وأعيد المحاولة؟',
+  'Loading listings — please try again in a few seconds.':
+    'يجري تحميل الإعلانات — حاول مرة ثانية بعد لحظات.',
 
   // Agent chat chrome
   'Ezhalah is searching…': 'إزهله يبحث…',
@@ -502,6 +516,7 @@ const AR: Record<string, string> = {
   // Browser
   'Done': 'تم',
   'Listing not found.': 'لم يُعثر على الإعلان.',
+  'Open in new tab': 'فتح في تبويب جديد',
   'For Rent': 'للإيجار',
   'For Buy': 'للبيع',
   'Area': 'المساحة',
@@ -518,6 +533,11 @@ const AR: Record<string, string> = {
   'Added':                             'أضيف',
   'Rent now, pay later':               'استأجر الآن وادفع لاحقًا',
   'from':                              'من',
+  'month':                             'شهر',
+  'Features':                          'المميزات',
+  'View on AQAR':                      'عرض على عقار',
+  'This listing is hosted on AQAR. Open it there to contact the advertiser.':
+    'هذا الإعلان مستضاف على عقار. افتحه هناك للتواصل مع المعلن.',
   '+{n} More Features':                '{n}+ خاصيات إضافية',
   'Show fewer features':               'عرض أقل من الخاصيات',
   'No additional features listed':     'لا توجد خاصيات إضافية',
@@ -552,6 +572,11 @@ const AR: Record<string, string> = {
 
   // Auth
   'Aqar, Bayut, Property Finder and more — all in one search.': 'منصات عقار وبيوت وبروبرتي فايندر والمزيد — في بحث واحد.',
+  // Auth hero — new title + subtitle (user-supplied Arabic; English mirrors it without naming
+  // platforms, per the platform-confidentiality rule). The title carries the brand "Ezhalah".
+  'Looking for a property? Ezhalah.': 'تدور على عقار؟ إزهله.',
+  'Ezhalah brings property listings from the various Saudi real-estate platforms together in one place.':
+    'إزهله تجمع العقارات المعروضة من مختلف منصات العقار السعودية في مكان واحد.',
   'Continue with Google': 'المتابعة باستخدام Google',
   'Continue with Apple': 'المتابعة باستخدام Apple',
   'or': 'أو',
@@ -667,6 +692,9 @@ const AR: Record<string, string> = {
   'Android / Chrome': 'أندرويد / كروم',
   'iPhone': 'آيفون',
   'Saved': 'تم الحفظ',
+  'Name saved': 'تم حفظ الاسم',
+  'Log out?': 'تسجيل الخروج؟',
+  'Are you sure you want to log out?': 'هل أنت متأكد أنك تريد تسجيل الخروج؟',
   'Danger zone': 'منطقة الخطر',
   'Delete my account': 'حذف حسابي',
   'Log out': 'تسجيل الخروج',

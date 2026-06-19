@@ -190,7 +190,67 @@ type BackendQuery = {
   count?: number; // how many listings the user asked to see (1–15)
 };
 
-function queryFromBackend(b: BackendQuery): SearchQuery {
+// AREA NICKNAMES → known district lists. The engine filters by district when these are present, so
+// "north Riyadh" actually returns listings IN northern Riyadh districts (not just any Riyadh result).
+// District names are kept BARE (no "حي " prefix) — the runSearch filter strips both sides before
+// matching, so a stored "حي الملقا" still hits "الملقا". (user request: "the agent should know
+// North Riyadh direct and show listings in North Riyadh.")
+const AREA_DISTRICTS: Record<string, string[]> = {
+  // Riyadh
+  'riyadh:north':  ['الملقا', 'حطين', 'الياسمين', 'النرجس', 'العقيق', 'الصحافة', 'النفل', 'الورود', 'الندى', 'الربيع'],
+  'riyadh:east':   ['قرطبة', 'غرناطة', 'الروضة', 'الرمال', 'النظيم', 'المونسية', 'الحمراء'],
+  'riyadh:south':  ['بدر', 'الدار البيضاء', 'المصانع', 'منفوحة', 'الشفا', 'الحزم', 'لبن', 'نمار', 'العزيزية', 'سلطانة'],
+  'riyadh:west':   ['السويدي', 'العريجاء', 'شبرا', 'ظهرة لبن', 'ظهرة البديعة', 'الفاخرية', 'العريجاء الغربية'],
+  'riyadh:center': ['العليا', 'السليمانية', 'الملز', 'الورود', 'الفيصلية', 'المرسلات', 'المعذر', 'الديرة', 'المربع'],
+  // Jeddah
+  'jeddah:north':  ['الشاطئ', 'أبحر', 'الزهراء', 'الحمدانية', 'الواحة', 'النعيم'],
+  'jeddah:south':  ['الجامعة', 'السبيل', 'العزيزية الجنوبية'],
+  'jeddah:east':   ['الفيصلية', 'النسيم', 'الفيحاء'],
+  'jeddah:west':   ['البلد', 'الشرفية', 'الكورنيش', 'النزهة'],
+};
+
+// Detect a North/South/East/West/center area phrase or an "حي X" / "in X district" mention in the
+// user's raw text, scoped to the resolved city. Returns the list of district names to filter on.
+function resolveDistrictsFromText(userText: string, city: string): string[] {
+  const t = userText.toLowerCase();
+  const ar = userText;
+  const city_lc = city.toLowerCase();
+  const out: string[] = [];
+
+  const cityKey = (city_lc.includes('riyadh') || ar.includes('الرياض')) ? 'riyadh'
+                : (city_lc.includes('jeddah') || ar.includes('جدة')) ? 'jeddah'
+                : null;
+
+  if (cityKey) {
+    const has = (en: string[], arRe: RegExp) =>
+      en.some((s) => t.includes(s)) || arRe.test(ar);
+    if (has(['north '], /شمال\s*(الرياض|جدة|المدينة|الخبر|الدمام)?/)) {
+      out.push(...(AREA_DISTRICTS[`${cityKey}:north`] ?? []));
+    }
+    if (has(['south '], /جنوب\s*(الرياض|جدة|المدينة|الخبر|الدمام)?/)) {
+      out.push(...(AREA_DISTRICTS[`${cityKey}:south`] ?? []));
+    }
+    if (has(['east '], /شرق\s*(الرياض|جدة|المدينة|الخبر|الدمام)?/)) {
+      out.push(...(AREA_DISTRICTS[`${cityKey}:east`] ?? []));
+    }
+    if (has(['west '], /غرب\s*(الرياض|جدة|المدينة|الخبر|الدمام)?/)) {
+      out.push(...(AREA_DISTRICTS[`${cityKey}:west`] ?? []));
+    }
+    if (has(['central ', 'center'], /وسط\s*(الرياض|جدة|المدينة)?/)) {
+      out.push(...(AREA_DISTRICTS[`${cityKey}:center`] ?? []));
+    }
+  }
+
+  // Specific "حي X" / "X district" mentions — capture up to 3 words of the name.
+  const arHi = ar.match(/حي\s+([؀-ۿ]+(?:\s+[؀-ۿ]+){0,2})/);
+  if (arHi) out.push(arHi[1].trim());
+  const enHi = userText.match(/\b(?:in|district\s+of|neighborhood\s+of)\s+(?:al[-\s])?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s*(?:district|neighborhood)?/);
+  if (enHi) out.push(`Al ${enHi[1]}`);
+
+  return Array.from(new Set(out));
+}
+
+function queryFromBackend(b: BackendQuery, userText: string = ''): SearchQuery {
   const q = emptyQuery();
   q.deal = b.deal === 'Buy' ? 'Buy' : 'Rent';
   if (b.bothDeals === true) q.bothDeals = true; // agent searched without knowing rent/buy → show both
@@ -219,6 +279,10 @@ function queryFromBackend(b: BackendQuery): SearchQuery {
   if (typeof b.priceOriginal === 'string' && b.priceOriginal.trim()) q.priceOriginal = b.priceOriginal.trim();
   if (typeof b.sort === 'string' && b.sort.trim() && b.sort !== 'none') q.sort = b.sort.trim() as SearchQuery['sort'];
   if (typeof b.count === 'number' && b.count >= 1) q.count = Math.min(Math.floor(b.count), 25);
+  // Layer on the explicit district resolution from the raw user text — area phrases ("North
+  // Riyadh") expand to known district lists; literal district mentions ("حي الرمال") pass through.
+  const districts = resolveDistrictsFromText(userText, q.location);
+  if (districts.length) q.districts = districts;
   return q;
 }
 
@@ -256,7 +320,7 @@ async function callAgentBackend(
       return {
         kind: 'listings',
         reply: String(d.reply ?? ''),
-        query: queryFromBackend(d.query ?? {}),
+        query: queryFromBackend(d.query ?? {}, text),
       };
     }
     if (d.kind === 'message') return { kind: 'message', reply: String(d.reply ?? '') };

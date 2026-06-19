@@ -38,9 +38,12 @@ export default function Settings() {
   const [editing, setEditing] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const [phStep, setPhStep] = useState<null | 'enter' | 'otp'>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // True when the typed name differs from the stored one — drives the explicit green Save button.
+  const nameChanged = name.trim().length > 0 && name.trim() !== shownName;
 
   // Keep the field in sync with the app language and stored spellings — e.g. switching the app to
   // Arabic flips the field to the Arabic name — but never clobber what the user is actively typing.
@@ -73,11 +76,13 @@ export default function Settings() {
     const v = name.trim();
     if (v && v !== shownName) {
       persistName(v);
-      // Brief "Saved / تم الحفظ" confirmation (item 8), then fade it out.
+      // Brief "تم حفظ الاسم / Name saved" confirmation, then fade it out.
       setJustSaved(true);
-      setTimeout(() => setJustSaved(false), 1600);
+      setTimeout(() => setJustSaved(false), 1800);
     } else if (!v) setName(shownName);
   };
+  // Explicit Save (button / Enter): commit and exit edit mode. (user request: a clear Save button,
+  // no silent blur-save.)
   const saveName = () => { commitName(); setEditing(false); };
   const nameRef = useRef(name);
   nameRef.current = name;
@@ -165,23 +170,31 @@ export default function Settings() {
                   {justSaved && (
                     <View style={s.savedTag}>
                       <Ionicons name="checkmark-circle" size={12} color={colors.primary} />
-                      <Text style={s.savedTx}>{tp('Saved')}</Text>
+                      <Text style={s.savedTx}>{tp('Name saved')}</Text>
                     </View>
                   )}
                 </View>
                 {editing ? (
-                  // Inline field — fades in, auto-saves on blur / Enter (no buttons).
-                  <TextInput
-                    style={[s.input, Platform.OS === 'web' ? ({ transitionProperty: 'opacity', transitionDuration: '160ms' } as any) : null]}
-                    value={name}
-                    autoFocus
-                    placeholder={tp('Display Name')}
-                    placeholderTextColor={colors.muted}
-                    onChangeText={setName}
-                    onBlur={saveName}
-                    onSubmitEditing={saveName}
-                    returnKeyType="done"
-                  />
+                  // Inline field + an explicit green Save button that only appears once the name has
+                  // actually changed. Enter also saves. No silent blur-save — the user commits. (user req.)
+                  <>
+                    <TextInput
+                      style={[s.input, Platform.OS === 'web' ? ({ transitionProperty: 'opacity', transitionDuration: '160ms' } as any) : null]}
+                      value={name}
+                      autoFocus
+                      placeholder={tp('Display Name')}
+                      placeholderTextColor={colors.muted}
+                      onChangeText={setName}
+                      onSubmitEditing={saveName}
+                      returnKeyType="done"
+                    />
+                    {nameChanged && (
+                      <Pressable style={s.saveBtn} onPress={saveName} hitSlop={6}>
+                        <Ionicons name="checkmark" size={15} color="#fff" />
+                        <Text style={s.saveBtnText}>{tp('Save')}</Text>
+                      </Pressable>
+                    )}
+                  </>
                 ) : (
                   <Text style={[s.v, { marginTop: 3 }]}>{name || shownName}</Text>
                 )}
@@ -224,18 +237,13 @@ export default function Settings() {
 
           {/* Note #10 — full-width Log out (green tint) + Delete my account (red tint) buttons, each
               with its own icon and stacked. Tint style matches the user's screenshot. (user request.) */}
-          <Pressable style={[s.logoutPrimary, loggingOut && { opacity: 0.85 }]} onPress={onLogout} disabled={loggingOut}>
-            {loggingOut ? (
-              <View style={s.busyRow}>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={s.logoutPrimaryText}>{tp('Signing out…')}</Text>
-              </View>
-            ) : (
-              <View style={s.btnRow}>
-                <Ionicons name="log-out-outline" size={20} color={colors.primary} />
-                <Text style={s.logoutPrimaryText}>{tp('Log out')}</Text>
-              </View>
-            )}
+          {/* Log out no longer signs out on the first tap — it opens a confirmation popup (like Delete
+              account). The actual sign-out + loading beat runs only after the user confirms. (user req.) */}
+          <Pressable style={s.logoutPrimary} onPress={() => setConfirmLogout(true)}>
+            <View style={s.btnRow}>
+              <Ionicons name="log-out-outline" size={20} color={colors.primary} />
+              <Text style={s.logoutPrimaryText}>{tp('Log out')}</Text>
+            </View>
           </Pressable>
 
           <Pressable style={s.deleteDanger} onPress={() => setConfirmDelete(true)}>
@@ -257,6 +265,31 @@ export default function Settings() {
           onClose={() => setPhStep(null)}
         />
       )}
+
+      {/* Log out confirm — same pattern as Delete account, but green/neutral (not destructive). */}
+      <Modal visible={confirmLogout} transparent animationType="fade" onRequestClose={() => { if (!loggingOut) setConfirmLogout(false); }}>
+        <View style={s.modalRoot}>
+          <Pressable style={s.modalBack} onPress={() => { if (!loggingOut) setConfirmLogout(false); }} />
+          <View style={s.modalCard}>
+            <View style={s.logoutIc}><Ionicons name="log-out-outline" size={22} color={colors.primary} /></View>
+            <Text style={s.delT}>{tp('Log out?')}</Text>
+            <Text style={s.delS}>{tp('Are you sure you want to log out?')}</Text>
+            <Pressable style={[s.logoutConfirm, loggingOut && { opacity: 0.9 }]} onPress={onLogout} disabled={loggingOut}>
+              {loggingOut ? (
+                <View style={s.busyRow}>
+                  <ActivityIndicator size="small" color="#fff" />
+                  <Text style={s.logoutConfirmText}>{tp('Signing out…')}</Text>
+                </View>
+              ) : (
+                <Text style={s.logoutConfirmText}>{tp('Log out')}</Text>
+              )}
+            </Pressable>
+            <Pressable style={s.delCancel} onPress={() => setConfirmLogout(false)} disabled={loggingOut}>
+              <Text style={s.delCancelText}>{tp('Cancel')}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       {/* Delete confirm */}
       <Modal visible={confirmDelete} transparent animationType="fade" onRequestClose={() => { if (!deleting) setConfirmDelete(false); }}>
@@ -446,6 +479,15 @@ const s = StyleSheet.create({
   savedTx: { fontSize: 11, fontWeight: '600', color: colors.primary },
   v: { fontSize: 15, fontWeight: '600', color: colors.ink, marginTop: 3 },
   input: { fontSize: 15, fontWeight: '600', color: colors.ink, marginTop: 3, borderBottomWidth: 1, borderBottomColor: colors.primary, paddingVertical: 2, ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  // Compact green Save button under the name field — app-green, noticeable but not oversized,
+  // self-sized to its content so it sits neatly under the input. (user request.)
+  saveBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    alignSelf: 'flex-start', backgroundColor: colors.primary, borderRadius: 10,
+    paddingVertical: 8, paddingHorizontal: 16, marginTop: 12,
+    ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}),
+  },
+  saveBtnText: { color: '#fff', fontSize: 13.5, fontWeight: '700' },
   act: { paddingHorizontal: 8, paddingVertical: 6 },
   actText: { fontSize: 14, fontWeight: '600', color: colors.primary },
   // Click-to-edit name target: a small hit area with a soft hover wash + text cursor (web).
@@ -488,6 +530,10 @@ const s = StyleSheet.create({
   delConfirmText: { color: '#fff', fontSize: 15, fontWeight: '600' },
   delCancel: { width: '100%', paddingVertical: 12, alignItems: 'center', marginTop: 4 },
   delCancelText: { fontSize: 14, fontWeight: '500', color: colors.muted },
+  // Log-out confirm dialog — neutral green tint (not destructive red).
+  logoutIc: { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  logoutConfirm: { width: '100%', backgroundColor: colors.primary, borderRadius: 13, paddingVertical: 13, alignItems: 'center', marginTop: 18 },
+  logoutConfirmText: { color: '#fff', fontSize: 15, fontWeight: '600' },
 
   // change-phone field
   phField: { flexDirection: 'row', gap: 8, marginTop: 18, width: '100%' },

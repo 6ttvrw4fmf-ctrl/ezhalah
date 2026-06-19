@@ -40,6 +40,14 @@ export type SearchQuery = {
   // How many listings the user explicitly asked to see (1–25). Absent → the default grid.
   // Drives how many cards the chat reveals up front. (user training decision.)
   count?: number;
+  // Specific district / neighborhood filter — populated when the user named one explicitly ("حي
+  // الرمال") OR a recognized area-nickname expanded to its districts ("North Riyadh" → Al Malqa,
+  // Hittin, Al Yasmin, Al Narjis, Al Aqiq, …). The engine filters listings by `district` ∩ this
+  // list. Stored loosely (Arabic raw or English transliteration) and matched with substring +
+  // "حي " prefix stripping so either side reads the other. Empty/undefined → no district filter.
+  // (user request: "North Riyadh should show listings IN North Riyadh — the agent should know
+  // direct.")
+  districts?: string[];
 };
 
 // The objective sort keys the agent/UI may request. NEVER a quality/popularity ordering.
@@ -397,7 +405,7 @@ export function interpretPrice(rawDigits: string, deal: Deal, sizeM2?: number, i
   return { kind: 'totalBuy', echo: `${sar} ${grouped(amount)}` };
 }
 
-export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number };
+export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string };
 
 function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   const t = q.type?.toLowerCase();
@@ -569,12 +577,33 @@ function sortListings(list: Listing[], sort: SortKey): Listing[] {
   return out;
 }
 
-export function runSearch(q: SearchQuery, pools: Pools = POOLS): SearchResult {
-  const eligible = pickPool(q, pools)
+// True if a stored listing district matches one of the wanted district names. Both sides are stripped
+// of the "حي " prefix and lowercased on the Latin side, then matched with bidirectional substring so
+// "حي الملقا" matches "الملقا" and vice versa, and "Al Olaya" matches "Olaya" too.
+function listingInDistricts(stored: string, wanted: string[]): boolean {
+  const s = stored.replace(/^حي\s+/, '').trim();
+  const sLc = s.toLowerCase();
+  return wanted.some((w) => {
+    const wn = w.replace(/^حي\s+/, '').trim();
+    const wLc = wn.toLowerCase();
+    return s.includes(wn) || wn.includes(s) || sLc.includes(wLc) || wLc.includes(sLc);
+  });
+}
+
+export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean }): SearchResult {
+  let eligible = pickPool(q, pools)
     // bothDeals (agent searched without knowing rent/buy) → show BOTH; otherwise filter to the deal.
     .filter((l) => q.bothDeals || l.deal === q.deal)
     .filter((l) => supports(l.source, q.deal))
     .sort((a, b) => (RECENCY[a.listed] ?? 99) - (RECENCY[b.listed] ?? 99));
+
+  // District filter: when the agent / area-phrase resolver named specific neighborhoods, narrow
+  // to listings in any of them. Don't dead-end — if nothing matches, fall back to the broader pool
+  // and flag it in notes. (user request: "North Riyadh should show listings IN North Riyadh.")
+  if (q.districts && q.districts.length) {
+    const inArea = eligible.filter((l) => listingInDistricts(l.district || '', q.districts!));
+    if (inArea.length > 0) eligible = inArea;
+  }
 
   const ns = notes(q);
   let listings = eligible;
@@ -601,9 +630,57 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS): SearchResult {
     sortNote = t(SORT_NOTE[q.sort]);
   }
 
-  // Return up to 15 matches (the requested-quantity cap): the chat shows the first `count` the user
-  // asked for (or the default 4-card 2×2 grid) and reveals the rest 4 at a time via "Show more", so
-  // additional listings are never blocked. (user training decision.)
+  // Return up to 25 matches (display cap): the chat shows the first `count` the user explicitly
+  // asked for, or up to 25 by default. Fewer than 25 available → show whatever exists; never pad
+  // to 25 by inventing rows.
   const count = q.count && q.count >= 1 ? Math.min(q.count, 25) : undefined;
-  return { heading: heading(q), notes: ns, listings: listings.slice(0, 25), sortNote, count };
+  // 0-results case → a friendly, ACTIONABLE recommendation. Three situations:
+  //  (a) the server fetch FAILED (network/backend error) → tell the user to retry, not that nothing
+  //      matched. (opts.fetchFailed is set by runQuery when fetchListingsForQuery returned null.)
+  //  (b) the fetch succeeded but the source pool is empty → there's genuinely no inventory of that
+  //      type/deal/city → suggest broadening (noResultsSuggestion handles the wording).
+  //  (c) the pool has rows but filters squeezed it to zero → relax the bottleneck filter.
+  let suggestion: string | undefined;
+  if (listings.length === 0) {
+    if (opts?.fetchFailed) {
+      suggestion = t('Loading listings — please try again in a few seconds.');
+    } else {
+      suggestion = noResultsSuggestion(q, pools);
+    }
+  }
+  return { heading: heading(q), notes: ns, listings: listings.slice(0, 25), sortNote, count, suggestion };
+}
+
+// Try relaxing one query field at a time and see which unlocks results. The order matters: we
+// prefer to relax the field the user is LEAST attached to (budget caps, then districts, then bed
+// count, then property type, finally city). The first relaxation that yields >0 listings wins.
+function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
+  const countWith = (mod: Partial<SearchQuery>): number => {
+    const q2: SearchQuery = { ...q, ...mod };
+    let list = pickPool(q2, pools)
+      .filter((l) => q2.bothDeals || l.deal === q2.deal)
+      .filter((l) => supports(l.source, q2.deal));
+    if (q2.districts && q2.districts.length) {
+      list = list.filter((l) => listingInDistricts(l.district || '', q2.districts!));
+    }
+    const pf = priceFilter(q2); if (pf) list = list.filter(pf);
+    const sf = sizeFilter(q2); if (sf) list = list.filter(sf);
+    return list.length;
+  };
+  if (q.priceInput && countWith({ priceInput: '' }) > 0) {
+    return t("No listings within that budget — there are matches above it. Want me to remove the budget?");
+  }
+  if (q.districts?.length && countWith({ districts: undefined }) > 0) {
+    return t("No matches in that specific area — but I can find some elsewhere in the same city. Want me to widen the area?");
+  }
+  if (q.detail && countWith({ detail: null }) > 0) {
+    return t("No matches with that exact size/bedroom count — close options exist if I drop it. Want me to?");
+  }
+  if (q.type && countWith({ type: null, category: q.category }) > 0) {
+    return t("No matches for that property type here — other types are available. Want me to broaden the type?");
+  }
+  if (q.location && countWith({ location: '' }) > 0) {
+    return t("No matches in that city — but the same search has results elsewhere in Saudi Arabia. Want me to broaden it Kingdom-wide?");
+  }
+  return t("Nothing matches that exact combination right now. Want me to broaden the search and try again?");
 }

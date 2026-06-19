@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated as RNAnimated, Easing as RNEasing, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -15,18 +15,15 @@ import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useI18n, tDetailOption, tPriceTab, detectLocale } from '@/i18n';
+import { iconForPrompt, useExamplePrompts } from '@/data/examplePrompts';
 
 const MAX_W = 560; // desktop-web: keep the mobile-first column centered
 
-// "Start here" suggestion chips — verbatim from the prototype (ezhalah-mobile.jsx §Sugg grid).
-const SUGGESTIONS: { icon: keyof typeof Ionicons.glyphMap; label: string; seed: string }[] = [
-  { icon: 'home-outline', label: 'Family villa in North Riyadh', seed: 'Family villa in North Riyadh' },
-  { icon: 'business-outline', label: 'Apartment for rent in Khobar', seed: 'Apartment for rent in Khobar' },
-  { icon: 'map-outline', label: 'Commercial land in Jeddah', seed: 'Commercial land in Jeddah' },
-  { icon: 'pricetag-outline', label: 'What can I get for SAR 500,000?', seed: 'What can I get for SAR 500,000?' },
-  { icon: 'water-outline', label: 'I want a villa with a pool', seed: 'I want a villa with a pool' },
-  { icon: 'storefront-outline', label: 'Shop for rent in Jeddah', seed: 'Shop for rent in Jeddah' },
-];
+// The 6 "Start here" chips ROTATE per mount — drawn from the shared examplePrompts library so the
+// home grid and the AI Agent's empty-state grid stay in lockstep. A returning user sees a fresh
+// random subset every visit / refresh / sidebar dismissal. Sampled inside the component via useMemo
+// keyed on locale (Arabic UI → Arabic pool, English UI → English pool — never mixed). (user request:
+// "always refresh whenever a user leaves or joins — same for Ezhalah AI Agent — create a rotation.")
 
 const AnimatedPressable = RNAnimated.createAnimatedComponent(Pressable);
 
@@ -77,6 +74,17 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, locale, setLocale, isRTL } = useI18n();
+  // Fresh random 6 examples per mount, biased toward real DB inventory (~70%) + curated variety.
+  // Renamed to `promptChips` to avoid colliding with the location-suggestions state below.
+  const promptLabels = useExamplePrompts(locale === 'ar' ? 'ar' : 'en', 6);
+  const promptChips = useMemo(
+    () => promptLabels.map((label) => ({
+      label,
+      seed: label,
+      icon: iconForPrompt(label) as keyof typeof Ionicons.glyphMap,
+    })),
+    [promptLabels],
+  );
   const { query, setQuery, gated, user } = useApp();
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
   const [suggestions, setSuggestions] = useState<Place[]>([]);
@@ -492,7 +500,7 @@ export default function Home() {
           </View>
 
           <View style={s.suggGrid}>
-            {SUGGESTIONS.map((sg, i) => (
+            {promptChips.map((sg, i) => (
               // Heartbeat wrapper holds the grid sizing and the gentle pulse; the Tappable inside keeps
               // the press-scale and fills the cell. (user request: heartbeat on the cards.)
               <Heartbeat key={sg.label} index={i} style={s.chipCell}>
@@ -500,7 +508,7 @@ export default function Home() {
                   <View style={s.chipIc}>
                     <Ionicons name={sg.icon} size={21} color={colors.chipIcon} />
                   </View>
-                  <Text style={s.chipTx}>{t(sg.label)}</Text>
+                  <Text style={s.chipTx}>{sg.label}</Text>
                 </Tappable>
               </Heartbeat>
             ))}

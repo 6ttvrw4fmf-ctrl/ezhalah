@@ -5,6 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
 import { useI18n, t as tr, tPrice } from '@/i18n';
+import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -80,7 +81,15 @@ export function ResultCard({
   variant?: 'compact' | 'grid'; // kept for backward compatibility — both render the new design
   rank?: number;
 }) {
-  const { t, isRTL } = useI18n();
+  const { t, isRTL, locale } = useI18n();
+  // EN UI: scraped Arabic district/city names get a fast client-side transliteration so users see
+  // "Al Olaya, Riyadh" instead of "حي العليا, Riyadh". AR UI: pass through unchanged. (user request:
+  // "when I send in English the place should be translated.")
+  const place = (raw: string) => (locale === 'en' && raw ? translitPlace(raw) : raw);
+  // Region (e.g. "north Riyadh") extracted from the Aqar listing URL — shown as a small chip so the
+  // user sees which part of the city the property is in. (user request.)
+  const region = regionFromUrl(listing.source_url);
+  const regionLabel = region ? (locale === 'en' ? region.en : region.ar) : '';
   const { width } = useWindowDimensions();
   const horizontal = IS_WEB && width >= 820; // desktop 3-column layout
   const [expanded, setExpanded] = useState(false);
@@ -105,10 +114,8 @@ export function ResultCard({
             <Text style={card.rankText}>#{rank}</Text>
           </View>
         ) : null}
-        <View style={card.platformBadge} pointerEvents="none">
-          <Ionicons name="location" size={11} color={colors.primary} />
-          <Text style={card.platformText}>{t('AQAR')}</Text>
-        </View>
+        {/* user request: removed the white "AQAR" pill that floated over the photo's top-right.
+            Source attribution still appears in the bottom strip and in the right-side panel. */}
         {listing.source_url ? (
           <View style={card.sourceStrip} pointerEvents="none">
             <Text style={card.sourceText} numberOfLines={1}>AQAR · sa.aqar.fm</Text>
@@ -124,25 +131,20 @@ export function ResultCard({
           <Text style={card.typeLabel}>{t(listing.type)} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
         </View>
         <Text style={[card.title, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
-          {t(listing.district) || t(listing.city)}{listing.district ? `, ${t(listing.city)}` : ''}
+          {place(t(listing.district)) || place(t(listing.city))}{listing.district ? `, ${place(t(listing.city))}` : ''}
         </Text>
         <View style={card.locRow}>
           <Ionicons name="location-outline" size={12} color={colors.primary} />
-          <Text style={card.locText}>{t(listing.city)}, {t('Saudi Arabia')}</Text>
+          <Text style={card.locText}>{place(t(listing.city))}, {t('Saudi Arabia')}</Text>
+          {regionLabel ? (
+            <View style={card.regionChip}>
+              <Ionicons name="compass-outline" size={10} color={colors.primary} />
+              <Text style={card.regionChipText} numberOfLines={1}>{regionLabel}</Text>
+            </View>
+          ) : null}
         </View>
         <Text style={card.price} numberOfLines={1}>{tPrice(listing.price)}</Text>
-        {listing.rent_now_pay_later ? (
-          <View style={card.rnplPill}>
-            <Text style={card.rnplLabel}>EJARI</Text>
-            <Text style={card.rnplDot}>·</Text>
-            <Text style={card.rnplLabelAr}>ريلز</Text>
-            <Ionicons name="chevron-forward" size={11} color={colors.primary} />
-            <Text style={card.rnplCta}>{t('Rent now, pay later')}</Text>
-            {listing.rent_now_pay_later_monthly ? (
-              <Text style={card.rnplFrom}>· {t('from')} SAR {Number(listing.rent_now_pay_later_monthly).toLocaleString('en-US')}/mo</Text>
-            ) : null}
-          </View>
-        ) : null}
+        {listing.rent_now_pay_later ? <RnplBanner monthly={listing.rent_now_pay_later_monthly ?? undefined} t={t} /> : null}
         <View style={card.statsRow}>
           {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
           {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} /> : null}
@@ -155,10 +157,7 @@ export function ResultCard({
       {/* ─── RIGHT: features panel ───────────────────────── */}
       <View style={card.rightCol}>
         <View style={card.hostHead}>
-          <View style={card.hostBadge}>
-            <Ionicons name="location" size={13} color={colors.primary} />
-            <Text style={card.hostBadgeText}>{t('AQAR')}</Text>
-          </View>
+          <AqarBadge />
           <View style={{ flex: 1 }}>
             <Text style={card.hostedOn}>{t('Hosted on AQAR')}</Text>
             <Text style={card.hostHint} numberOfLines={2}>
@@ -187,6 +186,46 @@ export function ResultCard({
           </Pressable>
         ) : null}
       </View>
+    </View>
+  );
+}
+
+// AQAR brand badge — uses the official AQAR logo PNG (Saudi-map silhouette with the green pin)
+// that the user dropped into assets/images/aqar-logo.png. Rendered with expo-image so it can be
+// cached and rounded by the parent corner-clip. (user request: use the real AQAR logo on the
+// cards, pixel-perfect, instead of a code-drawn approximation.)
+const AQAR_LOGO = require('../../assets/images/aqar-logo.png');
+function AqarBadge() {
+  // The PNG already has the green background + rounded shape baked in. Render it directly with
+  // contentFit="contain" so the whole logo (map + pin) is visible without being cropped, and no
+  // container background — otherwise the surrounding green box bleeds into the PNG's transparent
+  // corners and the image looks like it has white halos. (user request: fix the background.)
+  return (
+    <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />
+  );
+}
+
+// EJARI × ريلز "Rent now, pay later" banner — uses the official EJARI×ريلز partnership graphic
+// (assets/images/ejari-rnpl.png) the user supplied. Shown only when the listing is RNPL-eligible.
+// If the scraped data carries a monthly figure, the "from SAR X/month" subline appears underneath.
+// (user request: pixel-perfect official badge — replaced the code-drawn approximation.)
+const EJARI_LOGO = require('../../assets/images/ejari-rnpl.png');
+function RnplBanner({ monthly, t }: { monthly?: number; t: (k: string, p?: any) => string }) {
+  return (
+    <View style={card.rnplBanner}>
+      <View style={card.rnplRow}>
+        <Image source={EJARI_LOGO} style={card.ejariLogo} contentFit="contain" />
+        <View style={card.rnplChevs}>
+          <Ionicons name="chevron-forward" size={13} color="#3868c8" style={{ marginRight: -6 }} />
+          <Ionicons name="chevron-forward" size={13} color="#3868c8" />
+        </View>
+        <Text style={card.rnplCta}>{t('Rent now, pay later')}</Text>
+      </View>
+      {monthly ? (
+        <Text style={card.rnplFromLine}>
+          {t('from')} <Text style={card.rnplFromStrong}>SAR {Number(monthly).toLocaleString('en-US')}</Text>/{t('month')}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -237,19 +276,33 @@ const card = StyleSheet.create({
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   typeLabel: { fontSize: 11.5, color: colors.muted, fontWeight: '500' },
   title: { fontSize: 18, fontWeight: '800', color: colors.dark, letterSpacing: -0.3 },
-  locRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  locRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
   locText: { fontSize: 12, color: colors.primary, fontWeight: '500' },
-  price: { fontSize: 16.5, fontWeight: '800', color: colors.primary, marginTop: 2 },
-  rnplPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: '#e8f1ff', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5,
-    alignSelf: 'flex-start', marginTop: 2, flexWrap: 'wrap',
+  // Small region pill (e.g. "North Riyadh") next to the city line — light green, compact.
+  regionChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 2,
   },
-  rnplLabel: { fontSize: 10.5, color: '#1d4a8b', fontWeight: '700', letterSpacing: 0.3 },
-  rnplLabelAr: { fontSize: 10.5, color: '#1d4a8b', fontWeight: '700' },
-  rnplDot: { fontSize: 10.5, color: '#1d4a8b' },
-  rnplCta: { fontSize: 10.5, color: colors.primary, fontWeight: '600' },
-  rnplFrom: { fontSize: 10, color: colors.muted, fontWeight: '500' },
+  regionChipText: { fontSize: 10.5, color: colors.primary, fontWeight: '700' },
+  price: { fontSize: 16.5, fontWeight: '800', color: colors.primary, marginTop: 2 },
+
+  // EJARI × ريلز "Rent now, pay later" branded banner — light EJARI blue background, two-line
+  // layout (brand row on top, "from SAR X/mo" subline below). Premium feel — rounded corners,
+  // subtle border, generous padding. Self-aligned so it hugs content instead of stretching full
+  // width. (user-visible RNPL CTA — must read as an official partnership badge.)
+  rnplBanner: {
+    backgroundColor: '#e8efff', borderRadius: 10, borderWidth: 1, borderColor: '#cdd9f5',
+    paddingHorizontal: 10, paddingVertical: 8, alignSelf: 'flex-start', marginTop: 4, gap: 4,
+  },
+  rnplRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // The official EJARI×ريلز PNG is wider than tall — fixed height + contain keeps the aspect
+  // ratio and lets the parent banner's padding control the surround.
+  ejariLogo: { width: 90, height: 28 },
+  rnplChevs: { flexDirection: 'row', alignItems: 'center' },
+  rnplCta: { fontSize: 11.5, fontWeight: '700', color: '#3868c8' },
+  rnplFromLine: { fontSize: 10.5, color: colors.muted, fontWeight: '500' },
+  rnplFromStrong: { color: colors.dark, fontWeight: '700' },
+
   statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 4 },
   statChip: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   statBig: { fontSize: 12.5, fontWeight: '700', color: colors.dark, lineHeight: 15 },
@@ -260,12 +313,10 @@ const card = StyleSheet.create({
     width: 240, paddingHorizontal: 14, paddingVertical: 12, gap: 9,
     borderLeftWidth: 1, borderLeftColor: colors.fieldLine,
   },
-  hostHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  hostBadge: {
-    width: 38, height: 38, borderRadius: 9, backgroundColor: colors.tint,
-    alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 2,
-  },
-  hostBadgeText: { fontSize: 9, fontWeight: '800', color: colors.primary },
+  hostHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // The PNG carries its own background and rounded corners — we just size the slot. NO container
+  // background here (would bleed through the PNG's transparent margins).
+  hostBadge: { width: 44, height: 44 },
   hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },
   featGrid: { flexDirection: 'row', flexWrap: 'wrap' },

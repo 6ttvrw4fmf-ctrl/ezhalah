@@ -2,8 +2,8 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } from '@/i18n';
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
-import { POOLS, buildPools, type Listing, type Pools } from '@/data/listings';
-import { fetchListings } from '@/data/remote';
+import { buildPools, type Listing } from '@/data/listings';
+import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
 import { mapSupabaseUser, signOutBackend } from '@/lib/auth';
@@ -28,7 +28,7 @@ type AppState = {
   query: SearchQuery;
   setQuery: (updater: (q: SearchQuery) => SearchQuery) => void;
   resetQuery: () => void;
-  runQuery: (q: SearchQuery, record?: boolean) => SearchResult;
+  runQuery: (q: SearchQuery, record?: boolean) => Promise<SearchResult>;
   dataSource: DataSource;
   // Auth + the post-first-search gate (PRD §9): the first search is free; anything beyond it
   // requires sign-in. `gated` is true once a guest has used their one free search.
@@ -52,7 +52,7 @@ type AppState = {
   trackOpen: (listing: Listing) => void;
   // Resolve a listing by id from the live (Supabase-hydrated) catalog, so the in-app
   // browser opens real ingested listings — not just the bundled seed ids.
-  findListing: (id: number) => Listing | undefined;
+  findListing: (id: number) => Promise<Listing | undefined>;
   // Search history (PRD §13: retained until account deletion). Most-recent first.
   history: HistoryItem[];
   clearHistory: () => void;
@@ -96,11 +96,10 @@ const LEGACY_HISTORY_KEY = 'history';
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [query, setQueryState] = useState<SearchQuery>(emptyQuery());
-  // Start with EMPTY pools — Ezhalah is now a pure aggregator that only shows REAL scraped
-  // listings from Supabase. The bundled mock catalogue is no longer used as a fallback so the
-  // user never sees fake listings even for a flash. (user request: real only.)
-  const [pools, setPools] = useState<Pools>({ villa: [], apartment: [], land: [], budget: [], mixRent: [], mixBuy: [], room: [] });
-  const [dataSource, setDataSource] = useState<DataSource>('local');
+  // Ezhalah is a pure aggregator showing only REAL scraped listings. There's no whole-table load
+  // anymore — each search fetches its own matching subset from Supabase (see runQuery →
+  // fetchListingsForQuery). dataSource is constant 'supabase' (kept for any UI that reads it).
+  const dataSource: DataSource = 'supabase';
   const [user, setUser] = useState<AuthUser | null>(null);
   const [searchCount, setSearchCount] = useState(0);
   // Keep the user's name bilingual: when we only know one script (e.g. Google gives a Latin name),
@@ -248,20 +247,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  // Hydrate the catalog from Supabase. Pools start EMPTY (real listings only) — when the
-  // fetch returns rows, we replace; on failure we just stay empty and the user sees
-  // "no exact matches" rather than fake fallback listings. (user request.)
-  useEffect(() => {
-    let cancelled = false;
-    fetchListings().then((rows) => {
-      if (cancelled || !rows) return;
-      setPools(buildPools(rows));
-      setDataSource('supabase');
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // No startup catalog load anymore. Downloading the whole table (now 21k+ rows, ~47MB) timed out
+  // and broke search. Each search fetches only its matching subset from Supabase via runQuery →
+  // fetchListingsForQuery. (user-reported: app stuck on "Loading listings".)
 
   // Real auth: adopt an existing Supabase session on launch and keep `user` in sync
   // with the backend (covers OAuth redirects bouncing back to /auth and token refresh).
@@ -347,11 +335,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // `record` defaults to true: a genuine new search adds a history chat. Reopening a saved chat
       // passes record=false so just VIEWING it never spawns a fresh entry — a new chat is only made
       // by a new filter search / chat message (or New Chat), keeping the list clean. (user request.)
-      runQuery: (q, record = true) => {
+      runQuery: async (q, record = true) => {
         // A Room is always exactly 1 bedroom — normalize here so every path (filter or AI agent)
         // shows "1 bedroom" and uses the room price ladder, no matter what detail came in. (user request.)
         if (q.type === 'Room') q = { ...q, detail: '1' };
-        const r = runSearch(q, pools);
+        // Fetch ONLY this query's matching subset from Supabase (city + type + deal pushed server-side),
+        // then run the full client engine on it. Replaces the old "load the whole table" approach that
+        // timed out at 21k+ rows. null = backend error (flag it so the UI shows retry, not "no matches").
+        const rows = await fetchListingsForQuery(q);
+        const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null });
         if (record) {
           setSearchCount((c) => c + 1);
           // Record the chat in memory (it shows in the current session). Persistence only happens for
@@ -363,12 +355,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       trackOpen: (listing) => {
         void trackClick(listing, user?.sub ?? null);
       },
-      findListing: (id) => {
-        for (const key of Object.keys(pools) as (keyof Pools)[]) {
-          const hit = pools[key].find((l) => l.id === id);
-          if (hit) return hit;
-        }
-        return undefined;
+      findListing: async (id) => {
+        // Try the session cache (every searched/opened listing is cached), else fetch the single row.
+        const cached = getCachedListing(id);
+        if (cached) return cached;
+        return (await fetchListingById(id)) ?? undefined;
       },
       history,
       clearHistory: () => setHistory([]),
@@ -434,7 +425,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!INTRO_DEMO_MODE) AsyncStorage.setItem('hasSeenIntro', '1').catch(() => {});
       },
     }),
-    [query, pools, dataSource, user, searchCount, history, modal, introSeen, authChecked, pendingMessage, activeChatId, setActiveChatId],
+    [query, dataSource, user, searchCount, history, modal, introSeen, authChecked, pendingMessage, activeChatId, setActiveChatId],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

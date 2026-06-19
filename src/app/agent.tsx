@@ -30,57 +30,10 @@ const IS_WEB = Platform.OS === 'web';
 // room (the user barely scrolls). On phone it stays a comfortable single-column reading width.
 const MAX_W = IS_WEB ? 940 : 560;
 
-// Example-prompt POOLS — a large, varied library so a returning user sees a FRESH set every load /
-// refresh / session (we sample a random subset on mount). Two separate pools, one per language: an
-// Arabic-UI grid shows ONLY Arabic prompts, an English-UI grid ONLY English — never mixed. Each prompt
-// goes straight through the real AI Agent on tap (send(text), no translation). (user request.)
-const EN_POOL: string[] = [
-  // Residential
-  'Family villa in North Riyadh', 'Apartment in Al Narjis', 'Villa in Al Yasmin', 'Apartment in Al Malqa',
-  'Villa in Al Arid', 'Family apartment in Khobar', 'Apartment in North Jeddah', 'Villa in Al Hamra',
-  'Apartment in Al Rawdah', 'Villa in Hittin',
-  // Budget
-  'What can SAR 500,000 buy me?', 'What can SAR 800,000 buy me in Jeddah?', 'Properties under SAR 1 million',
-  'Apartments under SAR 60,000 per year', 'Villas under SAR 2 million', 'Land under SAR 700,000',
-  // Landmark
-  'Apartment near KAFD', 'Villa near Boulevard Riyadh City', 'Apartment near Ithra', 'Property near King Saud University',
-  'Apartment near Princess Nourah University', 'Property near KFUPM', 'Villa near Soudah', 'Land near NEOM',
-  'Property near Marid Castle', 'Apartment near Art Street Abha',
-  // Lifestyle
-  'Villa with a pool', 'Home near international schools', 'Beachfront property in Al Khobar', 'Sea view apartment in Jeddah',
-  'Chalet for weekend escapes', 'Farm near Abha', 'Family villa with a large garden', 'Home close to parks and walking areas',
-  // Commercial
-  'Office in Riyadh', 'Office near KAFD', 'Shop for rent in Jeddah', 'Warehouse in Dammam Industrial City',
-  'Commercial land in Jeddah', 'Showroom in Riyadh', 'Office near King Abdullah Road', 'Retail space in Khobar',
-  // Student
-  'Student apartment near KFUPM', 'Student apartment near King Saud University', 'Student apartment near Princess Nourah University',
-  'Student apartment near Imam University', 'Student apartment near Jazan University',
-  // Community & projects
-  'Villa in Sedra', 'Property in Al Fursan', 'Apartment in Khuzam Riyadh', 'Property near ROSHN communities',
-  'Villa near Qiddiya', 'Home in Shams Ar Riyadh',
-];
-const AR_POOL: string[] = [
-  'شقة بالقرب من كافد', 'فيلا في حي النرجس بالرياض', 'شقة عائلية في الخبر', 'أرض تجارية في جدة',
-  'فيلا مع مسبح في شمال الرياض', 'شقة بإطلالة بحرية في جدة', 'شقة طلابية قرب جامعة الملك فهد',
-  'مكتب بالقرب من جامعة الملك سعود', 'دور للإيجار في حي الملقا', 'مزرعة للبيع قرب أبها',
-  'شاليه قريب من الرياض للويكند', 'محل للإيجار في جدة', 'أرض بالقرب من نيوم', 'فيلا بالقرب من السودة',
-  'شقة قرب إثراء', 'مستودع في المدينة الصناعية بالدمام', 'عقار قرب واجهة الرياض', 'شقة بالقرب من بوليفارد الرياض',
-  'أرض سكنية في شمال الرياض', 'فيلا عائلية في الياسمين', 'شقة في الروضة', 'فيلا في حطين', 'أرض في الرمال',
-  'شقة في الصحافة', 'فيلا في المحمدية بجدة', 'شقة قرب جامعة الأميرة نورة', 'فيلا قرب مطار الملك خالد',
-  'أرض قرب مشروع القدية', 'شقة بالقرب من جامعة جازان', 'عقار قرب قلعة مارد', 'فيلا في الخبر مع حديقة',
-  'مكتب في حي العليا بالرياض', 'عقار قريب من مستشفى الملك فيصل التخصصي', 'أرض بالقرب من مشروع روشن',
-  'فيلا في سدرة', 'عقار في الفرسان', 'شقة في شمال جدة', 'مزرعة في عسير', 'استراحة للبيع قرب الرياض',
-];
-// Fisher–Yates shuffle, then take the first n — a fresh random subset each call. (Math.random is fine
-// in app code; it gives a new combination on every mount/refresh.)
-const sampleExamples = (pool: string[], n: number): string[] => {
-  const a = [...pool];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a.slice(0, n);
-};
+// Example-prompt pools, sampler, and the DB-driven hook all live in src/data/examplePrompts.ts so
+// the home onboarding grid and this agent screen share ONE library — adding a prompt or a new DB
+// source there now appears in both places.
+import { useExamplePrompts } from '@/data/examplePrompts';
 
 type ChatMsg =
   | { id: string; role: 'user'; text: string; typing?: boolean }
@@ -105,29 +58,18 @@ const greetingText = (locale: Locale): string =>
 // Ezhalah's SEARCHING-phase voice — one Najdi-flavoured swagger line chosen at random before each
 // search (its recognizable Saudi personality, NOT generic "searching now"). Shown ONLY while searching,
 // above the search summary; the RESULTS header switches to the professional RESULT_* copy. (user request.)
+// Curated subset: user removed slogans 6, 7, 8, 9, 10, 12, 13, 15, 18, 19, 20, 21, 22 from the
+// original 22 — leaving the 9 below. HYPE_AR and HYPE_EN stay in lockstep (same index = same
+// slogan). To re-add a slogan later, paste both the Arabic line and its English twin back at the
+// SAME index in both arrays.
 const HYPE_AR = [
   'ازهله، على شنبي!',
   'ازهله، على خشمي الوجيه!',
   'ازهله، ودونك غترتي وعقالي!',
   'ازهله، وفالك طيب!',
   'ازهله، من عيوني!',
-  'ازهله، وجاك الذيب!',
-  'ازهله، واعتبره في حبالي!',
-  'ازهله، وأنا ولد شدادها!',
-  'ازهله، وجاك العلم اللي يجمد على الشارب!',
-  'ازهله، وجبنا لك ديدها ورأسها!',
-  'ازهله، ومالك إلا سعة الخاطر وقرة العين!',
-  'ازهله، وحقك عليّ لو أبيع حلالي!',
-  'ازهله، وأبشر بالشحم والمفطح!',
   'ازهله، وابشر بسعدك!',
-  'ازهله، ورقبتي سدّادة!',
   'ازهله، وعلى يمناي كل اللي تبيه!',
-  'ازهله، ولا تشيل هم وأنا عمّك!',
-  'ازهله، لو تبي نجيب لك لبن العصفور!',
-  'ازهله، وراسي يشم الهواء!',
-  'ازهله، ومالك إلا رجالٍ تسد عين الشمس!',
-  'ازهله، واعتبر الموضوع منتهي قبل لا يبدأ!',
-  'ازهله، وحقّك يجيك لين حدّك وأنت مكيّف!',
 ];
 // English versions of the same 22 approved Arabic slogans (same index → same slogan). These are
 // FAITHFUL translations of HYPE_AR — not improvisations. The word "Ezhalah" is kept verbatim
@@ -136,28 +78,13 @@ const HYPE_AR = [
 // the RTL Arabic placement. (user request: "translate the Arabic slogan to English and put it in
 // the correct English position — just never translate the word Ezhalah.")
 const HYPE_EN = [
-  'Ezhalah, on my mustache!',                                            // ازهله، على شنبي!
-  'Ezhalah, on my honorable nose!',                                      // ازهله، على خشمي الوجيه!
-  'Ezhalah, take my ghutra and igal as collateral!',                     // ازهله، ودونك غترتي وعقالي!
-  'Ezhalah, and may your fortune be good!',                              // ازهله، وفالك طيب!
-  'Ezhalah, from my own eyes!',                                          // ازهله، من عيوني!
-  'Ezhalah, the wolf is at your service!',                               // ازهله، وجاك الذيب!
-  "Ezhalah, consider it caught in my net!",                              // ازهله، واعتبره في حبالي!
-  "Ezhalah, I'm the one who tightens the knot!",                         // ازهله، وأنا ولد شدادها!
-  "Ezhalah, news so sweet it'll freeze on your mustache!",               // ازهله، وجاك العلم اللي يجمد على الشارب!
-  "Ezhalah, we've brought it to you head to tail!",                      // ازهله، وجبنا لك ديدها ورأسها!
-  "Ezhalah, you'll get nothing but peace of mind and joy!",              // ازهله، ومالك إلا سعة الخاطر وقرة العين!
-  "Ezhalah, even if I have to sell my livestock for you!",               // ازهله، وحقك عليّ لو أبيع حلالي!
-  'Ezhalah, rejoice — the feast is ready!',                              // ازهله، وأبشر بالشحم والمفطح!
-  'Ezhalah, rejoice in your good fortune!',                              // ازهله، وابشر بسعدك!
-  "Ezhalah, my neck is your guarantee!",                                 // ازهله، ورقبتي سدّادة!
-  'Ezhalah, everything you want is in my right hand!',                   // ازهله، وعلى يمناي كل اللي تبيه!
-  "Ezhalah, don't carry any worry — I'm your uncle!",                    // ازهله، ولا تشيل هم وأنا عمّك!
-  "Ezhalah, if you want it, I'll bring you sparrow's milk!",             // ازهله، لو تبي نجيب لك لبن العصفور!
-  "Ezhalah, my head's already up scanning the wind!",                    // ازهله، وراسي يشم الهواء!
-  'Ezhalah, you deserve men who can blot out the sun!',                  // ازهله، ومالك إلا رجالٍ تسد عين الشمس!
-  'Ezhalah, consider it done before it even begins!',                    // ازهله، واعتبر الموضوع منتهي قبل لا يبدأ!
-  "Ezhalah, what's owed to you will reach your door — while you sit in the cool!", // ازهله، وحقّك يجيك لين حدّك وأنت مكيّف!
+  'Ezhalah, on my mustache!',                              // ازهله، على شنبي!
+  'Ezhalah, on my honorable nose!',                        // ازهله، على خشمي الوجيه!
+  'Ezhalah, take my ghutra and igal as collateral!',       // ازهله، ودونك غترتي وعقالي!
+  'Ezhalah, and may your fortune be good!',                // ازهله، وفالك طيب!
+  'Ezhalah, from my own eyes!',                            // ازهله، من عيوني!
+  'Ezhalah, rejoice in your good fortune!',                // ازهله، وابشر بسعدك!
+  'Ezhalah, everything you want is in my right hand!',     // ازهله، وعلى يمناي كل اللي تبيه!
 ];
 // RESULTS phase = professional, trustworthy (NOT the personality phrases). One picked at random;
 // rendered as plain text directly under the Search Summary — NO "Ezhalah!" prefix, no sparkle icon,
@@ -176,13 +103,26 @@ const resultDone = (locale: Locale): string => {
   const arr = locale === 'ar' ? RESULT_AR : RESULT_EN;
   return arr[Math.floor(Math.random() * arr.length)];
 };
-// Pick from the 22 approved slogans in the user's UI language. Both lists have IDENTICAL length and
-// order — same index = same slogan translated. The brand "Ezhalah" is kept verbatim in both. Random
-// index picks the same slogan regardless of locale, so flipping the UI mid-search shows the matching
-// translation. (user request: translate the Arabic to English when UI is English; never translate
-// the word Ezhalah itself.)
-const hypePhrase = (locale: Locale) => {
-  const arr = locale === 'en' ? HYPE_EN : HYPE_AR;
+// Pick a slogan in the LANGUAGE OF THE USER'S MESSAGE (not the UI locale). Counting Arabic vs
+// Latin word-runs in the text lets a user type "I want an apartment in Riyadh" inside an Arabic
+// UI and still get the English slogan back — which is what they expect. Falls back to the UI
+// locale when the message has no letters (e.g. just "4000"). The two arrays stay index-aligned so
+// the same random pick maps to the same translated slogan in either language. (user-reported:
+// "I sent in English but the slogan came back Arabic — see, didn't get translated.")
+function detectMsgLang(s: string): 'en' | 'ar' | null {
+  const words = s.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  let ar = 0, en = 0;
+  for (const w of words) {
+    if (/[؀-ۿ]/.test(w)) ar++;
+    else if (/[A-Za-z]/.test(w)) en++;
+  }
+  if (ar === en) return null;
+  return ar > en ? 'ar' : 'en';
+}
+const hypePhrase = (locale: Locale, messageText?: string) => {
+  const detected = messageText ? detectMsgLang(messageText) : null;
+  const lang: Locale = detected ?? locale;
+  const arr = lang === 'en' ? HYPE_EN : HYPE_AR;
   return arr[Math.floor(Math.random() * arr.length)];
 };
 
@@ -316,10 +256,7 @@ export default function Agent() {
   // A FRESH random subset of example prompts each mount/refresh — from the pool matching the UI
   // language (Arabic UI → Arabic pool, English UI → English pool, never mixed). Re-samples if the
   // language or column count changes. Phone shows 6, wider screens 12. (user request: rotation.)
-  const exampleSet = useMemo(
-    () => sampleExamples(locale === 'ar' ? AR_POOL : EN_POOL, narrowGrid ? 6 : 12),
-    [locale, narrowGrid],
-  );
+  const exampleSet = useExamplePrompts(locale === 'ar' ? 'ar' : 'en', narrowGrid ? 6 : 12);
   const { seed, filter, chatBubble, chatSub, replay, fresh } = useLocalSearchParams<{
     seed?: string;
     filter?: string;
@@ -352,7 +289,7 @@ export default function Agent() {
   // page eases down to each new card as it pops in — so the user is carried below one listing at a
   // time instead of a whole grid landing at once. (user request.) revealCount[id] = how many cards
   // are visible so far; absent = show all (used for replayed/history turns that don't type out).
-  const REVEAL_STEP_MS = 480;
+  const REVEAL_STEP_MS = 130; // snappy one-by-one cascade (25 cards ≈ 3s), smooth not distracting
   const [revealCount, setRevealCount] = useState<Record<string, number>>({});
   const revealTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   // The results turn whose cards are still popping in one-by-one (id + total count), so a new user
@@ -364,15 +301,43 @@ export default function Agent() {
   // reply as "done typing" so the cards render, but we reveal the full count in a single state update
   // and skip the staggered timers entirely. No `revealing` state → Stop button is gone from the card
   // phase. (user request: remove the property-card reveal animation.)
+  // Y-offset of each message inside the scroll content, captured via onLayout. Lets us scroll to the
+  // TOP of a results message (so the Ezhalah response stays visible and cards appear below) instead of
+  // yanking to the very bottom of the chat. (user request: don't drag the whole screen down.)
+  const msgYRef = useRef<Record<string, number>>({});
+  // After the reply text + sort line finish, reveal the property cards ONE BY ONE with a gentle
+  // stagger — and do NOT force-scroll to the bottom. We scroll once to bring the TOP of the response
+  // near the top of the viewport (keeping the message context visible), then let the cards fill in
+  // below at their own pace without any further auto-scroll. (user request: controlled, smooth, cards
+  // appear under the response; text fully typed BEFORE any card shows.)
   const startReveal = (id: string, n: number) => {
     setDoneTyping((d) => (d[id] ? d : { ...d, [id]: true }));
-    if (n > 0) {
-      pinModeRef.current = 'none';
-      setRevealCount((c) => ({ ...c, [id]: n }));
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 90);
-      revealActiveRef.current = null;
-      setRevealing(false);
+    pinModeRef.current = 'none'; // stop the bottom-follow so growing card list never yanks the view
+    if (n <= 0) { revealActiveRef.current = null; setRevealing(false); return; }
+    // Start with ZERO cards visible in the same render that reveals the text/sort line, so cards never
+    // flash in before the text is complete.
+    setRevealCount((c) => ({ ...c, [id]: 0 }));
+    // Gentle one-time scroll: bring the response's top ~80px from the top of the viewport. Keeps the
+    // slogan + summary + intro in view with the first cards just below — never the far bottom.
+    const y = msgYRef.current[id];
+    if (typeof y === 'number') {
+      setTimeout(() => scrollRef.current?.scrollTo({ y: Math.max(0, y - 80), animated: true }), 60);
     }
+    // Reveal cards one-by-one after a short beat (lets the sort line be read first). No scroll per card.
+    revealActiveRef.current = { id, count: n };
+    setRevealing(true);
+    let shown = 0;
+    const tick = () => {
+      shown += 1;
+      setRevealCount((c) => ({ ...c, [id]: shown }));
+      if (shown < n) {
+        revealTimers.current.push(setTimeout(tick, REVEAL_STEP_MS));
+      } else {
+        revealActiveRef.current = null;
+        setRevealing(false);
+      }
+    };
+    revealTimers.current.push(setTimeout(tick, 480)); // beat after the text completes
   };
   const markTyped = (id: string) => {
     const msg = msgs.find((m) => m.id === id);
@@ -464,9 +429,11 @@ export default function Agent() {
 
   // Shared "found" choreography: the typed reply ("answer respond") → a held "Ezhalah is searching…"
   // beat → the results header + cards. `statusId` is the thinking bubble we morph into the reply.
-  const playListings = async (run: Run, statusId: string, summary: string, result: SearchResult) => {
-    // 1) SEARCHING phase: status bubble shows the slogan + summary.
-    const slogan = hypePhrase(getLocale());
+  const playListings = async (run: Run, statusId: string, summary: string, result: SearchResult, messageText?: string) => {
+    // 1) SEARCHING phase: status bubble shows the slogan + summary. Slogan language follows the
+    // user's MESSAGE text (English message → English slogan) instead of the UI locale, so users
+    // who chat in one language and have their UI in the other still get the matching slogan.
+    const slogan = hypePhrase(getLocale(), messageText);
     setMsgs((m) => m.map((x) => (x.id === statusId ? { id: statusId, role: 'status', phase: 'searching', slogan, summary } : x)));
     toBottom();
     await waitRun(run, Math.max(1500, typeDuration(slogan)));
@@ -564,11 +531,11 @@ export default function Agent() {
       // A real search resolved — clear the anti-loop state so the next request starts fresh.
       askCountRef.current = 0;
       saidRef.current = [];
-      const result = runQuery(turn.query);
+      const result = await runQuery(turn.query); // now async: fetches the matching subset server-side
       // About to scrape: a random Saudi hype line + a compact read-back of the parsed query, then the
       // "searching…" beat. (user request — replaces the old prose reply + price-math note.)
       const reply = buildScrapeIntro(turn.query);
-      await playListings(run, statusId, reply, result);
+      await playListings(run, statusId, reply, result, v);
       if (run.cancelled) return;
       void promptSignupSoon(run); // a guest just used their one free search → prompt sign-up
     } else {
@@ -580,8 +547,8 @@ export default function Agent() {
       if (hasIntent && askCountRef.current >= 2) {
         askCountRef.current = 0;
         saidRef.current = [];
-        const result = runQuery(combined);
-        await playListings(run, statusId, buildScrapeIntro(combined), result);
+        const result = await runQuery(combined);
+        await playListings(run, statusId, buildScrapeIntro(combined), result, v);
         if (run.cancelled) return;
         void promptSignupSoon(run);
       } else {
@@ -642,8 +609,11 @@ export default function Agent() {
     const statusId = uid();
     setMsgs((m) => [...m, { id: statusId, role: 'status', phase: 'thinking' }]);
     toBottom();
-    const result = runQuery(pending.q);
     void (async () => {
+      // Fetch the matching subset DURING the thinking beat — the network wait hides inside the pause
+      // the user already sees, so the choreography timing is unchanged. (runQuery is now async.)
+      const result = await runQuery(pending.q);
+      if (run.cancelled) return;
       await waitRun(run, THINK_MS);
       if (run.cancelled) return;
       await playListings(run, statusId, buildScrapeIntro(pending.q), result);
@@ -657,17 +627,24 @@ export default function Agent() {
   // Reopening a past search from the sidebar (replay='0') just SHOWS the saved conversation — the
   // request bubble and the results render in their final state with no typewriter replay, no
   // "thinking/searching" beats. It's a history view, not a fresh run. (user request.)
-  const openStatic = (q: SearchQuery, override?: { bubble: string; sub: string }) => {
+  const openStatic = async (q: SearchQuery, override?: { bubble: string; sub: string }) => {
     const { bubble, sub } = override ?? filterToChat(q);
-    const result = runQuery(q, false); // viewing a saved chat — don't create a new history entry
+    const userId = uid();
     const resultsId = uid();
+    // Render the user bubble + a brief "searching…" status immediately so the screen is never blank
+    // while the per-search fetch (now async) resolves. (runQuery used to be synchronous.)
     setMsgs([
-      { id: uid(), role: 'user', text: bubble },
+      { id: userId, role: 'user', text: bubble },
+      { id: resultsId, role: 'status', phase: 'searching', summary: buildScrapeIntro(q) },
+    ]);
+    pinModeRef.current = 'top';
+    toTop();
+    const result = await runQuery(q, false); // viewing a saved chat — don't create a new history entry
+    // Morph into the final results state — all cards at once, no typewriter (history view).
+    setMsgs([
+      { id: userId, role: 'user', text: bubble },
       { id: resultsId, role: 'results', text: sub, result },
     ]);
-    // History view: show the reply done + ALL cards at once — no progressive reveal, no Stop button,
-    // no busy state (this isn't a live search). (Don't route through markTyped, which now drives the
-    // one-by-one reveal + Stop button for live searches.)
     setDoneTyping((d) => ({ ...d, [resultsId]: true }));
     setRevealCount((c) => ({ ...c, [resultsId]: result.listings.length }));
     pinModeRef.current = 'top';
@@ -800,28 +777,57 @@ export default function Agent() {
                 );
               }
               if (m.role === 'status') {
-                // While searching we show the slogan as PLAIN TEXT (no spinner, no icon, no decoration),
-                // with the Search Summary beneath it. The brief pre-search "thinking" beat keeps the
-                // spinner. (user request: slogan plain text only, above the summary.)
+                // While searching, the slogan is rendered with the SAME sparkle-icon layout as in the
+                // results phase. Earlier this block omitted the icon ("plain text only") which caused
+                // a visible flicker on phase transition: the text was there during searching, then a
+                // star "popped in" beside it when results arrived. Now the icon is present from the
+                // first frame, so the transition is seamless — only the message below the slogan
+                // changes. (user request: "they are displayed then the star pops up — fix it.")
                 if (m.slogan) {
                   const sr = msgRTL(m.slogan);
                   return (
-                    <View key={m.id} style={s.sloganWrap}>
-                      <Text style={[s.sloganText, { writingDirection: sr ? 'rtl' : 'ltr', textAlign: sr ? 'right' : 'left' }]}>{m.slogan}</Text>
+                    // Searching-phase slogan + summary: anchored to the RIGHT for Arabic (alignItems
+                    // flex-end), exactly like the final results block, so it never jumps left/centre
+                    // between the searching and results phases. (user request: Arabic assistant content
+                    // always on the right.)
+                    <View key={m.id} style={{ gap: 6, alignItems: sr ? 'flex-end' : 'flex-start', width: '100%' }}>
+                      <View style={[s.reply, { flexDirection: 'row', alignItems: 'center' }]}>
+                        {!sr && (
+                          <View style={s.replyIcon}>
+                            <Ionicons name="sparkles" size={14} color={colors.primary} />
+                          </View>
+                        )}
+                        <Text style={[s.sloganText, { writingDirection: sr ? 'rtl' : 'ltr', textAlign: sr ? 'right' : 'left' }]}>{m.slogan}</Text>
+                        {sr && (
+                          <View style={s.replyIcon}>
+                            <Ionicons name="sparkles" size={14} color={colors.primary} />
+                          </View>
+                        )}
+                      </View>
                       {m.summary ? (
-                        <Text style={[s.summaryText, { writingDirection: sr ? 'rtl' : 'ltr', textAlign: sr ? 'right' : 'left' }]}>{m.summary}</Text>
+                        <Text style={[s.summaryText, { writingDirection: sr ? 'rtl' : 'ltr', textAlign: sr ? 'right' : 'left', alignSelf: 'stretch' }]}>{m.summary}</Text>
                       ) : null}
                     </View>
                   );
                 }
-                return (
-                  <View key={m.id} style={s.status}>
-                    <Spinner />
-                    <Text style={s.statusText}>
-                      {m.phase === 'thinking' ? t('Ezhalah is thinking…') : t('Ezhalah is searching…')}
-                    </Text>
-                  </View>
-                );
+                {
+                  // "إزهله يفكر…" / "إزهله يبحث…" must sit on the FAR RIGHT for Arabic, exactly where
+                  // every Ezhalah message appears — never centered, never left, never LTR. The outer
+                  // View anchors the whole row to the right edge (alignItems flex-end); row-reverse
+                  // puts the spinner on the right with the text flowing right-to-left to its left.
+                  // English keeps the original left-anchored layout. (user request.)
+                  const sr = locale === 'ar';
+                  return (
+                    <View key={m.id} style={{ width: '100%', alignItems: sr ? 'flex-end' : 'flex-start' }}>
+                      <View style={[s.status, sr && { flexDirection: 'row-reverse', paddingLeft: 0, paddingRight: 2 }]}>
+                        <Spinner />
+                        <Text style={[s.statusText, { writingDirection: sr ? 'rtl' : 'ltr', textAlign: sr ? 'right' : 'left' }]}>
+                          {m.phase === 'thinking' ? t('Ezhalah is thinking…') : t('Ezhalah is searching…')}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                }
               }
               if (m.role === 'agent') {
                 // Per-message direction: each AI reply renders in its OWN language's direction and
@@ -848,19 +854,28 @@ export default function Agent() {
               // status into the same bubble (no duplicate slogan/summary block, no out-of-order intro).
               const rtl = msgRTL(m.text);
               return (
-                <View key={m.id} style={{ gap: 6 }}>
-                  {/* 1) BRANDED SLOGAN — sparkle icon + Ezhalah's personality line. Pinned LTR so the
-                      icon position is unambiguous: ENGLISH → icon on the LEFT (text on the right);
-                      ARABIC → text on the LEFT, icon on the FAR RIGHT (the text still reads right-to-
-                      left inside its bubble via writingDirection). (user request: Arabic icon on right.) */}
+                // ARABIC: the whole assistant response (slogan + summary + intro) sits on the RIGHT,
+                // directly under the user's right-aligned message — so alignItems flex-end clusters the
+                // text blocks to the right edge with the sparkle on the right. ENGLISH: flex-start (left).
+                // The property-cards View below opts back out with alignSelf:'stretch' so cards stay
+                // full-width regardless. (user request: Arabic assistant reply on the right, not left.)
+                <View
+                  key={m.id}
+                  onLayout={(e) => { msgYRef.current[m.id] = e.nativeEvent.layout.y; }}
+                  style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%' }}
+                >
+                  {/* 1) BRANDED SLOGAN — sparkle icon + Ezhalah's personality line. The row sizes to its
+                      content and is pushed to the correct edge by the parent's alignItems. ENGLISH →
+                      icon then text (reads left-to-right, clustered left). ARABIC → text then icon
+                      (icon on the far right, clustered right). */}
                   {m.slogan ? (
-                    <View style={[s.reply, { flexDirection: 'row', direction: 'ltr' as any }]}>
+                    <View style={[s.reply, { flexDirection: 'row', alignItems: 'center' }]}>
                       {!msgRTL(m.slogan) && (
                         <View style={s.replyIcon}>
                           <Ionicons name="sparkles" size={14} color={colors.primary} />
                         </View>
                       )}
-                      <Text style={[s.sloganText, { writingDirection: msgRTL(m.slogan) ? 'rtl' : 'ltr', textAlign: msgRTL(m.slogan) ? 'right' : 'left', flex: 1 }]}>{m.slogan}</Text>
+                      <Text style={[s.sloganText, { writingDirection: msgRTL(m.slogan) ? 'rtl' : 'ltr', textAlign: msgRTL(m.slogan) ? 'right' : 'left' }]}>{m.slogan}</Text>
                       {msgRTL(m.slogan) && (
                         <View style={s.replyIcon}>
                           <Ionicons name="sparkles" size={14} color={colors.primary} />
@@ -870,25 +885,36 @@ export default function Agent() {
                   ) : null}
                   {/* 2) SEARCH SUMMARY — what Ezhalah understood, directly under the slogan. */}
                   {m.summary ? (
-                    <Text style={[s.summaryText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>{m.summary}</Text>
+                    <Text style={[s.summaryText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', alignSelf: 'stretch' }]}>{m.summary}</Text>
                   ) : null}
                   {/* 3) RESULT INTRO — plain text, no sparkle, no "Ezhalah!" prefix — professional and
                       neutral. Sits below the Search Summary. (user request.) */}
-                  <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', marginTop: 6 }]}>
+                  <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', marginTop: 6, alignSelf: 'stretch' }]}>
                     {m.typing ? <Typer text={m.text} onDone={() => markTyped(m.id)} /> : m.text}
                   </Text>
                   {/* Hold the property cards back until Ezhalah has finished writing the words above —
                       listings never appear before the reply types out (user request). */}
                   {m.typing && !doneTyping[m.id] ? null : m.result.listings.length === 0 ? (
-                    <Text style={s.emptyRes}>{t('No exact matches — try broadening your search.')}</Text>
+                    // Prefer the SPECIFIC, actionable recommendation runSearch attached to the result
+                    // ("No listings within that budget — want me to remove it?"). Falls back to the
+                    // generic broaden line only when the diagnostic couldn't find a single relaxation
+                    // that would unlock results. (user request: "give the user a recommendation
+                    // like change something — put it like 'do you want me to?'".)
+                    <Text style={[s.emptyRes, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', alignSelf: 'stretch' }]}>
+                      {m.result.suggestion ?? t('No exact matches — try broadening your search.')}
+                    </Text>
                   ) : (
                     <>
-                      <Text style={[s.rankLine, { textAlign: rtl ? 'right' : 'left' }]}>{m.result.sortNote ?? t('Ranked by closest match.')}</Text>
+                      <Text style={[s.rankLine, { textAlign: rtl ? 'right' : 'left', alignSelf: 'stretch' }]}>{m.result.sortNote ?? t('Ranked by closest match.')}</Text>
                       {/* All result cards render AT ONCE — the per-card pop-in animation was removed
                           per user request ("remove that, not nice"). The cards just appear, no fade,
-                          no scale, no stagger. */}
-                      <View style={{ gap: 12, marginTop: 12 }}>
-                        {m.result.listings.slice(0, revealCount[m.id] ?? m.result.listings.length).map((l, i) => (
+                          no scale, no stagger. Cards stay FULL-WIDTH via alignSelf:stretch even though
+                          the parent clusters text to the right for Arabic. */}
+                      <View style={{ gap: 12, marginTop: 12, alignSelf: 'stretch' }}>
+                        {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
+                            drip (prevents a full-grid flash if setDoneTyping flushes a render before
+                            setRevealCount(0)). History/replay turns (not typing) show all immediately. */}
+                        {m.result.listings.slice(0, revealCount[m.id] ?? (m.typing ? 0 : m.result.listings.length)).map((l, i) => (
                           <ResultCard
                             key={l.id}
                             listing={l}
