@@ -1,0 +1,40 @@
+# Weekly hard-delete sweep — removes Aqar rows that have been marked inactive (active=false)
+# for more than 30 days. The 30-day buffer is the safety net: if liveness ever falsely kills a
+# real listing, there's a full month to notice and flip `active` back to true before the row is
+# permanently gone.
+#
+# Runs once a week — Sunday 02:00 UTC = Sunday 05:00 KSA, quiet time on Aqar so the load matters
+# even less than the discovery sweep.
+
+name: Aqar cleanup
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"   # 02:00 UTC every Sunday
+  workflow_dispatch: {}
+
+concurrency:
+  group: aqar-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+
+      - name: Run cleanup
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m scrapers.aqar.cleanup
