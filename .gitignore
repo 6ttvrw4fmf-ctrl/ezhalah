@@ -43,3 +43,6 @@ example
 /ios
 /android
 .vercel
+__pycache__/
+*.pyc
+scrapers/.env
