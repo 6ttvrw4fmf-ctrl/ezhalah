@@ -15,6 +15,7 @@ export const CATEGORY_TYPES: Record<Category, string[]> = {
     'Office', 'Warehouse', 'Shop', 'Showroom', 'Workshop', 'Factory',
     'Commercial Land', 'Industrial Land', 'Farm', 'Agriculture Plot',
     'Hotel', 'Commercial Building', 'Gas Station', 'Health Center',
+    'Kiosk', 'Cinema', 'Parking', 'Bank', 'School', 'Telecom Tower',
   ],
 };
 
@@ -41,6 +42,12 @@ const SIZE_BY_TYPE: Record<string, string[]> = {
   'Commercial Building': ['Under 500 m²', '500–1,500 m²', '1,500–5,000 m²', '5,000+ m²'],
   'Gas Station': ['Under 1,000 m²', '1,000–2,500 m²', '2,500–5,000 m²', '5,000+ m²'],
   'Health Center': ['Under 200 m²', '200–500 m²', '500–1,500 m²', '1,500+ m²'],
+  Kiosk: ['Under 10 m²', '10–25 m²', '25–50 m²', '50+ m²'],
+  Cinema: ['Under 500 m²', '500–1,500 m²', '1,500–3,000 m²', '3,000+ m²'],
+  Parking: ['Under 200 m²', '200–500 m²', '500–1,500 m²', '1,500+ m²'],
+  Bank: ['Under 100 m²', '100–250 m²', '250–500 m²', '500+ m²'],
+  School: ['Under 1,000 m²', '1,000–3,000 m²', '3,000–8,000 m²', '8,000+ m²'],
+  'Telecom Tower': ['Under 50 m²', '50–150 m²', '150–400 m²', '400+ m²'],
   // Residential (non-bedroom) types — same 4-tab + m² style for consistency.
   Building: ['Under 300 m²', '300–600 m²', '600–1,000 m²', '1,000+ m²'],
   'Residential Land': ['Under 300 m²', '300–600 m²', '600–1,000 m²', '1,000+ m²'],

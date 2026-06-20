@@ -65,6 +65,12 @@ SLUG_TO_TYPE = {
     "health_center":       "Health Center",
     "farm":                "Farm",
     "commercial_building": "Commercial Building",
+    "kiosk":               "Kiosk",
+    "cinema":              "Cinema",
+    "parking":             "Parking",
+    "bank":                "Bank",
+    "school":              "School",
+    "telecom_tower":       "Telecom Tower",
 }
 
 # Saudi city names (Arabic) → canonical English city names. Mirrors discover.CITY_AR (Aqar's

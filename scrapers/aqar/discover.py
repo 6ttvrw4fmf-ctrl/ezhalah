@@ -59,6 +59,19 @@ CATEGORIES = {
     ("farm",                "buy"):  "مزارع-للبيع",
     ("commercial_building", "rent"): "مجمعات-للإيجار",
     ("commercial_building", "buy"):  "مجمعات-للبيع",
+    # ── Niche commercial categories (Aqar's own menu slugs) ──
+    ("kiosk",          "rent"): "أكشاك-للإيجار",
+    ("kiosk",          "buy"):  "أكشاك-للبيع",
+    ("cinema",         "rent"): "دور-سينما-للإيجار",
+    ("cinema",         "buy"):  "دور-سينما-للبيع",
+    ("parking",        "rent"): "مواقف-سيارات-للإيجار",
+    ("parking",        "buy"):  "مواقف-سيارات-للبيع",
+    ("bank",           "rent"): "صراف-وبنوك-للإيجار",
+    ("bank",           "buy"):  "صراف-وبنوك-للبيع",
+    ("school",         "rent"): "مدارس-للإيجار",
+    ("school",         "buy"):  "مدارس-للبيع",
+    ("telecom_tower",  "rent"): "أبراج-اتصالات-للإيجار",
+    ("telecom_tower",  "buy"):  "أبراج-اتصالات-للبيع",
 }
 
 # The 10 RESIDENTIAL types per Ezhalah's taxonomy. Used by run.py's --all-residential mode.
@@ -67,10 +80,11 @@ RESIDENTIAL_TYPES = (
     "building", "rest_house", "chalet", "camp", "land",
 )
 
-# The 10 COMMERCIAL types we scrape (rent+buy each). Used by run_commercial.py.
+# The COMMERCIAL types we scrape (rent+buy each). Used by run_commercial.py.
 COMMERCIAL_TYPES = (
     "shop", "office", "warehouse", "workshop", "factory",
     "hotel", "gas_station", "health_center", "farm", "commercial_building",
+    "kiosk", "cinema", "parking", "bank", "school", "telecom_tower",
 )
 
 # Aqar's city URL slug must match its OWN city label exactly, or the page falls back to a national

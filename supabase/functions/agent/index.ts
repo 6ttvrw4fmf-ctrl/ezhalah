@@ -75,6 +75,7 @@ const COMMERCIAL_TYPES = [
   "Office", "Warehouse", "Shop", "Showroom", "Workshop", "Factory",
   "Commercial Land", "Industrial Land", "Farm", "Agriculture Plot",
   "Hotel", "Commercial Building", "Gas Station", "Health Center",
+  "Kiosk", "Cinema", "Parking", "Bank", "School", "Telecom Tower",
 ];
 const TYPES = [...RESIDENTIAL_TYPES, ...COMMERCIAL_TYPES];
 
