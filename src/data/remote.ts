@@ -118,7 +118,13 @@ function dbTypesFor(q: SearchQuery): string[] | null {
 function isCommercialQuery(q: SearchQuery): boolean {
   return q.category === 'Commercial' || (!!q.type && CATEGORY_TYPES.Commercial.includes(q.type));
 }
+// All LAND lives in the residential table — Aqar treats land as ONE category (أراضي), which we scrape
+// there, then split by zoning (Residential/Commercial/Industrial/Agriculture) from the listing text.
+// So a "Commercial Land" search must read the residential table even though it's a Commercial-category
+// type — otherwise it hits the (land-less) commercial table and returns 0. (user: split the land.)
+const LAND_TYPES = new Set(['Residential Land', 'Commercial Land', 'Industrial Land', 'Agriculture Plot']);
 function tableFor(q: SearchQuery): string {
+  if (q.type && LAND_TYPES.has(q.type)) return 'aqar_residential_listings';
   return isCommercialQuery(q) ? 'aqar_commercial_listings' : 'aqar_residential_listings';
 }
 

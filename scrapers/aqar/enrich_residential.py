@@ -99,6 +99,17 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     property_type = N.SLUG_TO_TYPE.get(type_slug)
     transaction_type = "Rent" if deal_slug == "rent" else "Buy"
 
+    # Land ZONING split: Aqar lumps every plot under one أراضي category (→ "Residential Land"). Read the
+    # listing text to tag the real zoning so commercial/industrial/agricultural plots aren't all labelled
+    # residential. Most-specific wins; no keyword → residential (Aqar's default). (user: split the land.)
+    if property_type == "Residential Land":
+        if re.search(r"صناعي", text):
+            property_type = "Industrial Land"
+        elif re.search(r"زراعي|مزرع", text):
+            property_type = "Agriculture Plot"
+        elif re.search(r"تجاري", text):
+            property_type = "Commercial Land"
+
     # ─── Basic info ──────────────────────────────────────────────────────────
     area_m2           = _int_after_label(text, r"المساحة\s*(?:الكلية|الإجمالية)?", r"\bالمساحة\b")
     interior_space_m2 = _int_after_label(text, r"المساحة\s*الداخلية", r"مساحة\s*البناء")

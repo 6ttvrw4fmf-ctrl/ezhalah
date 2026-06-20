@@ -13,6 +13,9 @@ export type Listing = {
   area: number; // m²
   beds: number; // 0 = not a dwelling
   source: string; // platform name
+  // Rent billing period: 'monthly' | 'annual' (null for Buy / mock data). When 'monthly', `price` is
+  // the per-month figure; otherwise yearly. Drives the per-month filter + the /mo vs /yr label. (user.)
+  rentPeriod?: string | null;
   listed: string; // human recency
   photo: string;
   // Real URL on the source platform — when present, the in-app browser redirects the
@@ -179,6 +182,8 @@ export function buildPools(rows: Listing[]): Pools {
     Camp: 'apartment',
     'Residential Land': 'land',
     'Commercial Land': 'land',
+    'Industrial Land': 'land',
+    'Agriculture Plot': 'land',
     Room: 'room',
   };
   // Crude "is this cheap?" heuristic — the search engine uses `budget` as its low-price bucket.

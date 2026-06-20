@@ -415,7 +415,7 @@ function pickPool(q: SearchQuery, pools: Pools): Listing[] {
     if (t.includes('villa')) return pools.villa;
     if (t === 'room') return pools.room; // 1-bedroom, room-market priced — not apartment prices
     if (t.includes('apartment') || t === 'floor') return pools.apartment;
-    if (t.includes('land') || t === 'warehouse' || t === 'factory') return pools.land;
+    if (t.includes('land') || t.includes('plot') || t === 'warehouse' || t === 'factory') return pools.land;
   }
   // "Rent or Buy" (deal unknown) with no specific type → draw from BOTH the rent and buy mixes so the
   // results can actually contain each (runSearch then keeps both). Otherwise the rent-only mix would
