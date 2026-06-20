@@ -87,7 +87,7 @@ CITY_MAP_AR = {
     "الأحساء": "Hofuf", "الاحساء": "Hofuf", "الجبيل": "Jubail", "القطيف": "Qatif",
     "حفر الباطن": "Hafar Al Batin", "رأس تنورة": "Ras Tanura", "راس تنورة": "Ras Tanura",
     "بقيق": "Abqaiq", "النعيرية": "An Nairyah", "الخفجي": "Khafji", "سيهات": "Sayhat",
-    "صفوى": "Safwa", "تاروت": "Tarout", "العيون": "Al Uyun",
+    "صفوى": "Safwa", "تاروت": "Tarout", "عنك": "Anak", "العيون": "Al Uyun",
     # Asir region
     "أبها": "Abha", "ابها": "Abha", "خميس مشيط": "Khamis Mushait", "بيشة": "Bisha",
     "محايل": "Mahayel", "أحد رفيده": "Ahad Rafidah", "المجاردة": "Al Majardah",
@@ -130,6 +130,7 @@ def _norm_ar(s: str) -> str:
     carry it ("أبو عريش"); without this they wouldn't match and the town fell into "Other"."""
     return (s.strip().replace("-", " ")
             .replace("أ", "ا").replace("إ", "ا").replace("آ", "ا").replace("ـ", "")
+            .replace("ة", "ه")  # تربه (slug) ↔ تربة (key) — word-final ta marbuta varies on Aqar
             .strip())
 
 

@@ -31,7 +31,7 @@ const KNOWN_CITIES = [
   'An Nabhaniyah', 'Ash Shamasiyah',
   // Eastern region
   'Dammam', 'Khobar', 'Dhahran', 'Hofuf', 'Jubail', 'Qatif', 'Hafar Al Batin', 'Ras Tanura',
-  'Abqaiq', 'An Nairyah', 'Khafji', 'Sayhat', 'Safwa', 'Tarout', 'Al Uyun',
+  'Abqaiq', 'An Nairyah', 'Khafji', 'Sayhat', 'Safwa', 'Tarout', 'Anak', 'Al Uyun',
   // Asir region
   'Abha', 'Khamis Mushait', 'Bisha', 'Mahayel', 'Ahad Rafidah', 'Al Majardah', 'Balsamar', 'Tathlith',
   // Tabuk region

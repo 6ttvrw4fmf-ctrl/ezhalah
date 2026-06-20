@@ -125,6 +125,7 @@ CITY_AR = {
     "sayhat":            "سيهات",
     "safwa":             "صفوى",
     "tarout":            "تاروت",
+    "anak":              "عنك",
     "al_uyun":           "العيون",
     # ── Asir region ──
     "abha":              "أبها",
