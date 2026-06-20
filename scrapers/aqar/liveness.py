@@ -81,16 +81,22 @@ def main() -> None:
     started = time.time()
 
     try:
-        # Pull active rows in pages of 1000 (Supabase's PostgREST default cap).
+        # Pull active rows in pages of 1000 via KEYSET pagination (walk forward by id) — NOT offset.
+        # Offset pagination on a 77k+ row table re-scans and skips `offset` rows every page, getting
+        # slower the deeper it goes until it hits the DB statement timeout (error 57014). Keyset is
+        # O(page_size) per page regardless of depth, AND it's more correct here: the sweep flips rows
+        # to active=false as it runs, which would shift an offset window and skip rows — a forward id
+        # cursor never does. (fix: liveness statement-timeout failure as the table grew.)
         page_size = 1000
-        offset = 0
+        last_id = 0
         while True:
             res = (
                 client.table("aqar_residential_listings")
                 .select("id, ad_number, listing_url, missing_count")
                 .eq("active", True)
+                .gt("id", last_id)
                 .order("id", desc=False)
-                .range(offset, offset + page_size - 1)
+                .limit(page_size)
                 .execute()
             )
             rows = res.data or []
@@ -98,6 +104,7 @@ def main() -> None:
                 break
 
             for row in rows:
+                last_id = row["id"]  # advance the cursor (rows are id-ascending)
                 seen += 1
                 url = (row.get("listing_url") or "").strip()
                 if not url:
@@ -142,8 +149,6 @@ def main() -> None:
 
                 if args.limit and seen >= args.limit:
                     raise StopIteration
-
-            offset += page_size
 
     except StopIteration:
         pass
