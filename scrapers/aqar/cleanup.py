@@ -36,16 +36,20 @@ def main() -> None:
                     help="Delete listings inactive for at least this many days. Default 30.")
     ap.add_argument("--dry-run", action="store_true",
                     help="Print what would be deleted, don't actually delete.")
+    ap.add_argument("--table", default="aqar_residential_listings",
+                    choices=["aqar_residential_listings", "aqar_commercial_listings"],
+                    help="Which listings table to clean. Run once per table to cover both verticals.")
     args = ap.parse_args()
 
+    table = args.table
     cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=args.age_days)).isoformat()
     client = sb()
-    run_id = begin_run("aqar_cleanup")
+    run_id = begin_run(f"aqar_cleanup:{table}")
 
     try:
         # First: count what's about to go (so the run log is meaningful + dry-run can preview).
         head = (
-            client.table("aqar_residential_listings")
+            client.table(table)
             .select("id", count="exact")
             .eq("active", False)
             .lt("last_seen_at", cutoff_iso)
@@ -69,7 +73,7 @@ def main() -> None:
         PAGE = 1000
         while True:
             picks = (
-                client.table("aqar_residential_listings")
+                client.table(table)
                 .select("id")
                 .eq("active", False)
                 .lt("last_seen_at", cutoff_iso)
@@ -79,7 +83,7 @@ def main() -> None:
             ids = [r["id"] for r in (picks.data or [])]
             if not ids:
                 break
-            client.table("aqar_residential_listings").delete().in_("id", ids).execute()
+            client.table(table).delete().in_("id", ids).execute()
             deleted += len(ids)
             print(f"  deleted batch of {len(ids)} (total {deleted}/{total})", flush=True)
             if len(ids) < PAGE:

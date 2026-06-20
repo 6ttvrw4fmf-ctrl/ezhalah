@@ -67,9 +67,13 @@ def main() -> None:
                     help="Stop after checking N rows (0 = all active rows). Useful for testing.")
     ap.add_argument("--grace", type=int, default=3,
                     help="Consecutive sweeps a listing must be missing before we kill it.")
+    ap.add_argument("--table", default="aqar_residential_listings",
+                    choices=["aqar_residential_listings", "aqar_commercial_listings"],
+                    help="Which listings table to sweep. Run once per table to cover both verticals.")
     args = ap.parse_args()
 
-    run_id = begin_run("aqar_liveness")
+    table = args.table
+    run_id = begin_run(f"aqar_liveness:{table}")
     now_iso = datetime.now(timezone.utc).isoformat()
     client = sb()
 
@@ -91,7 +95,7 @@ def main() -> None:
         last_id = 0
         while True:
             res = (
-                client.table("aqar_residential_listings")
+                client.table(table)
                 .select("id, ad_number, listing_url, missing_count")
                 .eq("active", True)
                 .gt("id", last_id)
@@ -117,19 +121,19 @@ def main() -> None:
                 if r is not None and looks_dead(status, body):
                     new_missing = (row.get("missing_count") or 0) + 1
                     if new_missing >= args.grace:
-                        client.table("aqar_residential_listings").update({
+                        client.table(table).update({
                             "active": False,
                             "missing_count": new_missing,
                         }).eq("id", row["id"]).execute()
                         killed += 1
                     else:
-                        client.table("aqar_residential_listings").update({
+                        client.table(table).update({
                             "missing_count": new_missing,
                         }).eq("id", row["id"]).execute()
                         pending_kill += 1
                 elif r is not None and status == 200:
                     # Alive — reset the missing counter and refresh last_seen_at.
-                    client.table("aqar_residential_listings").update({
+                    client.table(table).update({
                         "last_seen_at": now_iso,
                         "missing_count": 0,
                     }).eq("id", row["id"]).execute()

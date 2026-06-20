@@ -19,8 +19,15 @@ concurrency:
 
 jobs:
   cleanup:
+    name: Cleanup ${{ matrix.table }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false   # residential + commercial cleaned independently
+      matrix:
+        table:
+          - aqar_residential_listings
+          - aqar_commercial_listings
     steps:
       - uses: actions/checkout@v4
 
@@ -33,8 +40,8 @@ jobs:
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
 
-      - name: Run cleanup
+      - name: Run cleanup (${{ matrix.table }})
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python -m scrapers.aqar.cleanup
+        run: python -m scrapers.aqar.cleanup --table ${{ matrix.table }}
