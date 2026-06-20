@@ -124,22 +124,30 @@ def map_type(raw_ar: str) -> Optional[str]:
     return None
 
 
-def map_city(raw_ar: str) -> Optional[str]:
-    """Look up the canonical English city name from an Arabic city name or URL slug.
+def _norm_ar(s: str) -> str:
+    """Normalize an Arabic city string for matching: hyphens → spaces, and unify the alif
+    variants (أ إ آ → ا) + tatweel. Aqar URL slugs drop the hamza ("ابو-عريش") while our keys
+    carry it ("أبو عريش"); without this they wouldn't match and the town fell into "Other"."""
+    return (s.strip().replace("-", " ")
+            .replace("أ", "ا").replace("إ", "ا").replace("آ", "ا").replace("ـ", "")
+            .strip())
 
-    The Aqar URL slug is hyphenated (e.g. "حفر-الباطن"); CITY_MAP_AR keys are space-separated,
-    so we normalize hyphens → spaces before matching.
-    """
+
+def map_city(raw_ar: str) -> Optional[str]:
+    """Look up the canonical English city name from an Arabic city name or URL slug."""
     if not raw_ar:
         return None
-    raw = raw_ar.strip().replace("-", " ").strip()
-    if raw in CITY_MAP_AR:
-        return CITY_MAP_AR[raw]
-    # Prefer the LONGEST key match so "أحد المسارحة" doesn't get shadowed by a shorter token.
+    raw = _norm_ar(raw_ar)
+    # Exact match first (normalized both sides).
+    for ar, eng in CITY_MAP_AR.items():
+        if _norm_ar(ar) == raw:
+            return eng
+    # Else longest substring match so "أحد المسارحة" isn't shadowed by a shorter token.
     best = None
     for ar, eng in CITY_MAP_AR.items():
-        if ar in raw and (best is None or len(ar) > len(best[0])):
-            best = (ar, eng)
+        na = _norm_ar(ar)
+        if na in raw and (best is None or len(na) > len(best[0])):
+            best = (na, eng)
     return best[1] if best else None
     return None
 
