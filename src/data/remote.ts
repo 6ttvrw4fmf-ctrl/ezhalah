@@ -112,8 +112,13 @@ function dbTypesFor(q: SearchQuery): string[] | null {
 
 // Residential and Commercial are stored in two tables with identical schema. Pick the right one so a
 // Commercial search reads real commercial inventory instead of an honest-but-empty residential 0.
+// Route by category OR by a commercial TYPE — the agent often returns type:"Shop" without setting
+// category:"Commercial", and the two type lists never overlap, so the type alone is decisive.
+function isCommercialQuery(q: SearchQuery): boolean {
+  return q.category === 'Commercial' || (!!q.type && CATEGORY_TYPES.Commercial.includes(q.type));
+}
 function tableFor(q: SearchQuery): string {
-  return q.category === 'Commercial' ? 'aqar_commercial_listings' : 'aqar_residential_listings';
+  return isCommercialQuery(q) ? 'aqar_commercial_listings' : 'aqar_residential_listings';
 }
 
 const QUERY_LIMIT = 1500; // newest N matching rows — plenty for the 25-card display + load-more
