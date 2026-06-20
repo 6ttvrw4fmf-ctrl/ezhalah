@@ -1,15 +1,12 @@
-# Aqar deep-fill — bulk loads ALL listings for every city in parallel.
+# Aqar deep-fill — bulk loads ALL listings for every city in parallel, FAST.
 #
-# Unlike the regular sweep (3 pages, keeps fresh), this goes DEEP: up to 150 pages per
-# (type × deal × city) combo. One GitHub machine per city = own IP = no shared throttle.
-# 12 cities run simultaneously; each city scrapes all residential types concurrently
-# (WORKERS=14). This is the "fill the database fast" job.
+# Goes DEEP: up to 150 pages per (type × deal × city). One GitHub machine per shard = own IP.
+# SHARDING: the 7 heaviest cities (Riyadh, Jeddah, …) are split into 3 type-group jobs each, so
+# no single machine has to scrape all 10 of a big city's types (that used to take 2h+ and hit the
+# timeout). Small towns stay one job. The slowest single shard now sets the wall-clock — minutes,
+# not hours. ~108 shards total; GitHub runs ~20 at once.
 #
-# Expected runtime: 20–40 minutes per city (run in parallel, so wall-clock = slowest city).
-# Expected yield: thousands of new listings per city if they haven't been deep-scraped before.
-#
-# HOW TO RUN: Actions tab → "Aqar deep fill" → Run workflow.
-# Choose which city to scrape (leave blank = ALL cities in parallel).
+# HOW TO RUN: Actions tab → "Aqar deep fill" → Run workflow. Blank city = ALL (sharded).
 
 name: Aqar deep fill
 
@@ -30,32 +27,41 @@ on:
         default: "5000"
 
 jobs:
-  # Decide which cities to run. If a city was specified, run just that one.
-  # Otherwise, fan out to all cities.
+  # Build the shard matrix. Heavy cities → 3 type-group shards each; everything else → 1 shard (all
+  # types). If a single city was named, just that one (all types).
   setup:
     runs-on: ubuntu-latest
     outputs:
-      cities: ${{ steps.pick.outputs.cities }}
+      matrix: ${{ steps.gen.outputs.matrix }}
     steps:
-      - id: pick
+      - id: gen
+        shell: python
         run: |
-          if [ -n "${{ github.event.inputs.city }}" ]; then
-            echo "cities=[\"${{ github.event.inputs.city }}\"]" >> $GITHUB_OUTPUT
-          else
-            # Every city in Aqar's OWN catalog (apartment + land filters), all 13 regions.
-            # GitHub runs ~20 in parallel and queues the rest, so all ~95 complete in a few waves.
-            echo 'cities=["riyadh","al_kharj","al_majmaah","dawadmi","al_zulfi","afif","al_quwayiyah","shaqra","diriyah","al_muzahimiyah","thadiq","hawtat_bani_tamim","al_ghat","rumah","al_dalam","al_hariq","al_sulayyil","al_hayathim","jeddah","mecca","taif","rabigh","al_qunfudhah","kaec","thuwal","al_jumum","al_kamil","al_lith","turabah","raniyah","al_khurma","medina","yanbu","al_ula","badr","al_hanakiyah","umluj","khaybar","mahd_adh_dhahab","buraidah","unaizah","al_rass","al_bukayriyah","al_mithnab","al_badai","riyadh_al_khabra","al_nabhaniyah","al_shamasiyah","dammam","khobar","dhahran","hofuf","jubail","qatif","hafar_al_batin","ras_tanura","abqaiq","al_nairyah","khafji","sayhat","safwa","tarout","anak","al_uyun","abha","khamis_mushait","bisha","mahayel","ahad_rafidah","al_majardah","balsamar","tathlith","tabuk","duba","al_wajh","tayma","hail","baqaa","al_ghazalah","al_shanan","arar","rafha","turaif","jazan","sabya","abu_arish","samtah","baysh","ahad_al_masarihah","najran","sharurah","al_baha","sakaka","qurayyat","dawmat_al_jandal"]' >> $GITHUB_OUTPUT
-          fi
+          import json, os
+          one = "${{ github.event.inputs.city }}".strip()
+          ALL = ["riyadh","al_kharj","al_majmaah","dawadmi","al_zulfi","afif","al_quwayiyah","shaqra","diriyah","al_muzahimiyah","thadiq","hawtat_bani_tamim","al_ghat","rumah","al_dalam","al_hariq","al_sulayyil","al_hayathim","jeddah","mecca","taif","rabigh","al_qunfudhah","kaec","thuwal","al_jumum","al_kamil","al_lith","turabah","raniyah","al_khurma","medina","yanbu","al_ula","badr","al_hanakiyah","umluj","khaybar","mahd_adh_dhahab","buraidah","unaizah","al_rass","al_bukayriyah","al_mithnab","al_badai","riyadh_al_khabra","al_nabhaniyah","al_shamasiyah","dammam","khobar","dhahran","hofuf","jubail","qatif","hafar_al_batin","ras_tanura","abqaiq","al_nairyah","khafji","sayhat","safwa","tarout","anak","al_uyun","abha","khamis_mushait","bisha","mahayel","ahad_rafidah","al_majardah","balsamar","tathlith","tabuk","duba","al_wajh","tayma","hail","baqaa","al_ghazalah","al_shanan","arar","rafha","turaif","jazan","sabya","abu_arish","samtah","baysh","ahad_al_masarihah","najran","sharurah","al_baha","sakaka","qurayyat","dawmat_al_jandal"]
+          # Heaviest cities — sharded by type so they finish in minutes, not hours.
+          HEAVY = ["riyadh","jeddah","dammam","khobar","mecca","medina","buraidah"]
+          GROUPS = ["apartment,floor", "villa,building,land", "house,room,rest_house,chalet,camp"]
+          cities = [one] if one else ALL
+          inc = []
+          for c in cities:
+              if c in HEAVY and not one:
+                  for g in GROUPS:
+                      inc.append({"city": c, "types": g, "label": f"{c}:{g.split(',')[0]}…"})
+              else:
+                  inc.append({"city": c, "types": "all", "label": c})
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("matrix=" + json.dumps({"include": inc}) + "\n")
 
   deep-fill:
     needs: setup
-    name: Deep fill ${{ matrix.city }}
+    name: Fill ${{ matrix.label }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
     strategy:
       fail-fast: false
-      matrix:
-        city: ${{ fromJson(needs.setup.outputs.cities) }}
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -69,15 +75,15 @@ jobs:
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
 
-      - name: Deep fill ${{ matrix.city }}
+      - name: Fill ${{ matrix.label }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SCRAPE_WORKERS: "14"
-          SCRAPE_MIN_INTERVAL: "0.12"
+          SCRAPE_WORKERS: "16"
+          SCRAPE_MIN_INTERVAL: "0.10"
         run: |
           python -m scrapers.aqar.run_residential \
-            --all-residential \
             --city ${{ matrix.city }} \
+            --types "${{ matrix.types }}" \
             --pages ${{ github.event.inputs.pages || 150 }} \
             --limit ${{ github.event.inputs.limit || 5000 }}

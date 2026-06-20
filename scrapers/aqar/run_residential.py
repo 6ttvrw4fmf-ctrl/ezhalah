@@ -88,15 +88,28 @@ def main() -> int:
     p.add_argument("--limit", type=int, default=10, help="max listings per slice")
     p.add_argument("--all-residential", action="store_true",
                    help="ignore --type/--deal; sweep all 10 residential types × rent+buy")
+    p.add_argument("--types", default="",
+                   help="comma-separated subset of residential types to sweep (× rent+buy), e.g. "
+                        "'apartment,villa'. Use 'all' for every type. Lets the deep-fill SHARD a big "
+                        "city across machines by type so no single job does all 10 types.")
     args = p.parse_args()
 
     run_id = db.begin_run("aqar_residential")
     total_seen = 0
     total_upserted = 0
 
+    # Resolve which types to sweep. --types (subset/all) and --all-residential both mean "this type
+    # set × rent+buy"; a bare --type/--deal is the single-slice path.
+    type_list = None
+    if args.types:
+        type_list = list(D.RESIDENTIAL_TYPES) if args.types.strip() == "all" \
+            else [t.strip() for t in args.types.split(",") if t.strip()]
+    elif args.all_residential:
+        type_list = list(D.RESIDENTIAL_TYPES)
+
     try:
-        if args.all_residential:
-            for t in D.RESIDENTIAL_TYPES:
+        if type_list is not None:
+            for t in type_list:
                 for d in ("rent", "buy"):
                     if (t, d) not in D.CATEGORIES:
                         continue
