@@ -98,6 +98,7 @@ def discover(
         html = r.text
         # Cheap-and-effective: collect every href that looks like a listing URL.
         # We don't need a full HTML parser for this — a regex is enough.
+        new_on_page = 0
         for m in re.finditer(r'href="([^"]+)"', html):
             href = m.group(1)
             if not LISTING_RE.search(href):
@@ -106,7 +107,13 @@ def discover(
             if full in seen:
                 continue
             seen.add(full)
+            new_on_page += 1
             yielded += 1
             yield full
             if max_listings and yielded >= max_listings:
                 return
+        # Exhausted: once a page yields no NEW listings, the city has no more depth in this
+        # slice. Stop instead of hammering empty pages all the way to max_pages — this is what
+        # lets us safely set --pages very high (e.g. 150) and let each city stop where it ends.
+        if new_on_page == 0:
+            break
