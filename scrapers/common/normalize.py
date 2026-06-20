@@ -54,8 +54,17 @@ SLUG_TO_TYPE = {
     "chalet":     "Chalet",
     "camp":       "Camp",
     "land":       "Residential Land",
-    "shop":       "Shop",
-    "office":     "Office",
+    # ── Commercial types (written to aqar_commercial_listings) ──
+    "shop":                "Shop",
+    "office":              "Office",
+    "warehouse":           "Warehouse",
+    "workshop":            "Workshop",
+    "factory":             "Factory",
+    "hotel":               "Hotel",
+    "gas_station":         "Gas Station",
+    "health_center":       "Health Center",
+    "farm":                "Farm",
+    "commercial_building": "Commercial Building",
 }
 
 # Saudi city names (Arabic) → canonical English city names. Mirrors discover.CITY_AR (Aqar's

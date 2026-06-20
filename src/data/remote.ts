@@ -104,11 +104,16 @@ function dbTypesFor(q: SearchQuery): string[] | null {
   // reachable); keeping "Residential Land" pulled Commercial Land. The fetch now constrains to the one
   // canonical kept type, so the 1500-row budget is spent on it. (user: cards must match the kept type.)
   if (q.type) return [q.type];
-  // No specific type kept. This table is residential-only, so a Commercial category genuinely has zero
-  // inventory — constrain to commercial types (none exist here) to return an honest 0, never the whole
-  // residential table under a "Commercial" header. (audit: category leak.)
-  if (q.category === 'Commercial') return CATEGORY_TYPES.Commercial;
-  return null; // Residential / unset → whole residential table
+  // No specific type kept → whole category. We no longer need to constrain by the category's type
+  // list, because Residential and Commercial now live in SEPARATE tables (see tableFor) — selecting
+  // the right table already scopes the category. Return null = the whole (correct) table.
+  return null;
+}
+
+// Residential and Commercial are stored in two tables with identical schema. Pick the right one so a
+// Commercial search reads real commercial inventory instead of an honest-but-empty residential 0.
+function tableFor(q: SearchQuery): string {
+  return q.category === 'Commercial' ? 'aqar_commercial_listings' : 'aqar_residential_listings';
 }
 
 const QUERY_LIMIT = 1500; // newest N matching rows — plenty for the 25-card display + load-more
@@ -122,7 +127,7 @@ const QUERY_LIMIT = 1500; // newest N matching rows — plenty for the 25-card d
 // matches. (user-reported: search broken / "Loading listings" because the whole-table load timed out.)
 export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] | null> {
   if (!supabase) return null;
-  let req = supabase.from('aqar_residential_listings').select(LIST_SELECT).eq('active', true);
+  let req = supabase.from(tableFor(q)).select(LIST_SELECT).eq('active', true);
   // Deal: bothDeals (agent unsure rent/buy) → no filter, return both; else exact.
   if (!q.bothDeals) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
   // Type group (or whole category if type is null).
@@ -158,11 +163,15 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
   const hit = LISTING_CACHE.get(id);
   if (hit) return hit;
   if (!supabase) return null;
-  const { data, error } = await supabase.from('aqar_residential_listings').select(LIST_SELECT).eq('id', id).limit(1);
-  if (error || !data || !data.length) return null;
-  const [row] = finalize(data);
-  if (row) LISTING_CACHE.set(row.id, row);
-  return row ?? null;
+  // Both tables share one id sequence, so an id is unique across both. Try residential first
+  // (far larger), then commercial — so a deep-link to a commercial listing still resolves.
+  for (const table of ['aqar_residential_listings', 'aqar_commercial_listings']) {
+    const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).limit(1);
+    if (error || !data || !data.length) continue;
+    const [row] = finalize(data);
+    if (row) { LISTING_CACHE.set(row.id, row); return row; }
+  }
+  return null;
 }
 
 // Fetches the REAL Aqar listings + every column the new card design needs (rank/photo/title/

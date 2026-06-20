@@ -57,6 +57,14 @@ def upsert_aqar_residential(row: dict[str, Any]) -> None:
     sb().table("aqar_residential_listings").upsert(row, on_conflict="ad_number").execute()
 
 
+def upsert_aqar_commercial(row: dict[str, Any]) -> None:
+    """Upsert one Aqar commercial row, keyed on `ad_number`. Same schema/shape as residential
+    (the commercial table was cloned from it), just a different destination table."""
+    row = dict(row)
+    row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
+    sb().table("aqar_commercial_listings").upsert(row, on_conflict="ad_number").execute()
+
+
 def end_run(run_id: int, *, ok: bool, rows_seen: int, rows_upserted: int, notes: Optional[str] = None) -> None:
     sb().table("scrape_runs").update(
         {

@@ -37,15 +37,40 @@ CATEGORIES = {
     ("chalet",     "buy"):  "شاليه-للبيع",
     ("camp",       "rent"): "مخيم-للإيجار",
     ("land",       "buy"):  "أراضي-للبيع",
-    # Commercial — kept for later, not part of the residential sweep.
-    ("shop",       "rent"): "محلات-للإيجار",
-    ("office",     "rent"): "مكتب-تجاري-للإيجار",
+    # ── Commercial categories (verified against Aqar's own menu). Written to the
+    #    aqar_commercial_listings table by run_commercial.py. Slugs are Aqar's exact spelling. ──
+    ("shop",                "rent"): "محلات-للإيجار",
+    ("shop",                "buy"):  "محلات-للبيع",
+    ("office",              "rent"): "مكتب-تجاري-للإيجار",
+    ("office",              "buy"):  "مكاتب-للبيع",
+    ("warehouse",           "rent"): "مستودع-للإيجار",
+    ("warehouse",           "buy"):  "مستودعات-للبيع",
+    ("workshop",            "rent"): "ورش-للإيجار",
+    ("workshop",            "buy"):  "ورش-للبيع",
+    ("factory",             "rent"): "مصانع-للإيجار",
+    ("factory",             "buy"):  "مصانع-للبيع",
+    ("hotel",               "rent"): "فنادق-للإيجار",
+    ("hotel",               "buy"):  "فنادق-للبيع",
+    ("gas_station",         "rent"): "محطات-للإيجار",
+    ("gas_station",         "buy"):  "محطات-للبيع",
+    ("health_center",       "rent"): "مستشفيات-ومراكز-صحية-للإيجار",
+    ("health_center",       "buy"):  "مستشفيات-ومراكز-صحية-للبيع",
+    ("farm",                "rent"): "مزارع-للإيجار",
+    ("farm",                "buy"):  "مزارع-للبيع",
+    ("commercial_building", "rent"): "مجمعات-للإيجار",
+    ("commercial_building", "buy"):  "مجمعات-للبيع",
 }
 
 # The 10 RESIDENTIAL types per Ezhalah's taxonomy. Used by run.py's --all-residential mode.
 RESIDENTIAL_TYPES = (
     "apartment", "villa", "floor", "house", "room",
     "building", "rest_house", "chalet", "camp", "land",
+)
+
+# The 10 COMMERCIAL types we scrape (rent+buy each). Used by run_commercial.py.
+COMMERCIAL_TYPES = (
+    "shop", "office", "warehouse", "workshop", "factory",
+    "hotel", "gas_station", "health_center", "farm", "commercial_building",
 )
 
 # Aqar's city URL slug must match its OWN city label exactly, or the page falls back to a national

@@ -1,0 +1,75 @@
+# Aqar COMMERCIAL deep-fill — bulk loads commercial listings for every city in parallel.
+#
+# One GitHub machine per city (own IP), all cities at once. Each city scrapes all 10 commercial
+# types (shop, office, warehouse, workshop, factory, hotel, gas_station, health_center, farm,
+# commercial_building) × rent+buy and upserts into aqar_commercial_listings.
+#
+# HOW TO RUN: Actions tab → "Aqar commercial fill" → Run workflow.
+# Leave city blank for ALL cities in parallel, or name one city.
+
+name: Aqar commercial fill
+
+on:
+  workflow_dispatch:
+    inputs:
+      city:
+        description: "City to fill (leave blank for ALL cities in parallel)"
+        required: false
+        default: ""
+      pages:
+        description: "Max pages per slice (default 60 — commercial is thinner than residential)"
+        required: false
+        default: "60"
+      limit:
+        description: "Max listings per slice (default 3000)"
+        required: false
+        default: "3000"
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      cities: ${{ steps.pick.outputs.cities }}
+    steps:
+      - id: pick
+        run: |
+          if [ -n "${{ github.event.inputs.city }}" ]; then
+            echo "cities=[\"${{ github.event.inputs.city }}\"]" >> $GITHUB_OUTPUT
+          else
+            echo 'cities=["riyadh","al_kharj","al_majmaah","dawadmi","al_zulfi","afif","al_quwayiyah","shaqra","diriyah","al_muzahimiyah","thadiq","hawtat_bani_tamim","al_ghat","rumah","al_dalam","al_hariq","al_sulayyil","al_hayathim","jeddah","mecca","taif","rabigh","al_qunfudhah","kaec","thuwal","al_jumum","al_kamil","al_lith","turabah","raniyah","al_khurma","medina","yanbu","al_ula","badr","al_hanakiyah","umluj","khaybar","mahd_adh_dhahab","buraidah","unaizah","al_rass","al_bukayriyah","al_mithnab","al_badai","riyadh_al_khabra","al_nabhaniyah","al_shamasiyah","dammam","khobar","dhahran","hofuf","jubail","qatif","hafar_al_batin","ras_tanura","abqaiq","al_nairyah","khafji","sayhat","safwa","tarout","anak","al_uyun","abha","khamis_mushait","bisha","mahayel","ahad_rafidah","al_majardah","balsamar","tathlith","tabuk","duba","al_wajh","tayma","hail","baqaa","al_ghazalah","al_shanan","arar","rafha","turaif","jazan","sabya","abu_arish","samtah","baysh","ahad_al_masarihah","najran","sharurah","al_baha","sakaka","qurayyat","dawmat_al_jandal"]' >> $GITHUB_OUTPUT
+          fi
+
+  commercial-fill:
+    needs: setup
+    name: Commercial ${{ matrix.city }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        city: ${{ fromJson(needs.setup.outputs.cities) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+
+      - name: Commercial fill ${{ matrix.city }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_WORKERS: "12"
+          SCRAPE_MIN_INTERVAL: "0.13"
+        run: |
+          python -m scrapers.aqar.run_commercial \
+            --all-commercial \
+            --city ${{ matrix.city }} \
+            --pages ${{ github.event.inputs.pages || 60 }} \
+            --limit ${{ github.event.inputs.limit || 3000 }}
