@@ -1,0 +1,81 @@
+# Aqar deep-fill — bulk loads ALL listings for every city in parallel.
+#
+# Unlike the regular sweep (3 pages, keeps fresh), this goes DEEP: up to 150 pages per
+# (type × deal × city) combo. One GitHub machine per city = own IP = no shared throttle.
+# 12 cities run simultaneously; each city scrapes all residential types concurrently
+# (WORKERS=14). This is the "fill the database fast" job.
+#
+# Expected runtime: 20–40 minutes per city (run in parallel, so wall-clock = slowest city).
+# Expected yield: thousands of new listings per city if they haven't been deep-scraped before.
+#
+# HOW TO RUN: Actions tab → "Aqar deep fill" → Run workflow.
+# Choose which city to scrape (leave blank = ALL cities in parallel).
+
+name: Aqar deep fill
+
+on:
+  workflow_dispatch:
+    inputs:
+      city:
+        description: "City to deep-fill (leave blank for ALL cities in parallel)"
+        required: false
+        default: ""
+      pages:
+        description: "Max pages per slice (default 150)"
+        required: false
+        default: "150"
+      limit:
+        description: "Max listings per slice (default 5000)"
+        required: false
+        default: "5000"
+
+jobs:
+  # Decide which cities to run. If a city was specified, run just that one.
+  # Otherwise, fan out to all cities.
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      cities: ${{ steps.pick.outputs.cities }}
+    steps:
+      - id: pick
+        run: |
+          if [ -n "${{ github.event.inputs.city }}" ]; then
+            echo "cities=[\"${{ github.event.inputs.city }}\"]" >> $GITHUB_OUTPUT
+          else
+            echo 'cities=["riyadh","jeddah","khobar","dammam","mecca","medina","taif","abha","tabuk","buraidah","hail","hofuf"]' >> $GITHUB_OUTPUT
+          fi
+
+  deep-fill:
+    needs: setup
+    name: Deep fill ${{ matrix.city }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        city: ${{ fromJson(needs.setup.outputs.cities) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+
+      - name: Deep fill ${{ matrix.city }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_WORKERS: "14"
+          SCRAPE_MIN_INTERVAL: "0.12"
+        run: |
+          python -m scrapers.aqar.run_residential \
+            --all-residential \
+            --city ${{ matrix.city }} \
+            --pages ${{ github.event.inputs.pages || 150 }} \
+            --limit ${{ github.event.inputs.limit || 5000 }}

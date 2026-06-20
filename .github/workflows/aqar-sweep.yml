@@ -1,33 +1,47 @@
 # Aqar discovery sweep — the "grocery shopper" cron.
 #
-# Walks every (city × category) on Aqar.sa once every 4 hours, enriches new listings and
-# upserts them into Supabase. Refreshing the rows via upsert also updates `last_seen_at`
-# so the liveness sweep can tell what's still around.
+# Each city runs as its OWN parallel GitHub job on its own machine with its own IP address.
+# This means 12 cities scrape simultaneously instead of one at a time — roughly 12× faster.
+# Each runner does a light 3-page sweep of every (type × deal) combo for its city and upserts
+# new listings. Running every 4 hours keeps the DB fresh without missing anything for long.
 #
-# Cost: this job runs in ~5–15 minutes per sweep × 6 sweeps/day ≈ 30–90 GitHub minutes/day,
-# well within the free tier (~2,000 min/month for private repos, unlimited for public).
-#
-# Manual trigger: go to the Actions tab in GitHub → "Aqar sweep" → "Run workflow".
+# Manual trigger: Actions tab → "Aqar sweep" → Run workflow.
 
 name: Aqar sweep
 
 on:
   schedule:
-    # Every 4 hours, on the hour. cron is in UTC. KSA = UTC+3, so this fires at
-    # 03:00, 07:00, 11:00, 15:00, 19:00, 23:00 KSA — spread across the day.
+    # Every 4 hours, on the hour. UTC. KSA = UTC+3.
     - cron: "0 */4 * * *"
-  workflow_dispatch: {}  # lets you trigger it manually from the Actions UI
+  workflow_dispatch: {}
 
-# Don't pile up overlapping runs if a previous sweep is still going — cancel the in-flight
-# one so the new one takes over. (Sweeps are idempotent — upsert handles re-discovery.)
+# Cancel any in-flight sweep when a new one starts (sweeps are idempotent).
 concurrency:
   group: aqar-sweep
   cancel-in-progress: true
 
 jobs:
   sweep:
+    name: Sweep ${{ matrix.city }}
     runs-on: ubuntu-latest
-    timeout-minutes: 50  # if a sweep runs longer than this, something is wrong — kill it
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false   # one city failing doesn't kill the others
+      matrix:
+        city:
+          - riyadh
+          - jeddah
+          - khobar
+          - dammam
+          - mecca
+          - medina
+          - taif
+          - abha
+          - tabuk
+          - buraidah
+          - hail
+          - hofuf
+
     steps:
       - uses: actions/checkout@v4
 
@@ -40,12 +54,15 @@ jobs:
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
 
-      - name: Run discovery sweep
+      - name: Sweep ${{ matrix.city }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_WORKERS: "10"
+          SCRAPE_MIN_INTERVAL: "0.15"
         run: |
-          python -m scrapers.aqar.sweep \
-            --cities riyadh,jeddah,khobar,dammam,mecca,medina,taif \
+          python -m scrapers.aqar.run_residential \
+            --all-residential \
+            --city ${{ matrix.city }} \
             --pages 3 \
-            --limit-per-slice 120
+            --limit 300
