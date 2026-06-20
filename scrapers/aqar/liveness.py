@@ -70,12 +70,27 @@ def main() -> None:
     ap.add_argument("--table", default="aqar_residential_listings",
                     choices=["aqar_residential_listings", "aqar_commercial_listings"],
                     help="Which listings table to sweep. Run once per table to cover both verticals.")
+    ap.add_argument("--shards", type=int, default=1,
+                    help="Split the active rows into this many ID buckets so the sweep can run as N "
+                         "parallel jobs (each its own IP + throttle). A single job can't check 78k "
+                         "listings @ ~3/s within the 6h limit; sharding finishes in ~20-30 min.")
+    ap.add_argument("--shard", type=int, default=0,
+                    help="Which 0-indexed bucket THIS job handles (0 .. shards-1).")
     args = ap.parse_args()
 
     table = args.table
-    run_id = begin_run(f"aqar_liveness:{table}")
+    run_id = begin_run(f"aqar_liveness:{table}:{args.shard}/{args.shards}")
     now_iso = datetime.now(timezone.utc).isoformat()
     client = sb()
+
+    # Compute this shard's contiguous ID window from the table's max id. Even, gap-tolerant split:
+    # bucket size = ceil((maxid+1)/shards); this shard owns [shard*bucket, (shard+1)*bucket).
+    maxid_res = client.table(table).select("id").order("id", desc=True).limit(1).execute()
+    max_id = (maxid_res.data[0]["id"] if maxid_res.data else 0)
+    bucket = (max_id // max(1, args.shards)) + 1
+    lo = args.shard * bucket
+    hi = lo + bucket  # exclusive upper bound
+    print(f"shard {args.shard}/{args.shards} → id range [{lo}, {hi}) of max_id={max_id}", flush=True)
 
     seen = 0
     killed = 0
@@ -92,13 +107,14 @@ def main() -> None:
         # to active=false as it runs, which would shift an offset window and skip rows — a forward id
         # cursor never does. (fix: liveness statement-timeout failure as the table grew.)
         page_size = 1000
-        last_id = 0
+        last_id = lo - 1  # start the cursor at the bottom of this shard's ID window
         while True:
             res = (
                 client.table(table)
                 .select("id, ad_number, listing_url, missing_count")
                 .eq("active", True)
                 .gt("id", last_id)
+                .lt("id", hi)  # stay within this shard's window
                 .order("id", desc=False)
                 .limit(page_size)
                 .execute()

@@ -23,15 +23,19 @@ concurrency:
 
 jobs:
   liveness:
-    name: Liveness ${{ matrix.table }}
+    name: Liveness ${{ matrix.table }} #${{ matrix.shard }}
     runs-on: ubuntu-latest
-    timeout-minutes: 350  # ~6h cap
+    timeout-minutes: 120
     strategy:
-      fail-fast: false   # residential + commercial sweep independently, in parallel
+      fail-fast: false   # each shard/table runs independently, in parallel
       matrix:
         table:
           - aqar_residential_listings
           - aqar_commercial_listings
+        # 16 ID-buckets per table → ~78k/16 ≈ 5k listings each = ~25 min/shard. Each shard is its
+        # own GitHub machine/IP with its own throttle, so they run in parallel and the whole sweep
+        # finishes in one wave instead of timing out on a single 7-hour job.
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
       - uses: actions/checkout@v4
 
@@ -44,8 +48,8 @@ jobs:
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
 
-      - name: Run liveness sweep (${{ matrix.table }})
+      - name: Run liveness sweep (${{ matrix.table }} shard ${{ matrix.shard }})
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python -m scrapers.aqar.liveness --table ${{ matrix.table }}
+        run: python -m scrapers.aqar.liveness --table ${{ matrix.table }} --shards 16 --shard ${{ matrix.shard }}
