@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import type { Listing } from './listings';
-import type { Deal } from './taxonomy';
+import { type Deal, CATEGORY_TYPES } from './taxonomy';
 import type { SearchQuery } from './search';
 import { translitPlace } from '@/lib/translitPlace';
 
@@ -13,17 +13,58 @@ export function getCachedListing(id: number): Listing | undefined { return LISTI
 // Canonical Saudi city names as stored in the DB (English). Used to decide whether q.location is a
 // CITY we can push to a server-side filter, vs a district/landmark phrase (which the client resolves
 // fuzzily against the fetched subset). Substring match both ways so "Riyadh"/"al riyadh" both hit.
+// MUST mirror the scraper's canonical city labels (scrapers/common/normalize.CITY_MAP_AR values) —
+// these are the exact `city` strings stored in the DB, so a user searching any of these scopes the
+// server-side fetch to it. Adding a town here is what makes it findable. (~90 towns, all 13 regions.)
 const KNOWN_CITIES = [
-  'Riyadh', 'Jeddah', 'Mecca', 'Medina', 'Dammam', 'Khobar', 'Dhahran', 'Taif', 'Tabuk',
-  'Buraidah', 'Unaizah', 'Hail', 'Abha', 'Khamis Mushait', 'Najran', 'Jazan', 'Yanbu',
-  'Al Kharj', 'Al Ahsa', 'Hofuf', 'Qatif', 'Jubail', 'Arar', 'Sakaka', 'Al Baha', 'Hafar Al Batin',
+  // Riyadh region
+  'Riyadh', 'Al Kharj', 'Al Majmaah', 'Dawadmi', 'Al Zulfi', 'Afif', 'Al Quwayiyah', 'Shaqra',
+  'Diriyah', 'Al Muzahimiyah', 'Thadiq', 'Hawtat Bani Tamim', 'Al Ghat', 'Rumah', 'Al Dalam',
+  'Al Hariq', 'As Sulayyil', 'Al Hayathim',
+  // Makkah region
+  'Jeddah', 'Mecca', 'Taif', 'Rabigh', 'Al Qunfudhah', 'KAEC', 'Thuwal', 'Al Jumum', 'Al Kamil',
+  'Al Lith', 'Turabah', 'Raniyah', 'Al Khurma',
+  // Madinah region
+  'Medina', 'Yanbu', 'Al Ula', 'Badr', 'Al Hanakiyah', 'Umluj', 'Khaybar', 'Mahd adh Dhahab',
+  // Qassim region
+  'Buraidah', 'Unaizah', 'Ar Rass', 'Al Bukayriyah', 'Al Mithnab', 'Al Badai', 'Riyadh Al Khabra',
+  'An Nabhaniyah', 'Ash Shamasiyah',
+  // Eastern region
+  'Dammam', 'Khobar', 'Dhahran', 'Hofuf', 'Jubail', 'Qatif', 'Hafar Al Batin', 'Ras Tanura',
+  'Abqaiq', 'An Nairyah', 'Khafji', 'Sayhat', 'Safwa', 'Tarout', 'Al Uyun',
+  // Asir region
+  'Abha', 'Khamis Mushait', 'Bisha', 'Mahayel', 'Ahad Rafidah', 'Al Majardah', 'Balsamar', 'Tathlith',
+  // Tabuk region
+  'Tabuk', 'Duba', 'Al Wajh', 'Tayma',
+  // Hail region
+  'Hail', 'Baqaa', 'Al Ghazalah', 'Ash Shanan',
+  // Northern Borders region
+  'Arar', 'Rafha', 'Turaif',
+  // Jazan region
+  'Jazan', 'Sabya', 'Abu Arish', 'Samtah', 'Baysh', 'Ahad Al Masarihah',
+  // Najran region
+  'Najran', 'Sharurah',
+  // Al Bahah region
+  'Al Baha',
+  // Al Jouf region
+  'Sakaka', 'Qurayyat', 'Dawmat Al Jandal',
 ];
+// Alternate spellings a user might type → the canonical DB label. (Al Ahsa's listings are stored
+// under its main city Hofuf; without this an "Al Ahsa" search would scope to a city with 0 rows.)
+const CITY_ALIASES: Record<string, string> = {
+  'al ahsa': 'Hofuf', 'al hasa': 'Hofuf', 'alahsa': 'Hofuf', 'hasa': 'Hofuf', 'ahsa': 'Hofuf',
+  'al khobar': 'Khobar', 'al qatif': 'Qatif',
+};
 function cityFilterFor(location: string): string | null {
   const loc = location.trim().toLowerCase();
   if (!loc) return null;
+  if (CITY_ALIASES[loc]) return CITY_ALIASES[loc];
+  // Exact match first — avoids a short city name (e.g. "Badr", "Duba") substring-matching a longer
+  // unrelated location phrase before the intended city is reached.
+  for (const c of KNOWN_CITIES) if (loc === c.toLowerCase()) return c;
   for (const c of KNOWN_CITIES) {
     const cl = c.toLowerCase();
-    if (loc === cl || loc.includes(cl) || cl.includes(loc)) return c;
+    if (loc.includes(cl) || cl.includes(loc)) return c;
   }
   return null; // not a recognized city → don't constrain server-side; client narrows by district
 }
@@ -33,14 +74,16 @@ function cityFilterFor(location: string): string | null {
 // client pool draws from — e.g. asking for "Apartment" must also return House/Floor/Building/etc
 // because they share the apartment pool. Returns null = don't constrain (whole category).
 function dbTypesFor(q: SearchQuery): string[] | null {
-  const t = q.type?.toLowerCase();
-  if (!t) return null;
-  if (t.includes('villa')) return ['Villa'];
-  if (t === 'room') return ['Room'];
-  if (t.includes('apartment') || t === 'floor')
-    return ['Apartment', 'House', 'Floor', 'Building', 'Rest House', 'Chalet', 'Camp'];
-  if (t.includes('land')) return ['Residential Land', 'Commercial Land'];
-  return [q.type as string];
+  // A kept type must match EXACTLY — no sibling grouping. Keeping "Apartment" used to also pull Floor/
+  // Building/Rest House/Chalet/Camp (and the 1500-row cap could starve out every Apartment so ZERO were
+  // reachable); keeping "Residential Land" pulled Commercial Land. The fetch now constrains to the one
+  // canonical kept type, so the 1500-row budget is spent on it. (user: cards must match the kept type.)
+  if (q.type) return [q.type];
+  // No specific type kept. This table is residential-only, so a Commercial category genuinely has zero
+  // inventory — constrain to commercial types (none exist here) to return an honest 0, never the whole
+  // residential table under a "Commercial" header. (audit: category leak.)
+  if (q.category === 'Commercial') return CATEGORY_TYPES.Commercial;
+  return null; // Residential / unset → whole residential table
 }
 
 const QUERY_LIMIT = 1500; // newest N matching rows — plenty for the 25-card display + load-more
@@ -60,9 +103,22 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   // Type group (or whole category if type is null).
   const types = dbTypesFor(q);
   if (types && types.length) req = req.in('property_type', types);
-  // City — only when location is a recognized city; districts/landmarks are narrowed client-side.
-  const city = cityFilterFor(q.location || '');
+  // City — scope to a recognized city. Prefer a city named in the raw text; otherwise fall back to the
+  // resolver's canonical city, so a kept DISTRICT/landmark/Arabic-city ("Al Olaya", "العليا، الرياض",
+  // "near KAFD") scopes to its city instead of leaking all 21 cities. (audit: location leak.) The
+  // client then narrows to the exact district WITHIN that city via q.districts.
+  const city = cityFilterFor(q.location || '')
+    || (q.locationMatch?.city ? cityFilterFor(q.locationMatch.city) : null);
   if (city) req = req.eq('city', city);
+  // Rent period — the filter's monthly/annual toggle is a HARD segment, pushed to the DB. "per month"
+  // → only true monthly rentals; "per year" (or untagged) → annual listings. The agent path leaves
+  // q.rentPeriod undefined → no period filter (it shows whatever matches). (user: per month = charged
+  // monthly only, not yearly converted.)
+  if (q.deal === 'Rent' && q.rentPeriod === 'monthly') req = req.eq('rent_period', 'monthly');
+  else if (q.deal === 'Rent' && q.rentPeriod === 'annual') req = req.or('rent_period.eq.annual,rent_period.is.null');
+  // Bedrooms is filtered CLIENT-side (runSearch), NOT here — same as price/size. Pushing it to the DB
+  // would empty the pool on a 0-match search, so the "want me to drop the bedroom count?" relaxation
+  // could no longer see that other counts exist. Keeping it client-side preserves that suggestion.
   // Newest-first is cheap here because the filters above shrink the set and it's indexed.
   req = req.order('id', { ascending: false }).limit(QUERY_LIMIT);
   const { data, error } = await req;
@@ -91,7 +147,7 @@ const LIST_SELECT = [
   'id', 'ad_number', 'listing_url',
   'property_type', 'transaction_type',
   'city', 'neighborhood',
-  'price_annual', 'price_total',
+  'price_annual', 'price_total', 'rent_period',
   'area_m2', 'bedrooms', 'bathrooms',
   'master_bedrooms', 'halls',
   'parking', 'elevator', 'kitchen', 'maid_room',
@@ -106,10 +162,15 @@ const LIST_SELECT = [
 function finalize(rows: any[]): Listing[] {
   return rows.map((r: any): Listing => {
     const deal: Deal = r.transaction_type === 'Buy' ? 'Buy' : 'Rent';
-    const amount = deal === 'Rent' ? r.price_annual : r.price_total;
+    // A genuinely MONTHLY rental → show its monthly figure (price_annual was stored as monthly×12, so
+    // dividing back gives the exact monthly rent). Annual rentals keep the yearly figure. (user request.)
+    const isMonthlyRent = deal === 'Rent' && r.rent_period === 'monthly' && typeof r.price_annual === 'number';
+    const amount = deal === 'Rent'
+      ? (isMonthlyRent ? Math.round(r.price_annual / 12) : r.price_annual)
+      : r.price_total;
     const priceStr =
       typeof amount === 'number'
-        ? `SAR ${amount.toLocaleString('en-US')}${deal === 'Rent' ? '/yr' : ''}`
+        ? `SAR ${amount.toLocaleString('en-US')}${deal === 'Rent' ? (isMonthlyRent ? '/mo' : '/yr') : ''}`
         : 'Price on request';
     const photo = Array.isArray(r.photo_urls) && r.photo_urls.length > 0 ? r.photo_urls[0] : '';
     return {
@@ -123,6 +184,7 @@ function finalize(rows: any[]): Listing[] {
       area: r.area_m2 ?? 0,
       beds: r.bedrooms ?? 0,
       source: 'Aqar',
+      rentPeriod: deal === 'Rent' ? (r.rent_period ?? 'annual') : null,
       listed: r.date_added ?? 'recently',
       photo,
       source_url: r.listing_url,
