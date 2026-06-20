@@ -17,13 +17,13 @@ on:
         required: false
         default: ""
       pages:
-        description: "Max pages per slice (default 60 — commercial is thinner than residential)"
+        description: "Max pages per slice (default 150 — go deep; discover stops early when a slice runs out)"
         required: false
-        default: "60"
+        default: "150"
       limit:
-        description: "Max listings per slice (default 3000)"
+        description: "Max listings per slice (default 5000)"
         required: false
-        default: "3000"
+        default: "5000"
 
 jobs:
   setup:
@@ -43,7 +43,7 @@ jobs:
     needs: setup
     name: Commercial ${{ matrix.city }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -65,11 +65,11 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SCRAPE_WORKERS: "12"
-          SCRAPE_MIN_INTERVAL: "0.13"
+          SCRAPE_WORKERS: "16"
+          SCRAPE_MIN_INTERVAL: "0.10"
         run: |
           python -m scrapers.aqar.run_commercial \
             --all-commercial \
             --city ${{ matrix.city }} \
-            --pages ${{ github.event.inputs.pages || 60 }} \
-            --limit ${{ github.event.inputs.limit || 3000 }}
+            --pages ${{ github.event.inputs.pages || 150 }} \
+            --limit ${{ github.event.inputs.limit || 5000 }}
