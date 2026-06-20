@@ -1,0 +1,67 @@
+# Aqar COMMERCIAL discovery sweep — keeps the commercial table fresh, hands-free.
+#
+# Mirror of aqar-sweep.yml but for commercial: one parallel job per major city, a light 3-page
+# sweep of every commercial (type × deal) combo, upserted into aqar_commercial_listings.
+# Offset 2 hours from the residential sweep so the two don't fire at the same time.
+#
+# Manual trigger: Actions tab → "Aqar commercial sweep" → Run workflow.
+
+name: Aqar commercial sweep
+
+on:
+  schedule:
+    # Every 4 hours, offset by 2h from the residential sweep (which runs at 0,4,8,…).
+    # This fires at 02:00, 06:00, 10:00, 14:00, 18:00, 22:00 UTC.
+    - cron: "0 2-23/4 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: aqar-commercial-sweep
+  cancel-in-progress: true
+
+jobs:
+  sweep:
+    name: Commercial sweep ${{ matrix.city }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        city:
+          - riyadh
+          - jeddah
+          - khobar
+          - dammam
+          - mecca
+          - medina
+          - taif
+          - abha
+          - tabuk
+          - buraidah
+          - hail
+          - hofuf
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+
+      - name: Commercial sweep ${{ matrix.city }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_WORKERS: "10"
+          SCRAPE_MIN_INTERVAL: "0.15"
+        run: |
+          python -m scrapers.aqar.run_commercial \
+            --all-commercial \
+            --city ${{ matrix.city }} \
+            --pages 3 \
+            --limit 200
