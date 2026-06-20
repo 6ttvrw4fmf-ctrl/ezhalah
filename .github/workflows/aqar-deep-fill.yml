@@ -42,9 +42,9 @@ jobs:
           if [ -n "${{ github.event.inputs.city }}" ]; then
             echo "cities=[\"${{ github.event.inputs.city }}\"]" >> $GITHUB_OUTPUT
           else
-            # Every Saudi city/town across all 13 regions. GitHub runs up to ~20 in
-            # parallel and queues the rest, so all 58 still complete in a few waves.
-            echo 'cities=["riyadh","al_kharj","al_majmaah","dawadmi","al_zulfi","wadi_al_dawasir","afif","al_quwayiyah","shaqra","jeddah","mecca","taif","rabigh","al_qunfudhah","medina","yanbu","al_ula","badr","buraidah","unaizah","al_rass","al_bukayriyah","al_mithnab","dammam","khobar","dhahran","hofuf","ahsa","al_mubarraz","jubail","qatif","hafar_al_batin","ras_tanura","abqaiq","abha","khamis_mushait","bisha","al_namas","mahayel","tabuk","duba","al_wajh","tayma","hail","arar","rafha","turaif","jazan","sabya","abu_arish","samtah","najran","sharurah","al_baha","baljurashi","sakaka","qurayyat","dawmat_al_jandal"]' >> $GITHUB_OUTPUT
+            # Every city in Aqar's OWN catalog (apartment + land filters), all 13 regions.
+            # GitHub runs ~20 in parallel and queues the rest, so all ~95 complete in a few waves.
+            echo 'cities=["riyadh","al_kharj","al_majmaah","dawadmi","al_zulfi","afif","al_quwayiyah","shaqra","diriyah","al_muzahimiyah","thadiq","hawtat_bani_tamim","al_ghat","rumah","al_dalam","al_hariq","al_sulayyil","al_hayathim","jeddah","mecca","taif","rabigh","al_qunfudhah","kaec","thuwal","al_jumum","al_kamil","al_lith","turabah","raniyah","al_khurma","medina","yanbu","al_ula","badr","al_hanakiyah","umluj","khaybar","mahd_adh_dhahab","buraidah","unaizah","al_rass","al_bukayriyah","al_mithnab","al_badai","riyadh_al_khabra","al_nabhaniyah","al_shamasiyah","dammam","khobar","dhahran","hofuf","jubail","qatif","hafar_al_batin","ras_tanura","abqaiq","al_nairyah","khafji","sayhat","safwa","tarout","al_uyun","abha","khamis_mushait","bisha","mahayel","ahad_rafidah","al_majardah","balsamar","tathlith","tabuk","duba","al_wajh","tayma","hail","baqaa","al_ghazalah","al_shanan","arar","rafha","turaif","jazan","sabya","abu_arish","samtah","baysh","ahad_al_masarihah","najran","sharurah","al_baha","sakaka","qurayyat","dawmat_al_jandal"]' >> $GITHUB_OUTPUT
           fi
 
   deep-fill:
