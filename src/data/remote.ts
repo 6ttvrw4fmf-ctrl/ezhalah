@@ -49,11 +49,36 @@ const KNOWN_CITIES = [
   // Al Jouf region
   'Sakaka', 'Qurayyat', 'Dawmat Al Jandal',
 ];
-// Alternate spellings a user might type → the canonical DB label. (Al Ahsa's listings are stored
-// under its main city Hofuf; without this an "Al Ahsa" search would scope to a city with 0 rows.)
+// Alternate spellings → the canonical DB label. Two jobs: (1) human typos/synonyms (Al Ahsa's
+// listings live under Hofuf); (2) CANONICALIZE the AI agent's output — the agent transliterates
+// town names differently than the scraper labels them ("AlUla" vs DB "Al Ula"), so without this
+// the agent's reply scopes to a city with 0 rows and silently returns nothing despite live data.
+// Keys are lowercase (cityFilterFor lowercases before lookup). Audited agent↔DB drift, June 2026.
 const CITY_ALIASES: Record<string, string> = {
+  // Al Ahsa region → its city label Hofuf
   'al ahsa': 'Hofuf', 'al hasa': 'Hofuf', 'alahsa': 'Hofuf', 'hasa': 'Hofuf', 'ahsa': 'Hofuf',
   'al khobar': 'Khobar', 'al qatif': 'Qatif',
+  // Agent transliteration variants → canonical DB labels
+  'alula': 'Al Ula', 'al ula': 'Al Ula',
+  'al henakiyah': 'Al Hanakiyah',
+  'al mahd': 'Mahd adh Dhahab', 'mahd al dhahab': 'Mahd adh Dhahab',
+  'muhayil aseer': 'Mahayel', 'muhayil': 'Mahayel', 'mahayil': 'Mahayel', 'mahail': 'Mahayel',
+  'nairiyah': 'An Nairyah', 'al nairyah': 'An Nairyah', 'nairyah': 'An Nairyah',
+  'al majaridah': 'Al Majardah', 'al-majaridah': 'Al Majardah', 'majaridah': 'Al Majardah',
+  'tathleeth': 'Tathlith',
+  'al shimasiyah': 'Ash Shamasiyah', 'al shamasiyah': 'Ash Shamasiyah', 'shamasiyah': 'Ash Shamasiyah',
+  'ash shinan': 'Ash Shanan', 'al shinan': 'Ash Shanan', 'shinan': 'Ash Shanan',
+  'al nabhaniyah': 'An Nabhaniyah', 'nabhaniyah': 'An Nabhaniyah',
+  'al badayea': 'Al Badai', 'badayea': 'Al Badai', 'al badai': 'Al Badai',
+  'dumat al jandal': 'Dawmat Al Jandal',
+  'al qurayyat': 'Qurayyat', 'qurayyat': 'Qurayyat',
+  'al dawadmi': 'Dawadmi',
+  'zulfi': 'Al Zulfi',
+  'al dilam': 'Al Dalam', 'dilam': 'Al Dalam', 'al delam': 'Al Dalam',
+  'hotat bani tamim': 'Hawtat Bani Tamim', 'hawtat bani tameem': 'Hawtat Bani Tamim',
+  'al sulayyil': 'As Sulayyil', 'sulayyil': 'As Sulayyil', 'al sulayil': 'As Sulayyil',
+  'buraydah': 'Buraidah',
+  'uyun al jiwa': 'Al Uyun', 'oyun al jiwa': 'Al Uyun',
 };
 function cityFilterFor(location: string): string | null {
   const loc = location.trim().toLowerCase();

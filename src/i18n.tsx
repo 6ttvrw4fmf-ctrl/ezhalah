@@ -463,6 +463,8 @@ const AR: Record<string, string> = {
   'Price: {echo}': 'السعر: {echo}',
   'Nothing within your budget right now — showing the closest options above it.':
     'لا يوجد ضمن ميزانيتك حالياً — نعرض أقرب الخيارات الأعلى منها.',
+  'No listings in that exact neighborhood — showing others in the same city.':
+    'لا توجد إعلانات في هذا الحي بالتحديد — نعرض غيرها في نفس المدينة.',
   'No exact size match — showing the closest sizes available.':
     'لا يوجد بنفس المساحة بالضبط — نعرض أقرب المساحات المتاحة.',
   'Sorted by newest first.': 'مرتّبة من الأحدث.',
@@ -667,8 +669,9 @@ const AR: Record<string, string> = {
   'Sign up / Log in': 'إنشاء حساب / تسجيل الدخول',
   'Get more. Sign up free.': 'احصل على المزيد. سجل مجاناً.',
   'Sign up to keep searching': 'سجّل للاستمرار في البحث',
-  "That was your one free search. Sign up or log in to search as much as you like — and we'll save what you just searched.":
-    'كان هذا بحثك المجاني الوحيد. أنشئ حساباً أو سجّل الدخول للبحث بقدر ما تشاء، وسنحفظ ما بحثت عنه للتو.',
+  'Get more with a free account': 'احصل على المزيد بحساب مجاني',
+  'Sign up free to save your searches and favorites, and pick up right where you left off.':
+    'سجّل مجاناً لحفظ عمليات بحثك ومفضّلاتك، وتابع من حيث توقفت.',
   'Not now': 'ليس الآن',
   'Starred': 'المميّزة بنجمة',
   'Recent': 'الأخيرة',
@@ -847,7 +850,9 @@ export function tPrice(price: string): string {
   return price
     .replace('SAR', 'ر.س')
     .replace('/year', '/سنوياً')
-    .replace('/month', '/شهرياً');
+    .replace('/yr', '/سنوياً')   // finalize emits the abbreviated /yr — localize it too
+    .replace('/month', '/شهرياً')
+    .replace('/mo', '/شهرياً');  // monthly rentals show the per-month figure (user request)
 }
 
 export const sar = () => t('SAR');

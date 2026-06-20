@@ -4,6 +4,7 @@ import { detailFor, priceBandRange } from './taxonomy';
 import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
 import { supports } from './platforms';
 import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale } from '@/i18n';
+import { translitPlace } from '@/lib/translitPlace';
 
 // A parsed search. Every field optional — empty fields broaden, never dead-end. (PRD §6.1)
 export type SearchQuery = {
@@ -462,7 +463,10 @@ function priceFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
     // as-is. Otherwise (AI agent path) fall back to the magnitude heuristic. (user request.)
     const explicitMonthly = q.rentPeriod === 'monthly';
     const explicitAnnual = q.rentPeriod === 'annual';
-    const cap = explicitMonthly ? amount * 12
+    // "Per month": the pool is true monthly rentals priced per MONTH, so compare the monthly budget
+    // directly — do NOT ×12. "Per year": compare the yearly price. Agent path (neither set): keep the
+    // old magnitude heuristic. (user: per month = charged monthly, never converted to a year.)
+    const cap = explicitMonthly ? amount
       : explicitAnnual ? amount
       : (!q.priceIsAnnual && !q.bothDeals && amount <= 25_000 ? amount * 12 : amount);
     return (l) => withinValue(l.price, 0, cap);
@@ -491,7 +495,9 @@ function withinValue(price: string, min: number, max: number): boolean {
 // by size, accept any unit, ±10–15% tolerance.)
 function parseSizeRange(detail: string): { min: number; max: number } | null {
   const d = detail.replace(/,/g, '').trim();
-  if (/^([1-4]|5\+?)$/.test(d)) return null; // a bedroom count, not a size
+  // NOTE: the bedroom-vs-size decision is the CALLER's (sizeFilter guards on bedroomSpec first). We no
+  // longer reject a bare "5" here — for a non-bedroom type (e.g. Building) a kept "5" is a 5 m² SIZE and
+  // must build a real band, not be silently dropped. (audit: size bedroom-guard misfire.)
   const nums = (d.match(/\d+/g) ?? []).map((x) => parseInt(x, 10)).filter((n) => isFinite(n) && n > 0);
   if (nums.length === 0) return null;
   if (nums.length >= 2) return { min: Math.min(nums[0], nums[1]), max: Math.max(nums[0], nums[1]) };
@@ -506,9 +512,45 @@ function parseSizeRange(detail: string): { min: number; max: number } | null {
 // converts to m² before it reaches here. (user request: area is a first-class filter.)
 function sizeFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
   if (!q.detail) return null;
+  if (bedroomSpec(q)) return null; // the kept detail is a bedroom count → bedroomFilter handles it, not size
   const r = parseSizeRange(q.detail);
   if (!r) return null;
   return (l) => l.area > 0 && l.area >= r.min && l.area <= r.max;
+}
+
+// Exact property-type predicate: keep only listings of the kept type. Defense-in-depth on top of the
+// server's now-exact-type fetch — a kept type must NEVER surface a sibling (Apartment must not show
+// Floor/Building/Rest House/Chalet; Residential Land must not show Commercial Land). Null = no type
+// kept → broaden. (user: cards must match the kept property type, period.)
+function typeFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
+  if (!q.type) return null;
+  return (l) => l.type === q.type;
+}
+
+// The bedroom constraint a query implies — or null when `detail` isn't a bedroom count (a size band,
+// or a non-bedroom property type). "5+" → { n: 5, atLeast: true }; "1".."4" → exact. ONE source of
+// truth, shared by the client filter (runSearch) AND the server fetch (fetchListingsForQuery) so the
+// two never disagree. Mirrors the bedroom token used everywhere else: /^([1-4]|5\+?)$/.
+export function bedroomSpec(q: SearchQuery): { n: number; atLeast: boolean } | null {
+  if (!q.detail) return null;
+  const d = q.detail.trim();
+  // A bare 1-4 / 5+ token is ALWAYS a bedroom count (no size string ever looks like this — sizes carry a
+  // unit, a range, or a value >5). Don't require q.type: the agent can keep "3 bedrooms" with no type
+  // ("a place to rent in Riyadh, 3 bedrooms") and it must still constrain. (audit: bedroom type-null hole.)
+  if (!/^([1-4]|5\+?)$/.test(d)) return null;
+  // Only EXCLUDE it when a non-bedroom type is explicitly kept (e.g. an Office where "3" is a size, not beds).
+  if (q.type && !detailFor(q.type).isBedrooms) return null;
+  return { n: parseInt(d, 10), atLeast: d.startsWith('5') }; // "5"/"5+" is the top bucket → 5 or more
+}
+
+// Bedroom predicate: keep ONLY listings with the requested count ("5+" → 5 or more, else exact).
+// Unlike price/size, bedrooms is NEVER substituted with a "closest" value — a 6-bedroom house is a
+// different property, not a near-match for a 3-bedroom request, and showing it is exactly the bug the
+// user reported. Unknown counts (beds = 0) are excluded. (user: filter shows ONLY what I kept, period.)
+function bedroomFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
+  const spec = bedroomSpec(q);
+  if (!spec) return null;
+  return spec.atLeast ? (l) => l.beds >= spec.n : (l) => l.beds === spec.n;
 }
 
 // "Ezhalah!" is reserved for when listings are shown. (PRD §7.3)
@@ -583,11 +625,69 @@ function sortListings(list: Listing[], sort: SortKey): Listing[] {
 function listingInDistricts(stored: string, wanted: string[]): boolean {
   const s = stored.replace(/^حي\s+/, '').trim();
   const sLc = s.toLowerCase();
+  // The stored neighborhood is Arabic ("حي العليا"); a kept district label is usually English ("Al
+  // Olaya"). Transliterate the Arabic side so the two can match across scripts. (audit: district leak.)
+  const sTr = translitPlace(stored).toLowerCase();
   return wanted.some((w) => {
     const wn = w.replace(/^حي\s+/, '').trim();
     const wLc = wn.toLowerCase();
-    return s.includes(wn) || wn.includes(s) || sLc.includes(wLc) || wLc.includes(sLc);
+    return s.includes(wn) || wn.includes(s) || sLc.includes(wLc) || wLc.includes(sLc)
+      || (!!sTr && (sTr.includes(wLc) || wLc.includes(sTr)));
   });
+}
+
+// The single target size (m²) the user asked for — ONLY when they entered an exact size (a bare number,
+// optionally with a unit), not a band ("300–600 m²") or an open phrase ("under 300", "600+"). Used by
+// the closeness ranking; bands have no single target so every in-band card is equally close. Null when
+// the detail is a bedroom count or not a clean size.
+function exactSizeTarget(q: SearchQuery): number | null {
+  if (!q.detail || bedroomSpec(q)) return null;
+  const d = q.detail.replace(/,/g, '').trim();
+  if (!/^\d+(\s*(m²|m2|meter|metre|متر|م))?$/i.test(d)) return null; // a single size, not a range/keyword
+  const n = parseInt(d, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// The flat budget ceiling (SAR) the query implies, or null when there's no usable single cap (no price,
+// or a per-m² Buy with no fixed size). MUST mirror priceFilter's cap math — used only to rank above-
+// budget fallbacks by how close they are to the stated budget. (keep in sync with priceFilter.)
+function budgetCap(q: SearchQuery): number | null {
+  if (q.priceBand) { const r = priceBandRange(q.priceBand); return r ? r.max : null; }
+  const digits = (q.priceInput.match(/\d/g) ?? []).join('');
+  if (!digits) return null;
+  const amount = parseInt(digits, 10);
+  if (!amount || amount < 100) return null;
+  if (q.deal === 'Rent') {
+    const explicitMonthly = q.rentPeriod === 'monthly';
+    const explicitAnnual = q.rentPeriod === 'annual';
+    // Monthly pool is priced per month → the cap is the monthly budget as-is (mirrors priceFilter).
+    return explicitMonthly ? amount
+      : explicitAnnual ? amount
+      : (!q.priceIsAnnual && !q.bothDeals && amount <= 25_000 ? amount * 12 : amount);
+  }
+  if (amount <= 50_000) { const size = fixedSize(q); return size > 0 ? amount * size : null; }
+  return amount;
+}
+
+// CLOSENESS score — the default ranking, so #1 is the closest match to what the user asked and the last
+// card is the least close. After the hard filters every card already matches the kept type/deal/city/
+// beds/size, so closeness is decided by the soft signals that still vary:
+//   • Budget: a card WITHIN the stated budget scores 1 (uniform — all equally satisfy "up to X"); an
+//     above-budget fallback scores LESS the more it exceeds the cap, so the least-over-budget (closest
+//     to the stated budget) ranks highest. Neutral — it measures distance to the user's number, never
+//     "a better deal".
+//   • Exact size: the nearer the area to the requested size, the higher (bands stay uniform).
+//   • Newer listing (higher id) breaks ties.
+// Strictly factual closeness to the user's OWN criteria — never a quality/value judgment. (PRD §7 neutrality.)
+function closenessScore(l: Listing, q: SearchQuery, cap: number | null): number {
+  let bonus = 0;
+  if (cap && cap > 0) {
+    const v = listingPriceValue(l.price);
+    if (!Number.isNaN(v) && v > 0) bonus += 1 - Math.min(1, Math.max(0, v - cap) / cap);
+  }
+  const target = exactSizeTarget(q);
+  if (target && l.area > 0) bonus += 1 - Math.min(1, Math.abs(l.area - target) / target);
+  return bonus * 1e12 + (l.id || 0); // closeness dominates; newest-first tiebreak
 }
 
 export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean }): SearchResult {
@@ -595,18 +695,25 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
     // bothDeals (agent searched without knowing rent/buy) → show BOTH; otherwise filter to the deal.
     .filter((l) => q.bothDeals || l.deal === q.deal)
     .filter((l) => supports(l.source, q.deal))
+    // Exact kept type — a kept "Apartment" must never show a Floor/Building/Rest House sibling. (audit.)
+    .filter((l) => !q.type || l.type === q.type)
     .sort((a, b) => (RECENCY[a.listed] ?? 99) - (RECENCY[b.listed] ?? 99));
 
   // District filter: when the agent / area-phrase resolver named specific neighborhoods, narrow
   // to listings in any of them. Don't dead-end — if nothing matches, fall back to the broader pool
   // and flag it in notes. (user request: "North Riyadh should show listings IN North Riyadh.")
+  let districtFellBack = false;
   if (q.districts && q.districts.length) {
     const inArea = eligible.filter((l) => listingInDistricts(l.district || '', q.districts!));
     if (inArea.length > 0) eligible = inArea;
+    else districtFellBack = true; // nothing in that exact neighborhood — disclose it below (don't lie in the summary)
   }
 
   const ns = notes(q);
   let listings = eligible;
+  // The kept-field contract: if the summary names a neighborhood but we had to widen to the whole city,
+  // SAY SO — never show city-wide cards under a neighborhood heading with no disclosure. (audit: district leak.)
+  if (districtFellBack) ns.push(t('No listings in that exact neighborhood — showing others in the same city.'));
   // Apply the price filter, but never dead-end: if nothing fits, show the closest options and say so.
   const fits = priceFilter(q);
   if (fits != null) {
@@ -614,20 +721,29 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
     if (within.length > 0) listings = within;
     else ns.push(t('Nothing within your budget right now — showing the closest options above it.'));
   }
-  // Apply the size filter (area ±15% / band), also never dead-ending. (user request: filter by size.)
+  // Apply the size filter HARD — like bedrooms, no "closest size" substitution. A kept size of 30,000 m²
+  // with zero in-band used to fall back to the FULL unfiltered list (cards wildly off the kept size with
+  // only a soft note). The kept-value contract requires every visible card to match; zero in-band → show
+  // none and let the 0-results path offer to drop the size. (audit: size zero-in-band fallback leak.)
   const sizeFits = sizeFilter(q);
-  if (sizeFits != null) {
-    const within = listings.filter(sizeFits);
-    if (within.length > 0) listings = within;
-    else ns.push(t('No exact size match — showing the closest sizes available.'));
-  }
+  if (sizeFits != null) listings = listings.filter(sizeFits);
+  // Apply the bedroom filter HARD — unlike price it does NOT fall back to the closest count.
+  // If it squeezes to zero, the 0-results path (noResultsSuggestion) offers to drop it. This is the
+  // fix for "filter says 3 bedrooms but you showed 5- and 6-bed houses". (user: show ONLY what I kept.)
+  const bedFits = bedroomFilter(q);
+  if (bedFits != null) listings = listings.filter(bedFits);
 
-  // Re-order by the user's explicit OBJECTIVE sort, if any (else keep freshness order). Done AFTER
-  // filtering so the sort applies to the matches the user actually sees. (user training decision.)
+  // Order the matches. An explicit OBJECTIVE sort (cheapest, biggest, newest…) wins; otherwise the
+  // DEFAULT is closeness — #1 is the closest match to what the user asked, the last card the least
+  // close — which is what the "Ranked by closest match" heading promises. Done AFTER filtering so it
+  // applies to the matches the user actually sees. (user: "#1 closest … #25 least close.")
   let sortNote: string | undefined;
   if (q.sort) {
     listings = sortListings(listings, q.sort);
     sortNote = t(SORT_NOTE[q.sort]);
+  } else {
+    const cap = budgetCap(q);
+    listings = [...listings].sort((a, b) => closenessScore(b, q, cap) - closenessScore(a, q, cap));
   }
 
   // Return up to 25 matches (display cap): the chat shows the first `count` the user explicitly
@@ -659,12 +775,14 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
     const q2: SearchQuery = { ...q, ...mod };
     let list = pickPool(q2, pools)
       .filter((l) => q2.bothDeals || l.deal === q2.deal)
-      .filter((l) => supports(l.source, q2.deal));
+      .filter((l) => supports(l.source, q2.deal))
+      .filter((l) => !q2.type || l.type === q2.type);
     if (q2.districts && q2.districts.length) {
       list = list.filter((l) => listingInDistricts(l.district || '', q2.districts!));
     }
     const pf = priceFilter(q2); if (pf) list = list.filter(pf);
     const sf = sizeFilter(q2); if (sf) list = list.filter(sf);
+    const bf = bedroomFilter(q2); if (bf) list = list.filter(bf);
     return list.length;
   };
   if (q.priceInput && countWith({ priceInput: '' }) > 0) {

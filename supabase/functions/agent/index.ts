@@ -59,6 +59,11 @@ const CITIES = [
   "Rafha", "Turaif", "Al Uwayqilah", "Jadidat Arar",
   "Sharurah", "Badr Al Janoub", "Habona", "Khubash", "Thar", "Yadamah", "Al Wadi'ah",
   "Diriyah", "Al Kharj", "Al Dilam", "Al Majmaah", "Zulfi", "Al Ghat", "Thadiq", "Huraymila", "Rumah", "Al Muzahimiyah", "Dhurma", "Al Quwayiyah", "Al Dawadmi", "Shaqra", "Afif", "Al Hariq", "Hotat Bani Tamim", "Al Hawtah", "Al Aflaj", "Wadi Al Dawasir", "Al Sulayyil", "Al Jubail",
+  // Towns that exist in the listings DB but the agent previously had no term for — added so the
+  // agent can recognize and emit them (exact DB `city` labels). Coastal/rural towns mostly.
+  "Hofuf", "Mahd adh Dhahab", "Al Jumum", "Al Lith", "Al Qunfudhah", "Al Khurma", "Al Kamil",
+  "Rabigh", "Thuwal", "KAEC", "Turabah", "Raniyah", "Safwa", "Sayhat", "Anak", "Tarout",
+  "Al Uyun", "Al Hayathim", "Balsamar",
 ];
 // Canonical property types, split by category exactly as the app's filter does. The agent both
 // MAPS user input onto these AND lists them when a user asks "what types do you have?".
