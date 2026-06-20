@@ -5,6 +5,7 @@ import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
 import { supports } from './platforms';
 import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale } from '@/i18n';
 import { translitPlace } from '@/lib/translitPlace';
+import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 
 // A parsed search. Every field optional — empty fields broaden, never dead-end. (PRD §6.1)
 export type SearchQuery = {
@@ -690,6 +691,18 @@ function closenessScore(l: Listing, q: SearchQuery, cap: number | null): number 
   return bonus * 1e12 + (l.id || 0); // closeness dominates; newest-first tiebreak
 }
 
+// Round-robin an already-ranked list through the 13 regions so a country-wide search visibly spans
+// the Kingdom. The input is assumed sorted (closeness/newest); each region's sublist keeps that order,
+// and we interleave region-by-region. A listing whose city isn't in the catalog falls into 'Other'.
+function diversifyByRegion(listings: Listing[]): Listing[] {
+  const byRegion: Record<string, Listing[]> = {};
+  for (const l of listings) {
+    const r = CITY_TO_REGION[l.city] || 'Other';
+    (byRegion[r] ||= []).push(l);
+  }
+  return interleave(Object.values(byRegion));
+}
+
 export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean }): SearchResult {
   let eligible = pickPool(q, pools)
     // bothDeals (agent searched without knowing rent/buy) → show BOTH; otherwise filter to the deal.
@@ -699,21 +712,19 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
     .filter((l) => !q.type || l.type === q.type)
     .sort((a, b) => (RECENCY[a.listed] ?? 99) - (RECENCY[b.listed] ?? 99));
 
-  // District filter: when the agent / area-phrase resolver named specific neighborhoods, narrow
-  // to listings in any of them. Don't dead-end — if nothing matches, fall back to the broader pool
-  // and flag it in notes. (user request: "North Riyadh should show listings IN North Riyadh.")
-  let districtFellBack = false;
+  // District filter: when the agent / area-phrase resolver named specific neighborhoods, narrow to
+  // listings in any of them — STRICTLY. (user: "North Riyadh should show listings IN North Riyadh"
+  // and "if there's nothing, say you couldn't find it — never show the wrong ones.")
   if (q.districts && q.districts.length) {
-    const inArea = eligible.filter((l) => listingInDistricts(l.district || '', q.districts!));
-    if (inArea.length > 0) eligible = inArea;
-    else districtFellBack = true; // nothing in that exact neighborhood — disclose it below (don't lie in the summary)
+    // District is a STRICT kept field, exactly like bedrooms/size: keep ONLY listings in the chosen
+    // district(s). Zero in-district matches → show NONE (the 0-results path says "couldn't find that
+    // area"), NEVER widen to the whole city under a neighborhood heading. (user: match what I picked
+    // to the cards, or tell me you couldn't find it — never show the wrong ones.)
+    eligible = eligible.filter((l) => listingInDistricts(l.district || '', q.districts!));
   }
 
   const ns = notes(q);
   let listings = eligible;
-  // The kept-field contract: if the summary names a neighborhood but we had to widen to the whole city,
-  // SAY SO — never show city-wide cards under a neighborhood heading with no disclosure. (audit: district leak.)
-  if (districtFellBack) ns.push(t('No listings in that exact neighborhood — showing others in the same city.'));
   // Apply the price filter, but never dead-end: if nothing fits, show the closest options and say so.
   const fits = priceFilter(q);
   if (fits != null) {
@@ -744,6 +755,10 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
   } else {
     const cap = budgetCap(q);
     listings = [...listings].sort((a, b) => closenessScore(b, q, cap) - closenessScore(a, q, cap));
+    // Country-wide "Saudi" search → rotate the closeness-sorted matches through the 13 regions so the
+    // visible cards span the Kingdom instead of all coming from Riyadh/Jeddah. Closeness order is
+    // preserved WITHIN each region; only an explicit objective sort (above) overrides this. (user.)
+    if (isCountryWideQuery(q)) listings = diversifyByRegion(listings);
   }
 
   // Return up to 25 matches (display cap): the chat shows the first `count` the user explicitly

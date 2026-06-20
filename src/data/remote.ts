@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import type { Listing } from './listings';
 import { type Deal, CATEGORY_TYPES } from './taxonomy';
 import type { SearchQuery } from './search';
+import { REGIONS, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
 
 // Session cache of every listing we've fetched (by id) — lets the in-app browser open any listing
@@ -123,6 +124,19 @@ function tableFor(q: SearchQuery): string {
 
 const QUERY_LIMIT = 1500; // newest N matching rows — plenty for the 25-card display + load-more
 
+// Apply the kept NON-location filters (deal, type, rent period) to a fresh query on the right table.
+// Location scoping is added by the caller (city / region / country-wide). Keeps every branch identical
+// on the strict-contract fields. (filter contract.)
+function keptFiltersReq(q: SearchQuery) {
+  let req = supabase!.from(tableFor(q)).select(LIST_SELECT).eq('active', true);
+  if (!q.bothDeals) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
+  const types = dbTypesFor(q);
+  if (types && types.length) req = req.in('property_type', types);
+  if (q.deal === 'Rent' && q.rentPeriod === 'monthly') req = req.eq('rent_period', 'monthly');
+  else if (q.deal === 'Rent' && q.rentPeriod === 'annual') req = req.or('rent_period.eq.annual,rent_period.is.null');
+  return req;
+}
+
 // Server-side per-search fetch — the heart of the scale fix. Instead of downloading the whole 21k+
 // row table (which now times out → app got zero listings), we push the cheap exact filters
 // (transaction_type, property_type group, city) to Postgres and pull only the matching rows WITH
@@ -132,29 +146,44 @@ const QUERY_LIMIT = 1500; // newest N matching rows — plenty for the 25-card d
 // matches. (user-reported: search broken / "Loading listings" because the whole-table load timed out.)
 export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] | null> {
   if (!supabase) return null;
-  let req = supabase.from(tableFor(q)).select(LIST_SELECT).eq('active', true);
-  // Deal: bothDeals (agent unsure rent/buy) → no filter, return both; else exact.
-  if (!q.bothDeals) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
-  // Type group (or whole category if type is null).
-  const types = dbTypesFor(q);
-  if (types && types.length) req = req.in('property_type', types);
   // City — scope to a recognized city. Prefer a city named in the raw text; otherwise fall back to the
   // resolver's canonical city, so a kept DISTRICT/landmark/Arabic-city ("Al Olaya", "العليا، الرياض",
   // "near KAFD") scopes to its city instead of leaking all 21 cities. (audit: location leak.) The
   // client then narrows to the exact district WITHIN that city via q.districts.
   const city = cityFilterFor(q.location || '')
     || (q.locationMatch?.city ? cityFilterFor(q.locationMatch.city) : null);
+
+  // COUNTRY-WIDE ("Saudi"): no specific city → diversify across all 13 regions. Pull the newest K from
+  // each region's cities IN PARALLEL, then round-robin them, so the results span the Kingdom instead
+  // of being dominated by Riyadh/Jeddah's freshest. The kept strict filters (deal/type/period) still
+  // apply to every per-region query; bedrooms/price/size stay client-side as always. (user request.)
+  if (!city && isCountryWideQuery(q)) {
+    const regionKeys = Object.keys(REGIONS);
+    const perRegion = Math.ceil(QUERY_LIMIT / regionKeys.length);
+    const lists = await Promise.all(
+      regionKeys.map(async (rk) => {
+        const { data } = await keptFiltersReq(q).in('city', REGIONS[rk]).order('id', { ascending: false }).limit(perRegion);
+        return data ? finalize(data) : [];
+      }),
+    );
+    const rows = interleave(lists);
+    cacheListings(rows);
+    return rows;
+  }
+
+  // A place was NAMED but resolves to NO city we carry (e.g. a typo / unknown like "Rwam"), and it's
+  // not a district narrow within a city → return NONE so the UI says "couldn't find that place",
+  // instead of dumping nationwide cards under a label that doesn't match them. (user: match what I
+  // wrote to the cards, or tell me you couldn't find it — never show the wrong cities.)
+  if (!city && (q.location || '').trim() && !(q.districts && q.districts.length)) {
+    return [];
+  }
+
+  // City-scoped path. Bedrooms is filtered CLIENT-side (runSearch), NOT here — same as price/size —
+  // so a 0-match search can still see other counts exist for the "want me to drop the bedroom count?"
+  // relaxation. Newest-first is cheap on the filtered, indexed set.
+  let req = keptFiltersReq(q);
   if (city) req = req.eq('city', city);
-  // Rent period — the filter's monthly/annual toggle is a HARD segment, pushed to the DB. "per month"
-  // → only true monthly rentals; "per year" (or untagged) → annual listings. The agent path leaves
-  // q.rentPeriod undefined → no period filter (it shows whatever matches). (user: per month = charged
-  // monthly only, not yearly converted.)
-  if (q.deal === 'Rent' && q.rentPeriod === 'monthly') req = req.eq('rent_period', 'monthly');
-  else if (q.deal === 'Rent' && q.rentPeriod === 'annual') req = req.or('rent_period.eq.annual,rent_period.is.null');
-  // Bedrooms is filtered CLIENT-side (runSearch), NOT here — same as price/size. Pushing it to the DB
-  // would empty the pool on a 0-match search, so the "want me to drop the bedroom count?" relaxation
-  // could no longer see that other counts exist. Keeping it client-side preserves that suggestion.
-  // Newest-first is cheap here because the filters above shrink the set and it's indexed.
   req = req.order('id', { ascending: false }).limit(QUERY_LIMIT);
   const { data, error } = await req;
   if (error || !data) return null;
