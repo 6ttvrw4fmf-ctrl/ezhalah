@@ -42,7 +42,9 @@ jobs:
           if [ -n "${{ github.event.inputs.city }}" ]; then
             echo "cities=[\"${{ github.event.inputs.city }}\"]" >> $GITHUB_OUTPUT
           else
-            echo 'cities=["riyadh","jeddah","khobar","dammam","mecca","medina","taif","abha","tabuk","buraidah","hail","hofuf"]' >> $GITHUB_OUTPUT
+            # Every Saudi city/town across all 13 regions. GitHub runs up to ~20 in
+            # parallel and queues the rest, so all 58 still complete in a few waves.
+            echo 'cities=["riyadh","al_kharj","al_majmaah","dawadmi","al_zulfi","wadi_al_dawasir","afif","al_quwayiyah","shaqra","jeddah","mecca","taif","rabigh","al_qunfudhah","medina","yanbu","al_ula","badr","buraidah","unaizah","al_rass","al_bukayriyah","al_mithnab","dammam","khobar","dhahran","hofuf","ahsa","al_mubarraz","jubail","qatif","hafar_al_batin","ras_tanura","abqaiq","abha","khamis_mushait","bisha","al_namas","mahayel","tabuk","duba","al_wajh","tayma","hail","arar","rafha","turaif","jazan","sabya","abu_arish","samtah","najran","sharurah","al_baha","baljurashi","sakaka","qurayyat","dawmat_al_jandal"]' >> $GITHUB_OUTPUT
           fi
 
   deep-fill:

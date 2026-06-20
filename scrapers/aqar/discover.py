@@ -53,18 +53,77 @@ RESIDENTIAL_TYPES = (
 # cities + a few others need their FULL official names. Verified against sa.aqar.fm. (user-reported:
 # Mecca/Medina/Taif barely scraped.)
 CITY_AR = {
-    "riyadh":  "الرياض",
-    "jeddah":  "جدة",
-    "khobar":  "الخبر",
-    "dammam":  "الدمام",
-    "mecca":   "مكة-المكرمة",
-    "medina":  "المدينة-المنورة",
-    "hofuf":   "الهفوف",
-    "taif":    "الطائف",
-    "abha":    "أبها",
-    "tabuk":   "تبوك",
-    "buraidah":"بريدة",
-    "hail":    "حائل",
+    # ── Riyadh region ──
+    "riyadh":          "الرياض",
+    "al_kharj":        "الخرج",
+    "al_majmaah":      "المجمعة",
+    "dawadmi":         "الدوادمي",
+    "al_zulfi":        "الزلفي",
+    "wadi_al_dawasir": "وادي-الدواسر",
+    "afif":            "عفيف",
+    "al_quwayiyah":    "القويعية",
+    "shaqra":          "شقراء",
+    # ── Makkah region ──
+    "jeddah":          "جدة",
+    "mecca":           "مكة-المكرمة",
+    "taif":            "الطائف",
+    "rabigh":          "رابغ",
+    "al_qunfudhah":    "القنفذة",
+    # ── Madinah region ──
+    "medina":          "المدينة-المنورة",
+    "yanbu":           "ينبع",
+    "al_ula":          "العلا",
+    "badr":            "بدر",
+    # ── Qassim region ──
+    "buraidah":        "بريدة",
+    "unaizah":         "عنيزة",       # verified ✓
+    "al_rass":         "الرس",
+    "al_bukayriyah":   "البكيرية",
+    "al_mithnab":      "المذنب",
+    # ── Eastern region ──
+    "dammam":          "الدمام",
+    "khobar":          "الخبر",
+    "dhahran":         "الظهران",
+    "hofuf":           "الهفوف",
+    "ahsa":            "الأحساء",
+    "al_mubarraz":     "المبرز",
+    "jubail":          "الجبيل",
+    "qatif":           "القطيف",
+    "hafar_al_batin":  "حفر-الباطن",  # verified ✓
+    "ras_tanura":      "رأس-تنورة",
+    "abqaiq":          "بقيق",
+    # ── Asir region ──
+    "abha":            "أبها",
+    "khamis_mushait":  "خميس-مشيط",   # verified ✓
+    "bisha":           "بيشة",
+    "al_namas":        "النماص",
+    "mahayel":         "محايل-عسير",
+    # ── Tabuk region ──
+    "tabuk":           "تبوك",
+    "duba":            "ضباء",
+    "al_wajh":         "الوجه",
+    "tayma":           "تيماء",
+    # ── Hail region ──
+    "hail":            "حائل",
+    # ── Northern Borders region ──
+    "arar":            "عرعر",
+    "rafha":           "رفحاء",
+    "turaif":          "طريف",
+    # ── Jazan region ──
+    "jazan":           "جازان",
+    "sabya":           "صبيا",
+    "abu_arish":       "أبو-عريش",
+    "samtah":          "صامطة",
+    # ── Najran region ──
+    "najran":          "نجران",
+    "sharurah":        "شرورة",
+    # ── Al Bahah region ──
+    "al_baha":         "الباحة",
+    "baljurashi":      "بلجرشي",
+    # ── Al Jouf region ──
+    "sakaka":          "سكاكا",
+    "qurayyat":        "القريات",
+    "dawmat_al_jandal":"دومة-الجندل",
 }
 
 
