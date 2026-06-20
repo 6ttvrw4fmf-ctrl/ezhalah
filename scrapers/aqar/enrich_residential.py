@@ -118,6 +118,11 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     price_annual: Optional[int] = None
     price_total:  Optional[int] = None
     price_per_meter: Optional[int] = None
+    # The listing's billing period. Aqar shows rent as "69,000 §/سنوي" (yearly) OR "5,000 §/شهري"
+    # (monthly). We keep the ORIGINAL period so the app can filter "per month" to true monthly rentals
+    # instead of converting everything to yearly and losing the distinction. Default annual for Rent
+    # (the Saudi norm); None for Buy. (user request: "per month = charged monthly, not yearly".)
+    rent_period: Optional[str] = "annual" if transaction_type == "Rent" else None
 
     mp_yr = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*سنوي", text)
     if mp_yr:
@@ -125,8 +130,13 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
 
     mp_mo = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*شهري", text)
     if not price_annual and mp_mo:
+        # No yearly price, but a "/شهري" figure → this is a genuinely MONTHLY rental. Tag it and store
+        # the annualized figure too (monthly × 12) so sorting/compare still works. The app divides it
+        # back by 12 for the monthly display.
         v = N.to_int(mp_mo.group(1))
-        price_annual = v * 12 if v else None
+        if v:
+            price_annual = v * 12
+            rent_period = "monthly"
 
     mp_m2 = re.search(r"(\d[\d,]{1,})\s*[§ر﷼]?\s*/?\s*(?:متر|م²)", text)
     if mp_m2:
@@ -188,7 +198,10 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     md_city = re.search(r"/([^/]+?)/", url.split("aqar.fm")[-1].lstrip("/"))
     if md_city:
         city_ar = md_city.group(1)
-    city = N.map_city(city_ar or "") or "Riyadh"
+    # Every city in our scrape matrix is in CITY_MAP_AR, so this maps cleanly. Fall back to
+    # "Other" (NOT "Riyadh") if an unexpected slug ever appears — silently defaulting to Riyadh
+    # is what buried 70+ towns inside Riyadh before. "Other" is a loud, harmless signal instead.
+    city = N.map_city(city_ar or "") or "Other"
 
     region = _text_after_label(text, r"المنطقة")
     neighborhood = None
@@ -240,6 +253,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         "price_annual":            price_annual,
         "price_total":             price_total,
         "price_per_meter":         price_per_meter,
+        "rent_period":             rent_period,
         "rent_now_pay_later":         rent_now_pay_later,
         "rent_now_pay_later_monthly": rent_now_pay_later_monthly,
         # location

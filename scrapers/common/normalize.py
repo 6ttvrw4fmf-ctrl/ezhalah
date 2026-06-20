@@ -58,36 +58,55 @@ SLUG_TO_TYPE = {
     "office":     "Office",
 }
 
-# Saudi city names (Arabic) → canonical English city names from CITIES in agent SYSTEM.
+# Saudi city names (Arabic) → canonical English city names. Mirrors discover.CITY_AR (Aqar's
+# own 94-city catalog) so EVERY city we scrape gets a correct English label instead of falling
+# through to a default. Keys are stored space-separated; map_city() normalizes the hyphenated
+# URL slug (e.g. "حفر-الباطن") to spaces before lookup, so both forms match.
 CITY_MAP_AR = {
-    "الرياض":          "Riyadh",
-    "جدة":             "Jeddah",
-    "مكة":             "Mecca",
-    "مكة المكرمة":     "Mecca",
-    "المدينة":         "Medina",
-    "المدينة المنورة": "Medina",
-    "الدمام":          "Dammam",
-    "الخبر":           "Khobar",
-    "الظهران":         "Dhahran",
-    "الطائف":          "Taif",
-    "تبوك":            "Tabuk",
-    "بريدة":           "Buraidah",
-    "حائل":            "Hail",
-    "أبها":            "Abha",
-    "ابها":            "Abha",
-    "خميس مشيط":       "Khamis Mushait",
-    "نجران":           "Najran",
-    "جازان":           "Jazan",
-    "ينبع":            "Yanbu",
-    "الخرج":           "Al Kharj",
-    "الأحساء":         "Al Ahsa",
-    "الاحساء":         "Al Ahsa",
-    "القطيف":          "Qatif",
-    "الجبيل":          "Jubail",
-    "عرعر":            "Arar",
-    "سكاكا":           "Sakaka",
-    "الباحة":          "Al Baha",
-    "حفر الباطن":      "Hafar Al Batin",
+    # Riyadh region
+    "الرياض": "Riyadh", "الخرج": "Al Kharj", "المجمعة": "Al Majmaah", "الدوادمي": "Dawadmi",
+    "الزلفي": "Al Zulfi", "عفيف": "Afif", "القويعية": "Al Quwayiyah", "شقراء": "Shaqra",
+    "الدرعية": "Diriyah", "المزاحمية": "Al Muzahimiyah", "ثادق": "Thadiq",
+    "حوطة بني تميم": "Hawtat Bani Tamim", "الغاط": "Al Ghat", "رماح": "Rumah", "الدلم": "Al Dalam",
+    "الحريق": "Al Hariq", "السليل": "As Sulayyil", "الهياثم": "Al Hayathim",
+    # Makkah region
+    "جدة": "Jeddah", "مكة": "Mecca", "مكة المكرمة": "Mecca", "الطائف": "Taif", "رابغ": "Rabigh",
+    "القنفذة": "Al Qunfudhah", "مدينة الملك عبدالله الاقتصادية": "KAEC", "ثول": "Thuwal",
+    "الجموم": "Al Jumum", "الكامل": "Al Kamil", "الليث": "Al Lith", "تربة": "Turabah",
+    "رنية": "Raniyah", "الخرمة": "Al Khurma",
+    # Madinah region
+    "المدينة": "Medina", "المدينة المنورة": "Medina", "ينبع": "Yanbu", "العلا": "Al Ula",
+    "بدر": "Badr", "الحناكية": "Al Hanakiyah", "أملج": "Umluj", "خيبر": "Khaybar",
+    "مهد الذهب": "Mahd adh Dhahab",
+    # Qassim region
+    "بريدة": "Buraidah", "عنيزة": "Unaizah", "الرس": "Ar Rass", "البكيرية": "Al Bukayriyah",
+    "المذنب": "Al Mithnab", "البدائع": "Al Badai", "رياض الخبراء": "Riyadh Al Khabra",
+    "النبهانية": "An Nabhaniyah", "الشماسية": "Ash Shamasiyah",
+    # Eastern region
+    "الدمام": "Dammam", "الخبر": "Khobar", "الظهران": "Dhahran", "الهفوف": "Hofuf",
+    "الأحساء": "Hofuf", "الاحساء": "Hofuf", "الجبيل": "Jubail", "القطيف": "Qatif",
+    "حفر الباطن": "Hafar Al Batin", "رأس تنورة": "Ras Tanura", "راس تنورة": "Ras Tanura",
+    "بقيق": "Abqaiq", "النعيرية": "An Nairyah", "الخفجي": "Khafji", "سيهات": "Sayhat",
+    "صفوى": "Safwa", "تاروت": "Tarout", "العيون": "Al Uyun",
+    # Asir region
+    "أبها": "Abha", "ابها": "Abha", "خميس مشيط": "Khamis Mushait", "بيشة": "Bisha",
+    "محايل": "Mahayel", "أحد رفيده": "Ahad Rafidah", "المجاردة": "Al Majardah",
+    "بللسمر": "Balsamar", "تثليث": "Tathlith",
+    # Tabuk region
+    "تبوك": "Tabuk", "ضبا": "Duba", "الوجه": "Al Wajh", "تيماء": "Tayma",
+    # Hail region
+    "حائل": "Hail", "بقعاء": "Baqaa", "الغزالة": "Al Ghazalah", "الشنان": "Ash Shanan",
+    # Northern Borders region
+    "عرعر": "Arar", "رفحاء": "Rafha", "طريف": "Turaif",
+    # Jazan region
+    "جازان": "Jazan", "صبيا": "Sabya", "أبو عريش": "Abu Arish", "صامطة": "Samtah",
+    "بيش": "Baysh", "أحد المسارحة": "Ahad Al Masarihah",
+    # Najran region
+    "نجران": "Najran", "شرورة": "Sharurah",
+    # Al Bahah region
+    "الباحة": "Al Baha",
+    # Al Jouf region
+    "سكاكا": "Sakaka", "القريات": "Qurayyat", "دومة الجندل": "Dawmat Al Jandal",
 }
 
 
@@ -106,15 +125,22 @@ def map_type(raw_ar: str) -> Optional[str]:
 
 
 def map_city(raw_ar: str) -> Optional[str]:
-    """Look up the canonical English city name from an Arabic city name."""
+    """Look up the canonical English city name from an Arabic city name or URL slug.
+
+    The Aqar URL slug is hyphenated (e.g. "حفر-الباطن"); CITY_MAP_AR keys are space-separated,
+    so we normalize hyphens → spaces before matching.
+    """
     if not raw_ar:
         return None
-    raw = raw_ar.strip()
+    raw = raw_ar.strip().replace("-", " ").strip()
     if raw in CITY_MAP_AR:
         return CITY_MAP_AR[raw]
+    # Prefer the LONGEST key match so "أحد المسارحة" doesn't get shadowed by a shorter token.
+    best = None
     for ar, eng in CITY_MAP_AR.items():
-        if ar in raw:
-            return eng
+        if ar in raw and (best is None or len(ar) > len(best[0])):
+            best = (ar, eng)
+    return best[1] if best else None
     return None
 
 
