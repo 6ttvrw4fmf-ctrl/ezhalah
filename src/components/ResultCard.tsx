@@ -248,18 +248,32 @@ function AdditionalInformationPanel({ listing, t }: { listing: Listing; t: (k: s
 const AQAR_LOGO = require('../../assets/images/aqar-logo.png');
 const WASALT_LOGO = require('../../assets/images/wasalt-logo.png');
 function SourceBadge({ source }: { source: string }) {
-  const isWasalt = source.toLowerCase().includes('wasalt');
-  return (
-    <Image source={isWasalt ? WASALT_LOGO : AQAR_LOGO} style={card.hostBadge} contentFit="contain" />
-  );
+  const s = source.toLowerCase();
+  if (s.includes('wasalt')) return <Image source={WASALT_LOGO} style={card.hostBadge} contentFit="contain" />;
+  // Aldarim has no logo file yet — clean branded fallback (a navy square + building mark). Swap for
+  // the real logo when the user supplies it (same as Aqar/Wasalt PNGs).
+  if (s.includes('aldarim')) {
+    return (
+      <View style={[card.hostBadge, card.aldarimBadge]}>
+        <Ionicons name="business" size={22} color="#fff" />
+      </View>
+    );
+  }
+  return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
 // Pretty-print and hostname helpers for the "Hosted on X" labels. Mirrors SourceBadge's matching.
 function sourceName(source: string): string {
-  return source.toLowerCase().includes('wasalt') ? 'Wasalt' : 'AQAR';
+  const s = source.toLowerCase();
+  if (s.includes('wasalt')) return 'Wasalt';
+  if (s.includes('aldarim')) return 'Aldarim Real Estate';
+  return 'AQAR';
 }
 function sourceHost(source: string): string {
-  return source.toLowerCase().includes('wasalt') ? 'wasalt.sa' : 'sa.aqar.fm';
+  const s = source.toLowerCase();
+  if (s.includes('wasalt')) return 'wasalt.sa';
+  if (s.includes('aldarim')) return 'aldarim.sa';
+  return 'sa.aqar.fm';
 }
 
 // EJARI × ريلز "Rent now, pay later" banner — uses the official EJARI×ريلز partnership graphic
@@ -374,6 +388,7 @@ const card = StyleSheet.create({
   // The PNG carries its own background and rounded corners — we just size the slot. NO container
   // background here (would bleed through the PNG's transparent margins).
   hostBadge: { width: 44, height: 44 },
+  aldarimBadge: { borderRadius: 8, backgroundColor: '#14506b', alignItems: 'center', justifyContent: 'center' },
   hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },
   featGrid: { flexDirection: 'row', flexWrap: 'wrap' },

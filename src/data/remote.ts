@@ -128,15 +128,16 @@ function tableFor(q: SearchQuery): string {
   return isCommercialQuery(q) ? 'aqar_commercial_listings' : 'aqar_residential_listings';
 }
 
-// Multi-source: which Aqar+Wasalt tables to read for this query. Land types live only in Aqar
-// residential (Wasalt's land is in its own residential table, we include it too). Residential
-// queries hit both residential tables; commercial queries hit both commercial tables. Each card
-// renders its own SourceBadge so users see whether it's from Aqar or Wasalt. (user request: mix.)
+// Multi-source: which Aqar+Wasalt+Aldarim tables to read for this query. Residential queries hit all
+// three residential tables; commercial queries hit all three commercial tables; land types read the
+// residential tables (where land lives). Each card renders its own SourceBadge so users see the
+// platform. (user request: mix all sources.)
 function tablesFor(q: SearchQuery): string[] {
-  if (q.type && LAND_TYPES.has(q.type)) return ['aqar_residential_listings', 'wasalt_residential_listings'];
+  if (q.type && LAND_TYPES.has(q.type))
+    return ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings'];
   return isCommercialQuery(q)
-    ? ['aqar_commercial_listings', 'wasalt_commercial_listings']
-    : ['aqar_residential_listings', 'wasalt_residential_listings'];
+    ? ['aqar_commercial_listings', 'wasalt_commercial_listings', 'aldarim_commercial_listings']
+    : ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings'];
 }
 
 // Round-robin interleave so cards alternate between Aqar and Wasalt instead of front-loading one.
@@ -242,6 +243,7 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
   for (const table of [
     'aqar_residential_listings', 'aqar_commercial_listings',
     'wasalt_residential_listings', 'wasalt_commercial_listings',
+    'aldarim_residential_listings', 'aldarim_commercial_listings',
   ]) {
     const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).limit(1);
     if (error || !data || !data.length) continue;

@@ -7,7 +7,7 @@ name: Aldarim sync
 
 on:
   schedule:
-    - cron: "15 4 * * *"   # daily 04:15 UTC
+    - cron: "30 */4 * * *"   # every 4 hours (at :30), like the Aqar sweeps
   workflow_dispatch: {}
 
 concurrency:
