@@ -533,6 +533,10 @@ const AR: Record<string, string> = {
   'AQAR':                              'عقار',
   'Hosted on AQAR':                    'مستضاف على عقار',
   'Clicking this property will take you to sa.aqar.fm': 'الضغط على هذا الإعلان سيأخذك إلى sa.aqar.fm',
+  // Source-aware variants — the brand name varies (AQAR/Wasalt), so the localized string carries
+  // the {name} / {host} placeholder. The English value is the FALLBACK if a key is missing.
+  'Hosted on {name}':                  'مستضاف على {name}',
+  'Clicking this property will take you to {host}': 'الضغط على هذا الإعلان سيأخذك إلى {host}',
   'for Rent':                          'للإيجار',
   'for Sale':                          'للبيع',
   'Added':                             'أضيف',

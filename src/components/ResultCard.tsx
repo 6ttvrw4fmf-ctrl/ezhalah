@@ -90,6 +90,18 @@ export function ResultCard({
   // user sees which part of the city the property is in. (user request.)
   const region = regionFromUrl(listing.source_url);
   const regionLabel = region ? (locale === 'en' ? region.en : region.ar) : '';
+  // The scraper sometimes captured a whole junk string into `listed` (e.g. "28/04/2026 آخر تحديث منذ
+  // 22 ساعة ... المشاهدات 353 ..."). Show ONLY the clean DD/MM/YYYY date; if none, fall back to a
+  // localized "recently". Works in both languages, no re-scrape needed. (user request: don't show
+  // the Arabic junk on the English card.)
+  const cleanDate = (raw?: string): string => {
+    if (!raw) return '';
+    const m = raw.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
+    if (m) return m[1];
+    if (/^\s*recently\s*$|مؤخر/.test(raw)) return t('recently');
+    return raw.length <= 12 ? raw : '';
+  };
+  const listedClean = cleanDate(listing.listed);
   const { width } = useWindowDimensions();
   const horizontal = IS_WEB && width >= 820; // desktop 3-column layout
   const [expanded, setExpanded] = useState(false);
@@ -105,9 +117,12 @@ export function ResultCard({
   const overflow = Math.max(0, allActive.length - VISIBLE);
 
   return (
-    <View style={card.wrap}>
-      {/* ─── LEFT: photo block ────────────────────────────── */}
-      <Pressable onPress={onOpen} style={[card.photoCol, horizontal ? card.photoColWide : card.photoColTall]}>
+    // Desktop (≥820px): 3 columns side-by-side. Mobile/narrow: STACK vertically (photo on top, then
+    // info, then features) — the row layout crammed all 3 columns into a phone width and broke badly.
+    // (user-reported: "look how it looks like in the phone, it's horrible".)
+    <View style={[card.wrap, { flexDirection: horizontal ? 'row' : 'column' }]}>
+      {/* ─── photo block (full-width banner on mobile) ───── */}
+      <Pressable onPress={onOpen} style={[card.photoCol, horizontal ? card.photoColWide : card.photoColMobile]}>
         <Image source={{ uri: listing.photo }} style={card.photo} contentFit="cover" transition={150} />
         {rank ? (
           <View style={card.rankBadge} pointerEvents="none">
@@ -118,14 +133,14 @@ export function ResultCard({
             Source attribution still appears in the bottom strip and in the right-side panel. */}
         {listing.source_url ? (
           <View style={card.sourceStrip} pointerEvents="none">
-            <Text style={card.sourceText} numberOfLines={1}>AQAR · sa.aqar.fm</Text>
+            <Text style={card.sourceText} numberOfLines={1}>{sourceName(listing.source).toUpperCase()} · {sourceHost(listing.source)}</Text>
             <Ionicons name="open-outline" size={11} color="#fff" />
           </View>
         ) : null}
       </Pressable>
 
-      {/* ─── MIDDLE: property info ───────────────────────── */}
-      <Pressable onPress={onOpen} style={card.midCol}>
+      {/* ─── property info ───────────────────────── */}
+      <Pressable onPress={onOpen} style={[card.midCol, horizontal && card.midColFlex]}>
         <View style={card.typeRow}>
           <Ionicons name="home-outline" size={13} color={colors.muted} />
           <Text style={card.typeLabel}>{t(listing.type)} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
@@ -150,18 +165,18 @@ export function ResultCard({
           {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} /> : null}
           {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${tr('m²')}`} small={t('Area')} /> : null}
           <Stat icon="business-outline" big={t(listing.type)} small={t('Property Type')} />
-          {listing.listed ? <Stat icon="calendar-outline" big={t('Added')} small={listing.listed} /> : null}
+          {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
         </View>
       </Pressable>
 
-      {/* ─── RIGHT: features panel ───────────────────────── */}
-      <View style={card.rightCol}>
+      {/* ─── features panel (full-width below info on mobile) ─ */}
+      <View style={[card.rightCol, horizontal ? card.rightColSide : card.rightColBottom]}>
         <View style={card.hostHead}>
-          <AqarBadge />
+          <SourceBadge source={listing.source} />
           <View style={{ flex: 1 }}>
-            <Text style={card.hostedOn}>{t('Hosted on AQAR')}</Text>
+            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: sourceName(listing.source) })}</Text>
             <Text style={card.hostHint} numberOfLines={2}>
-              {t('Clicking this property will take you to sa.aqar.fm')}
+              {t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })}
             </Text>
           </View>
         </View>
@@ -190,19 +205,25 @@ export function ResultCard({
   );
 }
 
-// AQAR brand badge — uses the official AQAR logo PNG (Saudi-map silhouette with the green pin)
-// that the user dropped into assets/images/aqar-logo.png. Rendered with expo-image so it can be
-// cached and rounded by the parent corner-clip. (user request: use the real AQAR logo on the
-// cards, pixel-perfect, instead of a code-drawn approximation.)
+// Source-aware brand badge — same square shape for every platform, just swaps the logo art.
+// Both PNGs are pre-baked with their own background + rounded shape, so contentFit="contain"
+// shows the whole logo without halos. Defaults to Aqar (the original source) for unknown values.
+// (user request: replace Aqar with Wasalt cleanly, both rendered identical shape.)
 const AQAR_LOGO = require('../../assets/images/aqar-logo.png');
-function AqarBadge() {
-  // The PNG already has the green background + rounded shape baked in. Render it directly with
-  // contentFit="contain" so the whole logo (map + pin) is visible without being cropped, and no
-  // container background — otherwise the surrounding green box bleeds into the PNG's transparent
-  // corners and the image looks like it has white halos. (user request: fix the background.)
+const WASALT_LOGO = require('../../assets/images/wasalt-logo.png');
+function SourceBadge({ source }: { source: string }) {
+  const isWasalt = source.toLowerCase().includes('wasalt');
   return (
-    <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />
+    <Image source={isWasalt ? WASALT_LOGO : AQAR_LOGO} style={card.hostBadge} contentFit="contain" />
   );
+}
+
+// Pretty-print and hostname helpers for the "Hosted on X" labels. Mirrors SourceBadge's matching.
+function sourceName(source: string): string {
+  return source.toLowerCase().includes('wasalt') ? 'Wasalt' : 'AQAR';
+}
+function sourceHost(source: string): string {
+  return source.toLowerCase().includes('wasalt') ? 'wasalt.sa' : 'sa.aqar.fm';
 }
 
 // EJARI × ريلز "Rent now, pay later" banner — uses the official EJARI×ريلز partnership graphic
@@ -248,12 +269,12 @@ const card = StyleSheet.create({
   wrap: {
     backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.fieldLine,
     overflow: 'hidden', ...cardShadow,
-    flexDirection: 'row', alignItems: 'stretch',
+    alignItems: 'stretch', // flexDirection set inline (row desktop / column mobile)
   },
-  // LEFT: photo column
+  // photo column — fixed-size on desktop, full-width banner on mobile
   photoCol: { position: 'relative', backgroundColor: colors.tint, overflow: 'hidden' },
   photoColWide: { width: 240, height: 200 },
-  photoColTall: { width: 110, height: 110 },
+  photoColMobile: { width: '100%', height: 200 },
   photo: { width: '100%', height: '100%' },
   rankBadge: {
     position: 'absolute', top: 8, left: 8, backgroundColor: colors.primary,
@@ -272,7 +293,8 @@ const card = StyleSheet.create({
   sourceText: { color: '#fff', fontSize: 10, fontWeight: '600', flex: 1 },
 
   // MIDDLE: property info
-  midCol: { flex: 1.5, paddingHorizontal: 14, paddingVertical: 12, gap: 6 },
+  midCol: { paddingHorizontal: 14, paddingVertical: 12, gap: 6 },
+  midColFlex: { flex: 1.5 }, // desktop only — in the mobile column stack, flex would collapse it
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   typeLabel: { fontSize: 11.5, color: colors.muted, fontWeight: '500' },
   title: { fontSize: 18, fontWeight: '800', color: colors.dark, letterSpacing: -0.3 },
@@ -309,10 +331,9 @@ const card = StyleSheet.create({
   statSmall: { fontSize: 10, color: colors.muted, lineHeight: 12 },
 
   // RIGHT: features
-  rightCol: {
-    width: 240, paddingHorizontal: 14, paddingVertical: 12, gap: 9,
-    borderLeftWidth: 1, borderLeftColor: colors.fieldLine,
-  },
+  rightCol: { paddingHorizontal: 14, paddingVertical: 12, gap: 9 },
+  rightColSide: { width: 240, borderLeftWidth: 1, borderLeftColor: colors.fieldLine },     // desktop: side column
+  rightColBottom: { width: '100%', borderTopWidth: 1, borderTopColor: colors.fieldLine },  // mobile: below info
   hostHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   // The PNG carries its own background and rounded corners — we just size the slot. NO container
   // background here (would bleed through the PNG's transparent margins).
