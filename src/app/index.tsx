@@ -132,7 +132,18 @@ export default function Home() {
           : lm.kind === 'district' || lm.kind === 'city' || lm.kind === 'region'
             ? lm.label
             : lm.city || query.location; // landmark / geography / lifestyle → the canonical city
-    const q = { ...query, location: displayLoc, locationMatch: lm.kind === 'none' ? undefined : lm };
+    // Carry resolved districts so the engine narrows WITHIN the city (the fetch is city-scoped via
+    // lm.city). A DISTRICT pick → exactly that district (not its nearby ones). An AREA/landmark/geography
+    // → the district set that phrase means ("North Riyadh" → its districts, "near KAFD" → KAFD's). A
+    // city/region pick sets NO districts (the whole city is intended). (filter location contract.)
+    let districts: string[] | undefined;
+    if (lm.kind === 'district') {
+      districts = lm.label ? [lm.label] : undefined;
+    } else if (lm.kind === 'area' || lm.kind === 'landmark' || lm.kind === 'geography' || lm.kind === 'lifestyle') {
+      const clean = lm.districts.filter(Boolean);
+      if (clean.length) districts = clean;
+    }
+    const q = { ...query, location: displayLoc, locationMatch: lm.kind === 'none' ? undefined : lm, districts };
     RNAnimated.timing(heroAnim, {
       toValue: 1,
       duration: 300,
@@ -289,11 +300,11 @@ export default function Home() {
               </View>
             ) : null}
             <View style={s.topRight}>
-              {docked && (
-                <RNAnimated.View style={reveal(badgeAnim, 10)}>
-                  <AgentBadge onPress={() => router.push('/agent')} t={t} isRTL={isRTL} />
-                </RNAnimated.View>
-              )}
+              {/* The "Ezhalah AI Agent" badge now shows on MOBILE too (not just docked/desktop) so the
+                  AI agent is visible everywhere — parity with the website. (user request 2026-06-22.) */}
+              <RNAnimated.View style={reveal(badgeAnim, 10)}>
+                <AgentBadge onPress={() => router.push('/agent')} t={t} isRTL={isRTL} />
+              </RNAnimated.View>
               <Pressable style={s.shareBtn} hitSlop={8} onPress={onShare}>
                 <Ionicons name="share-social-outline" size={21} color={colors.ink} />
               </Pressable>

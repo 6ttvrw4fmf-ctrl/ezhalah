@@ -280,7 +280,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
             </Pressable>
           </>
         ) : (
-          <>
+          // Guest sidebar — wrapped in a ScrollView so it SCROLLS when the content is taller than a
+          // short phone screen (it had a fixed flex layout that clipped on mobile). flexGrow:1 keeps
+          // the sign-up CTA pinned to the bottom on tall screens. (user request 2026-06-22.)
+          <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
             <View style={s.brandRow}>
               <RNImage source={require('../../assets/images/eagle-mark.png')} style={s.logo} resizeMode="contain" />
               <Text ref={noTranslateRef} style={s.word}>{t('EZHALAH')}</Text>
@@ -304,7 +307,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                 <Text style={s.ctaSub}>{t('Get more. Sign up free.')}</Text>
               </View>
             </Pressable>
-          </>
+          </ScrollView>
         )}
     </>
   );
