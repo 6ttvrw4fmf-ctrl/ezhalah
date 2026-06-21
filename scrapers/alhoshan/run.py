@@ -55,6 +55,7 @@ TYPE_MAP = {
     "office": "Office", "shop": "Shop", "showroom": "Showroom", "warehouse": "Warehouse",
     "land_commercial": "Commercial Land", "commercial_building": "Commercial Building",
     "workshop": "Workshop", "hotel": "Hotel", "station": "Gas Station", "factory": "Factory",
+    "mixed_building": "Commercial Building", "commercial": "Commercial Building",
 }
 COMMERCIAL_TYPES = {
     "Office", "Shop", "Showroom", "Warehouse", "Commercial Land", "Commercial Building",
@@ -148,19 +149,28 @@ def fetch_page(s: cc.Session, page: int) -> tuple[list[dict], dict]:
     return [], {}
 
 
-_EXTRA = [("yearBuilt", "Year built"), ("direction", "Facade"),
-          ("floors", "Floors"), ("parkingSpaces", "Number of Parkings")]
-
-
-def _additional_info(specs: dict) -> list[dict[str, Any]]:
-    rows = []
-    for key, label in _EXTRA:
-        v = specs.get(key)
-        if v not in (None, "", 0, "0", []):
-            rows.append({"key": key, "label": label, "value": str(v)})
+def _additional_info(p: dict, specs: dict) -> list[dict[str, Any]]:
+    """The card's detailed-specs panel — mirrors Al Hoshan's own 'المواصفات التفصيلية' extras
+    (the ones not already shown as card fields: floor, building age, parking, facade, features,
+    ad-license)."""
+    from datetime import datetime
+    rows: list[dict[str, Any]] = []
+    # Building AGE (years) — Al Hoshan shows عمر البناء as an age, not the raw build year.
+    yb = specs.get("yearBuilt")
+    if isinstance(yb, (int, float)) and yb > 1900:
+        rows.append({"key": "age", "label": "Building age (years)", "value": str(max(0, datetime.now().year - int(yb)))})
+    if specs.get("direction"):
+        rows.append({"key": "direction", "label": "Facade", "value": str(specs["direction"])})
+    if specs.get("floors") not in (None, "", 0, "0"):
+        rows.append({"key": "floor", "label": "Floor", "value": str(specs["floors"])})
+    if specs.get("parkingSpaces") not in (None, "", 0, "0"):
+        rows.append({"key": "parking", "label": "Number of Parkings", "value": str(specs["parkingSpaces"])})
     feats = specs.get("features")
     if isinstance(feats, list) and feats:
         rows.append({"key": "features", "label": "Features", "value": "، ".join(str(f) for f in feats)})
+    lic = p.get("advertisingLicenseNumber")
+    if lic and not str(lic).startswith("•"):  # skip Al Hoshan's masked (••••) values
+        rows.append({"key": "adlic", "label": "Ad license number", "value": str(lic)})
     return rows
 
 
@@ -211,7 +221,7 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "title": p.get("title"),
         "photo_urls": [photo] if photo else [],
         "rega_location_verified": bool(p.get("advertisingLicenseNumber")),
-        "additional_info": _additional_info(specs),
+        "additional_info": _additional_info(p, specs),
     }
     return row, category
 
