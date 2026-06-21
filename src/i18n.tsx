@@ -544,7 +544,7 @@ const AR: Record<string, string> = {
   'Aldarim Real Estate':              'الدريم العقارية',
   'Aqar Gate':                         'بوابة العقار',
   'Al Hoshan':                         'الحوشان العقارية',
-  'Hajer Houses':                      'بيوت هجر',
+  'Hajer Houses Real Estate':          'بيوت هجر العقارية',
   'Deal':                              'ديل',
   'Additional Information':            'معلومات إضافية',
   'See more':                          'عرض المزيد',

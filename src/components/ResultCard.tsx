@@ -270,7 +270,7 @@ function sourceName(source: string): string {
   if (s.includes('aldarim')) return 'Aldarim Real Estate';
   if (s.includes('aqargate')) return 'Aqar Gate';
   if (s.includes('alhoshan')) return 'Al Hoshan';
-  if (s.includes('hajer')) return 'Hajer Houses';
+  if (s.includes('hajer')) return 'Hajer Houses Real Estate';
   return 'AQAR';
 }
 function sourceHost(source: string): string {
