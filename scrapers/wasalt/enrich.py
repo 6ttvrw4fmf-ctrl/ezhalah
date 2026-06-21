@@ -106,15 +106,20 @@ def fetch_detail(slug: str) -> tuple[bool, list[dict[str, Any]]]:
     return False, []  # retries exhausted → transient; retry on a later run
 
 
-def enrich_table(table: str, limit: int, workers: int) -> dict[str, int]:
+def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1) -> dict[str, int]:
     c = db.sb()
+    q = (c.table(table).select("ad_number,listing_url")
+         .eq("active", True).eq("detail_enriched", False))
+    # Cloud matrix sharding: 10 parallel jobs, each claims a DISJOINT slice by the last digit of
+    # ad_number (WST…N). Server-side, ~even, zero overlap → no duplicate proxy fetches. Only valid
+    # for shards==10 (single trailing digit). shards==1 (local) skips sharding entirely.
+    if shards == 10:
+        q = q.like("ad_number", f"%{shard}")
     # Fair drain: least-recently-attempted first (NULLs = never tried). Prevents new high-id rows
     # from permanently starving older un-enriched rows when daily inflow exceeds the cap.
-    rows = (c.table(table).select("ad_number,listing_url")
-            .eq("active", True).eq("detail_enriched", False)
-            .order("enrich_attempted_at", desc=False, nullsfirst=True)
+    rows = (q.order("enrich_attempted_at", desc=False, nullsfirst=True)
             .limit(limit).execute().data) or []
-    print(f"── {table}: {len(rows)} un-enriched rows to process (cap {limit})")
+    print(f"── {table} shard {shard}/{shards}: {len(rows)} un-enriched rows to process (cap {limit})")
     stats = {"deep": 0, "empty": 0, "fail": 0}
     lock = threading.Lock()
 
@@ -160,8 +165,10 @@ def main() -> int:
                     choices=["wasalt_residential_listings", "wasalt_commercial_listings"])
     ap.add_argument("--limit", type=int, default=800, help="Max rows to enrich this run (bounds proxy bandwidth).")
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--shard", type=int, default=0, help="This job's shard index (0..shards-1).")
+    ap.add_argument("--shards", type=int, default=1, help="Total shards (10 = cloud matrix by ad_number last digit).")
     args = ap.parse_args()
-    enrich_table(args.table, args.limit, args.workers)
+    enrich_table(args.table, args.limit, args.workers, args.shard, args.shards)
     return 0
 
 

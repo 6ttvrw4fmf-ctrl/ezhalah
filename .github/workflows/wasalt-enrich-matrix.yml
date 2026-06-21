@@ -1,0 +1,57 @@
+# Wasalt enrich MATRIX — one-time (or on-demand) FAST backfill of the deep REGA detail panel
+# (Plan/Land number, Street, Ad source, Facade, utilities…) across the whole catalog.
+#
+# Why a matrix: the deep fields only exist on each listing's individual detail page (~87 KB on the
+# wire, brotli). One IP gets rate-limited by Wasalt at ~800/hr. This fans the work across 10 parallel
+# jobs, each claiming a DISJOINT slice (ad_number last digit) and routing through the rotating Saudi
+# residential proxy — so 10× the effective IPs, ~10× the throughput, ~4 GB total one-time bandwidth.
+#
+# Manual trigger only (workflow_dispatch). The daily wasalt-enrich.yml handles the small trickle of
+# new listings after this clears the backlog.
+
+name: Wasalt enrich matrix
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max rows per shard (8000 drains a ~5k shard fully)"
+        default: "8000"
+      workers:
+        description: "Concurrent workers per shard"
+        default: "6"
+
+concurrency:
+  group: wasalt-enrich-matrix
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Enrich shard ${{ matrix.shard }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          SCRAPE_MIN_INTERVAL: "0.2"
+        run: |
+          python -m scrapers.wasalt.enrich \
+            --table wasalt_residential_listings \
+            --shard ${{ matrix.shard }} --shards 10 \
+            --limit ${{ github.event.inputs.limit || '8000' }} \
+            --workers ${{ github.event.inputs.workers || '6' }}

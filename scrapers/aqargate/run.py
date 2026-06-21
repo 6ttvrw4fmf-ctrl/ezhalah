@@ -104,23 +104,40 @@ def _text(v: Any) -> Optional[str]:
     return v if isinstance(v, str) else None
 
 
-_EXTRA = [
-    ("propertyAge", "Age"), ("propertyFace", "Facade"), ("planNumber", "Plan number"),
-    ("landNumber", "Land number"), ("streetWidth", "Street width"),
-]
+def _val(v: Any) -> Optional[str]:
+    """Clean a scalar into a display string, or None if empty/placeholder."""
+    if v in (None, "", 0, "0", []):
+        return None
+    s = str(v).strip()
+    return s or None
 
 
 def _additional_info(ar: dict) -> list[dict[str, Any]]:
-    rows = []
+    """Card 'Additional Information' panel — ONLY the fields we show for the other sources
+    (mirrors the Wasalt set: usage / age / facade / ad source / plan & land number / street /
+    services / obligations / license date). NEVER include the advertiser or responsible-person
+    name or phone number — that is personal data (PDPL)."""
+    rows: list[dict[str, Any]] = []
+
+    def add(key: str, label: str, value: Optional[str]) -> None:
+        if value:
+            rows.append({"key": key, "label": label, "value": value})
+
     usages = ar.get("propertyUsages")
-    if isinstance(usages, list) and usages:
-        rows.append({"key": "usage", "label": "Property usage", "value": ", ".join(str(u) for u in usages)})
-    elif usages:
-        rows.append({"key": "usage", "label": "Property usage", "value": str(usages)})
-    for key, label in _EXTRA:
-        v = ar.get(key)
-        if v not in (None, "", 0, "0"):
-            rows.append({"key": key, "label": label, "value": str(v)})
+    usage = (", ".join(str(u) for u in usages) if isinstance(usages, list) and usages
+             else _val(usages) or _val(ar.get("mainLandUseTypeName")))
+    add("usage", "Property usage", usage)
+    add("propertyAge", "Age", _val(ar.get("propertyAge")))
+    add("propertyFace", "Facade", _val(ar.get("propertyFace")))
+    add("adSource", "Ad source", _val(ar.get("adSource")))
+    add("planNumber", "Plan number", _val(ar.get("planNumber")))
+    add("landNumber", "Land number", _val(ar.get("landNumber")))
+    add("streetWidth", "Street width", _val(ar.get("streetWidth")))
+    utils = ar.get("propertyUtilities")
+    if isinstance(utils, list) and utils:
+        add("services", "Property services", "، ".join(str(u) for u in utils))
+    add("obligations", "Other obligations on the property", _val(ar.get("obligationsOnTheProperty")))
+    add("regaAdvLicDate", "License Issuance Date", _val(ar.get("creationDate")))
     return rows
 
 
