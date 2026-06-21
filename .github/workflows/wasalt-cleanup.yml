@@ -1,0 +1,39 @@
+# Wasalt cleanup — weekly hard-delete of rows inactive for >30 days. Same script as Aqar,
+# parameterised by table. No proxy needed (DB-only operation).
+
+name: Wasalt cleanup
+
+on:
+  schedule:
+    - cron: "30 2 * * 0"   # Sunday 02:30 UTC (offset from Aqar cleanup at 02:00)
+  workflow_dispatch: {}
+
+concurrency:
+  group: wasalt-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Cleanup ${{ matrix.table }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        table:
+          - wasalt_residential_listings
+          - wasalt_commercial_listings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Run cleanup (${{ matrix.table }})
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m scrapers.aqar.cleanup --table ${{ matrix.table }}

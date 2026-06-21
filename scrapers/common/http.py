@@ -58,17 +58,30 @@ def session() -> cc.Session:
                 "Cache-Control": "no-cache",
             }
         )
+        # When the URL we're about to fetch is wasalt.sa, route through the Saudi residential proxy
+        # so the cloud workflows don't get blocked. Liveness uses this `get(url)` helper for every
+        # check, so without this the cloud liveness for wasalt_*_listings would see every page as
+        # "dead" and wrongly mark live listings inactive. Aqar URLs ignore the proxy (no env var).
         _local.session = s
     return s
 
 
 def get(url: str, *, max_retries: int = 3, timeout: int = 25) -> Optional[cc.Response]:
-    """Polite, retry-on-soft-fail GET. Returns the Response on 2xx, None on permanent failure."""
+    """Polite, retry-on-soft-fail GET. Returns the Response on 2xx, None on permanent failure.
+    Routes wasalt.sa requests through WASALT_PROXY_URL when set (cloud liveness needs this)."""
     s = session()
+    # Per-request proxy: wasalt.sa from cloud needs the Saudi residential proxy or every page
+    # comes back as "blocked" and liveness would wrongly strike every Wasalt listing. Aqar URLs
+    # pass proxies=None and use the cloud IP directly.
+    proxies = None
+    if "wasalt.sa" in url or "wasalt.com" in url:
+        purl = os.environ.get("WASALT_PROXY_URL", "").strip()
+        if purl:
+            proxies = {"http": purl, "https": purl}
     for attempt in range(max_retries):
         _throttle(url)
         try:
-            r = s.get(url, timeout=timeout, allow_redirects=True)
+            r = s.get(url, timeout=timeout, allow_redirects=True, proxies=proxies)
         except Exception:
             time.sleep(2 * (attempt + 1))
             continue
