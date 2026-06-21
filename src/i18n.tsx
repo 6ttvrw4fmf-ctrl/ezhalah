@@ -538,8 +538,8 @@ const AR: Record<string, string> = {
   'Hosted on {name}':                  'مستضاف على {name}',
   // Source BRAND names — must localize in Arabic too (rule: Arabic UI = everything Arabic except
   // numbers/domains). The card translates the source name through t() before display, so an Arabic
-  // card reads "مستضاف على وصلت" not "Hosted on Wasalt". Applies to every source.
-  'AQAR':                              'عقار',
+  // card reads "مستضاف على وصلت" not "Hosted on Wasalt". Applies to every source. ('AQAR' is already
+  // defined above.)
   'Wasalt':                            'وصلت',
   'Aldarim Real Estate':              'الدريم العقارية',
   'Bayut':                             'بيوت',
