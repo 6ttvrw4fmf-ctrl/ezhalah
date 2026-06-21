@@ -73,6 +73,21 @@ def upsert_wasalt_residential(row: dict[str, Any]) -> None:
     sb().table("wasalt_residential_listings").upsert(row, on_conflict="ad_number").execute()
 
 
+def upsert_wasalt_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Upsert a WHOLE PAGE of Wasalt rows in one request — ~32× fewer round-trips than row-by-row,
+    the single biggest speedup for the Wasalt scrape. Dedups by ad_number within the batch first
+    (PostgREST rejects an upsert whose payload repeats the conflict key)."""
+    if not rows:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    seen: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        r = dict(r)
+        r["last_seen_at"] = now
+        seen[r["ad_number"]] = r  # last one wins on a dup id
+    sb().table("wasalt_residential_listings").upsert(list(seen.values()), on_conflict="ad_number").execute()
+
+
 def end_run(run_id: int, *, ok: bool, rows_seen: int, rows_upserted: int, notes: Optional[str] = None) -> None:
     sb().table("scrape_runs").update(
         {
