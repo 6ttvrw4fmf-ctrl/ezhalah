@@ -536,6 +536,14 @@ const AR: Record<string, string> = {
   // Source-aware variants — the brand name varies (AQAR/Wasalt), so the localized string carries
   // the {name} / {host} placeholder. The English value is the FALLBACK if a key is missing.
   'Hosted on {name}':                  'مستضاف على {name}',
+  // Source BRAND names — must localize in Arabic too (rule: Arabic UI = everything Arabic except
+  // numbers/domains). The card translates the source name through t() before display, so an Arabic
+  // card reads "مستضاف على وصلت" not "Hosted on Wasalt". Applies to every source.
+  'AQAR':                              'عقار',
+  'Wasalt':                            'وصلت',
+  'Aldarim Real Estate':              'الدريم العقارية',
+  'Bayut':                             'بيوت',
+  'Property Finder':                   'بروبرتي فايندر',
   'Additional Information':            'معلومات إضافية',
   'See more':                          'عرض المزيد',
   'See less':                          'عرض أقل',

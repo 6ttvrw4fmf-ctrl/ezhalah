@@ -133,7 +133,7 @@ export function ResultCard({
             Source attribution still appears in the bottom strip and in the right-side panel. */}
         {listing.source_url ? (
           <View style={card.sourceStrip} pointerEvents="none">
-            <Text style={card.sourceText} numberOfLines={1}>{sourceName(listing.source).toUpperCase()} · {sourceHost(listing.source)}</Text>
+            <Text style={card.sourceText} numberOfLines={1}>{t(sourceName(listing.source)).toUpperCase()} · {sourceHost(listing.source)}</Text>
             <Ionicons name="open-outline" size={11} color="#fff" />
           </View>
         ) : null}
@@ -174,7 +174,7 @@ export function ResultCard({
         <View style={card.hostHead}>
           <SourceBadge source={listing.source} />
           <View style={{ flex: 1 }}>
-            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: sourceName(listing.source) })}</Text>
+            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
             <Text style={card.hostHint} numberOfLines={2}>
               {t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })}
             </Text>
