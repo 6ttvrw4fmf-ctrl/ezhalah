@@ -248,8 +248,14 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
     halls_or_majlis = _i(_attr(prop, "noOfLivingRooms") or _attr(prop, "livingRooms") or _attr(prop, "noOfHalls"))
     sale_price = info.get("salePrice") or info.get("conversionPrice")
     rent_price = info.get("expectedRent")
+    # Property photos are served by Cloudflare Images, keyed by listing id + image filename. The
+    # bare cdn.wasalt.sa/<uuid> guess 404s — the real path is imagedelivery.net/<acct>/production/
+    # properties/<id>/images/<uuid>.jpg/<transform>. (verified against the live <img src>.)
     imgs = (prop.get("propertyFiles") or {}).get("images") or []
-    photo_urls = [f"https://cdn.wasalt.sa/{i}" for i in imgs[:30] if isinstance(i, str)]
+    photo_urls = [
+        f"https://imagedelivery.net/1DNKFJPRaeUdy_j8F7HT3w/production/properties/{pid}/images/{i}/width=800,quality=70,format=auto"
+        for i in imgs[:30] if isinstance(i, str)
+    ]
 
     # Aqar-parity rich fields (user request: same feature row + features grid as Aqar). Wasalt
     # exposes them on prop.attributes (key/value), propertyInfo.*, and prop.featureAmenities.
