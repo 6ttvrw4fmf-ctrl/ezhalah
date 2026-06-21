@@ -43,8 +43,6 @@ KEEP_KEYS = {
 }
 
 _local = threading.local()
-_last_lock = threading.Lock()
-_last = [0.0]
 
 
 def _session() -> cc.Session:
@@ -60,11 +58,14 @@ def _session() -> cc.Session:
 
 
 def _throttle() -> None:
-    with _last_lock:
-        wait = _last[0] + MIN_INTERVAL - time.monotonic()
-        if wait > 0:
-            time.sleep(wait)
-        _last[0] = time.monotonic()
+    # PER-THREAD throttle: each worker paces itself, so N workers give ~N×(1/MIN_INTERVAL) req/s.
+    # (A global lock here would serialize all workers down to a single 1/MIN_INTERVAL stream — the
+    # bug that made the first backfill crawl.)
+    last = getattr(_local, "last", 0.0)
+    wait = last + MIN_INTERVAL - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+    _local.last = time.monotonic()
 
 
 def _slug(url: str | None) -> str | None:
