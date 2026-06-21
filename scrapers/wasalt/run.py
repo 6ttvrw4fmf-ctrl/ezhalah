@@ -184,6 +184,8 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> int:
     count, total_pages, _ = fetch_page(s, deal, cat, slug, 1)
     pages = min(max_pages, total_pages or max_pages)
     print(f"\n── WASALT {slug.upper():<16} {deal.upper():<4} {cat.upper():<11} count={count} pages≤{pages}")
+    is_commercial = cat == "commercial"
+    upserter = db.upsert_wasalt_commercial_batch if is_commercial else db.upsert_wasalt_residential_batch
     upserted = 0
     for page in range(1, pages + 1):
         _, _, props = fetch_page(s, deal, cat, slug, page)
@@ -194,13 +196,10 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> int:
             row = map_property(prop, deal)
             if not row or not row.get("property_type"):
                 continue
-            main_type = (prop.get("propertyInfo") or {}).get("propertyMainType") or ("Commercial" if cat == "commercial" else "Residential")
-            if main_type == "Commercial":
-                continue  # commercial Wasalt is a later milestone (its own table)
             batch.append(row)
         if batch:
             try:
-                db.upsert_wasalt_residential_batch(batch)  # one round-trip per page, not per row
+                upserter(batch)  # one round-trip per page
                 upserted += len(batch)
             except Exception as e:
                 print(f"   ✗ batch upsert failed (page {page}): {str(e)[:90]}")
