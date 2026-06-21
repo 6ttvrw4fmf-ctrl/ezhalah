@@ -250,16 +250,14 @@ const WASALT_LOGO = require('../../assets/images/wasalt-logo.png');
 const ALDARIM_LOGO = require('../../assets/images/aldarim.jpg');
 const AQARGATE_LOGO = require('../../assets/images/aqargate-logo.jpg');
 const ALHOSHAN_LOGO = require('../../assets/images/alhoshan.jpg');
+const HAJER_LOGO = require('../../assets/images/hajer-logo.jpg');
 function SourceBadge({ source }: { source: string }) {
   const s = source.toLowerCase();
   if (s.includes('wasalt')) return <Image source={WASALT_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('aldarim')) return <Image source={ALDARIM_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('aqargate')) return <Image source={AQARGATE_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alhoshan')) return <Image source={ALHOSHAN_LOGO} style={card.hostBadge} contentFit="contain" />;
-  // Hajer Houses — no logo file yet; branded fallback badge (swap for the real logo when supplied).
-  if (s.includes('hajer')) return (
-    <View style={[card.hostBadge, card.hajerBadge]}><Ionicons name="business" size={22} color="#fff" /></View>
-  );
+  if (s.includes('hajer')) return <Image source={HAJER_LOGO} style={card.hostBadge} contentFit="contain" />;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
