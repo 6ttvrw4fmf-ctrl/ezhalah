@@ -216,8 +216,22 @@ def main() -> int:
             db.upsert_aldarim_residential_batch(res_rows)
         if com_rows:
             db.upsert_aldarim_commercial_batch(com_rows)
-        print(f"✓ Aldarim: {len(res_rows)} residential + {len(com_rows)} commercial upserted")
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res_rows) + len(com_rows), notes="")
+        # FULL-REFRESH liveness: we just fetched the COMPLETE available inventory, so any Aldarim
+        # row NOT seen this run is gone (sold/rented/removed) → mark it inactive. This makes the daily
+        # sync self-cleaning, so we never show a stale listing. (Replaces a separate liveness job.)
+        pruned = 0
+        if not args.pages or pages >= last_page:  # only prune on a FULL crawl, never a partial run
+            c = db.sb()
+            seen_res = [r["ad_number"] for r in res_rows]
+            seen_com = [r["ad_number"] for r in com_rows]
+            for tbl, seen_ads in (("aldarim_residential_listings", seen_res), ("aldarim_commercial_listings", seen_com)):
+                rows = (c.table(tbl).select("ad_number").eq("source", "Aldarim").eq("active", True).execute().data) or []
+                gone = [r["ad_number"] for r in rows if r["ad_number"] not in set(seen_ads)]
+                for i in range(0, len(gone), 200):
+                    c.table(tbl).update({"active": False}).in_("ad_number", gone[i:i + 200]).execute()
+                pruned += len(gone)
+        print(f"✓ Aldarim: {len(res_rows)} residential + {len(com_rows)} commercial upserted, {pruned} stale pruned")
+        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res_rows) + len(com_rows), notes=f"pruned={pruned}")
         return 0
     except Exception as e:
         if run_id:
