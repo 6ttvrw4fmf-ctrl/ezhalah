@@ -251,6 +251,7 @@ const ALDARIM_LOGO = require('../../assets/images/aldarim.jpg');
 const AQARGATE_LOGO = require('../../assets/images/aqargate-logo.jpg');
 const ALHOSHAN_LOGO = require('../../assets/images/alhoshan.jpg');
 const HAJER_LOGO = require('../../assets/images/hajer-logo.jpg');
+const SANADAK_LOGO = require('../../assets/images/sanadak-logo.jpg');
 function SourceBadge({ source }: { source: string }) {
   const s = source.toLowerCase();
   if (s.includes('wasalt')) return <Image source={WASALT_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -258,10 +259,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('aqargate')) return <Image source={AQARGATE_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alhoshan')) return <Image source={ALHOSHAN_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('hajer')) return <Image source={HAJER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  // Sanadak — no logo file yet; branded fallback badge (swap for the real logo when supplied).
-  if (s.includes('sanadak')) return (
-    <View style={[card.hostBadge, card.sanadakBadge]}><Ionicons name="document-text" size={20} color="#fff" /></View>
-  );
+  if (s.includes('sanadak')) return <Image source={SANADAK_LOGO} style={card.hostBadge} contentFit="contain" />;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 

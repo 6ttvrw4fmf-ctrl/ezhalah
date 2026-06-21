@@ -31,7 +31,9 @@ import json
 import os
 import re
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
 
@@ -46,7 +48,7 @@ from scrapers.common import db, normalize
 BASE = "https://sanadak.sa"
 SITEMAP = f"{BASE}/sitemap.xml"
 CDN = "dp57m2l5m3m9o.cloudfront.net"
-MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.35"))
+WORKERS = int(os.environ.get("SANADAK_WORKERS", "10"))  # concurrent RSC fetches — 1,164 pages × ~261KB
 
 TYPE_MAP = {
     "Apartment": "Apartment", "Villa": "Villa", "Floor": "Floor", "Building": "Building",
@@ -89,19 +91,34 @@ CITY_TO_REGION = {
     "Al Baha": "Al Bahah", "Arar": "Northern Borders", "Sakaka": "Al Jawf",
 }
 
-_last = 0.0
+_local = threading.local()
 
 
-def _throttle() -> None:
-    global _last
-    wait = _last + MIN_INTERVAL - time.monotonic()
-    if wait > 0:
-        time.sleep(wait)
-    _last = time.monotonic()
+def _session() -> cc.Session:
+    s = getattr(_local, "s", None)
+    if s is None:
+        s = cc.Session(impersonate="chrome124")
+        _local.s = s
+    return s
 
 
 def session() -> cc.Session:
     return cc.Session(impersonate="chrome124")
+
+
+def fetch_one(url: str) -> Optional[tuple[dict, str, str]]:
+    """Fetch + parse one listing. Returns (obj, body, url) or None. Thread-safe (thread-local session)."""
+    s = _session()
+    for attempt in range(3):
+        try:
+            body = s.get(url, timeout=30, headers={"RSC": "1"}).text
+        except Exception:
+            time.sleep(1.5 * (attempt + 1)); continue
+        o = _extract_obj(body)
+        if o:
+            return o, body, url
+        return None
+    return None
 
 
 def _int(v: Any) -> Optional[int]:
@@ -216,32 +233,33 @@ def main() -> int:
 
     s = session()
     urls = sitemap_urls(s)
-    print(f"Sanadak: {len(urls)} listings from sitemap")
+    if args.limit_test:
+        urls = urls[:max(args.limit_test * 2, 12)]
+    print(f"Sanadak: {len(urls)} listings from sitemap ({WORKERS} workers)")
     run_id = None if args.limit_test else db.begin_run("sanadak")
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
     try:
-        for idx, u in enumerate(urls):
-            if args.limit_test and seen >= args.limit_test:
-                break
-            _throttle()
-            try:
-                body = s.get(u, timeout=30, headers={"RSC": "1"}).text
-            except Exception:
-                continue
-            o = _extract_obj(body)
-            if not o:
-                continue
-            row, cat = map_listing(o, body, u)
-            if not row:
-                continue
-            if args.type != "all" and cat != args.type:
-                continue
-            (com if cat == "commercial" else res).append(row)
-            seen += 1
-            if not args.limit_test and seen % 200 == 0:
-                print(f"  …{seen}/{len(urls)}", flush=True)
+        # Concurrent RSC fetches (workers), but map+collect on the main thread (in-order, no lock).
+        done = 0
+        with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+            for result in ex.map(fetch_one, urls):
+                done += 1
+                if done % 200 == 0 and not args.limit_test:
+                    print(f"  …{done}/{len(urls)}", flush=True)
+                if not result:
+                    continue
+                o, body, u = result
+                row, cat = map_listing(o, body, u)
+                if not row:
+                    continue
+                if args.type != "all" and cat != args.type:
+                    continue
+                (com if cat == "commercial" else res).append(row)
+                seen += 1
+                if args.limit_test and seen >= args.limit_test:
+                    break
 
         if args.limit_test:
             print(f"DRY RUN — {len(res)} residential + {len(com)} commercial")
