@@ -8,7 +8,7 @@
 #
 # HOW TO RUN: Actions tab → "Aqar deep fill" → Run workflow. Blank city = ALL (sharded).
 
-name: Aqar deep fill
+name: Aqar residential deep fill
 
 on:
   workflow_dispatch:

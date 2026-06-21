@@ -7,7 +7,7 @@
 #
 # Manual trigger: Actions tab → "Aqar sweep" → Run workflow.
 
-name: Aqar sweep
+name: Aqar residential sweep
 
 on:
   schedule:
