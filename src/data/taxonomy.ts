@@ -1,4 +1,4 @@
-// Property taxonomy. Mirrors Aqar/Bayut structure. (PRD §5.2)
+// Property taxonomy. Mirrors Aqar structure. (PRD §5.2)
 
 export type Deal = 'Rent' | 'Buy';
 export const DEALS: Deal[] = ['Rent', 'Buy'];

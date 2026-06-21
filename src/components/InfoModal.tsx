@@ -86,7 +86,7 @@ function AboutBody({ t }: { t: (s: string) => string }) {
     <>
       <Text style={s.h}>{t('About Us')}</Text>
       <Text style={s.intro}>
-        {t('Ezhalah is a Saudi, AI-powered property search platform. We help people find properties faster by searching Aqar, Bayut, Property Finder, Wasalt and Aldarim in one place, and help those platforms reach more users by driving traffic directly to their listings.')}
+        {t('Ezhalah is a Saudi, AI-powered property search platform. We help people find properties faster by searching Aqar, Wasalt, Aldarim and more in one place, and help those platforms reach more users by driving traffic directly to their listings.')}
       </Text>
       <Text style={s.sec}>{t('Our role')}</Text>
       <Text style={s.tx}>{t('We are a property search platform only. We do not own, list, sell or rent any property. We do not facilitate transactions or collect commission.')}</Text>

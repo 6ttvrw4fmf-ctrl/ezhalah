@@ -26,7 +26,7 @@ export default function About() {
         <View style={s.col}>
           <Text style={s.h}>{t('About Us')}</Text>
           <Text style={s.intro}>
-            {t('Ezhalah is a Saudi, AI-powered property search platform. We help people find properties faster by searching Aqar, Bayut, Property Finder, Wasalt and Aldarim in one place, and help those platforms reach more users by driving traffic directly to their listings.')}
+            {t('Ezhalah is a Saudi, AI-powered property search platform. We help people find properties faster by searching Aqar, Wasalt, Aldarim and more in one place, and help those platforms reach more users by driving traffic directly to their listings.')}
           </Text>
 
           <Text style={s.sec}>{t('Our role')}</Text>

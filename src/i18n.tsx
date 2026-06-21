@@ -102,7 +102,7 @@ const AR: Record<string, string> = {
   'Looking for a property and want to see all available listings in one place? Ezhalah.': 'تدور على عقار وتبي تشوف كل المعروض في مكان واحد؟ إزهله',
   'Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.': 'إزهله منصة متخصصة للبحث في منصات العقار الإلكترونية بالمملكة باستخدام الذكاء الاصطناعي',
   'Ezhalah, and may your luck be good.': 'إزهله وفالك طيب.',
-  "Type anything. I'll search Aqar, Bayut, Property Finder and more in seconds.": 'اكتب أي شيء. سأبحث في منصات عقار وبيوت وبروبرتي فايندر والمزيد في ثواني.',
+  "Type anything. I'll search Aqar, Wasalt, Aldarim and more in seconds.": 'اكتب أي شيء. سأبحث في منصات عقار ووصلت والدريم والمزيد في ثواني.',
   "Tell me what you want and I'll find it": 'أخبرني بما تريد وسأجده لك',
   'Pick your details, leave it on us': 'اختر تفاصيلك واترك الباقي علينا',
   'Which city or neighborhood?': 'أي مدينة أو حي؟',
@@ -542,8 +542,7 @@ const AR: Record<string, string> = {
   // defined above.)
   'Wasalt':                            'وصلت',
   'Aldarim Real Estate':              'الدريم العقارية',
-  'Bayut':                             'بيوت',
-  'Property Finder':                   'بروبرتي فايندر',
+  'Deal':                              'ديل',
   'Additional Information':            'معلومات إضافية',
   'See more':                          'عرض المزيد',
   'See less':                          'عرض أقل',
@@ -592,7 +591,7 @@ const AR: Record<string, string> = {
     'هذا الإعلان مقدَّم من {source}. لا تملك إزهله هذا الإعلان ولا تتحقق منه — تأكد من كل التفاصيل مباشرة مع المصدر قبل أي قرار.',
 
   // Auth
-  'Aqar, Bayut, Property Finder and more — all in one search.': 'منصات عقار وبيوت وبروبرتي فايندر والمزيد — في بحث واحد.',
+  'Aqar, Wasalt, Aldarim and more — all in one search.': 'منصات عقار ووصلت والدريم والمزيد — في بحث واحد.',
   // Auth hero — new title + subtitle (user-supplied Arabic; English mirrors it without naming
   // platforms, per the platform-confidentiality rule). The title carries the brand "Ezhalah".
   'Looking for a property? Ezhalah.': 'تدور على عقار؟ إزهله.',
@@ -736,8 +735,8 @@ const AR: Record<string, string> = {
     'ملاحظة: لتغيير حساب {provider}، عليك حذف هذا الحساب وإنشاء حساب جديد بالحساب الآخر.',
 
   // About Us
-  'Ezhalah is a Saudi, AI-powered property search platform. We help people find properties faster by searching Aqar, Bayut, Property Finder, Wasalt and Aldarim in one place, and help those platforms reach more users by driving traffic directly to their listings.':
-    'إزهله منصة سعودية للبحث العقاري مدعومة بالذكاء الاصطناعي. نساعد الناس على إيجاد العقارات بشكل أسرع بالبحث في منصات عقار وبيوت وبروبرتي فايندر ووصلت والدارم في مكان واحد، ونساعد تلك المنصات على الوصول إلى مزيد من المستخدمين بتوجيه الزيارات مباشرة إلى إعلاناتها.',
+  'Ezhalah is a Saudi, AI-powered property search platform. We help people find properties faster by searching Aqar, Wasalt, Aldarim and more in one place, and help those platforms reach more users by driving traffic directly to their listings.':
+    'إزهله منصة سعودية للبحث العقاري مدعومة بالذكاء الاصطناعي. نساعد الناس على إيجاد العقارات بشكل أسرع بالبحث في منصات عقار ووصلت والدريم في مكان واحد، ونساعد تلك المنصات على الوصول إلى مزيد من المستخدمين بتوجيه الزيارات مباشرة إلى إعلاناتها.',
   'Our role': 'دورنا',
   'We are a property search platform only. We do not own, list, sell or rent any property. We do not facilitate transactions or collect commission.':
     'نحن منصة بحث عقاري فقط. لا نملك أو ندرج أو نبيع أو نؤجّر أي عقار. ولا نسهّل أي معاملة ولا نأخذ أي عمولة.',

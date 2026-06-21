@@ -1,6 +1,8 @@
 import type { Deal } from './taxonomy';
 
 // Source listing platforms. (PRD §8.1) allowsRent/allowsBuy gate which deals a source can appear in.
+// PRODUCT RULE: Ezhalah aggregates SAUDI-OWNED platforms only — we don't carry foreign companies
+// operating in the Saudi market (Bayut/EMPG, Property Finder/UAE were removed for this reason).
 export type Platform = {
   name: string;
   domain: string;
@@ -12,10 +14,9 @@ export type Platform = {
 
 export const PLATFORMS: Platform[] = [
   { name: 'Aqar', domain: 'sa.aqar.fm', brand: 'عقار · Aqar', phone: '+966 5X XXX 1180', allowsRent: true, allowsBuy: true },
-  { name: 'Bayut', domain: 'www.bayut.sa', brand: 'bayut', phone: '+966 5X XXX 2204', allowsRent: true, allowsBuy: true },
-  { name: 'Property Finder', domain: 'www.propertyfinder.sa', brand: 'Property Finder', phone: '+966 5X XXX 5540', allowsRent: true, allowsBuy: true },
   { name: 'Wasalt', domain: 'wasalt.sa', brand: 'Wasalt', phone: '+966 5X XXX 3360', allowsRent: true, allowsBuy: true },
-  { name: 'Aldarim', domain: 'aldarim.sa', brand: 'Aldarim', phone: '+966 5X XXX 4471', allowsRent: true, allowsBuy: true },
+  { name: 'Aldarim', domain: 'aldarim.sa', brand: 'Aldarim Real Estate', phone: '+966 5X XXX 4471', allowsRent: true, allowsBuy: true },
+  { name: 'Deal', domain: 'dealapp.sa', brand: 'Deal', phone: '+966 5X XXX 7700', allowsRent: true, allowsBuy: true },
 ];
 
 const BY_NAME: Record<string, Platform> = Object.fromEntries(PLATFORMS.map((p) => [p.name, p]));

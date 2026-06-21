@@ -33,8 +33,6 @@ export const colors = {
 // Per-platform brand colors. Keys match Platform.name. (PRD §8.1)
 export const platformColors: Record<string, string> = {
   Aqar: '#1f7a3d',
-  Bayut: '#16a35a',
-  'Property Finder': '#ef5350',
   Wasalt: '#0f7b6c',
   Aldarim: '#8a5a2b',
 };

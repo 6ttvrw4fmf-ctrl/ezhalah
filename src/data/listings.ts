@@ -78,10 +78,10 @@ export const POOLS = {
   villa: pool(
     [
       ['Villa', 'Rent', 'Riyadh', 'North Riyadh', 'SAR 95,000/year', 250, 5, 'Aqar'],
-      ['Villa', 'Rent', 'Riyadh', 'Al Malqa', 'SAR 120,000/year', 320, 6, 'Bayut'],
-      ['Villa', 'Buy', 'Riyadh', 'Hittin', 'SAR 2.9M', 400, 6, 'Bayut'],
+      ['Villa', 'Rent', 'Riyadh', 'Al Malqa', 'SAR 120,000/year', 320, 6, 'Wasalt'],
+      ['Villa', 'Buy', 'Riyadh', 'Hittin', 'SAR 2.9M', 400, 6, 'Wasalt'],
       ['Villa', 'Rent', 'Riyadh', 'Al Narjis', 'SAR 85,000/year', 280, 5, 'Aqar'],
-      ['Villa', 'Buy', 'Riyadh', 'Al Yasmin', 'SAR 3.4M', 450, 7, 'Property Finder'],
+      ['Villa', 'Buy', 'Riyadh', 'Al Yasmin', 'SAR 3.4M', 450, 7, 'Aldarim'],
     ],
     ['Prince Mohammed bin Saeed Road', 'King Fahd Road', 'Prince Turki Al Awwal Road', 'King Salman Road', 'Anas Ibn Malik Road'],
     ['https://images.unsplash.com/photo-1568605114967-8130f3a36994', 'https://images.unsplash.com/photo-1570129477492-45c003edd2be', 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750', 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6', 'https://images.unsplash.com/photo-1613490493576-7fde63acd811'],
@@ -89,9 +89,9 @@ export const POOLS = {
   ),
   apartment: pool(
     [
-      ['Apartment', 'Rent', 'Riyadh', 'Al Narjis', 'SAR 42,000/year', 140, 3, 'Bayut'],
+      ['Apartment', 'Rent', 'Riyadh', 'Al Narjis', 'SAR 42,000/year', 140, 3, 'Wasalt'],
       ['Apartment', 'Rent', 'Riyadh', 'Al Narjis', 'SAR 36,000/year', 120, 2, 'Aqar'],
-      ['Apartment', 'Buy', 'Riyadh', 'Al Narjis', 'SAR 850,000', 160, 3, 'Bayut'],
+      ['Apartment', 'Buy', 'Riyadh', 'Al Narjis', 'SAR 850,000', 160, 3, 'Wasalt'],
       ['Apartment', 'Rent', 'Riyadh', 'Al Narjis', 'SAR 48,000/year', 150, 3, 'Aqar'],
       ['Apartment', 'Buy', 'Riyadh', 'Al Narjis', 'SAR 1,100,000', 175, 4, 'Aldarim'],
     ],
@@ -102,9 +102,9 @@ export const POOLS = {
   land: pool(
     [
       ['Commercial Land', 'Buy', 'Jeddah', 'Al Hamra', 'SAR 920,000', 600, 0, 'Aqar'],
-      ['Commercial Land', 'Buy', 'Jeddah', 'Al Rawdah', 'SAR 780,000', 500, 0, 'Bayut'],
-      ['Commercial Land', 'Buy', 'Jeddah', 'Al Shati', 'SAR 990,000', 720, 0, 'Bayut'],
-      ['Commercial Land', 'Buy', 'Jeddah', 'Al Salamah', 'SAR 640,000', 420, 0, 'Property Finder'],
+      ['Commercial Land', 'Buy', 'Jeddah', 'Al Rawdah', 'SAR 780,000', 500, 0, 'Wasalt'],
+      ['Commercial Land', 'Buy', 'Jeddah', 'Al Shati', 'SAR 990,000', 720, 0, 'Wasalt'],
+      ['Commercial Land', 'Buy', 'Jeddah', 'Al Salamah', 'SAR 640,000', 420, 0, 'Aldarim'],
       ['Commercial Land', 'Buy', 'Jeddah', 'Al Naeem', 'SAR 870,000', 560, 0, 'Wasalt'],
     ],
     ['Prince Sultan Road', 'Malik Road', 'Corniche Road', 'Al Madinah Road', 'King Abdullah Road'],
@@ -114,7 +114,7 @@ export const POOLS = {
   budget: pool(
     [
       ['Apartment', 'Buy', 'Riyadh', 'Al Suwaidi', 'SAR 480,000', 110, 3, 'Aqar'],
-      ['Apartment', 'Buy', 'Riyadh', 'Al Olaya', 'SAR 520,000', 70, 1, 'Bayut'],
+      ['Apartment', 'Buy', 'Riyadh', 'Al Olaya', 'SAR 520,000', 70, 1, 'Wasalt'],
       ['Apartment', 'Buy', 'Riyadh', 'Al Aziziyah', 'SAR 450,000', 120, 3, 'Aqar'],
       ['House', 'Buy', 'Riyadh', 'Al Shifa', 'SAR 510,000', 130, 3, 'Aqar'],
       ['Apartment', 'Buy', 'Riyadh', 'Al Dar Al Baida', 'SAR 495,000', 115, 3, 'Aldarim'],
@@ -125,10 +125,10 @@ export const POOLS = {
   ),
   mixRent: pool(
     [
-      ['Villa', 'Rent', 'Riyadh', 'Al Malqa', 'SAR 120,000/year', 320, 6, 'Bayut'],
+      ['Villa', 'Rent', 'Riyadh', 'Al Malqa', 'SAR 120,000/year', 320, 6, 'Wasalt'],
       ['Apartment', 'Rent', 'Jeddah', 'Al Shati', 'SAR 55,000/year', 150, 3, 'Aqar'],
-      ['Chalet', 'Rent', 'Riyadh', 'Al Narjis', 'SAR 70,000/year', 200, 4, 'Property Finder'],
-      ['Apartment', 'Rent', 'Khobar', 'Al Olaya', 'SAR 48,000/year', 130, 2, 'Property Finder'],
+      ['Chalet', 'Rent', 'Riyadh', 'Al Narjis', 'SAR 70,000/year', 200, 4, 'Aldarim'],
+      ['Apartment', 'Rent', 'Khobar', 'Al Olaya', 'SAR 48,000/year', 130, 2, 'Aldarim'],
       ['Villa', 'Rent', 'Riyadh', 'Hittin', 'SAR 140,000/year', 380, 6, 'Wasalt'],
     ],
     ['King Fahd Road', 'Corniche Road', 'King Salman Road', 'Prince Faisal Bin Fahd Road', 'Prince Turki Al Awwal Road'],
@@ -137,10 +137,10 @@ export const POOLS = {
   ),
   mixBuy: pool(
     [
-      ['Villa', 'Buy', 'Riyadh', 'Hittin', 'SAR 2.9M', 400, 6, 'Bayut'],
-      ['Apartment', 'Buy', 'Jeddah', 'Al Hamra', 'SAR 1,250,000', 175, 4, 'Bayut'],
+      ['Villa', 'Buy', 'Riyadh', 'Hittin', 'SAR 2.9M', 400, 6, 'Wasalt'],
+      ['Apartment', 'Buy', 'Jeddah', 'Al Hamra', 'SAR 1,250,000', 175, 4, 'Wasalt'],
       ['Commercial Land', 'Buy', 'Riyadh', 'Al Yasmin', 'SAR 1,400,000', 500, 0, 'Aqar'],
-      ['House', 'Buy', 'Khobar', 'Al Aqrabiyah', 'SAR 980,000', 210, 4, 'Property Finder'],
+      ['House', 'Buy', 'Khobar', 'Al Aqrabiyah', 'SAR 980,000', 210, 4, 'Aldarim'],
       ['Villa', 'Buy', 'Riyadh', 'Al Yasmin', 'SAR 3.4M', 450, 7, 'Wasalt'],
     ],
     ['Prince Turki Al Awwal Road', 'Al Madinah Road', 'Anas Ibn Malik Road', 'King Abdullah Road', 'King Fahd Road'],
@@ -153,8 +153,8 @@ export const POOLS = {
   room: pool(
     [
       ['Room', 'Rent', 'Riyadh', 'Al Narjis', 'SAR 18,000/year', 24, 1, 'Aqar'],
-      ['Room', 'Rent', 'Riyadh', 'Al Malqa', 'SAR 24,000/year', 28, 1, 'Bayut'],
-      ['Room', 'Rent', 'Jeddah', 'Al Salamah', 'SAR 14,000/year', 20, 1, 'Property Finder'],
+      ['Room', 'Rent', 'Riyadh', 'Al Malqa', 'SAR 24,000/year', 28, 1, 'Wasalt'],
+      ['Room', 'Rent', 'Jeddah', 'Al Salamah', 'SAR 14,000/year', 20, 1, 'Aldarim'],
       ['Room', 'Rent', 'Khobar', 'Al Olaya', 'SAR 16,000/year', 22, 1, 'Wasalt'],
       ['Room', 'Rent', 'Riyadh', 'Al Sahafah', 'SAR 12,000/year', 16, 1, 'Aldarim'],
     ],
