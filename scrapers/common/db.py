@@ -65,6 +65,14 @@ def upsert_aqar_commercial(row: dict[str, Any]) -> None:
     sb().table("aqar_commercial_listings").upsert(row, on_conflict="ad_number").execute()
 
 
+def upsert_wasalt_residential(row: dict[str, Any]) -> None:
+    """Upsert one Wasalt residential row into its OWN table (separate source), keyed on `ad_number`
+    (Wasalt ids are namespaced 'WST<id>' so they never collide with Aqar)."""
+    row = dict(row)
+    row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
+    sb().table("wasalt_residential_listings").upsert(row, on_conflict="ad_number").execute()
+
+
 def end_run(run_id: int, *, ok: bool, rows_seen: int, rows_upserted: int, notes: Optional[str] = None) -> None:
     sb().table("scrape_runs").update(
         {
