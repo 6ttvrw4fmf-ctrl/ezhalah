@@ -111,7 +111,10 @@ def main() -> int:
         db.end_run(run_id, ok=ok, rows_seen=total_seen, rows_upserted=total_upserted, notes=notes)
 
     print(f"\n📊 Done. {total_upserted}/{total_seen} upserted across all slices. (run_id={run_id})")
-    return 0 if total_upserted else 1
+    # Exit 0 when the run COMPLETED cleanly, even if it upserted nothing — a small town with zero
+    # commercial inventory is a valid result, not a failure. Only a real crash (ok=False) → exit 1.
+    # (was `0 if total_upserted else 1`, which falsely marked empty-town shards as "failure".)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
