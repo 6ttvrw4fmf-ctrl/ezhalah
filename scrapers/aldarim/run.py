@@ -127,19 +127,27 @@ def _photos(L: dict) -> list[str]:
     return out[:30]
 
 
-# additional_info: the rich Aldarim-only extras, as label/value rows (like Wasalt's panel).
+# additional_info: the rich Aldarim extras, as label/value rows (the card's "Additional Information"
+# panel). NO rega_ad_number — user doesn't want it. Street widths + usage ARE wanted.
 _EXTRA_FIELDS = [
-    ("year_built", "Age"), ("facade", "Facade"), ("rega_ad_number", "REGA Ad No."),
+    ("year_built", "Age"), ("facade", "Facade"),
     ("plan_number", "Plan number"), ("plot_number", "Land number"),
     ("number_of_floors", "Total Floors"), ("unit_floor_number", "Floor"),
     ("majlis_rooms", "Majlis"), ("living_rooms", "Living rooms"),
     ("maid_rooms", "Maid room"), ("driver_rooms", "Driver room"),
-    ("parking_spots", "Parking"), ("street_width", "Street width"),
+    ("parking_spots", "Parking spots"),
+    ("street_width", "Street width"), ("street_width_east", "Street width (E)"),
+    ("street_width_west", "Street width (W)"), ("street_width_north", "Street width (N)"),
+    ("street_width_south", "Street width (S)"),
 ]
 
 
 def _additional_info(L: dict) -> list[dict[str, Any]]:
     rows = []
+    # Usage (Residential/Commercial) — shown on aldarim.sa, wanted on our card.
+    usage = (L.get("category") or "").title()
+    if usage:
+        rows.append({"key": "usage", "label": "Property usage", "value": usage})
     for key, label in _EXTRA_FIELDS:
         v = L.get(key)
         if v not in (None, "", 0, "0", False):
@@ -186,6 +194,18 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "property_age": str(L.get("year_built")) if L.get("year_built") else None,
         "rega_location_verified": bool(L.get("rega_ad_number")),
         "additional_info": _additional_info(L),
+        # Feature-grid booleans the card renders with icons — mapped from Aldarim's flags/counts so the
+        # card shows real features (Electricity/Water/Sewage/AC/parking…) instead of "No features".
+        "electricity":      bool(L.get("has_electricity")),
+        "water_supply":     bool(L.get("has_water")),
+        "sanitation":       bool(L.get("has_sewage")),
+        "air_conditioner":  bool(L.get("is_ac_installed")),
+        "kitchen":          bool(L.get("is_kitchen_installed")) or _int(L.get("kitchens")) is not None,
+        "parking":          (_int(L.get("parking_spots")) or 0) > 0,
+        "elevator":         (_int(L.get("elevators")) or 0) > 0,
+        "maid_room":        (_int(L.get("maid_rooms")) or 0) > 0,
+        "driver_room":      (_int(L.get("driver_rooms")) or 0) > 0,
+        "balcony_terrace":  (_int(L.get("balconies")) or 0) > 0,
         # (no detail_enriched — that's a Wasalt-only enrichment flag; Aldarim's API is already complete.)
     }
     return row, category

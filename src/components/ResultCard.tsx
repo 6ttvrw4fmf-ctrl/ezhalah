@@ -247,18 +247,11 @@ function AdditionalInformationPanel({ listing, t }: { listing: Listing; t: (k: s
 // (user request: replace Aqar with Wasalt cleanly, both rendered identical shape.)
 const AQAR_LOGO = require('../../assets/images/aqar-logo.png');
 const WASALT_LOGO = require('../../assets/images/wasalt-logo.png');
+const ALDARIM_LOGO = require('../../assets/images/aldarim.jpg');
 function SourceBadge({ source }: { source: string }) {
   const s = source.toLowerCase();
   if (s.includes('wasalt')) return <Image source={WASALT_LOGO} style={card.hostBadge} contentFit="contain" />;
-  // Aldarim has no logo file yet — clean branded fallback (a navy square + building mark). Swap for
-  // the real logo when the user supplies it (same as Aqar/Wasalt PNGs).
-  if (s.includes('aldarim')) {
-    return (
-      <View style={[card.hostBadge, card.aldarimBadge]}>
-        <Ionicons name="business" size={22} color="#fff" />
-      </View>
-    );
-  }
+  if (s.includes('aldarim')) return <Image source={ALDARIM_LOGO} style={card.hostBadge} contentFit="contain" />;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
