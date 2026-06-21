@@ -52,6 +52,22 @@ TYPE_MAP = {
 # A few types we treat as commercial-land when category is commercial.
 _LAND_TYPES = {"land"}
 
+# Aldarim's city name_en → our canonical label (so a "Mecca" search matches Aldarim's
+# "Makkah Al Mukarramah", etc.). REQUIRED or the few non-Riyadh listings are unfindable.
+CITY_MAP = {
+    "Makkah Al Mukarramah": "Mecca", "Makkah": "Mecca",
+    "Al Madinah Al Munawwarah": "Medina", "Al Madinah": "Medina",
+    "Ad Dir'iyah": "Diriyah", "Ad Diriyah": "Diriyah",
+    "Al 'ammariyah": "Al Ammariyah", "Al Khobar": "Khobar", "Aldammam": "Dammam",
+}
+
+
+def _city(v) -> str:
+    raw = _name(v)
+    if not raw:
+        return "Other"
+    return CITY_MAP.get(raw, raw)
+
 _last = 0.0
 
 
@@ -163,7 +179,7 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "price_total": _int(L.get("selling_price")) if not is_rent else None,
         "price_annual": _int(rent_price) if is_rent else None,
         "rent_period": "annual" if is_rent else None,
-        "city": _name(L.get("city")) or "Other",
+        "city": _city(L.get("city")),
         "neighborhood": (_name(L.get("district")) or "").replace(" Dist.", "").strip() or None,
         "title": L.get("name_en") or L.get("name_ar"),
         "photo_urls": _photos(L),
