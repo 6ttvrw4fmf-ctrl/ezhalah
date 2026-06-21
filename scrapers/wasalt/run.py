@@ -40,6 +40,13 @@ NEXT_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)<
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.4"))
 PAGE_SIZE = 32
 
+# Detail-page fetch is EXPENSIVE: one extra ~400KB HTML request PER listing. Through the Saudi
+# residential PROXY (cloud sweeps) that would burn the metered proxy bandwidth fast, so it's OFF by
+# default. Run LOCALLY (user's own Saudi IP, free bandwidth) with WASALT_FETCH_DETAIL=1 to backfill
+# the deep "Additional Information" fields (street / ad source / plan number / land number). Without
+# it, the card still shows the base panel built from the FREE search-list data. (cost guard.)
+FETCH_DETAIL = os.environ.get("WASALT_FETCH_DETAIL", "").strip().lower() not in ("", "0", "false", "no")
+
 # Wasalt's property-type slugs per category (the search's propertyTypeData). Each listing still
 # carries its REAL subtype in propertyInfo.propertySubType — these just drive query coverage.
 SLUGS = {
@@ -158,6 +165,7 @@ def _fetch_additional_attributes(s: cc.Session, slug: str) -> list[dict[str, Any
     label/value rows that populate the on-site 'Additional Information' panel."""
     if slug in _DETAIL_CACHE:
         return _DETAIL_CACHE[slug]
+    _throttle()  # detail fetches count toward the same politeness budget as search pages
     try:
         r = s.get(f"{BASE}/en/property/{slug}", timeout=25)
         if r.status_code != 200:
@@ -188,6 +196,22 @@ def _fetch_additional_attributes(s: cc.Session, slug: str) -> list[dict[str, Any
     except Exception:
         _DETAIL_CACHE[slug] = []
         return []
+
+
+def _base_additional_info(prop: dict, info: dict) -> list[dict[str, Any]]:
+    """Build the 'Additional Information' panel from the FREE search-list data (no detail fetch).
+    Covers the fields Wasalt exposes on the list page: Property usage, Age, Furniture, Facade. The
+    deeper fields (Street / Ad source / Plan / Land number) only exist on the detail page and are
+    added by _fetch_additional_attributes when WASALT_FETCH_DETAIL is enabled."""
+    out: list[dict[str, Any]] = []
+    def add(key, label, value):
+        if value not in (None, "", "None"):
+            out.append({"key": key, "label": label, "value": str(value)})
+    add("propertyMainType", "Property usage", info.get("possessionType") or info.get("propertyMainType"))
+    add("completionYear", "Age", _attr(prop, "completionYear"))
+    add("furnishingType", "Furniture", info.get("furnishingType"))
+    add("propertyFacade", "Facade", info.get("facingType") or _attr(prop, "facing"))
+    return out
 
 
 def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optional[dict[str, Any]]:
@@ -274,10 +298,15 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
         "title": info.get("title"),
         "photo_urls": photo_urls,
         "rega_location_verified": bool(prop.get("isRegaProp")),
-        # Wasalt-specific "Additional Information" panel rows (Property usage / Age / Facade / Street /
-        # Ad source / Plan number / Land number / etc). Lives on the detail page, fetched only when
-        # we have a session — set to [] if not available. The card renders this only for Wasalt rows.
-        "additional_info": (_fetch_additional_attributes(s, slug) if s is not None else []),
+        # "Additional Information" panel. Base rows (Property usage / Age / Furniture / Facade) come
+        # FREE from the search-list data. The deep rows (Street / Ad source / Plan / Land number)
+        # need the detail page, fetched ONLY when WASALT_FETCH_DETAIL=1 (local, free-bandwidth runs)
+        # — never on cloud sweeps, to protect the metered proxy. Detail rows win when present.
+        "additional_info": (
+            (_fetch_additional_attributes(s, slug) or _base_additional_info(prop, info))
+            if (FETCH_DETAIL and s is not None)
+            else _base_additional_info(prop, info)
+        ),
         # Feature-grid booleans the card already renders. Wasalt amenities map roughly:
         "parking":          has("parking", "garage"),
         "elevator":         has("elevator", "lift"),
