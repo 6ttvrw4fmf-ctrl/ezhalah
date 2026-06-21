@@ -703,6 +703,19 @@ function diversifyByRegion(listings: Listing[]): Listing[] {
   return interleave(Object.values(byRegion));
 }
 
+// Round-robin the (already-ranked) matches across their SOURCE platform (Aqar / Wasalt / …) so the
+// results visibly MIX both sources instead of one sweeping the top. This is REQUIRED because all
+// source tables share ONE id sequence with DISJOINT ranges (Aqar 1–431k, Wasalt 431k+), and the
+// closeness tiebreak is `+ l.id` — so without this every higher-id Wasalt row outranks every Aqar
+// row and the first screen is 100% one source. Closeness order is preserved WITHIN each source.
+// (user: "make it a mixture between Aqar and Wasalt — I don't see Aqar anymore".)
+function diversifyBySource(listings: Listing[]): Listing[] {
+  const bySource: Record<string, Listing[]> = {};
+  for (const l of listings) (bySource[l.source || 'Other'] ||= []).push(l);
+  const groups = Object.values(bySource);
+  return groups.length > 1 ? interleave(groups) : listings;
+}
+
 export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean }): SearchResult {
   let eligible = pickPool(q, pools)
     // bothDeals (agent searched without knowing rent/buy) → show BOTH; otherwise filter to the deal.
@@ -755,10 +768,18 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
   } else {
     const cap = budgetCap(q);
     listings = [...listings].sort((a, b) => closenessScore(b, q, cap) - closenessScore(a, q, cap));
-    // Country-wide "Saudi" search → rotate the closeness-sorted matches through the 13 regions so the
-    // visible cards span the Kingdom instead of all coming from Riyadh/Jeddah. Closeness order is
-    // preserved WITHIN each region; only an explicit objective sort (above) overrides this. (user.)
-    if (isCountryWideQuery(q)) listings = diversifyByRegion(listings);
+    if (isCountryWideQuery(q)) {
+      // Country-wide "Saudi" search → spread across the 13 regions AND mix sources. Group by region
+      // (each sublist keeps closeness order), source-interleave WITHIN each region, then rotate
+      // regions. So the visible cards span the Kingdom and mix Aqar + Wasalt. (user.)
+      const byRegion: Record<string, Listing[]> = {};
+      for (const l of listings) (byRegion[CITY_TO_REGION[l.city] || 'Other'] ||= []).push(l);
+      listings = interleave(Object.values(byRegion).map(diversifyBySource));
+    } else {
+      // City/area search → mix the two sources so neither dominates the top. Without this, Wasalt's
+      // higher id range sweeps the closeness id-tiebreak and the user "doesn't see Aqar anymore".
+      listings = diversifyBySource(listings);
+    }
   }
 
   // Return up to 25 matches (display cap): the chat shows the first `count` the user explicitly
