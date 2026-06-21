@@ -134,10 +134,10 @@ function tableFor(q: SearchQuery): string {
 // platform. (user request: mix all sources.)
 function tablesFor(q: SearchQuery): string[] {
   if (q.type && LAND_TYPES.has(q.type))
-    return ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings', 'aqargate_residential_listings', 'alhoshan_residential_listings', 'hajer_residential_listings'];
+    return ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings', 'aqargate_residential_listings', 'alhoshan_residential_listings', 'hajer_residential_listings', 'sanadak_residential_listings'];
   return isCommercialQuery(q)
-    ? ['aqar_commercial_listings', 'wasalt_commercial_listings', 'aldarim_commercial_listings', 'aqargate_commercial_listings', 'alhoshan_commercial_listings', 'hajer_commercial_listings']
-    : ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings', 'aqargate_residential_listings', 'alhoshan_residential_listings', 'hajer_residential_listings'];
+    ? ['aqar_commercial_listings', 'wasalt_commercial_listings', 'aldarim_commercial_listings', 'aqargate_commercial_listings', 'alhoshan_commercial_listings', 'hajer_commercial_listings', 'sanadak_commercial_listings']
+    : ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings', 'aqargate_residential_listings', 'alhoshan_residential_listings', 'hajer_residential_listings', 'sanadak_residential_listings'];
 }
 
 // Round-robin interleave so cards alternate between Aqar and Wasalt instead of front-loading one.
@@ -247,6 +247,7 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
     'aqargate_residential_listings', 'aqargate_commercial_listings',
     'alhoshan_residential_listings', 'alhoshan_commercial_listings',
     'hajer_residential_listings', 'hajer_commercial_listings',
+    'sanadak_residential_listings', 'sanadak_commercial_listings',
   ]) {
     const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).limit(1);
     if (error || !data || !data.length) continue;

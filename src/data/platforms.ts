@@ -19,6 +19,7 @@ export const PLATFORMS: Platform[] = [
   { name: 'Aqargate', domain: 'aqargate.com', brand: 'Aqar Gate', phone: '+966 5X XXX 6620', allowsRent: true, allowsBuy: true },
   { name: 'Alhoshan', domain: 'alhoshan.sa', brand: 'Al Hoshan', phone: '+966 5X XXX 8840', allowsRent: true, allowsBuy: true },
   { name: 'Hajer', domain: 'hajerhouses.com', brand: 'Hajer Houses Real Estate', phone: '+966 5X XXX 9910', allowsRent: true, allowsBuy: true },
+  { name: 'Sanadak', domain: 'sanadak.sa', brand: 'Sanadak', phone: '+966 5X XXX 1200', allowsRent: true, allowsBuy: true },
   { name: 'Deal', domain: 'dealapp.sa', brand: 'Deal', phone: '+966 5X XXX 7700', allowsRent: true, allowsBuy: true },
 ];
 
