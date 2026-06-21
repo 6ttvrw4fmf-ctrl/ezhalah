@@ -128,13 +128,32 @@ function tableFor(q: SearchQuery): string {
   return isCommercialQuery(q) ? 'aqar_commercial_listings' : 'aqar_residential_listings';
 }
 
+// Multi-source: which Aqar+Wasalt tables to read for this query. Land types live only in Aqar
+// residential (Wasalt's land is in its own residential table, we include it too). Residential
+// queries hit both residential tables; commercial queries hit both commercial tables. Each card
+// renders its own SourceBadge so users see whether it's from Aqar or Wasalt. (user request: mix.)
+function tablesFor(q: SearchQuery): string[] {
+  if (q.type && LAND_TYPES.has(q.type)) return ['aqar_residential_listings', 'wasalt_residential_listings'];
+  return isCommercialQuery(q)
+    ? ['aqar_commercial_listings', 'wasalt_commercial_listings']
+    : ['aqar_residential_listings', 'wasalt_residential_listings'];
+}
+
+// Round-robin interleave so cards alternate between Aqar and Wasalt instead of front-loading one.
+function interleaveSources<T>(lists: T[][]): T[] {
+  const out: T[] = [];
+  const max = Math.max(0, ...lists.map((l) => l.length));
+  for (let i = 0; i < max; i++) for (const l of lists) if (i < l.length) out.push(l[i]);
+  return out;
+}
+
 const QUERY_LIMIT = 1500; // newest N matching rows — plenty for the 25-card display + load-more
 
 // Apply the kept NON-location filters (deal, type, rent period) to a fresh query on the right table.
 // Location scoping is added by the caller (city / region / country-wide). Keeps every branch identical
 // on the strict-contract fields. (filter contract.)
-function keptFiltersReq(q: SearchQuery) {
-  let req = supabase!.from(tableFor(q)).select(LIST_SELECT).eq('active', true);
+function keptFiltersReq(q: SearchQuery, table?: string) {
+  let req = supabase!.from(table ?? tableFor(q)).select(LIST_SELECT).eq('active', true);
   if (!q.bothDeals) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
   const types = dbTypesFor(q);
   if (types && types.length) req = req.in('property_type', types);
@@ -165,12 +184,15 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   // apply to every per-region query; bedrooms/price/size stay client-side as always. (user request.)
   if (!city && isCountryWideQuery(q)) {
     const regionKeys = Object.keys(REGIONS);
-    const perRegion = Math.ceil(QUERY_LIMIT / regionKeys.length);
+    const tables = tablesFor(q);
+    // Quota split across (region × source) so all 13 regions × both sources are represented in
+    // the pool, and at display time interleave puts an Aqar then a Wasalt then an Aqar… (user.)
+    const perBucket = Math.ceil(QUERY_LIMIT / (regionKeys.length * tables.length));
     const lists = await Promise.all(
-      regionKeys.map(async (rk) => {
-        const { data } = await keptFiltersReq(q).in('city', REGIONS[rk]).order('id', { ascending: false }).limit(perRegion);
+      regionKeys.flatMap((rk) => tables.map(async (tbl) => {
+        const { data } = await keptFiltersReq(q, tbl).in('city', REGIONS[rk]).order('id', { ascending: false }).limit(perBucket);
         return data ? finalize(data) : [];
-      }),
+      })),
     );
     const rows = interleave(lists);
     cacheListings(rows);
@@ -185,15 +207,27 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
     return [];
   }
 
-  // City-scoped path. Bedrooms is filtered CLIENT-side (runSearch), NOT here — same as price/size —
-  // so a 0-match search can still see other counts exist for the "want me to drop the bedroom count?"
-  // relaxation. Newest-first is cheap on the filtered, indexed set.
-  let req = keptFiltersReq(q);
-  if (city) req = req.eq('city', city);
-  req = req.order('id', { ascending: false }).limit(QUERY_LIMIT);
-  const { data, error } = await req;
-  if (error || !data) return null;
-  const rows = finalize(data);
+  // City-scoped path — query BOTH the Aqar table AND the Wasalt table in parallel, then interleave
+  // so cards alternate sources (Aqar, Wasalt, Aqar, Wasalt…). Bedrooms is filtered CLIENT-side
+  // (runSearch), NOT here — same as price/size — so a 0-match search can still see other counts
+  // exist for the "drop the bedroom count?" relaxation. (user: mix both sources in results.)
+  const tables = tablesFor(q);
+  const perTable = Math.ceil(QUERY_LIMIT / tables.length);
+  const lists = await Promise.all(tables.map(async (tbl) => {
+    let req = keptFiltersReq(q, tbl);
+    if (city) req = req.eq('city', city);
+    req = req.order('id', { ascending: false }).limit(perTable);
+    const { data } = await req;
+    return data ? finalize(data) : [];
+  }));
+  // If BOTH queries errored (no data anywhere) return null so the UI shows the retry message,
+  // not an empty-result message. Otherwise interleave whatever each side returned.
+  if (lists.every((l) => l.length === 0)) {
+    // Distinguish "real empty" from "all errored" — re-query one table to confirm.
+    const probe = await keptFiltersReq(q, tables[0]).limit(1);
+    if (probe.error) return null;
+  }
+  const rows = interleaveSources(lists);
   cacheListings(rows);
   return rows;
 }
@@ -203,9 +237,12 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
   const hit = LISTING_CACHE.get(id);
   if (hit) return hit;
   if (!supabase) return null;
-  // Both tables share one id sequence, so an id is unique across both. Try residential first
-  // (far larger), then commercial — so a deep-link to a commercial listing still resolves.
-  for (const table of ['aqar_residential_listings', 'aqar_commercial_listings']) {
+  // All four tables share one id sequence, so an id is unique across them. Try residential first
+  // (far larger), then commercial; try Aqar before Wasalt only because Aqar is bigger.
+  for (const table of [
+    'aqar_residential_listings', 'aqar_commercial_listings',
+    'wasalt_residential_listings', 'wasalt_commercial_listings',
+  ]) {
     const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).limit(1);
     if (error || !data || !data.length) continue;
     const [row] = finalize(data);
