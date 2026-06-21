@@ -35,6 +35,9 @@ export type Listing = {
   project_name?: string | null;
   driver_room?: boolean;
   rega_location_verified?: boolean;
+  // Wasalt-only "Additional Information" panel — label/value pairs rendered on the card.
+  // Aqar rows leave this null and skip the panel. (user: rich Wasalt facts on the card.)
+  additional_info?: { key: string; label: string; value: string }[] | null;
   photos?: string[];
   rent_now_pay_later?: boolean;
   rent_now_pay_later_monthly?: number | null;

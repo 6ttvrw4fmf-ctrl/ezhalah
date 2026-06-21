@@ -536,6 +536,9 @@ const AR: Record<string, string> = {
   // Source-aware variants — the brand name varies (AQAR/Wasalt), so the localized string carries
   // the {name} / {host} placeholder. The English value is the FALLBACK if a key is missing.
   'Hosted on {name}':                  'مستضاف على {name}',
+  'Additional Information':            'معلومات إضافية',
+  'See more':                          'عرض المزيد',
+  'See less':                          'عرض أقل',
   'Clicking this property will take you to {host}': 'الضغط على هذا الإعلان سيأخذك إلى {host}',
   'for Rent':                          'للإيجار',
   'for Sale':                          'للبيع',

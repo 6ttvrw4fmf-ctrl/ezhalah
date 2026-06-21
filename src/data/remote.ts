@@ -271,6 +271,9 @@ const LIST_SELECT = [
   // CRITICAL: source must come from the DB row (rows in wasalt_* tables have source='Wasalt'),
   // not hardcoded — otherwise the card lies about "Hosted on AQAR" while linking to wasalt.sa.
   'source', 'rega_location_verified',
+  // Wasalt's "Additional Information" panel (Property usage / Age / Facade / Street / Ad source /
+  // Plan number / Land number / ...) — jsonb of {key,label,value}[]. Aqar rows leave it NULL.
+  'additional_info',
 ].join(', ');
 
 // Map raw DB rows → in-app `Listing` shape.
@@ -318,6 +321,7 @@ function finalize(rows: any[]): Listing[] {
       project_name: r.project_name ?? null,
       driver_room: !!r.driver_room,
       rega_location_verified: !!r.rega_location_verified,
+      additional_info: Array.isArray(r.additional_info) ? r.additional_info : null,
       photos: Array.isArray(r.photo_urls) ? r.photo_urls : [],
       rent_now_pay_later: !!r.rent_now_pay_later,
       rent_now_pay_later_monthly: r.rent_now_pay_later_monthly ?? null,

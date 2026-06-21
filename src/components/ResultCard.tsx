@@ -200,7 +200,43 @@ export function ResultCard({
             <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={colors.primary} />
           </Pressable>
         ) : null}
+        {/* Wasalt-only "Additional Information" panel — Property usage / Age / Facade / Street /
+            Ad source / Plan number / Land number, etc. Aqar rows have additional_info = null and
+            the panel is hidden (Aqar's card stays exactly as it was). (user request 2026-06.) */}
+        <AdditionalInformationPanel listing={listing} t={t} />
       </View>
+    </View>
+  );
+}
+
+// Render Wasalt's "Additional Information" rows on the card. Shows first 4 rows, with a
+// "See more" toggle that reveals the rest. Hidden entirely for Aqar (and for any Wasalt row
+// where the field hasn't been backfilled yet). Mirrors the on-site Wasalt panel design.
+function AdditionalInformationPanel({ listing, t }: { listing: Listing; t: (k: string, p?: any) => string }) {
+  const rows = listing.additional_info;
+  const [open, setOpen] = useState(false);
+  if (!rows || rows.length === 0) return null;
+  // Defensive cap: even if the scraper later expands the field set, the UI stays tidy.
+  const all = rows.filter((r) => r && r.label && r.value);
+  if (all.length === 0) return null;
+  const visible = open ? all : all.slice(0, 4);
+  return (
+    <View style={card.addlPanel}>
+      <Text style={card.addlTitle}>{t('Additional Information')}</Text>
+      <View style={card.addlGrid}>
+        {visible.map((r) => (
+          <View key={r.key} style={card.addlCell}>
+            <Text style={card.addlLabel}>{r.label}</Text>
+            <Text style={card.addlValue} numberOfLines={2}>{r.value}</Text>
+          </View>
+        ))}
+      </View>
+      {all.length > 4 ? (
+        <Pressable onPress={() => setOpen((x) => !x)} style={card.addlMoreBtn}>
+          <Text style={card.addlMoreText}>{open ? t('See less') : t('See more')}</Text>
+          <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={14} color={colors.primary} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -349,4 +385,22 @@ const card = StyleSheet.create({
     paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.fieldLine,
   },
   moreText: { fontSize: 11.5, fontWeight: '600', color: colors.primary },
+  // Wasalt "Additional Information" panel — sits BELOW the features grid, with a soft separator
+  // line so it reads as its own section. Two-column responsive grid matching the live Wasalt page.
+  addlPanel: {
+    marginTop: 10, paddingTop: 10,
+    borderTopWidth: 1, borderTopColor: colors.fieldLine,
+  },
+  addlTitle: { fontSize: 12.5, fontWeight: '700', color: colors.ink, marginBottom: 6 },
+  addlGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  addlCell: {
+    width: '50%', paddingVertical: 4, paddingRight: 6, gap: 1,
+  },
+  addlLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500' },
+  addlValue: { fontSize: 11.5, color: colors.ink, fontWeight: '600' },
+  addlMoreBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
+    paddingVertical: 6, marginTop: 4,
+  },
+  addlMoreText: { fontSize: 11.5, fontWeight: '600', color: colors.primary },
 });

@@ -146,7 +146,51 @@ def _attr(prop: dict, key: str) -> Any:
     return None
 
 
-def map_property(prop: dict, deal: str) -> Optional[dict[str, Any]]:
+# Wasalt's `additionalAttributes` LIVES ON THE DETAIL PAGE (not the search-list page). Fetching
+# every detail is expensive, so we batch the slug → additional_info during a sweep IF the slug is
+# new. This module-local LRU avoids re-fetching the same slug within one run.
+_DETAIL_CACHE: dict[str, list[dict[str, Any]]] = {}
+
+
+def _fetch_additional_attributes(s: cc.Session, slug: str) -> list[dict[str, Any]]:
+    """Fetch the listing's detail page and return its additionalAttributes list (or [] on failure).
+    Wasalt's detail page __NEXT_DATA__ exposes propertyDetailsV3.additionalAttributes — 20-30
+    label/value rows that populate the on-site 'Additional Information' panel."""
+    if slug in _DETAIL_CACHE:
+        return _DETAIL_CACHE[slug]
+    try:
+        r = s.get(f"{BASE}/en/property/{slug}", timeout=25)
+        if r.status_code != 200:
+            _DETAIL_CACHE[slug] = []
+            return []
+        m = NEXT_RE.search(r.text)
+        if not m:
+            _DETAIL_CACHE[slug] = []
+            return []
+        pdv = (json.loads(m.group(1)).get("props", {}).get("pageProps", {})
+               .get("propertyDetailsV3") or {})
+        raw = pdv.get("additionalAttributes") or []
+        # Keep only rows with a non-empty value the user would care about.
+        keep_keys = {
+            "propertyMainType", "completionYear", "propertyFacade", "street", "adSource",
+            "planNumber", "landNumber", "obligations", "zipCode", "regaAdvLicDate",
+            "additionalNumber", "buildingNumber", "electricityMeter", "waterMeter",
+            "noOfFloors", "floorNumber", "furnishingType", "noOfParkings",
+        }
+        rows = []
+        for a in raw:
+            if not isinstance(a, dict): continue
+            k = a.get("key"); lbl = a.get("label"); v = a.get("value")
+            if k in keep_keys and v not in (None, "", "None"):
+                rows.append({"key": k, "label": lbl, "value": v})
+        _DETAIL_CACHE[slug] = rows
+        return rows
+    except Exception:
+        _DETAIL_CACHE[slug] = []
+        return []
+
+
+def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optional[dict[str, Any]]:
     info = prop.get("propertyInfo") or {}
     pid = prop.get("id")
     slug = info.get("slug")
@@ -230,6 +274,10 @@ def map_property(prop: dict, deal: str) -> Optional[dict[str, Any]]:
         "title": info.get("title"),
         "photo_urls": photo_urls,
         "rega_location_verified": bool(prop.get("isRegaProp")),
+        # Wasalt-specific "Additional Information" panel rows (Property usage / Age / Facade / Street /
+        # Ad source / Plan number / Land number / etc). Lives on the detail page, fetched only when
+        # we have a session — set to [] if not available. The card renders this only for Wasalt rows.
+        "additional_info": (_fetch_additional_attributes(s, slug) if s is not None else []),
         # Feature-grid booleans the card already renders. Wasalt amenities map roughly:
         "parking":          has("parking", "garage"),
         "elevator":         has("elevator", "lift"),
@@ -268,7 +316,9 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> int:
             break
         batch = []
         for prop in props:
-            row = map_property(prop, deal)
+            # Pass the session so map_property can fetch the detail page's additionalAttributes
+            # (only on first sight of the slug — cached after that).
+            row = map_property(prop, deal, s)
             if not row or not row.get("property_type"):
                 continue
             batch.append(row)
