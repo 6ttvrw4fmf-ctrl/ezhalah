@@ -48,7 +48,9 @@ from scrapers.common import db, normalize
 BASE = "https://sanadak.sa"
 SITEMAP = f"{BASE}/sitemap.xml"
 CDN = "dp57m2l5m3m9o.cloudfront.net"
-WORKERS = int(os.environ.get("SANADAK_WORKERS", "10"))  # concurrent RSC fetches — 1,164 pages × ~261KB
+# Each /property-details RSC fetch triggers a server-side re-render (~2s) and Sanadak's origin can't
+# take much concurrency — 10 workers degrade it to ~16s each then timeouts. 4 is the gentle sweet spot.
+WORKERS = int(os.environ.get("SANADAK_WORKERS", "4"))
 
 TYPE_MAP = {
     "Apartment": "Apartment", "Villa": "Villa", "Floor": "Floor", "Building": "Building",
@@ -111,9 +113,9 @@ def fetch_one(url: str) -> Optional[tuple[dict, str, str]]:
     s = _session()
     for attempt in range(3):
         try:
-            body = s.get(url, timeout=30, headers={"RSC": "1"}).text
+            body = s.get(url, timeout=45, headers={"RSC": "1"}).text
         except Exception:
-            time.sleep(1.5 * (attempt + 1)); continue
+            time.sleep(2.0 * (attempt + 1)); continue
         o = _extract_obj(body)
         if o:
             return o, body, url
@@ -241,13 +243,29 @@ def main() -> int:
     com: list[dict] = []
     seen = 0
     try:
-        # Concurrent RSC fetches (workers), but map+collect on the main thread (in-order, no lock).
+        # Concurrent RSC fetches (workers), map+collect on the main thread, and FLUSH incrementally
+        # so cards appear progressively (the site is slow to serve, so a 1-shot end-upsert hides
+        # everything until 100% done). all_res/all_com track what was seen this run for the prune.
         done = 0
+        res_buf: list[dict] = []
+        com_buf: list[dict] = []
+        all_res_ads: set[str] = set()
+        all_com_ads: set[str] = set()
+
+        def flush() -> None:
+            nonlocal res_buf, com_buf
+            if res_buf and not args.limit_test:
+                db.upsert_sanadak_residential_batch(res_buf)
+                all_res_ads.update(r["ad_number"] for r in res_buf)
+                res_buf = []
+            if com_buf and not args.limit_test:
+                db.upsert_sanadak_commercial_batch(com_buf)
+                all_com_ads.update(r["ad_number"] for r in com_buf)
+                com_buf = []
+
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
             for result in ex.map(fetch_one, urls):
                 done += 1
-                if done % 200 == 0 and not args.limit_test:
-                    print(f"  …{done}/{len(urls)}", flush=True)
                 if not result:
                     continue
                 o, body, u = result
@@ -256,10 +274,15 @@ def main() -> int:
                     continue
                 if args.type != "all" and cat != args.type:
                     continue
+                (com_buf if cat == "commercial" else res_buf).append(row)
                 (com if cat == "commercial" else res).append(row)
                 seen += 1
                 if args.limit_test and seen >= args.limit_test:
                     break
+                if len(res_buf) + len(com_buf) >= 100:
+                    flush()
+                    print(f"  …{seen}/{len(urls)} upserted", flush=True)
+        flush()
 
         if args.limit_test:
             print(f"DRY RUN — {len(res)} residential + {len(com)} commercial")
@@ -268,10 +291,7 @@ def main() -> int:
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0][:70])
             return 0
 
-        if res:
-            db.upsert_sanadak_residential_batch(res)
-        if com:
-            db.upsert_sanadak_commercial_batch(com)
+        # (rows already upserted incrementally via flush())
         pruned = 0
         c = db.sb()
         for tbl, rows_seen in (("sanadak_residential_listings", res), ("sanadak_commercial_listings", com)):

@@ -7,7 +7,9 @@ name: Sanadak sync
 
 on:
   schedule:
-    - cron: "50 */4 * * *"   # every 4 hours (offset from the other sources)
+    - cron: "30 3 * * *"   # ONCE DAILY (03:30 UTC) — Sanadak's RSC pages re-render server-side (~2s
+                           # each) and the origin throttles concurrency; 1,164 low-churn listings don't
+                           # need 4h refresh, and daily keeps us a good citizen on a fragile origin.
   workflow_dispatch: {}
 
 concurrency:
