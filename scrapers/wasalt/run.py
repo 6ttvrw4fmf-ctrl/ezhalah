@@ -164,15 +164,47 @@ def map_property(prop: dict, deal: str) -> Optional[dict[str, Any]]:
         area_m2 = int(float(area)) if area not in (None, "", "0") else None
     except (TypeError, ValueError):
         area_m2 = None
-    beds = _attr(prop, "noOfBedrooms")
-    try:
-        bedrooms = int(beds) if beds not in (None, "") else None
-    except (TypeError, ValueError):
-        bedrooms = None
+    def _i(v):
+        try: return int(v) if v not in (None, "") else None
+        except (TypeError, ValueError): return None
+    bedrooms = _i(_attr(prop, "noOfBedrooms"))
+    bathrooms = _i(_attr(prop, "noOfBathrooms"))
+    halls_or_majlis = _i(_attr(prop, "noOfLivingRooms") or _attr(prop, "livingRooms") or _attr(prop, "noOfHalls"))
     sale_price = info.get("salePrice") or info.get("conversionPrice")
     rent_price = info.get("expectedRent")
     imgs = (prop.get("propertyFiles") or {}).get("images") or []
     photo_urls = [f"https://cdn.wasalt.sa/{i}" for i in imgs[:30] if isinstance(i, str)]
+
+    # Aqar-parity rich fields (user request: same feature row + features grid as Aqar). Wasalt
+    # exposes them on prop.attributes (key/value), propertyInfo.*, and prop.featureAmenities.
+    age_raw = _attr(prop, "completionYear")  # "New" or a year-count string
+    property_age = str(age_raw) if age_raw not in (None, "") else None
+
+    # Direction / facade — Wasalt sometimes carries it on streetInfo[].en.facing or attributes.facing.
+    direction = None
+    for si in prop.get("streetInfo") or []:
+        en = (si.get("en") or {}) if isinstance(si, dict) else {}
+        if en.get("facing"):
+            direction = en["facing"]; break
+    if not direction:
+        direction = _attr(prop, "facing") or _attr(prop, "direction")
+
+    street_name = None
+    for si in prop.get("streetInfo") or []:
+        if isinstance(si, dict):
+            street_name = si.get("streetName") or street_name
+    if not street_name:
+        street_name = info.get("streetName")
+
+    # Wasalt's `furnishingType` → matches Aqar's "Furnished/Un-Furnished" tag; "possessionType"
+    # is the property usage (Residential/Commercial). We carry both via residence_type.
+    residence_type = info.get("possessionType") or None
+    project_name = info.get("project") or info.get("managedBy") or None
+
+    # Feature amenities (Wasalt's curated list of nearby amenities — Parking, Mosque, etc.). We map
+    # each into the closest Aqar feature-grid boolean so the card UI lights up the same icons.
+    amenities = [(a or {}).get("name", "").lower() for a in (prop.get("featureAmenities") or []) if isinstance(a, dict)]
+    has = lambda *kws: any(kw in a for a in amenities for kw in kws)
     return {
         "ad_number": f"WST{pid}",
         "listing_url": f"{BASE}/en/property/{slug}",
@@ -182,6 +214,14 @@ def map_property(prop: dict, deal: str) -> Optional[dict[str, Any]]:
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": area_m2,
         "bedrooms": bedrooms,
+        "bathrooms": bathrooms,
+        "halls": halls_or_majlis,
+        "reception_rooms_majlis": halls_or_majlis,  # Wasalt doesn't separate; same number
+        "property_age": property_age,
+        "direction": direction,
+        "street_name": street_name,
+        "residence_type": residence_type,
+        "project_name": project_name,
         "price_annual": int(rent_price) if (is_rent and rent_price) else None,
         "price_total": int(sale_price) if (not is_rent and sale_price) else None,
         "rent_period": "annual" if is_rent else None,
@@ -190,6 +230,20 @@ def map_property(prop: dict, deal: str) -> Optional[dict[str, Any]]:
         "title": info.get("title"),
         "photo_urls": photo_urls,
         "rega_location_verified": bool(prop.get("isRegaProp")),
+        # Feature-grid booleans the card already renders. Wasalt amenities map roughly:
+        "parking":          has("parking", "garage"),
+        "elevator":         has("elevator", "lift"),
+        "kitchen":          has("kitchen"),
+        "maid_room":        has("maid"),
+        "driver_room":      has("driver"),
+        "air_conditioner":  has("air condition", "ac "),
+        "water_supply":     has("water"),
+        "electricity":      has("electric"),
+        "sanitation":       has("sewage", "sanitation", "drainage"),
+        "private_entrance": has("private entrance"),
+        "optical_fibers":   has("fiber", "fibre", "ftth"),
+        "laundry_room":     has("laundry"),
+        "balcony_terrace":  has("balcony", "terrace"),
     }
 
 

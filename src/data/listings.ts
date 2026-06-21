@@ -27,6 +27,14 @@ export type Listing = {
   bathrooms?: number;
   master_bedrooms?: number;
   halls?: number;
+  reception_rooms_majlis?: number;
+  property_age?: string | null;
+  direction?: string | null;
+  street_name?: string | null;
+  residence_type?: string | null;
+  project_name?: string | null;
+  driver_room?: boolean;
+  rega_location_verified?: boolean;
   photos?: string[];
   rent_now_pay_later?: boolean;
   rent_now_pay_later_monthly?: number | null;
