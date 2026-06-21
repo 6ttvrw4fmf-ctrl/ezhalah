@@ -167,6 +167,56 @@ def _extract_obj(body: str, anchor: str = '"advertisementNumber"') -> Optional[d
     return None
 
 
+# The two ad-responsible-person fields are PERSONAL DATA (PDPL) — never store them.
+PDPL_INFO_NAMES = {"مسؤول الاعلان", "رقم مسؤول الاعلان", "اسم المعلن", "جوال المعلن"}
+# Amenity boolean fields → Arabic label (only stored when True/available).
+AMENITY_BOOLS = {
+    "isFurnished": "مفروشة", "isDriverRoomAvailable": "غرفة سائق", "isGardenAvailable": "حديقة",
+    "isGymAvailable": "صالة رياضية", "isSwimmingPoolAvailable": "بركة سباحة",
+    "isElevatorAvailable": "مصعد", "isMaidRoomAvailable": "غرفة خادمة",
+    "isStorageRoomAvailable": "غرفة خزين", "isPrivateParkingAvailable": "موقف خاص",
+}
+_EMPTY_VALS = {None, "", "false", False, "لا", "لا ", "غير متوفر", "0", 0}
+
+
+def _resolve_additional_infos(body: str, o: dict) -> list[dict[str, Any]]:
+    """Resolve Sanadak's `additionalInfos` lazy RSC ref → its full list of {name, value} rows.
+    The flight stream embeds it as `$<id>` → row `<id>:["$..","$.."]` → each ref a {name,value}
+    object. Skip empty/'no' values, the boundaries array, and the PDPL person fields."""
+    ref = o.get("additionalInfos")
+    if not isinstance(ref, str) or not ref.startswith("$"):
+        return []
+    dec = json.JSONDecoder()
+
+    def _row(rid: str):
+        m = re.search(rf'(?:^|\n){re.escape(rid)}:(.+)', body)
+        if not m:
+            return None
+        try:
+            return dec.raw_decode(m.group(1))[0]
+        except Exception:
+            return None
+
+    lst = _row(ref[1:])
+    out: list[dict[str, Any]] = []
+    if isinstance(lst, list):
+        for item in lst:
+            if not (isinstance(item, str) and item.startswith("$")):
+                continue
+            obj = _row(item[1:])
+            if not isinstance(obj, dict):
+                continue
+            name = (obj.get("name") or "").strip()
+            val = obj.get("value")
+            if not name or name in PDPL_INFO_NAMES or isinstance(val, list) or val in _EMPTY_VALS:
+                continue
+            sval = str(val).strip()
+            if not sval or sval.startswith(("[", "{")):  # skip the empty boundaries array
+                continue
+            out.append({"key": name, "label": name, "value": sval})
+    return out
+
+
 def _images(body: str) -> list[str]:
     urls = re.findall(rf"https://{re.escape(CDN)}/[^\s\"\\]+\.(?:jpe?g|png|webp)", body)
     seen, out = set(), []
@@ -195,13 +245,21 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
     region = CITY_TO_REGION.get(city)
     price = _int(o.get("price"))
 
-    extra = []
-    for key, label in (("sellerLicenseNumber", "Ad license number"), ("advertisementNumber", "Ad number"),
-                       ("streetWidth", "Street width"), ("landNumber", "Land number"),
-                       ("documentType", "Deed type"), ("propertyFacingDirection", "Facade")):
+    # Rich data: core extras + the FULL additionalInfos REGA panel (license/plan/services/deed…,
+    # minus PDPL) + available amenities. Capture everything valuable now; standardize/filter later.
+    extra: list[dict[str, Any]] = []
+    for key, label in (("streetWidth", "Street width"), ("propertyFacingDirection", "Facade"),
+                       ("sellerLicenseNumber", "Ad license number")):
         v = o.get(key)
         if v not in (None, "", 0, "0"):
             extra.append({"key": key, "label": label, "value": str(v)})
+    extra.extend(_resolve_additional_infos(body, o))
+    for bkey, blabel in AMENITY_BOOLS.items():
+        if o.get(bkey) is True:
+            extra.append({"key": bkey, "label": blabel, "value": "متوفر"})
+    # de-dup by label (additionalInfos can overlap the core extras)
+    seen_labels: set[str] = set()
+    extra = [r for r in extra if not (r["label"] in seen_labels or seen_labels.add(r["label"]))]
 
     row = {
         "ad_number": f"SN{ad}",
