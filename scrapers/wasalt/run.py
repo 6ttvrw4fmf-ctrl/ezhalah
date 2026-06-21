@@ -222,6 +222,14 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
         return None
     sub = info.get("propertySubType") or ""
     property_type = TYPE_MAP.get(sub, sub or None)
+    # Resolve the "Additional Information" panel ONCE so we can also set the detail_enriched flag.
+    if FETCH_DETAIL and s is not None:
+        deep = _fetch_additional_attributes(s, slug)
+        addl_info = deep or _base_additional_info(prop, info)
+        detail_enriched = bool(deep)  # True only when the detail page actually yielded deep rows
+    else:
+        addl_info = _base_additional_info(prop, info)
+        detail_enriched = False
     raw_city = (info.get("city") or info.get("state") or "").strip()
     # Map to our canonical label; an unmapped/garbled Wasalt spelling → "Other" (honest, won't pollute
     # a real city search). High-volume cities are all covered in CITY_MAP.
@@ -298,15 +306,11 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
         "title": info.get("title"),
         "photo_urls": photo_urls,
         "rega_location_verified": bool(prop.get("isRegaProp")),
-        # "Additional Information" panel. Base rows (Property usage / Age / Furniture / Facade) come
-        # FREE from the search-list data. The deep rows (Street / Ad source / Plan / Land number)
-        # need the detail page, fetched ONLY when WASALT_FETCH_DETAIL=1 (local, free-bandwidth runs)
-        # — never on cloud sweeps, to protect the metered proxy. Detail rows win when present.
-        "additional_info": (
-            (_fetch_additional_attributes(s, slug) or _base_additional_info(prop, info))
-            if (FETCH_DETAIL and s is not None)
-            else _base_additional_info(prop, info)
-        ),
+        # "Additional Information" panel + the enriched flag (resolved above). Base rows come FREE
+        # from the search-list; deep rows only when WASALT_FETCH_DETAIL=1. detail_enriched lets the
+        # cloud "new-only" enricher skip rows that already have the deep fields. (cost guard.)
+        "additional_info": addl_info,
+        "detail_enriched": detail_enriched,
         # Feature-grid booleans the card already renders. Wasalt amenities map roughly:
         "parking":          has("parking", "garage"),
         "elevator":         has("elevator", "lift"),
