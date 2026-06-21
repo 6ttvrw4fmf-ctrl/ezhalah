@@ -256,6 +256,10 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('aldarim')) return <Image source={ALDARIM_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('aqargate')) return <Image source={AQARGATE_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alhoshan')) return <Image source={ALHOSHAN_LOGO} style={card.hostBadge} contentFit="contain" />;
+  // Hajer Houses — no logo file yet; branded fallback badge (swap for the real logo when supplied).
+  if (s.includes('hajer')) return (
+    <View style={[card.hostBadge, card.hajerBadge]}><Ionicons name="business" size={22} color="#fff" /></View>
+  );
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -266,6 +270,7 @@ function sourceName(source: string): string {
   if (s.includes('aldarim')) return 'Aldarim Real Estate';
   if (s.includes('aqargate')) return 'Aqar Gate';
   if (s.includes('alhoshan')) return 'Al Hoshan';
+  if (s.includes('hajer')) return 'Hajer Houses';
   return 'AQAR';
 }
 function sourceHost(source: string): string {
@@ -274,6 +279,7 @@ function sourceHost(source: string): string {
   if (s.includes('aldarim')) return 'aldarim.sa';
   if (s.includes('aqargate')) return 'aqargate.com';
   if (s.includes('alhoshan')) return 'alhoshan.sa';
+  if (s.includes('hajer')) return 'hajerhouses.com';
   return 'sa.aqar.fm';
 }
 
@@ -411,6 +417,7 @@ const card = StyleSheet.create({
   hostBadge: { width: 44, height: 44 },
   aldarimBadge: { borderRadius: 8, backgroundColor: '#14506b', alignItems: 'center', justifyContent: 'center' },
   aqargateBadge: { borderRadius: 8, backgroundColor: '#0d6e63', alignItems: 'center', justifyContent: 'center' },
+  hajerBadge: { borderRadius: 8, backgroundColor: '#6b4a2f', alignItems: 'center', justifyContent: 'center' },
   hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },
   featGrid: { flexDirection: 'row', flexWrap: 'wrap' },

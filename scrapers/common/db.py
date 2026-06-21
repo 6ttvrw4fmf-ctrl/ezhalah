@@ -146,3 +146,13 @@ def upsert_alhoshan_residential_batch(rows: list[dict[str, Any]]) -> None:
 def upsert_alhoshan_commercial_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Al Hoshan commercial rows into their own table."""
     _wasalt_batch("alhoshan_commercial_listings", rows)
+
+
+def upsert_hajer_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Hajer Houses (hajerhouses.com) residential rows (source='Hajer')."""
+    _wasalt_batch("hajer_residential_listings", rows)
+
+
+def upsert_hajer_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Hajer Houses commercial rows into their own table."""
+    _wasalt_batch("hajer_commercial_listings", rows)
