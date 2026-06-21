@@ -282,20 +282,15 @@ function sourceHost(source: string): string {
 // If the scraped data carries a monthly figure, the "from SAR X/month" subline appears underneath.
 // (user request: pixel-perfect official badge — replaced the code-drawn approximation.)
 const EJARI_LOGO = require('../../assets/images/ejari-rnpl.png');
+const AQSAT_LOGO = require('../../assets/images/aqsat.png');
 function RnplBanner({ monthly, source, t }: { monthly?: number; source?: string; t: (k: string, p?: any) => string }) {
   // أقساط (Aqsat) variant for Al Hoshan — its own rent-now-pay-later brand (annual rent over 12
-  // monthly installments). Swap in the official أقساط logo PNG here if/when the user supplies it.
+  // monthly installments). The official أقساط PNG already includes the "استأجر الحين.. وادفع بعدين"
+  // tagline, so no separate CTA text is needed — just the logo + the monthly subline.
   if ((source || '').toLowerCase().includes('alhoshan')) {
     return (
       <View style={[card.rnplBanner, card.aqsatBanner]}>
-        <View style={card.rnplRow}>
-          <Text style={card.aqsatBrand}>أقساط</Text>
-          <View style={card.rnplChevs}>
-            <Ionicons name="chevron-forward" size={13} color="#2c3e9e" style={{ marginRight: -6 }} />
-            <Ionicons name="chevron-forward" size={13} color="#2c3e9e" />
-          </View>
-          <Text style={card.aqsatCta}>{t('Rent now, pay later')}</Text>
-        </View>
+        <Image source={AQSAT_LOGO} style={card.aqsatLogo} contentFit="contain" />
         {monthly ? (
           <Text style={card.rnplFromLine}>
             {t('Over 12 months')} · <Text style={card.rnplFromStrong}>SAR {Number(monthly).toLocaleString('en-US')}</Text>/{t('month')}
@@ -395,9 +390,9 @@ const card = StyleSheet.create({
   rnplChevs: { flexDirection: 'row', alignItems: 'center' },
   rnplCta: { fontSize: 11.5, fontWeight: '700', color: '#3868c8' },
   // أقساط (Aqsat) variant — Al Hoshan's own RNPL brand; deeper indigo than EJARI's blue.
+  // The official PNG is the wordmark + tagline stacked, so it's a bit taller than the EJARI strip.
   aqsatBanner: { backgroundColor: '#ecedfb', borderColor: '#c9ccf2' },
-  aqsatBrand: { fontSize: 15, fontWeight: '800', color: '#2c3e9e', letterSpacing: 0.3 },
-  aqsatCta: { fontSize: 11.5, fontWeight: '700', color: '#2c3e9e' },
+  aqsatLogo: { width: 104, height: 40 },
   rnplFromLine: { fontSize: 10.5, color: colors.muted, fontWeight: '500' },
   rnplFromStrong: { color: colors.dark, fontWeight: '700' },
 
