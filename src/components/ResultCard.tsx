@@ -252,6 +252,14 @@ function SourceBadge({ source }: { source: string }) {
   const s = source.toLowerCase();
   if (s.includes('wasalt')) return <Image source={WASALT_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('aldarim')) return <Image source={ALDARIM_LOGO} style={card.hostBadge} contentFit="contain" />;
+  // Aqargate has no logo file yet — clean branded fallback (a teal square + gate/building mark).
+  if (s.includes('aqargate')) {
+    return (
+      <View style={[card.hostBadge, card.aqargateBadge]}>
+        <Ionicons name="business" size={22} color="#fff" />
+      </View>
+    );
+  }
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -260,12 +268,14 @@ function sourceName(source: string): string {
   const s = source.toLowerCase();
   if (s.includes('wasalt')) return 'Wasalt';
   if (s.includes('aldarim')) return 'Aldarim Real Estate';
+  if (s.includes('aqargate')) return 'Aqar Gate';
   return 'AQAR';
 }
 function sourceHost(source: string): string {
   const s = source.toLowerCase();
   if (s.includes('wasalt')) return 'wasalt.sa';
   if (s.includes('aldarim')) return 'aldarim.sa';
+  if (s.includes('aqargate')) return 'aqargate.com';
   return 'sa.aqar.fm';
 }
 
@@ -382,6 +392,7 @@ const card = StyleSheet.create({
   // background here (would bleed through the PNG's transparent margins).
   hostBadge: { width: 44, height: 44 },
   aldarimBadge: { borderRadius: 8, backgroundColor: '#14506b', alignItems: 'center', justifyContent: 'center' },
+  aqargateBadge: { borderRadius: 8, backgroundColor: '#0d6e63', alignItems: 'center', justifyContent: 'center' },
   hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },
   featGrid: { flexDirection: 'row', flexWrap: 'wrap' },

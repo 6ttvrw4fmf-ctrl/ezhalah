@@ -116,3 +116,23 @@ def upsert_aldarim_residential_batch(rows: list[dict[str, Any]]) -> None:
 def upsert_aldarim_commercial_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Aldarim commercial rows into their own table."""
     _wasalt_batch("aldarim_commercial_listings", rows)
+
+
+def upsert_deal_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Deal (dealapp.sa) residential rows into their own table (source='Deal')."""
+    _wasalt_batch("deal_residential_listings", rows)
+
+
+def upsert_deal_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Deal commercial rows into their own table."""
+    _wasalt_batch("deal_commercial_listings", rows)
+
+
+def upsert_aqargate_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Aqargate (aqargate.com) residential rows into their own table (source='Aqargate')."""
+    _wasalt_batch("aqargate_residential_listings", rows)
+
+
+def upsert_aqargate_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Aqargate commercial rows into their own table."""
+    _wasalt_batch("aqargate_commercial_listings", rows)
