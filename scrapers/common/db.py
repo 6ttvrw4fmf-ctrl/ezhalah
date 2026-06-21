@@ -136,3 +136,13 @@ def upsert_aqargate_residential_batch(rows: list[dict[str, Any]]) -> None:
 def upsert_aqargate_commercial_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Aqargate commercial rows into their own table."""
     _wasalt_batch("aqargate_commercial_listings", rows)
+
+
+def upsert_alhoshan_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Al Hoshan (alhoshan.sa) residential rows into their own table (source='Alhoshan')."""
+    _wasalt_batch("alhoshan_residential_listings", rows)
+
+
+def upsert_alhoshan_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Al Hoshan commercial rows into their own table."""
+    _wasalt_batch("alhoshan_commercial_listings", rows)

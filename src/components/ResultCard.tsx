@@ -226,7 +226,7 @@ function AdditionalInformationPanel({ listing, t }: { listing: Listing; t: (k: s
       <View style={card.addlGrid}>
         {visible.map((r) => (
           <View key={r.key} style={card.addlCell}>
-            <Text style={card.addlLabel}>{r.label}</Text>
+            <Text style={card.addlLabel}>{t(r.label)}</Text>
             <Text style={card.addlValue} numberOfLines={2}>{r.value}</Text>
           </View>
         ))}
@@ -248,18 +248,14 @@ function AdditionalInformationPanel({ listing, t }: { listing: Listing; t: (k: s
 const AQAR_LOGO = require('../../assets/images/aqar-logo.png');
 const WASALT_LOGO = require('../../assets/images/wasalt-logo.png');
 const ALDARIM_LOGO = require('../../assets/images/aldarim.jpg');
+const AQARGATE_LOGO = require('../../assets/images/aqargate-logo.jpg');
+const ALHOSHAN_LOGO = require('../../assets/images/alhoshan.jpg');
 function SourceBadge({ source }: { source: string }) {
   const s = source.toLowerCase();
   if (s.includes('wasalt')) return <Image source={WASALT_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('aldarim')) return <Image source={ALDARIM_LOGO} style={card.hostBadge} contentFit="contain" />;
-  // Aqargate has no logo file yet — clean branded fallback (a teal square + gate/building mark).
-  if (s.includes('aqargate')) {
-    return (
-      <View style={[card.hostBadge, card.aqargateBadge]}>
-        <Ionicons name="business" size={22} color="#fff" />
-      </View>
-    );
-  }
+  if (s.includes('aqargate')) return <Image source={AQARGATE_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('alhoshan')) return <Image source={ALHOSHAN_LOGO} style={card.hostBadge} contentFit="contain" />;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -269,6 +265,7 @@ function sourceName(source: string): string {
   if (s.includes('wasalt')) return 'Wasalt';
   if (s.includes('aldarim')) return 'Aldarim Real Estate';
   if (s.includes('aqargate')) return 'Aqar Gate';
+  if (s.includes('alhoshan')) return 'Al Hoshan';
   return 'AQAR';
 }
 function sourceHost(source: string): string {
@@ -276,6 +273,7 @@ function sourceHost(source: string): string {
   if (s.includes('wasalt')) return 'wasalt.sa';
   if (s.includes('aldarim')) return 'aldarim.sa';
   if (s.includes('aqargate')) return 'aqargate.com';
+  if (s.includes('alhoshan')) return 'alhoshan.sa';
   return 'sa.aqar.fm';
 }
 
