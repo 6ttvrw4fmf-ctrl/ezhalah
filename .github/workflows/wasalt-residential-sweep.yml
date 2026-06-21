@@ -1,0 +1,48 @@
+# Wasalt residential sweep — runs every 4h in the cloud through a Saudi residential proxy
+# (Webshare). Mirrors Aqar's residential sweep: light 3-page pass over every type-slug ×
+# sale+rent, one parallel matrix job per slice. The proxy makes wasalt.sa think the request
+# is coming from a Saudi home IP, which is the only way the cloud reaches it.
+
+name: Wasalt residential sweep
+
+on:
+  schedule:
+    # Every 4h on the hour (UTC). Offset 1h from Aqar's residential sweep so they don't all fire at once.
+    - cron: "0 1-23/4 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: wasalt-residential-sweep
+  cancel-in-progress: true
+
+jobs:
+  sweep:
+    name: Wasalt res ${{ matrix.slug }} ${{ matrix.deal }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        slug: [apartment, villa-townhouse, floor, building, land, rest-house, chalet, farm, room, duplex]
+        deal: [sale, rent]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Sweep ${{ matrix.slug }} ${{ matrix.deal }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          SCRAPE_MIN_INTERVAL: "0.4"
+        run: |
+          python -m scrapers.wasalt.run \
+            --type residential \
+            --slug ${{ matrix.slug }} \
+            --deal ${{ matrix.deal }} \
+            --pages 3

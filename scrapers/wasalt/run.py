@@ -107,6 +107,13 @@ def _throttle() -> None:
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
     s.headers.update({"Accept-Language": "en,ar;q=0.8"})
+    # Route through a Saudi residential proxy when WASALT_PROXY_URL is set in the env.
+    # This is how the GitHub Actions cloud workflows reach wasalt.sa — Wasalt geo-blocks bare
+    # datacenter IPs but accepts a Saudi residential proxy. Local runs leave the var unset and
+    # use the user's own Saudi home IP directly. (user request: 24/7 cloud parity with Aqar.)
+    proxy = os.environ.get("WASALT_PROXY_URL", "").strip()
+    if proxy:
+        s.proxies = {"http": proxy, "https": proxy}
     return s
 
 
