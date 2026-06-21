@@ -106,3 +106,13 @@ def end_run(run_id: int, *, ok: bool, rows_seen: int, rows_upserted: int, notes:
             "notes": notes,
         }
     ).eq("id", run_id).execute()
+
+
+def upsert_aldarim_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Aldarim residential rows into their own table (source='Aldarim')."""
+    _wasalt_batch("aldarim_residential_listings", rows)
+
+
+def upsert_aldarim_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Aldarim commercial rows into their own table."""
+    _wasalt_batch("aldarim_commercial_listings", rows)
