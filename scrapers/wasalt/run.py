@@ -47,15 +47,29 @@ SLUGS = {
     "commercial":  ["shop", "office", "warehouse", "commercial-land", "showroom", "building", "land"],
 }
 
-# Wasalt propertySubType (English) → our canonical taxonomy type. Unknowns fall back to the raw value.
+# Wasalt propertySubType → our canonical taxonomy type. Wasalt uses DIFFERENT names than Aqar
+# ("Office Space" not "Office", "Repair shop" not "Workshop", "Station" not "Gas Station",
+# "Booth" not "Kiosk") — without this map the filter for "Office" wouldn't match Wasalt's
+# "Office Space" rows and the kept-field contract would break.
 TYPE_MAP = {
+    # Residential
     "Apartment": "Apartment", "Villa": "Villa", "Townhouse": "Villa", "Duplex": "Villa",
     "Floor": "Floor", "Building": "Building", "Residential Building": "Building",
     "Land": "Residential Land", "Residential Land": "Residential Land", "Plot": "Residential Land",
     "Rest House": "Rest House", "Resthouse": "Rest House", "Chalet": "Chalet", "Farm": "Farm",
-    "Room": "Room", "Office": "Office", "Shop": "Shop", "Commercial Shop": "Shop",
-    "Warehouse": "Warehouse", "Showroom": "Showroom", "Commercial Land": "Commercial Land",
-    "Commercial Building": "Commercial Building", "Hotel": "Hotel", "Workshop": "Workshop",
+    "Room": "Room", "Small apartment (studio)": "Apartment", "Studio": "Apartment",
+    # Commercial (Wasalt's names → ours)
+    "Office": "Office", "Office Space": "Office",
+    "Shop": "Shop", "Commercial Shop": "Shop",
+    "Warehouse": "Warehouse",
+    "Showroom": "Showroom",
+    "Commercial Land": "Commercial Land",
+    "Commercial Building": "Commercial Building", "Tower": "Commercial Building",
+    "Hotel": "Hotel",
+    "Workshop": "Workshop", "Repair shop": "Workshop",
+    "Gas Station": "Gas Station", "Station": "Gas Station",
+    "Kiosk": "Kiosk", "Booth": "Kiosk",
+    "Parking": "Parking", "Car parking": "Parking",
 }
 
 # Wasalt city spelling → our canonical DB city label. Wasalt transliterates inconsistently
