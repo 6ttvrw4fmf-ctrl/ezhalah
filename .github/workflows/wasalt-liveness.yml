@@ -5,8 +5,10 @@
 name: Wasalt liveness
 
 on:
-  schedule:
-    - cron: "30 1 * * *"   # 01:30 UTC daily (offset from Aqar liveness at 01:00)
+  # NO auto-schedule: liveness fetches each listing's full ~400KB page, and for Wasalt that goes
+  # through the METERED Saudi proxy — daily over ~58k rows would be ~700 GB/month, which would blow
+  # the Webshare plan. Disabled until a lightweight (status/range-limited) liveness check is wired
+  # up. Manual-only for now. (cost guard — caught in adversarial review 2026-06.)
   workflow_dispatch: {}
 
 concurrency:

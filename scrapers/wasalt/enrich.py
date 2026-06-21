@@ -68,6 +68,11 @@ def _throttle() -> None:
     _local.last = time.monotonic()
 
 
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _slug(url: str | None) -> str | None:
     return url.rsplit("/property/", 1)[-1] if url and "/property/" in url else None
 
@@ -84,8 +89,10 @@ def fetch_detail(slug: str) -> tuple[bool, list[dict[str, Any]]]:
             time.sleep(1.5 * (attempt + 1)); continue
         if r.status_code in (429, 502, 503, 504):
             time.sleep(2 * (attempt + 1)); continue
+        if r.status_code in (401, 403):
+            return False, []  # WAF/block → transient, retry on a later run (NOT a permanent "done")
         if r.status_code != 200:
-            return True, []  # 404/permanent → loaded, nothing to get; don't retry forever
+            return True, []  # 404/410/permanent → loaded, nothing to get; don't retry forever
         m = NEXT_RE.search(r.text)
         if not m:
             return True, []
@@ -101,12 +108,17 @@ def fetch_detail(slug: str) -> tuple[bool, list[dict[str, Any]]]:
 
 def enrich_table(table: str, limit: int, workers: int) -> dict[str, int]:
     c = db.sb()
+    # Fair drain: least-recently-attempted first (NULLs = never tried). Prevents new high-id rows
+    # from permanently starving older un-enriched rows when daily inflow exceeds the cap.
     rows = (c.table(table).select("ad_number,listing_url")
             .eq("active", True).eq("detail_enriched", False)
-            .order("id", desc=True).limit(limit).execute().data) or []
+            .order("enrich_attempted_at", desc=False, nullsfirst=True)
+            .limit(limit).execute().data) or []
     print(f"── {table}: {len(rows)} un-enriched rows to process (cap {limit})")
     stats = {"deep": 0, "empty": 0, "fail": 0}
     lock = threading.Lock()
+
+    stamp = _now_iso()
 
     def work(row: dict) -> None:
         slug = _slug(row.get("listing_url"))
@@ -115,11 +127,18 @@ def enrich_table(table: str, limit: int, workers: int) -> dict[str, int]:
             return
         ok, deep = fetch_detail(slug)
         if not ok:
+            # Transient (network/403/block). Stamp the attempt so this row rotates to the BACK of the
+            # fair queue instead of being re-grabbed first every run — but leave detail_enriched=false
+            # so it IS retried later. (starvation guard.)
+            try:
+                db.sb().table(table).update({"enrich_attempted_at": stamp}).eq("ad_number", row["ad_number"]).execute()
+            except Exception:
+                pass
             with lock: stats["fail"] += 1
             return
-        # Mark enriched either way (page loaded). If we got deep rows, write them too; if empty,
-        # only flip the flag (the trigger leaves existing base additional_info untouched).
-        upd: dict[str, Any] = {"detail_enriched": True}
+        # Page loaded → mark enriched (page-loaded ⇒ no more to get). Write deep rows if any; if empty,
+        # only flip the flag + stamp (the trigger leaves the existing base additional_info untouched).
+        upd: dict[str, Any] = {"detail_enriched": True, "enrich_attempted_at": stamp}
         if deep:
             upd["additional_info"] = deep
         try:
