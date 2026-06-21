@@ -37,7 +37,8 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true",
                     help="Print what would be deleted, don't actually delete.")
     ap.add_argument("--table", default="aqar_residential_listings",
-                    choices=["aqar_residential_listings", "aqar_commercial_listings"],
+                    choices=["aqar_residential_listings", "aqar_commercial_listings",
+                             "wasalt_residential_listings", "wasalt_commercial_listings"],
                     help="Which listings table to clean. Run once per table to cover both verticals.")
     args = ap.parse_args()
 
