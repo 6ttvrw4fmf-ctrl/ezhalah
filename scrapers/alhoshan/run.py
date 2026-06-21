@@ -189,6 +189,11 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
     is_rent = purpose.startswith("rent")
     price = p.get("currentPrice") or p.get("price") or p.get("basePrice")
 
+    # "أقساط" rent-now-pay-later: Al Hoshan markets annual rent payable in 12 monthly installments
+    # (brand tagline "استأجر الحين.. وادفع بعدين"). No per-listing flag in the API, so it's the
+    # standard offer on any annual rental — monthly = annual / 12 (mirrors their on-site banner).
+    monthly_inst = round(_int(price) / 12) if (is_rent and _int(price)) else None
+
     # specs.city may be a city OR a region label — resolve both.
     raw_city = (specs.get("city") or "").strip()
     region = REGION_AR.get(raw_city)
@@ -215,6 +220,8 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "price_total": _int(price) if not is_rent else None,
         "price_annual": _int(price) if is_rent else None,
         "rent_period": "annual" if is_rent else None,
+        "rent_now_pay_later": bool(monthly_inst),
+        "rent_now_pay_later_monthly": monthly_inst,
         "city": city,
         "region": region,
         "neighborhood": specs.get("district") or None,

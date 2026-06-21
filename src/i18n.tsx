@@ -553,6 +553,7 @@ const AR: Record<string, string> = {
   'for Sale':                          'للبيع',
   'Added':                             'أضيف',
   'Rent now, pay later':               'استأجر الآن وادفع لاحقًا',
+  'Over 12 months':                    'على 12 شهر',
   'from':                              'من',
   'month':                             'شهر',
   'Features':                          'المميزات',

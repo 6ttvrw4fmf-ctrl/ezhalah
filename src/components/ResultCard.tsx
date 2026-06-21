@@ -159,7 +159,7 @@ export function ResultCard({
           ) : null}
         </View>
         <Text style={card.price} numberOfLines={1}>{tPrice(listing.price)}</Text>
-        {listing.rent_now_pay_later ? <RnplBanner monthly={listing.rent_now_pay_later_monthly ?? undefined} t={t} /> : null}
+        {listing.rent_now_pay_later ? <RnplBanner monthly={listing.rent_now_pay_later_monthly ?? undefined} source={listing.source} t={t} /> : null}
         <View style={card.statsRow}>
           {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
           {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} /> : null}
@@ -282,7 +282,28 @@ function sourceHost(source: string): string {
 // If the scraped data carries a monthly figure, the "from SAR X/month" subline appears underneath.
 // (user request: pixel-perfect official badge — replaced the code-drawn approximation.)
 const EJARI_LOGO = require('../../assets/images/ejari-rnpl.png');
-function RnplBanner({ monthly, t }: { monthly?: number; t: (k: string, p?: any) => string }) {
+function RnplBanner({ monthly, source, t }: { monthly?: number; source?: string; t: (k: string, p?: any) => string }) {
+  // أقساط (Aqsat) variant for Al Hoshan — its own rent-now-pay-later brand (annual rent over 12
+  // monthly installments). Swap in the official أقساط logo PNG here if/when the user supplies it.
+  if ((source || '').toLowerCase().includes('alhoshan')) {
+    return (
+      <View style={[card.rnplBanner, card.aqsatBanner]}>
+        <View style={card.rnplRow}>
+          <Text style={card.aqsatBrand}>أقساط</Text>
+          <View style={card.rnplChevs}>
+            <Ionicons name="chevron-forward" size={13} color="#2c3e9e" style={{ marginRight: -6 }} />
+            <Ionicons name="chevron-forward" size={13} color="#2c3e9e" />
+          </View>
+          <Text style={card.aqsatCta}>{t('Rent now, pay later')}</Text>
+        </View>
+        {monthly ? (
+          <Text style={card.rnplFromLine}>
+            {t('Over 12 months')} · <Text style={card.rnplFromStrong}>SAR {Number(monthly).toLocaleString('en-US')}</Text>/{t('month')}
+          </Text>
+        ) : null}
+      </View>
+    );
+  }
   return (
     <View style={card.rnplBanner}>
       <View style={card.rnplRow}>
@@ -373,6 +394,10 @@ const card = StyleSheet.create({
   ejariLogo: { width: 90, height: 28 },
   rnplChevs: { flexDirection: 'row', alignItems: 'center' },
   rnplCta: { fontSize: 11.5, fontWeight: '700', color: '#3868c8' },
+  // أقساط (Aqsat) variant — Al Hoshan's own RNPL brand; deeper indigo than EJARI's blue.
+  aqsatBanner: { backgroundColor: '#ecedfb', borderColor: '#c9ccf2' },
+  aqsatBrand: { fontSize: 15, fontWeight: '800', color: '#2c3e9e', letterSpacing: 0.3 },
+  aqsatCta: { fontSize: 11.5, fontWeight: '700', color: '#2c3e9e' },
   rnplFromLine: { fontSize: 10.5, color: colors.muted, fontWeight: '500' },
   rnplFromStrong: { color: colors.dark, fontWeight: '700' },
 
