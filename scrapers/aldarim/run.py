@@ -195,6 +195,10 @@ def main() -> int:
             if not listings:
                 break
             for L in listings:
+                # SKIP sold/rented — Aldarim's API returns them, but they're not available to buy/rent.
+                # (Found in recon: 74 of 231 were sold/rented. We only show what's actually on offer.)
+                if (L.get("availability_status") or "").lower() not in ("available", "", None):
+                    continue
                 row, cat = map_listing(L)
                 if not row or not row.get("property_type"):
                     continue
