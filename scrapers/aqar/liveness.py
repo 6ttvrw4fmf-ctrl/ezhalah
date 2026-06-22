@@ -48,6 +48,19 @@ DEAD_MARKERS = (
 )
 
 
+def _run_with_retry(fn, tries: int = 5):
+    """Run a DB call, retrying on Postgres statement-timeout (57014) — these come from transient
+    lock contention when the 4h sweep is mid-upsert on the same table. Back off and try again."""
+    for i in range(tries):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            if "57014" in str(e) and i < tries - 1:
+                time.sleep(2.0 * (i + 1))
+                continue
+            raise
+
+
 def looks_dead(status: int, body: str) -> bool:
     """True iff the response confirms this listing is gone (vs a transient hiccup)."""
     if status in (404, 410):
@@ -98,6 +111,7 @@ def main() -> None:
     refreshed = 0
     transient = 0
     pending_kill = 0  # missing this run but not yet past grace
+    alive_ids: list[int] = []  # batched "still alive" ids → one UPDATE per 200 (see flush below)
     started = time.time()
 
     try:
@@ -137,24 +151,27 @@ def main() -> None:
 
                 if r is not None and looks_dead(status, body):
                     new_missing = (row.get("missing_count") or 0) + 1
+                    upd: dict = {"missing_count": new_missing}
                     if new_missing >= args.grace:
-                        client.table(table).update({
-                            "active": False,
-                            "missing_count": new_missing,
-                        }).eq("id", row["id"]).execute()
+                        upd["active"] = False
                         killed += 1
                     else:
-                        client.table(table).update({
-                            "missing_count": new_missing,
-                        }).eq("id", row["id"]).execute()
                         pending_kill += 1
+                    _run_with_retry(lambda u=upd, i=row["id"]:
+                                    client.table(table).update(u).eq("id", i).execute())
                 elif r is not None and status == 200:
-                    # Alive — reset the missing counter and refresh last_seen_at.
-                    client.table(table).update({
-                        "last_seen_at": now_iso,
-                        "missing_count": 0,
-                    }).eq("id", row["id"]).execute()
+                    # Alive — BATCH the refresh. Every alive row gets the same values, so collect ids
+                    # and flush one `UPDATE … WHERE id IN (…)` per 200 rows instead of 84k single-row
+                    # writes. Far fewer statements ⇒ far less lock-contention exposure (the per-row
+                    # writes were timing out mid-sweep, error 57014). (fix: liveness 57014 failure.)
+                    alive_ids.append(row["id"])
                     refreshed += 1
+                    if len(alive_ids) >= 200:
+                        batch = list(alive_ids)
+                        _run_with_retry(lambda ids=batch: client.table(table)
+                                        .update({"last_seen_at": now_iso, "missing_count": 0})
+                                        .in_("id", ids).execute())
+                        alive_ids.clear()
                 else:
                     transient += 1
 
@@ -175,6 +192,12 @@ def main() -> None:
         pass
     except KeyboardInterrupt:
         print("\nInterrupted — finalizing run row.")
+
+    # Flush any remaining batched "alive" refreshes.
+    if alive_ids:
+        _run_with_retry(lambda ids=list(alive_ids): client.table(table)
+                        .update({"last_seen_at": now_iso, "missing_count": 0})
+                        .in_("id", ids).execute())
 
     notes = (
         f"refreshed={refreshed} killed={killed} "
