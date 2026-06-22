@@ -124,6 +124,45 @@ CITY_MAP_AR = {
     "سكاكا": "Sakaka", "القريات": "Qurayyat", "دومة الجندل": "Dawmat Al Jandal",
 }
 
+# English city → DB-canonical region. Built from CITY_MAP_AR's regional grouping so it stays in
+# lockstep with the city catalog. region_for_city() is the AUTHORITATIVE way to set a listing's
+# region: we derive it from the (reliable, URL-slug-based) city, NOT by scraping the page's
+# "المنطقة" label — that label-scrape was fragile and leaked the page <title>/breadcrumb blob into
+# the region field for ~2.6k Aqar listings (June 2026 region audit). City is trustworthy; region
+# follows from it. Region labels here MUST match the DB exactly ("Eastern Province","Al Bahah","Al Jawf").
+REGION_CITIES = {
+    "Riyadh": ["Riyadh", "Al Kharj", "Al Majmaah", "Dawadmi", "Al Zulfi", "Afif", "Al Quwayiyah",
+               "Shaqra", "Diriyah", "Al Muzahimiyah", "Thadiq", "Hawtat Bani Tamim", "Al Ghat",
+               "Rumah", "Al Dalam", "Al Hariq", "As Sulayyil", "Al Hayathim"],
+    "Makkah": ["Jeddah", "Mecca", "Taif", "Rabigh", "Al Qunfudhah", "KAEC", "Thuwal", "Al Jumum",
+               "Al Kamil", "Al Lith", "Turabah", "Raniyah", "Al Khurma"],
+    "Madinah": ["Medina", "Yanbu", "Al Ula", "Badr", "Al Hanakiyah", "Umluj", "Khaybar",
+                "Mahd adh Dhahab"],
+    "Qassim": ["Buraidah", "Unaizah", "Ar Rass", "Al Bukayriyah", "Al Mithnab", "Al Badai",
+               "Riyadh Al Khabra", "An Nabhaniyah", "Ash Shamasiyah"],
+    "Eastern Province": ["Dammam", "Khobar", "Dhahran", "Hofuf", "Jubail", "Qatif", "Hafar Al Batin",
+                         "Ras Tanura", "Abqaiq", "An Nairyah", "Khafji", "Sayhat", "Safwa", "Tarout",
+                         "Anak", "Al Uyun"],
+    "Asir": ["Abha", "Khamis Mushait", "Bisha", "Mahayel", "Ahad Rafidah", "Al Majardah",
+             "Balsamar", "Tathlith"],
+    "Tabuk": ["Tabuk", "Duba", "Al Wajh", "Tayma"],
+    "Hail": ["Hail", "Baqaa", "Al Ghazalah", "Ash Shanan"],
+    "Northern Borders": ["Arar", "Rafha", "Turaif"],
+    "Jazan": ["Jazan", "Sabya", "Abu Arish", "Samtah", "Baysh", "Ahad Al Masarihah"],
+    "Najran": ["Najran", "Sharurah"],
+    "Al Bahah": ["Al Baha"],
+    "Al Jawf": ["Sakaka", "Qurayyat", "Dawmat Al Jandal"],
+}
+CITY_TO_REGION = {city: region for region, cities in REGION_CITIES.items() for city in cities}
+
+
+def region_for_city(city: Optional[str]) -> Optional[str]:
+    """Authoritative region from a canonical English city name. Returns None for unknown/'Other'
+    cities — an honest NULL beats a wrong guess (and beats a leaked page-title blob)."""
+    if not city:
+        return None
+    return CITY_TO_REGION.get(city)
+
 
 def map_type(raw_ar: str) -> Optional[str]:
     """Look up the canonical English type from an Arabic property-type word."""

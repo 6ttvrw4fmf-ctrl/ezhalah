@@ -214,7 +214,11 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # is what buried 70+ towns inside Riyadh before. "Other" is a loud, harmless signal instead.
     city = N.map_city(city_ar or "") or "Other"
 
-    region = _text_after_label(text, r"المنطقة")
+    # Region is DERIVED from the (reliable, URL-slug-based) city — NOT scraped from the page. The
+    # page's "المنطقة" label proved fragile: when the layout differed it captured the <title>/
+    # breadcrumb blob and leaked it into region for ~2.6k listings. City is trustworthy; region
+    # follows from it via the canonical CITY_TO_REGION map. (June 2026 region audit.)
+    region = N.region_for_city(city)
     neighborhood = None
     md_nbhd = re.search(r"/(?:حي|الحي)-([^/]+?)/", url)
     if md_nbhd:

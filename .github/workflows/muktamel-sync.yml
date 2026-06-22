@@ -1,0 +1,53 @@
+# Muktamel sync — its OWN workflow, separate from the 4h small-sources matrix.
+#
+# Why separate: muktamel.com has no list API and a dead sitemap, so the only way to enumerate
+# listings is a sequential-ID scan — and every page is ~1.4MB and takes 4-17s to download. A full
+# 1..32000 pass is ~45GB over many hours, which can never fit a 4h cadence. So muktamel gets a
+# WEEKLY run, scoped to the live ID band (the dead low IDs are skipped), with a long timeout.
+#
+# The scraper parses the Nuxt 2 payload with one persistent Node worker (node ships on the runner),
+# so this needs Node available — hence the setup-node step the other scrapers don't have.
+
+name: Muktamel sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      min_id:
+        description: "Lowest listing id to scan (default 24000 = live band)"
+        required: false
+        default: "24000"
+      max_id:
+        description: "Highest listing id to scan"
+        required: false
+        default: "32000"
+
+concurrency:
+  group: muktamel-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330   # 1.4MB/page × ~8k live-band ids is slow; stay under GitHub's 6h cap
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Sync muktamel (live ID band)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MUKTAMEL_WORKERS: "8"
+        run: >-
+          python -m scrapers.muktamel.run --type all
+          --min-id ${{ github.event.inputs.min_id || '24000' }}
+          --max-id ${{ github.event.inputs.max_id || '32000' }}

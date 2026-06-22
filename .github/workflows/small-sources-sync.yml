@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 90   # covers aqarcity (~2.3k detail pages behind Cloudflare) + Sanadak; rest are fast
     strategy:
       fail-fast: false    # one source failing never blocks the others
-      max-parallel: 15
+      max-parallel: 18
       matrix:
         include:
           - { source: aldarim,  cmd: "python -m scrapers.aldarim.run --pages 50" }
@@ -46,6 +46,11 @@ jobs:
           - { source: mustqr,      cmd: "python -m scrapers.mustqr.run --type all" }
           - { source: ramzalqasim, cmd: "python -m scrapers.ramzalqasim.run --type all" }
           - { source: fursaghyr,   cmd: "python -m scrapers.fursaghyr.run --type all" }
+          - { source: jazwtn,      cmd: "python -m scrapers.jazwtn.run --type all" }
+          - { source: mizlaj,      cmd: "python -m scrapers.mizlaj.run --type all" }
+          # NOTE: muktamel is NOT here. Its pages are ~1.4MB each and it has no list API / usable
+          # sitemap, so a full sequential-ID scan is ~45GB over hours — impossible on a 4h cadence.
+          # It runs on its OWN weekly workflow (muktamel-sync.yml), scoped to the live ID band.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

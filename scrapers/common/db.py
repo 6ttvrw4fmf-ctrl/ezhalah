@@ -266,3 +266,33 @@ def upsert_fursaghyr_residential_batch(rows: list[dict[str, Any]]) -> None:
 def upsert_fursaghyr_commercial_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Fursa Ghyr commercial rows into their own table."""
     _wasalt_batch("fursaghyr_commercial_listings", rows)
+
+
+def upsert_jazwtn_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Jazwtn (jazwtn.sa) residential rows (source='Jazwtn')."""
+    _wasalt_batch("jazwtn_residential_listings", rows)
+
+
+def upsert_jazwtn_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Jazwtn commercial rows into their own table."""
+    _wasalt_batch("jazwtn_commercial_listings", rows)
+
+
+def upsert_mizlaj_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Mizlaj (mizlaj.com.sa) residential rows (source='Mizlaj')."""
+    _wasalt_batch("mizlaj_residential_listings", rows)
+
+
+def upsert_mizlaj_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Mizlaj commercial rows into their own table."""
+    _wasalt_batch("mizlaj_commercial_listings", rows)
+
+
+def upsert_muktamel_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Muktamel (muktamel.com) residential rows (source='Muktamel')."""
+    _wasalt_batch("muktamel_residential_listings", rows)
+
+
+def upsert_muktamel_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Muktamel commercial rows into their own table."""
+    _wasalt_batch("muktamel_commercial_listings", rows)

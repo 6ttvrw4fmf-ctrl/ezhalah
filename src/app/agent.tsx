@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Image as RNImage,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -17,6 +18,7 @@ import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { Spinner, Tappable, Heartbeat } from '@/components/ui';
 import HeroBackground from '@/components/HeroBackground';
 import ShareSheet from '@/components/ShareSheet';
+import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard, PopIn } from '@/components/ResultCard';
 import { parseQuery, respond } from '@/data/agent';
 import { openListing } from '@/lib/openListing';
@@ -25,6 +27,9 @@ import type { Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
+
+// The Ezhalah eagle logo — used in the header (top-left) + the sign-up popup. (user request: eagle, not stars.)
+const LOGO = require('../../assets/images/ezhalah-logo.png');
 
 const IS_WEB = Platform.OS === 'web';
 // On the web the results tile into a wrap grid, so the conversation column is wider to give them
@@ -278,6 +283,12 @@ export default function Agent() {
   // True WHILE the property cards are popping in one-by-one — so the Send button shows as a Stop button
   // for the whole reveal (not just the network wait), letting the user halt the drip. (user request.)
   const [revealing, setRevealing] = useState(false);
+  // Shows the guest sign-up popup ONCE per session (the existing authPrompt modal). (user request.)
+  const signupShownRef = useRef(false);
+  // Same pattern as the home screen: on mobile the sidebar isn't docked, so a hamburger opens it.
+  // On desktop it's a permanent column → no button. (user: couldn't see the burger on the phone.)
+  const docked = useDocked();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   // After a GUEST's one free search has displayed, a sign-up popup appears (shown once per session).
   // Accept → /auth (the search is already in history and carries over on sign-in); decline → keep
   // reading, but no more searching until they sign up / log in. (user request.)
@@ -338,7 +349,7 @@ export default function Agent() {
         setRevealing(false);
       }
     };
-    revealTimers.current.push(setTimeout(tick, 480)); // beat after the text completes
+    revealTimers.current.push(setTimeout(tick, 40)); // start the cascade right away — no empty gap
   };
   const markTyped = (id: string) => {
     const msg = msgs.find((m) => m.id === id);
@@ -417,7 +428,11 @@ export default function Agent() {
   // leave). So this is intentionally a NO-OP: no sign-up wall interrupts a guest. (Re-enable a soft,
   // non-blocking "sign up to save your searches" nudge here later if wanted.) (user request.)
   const promptSignupSoon = async (_run: Run) => {
-    return;
+    // A guest just completed a search → softly invite them to sign up. Once per session, after a
+    // beat so the cards land first; never for signed-in users. (user request: sign-up popup after search.)
+    if (user || signupShownRef.current) return;
+    signupShownRef.current = true;
+    setTimeout(() => { if (!user) setAuthPrompt(true); }, 1400);
   };
 
   // The "about to scrape" intro: one random Saudi-dialect hype line, then a compact read-back of
@@ -437,7 +452,9 @@ export default function Agent() {
     const slogan = hypePhrase(getLocale(), messageText);
     setMsgs((m) => m.map((x) => (x.id === statusId ? { id: statusId, role: 'status', phase: 'searching', slogan, summary } : x)));
     toBottom();
-    await waitRun(run, Math.max(1500, typeDuration(slogan)));
+    // Hold the searching phase long enough for BOTH the slogan and the (typewriter) Search Summary to
+    // finish typing, so the summary is fully written before it morphs into the results bubble. (user.)
+    await waitRun(run, Math.max(1500, typeDuration(slogan), typeDuration(summary)));
     if (run.cancelled) return;
     // 2) RESULTS: ONE consolidated bubble in the exact order the user wants:
     //    [slogan] → [Search Summary] → [Result intro] → [Sort line] → [Property cards].
@@ -726,13 +743,28 @@ export default function Agent() {
       <HeroBackground imageOpacity={0.55} scrim={0.2} fadeStart={0.8} fadeEnd={1} />
       {/* Header */}
       <View ref={setLtr} style={[s.topBar, { paddingTop: insets.top + 8 }]}>
-        {/* No back arrow — the agent screen is a primary destination, not a pushed detail, so the
-            chevron was just noise. A small spacer keeps the title off the edge. (user request.) */}
-        <View style={{ width: 6 }} />
-        <View style={s.titleWrap}>
-          <Ionicons name="sparkles" size={16} color={colors.primary} />
-          <Text ref={noTranslateRef} style={s.title}>{t('Ezhalah AI Agent')}</Text>
-        </View>
+        {/* Mobile only: a plain hamburger that opens the existing sidebar — same clean style as the
+            home screen's. On desktop the sidebar is docked, so just a small spacer. No eagle here. */}
+        {!docked ? (
+          <Pressable style={s.hamb} hitSlop={8} onPress={() => setSidebarOpen(true)}>
+            <Ionicons name="menu" size={22} color={colors.ink} />
+          </Pressable>
+        ) : (
+          <View style={{ width: 6 }} />
+        )}
+        {/* Landing state (only the agent's greeting so far) → "✨ Ezhalah AI Agent". Once the USER sends
+            a message or a filter search produces results, the header collapses to just the brand
+            "Ezhalah" with no sparkle. The greeting is role 'agent', so it doesn't count as "started".
+            (user request: "after he sends a message just show Ezhalah, remove the star".) */}
+        {(() => {
+          const started = msgs.some((m) => m.role === 'user' || m.role === 'results');
+          return (
+            <View style={s.titleWrap}>
+              {!started && <Ionicons name="sparkles" size={16} color={colors.primary} />}
+              <Text ref={noTranslateRef} style={s.title}>{started ? t('Ezhalah') : t('Ezhalah AI Agent')}</Text>
+            </View>
+          );
+        })()}
         <View style={{ flex: 1 }} />
         {/* Precise tab removed from the header (user request) — refining now happens inline, via the
             "I can get you something more precise." button under the results. */}
@@ -747,6 +779,7 @@ export default function Agent() {
         </Pressable>
       </View>
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
+      {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -806,7 +839,12 @@ export default function Agent() {
                         )}
                       </View>
                       {m.summary ? (
-                        <Text style={[s.summaryText, { writingDirection: sr ? 'rtl' : 'ltr', textAlign: sr ? 'right' : 'left', alignSelf: 'stretch' }]}>{m.summary}</Text>
+                        // The Search Summary TYPES OUT (typewriter) while Ezhalah is searching, then
+                        // persists fully-typed into the results bubble below. The searching beat waits
+                        // for it to finish (see playListings). (user request: "type it down, animation style".)
+                        <Text style={[s.summaryText, { writingDirection: sr ? 'rtl' : 'ltr', textAlign: sr ? 'right' : 'left', alignSelf: 'stretch' }]}>
+                          <Typer text={m.summary} />
+                        </Text>
                       ) : null}
                     </View>
                   );
@@ -925,19 +963,8 @@ export default function Agent() {
                           />
                         ))}
                       </View>
-                      {/* Refine inline: only on the LATEST results AND only while they're the last thing in
-                          the chat — once the user sends anything new (or hits Stop) it disappears. (user request.) */}
-                      {!stopped && m.id === lastId && (
-                      <Pressable
-                        style={s.preciseInline}
-                        onPress={() => send(locale === 'ar'
-                          ? 'اسألني سؤال واحد عشان نضيّق البحث ونطلّع نتائج أدق'
-                          : 'Ask me one question to narrow my search and get more precise results.')}
-                      >
-                        <Ionicons name="locate-outline" size={15} color={colors.primary} />
-                        <Text style={s.preciseInlineTxt}>{t('I can get you something more precise.')}</Text>
-                      </Pressable>
-                      )}
+                      {/* The "I can get you something more precise." refine CTA was removed here per user
+                          request — no message sits below the result cards now. */}
                     </>
                   )}
                 </View>
@@ -1032,11 +1059,11 @@ export default function Agent() {
           <Pressable style={s.promptBackdrop} onPress={() => setAuthPrompt(false)} />
           <View style={s.promptCard}>
             <View style={s.promptIcon}>
-              <Ionicons name="lock-open-outline" size={22} color={colors.primary} />
+              <RNImage source={LOGO} style={s.promptLogo} resizeMode="cover" />
             </View>
-            <Text style={s.promptTitle}>{t('Sign up to keep searching')}</Text>
+            <Text style={s.promptTitle}>{t('Get more with a free account')}</Text>
             <Text style={s.promptBody}>
-              {t("That was your one free search. Sign up or log in to search as much as you like — and we'll save what you just searched.")}
+              {t('Sign up free to save your searches and favorites, and pick up right where you left off.')}
             </Text>
             <Pressable style={s.promptPrimary} onPress={() => { setAuthPrompt(false); router.push('/auth'); }}>
               <Ionicons name="person-outline" size={16} color="#fff" />
@@ -1055,7 +1082,8 @@ export default function Agent() {
 const s = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.screenSide, paddingBottom: 8 },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
-  titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
+  titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   title: { fontSize: 14, fontWeight: '700', color: colors.ink },
   filterBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12 },
   // Note #5 — share icon sits beside the Filter pill in the agent header.
@@ -1121,7 +1149,8 @@ const s = StyleSheet.create({
   promptOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60, alignItems: 'center', justifyContent: 'center', padding: 28 },
   promptBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.5)' },
   promptCard: { width: '100%', maxWidth: 360, backgroundColor: colors.surface, borderRadius: 20, padding: 22, alignItems: 'center', gap: 9, ...cardShadow },
-  promptIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+  promptIcon: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginBottom: 2, overflow: 'hidden' },
+  promptLogo: { width: 56, height: 56, borderRadius: 28 },
   promptTitle: { fontSize: 17, fontWeight: '800', color: colors.ink, textAlign: 'center' },
   promptBody: { fontSize: 13.5, lineHeight: 19, color: colors.muted, textAlign: 'center' },
   promptPrimary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.primary, borderRadius: 13, paddingVertical: 13, width: '100%', marginTop: 6 },

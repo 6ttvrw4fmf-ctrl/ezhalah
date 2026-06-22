@@ -262,6 +262,9 @@ const TOOR_LOGO = require('../../assets/images/toor.jpg');
 const MUSTQR_LOGO = require('../../assets/images/mustaqr.jpg');
 const RAMZALQASIM_LOGO = require('../../assets/images/ramzalqassim.jpg');
 const FURSAGHYR_LOGO = require('../../assets/images/fursaghyr.jpg');
+const JAZWTN_LOGO = require('../../assets/images/jazan-watan.jpg');
+const MUKTAMEL_LOGO = require('../../assets/images/muktamel.jpg');
+const MIZLAJ_LOGO = require('../../assets/images/mizlaj.jpg');
 // Card hero photo with graceful fallback. Some sources (e.g. aqarcity) carry photo URLs that have
 // been deleted on their CDN and 302→/notfound, or are only published as thumbnails — listing one
 // dead URL would leave the card with an empty grey block. We try each URL in order and, if every
@@ -308,6 +311,9 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('mustqr')) return <Image source={MUSTQR_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('ramzalqasim')) return <Image source={RAMZALQASIM_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('fursaghyr')) return <Image source={FURSAGHYR_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('jazwtn')) return <Image source={JAZWTN_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('muktamel')) return <Image source={MUKTAMEL_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('mizlaj')) return <Image source={MIZLAJ_LOGO} style={card.hostBadge} contentFit="contain" />;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -330,6 +336,9 @@ function sourceName(source: string): string {
   if (s.includes('mustqr')) return 'Mustaqarr Real Estate';
   if (s.includes('ramzalqasim')) return 'Ramz Al Qassim Real Estate Investment';
   if (s.includes('fursaghyr')) return 'Fursa Ghyr Real Estate';
+  if (s.includes('jazwtn')) return 'Jazan Watan';
+  if (s.includes('mizlaj')) return 'Mizlaj Real Estate';
+  if (s.includes('muktamel')) return 'Muktamel';
   return 'AQAR';
 }
 function sourceHost(source: string): string {
@@ -350,6 +359,9 @@ function sourceHost(source: string): string {
   if (s.includes('mustqr')) return 'mustqr.sa';
   if (s.includes('ramzalqasim')) return 'ramzalqasim.com';
   if (s.includes('fursaghyr')) return 'fursaghyr.com';
+  if (s.includes('jazwtn')) return 'jazwtn.sa';
+  if (s.includes('mizlaj')) return 'mizlaj.com.sa';
+  if (s.includes('muktamel')) return 'muktamel.com';
   return 'sa.aqar.fm';
 }
 
@@ -497,6 +509,9 @@ const card = StyleSheet.create({
   mustqrBadge: { borderRadius: 8, backgroundColor: '#7c3a3a', alignItems: 'center', justifyContent: 'center' },
   ramzBadge:   { borderRadius: 8, backgroundColor: '#3d5a2b', alignItems: 'center', justifyContent: 'center' },
   fursaBadge:  { borderRadius: 8, backgroundColor: '#8a6a1f', alignItems: 'center', justifyContent: 'center' },
+  jazwtnBadge: { borderRadius: 8, backgroundColor: '#1f6b5a', alignItems: 'center', justifyContent: 'center' },
+  mizlajBadge: { borderRadius: 8, backgroundColor: '#6b2f4a', alignItems: 'center', justifyContent: 'center' },
+  muktamelBadge: { borderRadius: 8, backgroundColor: '#2f5d7a', alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: '#fff', fontWeight: '800', fontSize: 11, lineHeight: 13, textAlign: 'center' },
   hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },
