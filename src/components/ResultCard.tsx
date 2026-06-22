@@ -486,7 +486,9 @@ const card = StyleSheet.create({
   hostHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   // The PNG carries its own background and rounded corners — we just size the slot. NO container
   // background here (would bleed through the PNG's transparent margins).
-  hostBadge: { width: 44, height: 44 },
+  // 48×48 with a touch of internal padding feels right after the logo normalizer
+  // (each logo file now has identical 6% built-in margin, so they all visually fill).
+  hostBadge: { width: 48, height: 48 },
   aldarimBadge: { borderRadius: 8, backgroundColor: '#14506b', alignItems: 'center', justifyContent: 'center' },
   aqargateBadge: { borderRadius: 8, backgroundColor: '#0d6e63', alignItems: 'center', justifyContent: 'center' },
   hajerBadge: { borderRadius: 8, backgroundColor: '#6b4a2f', alignItems: 'center', justifyContent: 'center' },
