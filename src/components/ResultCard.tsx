@@ -123,7 +123,7 @@ export function ResultCard({
     <View style={[card.wrap, { flexDirection: horizontal ? 'row' : 'column' }]}>
       {/* ─── photo block (full-width banner on mobile) ───── */}
       <Pressable onPress={onOpen} style={[card.photoCol, horizontal ? card.photoColWide : card.photoColMobile]}>
-        <Image source={{ uri: listing.photo }} style={card.photo} contentFit="cover" transition={150} />
+        <ListingPhoto photos={(listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []))} style={card.photo} t={t} />
         {rank ? (
           <View style={card.rankBadge} pointerEvents="none">
             <Text style={card.rankText}>#{rank}</Text>
@@ -254,6 +254,34 @@ const HAJER_LOGO = require('../../assets/images/hajer-logo.jpg');
 const SANADAK_LOGO = require('../../assets/images/sanadak-logo.jpg');
 const EASTABHA_LOGO = require('../../assets/images/eastabha-logo.jpg');
 const AQARCITY_LOGO = require('../../assets/images/aqarcity-logo.jpg');
+// Card hero photo with graceful fallback. Some sources (e.g. aqarcity) carry photo URLs that have
+// been deleted on their CDN and 302→/notfound, or are only published as thumbnails — listing one
+// dead URL would leave the card with an empty grey block. We try each URL in order and, if every
+// one fails (or the listing genuinely has no photo), render a clean "no photo" placeholder.
+function ListingPhoto({ photos, style, t }: { photos: string[]; style: any; t: (k: string) => string }) {
+  const [idx, setIdx] = useState(0);
+  useEffect(() => { setIdx(0); }, [photos.join('|')]);
+  const uri = photos[idx];
+  if (!uri) {
+    return (
+      <View style={[style, card.photoFallback]}>
+        <Ionicons name="image-outline" size={28} color={colors.muted} />
+        <Text style={card.photoFallbackText}>{t('No photo available')}</Text>
+      </View>
+    );
+  }
+  return (
+    <Image
+      key={uri}
+      source={{ uri }}
+      style={style}
+      contentFit="cover"
+      transition={150}
+      onError={() => setIdx((i) => i + 1)}
+    />
+  );
+}
+
 function SourceBadge({ source }: { source: string }) {
   const s = source.toLowerCase();
   if (s.includes('wasalt')) return <Image source={WASALT_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -359,6 +387,8 @@ const card = StyleSheet.create({
   photoColWide: { width: 240, height: 200 },
   photoColMobile: { width: '100%', height: 200 },
   photo: { width: '100%', height: '100%' },
+  photoFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#eef2ec' },
+  photoFallbackText: { fontSize: 11, color: colors.muted, fontWeight: '600' },
   rankBadge: {
     position: 'absolute', top: 8, left: 8, backgroundColor: colors.primary,
     borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3,

@@ -290,25 +290,48 @@ def _map_type(*candidates: str) -> Optional[str]:
 
 
 def _images(ld: Optional[dict], body: str) -> list[str]:
-    """Full-size photos only: JSON-LD image[] minus /thumbnails/, plus same-origin
-    /public/upload/properties/*.jpg from the HTML (excluding the thumbnails/ variant)."""
-    out: list[str] = []
-    seen: set[str] = set()
+    """Photos for the card. Prefer the full-size /properties/<file> URL; if a listing only has the
+    /thumbnails/<file> variant on the page (because the full-size was deleted on the CDN), keep the
+    thumbnail rather than dropping the listing to zero photos — better small image than no image.
+    For each thumbnail we also try the synthesised full-size URL (strip '/thumbnails/'): the client
+    onError fallback will skip it cheaply if the file doesn't exist.
 
-    def add(u: str) -> None:
-        if "/thumbnails/" in u or "no_image" in u:
+    Also drops listings' 'no-image' placeholders."""
+    fulls: list[str] = []
+    thumbs: list[str] = []
+    seen: set[str] = set()
+    BAD = ("no_image", "no-image", "noimage")
+
+    def add(bucket: list[str], u: str) -> None:
+        if any(b in u.lower() for b in BAD):
             return
-        if u not in seen:
-            seen.add(u)
-            out.append(u)
+        if u in seen:
+            return
+        seen.add(u)
+        bucket.append(u)
 
     if ld:
         for u in ld.get("image", []) or []:
-            if isinstance(u, str):
-                add(u)
-    for u in re.findall(r"https://www\.aqarcity\.net/public/upload/properties/[^\s\"'\\]+?\.(?:jpe?g|png|webp)", body):
-        add(u)
-    return out[:25]
+            if not isinstance(u, str):
+                continue
+            (thumbs if "/thumbnails/" in u else fulls).append(u) if False else add(
+                thumbs if "/thumbnails/" in u else fulls, u)
+    for u in re.findall(r"https://www\.aqarcity\.net/public/upload/properties/(?:thumbnails/)?[^\s\"'\\]+?\.(?:jpe?g|png|webp)", body):
+        add(thumbs if "/thumbnails/" in u else fulls, u)
+
+    # When we only have thumbnails, also try the synthesised full-size URL ahead of each thumb so
+    # the card prefers the higher-res file when it exists.
+    if not fulls and thumbs:
+        out: list[str] = []
+        for tu in thumbs:
+            synth = tu.replace("/thumbnails/", "/")
+            if synth not in out and not any(b in synth.lower() for b in BAD):
+                out.append(synth)
+            if tu not in out:
+                out.append(tu)
+        return out[:25]
+
+    return (fulls + thumbs)[:25]
 
 
 def _sane_beds(n: Optional[int], category: str) -> Optional[int]:
