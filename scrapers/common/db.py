@@ -160,6 +160,47 @@ def upsert_aldarim_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("aldarim_commercial_listings", rows)
 
 
+# --- 2026-06 batch: Deal App, 24 Souq, Dwelleo, Era Pulse, Al Nowaisiry ---------------------
+def upsert_dealapp_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("dealapp_residential_listings", rows)
+
+
+def upsert_dealapp_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("dealapp_commercial_listings", rows)
+
+
+def upsert_souq24_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("souq24_residential_listings", rows)
+
+
+def upsert_souq24_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("souq24_commercial_listings", rows)
+
+
+def upsert_dwelleo_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("dwelleo_residential_listings", rows)
+
+
+def upsert_dwelleo_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("dwelleo_commercial_listings", rows)
+
+
+def upsert_erapulse_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("erapulse_residential_listings", rows)
+
+
+def upsert_erapulse_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("erapulse_commercial_listings", rows)
+
+
+def upsert_nowaisiry_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nowaisiry_residential_listings", rows)
+
+
+def upsert_nowaisiry_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nowaisiry_commercial_listings", rows)
+
+
 def upsert_deal_residential_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Deal (dealapp.sa) residential rows into their own table (source='Deal')."""
     _wasalt_batch("deal_residential_listings", rows)

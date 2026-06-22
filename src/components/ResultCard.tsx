@@ -322,6 +322,12 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('abeea')) return <View style={[card.hostBadge, card.abeeaBadge]}><Text style={card.badgeText}>ابيعا</Text></View>;
   if (s.includes('jurash')) return <View style={[card.hostBadge, card.jurashBadge]}><Text style={card.badgeText}>جرش</Text></View>;
   if (s.includes('alnokhba')) return <View style={[card.hostBadge, card.alnokhbaBadge]}><Text style={card.badgeText}>النخبة</Text></View>;
+  // 2026-06 batch — text-chips until the user supplies logos.
+  if (s.includes('deal')) return <View style={[card.hostBadge, card.dealappBadge]}><Text style={card.badgeText}>ديل</Text></View>;
+  if (s.includes('souq')) return <View style={[card.hostBadge, card.souq24Badge]}><Text style={card.badgeText}>سوق ٢٤</Text></View>;
+  if (s.includes('dwelleo')) return <View style={[card.hostBadge, card.dwelleoBadge]}><Text style={card.badgeText}>ديويليو</Text></View>;
+  if (s.includes('pulse')) return <View style={[card.hostBadge, card.erapulseBadge]}><Text style={card.badgeText}>نبض</Text></View>;
+  if (s.includes('nowaisiry')) return <View style={[card.hostBadge, card.nowaisiryBadge]}><Text style={card.badgeText}>النويصري</Text></View>;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -354,6 +360,11 @@ function sourceName(source: string): string {
   if (s.includes('abeea')) return 'Abeea Real Estate';
   if (s.includes('jurash')) return 'Jurash Real Estate';
   if (s.includes('alnokhba')) return 'Al Nokhba';
+  if (s.includes('deal')) return 'Deal App';
+  if (s.includes('souq')) return '24 Souq';
+  if (s.includes('dwelleo')) return 'Dwelleo';
+  if (s.includes('pulse')) return 'Era Pulse';
+  if (s.includes('nowaisiry')) return 'Al Nowaisiry Real Estate';
   return 'AQAR';
 }
 function sourceHost(source: string): string {
@@ -384,6 +395,11 @@ function sourceHost(source: string): string {
   if (s.includes('abeea')) return 'abeea.com.sa';
   if (s.includes('jurash')) return 'jurash.sa';
   if (s.includes('alnokhba')) return 'alnokhba-services.com';
+  if (s.includes('deal')) return 'dealapp.sa';
+  if (s.includes('souq')) return '24.com.sa';
+  if (s.includes('dwelleo')) return 'dwelleo.sa';
+  if (s.includes('pulse')) return 'erapulse.sa';
+  if (s.includes('nowaisiry')) return 'alnowaisiry.com';
   return 'sa.aqar.fm';
 }
 
@@ -541,6 +557,11 @@ const card = StyleSheet.create({
   abeeaBadge: { borderRadius: 8, backgroundColor: '#7a4a1f', alignItems: 'center', justifyContent: 'center' },
   jurashBadge: { borderRadius: 8, backgroundColor: '#2f5a5a', alignItems: 'center', justifyContent: 'center' },
   alnokhbaBadge: { borderRadius: 8, backgroundColor: '#5a2f3a', alignItems: 'center', justifyContent: 'center' },
+  dealappBadge:  { borderRadius: 8, backgroundColor: '#1d4a37', alignItems: 'center', justifyContent: 'center' },
+  souq24Badge:   { borderRadius: 8, backgroundColor: '#2f5d7a', alignItems: 'center', justifyContent: 'center' },
+  dwelleoBadge:  { borderRadius: 8, backgroundColor: '#4a3d7a', alignItems: 'center', justifyContent: 'center' },
+  erapulseBadge: { borderRadius: 8, backgroundColor: '#7a4a1f', alignItems: 'center', justifyContent: 'center' },
+  nowaisiryBadge:{ borderRadius: 8, backgroundColor: '#3a5a2f', alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: '#fff', fontWeight: '800', fontSize: 11, lineHeight: 13, textAlign: 'center' },
   hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },

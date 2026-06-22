@@ -55,6 +55,11 @@ jobs:
           - { source: abeea,       cmd: "python -m scrapers.abeea.run --type all" }
           - { source: jurash,      cmd: "python -m scrapers.jurash.run --type all" }
           - { source: alnokhba,    cmd: "python -m scrapers.alnokhba.run --type all" }
+          - { source: dealapp,     cmd: "DEALAPP_MAX_FILTER_PAGES=2000 python -m scrapers.dealapp.run --type all" }
+          - { source: souq24,      cmd: "python -m scrapers.souq24.run --type all" }
+          - { source: dwelleo,     cmd: "python -m scrapers.dwelleo.run --type all" }
+          - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
+          - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           # NOTE: muktamel is NOT here. Its pages are ~1.4MB each and it has no list API / usable
           # sitemap, so a full sequential-ID scan is ~45GB over hours — impossible on a 4h cadence.
           # It runs on its OWN weekly workflow (muktamel-sync.yml), scoped to the live ID band.
