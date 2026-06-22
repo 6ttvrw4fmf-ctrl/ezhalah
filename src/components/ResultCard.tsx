@@ -314,6 +314,14 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('jazwtn')) return <Image source={JAZWTN_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('muktamel')) return <Image source={MUKTAMEL_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('mizlaj')) return <Image source={MIZLAJ_LOGO} style={card.hostBadge} contentFit="contain" />;
+  // Batch 7 — text-chips until the user supplies logos.
+  if (s.includes('semsar')) return <View style={[card.hostBadge, card.semsarBadge]}><Text style={card.badgeText}>سمسار</Text></View>;
+  if (s.includes('aqaratikom')) return <View style={[card.hostBadge, card.aqaratikomBadge]}><Text style={card.badgeText}>عقاراتكم</Text></View>;
+  if (s.includes('awal')) return <View style={[card.hostBadge, card.awalBadge]}><Text style={card.badgeText}>أوال</Text></View>;
+  if (s.includes('alkhaas')) return <View style={[card.hostBadge, card.alkhaasBadge]}><Text style={card.badgeText}>الخاص</Text></View>;
+  if (s.includes('abeea')) return <View style={[card.hostBadge, card.abeeaBadge]}><Text style={card.badgeText}>ابيعا</Text></View>;
+  if (s.includes('jurash')) return <View style={[card.hostBadge, card.jurashBadge]}><Text style={card.badgeText}>جرش</Text></View>;
+  if (s.includes('alnokhba')) return <View style={[card.hostBadge, card.alnokhbaBadge]}><Text style={card.badgeText}>النخبة</Text></View>;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -339,6 +347,13 @@ function sourceName(source: string): string {
   if (s.includes('jazwtn')) return 'Jazan Watan';
   if (s.includes('mizlaj')) return 'Mizlaj Real Estate';
   if (s.includes('muktamel')) return 'Muktamel';
+  if (s.includes('semsar')) return 'Semsar';
+  if (s.includes('aqaratikom')) return 'Aqaratikom';
+  if (s.includes('awal')) return 'Awal Real Estate';
+  if (s.includes('alkhaas')) return 'Al Khaas';
+  if (s.includes('abeea')) return 'Abeea Real Estate';
+  if (s.includes('jurash')) return 'Jurash Real Estate';
+  if (s.includes('alnokhba')) return 'Al Nokhba';
   return 'AQAR';
 }
 function sourceHost(source: string): string {
@@ -362,6 +377,13 @@ function sourceHost(source: string): string {
   if (s.includes('jazwtn')) return 'jazwtn.sa';
   if (s.includes('mizlaj')) return 'mizlaj.com.sa';
   if (s.includes('muktamel')) return 'muktamel.com';
+  if (s.includes('semsar')) return 'semsarsaudi.com';
+  if (s.includes('aqaratikom')) return 'aqaratikom.com';
+  if (s.includes('awal')) return 'awaalun.com';
+  if (s.includes('alkhaas')) return 'alkhaas.net';
+  if (s.includes('abeea')) return 'abeea.com.sa';
+  if (s.includes('jurash')) return 'jurash.sa';
+  if (s.includes('alnokhba')) return 'alnokhba-services.com';
   return 'sa.aqar.fm';
 }
 
@@ -512,6 +534,13 @@ const card = StyleSheet.create({
   jazwtnBadge: { borderRadius: 8, backgroundColor: '#1f6b5a', alignItems: 'center', justifyContent: 'center' },
   mizlajBadge: { borderRadius: 8, backgroundColor: '#6b2f4a', alignItems: 'center', justifyContent: 'center' },
   muktamelBadge: { borderRadius: 8, backgroundColor: '#2f5d7a', alignItems: 'center', justifyContent: 'center' },
+  semsarBadge: { borderRadius: 8, backgroundColor: '#b8860b', alignItems: 'center', justifyContent: 'center' },
+  aqaratikomBadge: { borderRadius: 8, backgroundColor: '#1f6b6b', alignItems: 'center', justifyContent: 'center' },
+  awalBadge: { borderRadius: 8, backgroundColor: '#5a3a7a', alignItems: 'center', justifyContent: 'center' },
+  alkhaasBadge: { borderRadius: 8, backgroundColor: '#3a5a2f', alignItems: 'center', justifyContent: 'center' },
+  abeeaBadge: { borderRadius: 8, backgroundColor: '#7a4a1f', alignItems: 'center', justifyContent: 'center' },
+  jurashBadge: { borderRadius: 8, backgroundColor: '#2f5a5a', alignItems: 'center', justifyContent: 'center' },
+  alnokhbaBadge: { borderRadius: 8, backgroundColor: '#5a2f3a', alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: '#fff', fontWeight: '800', fontSize: 11, lineHeight: 13, textAlign: 'center' },
   hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },

@@ -48,6 +48,13 @@ jobs:
           - { source: fursaghyr,   cmd: "python -m scrapers.fursaghyr.run --type all" }
           - { source: jazwtn,      cmd: "python -m scrapers.jazwtn.run --type all" }
           - { source: mizlaj,      cmd: "python -m scrapers.mizlaj.run --type all" }
+          - { source: semsar,      cmd: "python -m scrapers.semsar.run --type all" }
+          - { source: aqaratikom,  cmd: "python -m scrapers.aqaratikom.run --type all" }
+          - { source: awal,        cmd: "python -m scrapers.awal.run --type all" }
+          - { source: alkhaas,     cmd: "python -m scrapers.alkhaas.run --type all" }
+          - { source: abeea,       cmd: "python -m scrapers.abeea.run --type all" }
+          - { source: jurash,      cmd: "python -m scrapers.jurash.run --type all" }
+          - { source: alnokhba,    cmd: "python -m scrapers.alnokhba.run --type all" }
           # NOTE: muktamel is NOT here. Its pages are ~1.4MB each and it has no list API / usable
           # sitemap, so a full sequential-ID scan is ~45GB over hours — impossible on a 4h cadence.
           # It runs on its OWN weekly workflow (muktamel-sync.yml), scoped to the live ID band.

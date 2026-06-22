@@ -296,3 +296,67 @@ def upsert_muktamel_residential_batch(rows: list[dict[str, Any]]) -> None:
 def upsert_muktamel_commercial_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Muktamel commercial rows into their own table."""
     _wasalt_batch("muktamel_commercial_listings", rows)
+
+
+# ── Batch 7: Semsar, Aqaratikom (Nawait), Awal, Al Khaas, Abeea, Jurash, Al Nokhba ──────────────
+def upsert_semsar_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Semsar (semsarsaudi.com) residential rows (source='Semsar')."""
+    _wasalt_batch("semsar_residential_listings", rows)
+
+
+def upsert_semsar_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("semsar_commercial_listings", rows)
+
+
+def upsert_aqaratikom_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Aqaratikom / Nawait (aqaratikom.com → nawait.sa) residential (source='Aqaratikom')."""
+    _wasalt_batch("aqaratikom_residential_listings", rows)
+
+
+def upsert_aqaratikom_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aqaratikom_commercial_listings", rows)
+
+
+def upsert_awal_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Awal (awaalun.com) residential rows (source='Awal')."""
+    _wasalt_batch("awal_residential_listings", rows)
+
+
+def upsert_awal_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("awal_commercial_listings", rows)
+
+
+def upsert_alkhaas_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Al Khaas (alkhaas.net) residential rows (source='Al Khaas')."""
+    _wasalt_batch("alkhaas_residential_listings", rows)
+
+
+def upsert_alkhaas_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alkhaas_commercial_listings", rows)
+
+
+def upsert_abeea_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Abeea (abeea.com.sa) residential rows (source='Abeea')."""
+    _wasalt_batch("abeea_residential_listings", rows)
+
+
+def upsert_abeea_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("abeea_commercial_listings", rows)
+
+
+def upsert_jurash_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Jurash (jurash.sa) residential rows (source='Jurash')."""
+    _wasalt_batch("jurash_residential_listings", rows)
+
+
+def upsert_jurash_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("jurash_commercial_listings", rows)
+
+
+def upsert_alnokhba_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Al Nokhba (alnokhba-services.com) residential rows (source='Al Nokhba')."""
+    _wasalt_batch("alnokhba_residential_listings", rows)
+
+
+def upsert_alnokhba_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alnokhba_commercial_listings", rows)
