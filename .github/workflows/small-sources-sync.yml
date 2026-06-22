@@ -27,10 +27,10 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 50   # covers Sanadak (gentle RSC scrape, ~25–35 min); the rest are seconds
+    timeout-minutes: 90   # covers aqarcity (~2.3k detail pages behind Cloudflare) + Sanadak; rest are fast
     strategy:
       fail-fast: false    # one source failing never blocks the others
-      max-parallel: 5
+      max-parallel: 7
       matrix:
         include:
           - { source: aldarim,  cmd: "python -m scrapers.aldarim.run --pages 50" }
@@ -38,6 +38,8 @@ jobs:
           - { source: hajer,    cmd: "python -m scrapers.hajer.run --type all" }
           - { source: alhoshan, cmd: "python -m scrapers.alhoshan.run --type all" }
           - { source: sanadak,  cmd: "python -m scrapers.sanadak.run --type all" }
+          - { source: eastabha, cmd: "python -m scrapers.eastabha.run --type all" }
+          - { source: aqarcity, cmd: "python -m scrapers.aqarcity.run --type all" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

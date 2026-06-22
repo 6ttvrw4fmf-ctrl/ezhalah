@@ -166,3 +166,23 @@ def upsert_sanadak_residential_batch(rows: list[dict[str, Any]]) -> None:
 def upsert_sanadak_commercial_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Sanadak commercial rows into their own table."""
     _wasalt_batch("sanadak_commercial_listings", rows)
+
+
+def upsert_eastabha_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert East Abha (eastabha.sa) residential rows (source='Eastabha')."""
+    _wasalt_batch("eastabha_residential_listings", rows)
+
+
+def upsert_eastabha_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert East Abha commercial rows into their own table."""
+    _wasalt_batch("eastabha_commercial_listings", rows)
+
+
+def upsert_aqarcity_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Aqar City (aqarcity.net) residential rows (source='Aqarcity')."""
+    _wasalt_batch("aqarcity_residential_listings", rows)
+
+
+def upsert_aqarcity_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Aqar City commercial rows into their own table."""
+    _wasalt_batch("aqarcity_commercial_listings", rows)

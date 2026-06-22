@@ -252,6 +252,8 @@ const AQARGATE_LOGO = require('../../assets/images/aqargate-logo.jpg');
 const ALHOSHAN_LOGO = require('../../assets/images/alhoshan.jpg');
 const HAJER_LOGO = require('../../assets/images/hajer-logo.jpg');
 const SANADAK_LOGO = require('../../assets/images/sanadak-logo.jpg');
+const EASTABHA_LOGO = require('../../assets/images/eastabha-logo.jpg');
+const AQARCITY_LOGO = require('../../assets/images/aqarcity-logo.jpg');
 function SourceBadge({ source }: { source: string }) {
   const s = source.toLowerCase();
   if (s.includes('wasalt')) return <Image source={WASALT_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -260,6 +262,8 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('alhoshan')) return <Image source={ALHOSHAN_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('hajer')) return <Image source={HAJER_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('sanadak')) return <Image source={SANADAK_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('eastabha')) return <Image source={EASTABHA_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('aqarcity')) return <Image source={AQARCITY_LOGO} style={card.hostBadge} contentFit="contain" />;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -272,6 +276,8 @@ function sourceName(source: string): string {
   if (s.includes('alhoshan')) return 'Al Hoshan';
   if (s.includes('hajer')) return 'Hajer Houses Real Estate';
   if (s.includes('sanadak')) return 'Sanadak';
+  if (s.includes('eastabha')) return 'East Abha Real Estate';
+  if (s.includes('aqarcity')) return 'Aqar City';
   return 'AQAR';
 }
 function sourceHost(source: string): string {
@@ -282,6 +288,8 @@ function sourceHost(source: string): string {
   if (s.includes('alhoshan')) return 'alhoshan.sa';
   if (s.includes('hajer')) return 'hajerhouses.com';
   if (s.includes('sanadak')) return 'sanadak.sa';
+  if (s.includes('eastabha')) return 'eastabha.sa';
+  if (s.includes('aqarcity')) return 'aqarcity.net';
   return 'sa.aqar.fm';
 }
 

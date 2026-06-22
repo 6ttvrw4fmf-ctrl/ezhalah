@@ -1,0 +1,516 @@
+"""East Abha (eastabha.sa / شرق أبها للخدمات العقارية) scraper — Saudi WordPress + WP Residence theme.
+
+شرق أبها للخدمات العقارية is an Asir-based (عسير / Abha) real-estate office. Saudi-owned →
+passes the Saudi-only rule. ~229 listings. No auth, no proxy, cloud-friendly. 8th source.
+
+Data path: a clean public WordPress REST API exposes the list + the taxonomy term names, but NOT
+the numeric specs. So:
+  1. List via /wp-json/wp/v2/estate_property (paginate using the x-wp-totalpages header). Each
+     record carries id, slug, link, title.rendered, content.rendered (Arabic spec text),
+     featured_media, date, modified, and taxonomy term-ID arrays.
+  2. Resolve the 7 taxonomies once (id→Arabic name dicts):
+        property_category        → property type (mixed with some deal words → cleaned)
+        property_action_category → deal type  بيع→Buy | إيجار→Rent | مزاد→SKIP (auctions)
+        property_city            → raw Arabic city
+        property_area            → raw Arabic district/area
+        property_county_state    → raw Arabic region (عسير → Asir)
+        property_features        → amenity list (→ boolean columns + features list)
+        property_status          → raw status label
+  3. Numeric specs are NOT in REST meta → parse the detail page HTML at the listing link. WP
+     Residence renders the main listing's specs as data-attributes on the map pin:
+         data-rooms / data-size / data-bathrooms / data-clean_price
+     plus the price text in .price_area, geo in data-cur_lat / data-cur_long. Area / age can also
+     fall back to the Arabic content text. Gallery photos come from the #property_slider_carousel
+     <a class="prettygalery"> hrefs (full-size) + the featured-media source_url.
+
+DEAL TYPE comes from property_action_category (the clean signal). مزاد (auction) → the whole
+listing is SKIPPED (user decision: NO auctions).
+
+PDPL: this site shows no advertiser name/number in the REST content (verified in recon), but we
+still defensively redact any 05xxxxxxxx / +9665… / wa.me out of title+description and never store
+a name/number anywhere. No REGA advertising-license number is shown on this site (noted in
+additional_info).
+
+Usage:
+  python -m scrapers.eastabha.run --limit 18           # small live validation run (no prune)
+  python -m scrapers.eastabha.run --type all           # full production crawl (+ prune unseen)
+"""
+from __future__ import annotations
+
+import argparse
+import html as ihtml
+import re
+import sys
+import urllib.parse as up
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT.parent) not in sys.path:
+    sys.path.insert(0, str(ROOT.parent))
+
+from scrapers.common import db, http  # noqa: E402
+
+BASE = "https://eastabha.sa"
+LIST_API = f"{BASE}/wp-json/wp/v2/estate_property"
+TAXONOMIES = (
+    "property_category",
+    "property_action_category",
+    "property_city",
+    "property_area",
+    "property_county_state",
+    "property_features",
+    "property_status",
+)
+
+# --- property type (canonical English) from the Arabic property_category term -------------------
+# property_category mixes pure-type terms with a few deal-flavoured ones ("شقه للبيع", "إيجار",
+# "روف للبيع"); we strip the deal words first, then match the residual.
+TYPE_MAP_AR = {
+    "شقة": "Apartment", "شقه": "Apartment", "شقق سكنية": "Apartment", "شقق": "Apartment",
+    "استوديو": "Studio", "ستوديو": "Studio",
+    "دوبلكس": "Duplex", "دوبليكس": "Duplex",
+    "فيلا": "Villa", "فلة": "Villa", "قصر": "Villa",
+    "بيت": "House", "منزل": "House",
+    "دور": "Floor", "دور سكني": "Floor", "دور أرضي": "Floor", "روف": "Floor", "روف للبيع": "Floor",
+    "عمارة": "Building", "عمارة عضم": "Building", "عماره": "Building",
+    "أرض": "Land", "ارض": "Land", "أرض سكنية": "Land", "ارض سكنية": "Land",
+    "أرض زراعية": "Land", "ارض زراعية": "Land", "أرض تجارية": "Commercial Land",
+    "مزرعة": "Farm", "استراحة": "Rest House", "إستراحة": "Rest House", "شاليه": "Chalet",
+    # commercial
+    "محل": "Shop", "محلات تجارية": "Shop", "محلات": "Shop", "معرض": "Showroom",
+    "مكتب": "Office", "مستودع": "Warehouse", "صناعي": "Warehouse",
+    "محطة بنزين": "Gas Station", "كافيه": "Shop", "كافيه - لاونج": "Shop", "تجاري": "Commercial Land",
+}
+# words to strip from a category term before type lookup (deal/status noise mixed into the taxonomy)
+_DEAL_WORDS = ("للبيع", "للايجار", "للإيجار", "إيجار", "ايجار", "بيع", "مزاد", "سكنية", "سكني", "أرضي", "ارضي")
+
+RESIDENTIAL_TYPES = {
+    "Apartment", "Villa", "Floor", "Duplex", "House", "Building", "Studio", "Rest House",
+    "Chalet", "Farm", "Land",
+}
+COMMERCIAL_TYPES = {
+    "Shop", "Office", "Warehouse", "Showroom", "Commercial Land", "Commercial Building",
+    "Gas Station",
+}
+
+# --- city → canonical English + region ----------------------------------------------------------
+CITY_MAP_AR = {
+    "أبها": "Abha", "ابها": "Abha", "احد رفيده الوادين": "Ahad Rafidah", "أحد رفيدة": "Ahad Rafidah",
+    "خميس مشيط": "Khamis Mushait", "النماص": "Al Namas", "تنومة": "Tanomah", "بيشة": "Bisha",
+    "تثليث": "Tathleeth", "محايل": "Muhayil", "ظهران الجنوب": "Dhahran Al Janub", "سراة عبيدة": "Sarat Abidah",
+    "الرياض": "Riyadh", "الخرج": "Al Kharj", "الدوادمي": "Dawadmi", "المجمعة": "Majmaah",
+    "الزلفي": "Zulfi", "القويعية": "Quwaiiyah", "الدرعية": "Diriyah",
+    "جدة": "Jeddah", "مكة المكرمة": "Mecca", "مكة": "Mecca", "الطائف": "Taif", "الجموم": "Al Jumum",
+    "تربة": "Turbah", "المدينة المنورة": "Medina", "العلا": "Al Ula",
+    "الدمام": "Dammam", "الخبر": "Khobar", "الظهران": "Dhahran", "القطيف": "Qatif", "الجبيل": "Jubail",
+    "الأحساء": "Hofuf", "الاحساء": "Hofuf", "الخفجي": "Khafji", "بقيق": "Buqayq",
+    "بريدة": "Buraidah", "الرس": "Ar Rass", "البكيرية": "Bukayriyah", "المذنب": "Muthnib",
+    "تبوك": "Tabuk", "تيماء": "Tayma", "حائل": "Hail", "نجران": "Najran", "جازان": "Jazan", "بيش": "Bish",
+    "الباحة": "Al Baha", "بلجرشي": "Baljurashi", "العقيق": "Al Aqiq", "القريات": "Qurayyat", "البرك": "Al Birk",
+}
+REGION_MAP_AR = {
+    "عسير": "Asir", "الرياض": "Riyadh", "مكة المكرمة": "Makkah", "المدينة المنورة": "Madinah",
+    "الشرقية": "Eastern Province", "القصيم": "Qassim", "تبوك": "Tabuk", "حائل": "Hail",
+    "جازان": "Jazan", "نجران": "Najran", "الباحة": "Al Bahah", "الجوف": "Al Jawf",
+    "الشماليه": "Northern Borders", "الحدود الشمالية": "Northern Borders",
+    "المملكة العربية السعودية": None,  # the country-level term — ignore, not a region
+}
+CITY_TO_REGION = {
+    "Abha": "Asir", "Ahad Rafidah": "Asir", "Khamis Mushait": "Asir", "Al Namas": "Asir",
+    "Tanomah": "Asir", "Bisha": "Asir", "Tathleeth": "Asir", "Muhayil": "Asir",
+    "Dhahran Al Janub": "Asir", "Sarat Abidah": "Asir",
+    "Riyadh": "Riyadh", "Al Kharj": "Riyadh", "Dawadmi": "Riyadh", "Majmaah": "Riyadh",
+    "Zulfi": "Riyadh", "Quwaiiyah": "Riyadh", "Diriyah": "Riyadh",
+    "Jeddah": "Makkah", "Mecca": "Makkah", "Taif": "Makkah", "Al Jumum": "Makkah", "Turbah": "Makkah",
+    "Medina": "Madinah", "Al Ula": "Madinah",
+    "Dammam": "Eastern Province", "Khobar": "Eastern Province", "Dhahran": "Eastern Province",
+    "Qatif": "Eastern Province", "Jubail": "Eastern Province", "Hofuf": "Eastern Province",
+    "Khafji": "Eastern Province", "Buqayq": "Eastern Province",
+    "Buraidah": "Qassim", "Ar Rass": "Qassim", "Bukayriyah": "Qassim", "Muthnib": "Qassim",
+    "Tabuk": "Tabuk", "Tayma": "Tabuk", "Hail": "Hail", "Najran": "Najran",
+    "Jazan": "Jazan", "Bish": "Jazan", "Al Baha": "Al Bahah", "Baljurashi": "Al Bahah", "Al Aqiq": "Al Bahah",
+    "Qurayyat": "Al Jawf", "Al Birk": "Asir",
+}
+
+# --- features (Arabic) → canonical boolean columns ----------------------------------------------
+FEATURE_COL = {
+    "مصعد": "elevator", "اسانسير": "elevator", "صنصير": "elevator",
+    "مطبخ مجهز": "kitchen", "مطبخ": "kitchen",
+    "كراج ملحق": "parking", "كراج": "parking", "موقف": "parking", "مواقف": "parking",
+    "تكييف مركزي": "air_conditioner", "تكييف": "air_conditioner",
+    "كهرباء": "electricity", "ماء": "water_supply", "مياه": "water_supply",
+    "شُرفة ، بلكونة": "balcony_terrace", "شرفة": "balcony_terrace", "بلكونة": "balcony_terrace",
+    "غرفة غسيل": "laundry_room", "سطح خاص": "villa_on_roof",
+    "حديقة": "balcony_terrace",  # closest canonical column
+    "مدخل خاص": "private_entrance", "ألياف بصرية": "optical_fibers",
+}
+
+# action-category Arabic → deal handling
+ACTION_BUY = ("بيع", "استثمار")
+ACTION_RENT = ("إيجار", "ايجار", "تأجير")
+ACTION_AUCTION = ("مزاد",)
+
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+_PHONE_RE = re.compile(r"(?:\+?9665\d{8}|05\d{8}|\b966\s?5\d{8}\b|wa\.me/\S+|واتس\S*\s*[\d٠-٩]{6,})")
+
+
+def _clean(s: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", ihtml.unescape(s or ""))).strip()
+
+
+def _redact(s: str) -> str:
+    """PDPL: strip any phone/WhatsApp out of free text before storing."""
+    return _PHONE_RE.sub("", s or "").strip()
+
+
+def _num(s: Optional[str]) -> Optional[int]:
+    if not s:
+        return None
+    s = str(s).translate(_AR_DIGITS).replace("٬", ",")
+    m = re.search(r"[\d,]+(?:\.\d+)?", s)
+    if not m:
+        return None
+    try:
+        v = float(m.group(0).replace(",", ""))
+        return int(v) if v else None
+    except ValueError:
+        return None
+
+
+def _price_from_text(s: Optional[str]) -> Optional[int]:
+    """Parse a price from free Arabic text, honouring magnitude words: '400 ألف ريال' → 400000,
+    '1.2 مليون' → 1200000. Plain numbers pass through. Sub-1000 results are treated as parse
+    noise (the bug that stored land prices as 400/100 — the 'ألف' was being dropped)."""
+    if not s:
+        return None
+    txt = re.sub(r"<[^>]+>", " ", up.unquote(str(s))).translate(_AR_DIGITS).replace("٬", ",")
+    m = re.search(r"[\d,]+(?:\.\d+)?", txt)
+    if not m:
+        return None
+    try:
+        val = float(m.group(0).replace(",", ""))
+    except ValueError:
+        return None
+    if any(w in txt for w in ("مليون", "ملايين")):
+        val *= 1_000_000
+    elif any(w in txt for w in ("ألف", "الف", "آلاف")):
+        val *= 1_000
+    val = int(val)
+    return val if val >= 1000 else None
+
+
+def _attr(name: str, html: str) -> Optional[str]:
+    """First value of a data-* attribute, read independently of sibling-attribute order."""
+    m = re.search(name + r'="([^"]*)"', html)
+    return m.group(1) if m else None
+
+
+def fetch_taxonomies(get) -> dict[str, dict[int, str]]:
+    out: dict[str, dict[int, str]] = {}
+    for tax in TAXONOMIES:
+        d: dict[int, str] = {}
+        page = 1
+        while True:
+            r = get(f"{BASE}/wp-json/wp/v2/{tax}?per_page=100&page={page}")
+            if not r or r.status_code != 200:
+                break
+            arr = r.json() or []
+            for t in arr:
+                d[int(t["id"])] = (t.get("name") or "").strip()
+            if len(arr) < 100:
+                break
+            page += 1
+        out[tax] = d
+    return out
+
+
+def fetch_list(get) -> list[dict]:
+    out: list[dict] = []
+    page = 1
+    pages = 1
+    while page <= pages:
+        r = get(f"{LIST_API}?per_page=100&page={page}")
+        if not r or r.status_code != 200:
+            break
+        if page == 1:
+            pages = int(r.headers.get("x-wp-totalpages", "1") or "1")
+        out += r.json() or []
+        page += 1
+    return out
+
+
+def _names(p: dict, tax: str, taxd: dict[str, dict[int, str]]) -> list[str]:
+    return [taxd[tax][i] for i in (p.get(tax) or []) if i in taxd.get(tax, {})]
+
+
+def _derive_type(cat_names: list[str]) -> Optional[str]:
+    for raw in cat_names:
+        if TYPE_MAP_AR.get(raw):
+            return TYPE_MAP_AR[raw]
+    # strip deal/status words and retry on the residual token(s)
+    for raw in cat_names:
+        residual = raw
+        for w in _DEAL_WORDS:
+            residual = residual.replace(w, " ")
+        residual = re.sub(r"\s+", " ", residual).strip()
+        for tok in (residual, residual.replace("ة", "ه"), residual.replace("ه", "ة")):
+            if TYPE_MAP_AR.get(tok):
+                return TYPE_MAP_AR[tok]
+        # commercial hints
+        if "تجار" in raw or "محل" in raw or "مكتب" in raw or "مستودع" in raw:
+            return "Commercial Land" if "ارض" in raw or "أرض" in raw else "Shop"
+    return None
+
+
+def parse_detail(html_text: str) -> dict[str, Any]:
+    """Pull numeric specs + geo + gallery from the WP Residence detail page."""
+    out: dict[str, Any] = {}
+    # Read each map-pin attribute INDEPENDENTLY — their order isn't stable, and the old fixed-order
+    # regex silently matched nothing (→ null beds/area) when the order differed.
+    out["bedrooms"] = _num(_attr("data-rooms", html_text))      # 0 → None (lister left it blank)
+    out["bathrooms"] = _num(_attr("data-bathrooms", html_text))
+    size = _attr("data-size", html_text)
+    if size:
+        out["area_m2"] = _num(re.sub(r"<[^>]+>", "", up.unquote(size)))
+    # Price: trust the numeric data-clean_price when > 0, else parse the display text WITH its
+    # ألف/مليون magnitude word (land listings carry clean_price=0 and a "400 ألف ريال" text).
+    clean = _num(_attr("data-clean_price", html_text))
+    out["price"] = clean if (clean and clean > 0) else _price_from_text(_attr("data-price", html_text))
+    if not out.get("price"):
+        pm = re.search(r'class="price_area">(.*?)</div>', html_text, re.S)
+        if pm:
+            out["price"] = _price_from_text(pm.group(1))
+    # geo
+    g = re.search(r'data-cur_lat="([\d.\-]+)"\s+data-cur_long="([\d.\-]+)"', html_text)
+    if g and g.group(1) not in ("", "0"):
+        out["lat"], out["lng"] = g.group(1), g.group(2)
+    # gallery from the carousel's full-size hrefs; fall back to any uploads image on the page so a
+    # non-standard gallery markup still yields photos (build_photos filters theme assets + dedupes).
+    cm = re.search(r'id="property_slider_carousel"(.*?)</ol>', html_text, re.S)
+    block = cm.group(1) if cm else html_text
+    hrefs = re.findall(r'<a href="(https://eastabha\.sa/wp-content/uploads/[^"]+?\.(?:jpe?g|png|webp))"[^>]*class="prettygalery"', block, re.I)
+    if not hrefs:
+        hrefs = re.findall(r'https://eastabha\.sa/wp-content/uploads/[^"\'\s]+?\.(?:jpe?g|png|webp)', html_text, re.I)
+    out["gallery"] = hrefs
+    return out
+
+
+def _content_specs(content: str) -> dict[str, Any]:
+    """Best-effort numeric pulls from the Arabic content text (area / age)."""
+    txt = _clean(content)
+    out: dict[str, Any] = {}
+    am = re.search(r"(?:المساحة|مساحة|مساحه)\D{0,6}([\d٠-٩,\.]+)\s*(?:م|متر)", txt)
+    if am:
+        out["area_m2"] = _num(am.group(1))
+    gm = re.search(r"عمر\D{0,8}([\d٠-٩]+)\s*(?:سنة|سنوات|عام)", txt)
+    if gm:
+        out["property_age"] = _num(gm.group(1))
+    return out
+
+
+def _is_real_photo(u: str) -> bool:
+    low = u.lower()
+    if any(x in low for x in ("/themes/", "/plugins/", "logo", "placeholder", "icon", "avatar", "artboard")):
+        return False
+    return True
+
+
+def _strip_size(u: str) -> str:
+    # turn ...-835x467.jpg into the original (...-scaled or bare). Keep -scaled, drop -WxH.
+    return re.sub(r"-\d{2,4}x\d{2,4}(?=\.(?:jpe?g|png|webp)$)", "", u, flags=re.I)
+
+
+def build_photos(featured_src: Optional[str], gallery: list[str]) -> list[str]:
+    seen: list[str] = []
+    for u in ([featured_src] if featured_src else []) + gallery:
+        if not u or not _is_real_photo(u):
+            continue
+        u = _strip_size(u)
+        if u not in seen:
+            seen.append(u)
+    return seen
+
+
+def _listing_url(p: dict) -> str:
+    """The real, working public URL. eastabha.sa renders pages at the SLUG path
+    (/properties/<slug>/); the post-id path /properties/<id>/ 404s for most listings, so we store
+    and fetch the slug `link` that the REST API gives us."""
+    link = p.get("link")
+    if isinstance(link, str) and link.startswith("http"):
+        return link
+    return f"{BASE}/properties/{p.get('id')}/"
+
+
+def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured_src: Optional[str]):
+    """Return (row, category) or (None, None) if it must be skipped (auction / unmappable)."""
+    actions = _names(p, "property_action_category", taxd)
+    if any(any(a in name for a in ACTION_AUCTION) for name in actions):
+        return None, None  # SKIP auctions entirely
+    is_rent = any(any(a in name for a in ACTION_RENT) for name in actions)
+    # if action is missing, infer rent from category words
+    cat_names = _names(p, "property_category", taxd)
+    if not actions and any("إيجار" in c or "ايجار" in c or "للايجار" in c for c in cat_names):
+        is_rent = True
+    if any("مزاد" in c for c in cat_names):  # auction also shows up in category sometimes
+        return None, None
+
+    property_type = _derive_type(cat_names) or "Land"  # default residential land when ambiguous
+    category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
+
+    city_ar = (_names(p, "property_city", taxd) or [""])[0]
+    area_names = _names(p, "property_area", taxd)
+    district_ar = area_names[0] if area_names else None
+    region_names = [r for r in _names(p, "property_county_state", taxd)]
+    region_ar = next((r for r in region_names if REGION_MAP_AR.get(r)), None) or next(
+        (r for r in region_names if r != "المملكة العربية السعودية"), None
+    )
+    city = CITY_MAP_AR.get(city_ar)
+    region = (REGION_MAP_AR.get(region_ar) if region_ar else None) or CITY_TO_REGION.get(city or "") or "Asir"
+
+    price = detail.get("price")
+    area_m2 = detail.get("area_m2") or _content_specs((p.get("content") or {}).get("rendered", "")).get("area_m2")
+    age = _content_specs((p.get("content") or {}).get("rendered", "")).get("property_age")
+    ppm = None
+    if price and area_m2:
+        ppm = round(price / area_m2)
+
+    title = _redact(_clean((p.get("title") or {}).get("rendered", "")))
+    description = _redact(_clean((p.get("content") or {}).get("rendered", "")))[:4000] or None
+
+    features_ar = _names(p, "property_features", taxd)
+    status_ar = (_names(p, "property_status", taxd) or [None])[0]
+
+    amenity_cols: dict[str, bool] = {}
+    for fa in features_ar:
+        col = FEATURE_COL.get(fa)
+        if col:
+            amenity_cols[col] = True
+
+    photos = build_photos(featured_src, detail.get("gallery") or [])
+
+    add: dict[str, Any] = {
+        "city_ar": city_ar or None,
+        "region_ar": region_ar or None,
+        "district_ar": district_ar,
+        "property_category_ar": cat_names or None,
+        "action_category_ar": actions or None,
+        "features_ar": features_ar or None,
+        "status_ar": status_ar,
+        "published": p.get("date"),
+        "modified": p.get("modified"),
+        "rega_license": None,  # this site shows no REGA advertising-license number
+        "rega_note": "No REGA advertising license number is displayed on eastabha.sa.",
+    }
+    if detail.get("lat"):
+        add["lat"], add["lng"] = detail["lat"], detail["lng"]
+
+    row = {
+        "ad_number": f"EA{p.get('id')}",
+        "listing_url": _listing_url(p),
+        "scraped_at": datetime.now(timezone.utc).isoformat(),
+        "active": True,
+        "source": "Eastabha",
+        "property_type": property_type,
+        "transaction_type": "Rent" if is_rent else "Buy",
+        "area_m2": area_m2,
+        "bedrooms": detail.get("bedrooms") or None,
+        "bathrooms": detail.get("bathrooms") or None,
+        "property_age": age,
+        "price_total": price if not is_rent else None,
+        "price_annual": price if is_rent else None,
+        "price_per_meter": ppm,
+        "rent_period": "annual" if is_rent else None,
+        "city": city,
+        "region": region,
+        "neighborhood": district_ar,
+        "rega_location_verified": False,
+        "photo_urls": photos,
+        "title": title or None,
+        "description": description,
+        "date_added": p.get("date"),
+        "last_update": p.get("modified"),
+        "additional_info": add,
+        **amenity_cols,
+    }
+    return row, category
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="East Abha (eastabha.sa) scraper")
+    ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="small validation run: scrape only N listings, no prune, no run-row")
+    args = ap.parse_args()
+
+    get = http.get
+    small = args.limit > 0
+
+    taxd = fetch_taxonomies(get)
+    print(f"taxonomies: " + ", ".join(f"{k}={len(v)}" for k, v in taxd.items()))
+    listings = fetch_list(get)
+    print(f"East Abha: {len(listings)} listings from REST")
+
+    run_id = None if small else db.begin_run("eastabha")
+    res: list[dict] = []
+    com: list[dict] = []
+    skipped_auction = 0
+    seen = 0
+    try:
+        for p in listings:
+            pid = p.get("id")
+            if not pid:
+                continue
+            r = get(_listing_url(p))
+            detail = parse_detail(r.text) if r and r.status_code == 200 else {}
+            featured_src = None
+            fm = p.get("featured_media")
+            if fm:
+                mr = get(f"{BASE}/wp-json/wp/v2/media/{fm}")
+                if mr and mr.status_code == 200:
+                    featured_src = (mr.json() or {}).get("source_url")
+            row, cat = map_listing(p, taxd, detail, featured_src)
+            if not row:
+                skipped_auction += 1
+                continue
+            if args.type != "all" and cat != args.type:
+                continue
+            (com if cat == "commercial" else res).append(row)
+            seen += 1
+            if small and seen >= args.limit:
+                break
+
+        if res:
+            db.upsert_eastabha_residential_batch(res)
+        if com:
+            db.upsert_eastabha_commercial_batch(com)
+
+        pruned = 0
+        if not small:  # prune unseen only on full runs
+            c = db.sb()
+            for tbl, rows_seen in (("eastabha_residential_listings", res), ("eastabha_commercial_listings", com)):
+                seen_ads = {r["ad_number"] for r in rows_seen}
+                existing = (c.table(tbl).select("ad_number").eq("source", "Eastabha").eq("active", True).execute().data) or []
+                gone = [e["ad_number"] for e in existing if e["ad_number"] not in seen_ads]
+                for i in range(0, len(gone), 200):
+                    c.table(tbl).update({"active": False}).in_("ad_number", gone[i:i + 200]).execute()
+                pruned += len(gone)
+
+        print(f"✓ Eastabha: {len(res)} residential + {len(com)} commercial upserted, "
+              f"{skipped_auction} auctions skipped, {pruned} stale pruned")
+        if run_id:
+            db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
+                       notes=f"auctions_skipped={skipped_auction} pruned={pruned}")
+        return 0
+    except Exception as e:
+        if run_id:
+            db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])
+        print(f"✗ {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
