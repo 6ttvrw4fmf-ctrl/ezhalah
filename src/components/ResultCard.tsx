@@ -258,6 +258,8 @@ const RAGHDAN_LOGO = require('../../assets/images/raghdan.jpg');
 const EAQARTABUK_LOGO = require('../../assets/images/eaqartabuk.jpg');
 const SATEL_LOGO = require('../../assets/images/satel.jpg');
 const SADIN_LOGO = require('../../assets/images/sadin.jpg');
+const TOOR_LOGO = require('../../assets/images/toor.jpg');
+const MUSTQR_LOGO = require('../../assets/images/mustaqr.jpg');
 // Card hero photo with graceful fallback. Some sources (e.g. aqarcity) carry photo URLs that have
 // been deleted on their CDN and 302→/notfound, or are only published as thumbnails — listing one
 // dead URL would leave the card with an empty grey block. We try each URL in order and, if every
@@ -300,6 +302,11 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('eaqartabuk')) return <Image source={EAQARTABUK_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('satel')) return <Image source={SATEL_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('sadin')) return <Image source={SADIN_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('toor')) return <Image source={TOOR_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('mustqr')) return <Image source={MUSTQR_LOGO} style={card.hostBadge} contentFit="contain" />;
+  // Text-chips for ramzalqasim + fursaghyr — still waiting on their logo images.
+  if (s.includes('ramzalqasim')) return <View style={[card.hostBadge, card.ramzBadge]}><Text style={card.badgeText}>رمز{'\n'}القصيم</Text></View>;
+  if (s.includes('fursaghyr')) return <View style={[card.hostBadge, card.fursaBadge]}><Text style={card.badgeText}>فرصة{'\n'}غير</Text></View>;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -318,6 +325,10 @@ function sourceName(source: string): string {
   if (s.includes('eaqartabuk')) return 'Candles';
   if (s.includes('satel')) return 'Satel';
   if (s.includes('sadin')) return 'Sadin for Real Estate';
+  if (s.includes('toor')) return 'TOOR';
+  if (s.includes('mustqr')) return 'Mustaqarr Real Estate';
+  if (s.includes('ramzalqasim')) return 'Ramz Al Qassim Real Estate Investment';
+  if (s.includes('fursaghyr')) return 'Fursa Ghyr Real Estate';
   return 'AQAR';
 }
 function sourceHost(source: string): string {
@@ -334,6 +345,10 @@ function sourceHost(source: string): string {
   if (s.includes('eaqartabuk')) return 'eaqartabuk.com';
   if (s.includes('satel')) return 'satel.sa';
   if (s.includes('sadin')) return 'sadin.com.sa';
+  if (s.includes('toor')) return 'toor.ooo';
+  if (s.includes('mustqr')) return 'mustqr.sa';
+  if (s.includes('ramzalqasim')) return 'ramzalqasim.com';
+  if (s.includes('fursaghyr')) return 'fursaghyr.com';
   return 'sa.aqar.fm';
 }
 
@@ -475,6 +490,11 @@ const card = StyleSheet.create({
   aqargateBadge: { borderRadius: 8, backgroundColor: '#0d6e63', alignItems: 'center', justifyContent: 'center' },
   hajerBadge: { borderRadius: 8, backgroundColor: '#6b4a2f', alignItems: 'center', justifyContent: 'center' },
   sanadakBadge: { borderRadius: 8, backgroundColor: '#1f7a5a', alignItems: 'center', justifyContent: 'center' },
+  toorBadge:   { borderRadius: 8, backgroundColor: '#2a4d6e', alignItems: 'center', justifyContent: 'center' },
+  mustqrBadge: { borderRadius: 8, backgroundColor: '#7c3a3a', alignItems: 'center', justifyContent: 'center' },
+  ramzBadge:   { borderRadius: 8, backgroundColor: '#3d5a2b', alignItems: 'center', justifyContent: 'center' },
+  fursaBadge:  { borderRadius: 8, backgroundColor: '#8a6a1f', alignItems: 'center', justifyContent: 'center' },
+  badgeText: { color: '#fff', fontWeight: '800', fontSize: 11, lineHeight: 13, textAlign: 'center' },
   hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },
   featGrid: { flexDirection: 'row', flexWrap: 'wrap' },

@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 90   # covers aqarcity (~2.3k detail pages behind Cloudflare) + Sanadak; rest are fast
     strategy:
       fail-fast: false    # one source failing never blocks the others
-      max-parallel: 11
+      max-parallel: 15
       matrix:
         include:
           - { source: aldarim,  cmd: "python -m scrapers.aldarim.run --pages 50" }
@@ -42,6 +42,10 @@ jobs:
           - { source: eaqartabuk, cmd: "python -m scrapers.eaqartabuk.run --type all" }
           - { source: satel,      cmd: "python -m scrapers.satel.run --type all" }
           - { source: sadin,      cmd: "python -m scrapers.sadin.run --type all" }
+          - { source: toor,        cmd: "python -m scrapers.toor.run --type all" }
+          - { source: mustqr,      cmd: "python -m scrapers.mustqr.run --type all" }
+          - { source: ramzalqasim, cmd: "python -m scrapers.ramzalqasim.run --type all" }
+          - { source: fursaghyr,   cmd: "python -m scrapers.fursaghyr.run --type all" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

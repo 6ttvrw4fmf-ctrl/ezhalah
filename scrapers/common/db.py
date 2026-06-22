@@ -226,3 +226,43 @@ def upsert_sadin_residential_batch(rows: list[dict[str, Any]]) -> None:
 def upsert_sadin_commercial_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Sadin commercial rows into their own table."""
     _wasalt_batch("sadin_commercial_listings", rows)
+
+
+def upsert_toor_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Toor (toor.ooo) residential rows (source='Toor')."""
+    _wasalt_batch("toor_residential_listings", rows)
+
+
+def upsert_toor_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Toor commercial rows into their own table."""
+    _wasalt_batch("toor_commercial_listings", rows)
+
+
+def upsert_mustqr_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Mustqr (mustqr.sa) residential rows (source='Mustqr')."""
+    _wasalt_batch("mustqr_residential_listings", rows)
+
+
+def upsert_mustqr_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Mustqr commercial rows into their own table."""
+    _wasalt_batch("mustqr_commercial_listings", rows)
+
+
+def upsert_ramzalqasim_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Ramz Al-Qassim (ramzalqasim.com) residential rows (source='Ramzalqasim')."""
+    _wasalt_batch("ramzalqasim_residential_listings", rows)
+
+
+def upsert_ramzalqasim_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Ramz Al-Qassim commercial rows into their own table."""
+    _wasalt_batch("ramzalqasim_commercial_listings", rows)
+
+
+def upsert_fursaghyr_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Fursa Ghyr (fursaghyr.com) residential rows (source='Fursaghyr')."""
+    _wasalt_batch("fursaghyr_residential_listings", rows)
+
+
+def upsert_fursaghyr_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Fursa Ghyr commercial rows into their own table."""
+    _wasalt_batch("fursaghyr_commercial_listings", rows)
