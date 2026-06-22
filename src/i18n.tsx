@@ -550,7 +550,7 @@ const AR: Record<string, string> = {
   'East Abha Real Estate':             'شرق أبها للخدمات العقارية',
   'Aqar City':                         'عقار ستي',
   'Raghdan Real Estate':               'رغدان للعقارات',
-  'Eaqar Tabuk':                       'عقار تبوك',
+  'Candles':                           'كاندلز عقار تبوك',
   'Satel':                             'ساتل العقارية',
   'Sadin for Real Estate':             'مكتب سدين للعقارات',
   'Deal':                              'ديل',
