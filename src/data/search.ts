@@ -793,12 +793,12 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
           if (pick.type) usedTypes.add(pick.type);
         }
       }
-      // Tail = the existing region-spread, with the top-row picks removed (no dupes).
-      const remaining = listings.filter((l) => !usedIds.has(l.id));
-      const byRegion: Record<string, Listing[]> = {};
-      for (const l of remaining) (byRegion[CITY_TO_REGION[l.city] || 'Other'] ||= []).push(l);
-      const tail = interleave(Object.values(byRegion).map(diversifyBySource));
-      listings = [...topRow, ...tail];
+      // Country-wide = EXACTLY one card per platform (the full roster, ordered by catalog size).
+      // No extra region "tail" — the user wants to see the platforms cleanly, ONE card each, and
+      // NOT be padded out to 25. So a country-wide "show me everywhere" returns exactly N cards =
+      // the number of platforms that have a matching listing. (user: "just show me the 20 only".)
+      void usedIds;
+      listings = topRow;
     } else {
       // City/area search → mix the two sources so neither dominates the top. Without this, Wasalt's
       // higher id range sweeps the closeness id-tiebreak and the user "doesn't see Aqar anymore".
