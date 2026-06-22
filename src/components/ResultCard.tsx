@@ -292,6 +292,11 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('sanadak')) return <Image source={SANADAK_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('eastabha')) return <Image source={EASTABHA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('aqarcity')) return <Image source={AQARCITY_LOGO} style={card.hostBadge} contentFit="contain" />;
+  // Placeholder text-chips until the user supplies these 4 platforms' logo images.
+  if (s.includes('raghdan')) return <View style={[card.hostBadge, card.raghdanBadge]}><Text style={card.badgeText}>رغدان</Text></View>;
+  if (s.includes('eaqartabuk')) return <View style={[card.hostBadge, card.tabukBadge]}><Text style={card.badgeText}>عقار{'\n'}تبوك</Text></View>;
+  if (s.includes('satel')) return <View style={[card.hostBadge, card.satelBadge]}><Text style={card.badgeText}>ساتل</Text></View>;
+  if (s.includes('sadin')) return <View style={[card.hostBadge, card.sadinBadge]}><Text style={card.badgeText}>سدين</Text></View>;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -306,6 +311,10 @@ function sourceName(source: string): string {
   if (s.includes('sanadak')) return 'Sanadak';
   if (s.includes('eastabha')) return 'East Abha Real Estate';
   if (s.includes('aqarcity')) return 'Aqar City';
+  if (s.includes('raghdan')) return 'Raghdan Real Estate';
+  if (s.includes('eaqartabuk')) return 'Eaqar Tabuk';
+  if (s.includes('satel')) return 'Satel';
+  if (s.includes('sadin')) return 'Sadin for Real Estate';
   return 'AQAR';
 }
 function sourceHost(source: string): string {
@@ -318,6 +327,10 @@ function sourceHost(source: string): string {
   if (s.includes('sanadak')) return 'sanadak.sa';
   if (s.includes('eastabha')) return 'eastabha.sa';
   if (s.includes('aqarcity')) return 'aqarcity.net';
+  if (s.includes('raghdan')) return 'raghdan.sa';
+  if (s.includes('eaqartabuk')) return 'eaqartabuk.com';
+  if (s.includes('satel')) return 'satel.sa';
+  if (s.includes('sadin')) return 'sadin.com.sa';
   return 'sa.aqar.fm';
 }
 
@@ -459,6 +472,11 @@ const card = StyleSheet.create({
   aqargateBadge: { borderRadius: 8, backgroundColor: '#0d6e63', alignItems: 'center', justifyContent: 'center' },
   hajerBadge: { borderRadius: 8, backgroundColor: '#6b4a2f', alignItems: 'center', justifyContent: 'center' },
   sanadakBadge: { borderRadius: 8, backgroundColor: '#1f7a5a', alignItems: 'center', justifyContent: 'center' },
+  raghdanBadge: { borderRadius: 8, backgroundColor: '#7a4ea3', alignItems: 'center', justifyContent: 'center' },
+  tabukBadge:   { borderRadius: 8, backgroundColor: '#0f6e8c', alignItems: 'center', justifyContent: 'center' },
+  satelBadge:   { borderRadius: 8, backgroundColor: '#b8862b', alignItems: 'center', justifyContent: 'center' },
+  sadinBadge:   { borderRadius: 8, backgroundColor: '#43607a', alignItems: 'center', justifyContent: 'center' },
+  badgeText: { color: '#fff', fontWeight: '800', fontSize: 11, lineHeight: 13, textAlign: 'center' },
   hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },
   featGrid: { flexDirection: 'row', flexWrap: 'wrap' },

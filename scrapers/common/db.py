@@ -186,3 +186,43 @@ def upsert_aqarcity_residential_batch(rows: list[dict[str, Any]]) -> None:
 def upsert_aqarcity_commercial_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Aqar City commercial rows into their own table."""
     _wasalt_batch("aqarcity_commercial_listings", rows)
+
+
+def upsert_raghdan_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Raghdan (raghdan.sa) residential rows (source='Raghdan')."""
+    _wasalt_batch("raghdan_residential_listings", rows)
+
+
+def upsert_raghdan_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Raghdan commercial rows into their own table."""
+    _wasalt_batch("raghdan_commercial_listings", rows)
+
+
+def upsert_eaqartabuk_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Eaqar Tabuk (eaqartabuk.com) residential rows (source='Eaqartabuk')."""
+    _wasalt_batch("eaqartabuk_residential_listings", rows)
+
+
+def upsert_eaqartabuk_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Eaqar Tabuk commercial rows into their own table."""
+    _wasalt_batch("eaqartabuk_commercial_listings", rows)
+
+
+def upsert_satel_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Satel (satel.sa) residential rows (source='Satel')."""
+    _wasalt_batch("satel_residential_listings", rows)
+
+
+def upsert_satel_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Satel commercial rows into their own table."""
+    _wasalt_batch("satel_commercial_listings", rows)
+
+
+def upsert_sadin_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Sadin (sadin.com.sa) residential rows (source='Sadin')."""
+    _wasalt_batch("sadin_residential_listings", rows)
+
+
+def upsert_sadin_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert Sadin commercial rows into their own table."""
+    _wasalt_batch("sadin_commercial_listings", rows)

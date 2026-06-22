@@ -22,6 +22,10 @@ export const PLATFORMS: Platform[] = [
   { name: 'Sanadak', domain: 'sanadak.sa', brand: 'Sanadak', phone: '+966 5X XXX 1200', allowsRent: true, allowsBuy: true },
   { name: 'Eastabha', domain: 'eastabha.sa', brand: 'East Abha Real Estate', phone: '+966 5X XXX 6662', allowsRent: true, allowsBuy: true },
   { name: 'Aqarcity', domain: 'aqarcity.net', brand: 'Aqar City', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Raghdan', domain: 'raghdan.sa', brand: 'Raghdan Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Eaqartabuk', domain: 'eaqartabuk.com', brand: 'Eaqar Tabuk', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Satel', domain: 'satel.sa', brand: 'Satel', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Sadin', domain: 'sadin.com.sa', brand: 'Sadin for Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Deal', domain: 'dealapp.sa', brand: 'Deal', phone: '+966 5X XXX 7700', allowsRent: true, allowsBuy: true },
 ];
 

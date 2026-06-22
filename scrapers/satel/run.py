@@ -1,0 +1,391 @@
+"""Satel (satel.sa / شركة ساتل العقارية) scraper — Saudi real-estate company, public JSON API.
+
+Satel is a Riyadh-focused, rent-heavy property company (boutique catalog ~196 listings, almost
+entirely Riyadh; a handful of Sale units). Saudi company, REGA-compliant → passes the Saudi-only
+rule. No auth, no proxy, cloud-friendly (open JSON API on apiv2.satel.sa).
+
+API (no auth, no key):
+  GET https://apiv2.satel.sa/categories/all                     → taxonomy (Residential/Commercial)
+  GET https://apiv2.satel.sa/property/filter?ver=2&limit=1000   → {data:[...], totalCount}
+       (the list item IS the full record — there's no richer detail endpoint we need.)
+
+Field map (Satel item → our schema):
+  slug                         → listing_url  https://listings.satel.sa/property/<slug>
+  propertyNumber               → ad_number  (ST<propertyNumber>; falls back to ST<_id>)
+  type  Rent|Buy(Sale)         → transaction_type Rent|Buy
+  catName Residential|Commercial → table routing (+ subCatName for the canonical type)
+  subCatName                   → property_type (TYPE_MAP)
+  price + priceGroup           → annual rent | monthly rent (rent_period) | Buy total (onetime)
+  floorArea (sqm)              → area_m2 ; beds/baths → bedrooms/bathrooms
+  address.{cityEn/Ar, subCityEn/Ar(district), postalCode, lat, lng} → city/region/neighborhood + geo
+  featuredImage / imageList[]  → photo_urls (filepath = public unsigned Spaces URL)
+  furnishing/kitchen/acType/parking*/status/createdAt/title* → additional_info
+
+PDPL: the Satel API returns NO advertiser/agent name or phone — but we still defensively redact
+any phone-like token from title/description and never store contact fields.
+
+Usage:  python -m scrapers.satel.run [--type residential|commercial|all] [--limit N] [--dry]
+        --limit N  → small validation run (first N mapped rows, REAL upsert, NO prune)
+        (full run = no --limit: whole catalog + prune of unseen on full runs only)
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+from curl_cffi import requests as cc
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT.parent) not in sys.path:
+    sys.path.insert(0, str(ROOT.parent))
+
+from scrapers.common import db, normalize  # noqa: E402
+
+SOURCE = "Satel"
+AD_PREFIX = "ST"
+DEFAULT_REGION = "Riyadh"  # Satel is a Riyadh company; almost everything is Riyadh.
+
+BASE = "https://apiv2.satel.sa"
+LISTING_BASE = "https://listings.satel.sa/property"
+FILTER_URL = f"{BASE}/property/filter?ver=2&limit=1000"
+CATEGORIES_URL = f"{BASE}/categories/all"
+MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
+
+# Satel subCatName → our canonical ENGLISH taxonomy.
+TYPE_MAP = {
+    "Villas": "Villa",
+    "Apartments": "Apartment",
+    "Compounds": "Building",        # residential compound → Building (closest canonical residential)
+    "Studio": "Studio",
+    "Duplex": "Duplex",
+    "Floor": "Floor",
+    # commercial
+    "Office Space": "Office",
+    "Office": "Office",
+    "Showroom": "Showroom",
+    "Shop": "Shop",
+    "Warehouse": "Warehouse",
+}
+COMMERCIAL_TYPES = {"Office", "Showroom", "Shop", "Warehouse"}
+
+# Phone / WhatsApp patterns to REDACT from any free text (PDPL).
+_PHONE_RE = re.compile(
+    r"(?:\+?9665\d{8}|\b05\d{8}\b|\b9200\d{4,6}\b|\b966\d{8,9}\b|wa\.me/\S+|(?:whatsapp|واتس\S*)\s*[:：]?\s*\+?\d[\d ]{6,})",
+    re.IGNORECASE,
+)
+
+
+def _redact(text: Optional[str]) -> Optional[str]:
+    if not text:
+        return text
+    cleaned = _PHONE_RE.sub("", str(text)).strip()
+    return cleaned or None
+
+
+_last = 0.0
+
+
+def _throttle() -> None:
+    global _last
+    wait = _last + MIN_INTERVAL - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+    _last = time.monotonic()
+
+
+def session() -> cc.Session:
+    s = cc.Session(impersonate="chrome124")
+    s.headers.update({"Accept": "application/json"})
+    return s
+
+
+def _num(v: Any) -> Optional[float]:
+    try:
+        if v in (None, "", "0"):
+            return None
+        f = float(v)
+        return f if f != 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _int(v: Any) -> Optional[int]:
+    f = _num(v)
+    return int(f) if f is not None else None
+
+
+def fetch_all(s: cc.Session) -> tuple[list[dict], int]:
+    _throttle()
+    for attempt in range(3):
+        try:
+            r = s.get(FILTER_URL, timeout=60)
+        except Exception:
+            time.sleep(2 * (attempt + 1)); continue
+        if r.status_code != 200:
+            time.sleep(2 * (attempt + 1)); continue
+        j = r.json()
+        data = j.get("data") if isinstance(j, dict) else j
+        total = (j.get("totalCount") if isinstance(j, dict) else None) or len(data or [])
+        return (data or []), int(total)
+    return [], 0
+
+
+def _photo_urls(p: dict) -> list[str]:
+    """Full-size public Spaces URLs. Use `filepath` (unsigned, no AWS query string), NOT
+    `fileAccessPath` (presigned + expiring). Dedupe, keep order, drop empties."""
+    urls: list[str] = []
+    seen: set[str] = set()
+    imgs = p.get("imageList") or []
+    if not imgs:
+        fi = p.get("featuredImage")
+        if isinstance(fi, dict):
+            imgs = [fi]
+    for img in imgs:
+        if not isinstance(img, dict):
+            continue
+        fp = img.get("filepath")
+        if isinstance(fp, str) and fp.startswith("http") and fp not in seen:
+            # strip an accidental presign query if present; keep the clean object URL.
+            clean = fp.split("?", 1)[0]
+            if clean not in seen:
+                seen.add(clean); seen.add(fp)
+                urls.append(clean)
+    return urls
+
+
+def _additional_info(p: dict, addr: dict) -> dict[str, Any]:
+    info: dict[str, Any] = {}
+    # raw Arabic location (ALWAYS stored per the cross-scraper convention).
+    city_ar = p.get("cityAr") or addr.get("cityAr")
+    dist_ar = p.get("subCityAr") or addr.get("subCityAr")
+    if city_ar:
+        info["city_ar"] = city_ar
+    info["region_ar"] = "الرياض"  # Satel = Riyadh region
+    if dist_ar:
+        info["district_ar"] = dist_ar
+
+    lat, lng = _num(p.get("lat") or addr.get("lat")), _num(p.get("lng") or addr.get("lng"))
+    if lat is not None and lng is not None:
+        info["geo"] = {"lat": lat, "lng": lng}
+
+    for src_key, dst_key in (
+        ("furnishing", "furnishing"),
+        ("kitchen", "kitchen"),
+        ("acType", "air_conditioning_type"),
+        ("parkingType", "parking_type"),
+        ("status", "availability_status"),
+        ("priceGroup", "price_group"),
+        ("subCatName", "sub_category"),
+        ("catName", "category"),
+        ("propertyNumber", "property_number"),
+    ):
+        v = p.get(src_key)
+        if v not in (None, "", []):
+            info[dst_key] = v
+
+    if _int(p.get("parkingSpots")):
+        info["parking_spots"] = _int(p.get("parkingSpots"))
+
+    pc = addr.get("postalCode")
+    if pc:
+        info["postal_code"] = pc
+
+    ca = p.get("createdAt")
+    if ca:
+        info["created_at"] = ca
+
+    vt = p.get("virtualTour")
+    if vt:
+        info["virtual_tour"] = vt
+
+    # bilingual titles (redacted), useful for search/display
+    t_en = _redact(p.get("titleEn"))
+    t_ar = _redact(p.get("titleAr"))
+    if t_en:
+        info["title_en"] = t_en
+    if t_ar:
+        info["title_ar"] = t_ar
+    return info
+
+
+def map_listing(p: dict) -> tuple[Optional[dict], str]:
+    addr = p.get("address") or {}
+
+    pnum = (p.get("propertyNumber") or "").strip()
+    ad_id = pnum or str(p.get("_id") or "").strip()
+    if not ad_id:
+        return None, "residential"
+
+    sub = (p.get("subCatName") or "").strip()
+    property_type = TYPE_MAP.get(sub)
+    cat_name = (p.get("catName") or "").strip().lower()
+    if not property_type:
+        # fall back on category so we never silently drop a known unit
+        property_type = "Office" if cat_name == "commercial" else "Apartment"
+    category = "commercial" if (property_type in COMMERCIAL_TYPES or cat_name == "commercial") else "residential"
+
+    raw_type = (p.get("type") or "").strip().lower()
+    is_rent = raw_type == "rent"
+    transaction_type = "Rent" if is_rent else "Buy"
+
+    price_group = (p.get("priceGroup") or "").strip().lower()
+    price = _int(p.get("price"))
+    if price is not None and price < 1000:  # SANITY: reject absurdly-low prices
+        price = None
+
+    price_total = price_annual = None
+    rent_period = None
+    if is_rent:
+        rent_period = "monthly" if price_group == "monthly" else "annual"
+        price_annual = price
+    else:
+        price_total = price
+
+    area = _num(p.get("floorArea"))
+    if area is not None and (area < 5 or area > 1_000_000):  # SANITY guard
+        area = None
+    area_m2 = int(area) if area is not None else None
+
+    # bedrooms: null for commercial/land or absurd counts
+    beds = _int(p.get("beds"))
+    if category == "commercial" or (beds is not None and beds > 20):
+        beds = None
+    baths = _int(p.get("baths"))
+    if baths is not None and baths > 20:
+        baths = None
+
+    price_per_meter = None
+    if price_total and area_m2:
+        price_per_meter = round(price_total / area_m2)
+
+    # city / region / neighborhood — Satel is overwhelmingly Riyadh; normalize messy cityEn values.
+    raw_city_en = (p.get("cityEn") or addr.get("cityEn") or "").strip()
+    raw_city_ar = (p.get("cityAr") or addr.get("cityAr") or "").strip()
+    city = normalize.map_city(raw_city_ar) or normalize.map_city(raw_city_en)
+    if not city:
+        # cityEn is noisy ("Al Riyadh", "RIYADH", Arabic) → default to Riyadh.
+        city = "Riyadh" if (not raw_city_en or "riyadh" in raw_city_en.lower() or raw_city_ar) else (raw_city_en or "Riyadh")
+    region = DEFAULT_REGION
+    neighborhood = (p.get("subCityEn") or addr.get("subCityEn") or "").strip() or None
+
+    slug = (p.get("slug") or "").strip()
+    listing_url = f"{LISTING_BASE}/{slug}" if slug else f"{LISTING_BASE}/{p.get('_id')}"
+
+    title = _redact(p.get("titleAr")) or _redact(p.get("titleEn")) or _redact(p.get("nameEn"))
+
+    row: dict[str, Any] = {
+        "ad_number": f"{AD_PREFIX}{ad_id}",
+        "listing_url": listing_url,
+        "source": SOURCE,
+        "active": True,
+        "scraped_at": datetime.now(timezone.utc).isoformat(),
+        "property_type": property_type,
+        "transaction_type": transaction_type,
+        "area_m2": area_m2,
+        "bedrooms": beds,
+        "bathrooms": baths,
+        "price_total": price_total,
+        "price_annual": price_annual,
+        "price_per_meter": price_per_meter,
+        "rent_period": rent_period,
+        "city": city,
+        "region": region,
+        "neighborhood": neighborhood,
+        "zip_code": (addr.get("postalCode") or None) or None,
+        "parking": bool(p.get("parking")),
+        "kitchen": bool(p.get("kitchen")),
+        "title": title,
+        "photo_urls": _photo_urls(p),
+        "additional_info": _additional_info(p, addr),
+    }
+    return row, category
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
+    ap.add_argument("--limit", type=int, default=None,
+                    help="small validation run: map+upsert only the first N rows, NO prune")
+    ap.add_argument("--dry", action="store_true", help="map only, no DB write")
+    args = ap.parse_args()
+
+    s = session()
+    data, total = fetch_all(s)
+    print(f"Satel: fetched {len(data)} of {total} listings")
+    if not data:
+        print("✗ no data returned")
+        return 1
+
+    is_small = args.limit is not None
+    run_id = None if (args.dry or is_small) else db.begin_run("satel")
+
+    res: list[dict] = []
+    com: list[dict] = []
+    seen = 0
+    try:
+        for p in data:
+            row, cat = map_listing(p)
+            if not row:
+                continue
+            if args.type != "all" and cat != args.type:
+                continue
+            (com if cat == "commercial" else res).append(row)
+            seen += 1
+            if is_small and seen >= args.limit:
+                break
+
+        print(f"Mapped {len(res)} residential + {len(com)} commercial")
+
+        if args.dry:
+            for r in (res + com)[:8]:
+                print("  ", {k: r[k] for k in ("ad_number", "property_type", "transaction_type",
+                                                "city", "region", "neighborhood", "area_m2",
+                                                "bedrooms", "price_total", "price_annual", "rent_period")})
+                print("     url:", r["listing_url"])
+                print("     photo:", (r["photo_urls"] or ["(none)"])[0][:90], f"({len(r['photo_urls'])} total)")
+            return 0
+
+        if res:
+            db.upsert_satel_residential_batch(res)
+        if com:
+            db.upsert_satel_commercial_batch(com)
+
+        pruned = 0
+        if not is_small:
+            # FULL run only: we fetched the COMPLETE catalog → mark unseen active rows inactive.
+            c = db.sb()
+            for tbl, rows_seen in (("satel_residential_listings", res), ("satel_commercial_listings", com)):
+                if args.type != "all":
+                    want = "commercial" if "commercial" in tbl else "residential"
+                    if args.type != want:
+                        continue
+                seen_ads = {r["ad_number"] for r in rows_seen}
+                existing = (c.table(tbl).select("ad_number").eq("source", SOURCE)
+                            .eq("active", True).execute().data) or []
+                gone = [r["ad_number"] for r in existing if r["ad_number"] not in seen_ads]
+                for i in range(0, len(gone), 200):
+                    c.table(tbl).update({"active": False}).in_("ad_number", gone[i:i + 200]).execute()
+                pruned += len(gone)
+            print(f"✓ Satel: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
+        else:
+            print(f"✓ Satel VALIDATION: {len(res)} residential + {len(com)} commercial upserted (no prune)")
+
+        if run_id:
+            db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}")
+        return 0
+    except Exception as e:
+        if run_id:
+            db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])
+        print(f"✗ {e}")
+        import traceback; traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
