@@ -4,8 +4,6 @@
 name: Wasalt cleanup
 
 on:
-  schedule:
-    - cron: "30 2 * * 0"   # Sunday 02:30 UTC (offset from Aqar cleanup at 02:00)
   workflow_dispatch: {}
 
 concurrency:

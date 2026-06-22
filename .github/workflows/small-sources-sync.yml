@@ -11,8 +11,6 @@
 name: Small sources sync
 
 on:
-  schedule:
-    - cron: "30 2 * * *"   # once daily at 02:30 UTC (offset from the big 4h sweeps)
   workflow_dispatch:
     inputs:
       source:

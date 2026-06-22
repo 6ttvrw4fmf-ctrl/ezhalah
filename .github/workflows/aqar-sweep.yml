@@ -10,9 +10,6 @@
 name: Aqar residential sweep
 
 on:
-  schedule:
-    # Every 4 hours, on the hour. UTC. KSA = UTC+3.
-    - cron: "0 */4 * * *"
   workflow_dispatch: {}
 
 # Cancel any in-flight sweep when a new one starts (sweeps are idempotent).

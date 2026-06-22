@@ -9,8 +9,6 @@
 name: Aqar cleanup
 
 on:
-  schedule:
-    - cron: "0 2 * * 0"   # 02:00 UTC every Sunday
   workflow_dispatch: {}
 
 concurrency:

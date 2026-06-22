@@ -6,8 +6,6 @@
 name: Wasalt enrich
 
 on:
-  schedule:
-    - cron: "0 5 * * *"   # once daily 05:00 UTC — comfortably covers a day of new listings
   workflow_dispatch:
     inputs:
       limit:

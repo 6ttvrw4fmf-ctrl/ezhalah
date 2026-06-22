@@ -9,10 +9,6 @@
 name: Aqar commercial sweep
 
 on:
-  schedule:
-    # Every 4 hours, offset by 2h from the residential sweep (which runs at 0,4,8,…).
-    # This fires at 02:00, 06:00, 10:00, 14:00, 18:00, 22:00 UTC.
-    - cron: "0 2-23/4 * * *"
   workflow_dispatch: {}
 
 concurrency:
