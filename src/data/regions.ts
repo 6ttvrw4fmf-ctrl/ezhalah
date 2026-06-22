@@ -33,9 +33,15 @@ const COUNTRY_ALIASES = new Set([
 ]);
 export function isCountryWideQuery(q: SearchQuery): boolean {
   if ((q.locationMatch as { kind?: string } | undefined)?.kind === 'country') return true;
-  const loc = (q.location || '').trim().toLowerCase();
+  const loc = (q.location || '').trim().toLowerCase()
+    // strip Arabic prefix words that don't change meaning: "كل / جميع / في كل / في"
+    .replace(/^(في\s+)?(كل|جميع)\s+/i, '')
+    .replace(/^في\s+/i, '')
+    .trim();
   if (!loc) return true; // no place named (agent "search everywhere") → the whole Kingdom, diversified
-  return COUNTRY_ALIASES.has(loc);
+  if (COUNTRY_ALIASES.has(loc)) return true;
+  // Loose contains-match — covers any phrasing that mentions the Kingdom (e.g. "أنحاء السعودية").
+  return /(saudi|kingdom|ksa|السعودي|المملكة)/i.test(loc);
 }
 
 // Round-robin interleave per-region lists: 1st of each region, then 2nd, … so the order rotates
