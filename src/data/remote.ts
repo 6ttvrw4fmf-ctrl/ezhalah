@@ -118,6 +118,73 @@ function dbTypesFor(q: SearchQuery): string[] | null {
 function isCommercialQuery(q: SearchQuery): boolean {
   return q.category === 'Commercial' || (!!q.type && CATEGORY_TYPES.Commercial.includes(q.type));
 }
+// Convert a listing's `additional_info` into the {key,label,value} rows the card's
+// AdditionalInformationPanel renders. Two shapes exist in the DB:
+//   • LEGACY (Wasalt/Aqar Gate): already an array of {label,value} → pass through.
+//   • NEW (Aqarcity/Eastabha/Sanadak/Raghdan/Candles/Satel/Sadin): a JSON object of rich fields
+//     (REGA license, amenities, services, furnishing, parcel/plan, facade, …) — whitelist the
+//     user-valuable keys here, in priority order, with i18n-able labels. Internal/raw keys
+//     (city_ar, lat/lng, *_ar, dates, ids) are intentionally excluded. (user: the valuable
+//     fields in "additional features" weren't showing for the new sources.)
+const ADDL_FIELDS: Array<[string, string]> = [
+  ['features', 'Amenities'],
+  ['features_ar', 'Amenities'],
+  ['services', 'Property services'],
+  ['furnishing', 'Furnishing'],
+  ['property_age', 'Building age (years)'],
+  ['age_text', 'Building age (years)'],
+  ['facade', 'Facade'],
+  ['floors', 'Total Floors'],
+  ['kitchens', 'Kitchens'],
+  ['halls', 'Majlis / Halls'],
+  ['property_use', 'Property usage'],
+  ['usage', 'Property usage'],
+  ['street_width', 'Street width'],
+  ['parking_type', 'Parking type'],
+  ['parking_spots', 'Number of Parkings'],
+  ['air_conditioning_type', 'AC type'],
+  ['kitchen', 'Kitchen'],
+  ['rega_ad_license_number', 'Ad license number'],
+  ['rega_license_status', 'License status'],
+  ['rega_license_issue_date', 'License Issuance Date'],
+  ['rega_license_expiry_date', 'License expiry'],
+  ['broker_fal_license', 'FAL license'],
+  ['parcel_number', 'Parcel number'],
+  ['plan_number', 'Plan number'],
+  ['postal_code', 'Postal Code'],
+  ['building_code_compliant', 'Building code compliant'],
+  ['warranties', 'Warranties'],
+  ['deed_location_text', 'Deed location'],
+  ['status_ar', 'Status'],
+  ['availability_status', 'Status'],
+  ['address', 'Address'],
+  ['street_address', 'Address'],
+];
+function buildAdditionalInfo(raw: any): Array<{ key: string; label: string; value: string }> | null {
+  if (!raw) return null;
+  if (Array.isArray(raw)) {
+    const rows = raw.filter((r: any) => r && r.label && r.value);
+    return rows.length ? rows : null;
+  }
+  if (typeof raw !== 'object') return null;
+  const out: Array<{ key: string; label: string; value: string }> = [];
+  const seen = new Set<string>();
+  for (const [key, label] of ADDL_FIELDS) {
+    if (seen.has(label)) continue;
+    let v: any = raw[key];
+    if (v === null || v === undefined || v === '' || v === '0' || v === false) continue;
+    if (Array.isArray(v)) { v = v.filter(Boolean).join('، '); if (!v) continue; }
+    else if (typeof v === 'boolean') v = 'Yes';
+    else if (typeof v === 'object') continue;
+    else v = String(v).trim();
+    if (!v || v === '0') continue;
+    if (v.length > 120) v = v.slice(0, 117) + '…';
+    seen.add(label);
+    out.push({ key, label, value: v });
+  }
+  return out.length ? out : null;
+}
+
 // All LAND lives in the residential table — Aqar treats land as ONE category (أراضي), which we scrape
 // there, then split by zoning (Residential/Commercial/Industrial/Agriculture) from the listing text.
 // So a "Commercial Land" search must read the residential table even though it's a Commercial-category
@@ -333,7 +400,7 @@ function finalize(rows: any[]): Listing[] {
       project_name: r.project_name ?? null,
       driver_room: !!r.driver_room,
       rega_location_verified: !!r.rega_location_verified,
-      additional_info: Array.isArray(r.additional_info) ? r.additional_info : null,
+      additional_info: buildAdditionalInfo(r.additional_info),
       photos: Array.isArray(r.photo_urls) ? r.photo_urls : [],
       rent_now_pay_later: !!r.rent_now_pay_later,
       rent_now_pay_later_monthly: r.rent_now_pay_later_monthly ?? null,
