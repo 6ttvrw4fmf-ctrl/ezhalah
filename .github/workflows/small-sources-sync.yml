@@ -1,0 +1,57 @@
+# Small sources sync — ONE daily workflow for ALL the small, low-churn Saudi platforms (Aldarim,
+# Aqar Gate, Hajer, Al Hoshan, Sanadak, …). Replaces the per-platform sync workflows.
+#
+# Why: these sites are small (tens–hundreds of listings) and low-churn, so they don't need the 4h
+# cadence the big sources (Aqar, Wasalt) get — daily is plenty. And ONE established daily cron fires
+# reliably, where many separate brand-new 4h crons get skipped by GitHub's scheduler.
+#
+# Add a new small platform = add ONE line to the matrix below: its name + the command that scrapes
+# both its verticals in one run. That's it.
+
+name: Small sources sync
+
+on:
+  schedule:
+    - cron: "30 2 * * *"   # once daily at 02:30 UTC (offset from the big 4h sweeps)
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Single source to run (blank = all)"
+        required: false
+        default: ""
+
+concurrency:
+  group: small-sources-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50   # covers Sanadak (gentle RSC scrape, ~25–35 min); the rest are seconds
+    strategy:
+      fail-fast: false    # one source failing never blocks the others
+      max-parallel: 5
+      matrix:
+        include:
+          - { source: aldarim,  cmd: "python -m scrapers.aldarim.run --pages 50" }
+          - { source: aqargate, cmd: "python -m scrapers.aqargate.run --type all" }
+          - { source: hajer,    cmd: "python -m scrapers.hajer.run --type all" }
+          - { source: alhoshan, cmd: "python -m scrapers.alhoshan.run --type all" }
+          - { source: sanadak,  cmd: "python -m scrapers.sanadak.run --type all" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Sync ${{ matrix.source }}
+        # Skip non-matching sources when a single source was requested via workflow_dispatch.
+        if: ${{ github.event.inputs.source == '' || github.event.inputs.source == matrix.source }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_MIN_INTERVAL: "0.3"
+        run: ${{ matrix.cmd }}
