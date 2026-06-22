@@ -73,6 +73,27 @@ def upsert_wasalt_residential(row: dict[str, Any]) -> None:
     sb().table("wasalt_residential_listings").upsert(row, on_conflict="ad_number").execute()
 
 
+# Numeric columns by Postgres integer width. A parse glitch that overflows one of these (e.g. a bad
+# price_per_meter of 90,533,352,829) used to make the WHOLE batch upsert fail with 22003, dropping
+# every row in it. We null the offending FIELD instead of losing the batch — the listing still saves.
+_INT2_COLS = frozenset({"bedrooms", "bathrooms", "master_bedrooms", "halls",
+                        "reception_rooms_majlis", "property_age", "street_width_m"})
+_INT4_COLS = frozenset({"area_m2", "interior_space_m2", "outdoor_area_m2", "price_per_meter",
+                        "rent_now_pay_later_monthly", "missing_count"})
+_INT8_COLS = frozenset({"price_annual", "price_total"})
+
+
+def _sanitize_ints(r: dict[str, Any]) -> None:
+    """Null any integer field whose value won't fit its Postgres column (prevents 22003 batch aborts)."""
+    for col, lo, hi in ((_INT2_COLS, -32768, 32767),
+                        (_INT4_COLS, -2147483648, 2147483647),
+                        (_INT8_COLS, -9223372036854775808, 9223372036854775807)):
+        for c in col:
+            v = r.get(c)
+            if isinstance(v, int) and not (lo <= v <= hi):
+                r[c] = None
+
+
 def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
@@ -81,6 +102,7 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
     for r in rows:
         r = dict(r)
         r["last_seen_at"] = now
+        _sanitize_ints(r)
         seen[r["ad_number"]] = r
     sb().table(table).upsert(list(seen.values()), on_conflict="ad_number").execute()
 
