@@ -511,16 +511,13 @@ def main() -> int:
 
         # Full run: prune listings active before but not seen this crawl (we fetched the FULL catalog).
         pruned = 0
-        c = db.sb()
         for tbl, rows_seen in (("alnokhba_residential_listings", res),
                                ("alnokhba_commercial_listings", com)):
-            seen_ads = {r["ad_number"] for r in rows_seen}
-            existing = (c.table(tbl).select("ad_number").eq("source", "Al Nokhba")
-                        .eq("active", True).execute().data) or []
-            gone = [r["ad_number"] for r in existing if r["ad_number"] not in seen_ads]
-            for i in range(0, len(gone), 200):
-                c.table(tbl).update({"active": False}).in_("ad_number", gone[i:i + 200]).execute()
-            pruned += len(gone)
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Al Nokhba")
+            if n < 0:
+                print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
+            else:
+                pruned += n
         print(f"✓ Al Nokhba: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
         db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}")
         return 0

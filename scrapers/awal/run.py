@@ -514,16 +514,13 @@ def main() -> int:
         # Full run: prune listings active before that weren't seen this crawl (we fetched the FULL
         # catalog). Sold rows were already upserted with active=False above.
         pruned = 0
-        c = db.sb()
         for tbl, rows_seen in (("awal_residential_listings", res),
                                ("awal_commercial_listings", com)):
-            seen_ads = {r["ad_number"] for r in rows_seen}
-            existing = (c.table(tbl).select("ad_number").eq("source", "Awal")
-                        .eq("active", True).execute().data) or []
-            stale = [r["ad_number"] for r in existing if r["ad_number"] not in seen_ads]
-            for i in range(0, len(stale), 200):
-                c.table(tbl).update({"active": False}).in_("ad_number", stale[i:i + 200]).execute()
-            pruned += len(stale)
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Awal")
+            if n < 0:
+                print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
+            else:
+                pruned += n
         print(f"✓ Awal: {len(res)} residential + {len(com)} commercial upserted, "
               f"{gone_ct} sold (inactive), {pruned} stale pruned")
         db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,

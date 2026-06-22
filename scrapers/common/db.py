@@ -96,6 +96,48 @@ def upsert_wasalt_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("wasalt_commercial_listings", rows)
 
 
+def prune_unseen(
+    table: str,
+    seen_ads,
+    source: Optional[str] = None,
+    *,
+    max_prune_frac: float = 0.85,
+    min_active_guard: int = 8,
+) -> int:
+    """Mark active rows in `table` whose ad_number wasn't seen this crawl as inactive.
+
+    This replaces the hand-rolled prune loop every scraper used to carry, and adds the
+    SAFETY GUARDS those loops lacked — a failed/blocked crawl must NEVER wipe a platform:
+
+      • If this crawl saw 0 ad_numbers but the table still has active rows, SKIP the prune.
+        A zero-result scrape almost always means the site was down/blocked/timed out, not
+        that every listing sold overnight. (This is exactly what wiped Jazan Watan + East
+        Abha — the site timed out, the scrape returned 0, and the old loop deactivated all.)
+      • If the prune would deactivate more than `max_prune_frac` of the currently-active
+        rows AND there are at least `min_active_guard` of them, SKIP it. A sudden collapse
+        (e.g. scraped 5 of 200) signals a partial/failed crawl, not real churn.
+
+    Returns the number of rows pruned, or -1 when a guard tripped (nothing was changed) so
+    the caller can flag the run degraded.
+    """
+    c = sb()
+    q = c.table(table).select("ad_number").eq("active", True)
+    if source:
+        q = q.eq("source", source)
+    existing = q.execute().data or []
+    if not existing:
+        return 0
+    seen = set(seen_ads)
+    if not seen:
+        return -1  # nothing scraped → site almost certainly down → keep everything active
+    gone = [r["ad_number"] for r in existing if r["ad_number"] not in seen]
+    if len(existing) >= min_active_guard and len(gone) > max_prune_frac * len(existing):
+        return -1  # collapse guard: refuse to deactivate the bulk of a catalog in one run
+    for i in range(0, len(gone), 200):
+        c.table(table).update({"active": False}).in_("ad_number", gone[i:i + 200]).execute()
+    return len(gone)
+
+
 def end_run(run_id: int, *, ok: bool, rows_seen: int, rows_upserted: int, notes: Optional[str] = None) -> None:
     sb().table("scrape_runs").update(
         {

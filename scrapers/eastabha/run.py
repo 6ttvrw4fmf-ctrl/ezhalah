@@ -487,15 +487,13 @@ def main() -> int:
             db.upsert_eastabha_commercial_batch(com)
 
         pruned = 0
-        if not small:  # prune unseen only on full runs
-            c = db.sb()
+        if not small:  # prune unseen only on full runs (db.prune_unseen guards against 0-scrape wipes)
             for tbl, rows_seen in (("eastabha_residential_listings", res), ("eastabha_commercial_listings", com)):
-                seen_ads = {r["ad_number"] for r in rows_seen}
-                existing = (c.table(tbl).select("ad_number").eq("source", "Eastabha").eq("active", True).execute().data) or []
-                gone = [e["ad_number"] for e in existing if e["ad_number"] not in seen_ads]
-                for i in range(0, len(gone), 200):
-                    c.table(tbl).update({"active": False}).in_("ad_number", gone[i:i + 200]).execute()
-                pruned += len(gone)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Eastabha")
+                if n < 0:
+                    print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
+                else:
+                    pruned += n
 
         print(f"✓ Eastabha: {len(res)} residential + {len(com)} commercial upserted, "
               f"{skipped_auction} auctions skipped, {pruned} stale pruned")

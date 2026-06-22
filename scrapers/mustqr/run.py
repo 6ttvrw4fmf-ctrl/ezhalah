@@ -398,19 +398,15 @@ def main() -> int:
             db.upsert_mustqr_commercial_batch(com)
         pruned = 0
         if full_run:
-            c = db.sb()
             for tbl, rows_seen in (
                 ("mustqr_residential_listings", res),
                 ("mustqr_commercial_listings", com),
             ):
-                seen_ads = {r["ad_number"] for r in rows_seen}
-                existing = (
-                    c.table(tbl).select("ad_number").eq("source", "Mustqr").eq("active", True).execute().data
-                ) or []
-                gone = [r["ad_number"] for r in existing if r["ad_number"] not in seen_ads]
-                for i in range(0, len(gone), 200):
-                    c.table(tbl).update({"active": False}).in_("ad_number", gone[i:i + 200]).execute()
-                pruned += len(gone)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Mustqr")
+                if n < 0:
+                    print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
+                else:
+                    pruned += n
         print(
             f"✓ Mustqr: {len(res)} residential + {len(com)} commercial upserted"
             + (f", {pruned} stale pruned" if full_run else " (validation: no prune)")

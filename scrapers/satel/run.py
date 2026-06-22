@@ -359,19 +359,16 @@ def main() -> int:
         pruned = 0
         if not is_small:
             # FULL run only: we fetched the COMPLETE catalog → mark unseen active rows inactive.
-            c = db.sb()
             for tbl, rows_seen in (("satel_residential_listings", res), ("satel_commercial_listings", com)):
                 if args.type != "all":
                     want = "commercial" if "commercial" in tbl else "residential"
                     if args.type != want:
                         continue
-                seen_ads = {r["ad_number"] for r in rows_seen}
-                existing = (c.table(tbl).select("ad_number").eq("source", SOURCE)
-                            .eq("active", True).execute().data) or []
-                gone = [r["ad_number"] for r in existing if r["ad_number"] not in seen_ads]
-                for i in range(0, len(gone), 200):
-                    c.table(tbl).update({"active": False}).in_("ad_number", gone[i:i + 200]).execute()
-                pruned += len(gone)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)
+                if n < 0:
+                    print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
+                else:
+                    pruned += n
             print(f"✓ Satel: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
         else:
             print(f"✓ Satel VALIDATION: {len(res)} residential + {len(com)} commercial upserted (no prune)")

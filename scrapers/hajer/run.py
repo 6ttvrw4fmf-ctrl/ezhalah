@@ -243,14 +243,12 @@ def main() -> int:
         if com:
             db.upsert_hajer_commercial_batch(com)
         pruned = 0
-        c = db.sb()
         for tbl, rows_seen in (("hajer_residential_listings", res), ("hajer_commercial_listings", com)):
-            seen_ads = {r["ad_number"] for r in rows_seen}
-            existing = (c.table(tbl).select("ad_number").eq("source", "Hajer").eq("active", True).execute().data) or []
-            extra_gone = [r["ad_number"] for r in existing if r["ad_number"] not in seen_ads]
-            for i in range(0, len(extra_gone), 200):
-                c.table(tbl).update({"active": False}).in_("ad_number", extra_gone[i:i + 200]).execute()
-            pruned += len(extra_gone)
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Hajer")
+            if n < 0:
+                print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
+            else:
+                pruned += n
         print(f"✓ Hajer: {len(res)} residential + {len(com)} commercial upserted, {gone_ct} sold/rented skipped, {pruned} stale pruned")
         db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"gone={gone_ct} pruned={pruned}")
         return 0

@@ -359,15 +359,13 @@ def main() -> int:
         pruned = 0
         if not is_validation:
             # FULL-REFRESH prune: we fetched the COMPLETE catalog → anything not seen is gone.
-            c = db.sb()
             for tbl, rows_seen in (("fursaghyr_residential_listings", res),
                                    ("fursaghyr_commercial_listings", com)):
-                seen_ads = {r["ad_number"] for r in rows_seen}
-                existing = (c.table(tbl).select("ad_number").eq("source", "Fursaghyr").eq("active", True).execute().data) or []
-                gone = [r["ad_number"] for r in existing if r["ad_number"] not in seen_ads]
-                for i in range(0, len(gone), 200):
-                    c.table(tbl).update({"active": False}).in_("ad_number", gone[i:i + 200]).execute()
-                pruned += len(gone)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Fursaghyr")
+                if n < 0:
+                    print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
+                else:
+                    pruned += n
 
         print(f"✓ Fursaghyr: {len(res)} residential + {len(com)} commercial upserted"
               + (f", {pruned} stale pruned" if not is_validation else " (validation, no prune)"))
