@@ -824,7 +824,11 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
       suggestion = noResultsSuggestion(q, pools);
     }
   }
-  return { heading: heading(q), notes: ns, listings: listings.slice(0, 25), sortNote, count, suggestion };
+  // Country-wide "show me everywhere" returns exactly ONE card per platform (the full roster — 27
+  // and growing). It must NOT be chopped by the 25-card default cap, or the last platforms vanish.
+  // Every other search keeps the 25 default. (user: country-wide showed only 25 of 27 platforms.)
+  const displayCap = isCountryWideQuery(q) ? Math.max(25, listings.length) : 25;
+  return { heading: heading(q), notes: ns, listings: listings.slice(0, displayCap), sortNote, count, suggestion };
 }
 
 // Try relaxing one query field at a time and see which unlocks results. The order matters: we
