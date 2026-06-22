@@ -769,12 +769,36 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
     const cap = budgetCap(q);
     listings = [...listings].sort((a, b) => closenessScore(b, q, cap) - closenessScore(a, q, cap));
     if (isCountryWideQuery(q)) {
-      // Country-wide "Saudi" search → spread across the 13 regions AND mix sources. Group by region
-      // (each sublist keeps closeness order), source-interleave WITHIN each region, then rotate
-      // regions. So the visible cards span the Kingdom and mix Aqar + Wasalt. (user.)
+      // Country-wide "Saudi" search → the user wants to SEE every platform we aggregate. So we
+      // (1) pick ONE representative card per source up-front (closest match within that source,
+      //     biased toward a property type no earlier source has shown yet → diverse top row), and
+      // (2) follow with the existing region-spread mix for the rest of the feed (deduped).
+      // Net effect: scrolling the first ~17 cards = one card per platform, each a different type.
+      // (user: "show me 1 listing from each, make sure different property type, all 17 platforms".)
+      const bySource: Record<string, Listing[]> = {};
+      for (const l of listings) (bySource[l.source || 'Other'] ||= []).push(l);
+      const usedTypes = new Set<string>();
+      const usedIds = new Set<number>();
+      const topRow: Listing[] = [];
+      // Walk sources in descending catalog size so the densest platforms anchor the top first.
+      const sourceOrder = Object.keys(bySource).sort((a, b) => bySource[b].length - bySource[a].length);
+      for (const src of sourceOrder) {
+        // Among this platform's closeness-sorted listings, pick the first whose property_type is
+        // still unseen. Fall back to the very first if every type is already shown.
+        const pool = bySource[src];
+        const pick = pool.find((l) => !usedTypes.has(l.type)) || pool[0];
+        if (pick) {
+          topRow.push(pick);
+          usedIds.add(pick.id);
+          if (pick.type) usedTypes.add(pick.type);
+        }
+      }
+      // Tail = the existing region-spread, with the top-row picks removed (no dupes).
+      const remaining = listings.filter((l) => !usedIds.has(l.id));
       const byRegion: Record<string, Listing[]> = {};
-      for (const l of listings) (byRegion[CITY_TO_REGION[l.city] || 'Other'] ||= []).push(l);
-      listings = interleave(Object.values(byRegion).map(diversifyBySource));
+      for (const l of remaining) (byRegion[CITY_TO_REGION[l.city] || 'Other'] ||= []).push(l);
+      const tail = interleave(Object.values(byRegion).map(diversifyBySource));
+      listings = [...topRow, ...tail];
     } else {
       // City/area search → mix the two sources so neither dominates the top. Without this, Wasalt's
       // higher id range sweeps the closeness id-tiebreak and the user "doesn't see Aqar anymore".
