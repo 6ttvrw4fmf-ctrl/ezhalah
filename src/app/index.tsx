@@ -10,7 +10,7 @@ import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
 import { CATEGORIES, DEALS, detailFor, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
-import { matchLocations, placeLabel, placeTitle, placeSub, placeIcon, placeKey, resolveLocation, type Place } from '@/data/locations';
+import { matchLocations, placeLabel, placeTitle, placeSub, placeIcon, placeKey, resolveLocation, ensureLocationIndex, type Place } from '@/data/locations';
 import { grouped, toLatinDigits } from '@/data/search';
 import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
@@ -115,7 +115,13 @@ export default function Home() {
   // no separate results page). The agent reads ?filter=… and runs it once on open. Pressing Search
   // first LIGHTENS the sketch backdrop (a deliberate "here we go" beat), then opens the results once
   // that lift has played.
-  const onSearch = () => {
+  // Warm the live district index when the home opens, so a typed district that exists in real
+  // inventory (e.g. "Al Doha Dist." in Yanbu) is recognized by the time the user searches.
+  useEffect(() => { void ensureLocationIndex(); }, []);
+
+  const onSearch = async () => {
+    // Make sure the live district index is loaded before resolving (first search only; cached after).
+    await ensureLocationIndex();
     // Commit the language on Search (not per keystroke): if the user typed the city in English the
     // app follows to English, in Arabic → Arabic. Empty/neutral input leaves the current language.
     const loc = detectLocale(query.location);
@@ -139,7 +145,9 @@ export default function Home() {
     // city/region pick sets NO districts (the whole city is intended). (filter location contract.)
     let districts: string[] | undefined;
     if (lm.kind === 'district') {
-      districts = lm.label ? [lm.label] : undefined;
+      // Live districts carry the exact DB district string(s) in `districts` (multiple = ambiguous,
+      // matched across cities); the catalog district carries only its label.
+      districts = lm.districts.length ? lm.districts : (lm.label ? [lm.label] : undefined);
     } else if (lm.kind === 'area' || lm.kind === 'landmark' || lm.kind === 'geography' || lm.kind === 'lifestyle') {
       const clean = lm.districts.filter(Boolean);
       if (clean.length) districts = clean;

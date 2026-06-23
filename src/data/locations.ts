@@ -6,6 +6,7 @@
 // first with English fallbacks. (PRD §5.1, prototype matchLocations — extended to nationwide data.)
 
 import raw from './sa-locations.json';
+import { supabase } from '@/lib/supabase';
 
 export type PlaceKind = 'country' | 'region' | 'city' | 'district';
 
@@ -306,11 +307,13 @@ export type LocationResolution = {
   raw: string;
   kind: 'district' | 'city' | 'region' | 'area' | 'landmark' | 'lifestyle' | 'geography' | 'none';
   city: string;        // canonical city for the engine/header ('' when not city-specific)
+  region?: string;     // canonical region (for the "Region → District" display rule)
   label: string;       // primary matched label (place name, or the area/landmark/geography phrase)
   districts: string[]; // related / nearby districts to display
-  cities: string[];    // extra nearby cities (landmark / geography)
+  cities: string[];    // extra nearby cities (landmark / geography); multi-city ambiguity matches
   landmark?: string;
   note?: string;
+  ambiguous?: boolean; // the typed district matched 2+ cities → multi-city search + "refine" notice
 };
 
 // Letters/digits only (drops spaces, punctuation, Arabic diacritics) — for phrase `includes` tests.
@@ -413,6 +416,70 @@ const CITY_TOKENS: [string, string][] = [
 ];
 const scopeCity = (f: string): string => { for (const [k, c] of CITY_TOKENS) if (f.includes(k)) return c; return ''; };
 
+// ── LIVE district index (read-time merge: catalog + real listing districts) ──────────────────────
+// The static catalog (sa-locations.json) misses districts that exist in real listings (e.g. "Al Doha
+// Dist." in Yanbu). We load the DB's `location_index` materialized view once per session and merge it
+// in, so any district that actually has inventory is recognized + narrowable. (user: DB is the source
+// of truth; every district stored must be searchable.)
+type LiveDistrict = { district: string; city: string; region: string; n: number };
+let LIVE_DISTRICTS: LiveDistrict[] = [];
+let _liveLoaded = false;
+let _livePromise: Promise<void> | null = null;
+
+export async function ensureLocationIndex(): Promise<void> {
+  if (_liveLoaded || !supabase) return;
+  if (_livePromise) return _livePromise;
+  _livePromise = (async () => {
+    try {
+      const { data } = await supabase.from('location_index').select('city,district,region,n');
+      if (data) LIVE_DISTRICTS = data.filter((r: any) => r.city && r.district) as LiveDistrict[];
+      _liveLoaded = true;
+    } catch { /* keep the catalog-only resolver as fallback */ }
+  })();
+  return _livePromise;
+}
+
+// Normalize a district string for matching. flatLoc already lowercases + strips spaces/diacritics/
+// punctuation, so we remove the "district"/"dist"/"neighborhood"/"حي" MARKERS as substrings. So
+// "Al Doha District" ~ "Al Doha Dist." ~ "حي الدوحة" compare equal-ish. (Don't strip "al" — it would
+// corrupt names like "Al Salam"/"السلام".)
+function normDist(s: string): string {
+  return flatLoc(s)
+    .replace(/district/g, '')
+    .replace(/neighbou?rhood/g, '')
+    .replace(/dist/g, '')
+    .replace(/الحي/g, '')
+    .replace(/حي/g, '');
+}
+
+// Find live districts matching the typed input. The district "probe" is the input with the named city
+// removed — so "Al Doha District, Yanbu" probes "al doha" (not the city). A bare city name probes to
+// empty → no district match (stays a city search). When a city is named we scope to it; otherwise a
+// district name shared by several cities returns all of them (the ambiguity case).
+function liveDistrictLookup(raw: string): LiveDistrict[] {
+  if (!LIVE_DISTRICTS.length) return [];
+  const cityHit = matchLocations(raw).find((p) => p.kind === 'city');
+  const cityKey = cityHit ? flatLoc(cityHit.nameEn) : '';
+  const cityKeyAr = cityHit ? flatLoc(cityHit.nameAr) : '';
+  let probe = normDist(raw);
+  if (cityKey) probe = probe.replace(cityKey, '');
+  if (cityKeyAr) probe = probe.replace(cityKeyAr, '');
+  if (probe.length < 2) return []; // input is just a city (or nothing district-specific)
+  const out: LiveDistrict[] = [];
+  for (const d of LIVE_DISTRICTS) {
+    const nd = normDist(d.district);
+    if (nd.length < 2) continue;
+    if (!(probe.includes(nd) || nd.includes(probe))) continue;
+    if (cityKey) {
+      const dc = flatLoc(d.city);
+      if (dc !== cityKey && dc !== cityKeyAr) continue; // a city was named → keep only that city
+    }
+    out.push(d);
+  }
+  out.sort((a, b) => b.n - a.n); // strongest (most listings) first
+  return out;
+}
+
 export function resolveLocation(input: string, locale: string): LocationResolution {
   const raw = input.trim();
   const base: LocationResolution = { raw, kind: 'none', city: '', label: raw, districts: [], cities: [] };
@@ -433,9 +500,25 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
   //    geography/lifestyle so a genuine place always wins over a loose keyword. Districts rank above
   //    the city in the matcher when the typed name IS a district, satisfying the priority order.
   const hit = matchLocations(raw)[0];
+  // A catalog DISTRICT wins (clean names + region context).
+  if (hit && hit.kind === 'district') {
+    return { raw, kind: 'district', city: ar(locale) ? (hit.cityAr ?? '') : (hit.cityEn ?? ''), region: ar(locale) ? hit.regionAr : hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [] };
+  }
+  // 3b) LIVE district merge — a district that exists in real inventory but NOT the static catalog
+  //     (e.g. "Al Doha Dist." in Yanbu). Beats a bare city match so the typed district actually
+  //     narrows. One city → district scope; 2+ cities → multi-city ambiguity (search all + notice).
+  const live = liveDistrictLookup(raw);
+  if (live.length) {
+    const cities = Array.from(new Set(live.map((d) => d.city)));
+    const top = live[0];
+    if (cities.length === 1) {
+      return { raw, kind: 'district', city: top.city, region: top.region, label: top.district, districts: [top.district], cities: [] };
+    }
+    const districts = Array.from(new Set(live.map((d) => d.district)));
+    return { raw, kind: 'district', city: top.city, region: top.region, label: top.district, districts, cities, ambiguous: true };
+  }
   if (hit) {
-    if (hit.kind === 'district') return { raw, kind: 'district', city: ar(locale) ? (hit.cityAr ?? '') : (hit.cityEn ?? ''), label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [] };
-    if (hit.kind === 'city') return { raw, kind: 'city', city: ar(locale) ? hit.nameAr : hit.nameEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [] };
+    if (hit.kind === 'city') return { raw, kind: 'city', city: ar(locale) ? hit.nameAr : hit.nameEn, region: ar(locale) ? hit.regionAr : hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [] };
     if (hit.kind === 'region') return { raw, kind: 'region', city: '', label: ar(locale) ? hit.nameAr : `${hit.nameEn} Region`, districts: [], cities: [] };
     // country → fall through to geography/lifestyle/none (it isn't a specific place to anchor on)
   }
