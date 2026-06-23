@@ -54,6 +54,8 @@ def upsert_aqar_residential(row: dict[str, Any]) -> None:
     """Upsert one Aqar residential row, keyed on `ad_number`."""
     row = dict(row)
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
+    _sanitize_price(row)
+    _sanitize_ints(row)
     sb().table("aqar_residential_listings").upsert(row, on_conflict="ad_number").execute()
 
 
@@ -62,6 +64,8 @@ def upsert_aqar_commercial(row: dict[str, Any]) -> None:
     (the commercial table was cloned from it), just a different destination table."""
     row = dict(row)
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
+    _sanitize_price(row)
+    _sanitize_ints(row)
     sb().table("aqar_commercial_listings").upsert(row, on_conflict="ad_number").execute()
 
 
@@ -70,6 +74,8 @@ def upsert_wasalt_residential(row: dict[str, Any]) -> None:
     (Wasalt ids are namespaced 'WST<id>' so they never collide with Aqar)."""
     row = dict(row)
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
+    _sanitize_price(row)
+    _sanitize_ints(row)
     sb().table("wasalt_residential_listings").upsert(row, on_conflict="ad_number").execute()
 
 
@@ -94,6 +100,19 @@ def _sanitize_ints(r: dict[str, Any]) -> None:
                 r[c] = None
 
 
+def _sanitize_price(r: dict[str, Any]) -> None:
+    """HIDE listings whose price is a clear advertiser typo — total > 1B SAR, per-meter > 300k SAR/m²,
+    or annual rent > 100M SAR (e.g. a land ad with سعر المتر = 800,000 × 57,500 m² = 46,000,000,000).
+    The source site shows that bogus number too, so a "Price on request" card would contradict the page;
+    marking the row inactive keeps the rule that a card's price always equals the price the user sees
+    after clicking through. Runs on every upsert path so it can't slip in on any platform."""
+    pt, ppm, pa = r.get("price_total"), r.get("price_per_meter"), r.get("price_annual")
+    if ((isinstance(pt, (int, float)) and pt > 1_000_000_000)
+            or (isinstance(ppm, (int, float)) and ppm > 300_000)
+            or (isinstance(pa, (int, float)) and pa > 100_000_000)):
+        r["active"] = False
+
+
 def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
@@ -102,6 +121,7 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
     for r in rows:
         r = dict(r)
         r["last_seen_at"] = now
+        _sanitize_price(r)
         _sanitize_ints(r)
         seen[r["ad_number"]] = r
     sb().table(table).upsert(list(seen.values()), on_conflict="ad_number").execute()
