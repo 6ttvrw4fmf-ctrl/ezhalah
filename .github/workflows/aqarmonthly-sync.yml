@@ -23,12 +23,12 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 16
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -43,4 +43,4 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_MIN_INTERVAL: "0.3"
-        run: python -m scrapers.aqarmonthly.run --shard ${{ matrix.shard }}/8
+        run: python -m scrapers.aqarmonthly.run --shard ${{ matrix.shard }}/16

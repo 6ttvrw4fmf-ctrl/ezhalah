@@ -98,7 +98,7 @@ def _gql(query: str, variables: dict, tries: int = 3):
     return None, False
 
 
-def _month_windows_ms(offsets=(1, 31, 61, 91, 121, 151, 181, 211, 241, 271, 301, 331)) -> list[tuple[int, int]]:
+def _month_windows_ms(offsets=(1, 31, 61, 91, 121, 151)) -> list[tuple[int, int]]:
     """Candidate 30-day booking windows as (start_ms, end_ms) Unix-MILLISECOND pairs (Aqar wants ms
     Floats). Most daily-rental units have SOME dates reserved, so the immediate today→+30 window often
     fails with "dates already reserved" — we try the nearest free 30-day window instead, walking
