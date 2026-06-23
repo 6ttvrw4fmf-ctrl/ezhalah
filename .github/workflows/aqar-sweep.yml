@@ -26,18 +26,104 @@ jobs:
       fail-fast: false   # one city failing doesn't kill the others
       matrix:
         city:
+          # Full 95-city catalog — matches the commercial sweep so niche regions (Al Jawf, Najran,
+          # Northern Borders, Al Bahah, Jazan, …) stay fresh every 4h, not just on manual deep-fills.
+          # Each city is a light 3-page sweep; the heavy big cities already dominated the wall-clock.
           - riyadh
+          - al_kharj
+          - al_majmaah
+          - dawadmi
+          - al_zulfi
+          - afif
+          - al_quwayiyah
+          - shaqra
+          - diriyah
+          - al_muzahimiyah
+          - thadiq
+          - hawtat_bani_tamim
+          - al_ghat
+          - rumah
+          - al_dalam
+          - al_hariq
+          - al_sulayyil
+          - al_hayathim
           - jeddah
-          - khobar
-          - dammam
           - mecca
-          - medina
           - taif
-          - abha
-          - tabuk
+          - rabigh
+          - al_qunfudhah
+          - kaec
+          - thuwal
+          - al_jumum
+          - al_kamil
+          - al_lith
+          - turabah
+          - raniyah
+          - al_khurma
+          - medina
+          - yanbu
+          - al_ula
+          - badr
+          - al_hanakiyah
+          - umluj
+          - khaybar
+          - mahd_adh_dhahab
           - buraidah
-          - hail
+          - unaizah
+          - al_rass
+          - al_bukayriyah
+          - al_mithnab
+          - al_badai
+          - riyadh_al_khabra
+          - al_nabhaniyah
+          - al_shamasiyah
+          - dammam
+          - khobar
+          - dhahran
           - hofuf
+          - jubail
+          - qatif
+          - hafar_al_batin
+          - ras_tanura
+          - abqaiq
+          - al_nairyah
+          - khafji
+          - sayhat
+          - safwa
+          - tarout
+          - anak
+          - al_uyun
+          - abha
+          - khamis_mushait
+          - bisha
+          - mahayel
+          - ahad_rafidah
+          - al_majardah
+          - balsamar
+          - tathlith
+          - tabuk
+          - duba
+          - al_wajh
+          - tayma
+          - hail
+          - baqaa
+          - al_ghazalah
+          - al_shanan
+          - arar
+          - rafha
+          - turaif
+          - jazan
+          - sabya
+          - abu_arish
+          - samtah
+          - baysh
+          - ahad_al_masarihah
+          - najran
+          - sharurah
+          - al_baha
+          - sakaka
+          - qurayyat
+          - dawmat_al_jandal
 
     steps:
       - uses: actions/checkout@v4
