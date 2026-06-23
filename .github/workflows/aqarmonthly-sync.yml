@@ -1,0 +1,46 @@
+# Aqar Monthly sync — Aqar's DailyRenting (furnished short-stay) vertical, priced for a 30-day stay
+# = the monthly product (Gathern twin). Separate table aqarmonthly_residential_listings.
+#
+# Each unit needs a per-listing price call (the nearest AVAILABLE 30-day window — many units have some
+# dates reserved, so we walk forward month-by-month). That's a few thousand GraphQL calls, so we run
+# a PARALLEL MATRIX of 8 shards: each shard prices a stride slice ids[i::8] on its own runner/IP.
+# Wall-clock ≈ the heaviest shard (~10 min) instead of ~80 min sequential.
+#
+# Shards skip the prune (each sees only its slice). For ongoing stale-removal the weekly project-wide
+# purge + the collapse guard cover it; a cross-shard prune is a follow-up if needed.
+#
+# Triggered by pg_cron → workflow_dispatch (GitHub's own schedule: triggers were dropped project-wide).
+
+name: Aqar Monthly sync
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: aqarmonthly-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Sync Aqar Monthly shard ${{ matrix.shard }}/8
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_MIN_INTERVAL: "0.3"
+        run: python -m scrapers.aqarmonthly.run --shard ${{ matrix.shard }}/8

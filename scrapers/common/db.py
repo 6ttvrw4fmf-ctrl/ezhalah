@@ -252,6 +252,11 @@ def upsert_gathern_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("gathern_commercial_listings", rows)
 
 
+def upsert_aqarmonthly_residential_batch(rows: list[dict[str, Any]]) -> None:
+    """Aqar DailyRenting MONTHLY furnished short-stay units only (source='Aqar Monthly')."""
+    _wasalt_batch("aqarmonthly_residential_listings", rows)
+
+
 def upsert_deal_residential_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Deal (dealapp.sa) residential rows into their own table (source='Deal')."""
     _wasalt_batch("deal_residential_listings", rows)
