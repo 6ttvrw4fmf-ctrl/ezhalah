@@ -189,6 +189,8 @@ const AR: Record<string, string> = {
   'Residential Building': 'عمارة سكنية',
   'Specialized Facilities': 'منشآت متخصصة',
   'Staff Housing': 'سكن عمال',
+  'Bank': 'بنك',
+  'Telecom Tower': 'برج اتصالات',
   'Studio': 'استوديو',
   'Duplex': 'دوبلكس',
   'Palace': 'قصر',
