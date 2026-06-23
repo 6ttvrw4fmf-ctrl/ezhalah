@@ -509,13 +509,27 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
   //     narrows. One city → district scope; 2+ cities → multi-city ambiguity (search all + notice).
   const live = liveDistrictLookup(raw);
   if (live.length) {
-    const cities = Array.from(new Set(live.map((d) => d.city)));
-    const top = live[0];
-    if (cities.length === 1) {
-      return { raw, kind: 'district', city: top.city, region: top.region, label: top.district, districts: [top.district], cities: [] };
+    // Aggregate the matched districts BY CITY (a famous district like "Al Olaya" exists in several
+    // cities AND is fragmented across spelling variants — Al-Olaya / Al Olaya / Al Olaya Dist. — so we
+    // must sum per city, not pick the single biggest row, or Khobar's one big row beats Riyadh's split
+    // total). Keep only HIGH-CONFIDENCE cities (≥15% of the top city, max 6) so tiny 1-2 listing
+    // coincidental matches don't dilute. (user: search all high-confidence matches; rank by intent.)
+    const byCity = new Map<string, { region: string; n: number; districts: Set<string> }>();
+    for (const d of live) {
+      const e = byCity.get(d.city) ?? { region: d.region, n: 0, districts: new Set<string>() };
+      e.n += d.n; e.districts.add(d.district);
+      byCity.set(d.city, e);
     }
-    const districts = Array.from(new Set(live.map((d) => d.district)));
-    return { raw, kind: 'district', city: top.city, region: top.region, label: top.district, districts, cities, ambiguous: true };
+    const entries = Array.from(byCity.entries()).sort((a, b) => b[1].n - a[1].n);
+    const maxN = entries[0][1].n;
+    const strong = entries.filter(([, e]) => e.n >= Math.max(3, maxN * 0.15)).slice(0, 6);
+    const allDistricts = Array.from(new Set(live.map((d) => d.district)));
+    if (strong.length === 1) {
+      const [cityName, e] = strong[0];
+      return { raw, kind: 'district', city: cityName, region: e.region, label: Array.from(e.districts)[0], districts: Array.from(e.districts), cities: [] };
+    }
+    // Multi-city ambiguity → the engine searches ALL `cities` + shows the "multiple locations" notice.
+    return { raw, kind: 'district', city: strong[0][0], region: strong[0][1].region, label: raw, districts: allDistricts, cities: strong.map(([c]) => c), ambiguous: true };
   }
   if (hit) {
     if (hit.kind === 'city') return { raw, kind: 'city', city: ar(locale) ? hit.nameAr : hit.nameEn, region: ar(locale) ? hit.regionAr : hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [] };

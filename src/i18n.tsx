@@ -403,6 +403,9 @@ const AR: Record<string, string> = {
   'Nearby Cities': 'مدن قريبة',
   'Landmark': 'معلم',
   'You typed': 'كتبت',
+  'Cities': 'المدن',
+  'We found multiple locations matching "{name}". Showing the closest matches from our database.':
+    'وجدنا عدة مواقع مطابقة لـ "{name}". نعرض لك أقرب النتائج من قاعدة بياناتنا.',
   'Budget': 'الميزانية',
   'Your budget': 'ميزانيتك',
   'Monthly Rent': 'الإيجار الشهري',

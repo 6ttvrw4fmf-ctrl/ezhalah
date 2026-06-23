@@ -261,6 +261,25 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   const city = cityFilterFor(q.location || '')
     || (q.locationMatch?.city ? cityFilterFor(q.locationMatch.city) : null);
 
+  // MULTI-CITY (ambiguous location — e.g. "Al Olaya" exists in Riyadh AND Khobar): scope to ALL the
+  // high-confidence matched cities, not one. The engine ranks the best 25 ACROSS them and the UI shows
+  // the "multiple locations matched" notice. The district narrow (q.districts carries every spelling
+  // variant) still applies client-side in runSearch. (user: search all + notice, never pick one.)
+  const ambCities = q.locationMatch?.ambiguous && q.locationMatch.cities?.length
+    ? Array.from(new Set(q.locationMatch.cities.map((c) => cityFilterFor(c) || c).filter(Boolean)))
+    : null;
+  if (ambCities && ambCities.length) {
+    const tables = tablesFor(q);
+    const perTable = Math.ceil(QUERY_LIMIT / tables.length);
+    const lists = await Promise.all(tables.map(async (tbl) => {
+      const { data } = await keptFiltersReq(q, tbl).in('city', ambCities).order('id', { ascending: false }).limit(perTable);
+      return data ? finalize(data, tbl.includes('_commercial') ? 'com' : 'res') : [];
+    }));
+    const rows = interleaveSources(lists);
+    cacheListings(rows);
+    return rows;
+  }
+
   // COUNTRY-WIDE ("Saudi"): no specific city → diversify across all 13 regions. Pull the newest K from
   // each region's cities IN PARALLEL, then round-robin them, so the results span the Kingdom instead
   // of being dominated by Riyadh/Jeddah's freshest. The kept strict filters (deal/type/period) still

@@ -293,8 +293,13 @@ function locationLines(q: SearchQuery): string[] {
       out.push(`${t('Region')}: ${lm.label}`);
       break;
     case 'district':
-      if (cityLabel) out.push(`${t('City')}: ${cityLabel}`);
       out.push(`${t('Neighborhood')}: ${lm.label}`);
+      if (lm.ambiguous && lm.cities && lm.cities.length) {
+        // The district name exists in several cities → show them all (we searched all), not one.
+        out.push(`${t('Cities')}: ${join(lm.cities.map((c) => tPlace(c)))}`);
+      } else if (cityLabel) {
+        out.push(`${t('City')}: ${cityLabel}`);
+      }
       break;
     case 'area':
       // The nickname phrase ("North Riyadh") is already echoed in the request bubble; here we show the
@@ -788,6 +793,11 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
   }
 
   const ns = notes(q);
+  // Multi-city ambiguity notice — when the typed location matched several cities, we searched ALL of
+  // them and surface this so the user knows + can refine. (user: prefer results + notice over asking.)
+  if (q.locationMatch?.ambiguous && q.locationMatch.cities && q.locationMatch.cities.length > 1) {
+    ns.unshift(t('We found multiple locations matching "{name}". Showing the closest matches from our database.', { name: q.locationMatch.raw || q.location }));
+  }
   let listings = eligible;
   // Apply the price filter, but never dead-end: if nothing fits, show the closest options and say so.
   const fits = priceFilter(q);
