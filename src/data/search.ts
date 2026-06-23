@@ -828,43 +828,12 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
     sortNote = t(SORT_NOTE[q.sort]);
   } else {
     const cap = budgetCap(q);
+    // Rank PURELY by closeness/relevance — the SAME rule for every search (country-wide, region, city,
+    // district, landmark). No "one card per platform" roster, no forced source interleave: if the
+    // closest matches all come from one platform because they ARE the closest, that's fine. Platform
+    // diversity never overrides relevance. (user: best matches regardless of platform; remove the
+    // one-property-per-platform behavior; one display rule everywhere.)
     listings = [...listings].sort((a, b) => closenessScore(b, q, cap) - closenessScore(a, q, cap));
-    if (isCountryWideQuery(q) && !(q.sources && q.sources.length)) {
-      // Country-wide "Saudi" search → the user wants to SEE every platform we aggregate. So we
-      // (1) pick ONE representative card per source up-front (closest match within that source,
-      //     biased toward a property type no earlier source has shown yet → diverse top row), and
-      // (2) follow with the existing region-spread mix for the rest of the feed (deduped).
-      // Net effect: scrolling the first ~17 cards = one card per platform, each a different type.
-      // (user: "show me 1 listing from each, make sure different property type, all 17 platforms".)
-      const bySource: Record<string, Listing[]> = {};
-      for (const l of listings) (bySource[l.source || 'Other'] ||= []).push(l);
-      const usedTypes = new Set<string>();
-      const usedIds = new Set<number>();
-      const topRow: Listing[] = [];
-      // Walk sources in descending catalog size so the densest platforms anchor the top first.
-      const sourceOrder = Object.keys(bySource).sort((a, b) => bySource[b].length - bySource[a].length);
-      for (const src of sourceOrder) {
-        // Among this platform's closeness-sorted listings, pick the first whose property_type is
-        // still unseen. Fall back to the very first if every type is already shown.
-        const pool = bySource[src];
-        const pick = pool.find((l) => !usedTypes.has(cleanOf(l))) || pool[0];
-        if (pick) {
-          topRow.push(pick);
-          usedIds.add(pick.id);
-          usedTypes.add(cleanOf(pick));
-        }
-      }
-      // Country-wide = EXACTLY one card per platform (the full roster, ordered by catalog size).
-      // No extra region "tail" — the user wants to see the platforms cleanly, ONE card each, and
-      // NOT be padded out to 25. So a country-wide "show me everywhere" returns exactly N cards =
-      // the number of platforms that have a matching listing. (user: "just show me the 20 only".)
-      void usedIds;
-      listings = topRow;
-    } else {
-      // City/area search → mix the two sources so neither dominates the top. Without this, Wasalt's
-      // higher id range sweeps the closeness id-tiebreak and the user "doesn't see Aqar anymore".
-      listings = diversifyBySource(listings);
-    }
   }
 
   // Return up to 25 matches (display cap): the chat shows the first `count` the user explicitly
@@ -885,10 +854,9 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
       suggestion = noResultsSuggestion(q, pools);
     }
   }
-  // Country-wide "show me everywhere" returns exactly ONE card per platform (the full roster — 27
-  // and growing). It must NOT be chopped by the 25-card default cap, or the last platforms vanish.
-  // Every other search keeps the 25 default. (user: country-wide showed only 25 of 27 platforms.)
-  const displayCap = isCountryWideQuery(q) ? Math.max(25, listings.length) : 25;
+  // ONE display rule for EVERY search (incl. country-wide): the best 25 ranked closest→least. (The
+  // Show-More-to-200 paging is a UI increment on top; the engine returns the ranked set.) (user.)
+  const displayCap = 25;
   return { heading: heading(q), notes: ns, listings: listings.slice(0, displayCap), sortNote, count, suggestion };
 }
 
