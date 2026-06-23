@@ -4,6 +4,7 @@ import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } fro
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
+import { resolveLocation, ensureLocationIndex } from '@/data/locations';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
 import { mapSupabaseUser, signOutBackend } from '@/lib/auth';
@@ -339,6 +340,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // A Room is always exactly 1 bedroom — normalize here so every path (filter or AI agent)
         // shows "1 bedroom" and uses the room price ladder, no matter what detail came in. (user request.)
         if (q.type === 'Room') q = { ...q, detail: '1' };
+        // ONE LOCATION ENGINE (user: same resolution everywhere). The FILTER path resolves location up
+        // front and attaches q.locationMatch. The AI-CHAT path does NOT — Gemini returns a raw city
+        // string that may be a typo or homophone ("Rakk"→Al Rakah, "القرص"→Ar Rass), which dead-ended
+        // at "no results". Resolve it HERE, through the SAME resolver the filter uses, so a near miss
+        // still finds the real city and the Search Summary shows the corrected Region → City → District.
+        if (!q.locationMatch && q.location && q.location.trim()) {
+          try {
+            await ensureLocationIndex();
+            const lm = resolveLocation(q.location, getLocale());
+            if (lm.kind !== 'none') {
+              const display =
+                lm.kind === 'district' || lm.kind === 'city' || lm.kind === 'region' ? lm.label : (lm.city || q.location);
+              let districts = q.districts;
+              if (lm.kind === 'district') {
+                districts = lm.districts.length ? lm.districts : (lm.label ? [lm.label] : districts);
+              } else if (lm.kind === 'area' || lm.kind === 'landmark' || lm.kind === 'geography' || lm.kind === 'lifestyle') {
+                const clean = lm.districts.filter(Boolean);
+                if (clean.length) districts = clean;
+              }
+              q = { ...q, location: display, locationMatch: lm, districts };
+            }
+          } catch { /* fall back to the raw location — never hard-fail the search */ }
+        }
         // Fetch ONLY this query's matching subset from Supabase (city + type + deal pushed server-side),
         // then run the full client engine on it. Replaces the old "load the whole table" approach that
         // timed out at 21k+ rows. null = backend error (flag it so the UI shows retry, not "no matches").
@@ -350,7 +374,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // signed-in users — a guest's chats are never written to storage, so they vanish on leave.
           recordHistory(q);
         }
-        return r;
+        // Attach the RESOLVED query so the caller renders the Search Summary from what actually ran
+        // (the corrected city/region), not the raw pre-resolution text. (one-engine summary parity.)
+        return { ...r, query: q };
       },
       trackOpen: (listing) => {
         void trackClick(listing, user?.sub ?? null);

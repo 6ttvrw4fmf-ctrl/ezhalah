@@ -551,8 +551,9 @@ export default function Agent() {
       saidRef.current = [];
       const result = await runQuery(turn.query); // now async: fetches the matching subset server-side
       // About to scrape: a random Saudi hype line + a compact read-back of the parsed query, then the
-      // "searching…" beat. (user request — replaces the old prose reply + price-math note.)
-      const reply = buildScrapeIntro(turn.query);
+      // "searching…" beat. Build the read-back from the RESOLVED query (result.query) so a corrected
+      // location (typo → real city + Region → District) shows in the summary. (user request.)
+      const reply = buildScrapeIntro(result.query ?? turn.query);
       await playListings(run, statusId, reply, result, v);
       if (run.cancelled) return;
       void promptSignupSoon(run); // a guest just used their one free search → prompt sign-up
@@ -566,7 +567,7 @@ export default function Agent() {
         askCountRef.current = 0;
         saidRef.current = [];
         const result = await runQuery(combined);
-        await playListings(run, statusId, buildScrapeIntro(combined), result, v);
+        await playListings(run, statusId, buildScrapeIntro(result.query ?? combined), result, v);
         if (run.cancelled) return;
         void promptSignupSoon(run);
       } else {
@@ -634,7 +635,7 @@ export default function Agent() {
       if (run.cancelled) return;
       await waitRun(run, THINK_MS);
       if (run.cancelled) return;
-      await playListings(run, statusId, buildScrapeIntro(pending.q), result);
+      await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
       if (run.cancelled) return;
       setBusy(false);
       runRef.current = null;

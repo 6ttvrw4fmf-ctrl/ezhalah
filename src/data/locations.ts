@@ -85,6 +85,29 @@ const stripAl = (s: string) => s.replace(/^al/, '').replace(/^ال/, '');
 const stripDistrictWord = (s: string) =>
   s.replace(/^حي/, '').replace(/^(?:district|dist)/, '').replace(/(?:district|dist)$/, '');
 
+// Homophone / look-alike letter folding — used for FUZZY matching ONLY (never exact lookup), so a
+// typist who confuses near-identical Arabic letters still lands on the right place: ص/ث→س, ض/ظ/ذ→ز,
+// ط→ت. Built on top of `norm` (which already folds the alef variants, ة→ه, ى/ي→ي). Latin is left
+// untouched. Example: "القرص" → "القرس", one edit from "الرس" (Ar Rass) — the typo the user hit.
+const fuzzyFold = (s: string) =>
+  norm(s).replace(/[صث]/g, 'س').replace(/[ضظذ]/g, 'ز').replace(/ط/g, 'ت');
+
+// Character-bigram Dice coefficient (0…1). Tolerant of length differences and transposed letters in a
+// way raw edit distance is not — a useful second opinion when deciding if a typed place ≈ a real one.
+function dice(a: string, b: string): number {
+  if (a === b) return a ? 1 : 0;
+  if (a.length < 2 || b.length < 2) return 0;
+  const grams = (s: string) => {
+    const m = new Map<string, number>();
+    for (let i = 0; i < s.length - 1; i++) { const g = s.slice(i, i + 2); m.set(g, (m.get(g) ?? 0) + 1); }
+    return m;
+  };
+  const A = grams(a), B = grams(b);
+  let inter = 0;
+  for (const [g, c] of A) { const d = B.get(g); if (d) inter += Math.min(c, d); }
+  return (2 * inter) / ((a.length - 1) + (b.length - 1));
+}
+
 // A search key. `lead` keys anchor at the start of the name ("name starts with query"); non-lead
 // keys are individual words ("some word in the name starts with query"). Matching is always a
 // prefix test — never a mid-word substring — so typing letters narrows the list cleanly.
@@ -422,7 +445,12 @@ const scopeCity = (f: string): string => { for (const [k, c] of CITY_TOKENS) if 
 // in, so any district that actually has inventory is recognized + narrowable. (user: DB is the source
 // of truth; every district stored must be searchable.)
 type LiveDistrict = { district: string; city: string; region: string; n: number };
+type LiveCity = { city: string; region: string; n: number };
 let LIVE_DISTRICTS: LiveDistrict[] = [];
+// Distinct cities that actually have inventory, with their region + listing count. This is the
+// AUTHORITATIVE city→region source (the catalog can be stale; the DB is the source of truth) and the
+// target set for fuzzy city correction ("القرص"→Ar Rass, "jedah"→Jeddah). (user: DB is the truth.)
+let LIVE_CITIES: LiveCity[] = [];
 let _liveLoaded = false;
 let _livePromise: Promise<void> | null = null;
 
@@ -432,11 +460,91 @@ export async function ensureLocationIndex(): Promise<void> {
   _livePromise = (async () => {
     try {
       const { data } = await supabase.from('location_index').select('city,district,region,n');
-      if (data) LIVE_DISTRICTS = data.filter((r: any) => r.city && r.district) as LiveDistrict[];
+      if (data) {
+        LIVE_DISTRICTS = data.filter((r: any) => r.city && r.district) as LiveDistrict[];
+        // City→region aggregation over EVERY row (a city counts even where its district is null), so
+        // any city with listings resolves and carries its real region.
+        const agg = new Map<string, LiveCity>();
+        for (const r of data as any[]) {
+          if (!r.city || r.city === 'Other') continue;
+          const e = agg.get(r.city) ?? { city: r.city, region: r.region ?? '', n: 0 };
+          e.n += Number(r.n) || 0;
+          if (!e.region && r.region) e.region = r.region;
+          agg.set(r.city, e);
+        }
+        LIVE_CITIES = [...agg.values()];
+        _cityKeys = null; // rebuild the fuzzy-city index now that live cities are loaded
+      }
       _liveLoaded = true;
     } catch { /* keep the catalog-only resolver as fallback */ }
   })();
   return _livePromise;
+}
+
+// The region a canonical (English) city sits in — live index first (truth), catalog as fallback.
+function regionForCity(city: string): string {
+  const lc = city.toLowerCase();
+  for (const v of LIVE_CITIES) if (v.city.toLowerCase() === lc) return v.region;
+  const cc = CITIES_IDX.find((c) => c.place.nameEn.toLowerCase() === lc);
+  return cc?.place.regionEn ?? '';
+}
+
+// The locale-appropriate display name for a canonical (English) city — Arabic from the catalog when we
+// have it, else the canonical English. Used so a fuzzy-corrected city shows in the user's language.
+function cityDisplay(cityEn: string, locale: string): string {
+  if (!ar(locale)) return cityEn;
+  const cc = CITIES_IDX.find((c) => c.place.nameEn.toLowerCase() === cityEn.toLowerCase());
+  if (cc?.place.nameAr) return cc.place.nameAr;
+  // Catalog miss → the curated CITY_TOKENS map carries Arabic spellings for the long tail of towns.
+  for (const [k, c] of CITY_TOKENS) if (c === cityEn && /[ء-ي]/.test(k)) return k;
+  return cityEn;
+}
+
+// ── Fuzzy CITY index (typo/Arabic correction) ────────────────────────────────────────────────────
+// Every way a city can be written → its canonical English DB label: the curated CITY_TOKENS map
+// (Arabic + transliterations for ~150 towns), the nationwide catalog (EN + AR), and the live cities.
+// Rebuilt when the live index loads. Each entry caches a homophone-folded key for fuzzy comparison.
+type CityKey = { key: string; fold: string; city: string };
+let _cityKeys: CityKey[] | null = null;
+function cityKeys(): CityKey[] {
+  if (_cityKeys) return _cityKeys;
+  const out: CityKey[] = [];
+  const seen = new Set<string>();
+  const add = (rawName: string, city: string) => {
+    const k = norm(rawName);
+    if (k.length < 3) return;
+    const sig = `${k}|${city}`;
+    if (seen.has(sig)) return;
+    seen.add(sig);
+    out.push({ key: k, fold: fuzzyFold(rawName), city });
+  };
+  for (const [k, c] of CITY_TOKENS) add(k, c);
+  for (const c of CITIES_IDX) { add(c.place.nameEn, c.place.nameEn); add(c.place.nameAr, c.place.nameEn); }
+  for (const lc of LIVE_CITIES) add(lc.city, lc.city);
+  _cityKeys = out;
+  return out;
+}
+
+// Best fuzzy city match for a typed/parsed location, or null. Pure typo correction — exact/substring
+// city resolution is handled upstream; this is the last resort BEFORE a "couldn't find it" so a near
+// miss ("القرص"≈الرس, "khubar"≈Khobar) still finds real inventory instead of dead-ending. Requires a
+// shared first letter + a small edit distance (scaled by length), or a high Dice overlap; never a
+// loose guess (precision matters — we must not show the WRONG city's cards). (user: match or say none.)
+function fuzzyCity(raw: string): { city: string; region: string } | null {
+  const q = norm(raw);
+  if (q.length < 4) return null; // too short to correct safely
+  const qf = fuzzyFold(raw);
+  const maxD = qf.length <= 4 ? 1 : qf.length <= 7 ? 2 : 3;
+  let best: { city: string; ed: number; d: number } | null = null;
+  for (const ck of cityKeys()) {
+    if (ck.key === q) return { city: ck.city, region: regionForCity(ck.city) }; // exact (folded earlier)
+    const sharesHead = ck.fold[0] === qf[0];
+    const ed = sharesHead ? editDistance(ck.fold, qf) : 99;
+    const d = dice(ck.fold, qf);
+    if (!((sharesHead && ed <= maxD) || d >= 0.62)) continue;
+    if (!best || ed < best.ed || (ed === best.ed && d > best.d)) best = { city: ck.city, ed, d };
+  }
+  return best ? { city: best.city, region: regionForCity(best.city) } : null;
 }
 
 // Normalize a district string for matching. flatLoc already lowercases + strips spaces/diacritics/
@@ -465,11 +573,26 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   if (cityKey) probe = probe.replace(cityKey, '');
   if (cityKeyAr) probe = probe.replace(cityKeyAr, '');
   if (probe.length < 2) return []; // input is just a city (or nothing district-specific)
+  const probeF = fuzzyFold(probe);
+  // Fuzzy-match the probe against the WORDS of a district name (not just the glued whole), so a typo'd
+  // or partial district token still hits — "Rakk" ≈ the "Rakah" in "Al Rakah Al Shamaliyah". Shared
+  // first letter + a small length-scaled edit distance keeps it from over-matching. (user: Rakk→Rakah.)
+  const tokenMaxD = probeF.length <= 3 ? 1 : probeF.length <= 7 ? 2 : 3;
+  const fuzzyTokenHit = (district: string): boolean => {
+    if (probeF.length < 4) return false;
+    for (const tok of district.split(/[^\p{L}\p{N}]+/u)) {
+      const tf = fuzzyFold(tok);
+      if (tf.length < 4 || ARTICLE.has(tf) || DISTRICT_WORD.has(tf)) continue;
+      if (tf === probeF) return true;
+      if (tf[0] === probeF[0] && editDistance(tf, probeF) <= tokenMaxD) return true;
+    }
+    return false;
+  };
   const out: LiveDistrict[] = [];
   for (const d of LIVE_DISTRICTS) {
     const nd = normDist(d.district);
     if (nd.length < 2) continue;
-    if (!(probe.includes(nd) || nd.includes(probe))) continue;
+    if (!(probe.includes(nd) || nd.includes(probe) || fuzzyTokenHit(d.district))) continue;
     if (cityKey) {
       const dc = flatLoc(d.city);
       if (dc !== cityKey && dc !== cityKeyAr) continue; // a city was named → keep only that city
@@ -502,7 +625,10 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
   const hit = matchLocations(raw)[0];
   // A catalog DISTRICT wins (clean names + region context).
   if (hit && hit.kind === 'district') {
-    return { raw, kind: 'district', city: ar(locale) ? (hit.cityAr ?? '') : (hit.cityEn ?? ''), region: ar(locale) ? hit.regionAr : hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [] };
+    // city/region are ENGINE-FACING (the engine's cityFilterFor only understands the English DB labels)
+    // → always canonical English; `label` carries the locale display. (so chat-path English from Gemini
+    // and Arabic filter picks both scope the server fetch correctly.)
+    return { raw, kind: 'district', city: hit.cityEn ?? '', region: hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [] };
   }
   // 3b) LIVE district merge — a district that exists in real inventory but NOT the static catalog
   //     (e.g. "Al Doha Dist." in Yanbu). Beats a bare city match so the typed district actually
@@ -532,9 +658,17 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
     return { raw, kind: 'district', city: strong[0][0], region: strong[0][1].region, label: raw, districts: allDistricts, cities: strong.map(([c]) => c), ambiguous: true };
   }
   if (hit) {
-    if (hit.kind === 'city') return { raw, kind: 'city', city: ar(locale) ? hit.nameAr : hit.nameEn, region: ar(locale) ? hit.regionAr : hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [] };
+    if (hit.kind === 'city') return { raw, kind: 'city', city: hit.nameEn, region: hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [] };
     if (hit.kind === 'region') return { raw, kind: 'region', city: '', label: ar(locale) ? hit.nameAr : `${hit.nameEn} Region`, districts: [], cities: [] };
     // country → fall through to geography/lifestyle/none (it isn't a specific place to anchor on)
+  }
+  // 3c) FUZZY city correction — a typo'd / homophone-spelled city the exact matchers missed ("القرص"→
+  //     Ar Rass, "khubar"→Khobar, "jedah"→Jeddah). Last resort before geography cues / "couldn't find
+  //     it", so a near-miss still finds the real city's inventory instead of dead-ending. Region comes
+  //     from the live DB index, so the summary can show Region → City. (user: don't dead-end a typo.)
+  const fc = fuzzyCity(raw);
+  if (fc && fc.city) {
+    return { raw, kind: 'city', city: cityDisplay(fc.city, locale), region: fc.region || undefined, label: cityDisplay(fc.city, locale), districts: [], cities: [] };
   }
   // 4) Geography cue ("near the sea" → coastal city + waterfront districts).
   for (const g of GEOGRAPHY) if (hasWord(g.words)) {

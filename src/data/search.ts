@@ -279,15 +279,22 @@ function locationLines(q: SearchQuery): string[] {
   }
   const join = (xs: string[]) => xs.join(getLocale() === 'ar' ? '، ' : ', ');
   const cityLabel = lm.city ? tPlace(lm.city) : '';
-  // Reassure the user when we corrected a typo'd place name.
+  const regionLabel = lm.region ? tPlace(lm.region) : '';
+  // Reassure the user ONLY when we corrected a typo'd place name. Suppress when the difference is just
+  // localization (the resolver returns a localized label while the raw was the other script — e.g. the
+  // agent extracted English "Riyadh" and we show "الرياض"), which is a translation, not a correction.
   const simp = (s: string) => s.toLowerCase().replace(/[^a-zء-ي]/gu, '');
+  const hasAr = (s: string) => /[ء-ي]/.test(s);
+  const sameScript = hasAr(lm.raw) === hasAr(lm.label);
   const out: string[] = [];
-  if ((lm.kind === 'district' || lm.kind === 'city') && simp(lm.raw) && simp(lm.raw) !== simp(lm.label)) {
+  if ((lm.kind === 'district' || lm.kind === 'city') && simp(lm.raw) && simp(lm.raw) !== simp(lm.label) && sameScript) {
     out.push(`${t('You typed')}: ${lm.raw}`);
   }
   switch (lm.kind) {
     case 'city':
       out.push(`${t('City')}: ${tPlace(lm.label)}`);
+      // Region disambiguates same-named cities/districts across the Kingdom. (user: include the region.)
+      if (regionLabel) out.push(`${t('Region')}: ${regionLabel}`);
       break;
     case 'region':
       out.push(`${t('Region')}: ${lm.label}`);
@@ -297,8 +304,11 @@ function locationLines(q: SearchQuery): string[] {
       if (lm.ambiguous && lm.cities && lm.cities.length) {
         // The district name exists in several cities → show them all (we searched all), not one.
         out.push(`${t('Cities')}: ${join(lm.cities.map((c) => tPlace(c)))}`);
-      } else if (cityLabel) {
-        out.push(`${t('City')}: ${cityLabel}`);
+      } else {
+        // Same district name exists in different cities → always show City + Region so the user knows
+        // WHICH one we matched (e.g. Al Olaya → Riyadh vs Khobar). (user request.)
+        if (cityLabel) out.push(`${t('City')}: ${cityLabel}`);
+        if (regionLabel) out.push(`${t('Region')}: ${regionLabel}`);
       }
       break;
     case 'area':
@@ -441,7 +451,7 @@ export function interpretPrice(rawDigits: string, deal: Deal, sizeM2?: number, i
   return { kind: 'totalBuy', echo: `${sar} ${grouped(amount)}` };
 }
 
-export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string };
+export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery };
 
 function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run
