@@ -4,6 +4,7 @@ import { type Deal, CATEGORY_TYPES } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
+import { normalizeType, type SourceKind } from './propertyTypes';
 
 // Session cache of every listing we've fetched (by id) — lets the in-app browser open any listing
 // the user has seen without a refetch, even though we no longer hold the whole table in memory.
@@ -276,7 +277,7 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
     const lists = await Promise.all(
       regionKeys.flatMap((rk) => tables.map(async (tbl) => {
         const { data } = await keptFiltersReq(q, tbl).in('city', REGIONS[rk]).order('id', { ascending: false }).limit(perBucket);
-        return data ? finalize(data) : [];
+        return data ? finalize(data, tbl.includes('_commercial') ? 'com' : 'res') : [];
       })),
     );
     const rows = interleave(lists);
@@ -303,7 +304,7 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
     if (city) req = req.eq('city', city);
     req = req.order('id', { ascending: false }).limit(perTable);
     const { data } = await req;
-    return data ? finalize(data) : [];
+    return data ? finalize(data, tbl.includes('_commercial') ? 'com' : 'res') : [];
   }));
   // If BOTH queries errored (no data anywhere) return null so the UI shows the retry message,
   // not an empty-result message. Otherwise interleave whatever each side returned.
@@ -360,7 +361,7 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
   ]) {
     const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).limit(1);
     if (error || !data || !data.length) continue;
-    const [row] = finalize(data);
+    const [row] = finalize(data, table.includes('_commercial') ? 'com' : 'res');
     if (row) { LISTING_CACHE.set(row.id, row); return row; }
   }
   return null;
@@ -391,10 +392,14 @@ const LIST_SELECT = [
   'additional_info',
 ].join(', ');
 
-// Map raw DB rows → in-app `Listing` shape.
-function finalize(rows: any[]): Listing[] {
+// Map raw DB rows → in-app `Listing` shape. `kind` = which table-kind the rows came from (res/com),
+// needed to normalize the ambiguous "Building" type (residential vs commercial) into the clean type.
+function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
   return rows.map((r: any): Listing => {
     const deal: Deal = r.transaction_type === 'Buy' ? 'Buy' : 'Rent';
+    // Normalize the raw scraped property_type → {macro_category, clean_property_type}. The card shows
+    // `cleanType`; `type` keeps the raw value for the engine + debugging. (clean-type filter, step 2.)
+    const norm = normalizeType(r.property_type, kind);
     // A genuinely MONTHLY rental → show its monthly figure (price_annual was stored as monthly×12, so
     // dividing back gives the exact monthly rent). Annual rentals keep the yearly figure. (user request.)
     const isMonthlyRent = deal === 'Rent' && r.rent_period === 'monthly' && typeof r.price_annual === 'number';
@@ -409,6 +414,8 @@ function finalize(rows: any[]): Listing[] {
     return {
       id: Number(r.id),
       type: r.property_type ?? 'Apartment',
+      cleanType: norm.clean,
+      macro: norm.macro,
       deal,
       city: r.city ?? '',
       district: r.neighborhood ?? '',

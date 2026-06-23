@@ -143,7 +143,7 @@ export function ResultCard({
       <Pressable onPress={onOpen} style={[card.midCol, horizontal && card.midColFlex]}>
         <View style={card.typeRow}>
           <Ionicons name="home-outline" size={13} color={colors.muted} />
-          <Text style={card.typeLabel}>{t(listing.type)} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
+          <Text style={card.typeLabel}>{t(listing.cleanType ?? listing.type)} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
         </View>
         <Text style={[card.title, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
           {place(t(listing.district)) || place(t(listing.city))}{listing.district ? `, ${place(t(listing.city))}` : ''}
@@ -164,7 +164,7 @@ export function ResultCard({
           {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
           {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} /> : null}
           {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${tr('m²')}`} small={t('Area')} /> : null}
-          <Stat icon="business-outline" big={t(listing.type)} small={t('Property Type')} />
+          <Stat icon="business-outline" big={t(listing.cleanType ?? listing.type)} small={t('Property Type')} />
           {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
         </View>
       </Pressable>

@@ -176,6 +176,12 @@ const AR: Record<string, string> = {
   'Camp': 'مخيم',
   'Hotel': 'فندق',
   'Commercial Building': 'مبنى تجاري',
+  'Residential Building': 'عمارة سكنية',
+  'Specialized Facilities': 'منشآت متخصصة',
+  'Staff Housing': 'سكن عمال',
+  'Studio': 'استوديو',
+  'Duplex': 'دوبلكس',
+  'Palace': 'قصر',
   'Gas Station': 'محطة وقود',
   'Health Center': 'مركز صحي',
 

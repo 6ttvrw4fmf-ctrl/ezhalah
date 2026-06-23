@@ -13,6 +13,10 @@ export type Listing = {
   area: number; // m²
   beds: number; // 0 = not a dwelling
   source: string; // platform name
+  // Normalized property type (the new 2-macro system). `type` stays the RAW scraped value (engine +
+  // debug); the CARD and filter use these. Computed at read-time via propertyTypes.normalizeType.
+  cleanType?: string; // clean_property_type — e.g. raw "Building"(res) → "Residential Building"
+  macro?: 'Residential' | 'Commercial'; // macro_category
   // Rent billing period: 'monthly' | 'annual' (null for Buy / mock data). When 'monthly', `price` is
   // the per-month figure; otherwise yearly. Drives the per-month filter + the /mo vs /yr label. (user.)
   rentPeriod?: string | null;
