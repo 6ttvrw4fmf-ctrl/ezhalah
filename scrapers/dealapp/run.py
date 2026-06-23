@@ -400,6 +400,14 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str]:
     ppm = _num((_spec_value(html, "سعر المتر") or "").replace("ريال", ""))
     price_per_meter = round(ppm) if ppm else (round(price / area) if (price and area and not is_rent) else None)
 
+    # Advertiser data-entry errors on Deal App produce billion-riyal prices (e.g. a land ad with
+    # سعر المتر = 800,000 ﷼/m² × 57,500 m² = 46,000,000,000). A per-meter price above 300k SAR/m² or a
+    # total above 1B is not a real market price → drop the price so the card shows "Price on request"
+    # instead of a garbage number. (The listing itself is kept; only the bogus price is dropped.)
+    if (price_per_meter and price_per_meter > 300_000) or (price and price > 1_000_000_000):
+        price = None
+        price_per_meter = None
+
     # ── location: breadcrumb Arabic city is the best map_city input; addressRegion is the DISTRICT ──
     city_ar = _breadcrumb_city_ar(schema)
     city = normalize.map_city(city_ar) if city_ar else None
