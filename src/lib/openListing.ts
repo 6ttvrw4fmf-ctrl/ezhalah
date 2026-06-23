@@ -20,8 +20,24 @@ function localizeAqarUrl(url: string | null | undefined, locale: string): string
   return `${m[1]}/en${m[2]}`;
 }
 
+// Gathern: append today→+30 day dates so the unit page opens directly in monthly view.
+// The scraper stores the bare /view/{chalet_id}/unit/{unit_id} URL (no dates) so the click-through
+// always uses a fresh date window rather than stale scraped dates.
+function gathernDateUrl(url: string): string {
+  const today = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const checkIn = fmt(today);
+  const out = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const checkOut = fmt(out);
+  return `${url}?check_in=${checkIn}&check_out=${checkOut}`;
+}
+
 export async function openListing(listing: Listing): Promise<void> {
-  const url = localizeAqarUrl(listing.source_url, getLocale());
+  const raw = listing.source_url;
+  const url = raw?.includes('gathern.co')
+    ? gathernDateUrl(raw)
+    : localizeAqarUrl(raw, getLocale());
   if (!url) return;
   if (Platform.OS === 'web') {
     if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer');

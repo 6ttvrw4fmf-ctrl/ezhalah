@@ -322,6 +322,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('abeea')) return <View style={[card.hostBadge, card.abeeaBadge]}><Text style={card.badgeText}>ابيعا</Text></View>;
   if (s.includes('jurash')) return <View style={[card.hostBadge, card.jurashBadge]}><Text style={card.badgeText}>جرش</Text></View>;
   if (s.includes('alnokhba')) return <View style={[card.hostBadge, card.alnokhbaBadge]}><Text style={card.badgeText}>النخبة</Text></View>;
+  if (s.includes('gathern')) return <View style={[card.hostBadge, card.gathernBadge]}><Text style={card.badgeText}>Gathern</Text></View>;
   // 2026-06 batch — text-chips until the user supplies logos.
   if (s.includes('deal')) return <Image source={DEALAPP_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('souq')) return <View style={[card.hostBadge, card.souq24Badge]}><Text style={card.badgeText}>سوق ٢٤</Text></View>;
@@ -359,6 +360,7 @@ function sourceName(source: string): string {
   if (s.includes('abeea')) return 'Abeea Real Estate';
   if (s.includes('jurash')) return 'Jurash Real Estate';
   if (s.includes('alnokhba')) return 'Al Nokhba';
+  if (s.includes('gathern')) return 'Gathern';
   if (s.includes('deal')) return 'Deal App';
   if (s.includes('souq')) return '24 Souq';
   if (s.includes('pulse')) return 'Era Pulse';
@@ -393,6 +395,7 @@ function sourceHost(source: string): string {
   if (s.includes('abeea')) return 'abeea.com.sa';
   if (s.includes('jurash')) return 'jurash.sa';
   if (s.includes('alnokhba')) return 'alnokhba-services.com';
+  if (s.includes('gathern')) return 'gathern.co';
   if (s.includes('deal')) return 'dealapp.sa';
   if (s.includes('souq')) return '24.com.sa';
   if (s.includes('pulse')) return 'erapulse.sa';
@@ -554,6 +557,7 @@ const card = StyleSheet.create({
   abeeaBadge: { borderRadius: 8, backgroundColor: '#7a4a1f', alignItems: 'center', justifyContent: 'center' },
   jurashBadge: { borderRadius: 8, backgroundColor: '#2f5a5a', alignItems: 'center', justifyContent: 'center' },
   alnokhbaBadge: { borderRadius: 8, backgroundColor: '#5a2f3a', alignItems: 'center', justifyContent: 'center' },
+  gathernBadge:  { borderRadius: 8, backgroundColor: '#e87820', alignItems: 'center', justifyContent: 'center' },
   dealappBadge:  { borderRadius: 8, backgroundColor: '#1d4a37', alignItems: 'center', justifyContent: 'center' },
   souq24Badge:   { borderRadius: 8, backgroundColor: '#2f5d7a', alignItems: 'center', justifyContent: 'center' },
   erapulseBadge: { borderRadius: 8, backgroundColor: '#7a4a1f', alignItems: 'center', justifyContent: 'center' },

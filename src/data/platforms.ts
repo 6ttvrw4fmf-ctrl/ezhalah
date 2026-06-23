@@ -39,6 +39,7 @@ export const PLATFORMS: Platform[] = [
   { name: 'Abeea', domain: 'abeea.com.sa', brand: 'Abeea Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Jurash', domain: 'jurash.sa', brand: 'Jurash Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Al Nokhba', domain: 'alnokhba-services.com', brand: 'Al Nokhba', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Gathern', domain: 'gathern.co', brand: 'Gathern', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   { name: 'Deal App', domain: 'dealapp.sa', brand: 'Deal App', phone: '+966 5X XXX 7700', allowsRent: true, allowsBuy: true },
   { name: '24 Souq', domain: '24.com.sa', brand: '24 Souq', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Era Pulse', domain: 'erapulse.sa', brand: 'Era Pulse', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
