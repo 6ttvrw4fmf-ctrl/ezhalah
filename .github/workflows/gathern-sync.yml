@@ -1,0 +1,53 @@
+# Gathern sync — MONTHLY furnished residential units across ~190 Saudi cities.
+#
+# Run as a PARALLEL MATRIX: 12 shards, each on its own GitHub runner (= its own IP). Two wins:
+#   1. Speed — all shards crawl concurrently, so wall-clock ≈ the single heaviest shard (one big
+#      city like Riyadh ~167 pages), not the sum of all cities. ~1-2h sequential → ~10-20 min.
+#   2. No throttling — Gathern rate-limits a single IP after heavy pagination; spreading cities
+#      across 12 runners means no one IP does enough volume to get blocked (which is what throttled
+#      the local validation run after Riyadh).
+#
+# The scraper fetches the full Saudi city list, sorts by id (deterministic), then each shard
+# processes cities[i::12] (stride partition spreads big + small cities evenly). It de-dups by
+# ad_number. Shards skip the prune (each sees only its slice); see the prune note below.
+#
+# Triggered by pg_cron → GitHub workflow_dispatch (GitHub's own schedule: triggers were dropped
+# project-wide because they skipped ~half the runs). The pg_cron job calls this with no inputs.
+#
+# PRUNE: a sharded run can't safely prune (no job sees all cities). For the initial populate this is
+# moot (fresh table). For ongoing stale-removal, the project-wide weekly purge_inactive_listings +
+# the collapse guard cover it short-term; a cross-shard prune (artifact union) is a follow-up.
+
+name: Gathern sync
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: gathern-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false        # one shard failing never blocks the others
+      max-parallel: 12
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Sync Gathern shard ${{ matrix.shard }}/12 (monthly residential)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_MIN_INTERVAL: "0.3"
+        run: python -m scrapers.gathern.run --shard ${{ matrix.shard }}/12
