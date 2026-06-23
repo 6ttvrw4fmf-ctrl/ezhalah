@@ -547,6 +547,38 @@ function fuzzyCity(raw: string): { city: string; region: string } | null {
   return best ? { city: best.city, region: regionForCity(best.city) } : null;
 }
 
+// Does a canonical (English) city actually have live inventory? Used to decide whether a 0-result
+// search is "this city is empty / obscure" vs "the filters were too tight on a busy city".
+export function cityHasListings(cityEn: string): boolean {
+  const lc = (cityEn || '').toLowerCase();
+  return LIVE_CITIES.some((v) => v.city.toLowerCase() === lc && v.n > 0);
+}
+
+// A close city that DOES have inventory and the user might have meant — to offer an honest "did you
+// mean X?" when the place they named is real but empty (e.g. "القرص" = Al Qars, Tabuk, 0 listings; the
+// likely intent is "الرس" = Ar Rass, Qassim, 213). We SUGGEST a real alternative, never silently swap
+// it in — the database is still the source of truth. (user: don't dead-end; propose a place with data.)
+export function nearbyCityWithListings(raw: string, excludeCityEn?: string): { cityEn: string; region: string; n: number } | null {
+  const q = norm(raw);
+  if (q.length < 4) return null;
+  const qf = fuzzyFold(raw);
+  const maxD = qf.length <= 4 ? 1 : qf.length <= 7 ? 2 : 3;
+  const ex = (excludeCityEn || '').toLowerCase();
+  const keys = cityKeys();
+  let best: { cityEn: string; region: string; n: number; ed: number } | null = null;
+  for (const lc of LIVE_CITIES) {
+    if (lc.n <= 0 || lc.city.toLowerCase() === ex) continue;
+    let bestEd = 99;
+    for (const ck of keys) {
+      if (ck.city.toLowerCase() !== lc.city.toLowerCase() || ck.fold[0] !== qf[0]) continue;
+      bestEd = Math.min(bestEd, editDistance(ck.fold, qf));
+    }
+    if (bestEd > maxD) continue;
+    if (!best || bestEd < best.ed || (bestEd === best.ed && lc.n > best.n)) best = { cityEn: lc.city, region: lc.region, n: lc.n, ed: bestEd };
+  }
+  return best ? { cityEn: best.cityEn, region: best.region, n: best.n } : null;
+}
+
 // Normalize a district string for matching. flatLoc already lowercases + strips spaces/diacritics/
 // punctuation, so we remove the "district"/"dist"/"neighborhood"/"حي" MARKERS as substrings. So
 // "Al Doha District" ~ "Al Doha Dist." ~ "حي الدوحة" compare equal-ish. (Don't strip "al" — it would

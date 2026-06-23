@@ -1,5 +1,6 @@
 import type { Category, Deal } from './taxonomy';
 import type { LocationResolution } from './locations';
+import { cityHasListings, nearbyCityWithListings } from './locations';
 import { detailFor, priceBandRange } from './taxonomy';
 import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
 import { supports } from './platforms';
@@ -888,6 +889,17 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
     const bf = bedroomFilter(q2); if (bf) list = list.filter(bf);
     return list.length;
   };
+  // "Did you mean X?" — FIRST, because if the named place itself is empty no other relaxation helps.
+  // Fires only when the resolved place has NO live inventory (a real-but-empty/obscure town like
+  // "القرص"=Al Qars, or an unrecognized place) AND a close city that DOES have listings exists (الرس).
+  // We SUGGEST it; we never silently switch cities — the DB stays the source of truth. (user request.)
+  const lmCity = q.locationMatch?.city || '';
+  if (q.location.trim() && (!lmCity || !cityHasListings(lmCity))) {
+    const alt = nearbyCityWithListings(q.locationMatch?.raw || q.location, lmCity);
+    if (alt) {
+      return t('We couldn’t find listings in "{place}". Did you mean {alt}?', { place: q.locationMatch?.label || q.location, alt: tPlace(alt.cityEn) });
+    }
+  }
   if (q.priceInput && countWith({ priceInput: '' }) > 0) {
     return t("No listings within that budget — there are matches above it. Want me to remove the budget?");
   }
