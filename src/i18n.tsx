@@ -408,6 +408,19 @@ const AR: Record<string, string> = {
     'وجدنا عدة مواقع مطابقة لـ "{name}". نعرض لك أقرب النتائج من قاعدة بياناتنا.',
   'We couldn’t find listings in "{place}". Did you mean {alt}?':
     'ما لقينا إعلانات في "{place}". هل تقصد {alt}؟',
+  // Region names as stored in the DB location_index — used by the Search Summary's Region line so an
+  // Arabic user sees the region in Arabic (not the English DB key). (Riyadh/Makkah already translated.)
+  'Eastern Province': 'المنطقة الشرقية',
+  'Madinah': 'منطقة المدينة المنورة',
+  'Qassim': 'منطقة القصيم',
+  'Jazan': 'منطقة جازان',
+  'Asir': 'منطقة عسير',
+  'Hail': 'منطقة حائل',
+  'Tabuk': 'منطقة تبوك',
+  'Al Bahah': 'منطقة الباحة',
+  'Northern Borders': 'منطقة الحدود الشمالية',
+  'Najran': 'منطقة نجران',
+  'Al Jawf': 'منطقة الجوف',
   'Budget': 'الميزانية',
   'Your budget': 'ميزانيتك',
   'Monthly Rent': 'الإيجار الشهري',

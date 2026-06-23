@@ -96,7 +96,9 @@ const historyKey = (sub: string) => 'history:' + sub;
 const LEGACY_HISTORY_KEY = 'history';
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [query, setQueryState] = useState<SearchQuery>(emptyQuery());
+  // The FILTER (home) defaults to Buy highlighted (user request). emptyQuery() stays Rent-default for
+  // the agent/chat base — this override is only the filter form's starting state.
+  const [query, setQueryState] = useState<SearchQuery>({ ...emptyQuery(), deal: 'Buy' });
   // Ezhalah is a pure aggregator showing only REAL scraped listings. There's no whole-table load
   // anymore — each search fetches its own matching subset from Supabase (see runQuery →
   // fetchListingsForQuery). dataSource is constant 'supabase' (kept for any UI that reads it).

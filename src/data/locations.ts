@@ -539,9 +539,10 @@ function fuzzyCity(raw: string): { city: string; region: string } | null {
   for (const ck of cityKeys()) {
     if (ck.key === q) return { city: ck.city, region: regionForCity(ck.city) }; // exact (folded earlier)
     const sharesHead = ck.fold[0] === qf[0];
-    const ed = sharesHead ? editDistance(ck.fold, qf) : 99;
+    if (!sharesHead) continue; // a shared first letter is REQUIRED — never accept on Dice overlap alone
+    const ed = editDistance(ck.fold, qf);
     const d = dice(ck.fold, qf);
-    if (!((sharesHead && ed <= maxD) || d >= 0.62)) continue;
+    if (!(ed <= maxD || d >= 0.62)) continue;
     if (!best || ed < best.ed || (ed === best.ed && d > best.d)) best = { city: ck.city, ed, d };
   }
   return best ? { city: best.city, region: regionForCity(best.city) } : null;
@@ -573,6 +574,9 @@ export function nearbyCityWithListings(raw: string, excludeCityEn?: string): { c
       if (ck.city.toLowerCase() !== lc.city.toLowerCase() || ck.fold[0] !== qf[0]) continue;
       bestEd = Math.min(bestEd, editDistance(ck.fold, qf));
     }
+    // Fallback: some live cities have no curated spelling key — compare the city's own English name.
+    const lf = fuzzyFold(lc.city);
+    if (lf[0] === qf[0]) bestEd = Math.min(bestEd, editDistance(lf, qf));
     if (bestEd > maxD) continue;
     if (!best || bestEd < best.ed || (bestEd === best.ed && lc.n > best.n)) best = { cityEn: lc.city, region: lc.region, n: lc.n, ed: bestEd };
   }
@@ -700,7 +704,10 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
   //     from the live DB index, so the summary can show Region → City. (user: don't dead-end a typo.)
   const fc = fuzzyCity(raw);
   if (fc && fc.city) {
-    return { raw, kind: 'city', city: cityDisplay(fc.city, locale), region: fc.region || undefined, label: cityDisplay(fc.city, locale), districts: [], cities: [] };
+    // `city` is ENGINE-FACING → canonical English (cityFilterFor / cityHasListings / nearbyCity all key
+    // off the English DB label); `label` carries the localized display. (Returning the localized name
+    // here would silently break server-side scoping for Arabic-locale fuzzy hits — caught in review.)
+    return { raw, kind: 'city', city: fc.city, region: fc.region || undefined, label: cityDisplay(fc.city, locale), districts: [], cities: [] };
   }
   // 4) Geography cue ("near the sea" → coastal city + waterfront districts).
   for (const g of GEOGRAPHY) if (hasWord(g.words)) {
