@@ -315,7 +315,6 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('muktamel')) return <Image source={MUKTAMEL_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('mizlaj')) return <Image source={MIZLAJ_LOGO} style={card.hostBadge} contentFit="contain" />;
   // Batch 7 — text-chips until the user supplies logos.
-  if (s.includes('semsar')) return <View style={[card.hostBadge, card.semsarBadge]}><Text style={card.badgeText}>سمسار</Text></View>;
   if (s.includes('aqaratikom')) return <View style={[card.hostBadge, card.aqaratikomBadge]}><Text style={card.badgeText}>عقاراتكم</Text></View>;
   if (s.includes('awal')) return <View style={[card.hostBadge, card.awalBadge]}><Text style={card.badgeText}>أوال</Text></View>;
   if (s.includes('alkhaas')) return <View style={[card.hostBadge, card.alkhaasBadge]}><Text style={card.badgeText}>الخاص</Text></View>;
@@ -325,7 +324,6 @@ function SourceBadge({ source }: { source: string }) {
   // 2026-06 batch — text-chips until the user supplies logos.
   if (s.includes('deal')) return <View style={[card.hostBadge, card.dealappBadge]}><Text style={card.badgeText}>ديل</Text></View>;
   if (s.includes('souq')) return <View style={[card.hostBadge, card.souq24Badge]}><Text style={card.badgeText}>سوق ٢٤</Text></View>;
-  if (s.includes('dwelleo')) return <View style={[card.hostBadge, card.dwelleoBadge]}><Text style={card.badgeText}>ديويليو</Text></View>;
   if (s.includes('pulse')) return <View style={[card.hostBadge, card.erapulseBadge]}><Text style={card.badgeText}>نبض</Text></View>;
   if (s.includes('nowaisiry')) return <View style={[card.hostBadge, card.nowaisiryBadge]}><Text style={card.badgeText}>النويصري</Text></View>;
   if (s.includes('october')) return <View style={[card.hostBadge, card.octoberBadge]}><Text style={card.badgeText}>١ أكتوبر</Text></View>;
@@ -354,7 +352,6 @@ function sourceName(source: string): string {
   if (s.includes('jazwtn')) return 'Jazan Watan';
   if (s.includes('mizlaj')) return 'Mizlaj Real Estate';
   if (s.includes('muktamel')) return 'Muktamel';
-  if (s.includes('semsar')) return 'Semsar';
   if (s.includes('aqaratikom')) return 'Aqaratikom';
   if (s.includes('awal')) return 'Awal Real Estate';
   if (s.includes('alkhaas')) return 'Al Khaas';
@@ -363,7 +360,6 @@ function sourceName(source: string): string {
   if (s.includes('alnokhba')) return 'Al Nokhba';
   if (s.includes('deal')) return 'Deal App';
   if (s.includes('souq')) return '24 Souq';
-  if (s.includes('dwelleo')) return 'Dwelleo';
   if (s.includes('pulse')) return 'Era Pulse';
   if (s.includes('nowaisiry')) return 'Al Nowaisiry Real Estate';
   if (s.includes('october')) return '1 October Real Estate';
@@ -390,7 +386,6 @@ function sourceHost(source: string): string {
   if (s.includes('jazwtn')) return 'jazwtn.sa';
   if (s.includes('mizlaj')) return 'mizlaj.com.sa';
   if (s.includes('muktamel')) return 'muktamel.com';
-  if (s.includes('semsar')) return 'semsarsaudi.com';
   if (s.includes('aqaratikom')) return 'aqaratikom.com';
   if (s.includes('awal')) return 'awaalun.com';
   if (s.includes('alkhaas')) return 'alkhaas.net';
@@ -399,7 +394,6 @@ function sourceHost(source: string): string {
   if (s.includes('alnokhba')) return 'alnokhba-services.com';
   if (s.includes('deal')) return 'dealapp.sa';
   if (s.includes('souq')) return '24.com.sa';
-  if (s.includes('dwelleo')) return 'dwelleo.sa';
   if (s.includes('pulse')) return 'erapulse.sa';
   if (s.includes('nowaisiry')) return 'alnowaisiry.com';
   if (s.includes('october')) return '1october.com.sa';
@@ -553,7 +547,6 @@ const card = StyleSheet.create({
   jazwtnBadge: { borderRadius: 8, backgroundColor: '#1f6b5a', alignItems: 'center', justifyContent: 'center' },
   mizlajBadge: { borderRadius: 8, backgroundColor: '#6b2f4a', alignItems: 'center', justifyContent: 'center' },
   muktamelBadge: { borderRadius: 8, backgroundColor: '#2f5d7a', alignItems: 'center', justifyContent: 'center' },
-  semsarBadge: { borderRadius: 8, backgroundColor: '#b8860b', alignItems: 'center', justifyContent: 'center' },
   aqaratikomBadge: { borderRadius: 8, backgroundColor: '#1f6b6b', alignItems: 'center', justifyContent: 'center' },
   awalBadge: { borderRadius: 8, backgroundColor: '#5a3a7a', alignItems: 'center', justifyContent: 'center' },
   alkhaasBadge: { borderRadius: 8, backgroundColor: '#3a5a2f', alignItems: 'center', justifyContent: 'center' },
@@ -562,7 +555,6 @@ const card = StyleSheet.create({
   alnokhbaBadge: { borderRadius: 8, backgroundColor: '#5a2f3a', alignItems: 'center', justifyContent: 'center' },
   dealappBadge:  { borderRadius: 8, backgroundColor: '#1d4a37', alignItems: 'center', justifyContent: 'center' },
   souq24Badge:   { borderRadius: 8, backgroundColor: '#2f5d7a', alignItems: 'center', justifyContent: 'center' },
-  dwelleoBadge:  { borderRadius: 8, backgroundColor: '#4a3d7a', alignItems: 'center', justifyContent: 'center' },
   erapulseBadge: { borderRadius: 8, backgroundColor: '#7a4a1f', alignItems: 'center', justifyContent: 'center' },
   nowaisiryBadge:{ borderRadius: 8, backgroundColor: '#3a5a2f', alignItems: 'center', justifyContent: 'center' },
   octoberBadge:  { borderRadius: 8, backgroundColor: '#6b3a2f', alignItems: 'center', justifyContent: 'center' },

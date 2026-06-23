@@ -219,14 +219,6 @@ def upsert_souq24_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("souq24_commercial_listings", rows)
 
 
-def upsert_dwelleo_residential_batch(rows: list[dict[str, Any]]) -> None:
-    _wasalt_batch("dwelleo_residential_listings", rows)
-
-
-def upsert_dwelleo_commercial_batch(rows: list[dict[str, Any]]) -> None:
-    _wasalt_batch("dwelleo_commercial_listings", rows)
-
-
 def upsert_erapulse_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("erapulse_residential_listings", rows)
 
@@ -432,15 +424,6 @@ def upsert_muktamel_commercial_batch(rows: list[dict[str, Any]]) -> None:
 
 
 # ── Batch 7: Semsar, Aqaratikom (Nawait), Awal, Al Khaas, Abeea, Jurash, Al Nokhba ──────────────
-def upsert_semsar_residential_batch(rows: list[dict[str, Any]]) -> None:
-    """Batch upsert Semsar (semsarsaudi.com) residential rows (source='Semsar')."""
-    _wasalt_batch("semsar_residential_listings", rows)
-
-
-def upsert_semsar_commercial_batch(rows: list[dict[str, Any]]) -> None:
-    _wasalt_batch("semsar_commercial_listings", rows)
-
-
 def upsert_aqaratikom_residential_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Aqaratikom / Nawait (aqaratikom.com → nawait.sa) residential (source='Aqaratikom')."""
     _wasalt_batch("aqaratikom_residential_listings", rows)

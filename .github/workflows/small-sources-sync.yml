@@ -48,7 +48,6 @@ jobs:
           - { source: fursaghyr,   cmd: "python -m scrapers.fursaghyr.run --type all" }
           - { source: jazwtn,      cmd: "python -m scrapers.jazwtn.run --type all" }
           - { source: mizlaj,      cmd: "python -m scrapers.mizlaj.run --type all" }
-          - { source: semsar,      cmd: "python -m scrapers.semsar.run --type all" }
           - { source: aqaratikom,  cmd: "python -m scrapers.aqaratikom.run --type all" }
           - { source: awal,        cmd: "python -m scrapers.awal.run --type all" }
           - { source: alkhaas,     cmd: "python -m scrapers.alkhaas.run --type all" }
@@ -57,7 +56,6 @@ jobs:
           - { source: alnokhba,    cmd: "python -m scrapers.alnokhba.run --type all" }
           - { source: dealapp,     cmd: "DEALAPP_MAX_FILTER_PAGES=2000 DEALAPP_WORKERS=3 python -m scrapers.dealapp.run --type all" }
           - { source: souq24,      cmd: "python -m scrapers.souq24.run --type all" }
-          - { source: dwelleo,     cmd: "python -m scrapers.dwelleo.run --type all" }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
