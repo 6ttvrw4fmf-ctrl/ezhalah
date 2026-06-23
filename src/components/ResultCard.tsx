@@ -274,6 +274,9 @@ const ALKHAAS_LOGO = require('../../assets/images/alkhaas.jpg');
 const ABEEA_LOGO = require('../../assets/images/abeea.jpg');
 const JURASH_LOGO = require('../../assets/images/jurash.jpg');
 const ALNOKHBA_LOGO = require('../../assets/images/alnokhba.jpg');
+const SOUQ24_LOGO = require('../../assets/images/souq24.jpg');
+const ERAPULSE_LOGO = require('../../assets/images/erapulse.jpg');
+const NOWAISIRY_LOGO = require('../../assets/images/nowaisiry.jpg');
 // Card hero photo with graceful fallback. Some sources (e.g. aqarcity) carry photo URLs that have
 // been deleted on their CDN and 302→/notfound, or are only published as thumbnails — listing one
 // dead URL would leave the card with an empty grey block. We try each URL in order and, if every
@@ -333,9 +336,9 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('gathern')) return <Image source={GATHERN_LOGO} style={card.hostBadge} contentFit="contain" />;
   // 2026-06 batch — text-chips until the user supplies logos.
   if (s.includes('deal')) return <Image source={DEALAPP_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('souq')) return <View style={[card.hostBadge, card.souq24Badge]}><Text style={card.badgeText}>سوق ٢٤</Text></View>;
-  if (s.includes('pulse')) return <View style={[card.hostBadge, card.erapulseBadge]}><Text style={card.badgeText}>نبض</Text></View>;
-  if (s.includes('nowaisiry')) return <View style={[card.hostBadge, card.nowaisiryBadge]}><Text style={card.badgeText}>النويصري</Text></View>;
+  if (s.includes('souq')) return <Image source={SOUQ24_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('pulse')) return <Image source={ERAPULSE_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('nowaisiry')) return <Image source={NOWAISIRY_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('october')) return <Image source={OCTOBER_LOGO} style={card.hostBadge} contentFit="contain" />;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
