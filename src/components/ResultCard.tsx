@@ -266,6 +266,7 @@ const JAZWTN_LOGO = require('../../assets/images/jazan-watan.jpg');
 const MUKTAMEL_LOGO = require('../../assets/images/muktamel.jpg');
 const MIZLAJ_LOGO = require('../../assets/images/mizlaj.jpg');
 const DEALAPP_LOGO = require('../../assets/images/dealapp.jpg');
+const GATHERN_LOGO = require('../../assets/images/gathern.jpg');
 // Card hero photo with graceful fallback. Some sources (e.g. aqarcity) carry photo URLs that have
 // been deleted on their CDN and 302→/notfound, or are only published as thumbnails — listing one
 // dead URL would leave the card with an empty grey block. We try each URL in order and, if every
@@ -322,7 +323,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('abeea')) return <View style={[card.hostBadge, card.abeeaBadge]}><Text style={card.badgeText}>ابيعا</Text></View>;
   if (s.includes('jurash')) return <View style={[card.hostBadge, card.jurashBadge]}><Text style={card.badgeText}>جرش</Text></View>;
   if (s.includes('alnokhba')) return <View style={[card.hostBadge, card.alnokhbaBadge]}><Text style={card.badgeText}>النخبة</Text></View>;
-  if (s.includes('gathern')) return <View style={[card.hostBadge, card.gathernBadge]}><Text style={card.badgeText}>Gathern</Text></View>;
+  if (s.includes('gathern')) return <Image source={GATHERN_LOGO} style={card.hostBadge} contentFit="contain" />;
   // 2026-06 batch — text-chips until the user supplies logos.
   if (s.includes('deal')) return <Image source={DEALAPP_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('souq')) return <View style={[card.hostBadge, card.souq24Badge]}><Text style={card.badgeText}>سوق ٢٤</Text></View>;
