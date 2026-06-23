@@ -402,9 +402,11 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str]:
 
     # Advertiser data-entry errors on Deal App produce billion-riyal prices (e.g. a land ad with
     # سعر المتر = 800,000 ﷼/m² × 57,500 m² = 46,000,000,000). A per-meter price above 300k SAR/m² or a
-    # total above 1B is not a real market price → drop the price so the card shows "Price on request"
-    # instead of a garbage number. (The listing itself is kept; only the bogus price is dropped.)
-    if (price_per_meter and price_per_meter > 300_000) or (price and price > 1_000_000_000):
+    # total above 1B is not a real market price. We HIDE these (active=False below) rather than show a
+    # priceless card — the dealapp.sa page still shows the bogus number, so a "Price on request" card
+    # would contradict the page. Hiding keeps card price === the price the user sees after clicking.
+    price_bad = bool((price_per_meter and price_per_meter > 300_000) or (price and price > 1_000_000_000))
+    if price_bad:
         price = None
         price_per_meter = None
 
@@ -428,7 +430,7 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str]:
     head = html[: html.find("real-estate")] if "real-estate" in html else ""
     if "تم البيع" in head or "تم التأجير" in head:
         sold = True
-    active = not sold
+    active = not sold and not price_bad
 
     # ── geo / REGA / facade etc → additional_info ──
     lat = geo.get("latitude")
