@@ -1,10 +1,10 @@
 import { supabase } from '@/lib/supabase';
 import type { Listing } from './listings';
-import { type Deal, CATEGORY_TYPES } from './taxonomy';
+import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
-import { normalizeType, type SourceKind } from './propertyTypes';
+import { normalizeType, queryForSelection, type SourceKind } from './propertyTypes';
 
 // Session cache of every listing we've fetched (by id) — lets the in-app browser open any listing
 // the user has seen without a refetch, even though we no longer hold the whole table in memory.
@@ -96,28 +96,20 @@ function cityFilterFor(location: string): string | null {
   return null; // not a recognized city → don't constrain server-side; client narrows by district
 }
 
-// Map a SearchQuery's type → the DB property_type values the client pool needs. MUST mirror
-// buildPools' TYPE_TO_POOL grouping (listings.ts) so the server returns exactly the rows the chosen
-// client pool draws from — e.g. asking for "Apartment" must also return House/Floor/Building/etc
-// because they share the apartment pool. Returns null = don't constrain (whole category).
-function dbTypesFor(q: SearchQuery): string[] | null {
-  // A kept type must match EXACTLY — no sibling grouping. Keeping "Apartment" used to also pull Floor/
-  // Building/Rest House/Chalet/Camp (and the 1500-row cap could starve out every Apartment so ZERO were
-  // reachable); keeping "Residential Land" pulled Commercial Land. The fetch now constrains to the one
-  // canonical kept type, so the 1500-row budget is spent on it. (user: cards must match the kept type.)
-  if (q.type) return [q.type];
-  // No specific type kept → whole category. We no longer need to constrain by the category's type
-  // list, because Residential and Commercial now live in SEPARATE tables (see tableFor) — selecting
-  // the right table already scopes the category. Return null = the whole (correct) table.
-  return null;
+// The user's TYPE selection, in clean-type terms. `q.type` is a CLEAN property type (filter sets it
+// directly; the agent path normalizes its raw output to clean before storing it here). `q.typeGroup`
+// is a subcategory GROUP (soft/broad intent). Either resolves — via propertyTypes.queryForSelection —
+// to the RAW property_type strings + table kinds we must actually query. (clean-type filter.)
+function selection(q: SearchQuery): string | null {
+  return q.type || q.typeGroup || null;
 }
 
-// Residential and Commercial are stored in two tables with identical schema. Pick the right one so a
-// Commercial search reads real commercial inventory instead of an honest-but-empty residential 0.
-// Route by category OR by a commercial TYPE — the agent often returns type:"Shop" without setting
-// category:"Commercial", and the two type lists never overlap, so the type alone is decisive.
-function isCommercialQuery(q: SearchQuery): boolean {
-  return q.category === 'Commercial' || (!!q.type && CATEGORY_TYPES.Commercial.includes(q.type));
+// Map the selection → the RAW DB property_type values to constrain to (server-side). null = no type
+// constraint (a macro-only "all Residential/Commercial" search). The raw set covers every scraped
+// spelling a clean type came from (e.g. Shop ⊇ {Shop, Kiosk}; Studio ⊇ {Studio, ستوديو, …}).
+function dbTypesFor(q: SearchQuery): string[] | null {
+  const cq = queryForSelection(selection(q));
+  return cq && cq.rawTypes.length ? cq.rawTypes : null;
 }
 // Convert a listing's `additional_info` into the {key,label,value} rows the card's
 // AdditionalInformationPanel renders. Two shapes exist in the DB:
@@ -186,37 +178,42 @@ function buildAdditionalInfo(raw: any): Array<{ key: string; label: string; valu
   return out.length ? out : null;
 }
 
-// All LAND lives in the residential table — Aqar treats land as ONE category (أراضي), which we scrape
-// there, then split by zoning (Residential/Commercial/Industrial/Agriculture) from the listing text.
-// So a "Commercial Land" search must read the residential table even though it's a Commercial-category
-// type — otherwise it hits the (land-less) commercial table and returns 0. (user: split the land.)
-const LAND_TYPES = new Set(['Residential Land', 'Commercial Land', 'Industrial Land', 'Agriculture Plot']);
-function tableFor(q: SearchQuery): string {
-  if (q.type && LAND_TYPES.has(q.type)) return 'aqar_residential_listings';
-  return isCommercialQuery(q) ? 'aqar_commercial_listings' : 'aqar_residential_listings';
+// Every platform's residential / commercial table. A clean type's CleanQuery.kinds says which kind(s)
+// to read — and because macro_category is decoupled from the physical table (Commercial Land lives in
+// RESIDENTIAL tables, etc.), cross-table types ('both' kinds) read both and the client filters by the
+// normalized macro. Gathern + Aqar Monthly are monthly-only RESIDENTIAL sources (no commercial table).
+const RES_TABLES = ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings', 'aqargate_residential_listings', 'alhoshan_residential_listings', 'hajer_residential_listings', 'sanadak_residential_listings', 'eastabha_residential_listings', 'aqarcity_residential_listings', 'raghdan_residential_listings', 'eaqartabuk_residential_listings', 'satel_residential_listings', 'sadin_residential_listings', 'toor_residential_listings', 'mustqr_residential_listings', 'ramzalqasim_residential_listings', 'fursaghyr_residential_listings', 'jazwtn_residential_listings', 'mizlaj_residential_listings', 'muktamel_residential_listings', 'aqaratikom_residential_listings', 'awal_residential_listings', 'alkhaas_residential_listings', 'abeea_residential_listings', 'jurash_residential_listings', 'alnokhba_residential_listings', 'dealapp_residential_listings', 'souq24_residential_listings', 'erapulse_residential_listings', 'nowaisiry_residential_listings', 'october_residential_listings'];
+const COM_TABLES = ['aqar_commercial_listings', 'wasalt_commercial_listings', 'aldarim_commercial_listings', 'aqargate_commercial_listings', 'alhoshan_commercial_listings', 'hajer_commercial_listings', 'sanadak_commercial_listings', 'eastabha_commercial_listings', 'aqarcity_commercial_listings', 'raghdan_commercial_listings', 'eaqartabuk_commercial_listings', 'satel_commercial_listings', 'sadin_commercial_listings', 'toor_commercial_listings', 'mustqr_commercial_listings', 'ramzalqasim_commercial_listings', 'fursaghyr_commercial_listings', 'jazwtn_commercial_listings', 'mizlaj_commercial_listings', 'muktamel_commercial_listings', 'aqaratikom_commercial_listings', 'awal_commercial_listings', 'alkhaas_commercial_listings', 'abeea_commercial_listings', 'jurash_commercial_listings', 'alnokhba_commercial_listings', 'dealapp_commercial_listings', 'souq24_commercial_listings', 'erapulse_commercial_listings', 'nowaisiry_commercial_listings', 'october_commercial_listings'];
+
+function resTables(q: SearchQuery): string[] {
+  // Gathern + Aqar Monthly only on explicit monthly-rent searches (see [[gathern-source]]).
+  return (q.deal === 'Rent' && q.rentPeriod === 'monthly')
+    ? [...RES_TABLES, 'gathern_residential_listings', 'aqarmonthly_residential_listings']
+    : RES_TABLES;
 }
 
-// Multi-source: which Aqar+Wasalt+Aldarim tables to read for this query. Residential queries hit all
-// three residential tables; commercial queries hit all three commercial tables; land types read the
-// residential tables (where land lives). Each card renders its own SourceBadge so users see the
-// platform. (user request: mix all sources.)
+// Which table KIND(s) this query reads: from the selected clean type/group's CleanQuery, else (a
+// macro-only search) from q.category. Default Residential.
+function kindsFor(q: SearchQuery): SourceKind[] {
+  const cq = queryForSelection(selection(q));
+  if (cq) return cq.kinds;
+  return q.category === 'Commercial' ? ['com'] : ['res'];
+}
+
+function tableFor(q: SearchQuery): string {
+  return kindsFor(q).includes('res') ? 'aqar_residential_listings' : 'aqar_commercial_listings';
+}
+
+// Multi-source: which platform tables to read. Built from the query's table kind(s); a clean type
+// scoped to one kind reads only that kind, a cross-table type reads both. Each card renders its own
+// SourceBadge. (user request: mix all sources.)
 function tablesFor(q: SearchQuery): string[] {
-  let tables: string[];
-  if (q.type && LAND_TYPES.has(q.type))
-    tables = ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings', 'aqargate_residential_listings', 'alhoshan_residential_listings', 'hajer_residential_listings', 'sanadak_residential_listings', 'eastabha_residential_listings', 'aqarcity_residential_listings', 'raghdan_residential_listings', 'eaqartabuk_residential_listings', 'satel_residential_listings', 'sadin_residential_listings', 'toor_residential_listings', 'mustqr_residential_listings', 'ramzalqasim_residential_listings', 'fursaghyr_residential_listings', 'jazwtn_residential_listings', 'mizlaj_residential_listings', 'muktamel_residential_listings', 'aqaratikom_residential_listings', 'awal_residential_listings', 'alkhaas_residential_listings', 'abeea_residential_listings', 'jurash_residential_listings', 'alnokhba_residential_listings', 'dealapp_residential_listings', 'souq24_residential_listings', 'erapulse_residential_listings', 'nowaisiry_residential_listings', 'october_residential_listings'];
-  else if (isCommercialQuery(q))
-    tables = ['aqar_commercial_listings', 'wasalt_commercial_listings', 'aldarim_commercial_listings', 'aqargate_commercial_listings', 'alhoshan_commercial_listings', 'hajer_commercial_listings', 'sanadak_commercial_listings', 'eastabha_commercial_listings', 'aqarcity_commercial_listings', 'raghdan_commercial_listings', 'eaqartabuk_commercial_listings', 'satel_commercial_listings', 'sadin_commercial_listings', 'toor_commercial_listings', 'mustqr_commercial_listings', 'ramzalqasim_commercial_listings', 'fursaghyr_commercial_listings', 'jazwtn_commercial_listings', 'mizlaj_commercial_listings', 'muktamel_commercial_listings', 'aqaratikom_commercial_listings', 'awal_commercial_listings', 'alkhaas_commercial_listings', 'abeea_commercial_listings', 'jurash_commercial_listings', 'alnokhba_commercial_listings', 'dealapp_commercial_listings', 'souq24_commercial_listings', 'erapulse_commercial_listings', 'nowaisiry_commercial_listings', 'october_commercial_listings'];
-  else {
-    tables = ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings', 'aqargate_residential_listings', 'alhoshan_residential_listings', 'hajer_residential_listings', 'sanadak_residential_listings', 'eastabha_residential_listings', 'aqarcity_residential_listings', 'raghdan_residential_listings', 'eaqartabuk_residential_listings', 'satel_residential_listings', 'sadin_residential_listings', 'toor_residential_listings', 'mustqr_residential_listings', 'ramzalqasim_residential_listings', 'fursaghyr_residential_listings', 'jazwtn_residential_listings', 'mizlaj_residential_listings', 'muktamel_residential_listings', 'aqaratikom_residential_listings', 'awal_residential_listings', 'alkhaas_residential_listings', 'abeea_residential_listings', 'jurash_residential_listings', 'alnokhba_residential_listings', 'dealapp_residential_listings', 'souq24_residential_listings', 'erapulse_residential_listings', 'nowaisiry_residential_listings', 'october_residential_listings'];
-    // Gathern is monthly-only furnished rent. NEVER show it for annual (or any non-monthly) searches:
-    // only query its table when the user EXPLICITLY chose monthly rent (or named Gathern — see below,
-    // which forces monthly). Stricter than the keptFiltersReq rent_period filter — closes the gap
-    // where rentPeriod is unset (agent path applies no period filter). (user: never show gathern for annual.)
-    if (q.deal === 'Rent' && q.rentPeriod === 'monthly') tables.push('gathern_residential_listings');
-  }
+  const kinds = kindsFor(q);
+  let tables: string[] = [];
+  if (kinds.includes('res')) tables.push(...resTables(q));
+  if (kinds.includes('com')) tables.push(...COM_TABLES);
   // PLATFORM filter: the user named specific platforms ("show me Gathern only"). q.sources holds
-  // table prefixes; keep only tables for those platforms so the results are that platform's listings
-  // alone. (user: "if I say show me gathern only, show me gathern only".)
+  // table prefixes; keep only those platforms' tables. (user: "show me gathern only".)
   if (q.sources && q.sources.length) {
     const wanted = new Set(q.sources);
     const only = tables.filter((tbl) => wanted.has(tbl.replace(/_(residential|commercial)_listings$/, '')));

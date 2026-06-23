@@ -8,7 +8,8 @@ import HeroBackground from '@/components/HeroBackground';
 import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
-import { CATEGORIES, CATEGORY_TYPES, DEALS, detailFor, priceTabsFor, type Category } from '@/data/taxonomy';
+import { CATEGORIES, DEALS, detailFor, priceTabsFor, type Category } from '@/data/taxonomy';
+import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { matchLocations, placeLabel, placeTitle, placeSub, placeIcon, placeKey, resolveLocation, type Place } from '@/data/locations';
 import { grouped, toLatinDigits } from '@/data/search';
 import { noTranslateRef } from '@/noTranslate';
@@ -385,7 +386,7 @@ export default function Home() {
               </ScrollView>
             )}
 
-            {/* Category */}
+            {/* Category — Residential / Commercial (macro) */}
             <View style={s.pick}>
               <FieldLabel>{t('Category')}</FieldLabel>
               <View style={s.row}>
@@ -394,18 +395,38 @@ export default function Home() {
                     key={cat}
                     label={t(cat)}
                     selected={query.category === cat}
-                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, type: null, detail: null, priceBand: null })); scrollDown(); }}
+                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, detail: null, priceBand: null })); scrollDown(); }}
                   />
                 ))}
               </View>
             </View>
 
-            {/* Property type (scoped) */}
+            {/* Subcategory group — a SOFT/broad intent (e.g. "Vacation & Rural"). Selecting just the
+                group searches all its clean types; picking a specific type below makes it exact. */}
             {query.category && (
+              <View style={s.pick}>
+                <FieldLabel>{t('Property group')}</FieldLabel>
+                <View style={s.wrap}>
+                  {groupsFor(query.category as Macro).map((g) => (
+                    <OptionBox
+                      key={g.group}
+                      label={t(g.group)}
+                      selected={query.typeGroup === g.group}
+                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, detail: null, priceBand: null })); scrollDown(); }}
+                      style={s.wrapCell}
+                    />
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Clean property type (scoped to the chosen group) — the EXACT/hard filter. Optional:
+                leaving it unselected keeps the broad group intent. */}
+            {query.typeGroup && (
               <View style={s.pick}>
                 <FieldLabel>{t('Property type')}</FieldLabel>
                 <View style={s.wrap}>
-                  {CATEGORY_TYPES[query.category as Category].map((ty) => (
+                  {groupMembers(query.typeGroup).map((ty) => (
                     <OptionBox
                       key={ty}
                       label={t(ty)}

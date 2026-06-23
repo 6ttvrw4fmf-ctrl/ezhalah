@@ -22,6 +22,8 @@ export const CATEGORY_TYPES: Record<Category, string[]> = {
 // Types measured by bedrooms (dwellings); everything else by size in m².
 const BEDROOM_TYPES = new Set([
   'Apartment', 'Villa', 'Floor', 'House', 'Room', 'Rest House', 'Chalet',
+  // New clean dwelling types (2-macro filter): measured by bedrooms like their siblings.
+  'Duplex', 'Palace',
 ]);
 
 // Size ranges per type — exactly 4 tabs each, labelled in m² (product-defined ladders). Canonical
@@ -57,8 +59,8 @@ const SIZE_BY_TYPE: Record<string, string[]> = {
 export type Detail = { label: string; options: string[]; isBedrooms: boolean };
 
 export function detailFor(type: string): Detail {
-  // A Room is single-occupancy — always exactly 1 bedroom, never a range. (user request.)
-  if (type === 'Room') {
+  // A Room / Studio is single-occupancy — always exactly 1 bedroom, never a range. (user request.)
+  if (type === 'Room' || type === 'Studio') {
     return { label: 'Bedrooms', options: ['1'], isBedrooms: true };
   }
   if (BEDROOM_TYPES.has(type)) {

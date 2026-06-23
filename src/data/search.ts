@@ -6,6 +6,7 @@ import { supports } from './platforms';
 import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale } from '@/i18n';
 import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
+import { groupMembers, CLEAN_MACRO } from './propertyTypes';
 
 // A parsed search. Every field optional — empty fields broaden, never dead-end. (PRD §6.1)
 export type SearchQuery = {
@@ -56,6 +57,11 @@ export type SearchQuery = {
   // bypassed so the user sees that platform's listings in full. Empty/undefined → all platforms.
   // (user: "if I say show me gathern only, show me gathern only".)
   sources?: string[];
+  // Subcategory GROUP selected in the filter (e.g. "Vacation & Rural") — a SOFT/broad intent: match
+  // any clean type in that group. `type` (a single CLEAN property type, e.g. "Chalet") is the HARD
+  // exact filter. Both feed the one engine; the filter sets these, the agent resolves to them.
+  // (user: filter = structured AI input; group = head-start intent, type = exact.)
+  typeGroup?: string | null;
 };
 
 // The objective sort keys the agent/UI may request. NEVER a quality/popularity ordering.
@@ -433,6 +439,10 @@ export function interpretPrice(rawDigits: string, deal: Deal, sizeM2?: number, i
 export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string };
 
 function pickPool(q: SearchQuery, pools: Pools): Listing[] {
+  // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run
+  // over the whole fetched set and let matchesType decide. (The old keyword→mock-pool buckets only
+  // covered a few residential types and would silently drop Shop/Office/Residential Building/etc.)
+  if (q.type || q.typeGroup) return allRows(pools);
   const t = q.type?.toLowerCase();
   if (t) {
     if (t.includes('villa')) return pools.villa;
@@ -542,13 +552,31 @@ function sizeFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
   return (l) => l.area > 0 && l.area >= r.min && l.area <= r.max;
 }
 
-// Exact property-type predicate: keep only listings of the kept type. Defense-in-depth on top of the
-// server's now-exact-type fetch — a kept type must NEVER surface a sibling (Apartment must not show
-// Floor/Building/Rest House/Chalet; Residential Land must not show Commercial Land). Null = no type
-// kept → broaden. (user: cards must match the kept property type, period.)
-function typeFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
-  if (!q.type) return null;
-  return (l) => l.type === q.type;
+// The listing's CLEAN property type (normalized at read-time in remote.finalize). Falls back to the
+// raw `type` for the bundled mock catalog (which has no cleanType).
+const cleanOf = (l: Listing): string => l.cleanType ?? l.type;
+
+// Does a listing satisfy the query's TYPE selection? CLEAN type (`q.type`) = EXACT match (a kept
+// "Apartment" never shows a Floor/Building sibling). A subcategory GROUP (`q.typeGroup`) = any clean
+// type in that group (broad). Macro only (`q.category`, no type) = same macro_category — this is what
+// excludes a Commercial-Land row (macro=Commercial) from a Residential search even though it lives in
+// a residential table. Nothing kept → match all. (clean-type filter; strict-contract preserved.)
+function matchesType(l: Listing, q: SearchQuery): boolean {
+  const c = cleanOf(l);
+  if (q.type) return c === q.type;
+  if (q.typeGroup) return groupMembers(q.typeGroup).includes(c);
+  if (q.category) return (l.macro ?? CLEAN_MACRO[c] ?? 'Residential') === q.category;
+  return true;
+}
+
+// Every fetched row, deduped by id. The server fetch already scoped rows to the selected clean type's
+// raw set + tables, so when a type/group is chosen we run matchesType over the WHOLE fetched set
+// rather than a single mock "pool" (which buckets by old raw type and could drop e.g. Shop/Building).
+function allRows(pools: Pools): Listing[] {
+  const seen = new Set<number>();
+  const out: Listing[] = [];
+  for (const arr of Object.values(pools)) for (const l of arr) if (!seen.has(l.id)) { seen.add(l.id); out.push(l); }
+  return out;
 }
 
 // The bedroom constraint a query implies — or null when `detail` isn't a bedroom count (a size band,
@@ -744,8 +772,8 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
     // bothDeals (agent searched without knowing rent/buy) → show BOTH; otherwise filter to the deal.
     .filter((l) => q.bothDeals || l.deal === q.deal)
     .filter((l) => supports(l.source, q.deal))
-    // Exact kept type — a kept "Apartment" must never show a Floor/Building/Rest House sibling. (audit.)
-    .filter((l) => !q.type || l.type === q.type)
+    // Clean-type match — exact for a kept type, group-member for a subcategory, macro for category. (audit.)
+    .filter((l) => matchesType(l, q))
     .sort((a, b) => (RECENCY[a.listed] ?? 99) - (RECENCY[b.listed] ?? 99));
 
   // District filter: when the agent / area-phrase resolver named specific neighborhoods, narrow to
@@ -809,11 +837,11 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
         // Among this platform's closeness-sorted listings, pick the first whose property_type is
         // still unseen. Fall back to the very first if every type is already shown.
         const pool = bySource[src];
-        const pick = pool.find((l) => !usedTypes.has(l.type)) || pool[0];
+        const pick = pool.find((l) => !usedTypes.has(cleanOf(l))) || pool[0];
         if (pick) {
           topRow.push(pick);
           usedIds.add(pick.id);
-          if (pick.type) usedTypes.add(pick.type);
+          usedTypes.add(cleanOf(pick));
         }
       }
       // Country-wide = EXACTLY one card per platform (the full roster, ordered by catalog size).
@@ -863,7 +891,7 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
     let list = pickPool(q2, pools)
       .filter((l) => q2.bothDeals || l.deal === q2.deal)
       .filter((l) => supports(l.source, q2.deal))
-      .filter((l) => !q2.type || l.type === q2.type);
+      .filter((l) => matchesType(l, q2));
     if (q2.districts && q2.districts.length) {
       list = list.filter((l) => listingInDistricts(l.district || '', q2.districts!));
     }

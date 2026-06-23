@@ -12,6 +12,7 @@ import { CATEGORY_TYPES, type Category } from './taxonomy';
 import { t, getLocale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
 import { landmarkHint, ensureLandmarks } from './landmarks';
+import { normalizeType } from './propertyTypes';
 
 export type AgentTurn =
   | { kind: 'listings'; reply: string; query: SearchQuery }
@@ -336,6 +337,11 @@ function queryFromBackend(b: BackendQuery, userText: string = ''): SearchQuery {
       q.type = ty;
       q.category = RES_TYPES.has(ty) ? 'Residential' : 'Commercial';
     }
+    // Normalize the agent's raw type to the SAME clean type the filter uses, so both paths produce one
+    // normalized query before the DB. (user: filter + AI must end with the exact same property type.)
+    const norm = normalizeType(q.type, q.category === 'Commercial' ? 'com' : 'res');
+    q.type = norm.clean === 'Unknown' ? null : norm.clean;
+    q.category = norm.macro;
   }
 
   // `detail` may be a bedroom count (1–5+) OR a size in m² — for a home the user can give EITHER (their
@@ -451,8 +457,10 @@ export function parseQuery(text: string): SearchQuery {
     }
   }
   if (foundType) {
-    q.type = foundType;
-    q.category = foundCat;
+    // Normalize to the clean type (same as the edge + filter paths).
+    const norm = normalizeType(foundType, foundCat === 'Commercial' ? 'com' : 'res');
+    q.type = norm.clean === 'Unknown' ? null : norm.clean;
+    q.category = norm.macro;
   }
 
   const beds = t.match(/(\d+)\s*(?:bed|bedroom|br)\b/) ?? text.match(/(\d+)\s*(?:غرف|غرفة|غرفه)/);
