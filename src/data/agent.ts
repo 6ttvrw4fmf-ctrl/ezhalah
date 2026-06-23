@@ -188,6 +188,7 @@ type BackendQuery = {
   priceIsAnnual?: boolean;
   sort?: string; // objective ordering the user asked for (newest/price_asc/area_desc/…)
   count?: number; // how many listings the user asked to see (1–15)
+  platforms?: string[]; // platform display names the user restricted to (carried across turns by the model)
 };
 
 // AREA NICKNAMES → known district lists. The engine filters by district when these are present, so
@@ -297,8 +298,15 @@ function resolveSourcesFromText(text: string): string[] {
   return Array.from(out);
 }
 // Apply a platform filter (and Gathern's monthly implication) onto a query built from any path.
-function applySourceFilter(q: SearchQuery, userText: string): void {
-  const sources = resolveSourcesFromText(userText);
+// Two signals are unioned: (1) platform names the EDGE resolved & CARRIES ACROSS TURNS (so "yes" to
+// "did you mean Deal App?" still filters to Deal App), and (2) names in the raw current message (the
+// offline-fallback path). Both run through resolveSourcesFromText to map any spelling → table prefix.
+// (user: "deal doesn't show when I type it" — the name was in a prior turn; rely on the edge field.)
+function applySourceFilter(q: SearchQuery, userText: string, edgePlatforms?: string[]): void {
+  const set = new Set<string>();
+  for (const p of edgePlatforms ?? []) for (const s of resolveSourcesFromText(p)) set.add(s);
+  for (const s of resolveSourcesFromText(userText)) set.add(s);
+  const sources = Array.from(set);
   if (!sources.length) return;
   q.sources = sources;
   // Gathern is monthly-only furnished rent — naming it means the user wants its monthly inventory,
@@ -343,7 +351,7 @@ function queryFromBackend(b: BackendQuery, userText: string = ''): SearchQuery {
   // Riyadh") expand to known district lists; literal district mentions ("حي الرمال") pass through.
   const districts = resolveDistrictsFromText(userText, q.location);
   if (districts.length) q.districts = districts;
-  applySourceFilter(q, userText);
+  applySourceFilter(q, userText, b.platforms);
   return q;
 }
 

@@ -104,7 +104,7 @@ PLATFORM CONFIDENTIALITY (STRICT). The names of the source platforms are CONFIDE
 Then either invite them back to their search or ask the next useful question.
 EXCEPTION — USER-NAMED PLATFORM FILTER: if the user THEMSELVES names a platform in order to RESTRICT their search to it ("show me Aqar only", "listings from Wasalt", "Gathern فقط"), that is NOT the confidential-roster question — honor it as a search filter and you MAY echo that one platform's name back (see PLATFORMS ═══ PLATFORM FILTERING). The confidentiality rule above still fully applies to the "which sites do you search / where did you find this / do you scrape" questions: never volunteer the roster, never reveal platforms the user did not name, never disclose which platform an individual result came from unless the user filtered to it.
 
-OUTPUT — return ONLY a JSON object: { kind, reply, deal, location, type, detail, price, pricing_basis, sort, count }.
+OUTPUT — return ONLY a JSON object: { kind, reply, deal, location, type, detail, price, pricing_basis, sort, count, platforms }.
 - kind: "listings" = search NOW; "message" = say something or ask ONE question; "interview" = only if the user explicitly asks to be guided step by step.
 - reply: the text the user sees — short, warm, Saudi.
 - deal: "Rent" (for rent), "Buy" (for sale), or "Both" — use "Both" when you are searching but rent-vs-buy is still unknown (you've already used your question); it shows BOTH. Do NOT default to "Rent" when you don't know.
@@ -114,6 +114,7 @@ OUTPUT — return ONLY a JSON object: { kind, reply, deal, location, type, detai
 - price: digits only, SAR. "" if none.
 - pricing_basis: the exact period/basis of the price — "daily_rent","weekly_rent","monthly_rent","quarterly_rent","annual_rent","full_price","price_per_sqm", or "none". Capture the period EXACTLY as the user said it (the app converts any rent period to an annual figure).
 - count: how many listings the user asked to see, as a number 1–15; "0" if they didn't say. "show me 10"→"10", "just one"/"give me an apartment"→"1", "top 3"→"3", "20"/"50"→"15" (the cap). Never fabricate listings to reach it.
+- platforms: an ARRAY of the EXACT platform names (from RECOGNIZED PLATFORM NAMES) the user restricted their search to. Empty array [] when they didn't name one. CRITICAL — CARRY IT ACROSS TURNS: once the user picks a platform (or confirms one you asked about, e.g. you ask "did you mean Deal App?" and they reply "yes"), set platforms:["Deal App"] on the SEARCH turn even though the confirming message itself ("yes") doesn't repeat the name. Keep it set on follow-up searches in the same chat until they change/clear it. Use the canonical English name exactly as in the list (e.g. "Deal App", "Aqar", "Gathern", "Al Khaas"). This is how the app limits results to that platform.
 - sort: the OBJECTIVE order the user asked for, else "none" (default = newest first). "newest"/"oldest" (most/least recent), "price_asc"/"price_desc" (cheapest/most expensive, e.g. "from lowest price", "الأرخص"), "area_asc"/"area_desc" (smallest/largest, e.g. "biggest first", "الأكبر مساحة"), "ppm_asc"/"ppm_desc" (lowest/highest price per m²), "beds_desc" (most bedrooms first). Subjective requests ("best", "most popular", "recommended") are NOT a sort — use "none" and never imply a quality ranking. Map "cheap/أرخص/أرخص أول" → price_asc, "biggest/أكبر" → area_desc, "newest/أحدث/الأجدد" → newest.
 
 CANONICAL CITIES: ${CITIES.join(", ")}.
@@ -386,8 +387,9 @@ const SCHEMA = {
       enum: ["none", "newest", "oldest", "price_asc", "price_desc", "area_asc", "area_desc", "ppm_asc", "ppm_desc", "beds_desc"],
     },
     count: { type: "STRING" },
+    platforms: { type: "ARRAY", items: { type: "STRING" } },
   },
-  required: ["kind", "reply", "deal", "location", "type", "detail", "price", "pricing_basis", "sort", "count"],
+  required: ["kind", "reply", "deal", "location", "type", "detail", "price", "pricing_basis", "sort", "count", "platforms"],
 };
 
 Deno.serve(async (req: Request) => {
@@ -633,6 +635,7 @@ Deno.serve(async (req: Request) => {
             const n = parseInt(String(out.count ?? "").replace(/[^\d]/g, ""), 10);
             return isFinite(n) && n >= 1 ? Math.min(n, 15) : undefined;
           })(),
+          platforms: Array.isArray(out.platforms) ? out.platforms.filter((p: unknown) => typeof p === "string" && p) : [],
         },
       });
     }
