@@ -573,6 +573,7 @@ const AR: Record<string, string> = {
   'Dwelleo':                           'ديويليو',
   'Era Pulse':                         'نبض العصر',
   'Al Nowaisiry Real Estate':          'النويصري العقارية',
+  '1 October Real Estate':             '1 أكتوبر العقارية',
   'Additional Information':            'معلومات إضافية',
   'See more':                          'عرض المزيد',
   'See less':                          'عرض أقل',

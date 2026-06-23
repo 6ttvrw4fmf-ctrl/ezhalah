@@ -223,6 +223,14 @@ def upsert_nowaisiry_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("nowaisiry_commercial_listings", rows)
 
 
+def upsert_october_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("october_residential_listings", rows)
+
+
+def upsert_october_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("october_commercial_listings", rows)
+
+
 def upsert_deal_residential_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Deal (dealapp.sa) residential rows into their own table (source='Deal')."""
     _wasalt_batch("deal_residential_listings", rows)

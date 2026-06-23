@@ -60,6 +60,7 @@ jobs:
           - { source: dwelleo,     cmd: "python -m scrapers.dwelleo.run --type all" }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
+          - { source: october,    cmd: "python -m scrapers.october.run --type all" }
           # NOTE: muktamel is NOT here. Its pages are ~1.4MB each and it has no list API / usable
           # sitemap, so a full sequential-ID scan is ~45GB over hours — impossible on a 4h cadence.
           # It runs on its OWN weekly workflow (muktamel-sync.yml), scoped to the live ID band.

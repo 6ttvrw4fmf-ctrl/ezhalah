@@ -328,6 +328,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('dwelleo')) return <View style={[card.hostBadge, card.dwelleoBadge]}><Text style={card.badgeText}>ديويليو</Text></View>;
   if (s.includes('pulse')) return <View style={[card.hostBadge, card.erapulseBadge]}><Text style={card.badgeText}>نبض</Text></View>;
   if (s.includes('nowaisiry')) return <View style={[card.hostBadge, card.nowaisiryBadge]}><Text style={card.badgeText}>النويصري</Text></View>;
+  if (s.includes('october')) return <View style={[card.hostBadge, card.octoberBadge]}><Text style={card.badgeText}>١ أكتوبر</Text></View>;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -365,6 +366,7 @@ function sourceName(source: string): string {
   if (s.includes('dwelleo')) return 'Dwelleo';
   if (s.includes('pulse')) return 'Era Pulse';
   if (s.includes('nowaisiry')) return 'Al Nowaisiry Real Estate';
+  if (s.includes('october')) return '1 October Real Estate';
   return 'AQAR';
 }
 function sourceHost(source: string): string {
@@ -400,6 +402,7 @@ function sourceHost(source: string): string {
   if (s.includes('dwelleo')) return 'dwelleo.sa';
   if (s.includes('pulse')) return 'erapulse.sa';
   if (s.includes('nowaisiry')) return 'alnowaisiry.com';
+  if (s.includes('october')) return '1october.com.sa';
   return 'sa.aqar.fm';
 }
 
@@ -562,6 +565,7 @@ const card = StyleSheet.create({
   dwelleoBadge:  { borderRadius: 8, backgroundColor: '#4a3d7a', alignItems: 'center', justifyContent: 'center' },
   erapulseBadge: { borderRadius: 8, backgroundColor: '#7a4a1f', alignItems: 'center', justifyContent: 'center' },
   nowaisiryBadge:{ borderRadius: 8, backgroundColor: '#3a5a2f', alignItems: 'center', justifyContent: 'center' },
+  octoberBadge:  { borderRadius: 8, backgroundColor: '#6b3a2f', alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: '#fff', fontWeight: '800', fontSize: 11, lineHeight: 13, textAlign: 'center' },
   hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },

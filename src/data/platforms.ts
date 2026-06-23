@@ -45,6 +45,7 @@ export const PLATFORMS: Platform[] = [
   { name: 'Dwelleo', domain: 'dwelleo.sa', brand: 'Dwelleo', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Era Pulse', domain: 'erapulse.sa', brand: 'Era Pulse', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Al Nowaisiry', domain: 'alnowaisiry.com', brand: 'Al Nowaisiry Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: '1 October', domain: '1october.com.sa', brand: '1 October Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
 ];
 
 const BY_NAME: Record<string, Platform> = Object.fromEntries(PLATFORMS.map((p) => [p.name, p]));
