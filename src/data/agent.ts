@@ -12,7 +12,7 @@ import { CATEGORY_TYPES, type Category } from './taxonomy';
 import { t, getLocale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
 import { landmarkHint, ensureLandmarks } from './landmarks';
-import { normalizeType } from './propertyTypes';
+import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 
 export type AgentTurn =
   | { kind: 'listings'; reply: string; query: SearchQuery }
@@ -328,20 +328,27 @@ function queryFromBackend(b: BackendQuery, userText: string = ''): SearchQuery {
 
   const ty = typeof b.type === 'string' && b.type.trim() ? b.type.trim() : null;
   if (ty) {
-    // Match the canonical type back onto a known engine type + its category.
-    const hit = ALL_TYPES.find(([k]) => k.toLowerCase() === ty.toLowerCase());
-    if (hit) {
-      q.type = hit[0];
-      q.category = hit[1];
-    } else {
+    if (isCleanType(ty)) {
+      // The agent already returned a CLEAN type (it knows them from the DB behavior notes, e.g.
+      // "Residential Building", "Specialized Facilities") → use it directly with its macro.
       q.type = ty;
-      q.category = RES_TYPES.has(ty) ? 'Residential' : 'Commercial';
+      q.category = CLEAN_MACRO[ty];
+    } else {
+      // A raw/legacy type → resolve to the engine type, then normalize to the same clean type the
+      // filter uses, so both paths produce one normalized query before the DB. (user: filter + AI
+      // must end with the exact same property type.)
+      const hit = ALL_TYPES.find(([k]) => k.toLowerCase() === ty.toLowerCase());
+      if (hit) {
+        q.type = hit[0];
+        q.category = hit[1];
+      } else {
+        q.type = ty;
+        q.category = RES_TYPES.has(ty) ? 'Residential' : 'Commercial';
+      }
+      const norm = normalizeType(q.type, q.category === 'Commercial' ? 'com' : 'res');
+      q.type = norm.clean === 'Unknown' ? null : norm.clean;
+      q.category = norm.macro;
     }
-    // Normalize the agent's raw type to the SAME clean type the filter uses, so both paths produce one
-    // normalized query before the DB. (user: filter + AI must end with the exact same property type.)
-    const norm = normalizeType(q.type, q.category === 'Commercial' ? 'com' : 'res');
-    q.type = norm.clean === 'Unknown' ? null : norm.clean;
-    q.category = norm.macro;
   }
 
   // `detail` may be a bedroom count (1–5+) OR a size in m² — for a home the user can give EITHER (their

@@ -27,6 +27,33 @@ const FALLBACK_MODEL = Deno.env.get("GEMINI_FALLBACK_MODEL") ?? "gemini-2.5-flas
 const urlFor = (m: string) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
 
+// ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
+// AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
+// function. We read the active rows at runtime and append them to the system prompt. Cached ~60s so
+// it's at most one tiny DB read per cold function, not per request. If the read fails, we fall back
+// to the last cached value (or nothing) — the baked-in SYSTEM prompt always still holds.
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+let _notesCache: { text: string; at: number } = { text: "", at: 0 };
+async function liveNotes(): Promise<string> {
+  const now = Date.now();
+  if (_notesCache.at && now - _notesCache.at < 60_000) return _notesCache.text;
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/agent_notes?select=title,content&active=eq.true&order=priority`,
+      { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } },
+    );
+    if (r.ok) {
+      const rows = await r.json();
+      const text = (rows as Array<{ title: string; content: string }>)
+        .map((n) => `• ${n.title}\n${n.content}`).join("\n\n");
+      _notesCache = { text, at: now };
+      return text;
+    }
+  } catch { /* fall through to cached/empty */ }
+  return _notesCache.text;
+}
+
 // Public project keys (already shipped in the app bundle) — soft gate so random
 // callers can't burn the model budget. No privileged work here.
 const PUBLIC_KEY = "sb_publishable_vXzwxdpfrzmbwtbR5aXcKA_cMUO8hVB";
@@ -533,7 +560,13 @@ Deno.serve(async (req: Request) => {
     // the model otherwise slips to Arabic when an English message contains one Arabic word (a city).
     const langName = locale === "en" ? "English" : "Arabic";
     const langLine = `\n\nREPLY LANGUAGE FOR THIS TURN: ${langName} ONLY. The "reply" field MUST be written 100% in ${langName} — every single word, no exceptions, even if the user's message contains a word in the other language.`;
-    let out: any = await runModel(contents, langLine);
+    // DB-driven behavior notes (editable in the agent_notes table, no redeploy) — appended last so
+    // they're authoritative on any conflict with the baked-in prompt above.
+    const notes = await liveNotes();
+    const notesBlock = notes
+      ? `\n\n═══ LIVE BEHAVIOR NOTES (authoritative — override anything above on conflict) ═══\n${notes}`
+      : "";
+    let out: any = await runModel(contents, langLine + notesBlock);
     if (out?.__err) return out.__err;
     if (!out?.kind) return json({ error: "no classification" }, 502);
 
