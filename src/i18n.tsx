@@ -375,6 +375,7 @@ const AR: Record<string, string> = {
   'Search Summary': 'ملخص البحث',
   'Property Type': 'نوع العقار',
   'Transaction Type': 'نوع العملية',
+  'Platform': 'المنصة',
   'For Sale': 'للبيع',
   'City': 'المدينة',
   'Region': 'الإقليم',

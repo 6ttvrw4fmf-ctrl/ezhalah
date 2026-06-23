@@ -315,6 +315,17 @@ function locationLines(q: SearchQuery): string[] {
 // Ezhalah understood and can spot a mistake before results (user spec: Search Understanding Panel).
 // Only fields that were actually identified are included. District / lifestyle / landmark / property-age
 // aren't captured in the query yet (they need the richer scraped listing schema), so they're omitted.
+// Platform table-prefix → human display name, for the Search Summary's "Platform" line.
+const SOURCE_LABELS: Record<string, string> = {
+  aqar: 'Aqar', wasalt: 'Wasalt', aldarim: 'Aldarim', aqargate: 'Aqar Gate', alhoshan: 'Al Hoshan',
+  hajer: 'Hajer', sanadak: 'Sanadak', eastabha: 'East Abha', aqarcity: 'Aqar City', raghdan: 'Raghdan',
+  eaqartabuk: 'Candles', satel: 'Satel', sadin: 'Sadin', toor: 'Toor', mustqr: 'Mustaqarr',
+  ramzalqasim: 'Ramz Al Qassim', fursaghyr: 'Fursa Ghyr', jazwtn: 'Jazan Watan', mizlaj: 'Mizlaj',
+  muktamel: 'Muktamel', aqaratikom: 'Aqaratikom', awal: 'Awal United for Real Estate', alkhaas: 'Al Khaas',
+  abeea: 'Abeea', jurash: 'Jurash', alnokhba: 'Al Nokhba', dealapp: 'Deal App', souq24: '24 Souq',
+  erapulse: 'Era Pulse', nowaisiry: 'Al Nowaisiry', october: '1 October', gathern: 'Gathern',
+};
+
 export function searchSummary(q: SearchQuery): string {
   const lines: string[] = [];
   // English keeps the canonical capitalized type ("Villa", "Rest House"); Arabic uses the translation.
@@ -324,6 +335,12 @@ export function searchSummary(q: SearchQuery): string {
   if (q.type) lines.push(`• ${t('Property Type')}: ${getLocale() === 'ar' ? tWord(q.type) : q.type}`);
   else if (q.category) lines.push(`• ${t('Property Type')}: ${t(q.category)}`);
   lines.push(`• ${t('Transaction Type')}: ${q.bothDeals ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}`);
+  // Platform filter line — when the user restricted to specific platforms ("Aqar only"), show which,
+  // so the filter is visibly confirmed. (user: "when I type alkhaas it must be al khaas, not aqar".)
+  if (q.sources && q.sources.length) {
+    const names = q.sources.map((s) => SOURCE_LABELS[s] ?? s).join('، ');
+    lines.push(`• ${t('Platform')}: ${names}`);
+  }
   // Always show a location line. If nothing was typed/inferred, the search covers the whole Kingdom,
   // so the summary says "City: Saudi Arabia". (user request: empty region → Saudi Arabia.)
   const locLines = locationLines(q);
