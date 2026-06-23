@@ -567,6 +567,23 @@ function withRestate(original: string, tail: string): string {
   return tail ? `${lead} ${tail}` : lead;
 }
 
+// Platform-filter safety net. If the user clearly NAMES one of our platforms to FILTER by
+// ("show me Aqar only", "Gathern فقط", "give me wasalt") — an imperative, NOT a "which sites do you
+// search?" question — but the model deflected with a non-search reply, we run the search ourselves.
+// This guarantees a named-platform filter ALWAYS returns that platform, independent of the model's
+// mood (the LLM is unreliable for a bare platform-only request). Genuine confidentiality QUESTIONS
+// keep the model's neutral deflection. (user: "if I type give me aqar only, show me aqar only.")
+const PLATFORM_Q_RE = /[?؟]|\b(do|does|did|are|is|can|could|would|which|what|where|how|why|who)\b|\b(هل|وش|وين|كيف|ليش|ايش|إيش)\b/i;
+function maybeForcePlatformSearch(turn: AgentTurn, text: string): AgentTurn {
+  if (turn.kind === 'listings') return turn;       // already searching → sources set by queryFromBackend
+  const sources = resolveSourcesFromText(text);
+  if (!sources.length) return turn;                // no platform named → leave the model's reply
+  if (PLATFORM_Q_RE.test(text)) return turn;       // "do you search Aqar?" → keep neutral deflection
+  const q = parseQuery(text);                      // applySourceFilter sets q.sources (+ Gathern→monthly)
+  if (!q.sources || !q.sources.length) return turn;
+  return { kind: 'listings', reply: withRestate(text, ''), query: q };
+}
+
 // Classify the message and craft a neutral reply. Deterministic; the listings themselves are
 // produced by runSearch in the store so the agent path and the filter path share one engine.
 //
@@ -597,6 +614,10 @@ export async function respond(text: string, opts?: { loggedIn?: boolean; history
   // any reason, fall through to the bundled heuristic below so the app never hard-fails.
   const backend = await callAgentBackend(v, { loggedIn, order, history: opts?.history });
   if (backend) {
+    // Named-platform filter safety net: if the user said "Aqar only" / "Gathern فقط" but the model
+    // deflected, force the search. When we override, the reply is already final — return as-is.
+    const forced = maybeForcePlatformSearch(backend, v);
+    if (forced !== backend) return forced;
     // For a GUEST listings search we lead with the deterministic normalization echo ("Got it — you're
     // looking for …" with currencies/measurements fixed), keeping the fast search-first feel. For a
     // LOGGED-IN user the model already returns its own structured read-back ("Here is what I have for
