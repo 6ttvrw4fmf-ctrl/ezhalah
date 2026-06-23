@@ -34,7 +34,7 @@ export const PLATFORMS: Platform[] = [
   { name: 'Mizlaj', domain: 'mizlaj.com.sa', brand: 'Mizlaj Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Muktamel', domain: 'muktamel.com', brand: 'Muktamel', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Aqaratikom', domain: 'aqaratikom.com', brand: 'Aqaratikom', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
-  { name: 'Awal', domain: 'awaalun.com', brand: 'Awal Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Awal', domain: 'awaalun.com', brand: 'Awal United for Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Al Khaas', domain: 'alkhaas.net', brand: 'Al Khaas', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Abeea', domain: 'abeea.com.sa', brand: 'Abeea Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Jurash', domain: 'jurash.sa', brand: 'Jurash Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },

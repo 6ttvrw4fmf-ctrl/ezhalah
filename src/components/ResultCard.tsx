@@ -358,7 +358,7 @@ function sourceName(source: string): string {
   if (s.includes('mizlaj')) return 'Mizlaj Real Estate';
   if (s.includes('muktamel')) return 'Muktamel';
   if (s.includes('aqaratikom')) return 'Aqaratikom';
-  if (s.includes('awal')) return 'Awal Real Estate';
+  if (s.includes('awal')) return 'Awal United for Real Estate';
   if (s.includes('alkhaas')) return 'Al Khaas';
   if (s.includes('abeea')) return 'Abeea Real Estate';
   if (s.includes('jurash')) return 'Jurash Real Estate';
