@@ -50,6 +50,12 @@ export type SearchQuery = {
   // (user request: "North Riyadh should show listings IN North Riyadh — the agent should know
   // direct.")
   districts?: string[];
+  // Restrict results to specific PLATFORMS the user named ("show me Gathern only", "Aqar and
+  // Wasalt"). Values are table prefixes ('gathern', 'aqar', …). When set, only those platforms'
+  // tables are queried (remote.tablesFor) and the country-wide one-card-per-platform roster is
+  // bypassed so the user sees that platform's listings in full. Empty/undefined → all platforms.
+  // (user: "if I say show me gathern only, show me gathern only".)
+  sources?: string[];
 };
 
 // The objective sort keys the agent/UI may request. NEVER a quality/popularity ordering.
@@ -768,7 +774,7 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
   } else {
     const cap = budgetCap(q);
     listings = [...listings].sort((a, b) => closenessScore(b, q, cap) - closenessScore(a, q, cap));
-    if (isCountryWideQuery(q)) {
+    if (isCountryWideQuery(q) && !(q.sources && q.sources.length)) {
       // Country-wide "Saudi" search → the user wants to SEE every platform we aggregate. So we
       // (1) pick ONE representative card per source up-front (closest match within that source,
       //     biased toward a property type no earlier source has shown yet → diverse top row), and

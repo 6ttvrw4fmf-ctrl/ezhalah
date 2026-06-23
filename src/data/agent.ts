@@ -250,6 +250,66 @@ function resolveDistrictsFromText(userText: string, city: string): string[] {
   return Array.from(new Set(out));
 }
 
+// Platform-name → table-prefix patterns. When the user names a platform ("show me Gathern only",
+// "Aqar and Wasalt"), we restrict results to it. Conservative on purpose: distinctive BRAND names
+// only — bare "عقار" is just Arabic for "real estate", so Aqar needs its Latin name / a compound is
+// matched first. Order matters only for the aqar-compounds vs bare-aqar disambiguation below.
+const PLATFORM_PATTERNS: Array<[RegExp, string]> = [
+  [/\bgathern\b|جاذرين|جاذر|قاذرن|كاذرن/i, 'gathern'],
+  [/\bwasalt\b|وصلت/i, 'wasalt'],
+  [/\baldarim\b|الدارم/i, 'aldarim'],
+  [/\baqar\s*gate\b|aqargate|بوابة العقار/i, 'aqargate'],
+  [/\bal\s*hoshan\b|alhoshan|الحوشان/i, 'alhoshan'],
+  [/\bhajer\b|بيوت هجر|هجر/i, 'hajer'],
+  [/\bsanadak\b|سندك/i, 'sanadak'],
+  [/\beast\s*abha\b|eastabha|شرق ابها/i, 'eastabha'],
+  [/\baqar\s*city\b|aqarcity|مدينة العقار/i, 'aqarcity'],
+  [/\braghdan\b|رغدان/i, 'raghdan'],
+  [/\bcandles\b|eaqartabuk|شموع/i, 'eaqartabuk'],
+  [/\bsatel\b|ساتل/i, 'satel'],
+  [/\bsadin\b|سادن/i, 'sadin'],
+  [/\btoor\b|تور/i, 'toor'],
+  [/\bmustqr\b|mustaqarr|مستقر/i, 'mustqr'],
+  [/ramz\s*al\s*qass?im|ramzalqasim|رمز القصيم/i, 'ramzalqasim'],
+  [/fursa\s*ghyr|fursaghyr|فرصة غير/i, 'fursaghyr'],
+  [/jazan\s*watan|jazwtn|جازان وطن/i, 'jazwtn'],
+  [/\bmizlaj\b|مزلاج/i, 'mizlaj'],
+  [/\bmuktamel\b|مكتمل/i, 'muktamel'],
+  [/\baqaratikom\b|عقاراتكم/i, 'aqaratikom'],
+  [/\bawal\b|أوال|اوال/i, 'awal'],
+  [/al\s*khaas|alkhaas|الخاص/i, 'alkhaas'],
+  [/\babeea\b|ابيعا|أبيعا/i, 'abeea'],
+  [/\bjurash\b|جرش/i, 'jurash'],
+  [/al\s*nokhba|alnokhba|النخبة/i, 'alnokhba'],
+  [/deal\s*app|dealapp|ديل/i, 'dealapp'],
+  [/24\s*souq|souq\s*24|سوق\s*24|سوق\s*٢٤/i, 'souq24'],
+  [/era\s*pulse|erapulse|نبض/i, 'erapulse'],
+  [/al\s*nowaisiry|nowaisiry|النويصري/i, 'nowaisiry'],
+  [/1\s*october|october|اكتوبر|أكتوبر/i, 'october'],
+];
+function resolveSourcesFromText(text: string): string[] {
+  const out = new Set<string>();
+  for (const [re, prefix] of PLATFORM_PATTERNS) if (re.test(text)) out.add(prefix);
+  // Bare "Aqar" only when no aqar-compound already matched (so "Aqar Gate" → aqargate, not both).
+  if (!out.has('aqargate') && !out.has('aqarcity') && !out.has('aqaratikom') && /\baqar\b|aqar\.fm/i.test(text)) {
+    out.add('aqar');
+  }
+  return Array.from(out);
+}
+// Apply a platform filter (and Gathern's monthly implication) onto a query built from any path.
+function applySourceFilter(q: SearchQuery, userText: string): void {
+  const sources = resolveSourcesFromText(userText);
+  if (!sources.length) return;
+  q.sources = sources;
+  // Gathern is monthly-only furnished rent — naming it means the user wants its monthly inventory,
+  // so force Rent + monthly (otherwise the monthly-only table is never queried). (user request.)
+  if (sources.includes('gathern')) {
+    q.deal = 'Rent';
+    q.bothDeals = false;
+    q.rentPeriod = 'monthly';
+  }
+}
+
 function queryFromBackend(b: BackendQuery, userText: string = ''): SearchQuery {
   const q = emptyQuery();
   q.deal = b.deal === 'Buy' ? 'Buy' : 'Rent';
@@ -283,6 +343,7 @@ function queryFromBackend(b: BackendQuery, userText: string = ''): SearchQuery {
   // Riyadh") expand to known district lists; literal district mentions ("حي الرمال") pass through.
   const districts = resolveDistrictsFromText(userText, q.location);
   if (districts.length) q.districts = districts;
+  applySourceFilter(q, userText);
   return q;
 }
 
@@ -414,6 +475,7 @@ export function parseQuery(text: string): SearchQuery {
     }
   }
 
+  applySourceFilter(q, text);
   return q;
 }
 
