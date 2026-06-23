@@ -79,19 +79,23 @@ def _sess() -> cc.Session:
     return s
 
 
-def _gql(query: str, variables: dict, tries: int = 4):
+def _gql(query: str, variables: dict, tries: int = 3):
+    """Returns (data, gql_errored). Retries ONLY transient failures (network error / no response).
+    A valid JSON response that carries GraphQL `errors` (e.g. "dates already reserved", INVALID_INPUT)
+    is a deterministic business error — return immediately so the caller can move on (NOT retry it;
+    retrying booked-date errors is what made the crawl crawl)."""
     for i in range(tries):
         _throttle()
         try:
             r = _sess().post(GQL, json={"query": query, "variables": variables}, timeout=30)
             d = r.json()
-            if d.get("errors"):
-                time.sleep(0.8 * (i + 1))
-                continue
-            return d.get("data")
+            # Return PARTIAL data even on errors: when only the price field errors ("dates reserved"),
+            # the response still carries Listing.get, so the caller keeps the detail and just retries
+            # the price on the next window. Business errors are NOT retried (deterministic).
+            return d.get("data"), bool(d.get("errors"))
         except Exception:
-            time.sleep(0.8 * (i + 1))
-    return None
+            time.sleep(0.6 * (i + 1))        # transient (network) → back off and retry
+    return None, False
 
 
 def _month_windows_ms(offsets=(1, 31, 61, 91, 121, 151, 181, 211, 241, 271, 301, 331)) -> list[tuple[int, int]]:
@@ -122,7 +126,7 @@ def discover_ids(max_listings: int | None = None) -> list[int]:
     ids: list[int] = []
     frm, size = 0, 50
     while True:
-        d = _gql(FIND_Q, {"drf": {"availability": {"eq": 1}}, "size": size, "from": frm})
+        d, _ = _gql(FIND_Q, {"drf": {"availability": {"eq": 1}}, "size": size, "from": frm})
         if not d:
             break
         fr = d["Search"]["find"]
@@ -190,14 +194,15 @@ def fetch_row(listing_id: int, windows: list[tuple[int, int]]) -> dict | None:
     so we only re-issue the cheap price query per window until one is free."""
     g = None
     for (s_ms, e_ms) in windows:
-        d = _gql(DETAIL_Q, {"id": int(listing_id), "s": s_ms, "e": e_ms})
-        if not d:
-            continue
-        if g is None:
-            g = (d.get("Listing") or {}).get("get")
-        p = (d.get("DailyRenting") or {}).get("getCalculatedBookingPriceWithDiscount")
-        if g and p:
-            return map_listing(g, p)
+        d, errored = _gql(DETAIL_Q, {"id": int(listing_id), "s": s_ms, "e": e_ms})
+        if d:
+            if g is None:
+                g = (d.get("Listing") or {}).get("get")
+            p = (d.get("DailyRenting") or {}).get("getCalculatedBookingPriceWithDiscount")
+            if g and p:
+                return map_listing(g, p)
+        # errored (dates reserved / invalid) → just try the next window. If we already have detail (g)
+        # but no free window after all candidates, the unit is fully booked → skip it.
     return None
 
 
