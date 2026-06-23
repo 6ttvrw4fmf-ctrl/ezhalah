@@ -382,8 +382,11 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
 
 # ── Fetch ────────────────────────────────────────────────────────────────────────
 def fetch_page(s: cc.Session, page: int) -> tuple[list[dict], dict]:
+    # api.erapulse.sa is intermittent — it sometimes answers 200 with an empty/non-JSON body
+    # (rate-limit/flap). Retry on that AND on an empty page-1 instead of giving up after one shot,
+    # so a flaky API doesn't fail the whole run (the prune-guard then keeps existing listings anyway).
     _throttle()
-    for attempt in range(3):
+    for attempt in range(5):
         try:
             r = s.get(LIST_URL, params={"page": page, "limit": PAGE_SIZE}, timeout=30)
         except Exception:
@@ -393,8 +396,12 @@ def fetch_page(s: cc.Session, page: int) -> tuple[list[dict], dict]:
         try:
             j = r.json()
         except Exception:
-            return [], {}
-        return (j.get("data") or []), (j.get("pagination") or {})
+            time.sleep(2 * (attempt + 1)); continue   # empty/non-JSON body → retry
+        data = j.get("data") or []
+        pag = j.get("pagination") or {}
+        if data or page > 1:          # page-1 emptiness is the flaky case → retry; later pages empty = real end
+            return data, pag
+        time.sleep(2 * (attempt + 1))
     return [], {}
 
 
