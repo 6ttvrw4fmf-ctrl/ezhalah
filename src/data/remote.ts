@@ -245,6 +245,22 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   return req;
 }
 
+// Fetch the newest matching rows for ONE table. When a DISTRICT narrow is active, push it SERVER-SIDE
+// (.in('neighborhood', …)) so we pull the district's listings directly. Without this the fetch grabbed
+// the newest ~1500 rows CITY-WIDE and filtered to the district on the client, so a district that wasn't
+// among the freshest city rows returned almost nothing ("Al Olaya buy showed only 5 of 106"). Falls
+// back to the city-wide page when the district filter finds nothing (the location index can lag a
+// brand-new neighborhood value), so we never regress to fewer results. (user: "only 5? are you sure?")
+async function fetchTable(q: SearchQuery, tbl: string, scope: (r: any) => any, limit: number): Promise<Listing[]> {
+  const kind: SourceKind = tbl.includes('_commercial') ? 'com' : 'res';
+  if (q.districts && q.districts.length) {
+    const { data } = await scope(keptFiltersReq(q, tbl)).in('neighborhood', q.districts).order('id', { ascending: false }).limit(limit);
+    if (data && data.length) return finalize(data, kind);
+  }
+  const { data } = await scope(keptFiltersReq(q, tbl)).order('id', { ascending: false }).limit(limit);
+  return data ? finalize(data, kind) : [];
+}
+
 // Server-side per-search fetch — the heart of the scale fix. Instead of downloading the whole 21k+
 // row table (which now times out → app got zero listings), we push the cheap exact filters
 // (transaction_type, property_type group, city) to Postgres and pull only the matching rows WITH
@@ -271,10 +287,7 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   if (ambCities && ambCities.length) {
     const tables = tablesFor(q);
     const perTable = Math.ceil(QUERY_LIMIT / tables.length);
-    const lists = await Promise.all(tables.map(async (tbl) => {
-      const { data } = await keptFiltersReq(q, tbl).in('city', ambCities).order('id', { ascending: false }).limit(perTable);
-      return data ? finalize(data, tbl.includes('_commercial') ? 'com' : 'res') : [];
-    }));
+    const lists = await Promise.all(tables.map((tbl) => fetchTable(q, tbl, (r) => r.in('city', ambCities), perTable)));
     const rows = interleaveSources(lists);
     cacheListings(rows);
     return rows;
@@ -315,13 +328,7 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   // exist for the "drop the bedroom count?" relaxation. (user: mix both sources in results.)
   const tables = tablesFor(q);
   const perTable = Math.ceil(QUERY_LIMIT / tables.length);
-  const lists = await Promise.all(tables.map(async (tbl) => {
-    let req = keptFiltersReq(q, tbl);
-    if (city) req = req.eq('city', city);
-    req = req.order('id', { ascending: false }).limit(perTable);
-    const { data } = await req;
-    return data ? finalize(data, tbl.includes('_commercial') ? 'com' : 'res') : [];
-  }));
+  const lists = await Promise.all(tables.map((tbl) => fetchTable(q, tbl, (r) => (city ? r.eq('city', city) : r), perTable)));
   // If BOTH queries errored (no data anywhere) return null so the UI shows the retry message,
   // not an empty-result message. Otherwise interleave whatever each side returned.
   if (lists.every((l) => l.length === 0)) {

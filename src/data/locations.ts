@@ -614,6 +614,27 @@ function normDist(s: string): string {
     .replace(/حي/g, '');
 }
 
+// Cross-script district bridge, built once from the catalog's en↔ar district pairs: a normalized
+// district name in ONE script → its equivalent forms in the OTHER. Lets an English query ("Al Olaya")
+// match Arabic-tagged live districts ("حي العليا") and vice-versa — without it, the 106 Arabic-tagged
+// Al-Olaya Buy listings were invisible to a Latin search (user: "only 5? are you sure?").
+let _distBridge: Map<string, Set<string>> | null = null;
+function districtBridge(): Map<string, Set<string>> {
+  if (_distBridge) return _distBridge;
+  const m = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    if (!a || !b || a === b || a.length < 3 || b.length < 3) return;
+    if (!m.has(a)) m.set(a, new Set());
+    m.get(a)!.add(b);
+  };
+  for (const d of DISTRICTS_IDX) {
+    const en = normDist(d.place.nameEn), ar = normDist(d.place.nameAr);
+    link(en, ar); link(ar, en);
+  }
+  _distBridge = m;
+  return m;
+}
+
 // Find live districts matching the typed input. The district "probe" is the input with the named city
 // removed — so "Al Doha District, Yanbu" probes "al doha" (not the city). A bare city name probes to
 // empty → no district match (stays a city search). When a city is named we scope to it; otherwise a
@@ -640,6 +661,9 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   if (cityKey) probe = probe.replace(cityKey, '');
   if (cityKeyAr) probe = probe.replace(cityKeyAr, '');
   if (probe.length < 2) return []; // input is just a city (or nothing district-specific)
+  // Add the OTHER-script equivalents of the probe so a Latin query reaches Arabic-tagged districts and
+  // vice-versa (the catalog provides the en↔ar pairing). (user: Al Olaya missed its Arabic listings.)
+  const probeAlts = [probe, ...(districtBridge().get(probe) || [])];
   const probeF = fuzzyFold(probe);
   // Fuzzy-match the probe against the WORDS of a district name (not just the glued whole), so a typo'd
   // or partial district token still hits — "Rakk" ≈ the "Rakah" in "Al Rakah Al Shamaliyah". Shared
@@ -660,7 +684,7 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   for (const d of LIVE_DISTRICTS) {
     const nd = normDist(d.district);
     if (nd.length < 2) continue;
-    if (!(probe.includes(nd) || nd.includes(probe) || fuzzyTokenHit(d.district))) continue;
+    if (!(probeAlts.some((p) => p.includes(nd) || nd.includes(p)) || fuzzyTokenHit(d.district))) continue;
     if (cityKey) {
       const dc = flatLoc(d.city);
       if (dc !== cityKey && dc !== cityKeyAr) continue; // a city was named → keep only that city
