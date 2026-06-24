@@ -295,8 +295,24 @@ function placeHasInventory(p: Place): boolean {
       return true; // every region has scraped listings
     case 'city':
       return cityHasListings(p.nameEn);
-    case 'district':
-      return rawDistrictVariants(p).length > 0;
+    case 'district': {
+      // Does this catalog district have listings? Match the city by ARABIC (the live index stores the
+      // city as an English DB label whose spelling can differ from the catalog's — "Unaizah" vs "Unayzah"
+      // — so we map the index city → Arabic via CITY_AR_DISPLAY and compare in Arabic), and the district
+      // cross-script (word-aligned Arabic, or English exact). (fix: عنيزة's العليا was wrongly "no inventory".)
+      const cityAr = p.cityAr;
+      const cityEnK = flatLoc(p.cityEn ?? '');
+      const arKey = normDist(p.nameAr);
+      const enKey = normDist(p.nameEn);
+      for (const d of LIVE_DISTRICTS) {
+        const dCityEnK = flatLoc(d.city);
+        if (dCityEnK !== cityEnK && CITY_AR_DISPLAY[dCityEnK] !== cityAr) continue;
+        const nd = normDist(d.district);
+        if ((arKey.length >= 2 && (nd === arKey || districtMatchesProbe(d.district, arKey))) ||
+            (enKey.length >= 2 && nd === enKey)) return true;
+      }
+      return false;
+    }
   }
 }
 
