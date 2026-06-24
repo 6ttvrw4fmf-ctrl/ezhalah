@@ -279,7 +279,7 @@ function scoreKeys(keys: Key[], qs: string[], q: string, fuzzyOk: boolean, maxDi
 }
 
 const KIND_RANK: Record<PlaceKind, number> = { country: 0, region: 1, city: 2, district: 3 };
-const MAX_RESULTS = 40;
+const MAX_RESULTS = 14; // picker list size — small + clean (was 40, which flooded the dropdown with noise)
 
 // As the user types, surface matching places ranked by how well they match (exact → prefix → typo
 // → substring), then by level (country → region → city → district), then by the within-type metric.
@@ -352,13 +352,19 @@ export function matchLocations(query: string): Place[] {
   for (const c of CITIES_IDX) consider(c, true);
   for (const d of DISTRICTS_IDX) consider(d, false);
 
+  // Drop FUZZY (typo) matches when the query already hit enough REAL places — they're pure noise then, and
+  // they cause wrong resolutions (e.g. "العقيق الرياض" fuzzy-hitting the Asir city "العقيقة", or flooding
+  // "الرياض" with الريان/الراس/الرفاع…). Keep fuzzy ONLY when there's little solid signal, so genuine typo
+  // recovery ("القرص"→الرس) still works. (picker cleanup + user bug 2026-06-25.)
+  const solid = hits.filter((h) => h.type < 4);
+  const ranked = solid.length >= 3 ? solid : hits;
   // Rank: best match TYPE first; then INVENTORY (places we have listings for rank above zero-listing
   // catalog entries); then kind (region > city > district); then closeness. placeHasInventory loops the
   // live index, so do a CHEAP sort first (no inventory) and compute inventory ONLY for the top candidates —
   // otherwise a broad one-letter query that matches hundreds of districts froze the picker on every
   // keystroke. The slice is generous (>> MAX_RESULTS) so inventory can still promote within the shortlist.
-  hits.sort((a, b) => a.type - b.type || a.kind - b.kind || a.metric - b.metric);
-  const top = hits.slice(0, Math.max(MAX_RESULTS * 4, 48));
+  ranked.sort((a, b) => a.type - b.type || a.kind - b.kind || a.metric - b.metric);
+  const top = ranked.slice(0, Math.max(MAX_RESULTS * 4, 48));
   const inv = new Map<Place, number>();
   for (const h of top) if (!inv.has(h.place)) inv.set(h.place, placeHasInventoryMemo(h.place) ? 0 : 1);
   top.sort((a, b) => a.type - b.type || inv.get(a.place)! - inv.get(b.place)! || a.kind - b.kind || a.metric - b.metric);
@@ -889,6 +895,19 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
   // 2) Area nickname ("North Riyadh" → its districts).
   for (const nk of NICKNAMES) if (nk.keys.some((k) => f.includes(k))) {
     return { raw, kind: 'area', city: nk.city, label: raw, districts: nk.districts, cities: [] };
+  }
+  // 2.3) "منطقة X" — an explicit REGION pick (the picker's region label, or a typed "منطقة الرياض"). Resolve
+  //      X to its REGION and search the WHOLE region — NEVER a district. Region names that are ALSO city
+  //      names ("منطقة الرياض" / "منطقة تبوك" / "منطقة مكة") otherwise fall into the live-district merge below
+  //      and over-match dozens of districts (منطقة الرياض → 40 districts). Must run BEFORE that merge.
+  //      (user: selecting a region searches the whole region and never auto-attaches a district.)
+  const regM = /^\s*منطقة\s+(.+)$/.exec(raw);
+  if (regM) {
+    const rHit = matchLocations(regM[1].trim()).find((p) => p.kind === 'region');
+    if (rHit) {
+      const rr = citiesInRegion(rHit.nameEn);
+      return { raw, kind: 'region', city: '', region: rr.region || undefined, label: ar(locale) ? rHit.nameAr : `${rHit.nameEn} Region`, districts: [], cities: rr.cities, exact: true };
+    }
   }
   // 2.5) "District، City" — the picker's OWN label format (nameAr، cityAr) and Gemini's "حي العليا، الرياض".
   //      Re-resolving such a label as one string is lossy: the city token ("الرياض") bloats the district
