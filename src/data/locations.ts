@@ -491,7 +491,7 @@ function regionForCity(city: string): string {
 
 // The locale-appropriate display name for a canonical (English) city — Arabic from the catalog when we
 // have it, else the canonical English. Used so a fuzzy-corrected city shows in the user's language.
-function cityDisplay(cityEn: string, locale: string): string {
+export function cityDisplay(cityEn: string, locale: string): string {
   if (!ar(locale)) return cityEn;
   const cc = CITIES_IDX.find((c) => c.place.nameEn.toLowerCase() === cityEn.toLowerCase());
   if (cc?.place.nameAr) return cc.place.nameAr;
@@ -546,6 +546,24 @@ function fuzzyCity(raw: string): { city: string; region: string } | null {
     if (!best || ed < best.ed || (ed === best.ed && d > best.d)) best = { city: ck.city, ed, d };
   }
   return best ? { city: best.city, region: regionForCity(best.city) } : null;
+}
+
+// Detect an EXPLICITLY-named city anywhere in a free-typed location — for "District, City" / "حي X،
+// المدينة" phrases where norm() glues the words so matchLocations misses the city. Scans the FULL
+// city-key set (catalog EN+AR + curated tokens + live cities), which is far more complete than the
+// curated CITY_TOKENS the old scopeCity used — e.g. it knows "الظهران" = Dhahran from the catalog.
+// Longest key wins (most specific) and the key must be shorter than the whole input (a bare city is a
+// city search, handled elsewhere). Returns { city, key } or null. (user: "…، الظهران" must scope to Dhahran.)
+function cityInInput(raw: string): { city: string; key: string } | null {
+  const q = norm(raw);
+  if (q.length < 5) return null;
+  let best: { city: string; key: string } | null = null;
+  let bestLen = 0;
+  for (const ck of cityKeys()) {
+    if (ck.key.length < 4 || ck.key.length <= bestLen || ck.key.length >= q.length) continue;
+    if (q.includes(ck.key)) { best = { city: ck.city, key: ck.key }; bestLen = ck.key.length; }
+  }
+  return best;
 }
 
 // Does a canonical (English) city actually have live inventory? Used to decide whether a 0-result
@@ -611,12 +629,12 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   // EXPLICITLY-named city scopes the search to itself instead of going ambiguous across the Kingdom.
   // (user bug: "Al Olaya District, Riyadh" returned Riyadh+Mecca+Khobar+Jeddah and a non-Olaya Mecca land.)
   if (!cityKey) {
-    const sc = scopeCity(flatLoc(raw)); // canonical English city, '' if none
-    if (sc) {
-      cityKey = flatLoc(sc);
-      // Strip EVERY spelling of that city from the probe so it doesn't bloat (a long probe inflates the
-      // fuzzy edit-distance budget and over-matches unrelated districts).
-      for (const [tok, c] of CITY_TOKENS) if (c === sc) probe = probe.replace(flatLoc(tok), '');
+    const ci = cityInInput(raw); // full catalog/live scan — knows Arabic city names the tokens miss
+    if (ci) {
+      cityKey = flatLoc(ci.city);
+      // Strip the matched city token + its English name from the probe so it doesn't bloat (a long probe
+      // inflates the fuzzy edit-distance budget and over-matches unrelated districts).
+      probe = probe.replace(ci.key, '').replace(flatLoc(ci.city), '');
     }
   }
   if (cityKey) probe = probe.replace(cityKey, '');

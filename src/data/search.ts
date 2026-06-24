@@ -1,6 +1,6 @@
 import type { Category, Deal } from './taxonomy';
 import type { LocationResolution } from './locations';
-import { cityHasListings, nearbyCityWithListings } from './locations';
+import { cityHasListings, nearbyCityWithListings, cityDisplay } from './locations';
 import { detailFor, priceBandRange } from './taxonomy';
 import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
 import { supports } from './platforms';
@@ -279,7 +279,9 @@ function locationLines(q: SearchQuery): string[] {
     return q.location.trim() ? [`${t('City')}: ${tPlace(q.location.trim())}`] : [];
   }
   const join = (xs: string[]) => xs.join(getLocale() === 'ar' ? '، ' : ', ');
-  const cityLabel = lm.city ? tPlace(lm.city) : '';
+  // lm.city is canonical English (engine-facing); localize it for display via the catalog-backed
+  // cityDisplay (knows e.g. Dhahran→الظهران) so a district's City line isn't shown in English.
+  const cityLabel = lm.city ? cityDisplay(lm.city, getLocale()) : '';
   const regionLabel = lm.region ? tPlace(lm.region) : '';
   // Reassure the user ONLY when we corrected a typo'd place name. Suppress when the difference is just
   // localization (the resolver returns a localized label while the raw was the other script — e.g. the
@@ -304,7 +306,7 @@ function locationLines(q: SearchQuery): string[] {
       out.push(`${t('Neighborhood')}: ${lm.label}`);
       if (lm.ambiguous && lm.cities && lm.cities.length) {
         // The district name exists in several cities → show them all (we searched all), not one.
-        out.push(`${t('Cities')}: ${join(lm.cities.map((c) => tPlace(c)))}`);
+        out.push(`${t('Cities')}: ${join(lm.cities.map((c) => cityDisplay(c, getLocale())))}`);
       } else {
         // Same district name exists in different cities → always show City + Region so the user knows
         // WHICH one we matched (e.g. Al Olaya → Riyadh vs Khobar). (user request.)
@@ -321,7 +323,7 @@ function locationLines(q: SearchQuery): string[] {
     case 'landmark':
       out.push(`${t('Landmark')}: ${lm.landmark ?? lm.label}`);
       if (lm.districts.length) out.push(`${t('Nearby Districts')}: ${join(lm.districts)}`);
-      if (lm.cities.length) out.push(`${t('Nearby Cities')}: ${join(lm.cities.map((c) => tPlace(c)))}`);
+      if (lm.cities.length) out.push(`${t('Nearby Cities')}: ${join(lm.cities.map((c) => cityDisplay(c, getLocale())))}`);
       else if (cityLabel) out.push(`${t('City')}: ${cityLabel}`);
       break;
     case 'geography':
