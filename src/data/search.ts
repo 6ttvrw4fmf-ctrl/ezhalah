@@ -905,17 +905,29 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
   // show ONLY them; if not enough platforms publish that detail, keep the area's listings and say so.
   // We never invent that a listing is near something — only what the listing itself says. (user spec.)
   if (q.keywords && q.keywords.length && listings.length) {
-    const kws = q.keywords.map((k) => k.toLowerCase()).filter(Boolean);
-    const matched = listings.filter((l) => {
-      const blob = [l.street_name, l.title, l.description, l.direction, l.project_name, l.road, l.district,
-        ...((l.additional_info ?? []).map((a) => a.value))].filter(Boolean).join(' ').toLowerCase();
-      return kws.some((k) => blob.includes(k));
-    });
-    if (matched.length) {
-      listings = matched;
-      ns.push(t('Showing listings whose details mention what you searched for — street and nearby info is published by only some platforms.'));
-    } else {
-      ns.push(t('Only some platforms provide street or nearby information, so showing listings from the same district instead.'));
+    // Text-search a street/keyword ONLY for a GENUINE street/proximity ask — never when the term is just
+    // part of the place the user already picked. ~31 real districts ARE named after a street (e.g. «شارع
+    // الملك عبدالله», «الطريق الدائري الغربي»); for those the location filter already handles it, so we do
+    // NOT layer a street/title/description text search on top. A free-typed street that ISN'T a structured
+    // place (kind 'none') keeps its keyword. (audit fix: those fields are checked only when truly asked.)
+    const structured = ['district', 'city', 'region', 'area'].includes(q.locationMatch?.kind ?? 'none');
+    const locText = `${q.location ?? ''} ${q.locationMatch?.label ?? ''} ${(q.districts ?? []).join(' ')}`.toLowerCase();
+    const kws = q.keywords
+      .map((k) => k.toLowerCase())
+      .filter(Boolean)
+      .filter((k) => !(structured && locText.includes(k)));
+    if (kws.length) {
+      const matched = listings.filter((l) => {
+        const blob = [l.street_name, l.title, l.description, l.direction, l.project_name, l.road, l.district,
+          ...((l.additional_info ?? []).map((a) => a.value))].filter(Boolean).join(' ').toLowerCase();
+        return kws.some((k) => blob.includes(k));
+      });
+      if (matched.length) {
+        listings = matched;
+        ns.push(t('Showing listings whose details mention what you searched for — street and nearby info is published by only some platforms.'));
+      } else {
+        ns.push(t('Only some platforms provide street or nearby information, so showing listings from the same district instead.'));
+      }
     }
   }
 
