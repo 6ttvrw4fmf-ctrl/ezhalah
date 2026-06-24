@@ -865,9 +865,26 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
   const hit = matchLocations(raw)[0];
   // A catalog DISTRICT wins (clean names + region context).
   if (hit && hit.kind === 'district') {
-    // city/region are ENGINE-FACING (the engine's cityFilterFor only understands the English DB labels)
-    // → always canonical English; `label` carries the locale display. (so chat-path English from Gemini
-    // and Arabic filter picks both scope the server fetch correctly.)
+    // Bare-district ambiguity: if this district name recurs across SEVERAL cities in real inventory and
+    // the user did NOT pin a city, ASK which city (inventory-first) instead of silently picking the
+    // biggest. liveDistrictLookup already scopes to a city the user named — so «الروضة، جدة» stays
+    // single-city while a bare «الروضة» surfaces the multi-city options. (user: ask «تقصد… الرياض أو جدة؟».)
+    const liveCat = liveDistrictLookup(raw);
+    if (liveCat.length) {
+      const byCity = new Map<string, { region: string; n: number }>();
+      for (const d of liveCat) { const e = byCity.get(d.city) ?? { region: d.region, n: 0 }; e.n += d.n; byCity.set(d.city, e); }
+      const entries = Array.from(byCity.entries()).sort((a, b) => b[1].n - a[1].n);
+      const maxN = entries[0][1].n;
+      const strong = entries.filter(([, e]) => e.n >= Math.max(3, maxN * 0.15)).slice(0, 6);
+      if (strong.length >= 2) {
+        // Multi-city → the engine searches ALL `cities` (+ "multiple locations" notice) and the agent's
+        // deterministic backstop asks «أي مدينة؟», listing these cities inventory-first.
+        const allDistricts = Array.from(new Set(liveCat.map((d) => d.district)));
+        return { raw, kind: 'district', city: strong[0][0], region: strong[0][1].region, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: allDistricts, cities: strong.map(([c]) => c), ambiguous: true, exact: true };
+      }
+    }
+    // Single, unambiguous district. city/region are ENGINE-FACING (the engine's cityFilterFor only
+    // understands the English DB labels) → always canonical English; `label` carries the locale display.
     // GitHub catalog controls the clean name SHOWN; the raw listing index controls what's SEARCHED:
     // expand the picked clean district to EVERY raw spelling that actually exists (حي العليا / Al-Olaya
     // / Al Olaya Dist. / …) so one tidy pick returns all variants across all platforms. Arabic-primary
