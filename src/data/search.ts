@@ -998,7 +998,10 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
   // listings for the chosen deal+category → say so plainly. NEVER "did you mean", never substitute a
   // nearby place. (The filter catalog ≠ the listing DB; some real places correctly return zero.)
   const lm = q.locationMatch;
-  const explicitPlace = !!lm && (lm.kind === 'district' || lm.kind === 'city' || lm.kind === 'region');
+  // EXACT = a real catalog/inventory place the user clearly named or picked (district/city/region), NOT a
+  // fuzzy typo guess. Only an exact-but-empty place gets the honest zero-state; a misspelled near-miss
+  // («القرص») falls through to the «هل تقصد الرس؟» suggestion below. (user: typo = ask/did-you-mean.)
+  const explicitPlace = !!lm && lm.exact === true && (lm.kind === 'district' || lm.kind === 'city' || lm.kind === 'region');
   if (explicitPlace && countWith({ priceInput: '', priceBand: null, detail: null, type: null, typeGroup: null }) === 0) {
     return t('No listings in this location right now.');
   }

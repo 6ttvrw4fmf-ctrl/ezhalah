@@ -373,6 +373,9 @@ export type LocationResolution = {
   landmark?: string;
   note?: string;
   ambiguous?: boolean; // the typed district matched 2+ cities → multi-city search + "refine" notice
+  exact?: boolean;     // an EXACT catalog/inventory place (district/city/region), NOT a fuzzy typo guess —
+                       // gates the zero-state vs "did you mean": exact + empty = honest zero (no substitute);
+                       // fuzzy (a misspelled near-miss) keeps the «هل تقصد…؟» suggestion. (filter location policy)
 };
 
 // Letters/digits only (drops spaces, punctuation, Arabic diacritics) — for phrase `includes` tests.
@@ -869,7 +872,7 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
     // expand the picked clean district to EVERY raw spelling that actually exists (حي العليا / Al-Olaya
     // / Al Olaya Dist. / …) so one tidy pick returns all variants across all platforms. Arabic-primary
     // (rawDistrictVariants probes the catalog's Arabic name first). Empty → store falls back to the label.
-    return { raw, kind: 'district', city: hit.cityEn ?? '', region: hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: rawDistrictVariants(hit), cities: [] };
+    return { raw, kind: 'district', city: hit.cityEn ?? '', region: hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: rawDistrictVariants(hit), cities: [], exact: true };
   }
   // 3b) LIVE district merge — a district that exists in real inventory but NOT the static catalog
   //     (e.g. "Al Doha Dist." in Yanbu). Beats a bare city match so the typed district actually
@@ -893,18 +896,18 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
     const allDistricts = Array.from(new Set(live.map((d) => d.district)));
     if (strong.length === 1) {
       const [cityName, e] = strong[0];
-      return { raw, kind: 'district', city: cityName, region: e.region, label: Array.from(e.districts)[0], districts: Array.from(e.districts), cities: [] };
+      return { raw, kind: 'district', city: cityName, region: e.region, label: Array.from(e.districts)[0], districts: Array.from(e.districts), cities: [], exact: true };
     }
     // Multi-city ambiguity → the engine searches ALL `cities` + shows the "multiple locations" notice.
-    return { raw, kind: 'district', city: strong[0][0], region: strong[0][1].region, label: raw, districts: allDistricts, cities: strong.map(([c]) => c), ambiguous: true };
+    return { raw, kind: 'district', city: strong[0][0], region: strong[0][1].region, label: raw, districts: allDistricts, cities: strong.map(([c]) => c), ambiguous: true, exact: true };
   }
   if (hit) {
-    if (hit.kind === 'city') return { raw, kind: 'city', city: hit.nameEn, region: hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [] };
+    if (hit.kind === 'city') return { raw, kind: 'city', city: hit.nameEn, region: hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [], exact: true };
     if (hit.kind === 'region') {
       // Region search → carry the DB region value + ALL its cities, so the engine returns the whole
       // region (not just the capital). (user: "Region search = all listings in that region.")
       const r = citiesInRegion(hit.nameEn);
-      return { raw, kind: 'region', city: '', region: r.region || undefined, label: ar(locale) ? hit.nameAr : `${hit.nameEn} Region`, districts: [], cities: r.cities };
+      return { raw, kind: 'region', city: '', region: r.region || undefined, label: ar(locale) ? hit.nameAr : `${hit.nameEn} Region`, districts: [], cities: r.cities, exact: true };
     }
     // country → fall through to geography/lifestyle/none (it isn't a specific place to anchor on)
   }
