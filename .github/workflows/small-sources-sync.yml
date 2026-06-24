@@ -54,10 +54,7 @@ jobs:
           - { source: abeea,       cmd: "python -m scrapers.abeea.run --type all" }
           - { source: jurash,      cmd: "python -m scrapers.jurash.run --type all" }
           - { source: alnokhba,    cmd: "python -m scrapers.alnokhba.run --type all" }
-          # Deal App: the sitemap/filter-page enumeration broke (site change → 0 ids found, prune guard
-          # kept the stale rows). dealapp.sa's JSON API still works, so we now feed the SAME dealapp_*
-          # tables from the API scraper (scrapers.deal → repointed to dealapp_* tables). (user: fix scraping.)
-          - { source: dealapp,     cmd: "python -m scrapers.deal.run --type all" }
+          - { source: dealapp,     cmd: "DEALAPP_MAX_FILTER_PAGES=2000 DEALAPP_WORKERS=3 python -m scrapers.dealapp.run --type all" }
           - { source: souq24,      cmd: "python -m scrapers.souq24.run --type all" }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }

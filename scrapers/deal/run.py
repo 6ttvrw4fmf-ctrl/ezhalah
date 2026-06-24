@@ -230,7 +230,7 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
     row = {
         "ad_number": f"DEAL{L.get('code') or pid}",
         "listing_url": f"https://dealapp.sa/ar/marketplace/ad/{pid}",
-        "source": "Deal App",
+        "source": "Deal",
         "active": True,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
@@ -255,7 +255,7 @@ def scrape(type_filter: str, max_pages: int, dry: int) -> int:
     _, total = fetch_page(s, auth, 1)
     pages = min(max_pages, (total + PER_PAGE - 1) // PER_PAGE) if total else max_pages
     print(f"Deal: total={total}, scraping up to {pages} pages (limit {PER_PAGE}/page)")
-    run_id = None if dry else db.begin_run("dealapp")
+    run_id = None if dry else db.begin_run("deal")
     res: list[dict] = []
     com: list[dict] = []
     seen = skipped = 0
@@ -276,8 +276,8 @@ def scrape(type_filter: str, max_pages: int, dry: int) -> int:
             if dry and page >= dry:
                 break
             if not dry and (len(res) >= BATCH or len(com) >= BATCH):
-                if res: db.upsert_dealapp_residential_batch(res); res = []
-                if com: db.upsert_dealapp_commercial_batch(com); com = []
+                if res: db.upsert_deal_residential_batch(res); res = []
+                if com: db.upsert_deal_commercial_batch(com); com = []
             if page % 100 == 0:
                 print(f"  [{page}/{pages}] kept {seen}, skipped {skipped}")
         if dry:
@@ -286,8 +286,8 @@ def scrape(type_filter: str, max_pages: int, dry: int) -> int:
                 print("  ", {k: r[k] for k in ("ad_number", "property_type", "transaction_type", "city", "neighborhood", "area_m2", "price_total")})
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0][:80])
             return 0
-        if res: db.upsert_dealapp_residential_batch(res)
-        if com: db.upsert_dealapp_commercial_batch(com)
+        if res: db.upsert_deal_residential_batch(res)
+        if com: db.upsert_deal_commercial_batch(com)
         print(f"✓ Deal: kept {seen}, skipped {skipped}")
         db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"skipped={skipped}")
         return 0
