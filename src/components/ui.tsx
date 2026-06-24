@@ -51,6 +51,16 @@ export function Tappable({
   );
 }
 
+// Smooth reveal for content that mounts in — the filter's progressive steps (Property group → type →
+// detail → budget). Fades + slides up gently so a newly-unlocked section glides in instead of popping,
+// matching the soft feel of opening a listing. (user: filter selections should feel smooth, not harsh.)
+export function Reveal({ children, style }: { children: React.ReactNode; style?: ViewStyle | ViewStyle[] }) {
+  const v = useSharedValue(0);
+  useEffect(() => { v.value = withTiming(1, EASE); }, [v]);
+  const a = useAnimatedStyle(() => ({ opacity: v.value, transform: [{ translateY: (1 - v.value) * 10 }] }));
+  return <Animated.View style={[style as any, a]}>{children}</Animated.View>;
+}
+
 // Gentle "heartbeat" pulse — a soft double-thump (lub-dub) then a rest, looping forever, so the
 // example/suggestion cards feel alive without being distracting. Subtle scale only (≤1.035). An
 // optional index staggers each card's beat so they don't all thump in lockstep. (user request.)

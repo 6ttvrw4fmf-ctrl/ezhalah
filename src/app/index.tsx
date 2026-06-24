@@ -5,7 +5,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import HeroBackground from '@/components/HeroBackground';
-import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat } from '@/components/ui';
+import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
 import { CATEGORIES, DEALS, detailFor, priceTabsFor, type Category } from '@/data/taxonomy';
@@ -424,7 +424,7 @@ export default function Home() {
             {/* Subcategory group — a SOFT/broad intent (e.g. "Vacation & Rural"). Selecting just the
                 group searches all its clean types; picking a specific type below makes it exact. */}
             {query.category && (
-              <View style={s.pick}>
+              <Reveal style={s.pick}>
                 <FieldLabel>{t('Property group')}</FieldLabel>
                 <View style={s.wrap}>
                   {groupsFor(query.category as Macro).map((g) => (
@@ -437,13 +437,13 @@ export default function Home() {
                     />
                   ))}
                 </View>
-              </View>
+              </Reveal>
             )}
 
             {/* Clean property type (scoped to the chosen group) — the EXACT/hard filter. Optional:
                 leaving it unselected keeps the broad group intent. */}
             {query.typeGroup && (
-              <View style={s.pick}>
+              <Reveal style={s.pick}>
                 <FieldLabel>{t('Property type')}</FieldLabel>
                 <View style={s.wrap}>
                   {groupMembers(query.typeGroup).map((ty) => (
@@ -456,12 +456,12 @@ export default function Home() {
                     />
                   ))}
                 </View>
-              </View>
+              </Reveal>
             )}
 
             {/* Detail (bedrooms / size) */}
             {detail && (
-              <View style={s.pick}>
+              <Reveal style={s.pick}>
                 <FieldLabel>{t(detail.label)}</FieldLabel>
                 <View style={s.wrap}>
                   {detail.options.map((opt) => (
@@ -496,14 +496,14 @@ export default function Home() {
                     <Text style={s.sizeUnit}>{t('m²')}</Text>
                   </View>
                 )}
-              </View>
+              </Reveal>
             )}
 
             {/* Rent only: tiny Monthly / Yearly toggle that tells the engine which period the typed
                 number represents. The user sees no math; they just pick what they're thinking in.
                 Hidden for Buy. (user request.) */}
             {query.deal === 'Rent' && (
-              <View style={{ marginTop: 12 }}>
+              <Reveal style={{ marginTop: 12 }}>
                 <Segmented
                   options={['Monthly', 'Yearly']}
                   value={rentPeriod === 'monthly' ? 'Monthly' : 'Yearly'}
@@ -513,7 +513,7 @@ export default function Home() {
                 <Text style={s.rentHint}>
                   {t(rentPeriod === 'monthly' ? 'Monthly: 1–11 month lease, price/month.' : 'Annual: 12-month lease, price/year.')}
                 </Text>
-              </View>
+              </Reveal>
             )}
             <Pressable style={[s.field, { marginTop: 12 }]} onPress={() => priceRef.current?.focus()}>
               <View style={s.flWrap}>
