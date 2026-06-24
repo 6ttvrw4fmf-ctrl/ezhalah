@@ -273,8 +273,10 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   if (!q.bothDeals) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
   const types = dbTypesFor(q);
   if (types && types.length) req = req.in('property_type', types);
-  if (q.deal === 'Rent' && q.rentPeriod === 'monthly') req = req.eq('rent_period', 'monthly');
-  else if (q.deal === 'Rent' && q.rentPeriod === 'annual') req = req.or('rent_period.eq.annual,rent_period.is.null');
+  // Rent-period filter only when the deal is actually Rent — NOT for a "rent or buy" (bothDeals) search,
+  // where a monthly filter would wrongly drop every Buy row (Buy has no rent_period). (audit bug.)
+  if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'monthly') req = req.eq('rent_period', 'monthly');
+  else if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'annual') req = req.or('rent_period.eq.annual,rent_period.is.null');
   return req;
 }
 
