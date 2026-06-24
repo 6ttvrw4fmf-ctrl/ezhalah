@@ -245,98 +245,102 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   return req;
 }
 
-// Fetch the newest matching rows for ONE table. When a DISTRICT narrow is active, push it SERVER-SIDE
-// (.in('neighborhood', …)) so we pull the district's listings directly. Without this the fetch grabbed
-// the newest ~1500 rows CITY-WIDE and filtered to the district on the client, so a district that wasn't
-// among the freshest city rows returned almost nothing ("Al Olaya buy showed only 5 of 106"). Falls
-// back to the city-wide page when the district filter finds nothing (the location index can lag a
-// brand-new neighborhood value), so we never regress to fewer results. (user: "only 5? are you sure?")
-async function fetchTable(q: SearchQuery, tbl: string, scope: (r: any) => any, limit: number): Promise<Listing[]> {
-  const kind: SourceKind = tbl.includes('_commercial') ? 'com' : 'res';
-  if (q.districts && q.districts.length) {
-    const { data } = await scope(keptFiltersReq(q, tbl)).in('neighborhood', q.districts).order('id', { ascending: false }).limit(limit);
-    if (data && data.length) return finalize(data, kind);
+// A candidate row from the location index (the routing layer): just enough to find the exact raw row.
+type Cand = { source_table: string; listing_id: number; platform: string };
+
+// Round-robin the candidates by platform (preserving each platform's newest-first order) so a broad
+// search shows a balanced mix instead of the top being monopolised by the platforms that scrape most
+// often. (user: "preserve platform diversity for broad searches.")
+function interleaveByPlatform(cands: Cand[]): Cand[] {
+  const groups = new Map<string, Cand[]>();
+  for (const c of cands) {
+    let g = groups.get(c.platform);
+    if (!g) { g = []; groups.set(c.platform, g); }
+    g.push(c);
   }
-  const { data } = await scope(keptFiltersReq(q, tbl)).order('id', { ascending: false }).limit(limit);
-  return data ? finalize(data, kind) : [];
+  const arrs = [...groups.values()];
+  const out: Cand[] = [];
+  for (let i = 0; out.length < cands.length; i++) {
+    let progressed = false;
+    for (const a of arrs) { if (i < a.length) { out.push(a[i]); progressed = true; } }
+    if (!progressed) break;
+  }
+  return out;
 }
 
-// Server-side per-search fetch — the heart of the scale fix. Instead of downloading the whole 21k+
-// row table (which now times out → app got zero listings), we push the cheap exact filters
-// (transaction_type, property_type group, city) to Postgres and pull only the matching rows WITH
-// photos. The client's runSearch then applies the intricate price/size/district/sort/suggestion
-// logic on this small subset. Ordered newest-first (cheap on the indexed, filtered set). Returns
-// null on backend error (so the caller can show a retry message), [] when there genuinely are no
-// matches. (user-reported: search broken / "Loading listings" because the whole-table load timed out.)
+// Fetch the FULL card rows for a set of ids from ONE raw platform table, applying the kept server-side
+// filters (transaction_type / property_type / rent period). Chunked because a `.in('id', […])` list
+// can be long. Raw tables stay the source of truth — the index only told us WHICH rows to pull.
+const ID_CHUNK = 200;
+async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[]): Promise<Listing[]> {
+  const kind: SourceKind = tbl.includes('_commercial') ? 'com' : 'res';
+  const out: Listing[] = [];
+  for (let i = 0; i < ids.length; i += ID_CHUNK) {
+    const { data } = await keptFiltersReq(q, tbl).in('id', ids.slice(i, i + ID_CHUNK)).limit(ID_CHUNK);
+    if (data) out.push(...finalize(data, kind));
+  }
+  return out;
+}
+
+// Per-search fetch — ROUTING LAYER (Phase 1.5). The buy/rent location index (a materialized view over
+// the raw tables, refreshed by pg_cron) is queried for the location-scoped, purpose-split, newest-first,
+// platform-diverse set of (source_table, listing_id). We then pull the FULL cards from the RAW tables by
+// id — raw stays the single source of truth; the index only maps "location search → exact raw listing".
+// Returns null on a backend error (UI shows retry), [] when the location genuinely has no listings.
+// (user spec: route rent→rent_location_index, buy→buy_location_index, then fetch details from raw.)
 export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] | null> {
   if (!supabase) return null;
-  // City — scope to a recognized city. Prefer a city named in the raw text; otherwise fall back to the
-  // resolver's canonical city, so a kept DISTRICT/landmark/Arabic-city ("Al Olaya", "العليا، الرياض",
-  // "near KAFD") scopes to its city instead of leaking all 21 cities. (audit: location leak.) The
-  // client then narrows to the exact district WITHIN that city via q.districts.
+  const tables = tablesFor(q);
+  if (!tables.length) return [];
+
+  // Resolve the location scope. Prefer a city named in the raw text, else the resolver's canonical city.
   const city = cityFilterFor(q.location || '')
     || (q.locationMatch?.city ? cityFilterFor(q.locationMatch.city) : null);
-
-  // MULTI-CITY (ambiguous location — e.g. "Al Olaya" exists in Riyadh AND Khobar): scope to ALL the
-  // high-confidence matched cities, not one. The engine ranks the best 25 ACROSS them and the UI shows
-  // the "multiple locations matched" notice. The district narrow (q.districts carries every spelling
-  // variant) still applies client-side in runSearch. (user: search all + notice, never pick one.)
+  // MULTI-CITY ambiguity (e.g. "Al Olaya" in Riyadh AND Khobar) → search all matched cities.
   const ambCities = q.locationMatch?.ambiguous && q.locationMatch.cities?.length
     ? Array.from(new Set(q.locationMatch.cities.map((c) => cityFilterFor(c) || c).filter(Boolean)))
     : null;
-  if (ambCities && ambCities.length) {
-    const tables = tablesFor(q);
-    const perTable = Math.ceil(QUERY_LIMIT / tables.length);
-    const lists = await Promise.all(tables.map((tbl) => fetchTable(q, tbl, (r) => r.in('city', ambCities), perTable)));
-    const rows = interleaveSources(lists);
-    cacheListings(rows);
-    return rows;
-  }
+  const cities = ambCities && ambCities.length ? ambCities : (city ? [city] : null);
+  const countryWide = isCountryWideQuery(q);
 
-  // COUNTRY-WIDE ("Saudi"): no specific city → diversify across all 13 regions. Pull the newest K from
-  // each region's cities IN PARALLEL, then round-robin them, so the results span the Kingdom instead
-  // of being dominated by Riyadh/Jeddah's freshest. The kept strict filters (deal/type/period) still
-  // apply to every per-region query; bedrooms/price/size stay client-side as always. (user request.)
-  if (!city && isCountryWideQuery(q)) {
-    const regionKeys = Object.keys(REGIONS);
-    const tables = tablesFor(q);
-    // Quota split across (region × source) so all 13 regions × both sources are represented in
-    // the pool, and at display time interleave puts an Aqar then a Wasalt then an Aqar… (user.)
-    const perBucket = Math.ceil(QUERY_LIMIT / (regionKeys.length * tables.length));
-    const lists = await Promise.all(
-      regionKeys.flatMap((rk) => tables.map(async (tbl) => {
-        const { data } = await keptFiltersReq(q, tbl).in('city', REGIONS[rk]).order('id', { ascending: false }).limit(perBucket);
-        return data ? finalize(data, tbl.includes('_commercial') ? 'com' : 'res') : [];
-      })),
-    );
-    const rows = interleave(lists);
-    cacheListings(rows);
-    return rows;
-  }
-
-  // A place was NAMED but resolves to NO city we carry (e.g. a typo / unknown like "Rwam"), and it's
-  // not a district narrow within a city → return NONE so the UI says "couldn't find that place",
-  // instead of dumping nationwide cards under a label that doesn't match them. (user: match what I
-  // wrote to the cards, or tell me you couldn't find it — never show the wrong cities.)
-  if (!city && (q.location || '').trim() && !(q.districts && q.districts.length)) {
+  // A place was NAMED but resolves to NO city, and it's not a district or a country-wide search →
+  // honest ZERO (never substitute a nearby place). (user: real-but-empty location returns 0.)
+  if (!cities && !countryWide && !(q.districts && q.districts.length) && (q.location || '').trim()) {
     return [];
   }
 
-  // City-scoped path — query BOTH the Aqar table AND the Wasalt table in parallel, then interleave
-  // so cards alternate sources (Aqar, Wasalt, Aqar, Wasalt…). Bedrooms is filtered CLIENT-side
-  // (runSearch), NOT here — same as price/size — so a 0-match search can still see other counts
-  // exist for the "drop the bedroom count?" relaxation. (user: mix both sources in results.)
-  const tables = tablesFor(q);
-  const perTable = Math.ceil(QUERY_LIMIT / tables.length);
-  const lists = await Promise.all(tables.map((tbl) => fetchTable(q, tbl, (r) => (city ? r.eq('city', city) : r), perTable)));
-  // If BOTH queries errored (no data anywhere) return null so the UI shows the retry message,
-  // not an empty-result message. Otherwise interleave whatever each side returned.
-  if (lists.every((l) => l.length === 0)) {
-    // Distinguish "real empty" from "all errored" — re-query one table to confirm.
-    const probe = await keptFiltersReq(q, tables[0]).limit(1);
-    if (probe.error) return null;
+  // 1) Ask the location index for the candidate set (newest-first, diverse, location + purpose filtered).
+  const { data: cands, error } = await supabase.rpc('location_search_candidates', {
+    p_purpose: q.bothDeals ? null : (q.deal === 'Buy' ? 'buy' : 'rent'),
+    p_cities: cities,
+    p_districts: q.districts && q.districts.length ? q.districts : null,
+    p_tables: tables,
+    p_platforms: q.sources && q.sources.length ? q.sources : null,
+    p_per_platform: 400,
+    p_limit: QUERY_LIMIT,
+  });
+  if (error) return null;                       // index error → retry UI, not "no matches"
+  if (!cands || !(cands as Cand[]).length) return [];
+
+  // 2) Interleave by platform for diversity, group ids by source_table.
+  const ordered = interleaveByPlatform((cands as any[]).map((c) => ({ source_table: c.source_table, listing_id: Number(c.listing_id), platform: c.platform })));
+  const byTable = new Map<string, number[]>();
+  for (const c of ordered) {
+    let a = byTable.get(c.source_table);
+    if (!a) { a = []; byTable.set(c.source_table, a); }
+    a.push(c.listing_id);
   }
-  const rows = interleaveSources(lists);
+
+  // 3) Fetch the full cards from the RAW tables by id (type/period filters applied there).
+  const entries = [...byTable];
+  const fetched = await Promise.all(entries.map(([tbl, ids]) => fetchRawByIds(q, tbl, ids)));
+  const map = new Map<string, Listing>();
+  entries.forEach(([tbl], i) => { for (const l of fetched[i]) map.set(`${tbl}:${l.id}`, l); });
+
+  // 4) Reassemble in the diverse/newest candidate order; keep only rows still active + type-matching in
+  //    raw (so index↔raw drift, or a type filter, naturally drops the rest).
+  const rows: Listing[] = [];
+  for (const c of ordered) { const l = map.get(`${c.source_table}:${c.listing_id}`); if (l) rows.push(l); }
   cacheListings(rows);
   return rows;
 }
