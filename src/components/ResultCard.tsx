@@ -90,6 +90,9 @@ export function ResultCard({
   // user sees which part of the city the property is in. (user request.)
   const region = regionFromUrl(listing.source_url);
   const regionLabel = region ? (locale === 'en' ? region.en : region.ar) : '';
+  // Description (P2): show the source's text ONLY when it is REAL Arabic (Aqar keeps its own as-is).
+  // English or empty (Wasalt carries none) shows nothing — we never translate or invent a description.
+  const descAr = (() => { const d = (listing.description ?? '').trim(); return d && /[ء-ي]/.test(d) ? d : null; })();
   // The scraper sometimes captured a whole junk string into `listed` (e.g. "28/04/2026 آخر تحديث منذ
   // 22 ساعة ... المشاهدات 353 ..."). Show ONLY the clean DD/MM/YYYY date; if none, fall back to a
   // localized "recently". Works in both languages, no re-scrape needed. (user request: don't show
@@ -160,6 +163,9 @@ export function ResultCard({
         </View>
         <Text style={card.price} numberOfLines={1}>{tPrice(listing.price)}</Text>
         {listing.rent_now_pay_later ? <RnplBanner monthly={listing.rent_now_pay_later_monthly ?? undefined} source={listing.source} t={t} /> : null}
+        {descAr ? (
+          <Text style={[card.desc, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={3}>{descAr}</Text>
+        ) : null}
         <View style={card.statsRow}>
           {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
           {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} /> : null}
@@ -505,6 +511,7 @@ const card = StyleSheet.create({
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   typeLabel: { fontSize: 11.5, color: colors.muted, fontWeight: '500' },
   title: { fontSize: 18, fontWeight: '800', color: colors.dark, letterSpacing: -0.3 },
+  desc: { fontSize: 13, color: colors.muted, lineHeight: 19, marginTop: 8 },
   locRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
   locText: { fontSize: 12, color: colors.primary, fontWeight: '500' },
   // Small region pill (e.g. "North Riyadh") next to the city line — light green, compact.
