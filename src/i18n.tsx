@@ -923,7 +923,7 @@ export function isLatinOnlyInput(text: string): boolean {
   const stripped = (text || '').replace(/[0-9٠-٩۰-۹]/g, '');
   return _latinScript.test(stripped) && !_arScript.test(stripped);
 }
-export const ARABIC_ONLY_MSG = 'الرجاء كتابة طلبك باللغة العربية عشان نقدر نبحث لك بدقة';
+export const ARABIC_ONLY_MSG = 'هذا التطبيق يدعم اللغة العربية فقط. الرجاء الكتابة بالعربية.';
 
 // A property type or category — Arabic translation, or lowercased English (matches the prior
 // "here are villas" phrasing).

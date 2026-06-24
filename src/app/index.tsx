@@ -608,14 +608,14 @@ const s = StyleSheet.create({
   rentHint: { fontSize: 11.5, color: colors.muted, marginTop: 6, paddingHorizontal: 4, lineHeight: 16 },
 
   card: { marginTop: 46, backgroundColor: colors.surface, borderRadius: radius.sheet, borderWidth: 1, borderColor: colors.fieldLine, padding: space.card, ...cardShadow },
-  field: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 52, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, paddingHorizontal: 14, backgroundColor: colors.surface },
+  field: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 52, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, paddingHorizontal: 14, backgroundColor: colors.surface, ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
   sizeField: { marginTop: 8, height: 46 },
   sizeFieldOn: { borderColor: colors.primary },
   sizeInput: { flex: 1, fontSize: 14, color: colors.ink, padding: 0, height: '100%', textAlign: 'left', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
   sizeUnit: { fontSize: 13.5, fontWeight: '700', color: colors.muted },
 
-  flWrap: { flex: 1, height: 52, justifyContent: 'center', position: 'relative' },
-  flLabel: { position: 'absolute', left: 0, top: 17, fontSize: 14, color: colors.muted },
+  flWrap: { flex: 1, height: 52, justifyContent: 'center', position: 'relative', ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
+  flLabel: { position: 'absolute', left: 0, top: 17, fontSize: 14, color: colors.muted, ...(Platform.OS === 'web' ? { cursor: 'text' as any, transitionProperty: 'top, font-size, color' as any, transitionDuration: '140ms' as any } : {}) },
   flLabelUp: { top: 7, fontSize: 10, color: colors.primary, fontWeight: '600' },
   flInput: { fontSize: 14, color: colors.ink, padding: 0, height: '100%', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
   flInputUp: { paddingTop: 15 },
