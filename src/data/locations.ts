@@ -603,17 +603,31 @@ function normDist(s: string): string {
 function liveDistrictLookup(raw: string): LiveDistrict[] {
   if (!LIVE_DISTRICTS.length) return [];
   const cityHit = matchLocations(raw).find((p) => p.kind === 'city');
-  const cityKey = cityHit ? flatLoc(cityHit.nameEn) : '';
-  const cityKeyAr = cityHit ? flatLoc(cityHit.nameAr) : '';
+  let cityKey = cityHit ? flatLoc(cityHit.nameEn) : '';
+  let cityKeyAr = cityHit ? flatLoc(cityHit.nameAr) : '';
   let probe = normDist(raw);
+  // A "District, City" / "حي X، المدينة" phrase glues into one token (norm strips spaces/commas), so
+  // matchLocations usually MISSES the city. Fall back to a substring city-token scan (scopeCity) so an
+  // EXPLICITLY-named city scopes the search to itself instead of going ambiguous across the Kingdom.
+  // (user bug: "Al Olaya District, Riyadh" returned Riyadh+Mecca+Khobar+Jeddah and a non-Olaya Mecca land.)
+  if (!cityKey) {
+    const sc = scopeCity(flatLoc(raw)); // canonical English city, '' if none
+    if (sc) {
+      cityKey = flatLoc(sc);
+      // Strip EVERY spelling of that city from the probe so it doesn't bloat (a long probe inflates the
+      // fuzzy edit-distance budget and over-matches unrelated districts).
+      for (const [tok, c] of CITY_TOKENS) if (c === sc) probe = probe.replace(flatLoc(tok), '');
+    }
+  }
   if (cityKey) probe = probe.replace(cityKey, '');
   if (cityKeyAr) probe = probe.replace(cityKeyAr, '');
   if (probe.length < 2) return []; // input is just a city (or nothing district-specific)
   const probeF = fuzzyFold(probe);
   // Fuzzy-match the probe against the WORDS of a district name (not just the glued whole), so a typo'd
   // or partial district token still hits — "Rakk" ≈ the "Rakah" in "Al Rakah Al Shamaliyah". Shared
-  // first letter + a small length-scaled edit distance keeps it from over-matching. (user: Rakk→Rakah.)
-  const tokenMaxD = probeF.length <= 3 ? 1 : probeF.length <= 7 ? 2 : 3;
+  // first letter + a small edit distance keeps it tight. CAP at 2: editDistance() returns 3 as its
+  // "too different" sentinel (length diff > 2), so a budget of 3 would let unrelated tokens through.
+  const tokenMaxD = probeF.length <= 3 ? 1 : 2;
   const fuzzyTokenHit = (district: string): boolean => {
     if (probeF.length < 4) return false;
     for (const tok of district.split(/[^\p{L}\p{N}]+/u)) {
