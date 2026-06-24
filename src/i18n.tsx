@@ -41,9 +41,8 @@ function hasAuthSession(): boolean {
 function readSavedLocale(): Locale {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     try {
-      if (!hasAuthSession()) return 'ar'; // guest → Arabic-first, never a remembered language
-      const v = window.localStorage?.getItem(LOCALE_KEY);
-      if (v === 'en' || v === 'ar') return v;
+      // Arabic-only product: the UI is always Arabic. Clear any legacy saved 'en' so it can't resurface.
+      if (window.localStorage?.getItem(LOCALE_KEY) === 'en') window.localStorage.removeItem(LOCALE_KEY);
     } catch {}
   }
   return 'ar';
@@ -915,6 +914,16 @@ export function detectLocale(text: string): Locale | null {
   return null;
 }
 
+// Arabic-only INPUT guard: true when the user typed in English (Latin letters present, no Arabic).
+// Digits (Western, Arabic-Indic, Persian) are stripped first so a number never counts as Latin —
+// numbers stay 0-9 per the product rule. Used to REJECT English search input at the entry points,
+// ABOVE the internal English↔Arabic mapping layer (which stays intact for matching the data).
+export function isLatinOnlyInput(text: string): boolean {
+  const stripped = (text || '').replace(/[0-9٠-٩۰-۹]/g, '');
+  return _latinScript.test(stripped) && !_arScript.test(stripped);
+}
+export const ARABIC_ONLY_MSG = 'الرجاء كتابة طلبك باللغة العربية عشان نقدر نبحث لك بدقة';
+
 // A property type or category — Arabic translation, or lowercased English (matches the prior
 // "here are villas" phrasing).
 export function tWord(en: string): string {
@@ -1037,6 +1046,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   // on Send, then call respond()) gets a reply in the NEW language — not the previous one. React
   // state stays the source of truth; this just removes the one-render lag for the static `t()`.
   const setLocale = useCallback((l: Locale) => {
+    if (l !== 'ar') return; // Arabic-only product: the UI never switches to English
     _locale = l;
     persistLocale(l); // save synchronously (web) so a refresh keeps this language — guest or signed-in
     setLocaleState(l);

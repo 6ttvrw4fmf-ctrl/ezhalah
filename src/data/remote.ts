@@ -129,6 +129,51 @@ function cityFilterFor(location: string): string | null {
   return null; // not a recognized city → don't constrain server-side; client narrows by district
 }
 
+// English DB-city label → Arabic canonical city (mirrors the DB's loc_city_map). The RPC matches the
+// indexed Arabic `city` column, so once the resolver picks a city we translate it to Arabic before
+// querying. Falls back to English (the RPC also matches the raw English column). Keyed lowercase.
+const CITY_AR: Record<string, string> = {
+  'abha': 'أبها', 'abqaiq': 'بقيق', 'abu arish': 'أبو عريش',
+  'afif': 'عفيف', 'ahad al masarihah': 'أحد المسارحة', 'ahad rafidah': 'أحد رفيدة',
+  'al ammariyah': 'العمارية', 'al aqiq': 'العقيق', 'al badai': 'البدائع',
+  'al badaie': 'البدائع', 'al baha': 'الباحة', 'al bahah': 'الباحة',
+  'al birk': 'البرك', 'al bukayriyah': 'البكيرية', 'al dalam': 'الدلم',
+  'al ghat': 'الغاط', 'al ghazalah': 'الغزالة', 'al hanakiyah': 'الحناكية',
+  'al hariq': 'الحريق', 'al hayathim': 'الهياثم', 'al jumum': 'الجموم',
+  'al kamil': 'الكامل', 'al kharj': 'الخرج', 'al khurma': 'الخرمة',
+  'al lith': 'الليث', 'al majardah': 'المجاردة', 'al majmaah': 'المجمعة',
+  'al mithnab': 'المذنب', 'al muzahimiyah': 'المزاحمية', 'al namas': 'النماص',
+  'al qunfudhah': 'القنفذة', 'al quwayiyah': 'القويعية', 'al ula': 'العلا',
+  'al uyun': 'العيون', 'al wajh': 'الوجه', 'al zulfi': 'الزلفي',
+  'an nabhaniyah': 'النبهانية', 'an nairyah': 'النعيرية', 'anak': 'عنك',
+  'ar rass': 'الرس', 'arar': 'عرعر', 'as sulayyil': 'السليل',
+  'ash shamasiyah': 'الشماسية', 'ash shanan': 'الشنان', 'badr': 'بدر',
+  'balsamar': 'بلسمر', 'baqaa': 'بقعاء', 'baysh': 'بيش',
+  'bish': 'بيش', 'bisha': 'بيشة', 'buraidah': 'بريدة',
+  'dammam': 'الدمام', 'dawadmi': 'الدوادمي', 'dawmat al jandal': 'دومة الجندل',
+  'dhahran': 'الظهران', 'dhahran al janub': 'ظهران الجنوب', 'diriyah': 'الدرعية',
+  'duba': 'ضباء', 'hafar al batin': 'حفر الباطن', 'hail': 'حائل',
+  'hawtat bani tamim': 'حوطة بني تميم', 'hofuf': 'الهفوف', 'jazan': 'جازان',
+  'jeddah': 'جدة', 'jubail': 'الجبيل', 'kaec': 'مدينة الملك عبدالله الاقتصادية',
+  'khafji': 'الخفجي', 'khamis mushait': 'خميس مشيط', 'khaybar': 'خيبر',
+  'khobar': 'الخبر', 'mahayel': 'محايل عسير', 'mahd adh dhahab': 'مهد الذهب',
+  'malham': 'ملهم', 'mecca': 'مكة المكرمة', 'medina': 'المدينة المنورة',
+  'najran': 'نجران', 'qatif': 'القطيف', 'qurayyat': 'القريات',
+  'rabigh': 'رابغ', 'rafha': 'رفحاء', 'raniyah': 'رنية',
+  'ras tanura': 'رأس تنورة', 'riyadh': 'الرياض', 'riyadh al khabra': 'رياض الخبراء',
+  'rumah': 'رماح', 'sabya': 'صبيا', 'safwa': 'صفوى',
+  'sakaka': 'سكاكا', 'samtah': 'صامطة', 'sayhat': 'سيهات',
+  'shaqra': 'شقراء', 'sharurah': 'شرورة', 'tabuk': 'تبوك',
+  'taif': 'الطائف', 'tarout': 'تاروت', 'tathleeth': 'تثليث',
+  'tathlith': 'تثليث', 'tayma': 'تيماء', 'thadiq': 'ثادق',
+  'thuwal': 'ثول', 'turabah': 'تربة', 'turaif': 'طريف',
+  'umluj': 'أملج', 'unaizah': 'عنيزة', 'yanbu': 'ينبع',
+};
+function arCity(en: string | null): string | null {
+  if (!en) return null;
+  return CITY_AR[en.trim().toLowerCase()] || en;
+}
+
 // The user's TYPE selection, in clean-type terms. `q.type` is a CLEAN property type (filter sets it
 // directly; the agent path normalizes its raw output to clean before storing it here). `q.typeGroup`
 // is a subcategory GROUP (soft/broad intent). Either resolves — via propertyTypes.queryForSelection —
@@ -395,13 +440,14 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   if (lm?.kind === 'region' && lm.cities && lm.cities.length) {
     // REGION search → every city in the region (resolver expanded it from the index's region→city data),
     // so we return the WHOLE region, not just its capital. (user: "Region = all listings in that region.")
-    cities = Array.from(new Set(lm.cities.map((c) => cityFilterFor(c) || c).filter(Boolean)));
+    cities = Array.from(new Set(lm.cities.map((c) => arCity(cityFilterFor(c) || c)).filter(Boolean))) as string[];
   } else if (lm?.ambiguous && lm.cities && lm.cities.length) {
     // MULTI-CITY ambiguity (e.g. "Al Olaya" in Riyadh AND Khobar) → search all matched cities.
-    cities = Array.from(new Set(lm.cities.map((c) => cityFilterFor(c) || c).filter(Boolean)));
+    cities = Array.from(new Set(lm.cities.map((c) => arCity(cityFilterFor(c) || c)).filter(Boolean))) as string[];
   } else {
     // CITY (or a district scoped to a city): prefer a city named in the raw text, else the resolver's.
-    const city = cityFilterFor(q.location || '') || (lm?.city ? cityFilterFor(lm.city) : null);
+    // Translate to the Arabic canonical city so the RPC hits the indexed Arabic column. (Arabic-only.)
+    const city = arCity(cityFilterFor(q.location || '') || (lm?.city ? cityFilterFor(lm.city) : null));
     if (city) cities = [city];
   }
   const countryWide = isCountryWideQuery(q);

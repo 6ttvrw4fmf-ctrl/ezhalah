@@ -25,7 +25,7 @@ import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, type SearchQuery, type SearchResult } from '@/data/search';
 import type { Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
-import { useI18n, detectLocale, getLocale, t as tr, type Locale } from '@/i18n';
+import { useI18n, detectLocale, getLocale, isLatinOnlyInput, ARABIC_ONLY_MSG, t as tr, type Locale } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 
 // The Ezhalah eagle logo — used in the header (top-left) + the sign-up popup. (user request: eagle, not stars.)
@@ -478,6 +478,13 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
+    // Arabic-only product: reject English (Latin) input — never translate or search it. Sits ABOVE
+    // the gate + the internal English mapping layer, so English never reaches the search. (user rule)
+    if (isLatinOnlyInput(v)) {
+      setMsgs((m) => [...m, { id: uid(), role: 'user', text: v }, { id: uid(), role: 'agent', text: ARABIC_ONLY_MSG }]);
+      setTyped('');
+      return;
+    }
     if (gated) {
       // Park what they wrote and send them to sign in — after auth the chat replays it (see the
       // pending-message effect below), so logging in never makes them lose it or start over.

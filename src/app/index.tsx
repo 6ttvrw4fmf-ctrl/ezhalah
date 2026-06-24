@@ -15,7 +15,7 @@ import { grouped, toLatinDigits } from '@/data/search';
 import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
-import { useI18n, tDetailOption, tPriceTab, detectLocale } from '@/i18n';
+import { useI18n, tDetailOption, tPriceTab, detectLocale, isLatinOnlyInput, ARABIC_ONLY_MSG } from '@/i18n';
 import { iconForPrompt, useExamplePrompts } from '@/data/examplePrompts';
 
 const MAX_W = 560; // desktop-web: keep the mobile-first column centered
@@ -90,6 +90,7 @@ export default function Home() {
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
   const [suggestions, setSuggestions] = useState<Place[]>([]);
   const [cityFocus, setCityFocus] = useState(false);
+  const [locMsg, setLocMsg] = useState(''); // Arabic-only: shown when the user types the city in English
   const cityRef = useRef<TextInput>(null);
   // Auto-advance the form: as the user fills each step (deal, location, category, type, detail,
   // price), gently scroll DOWN so the just-revealed section and the Search button come into view —
@@ -120,6 +121,9 @@ export default function Home() {
   useEffect(() => { void ensureLocationIndex(); }, []);
 
   const onSearch = async () => {
+    // Arabic-only product: if the city was typed in English, don't search — ask for Arabic. This sits
+    // ABOVE resolveLocation so English never reaches the internal mapping layer. (user rule)
+    if (isLatinOnlyInput(query.location)) { setLocMsg(ARABIC_ONLY_MSG); return; }
     // Make sure the live district index is loaded before resolving (first search only; cached after).
     await ensureLocationIndex();
     // Commit the language on Search (not per keystroke): if the user typed the city in English the
@@ -348,13 +352,12 @@ export default function Home() {
                   onBlur={() => setTimeout(() => setCityFocus(false), 150)}
                   onChangeText={(v) => {
                     setQuery((q) => ({ ...q, location: v }));
-                    setSuggestions(matchLocations(v));
-                    // The first letter sets the whole app's language live — an English letter flips
-                    // everything to English, an Arabic letter to Arabic — for everyone, signed in or
-                    // out. The app always reflects the LAST language the user typed (user request); a
-                    // signed-in user's choice is also persisted so it sticks across a refresh.
-                    const loc = detectLocale(v);
-                    if (loc && loc !== locale) setLocale(loc);
+                    // Arabic-only product: English typing gets NO autocomplete and an Arabic hint; the
+                    // app never flips to English. The internal English↔Arabic mapping still runs on
+                    // Search (for Arabic input that resolves against English DB labels). (user rule)
+                    const latin = isLatinOnlyInput(v);
+                    setSuggestions(latin ? [] : matchLocations(v));
+                    setLocMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
               </View>
@@ -364,6 +367,10 @@ export default function Home() {
                 </Pressable>
               )}
             </Pressable>
+
+            {locMsg ? (
+              <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{locMsg}</Text>
+            ) : null}
 
             {cityFocus && suggestions.length > 0 && (
               <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
