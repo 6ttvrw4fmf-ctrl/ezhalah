@@ -703,7 +703,12 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   for (const d of LIVE_DISTRICTS) {
     const nd = normDist(d.district);
     if (nd.length < 2) continue;
-    if (!(probeAlts.some((p) => p.includes(nd) || nd.includes(p)) || fuzzyTokenHit(d.district))) continue;
+    // Arabic-first, SAME rule as the picker (rawDistrictVariants): the raw value must CONTAIN a probe
+    // (probeAlts already include the cross-script ARABIC equivalent of an English probe, so an English
+    // query is matched on its Arabic form) OR fuzzy-match a word (typo recovery). Do NOT match the
+    // reverse (probe contains raw) — that let a long English probe pull a SHORTER, different district
+    // ("assafarat" ⊃ "assafa"). Raw Arabic is the source of truth; English is a helper alias. (user.)
+    if (!(probeAlts.some((p) => nd.includes(p)) || fuzzyTokenHit(d.district))) continue;
     if (cityKey) {
       const dc = flatLoc(d.city);
       if (dc !== cityKey && dc !== cityKeyAr) continue; // a city was named → keep only that city
@@ -725,26 +730,22 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
 export function rawDistrictVariants(place: Place): string[] {
   if (place.kind !== 'district' || !LIVE_DISTRICTS.length) return [];
   const cityKeys = [flatLoc(place.cityEn ?? ''), flatLoc(place.cityAr ?? '')].filter(Boolean);
-  const probes = new Set<string>();
-  for (const nm of [place.nameEn, place.nameAr]) {
-    const p = normDist(nm);
-    if (p.length < 2) continue;
-    probes.add(p);
-    for (const alt of districtBridge().get(p) || []) if (alt.length >= 2) probes.add(alt);
-  }
-  if (!probes.size) return [];
+  // ARABIC is the canonical matching KEY — the platforms and the GitHub catalog are Arabic-first, and
+  // English transliterations are inconsistent. The Arabic name matches EXACT, or when the raw value
+  // carries city/marker noise ("العليا الرياض" ⊇ "العليا"). The English name is ONLY an EXACT alias —
+  // it recovers English-TAGGED raw rows ("Al-Olaya") but NEVER matches by loose substring, which is what
+  // wrongly pulled a different district ("Assafarat" ⊃ "As-Safa"). (user: Arabic is the source of truth.)
+  const arKey = normDist(place.nameAr);
+  const enKey = normDist(place.nameEn);
+  if (arKey.length < 2 && enKey.length < 2) return [];
   const out = new Set<string>();
   for (const d of LIVE_DISTRICTS) {
     if (cityKeys.length && !cityKeys.includes(flatLoc(d.city))) continue;
     const nd = normDist(d.district);
     if (nd.length < 2) continue;
-    for (const p of probes) {
-      // Match EXACT, or the raw value CONTAINS the clean name (raw may carry city/marker noise, e.g.
-      // "العليا الرياض" ⊇ "العليا"). Do NOT match the reverse (clean name contains raw) — that wrongly
-      // pulled a SHORTER, different district whose name is a prefix of ours (e.g. catalog "As-Safarat"
-      // ⊃ raw "As-Safa", two different Riyadh districts). (user-reported: السفارات returned As-Safa.)
-      if (p === nd || nd.includes(p)) { out.add(d.district); break; }
-    }
+    const arHit = arKey.length >= 2 && (nd === arKey || nd.includes(arKey)); // Arabic: exact or raw+noise
+    const enHit = enKey.length >= 2 && nd === enKey;                          // English: EXACT alias only
+    if (arHit || enHit) out.add(d.district);
   }
   return [...out];
 }
