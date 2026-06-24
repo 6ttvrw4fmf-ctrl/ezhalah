@@ -739,7 +739,11 @@ export function rawDistrictVariants(place: Place): string[] {
     const nd = normDist(d.district);
     if (nd.length < 2) continue;
     for (const p of probes) {
-      if (p === nd || p.includes(nd) || nd.includes(p)) { out.add(d.district); break; }
+      // Match EXACT, or the raw value CONTAINS the clean name (raw may carry city/marker noise, e.g.
+      // "العليا الرياض" ⊇ "العليا"). Do NOT match the reverse (clean name contains raw) — that wrongly
+      // pulled a SHORTER, different district whose name is a prefix of ours (e.g. catalog "As-Safarat"
+      // ⊃ raw "As-Safa", two different Riyadh districts). (user-reported: السفارات returned As-Safa.)
+      if (p === nd || nd.includes(p)) { out.add(d.district); break; }
     }
   }
   return [...out];
