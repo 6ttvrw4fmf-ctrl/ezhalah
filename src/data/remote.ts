@@ -57,8 +57,41 @@ const KNOWN_CITIES = [
 // the agent's reply scopes to a city with 0 rows and silently returns nothing despite live data.
 // Keys are lowercase (cityFilterFor lowercases before lookup). Audited agent↔DB drift, June 2026.
 const CITY_ALIASES: Record<string, string> = {
-  // Al Ahsa region → its city label Hofuf
+  // Al Ahsa / Al Hofuf region → its DB city label Hofuf. The CATALOG's English name for الهفوف is
+  // "Al Hafuf" (what the picker shows + the resolver returns), which differs from the DB label "Hofuf"
+  // — so map every form. (user-reported: "Al Hafuf" returned 0 listings + a bad "did you mean Abha".)
   'al ahsa': 'Hofuf', 'al hasa': 'Hofuf', 'alahsa': 'Hofuf', 'hasa': 'Hofuf', 'ahsa': 'Hofuf',
+  'al hafuf': 'Hofuf', 'alhafuf': 'Hofuf', 'hafuf': 'Hofuf', 'al hofuf': 'Hofuf', 'hufuf': 'Hofuf',
+  'الهفوف': 'Hofuf', 'الأحساء': 'Hofuf', 'الاحساء': 'Hofuf',
+  // CATALOG-vs-DB city-label mismatches: the picker/agent surface the CATALOG's English spelling
+  // (Makkah, Madinah, Khamis Mushayt, Buqayq, …) which differs from the DB label, so a pick dead-ended
+  // at 0 results. Audited ALL 25 listing-cities the picker couldn't reach + their Arabic. (user-reported
+  // via "Al Hafuf"; Mecca 6.2k + Medina 7k were the biggest.) Map every form → the DB label.
+  'madinah': 'Medina', 'المدينة المنورة': 'Medina', 'المدينه المنوره': 'Medina',
+  'makkah': 'Mecca', 'مكة المكرمة': 'Mecca', 'مكه المكرمه': 'Mecca', 'مكة': 'Mecca',
+  'khamis mushayt': 'Khamis Mushait', 'خميس مشيط': 'Khamis Mushait',
+  'unayzah': 'Unaizah', 'عنيزة': 'Unaizah',
+  'al majma\'ah': 'Al Majmaah', 'al majmaah': 'Al Majmaah', 'المجمعة': 'Al Majmaah',
+  'al quway\'iyah': 'Al Quwayiyah', 'القويعية': 'Al Quwayiyah',
+  'riyad al khabra': 'Riyadh Al Khabra', 'رياض الخبراء': 'Riyadh Al Khabra',
+  'buqayq': 'Abqaiq', 'بقيق': 'Abqaiq',
+  'king abdullah economic city': 'KAEC', 'مدينة الملك عبدالله الاقتصادية': 'KAEC',
+  'az zulfi': 'Al Zulfi', 'الزلفي': 'Al Zulfi',
+  'ad duwadimi': 'Dawadmi', 'الدوادمي': 'Dawadmi',
+  'al qunfidhah': 'Al Qunfudhah', 'القنفذة': 'Al Qunfudhah',
+  'al hinakiyah': 'Al Hanakiyah', 'الحناكية': 'Al Hanakiyah',
+  'an nu\'ayriyah': 'An Nairyah', 'النعيرية': 'An Nairyah',
+  'bish': 'Baysh', 'بيش': 'Baysh',
+  'ahad rifaydah': 'Ahad Rafidah', 'أحد رفيدة': 'Ahad Rafidah', 'احد رفيده': 'Ahad Rafidah',
+  'baq\'a': 'Baqaa', 'بقعاء': 'Baqaa',
+  'al midhnab': 'Al Mithnab', 'المذنب': 'Al Mithnab',
+  'ad dilam': 'Al Dalam', 'الدلم': 'Al Dalam',
+  'tarut': 'Tarout', 'تاروت': 'Tarout',
+  'ahad al musarihah': 'Ahad Al Masarihah', 'أحد المسارحة': 'Ahad Al Masarihah',
+  'بلسمر': 'Balsamar',
+  'ras tannurah': 'Ras Tanura', 'رأس تنورة': 'Ras Tanura', 'راس تنوره': 'Ras Tanura',
+  'تربة': 'Turabah',
+  'an namas': 'Al Namas', 'النماص': 'Al Namas',
   'al khobar': 'Khobar', 'al qatif': 'Qatif',
   // Agent transliteration variants → canonical DB labels
   'alula': 'Al Ula', 'al ula': 'Al Ula',
