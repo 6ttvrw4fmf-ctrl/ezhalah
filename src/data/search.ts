@@ -349,7 +349,7 @@ const SOURCE_LABELS: Record<string, string> = {
   eaqartabuk: 'Candles', satel: 'Satel', sadin: 'Sadin', toor: 'Toor', mustqr: 'Mustaqarr',
   ramzalqasim: 'Ramz Al Qassim', fursaghyr: 'Fursa Ghyr', jazwtn: 'Jazan Watan', mizlaj: 'Mizlaj',
   muktamel: 'Muktamel', aqaratikom: 'Aqaratikom', awal: 'Awal United for Real Estate', alkhaas: 'Al Khaas',
-  abeea: 'Abeea', jurash: 'Jurash', alnokhba: 'Al Nokhba', dealapp: 'Deal App', souq24: '24 Souq',
+  abeea: 'Abeea', jurash: 'Jurash', alnokhba: 'Al Nokhba', dealapp: 'Deal App',
   erapulse: 'Era Pulse', nowaisiry: 'Al Nowaisiry', october: '1 October', gathern: 'Gathern',
 };
 

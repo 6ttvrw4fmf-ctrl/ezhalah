@@ -284,7 +284,6 @@ const PLATFORM_PATTERNS: Array<[RegExp, string]> = [
   [/\bjurash\b|جرش/i, 'jurash'],
   [/al\s*nokhba|alnokhba|النخبة/i, 'alnokhba'],
   [/deal\s*app|dealapp|ديل/i, 'dealapp'],
-  [/24\s*souq|souq\s*24|سوق\s*24|سوق\s*٢٤/i, 'souq24'],
   [/era\s*pulse|erapulse|نبض/i, 'erapulse'],
   [/al\s*nowaisiry|nowaisiry|النويصري/i, 'nowaisiry'],
   [/1\s*october|october|اكتوبر|أكتوبر/i, 'october'],
