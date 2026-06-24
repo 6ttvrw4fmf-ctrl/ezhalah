@@ -369,7 +369,12 @@ export default function Agent() {
     setRevealing(false);
   };
   const scrollRef = useRef<ScrollView>(null);
-  const seededRef = useRef(false);
+  // Per-param change detection so REPEATED filter/seed searches re-run. The agent screen is REUSED
+  // (not remounted) between searches, so a one-shot "seeded" guard used to swallow every search after
+  // the first → "keep searching, nothing pops up". Track the last-handled param and re-run on change.
+  const lastFilterRef = useRef<string | undefined>(undefined);
+  const lastSeedRef = useRef<string | undefined>(undefined);
+  const greetedRef = useRef(false);
   const consumedPendingRef = useRef(false);
   const greetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Which edge the thread sticks to as content grows. A filter search opens at the TOP (so the
@@ -689,20 +694,33 @@ export default function Agent() {
   // A "Start here" chip routes here with ?seed=…; Filter search with ?filter=… — run once on open.
   // With neither, this is a brand-new chat → Ezhalah sends its greeting.
   useEffect(() => {
-    if (seededRef.current) return;
-    if (filter) {
-      seededRef.current = true;
+    // Re-run whenever the param CHANGES — the agent screen is REUSED (not remounted) between searches,
+    // so a one-shot guard silently swallowed every search after the first. A new filter/seed search
+    // starts a fresh chat (prior chats stay in the sidebar). (bug fix: "keep searching → nothing pops up".)
+    const startFresh = () => {
+      if (runRef.current) runRef.current.cancelled = true; // stop any in-flight previous search
+      finalizeReveal();                                    // stop the prior search's drip-reveal/typing
+      setStopped(false);
+      setBusy(false);
+      setMsgs([]);                                         // new search = a clean chat view
+    };
+    if (filter && filter !== lastFilterRef.current) {
+      lastFilterRef.current = filter;
+      lastSeedRef.current = undefined;
       try {
         const q = JSON.parse(filter) as SearchQuery;
         const override = chatBubble && chatSub ? { bubble: chatBubble, sub: chatSub } : undefined;
+        startFresh();
         if (replay === '0') openStatic(q, override);
         else sendFilter(q, override);
       } catch {}
-    } else if (seed) {
-      seededRef.current = true;
+    } else if (seed && seed !== lastSeedRef.current) {
+      lastSeedRef.current = seed;
+      lastFilterRef.current = undefined;
+      startFresh();
       send(seed);
-    } else {
-      seededRef.current = true;
+    } else if (!filter && !seed && !greetedRef.current) {
+      greetedRef.current = true;
       sendGreeting();
     }
   }, [seed, filter, chatBubble, chatSub, replay]);
@@ -717,6 +735,10 @@ export default function Agent() {
     if (greetTimerRef.current) clearTimeout(greetTimerRef.current);
     setBusy(false);
     setMsgs([]);
+    // Forget the last-handled filter/seed so a re-search AFTER New Chat re-runs even if it's identical
+    // to a previous one (otherwise the change-detection would skip it and leave just the greeting).
+    lastFilterRef.current = undefined;
+    lastSeedRef.current = undefined;
     sendGreeting();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fresh]);
