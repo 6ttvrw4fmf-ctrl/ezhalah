@@ -21,6 +21,7 @@ import ShareSheet from '@/components/ShareSheet';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard, PopIn } from '@/components/ResultCard';
 import { parseQuery, respond } from '@/data/agent';
+import { resolveLocation, cityDisplay } from '@/data/locations';
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, type SearchQuery, type SearchResult } from '@/data/search';
 import type { Category } from '@/data/taxonomy';
@@ -115,6 +116,26 @@ const resultDone = (locale: Locale): string => {
 // locale when the message has no letters (e.g. just "4000"). The two arrays stay index-aligned so
 // the same random pick maps to the same translated slogan in either language. (user-reported:
 // "I sent in English but the slogan came back Arabic — see, didn't get translated.")
+// DETERMINISTIC location-certainty backstop (does NOT depend on the model). Returns an Arabic clarification
+// question when the parsed query's location is not confident enough to search — (a) no location at all and
+// the user did not ask Kingdom-wide, or (b) a bare district that exists in SEVERAL cities with no city given.
+// Else null (search). The app's resolver knows the ambiguity even when Gemini decides to search anyway.
+// (user: ask when unsure — «ابي بيت» must ask «في أي مدينة؟», «حي البلد» must ask which city.)
+const KINGDOM_WIDE = /السعودي|المملك|كل المدن|كل المملك|كل مدن|في كل مكان|بأي مكان|أي مكان|اي مكان|everywhere|kingdom|\bsaudi\b/i;
+function locationClarification(q: SearchQuery, userText: string): string | null {
+  const loc = (q.location ?? '').trim();
+  if (!loc) {
+    if (KINGDOM_WIDE.test(userText)) return null; // user explicitly wants the whole Kingdom
+    return 'في أي مدينة تبحث؟ (وإذا تبي كل المملكة قل لي «كل مدن المملكة»)';
+  }
+  const lm = resolveLocation(loc, 'ar');
+  if (lm.kind === 'district' && lm.ambiguous && lm.cities && lm.cities.length > 1) {
+    const names = Array.from(new Set(lm.cities.slice(0, 8).map((c) => cityDisplay(c, 'ar')))).slice(0, 6);
+    return `«${lm.label}» موجود في أكثر من مدينة (${names.join('، ')}). أي مدينة تقصدها؟`;
+  }
+  return null;
+}
+
 function detectMsgLang(s: string): 'en' | 'ar' | null {
   const words = s.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   let ar = 0, en = 0;
@@ -558,17 +579,28 @@ export default function Agent() {
     }
 
     if (turn.kind === 'listings') {
-      // A real search resolved — clear the anti-loop state so the next request starts fresh.
-      askCountRef.current = 0;
-      saidRef.current = [];
-      const result = await runQuery(turn.query); // now async: fetches the matching subset server-side
-      // About to scrape: a random Saudi hype line + a compact read-back of the parsed query, then the
-      // "searching…" beat. Build the read-back from the RESOLVED query (result.query) so a corrected
-      // location (typo → real city + Region → District) shows in the summary. (user request.)
-      const reply = buildScrapeIntro(result.query ?? turn.query);
-      await playListings(run, statusId, reply, result, v);
-      if (run.cancelled) return;
-      void promptSignupSoon(run); // a guest just used their one free search → prompt sign-up
+      // DETERMINISTIC backstop: even though the model chose to search, if the location is not usable
+      // (no city / a bare multi-city district) ASK in Arabic instead — accuracy over speed. After 2 asks
+      // we stop pestering and search with whatever we have. (user: it MUST ask, not guess the location.)
+      const clarifyQ = locationClarification(turn.query, v);
+      if (clarifyQ && askCountRef.current < 2) {
+        askCountRef.current += 1;
+        setMsgs((m) =>
+          m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: clarifyQ, typing: true } : x)),
+        );
+      } else {
+        // A real search resolved — clear the anti-loop state so the next request starts fresh.
+        askCountRef.current = 0;
+        saidRef.current = [];
+        const result = await runQuery(turn.query); // now async: fetches the matching subset server-side
+        // About to scrape: a random Saudi hype line + a compact read-back of the parsed query, then the
+        // "searching…" beat. Build the read-back from the RESOLVED query (result.query) so a corrected
+        // location (typo → real city + Region → District) shows in the summary. (user request.)
+        const reply = buildScrapeIntro(result.query ?? turn.query);
+        await playListings(run, statusId, reply, result, v);
+        if (run.cancelled) return;
+        void promptSignupSoon(run); // a guest just used their one free search → prompt sign-up
+      }
     } else {
       // The model asked a clarifying question. Read back EVERYTHING said so far: if we can already see
       // a usable detail (a type, a city, a size, a budget) and we've asked twice, stop pestering and
