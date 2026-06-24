@@ -285,6 +285,21 @@ const MAX_RESULTS = 40;
 // → substring), then by level (country → region → city → district), then by the within-type metric.
 // Typo tolerance applies to regions and cities; districts match by prefix/substring only (there are
 // thousands). The dropdown scrolls and the list is capped so it never floods.
+// Does this catalog place have ANY scraped listing in our DB? Used to rank real places above zero-listing
+// catalog entries in the picker — the catalog is the full Saudi hierarchy; the listing DB is a subset.
+// (filter location policy: inventory first, but zero-listing places stay selectable below.)
+function placeHasInventory(p: Place): boolean {
+  switch (p.kind) {
+    case 'country':
+    case 'region':
+      return true; // every region has scraped listings
+    case 'city':
+      return cityHasListings(p.nameEn);
+    case 'district':
+      return rawDistrictVariants(p).length > 0;
+  }
+}
+
 export function matchLocations(query: string): Place[] {
   const q = norm(query.trim());
   if (!q) return [];
@@ -295,13 +310,13 @@ export function matchLocations(query: string): Place[] {
   const fuzzyOk = q.length >= 4;
   const maxDist = q.length >= 6 ? 2 : 1;
 
-  type Hit = { place: Place; primary: number; metric: number };
+  type Hit = { place: Place; type: number; kind: number; metric: number };
   const hits: Hit[] = [];
 
   const consider = (idx: Indexed, allowFuzzy: boolean) => {
     const sc = scoreKeys(idx.keys, qs, q, allowFuzzy && fuzzyOk, maxDist);
     if (!sc) return;
-    hits.push({ place: idx.place, primary: sc.type * 10 + KIND_RANK[idx.place.kind], metric: sc.metric });
+    hits.push({ place: idx.place, type: sc.type, kind: KIND_RANK[idx.place.kind], metric: sc.metric });
   };
 
   consider(COUNTRY, false);
@@ -309,7 +324,12 @@ export function matchLocations(query: string): Place[] {
   for (const c of CITIES_IDX) consider(c, true);
   for (const d of DISTRICTS_IDX) consider(d, false);
 
-  hits.sort((a, b) => a.primary - b.primary || a.metric - b.metric);
+  // Rank: best match TYPE first; then INVENTORY (places we actually have listings for rank above zero-
+  // listing catalog entries); then kind (region > city > district); then closeness. Zero-listing catalog
+  // places stay selectable, just below the ones we have. (filter location policy: inventory first, none removed.)
+  const inv = new Map<Place, number>();
+  for (const h of hits) if (!inv.has(h.place)) inv.set(h.place, placeHasInventory(h.place) ? 0 : 1);
+  hits.sort((a, b) => a.type - b.type || inv.get(a.place)! - inv.get(b.place)! || a.kind - b.kind || a.metric - b.metric);
   return hits.slice(0, MAX_RESULTS).map((h) => h.place);
 }
 

@@ -994,12 +994,19 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
     const bf = bedroomFilter(q2); if (bf) list = list.filter(bf);
     return list.length;
   };
-  // "Did you mean X?" — FIRST, because if the named place itself is empty no other relaxation helps.
-  // Fires only when the resolved place has NO live inventory (a real-but-empty/obscure town like
-  // "القرص"=Al Qars, or an unrecognized place) AND a close city that DOES have listings exists (الرس).
+  // Filter location policy: an EXPLICIT catalog place (region/city/district) that genuinely has ZERO
+  // listings for the chosen deal+category → say so plainly. NEVER "did you mean", never substitute a
+  // nearby place. (The filter catalog ≠ the listing DB; some real places correctly return zero.)
+  const lm = q.locationMatch;
+  const explicitPlace = !!lm && (lm.kind === 'district' || lm.kind === 'city' || lm.kind === 'region');
+  if (explicitPlace && countWith({ priceInput: '', priceBand: null, detail: null, type: null, typeGroup: null }) === 0) {
+    return t('No listings in this location right now.');
+  }
+  // "Did you mean X?" — only for a FREE-TYPED, unresolved place (a typo/obscure town), NEVER for an
+  // explicit catalog pick. Fires when the resolved place has NO live inventory AND a close city exists.
   // We SUGGEST it; we never silently switch cities — the DB stays the source of truth. (user request.)
   const lmCity = q.locationMatch?.city || '';
-  if (q.location.trim() && (!lmCity || !cityHasListings(lmCity))) {
+  if (!explicitPlace && q.location.trim() && (!lmCity || !cityHasListings(lmCity))) {
     const alt = nearbyCityWithListings(q.locationMatch?.raw || q.location, lmCity);
     if (alt) {
       return t('We couldn’t find listings in "{place}". Did you mean {alt}?', { place: q.locationMatch?.label || q.location, alt: tPlace(alt.cityEn) });

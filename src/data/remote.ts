@@ -457,6 +457,10 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   if ((!cities || !cities.length) && !countryWide && !(q.districts && q.districts.length) && (q.location || '').trim()) {
     return [];
   }
+  // An explicit DISTRICT pick that has NO listings in our data (the resolver found no raw variants for it)
+  // → honest ZERO; never widen to the whole city. The district is a real catalog place we simply have no
+  // listings for. (Filter location policy: show real listings for the selected location, or a clear zero.)
+  if (lm?.kind === 'district' && !(q.districts && q.districts.length)) return [];
 
   // 1) Ask the location index for the candidate set (newest-first, diverse, location + purpose filtered).
   const { data: cands, error } = await supabase.rpc('location_search_candidates', {
