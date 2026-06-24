@@ -547,6 +547,17 @@ function citiesInRegion(regionName: string): { region: string; cities: string[] 
   return { region, cities };
 }
 
+// Top-K cities in a region BY REAL INVENTORY — for the agent's "whole region or a specific city?"
+// clarifier, so the suggested cities are ones we actually have listings in. (user: name real cities.)
+export function topCitiesInRegion(regionName: string, k = 2): string[] {
+  const want = (regionName || '').trim().toLowerCase();
+  if (!want) return [];
+  let region = '';
+  for (const v of LIVE_CITIES) { const rl = v.region.toLowerCase(); if (rl === want || rl.includes(want) || want.includes(rl)) { region = v.region; break; } }
+  if (!region) return [];
+  return LIVE_CITIES.filter((v) => v.region === region && v.n > 0).sort((a, b) => b.n - a.n).slice(0, k).map((v) => v.city);
+}
+
 // The locale-appropriate display name for a canonical (English) city — Arabic from the catalog when we
 // have it, else the canonical English. Used so a fuzzy-corrected city shows in the user's language.
 // Authoritative DB-city-label → Arabic (mirrors the DB loc_city_map / remote.ts CITY_AR). The catalog's

@@ -21,7 +21,7 @@ import ShareSheet from '@/components/ShareSheet';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard, PopIn } from '@/components/ResultCard';
 import { parseQuery, respond } from '@/data/agent';
-import { resolveLocation, cityDisplay } from '@/data/locations';
+import { resolveLocation, cityDisplay, topCitiesInRegion } from '@/data/locations';
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, type SearchQuery, type SearchResult } from '@/data/search';
 import type { Category } from '@/data/taxonomy';
@@ -122,16 +122,32 @@ const resultDone = (locale: Locale): string => {
 // Else null (search). The app's resolver knows the ambiguity even when Gemini decides to search anyway.
 // (user: ask when unsure — «ابي بيت» must ask «في أي مدينة؟», «حي البلد» must ask which city.)
 const KINGDOM_WIDE = /السعودي|المملك|كل المدن|كل المملك|كل مدن|في كل مكان|بأي مكان|أي مكان|اي مكان|everywhere|kingdom|\bsaudi\b/i;
+// The user signalling they already want the WHOLE region/city — so we should NOT ask to narrow, just
+// search it all. (user: "if the user wants a broad search, that is fine — search the whole region/city.")
+const WHOLE_AREA = /كامل|كاملة|بالكامل|كلها|كل المدين|كل المنطق|المدينة كلها|المنطقة كلها|كل الأحياء|أي حي|اي حي|\bwhole\b|\bentire\b|all of/i;
 function locationClarification(q: SearchQuery, userText: string): string | null {
   const loc = (q.location ?? '').trim();
   if (!loc) {
     if (KINGDOM_WIDE.test(userText)) return null; // user explicitly wants the whole Kingdom
     return 'في أي مدينة تبحث؟ (وإذا تبي كل المملكة قل لي «كل مدن المملكة»)';
   }
+  // The user explicitly asked for the whole area (or the whole Kingdom) — honour it, don't ask to narrow.
+  if (WHOLE_AREA.test(userText) || KINGDOM_WIDE.test(userText)) return null;
   const lm = resolveLocation(loc, 'ar');
+  // 1) A bare district shared by several cities → ask WHICH CITY (cities with listings first).
   if (lm.kind === 'district' && lm.ambiguous && lm.cities && lm.cities.length > 1) {
     const names = Array.from(new Set(lm.cities.slice(0, 8).map((c) => cityDisplay(c, 'ar')))).slice(0, 6);
     return `«${lm.label}» موجود في أكثر من مدينة (${names.join('، ')}). أي مدينة تقصدها؟`;
+  }
+  // 2) A REGION → ask the WHOLE region or a specific city (name a couple of its real, in-inventory cities).
+  if (lm.kind === 'region') {
+    const cities = topCitiesInRegion(lm.region ?? lm.city ?? loc, 2).map((c) => cityDisplay(c, 'ar'));
+    const hint = cities.length ? ` مثل ${cities.join(' أو ')}` : '';
+    return `تقصد ${lm.label} كاملة، أو مدينة معيّنة${hint}؟`;
+  }
+  // 3) A whole CITY with no neighbourhood → ask the WHOLE city or a specific district.
+  if (lm.kind === 'city') {
+    return `تقصد مدينة ${cityDisplay(lm.city, 'ar')} كاملة، أو حي معيّن؟`;
   }
   return null;
 }
