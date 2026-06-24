@@ -430,6 +430,15 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   const cleanCands = (cands as any[]).map((c, i) => ({
     source_table: c.source_table as string, listing_id: Number(c.listing_id), platform: c.platform as string, rank: i,
   }));
+  // The index returns the ARABIC-CANONICAL location for every candidate (region_ar/city_ar/district_ar).
+  // We display THAT — never the raw English/transliterated value underneath. (user: Arabic is canonical;
+  // the displayed location must come only from the Arabic location DB.)
+  const arLoc = new Map<string, { region: string; city: string; district: string }>();
+  for (const c of cands as any[]) {
+    arLoc.set(`${c.source_table}:${Number(c.listing_id)}`, {
+      region: (c.region_ar as string) || '', city: (c.city_ar as string) || '', district: (c.district_ar as string) || '',
+    });
+  }
   const byTable = new Map<string, number[]>();
   for (const c of cleanCands) {
     let a = byTable.get(c.source_table);
@@ -450,8 +459,17 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   for (const c of cleanCands) {
     const l = map.get(`${c.source_table}:${c.listing_id}`);
     if (!l) continue;
+    // Replace the raw location with the Arabic canonical one for DISPLAY + grouping. District falls back
+    // to '' (city-level only) when there's no confident Arabic match — we never show the English original.
+    const ar = arLoc.get(`${c.source_table}:${c.listing_id}`);
+    if (ar) {
+      if (ar.city) l.city = ar.city;
+      l.district = ar.district || '';
+      l.regionAr = ar.region || '';
+    }
     const city = l.city || '';
-    ranked.push({ l, platform: c.platform, city, region: CITY_TO_REGION[city] || city, rank: c.rank });
+    const region = ar?.region || CITY_TO_REGION[city] || city;
+    ranked.push({ l, platform: c.platform, city, region, rank: c.rank });
   }
   const rows = orderByScope(ranked, scopeOf(q, cities, countryWide)).map((r) => r.l);
   cacheListings(rows);

@@ -773,7 +773,7 @@ function closenessScore(l: Listing, q: SearchQuery, cap: number | null): number 
 function diversifyByRegion(listings: Listing[]): Listing[] {
   const byRegion: Record<string, Listing[]> = {};
   for (const l of listings) {
-    const r = CITY_TO_REGION[l.city] || 'Other';
+    const r = l.regionAr || CITY_TO_REGION[l.city] || 'Other';
     (byRegion[r] ||= []).push(l);
   }
   return interleave(Object.values(byRegion));
@@ -847,7 +847,7 @@ function rankResults(listings: Listing[], q: SearchQuery, cap: number | null): L
   for (const k of [...tiers.keys()].sort((a, b) => b - a)) {       // closest relevance tier first
     const tier = tiers.get(k)!;                                    // (input is already recency-ordered)
     out.push(...(broad
-      ? naturalSpread(shuffle(tier), (l) => CITY_TO_REGION[l.city] || l.city || 'Other')
+      ? naturalSpread(shuffle(tier), (l) => l.regionAr || CITY_TO_REGION[l.city] || l.city || 'Other')
       : tier));
   }
   return out;

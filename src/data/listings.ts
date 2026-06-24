@@ -6,9 +6,12 @@ export type Listing = {
   id: number;
   type: string;
   deal: Deal;
-  city: string;
-  district: string;
+  city: string;       // Arabic-canonical city (from the location index) for fetched listings
+  district: string;   // Arabic-canonical district (or '' when no confident match) for fetched listings
   road: string;
+  // Arabic-canonical region (e.g. "منطقة الرياض"), derived from the city in the location index. Set on
+  // real fetched listings; used for display + region grouping. Mock listings leave it undefined.
+  regionAr?: string;
   price: string; // pre-formatted display string
   area: number; // m²
   beds: number; // 0 = not a dwelling
