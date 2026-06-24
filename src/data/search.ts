@@ -792,6 +792,67 @@ function diversifyBySource(listings: Listing[]): Listing[] {
   return groups.length > 1 ? interleave(groups) : listings;
 }
 
+// The price/size relevance bonus (0..2): how close a listing is to the user's budget/size. 0 when no
+// price or size was given (a broad search → every listing is equally relevant).
+function closenessBonus(l: Listing, q: SearchQuery, cap: number | null): number {
+  let bonus = 0;
+  if (cap && cap > 0) {
+    const v = listingPriceValue(l.price);
+    if (!Number.isNaN(v) && v > 0) bonus += 1 - Math.min(1, Math.max(0, v - cap) / cap);
+  }
+  const target = exactSizeTarget(q);
+  if (target && l.area > 0) bonus += 1 - Math.min(1, Math.abs(l.area - target) / target);
+  return bonus;
+}
+
+function shuffle<T>(a: T[]): T[] {
+  const r = [...a];
+  for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r[i], r[j]] = [r[j], r[i]]; }
+  return r;
+}
+
+// Greedy de-cluster: avoid two listings with the same key back-to-back WHEN an alternative exists — but
+// NEVER skip, cap, or reserve a slot (if one group is all that's left, it just continues). Gives a
+// NATURAL, proportional spread, not a forced equal split. (user: diversity is a bonus, never forced;
+// never hide a listing to show more variety.)
+function naturalSpread<T>(items: T[], key: (x: T) => string): T[] {
+  const pool = [...items];
+  const out: T[] = [];
+  let prev: string | null = null;
+  while (pool.length) {
+    let i = pool.findIndex((x) => key(x) !== prev);
+    if (i < 0) i = 0;
+    const [pick] = pool.splice(i, 1);
+    out.push(pick);
+    prev = key(pick);
+  }
+  return out;
+}
+
+// THE result-display rule (user): RELEVANCE / intent first; platform & region diversity are only a
+// natural BONUS among similarly-relevant listings — never forced, never reserving slots, never hiding a
+// better listing. A BROAD overview (whole-Kingdom or whole-region) is shuffled + region-spread so it
+// varies between runs and spans Saudi naturally. A SPECIFIC search stays in pure relevance → recency
+// order — if the best matches are all one platform, that's fine. Only ever real listings, nothing made up.
+function rankResults(listings: Listing[], q: SearchQuery, cap: number | null): Listing[] {
+  const broad = isCountryWideQuery(q) || q.locationMatch?.kind === 'region';
+  // Coarse relevance tiers (closer price/size ranks higher). No price/size → one tier (all equal).
+  const tiers = new Map<number, Listing[]>();
+  for (const l of listings) {
+    const k = Math.round(closenessBonus(l, q, cap) * 50);
+    if (!tiers.has(k)) tiers.set(k, []);
+    tiers.get(k)!.push(l);
+  }
+  const out: Listing[] = [];
+  for (const k of [...tiers.keys()].sort((a, b) => b - a)) {       // closest relevance tier first
+    const tier = tiers.get(k)!;                                    // (input is already recency-ordered)
+    out.push(...(broad
+      ? naturalSpread(shuffle(tier), (l) => CITY_TO_REGION[l.city] || l.city || 'Other')
+      : tier));
+  }
+  return out;
+}
+
 export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean }): SearchResult {
   let eligible = pickPool(q, pools)
     // bothDeals (agent searched without knowing rent/buy) → show BOTH; otherwise filter to the deal.
@@ -868,12 +929,11 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
     sortNote = t(SORT_NOTE[q.sort]);
   } else {
     const cap = budgetCap(q);
-    // Rank PURELY by closeness/relevance — the SAME rule for every search (country-wide, region, city,
-    // district, landmark). No "one card per platform" roster, no forced source interleave: if the
-    // closest matches all come from one platform because they ARE the closest, that's fine. Platform
-    // diversity never overrides relevance. (user: best matches regardless of platform; remove the
-    // one-property-per-platform behavior; one display rule everywhere.)
-    listings = [...listings].sort((a, b) => closenessScore(b, q, cap) - closenessScore(a, q, cap));
+    // Relevance / intent FIRST; platform & region diversity only a natural bonus among equally-relevant
+    // listings (never forced, never reserved, never hiding a better listing). Broad overviews are
+    // shuffled + region-spread so they vary and span Saudi; specific searches stay relevance→recency —
+    // if the best matches are all one platform, that's fine. Only real listings. (user display rule.)
+    listings = rankResults(listings, q, cap);
   }
 
   // Return up to 25 matches (display cap): the chat shows the first `count` the user explicitly
