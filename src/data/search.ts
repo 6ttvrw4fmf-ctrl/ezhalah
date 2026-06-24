@@ -836,6 +836,12 @@ function naturalSpread<T>(items: T[], key: (x: T) => string): T[] {
 // order — if the best matches are all one platform, that's fine. Only ever real listings, nothing made up.
 function rankResults(listings: Listing[], q: SearchQuery, cap: number | null): Listing[] {
   const broad = isCountryWideQuery(q) || q.locationMatch?.kind === 'region';
+  // Diversity key: a whole-Kingdom search varies by REGION; a single-region search varies by CITY so the
+  // user sees listings from the DIFFERENT cities under that region, not all from the capital. (user request:
+  // "when the user gives a region, show each listing with a different city under that region".)
+  const spreadKey = isCountryWideQuery(q)
+    ? (l: Listing) => l.regionAr || CITY_TO_REGION[l.city] || l.city || 'Other'
+    : (l: Listing) => l.city || 'Other';
   // Coarse relevance tiers (closer price/size ranks higher). No price/size → one tier (all equal).
   const tiers = new Map<number, Listing[]>();
   for (const l of listings) {
@@ -846,9 +852,7 @@ function rankResults(listings: Listing[], q: SearchQuery, cap: number | null): L
   const out: Listing[] = [];
   for (const k of [...tiers.keys()].sort((a, b) => b - a)) {       // closest relevance tier first
     const tier = tiers.get(k)!;                                    // (input is already recency-ordered)
-    out.push(...(broad
-      ? naturalSpread(shuffle(tier), (l) => l.regionAr || CITY_TO_REGION[l.city] || l.city || 'Other')
-      : tier));
+    out.push(...(broad ? naturalSpread(shuffle(tier), spreadKey) : tier));
   }
   return out;
 }
