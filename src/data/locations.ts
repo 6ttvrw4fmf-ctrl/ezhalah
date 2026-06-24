@@ -316,6 +316,18 @@ function placeHasInventory(p: Place): boolean {
   }
 }
 
+// placeHasInventory loops the live index, and matchLocations runs on EVERY keystroke — so memoize it.
+// The catalog Place objects are stable singletons (REGIONS/CITIES/DISTRICTS_IDX), so a WeakMap keyed by
+// the place is safe; it's reset whenever the live index reloads (ensureLocationIndex). (perf: typing froze.)
+let _invMemo = new WeakMap<Place, boolean>();
+function placeHasInventoryMemo(p: Place): boolean {
+  const cached = _invMemo.get(p);
+  if (cached !== undefined) return cached;
+  const v = placeHasInventory(p);
+  _invMemo.set(p, v);
+  return v;
+}
+
 export function matchLocations(query: string): Place[] {
   const q = norm(query.trim());
   if (!q) return [];
@@ -340,13 +352,17 @@ export function matchLocations(query: string): Place[] {
   for (const c of CITIES_IDX) consider(c, true);
   for (const d of DISTRICTS_IDX) consider(d, false);
 
-  // Rank: best match TYPE first; then INVENTORY (places we actually have listings for rank above zero-
-  // listing catalog entries); then kind (region > city > district); then closeness. Zero-listing catalog
-  // places stay selectable, just below the ones we have. (filter location policy: inventory first, none removed.)
+  // Rank: best match TYPE first; then INVENTORY (places we have listings for rank above zero-listing
+  // catalog entries); then kind (region > city > district); then closeness. placeHasInventory loops the
+  // live index, so do a CHEAP sort first (no inventory) and compute inventory ONLY for the top candidates —
+  // otherwise a broad one-letter query that matches hundreds of districts froze the picker on every
+  // keystroke. The slice is generous (>> MAX_RESULTS) so inventory can still promote within the shortlist.
+  hits.sort((a, b) => a.type - b.type || a.kind - b.kind || a.metric - b.metric);
+  const top = hits.slice(0, Math.max(MAX_RESULTS * 4, 48));
   const inv = new Map<Place, number>();
-  for (const h of hits) if (!inv.has(h.place)) inv.set(h.place, placeHasInventory(h.place) ? 0 : 1);
-  hits.sort((a, b) => a.type - b.type || inv.get(a.place)! - inv.get(b.place)! || a.kind - b.kind || a.metric - b.metric);
-  return hits.slice(0, MAX_RESULTS).map((h) => h.place);
+  for (const h of top) if (!inv.has(h.place)) inv.set(h.place, placeHasInventoryMemo(h.place) ? 0 : 1);
+  top.sort((a, b) => a.type - b.type || inv.get(a.place)! - inv.get(b.place)! || a.kind - b.kind || a.metric - b.metric);
+  return top.slice(0, MAX_RESULTS).map((h) => h.place);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -513,6 +529,7 @@ export async function ensureLocationIndex(): Promise<void> {
         }
         LIVE_CITIES = [...agg.values()];
         _cityKeys = null; // rebuild the fuzzy-city index now that live cities are loaded
+        _invMemo = new WeakMap(); // recompute inventory against the fresh index
       }
       _liveLoaded = true;
     } catch { /* keep the catalog-only resolver as fallback */ }
