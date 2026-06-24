@@ -510,8 +510,37 @@ function citiesInRegion(regionName: string): { region: string; cities: string[] 
 
 // The locale-appropriate display name for a canonical (English) city — Arabic from the catalog when we
 // have it, else the canonical English. Used so a fuzzy-corrected city shows in the user's language.
+// Authoritative DB-city-label → Arabic (mirrors the DB loc_city_map / remote.ts CITY_AR). The catalog's
+// English spelling often differs from the DB label ("Al Hafuf" vs "Hofuf", "Makkah" vs "Mecca"), so the
+// catalog lookup below MISSES those and they used to leak English into the Arabic UI. Keyed lowercase.
+const CITY_AR_DISPLAY: Record<string, string> = {
+  'abha': 'أبها', 'abqaiq': 'بقيق', 'abu arish': 'أبو عريش', 'afif': 'عفيف', 'ahad al masarihah': 'أحد المسارحة',
+  'ahad rafidah': 'أحد رفيدة', 'al ammariyah': 'العمارية', 'al aqiq': 'العقيق', 'al badai': 'البدائع', 'al badaie': 'البدائع',
+  'al baha': 'الباحة', 'al bahah': 'الباحة', 'al birk': 'البرك', 'al bukayriyah': 'البكيرية', 'al dalam': 'الدلم',
+  'al ghat': 'الغاط', 'al ghazalah': 'الغزالة', 'al hanakiyah': 'الحناكية', 'al hariq': 'الحريق', 'al hayathim': 'الهياثم',
+  'al jumum': 'الجموم', 'al kamil': 'الكامل', 'al kharj': 'الخرج', 'al khurma': 'الخرمة', 'al lith': 'الليث',
+  'al majardah': 'المجاردة', 'al majmaah': 'المجمعة', 'al mithnab': 'المذنب', 'al muzahimiyah': 'المزاحمية', 'al namas': 'النماص',
+  'al qunfudhah': 'القنفذة', 'al quwayiyah': 'القويعية', 'al ula': 'العلا', 'al uyun': 'العيون', 'al wajh': 'الوجه',
+  'al zulfi': 'الزلفي', 'an nabhaniyah': 'النبهانية', 'an nairyah': 'النعيرية', 'anak': 'عنك', 'ar rass': 'الرس',
+  'arar': 'عرعر', 'as sulayyil': 'السليل', 'ash shamasiyah': 'الشماسية', 'ash shanan': 'الشنان', 'badr': 'بدر',
+  'balsamar': 'بلسمر', 'baqaa': 'بقعاء', 'baysh': 'بيش', 'bish': 'بيش', 'bisha': 'بيشة', 'buraidah': 'بريدة',
+  'dammam': 'الدمام', 'dawadmi': 'الدوادمي', 'dawmat al jandal': 'دومة الجندل', 'dhahran': 'الظهران',
+  'dhahran al janub': 'ظهران الجنوب', 'diriyah': 'الدرعية', 'duba': 'ضباء', 'hafar al batin': 'حفر الباطن', 'hail': 'حائل',
+  'hawtat bani tamim': 'حوطة بني تميم', 'hofuf': 'الهفوف', 'jazan': 'جازان', 'jeddah': 'جدة', 'jubail': 'الجبيل',
+  'kaec': 'مدينة الملك عبدالله الاقتصادية', 'khafji': 'الخفجي', 'khamis mushait': 'خميس مشيط', 'khaybar': 'خيبر',
+  'khobar': 'الخبر', 'mahayel': 'محايل عسير', 'mahd adh dhahab': 'مهد الذهب', 'malham': 'ملهم', 'mecca': 'مكة المكرمة',
+  'medina': 'المدينة المنورة', 'najran': 'نجران', 'qatif': 'القطيف', 'qurayyat': 'القريات', 'rabigh': 'رابغ',
+  'rafha': 'رفحاء', 'raniyah': 'رنية', 'ras tanura': 'رأس تنورة', 'riyadh': 'الرياض', 'riyadh al khabra': 'رياض الخبراء',
+  'rumah': 'رماح', 'sabya': 'صبيا', 'safwa': 'صفوى', 'sakaka': 'سكاكا', 'samtah': 'صامطة', 'sayhat': 'سيهات',
+  'shaqra': 'شقراء', 'sharurah': 'شرورة', 'tabuk': 'تبوك', 'taif': 'الطائف', 'tarout': 'تاروت', 'tathleeth': 'تثليث',
+  'tathlith': 'تثليث', 'tayma': 'تيماء', 'thadiq': 'ثادق', 'thuwal': 'ثول', 'turabah': 'تربة', 'turaif': 'طريف',
+  'umluj': 'أملج', 'unaizah': 'عنيزة', 'yanbu': 'ينبع',
+};
 export function cityDisplay(cityEn: string, locale: string): string {
   if (!ar(locale)) return cityEn;
+  // Authoritative DB-label map first (covers the aliased cities the catalog spells differently).
+  const direct = CITY_AR_DISPLAY[cityEn.trim().toLowerCase()];
+  if (direct) return direct;
   const cc = CITIES_IDX.find((c) => c.place.nameEn.toLowerCase() === cityEn.toLowerCase());
   if (cc?.place.nameAr) return cc.place.nameAr;
   // Catalog miss → the curated CITY_TOKENS map carries Arabic spellings for the long tail of towns.
@@ -633,6 +662,28 @@ function normDist(s: string): string {
     .replace(/حي/g, '');
 }
 
+// Whole-WORD (word-aligned) probe match: the probe must equal a CONTIGUOUS run of WHOLE words of the
+// district name — NOT a loose substring/prefix. So «البلد» matches «حي البلد», «العليا الرياض» (city
+// noise) and the glued English «albalad» vs «Al Balad Dist.», but NEVER «حي البلدية» / «محاسن البلدية»
+// where «البلد» is only a PREFIX of the longer word «البلدية». (fix: «حي البلد» wrongly pulled البلدية in
+// الهفوف/حفر الباطن — a different neighbourhood — because of substring matching.)
+function districtMatchesProbe(district: string, probe: string): boolean {
+  if (!probe) return false;
+  const words = district
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((w) => flatLoc(w).replace(/district|dist|neighbou?rhood/g, ''))
+    .filter((w) => w.length >= 2 && !DISTRICT_WORD.has(w) && w !== 'الحي');
+  for (let i = 0; i < words.length; i++) {
+    let acc = '';
+    for (let j = i; j < words.length; j++) {
+      acc += words[j];
+      if (acc === probe) return true;
+      if (acc.length >= probe.length) break; // longer than the probe → this run can't equal it
+    }
+  }
+  return false;
+}
+
 // Cross-script district bridge, built once from the catalog's en↔ar district pairs: a normalized
 // district name in ONE script → its equivalent forms in the OTHER. Lets an English query ("Al Olaya")
 // match Arabic-tagged live districts ("حي العليا") and vice-versa — without it, the 106 Arabic-tagged
@@ -695,7 +746,10 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
       const tf = fuzzyFold(tok);
       if (tf.length < 4 || ARTICLE.has(tf) || DISTRICT_WORD.has(tf)) continue;
       if (tf === probeF) return true;
-      if (tf[0] === probeF[0] && editDistance(tf, probeF) <= tokenMaxD) return true;
+      // Typo recovery: same first letter, SIMILAR length (±1), small edit distance. The length guard
+      // stops a longer DIFFERENT word from passing as a typo — «البلد»(5) vs «البلدية»(7) is a +2 suffix,
+      // a different word, not a typo, so it must NOT match. (paired with the word-aligned exact match.)
+      if (tf[0] === probeF[0] && Math.abs(tf.length - probeF.length) <= 1 && editDistance(tf, probeF) <= tokenMaxD) return true;
     }
     return false;
   };
@@ -708,7 +762,7 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
     // query is matched on its Arabic form) OR fuzzy-match a word (typo recovery). Do NOT match the
     // reverse (probe contains raw) — that let a long English probe pull a SHORTER, different district
     // ("assafarat" ⊃ "assafa"). Raw Arabic is the source of truth; English is a helper alias. (user.)
-    if (!(probeAlts.some((p) => nd.includes(p)) || fuzzyTokenHit(d.district))) continue;
+    if (!(probeAlts.some((p) => districtMatchesProbe(d.district, p)) || fuzzyTokenHit(d.district))) continue;
     if (cityKey) {
       const dc = flatLoc(d.city);
       if (dc !== cityKey && dc !== cityKeyAr) continue; // a city was named → keep only that city
@@ -743,7 +797,7 @@ export function rawDistrictVariants(place: Place): string[] {
     if (cityKeys.length && !cityKeys.includes(flatLoc(d.city))) continue;
     const nd = normDist(d.district);
     if (nd.length < 2) continue;
-    const arHit = arKey.length >= 2 && (nd === arKey || nd.includes(arKey)); // Arabic: exact or raw+noise
+    const arHit = arKey.length >= 2 && (nd === arKey || districtMatchesProbe(d.district, arKey)); // Arabic: exact OR word-aligned (raw + city noise), never a prefix of a longer word («البلد» ≠ «البلدية»)
     const enHit = enKey.length >= 2 && nd === enKey;                          // English: EXACT alias only
     if (arHit || enHit) out.add(d.district);
   }
