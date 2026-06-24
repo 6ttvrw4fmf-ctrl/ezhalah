@@ -318,6 +318,37 @@ function applySourceFilter(q: SearchQuery, userText: string, edgePlatforms?: str
   }
 }
 
+// Proximity / landmark / street cues → the Arabic-primary search TERMS matched against a listing's own
+// text (street_name / title / description) in runSearch. CONSERVATIVE on purpose: the noun terms fire
+// only with a clear "near/قريب" cue (so a place called "Park View" never becomes a park search); a
+// named street fires on its explicit شارع/طريق/"street" marker. Arabic terms only — descriptions are
+// Arabic and Arabic is the primary matching key (agent_notes id 3 rule 6). Empty for an ordinary search.
+const PROX_CUE = /\b(near|close to|next to|beside|walking distance|overlook|facing)\b|قريب|قرب|بجانب|\bجنب\b|جوار|مقابل|يطل|تطل|حذاء|ملاصق|محاذي|قبالة/i;
+const NEARBY_LEX: { re: RegExp; terms: string[] }[] = [
+  { re: /mosque|masjid|مسجد|جامع/i, terms: ['مسجد', 'جامع'] },
+  { re: /school|مدرسة|مدرسه|مدارس/i, terms: ['مدرسة', 'مدارس'] },
+  { re: /\bpark\b|garden|حديقة|حديقه|منتزه|متنزه/i, terms: ['حديقة', 'منتزه'] },
+  { re: /hospital|clinic|مستشفى|مستوصف|عيادة/i, terms: ['مستشفى', 'عيادة'] },
+  { re: /university|college|جامعة|كلية/i, terms: ['جامعة', 'كلية'] },
+  { re: /\bmall\b|بلازا|سنتر/i, terms: ['مول', 'بلازا'] },
+  { re: /metro|مترو|محطة/i, terms: ['مترو', 'محطة'] },
+  { re: /corniche|كورنيش/i, terms: ['كورنيش'] },
+  { re: /\bbeach\b|seafront|شاطئ/i, terms: ['شاطئ'] },
+  { re: /airport|مطار/i, terms: ['مطار'] },
+];
+function extractNearbyKeywords(text: string): string[] {
+  const out = new Set<string>();
+  if (PROX_CUE.test(text)) for (const { re, terms } of NEARBY_LEX) if (re.test(text)) terms.forEach((x) => out.add(x));
+  // A named street/road → match the street name itself ("شارع الملك فهد" → "الملك فهد"). Trim a trailing
+  // "في المدينة / حي …" so the keyword is just the street, not the city.
+  const ar = text.match(/(?:شارع|طريق)\s+([^\n,،.()]{2,30})/);
+  const en = text.match(/\b([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+(?:street|st\.?|road|rd\.?)\b/i);
+  let st = ar ? ar[1].replace(/\s+(في|قرب|قريب|بجانب|بحي|حي)\s+.*/, '').trim() : (en ? en[1].trim() : '');
+  st = st.replace(/^(?:on|in|at|the|near|by)\s+/i, '').trim();
+  if (st.length >= 2) out.add(st);
+  return [...out];
+}
+
 function queryFromBackend(b: BackendQuery, userText: string = ''): SearchQuery {
   const q = emptyQuery();
   q.deal = b.deal === 'Buy' ? 'Buy' : 'Rent';
@@ -364,6 +395,10 @@ function queryFromBackend(b: BackendQuery, userText: string = ''): SearchQuery {
   const districts = resolveDistrictsFromText(userText, q.location);
   if (districts.length) q.districts = districts;
   applySourceFilter(q, userText, b.platforms);
+  // Street / "near a mosque|school|park" terms from the raw message (Q3) — matched against the
+  // listing's own street/title/description in runSearch; empty for an ordinary search.
+  const kw = extractNearbyKeywords(userText);
+  if (kw.length) q.keywords = kw;
   return q;
 }
 
@@ -498,6 +533,8 @@ export function parseQuery(text: string): SearchQuery {
   }
 
   applySourceFilter(q, text);
+  const kw = extractNearbyKeywords(text);
+  if (kw.length) q.keywords = kw;
   return q;
 }
 

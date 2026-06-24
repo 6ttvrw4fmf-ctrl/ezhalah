@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase';
 import type { Listing } from './listings';
 import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
-import { REGIONS, isCountryWideQuery, interleave } from './regions';
+import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
 import { normalizeType, queryForSelection, type SourceKind } from './propertyTypes';
 
@@ -268,6 +268,67 @@ function interleaveByPlatform(cands: Cand[]): Cand[] {
   return out;
 }
 
+// ── Adaptive, scope-aware result ordering ───────────────────────────────────────────────────────
+// The RPC returns candidates already newest-first (true last_updated recency), so a candidate's INDEX
+// is its recency rank — `listed` on the card is only a coarse human label ("today"/"2 months ago") and
+// is NOT sortable. We keep that recency, then DIVERSIFY by geography according to how BROAD the search
+// is, so a Region or country-wide search shows the whole market instead of 25 cards from one city. (user.)
+//   District : newest only (recency wins — if the 25 newest are all one platform, that's fine).
+//   City     : newest + platform diversity (no single platform monopolises the page).
+//   Region   : city diversity → platform diversity → newest (every city in the region contributes).
+//   Country  : region diversity → city diversity → platform diversity → newest (the whole Kingdom).
+type Scope = 'district' | 'city' | 'region' | 'country';
+type Ranked = { l: Listing; platform: string; city: string; region: string; rank: number };
+
+function scopeOf(q: SearchQuery, cities: string[] | null, countryWide: boolean): Scope {
+  if (countryWide) return 'country';
+  const lm = q.locationMatch;
+  if (lm?.kind === 'region') return 'region';
+  // A name that matched several cities (e.g. "Al Rawdah" in Jeddah/Riyadh/Khobar) is searched across
+  // all of them → diversify by city like a region. (user: search all matches, balanced.)
+  if (lm?.ambiguous && lm.cities && lm.cities.length > 1) return 'region';
+  if (cities && cities.length > 1) return 'region';
+  if (q.districts && q.districts.length) return 'district';
+  return 'city';
+}
+
+function rankedKey(r: Ranked, k: string): string {
+  return k === 'platform' ? r.platform : k === 'city' ? r.city : k === 'region' ? r.region : '';
+}
+
+// Hierarchical round-robin: group by the first key, order groups by size (densest first) then freshness,
+// take one card per group per pass, and recurse with the remaining keys. At the leaf (no keys), it is
+// pure newest-first by the RPC recency rank.
+function interleaveRanked(rows: Ranked[], keys: string[]): Ranked[] {
+  if (!keys.length) return [...rows].sort((a, b) => a.rank - b.rank);
+  const [k, ...rest] = keys;
+  const groups = new Map<string, Ranked[]>();
+  for (const r of rows) {
+    const g = rankedKey(r, k) || '∅';
+    let a = groups.get(g);
+    if (!a) { a = []; groups.set(g, a); }
+    a.push(r);
+  }
+  const lists = [...groups.values()].map((g) => interleaveRanked(g, rest));
+  // Densest group leads (Riyadh before a tiny town); ties broken by the freshest listing in the group.
+  lists.sort((a, b) => b.length - a.length || a[0].rank - b[0].rank);
+  const out: Ranked[] = [];
+  for (let i = 0; out.length < rows.length; i++) {
+    let progressed = false;
+    for (const g of lists) { if (i < g.length) { out.push(g[i]); progressed = true; } }
+    if (!progressed) break;
+  }
+  return out;
+}
+
+function orderByScope(rows: Ranked[], scope: Scope): Ranked[] {
+  const keys = scope === 'country' ? ['region', 'city', 'platform']
+    : scope === 'region' ? ['city', 'platform']
+    : scope === 'city' ? ['platform']
+    : [];
+  return interleaveRanked(rows, keys);
+}
+
 // Fetch the FULL card rows for a set of ids from ONE raw platform table, applying the kept server-side
 // filters (transaction_type / property_type / rent period). Chunked because a `.in('id', […])` list
 // can be long. Raw tables stay the source of truth — the index only told us WHICH rows to pull.
@@ -329,10 +390,13 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   if (error) return null;                       // index error → retry UI, not "no matches"
   if (!cands || !(cands as Cand[]).length) return [];
 
-  // 2) Interleave by platform for diversity, group ids by source_table.
-  const ordered = interleaveByPlatform((cands as any[]).map((c) => ({ source_table: c.source_table, listing_id: Number(c.listing_id), platform: c.platform })));
+  // 2) Keep the RPC's newest-first order (true last_updated recency); remember each candidate's recency
+  //    rank, and group ids by source_table to fetch the full cards.
+  const cleanCands = (cands as any[]).map((c, i) => ({
+    source_table: c.source_table as string, listing_id: Number(c.listing_id), platform: c.platform as string, rank: i,
+  }));
   const byTable = new Map<string, number[]>();
-  for (const c of ordered) {
+  for (const c of cleanCands) {
     let a = byTable.get(c.source_table);
     if (!a) { a = []; byTable.set(c.source_table, a); }
     a.push(c.listing_id);
@@ -344,10 +408,17 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   const map = new Map<string, Listing>();
   entries.forEach(([tbl], i) => { for (const l of fetched[i]) map.set(`${tbl}:${l.id}`, l); });
 
-  // 4) Reassemble in the diverse/newest candidate order; keep only rows still active + type-matching in
-  //    raw (so index↔raw drift, or a type filter, naturally drops the rest).
-  const rows: Listing[] = [];
-  for (const c of ordered) { const l = map.get(`${c.source_table}:${c.listing_id}`); if (l) rows.push(l); }
+  // 4) Rebuild in newest-first order (dropping rows the raw filters / index↔raw drift removed), attach
+  //    each row's city + region, then DIVERSIFY by geography according to the search scope so broad
+  //    searches show the whole market, not 25 cards from one city/platform. (user: adaptive ordering.)
+  const ranked: Ranked[] = [];
+  for (const c of cleanCands) {
+    const l = map.get(`${c.source_table}:${c.listing_id}`);
+    if (!l) continue;
+    const city = l.city || '';
+    ranked.push({ l, platform: c.platform, city, region: CITY_TO_REGION[city] || city, rank: c.rank });
+  }
+  const rows = orderByScope(ranked, scopeOf(q, cities, countryWide)).map((r) => r.l);
   cacheListings(rows);
   return rows;
 }
@@ -424,6 +495,8 @@ const LIST_SELECT = [
   // Wasalt's "Additional Information" panel (Property usage / Age / Facade / Street / Ad source /
   // Plan number / Land number / ...) — jsonb of {key,label,value}[]. Aqar rows leave it NULL.
   'additional_info',
+  // Free-text fields for the street / "near X" search (Q3) — present on all 63 platform tables.
+  'title', 'description',
 ].join(', ');
 
 // Map raw DB rows → in-app `Listing` shape. `kind` = which table-kind the rows came from (res/com),
@@ -473,6 +546,8 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       property_age: r.property_age ?? null,
       direction: r.direction ?? null,
       street_name: r.street_name ?? null,
+      title: r.title ?? null,
+      description: r.description ?? null,
       residence_type: r.residence_type ?? null,
       project_name: r.project_name ?? null,
       driver_room: !!r.driver_room,

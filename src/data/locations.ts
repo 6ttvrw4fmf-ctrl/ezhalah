@@ -714,6 +714,37 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   return out;
 }
 
+// PICKER → RAW bridge. Given a CLEAN catalog place (from sa-locations.json) the user picked in the
+// filter, return every RAW district spelling for it that actually exists in the listing index — so the
+// search covers ALL variants at once. Example: catalog "Al Olaya" (Riyadh) → ["حي العليا","Al-Olaya",
+// "Al Olaya","Al Olaya Dist.","العليا","العليا الرياض",…] (7 spellings / ~562 listings, otherwise split).
+// The GitHub catalog controls what the user SEES; this controls what the app SEARCHES. Raw values stay
+// untouched. EXACT/substring match only (no fuzzy — the catalog name is exact) so a neighbouring district
+// like "حي عليشة" is never pulled in. City-scoped (a famous district name can exist in several cities).
+// Used by both the filter picker and — via resolveLocation — the AI agent, so they share one mapping.
+export function rawDistrictVariants(place: Place): string[] {
+  if (place.kind !== 'district' || !LIVE_DISTRICTS.length) return [];
+  const cityKeys = [flatLoc(place.cityEn ?? ''), flatLoc(place.cityAr ?? '')].filter(Boolean);
+  const probes = new Set<string>();
+  for (const nm of [place.nameEn, place.nameAr]) {
+    const p = normDist(nm);
+    if (p.length < 2) continue;
+    probes.add(p);
+    for (const alt of districtBridge().get(p) || []) if (alt.length >= 2) probes.add(alt);
+  }
+  if (!probes.size) return [];
+  const out = new Set<string>();
+  for (const d of LIVE_DISTRICTS) {
+    if (cityKeys.length && !cityKeys.includes(flatLoc(d.city))) continue;
+    const nd = normDist(d.district);
+    if (nd.length < 2) continue;
+    for (const p of probes) {
+      if (p === nd || p.includes(nd) || nd.includes(p)) { out.add(d.district); break; }
+    }
+  }
+  return [...out];
+}
+
 export function resolveLocation(input: string, locale: string): LocationResolution {
   const raw = input.trim();
   const base: LocationResolution = { raw, kind: 'none', city: '', label: raw, districts: [], cities: [] };
@@ -739,7 +770,11 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
     // city/region are ENGINE-FACING (the engine's cityFilterFor only understands the English DB labels)
     // → always canonical English; `label` carries the locale display. (so chat-path English from Gemini
     // and Arabic filter picks both scope the server fetch correctly.)
-    return { raw, kind: 'district', city: hit.cityEn ?? '', region: hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [] };
+    // GitHub catalog controls the clean name SHOWN; the raw listing index controls what's SEARCHED:
+    // expand the picked clean district to EVERY raw spelling that actually exists (حي العليا / Al-Olaya
+    // / Al Olaya Dist. / …) so one tidy pick returns all variants across all platforms. Arabic-primary
+    // (rawDistrictVariants probes the catalog's Arabic name first). Empty → store falls back to the label.
+    return { raw, kind: 'district', city: hit.cityEn ?? '', region: hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: rawDistrictVariants(hit), cities: [] };
   }
   // 3b) LIVE district merge — a district that exists in real inventory but NOT the static catalog
   //     (e.g. "Al Doha Dist." in Yanbu). Beats a bare city match so the typed district actually

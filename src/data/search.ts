@@ -52,6 +52,10 @@ export type SearchQuery = {
   // (user request: "North Riyadh should show listings IN North Riyadh — the agent should know
   // direct.")
   districts?: string[];
+  // Free-text terms matched against the listing's OWN text (street_name / title / description / facade) —
+  // the street / "near a mosque|school|park" / facade search. Extracted from the user's message; if real
+  // matches exist we show only them, else we keep the area + a note. Never invented. (Q3.)
+  keywords?: string[];
   // Restrict results to specific PLATFORMS the user named ("show me Gathern only", "Aqar and
   // Wasalt"). Values are table prefixes ('gathern', 'aqar', …). When set, only those platforms'
   // tables are queried (remote.tablesFor) and the country-wide one-card-per-platform roster is
@@ -833,6 +837,26 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
   // fix for "filter says 3 bedrooms but you showed 5- and 6-bed houses". (user: show ONLY what I kept.)
   const bedFits = bedroomFilter(q);
   if (bedFits != null) listings = listings.filter(bedFits);
+
+  // Street / "near X" / facade text search (Q3). When the user asked about a street, a facade, a
+  // landmark, or proximity ("near a mosque/school/park"), match the term against each listing's OWN
+  // text — street name, title, description, facade, project, additional-info. If real matches exist,
+  // show ONLY them; if not enough platforms publish that detail, keep the area's listings and say so.
+  // We never invent that a listing is near something — only what the listing itself says. (user spec.)
+  if (q.keywords && q.keywords.length && listings.length) {
+    const kws = q.keywords.map((k) => k.toLowerCase()).filter(Boolean);
+    const matched = listings.filter((l) => {
+      const blob = [l.street_name, l.title, l.description, l.direction, l.project_name, l.road, l.district,
+        ...((l.additional_info ?? []).map((a) => a.value))].filter(Boolean).join(' ').toLowerCase();
+      return kws.some((k) => blob.includes(k));
+    });
+    if (matched.length) {
+      listings = matched;
+      ns.push(t('Showing listings whose details mention what you searched for — street and nearby info is published by only some platforms.'));
+    } else {
+      ns.push(t('Only some platforms provide street or nearby information, so showing listings from the same district instead.'));
+    }
+  }
 
   // Order the matches. An explicit OBJECTIVE sort (cheapest, biggest, newest…) wins; otherwise the
   // DEFAULT is closeness — #1 is the closest match to what the user asked, the last card the least

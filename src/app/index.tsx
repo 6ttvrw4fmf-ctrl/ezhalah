@@ -387,7 +387,14 @@ export default function Home() {
                     <Ionicons name={placeIcon(sg)} size={16} color={colors.primary} />
                     <View style={{ flex: 1 }}>
                       <Text style={s.suggCity}>{placeTitle(sg, sugLocale)}</Text>
-                      <Text style={s.suggDist}>{placeSub(sg, sugLocale)}</Text>
+                      {/* District rows confirm the clean catalog mapping bilingually: the OTHER-script
+                          name + the parent city (e.g. EN app → "العليا · Riyadh"). One pick searches all
+                          raw spellings underneath. Other levels keep the city·region context. */}
+                      <Text style={s.suggDist}>
+                        {sg.kind === 'district'
+                          ? `${placeTitle(sg, sugLocale === 'ar' ? 'en' : 'ar')} · ${(sugLocale === 'ar' ? sg.cityAr : sg.cityEn) ?? ''}`
+                          : placeSub(sg, sugLocale)}
+                      </Text>
                     </View>
                   </Pressable>
                 ))}

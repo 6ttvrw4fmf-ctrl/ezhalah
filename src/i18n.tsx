@@ -497,6 +497,10 @@ const AR: Record<string, string> = {
   '{what} {verb} in {place}': '{what} {verb} في {place}',
   'Searching all of Saudi Arabia — add a city to narrow it down.': 'يشمل البحث كامل المملكة العربية السعودية — أضف مدينة لتضييق النطاق.',
   'Showing a mix of property types.': 'نعرض مزيجاً من أنواع العقارات.',
+  'Showing listings whose details mention what you searched for — street and nearby info is published by only some platforms.':
+    'نعرض الإعلانات التي تذكر ما بحثت عنه في تفاصيلها — معلومات الشارع والمواقع القريبة متوفرة لدى بعض المنصات فقط.',
+  'Only some platforms provide street or nearby information, so showing listings from the same district instead.':
+    'بعض المنصات فقط توفر معلومات الشارع أو المواقع القريبة، لذا نعرض إعلانات من نفس الحي بدلاً من ذلك.',
   'Price: {echo}': 'السعر: {echo}',
   'Nothing within your budget right now — showing the closest options above it.':
     'لا يوجد ضمن ميزانيتك حالياً — نعرض أقرب الخيارات الأعلى منها.',
@@ -642,7 +646,6 @@ const AR: Record<string, string> = {
   'Sanitation':         'صرف صحي',
   // "Additional Information" panel labels (Wasalt + Aqar Gate REGA fields). Labels localize; the
   // values are source data (REGA), shown as-is.
-  'Additional Information':              'معلومات إضافية',
   'Property usage':                     'استخدام العقار',
   'Age':                                'عمر العقار',
   'Facade':                             'الواجهة',
@@ -662,12 +665,8 @@ const AR: Record<string, string> = {
   'Property Floor':                     'الطابق',
   'Furniture':                          'الأثاث',
   'Number of Parkings':                 'عدد المواقف',
-  'See more':                           'عرض المزيد',
-  'See less':                           'عرض أقل',
   'Building age (years)':               'عمر البناء (بالسنوات)',
-  'Floor':                              'الطابق',
   'Ad license number':                  'رقم رخصة الإعلان',
-  'Features':                           'المميزات',
   // New-platform additional-info labels (Aqarcity/Eastabha/Sanadak/Raghdan/Candles/Satel/Sadin).
   'Amenities':                          'المرافق',
   'Furnishing':                         'التأثيث',

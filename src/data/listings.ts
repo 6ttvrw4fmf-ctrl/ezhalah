@@ -35,6 +35,9 @@ export type Listing = {
   property_age?: string | null;
   direction?: string | null;
   street_name?: string | null;
+  // Free-text scraped fields — power the street / "near X" text search (Q3). Not every platform fills them.
+  title?: string | null;
+  description?: string | null;
   residence_type?: string | null;
   project_name?: string | null;
   driver_room?: boolean;
