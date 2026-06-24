@@ -293,19 +293,26 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   const tables = tablesFor(q);
   if (!tables.length) return [];
 
-  // Resolve the location scope. Prefer a city named in the raw text, else the resolver's canonical city.
-  const city = cityFilterFor(q.location || '')
-    || (q.locationMatch?.city ? cityFilterFor(q.locationMatch.city) : null);
-  // MULTI-CITY ambiguity (e.g. "Al Olaya" in Riyadh AND Khobar) → search all matched cities.
-  const ambCities = q.locationMatch?.ambiguous && q.locationMatch.cities?.length
-    ? Array.from(new Set(q.locationMatch.cities.map((c) => cityFilterFor(c) || c).filter(Boolean)))
-    : null;
-  const cities = ambCities && ambCities.length ? ambCities : (city ? [city] : null);
+  // Resolve the location scope into a set of cities to filter the index by.
+  const lm = q.locationMatch;
+  let cities: string[] | null = null;
+  if (lm?.kind === 'region' && lm.cities && lm.cities.length) {
+    // REGION search → every city in the region (resolver expanded it from the index's region→city data),
+    // so we return the WHOLE region, not just its capital. (user: "Region = all listings in that region.")
+    cities = Array.from(new Set(lm.cities.map((c) => cityFilterFor(c) || c).filter(Boolean)));
+  } else if (lm?.ambiguous && lm.cities && lm.cities.length) {
+    // MULTI-CITY ambiguity (e.g. "Al Olaya" in Riyadh AND Khobar) → search all matched cities.
+    cities = Array.from(new Set(lm.cities.map((c) => cityFilterFor(c) || c).filter(Boolean)));
+  } else {
+    // CITY (or a district scoped to a city): prefer a city named in the raw text, else the resolver's.
+    const city = cityFilterFor(q.location || '') || (lm?.city ? cityFilterFor(lm.city) : null);
+    if (city) cities = [city];
+  }
   const countryWide = isCountryWideQuery(q);
 
   // A place was NAMED but resolves to NO city, and it's not a district or a country-wide search →
   // honest ZERO (never substitute a nearby place). (user: real-but-empty location returns 0.)
-  if (!cities && !countryWide && !(q.districts && q.districts.length) && (q.location || '').trim()) {
+  if ((!cities || !cities.length) && !countryWide && !(q.districts && q.districts.length) && (q.location || '').trim()) {
     return [];
   }
 

@@ -489,6 +489,25 @@ function regionForCity(city: string): string {
   return cc?.place.regionEn ?? '';
 }
 
+// Expand a REGION name → its canonical DB region value + the list of cities it contains, read straight
+// from the live index (LIVE_CITIES holds every city-with-inventory and its region). Used so a region
+// search resolves to "all cities in that region" without any region→city map to maintain. The catalog
+// region name can differ slightly from the DB value ("Bahah"→"Al Bahah", "Jawf"→"Al Jawf"), so we match
+// exact-or-contains. (user: "Region search = all listings in that region.")
+function citiesInRegion(regionName: string): { region: string; cities: string[] } {
+  const want = (regionName || '').trim().toLowerCase();
+  if (!want) return { region: '', cities: [] };
+  // pick the index's region value that matches (exact, or one contains the other — handles Al Bahah/Bahah)
+  let region = '';
+  for (const v of LIVE_CITIES) {
+    const rl = v.region.toLowerCase();
+    if (rl === want || rl.includes(want) || want.includes(rl)) { region = v.region; break; }
+  }
+  if (!region) return { region: '', cities: [] };
+  const cities = Array.from(new Set(LIVE_CITIES.filter((v) => v.region === region).map((v) => v.city)));
+  return { region, cities };
+}
+
 // The locale-appropriate display name for a canonical (English) city — Arabic from the catalog when we
 // have it, else the canonical English. Used so a fuzzy-corrected city shows in the user's language.
 export function cityDisplay(cityEn: string, locale: string): string {
@@ -751,7 +770,12 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
   }
   if (hit) {
     if (hit.kind === 'city') return { raw, kind: 'city', city: hit.nameEn, region: hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [] };
-    if (hit.kind === 'region') return { raw, kind: 'region', city: '', label: ar(locale) ? hit.nameAr : `${hit.nameEn} Region`, districts: [], cities: [] };
+    if (hit.kind === 'region') {
+      // Region search → carry the DB region value + ALL its cities, so the engine returns the whole
+      // region (not just the capital). (user: "Region search = all listings in that region.")
+      const r = citiesInRegion(hit.nameEn);
+      return { raw, kind: 'region', city: '', region: r.region || undefined, label: ar(locale) ? hit.nameAr : `${hit.nameEn} Region`, districts: [], cities: r.cities };
+    }
     // country → fall through to geography/lifestyle/none (it isn't a specific place to anchor on)
   }
   // 3c) FUZZY city correction — a typo'd / homophone-spelled city the exact matchers missed ("القرص"→
