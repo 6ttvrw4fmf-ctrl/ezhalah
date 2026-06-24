@@ -851,6 +851,8 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
 export function rawDistrictVariants(place: Place): string[] {
   if (place.kind !== 'district' || !LIVE_DISTRICTS.length) return [];
   const cityKeys = [flatLoc(place.cityEn ?? ''), flatLoc(place.cityAr ?? '')].filter(Boolean);
+  const cityArName = place.cityAr ?? ''; // also match the live index's English city label by its Arabic
+                                         // mapping (catalog "Al Khobar" vs index "Khobar"). (transliteration)
   // ARABIC is the canonical matching KEY — the platforms and the GitHub catalog are Arabic-first, and
   // English transliterations are inconsistent. The Arabic name matches EXACT, or when the raw value
   // carries city/marker noise ("العليا الرياض" ⊇ "العليا"). The English name is ONLY an EXACT alias —
@@ -861,7 +863,8 @@ export function rawDistrictVariants(place: Place): string[] {
   if (arKey.length < 2 && enKey.length < 2) return [];
   const out = new Set<string>();
   for (const d of LIVE_DISTRICTS) {
-    if (cityKeys.length && !cityKeys.includes(flatLoc(d.city))) continue;
+    const dCityK = flatLoc(d.city);
+    if (cityKeys.length && !cityKeys.includes(dCityK) && CITY_AR_DISPLAY[dCityK] !== cityArName) continue;
     const nd = normDist(d.district);
     if (nd.length < 2) continue;
     const arHit = arKey.length >= 2 && (nd === arKey || districtMatchesProbe(d.district, arKey)); // Arabic: exact OR word-aligned (raw + city noise), never a prefix of a longer word («البلد» ≠ «البلدية»)
@@ -886,6 +889,24 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
   // 2) Area nickname ("North Riyadh" → its districts).
   for (const nk of NICKNAMES) if (nk.keys.some((k) => f.includes(k))) {
     return { raw, kind: 'area', city: nk.city, label: raw, districts: nk.districts, cities: [] };
+  }
+  // 2.5) "District، City" — the picker's OWN label format (nameAr، cityAr) and Gemini's "حي العليا، الرياض".
+  //      Re-resolving such a label as one string is lossy: the city token ("الرياض") bloats the district
+  //      probe and over-matches the city-noise in raw district strings, and the district name can collide
+  //      with a spurious catalog "city". So split on the comma and resolve the DISTRICT part scoped EXACTLY
+  //      to the named CITY. (user bug 2026-06-25: picking the "حي الملقا" suggestion re-resolved to العليا /
+  //      الملز / الملك فهد / جامعة الملك سعود instead of الملقا.)
+  const cp = raw.split(/[،,]/).map((s) => s.trim()).filter(Boolean);
+  if (cp.length >= 2) {
+    const cityM = matchLocations(cp[cp.length - 1]).find((p) => p.kind === 'city');
+    const distM = matchLocations(cp[0]).find((p) => p.kind === 'district');
+    if (cityM && distM) {
+      const scoped: Place = { ...distM, cityEn: cityM.nameEn, cityAr: cityM.nameAr, regionEn: cityM.regionEn, regionAr: cityM.regionAr };
+      const variants = rawDistrictVariants(scoped);
+      if (variants.length) {
+        return { raw, kind: 'district', city: cityM.nameEn, region: cityM.regionEn, label: ar(locale) ? distM.nameAr : distM.nameEn, districts: variants, cities: [], exact: true };
+      }
+    }
   }
   // 3) Real place name (district → city → region) via the nationwide matcher. Tried BEFORE
   //    geography/lifestyle so a genuine place always wins over a loose keyword. Districts rank above
