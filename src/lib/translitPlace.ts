@@ -169,6 +169,39 @@ const LETTER: Record<string, string> = {
 
 const ARABIC_RE = /[؀-ۿ]/;
 
+// ── Catalog-backed dictionary (the BIG win) ───────────────────────────────────────────────────────
+// The curated DICT above is hand-tuned but tiny (~150). The official location catalog
+// (sa-locations.json) carries a clean English name for EVERY city and ~6,500 districts, so we build a
+// comprehensive Arabic→English map from it. This is what stops the letter-by-letter fallback from
+// leaking garbled names ("Aldwhh Aljnwbyh") onto the English cards. (user: "the Arabic is a mess —
+// translate it to English; match what's in the database.")
+import sa from '@/data/sa-locations.json';
+const _sa = sa as { regions: [number, string, string][]; cities: [number, number, string, string][]; districts: [number, number, string, string][] };
+
+// Normalize an Arabic place key: drop diacritics/tatweel, the "حي " prefix, fold letter variants, keep
+// word spacing. Used so a listing's raw Arabic ("حي العليا") matches the catalog's Arabic ("العليا").
+function normAr(s: string): string {
+  return s
+    .replace(/[ً-ٰٟ]/g, '').replace(/ـ/g, '')
+    .trim()
+    .replace(/^ال?حي\s+/, '').replace(/^حى\s+/, '')
+    .replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي')
+    .replace(/\s+/g, ' ').trim();
+}
+// Tidy an English catalog name for display: drop the "Dist."/"District"/"Neighborhood" markers.
+function tidyEn(s: string): string {
+  return s
+    .replace(/\bDist\.?/gi, '').replace(/\bDistrict\b/gi, '').replace(/\bNeighbou?rhood\b/gi, '')
+    .replace(/[.,\s]+$/, '') // strip any trailing dot/comma/space the marker left behind
+    .replace(/\s+/g, ' ').trim();
+}
+const CATALOG_AR: Record<string, string> = (() => {
+  const m: Record<string, string> = {};
+  for (const [, , en, ar] of _sa.cities) { const k = normAr(ar); if (k && !m[k]) m[k] = en; }
+  for (const [, , en, ar] of _sa.districts) { const k = normAr(ar); if (k && !m[k]) m[k] = tidyEn(en); }
+  return m;
+})();
+
 function letterTransliterate(s: string): string {
   let out = '';
   for (const ch of s) out += LETTER[ch] ?? ch;
@@ -230,5 +263,8 @@ export function translitPlace(raw: string): string {
   // through as "حي العليا" but our dict keys on the bare name.
   const stripped = trimmed.replace(/^حي\s+/, '').replace(/^حى\s+/, '');
   if (DICT[stripped]) return DICT[stripped];
+  // Comprehensive catalog lookup (cities + ~6,500 districts) — clean official English, no garbling.
+  const key = normAr(trimmed);
+  if (CATALOG_AR[key]) return CATALOG_AR[key];
   return letterTransliterate(stripped);
 }

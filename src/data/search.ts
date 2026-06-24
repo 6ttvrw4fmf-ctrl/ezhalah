@@ -289,6 +289,9 @@ function locationLines(q: SearchQuery): string[] {
   const simp = (s: string) => s.toLowerCase().replace(/[^a-zء-ي]/gu, '');
   const hasAr = (s: string) => /[ء-ي]/.test(s);
   const sameScript = hasAr(lm.raw) === hasAr(lm.label);
+  // In the English UI, transliterate an Arabic district/place name to clean English so the summary
+  // never shows raw Arabic. (user: translate Arabic → English; "the Arabic is a mess".)
+  const dispP = (s: string) => (getLocale() === 'en' ? translitPlace(s) : s);
   const out: string[] = [];
   if ((lm.kind === 'district' || lm.kind === 'city') && simp(lm.raw) && simp(lm.raw) !== simp(lm.label) && sameScript) {
     out.push(`${t('You typed')}: ${lm.raw}`);
@@ -303,7 +306,7 @@ function locationLines(q: SearchQuery): string[] {
       out.push(`${t('Region')}: ${lm.label}`);
       break;
     case 'district':
-      out.push(`${t('Neighborhood')}: ${lm.label}`);
+      out.push(`${t('Neighborhood')}: ${dispP(lm.label)}`);
       if (lm.ambiguous && lm.cities && lm.cities.length) {
         // The district name exists in several cities → show them all (we searched all), not one.
         out.push(`${t('Cities')}: ${join(lm.cities.map((c) => cityDisplay(c, getLocale())))}`);
@@ -318,18 +321,18 @@ function locationLines(q: SearchQuery): string[] {
       // The nickname phrase ("North Riyadh") is already echoed in the request bubble; here we show the
       // city it maps to and the districts it covers.
       if (cityLabel) out.push(`${t('City')}: ${cityLabel}`);
-      if (lm.districts.length) out.push(`${t('Districts')}: ${join(lm.districts)}`);
+      if (lm.districts.length) out.push(`${t('Districts')}: ${join(lm.districts.map(dispP))}`);
       break;
     case 'landmark':
       out.push(`${t('Landmark')}: ${lm.landmark ?? lm.label}`);
-      if (lm.districts.length) out.push(`${t('Nearby Districts')}: ${join(lm.districts)}`);
+      if (lm.districts.length) out.push(`${t('Nearby Districts')}: ${join(lm.districts.map(dispP))}`);
       if (lm.cities.length) out.push(`${t('Nearby Cities')}: ${join(lm.cities.map((c) => cityDisplay(c, getLocale())))}`);
       else if (cityLabel) out.push(`${t('City')}: ${cityLabel}`);
       break;
     case 'geography':
     case 'lifestyle':
       if (cityLabel) out.push(`${t('City')}: ${cityLabel}`);
-      if (lm.districts.length) out.push(`${t('Districts')}: ${join(lm.districts)}`);
+      if (lm.districts.length) out.push(`${t('Districts')}: ${join(lm.districts.map(dispP))}`);
       break;
   }
   return out;
