@@ -44,6 +44,11 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+from scrapers.common.arabic_location import to_catalog
+
+# PDPL: seller identity + contact — never stored. (sellerLicenseNumber is a REGA licence, kept.)
+_PII_SANADAK = {"sellerId", "sellerName", "sellerUsername", "sellerPhonenumber",
+                "sellerWhatsAppNumber", "sellerProfileUrl"}
 
 BASE = "https://sanadak.sa"
 SITEMAP = f"{BASE}/sitemap.xml"
@@ -230,6 +235,18 @@ def _images(body: str) -> list[str]:
     return out
 
 
+def _all_images(body: str) -> list[str]:
+    """ALL listing photo URLs (uncapped, deduped by base) for the complete-source capture. The live
+    photo_urls stays capped at 8; this keeps the full gallery in source_capture (no binary re-host)."""
+    seen, out = set(), []
+    for u in re.findall(rf"https://{re.escape(CDN)}/[^\s\"\\]+\.(?:jpe?g|png|webp)", body):
+        base = re.sub(r"-\d+x\d+(?=\.)", "", u)
+        if base not in seen:
+            seen.add(base)
+            out.append(u)
+    return out
+
+
 def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
     if not o.get("isPublished", True):
         return None, "residential"
@@ -243,6 +260,17 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
     raw_city = (o.get("city") or "").strip()
     city = CITY_AR.get(raw_city) or normalize.map_city(raw_city) or "Other"
     region = CITY_TO_REGION.get(city)
+
+    # Native STRUCTURED Arabic (ADDITIVE — live city/region/neighborhood above untouched). Sanadak's
+    # RSC object carries Arabic city + district directly; the scraper's region is the twin-disambiguation
+    # hint. source_capture = the full listing object MINUS PDPL seller fields + ALL photo URLs (the live
+    # photo_urls stays capped at 8). The Arabic description is already inside the object. Numbers unchanged.
+    city_ar = raw_city or None
+    district_ar = (o.get("district") or "").strip() or None
+    cid, rid = to_catalog(city_ar, region_hint=region)
+    cap = {k: v for k, v in o.items() if k not in _PII_SANADAK}
+    cap["_photo_urls_all"] = _all_images(body)
+
     price = _int(o.get("price"))
 
     # Rich data: core extras + the FULL additionalInfos REGA panel (license/plan/services/deed…,
@@ -281,6 +309,12 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
         "photo_urls": _images(body),
         "rega_location_verified": bool(o.get("sellerLicenseNumber")),
         "additional_info": extra,
+        # ── Arabic-native structured (additive, shadow) + complete-source capture ──
+        "city_ar": city_ar,
+        "district_ar": district_ar,
+        "city_id": cid,
+        "region_id": rid,
+        "source_capture": cap,
     }
     return row, category
 
