@@ -41,6 +41,7 @@ from curl_cffi import requests as cc
 
 from scrapers.common import db
 from scrapers.common import normalize as N
+from scrapers.common.arabic_location import resolve_slug
 
 GQL = "https://sa.aqar.fm/graphql"
 WORKERS = int(os.environ.get("SCRAPE_WORKERS", "6"))
@@ -115,7 +116,8 @@ FIND_Q = ("query($drf:DailyRentingFilter,$size:Int,$from:Int){ Search{ "
           "find(daily_renting_filter:$drf, size:$size, from:$from){ total listings{ id } } } }")
 
 DETAIL_Q = ("query($id:Int!,$s:Float!,$e:Float!){ "
-            "Listing{ get(id:$id){ id category beds area rooms capacity furnished content uri imgs } } "
+            "Listing{ get(id:$id){ id category beds area rooms capacity furnished content content_en uri imgs "
+            "location_city location_district location_region location_street city_id district_id } } "
             "DailyRenting{ getCalculatedBookingPriceWithDiscount(listing_id:$id, start_date:$s, end_date:$e){ "
             "discounted_price total_price } } }")
 
@@ -169,6 +171,16 @@ def map_listing(g: dict, price: dict) -> dict | None:
         return None
 
     imgs = ["https://images.aqar.fm/" + k for k in (g.get("imgs") or []) if k][:30]
+
+    # Native Arabic R/C/D (ADDITIVE — the live city/region/neighborhood above stay the lossy slug-parse,
+    # unchanged, until cutover). Aqar's STRUCTURED location_* fields are NULL for the DailyRenting
+    # vertical, so we resolve R/C/D from the Arabic URI slug with the shared DETERMINISTIC, catalog-
+    # validated resolver (positional «منطقة X» + rightmost whole-name catalog city; never loose-matched;
+    # unresolved stays null, never guessed). This FIXES the live false-positives (street «مكة المكرمة»
+    # or district «المدينة» no longer mis-map the city). source_capture = the full detail minus PII
+    # (descriptions phone-redacted; the detail exposes no broker contact field). Numbers unchanged.
+    loc = resolve_slug(uri)
+    capture = {k: (_redact(v) if k in ("content", "content_en") else v) for k, v in g.items()}
     return {
         "ad_number":        f"AQM{g['id']}",
         "listing_url":      f"https://sa.aqar.fm/{uri}",
@@ -186,6 +198,12 @@ def map_listing(g: dict, price: dict) -> dict | None:
         "title":            _redact((g.get("content") or "").split("\n")[0][:120]),
         "description":      _redact(g.get("content")),
         "photo_urls":       imgs,
+        # ── Arabic-native (additive, shadow) + complete-source capture ──────────
+        "city_ar":          loc["city_ar"],
+        "district_ar":      loc["district_ar"],
+        "city_id":          loc["city_id"],
+        "region_id":        loc["region_id"],
+        "source_capture":   capture,
     }
 
 
