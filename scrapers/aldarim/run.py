@@ -32,6 +32,10 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db
+from scrapers.common.arabic_location import to_catalog
+
+# PDPL: never store advertiser contact/identity. The rest of the API item is kept.
+_PII = {"whatsapp_number", "rega_advertiser_number"}
 
 API = "https://aldarim.nzl-backend.com/api/public/properties"
 SITE = "https://www.aldarim.sa/en/properties"
@@ -172,6 +176,15 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
 
     area = _int(L.get("area")) or _int(L.get("built_up_area"))
     rent_price = (L.get("rent_price_annually") or L.get("rent_price_monthly"))
+
+    # Native Arabic R/C/D (ADDITIVE — live city/neighborhood above untouched). The API already carries
+    # city.name_ar / district.name_ar; we just stopped discarding them. No region signal from Aldarim,
+    # so same-name twins (rare here — mostly Riyadh) stay region_id-null rather than guessing.
+    cityd = L.get("city") if isinstance(L.get("city"), dict) else {}
+    distd = L.get("district") if isinstance(L.get("district"), dict) else {}
+    city_ar = (cityd.get("name_ar") or "").strip() or None
+    district_ar = (distd.get("name_ar") or "").strip() or None
+    cid, rid = to_catalog(city_ar)
     row = {
         "ad_number": f"ALD{pid}",
         "listing_url": f"https://www.aldarim.sa/en/properties/{pid}",
@@ -207,6 +220,12 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "driver_room":      (_int(L.get("driver_rooms")) or 0) > 0,
         "balcony_terrace":  (_int(L.get("balconies")) or 0) > 0,
         # (no detail_enriched — that's a Wasalt-only enrichment flag; Aldarim's API is already complete.)
+        # ── Arabic-native (additive, shadow) + complete-source capture ──────────
+        "city_ar": city_ar,
+        "district_ar": district_ar,
+        "city_id": cid,
+        "region_id": rid,
+        "source_capture": {k: v for k, v in L.items() if k not in _PII},
     }
     return row, category
 
