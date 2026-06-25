@@ -135,7 +135,7 @@ OUTPUT — return ONLY a JSON object: { kind, reply, deal, location, type, detai
 - kind: "listings" = search NOW; "message" = say something or ask ONE question; "interview" = only if the user explicitly asks to be guided step by step.
 - reply: the text the user sees — short, warm, Saudi.
 - deal: "Rent" (for rent), "Buy" (for sale), or "Both" — use "Both" when you are searching but rent-vs-buy is still unknown (you've already used your question); it shows BOTH. Do NOT default to "Rent" when you don't know.
-- location: ONE canonical Saudi city in English from the CITIES list. Map districts/landmarks/geography/lifestyle to the right city. "" if unknown.
+- location: the user's intended Saudi place. PREFER a canonical English city from the CITIES list when the user named one (or a clear district/landmark inside one). IF the user named a small town / less-famous place that is NOT in the CITIES list, output it AS THE USER WROTE IT (Arabic verbatim — e.g. "ذبحة"/"الهياثم"/"الوجه"). NEVER remap an unknown place to a phonetically-similar known city ("ذبحة" → "Abha" is FORBIDDEN). The app validates against the full Saudi catalog (~4,581 cities, much larger than this list). "" only when truly unknown after honest attempt.
 - type: ONE canonical English type from the TYPES list (map synonyms). "" if unknown.
 - detail: bedrooms ("1","2","3","4","5+") for residential & leisure; size in square meters for commercial/land/farm. "" if unknown.
 - price: digits only, SAR. "" if none.
@@ -651,6 +651,13 @@ Deno.serve(async (req: Request) => {
           if (o) { priceOriginal = o; break; }
         }
       }
+      // Bug-fix #7 (audit `agent-no-postmodel-catalog-guard`): defensive post-model location guard.
+      // Pass through the model's location verbatim — the client resolver validates against the full
+      // catalog (4,581 cities). NEVER force into a CITIES-list member; if Gemini outputs Arabic
+      // (e.g. "ذبحة" for the unknown Eastern-Province city), let it through unchanged so the client
+      // can match it exactly. Just normalize whitespace and reject objects/arrays sneaking through.
+      const rawLoc = typeof out.location === "string" ? out.location : "";
+      const location = rawLoc.replace(/\s+/g, " ").trim();
       return json({
         kind: "listings",
         reply: lead(out.reply),
@@ -658,7 +665,7 @@ Deno.serve(async (req: Request) => {
           deal,
           bothDeals,
           priceIsAnnual,
-          location: typeof out.location === "string" ? out.location : "",
+          location,
           type: typeof out.type === "string" && out.type ? out.type : null,
           detail: typeof out.detail === "string" && out.detail ? out.detail : null,
           price,
