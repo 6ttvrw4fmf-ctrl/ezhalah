@@ -119,14 +119,13 @@ function cityFilterFor(location: string): string | null {
   const loc = location.trim().toLowerCase();
   if (!loc) return null;
   if (CITY_ALIASES[loc]) return CITY_ALIASES[loc];
-  // Exact match first — avoids a short city name (e.g. "Badr", "Duba") substring-matching a longer
-  // unrelated location phrase before the intended city is reached.
+  // Exact match against the curated KNOWN_CITIES list. Substring matching (loc.includes(c) ||
+  // c.includes(loc)) was REMOVED 2026-06-26 — it silently substituted one real city for another
+  // ('dhabhah'.includes('abha') → returned Abha for a search of Dhabhah, an Eastern-Province city
+  // in a different region with 0 listings). Locked rule: never silently substitute one catalog city
+  // for another. Unknown → null; the caller honest-zeroes at remote.ts:457.
   for (const c of KNOWN_CITIES) if (loc === c.toLowerCase()) return c;
-  for (const c of KNOWN_CITIES) {
-    const cl = c.toLowerCase();
-    if (loc.includes(cl) || cl.includes(loc)) return c;
-  }
-  return null; // not a recognized city → don't constrain server-side; client narrows by district
+  return null;
 }
 
 // English DB-city label → Arabic canonical city (mirrors the DB's loc_city_map). The RPC matches the
@@ -437,7 +436,12 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   // Resolve the location scope into a set of cities to filter the index by.
   const lm = q.locationMatch;
   let cities: string[] | null = null;
-  if (lm?.kind === 'region' && lm.cities && lm.cities.length) {
+  if (lm?.exact && lm.kind === 'city' && lm.city) {
+    // EXACT catalog city match → push canonical Arabic straight to the RPC. Never re-route through
+    // cityFilterFor (which would have substring-substituted 'Dhabhah'→'Abha' — see locked rule).
+    // 2026-06-26 fix for the ذبحة→أبها cross-region leak: an exact catalog hit is the answer.
+    cities = [arCity(lm.city) || lm.city];
+  } else if (lm?.kind === 'region' && lm.cities && lm.cities.length) {
     // REGION search → every city in the region (resolver expanded it from the index's region→city data),
     // so we return the WHOLE region, not just its capital. (user: "Region = all listings in that region.")
     cities = Array.from(new Set(lm.cities.map((c) => arCity(cityFilterFor(c) || c)).filter(Boolean))) as string[];
