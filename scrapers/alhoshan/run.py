@@ -39,6 +39,10 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+from scrapers.common.arabic_location import to_catalog
+
+# PDPL: never store these containers (advertiser / brokerage identity).
+_PII = {"advertiser", "brokerageBadge", "brokerageContract"}
 
 BASE = "https://www.alhoshan.sa"
 SEARCH = f"{BASE}/api/alhoshan/properties/search"
@@ -207,6 +211,14 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
     photo = (img if isinstance(img, str) and img.startswith("http")
              else (BASE + img if isinstance(img, str) and img.startswith("/") else None))
 
+    # Native Arabic R/C/D (ADDITIVE — the live English city/region/neighborhood above are untouched)
+    # + catalog IDs, resolved from the source's own Arabic specs.city/specs.district. `region` (the
+    # scraper's own region signal) disambiguates same-name twins (e.g. «بيش» Asir vs Jazan).
+    cid, rid = to_catalog(raw_city, region_hint=region)
+    # Complete-source capture (capture-once contract): the whole API item MINUS broker PII. The Al
+    # Hoshan list item IS the full record (description, lat/lng, street, all specs, seo*) — no detail
+    # endpoint to chase. Stored in source_capture, which the app never selects. Numbers unchanged.
+
     row = {
         "ad_number": f"AH{pub}",
         "listing_url": f"{BASE}/properties/{pub}",
@@ -229,6 +241,12 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "photo_urls": [photo] if photo else [],
         "rega_location_verified": bool(p.get("advertisingLicenseNumber")),
         "additional_info": _additional_info(p, specs),
+        # ── Arabic-native (additive, shadow) + complete-source capture ──────────
+        "city_ar": raw_city or None,
+        "district_ar": (specs.get("district") or "").strip() or None,
+        "city_id": cid,
+        "region_id": rid,
+        "source_capture": {k: v for k, v in p.items() if k not in _PII},
     }
     return row, category
 
