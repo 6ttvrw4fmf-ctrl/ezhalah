@@ -995,7 +995,29 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
     return { raw, kind: 'district', city: strong[0][0], region: strong[0][1].region, label: raw, districts: allDistricts, cities: strong.map(([c]) => c), ambiguous: true, exact: true };
   }
   if (hit) {
-    if (hit.kind === 'city') return { raw, kind: 'city', city: hit.nameEn, region: hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [], exact: true };
+    if (hit.kind === 'city') {
+      // Bug-fix #3 (audit `resolver-no-twin-ambiguity-branch`): the catalog has ~300 city-name groups
+      // that repeat across regions (e.g. «الهفوف» Eastern + Riyadh hamlet, «بيش» Asir + Jazan). If the
+      // user typed the bare city name with NO region hint, the resolver previously silently picked
+      // matchLocations()[0] — which could be the wrong twin. Detect any other matched city with the
+      // SAME Arabic/English name in a different region and surface as ambiguous so the agent backstop
+      // asks «تقصد X في R1 ولا X في R2؟» and the engine refuses to fan out across regions.
+      const allMatches = matchLocations(raw);
+      const twins = allMatches.filter((p) =>
+        p.kind === 'city' && p !== hit && p.regionEn !== hit.regionEn &&
+        (p.nameAr === hit.nameAr || p.nameEn.toLowerCase() === hit.nameEn.toLowerCase())
+      );
+      if (twins.length > 0) {
+        const all = [hit, ...twins];
+        return {
+          raw, kind: 'city', city: hit.nameEn, region: hit.regionEn,
+          label: ar(locale) ? hit.nameAr : hit.nameEn,
+          districts: [], cities: all.map((p) => p.nameEn),
+          ambiguous: true, exact: true,
+        };
+      }
+      return { raw, kind: 'city', city: hit.nameEn, region: hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [], exact: true };
+    }
     if (hit.kind === 'region') {
       // Region search → carry the DB region value + ALL its cities, so the engine returns the whole
       // region (not just the capital). (user: "Region search = all listings in that region.")

@@ -118,6 +118,13 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
   // The user explicitly asked for the whole area (or the whole Kingdom) — honour it, don't ask to narrow.
   if (WHOLE_AREA.test(userText) || KINGDOM_WIDE.test(userText)) return null;
   const lm = resolveLocation(loc, 'ar');
+  // Bug-fix #3: a TWIN CITY (same name in 2+ catalog regions, e.g. «الهفوف» Eastern vs Riyadh) → ask
+  // WHICH REGION. The resolver flags ambiguous=true on kind='city' for these; the engine refuses to
+  // fan out cross-region until the user picks. Per locked rule: same name in 2 regions → never guess.
+  if (lm.kind === 'city' && lm.ambiguous && lm.cities && lm.cities.length > 1) {
+    const names = Array.from(new Set(lm.cities.slice(0, 6).map((c) => cityDisplay(c, 'ar'))));
+    return `«${lm.label}» موجودة في أكثر من منطقة (${names.join('، ')}). أي منطقة تقصد؟`;
+  }
   // 1) A bare district shared by several cities → ask WHICH CITY (cities with listings first).
   if (lm.kind === 'district' && lm.ambiguous && lm.cities && lm.cities.length > 1) {
     const names = Array.from(new Set(lm.cities.slice(0, 8).map((c) => cityDisplay(c, 'ar')))).slice(0, 6);
