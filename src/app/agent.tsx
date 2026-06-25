@@ -593,17 +593,21 @@ export default function Agent() {
           m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: clarifyQ, typing: true } : x)),
         );
       } else {
-        // A real search resolved — clear the anti-loop state so the next request starts fresh.
+        // Bug-fix #10 (audit `agent-2ask-cap-silent-search`): when we hit the 2-question cap with an
+        // unusable location, the silent fallback search needs to TELL the user what scope was used so
+        // they're not surprised by broad results. (user directive: "explain the search scope used".)
+        const forcedBroad = !!clarifyQ && askCountRef.current >= 2;
         askCountRef.current = 0;
         saidRef.current = [];
-        const result = await runQuery(turn.query); // now async: fetches the matching subset server-side
-        // About to scrape: a random Saudi hype line + a compact read-back of the parsed query, then the
-        // "searching…" beat. Build the read-back from the RESOLVED query (result.query) so a corrected
-        // location (typo → real city + Region → District) shows in the summary. (user request.)
-        const reply = buildScrapeIntro(result.query ?? turn.query);
+        const result = await runQuery(turn.query);
+        const reply = forcedBroad
+          ? `${v === 'ar'
+              ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
+              : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query)}`
+          : buildScrapeIntro(result.query ?? turn.query);
         await playListings(run, statusId, reply, result, v);
         if (run.cancelled) return;
-        void promptSignupSoon(run); // a guest just used their one free search → prompt sign-up
+        void promptSignupSoon(run);
       }
     } else {
       // The model asked a clarifying question. Read back EVERYTHING said so far: if we can already see

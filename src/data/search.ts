@@ -1005,12 +1005,16 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
   if (explicitPlace && countWith({ priceInput: '', priceBand: null, detail: null, type: null, typeGroup: null }) === 0) {
     return t('No listings in this location right now.');
   }
-  // "Did you mean X?" — only for a FREE-TYPED, unresolved place (a typo/obscure town), NEVER for an
-  // explicit catalog pick. Fires when the resolved place has NO live inventory AND a close city exists.
-  // We SUGGEST it; we never silently switch cities — the DB stays the source of truth. (user request.)
+  // "Did you mean X?" — fires for: (a) a free-typed unresolved place (typo/obscure town) whose lm has
+  // NO live inventory and a close city exists, OR (b) bug-fix #9: a fuzzy-corrected city (lm.fuzzy)
+  // REGARDLESS of whether the corrected city has inventory — the locked rule is never to silently
+  // swap cities, so the user must see «هل تقصد X؟» before accepting the substitute. (user request.)
   const lmCity = q.locationMatch?.city || '';
-  if (!explicitPlace && q.location.trim() && (!lmCity || !cityHasListings(lmCity))) {
-    const alt = nearbyCityWithListings(q.locationMatch?.raw || q.location, lmCity);
+  const isFuzzy = q.locationMatch?.fuzzy === true;
+  if (!explicitPlace && q.location.trim() && (isFuzzy || !lmCity || !cityHasListings(lmCity))) {
+    const alt = isFuzzy && lmCity
+      ? { cityEn: lmCity, region: q.locationMatch?.region || '', n: 0 }
+      : nearbyCityWithListings(q.locationMatch?.raw || q.location, lmCity);
     if (alt) {
       return t('We couldn’t find listings in "{place}". Did you mean {alt}?', { place: q.locationMatch?.label || q.location, alt: tPlace(alt.cityEn) });
     }

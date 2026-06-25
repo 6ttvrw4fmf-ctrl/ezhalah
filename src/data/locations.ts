@@ -398,6 +398,9 @@ export type LocationResolution = {
   exact?: boolean;     // an EXACT catalog/inventory place (district/city/region), NOT a fuzzy typo guess —
                        // gates the zero-state vs "did you mean": exact + empty = honest zero (no substitute);
                        // fuzzy (a misspelled near-miss) keeps the «هل تقصد…؟» suggestion. (filter location policy)
+  fuzzy?: boolean;     // bug-fix #9: a fuzzy-corrected city (e.g. «القرص»→«الرس»). The «هل تقصد X؟»
+                       // banner must surface whenever this is set, regardless of whether the corrected
+                       // city has listings. Locked rule: fuzzy correction never silently swaps cities.
 };
 
 // Letters/digits only (drops spaces, punctuation, Arabic diacritics) — for phrase `includes` tests.
@@ -845,8 +848,14 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
     // ("assafarat" ⊃ "assafa"). Raw Arabic is the source of truth; English is a helper alias. (user.)
     if (!(probeAlts.some((p) => districtMatchesProbe(d.district, p)) || fuzzyTokenHit(d.district))) continue;
     if (cityKey) {
+      // Bug-fix #11 (audit `liveDistrictLookup-canonical-mismatch`): the live index stores d.city in
+      // English DB labels while the picker / catalog may pass cityKeyAr in Arabic. Route through
+      // CITY_AR_DISPLAY so an English raw city compares correctly against the Arabic catalog city
+      // (mirrors rawDistrictVariants' check at line 881). Without this, picker-chosen Arabic cities
+      // failed to match their English-labelled live districts → districts dropped silently.
       const dc = flatLoc(d.city);
-      if (dc !== cityKey && dc !== cityKeyAr) continue; // a city was named → keep only that city
+      const dcAr = CITY_AR_DISPLAY[dc] || '';
+      if (dc !== cityKey && dc !== cityKeyAr && flatLoc(dcAr) !== cityKeyAr) continue;
     }
     out.push(d);
   }
@@ -1035,7 +1044,10 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
     // `city` is ENGINE-FACING → canonical English (cityFilterFor / cityHasListings / nearbyCity all key
     // off the English DB label); `label` carries the localized display. (Returning the localized name
     // here would silently break server-side scoping for Arabic-locale fuzzy hits — caught in review.)
-    return { raw, kind: 'city', city: fc.city, region: fc.region || undefined, label: cityDisplay(fc.city, locale), districts: [], cities: [] };
+    // Bug-fix #9: tag this as a fuzzy correction so the «هل تقصد X؟» banner ALWAYS surfaces — even if
+    // the corrected city has live inventory (the old gate hid the banner when the substitute city
+    // happened to have listings, silently swapping cities). Per locked rule: never silently substitute.
+    return { raw, kind: 'city', city: fc.city, region: fc.region || undefined, label: cityDisplay(fc.city, locale), districts: [], cities: [], fuzzy: true };
   }
   // 4) Geography cue ("near the sea" → coastal city + waterfront districts).
   for (const g of GEOGRAPHY) if (hasWord(g.words)) {
