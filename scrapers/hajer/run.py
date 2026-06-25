@@ -41,6 +41,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+from scrapers.common.arabic_location import to_catalog
 
 BASE = "https://hajerhouses.com"
 LIST_API = f"{BASE}/wp-json/wp/v2/properties"
@@ -161,6 +162,18 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     raw_city = f.get("المدينة", "").strip()
     city = CITY_MAP_AR.get(raw_city) or normalize.map_city(raw_city) or "Hofuf"
     region = CITY_TO_REGION.get(city)
+
+    # Native Arabic R/C/D (ADDITIVE — live city/region/neighborhood above untouched). hajer's REM table
+    # carries Arabic المدينة + أسم الحي. Per the standing rule المبرز/الأحساء/الهفوف stay catalog-SEPARATE
+    # (resolved as-published, not folded); this Al-Ahsa-only brokerage defaults a missing city to «الأحساء».
+    # region hint = the scraper's region (twin disambiguation). source_capture = the full REM field table +
+    # WP basics (the source spec table carries NO broker PII). Numbers unchanged.
+    city_ar = raw_city or "الأحساء"
+    district_ar = (f.get("أسم الحي") or "").strip() or None
+    cid, rid = to_catalog(city_ar, region_hint=region)
+    cap = {"rem_fields": f, "wp_id": p.get("id"), "link": p.get("link"),
+           "title": _clean((p.get("title") or {}).get("rendered", ""))}
+
     price = _num(f.get("السعر"))
 
     extra = []
@@ -190,6 +203,12 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         "photo_urls": _image(p, html_text),
         "rega_location_verified": False,
         "additional_info": extra,
+        # ── Arabic-native (additive, shadow) + complete-source capture ──────────
+        "city_ar": city_ar,
+        "district_ar": district_ar,
+        "city_id": cid,
+        "region_id": rid,
+        "source_capture": cap,
     }
     return row, category, gone
 
