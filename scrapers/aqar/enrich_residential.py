@@ -8,9 +8,18 @@ from __future__ import annotations
 
 import re
 from typing import Any, Optional
+from urllib.parse import urlparse, unquote
 
 from scrapers.common.http import get
 from scrapers.common import normalize as N
+
+
+# PDPL: never store broker/advertiser contact. Strip Saudi mobile numbers from any free text we keep.
+_PII_PHONE_RE = re.compile(r"(?:(?:\+|00)?966|0)5\d{8}")
+
+
+def _redact_pii(s: str) -> str:
+    return _PII_PHONE_RE.sub("[redacted]", s)
 
 
 LISTING_ID_RE = re.compile(r"-(\d{6,})/?$")
@@ -234,7 +243,11 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     features = {col: _flag(text, pats) for col, pats in FEATURE_PATTERNS}
 
     # ─── Media & Metadata ────────────────────────────────────────────────────
-    photos = list(dict.fromkeys(re.findall(r'https://images\.aqar\.fm[^"\'\s]+', html)))[:30]
+    # ALL listing photos (no cap). Scoped to images.aqar.fm — the gallery CDN — so the broker
+    # avatar on cdn.aqar.fm/users/* (PII) and the REGA s3 license icons are NOT swept in.
+    # (capture-complete contract: store every photo URL the source exposes; the old [:30] cap was
+    # silently dropping galleries — observed up to 65 distinct image URLs on a single listing.)
+    photos = list(dict.fromkeys(re.findall(r'https://images\.aqar\.fm[^"\'\s]+', html)))
     mv = re.search(r'https://[^"\'\s]+\.(?:mp4|webm|mov)', html, re.IGNORECASE)
     video_url = mv.group(0) if mv else None
     mt = re.search(r"<title>(.*?)</title>", html, re.DOTALL)
@@ -243,6 +256,24 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     description = md.group(1).strip() if md else None
     date_added  = _text_after_label(text, r"تاريخ\s*الإعلان", r"تاريخ\s*الإضافة")
     last_update = _text_after_label(text, r"آخر\s*تحديث")
+
+    # ── Complete-source capture (capture-once contract) ──────────────────────────
+    # Stored in the DEDICATED `source_capture` column — NOT `additional_info` (which the app selects
+    # on every search and renders as the {key,label,value} panel; Aqar keeps that NULL). source_capture
+    # is never selected by the client, so this adds zero query weight to live search.
+    # Aqar pages carry no clean JSON-LD/__NEXT_DATA__ blob and expose no coordinates; the de-tagged
+    # visible `text` already holds every field the page shows (title, description, all specs, location
+    # text, features, dates). Store it verbatim — minus Saudi phone numbers (PDPL) — so any field we
+    # don't promote to a dedicated column today stays recoverable from stored data WITHOUT a re-scrape.
+    # `url_path` keeps the full Arabic location hierarchy the slug encodes. Images = URLs only.
+    # (The richer Next.js `self.__next_f` RSC flight payload is a future option, stored PII-redacted, if
+    # a NON-visible structured field is ever needed; the visible text covers all Aqar displays today.)
+    source_capture = {
+        "schema": "aqar.v2-fulltext",
+        "source_text": _redact_pii(text),
+        "url_path": unquote(urlparse(url).path),
+        "image_count": len(photos),
+    }
 
     return {
         "ad_number":               ad_number,
@@ -289,4 +320,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         "description":             description,
         "date_added":              date_added,
         "last_update":             last_update,
+        # complete-source capture (full visible content + location path, PII-redacted). Dedicated
+        # column the client never selects; keeps `additional_info` NULL for Aqar as the app expects.
+        "source_capture":          source_capture,
     }

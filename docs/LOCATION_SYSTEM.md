@@ -9,6 +9,67 @@ rules the system must never break.
 
 ---
 
+## 0. Target architecture (AGREED 2026‑06‑25 — north star; NOT yet implemented)
+
+> §1–§10 describe the **current** (English‑pivot) implementation. This section records the **agreed
+> target**. Migration is staged + parity‑gated (Phase A first; see §11). **Nothing here is live yet.**
+
+**Principle: the internal search key is the Saudi catalog ID — not English text, and not Arabic text.**
+Arabic is the canonical language; English is **not** part of the core search pipeline (and the app no
+longer supports English as a language).
+
+- **Arabic is canonical** for storage, matching, and display. Display is always Arabic.
+- **Key on stable catalog IDs.** Region and City use stable Saudi‑catalog IDs (`region_id`, `city_id`).
+  District uses `district_id` **where the catalog has one**, otherwise it falls back to the **raw Arabic
+  district text** scoped under its `city_id`. (Catalog district coverage is currently ~13 cities, so most
+  districts stay Arabic‑text for now — this is fine: district is already kept verbatim in Arabic.)
+- **Ingest = match, then assign.** Scraped Arabic location is matched against the catalog at ingest and
+  assigned `region_id` / `city_id` / `district_id`. The match (Arabic → catalog via a shared `normalize_ar`
+  + a small curated Arabic alias map, ~45 entries) is the **one place accuracy is determined**; everything
+  downstream is integer IDs and cannot drift.
+- **Store per listing:** `region_id`, `city_id`, `district_id` (nullable), the **raw Arabic** region/city/
+  district exactly as published by the source, and the Arabic canonical display name. Raw text is never
+  overwritten (source of truth + audit).
+- **Index on IDs.** The location index/canonical store is built from the IDs.
+- **One resolution for both front doors.** The Filter and the AI Agent both resolve the user's location to
+  the **same catalog IDs**; search filters by ID wherever possible. Exact Region/City/District = exact
+  integer scope — the strongest guarantee that the user gets exactly what they selected.
+- **English handling:** removed from scrape → match → index → filter → agent → display. If an English
+  string ever arrives, it is converted to a catalog entry at the **input stage only**, never stored or indexed.
+
+**Why IDs over Arabic text as the key:** collision‑free (أبها/ابها = one id; the `Unayzah≠Unaizah` class
+becomes impossible), language‑neutral, stable across re‑spelling, hierarchy‑native (district_id → city_id →
+region_id). **IDs do not raise match accuracy** — they make a *correct* match permanent and unambiguous.
+Accuracy still rests on the ingest match + catalog authority. **IDs must be append‑only (never renumbered).**
+
+---
+
+## 0.1 Scraper capture contract (complete‑capture standard — ALL platforms, from day one)
+
+Every scrape / re‑fetch **captures the complete source listing whenever available, stores it once**, so we
+**never re‑scrape a platform later just to start using another field.**
+
+- **Capture (when the source provides it):** title, description, region, city/town, district, address,
+  street name, facade/direction, street width, **boundaries, dimensions**, property type/subtype, amenities,
+  utilities, furnishing, REGA description, **all photo URLs**, and every other listing attribute. **Numbers
+  unchanged.** Arabic is the source of truth; never machine‑translate.
+- **Store:** dedicated columns for the resolution fields (`city_ar`/`region_id`/`district_ar`…) + a JSONB
+  blob (`ar_data` / `additional_info`) for everything else. Photos as **URLs** in `photo_urls`.
+- **Images = URLs only.** We reference the platform's image CDN; we do **NOT** download/re‑host the binary
+  image files (separate, deliberate decision if ever needed — storage + copyright).
+- **Exclude PII:** broker/agent personal data (owner/agent name, company, email, contact) is **never stored.**
+- **Use now (current phase):** ONLY **Region / City‑Town / District** are wired into the Filter + AI Agent.
+  Everything else is **parked and unused** until a later phase.
+- **Enable later with ZERO re‑scrape:** advanced fields are already stored — turning them on is a config/UI
+  change, not a new crawl.
+- **Future scrapers follow this from day one** (the new‑scraper template enforces it).
+- **Known limits (not failures):** can't capture data the source doesn't publish (e.g. Aqar has no
+  *structured* boundaries — only free‑text in the description); a platform that's down (e.g. erapulse / CF‑530)
+  waits; listings the source never located stay unresolved; and any *older* scraper that stored only a subset
+  needs a one‑time backfill for a newly‑wanted field (verify per platform before the advanced phase).
+
+---
+
 ## 1. Overall architecture
 
 Data flows in **one direction**, through five layers. Each layer has a single job.
@@ -220,6 +281,16 @@ never hiding a better listing.** Newest‑first within a relevance tier.
 5. **Never invent locations.**
 6. **Never substitute another location** unless the user explicitly asks for alternatives.
 7. **Only display real listings that exist in our database.**
+8. **The catalog and the listings database are SEPARATE — a valid catalog location with zero listings is CORRECT behavior, not a bug.**
+   - **Catalog** (`sa-locations.json`) = *all* valid Saudi regions, cities, districts, and locations — complete, **independent of inventory**.
+   - **Listings database** = only the active scraped listings we currently hold (~170k).
+   - A user selects/types a **valid catalog location** → search **that exact location** (and show its real catalog region):
+     - has active listings → show them;
+     - **zero** active listings → show **«ما فيه إعلانات في هذا الموقع حالياً»**.
+   - **Never** substitute another city/district/region. **Never** invent a region. **Never** treat zero inventory as a failure. **Never** remove a valid catalog location just because it currently has no listings.
+   - Applies to **both the Filter and the Ezhalah AI Agent.**
+   - Ask to clarify **only** when the place is genuinely ambiguous/unclear — never for a valid place that is simply empty.
+   - _Worked example:_ «اللحن» (Al Lihin) is a real catalog **city** in منطقة المدينة المنورة with no current listings → the honest‑zero response is **correct**, not a bug. (Whereas a typed string that is *not* in the catalog and *not* a clear same‑place misspelling → «هل تقصد …؟» with the closest real place, or honest zero — never invent a region for it.)
 
 ---
 
