@@ -57,10 +57,9 @@ const uid = () => 'm' + Date.now() + Math.round(Math.random() * 1e6);
 // The opening greeting Ezhalah types into a fresh chat (user-authored, verbatim). Language follows
 // the UI locale — Arabic in Arabic mode, English in English mode, never mixed. Rendered live from
 // the locale (not frozen at send time) so flipping language re-renders it in the other language.
+// Welcome banner: user request — just the word «ازهله», no flourishes / jokes / "son of AI" line.
 const greetingText = (locale: Locale): string =>
-  locale === 'ar'
-    ? 'ارحب! أنا إزهله. وش العقار والمدينة اللي تدور عليها؟ عطني التفاصيل وابشر بسعدك.. ازهله، وأنا ولد الذكاء الاصطناعي!'
-    : "Hello! I'm Ezhalah. What property and city are you looking for? Give me the details and I'll do my best to find it for you.. Ezhalah, for I am truly the son of Artificial Intelligence!";
+  locale === 'ar' ? 'ازهله' : 'Ezhalah';
 
 // Ezhalah's SEARCHING-phase voice — one Najdi-flavoured swagger line chosen at random before each
 // search (its recognizable Saudi personality, NOT generic "searching now"). Shown ONLY while searching,
@@ -69,30 +68,15 @@ const greetingText = (locale: Locale): string =>
 // original 22 — leaving the 9 below. HYPE_AR and HYPE_EN stay in lockstep (same index = same
 // slogan). To re-add a slogan later, paste both the Arabic line and its English twin back at the
 // SAME index in both arrays.
-const HYPE_AR = [
-  'ازهله، على شنبي!',
-  'ازهله، على خشمي الوجيه!',
-  'ازهله، ودونك غترتي وعقالي!',
-  'ازهله، وفالك طيب!',
-  'ازهله، من عيوني!',
-  'ازهله، وابشر بسعدك!',
-  'ازهله، وعلى يمناي كل اللي تبيه!',
-];
+// User request: no jokes / flourishes — just the word «ازهله» everywhere.
+const HYPE_AR = ['ازهله'];
 // English versions of the same 22 approved Arabic slogans (same index → same slogan). These are
 // FAITHFUL translations of HYPE_AR — not improvisations. The word "Ezhalah" is kept verbatim
 // (NEVER translated to "Leave it to us" / "facilitate" / etc.) and the Najdi imagery is preserved.
 // The slogan is rendered LTR with the sparkle icon on the LEFT when the UI is English, mirroring
 // the RTL Arabic placement. (user request: "translate the Arabic slogan to English and put it in
 // the correct English position — just never translate the word Ezhalah.")
-const HYPE_EN = [
-  'Ezhalah, on my mustache!',                              // ازهله، على شنبي!
-  'Ezhalah, on my honorable nose!',                        // ازهله، على خشمي الوجيه!
-  'Ezhalah, take my ghutra and igal as collateral!',       // ازهله، ودونك غترتي وعقالي!
-  'Ezhalah, and may your fortune be good!',                // ازهله، وفالك طيب!
-  'Ezhalah, from my own eyes!',                            // ازهله، من عيوني!
-  'Ezhalah, rejoice in your good fortune!',                // ازهله، وابشر بسعدك!
-  'Ezhalah, everything you want is in my right hand!',     // ازهله، وعلى يمناي كل اللي تبيه!
-];
+const HYPE_EN = ['Ezhalah'];
 // RESULTS phase = professional, trustworthy (NOT the personality phrases). One picked at random;
 // rendered as plain text directly under the Search Summary — NO "Ezhalah!" prefix, no sparkle icon,
 // so it doesn't look like a second slogan. The branded slogan above carries the personality. (user request.)
