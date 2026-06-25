@@ -461,7 +461,15 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   // Resolve the location scope into a set of cities to filter the index by.
   const lm = q.locationMatch;
   let cities: string[] | null = null;
-  if (lm?.exact && lm.kind === 'city' && lm.city) {
+  // Bug-fix #3+#4+#5 (2026-06-26): when the resolver flagged AMBIGUOUS (twin city, or bare district in
+  // multiple cities), do NOT fan out across the matched cities — return [] so the deterministic agent
+  // backstop's clarification fires («أي مدينة؟» / «أي منطقة؟»). Per locked rules: selected City →
+  // search ONLY that city; same name in 2 regions → ask, never guess. The user's city pin (if any)
+  // is already encoded in q.location and resolved via the "District، City" branch upstream, so by the
+  // time we see ambiguous=true here the user has NOT pinned a city.
+  if (lm?.ambiguous && lm.cities && lm.cities.length > 1) {
+    cities = [];
+  } else if (lm?.exact && lm.kind === 'city' && lm.city) {
     // EXACT catalog city match → push canonical Arabic straight to the RPC. Never re-route through
     // cityFilterFor (which would have substring-substituted 'Dhabhah'→'Abha' — see locked rule).
     // 2026-06-26 fix for the ذبحة→أبها cross-region leak: an exact catalog hit is the answer.
