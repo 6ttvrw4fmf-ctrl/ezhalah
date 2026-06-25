@@ -202,9 +202,10 @@ def to_catalog(city_ar: Optional[str], region_hint: Union[int, str, None] = None
         hit = pick(stripped)
         if hit:
             return hit
-    # Otherwise treat it as a region label → region_id only.
+    # Otherwise treat it as a region label → region_id only; failing that, fall back to an explicit
+    # region hint (e.g. a structured «منطقة …» field) so an unknown city still keeps its real region.
     rid = _REGION_NORM.get(n) or _REGION_NORM.get(stripped) or _REGION_NORM.get("منطقه " + n)
-    return None, rid
+    return None, (rid or hint)
 
 
 def region_id_for(city_ar: Optional[str], region_hint: Union[int, str, None] = None) -> Optional[int]:

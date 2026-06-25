@@ -33,7 +33,14 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
+import copy
+
 from scrapers.common import db, normalize
+from scrapers.common.arabic_location import to_catalog
+
+# PDPL: advertiser/agent identity + contact inside advertisement_response — never stored.
+_PII = {"advertiserId", "advertiserName", "responsibleEmployeeName",
+        "responsibleEmployeePhoneNumber", "phoneNumber"}
 
 API = "https://aqargate.com/wp-json/wp/v2/properties"
 HEADERS = {"Accept": "application/json"}
@@ -159,6 +166,21 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
 
     city = normalize.map_city(loc.get("city") or "") or "Other"
+
+    # Native STRUCTURED Arabic (ADDITIVE — live city/neighborhood above untouched). Aqargate's REST
+    # carries a clean {region, city, district} in Arabic → resolve catalog IDs with the region as the
+    # twin-disambiguation hint (no parser, no loose matching). source_capture = the whole WordPress
+    # property MINUS advertiser PII (nested in advertisement_response). Numbers/photos unchanged.
+    city_ar = (loc.get("city") or "").strip() or None
+    region_ar = (loc.get("region") or "").strip() or None
+    district_ar = (loc.get("district") or "").strip() or None
+    cid, rid = to_catalog(city_ar, region_hint=region_ar)
+    cap = copy.deepcopy(p)
+    _arc = (cap.get("property_meta") or {}).get("advertisement_response")
+    if isinstance(_arc, dict):
+        for _k in _PII:
+            _arc.pop(_k, None)
+
     price = ar.get("propertyPrice") or ar.get("landTotalPrice")
     rent = ar.get("landTotalAnnualRent") or ar.get("propertyPrice")
     thumb = p.get("thumbnail")
@@ -182,6 +204,12 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "property_age": _int(ar.get("propertyAge")),
         "rega_location_verified": bool(ar.get("adLicenseNumber")),
         "additional_info": _additional_info(ar),
+        # ── Arabic-native structured (additive, shadow) + complete-source capture ──
+        "city_ar": city_ar,
+        "district_ar": district_ar,
+        "city_id": cid,
+        "region_id": rid,
+        "source_capture": cap,
     }
     return row, category
 
