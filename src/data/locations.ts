@@ -655,15 +655,23 @@ function fuzzyCity(raw: string): { city: string; region: string } | null {
   const q = norm(raw);
   if (q.length < 4) return null; // too short to correct safely
   const qf = fuzzyFold(raw);
+  // STRICT thresholds (post «ذبحة»→«أبها» bug, 2026-06-26): rely on EDIT DISTANCE only — that's what
+  // a "typo" actually is. Drop the loose Dice-OR-ed-OR fallback that previously let «ذبحة» (ed=3 to
+  // «أبها», Dice tiny — clearly different words) substitute «أبها» on a generous Dice threshold.
+  // Real typos like «القرص»→«الرس» have ed=1 and pass cleanly under ed alone. Locked rule: never
+  // silently substitute one catalog city for another.
+  //   • exact folded match → return immediately
+  //   • else require shared first letter + length within ±1 + ed ≤ maxD (small)
+  //   • Dice is only a tie-breaker, never a sole acceptance signal
   const maxD = qf.length <= 4 ? 1 : qf.length <= 7 ? 2 : 3;
   let best: { city: string; ed: number; d: number } | null = null;
   for (const ck of cityKeys()) {
     if (ck.key === q) return { city: ck.city, region: regionForCity(ck.city) }; // exact (folded earlier)
-    const sharesHead = ck.fold[0] === qf[0];
-    if (!sharesHead) continue; // a shared first letter is REQUIRED — never accept on Dice overlap alone
+    if (ck.fold[0] !== qf[0]) continue; // shared first letter REQUIRED
+    if (Math.abs(ck.fold.length - qf.length) > 1) continue; // length within ±1 (different-length = different word)
     const ed = editDistance(ck.fold, qf);
+    if (ed > maxD) continue; // ed is the only acceptance gate
     const d = dice(ck.fold, qf);
-    if (!(ed <= maxD || d >= 0.62)) continue;
     if (!best || ed < best.ed || (ed === best.ed && d > best.d)) best = { city: ck.city, ed, d };
   }
   return best ? { city: best.city, region: regionForCity(best.city) } : null;
