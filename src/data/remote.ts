@@ -32,8 +32,9 @@ const KNOWN_CITIES = [
   'Buraidah', 'Unaizah', 'Ar Rass', 'Al Bukayriyah', 'Al Mithnab', 'Al Badai', 'Riyadh Al Khabra',
   'An Nabhaniyah', 'Ash Shamasiyah',
   // Eastern region
-  'Dammam', 'Khobar', 'Dhahran', 'Hofuf', 'Jubail', 'Qatif', 'Hafar Al Batin', 'Ras Tanura',
-  'Abqaiq', 'An Nairyah', 'Khafji', 'Sayhat', 'Safwa', 'Tarout', 'Anak', 'Al Uyun',
+  'Dammam', 'Khobar', 'Dhahran', 'Hofuf', 'Al Ahsa', 'Mubarraz', 'Jubail', 'Qatif',
+  'Hafar Al Batin', 'Ras Tanura', 'Abqaiq', 'An Nairyah', 'Khafji', 'Sayhat', 'Safwa',
+  'Tarout', 'Anak', 'Al Uyun',
   // Asir region
   'Abha', 'Khamis Mushait', 'Bisha', 'Mahayel', 'Ahad Rafidah', 'Al Majardah', 'Balsamar', 'Tathlith',
   // Tabuk region
@@ -57,12 +58,14 @@ const KNOWN_CITIES = [
 // the agent's reply scopes to a city with 0 rows and silently returns nothing despite live data.
 // Keys are lowercase (cityFilterFor lowercases before lookup). Audited agent↔DB drift, June 2026.
 const CITY_ALIASES: Record<string, string> = {
-  // Al Ahsa / Al Hofuf region → its DB city label Hofuf. The CATALOG's English name for الهفوف is
-  // "Al Hafuf" (what the picker shows + the resolver returns), which differs from the DB label "Hofuf"
-  // — so map every form. (user-reported: "Al Hafuf" returned 0 listings + a bad "did you mean Abha".)
-  'al ahsa': 'Hofuf', 'al hasa': 'Hofuf', 'alahsa': 'Hofuf', 'hasa': 'Hofuf', 'ahsa': 'Hofuf',
-  'al hafuf': 'Hofuf', 'alhafuf': 'Hofuf', 'hafuf': 'Hofuf', 'al hofuf': 'Hofuf', 'hufuf': 'Hofuf',
-  'الهفوف': 'Hofuf', 'الأحساء': 'Hofuf', 'الاحساء': 'Hofuf',
+  // الأحساء / الهفوف / المبرز — three DISTINCT Eastern-Province catalog cities. User decision #5 (locked
+  // 2026-06-25): keep them strictly separate, never merged. Previously every form collapsed to "Hofuf";
+  // that was the alias-collapse bug. Each Arabic form now maps to its OWN canonical English DB label.
+  'الاحساء': 'Al Ahsa', 'الأحساء': 'Al Ahsa',
+  'al ahsa': 'Al Ahsa', 'al hasa': 'Al Ahsa', 'alahsa': 'Al Ahsa', 'hasa': 'Al Ahsa', 'ahsa': 'Al Ahsa',
+  'الهفوف': 'Hofuf', 'al hofuf': 'Hofuf', 'hofuf': 'Hofuf', 'al hafuf': 'Hofuf', 'alhafuf': 'Hofuf',
+  'hafuf': 'Hofuf', 'hufuf': 'Hofuf',
+  'المبرز': 'Mubarraz', 'al mubarraz': 'Mubarraz', 'mubarraz': 'Mubarraz', 'mubarrez': 'Mubarraz',
   // CATALOG-vs-DB city-label mismatches: the picker/agent surface the CATALOG's English spelling
   // (Makkah, Madinah, Khamis Mushayt, Buqayq, …) which differs from the DB label, so a pick dead-ended
   // at 0 results. Audited ALL 25 listing-cities the picker couldn't reach + their Arabic. (user-reported
@@ -152,7 +155,9 @@ const CITY_AR: Record<string, string> = {
   'dammam': 'الدمام', 'dawadmi': 'الدوادمي', 'dawmat al jandal': 'دومة الجندل',
   'dhahran': 'الظهران', 'dhahran al janub': 'ظهران الجنوب', 'diriyah': 'الدرعية',
   'duba': 'ضباء', 'hafar al batin': 'حفر الباطن', 'hail': 'حائل',
-  'hawtat bani tamim': 'حوطة بني تميم', 'hofuf': 'الهفوف', 'jazan': 'جازان',
+  'hawtat bani tamim': 'حوطة بني تميم', 'hofuf': 'الهفوف',
+  'al ahsa': 'الاحساء', 'mubarraz': 'المبرز',
+  'jazan': 'جازان',
   'jeddah': 'جدة', 'jubail': 'الجبيل', 'kaec': 'مدينة الملك عبدالله الاقتصادية',
   'khafji': 'الخفجي', 'khamis mushait': 'خميس مشيط', 'khaybar': 'خيبر',
   'khobar': 'الخبر', 'mahayel': 'محايل عسير', 'mahd adh dhahab': 'مهد الذهب',
@@ -171,6 +176,26 @@ const CITY_AR: Record<string, string> = {
 function arCity(en: string | null): string | null {
   if (!en) return null;
   return CITY_AR[en.trim().toLowerCase()] || en;
+}
+
+// Region name → region_id, mirrors loc_catalog_region (13 stable rows). Used to pass p_region_ids to
+// the RPC so same-name twin cities (e.g. «الهفوف» Eastern vs Riyadh) never fuse across regions.
+// Bug-fix #2 (audit `engine-no-region-scoping-twin-fusion`): the RPC matches city_ar only, so without
+// a region scope, all 290 twin-city groups in the catalog blur cross-region.
+const REGION_TO_ID: Record<string, number> = {
+  // Arabic canonical
+  'منطقة الرياض': 1, 'منطقة مكة المكرمة': 2, 'منطقة المدينة المنورة': 3, 'منطقة القصيم': 4,
+  'المنطقة الشرقية': 5, 'منطقة عسير': 6, 'منطقة تبوك': 7, 'منطقة حائل': 8,
+  'منطقة الحدود الشمالية': 9, 'منطقة جازان': 10, 'منطقة نجران': 11, 'منطقة الباحة': 12, 'منطقة الجوف': 13,
+  // English labels the resolver may also emit
+  'Riyadh': 1, 'Makkah': 2, 'Mecca': 2, 'Madinah': 3, 'Medina': 3, 'Qassim': 4,
+  'Eastern Province': 5, 'Eastern': 5, 'Asir': 6, 'Tabuk': 7, 'Hail': 8,
+  'Northern Borders': 9, 'Jazan': 10, 'Najran': 11, 'Al Bahah': 12, 'Al Baha': 12, 'Al Jawf': 13,
+};
+function regionIdsFor(lm: { exact?: boolean; kind?: string; region?: string } | null | undefined): number[] | null {
+  if (!lm || !lm.region) return null;
+  const id = REGION_TO_ID[lm.region.trim()];
+  return id ? [id] : null;
 }
 
 // The user's TYPE selection, in clean-type terms. `q.type` is a CLEAN property type (filter sets it
@@ -475,6 +500,9 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
     p_platforms: q.sources && q.sources.length ? q.sources : null,
     p_per_platform: 400,
     p_limit: QUERY_LIMIT,
+    // Region scope (bug-fix #2): pass region_id so same-name twin cities don't fuse cross-region.
+    // Derived from the resolver's region; null when no region context is known.
+    p_region_ids: regionIdsFor(lm),
   });
   if (error) return null;                       // index error → retry UI, not "no matches"
   if (!cands || !(cands as Cand[]).length) return [];
