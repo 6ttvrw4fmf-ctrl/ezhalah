@@ -243,8 +243,10 @@ function resolveDistrictsFromText(userText: string, city: string): string[] {
     }
   }
 
-  // Specific "حي X" / "X district" mentions — capture up to 3 words of the name.
-  const arHi = ar.match(/حي\s+([؀-ۿ]+(?:\s+[؀-ۿ]+){0,2})/);
+  // Specific "حي X" / "X district" mentions — bug-fix #12: capture at most 2 Arabic tokens (was 3),
+  // and stop on common scope/conjunction tokens (في / و / أو / منطقة / مدينة) so phrases like
+  // «حي العزيزية في الرياض» don't capture «العزيزية في الرياض» as a district name.
+  const arHi = ar.match(/حي\s+([؀-ۿ]+(?:\s+(?!في|و|أو|منطقة|مدينة)[؀-ۿ]+)?)/);
   if (arHi) out.push(arHi[1].trim());
   const enHi = userText.match(/\b(?:in|district\s+of|neighborhood\s+of)\s+(?:al[-\s])?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s*(?:district|neighborhood)?/);
   if (enHi) out.push(`Al ${enHi[1]}`);
