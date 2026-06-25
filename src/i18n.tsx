@@ -108,7 +108,6 @@ const AR: Record<string, string> = {
   'Start here': 'ابدأ من هنا',
   'Tap any of these to see real listings now': 'اضغط على أي منها لرؤية إعلانات حقيقية الآن',
   'Ezhalah — leave it on us.': 'Ezhalah — اتركها علينا.',
-  "Tell me the property and the city, and rejoice in your good fortune — I'm the son of Artificial Intelligence.": 'قول لي نوع العقار والمدينة، وأبشر بسعدك — أنا ولد الذكاء الاصطناعي.',
   'Max annual or monthly rent': 'الحد الأقصى للإيجار السنوي أو الشهري',
   'Max buy price or price per meter': 'الحد الأقصى لسعر الشراء أو سعر المتر',
   'Max monthly or annual rent': 'الحد الأقصى للإيجار الشهري أو السنوي',
