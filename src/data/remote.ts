@@ -5,6 +5,20 @@ import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
 import { normalizeType, queryForSelection, type SourceKind } from './propertyTypes';
+import { scoreListingProximity } from './proximity';
+
+// Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
+function relGroupOf(rel: string): string {
+  switch (rel) {
+    case 'near': return 'near';
+    case 'opposite': case 'behind': return 'position';
+    case 'time_distance': return 'distance';
+    case 'view': return 'view';
+    case 'road_position': return 'road';
+    case 'centrality': return 'centrality';
+    default: return '__parked__'; // within etc. → never matches a stored group
+  }
+}
 
 // Session cache of every listing we've fetched (by id) — lets the in-app browser open any listing
 // the user has seen without a refetch, even though we no longer hold the whole table in memory.
@@ -382,7 +396,7 @@ function interleaveByPlatform(cands: Cand[]): Cand[] {
 //   Region   : city diversity → platform diversity → newest (every city in the region contributes).
 //   Country  : region diversity → city diversity → platform diversity → newest (the whole Kingdom).
 type Scope = 'district' | 'city' | 'region' | 'country';
-type Ranked = { l: Listing; platform: string; city: string; region: string; rank: number };
+type Ranked = { l: Listing; platform: string; city: string; region: string; rank: number; source_table: string };
 
 function scopeOf(q: SearchQuery, cities: string[] | null, countryWide: boolean): Scope {
   if (countryWide) return 'country';
@@ -461,13 +475,17 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   // Resolve the location scope into a set of cities to filter the index by.
   const lm = q.locationMatch;
   let cities: string[] | null = null;
-  // Bug-fix #3+#4+#5 (2026-06-26): when the resolver flagged AMBIGUOUS (twin city, or bare district in
-  // multiple cities), do NOT fan out across the matched cities — return [] so the deterministic agent
-  // backstop's clarification fires («أي مدينة؟» / «أي منطقة؟»). Per locked rules: selected City →
-  // search ONLY that city; same name in 2 regions → ask, never guess. The user's city pin (if any)
-  // is already encoded in q.location and resolved via the "District، City" branch upstream, so by the
-  // time we see ambiguous=true here the user has NOT pinned a city.
-  if (lm?.ambiguous && lm.cities && lm.cities.length > 1) {
+  // TWIN CITY already disambiguated by the AI Agent's catalog backstop (q.regionPin = the region the
+  // user chose, e.g. «القصب» → «منطقة الرياض»). Search THIS exact Arabic city, scoped to the pinned
+  // region below — never re-flag it ambiguous, never honest-zero it. q.location is already the Arabic
+  // canonical city the catalog returned. (2026-06-26 twin-city false-zero fix.)
+  if (q.regionPin && (q.location || '').trim()) {
+    cities = [arCity(q.location) || q.location];
+  } else if (lm?.ambiguous && lm.cities && lm.cities.length > 1) {
+    // Bug-fix #3+#4+#5 (2026-06-26): when the resolver flagged AMBIGUOUS (twin city, or bare district in
+    // multiple cities), do NOT fan out across the matched cities — return [] so the deterministic agent
+    // backstop's clarification fires («أي مدينة؟» / «أي منطقة؟»). Per locked rules: selected City →
+    // search ONLY that city; same name in 2 regions → ask, never guess.
     cities = [];
   } else if (lm?.exact && lm.kind === 'city' && lm.city) {
     // EXACT catalog city match → push canonical Arabic straight to the RPC. Never re-route through
@@ -509,8 +527,10 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
     p_per_platform: 400,
     p_limit: QUERY_LIMIT,
     // Region scope (bug-fix #2): pass region_id so same-name twin cities don't fuse cross-region.
-    // Derived from the resolver's region; null when no region context is known.
-    p_region_ids: regionIdsFor(lm),
+    // A pinned region (twin disambiguated by the agent backstop) wins; else the resolver's region.
+    p_region_ids: q.regionPin
+      ? (REGION_TO_ID[q.regionPin] ? [REGION_TO_ID[q.regionPin]] : null)
+      : regionIdsFor(lm),
   });
   if (error) return null;                       // index error → retry UI, not "no matches"
   if (!cands || !(cands as Cand[]).length) return [];
@@ -559,9 +579,51 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
     }
     const city = l.city || '';
     const region = ar?.region || CITY_TO_REGION[city] || city;
-    ranked.push({ l, platform: c.platform, city, region, rank: c.rank });
+    ranked.push({ l, platform: c.platform, city, region, rank: c.rank, source_table: c.source_table });
   }
-  const rows = orderByScope(ranked, scopeOf(q, cities, countryWide)).map((r) => r.l);
+  const USE_RELATION_TABLE = true;
+  const scoped = orderByScope(ranked, scopeOf(q, cities, countryWide));
+  let rows = scoped.map((r) => r.l);
+  // Location-RELATIONSHIP ranking (2026-06-26): when the user expressed a proximity intent
+  // («قريب من مستشفى الحبيب» / «يطل على البحر»), rank listings that actually express that same
+  // relationship+entity above bare keyword mentions — strong phrase + exact name first. Stable:
+  // scored rows lead by score, everything else keeps the scope/freshness order. (user spec.)
+  if (q.proximity && q.proximity.length) {
+    if (!USE_RELATION_TABLE) {
+      // OFF: unchanged runtime scoring (current behavior)
+      const blobOf = (l: Listing) => [l.title, l.description, l.street_name, l.district, l.direction,
+        l.project_name, l.road, ...((l.additional_info ?? []).map((a) => a.value))].filter(Boolean).join(' ');
+      rows = rows
+        .map((l, i) => ({ l, i, s: scoreListingProximity(blobOf(l), q.proximity!) }))
+        .sort((a, b) => (b.s - a.s) || (a.i - b.i))
+        .map((x) => x.l);
+    } else {
+      // ON: re-rank within the already-anchored set via the precomputed listing_location_relations table.
+      const intents = q.proximity!.map((p) => ({
+        group: relGroupOf(p.relationship),
+        phrase: p.phrase,
+        category_en: p.category || null,
+        name: p.name || null,
+      }));
+      const st  = scoped.map((r) => r.source_table);
+      const ids = scoped.map((r) => r.l.id);
+      const bmap = new Map<string, number>();
+      try {
+        if (supabase) {
+          const { data: boosts } = await supabase.rpc('loc_rel_rank', {
+            p_source_tables: st, p_listing_ids: ids, p_intents: intents,
+          });
+          for (const b of (boosts ?? [])) bmap.set(`${b.source_table}:${Number(b.listing_id)}`, Number(b.boost));
+        }
+      } catch (_e) {
+        // RPC error → all-zero boosts → base scope order preserved
+      }
+      rows = scoped
+        .map((r, i) => ({ r, i, s: bmap.get(`${r.source_table}:${r.l.id}`) ?? 0 }))
+        .sort((a, b) => (b.s - a.s) || (a.i - b.i))
+        .map((x) => x.r.l);
+    }
+  }
   cacheListings(rows);
   return rows;
 }
