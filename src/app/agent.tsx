@@ -121,9 +121,21 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
   // Bug-fix #3: a TWIN CITY (same name in 2+ catalog regions, e.g. «الهفوف» Eastern vs Riyadh) → ask
   // WHICH REGION. The resolver flags ambiguous=true on kind='city' for these; the engine refuses to
   // fan out cross-region until the user picks. Per locked rule: same name in 2 regions → never guess.
-  if (lm.kind === 'city' && lm.ambiguous && lm.cities && lm.cities.length > 1) {
-    const names = Array.from(new Set(lm.cities.slice(0, 6).map((c) => cityDisplay(c, 'ar'))));
-    return `«${lm.label}» موجودة في أكثر من منطقة (${names.join('، ')}). أي منطقة تقصد؟`;
+  if (lm.kind === 'city' && lm.ambiguous && lm.twinRegions && lm.twinRegions.length > 1) {
+    // audit #2 fix: show the REGIONS, not the city display labels (which are identical for twins and
+    // dedupe to one blank option). «الهفوف موجودة في أكثر من منطقة (المنطقة الشرقية، منطقة الرياض)…»
+    const regions = Array.from(new Set(lm.twinRegions));
+    return `«${lm.label}» موجودة في أكثر من منطقة (${regions.join('، ')}). أي منطقة تقصد؟`;
+  }
+  // Region-vs-city SAME NAME (الرياض/جازان/تبوك/حائل/نجران/الباحة/الجوف) → ask مدينة ولا منطقة, never
+  // default to the city. Must precede the generic city branch below. (audit #4 / Q38.)
+  if (lm.regionOrCity) {
+    return `«${lm.label}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${lm.label} ولا منطقة ${lm.label} كاملة؟`;
+  }
+  // Geography cue (sea/mountain/desert) with NO city → ask the city; never auto-pick a default.
+  // (audit #12 / Q39 case A.)
+  if (lm.kind === 'geography' && lm.needsCity) {
+    return 'تقصد في أي مدينة أو منطقة؟';
   }
   // 1) A bare district shared by several cities → ask WHICH CITY (cities with listings first).
   if (lm.kind === 'district' && lm.ambiguous && lm.cities && lm.cities.length > 1) {
@@ -566,7 +578,7 @@ export default function Agent() {
       .slice(-10);
     // Pass auth state: a guest searches on any property query; a logged-in user only gets listings
     // when their message is a direct order, otherwise Ezhalah replies conversationally. (user request.)
-    const turn = await respond(v, { loggedIn: !!user, history });
+    const turn = await respond(v, { loggedIn: !!user, history, attemptTexts: saidRef.current });
     if (run.cancelled) return;
     // Hold "Ezhalah is thinking…" for at least THINK_MS even if the network came back faster, so the
     // thinking beat always reads as a deliberate ~3s pause before the reply types out (user request).

@@ -54,6 +54,41 @@ async function liveNotes(): Promise<string> {
   return _notesCache.text;
 }
 
+// ── DETERMINISTIC CATALOG CLASSIFIER (loc_classify RPC) ───────────────────────
+// The SQL function loc_classify(token) maps a location token to the official Arabic
+// catalog, inventory-aware. It tells us, with certainty the LLM cannot, whether a
+// place is a twin city (same name, ≥2 regions), a twin district (same «حي», ≥2
+// cities), a region-or-city same-name (الرياض/جازان/…), a single city, or unknown.
+// We use it as a POST-MODEL backstop so twin disambiguation + honest-zero are
+// guaranteed regardless of model drift. Best-effort: any failure → null → normal path.
+async function locClassify(token: string): Promise<Record<string, unknown> | null> {
+  const t = (token || "").trim();
+  if (!t) return null;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/loc_classify`, {
+      method: "POST",
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ p_token: t }),
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+// Arabic fold mirroring SQL normalize_ar: unify alef/ta-marbuta/alef-maqsura, drop
+// tatweel + bidi marks, collapse spaces. Used to check whether the user already named
+// one of the catalog candidates (so we don't re-ask a question they've answered).
+function arNorm(s: string): string {
+  return (s || "")
+    .replace(/[‎‏‪-‮؜]/g, "")
+    .replace(/ـ/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // Public project keys (already shipped in the app bundle) — soft gate so random
 // callers can't burn the model budget. No privileged work here.
 const PUBLIC_KEY = "sb_publishable_vXzwxdpfrzmbwtbR5aXcKA_cMUO8hVB";
@@ -173,7 +208,7 @@ RIYADH LANDMARK RECOGNITION — people search by LANDMARK, not district ("villa 
 GEOGRAPHY → city: "near the sea / beach / coast / corniche / waterfront" → a COASTAL city (Jeddah, or Khobar / Dammam / Yanbu / Jazan). "mountains / cool weather / highlands" → Abha, Taif, Al Baha, or Khamis Mushait. "desert / edge of town / open land / for a camp" → a desert-edge city (Al Kharj, Buraidah, Hail, Najran).
 LIFESTYLE → the right city, and name fitting districts in your reply: family → Al Malqa / Al Yasmin / Al Narjis / Hittin (Riyadh), Al Salamah (Jeddah), Al Thuqbah (Khobar); luxury → Al Olaya / KAFD / Hittin (Riyadh), Ash Shati (Jeddah), Khobar Corniche; waterfront → Ash Shati / Obhur (Jeddah), Khobar & Dammam Corniche; business → KAFD / Al Olaya (Riyadh), Al Hamra (Jeddah); student → Sulaymaniyah / Al Malaz (Riyadh); mountain → Abha, Al Baha.
 LOCATION — ALWAYS NORMALIZE (never trust raw text as the final location). Resolve in this priority: 1) regions / cities / districts (Saudi location database) → 2) landmarks → 3) lifestyle → 4) geography. Map any DISTRICT to its parent CITY for the search (the engine is city-level). Resolve AREA NICKNAMES to their districts then the city: "North / Northern Riyadh" → Al Malqa, Hittin, Al Yasmin, Al Aqiq, Al Narjis (all Riyadh); "East Riyadh" → Qurtubah / Granada area (Riyadh); "North Jeddah" → Ash Shati / Al Shati / Obhur area (Jeddah). Always anchor to the canonical city.
-SPELLING & VARIANTS: understand typos and variants in Arabic + English (Riyad / Ruyadh / الرياض → Riyadh; Jedah / جدة → Jeddah; Almalqa / الملقا → Al Malqa; حي الملقا → Al Malqa). Never ask the user to retype because of spelling.
+SPELLING & VARIANTS: understand obvious typos and Arabic/English variants of WELL-KNOWN places (Riyad / Ruyadh / الرياض → Riyadh; Jedah / جدة → Jeddah; Almalqa / الملقا → Al Malqa; حي الملقا → Al Malqa) and search them directly. BUT when a token is NOT an exact catalog place and is only CLOSE to one (a real misspelling of a smaller place, e.g. «القرص» vs «الرس»), do NOT silently substitute it — output it as the user wrote it and let the app confirm «هل تقصد …؟». Accuracy of the location outranks avoiding a question: never silently correct a place the user did not clearly write.
 NUMBERS: shorthand 1m = 1,000,000; 500k = 500,000; نص مليون = 500,000; مليونين = 2,000,000. Foreign currency (USD/AED/KWD/BHD/EUR) and area units (sqft / قدم → m²) are normalized by the app — just capture the figure the user said.
 FOREIGN CURRENCY — SHOW BOTH: when the budget is in a foreign currency, your reply MUST state BOTH the original and the SAR equivalent, e.g. "USD 100,000 (about SAR 375,000)" or "100,000 dollars ≈ SAR 375,000". Ezhalah searches in SAR (Saudi platforms use SAR), but always show the user both values for transparency. Approx rates: 1 USD≈3.75, 1 AED≈1.02, 1 KWD≈12.2, 1 BHD≈9.95, 1 QAR≈1.03, 1 OMR≈9.75, 1 EUR≈4.1, 1 GBP≈4.8 SAR.
 SIZE vs BUDGET — a number with a SIZE/area/length unit (m, m², sqm, sq m, meter, sq ft, sqft, square feet, feet, cm, centimetre, قدم, متر) is the SIZE → put it in detail ONLY, leave price "". A number that is money (a currency, or "for/under/budget X" with NO size unit) is the BUDGET → put it in price ONLY. NEVER copy the SAME number into both price and detail, and NEVER treat a size as a budget. e.g. "land 200000 cm" → detail "200000", price ""; "land for 200,000 SAR" → price "200000", detail "".
@@ -657,7 +692,53 @@ Deno.serve(async (req: Request) => {
       // (e.g. "ذبحة" for the unknown Eastern-Province city), let it through unchanged so the client
       // can match it exactly. Just normalize whitespace and reject objects/arrays sneaking through.
       const rawLoc = typeof out.location === "string" ? out.location : "";
-      const location = rawLoc.replace(/\s+/g, " ").trim();
+      let location = rawLoc.replace(/\s+/g, " ").trim();
+
+      // ── DETERMINISTIC CATALOG BACKSTOP ──────────────────────────────────────
+      // Disambiguate twins + region-vs-city against the official Arabic catalog BEFORE
+      // searching — never silently pick a region/city, never false-zero a real twin.
+      // loc_classify is authoritative; the model only proposes the token. A follow-up
+      // guard prevents re-asking a question the user just answered (no ask-loops).
+      let regionPin: string | undefined;   // region_ar to scope a twin city to one region
+      let districtPin: string | undefined; // «حي …» to scope a twin district to one city
+      if (location) {
+        const cls = await locClassify(location);
+        const ck = String(cls?.kind ?? "");
+        const nm = String(cls?.name ?? location);
+        const lastModel = [...history].reverse().find((h) => h?.role === "model")?.text ?? "";
+        // markers of a clarification WE generated on the previous turn → this turn answers it
+        const alreadyAsked = /أكثر من منطقة|أكثر من مدينة|اسم مدينة واسم منطقة|ولا منطقة/.test(String(lastModel));
+        const hay = arNorm(`${text} ${history.map((h) => String(h?.text ?? "")).join(" ")}`);
+        const said = (s: string) => !!s && hay.includes(arNorm(s));
+
+        if (ck === "region_or_city") {
+          const wantsCity = /\bمدينة\b/.test(text);
+          const wantsRegion = /\bمنطقة\b/.test(text);
+          if (wantsRegion && !wantsCity) regionPin = `منطقة ${nm}`;
+          else if (!wantsCity && !wantsRegion && !alreadyAsked) {
+            return json({ kind: "message", reply: `«${nm}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${nm} ولا منطقة ${nm} كاملة؟` });
+          }
+        } else if (ck === "twin_city") {
+          const regions = (Array.isArray(cls?.regions) ? cls!.regions : []) as Array<Record<string, unknown>>;
+          const pick = regions.find((r) => said(String(r.region_ar)) || said(String(r.region_ar).replace(/^منطقة\s+/, "")));
+          if (pick) regionPin = String(pick.region_ar);
+          else if (!alreadyAsked && regions.length > 1) {
+            const list = regions.map((r) => String(r.region_ar)).join("، ");
+            return json({ kind: "message", reply: `«${nm}» موجودة في أكثر من منطقة (${list}). أي منطقة تقصد؟` });
+          }
+        } else if (ck === "twin_district") {
+          const cities = (Array.isArray(cls?.cities) ? cls!.cities : []) as Array<Record<string, unknown>>;
+          const pick = cities.find((c) => said(String(c.city_ar)));
+          if (pick) { location = String(pick.city_ar); districtPin = `حي ${nm}`; }
+          else if (!alreadyAsked && cities.length > 1) {
+            const top = cities.slice(0, 8);
+            const lines = top.map((c) => `• ${c.city_ar}`).join("\n");
+            const more = cities.length > top.length ? "\n• أو مدينة أخرى" : "";
+            return json({ kind: "message", reply: `حي ${nm} موجود في أكثر من مدينة. تقصد حي ${nm} في أي مدينة؟\n${lines}${more}` });
+          }
+        }
+      }
+
       return json({
         kind: "listings",
         reply: lead(out.reply),
@@ -666,6 +747,8 @@ Deno.serve(async (req: Request) => {
           bothDeals,
           priceIsAnnual,
           location,
+          regionPin,
+          districtPin,
           type: typeof out.type === "string" && out.type ? out.type : null,
           detail: typeof out.detail === "string" && out.detail ? out.detail : null,
           price,

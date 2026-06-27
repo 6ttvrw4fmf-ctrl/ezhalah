@@ -8,6 +8,7 @@
 // contract (AgentTurn) stays the same so the chat UI never changes.
 
 import { emptyQuery, toLatinDigits, grouped, type SearchQuery } from './search';
+import { parseProximity, proximityKeywords, type ProximityIntent } from './proximity';
 import { CATEGORY_TYPES, type Category } from './taxonomy';
 import { t, getLocale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
@@ -190,6 +191,8 @@ type BackendQuery = {
   sort?: string; // objective ordering the user asked for (newest/price_asc/area_desc/…)
   count?: number; // how many listings the user asked to see (1–15)
   platforms?: string[]; // platform display names the user restricted to (carried across turns by the model)
+  regionPin?: string;   // region_ar the edge catalog backstop pinned for a TWIN city (القصب → منطقة الرياض)
+  districtPin?: string; // «حي …» the edge pinned for a TWIN district resolved to one city (حي الروضة → جدة)
 };
 
 // AREA NICKNAMES → known district lists. The engine filters by district when these are present, so
@@ -243,13 +246,14 @@ function resolveDistrictsFromText(userText: string, city: string): string[] {
     }
   }
 
-  // Specific "حي X" / "X district" mentions — bug-fix #12: capture at most 2 Arabic tokens (was 3),
-  // and stop on common scope/conjunction tokens (في / و / أو / منطقة / مدينة) so phrases like
-  // «حي العزيزية في الرياض» don't capture «العزيزية في الرياض» as a district name.
-  const arHi = ar.match(/حي\s+([؀-ۿ]+(?:\s+(?!في|و|أو|منطقة|مدينة)[؀-ۿ]+)?)/);
-  if (arHi) out.push(arHi[1].trim());
-  const enHi = userText.match(/\b(?:in|district\s+of|neighborhood\s+of)\s+(?:al[-\s])?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s*(?:district|neighborhood)?/);
-  if (enHi) out.push(`Al ${enHi[1]}`);
+  // Specific "حي X" / "X district" mentions — capture EVERY one (multi-district same-city OR search,
+  // Q33: «حي الملقا أو حي حطين أو حي الياسمين»). Each match is ≤2 Arabic tokens, stopping on
+  // scope/conjunction tokens (في/و/أو/منطقة/مدينة) so «حي العزيزية في الرياض» captures «العزيزية», not
+  // «العزيزية في الرياض». (audit #6: was a single .match() — only the first حي was kept.)
+  const arHiRe = /حي\s+([؀-ۿ]+(?:\s+(?!في|و|أو|منطقة|مدينة)[؀-ۿ]+)?)/g;
+  for (const m of ar.matchAll(arHiRe)) out.push(m[1].trim());
+  const enHiRe = /\b(?:in|district\s+of|neighborhood\s+of)\s+(?:al[-\s])?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s*(?:district|neighborhood)?/g;
+  for (const m of userText.matchAll(enHiRe)) out.push(`Al ${m[1]}`);
 
   return Array.from(new Set(out));
 }
@@ -337,6 +341,13 @@ const NEARBY_LEX: { re: RegExp; terms: string[] }[] = [
   { re: /corniche|كورنيش/i, terms: ['كورنيش'] },
   { re: /\bbeach\b|seafront|شاطئ/i, terms: ['شاطئ'] },
   { re: /airport|مطار/i, terms: ['مطار'] },
+  // Geography helpers — sea/mountain/desert. «بحر(?![ةه])» avoids the town «بحرة». A bare sea/mountain/
+  // desert cue with NO city is handled upstream (resolver needsCity / agent_notes Q39 asks the city);
+  // here we only contribute the text-search TERMS once a city IS known. (audit #12.)
+  { re: /\bsea\b|sea ?view|seafront|waterfront|بحر(?![ةه])|البحر|إطلال.* بحري|واجهة بحرية/i, terms: ['بحر', 'إطلالة بحرية', 'واجهة بحرية', 'كورنيش'] },
+  { re: /\bmountain\b|highland|جبل|جبال|مرتفعات/i, terms: ['جبل', 'جبال'] },
+  { re: /\bdesert\b|صحراء|البر\b/i, terms: ['صحراء'] },
+  { re: /\bmarket\b|سوق|أسواق/i, terms: ['سوق', 'أسواق'] },
 ];
 function extractNearbyKeywords(text: string): string[] {
   const out = new Set<string>();
@@ -351,7 +362,7 @@ function extractNearbyKeywords(text: string): string[] {
   return [...out];
 }
 
-function queryFromBackend(b: BackendQuery, userText: string = ''): SearchQuery {
+function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts?: string[]): SearchQuery {
   const q = emptyQuery();
   q.deal = b.deal === 'Buy' ? 'Buy' : 'Rent';
   if (b.bothDeals === true) q.bothDeals = true; // agent searched without knowing rent/buy → show both
@@ -396,10 +407,36 @@ function queryFromBackend(b: BackendQuery, userText: string = ''): SearchQuery {
   // Riyadh") expand to known district lists; literal district mentions ("حي الرمال") pass through.
   const districts = resolveDistrictsFromText(userText, q.location);
   if (districts.length) q.districts = districts;
+  // The edge catalog backstop pinned a TWIN city's region (القصب → منطقة الرياض) or resolved a TWIN
+  // district to one city (حي الروضة → جدة, districtPin="حي الروضة"). Honour both so the disambiguated
+  // search hits the chosen scope and is NOT re-flagged ambiguous downstream. (twin false-zero fix.)
+  if (typeof b.regionPin === 'string' && b.regionPin.trim()) q.regionPin = b.regionPin.trim();
+  if (typeof b.districtPin === 'string' && b.districtPin.trim()) {
+    const d = b.districtPin.trim();
+    q.districts = Array.from(new Set([...(q.districts ?? []), d]));
+  }
   applySourceFilter(q, userText, b.platforms);
   // Street / "near a mosque|school|park" terms from the raw message (Q3) — matched against the
   // listing's own street/title/description in runSearch; empty for an ordinary search.
-  const kw = extractNearbyKeywords(userText);
+  // Location-RELATIONSHIP layer (2026-06-26): parse «قريب من مستشفى الحبيب» → {near, hospital,
+  // الحبيب}. q.proximity drives RANKING (strong phrase + exact name first); its terms also feed the
+  // keyword filter so the matched set still narrows. Merged with the legacy nearby-keyword extractor.
+  // Parse over the WHOLE search attempt (every user line this attempt), not just the last message —
+  // otherwise «شقة بإطلالة بحرية» followed by a clarification «جدة كاملة» loses the sea-view intent,
+  // because the edge `query` buckets never carry proximity. Parse each message SEPARATELY and merge:
+  // concatenating the lines would let one message's tail bleed into the next phrase's entity name
+  // («...البحر  جدة كاملة» → name «البحر جدة كاملة»). (multi-turn fix 2026-06-27.)
+  const proxSources = (proximityTexts && proximityTexts.length) ? proximityTexts : [userText];
+  const proxSeen = new Set<string>();
+  const prox: ProximityIntent[] = [];
+  for (const ptxt of proxSources) {
+    for (const p of parseProximity(ptxt)) {
+      const k = `${p.relationship}|${p.category}|${p.name}`;
+      if (!proxSeen.has(k)) { proxSeen.add(k); prox.push(p); }
+    }
+  }
+  if (prox.length) q.proximity = prox;
+  const kw = Array.from(new Set([...extractNearbyKeywords(userText), ...proximityKeywords(prox)]));
   if (kw.length) q.keywords = kw;
   return q;
 }
@@ -411,7 +448,7 @@ export type AgentHistoryTurn = { role: 'user' | 'model'; text: string };
 
 async function callAgentBackend(
   text: string,
-  ctx: { loggedIn: boolean; order: boolean; history?: AgentHistoryTurn[] },
+  ctx: { loggedIn: boolean; order: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[] },
 ): Promise<AgentTurn | null> {
   if (!supabase) return null;
   try {
@@ -438,7 +475,7 @@ async function callAgentBackend(
       return {
         kind: 'listings',
         reply: String(d.reply ?? ''),
-        query: queryFromBackend(d.query ?? {}, text),
+        query: queryFromBackend(d.query ?? {}, text, ctx.attemptTexts ?? [text]),
       };
     }
     if (d.kind === 'message') return { kind: 'message', reply: String(d.reply ?? '') };
@@ -652,7 +689,7 @@ function maybeForcePlatformSearch(turn: AgentTurn, text: string): AgentTurn {
 // listings right away. A LOGGED-IN user gets a full conversational assistant — listings appear ONLY
 // when they give a direct search order ("I want…/show me…/أريد…"); otherwise Ezhalah just helps,
 // neutrally, like a normal assistant and invites them to say "show me" when ready.
-export async function respond(text: string, opts?: { loggedIn?: boolean; history?: AgentHistoryTurn[] }): Promise<AgentTurn> {
+export async function respond(text: string, opts?: { loggedIn?: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[] }): Promise<AgentTurn> {
   const v = text.trim();
   const loggedIn = !!opts?.loggedIn;
   if (!v) return { kind: 'message', reply: t("Tell me what you're looking for and I'll search for it.") };
@@ -673,7 +710,7 @@ export async function respond(text: string, opts?: { loggedIn?: boolean; history
   // Real LLM agent (Gemini edge function). It handles Arabic natively, applies the non-advisory
   // rules, and now also the auth-aware behavior (we pass loggedIn + order). If it's unavailable for
   // any reason, fall through to the bundled heuristic below so the app never hard-fails.
-  const backend = await callAgentBackend(v, { loggedIn, order, history: opts?.history });
+  const backend = await callAgentBackend(v, { loggedIn, order, history: opts?.history, attemptTexts: opts?.attemptTexts });
   if (backend) {
     // Named-platform filter safety net: if the user said "Aqar only" / "Gathern فقط" but the model
     // deflected, force the search. When we override, the reply is already final — return as-is.

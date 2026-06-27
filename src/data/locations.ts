@@ -401,6 +401,19 @@ export type LocationResolution = {
   fuzzy?: boolean;     // bug-fix #9: a fuzzy-corrected city (e.g. «القرص»→«الرس»). The «هل تقصد X؟»
                        // banner must surface whenever this is set, regardless of whether the corrected
                        // city has listings. Locked rule: fuzzy correction never silently swaps cities.
+  // For an AMBIGUOUS twin city/district: the Arabic REGION (twin city) or CITY (twin district) labels of
+  // each candidate, parallel to `cities`. The clarifier shows THESE — city display labels are identical
+  // for twins («الهفوف»/«الهفوف») so without the region/city distinction the picker dedupes to one blank
+  // option. (audit #2: twin clarifier showed no regions.)
+  twinRegions?: string[];
+  // The bare token is BOTH a region name AND a city name (الرياض/جازان/تبوك/حائل/نجران/الباحة/الجوف).
+  // The UI must ask «تقصد مدينة X ولا منطقة X؟» before searching — never silently default to the city.
+  // (audit #4: region-vs-city same-name silently defaulted to city.)
+  regionOrCity?: boolean;
+  // A geography cue (sea/mountain/desert) with NO city in the input. We must NOT auto-pick a default
+  // city — ask «تقصد في أي مدينة أو منطقة؟». `cities` carries suggested coastal/mountain cities only as
+  // options, never an auto-search. (audit #12: «قريب من البحر» silently became Jeddah.)
+  needsCity?: boolean;
 };
 
 // Letters/digits only (drops spaces, punctuation, Arabic diacritics) — for phrase `includes` tests.
@@ -1022,8 +1035,20 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
           raw, kind: 'city', city: hit.nameEn, region: hit.regionEn,
           label: ar(locale) ? hit.nameAr : hit.nameEn,
           districts: [], cities: all.map((p) => p.nameEn),
+          // Region labels parallel to `cities` so the clarifier shows «الشرقية / الرياض» — without this the
+          // identical city display labels («الهفوف»/«الهفوف») dedupe to one blank option. (audit #2.)
+          twinRegions: all.map((p) => (ar(locale) ? (p.regionAr || p.regionEn || '') : (p.regionEn || ''))).filter(Boolean),
           ambiguous: true, exact: true,
         };
+      }
+      // Region-vs-city SAME NAME (الرياض/جازان/تبوك/حائل/نجران/الباحة/الجوف): the bare token also matches a
+      // region of the same name → ask «مدينة ولا منطقة؟», never default to city. (audit #4 / Q38.)
+      const sameRegion = matchLocations(raw).find((p) => p.kind === 'region' &&
+        (p.nameAr === hit.nameAr || p.nameEn.toLowerCase() === hit.nameEn.toLowerCase()));
+      if (sameRegion) {
+        return { raw, kind: 'city', city: hit.nameEn, region: hit.regionEn,
+          label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [],
+          regionOrCity: true, exact: true };
       }
       return { raw, kind: 'city', city: hit.nameEn, region: hit.regionEn, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: [], cities: [], exact: true };
     }
@@ -1049,9 +1074,13 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
     // happened to have listings, silently swapping cities). Per locked rule: never silently substitute.
     return { raw, kind: 'city', city: fc.city, region: fc.region || undefined, label: cityDisplay(fc.city, locale), districts: [], cities: [], fuzzy: true };
   }
-  // 4) Geography cue ("near the sea" → coastal city + waterfront districts).
+  // 4) Geography cue ("near the sea / mountain / desert"). NEVER auto-pick a default city: if the user
+  //    named a city, scope to it; otherwise ASK «تقصد في أي مدينة أو منطقة؟» and offer the candidate
+  //    cities as options only — the cue is a HELPER, not a location. (audit #12 / Q39: no silent Jeddah.)
   for (const g of GEOGRAPHY) if (hasWord(g.words)) {
-    return { raw, kind: 'geography', city: scopeCity(f) || g.city, label: g.note, districts: g.districts, cities: g.cities, note: g.note };
+    const sc = scopeCity(f);
+    if (sc) return { raw, kind: 'geography', city: sc, label: g.note, districts: [], cities: [], note: g.note };
+    return { raw, kind: 'geography', city: '', label: g.note, districts: [], cities: g.cities, needsCity: true, note: g.note };
   }
   // 5) Lifestyle cue.
   for (const ls of LIFESTYLE) if (hasWord(ls.words)) {

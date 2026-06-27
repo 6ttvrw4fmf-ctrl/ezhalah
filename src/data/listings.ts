@@ -67,6 +67,10 @@ export type Listing = {
     laundry_room?: boolean;
     balcony_terrace?: boolean;
   };
+  // Location-RELATIONSHIP rank score for the CURRENT proximity query («قريب من مستشفى»), computed in
+  // fetchListingsForQuery (via loc_rel_rank RPC or the runtime scorer) and consumed by runSearch's
+  // ranking step. 0 / undefined = the listing doesn't express the asked relationship. Per-query only.
+  proximityBoost?: number;
 };
 
 export const LISTED_SEQ = ['today', '2 days ago', '2 months ago', '8 months ago', '1 year ago'];

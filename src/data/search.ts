@@ -1,5 +1,7 @@
 import type { Category, Deal } from './taxonomy';
 import type { LocationResolution } from './locations';
+import type { ProximityIntent } from './proximity';
+import { scoreListingProximity } from './proximity';
 import { cityHasListings, nearbyCityWithListings, cityDisplay } from './locations';
 import { detailFor, priceBandRange } from './taxonomy';
 import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
@@ -34,6 +36,11 @@ export type SearchQuery = {
   // city / area nickname / landmark / geography). Drives the Search Summary's location lines so the
   // user sees exactly what Ezhalah matched. Absent on the agent path (Gemini resolves there). (user request.)
   locationMatch?: LocationResolution;
+  // A region (Arabic, e.g. "منطقة الرياض") the AI Agent's catalog backstop already pinned to
+  // disambiguate a TWIN city — same city name in 2+ regions (القصب in الرياض AND عسير). When set,
+  // the engine scopes `location` to THIS region only and must NOT treat it as ambiguous (the user
+  // already chose). Absent on a normal single-city search. (2026-06-26 twin-city false-zero fix.)
+  regionPin?: string;
   // The user's ORIGINAL foreign-currency budget, e.g. "USD 100,000" — shown alongside the SAR figure
   // in the Budget line for transparency ("USD 100,000 (≈ SAR 375,000)"). Empty when SAR. (user request.)
   priceOriginal?: string;
@@ -56,6 +63,11 @@ export type SearchQuery = {
   // the street / "near a mosque|school|park" / facade search. Extracted from the user's message; if real
   // matches exist we show only them, else we keep the area + a note. Never invented. (Q3.)
   keywords?: string[];
+  // Location-RELATIONSHIP intents parsed from the user's message (2026-06-26): each is a
+  // {relationship, category, name} triple — «قريب من مستشفى الحبيب» → near / hospital / الحبيب.
+  // The keyword filter still narrows the set; THIS drives RANKING — listings that express the same
+  // relationship to the same entity (strong phrase + exact name) rank above bare keyword mentions.
+  proximity?: ProximityIntent[];
   // Restrict results to specific PLATFORMS the user named ("show me Gathern only", "Aqar and
   // Wasalt"). Values are table prefixes ('gathern', 'aqar', …). When set, only those platforms'
   // tables are queried (remote.tablesFor) and the country-wide one-card-per-platform roster is
@@ -950,6 +962,18 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
     // shuffled + region-spread so they vary and span Saudi; specific searches stay relevance→recency —
     // if the best matches are all one platform, that's fine. Only real listings. (user display rule.)
     listings = rankResults(listings, q, cap);
+    // Location-RELATIONSHIP ranking: when the user asked for a proximity («قريب من مستشفى» / «يطل على
+    // البحر»), surface the listings that actually express that same relationship+entity FIRST. The boost
+    // was precomputed per listing in fetchListingsForQuery (loc_rel_rank RPC / runtime scorer) and rides
+    // on l.proximityBoost. STABLE: equal-boost listings keep the relevance→diversity→recency order above,
+    // so this only lifts genuine matches without disturbing everything else. No explicit objective sort
+    // is overridden (that branch returns earlier). (live-path fix 2026-06-27.)
+    if (q.proximity && q.proximity.length) {
+      listings = listings
+        .map((l, i) => ({ l, i, s: l.proximityBoost ?? 0 }))
+        .sort((a, b) => (b.s - a.s) || (a.i - b.i))
+        .map((x) => x.l);
+    }
   }
 
   // Return up to 25 matches (display cap): the chat shows the first `count` the user explicitly

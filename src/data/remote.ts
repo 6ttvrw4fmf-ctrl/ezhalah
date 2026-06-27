@@ -583,22 +583,20 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   }
   const USE_RELATION_TABLE = true;
   const scoped = orderByScope(ranked, scopeOf(q, cities, countryWide));
-  let rows = scoped.map((r) => r.l);
-  // Location-RELATIONSHIP ranking (2026-06-26): when the user expressed a proximity intent
-  // («قريب من مستشفى الحبيب» / «يطل على البحر»), rank listings that actually express that same
-  // relationship+entity above bare keyword mentions — strong phrase + exact name first. Stable:
-  // scored rows lead by score, everything else keeps the scope/freshness order. (user spec.)
+  const rows = scoped.map((r) => r.l);
+  // Location-RELATIONSHIP ranking (2026-06-27): when the user expressed a proximity intent
+  // («قريب من مستشفى الحبيب» / «يطل على البحر»), ATTACH a boost score to every candidate so the
+  // ranking step in runSearch can lead with the listings that express that same relationship+entity.
+  // NB: reordering `rows` here is pointless — runSearch re-sorts from scratch (recency + rankResults),
+  // so the boost MUST travel on the listing object and be consumed there. (live-path fix.)
   if (q.proximity && q.proximity.length) {
     if (!USE_RELATION_TABLE) {
-      // OFF: unchanged runtime scoring (current behavior)
+      // OFF: runtime text scorer.
       const blobOf = (l: Listing) => [l.title, l.description, l.street_name, l.district, l.direction,
         l.project_name, l.road, ...((l.additional_info ?? []).map((a) => a.value))].filter(Boolean).join(' ');
-      rows = rows
-        .map((l, i) => ({ l, i, s: scoreListingProximity(blobOf(l), q.proximity!) }))
-        .sort((a, b) => (b.s - a.s) || (a.i - b.i))
-        .map((x) => x.l);
+      for (const r of scoped) r.l.proximityBoost = scoreListingProximity(blobOf(r.l), q.proximity!);
     } else {
-      // ON: re-rank within the already-anchored set via the precomputed listing_location_relations table.
+      // ON: precomputed listing_location_relations via the loc_rel_rank RPC.
       const intents = q.proximity!.map((p) => ({
         group: relGroupOf(p.relationship),
         phrase: p.phrase,
@@ -608,20 +606,21 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
       const st  = scoped.map((r) => r.source_table);
       const ids = scoped.map((r) => r.l.id);
       const bmap = new Map<string, number>();
+      let rpcCount = 0;
+      let rpcErr: unknown = null;
       try {
         if (supabase) {
-          const { data: boosts } = await supabase.rpc('loc_rel_rank', {
+          const { data: boosts, error } = await supabase.rpc('loc_rel_rank', {
             p_source_tables: st, p_listing_ids: ids, p_intents: intents,
           });
+          if (error) rpcErr = error;
           for (const b of (boosts ?? [])) bmap.set(`${b.source_table}:${Number(b.listing_id)}`, Number(b.boost));
+          rpcCount = (boosts ?? []).length;
         }
-      } catch (_e) {
-        // RPC error → all-zero boosts → base scope order preserved
+      } catch (e) {
+        rpcErr = e;
       }
-      rows = scoped
-        .map((r, i) => ({ r, i, s: bmap.get(`${r.source_table}:${r.l.id}`) ?? 0 }))
-        .sort((a, b) => (b.s - a.s) || (a.i - b.i))
-        .map((x) => x.r.l);
+      for (const r of scoped) r.l.proximityBoost = bmap.get(`${r.source_table}:${r.l.id}`) ?? 0;
     }
   }
   cacheListings(rows);
