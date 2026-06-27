@@ -362,6 +362,22 @@ function extractNearbyKeywords(text: string): string[] {
   return [...out];
 }
 
+// A free-typed "location" that is actually a ROAD/STREET phrase ("طريق الملك فهد", "شارع الأمير محمد").
+// Roads are proximity/location-intelligence signals, never administrative places — they must not be searched
+// as a city (that yields a false zero). Detect the prefix so we can strip such a value out of q.location.
+// NB: JS \b is ASCII-only and never fires after an Arabic letter, so we use an explicit separator
+// lookahead instead — without it this regex silently never matched and roads stayed in q.location.
+const ROAD_PREFIX_RE = /^\s*(?:على\s+|في\s+)?(?:طريق|شارع|الطريق|الشارع|درب|مخرج)(?=[\s،,]|$)/;
+// Recover a real city named ANYWHERE in the user's text (Arabic-primary), or null — mirrors parseQuery's
+// city scan, so «في الرياض على طريق الملك فهد» still anchors to الرياض when the agent mis-placed the road
+// into q.location. Never invents a city: no match → null.
+function cityFromText(text: string): string | null {
+  for (const ar of Object.keys(AR_CITY)) if (text.includes(ar)) return ar;
+  const lower = text.toLowerCase();
+  for (const city of CITIES) if (lower.includes(city.toLowerCase())) return city;
+  return null;
+}
+
 function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts?: string[]): SearchQuery {
   const q = emptyQuery();
   q.deal = b.deal === 'Buy' ? 'Buy' : 'Rent';
@@ -436,6 +452,17 @@ function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts
     }
   }
   if (prox.length) q.proximity = prox;
+  // Road phrases are PROXIMITY signals, not administrative locations. The edge agent sometimes drops a road
+  // into q.location («على طريق الملك فهد» → location="طريق الملك فهد"), which would then be searched as a
+  // CITY → false zero. When the user expressed a ROAD proximity AND q.location is a bare road phrase, strip
+  // it (the road already rides on q.proximity) and recover a real city from everything the user said this
+  // attempt, so «في الرياض على طريق الملك فهد» still anchors to الرياض. No city in the text → leave location
+  // empty (normal fallback); never invent a city, never search the road as a city. Gating on an actual road
+  // proximity intent means a district legitimately named after a street (picked without «على/قريب من طريق»)
+  // is left untouched. (road location-extraction fix 2026-06-27.)
+  if (q.location && ROAD_PREFIX_RE.test(q.location) && prox.some((p) => p.category === 'road')) {
+    q.location = cityFromText(proxSources.join(' ')) ?? '';
+  }
   const kw = Array.from(new Set([...extractNearbyKeywords(userText), ...proximityKeywords(prox)]));
   if (kw.length) q.keywords = kw;
   return q;
