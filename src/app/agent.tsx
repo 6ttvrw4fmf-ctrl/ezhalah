@@ -21,6 +21,7 @@ import ShareSheet from '@/components/ShareSheet';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard, PopIn } from '@/components/ResultCard';
 import { parseQuery, respond } from '@/data/agent';
+import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion } from '@/data/locations';
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, type SearchQuery, type SearchResult } from '@/data/search';
@@ -113,6 +114,14 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
   const loc = (q.location ?? '').trim();
   if (!loc) {
     if (KINGDOM_WIDE.test(userText)) return null; // user explicitly wants the whole Kingdom
+    // SMART, conversational city ask for a proximity/landmark search with no city: echo the user's OWN
+    // phrase instead of a generic question — «قريب من الافنيوز» → «في أي مدينة تبحث عن عقار قريب من
+    // الافنيوز؟». Feels like a continuation; never invents a city. On their answer the search resumes with
+    // city + the same proximity (q.proximity is re-parsed/merged across the attempt). (clarification UX.)
+    const prox = (q.proximity ?? [])
+      .map((p) => (p.text || `${p.phrase} ${p.name || p.categoryAr}`).trim())
+      .filter(Boolean);
+    if (prox.length) return `في أي مدينة تبحث عن عقار ${prox.join(' و')}؟`;
     return 'في أي مدينة تبحث؟ (وإذا تبي كل المملكة قل لي «كل مدن المملكة»)';
   }
   // The user explicitly asked for the whole area (or the whole Kingdom) — honour it, don't ask to narrow.
@@ -622,23 +631,42 @@ export default function Agent() {
         void promptSignupSoon(run);
       }
     } else {
-      // The model asked a clarifying question. Read back EVERYTHING said so far: if we can already see
-      // a usable detail (a type, a city, a size, a budget) and we've asked twice, stop pestering and
-      // just search with whatever we have. (user request: max 2 asks → skip → scrape.)
-      const combined = parseQuery(saidRef.current.join(' '));
-      const hasIntent = !!(combined.type || combined.location || combined.detail || combined.priceInput);
-      if (hasIntent && askCountRef.current >= 2) {
-        askCountRef.current = 0;
-        saidRef.current = [];
-        const result = await runQuery(combined);
-        await playListings(run, statusId, buildScrapeIntro(result.query ?? combined), result, v);
-        if (run.cancelled) return;
-        void promptSignupSoon(run);
-      } else {
-        if (hasIntent) askCountRef.current += 1; // only count asks once the user has shown intent
+      const attemptText = saidRef.current.join(' ');
+      const combined = parseQuery(attemptText);
+      // STANDARD smart city ask: a proximity/landmark search with NO city → ask WHICH CITY, echoing the
+      // user's own phrase, even if the model chose to ask something else (e.g. the property type). For a
+      // proximity search the city is the highest-value missing piece, and we never invent one. On the
+      // user's answer the search resumes with city + the same proximity (re-parsed across the attempt).
+      const proxAll = parseProximity(attemptText);
+      if (proxAll.length && !combined.location && !KINGDOM_WIDE.test(attemptText) && askCountRef.current < 2) {
+        const phrase = proxAll
+          .map((p) => (p.text || `${p.phrase} ${p.name || p.categoryAr}`).trim())
+          .filter(Boolean)
+          .join(' و');
+        askCountRef.current += 1;
         setMsgs((m) =>
-          m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: turn.reply, typing: true } : x)),
+          m.map((x) => (x.id === statusId
+            ? { id: statusId, role: 'agent', text: phrase ? `في أي مدينة تبحث عن عقار ${phrase}؟` : 'في أي مدينة تبحث؟', typing: true }
+            : x)),
         );
+      } else {
+        // The model asked a clarifying question. Read back EVERYTHING said so far: if we can already see
+        // a usable detail (a type, a city, a size, a budget) and we've asked twice, stop pestering and
+        // just search with whatever we have. (user request: max 2 asks → skip → scrape.)
+        const hasIntent = !!(combined.type || combined.location || combined.detail || combined.priceInput);
+        if (hasIntent && askCountRef.current >= 2) {
+          askCountRef.current = 0;
+          saidRef.current = [];
+          const result = await runQuery(combined);
+          await playListings(run, statusId, buildScrapeIntro(result.query ?? combined), result, v);
+          if (run.cancelled) return;
+          void promptSignupSoon(run);
+        } else {
+          if (hasIntent) askCountRef.current += 1; // only count asks once the user has shown intent
+          setMsgs((m) =>
+            m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: turn.reply, typing: true } : x)),
+          );
+        }
       }
     }
     // The network turn is done; the cards then reveal on their own timers (busy is free, so the user can

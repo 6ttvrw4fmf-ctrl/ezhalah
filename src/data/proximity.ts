@@ -27,6 +27,7 @@ export type ProximityIntent = {
   categoryAr: string; // Arabic category label ("مستشفيات") or ''
   name: string;       // the specific entity text after the phrase ("الحبيب") or ''
   weight: number;     // ranking strength of this relationship (0–1)
+  text: string;       // the user's matched proximity phrase verbatim ("قريب من الافنيوز") — for echoing back
 };
 
 // Relationship groups → Arabic trigger phrases + ranking weight. Ordered longest-
@@ -153,10 +154,11 @@ export function parseProximity(text: string): ProximityIntent[] {
       // as a specific-landmark name and match nothing). For an IMPLIED_CAT phrase the phrase already ate
       // the category noun, so `after` IS the name and nothing is stripped. (RPC name-tier fix 2026-06-27.)
       let nameSrc = after;
+      let catKw = ''; // the category keyword actually matched in the text («مستشفى», «البحر», «الافنيوز»)
       if (cat.key) {
         const ce = CATEGORY_LEX.find((c) => c.key === cat.key);
         const m = ce ? after.match(ce.kw) : null;
-        if (m) nameSrc = after.slice(after.indexOf(m[0]) + m[0].length);
+        if (m) { catKw = m[0]; nameSrc = after.slice(after.indexOf(m[0]) + m[0].length); }
       } else if (IMPLIED_CAT[phrase]) {
         cat = IMPLIED_CAT[phrase];
       }
@@ -164,10 +166,14 @@ export function parseProximity(text: string): ProximityIntent[] {
         const name = extractName(nameSrc.slice(0, 60));
         // road/street position is only meaningful with a NAME (else it's «شارع عرض ٢٠» width noise)
         if ((cat.key === 'street') && !name) { idx = text.indexOf(phrase, idx + phrase.length); continue; }
+        // Reconstruct the user's matched phrase verbatim for echoing in a clarification question:
+        // phrase + the matched category keyword (if any) + the specific name. («قريب من» + «الافنيوز» = «قريب
+        // من الافنيوز»; «قريب من» + «مستشفى» + «الحبيب»; «على طريق» + «الملك فهد»; «مطل على» + «البحر».)
+        const matched = `${phrase} ${[catKw, name].filter(Boolean).join(' ')}`.replace(/\s+/g, ' ').trim();
         const dedup = `${rel}|${cat.key}|${name}`;
         if (!seen.has(dedup)) {
           seen.add(dedup);
-          out.push({ relationship: rel, phrase, category: cat.key, categoryAr: cat.ar, name, weight });
+          out.push({ relationship: rel, phrase, category: cat.key, categoryAr: cat.ar, name, weight, text: matched });
         }
       }
       idx = text.indexOf(phrase, idx + phrase.length);
