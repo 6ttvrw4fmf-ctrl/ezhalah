@@ -376,6 +376,7 @@ export function searchSummary(q: SearchQuery): string {
   // Commercial — always one or the other), so a default-button "Search" still shows what they chose.
   // (user request: "if user just clicks search by default, it shows what the button clicked at.")
   if (q.type) lines.push(`• ${t('Property Type')}: ${getLocale() === 'ar' ? tWord(q.type) : q.type}`);
+  else if (q.typeGroup) lines.push(`• ${t('Property Type')}: ${t(q.typeGroup)}`);
   else if (q.category) lines.push(`• ${t('Property Type')}: ${t(q.category)}`);
   lines.push(`• ${t('Transaction Type')}: ${q.bothDeals ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}`);
   // Platform filter line — when the user restricted to specific platforms ("Aqar only"), show which,
@@ -407,6 +408,7 @@ export function searchSummary(q: SearchQuery): string {
 export function querySummaryLine(q: SearchQuery): string {
   const parts: string[] = [];
   if (q.type) parts.push(tWord(q.type));
+  else if (q.typeGroup) parts.push(t(q.typeGroup));
   else if (q.category) parts.push(tWord(q.category));
   parts.push(t(q.deal === 'Rent' ? 'Rent' : 'Buy'));
   if (q.location.trim()) parts.push(tPlace(q.location.trim()));
