@@ -317,6 +317,16 @@ function resTables(q: SearchQuery): string[] {
     : RES_TABLES;
 }
 
+// Commercial-macro raw types that physically live in residential tables. Aqar scrapes all land
+// (commercial + industrial) into its residential table. Used for the secondary RPC pass in broad
+// Commercial searches so the 1500-candidate budget isn't consumed by apartments/villas.
+const COMMERCIAL_RAW_IN_RES = [
+  'Commercial Land', 'Industrial Land', 'Hotel', 'Warehouse', 'Workshop', 'Factory',
+  'Telecom Tower', 'Commercial Building', 'Office', 'Shop', 'Kiosk', 'Showroom', 'Bank',
+  'Gas Station', 'Station', 'محطة بنزين', 'School', 'Health Center', 'Hall', 'Parking',
+  'Cinema', 'سكن عمال',
+];
+
 // Which table KIND(s) this query reads: from the selected clean type/group's CleanQuery, else (a
 // macro-only search) from q.category. Default Residential.
 function kindsFor(q: SearchQuery): SourceKind[] {
@@ -474,6 +484,20 @@ async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[]): Promis
   return out;
 }
 
+// Secondary fetch for broad Commercial searches: pulls rows from a residential table but constrains
+// to commercial raw types only, so apartments/villas never appear in commercial results.
+async function fetchCommercialFromResTables(q: SearchQuery, tbl: string, ids: number[]): Promise<Listing[]> {
+  const out: Listing[] = [];
+  for (let i = 0; i < ids.length; i += ID_CHUNK) {
+    let req = supabase!.from(tbl).select(LIST_SELECT).eq('active', true)
+      .in('property_type', COMMERCIAL_RAW_IN_RES);
+    if (!q.bothDeals) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
+    const { data } = await req.in('id', ids.slice(i, i + ID_CHUNK)).limit(ID_CHUNK);
+    if (data) out.push(...finalize(data, 'res'));
+  }
+  return out;
+}
+
 // Per-search fetch — ROUTING LAYER (Phase 1.5). The buy/rent location index (a materialized view over
 // the raw tables, refreshed by pg_cron) is queried for the location-scoped, purpose-split, newest-first,
 // platform-diverse set of (source_table, listing_id). We then pull the FULL cards from the RAW tables by
@@ -484,6 +508,9 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   if (!supabase) return null;
   const tables = tablesFor(q);
   if (!tables.length) return [];
+  // Broad Commercial (no specific type/group): must ALSO sweep res tables for Commercial Land +
+  // Industrial Land which Aqar stores in residential tables (~8,166 rows, audit 2026-06-28).
+  const isBroadCommercial = q.category === 'Commercial' && !q.type && !q.typeGroup;
 
   // Resolve the location scope into a set of cities to filter the index by.
   const lm = q.locationMatch;
@@ -562,6 +589,30 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
       region: (c.region_ar as string) || '', city: (c.city_ar as string) || '', district: (c.district_ar as string) || '',
     });
   }
+  // Broad Commercial secondary pass: sweep res tables for commercial types stored there.
+  // A separate RPC call so the 1500-candidate budget above isn't consumed by apartments.
+  if (isBroadCommercial) {
+    const { data: resCands } = await supabase.rpc('location_search_candidates', {
+      p_purpose: q.bothDeals ? null : (q.deal === 'Buy' ? 'buy' : 'rent'),
+      p_cities: cities,
+      p_districts: q.districts && q.districts.length ? q.districts : null,
+      p_tables: resTables(q),
+      p_platforms: q.sources && q.sources.length ? q.sources : null,
+      p_per_platform: 400,
+      p_limit: QUERY_LIMIT,
+      p_region_ids: q.regionPin
+        ? (REGION_TO_ID[q.regionPin] ? [REGION_TO_ID[q.regionPin]] : null)
+        : regionIdsFor(lm),
+    });
+    if (resCands && (resCands as any[]).length) {
+      const base = cleanCands.length;
+      for (const [i, c] of (resCands as any[]).entries()) {
+        cleanCands.push({ source_table: c.source_table as string, listing_id: Number(c.listing_id), platform: c.platform as string, rank: base + i });
+        arLoc.set(`${c.source_table}:${Number(c.listing_id)}`, { region: (c.region_ar as string) || '', city: (c.city_ar as string) || '', district: (c.district_ar as string) || '' });
+      }
+    }
+  }
+
   const byTable = new Map<string, number[]>();
   for (const c of cleanCands) {
     let a = byTable.get(c.source_table);
@@ -570,8 +621,14 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   }
 
   // 3) Fetch the full cards from the RAW tables by id (type/period filters applied there).
+  // Res-table candidates from a broad Commercial sweep use a commercial-type-constrained fetch so
+  // apartments never slip through.
   const entries = [...byTable];
-  const fetched = await Promise.all(entries.map(([tbl, ids]) => fetchRawByIds(q, tbl, ids)));
+  const fetched = await Promise.all(entries.map(([tbl, ids]) =>
+    (isBroadCommercial && tbl.includes('_residential_'))
+      ? fetchCommercialFromResTables(q, tbl, ids)
+      : fetchRawByIds(q, tbl, ids)
+  ));
   const map = new Map<string, Listing>();
   entries.forEach(([tbl], i) => { for (const l of fetched[i]) map.set(`${tbl}:${l.id}`, l); });
 

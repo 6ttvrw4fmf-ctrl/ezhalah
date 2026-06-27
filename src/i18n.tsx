@@ -135,7 +135,7 @@ const AR: Record<string, string> = {
   // Subcategory groups (2-macro filter)
   'Apartments & Co-living': 'الشقق والسكن المشترك',
   'Villas & Houses': 'الفلل والبيوت',
-  'Vacation & Rural': 'الاصطياف والريف',
+  'Vacation & Rural': 'الاستراحات والريف',
   'Residential Plots': 'الأراضي السكنية',
   'Retail & Workspace': 'التجزئة والمكاتب',
   'Industrial & Logistics': 'الصناعة واللوجستيات',
