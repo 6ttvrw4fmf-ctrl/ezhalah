@@ -463,6 +463,24 @@ function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts
   if (q.location && ROAD_PREFIX_RE.test(q.location) && prox.some((p) => p.category === 'road')) {
     q.location = cityFromText(proxSources.join(' ')) ?? '';
   }
+  // ANTI-GUESS: the edge agent sometimes APPENDS a city/region the user never typed («حي العزيزية» →
+  // location="حي العزيزية، الخبر»; «حي الروضة» → "حي الروضة، الدمام"). That guesses the region/city, which
+  // the locked rule forbids — an ambiguous district must trigger a clarification, not a silent guess. If
+  // q.location is a compound «X، anchor» whose trailing anchor does NOT appear in anything the user actually
+  // typed this attempt, drop the anchor and keep the BARE place. The resolver then either resolves it
+  // uniquely (→ search) or flags it ambiguous (→ the chat's locationClarification asks «أي مدينة؟»). An
+  // anchor the user DID type is always kept. (anti-guess location fix 2026-06-27.)
+  if (q.location && /[،,]/.test(q.location)) {
+    const said = proxSources.join(' ');
+    const parts = q.location.split(/[،,]/).map((s) => s.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      const anchor = parts[parts.length - 1];
+      const anchorCore = anchor.replace(/^\s*(?:ال)?منطقة\s+/, '').trim();
+      if (!said.includes(anchor) && (!anchorCore || !said.includes(anchorCore))) {
+        q.location = parts.slice(0, -1).join('، ');
+      }
+    }
+  }
   const kw = Array.from(new Set([...extractNearbyKeywords(userText), ...proximityKeywords(prox)]));
   if (kw.length) q.keywords = kw;
   return q;

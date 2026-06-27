@@ -947,38 +947,33 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
   //      الملز / الملك فهد / جامعة الملك سعود instead of الملقا.)
   const cp = raw.split(/[،,]/).map((s) => s.trim()).filter(Boolean);
   if (cp.length >= 2) {
-    const cityM = matchLocations(cp[cp.length - 1]).find((p) => p.kind === 'city');
+    // A compound "District، <anchor>" (the picker's own label, or Gemini's «حي الجسر، المنطقة الشرقية» /
+    // «حي العزيزية، الخبر»). HONOR the explicit anchor (region or city) and NEVER silently jump to another
+    // place — that is the locked rule: never guess the region/city. We only re-scope the resolver's own
+    // catalog output; we never invent names. (compound location fix 2026-06-27.)
+    const lastTok = cp[cp.length - 1];
     const distM = matchLocations(cp[0]).find((p) => p.kind === 'district');
-    if (cityM && distM) {
+    const isExplicitRegion = /^\s*(?:ال)?منطقة\s+/.test(lastTok);
+    const regTok = isExplicitRegion ? lastTok.replace(/^\s*(?:ال)?منطقة\s+/, '').trim() : lastTok;
+    const regHit = matchLocations(regTok).find((p) => p.kind === 'region');
+    const cityM = matchLocations(lastTok).find((p) => p.kind === 'city');
+    // (1) District، REGION — «حي الجسر، المنطقة الشرقية». Handled FIRST because an explicit «منطقة X» token
+    //     also surfaces a spurious city hit (المندسة الشرقية). Pick the catalog district candidate whose
+    //     region matches the named region; honor that region. Always returns (empty variants → the district
+    //     name itself) so a real region anchor never falls through to a wrong-city guess.
+    if (distM && regHit && (isExplicitRegion || !cityM)) {
+      const cands = matchLocations(cp[0]).filter((p) => p.kind === 'district');
+      const pick = cands.find((d) => d.regionEn === regHit.nameEn || d.regionAr === regHit.nameAr) || distM;
+      const variants = rawDistrictVariants(pick);
+      return { raw, kind: 'district', city: pick.cityEn ?? '', region: pick.regionEn, label: ar(locale) ? pick.nameAr : pick.nameEn, districts: variants.length ? variants : [pick.nameAr], cities: [], exact: true };
+    }
+    // (2) District، CITY — «حي الملقا، الرياض» / «حي العزيزية، الخبر». HONOR the named city: scope the
+    //     district to it and NEVER jump to another city. Empty variants → still return the city-scoped
+    //     district (the engine honest-zeroes if that district has no inventory there) — never a guess.
+    if (distM && cityM) {
       const scoped: Place = { ...distM, cityEn: cityM.nameEn, cityAr: cityM.nameAr, regionEn: cityM.regionEn, regionAr: cityM.regionAr };
       const variants = rawDistrictVariants(scoped);
-      if (variants.length) {
-        return { raw, kind: 'district', city: cityM.nameEn, region: cityM.regionEn, label: ar(locale) ? distM.nameAr : distM.nameEn, districts: variants, cities: [], exact: true };
-      }
-    }
-    // "District، REGION" (e.g. Gemini's «حي الجسر، المنطقة الشرقية») — the trailing token is a REGION, not a
-    // city, so the district،city branch above never fired and matching the whole comma-string fails →
-    // kind 'none' → false "no results" (the Filter, which gets the clean «حي الجسر», resolves it fine).
-    // Resolve the DISTRICT part EXACTLY as the Filter would, then, if the trailing token is a real region,
-    // narrow an ambiguous district to the cities inside that region. We only re-scope the resolver's own
-    // output — never invent or rewrite DB names. (chat==filter location fix 2026-06-27.)
-    // "District، REGION" (e.g. Gemini's «حي الجسر، المنطقة الشرقية»). The trailing token is a REGION, not a
-    // city (and it also surfaces a spurious CITY hit — المندسة الشرقية — so the district،city branch above
-    // mis-fires and returns nothing). Build the resolution straight from the CLEAN catalog district `distM`,
-    // which already carries its own city + region — exactly like the district،city branch — instead of
-    // re-resolving the «حي X» string, which triggers the noisy live-district fuzzy merge (ambiguous across
-    // unrelated cities → the engine's clarify backstop → 0 results). Among the catalog candidates, prefer the
-    // one whose region matches the named region. Mirrors the Filter exactly; never invents names. (chat==filter.)
-    if (distM) {
-      const lastTok = cp[cp.length - 1];
-      const regHit = matchLocations(lastTok).find((p) => p.kind === 'region')
-                  || matchLocations(lastTok.replace(/^\s*(?:ال)?منطقة\s+/, '').trim()).find((p) => p.kind === 'region');
-      const cands = matchLocations(cp[0]).filter((p) => p.kind === 'district');
-      const pick = (regHit && cands.find((d) => d.regionEn === regHit.nameEn || d.regionAr === regHit.nameAr)) || distM;
-      const variants = rawDistrictVariants(pick);
-      if (variants.length) {
-        return { raw, kind: 'district', city: pick.cityEn ?? '', region: pick.regionEn, label: ar(locale) ? pick.nameAr : pick.nameEn, districts: variants, cities: [], exact: true };
-      }
+      return { raw, kind: 'district', city: cityM.nameEn, region: cityM.regionEn, label: ar(locale) ? distM.nameAr : distM.nameEn, districts: variants.length ? variants : [distM.nameAr], cities: [], exact: true };
     }
   }
   // 3) Real place name (district → city → region) via the nationwide matcher. Tried BEFORE
