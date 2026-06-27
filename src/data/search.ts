@@ -473,7 +473,7 @@ export function interpretPrice(rawDigits: string, deal: Deal, sizeM2?: number, i
   return { kind: 'totalBuy', echo: `${sar} ${grouped(amount)}` };
 }
 
-export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery };
+export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number };
 
 function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run
@@ -847,14 +847,11 @@ function naturalSpread<T>(items: T[], key: (x: T) => string): T[] {
 // varies between runs and spans Saudi naturally. A SPECIFIC search stays in pure relevance → recency
 // order — if the best matches are all one platform, that's fine. Only ever real listings, nothing made up.
 function rankResults(listings: Listing[], q: SearchQuery, cap: number | null): Listing[] {
-  const broad = isCountryWideQuery(q) || q.locationMatch?.kind === 'region';
-  // Diversity key: a whole-Kingdom search varies by REGION; a single-region search varies by CITY so the
-  // user sees listings from the DIFFERENT cities under that region, not all from the capital. (user request:
-  // "when the user gives a region, show each listing with a different city under that region".)
-  const spreadKey = isCountryWideQuery(q)
-    ? (l: Listing) => l.regionAr || CITY_TO_REGION[l.city] || l.city || 'Other'
-    : (l: Listing) => l.city || 'Other';
-  // Coarse relevance tiers (closer price/size ranks higher). No price/size → one tier (all equal).
+  // Coarse relevance tiers (closer price/size ranks higher). No price/size → one tier (all equal). WITHIN
+  // each tier we PRESERVE the order the server diversity step already produced (orderByScope:
+  // region→city→district→platform per scope), so platform/district/city diversity SURVIVES to the displayed
+  // top-25 — we no longer random-shuffle here (that used to drop platform diversity on broad searches).
+  // Repeat-visit variety now comes from the deterministic rotation in runSearch, not randomness. (diversity fix.)
   const tiers = new Map<number, Listing[]>();
   for (const l of listings) {
     const k = Math.round(closenessBonus(l, q, cap) * 50);
@@ -862,14 +859,11 @@ function rankResults(listings: Listing[], q: SearchQuery, cap: number | null): L
     tiers.get(k)!.push(l);
   }
   const out: Listing[] = [];
-  for (const k of [...tiers.keys()].sort((a, b) => b - a)) {       // closest relevance tier first
-    const tier = tiers.get(k)!;                                    // (input is already recency-ordered)
-    out.push(...(broad ? naturalSpread(shuffle(tier), spreadKey) : tier));
-  }
+  for (const k of [...tiers.keys()].sort((a, b) => b - a)) out.push(...tiers.get(k)!);  // closest tier first; diversity order kept
   return out;
 }
 
-export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean }): SearchResult {
+export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean; visitOffset?: number }): SearchResult {
   let eligible = pickPool(q, pools)
     // bothDeals (agent searched without knowing rent/buy) → show BOTH; otherwise filter to the deal.
     .filter((l) => q.bothDeals || l.deal === q.deal)
@@ -999,8 +993,21 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
   }
   // ONE display rule for EVERY search (incl. country-wide): the best 25 ranked closest→least. (The
   // Show-More-to-200 paging is a UI increment on top; the engine returns the ranked set.) (user.)
-  const displayCap = 25;
-  return { heading: heading(q), notes: ns, listings: listings.slice(0, displayCap), sortNote, count, suggestion };
+  // TOTAL matches (before any display cap) — drives the «more than 25» message + the show-all button.
+  const total = listings.length;
+  // QUALITY-PRESERVING repeat-visit rotation (user 2026-06-27): on a repeat search of the SAME filter
+  // (visitOffset advances per visit, persisted by the caller), rotate a 25-window over the TOP-quality
+  // pool so a return visitor sees DIFFERENT high-quality listings — deterministic, never random, always
+  // inside the same filters. First visit (offset 0) shows the top 25 as usual.
+  if (opts?.visitOffset && total > 25) {
+    const POOL = Math.min(total, 100);
+    const off = (opts.visitOffset * 25) % POOL;
+    if (off > 0) listings = [...listings.slice(off, POOL), ...listings.slice(0, off), ...listings.slice(POOL)];
+  }
+  // Return up to the system max (200) so "show all" reveals beyond the first 25 with NO refetch; the UI
+  // shows the first 25 and only reveals the rest when the user taps «عرض جميع النتائج». (user: first 25 + show-all.)
+  const SHOW_ALL_MAX = 200;
+  return { heading: heading(q), notes: ns, listings: listings.slice(0, SHOW_ALL_MAX), sortNote, count, suggestion, total };
 }
 
 // Try relaxing one query field at a time and see which unlocks results. The order matters: we

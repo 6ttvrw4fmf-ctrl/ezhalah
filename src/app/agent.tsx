@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Image as RNImage,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -22,16 +21,13 @@ import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard, PopIn } from '@/components/ResultCard';
 import { parseQuery, respond } from '@/data/agent';
 import { parseProximity } from '@/data/proximity';
-import { resolveLocation, cityDisplay, topCitiesInRegion } from '@/data/locations';
+import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, type SearchQuery, type SearchResult } from '@/data/search';
 import type { Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
-
-// The Ezhalah eagle logo — used in the header (top-left) + the sign-up popup. (user request: eagle, not stars.)
-const LOGO = require('../../assets/images/ezhalah-logo.png');
 
 const IS_WEB = Platform.OS === 'web';
 // On the web the results tile into a wrap grid, so the conversation column is wider to give them
@@ -43,13 +39,28 @@ const MAX_W = IS_WEB ? 940 : 560;
 // source there now appears in both places.
 import { useExamplePrompts } from '@/data/examplePrompts';
 
+// A «more precise» refine prompt attached to an agent message: ONE clarifying dimension with clickable
+// answer chips (never typed). Tapping a chip merges that one field into the SAME filter and re-searches.
+type RefinePrompt = { dim: string; baseQ: SearchQuery; options: { label: string; value: string }[] };
+
 type ChatMsg =
   | { id: string; role: 'user'; text: string; typing?: boolean }
-  | { id: string; role: 'agent'; text: string; typing?: boolean; greeting?: boolean }
+  | { id: string; role: 'agent'; text: string; typing?: boolean; greeting?: boolean; refine?: RefinePrompt; refineDone?: boolean }
   | { id: string; role: 'results'; text: string; result: SearchResult; typing?: boolean; slogan?: string; summary?: string }
   | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string };
 
 const uid = () => 'm' + Date.now() + Math.round(Math.random() * 1e6);
+
+// Readable labels for the refine answer chips. Numbers stay Western digits (project rule: Arabic
+// everywhere EXCEPT numbers). A budget chip is a ceiling («up to X»); beds are exact counts (5 = 5+).
+const budgetLabel = (c: number, ar: boolean): string =>
+  c >= 1_000_000
+    ? (ar ? `حتى ${c / 1_000_000} مليون` : `Up to ${c / 1_000_000}M`)
+    : (ar ? `حتى ${c / 1_000} ألف` : `Up to ${c / 1_000}K`);
+const bedsLabel = (n: string, ar: boolean): string => {
+  if (ar) return n === '1' ? 'غرفة واحدة' : n === '2' ? 'غرفتين' : n === '5' ? '5+ غرف' : `${n} غرف`;
+  return n === '1' ? '1 bedroom' : n === '5' ? '5+ bedrooms' : `${n} bedrooms`;
+};
 
 // Right before Ezhalah goes off to scrape, it answers with ONE random Saudi-dialect hype line — a
 // playful "you got it" in Najdi colour, never a recommendation or any judgement on the search (user
@@ -332,16 +343,10 @@ export default function Agent() {
   // True WHILE the property cards are popping in one-by-one — so the Send button shows as a Stop button
   // for the whole reveal (not just the network wait), letting the user halt the drip. (user request.)
   const [revealing, setRevealing] = useState(false);
-  // Shows the guest sign-up popup ONCE per session (the existing authPrompt modal). (user request.)
-  const signupShownRef = useRef(false);
   // Same pattern as the home screen: on mobile the sidebar isn't docked, so a hamburger opens it.
   // On desktop it's a permanent column → no button. (user: couldn't see the burger on the phone.)
   const docked = useDocked();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  // After a GUEST's one free search has displayed, a sign-up popup appears (shown once per session).
-  // Accept → /auth (the search is already in history and carries over on sign-in); decline → keep
-  // reading, but no more searching until they sign up / log in. (user request.)
-  const [authPrompt, setAuthPrompt] = useState(false);
   // Which result messages have finished typing their reply. The property cards stay hidden until the
   // words above them are fully written out, so listings never appear before Ezhalah has spoken (user
   // request). Keyed by message id.
@@ -351,7 +356,10 @@ export default function Agent() {
   // time instead of a whole grid landing at once. (user request.) revealCount[id] = how many cards
   // are visible so far; absent = show all (used for replayed/history turns that don't type out).
   const REVEAL_STEP_MS = 130; // snappy one-by-one cascade (25 cards ≈ 3s), smooth not distracting
+  const FIRST_PAGE = 25; // show the first 25; «عرض جميع النتائج» reveals the rest (up to 200). (user 2026-06-27.)
   const [revealCount, setRevealCount] = useState<Record<string, number>>({});
+  const [shownAll, setShownAll] = useState<Record<string, boolean>>({}); // result msg id → user tapped "show all results"
+  const pendingRefineRef = useRef<{ q: SearchQuery; dim: string } | null>(null); // a >25 "refine" question awaiting the user's one-line answer
   const revealTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   // The results turn whose cards are still popping in one-by-one (id + total count), so a new user
   // message can instantly finish it and stop the drip. null once the reveal completes. (user request.)
@@ -402,7 +410,7 @@ export default function Agent() {
   };
   const markTyped = (id: string) => {
     const msg = msgs.find((m) => m.id === id);
-    startReveal(id, msg?.role === 'results' ? (msg.result?.listings?.length ?? 0) : 0);
+    startReveal(id, msg?.role === 'results' ? Math.min(FIRST_PAGE, msg.result?.listings?.length ?? 0) : 0);
   };
   // Cancel any pending one-by-one reveals (on unmount, or when a new turn starts).
   const clearReveals = () => { revealTimers.current.forEach(clearTimeout); revealTimers.current = []; };
@@ -477,17 +485,10 @@ export default function Agent() {
     toBottom();
   };
 
-  // Guests are no longer blocked after a search — they can keep searching freely within their
-  // session/chat; only the saving differs (a guest's chats are never persisted, so they're gone on
-  // leave). So this is intentionally a NO-OP: no sign-up wall interrupts a guest. (Re-enable a soft,
-  // non-blocking "sign up to save your searches" nudge here later if wanted.) (user request.)
-  const promptSignupSoon = async (_run: Run) => {
-    // A guest just completed a search → softly invite them to sign up. Once per session, after a
-    // beat so the cards land first; never for signed-in users. (user request: sign-up popup after search.)
-    if (user || signupShownRef.current) return;
-    signupShownRef.current = true;
-    setTimeout(() => { if (!user) setAuthPrompt(true); }, 1400);
-  };
+  // Guests are NOT interrupted by any sign-up popup after a search — they search freely within their
+  // session (a guest's chats just aren't persisted). NO-OP by design: the post-search sign-up modal was
+  // removed. (user 2026-06-28: "remove this popup, no need.") Re-enable a soft nudge here if ever wanted.
+  const promptSignupSoon = async (_run: Run) => { /* intentionally does nothing */ };
 
   // The "about to scrape" intro: one random Saudi-dialect hype line, then a compact read-back of
   // exactly what we're going to search for — "Looking for:" + "Villa · Rent · Riyadh · SAR 5,000 ·
@@ -524,6 +525,106 @@ export default function Agent() {
     toBottom();
   };
 
+  // «ساعدني ألقى نتائج أدق» — pick ONE missing/broad dimension and ask a single clarifying question with
+  // CLICKABLE answer chips (never typed). The tapped answer is merged into the SAME filter query and
+  // re-searched. One question at a time; never shows more listings itself. A typed reply still works as a
+  // fallback (the refine intercept in send). (user 2026-06-27: clickable, not typed.)
+  const startRefine = (q?: SearchQuery) => {
+    if (!q) return;
+    const ar = getLocale() !== 'en'; // Arabic-first; English session → English labels.
+    let dim = ''; let ask = ''; let options: { label: string; value: string }[] = [];
+    // DISTRICT first — only when a city is set AND we have real, listing-backed neighbourhoods to offer.
+    if (q.location && !(q.districts && q.districts.length) && q.locationMatch?.kind !== 'district') {
+      const ds = topDistrictsForCity(q.location, 6);
+      if (ds.length >= 2) {
+        dim = 'district';
+        ask = ar ? `أي حي تفضّل في ${q.location}؟` : `Which district in ${q.location}?`;
+        options = ds.map((d) => ({ label: d, value: d }));
+      }
+    }
+    if (!dim && !q.priceInput && !q.priceBand) {
+      dim = 'budget';
+      ask = ar ? 'كم ميزانيتك تقريباً؟' : 'What is your approximate budget?';
+      const ceil = q.deal === 'Buy' ? [500_000, 1_000_000, 2_000_000, 5_000_000] : [30_000, 50_000, 80_000, 150_000];
+      options = ceil.map((c) => ({ label: budgetLabel(c, ar), value: String(c) }));
+    }
+    if (!dim && !q.detail) {
+      dim = 'beds';
+      ask = ar ? 'كم غرفة نوم تبغى؟' : 'How many bedrooms?';
+      options = ['1', '2', '3', '4', '5'].map((n) => ({ label: bedsLabel(n, ar), value: n }));
+    }
+    if (!dim && !q.type) {
+      dim = 'type';
+      ask = ar ? 'أي نوع عقار تفضّل؟' : 'Which property type?';
+      const pairs: [string, string][] = ar
+        ? [['شقة', 'شقة'], ['فيلا', 'فيلا'], ['دور', 'دور'], ['أرض', 'أرض']]
+        : [['Apartment', 'apartment'], ['Villa', 'villa'], ['Floor', 'floor'], ['Land', 'land']];
+      options = pairs.map(([label, value]) => ({ label, value }));
+    }
+    if (!dim) { // everything already specified → open free-form question (typed answer)
+      dim = 'free';
+      ask = ar ? 'وش تحب نضيّق فيه أكثر؟ (الميزانية، الحي، عدد الغرف، نوع العقار…)'
+               : 'What would you like to narrow further? (budget, district, bedrooms, type…)';
+    }
+    pendingRefineRef.current = { q, dim }; // typed-answer fallback; chips are the primary path
+    const refine = options.length ? { dim, baseQ: q, options } : undefined;
+    setMsgs((m) => [...m, { id: uid(), role: 'agent', text: ask, typing: true, refine }]);
+    toBottom();
+  };
+
+  // Merge the user's one-line refine answer into the existing filter query — only the asked dimension.
+  const applyRefinement = (base: SearchQuery, dim: string, answer: string): SearchQuery => {
+    const a = answer.trim();
+    const refined: SearchQuery = { ...base };
+    if (dim === 'district') {
+      const hood = a.replace(/^\s*حي\s+/, '').trim();
+      refined.location = `حي ${hood}، ${base.location ?? ''}`.trim(); // resolveLocation handles «District، City»
+      refined.locationMatch = undefined; refined.districts = undefined;
+    } else if (dim === 'budget') {
+      refined.priceInput = a;
+    } else if (dim === 'beds') {
+      const n = (a.match(/\d+/) || [])[0]; if (n) refined.detail = n;
+    } else if (dim === 'type') {
+      const p = parseQuery(a);
+      if (p.type) refined.type = p.type;
+      if (p.typeGroup) refined.typeGroup = p.typeGroup;
+      if (p.category) refined.category = p.category;
+    } else {
+      const p = parseQuery(`${a} ${base.location ?? ''}`);
+      if (p.type) refined.type = p.type;
+      if (p.priceInput) refined.priceInput = p.priceInput;
+      if (p.detail) refined.detail = p.detail;
+    }
+    return refined;
+  };
+
+  // Run a refine answer (tapped chip OR typed reply): echo `label` as the user's bubble, merge the one
+  // asked dimension into the SAME filter, and re-search. (user 2026-06-27.)
+  const runRefine = async (baseQ: SearchQuery, dim: string, value: string, label: string) => {
+    pendingRefineRef.current = null;
+    finalizeReveal();
+    setStopped(false);
+    setBusy(true);
+    const refined = applyRefinement(baseQ, dim, value);
+    const run = makeRun(); runRef.current = run;
+    const statusId = uid();
+    setMsgs((m) => [...m, { id: uid(), role: 'user', text: label }, { id: statusId, role: 'status', phase: 'thinking' }]);
+    toBottom();
+    const result = await runQuery(refined);
+    if (run.cancelled) return;
+    await playListings(run, statusId, buildScrapeIntro(result.query ?? refined), result, label);
+    if (run.cancelled) return;
+    void promptSignupSoon(run);
+    setBusy(false); runRef.current = null; toBottom();
+  };
+
+  // Tap on a refine answer chip → lock that question's chips so it can't be answered twice, then run.
+  const pickRefine = (msgId: string, r: RefinePrompt, opt: { label: string; value: string }) => {
+    if (busy) return;
+    setMsgs((m) => m.map((x) => (x.id === msgId ? { ...x, refineDone: true } : x)));
+    void runRefine(r.baseQ, r.dim, opt.value, opt.label);
+  };
+
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
@@ -542,6 +643,13 @@ export default function Agent() {
     finalizeReveal(); // stop the previous search's cards from drip-revealing now that the user moved on
     setStopped(false); // new turn — re-enable the refine CTA and clear the stopped state
     setBusy(true);
+    // REFINE INTERCEPT: if we just asked a «نتائج أدق» clarifying question, read THIS message as the answer,
+    // merge it into the SAME filter, and re-search — never run it through the normal agent path. (user 2026-06-27.)
+    if (pendingRefineRef.current) {
+      const { q: baseQ, dim } = pendingRefineRef.current;
+      await runRefine(baseQ, dim, v, v);
+      return;
+    }
     // Sidebar Recent entry: title = the user's exact message. First send in a new chat creates the
     // entry; subsequent sends update the title to the latest user message. Signed-in users only —
     // for guests this is a no-op (their chats stay session-local). (user request.)
@@ -757,7 +865,7 @@ export default function Agent() {
       { id: resultsId, role: 'results', text: sub, result },
     ]);
     setDoneTyping((d) => ({ ...d, [resultsId]: true }));
-    setRevealCount((c) => ({ ...c, [resultsId]: result.listings.length }));
+    setRevealCount((c) => ({ ...c, [resultsId]: Math.min(FIRST_PAGE, result.listings.length) }));
     pinModeRef.current = 'top';
     toTop();
   };
@@ -988,13 +1096,26 @@ export default function Agent() {
                 const txt = m.greeting ? greetingText(locale) : m.text;
                 const rtl = msgRTL(txt);
                 return (
-                  <View key={m.id} style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: '85%', direction: (rtl ? 'rtl' : 'ltr') as any }]}>
-                    <View style={s.replyIcon}>
-                      <Ionicons name="sparkles" size={14} color={colors.primary} />
+                  <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: '88%' }}>
+                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', direction: (rtl ? 'rtl' : 'ltr') as any }]}>
+                      <View style={s.replyIcon}>
+                        <Ionicons name="sparkles" size={14} color={colors.primary} />
+                      </View>
+                      <Text style={[s.replyText, m.greeting && s.greetingText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
+                        {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
+                      </Text>
                     </View>
-                    <Text style={[s.replyText, m.greeting && s.greetingText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
-                      {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
-                    </Text>
+                    {/* Clickable refine answer chips — appear once the question finishes typing; tapping one
+                        re-searches with that single field merged in (never typed). (user 2026-06-27.) */}
+                    {m.refine && !m.refineDone && (!m.typing || doneTyping[m.id]) ? (
+                      <View style={[s.rChipRow, { flexDirection: rtl ? 'row-reverse' : 'row', justifyContent: rtl ? 'flex-end' : 'flex-start' }]}>
+                        {m.refine.options.map((opt) => (
+                          <Pressable key={opt.value} style={s.rChip} onPress={() => pickRefine(m.id, m.refine!, opt)}>
+                            <Text style={s.rChipTx}>{opt.label}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    ) : null}
                   </View>
                 );
               }
@@ -1063,7 +1184,7 @@ export default function Agent() {
                         {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
                             setRevealCount(0)). History/replay turns (not typing) show all immediately. */}
-                        {m.result.listings.slice(0, revealCount[m.id] ?? (m.typing ? 0 : m.result.listings.length)).map((l, i) => (
+                        {m.result.listings.slice(0, revealCount[m.id] ?? (m.typing ? 0 : Math.min(FIRST_PAGE, m.result.listings.length))).map((l, i) => (
                           <ResultCard
                             key={l.id}
                             listing={l}
@@ -1073,8 +1194,30 @@ export default function Agent() {
                           />
                         ))}
                       </View>
-                      {/* The "I can get you something more precise." refine CTA was removed here per user
-                          request — no message sits below the result cards now. */}
+                      {/* MORE-THAN-25 message + two actions (user 2026-06-27): a NORMAL assistant message
+                          (not a tiny note) shown only when total > 25 and we're still on the first 25.
+                          «عرض جميع النتائج» reveals the rest (up to 200), filters unchanged. «ساعدني ألقى
+                          نتائج أدق» asks ONE clarifying question then re-searches. Hidden at ≤25 or after show-all. */}
+                      {(() => {
+                        const total = m.result.total ?? m.result.listings.length;
+                        const shown = revealCount[m.id] ?? (m.typing ? 0 : Math.min(FIRST_PAGE, m.result.listings.length));
+                        if (total <= FIRST_PAGE || shownAll[m.id] || shown < FIRST_PAGE) return null;
+                        return (
+                          <View style={{ gap: 10, marginTop: 14, alignSelf: 'stretch' }}>
+                            <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
+                              {t('I have more than that, but I showed you the first 25 listings. Want me to show all results, or help you find more precise ones?')}
+                            </Text>
+                            <View style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
+                              <Pressable style={s.mBtnPrimary} onPress={() => { setShownAll((x) => ({ ...x, [m.id]: true })); setRevealCount((c) => ({ ...c, [m.id]: Math.min(200, m.result.listings.length) })); }}>
+                                <Text style={s.mBtnPrimaryTx}>{t('Show all results')}</Text>
+                              </Pressable>
+                              <Pressable style={s.mBtnAlt} onPress={() => startRefine(m.result.query)}>
+                                <Text style={s.mBtnAltTx}>{t('Help me find more precise results')}</Text>
+                              </Pressable>
+                            </View>
+                          </View>
+                        );
+                      })()}
                     </>
                   )}
                 </View>
@@ -1160,31 +1303,6 @@ export default function Agent() {
           </View>
         </View>
       </KeyboardAvoidingView>
-
-      {/* Sign-up wall: shown once, just after a guest's free search reveals. Accept → /auth (the
-          search is already saved and carries over on sign-in); decline → keep reading, no more
-          searching until they sign up / log in. (user request.) */}
-      {authPrompt && (
-        <View style={s.promptOverlay}>
-          <Pressable style={s.promptBackdrop} onPress={() => setAuthPrompt(false)} />
-          <View style={s.promptCard}>
-            <View style={s.promptIcon}>
-              <RNImage source={LOGO} style={s.promptLogo} resizeMode="cover" />
-            </View>
-            <Text style={s.promptTitle}>{t('Get more with a free account')}</Text>
-            <Text style={s.promptBody}>
-              {t('Sign up free to save your searches and favorites, and pick up right where you left off.')}
-            </Text>
-            <Pressable style={s.promptPrimary} onPress={() => { setAuthPrompt(false); router.push('/auth'); }}>
-              <Ionicons name="person-outline" size={16} color="#fff" />
-              <Text style={s.promptPrimaryTx}>{t('Sign up / Log in')}</Text>
-            </Pressable>
-            <Pressable style={s.promptSecondary} onPress={() => setAuthPrompt(false)}>
-              <Text style={s.promptSecondaryTx}>{t('Not now')}</Text>
-            </Pressable>
-          </View>
-        </View>
-      )}
     </View>
   );
 }
@@ -1244,6 +1362,16 @@ const s = StyleSheet.create({
   // "Show more" pill, centered under the cards — neutral, never a "load best" CTA. (user request.)
   showMore: { alignSelf: 'center', marginTop: 14, paddingVertical: 9, paddingHorizontal: 22, borderRadius: 999, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
   showMoreTxt: { fontSize: 13, fontWeight: '700', color: colors.primary },
+  // The two actions under the «more than 25» message: primary (show all) + outline (refine). (user 2026-06-27.)
+  mBtnRow: { flexWrap: 'wrap', gap: 8, marginTop: 2 },
+  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, backgroundColor: colors.primary },
+  mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: '#fff' },
+  mBtnAlt: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  mBtnAltTx: { fontSize: 13, fontWeight: '700', color: colors.primary },
+  // Clickable refine answer chips (district/budget/beds/type) under a «more precise» question. (user 2026-06-27.)
+  rChipRow: { flexWrap: 'wrap', gap: 8, alignSelf: 'stretch' },
+  rChip: { paddingVertical: 9, paddingHorizontal: 16, borderRadius: 999, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.surface },
+  rChipTx: { fontSize: 13, fontWeight: '700', color: colors.primary },
   // Inline "I can get you something more precise." pill, sits under the visible listing. (user request.)
   preciseInline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, alignSelf: 'center', marginTop: 10, paddingVertical: 9, paddingHorizontal: 16, borderRadius: 999, borderWidth: 1, borderColor: colors.tintLine, backgroundColor: colors.tint },
   preciseInlineTxt: { fontSize: 12.5, fontWeight: '700', color: colors.primary },

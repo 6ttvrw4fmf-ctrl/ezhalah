@@ -369,7 +369,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // then run the full client engine on it. Replaces the old "load the whole table" approach that
         // timed out at 21k+ rows. null = backend error (flag it so the UI shows retry, not "no matches").
         const rows = await fetchListingsForQuery(q);
-        const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null });
+        // Repeat-visit rotation offset: a per-filter counter persisted in localStorage so returning to the
+        // SAME filter (deal + location/districts) later surfaces a DIFFERENT high-quality first 25, never the
+        // exact same set — while staying strictly inside the filters. Device-local (guests included);
+        // best-effort (no localStorage → offset 0, no rotation). (user 2026-06-27.)
+        let visitOffset = 0;
+        try {
+          const sig = `ezh_rot:${q.deal}|${q.regionPin ?? ''}|${(q.districts ?? []).join(',')}|${(q.location ?? '').trim()}`;
+          const ls = (globalThis as { localStorage?: { getItem(k: string): string | null; setItem(k: string, v: string): void } }).localStorage;
+          const prev = parseInt(ls?.getItem(sig) ?? '0', 10);
+          visitOffset = Number.isFinite(prev) ? prev : 0;
+          ls?.setItem(sig, String(visitOffset + 1));
+        } catch { /* no localStorage (SSR/native) → no rotation, fine */ }
+        const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null, visitOffset });
         if (record) {
           setSearchCount((c) => c + 1);
           // Record the chat in memory (it shows in the current session). Persistence only happens for

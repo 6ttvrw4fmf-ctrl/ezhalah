@@ -405,7 +405,7 @@ function interleaveByPlatform(cands: Cand[]): Cand[] {
 //   Region   : city diversity → platform diversity → newest (every city in the region contributes).
 //   Country  : region diversity → city diversity → platform diversity → newest (the whole Kingdom).
 type Scope = 'district' | 'city' | 'region' | 'country';
-type Ranked = { l: Listing; platform: string; city: string; region: string; rank: number; source_table: string };
+type Ranked = { l: Listing; platform: string; city: string; region: string; district: string; rank: number; source_table: string };
 
 function scopeOf(q: SearchQuery, cities: string[] | null, countryWide: boolean): Scope {
   if (countryWide) return 'country';
@@ -420,7 +420,7 @@ function scopeOf(q: SearchQuery, cities: string[] | null, countryWide: boolean):
 }
 
 function rankedKey(r: Ranked, k: string): string {
-  return k === 'platform' ? r.platform : k === 'city' ? r.city : k === 'region' ? r.region : '';
+  return k === 'platform' ? r.platform : k === 'city' ? r.city : k === 'region' ? r.region : k === 'district' ? r.district : '';
 }
 
 // Hierarchical round-robin: group by the first key, order groups by size (densest first) then freshness,
@@ -449,9 +449,13 @@ function interleaveRanked(rows: Ranked[], keys: string[]): Ranked[] {
 }
 
 function orderByScope(rows: Ranked[], scope: Scope): Ranked[] {
-  const keys = scope === 'country' ? ['region', 'city', 'platform']
-    : scope === 'region' ? ['city', 'platform']
-    : scope === 'city' ? ['platform']
+  // Diversity hierarchy per scope (user 2026-06-27): Region → cities → districts → platforms; City →
+  // districts → platforms; District → platforms (price/type/freshness variety come from the recency leaf
+  // + repeat-visit rotation). Always stays INSIDE the selected scope. Country adds region at the top.
+  const keys = scope === 'country' ? ['region', 'city', 'district', 'platform']
+    : scope === 'region' ? ['city', 'district', 'platform']
+    : scope === 'city' ? ['district', 'platform']
+    : scope === 'district' ? ['platform']
     : [];
   return interleaveRanked(rows, keys);
 }
@@ -588,7 +592,7 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
     }
     const city = l.city || '';
     const region = ar?.region || CITY_TO_REGION[city] || city;
-    ranked.push({ l, platform: c.platform, city, region, rank: c.rank, source_table: c.source_table });
+    ranked.push({ l, platform: c.platform, city, region, district: l.district || '', rank: c.rank, source_table: c.source_table });
   }
   const USE_RELATION_TABLE = true;
   const scoped = orderByScope(ranked, scopeOf(q, cities, countryWide));

@@ -637,6 +637,30 @@ export function cityDisplay(cityEn: string, locale: string): string {
   return cityEn;
 }
 
+// Top districts (by REAL live inventory) for an Arabic city name — Arabic-clean and deduped. Used by the
+// chat's «ساعدني ألقى نتائج أدق» refine flow so a follow-up «أي حي؟» offers genuine, listing-backed
+// neighbourhoods to TAP, never typed. Returns [] when the live index isn't loaded or the city has none —
+// the caller then falls back to a different clarifying dimension. (user 2026-06-27: clickable refine.)
+export function topDistrictsForCity(cityArabic: string, limit = 6): string[] {
+  if (!LIVE_DISTRICTS.length || !cityArabic) return [];
+  const norm = (s: string) => s.replace(/\s+/g, '').replace(/[ةه]$/, '');
+  const want = norm(cityArabic);
+  const seen = new Set<string>();
+  const out: { name: string; n: number }[] = [];
+  for (const d of LIVE_DISTRICTS) {
+    if (norm(cityDisplay(d.city, 'ar')) !== want) continue;
+    const name = (d.district || '').trim();
+    if (!/[ء-ي]/.test(name)) continue;            // Arabic-script names only → clean chip labels
+    const clean = name.replace(/^حي\s+/, '').trim();
+    const key = norm(clean);
+    if (key.length < 2 || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ name: clean, n: Number(d.n) || 0 });
+  }
+  out.sort((a, b) => b.n - a.n);                   // most inventory first
+  return out.slice(0, limit).map((x) => x.name);
+}
+
 // ── Fuzzy CITY index (typo/Arabic correction) ────────────────────────────────────────────────────
 // Every way a city can be written → its canonical English DB label: the curated CITY_TOKENS map
 // (Arabic + transliterations for ~150 towns), the nationwide catalog (EN + AR), and the live cities.

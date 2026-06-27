@@ -224,8 +224,12 @@ export function buildPools(rows: Listing[]): Pools {
   }
   // No fake fallback: Ezhalah is a pure aggregator now — empty pools stay empty so the user
   // sees "no exact matches" instead of stale mock listings. (user request: real listings only.)
-  for (const key of Object.keys(out) as PoolKey[]) {
-    out[key].sort((a, b) => b.id - a.id); // newest first
-  }
+  //
+  // PRESERVE the incoming order — do NOT re-sort by id. `rows` arrives from fetchListingsForQuery
+  // ALREADY ordered by `orderByScope`: diversity-primary (Region→cities→districts→platforms etc.,
+  // per the user's per-scope diversity spec) with true newest-first as the leaf tiebreaker. A blanket
+  // `sort((a,b)=>b.id-a.id)` here re-clustered every pool by raw id, which silently DISCARDED that
+  // diversity (one platform/city with the highest ids monopolised the first 25). Keeping insertion
+  // order lets the diversified ranking survive to the display. (user 2026-06-27: improve diversity.)
   return out;
 }
