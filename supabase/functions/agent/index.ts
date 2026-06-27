@@ -89,6 +89,29 @@ function arNorm(s: string): string {
     .trim();
 }
 
+// EDGE ANTI-GUESS (deterministic; parity with production v81). The model still sometimes "helpfully"
+// appends a famous district's city («حي العزيزية» → «حي العزيزية، الخبر») despite the prompt. Never let a
+// guessed city/region survive: if the location is a compound «X، anchor» whose trailing anchor (a city, or
+// a «منطقة …» region) does NOT appear in anything the USER actually typed (this turn + prior user turns),
+// drop the anchor and keep the bare place. The catalog backstop (loc_classify) then resolves a unique place
+// or ASKS for an ambiguous district. An anchor the user DID type is always kept.
+function stripGuessedAnchor(loc: unknown, text: string, history: Array<{ role?: string; text?: string }>): string {
+  if (typeof loc !== "string" || !loc.trim()) return "";
+  let s = loc.trim();
+  const said = arNorm([text, ...(Array.isArray(history) ? history : [])
+    .filter((h) => h && h.role !== "model")
+    .map((h) => String(h?.text ?? ""))].join(" "));
+  const parts = s.split(/[،,]/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    const anchor = parts[parts.length - 1];
+    const core = anchor.replace(/^\s*(?:ال)?منطقة\s+/, "").trim();
+    if (!said.includes(arNorm(anchor)) && (!core || !said.includes(arNorm(core)))) {
+      s = parts.slice(0, -1).join("، ");
+    }
+  }
+  return s;
+}
+
 // Public project keys (already shipped in the app bundle) — soft gate so random
 // callers can't burn the model budget. No privileged work here.
 const PUBLIC_KEY = "sb_publishable_vXzwxdpfrzmbwtbR5aXcKA_cMUO8hVB";
@@ -267,7 +290,7 @@ HUMAN / SUPPORT: if the user wants a human, wants to report a problem, dispute a
 3. WESTERN DIGITS ALWAYS (0-9), in every language.
 4. NEVER invent listings, prices, availability, or property details. NEVER return zero results when reasonable alternatives exist — widen the search instead (neighbouring districts, nearby cities, budget ±15%, the closest bedroom count / size, related property types) and briefly say WHAT you widened, e.g. (English) "No exact match, so I widened to nearby districts — here's what's available." / (Arabic) "ما فيه مطابقة تامة، فوسّعت للأحياء القريبة — هذي المتاح." If nothing matches exactly but closest options exist, say (English) "I couldn't find an exact match, but here are the closest options." / (Arabic) "ما لقيت نفس المواصفات بالضبط، لكن هذي أقرب النتائج المتاحة." Only if truly nothing relevant exists anywhere, say so and ask which ONE filter to relax — never fabricate a listing to fill the gap.
 5. STAY IN SCOPE — but DON'T over-deflect. A real property request is ALWAYS a search, never a deflection: if the user names a property type, a budget, or a place (e.g. "I want a commercial land for 200,000 in Saudi Arabia", "land 500 sqm", "villa under 2m"), classify it as kind="listings" (ask at most the ONE missing field, e.g. the city) — NEVER reply "I can only help you find properties". A CATEGORY answer is also a valid property answer, NEVER out-of-scope: "residential" / "commercial" (or typos like "resideintal", "residental", "resedintial", "comercial", or Arabic سكني / تجاري) → treat it as the category and SEARCH (leave type="" to show a mix of that category); do NOT reply "I can only help you find properties". Understand misspelled property words generally (house/apartment/villa/land/office and their typos) — never deflect a real property term just because it's misspelled. Questions ABOUT Ezhalah (what it is, how it works, platforms, free/cost, who owns the listings, data/privacy/PDPL, is it safe) are ALSO in scope — answer them (see WHAT EZHALAH IS). ONLY a genuinely unrelated topic (weather, coding, recipes, math, general chit-chat with no property intent) → kind="message": (English) "I can only help you find properties in Saudi Arabia. What type of property are you looking for?" / (Arabic) "أنا أقدر أساعدك ببحث العقارات في السعودية بس. أي نوع عقار تدور عليه؟"
-6. CLARIFYING QUESTIONS ARE CONFIDENCE-BASED, NOT BANNED (see QUESTION POLICY): high confidence → 0, medium → 1, low → at most 2; never more than two before the first search; after searching you may ask follow-ups that refine. For a HIGH-confidence place (a clear city/district or a recognized landmark) infer the city and search without asking (e.g. near Aramco → Dhahran, near the sea → Jeddah). NEVER guess a city on LOW confidence, and NEVER claim a place does not exist just because it is not a landmark. If after your allowed questions the city is still unknown, leave location "" and search ALL of Saudi Arabia (never a random/default city). If rent vs buy is still unknown, deal="Both". "NEAR ME" / "close to my work" / "within X km" — you have NO live GPS or device location: infer the city/district from any landmark, area, or workplace they name and search immediately; if they named nothing locatable, that is a clarifying question (ask which city/area); if still unknown, search ALL of Saudi Arabia. Never claim to know where the user physically is.
+6. CLARIFYING QUESTIONS ARE CONFIDENCE-BASED, NOT BANNED (see QUESTION POLICY): high confidence → 0, medium → 1, low → at most 2; never more than two before the first search; after searching you may ask follow-ups that refine. For a HIGH-confidence place (a clear city/district or a recognized landmark) infer the city and search without asking (e.g. near Aramco → Dhahran). A bare geography/proximity cue (near the sea, near a road) is NOT high-confidence for a city — never infer one from it. NEVER guess a city on LOW confidence, and NEVER claim a place does not exist just because it is not a landmark. If after your allowed questions the city is still unknown, leave location "" and search ALL of Saudi Arabia (never a random/default city). If rent vs buy is still unknown, deal="Both". "NEAR ME" / "close to my work" / "within X km" — you have NO live GPS or device location: infer the city/district from any landmark, area, or workplace they name and search immediately; if they named nothing locatable, that is a clarifying question (ask which city/area); if still unknown, search ALL of Saudi Arabia. Never claim to know where the user physically is.
 7. NEUTRAL SEARCH ENGINE. You are a search engine — NOT a recommendation engine, personalization engine, advisor, or broker. NEVER personalize results, learn a user's favourite cities/districts/types, or carry preferences across chats — the SAME search returns the SAME results for everyone (given the same listings). Ranking is neutral (freshness → relevance → active listing), never by clicks, popularity, or sponsored placement. You only: Search → Understand → Display. The user decides.
 8. WHEN UNSURE, ASK. If YOU are not sure of what the user wants — what they mean, which option they're picking, which place/landmark they referred to, which budget figure, rent vs buy, anything material — ASK. If THEY were not clear, tell them gently and ASK ("I want to get this right — did you mean X or Y?", "I'm not 100% sure I caught that — could you rephrase?"). Never silently guess on a material detail; never invent or assume to avoid asking. This RULE OVERRIDES the QUESTION POLICY count limits: a genuine clarification you need to do the search correctly is always allowed even if you've already asked two questions, and is preferred over inventing a guess. When in doubt, the answer is always to ask the user. (user request.)
 
@@ -692,7 +715,11 @@ Deno.serve(async (req: Request) => {
       // (e.g. "ذبحة" for the unknown Eastern-Province city), let it through unchanged so the client
       // can match it exactly. Just normalize whitespace and reject objects/arrays sneaking through.
       const rawLoc = typeof out.location === "string" ? out.location : "";
-      let location = rawLoc.replace(/\s+/g, " ").trim();
+      // EDGE ANTI-GUESS (parity with prod v81): strip any city/region the user never typed BEFORE the
+      // catalog backstop runs, so a model-appended anchor («حي العزيزية» → «حي العزيزية، الخبر») can't slip
+      // a guessed city past loc_classify. A user-typed anchor is kept; loc_classify then asks for a bare
+      // ambiguous district. The client safeguard remains as the final net.
+      let location = stripGuessedAnchor(rawLoc, text, history).replace(/\s+/g, " ").trim();
 
       // ── DETERMINISTIC CATALOG BACKSTOP ──────────────────────────────────────
       // Disambiguate twins + region-vs-city against the official Arabic catalog BEFORE
