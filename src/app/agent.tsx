@@ -1158,9 +1158,13 @@ export default function Agent() {
                     <Text style={[s.summaryText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', alignSelf: 'stretch' }]}>{m.summary}</Text>
                   ) : null}
                   {/* 3) RESULT INTRO — plain text, no sparkle, no "Ezhalah!" prefix — professional and
-                      neutral. Sits below the Search Summary. (user request.) */}
+                      neutral. Sits below the Search Summary. SUPPRESSED when there are 0 results: the
+                      generic "I found some properties" line must NOT appear above the honest «ما فيه
+                      إعلانات في هذا الموقع حالياً» empty state (they contradicted each other). The empty
+                      Typer still fires onDone so the empty-state line below reveals. (user: الحيمة showed
+                      both "found some" AND "no listings".) */}
                   <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', marginTop: 6, alignSelf: 'stretch' }]}>
-                    {m.typing ? <Typer text={m.text} onDone={() => markTyped(m.id)} /> : m.text}
+                    {m.typing ? <Typer text={m.result.listings.length === 0 ? '' : m.text} onDone={() => markTyped(m.id)} /> : (m.result.listings.length === 0 ? '' : m.text)}
                   </Text>
                   {/* Hold the property cards back until Ezhalah has finished writing the words above —
                       listings never appear before the reply types out (user request). */}
