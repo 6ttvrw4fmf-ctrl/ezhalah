@@ -470,16 +470,25 @@ function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts
   // typed this attempt, drop the anchor and keep the BARE place. The resolver then either resolves it
   // uniquely (→ search) or flags it ambiguous (→ the chat's locationClarification asks «أي مدينة؟»). An
   // anchor the user DID type is always kept. (anti-guess location fix 2026-06-27.)
+  const saidAll = proxSources.join(' ');
   if (q.location && /[،,]/.test(q.location)) {
-    const said = proxSources.join(' ');
     const parts = q.location.split(/[،,]/).map((s) => s.trim()).filter(Boolean);
     if (parts.length >= 2) {
       const anchor = parts[parts.length - 1];
       const anchorCore = anchor.replace(/^\s*(?:ال)?منطقة\s+/, '').trim();
-      if (!said.includes(anchor) && (!anchorCore || !said.includes(anchorCore))) {
+      if (!saidAll.includes(anchor) && (!anchorCore || !saidAll.includes(anchorCore))) {
         q.location = parts.slice(0, -1).join('، ');
       }
     }
+  }
+  // ANTI-GUESS (bare city): for a PROXIMITY-only ask with no city, the edge sometimes fills a default city
+  // into q.location («قريب من مستشفى الحبيب» → "الرياض"; «قريب من الافنيوز» → "الرياض"; a road → "جدة").
+  // The proximity/landmark already rides on q.proximity, so if the whole q.location does not appear in what
+  // the user actually typed this attempt, it is invented → drop it. The chat's locationClarification then
+  // asks «في أي مدينة تبحث؟» instead of silently searching a guessed city. A city the user typed (or that
+  // carried over from a prior turn, since proxSources is the whole attempt) is always kept. (anti-guess.)
+  if (q.location && prox.length && !cityFromText(saidAll) && !saidAll.includes(q.location)) {
+    q.location = '';
   }
   const kw = Array.from(new Set([...extractNearbyKeywords(userText), ...proximityKeywords(prox)]));
   if (kw.length) q.keywords = kw;
