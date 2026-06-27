@@ -962,18 +962,21 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
     // shuffled + region-spread so they vary and span Saudi; specific searches stay relevance→recency —
     // if the best matches are all one platform, that's fine. Only real listings. (user display rule.)
     listings = rankResults(listings, q, cap);
-    // Location-RELATIONSHIP ranking: when the user asked for a proximity («قريب من مستشفى» / «يطل على
-    // البحر»), surface the listings that actually express that same relationship+entity FIRST. The boost
-    // was precomputed per listing in fetchListingsForQuery (loc_rel_rank RPC / runtime scorer) and rides
-    // on l.proximityBoost. STABLE: equal-boost listings keep the relevance→diversity→recency order above,
-    // so this only lifts genuine matches without disturbing everything else. No explicit objective sort
-    // is overridden (that branch returns earlier). (live-path fix 2026-06-27.)
-    if (q.proximity && q.proximity.length) {
-      listings = listings
-        .map((l, i) => ({ l, i, s: l.proximityBoost ?? 0 }))
-        .sort((a, b) => (b.s - a.s) || (a.i - b.i))
-        .map((x) => x.l);
-    }
+  }
+  // Location-RELATIONSHIP ranking — applies to BOTH branches above. A proximity intent («قريب من مسجد» /
+  // «يطل على البحر») is the user's PRIMARY ask, so the listings that actually express that relationship
+  // (evidence in their own title/description/source_capture, precomputed into l.proximityBoost by
+  // fetchListingsForQuery) MUST lead — even when the agent attached a DEFAULT sort like 'newest' (shown as
+  // «مرتّبة من الأحدث»). STABLE: equal-boost listings keep whatever order the branch above produced
+  // (an objective sort OR relevance→diversity→recency), so a real "cheapest/biggest" sort still orders
+  // WITHIN the boosted matches. (live-path fix 2026-06-27: the boost previously sat ONLY in the
+  // no-explicit-sort branch, so the agent's default 'newest' sort skipped it and proximity searches came
+  // back recency-ranked instead of relationship-ranked.)
+  if (q.proximity && q.proximity.length && listings.length) {
+    listings = listings
+      .map((l, i) => ({ l, i, s: l.proximityBoost ?? 0 }))
+      .sort((a, b) => (b.s - a.s) || (a.i - b.i))
+      .map((x) => x.l);
   }
 
   // Return up to 25 matches (display cap): the chat shows the first `count` the user explicitly
