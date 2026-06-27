@@ -956,6 +956,30 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
         return { raw, kind: 'district', city: cityM.nameEn, region: cityM.regionEn, label: ar(locale) ? distM.nameAr : distM.nameEn, districts: variants, cities: [], exact: true };
       }
     }
+    // "District، REGION" (e.g. Gemini's «حي الجسر، المنطقة الشرقية») — the trailing token is a REGION, not a
+    // city, so the district،city branch above never fired and matching the whole comma-string fails →
+    // kind 'none' → false "no results" (the Filter, which gets the clean «حي الجسر», resolves it fine).
+    // Resolve the DISTRICT part EXACTLY as the Filter would, then, if the trailing token is a real region,
+    // narrow an ambiguous district to the cities inside that region. We only re-scope the resolver's own
+    // output — never invent or rewrite DB names. (chat==filter location fix 2026-06-27.)
+    // "District، REGION" (e.g. Gemini's «حي الجسر، المنطقة الشرقية»). The trailing token is a REGION, not a
+    // city (and it also surfaces a spurious CITY hit — المندسة الشرقية — so the district،city branch above
+    // mis-fires and returns nothing). Build the resolution straight from the CLEAN catalog district `distM`,
+    // which already carries its own city + region — exactly like the district،city branch — instead of
+    // re-resolving the «حي X» string, which triggers the noisy live-district fuzzy merge (ambiguous across
+    // unrelated cities → the engine's clarify backstop → 0 results). Among the catalog candidates, prefer the
+    // one whose region matches the named region. Mirrors the Filter exactly; never invents names. (chat==filter.)
+    if (distM) {
+      const lastTok = cp[cp.length - 1];
+      const regHit = matchLocations(lastTok).find((p) => p.kind === 'region')
+                  || matchLocations(lastTok.replace(/^\s*(?:ال)?منطقة\s+/, '').trim()).find((p) => p.kind === 'region');
+      const cands = matchLocations(cp[0]).filter((p) => p.kind === 'district');
+      const pick = (regHit && cands.find((d) => d.regionEn === regHit.nameEn || d.regionAr === regHit.nameAr)) || distM;
+      const variants = rawDistrictVariants(pick);
+      if (variants.length) {
+        return { raw, kind: 'district', city: pick.cityEn ?? '', region: pick.regionEn, label: ar(locale) ? pick.nameAr : pick.nameEn, districts: variants, cities: [], exact: true };
+      }
+    }
   }
   // 3) Real place name (district → city → region) via the nationwide matcher. Tried BEFORE
   //    geography/lifestyle so a genuine place always wins over a loose keyword. Districts rank above

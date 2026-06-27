@@ -176,6 +176,9 @@ const CITY_AR: Record<string, string> = {
   'khafji': 'الخفجي', 'khamis mushait': 'خميس مشيط', 'khaybar': 'خيبر',
   'khobar': 'الخبر', 'mahayel': 'محايل عسير', 'mahd adh dhahab': 'مهد الذهب',
   'malham': 'ملهم', 'mecca': 'مكة المكرمة', 'medina': 'المدينة المنورة',
+  // Catalog (sa-locations.json) spells these "Makkah"/"Madinah"; keep both so the resolver's own output maps.
+  'makkah': 'مكة المكرمة', 'makkah al mukarramah': 'مكة المكرمة',
+  'madinah': 'المدينة المنورة', 'al madinah': 'المدينة المنورة', 'al madinah al munawwarah': 'المدينة المنورة',
   'najran': 'نجران', 'qatif': 'القطيف', 'qurayyat': 'القريات',
   'rabigh': 'رابغ', 'rafha': 'رفحاء', 'raniyah': 'رنية',
   'ras tanura': 'رأس تنورة', 'riyadh': 'الرياض', 'riyadh al khabra': 'رياض الخبراء',
@@ -189,7 +192,13 @@ const CITY_AR: Record<string, string> = {
 };
 function arCity(en: string | null): string | null {
   if (!en) return null;
-  return CITY_AR[en.trim().toLowerCase()] || en;
+  const k = en.trim().toLowerCase();
+  // The Saudi catalog (sa-locations.json, used by resolveLocation/matchLocations) spells many cities WITH
+  // the article — "Al Khobar", "At Taif", "Al Jubail" — while CITY_AR is keyed on the bare form
+  // ("khobar", "taif", "jubail"). Without the article-stripped fallback the resolver's own city output
+  // missed the map and the ENGLISH name reached the RPC (which matches the Arabic `city` column) → 0
+  // results for WHOLE cities (الخبر 6089, etc.) in BOTH Filter and Chat. (city-canonical fix 2026-06-27.)
+  return CITY_AR[k] || CITY_AR[k.replace(/^(?:al|at|ad|as|ar|az|an|ash)\s+/, '')] || en;
 }
 
 // Region name → region_id, mirrors loc_catalog_region (13 stable rows). Used to pass p_region_ids to
