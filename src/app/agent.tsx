@@ -1157,26 +1157,26 @@ export default function Agent() {
                   {m.summary ? (
                     <Text style={[s.summaryText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', alignSelf: 'stretch' }]}>{m.summary}</Text>
                   ) : null}
-                  {/* 3) RESULT INTRO — plain text, no sparkle, no "Ezhalah!" prefix — professional and
-                      neutral. Sits below the Search Summary. SUPPRESSED when there are 0 results: the
-                      generic "I found some properties" line must NOT appear above the honest «ما فيه
-                      إعلانات في هذا الموقع حالياً» empty state (they contradicted each other). The empty
-                      Typer still fires onDone so the empty-state line below reveals. (user: الحيمة showed
-                      both "found some" AND "no listings".) */}
-                  <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', marginTop: 6, alignSelf: 'stretch' }]}>
-                    {m.typing ? <Typer text={m.result.listings.length === 0 ? '' : m.text} onDone={() => markTyped(m.id)} /> : (m.result.listings.length === 0 ? '' : m.text)}
-                  </Text>
+                  {/* 3) RESULT INTRO — always typed/animated (user: "never show the text just like this,
+                      always written with animation"). For 0-result searches: type the empty-state
+                      suggestion directly here so it animates; the static block below is suppressed to
+                      avoid a duplicate. For searches with results: type the normal intro text. */}
+                  {(() => {
+                    const zeroResult = m.result.listings.length === 0;
+                    const txt = zeroResult
+                      ? (m.result.suggestion ?? t('No exact matches — try broadening your search.'))
+                      : m.text;
+                    return (
+                      <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', marginTop: 6, alignSelf: 'stretch' }]}>
+                        {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
+                      </Text>
+                    );
+                  })()}
                   {/* Hold the property cards back until Ezhalah has finished writing the words above —
                       listings never appear before the reply types out (user request). */}
                   {m.typing && !doneTyping[m.id] ? null : m.result.listings.length === 0 ? (
-                    // Prefer the SPECIFIC, actionable recommendation runSearch attached to the result
-                    // ("No listings within that budget — want me to remove it?"). Falls back to the
-                    // generic broaden line only when the diagnostic couldn't find a single relaxation
-                    // that would unlock results. (user request: "give the user a recommendation
-                    // like change something — put it like 'do you want me to?'".)
-                    <Text style={[s.emptyRes, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', alignSelf: 'stretch' }]}>
-                      {m.result.suggestion ?? t('No exact matches — try broadening your search.')}
-                    </Text>
+                    // Zero-result: text already animated in slot above — render nothing here to avoid duplicate.
+                    null
                   ) : (
                     <>
                       <Text style={[s.rankLine, { textAlign: rtl ? 'right' : 'left', alignSelf: 'stretch' }]}>{m.result.sortNote ?? t('Ranked by closest match.')}</Text>
