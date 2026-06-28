@@ -80,7 +80,7 @@ const RAW_TO_CLEAN: Record<string, string> = {
   'Warehouse': 'Warehouse', 'Workshop': 'Workshop', 'Factory': 'Factory', 'Telecom Tower': 'Telecom Tower',
   // Commercial — buildings & facilities
   'Commercial Building': 'Commercial Building', 'Hotel': 'Hotel',
-  'School': 'Specialized Facilities', 'Health Center': 'Specialized Facilities',
+  'School': 'Specialized Facilities', 'مدرسة': 'Specialized Facilities', 'Health Center': 'Specialized Facilities',
   'Hall': 'Specialized Facilities', 'Parking': 'Specialized Facilities', 'Cinema': 'Specialized Facilities',
   'Gas Station': 'Gas Station', 'Station': 'Gas Station', 'محطة بنزين': 'Gas Station',
   'سكن عمال': 'Staff Housing',
@@ -143,7 +143,7 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   // Commercial — Buildings & Facilities
   'Commercial Building': { rawTypes: ['Commercial Building', 'Building'], kinds: ['com'] },
   'Hotel':               { rawTypes: ['Hotel'], kinds: BOTH },
-  'Specialized Facilities': { rawTypes: ['School', 'Health Center', 'Hall', 'Parking', 'Cinema'], kinds: ['com'] },
+  'Specialized Facilities': { rawTypes: ['School', 'مدرسة', 'Health Center', 'Hall', 'Parking', 'Cinema'], kinds: ['com'] },
   'Gas Station':         { rawTypes: ['Gas Station', 'Station', 'محطة بنزين'], kinds: BOTH },
   'Staff Housing':       { rawTypes: ['سكن عمال'], kinds: BOTH },
   // Commercial — Plots (physically in RES tables on Aqar → both)

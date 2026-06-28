@@ -323,7 +323,7 @@ function resTables(q: SearchQuery): string[] {
 const COMMERCIAL_RAW_IN_RES = [
   'Commercial Land', 'Industrial Land', 'Hotel', 'Warehouse', 'Workshop', 'Factory',
   'Telecom Tower', 'Commercial Building', 'Office', 'Shop', 'Kiosk', 'Showroom', 'Bank',
-  'Gas Station', 'Station', 'محطة بنزين', 'School', 'Health Center', 'Hall', 'Parking',
+  'Gas Station', 'Station', 'محطة بنزين', 'School', 'مدرسة', 'Health Center', 'Hall', 'Parking',
   'Cinema', 'سكن عمال',
 ];
 
