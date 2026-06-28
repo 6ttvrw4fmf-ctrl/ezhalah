@@ -83,6 +83,10 @@ export type SearchQuery = {
   // Independent of `detail` so both beds and area can be set simultaneously. Ignored once a type is
   // selected (the type-level detail chip takes over). (user: no forced type selection for bed filter.)
   contextBeds?: string | null;
+  // Area (m²) entered at the CATEGORY/GROUP level. Has its OWN field so a bare "3" is never mistaken
+  // for a 3-bedroom count (the shared `detail` field reads a bare 1–5 as bedrooms). Independent of
+  // contextBeds so the user can set area only, beds only, or both. (user: typing 1–5 m² showed nothing.)
+  contextSize?: string | null;
 };
 
 // The objective sort keys the agent/UI may request. NEVER a quality/popularity ordering.
@@ -395,14 +399,15 @@ export function searchSummary(q: SearchQuery): string {
   if (locLines.length) for (const l of locLines) lines.push(`• ${l}`);
   else lines.push(`• ${t('City')}: ${t('Saudi Arabia')}`);
   for (const b of budgetLines(q)) lines.push(`• ${b}`);
+  // Category/group-level refinements (filter UI). Each has its own field, so the labels are unambiguous.
   if (q.contextBeds) lines.push(`• ${t('Bedrooms')}: ${q.contextBeds}`);
+  if (q.contextSize) lines.push(`• ${t('Size')}: ${q.contextSize} ${t('m²')}`);
   if (q.detail) {
-    // Label by VALUE, not by type: a home's detail may be a BEDROOM count OR a SIZE (the user's
-    // choice). A bedroom-shaped value (1–4 or "5+") → Bedrooms; a size band ("100–300 m²") or any
-    // larger number → Size. This keeps "house, 3 beds" → Bedrooms 3 and "house, 1500 m²" → Size 1500.
+    // Type/agent path shares ONE detail field for BEDROOM count OR SIZE. Label by VALUE: a bedroom-
+    // shaped value (1–4 or "5+") → Bedrooms; a size band ("100–300 m²") or any larger number → Size.
     if (/m²/.test(q.detail)) lines.push(`• ${t('Size')}: ${tDetailOption(q.detail)}`);
-    else if (/^([1-4]|5\+?)$/.test(q.detail) && !q.contextBeds) lines.push(`• ${t('Bedrooms')}: ${q.detail}`);
-    else if (!/^([1-4]|5\+?)$/.test(q.detail) || q.contextBeds) lines.push(`• ${t('Size')}: ${q.detail} ${t('m²')}`);
+    else if (/^([1-4]|5\+?)$/.test(q.detail)) lines.push(`• ${t('Bedrooms')}: ${q.detail}`);
+    else lines.push(`• ${t('Size')}: ${q.detail} ${t('m²')}`);
   }
   return `${t('Search Summary')}\n${lines.join('\n')}`;
 }
@@ -424,9 +429,10 @@ export function querySummaryLine(q: SearchQuery): string {
     if (amount) parts.push(`${t('SAR')} ${grouped(amount)}`);
   }
   if (q.contextBeds) parts.push(t('{n} beds', { n: q.contextBeds }));
+  if (q.contextSize) parts.push(t('{n} m²', { n: q.contextSize }));
   if (q.detail) {
     if (/m²/.test(q.detail)) parts.push(tDetailOption(q.detail));
-    else if (/^([1-4]|5\+?)$/.test(q.detail) && !q.contextBeds) parts.push(t('{n} beds', { n: q.detail }));
+    else if (/^([1-4]|5\+?)$/.test(q.detail)) parts.push(t('{n} beds', { n: q.detail }));
     else parts.push(t('{n} m²', { n: q.detail }));
   }
   return parts.join(' · ');
@@ -590,17 +596,11 @@ function parseSizeRange(detail: string): { min: number; max: number } | null {
 // to filter on (bedroom count, or no detail). The user can give the size in any unit — the agent/app
 // converts to m² before it reaches here. (user request: area is a first-class filter.)
 function sizeFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
-  if (!q.detail) return null;
-  // When contextBeds is the bedroom source (no type), detail is a SIZE value — do NOT skip it.
-  // Only skip when detail itself is a bedroom count (type-level or agent path).
-  if (!q.contextBeds) {
-    if (bedroomSpec(q)) return null; // detail is a bedroom count on agent/type path → bedroomFilter handles it
-  } else {
-    // contextBeds handles bedrooms; check if detail is still a bedroom token (shouldn't be, but guard).
-    const d = q.detail.trim();
-    if (/^([1-4]|5\+?)$/.test(d) && (!q.type || detailFor(q.type).isBedrooms)) return null;
-  }
-  const r = parseSizeRange(q.detail);
+  // Context-level area (filter UI, category/group, no type) has its OWN field, so a bare "3" here is
+  // always a 3 m² size — never a bedroom count. Type/agent path keeps reading the shared detail field.
+  const raw = q.contextSize ?? (q.detail && !bedroomSpec(q) ? q.detail : null);
+  if (!raw) return null;
+  const r = parseSizeRange(raw);
   if (!r) return null;
   return (l) => l.area > 0 && l.area >= r.min && l.area <= r.max;
 }
@@ -753,8 +753,9 @@ function listingInDistricts(stored: string, wanted: string[]): boolean {
 // the closeness ranking; bands have no single target so every in-band card is equally close. Null when
 // the detail is a bedroom count or not a clean size.
 function exactSizeTarget(q: SearchQuery): number | null {
-  if (!q.detail || bedroomSpec(q)) return null;
-  const d = q.detail.replace(/,/g, '').trim();
+  const raw = q.contextSize ?? (q.detail && !bedroomSpec(q) ? q.detail : null);
+  if (!raw) return null;
+  const d = raw.replace(/,/g, '').trim();
   if (!/^\d+(\s*(m²|m2|meter|metre|متر|م))?$/i.test(d)) return null; // a single size, not a range/keyword
   const n = parseInt(d, 10);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -1059,7 +1060,7 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
   // fuzzy typo guess. Only an exact-but-empty place gets the honest zero-state; a misspelled near-miss
   // («القرص») falls through to the «هل تقصد الرس؟» suggestion below. (user: typo = ask/did-you-mean.)
   const explicitPlace = !!lm && lm.exact === true && (lm.kind === 'district' || lm.kind === 'city' || lm.kind === 'region');
-  if (explicitPlace && countWith({ priceInput: '', priceBand: null, detail: null, type: null, typeGroup: null }) === 0) {
+  if (explicitPlace && countWith({ priceInput: '', priceBand: null, detail: null, contextBeds: null, contextSize: null, type: null, typeGroup: null }) === 0) {
     return t('No listings in this location right now.');
   }
   // "Did you mean X?" — fires for: (a) a free-typed unresolved place (typo/obscure town) whose lm has
@@ -1082,7 +1083,7 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
   if (q.districts?.length && countWith({ districts: undefined }) > 0) {
     return t("No matches in that specific area — but I can find some elsewhere in the same city. Want me to widen the area?");
   }
-  if (q.detail && countWith({ detail: null }) > 0) {
+  if ((q.detail || q.contextBeds || q.contextSize) && countWith({ detail: null, contextBeds: null, contextSize: null }) > 0) {
     return t("No matches with that exact size/bedroom count — close options exist if I drop it. Want me to?");
   }
   if (q.type && countWith({ type: null, category: q.category }) > 0) {

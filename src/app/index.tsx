@@ -195,9 +195,9 @@ export default function Home() {
   // they can see it and tap in to edit it. A band shows its label minus the trailing unit (the box
   // renders "m²" on the side); a custom number shows as-is.
   const sizeIsBand = !!detail && !detail.isBedrooms && !!query.detail && detail.options.includes(query.detail);
-  // Context-level size box value: shown in the area input when no type is selected.
-  const contextSizeValue = !query.type && query.detail && !/^([1-4]|5\+?)$/.test(query.detail)
-    ? grouped(parseInt(query.detail, 10) || 0) : '';
+  // Context-level size box value: shown in the area input when no type is selected. Reads its OWN
+  // field (contextSize) so a small area like "3" displays — it's never read as a bedroom count.
+  const contextSizeValue = query.contextSize ? grouped(parseInt(query.contextSize, 10) || 0) : '';
   const sizeBoxValue = !detail || detail.isBedrooms || !query.detail
     ? ''
     : sizeIsBand
@@ -420,7 +420,7 @@ export default function Home() {
                     key={cat}
                     label={t(cat)}
                     selected={query.category === cat}
-                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, detail: null, contextBeds: null, priceBand: null })); scrollDown(); }}
+                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, detail: null, contextBeds: null, contextSize: null, priceBand: null })); scrollDown(); }}
                   />
                 ))}
               </View>
@@ -437,7 +437,7 @@ export default function Home() {
                       key={g.group}
                       label={t(g.group)}
                       selected={query.typeGroup === g.group}
-                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, detail: null, contextBeds: null, priceBand: null })); scrollDown(); }}
+                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, detail: null, contextBeds: null, contextSize: null, priceBand: null })); scrollDown(); }}
                       style={s.wrapCell}
                     />
                   ))}
@@ -456,7 +456,7 @@ export default function Home() {
                       key={ty}
                       label={t(ty)}
                       selected={query.type === ty}
-                      onPress={() => { setQuery((q) => ({ ...q, type: q.type === ty ? null : ty, detail: q.type === ty ? null : ty === 'Room' ? '1' : null, contextBeds: null, priceBand: null })); scrollDown(); }}
+                      onPress={() => { setQuery((q) => ({ ...q, type: q.type === ty ? null : ty, detail: q.type === ty ? null : ty === 'Room' ? '1' : null, contextBeds: null, contextSize: null, priceBand: null })); scrollDown(); }}
                       style={s.wrapCell}
                     />
                   ))}
@@ -489,7 +489,7 @@ export default function Home() {
                   )}
 
                   <Text style={[s.ctxSubLabel, ctx.showBeds ? { marginTop: 14 } : null]}>{t('Area (m²)')}</Text>
-                  <View style={[s.field, s.sizeField, query.detail ? s.sizeFieldOn : null]}>
+                  <View style={[s.field, s.sizeField, query.contextSize ? s.sizeFieldOn : null]}>
                     <TextInput
                       style={s.sizeInput}
                       keyboardType="number-pad"
@@ -498,7 +498,7 @@ export default function Home() {
                       value={contextSizeValue}
                       onChangeText={(v) => {
                         const digits = toLatinDigits(v).replace(/\D/g, '');
-                        setQuery((q) => ({ ...q, detail: digits ? digits : null, priceBand: null }));
+                        setQuery((q) => ({ ...q, contextSize: digits ? digits : null, priceBand: null }));
                       }}
                     />
                     <Text style={s.sizeUnit}>{t('م²')}</Text>
