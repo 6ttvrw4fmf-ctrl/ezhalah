@@ -464,41 +464,45 @@ export default function Home() {
               </Reveal>
             )}
 
-            {/* Context-level bedrooms — shown at category/group level, no specific type needed */}
-            {ctx?.showBeds && (
+            {/* Combined optional refine section: bedrooms + area in one card */}
+            {(ctx?.showBeds || ctx?.showSize) && (
               <Reveal style={s.pick}>
-                <FieldLabel>{t('Bedrooms')}</FieldLabel>
-                <View style={s.wrap}>
-                  {['1', '2', '3', '4', '5+'].map((opt) => (
-                    <OptionBox
-                      key={opt}
-                      label={opt}
-                      selected={query.contextBeds === opt}
-                      onPress={() => { setQuery((q) => ({ ...q, contextBeds: q.contextBeds === opt ? null : opt, priceBand: null })); scrollDown(); }}
-                      style={s.wrapCell}
-                    />
-                  ))}
-                </View>
-              </Reveal>
-            )}
+                <View style={s.ctxBox}>
+                  <Text style={s.ctxTitle}>{t('Refine your search')}</Text>
+                  <Text style={s.ctxSub}>{t('Select bedrooms or area, or leave both empty to see all options')}</Text>
 
-            {/* Context-level area — shown at category/group level, no specific type needed */}
-            {ctx?.showSize && (
-              <Reveal style={s.pick}>
-                <FieldLabel>{t('Area (m²)')}</FieldLabel>
-                <View style={[s.field, s.sizeField, query.detail ? s.sizeFieldOn : null]}>
-                  <TextInput
-                    style={s.sizeInput}
-                    keyboardType="number-pad"
-                    placeholder={t('Enter area in m²')}
-                    placeholderTextColor={colors.muted}
-                    value={contextSizeValue}
-                    onChangeText={(v) => {
-                      const digits = toLatinDigits(v).replace(/\D/g, '');
-                      setQuery((q) => ({ ...q, detail: digits ? digits : null, priceBand: null }));
-                    }}
-                  />
-                  <Text style={s.sizeUnit}>{t('m²')}</Text>
+                  {ctx.showBeds && (
+                    <>
+                      <Text style={s.ctxSubLabel}>{t('Bedrooms')}</Text>
+                      <View style={[s.wrap, { marginBottom: 4 }]}>
+                        {(['any', '1', '2', '3', '4', '5+'] as const).map((opt) => (
+                          <OptionBox
+                            key={opt}
+                            label={opt === 'any' ? t('Any count') : opt}
+                            selected={opt === 'any' ? !query.contextBeds : query.contextBeds === opt}
+                            onPress={() => { setQuery((q) => ({ ...q, contextBeds: opt === 'any' ? null : (q.contextBeds === opt ? null : opt), priceBand: null })); scrollDown(); }}
+                            style={s.wrapCell}
+                          />
+                        ))}
+                      </View>
+                    </>
+                  )}
+
+                  <Text style={[s.ctxSubLabel, ctx.showBeds ? { marginTop: 14 } : null]}>{t('Area (m²)')}</Text>
+                  <View style={[s.field, s.sizeField, query.detail ? s.sizeFieldOn : null]}>
+                    <TextInput
+                      style={s.sizeInput}
+                      keyboardType="number-pad"
+                      placeholder={t('Enter area in m²')}
+                      placeholderTextColor={colors.muted}
+                      value={contextSizeValue}
+                      onChangeText={(v) => {
+                        const digits = toLatinDigits(v).replace(/\D/g, '');
+                        setQuery((q) => ({ ...q, detail: digits ? digits : null, priceBand: null }));
+                      }}
+                    />
+                    <Text style={s.sizeUnit}>{t('م²')}</Text>
+                  </View>
                 </View>
               </Reveal>
             )}
@@ -671,6 +675,10 @@ const s = StyleSheet.create({
   suggDist: { fontSize: 11.5, color: colors.muted },
 
   pick: { marginTop: 12 },
+  ctxBox: { backgroundColor: colors.chipFill, borderWidth: 1, borderColor: colors.chipLine, borderRadius: 12, padding: 14 },
+  ctxTitle: { fontSize: 14, fontWeight: '700', color: colors.ink, textAlign: 'right', marginBottom: 5 },
+  ctxSub: { fontSize: 12, color: colors.muted, textAlign: 'right', lineHeight: 18, marginBottom: 14 },
+  ctxSubLabel: { fontSize: 12.5, fontWeight: '600', color: colors.muted, textAlign: 'right', marginBottom: 8 },
   row: { flexDirection: 'row', gap: 8 },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   wrapCell: { flexGrow: 1, flexBasis: '30%', minWidth: 90, flex: 0 },
