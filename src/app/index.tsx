@@ -8,7 +8,7 @@ import HeroBackground from '@/components/HeroBackground';
 import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
-import { CATEGORIES, DEALS, detailFor, priceTabsFor, type Category } from '@/data/taxonomy';
+import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { matchLocations, placeLabel, placeTitle, placeSub, placeIcon, placeKey, resolveLocation, ensureLocationIndex, type Place } from '@/data/locations';
 import { grouped, toLatinDigits } from '@/data/search';
@@ -189,10 +189,15 @@ export default function Home() {
   };
 
   const detail = query.type ? detailFor(query.type) : null;
+  // Context-level detail: shown at category/group level when no specific type is selected.
+  const ctx = !query.type ? detailForContext(query.category, query.typeGroup ?? null) : null;
   // Whatever the user chose (a size band) or typed (a custom number) is mirrored INTO the size box so
   // they can see it and tap in to edit it. A band shows its label minus the trailing unit (the box
   // renders "m²" on the side); a custom number shows as-is.
   const sizeIsBand = !!detail && !detail.isBedrooms && !!query.detail && detail.options.includes(query.detail);
+  // Context-level size box value: shown in the area input when no type is selected.
+  const contextSizeValue = !query.type && query.detail && !/^([1-4]|5\+?)$/.test(query.detail)
+    ? grouped(parseInt(query.detail, 10) || 0) : '';
   const sizeBoxValue = !detail || detail.isBedrooms || !query.detail
     ? ''
     : sizeIsBand
@@ -415,7 +420,7 @@ export default function Home() {
                     key={cat}
                     label={t(cat)}
                     selected={query.category === cat}
-                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, detail: null, priceBand: null })); scrollDown(); }}
+                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, detail: null, contextBeds: null, priceBand: null })); scrollDown(); }}
                   />
                 ))}
               </View>
@@ -432,7 +437,7 @@ export default function Home() {
                       key={g.group}
                       label={t(g.group)}
                       selected={query.typeGroup === g.group}
-                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, detail: null, priceBand: null })); scrollDown(); }}
+                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, detail: null, contextBeds: null, priceBand: null })); scrollDown(); }}
                       style={s.wrapCell}
                     />
                   ))}
@@ -451,10 +456,49 @@ export default function Home() {
                       key={ty}
                       label={t(ty)}
                       selected={query.type === ty}
-                      onPress={() => { setQuery((q) => ({ ...q, type: q.type === ty ? null : ty, detail: q.type === ty ? null : ty === 'Room' ? '1' : null, priceBand: null })); scrollDown(); }}
+                      onPress={() => { setQuery((q) => ({ ...q, type: q.type === ty ? null : ty, detail: q.type === ty ? null : ty === 'Room' ? '1' : null, contextBeds: null, priceBand: null })); scrollDown(); }}
                       style={s.wrapCell}
                     />
                   ))}
+                </View>
+              </Reveal>
+            )}
+
+            {/* Context-level bedrooms — shown at category/group level, no specific type needed */}
+            {ctx?.showBeds && (
+              <Reveal style={s.pick}>
+                <FieldLabel>{t('Bedrooms')}</FieldLabel>
+                <View style={s.wrap}>
+                  {['1', '2', '3', '4', '5+'].map((opt) => (
+                    <OptionBox
+                      key={opt}
+                      label={opt}
+                      selected={query.contextBeds === opt}
+                      onPress={() => { setQuery((q) => ({ ...q, contextBeds: q.contextBeds === opt ? null : opt, priceBand: null })); scrollDown(); }}
+                      style={s.wrapCell}
+                    />
+                  ))}
+                </View>
+              </Reveal>
+            )}
+
+            {/* Context-level area — shown at category/group level, no specific type needed */}
+            {ctx?.showSize && (
+              <Reveal style={s.pick}>
+                <FieldLabel>{t('Area (m²)')}</FieldLabel>
+                <View style={[s.field, s.sizeField, query.detail ? s.sizeFieldOn : null]}>
+                  <TextInput
+                    style={s.sizeInput}
+                    keyboardType="number-pad"
+                    placeholder={t('Enter area in m²')}
+                    placeholderTextColor={colors.muted}
+                    value={contextSizeValue}
+                    onChangeText={(v) => {
+                      const digits = toLatinDigits(v).replace(/\D/g, '');
+                      setQuery((q) => ({ ...q, detail: digits ? digits : null, priceBand: null }));
+                    }}
+                  />
+                  <Text style={s.sizeUnit}>{t('m²')}</Text>
                 </View>
               </Reveal>
             )}

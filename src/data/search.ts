@@ -79,6 +79,10 @@ export type SearchQuery = {
   // exact filter. Both feed the one engine; the filter sets these, the agent resolves to them.
   // (user: filter = structured AI input; group = head-start intent, type = exact.)
   typeGroup?: string | null;
+  // Bedroom count selected at the CATEGORY/GROUP level — shown before the user picks a specific type.
+  // Independent of `detail` so both beds and area can be set simultaneously. Ignored once a type is
+  // selected (the type-level detail chip takes over). (user: no forced type selection for bed filter.)
+  contextBeds?: string | null;
 };
 
 // The objective sort keys the agent/UI may request. NEVER a quality/popularity ordering.
@@ -391,13 +395,14 @@ export function searchSummary(q: SearchQuery): string {
   if (locLines.length) for (const l of locLines) lines.push(`• ${l}`);
   else lines.push(`• ${t('City')}: ${t('Saudi Arabia')}`);
   for (const b of budgetLines(q)) lines.push(`• ${b}`);
+  if (q.contextBeds) lines.push(`• ${t('Bedrooms')}: ${q.contextBeds}`);
   if (q.detail) {
     // Label by VALUE, not by type: a home's detail may be a BEDROOM count OR a SIZE (the user's
     // choice). A bedroom-shaped value (1–4 or "5+") → Bedrooms; a size band ("100–300 m²") or any
     // larger number → Size. This keeps "house, 3 beds" → Bedrooms 3 and "house, 1500 m²" → Size 1500.
     if (/m²/.test(q.detail)) lines.push(`• ${t('Size')}: ${tDetailOption(q.detail)}`);
-    else if (/^([1-4]|5\+?)$/.test(q.detail)) lines.push(`• ${t('Bedrooms')}: ${q.detail}`);
-    else lines.push(`• ${t('Size')}: ${q.detail} ${t('m²')}`);
+    else if (/^([1-4]|5\+?)$/.test(q.detail) && !q.contextBeds) lines.push(`• ${t('Bedrooms')}: ${q.detail}`);
+    else if (!/^([1-4]|5\+?)$/.test(q.detail) || q.contextBeds) lines.push(`• ${t('Size')}: ${q.detail} ${t('m²')}`);
   }
   return `${t('Search Summary')}\n${lines.join('\n')}`;
 }
@@ -418,9 +423,10 @@ export function querySummaryLine(q: SearchQuery): string {
     const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10) || 0;
     if (amount) parts.push(`${t('SAR')} ${grouped(amount)}`);
   }
+  if (q.contextBeds) parts.push(t('{n} beds', { n: q.contextBeds }));
   if (q.detail) {
     if (/m²/.test(q.detail)) parts.push(tDetailOption(q.detail));
-    else if (/^([1-4]|5\+?)$/.test(q.detail)) parts.push(t('{n} beds', { n: q.detail }));
+    else if (/^([1-4]|5\+?)$/.test(q.detail) && !q.contextBeds) parts.push(t('{n} beds', { n: q.detail }));
     else parts.push(t('{n} m²', { n: q.detail }));
   }
   return parts.join(' · ');
@@ -585,7 +591,15 @@ function parseSizeRange(detail: string): { min: number; max: number } | null {
 // converts to m² before it reaches here. (user request: area is a first-class filter.)
 function sizeFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
   if (!q.detail) return null;
-  if (bedroomSpec(q)) return null; // the kept detail is a bedroom count → bedroomFilter handles it, not size
+  // When contextBeds is the bedroom source (no type), detail is a SIZE value — do NOT skip it.
+  // Only skip when detail itself is a bedroom count (type-level or agent path).
+  if (!q.contextBeds) {
+    if (bedroomSpec(q)) return null; // detail is a bedroom count on agent/type path → bedroomFilter handles it
+  } else {
+    // contextBeds handles bedrooms; check if detail is still a bedroom token (shouldn't be, but guard).
+    const d = q.detail.trim();
+    if (/^([1-4]|5\+?)$/.test(d) && (!q.type || detailFor(q.type).isBedrooms)) return null;
+  }
   const r = parseSizeRange(q.detail);
   if (!r) return null;
   return (l) => l.area > 0 && l.area >= r.min && l.area <= r.max;
@@ -618,11 +632,18 @@ function allRows(pools: Pools): Listing[] {
   return out;
 }
 
-// The bedroom constraint a query implies — or null when `detail` isn't a bedroom count (a size band,
-// or a non-bedroom property type). "5+" → { n: 5, atLeast: true }; "1".."4" → exact. ONE source of
-// truth, shared by the client filter (runSearch) AND the server fetch (fetchListingsForQuery) so the
-// two never disagree. Mirrors the bedroom token used everywhere else: /^([1-4]|5\+?)$/.
+// The bedroom constraint a query implies — or null when there's no bedroom filter. "5+" → { n: 5,
+// atLeast: true }; "1".."4" → exact. ONE source of truth shared by the client filter (runSearch)
+// AND the server fetch (fetchListingsForQuery). Two sources: (1) contextBeds — set at the
+// category/group level when no type is selected; (2) detail — the type-level bedroom chip (agent +
+// type-selected UI). contextBeds is ignored once a type is selected.
 export function bedroomSpec(q: SearchQuery): { n: number; atLeast: boolean } | null {
+  // Context-level bedrooms (filter UI, category/group level, no type selected).
+  if (!q.type && q.contextBeds) {
+    const d = q.contextBeds.trim();
+    if (/^([1-4]|5\+?)$/.test(d)) return { n: parseInt(d, 10), atLeast: d.startsWith('5') };
+  }
+  // Type-level bedrooms via the shared detail field (agent path + type-selected UI).
   if (!q.detail) return null;
   const d = q.detail.trim();
   // A bare 1-4 / 5+ token is ALWAYS a bedroom count (no size string ever looks like this — sizes carry a

@@ -568,6 +568,8 @@ const AR: Record<string, string> = {
   'For Rent': 'للإيجار',
   'For Buy': 'للبيع',
   'Area': 'المساحة',
+  'Area (m²)': 'المساحة م²',
+  'Enter area in m²': 'أدخل المساحة م²',
   'Beds': 'غرف',
   'Baths': 'حمامات',
   'Bed':  'غرفة',

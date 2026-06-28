@@ -58,6 +58,18 @@ const SIZE_BY_TYPE: Record<string, string[]> = {
 
 export type Detail = { label: string; options: string[]; isBedrooms: boolean };
 
+// Context-level detail config: which optional filters to surface at the category/group level,
+// BEFORE the user picks a specific type. Land groups and Commercial → size only (no bedrooms).
+// All dwelling groups and bare Residential → show both. (user: show filters without forcing a type.)
+export type ContextDetail = { showBeds: boolean; showSize: boolean };
+export function detailForContext(category: string | null, typeGroup: string | null): ContextDetail | null {
+  if (!category) return null;
+  if (category === 'Commercial') return { showBeds: false, showSize: true };
+  // Residential land → area only; all other Residential groups (or none) → beds + area.
+  const isLandGroup = typeGroup === 'Residential Plots';
+  return { showBeds: !isLandGroup, showSize: true };
+}
+
 export function detailFor(type: string): Detail {
   // A Room / Studio is single-occupancy — always exactly 1 bedroom, never a range. (user request.)
   if (type === 'Room' || type === 'Studio') {
