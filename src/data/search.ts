@@ -94,6 +94,21 @@ export type SearchQuery = {
   // for a 3-bedroom count (the shared `detail` field reads a bare 1–5 as bedrooms). Independent of
   // contextBeds so the user can set area only, beds only, or both. (user: typing 1–5 m² showed nothing.)
   contextSize?: string | null;
+  // Area range (filter UI, m²): min only → area ≥ min, max only → area ≤ max, both → between. Raw digit
+  // strings. Mutually exclusive with bedrooms in the UI. Supersede contextSize when set. HARD filter.
+  areaMin?: string | null;
+  areaMax?: string | null;
+  // Price range (filter UI, SAR — same unit as the displayed price for the chosen deal/period): min →
+  // price ≥ min, max → price ≤ max, both → between. Raw digit strings. HARD filter (no closest-above).
+  priceMin?: string | null;
+  priceMax?: string | null;
+};
+
+// Parse a raw digit string ("1,200" / "300" / "") → a positive number, or null when empty/invalid.
+const numOrNull = (s: string | null | undefined): number | null => {
+  if (!s) return null;
+  const n = parseInt(String(s).replace(/[^\d]/g, ''), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
 };
 
 // The objective sort keys the agent/UI may request. NEVER a quality/popularity ordering.
@@ -264,6 +279,12 @@ function budgetLines(q: SearchQuery): string[] {
   // If the user gave a foreign currency, lead with their original figure so both are visible:
   // "Your budget: USD 100,000" then the SAR line(s) used for the actual search. (user request.)
   const orig = q.priceOriginal ? [`${t('Your budget')}: ${q.priceOriginal}`] : [];
+  const pLo = numOrNull(q.priceMin), pHi = numOrNull(q.priceMax);
+  if (pLo != null || pHi != null) {
+    const r = pLo != null && pHi != null ? `${t('From')} ${grouped(pLo)} ${t('To')} ${grouped(pHi)}`
+      : pLo != null ? `${t('From')} ${grouped(pLo)}` : `${t('To')} ${grouped(pHi!)}`;
+    return [...orig, `${t('Budget')}: ${r} ${sar}`];
+  }
   if (q.priceBand) return [...orig, `${t('Budget')}: ${tPriceTab(q.priceBand)}`];
   const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10) || 0;
   if (!amount) return orig;
@@ -410,7 +431,12 @@ export function searchSummary(q: SearchQuery): string {
   // Category/group-level refinements (filter UI). Each has its own field, so the labels are unambiguous.
   const summaryBeds = effectiveBeds(q);
   if (summaryBeds.length) lines.push(`• ${t('Bedrooms')}: ${summaryBeds.join('، ')}`);
-  if (q.contextSize) lines.push(`• ${t('Size')}: ${q.contextSize} ${t('m²')}`);
+  const aLo = numOrNull(q.areaMin), aHi = numOrNull(q.areaMax);
+  if (aLo != null || aHi != null) {
+    const r = aLo != null && aHi != null ? `${t('From')} ${grouped(aLo)} ${t('To')} ${grouped(aHi)}`
+      : aLo != null ? `${t('From')} ${grouped(aLo)}` : `${t('To')} ${grouped(aHi!)}`;
+    lines.push(`• ${t('Size')}: ${r} ${t('m²')}`);
+  } else if (q.contextSize) lines.push(`• ${t('Size')}: ${q.contextSize} ${t('m²')}`);
   if (q.detail) {
     // Type/agent path shares ONE detail field for BEDROOM count OR SIZE. Label by VALUE: a bedroom-
     // shaped value (1–4 or "5+") → Bedrooms; a size band ("100–300 m²") or any larger number → Size.
@@ -432,7 +458,12 @@ export function querySummaryLine(q: SearchQuery): string {
   else if (q.category) parts.push(tWord(q.category));
   parts.push(t(q.deal === 'Rent' ? 'Rent' : 'Buy'));
   if (q.location.trim()) parts.push(tPlace(q.location.trim()));
-  if (q.priceBand) {
+  const qpLo = numOrNull(q.priceMin), qpHi = numOrNull(q.priceMax);
+  if (qpLo != null || qpHi != null) {
+    const r = qpLo != null && qpHi != null ? `${grouped(qpLo)}–${grouped(qpHi)}`
+      : qpLo != null ? `${t('From')} ${grouped(qpLo)}` : `${t('To')} ${grouped(qpHi!)}`;
+    parts.push(`${t('SAR')} ${r}`);
+  } else if (q.priceBand) {
     parts.push(tPriceTab(q.priceBand));
   } else {
     const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10) || 0;
@@ -440,7 +471,12 @@ export function querySummaryLine(q: SearchQuery): string {
   }
   const lineBeds = effectiveBeds(q);
   if (lineBeds.length) parts.push(t('{n} beds', { n: lineBeds.join('، ') }));
-  if (q.contextSize) parts.push(t('{n} m²', { n: q.contextSize }));
+  const qaLo = numOrNull(q.areaMin), qaHi = numOrNull(q.areaMax);
+  if (qaLo != null || qaHi != null) {
+    const r = qaLo != null && qaHi != null ? `${grouped(qaLo)}–${grouped(qaHi)}`
+      : qaLo != null ? `${t('From')} ${grouped(qaLo)}` : `${t('To')} ${grouped(qaHi!)}`;
+    parts.push(`${r} ${t('m²')}`);
+  } else if (q.contextSize) parts.push(t('{n} m²', { n: q.contextSize }));
   if (q.detail) {
     if (/m²/.test(q.detail)) parts.push(tDetailOption(q.detail));
     else if (/^([1-4]|5\+?)$/.test(q.detail)) parts.push(t('{n} beds', { n: q.detail }));
@@ -544,6 +580,14 @@ function listingPriceValue(price: string): number {
 //     which is what lets "villa at SAR 1,000/m²" filter correctly without an entered area;
 //   • Rent → annual ceiling (monthly ×12, or a large figure as-is). (PRD §6.2)
 function priceFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
+  // Explicit price RANGE (filter UI): min only → ≥, max only → ≤, both → between. The bounds are in the
+  // SAME unit as the displayed price (Buy total; Rent annual or monthly per the chosen period), so they
+  // compare directly. Wins over the legacy band / single ceiling. HARD (enforced in runSearch).
+  const lo = numOrNull(q.priceMin), hi = numOrNull(q.priceMax);
+  if (lo != null || hi != null) {
+    const min = lo ?? 0, max = hi ?? Infinity;
+    return (l) => withinValue(l.price, min, max);
+  }
   if (q.priceBand) {
     const r = priceBandRange(q.priceBand);
     if (r) return (l) => withinValue(l.price, r.min, r.max);
@@ -607,8 +651,14 @@ function parseSizeRange(detail: string): { min: number; max: number } | null {
 // to filter on (bedroom count, or no detail). The user can give the size in any unit — the agent/app
 // converts to m² before it reaches here. (user request: area is a first-class filter.)
 function sizeFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
-  // Context-level area (filter UI, category/group, no type) has its OWN field, so a bare "3" here is
-  // always a 3 m² size — never a bedroom count. Type/agent path keeps reading the shared detail field.
+  // Explicit area RANGE (filter UI): min only → ≥, max only → ≤, both → between. Wins over the legacy
+  // single contextSize / detail. Area = 0 (unknown) is always excluded once any area bound is set.
+  const lo = numOrNull(q.areaMin), hi = numOrNull(q.areaMax);
+  if (lo != null || hi != null) {
+    const min = lo ?? 0, max = hi ?? Infinity;
+    return (l) => l.area > 0 && l.area >= min && l.area <= max;
+  }
+  // Legacy single value (back-compat / agent): contextSize (own field), else the shared detail field.
   const raw = q.contextSize ?? (q.detail && !bedroomSpec(q) ? q.detail : null);
   if (!raw) return null;
   const r = parseSizeRange(raw);
@@ -947,13 +997,11 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
     ns.unshift(t('We found multiple locations matching "{name}". Showing the closest matches from our database.', { name: q.locationMatch.raw || q.location }));
   }
   let listings = eligible;
-  // Apply the price filter, but never dead-end: if nothing fits, show the closest options and say so.
+  // Apply the price filter HARD — like size/bedrooms, NEVER substitute "closest above". A kept max means
+  // the user must not see anything priced above it; zero in-range → show none and let the 0-results path
+  // offer to relax the budget. (user 2026-06-28: price is a hard filter, honest zero, no closest-above.)
   const fits = priceFilter(q);
-  if (fits != null) {
-    const within = listings.filter(fits);
-    if (within.length > 0) listings = within;
-    else ns.push(t('Nothing within your budget right now — showing the closest options above it.'));
-  }
+  if (fits != null) listings = listings.filter(fits);
   // Apply the size filter HARD — like bedrooms, no "closest size" substitution. A kept size of 30,000 m²
   // with zero in-band used to fall back to the FULL unfiltered list (cards wildly off the kept size with
   // only a soft note). The kept-value contract requires every visible card to match; zero in-band → show
@@ -1093,7 +1141,7 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
   // fuzzy typo guess. Only an exact-but-empty place gets the honest zero-state; a misspelled near-miss
   // («القرص») falls through to the «هل تقصد الرس؟» suggestion below. (user: typo = ask/did-you-mean.)
   const explicitPlace = !!lm && lm.exact === true && (lm.kind === 'district' || lm.kind === 'city' || lm.kind === 'region');
-  if (explicitPlace && countWith({ priceInput: '', priceBand: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, type: null, types: null, typeGroup: null }) === 0) {
+  if (explicitPlace && countWith({ priceInput: '', priceBand: null, priceMin: null, priceMax: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, type: null, types: null, typeGroup: null }) === 0) {
     return t('No listings in this location right now.');
   }
   // "Did you mean X?" — fires for: (a) a free-typed unresolved place (typo/obscure town) whose lm has
@@ -1110,13 +1158,13 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
       return t('We couldn’t find listings in "{place}". Did you mean {alt}?', { place: q.locationMatch?.label || q.location, alt: tPlace(alt.cityEn) });
     }
   }
-  if (q.priceInput && countWith({ priceInput: '' }) > 0) {
-    return t("No listings within that budget — there are matches above it. Want me to remove the budget?");
+  if ((q.priceInput || q.priceMin || q.priceMax) && countWith({ priceInput: '', priceMin: null, priceMax: null }) > 0) {
+    return t("No listings in that price range — there are matches outside it. Want me to remove the price filter?");
   }
   if (q.districts?.length && countWith({ districts: undefined }) > 0) {
     return t("No matches in that specific area — but I can find some elsewhere in the same city. Want me to widen the area?");
   }
-  if ((q.detail || q.contextBeds || q.contextBedsList?.length || q.contextSize) && countWith({ detail: null, contextBeds: null, contextBedsList: null, contextSize: null }) > 0) {
+  if ((q.detail || q.contextBeds || q.contextBedsList?.length || q.contextSize || q.areaMin || q.areaMax) && countWith({ detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null }) > 0) {
     return t("No matches with that exact size/bedroom count — close options exist if I drop it. Want me to?");
   }
   if (q.type && countWith({ type: null, category: q.category }) > 0) {
