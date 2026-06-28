@@ -480,7 +480,7 @@ export default function Home() {
                             key={opt}
                             label={opt === 'any' ? t('Any count') : opt}
                             selected={opt === 'any' ? !query.contextBeds : query.contextBeds === opt}
-                            onPress={() => { setQuery((q) => ({ ...q, contextBeds: opt === 'any' ? null : (q.contextBeds === opt ? null : opt), priceBand: null })); scrollDown(); }}
+                            onPress={() => { setQuery((q) => { const nb = opt === 'any' ? null : (q.contextBeds === opt ? null : opt); return { ...q, contextBeds: nb, contextSize: nb ? null : q.contextSize, priceBand: null }; }); scrollDown(); }}
                             style={s.wrapCell}
                           />
                         ))}
@@ -488,21 +488,28 @@ export default function Home() {
                     </>
                   )}
 
-                  <Text style={[s.ctxSubLabel, ctx.showBeds ? { marginTop: 14 } : null]}>{t('Area (m²)')}</Text>
-                  <View style={[s.field, s.sizeField, query.contextSize ? s.sizeFieldOn : null]}>
-                    <TextInput
-                      style={s.sizeInput}
-                      keyboardType="number-pad"
-                      placeholder={t('Enter area in m²')}
-                      placeholderTextColor={colors.muted}
-                      value={contextSizeValue}
-                      onChangeText={(v) => {
-                        const digits = toLatinDigits(v).replace(/\D/g, '');
-                        setQuery((q) => ({ ...q, contextSize: digits ? digits : null, priceBand: null }));
-                      }}
-                    />
-                    <Text style={s.sizeUnit}>{t('م²')}</Text>
-                  </View>
+                  {/* Bedrooms and Area are mutually exclusive: once a specific bedroom count is picked,
+                      the area input is hidden (and its value cleared in the bed onPress). Groups with no
+                      bedrooms (land / commercial) always show area. (user: pick beds OR size, not both.) */}
+                  {(!ctx.showBeds || !query.contextBeds) && (
+                    <>
+                      <Text style={[s.ctxSubLabel, ctx.showBeds ? { marginTop: 14 } : null]}>{t('Area (m²)')}</Text>
+                      <View style={[s.field, s.sizeField, query.contextSize ? s.sizeFieldOn : null]}>
+                        <TextInput
+                          style={s.sizeInput}
+                          keyboardType="number-pad"
+                          placeholder={t('Enter area in m²')}
+                          placeholderTextColor={colors.muted}
+                          value={contextSizeValue}
+                          onChangeText={(v) => {
+                            const digits = toLatinDigits(v).replace(/\D/g, '');
+                            setQuery((q) => ({ ...q, contextSize: digits ? digits : null, priceBand: null }));
+                          }}
+                        />
+                        <Text style={s.sizeUnit}>{t('م²')}</Text>
+                      </View>
+                    </>
+                  )}
                 </View>
               </Reveal>
             )}
