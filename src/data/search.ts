@@ -17,6 +17,9 @@ export type SearchQuery = {
   location: string;
   category: Category | null;
   type: string | null;
+  // Multi-select within a group (filter path): OR across these clean types. The single `type` stays
+  // for the agent path; the engine treats `type` as a 1-element selection (see effectiveTypes).
+  types?: string[] | null;
   detail: string | null; // bedrooms value or size band
   priceInput: string; // raw digits
   priceBand: string | null; // selected preset price band ("SAR 75k–150k"); overrides priceInput
@@ -383,7 +386,8 @@ export function searchSummary(q: SearchQuery): string {
   // If the user didn't pick a SPECIFIC type, fall back to the CATEGORY they have selected (Residential/
   // Commercial — always one or the other), so a default-button "Search" still shows what they chose.
   // (user request: "if user just clicks search by default, it shows what the button clicked at.")
-  if (q.type) lines.push(`• ${t('Property Type')}: ${getLocale() === 'ar' ? tWord(q.type) : q.type}`);
+  const summaryTypes = effectiveTypes(q);
+  if (summaryTypes.length) lines.push(`• ${t('Property Type')}: ${summaryTypes.map((x) => getLocale() === 'ar' ? tWord(x) : x).join('، ')}`);
   else if (q.typeGroup) lines.push(`• ${t('Property Type')}: ${t(q.typeGroup)}`);
   else if (q.category) lines.push(`• ${t('Property Type')}: ${t(q.category)}`);
   lines.push(`• ${t('Transaction Type')}: ${q.bothDeals ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}`);
@@ -417,7 +421,8 @@ export function searchSummary(q: SearchQuery): string {
 // a vague query stays short. Western digits throughout (PRD rule). (user request: short summary.)
 export function querySummaryLine(q: SearchQuery): string {
   const parts: string[] = [];
-  if (q.type) parts.push(tWord(q.type));
+  const lineTypes = effectiveTypes(q);
+  if (lineTypes.length) parts.push(lineTypes.map((x) => tWord(x)).join('، '));
   else if (q.typeGroup) parts.push(t(q.typeGroup));
   else if (q.category) parts.push(tWord(q.category));
   parts.push(t(q.deal === 'Rent' ? 'Rent' : 'Buy'));
@@ -493,7 +498,7 @@ function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run
   // over the whole fetched set and let matchesType decide. (The old keyword→mock-pool buckets only
   // covered a few residential types and would silently drop Shop/Office/Residential Building/etc.)
-  if (q.type || q.typeGroup) return allRows(pools);
+  if (q.type || (q.types && q.types.length) || q.typeGroup) return allRows(pools);
   const t = q.type?.toLowerCase();
   if (t) {
     if (t.includes('villa')) return pools.villa;
@@ -614,9 +619,17 @@ const cleanOf = (l: Listing): string => l.cleanType ?? l.type;
 // type in that group (broad). Macro only (`q.category`, no type) = same macro_category — this is what
 // excludes a Commercial-Land row (macro=Commercial) from a Residential search even though it lives in
 // a residential table. Nothing kept → match all. (clean-type filter; strict-contract preserved.)
+// The selected clean types as a list: the filter's multi-select (`q.types`), else the single `q.type`
+// (agent path) as a 1-element list, else empty. One code path covers single + multi everywhere.
+export function effectiveTypes(q: SearchQuery): string[] {
+  if (q.types && q.types.length) return q.types;
+  return q.type ? [q.type] : [];
+}
+
 function matchesType(l: Listing, q: SearchQuery): boolean {
   const c = cleanOf(l);
-  if (q.type) return c === q.type;
+  const sel = effectiveTypes(q);
+  if (sel.length) return sel.includes(c);                 // one OR more selected clean types (OR within the group)
   if (q.typeGroup) return groupMembers(q.typeGroup).includes(c);
   if (q.category) return (l.macro ?? CLEAN_MACRO[c] ?? 'Residential') === q.category;
   return true;

@@ -170,3 +170,17 @@ export function queryForSelection(sel: string | null | undefined): CleanQuery | 
   }
   return null;
 }
+
+// Multi-select within a group: union several clean types' raw-type queries → OR across them. Returns
+// the combined raw property_types + table kinds to read, or null when none resolve. (multi-type filter.)
+export function queryForTypes(types: string[]): CleanQuery | null {
+  const raws = new Set<string>();
+  const kinds = new Set<SourceKind>();
+  for (const ty of types) {
+    const q = queryForSelection(ty);
+    if (!q) continue;
+    q.rawTypes.forEach((r) => raws.add(r));
+    q.kinds.forEach((k) => kinds.add(k));
+  }
+  return raws.size ? { rawTypes: [...raws], kinds: [...kinds] } : null;
+}

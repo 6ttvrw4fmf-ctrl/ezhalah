@@ -420,7 +420,7 @@ export default function Home() {
                     key={cat}
                     label={t(cat)}
                     selected={query.category === cat}
-                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, detail: null, contextBeds: null, contextSize: null, priceBand: null })); scrollDown(); }}
+                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, types: null, detail: null, contextBeds: null, contextSize: null, priceBand: null })); scrollDown(); }}
                   />
                 ))}
               </View>
@@ -437,7 +437,7 @@ export default function Home() {
                       key={g.group}
                       label={t(g.group)}
                       selected={query.typeGroup === g.group}
-                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, detail: null, contextBeds: null, contextSize: null, priceBand: null })); scrollDown(); }}
+                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, types: null, detail: null, contextBeds: null, contextSize: null, priceBand: null })); scrollDown(); }}
                       style={s.wrapCell}
                     />
                   ))}
@@ -455,8 +455,8 @@ export default function Home() {
                     <OptionBox
                       key={ty}
                       label={t(ty)}
-                      selected={query.type === ty}
-                      onPress={() => { setQuery((q) => ({ ...q, type: q.type === ty ? null : ty, detail: q.type === ty ? null : ty === 'Room' ? '1' : null, contextBeds: null, contextSize: null, priceBand: null })); scrollDown(); }}
+                      selected={(query.types ?? []).includes(ty)}
+                      onPress={() => { setQuery((q) => { const cur = q.types ?? []; const next = cur.includes(ty) ? cur.filter((x) => x !== ty) : [...cur, ty]; return { ...q, types: next.length ? next : null, type: null, detail: null, priceBand: null }; }); scrollDown(); }}
                       style={s.wrapCell}
                     />
                   ))}

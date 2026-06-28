@@ -4,7 +4,7 @@ import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
-import { normalizeType, queryForSelection, type SourceKind } from './propertyTypes';
+import { normalizeType, queryForSelection, queryForTypes, type CleanQuery, type SourceKind } from './propertyTypes';
 import { scoreListingProximity } from './proximity';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
@@ -221,19 +221,22 @@ function regionIdsFor(lm: { exact?: boolean; kind?: string; region?: string } | 
   return id ? [id] : null;
 }
 
-// The user's TYPE selection, in clean-type terms. `q.type` is a CLEAN property type (filter sets it
-// directly; the agent path normalizes its raw output to clean before storing it here). `q.typeGroup`
-// is a subcategory GROUP (soft/broad intent). Either resolves — via propertyTypes.queryForSelection —
-// to the RAW property_type strings + table kinds we must actually query. (clean-type filter.)
-function selection(q: SearchQuery): string | null {
-  return q.type || q.typeGroup || null;
+// The clean-type query for the current selection. The filter's multi-select (`q.types`) ORs across the
+// chosen types; a single `q.type` (agent path) is a 1-element selection; a `q.typeGroup` with no types
+// expands to the whole group. Resolves to the RAW property_type strings + table kinds to query. This is
+// macro-agnostic — Residential and Commercial groups go through the exact same path. (multi-type filter.)
+function effectiveCleanQuery(q: SearchQuery): CleanQuery | null {
+  const types = q.types && q.types.length ? q.types : (q.type ? [q.type] : []);
+  if (types.length) return queryForTypes(types);
+  if (q.typeGroup) return queryForSelection(q.typeGroup);
+  return null;
 }
 
 // Map the selection → the RAW DB property_type values to constrain to (server-side). null = no type
 // constraint (a macro-only "all Residential/Commercial" search). The raw set covers every scraped
 // spelling a clean type came from (e.g. Shop ⊇ {Shop, Kiosk}; Studio ⊇ {Studio, ستوديو, …}).
 function dbTypesFor(q: SearchQuery): string[] | null {
-  const cq = queryForSelection(selection(q));
+  const cq = effectiveCleanQuery(q);
   return cq && cq.rawTypes.length ? cq.rawTypes : null;
 }
 // Convert a listing's `additional_info` into the {key,label,value} rows the card's
@@ -330,7 +333,7 @@ const COMMERCIAL_RAW_IN_RES = [
 // Which table KIND(s) this query reads: from the selected clean type/group's CleanQuery, else (a
 // macro-only search) from q.category. Default Residential.
 function kindsFor(q: SearchQuery): SourceKind[] {
-  const cq = queryForSelection(selection(q));
+  const cq = effectiveCleanQuery(q);
   if (cq) return cq.kinds;
   return q.category === 'Commercial' ? ['com'] : ['res'];
 }
@@ -430,7 +433,7 @@ function scopeOf(q: SearchQuery, cities: string[] | null, countryWide: boolean):
 }
 
 function rankedKey(r: Ranked, k: string): string {
-  return k === 'platform' ? r.platform : k === 'city' ? r.city : k === 'region' ? r.region : k === 'district' ? r.district : '';
+  return k === 'platform' ? r.platform : k === 'city' ? r.city : k === 'region' ? r.region : k === 'district' ? r.district : k === 'cleanType' ? (r.l.cleanType ?? '') : '';
 }
 
 // Hierarchical round-robin: group by the first key, order groups by size (densest first) then freshness,
@@ -458,15 +461,19 @@ function interleaveRanked(rows: Ranked[], keys: string[]): Ranked[] {
   return out;
 }
 
-function orderByScope(rows: Ranked[], scope: Scope): Ranked[] {
+function orderByScope(rows: Ranked[], scope: Scope, multiType = false): Ranked[] {
   // Diversity hierarchy per scope (user 2026-06-27): Region → cities → districts → platforms; City →
   // districts → platforms; District → platforms (price/type/freshness variety come from the recency leaf
   // + repeat-visit rotation). Always stays INSIDE the selected scope. Country adds region at the top.
-  const keys = scope === 'country' ? ['region', 'city', 'district', 'platform']
+  const base = scope === 'country' ? ['region', 'city', 'district', 'platform']
     : scope === 'region' ? ['city', 'district', 'platform']
     : scope === 'city' ? ['district', 'platform']
     : scope === 'district' ? ['platform']
     : [];
+  // Tier 3 (user rule 2026-06-28): when the user picked MULTIPLE exact types, spread across THOSE types
+  // LAST — after platform. This only re-orders the already-matched set; it never introduces an unpicked
+  // type (the rows were already constrained to the selected types by the raw fetch + matchesType).
+  const keys = multiType ? [...base, 'cleanType'] : base;
   return interleaveRanked(rows, keys);
 }
 
@@ -510,7 +517,7 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   if (!tables.length) return [];
   // Broad Commercial (no specific type/group): must ALSO sweep res tables for Commercial Land +
   // Industrial Land which Aqar stores in residential tables (~8,166 rows, audit 2026-06-28).
-  const isBroadCommercial = q.category === 'Commercial' && !q.type && !q.typeGroup;
+  const isBroadCommercial = q.category === 'Commercial' && !q.type && !(q.types && q.types.length) && !q.typeGroup;
 
   // Resolve the location scope into a set of cities to filter the index by.
   const lm = q.locationMatch;
@@ -652,7 +659,7 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
     ranked.push({ l, platform: c.platform, city, region, district: l.district || '', rank: c.rank, source_table: c.source_table });
   }
   const USE_RELATION_TABLE = true;
-  const scoped = orderByScope(ranked, scopeOf(q, cities, countryWide));
+  const scoped = orderByScope(ranked, scopeOf(q, cities, countryWide), (q.types?.length ?? 0) > 1);
   const rows = scoped.map((r) => r.l);
   // Location-RELATIONSHIP ranking (2026-06-27): when the user expressed a proximity intent
   // («قريب من مستشفى الحبيب» / «يطل على البحر»), ATTACH a boost score to every candidate so the
