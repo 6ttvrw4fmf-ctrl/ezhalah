@@ -420,7 +420,7 @@ export default function Home() {
                     key={cat}
                     label={t(cat)}
                     selected={query.category === cat}
-                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, types: null, detail: null, contextBeds: null, contextSize: null, priceBand: null })); scrollDown(); }}
+                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, types: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, priceBand: null })); scrollDown(); }}
                   />
                 ))}
               </View>
@@ -437,7 +437,7 @@ export default function Home() {
                       key={g.group}
                       label={t(g.group)}
                       selected={query.typeGroup === g.group}
-                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, types: null, detail: null, contextBeds: null, contextSize: null, priceBand: null })); scrollDown(); }}
+                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, types: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, priceBand: null })); scrollDown(); }}
                       style={s.wrapCell}
                     />
                   ))}
@@ -479,8 +479,13 @@ export default function Home() {
                           <OptionBox
                             key={opt}
                             label={opt === 'any' ? t('Any count') : opt}
-                            selected={opt === 'any' ? !query.contextBeds : query.contextBeds === opt}
-                            onPress={() => { setQuery((q) => { const nb = opt === 'any' ? null : (q.contextBeds === opt ? null : opt); return { ...q, contextBeds: nb, contextSize: nb ? null : q.contextSize, priceBand: null }; }); scrollDown(); }}
+                            selected={opt === 'any' ? !(query.contextBedsList?.length) : (query.contextBedsList ?? []).includes(opt)}
+                            onPress={() => { setQuery((q) => {
+                              if (opt === 'any') return { ...q, contextBedsList: null, contextBeds: null, priceBand: null };
+                              const cur = q.contextBedsList ?? [];
+                              const next = cur.includes(opt) ? cur.filter((x) => x !== opt) : [...cur, opt];
+                              return { ...q, contextBedsList: next.length ? next : null, contextBeds: null, contextSize: next.length ? null : q.contextSize, priceBand: null };
+                            }); scrollDown(); }}
                             style={s.wrapCell}
                           />
                         ))}
@@ -491,7 +496,7 @@ export default function Home() {
                   {/* Bedrooms and Area are mutually exclusive: once a specific bedroom count is picked,
                       the area input is hidden (and its value cleared in the bed onPress). Groups with no
                       bedrooms (land / commercial) always show area. (user: pick beds OR size, not both.) */}
-                  {(!ctx.showBeds || !query.contextBeds) && (
+                  {(!ctx.showBeds || !(query.contextBedsList?.length)) && (
                     <>
                       <Text style={[s.ctxSubLabel, ctx.showBeds ? { marginTop: 14 } : null]}>{t('Area (m²)')}</Text>
                       <View style={[s.field, s.sizeField, query.contextSize ? s.sizeFieldOn : null]}>

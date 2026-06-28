@@ -86,6 +86,10 @@ export type SearchQuery = {
   // Independent of `detail` so both beds and area can be set simultaneously. Ignored once a type is
   // selected (the type-level detail chip takes over). (user: no forced type selection for bed filter.)
   contextBeds?: string | null;
+  // Multi-select bedrooms (filter path): OR across these counts ("1".."4" exact, "5+" = 5 or more).
+  // The single `contextBeds` stays for back-compat; the engine treats it as a 1-element selection
+  // (see effectiveBeds). ANDed with every other filter; never widened by diversity.
+  contextBedsList?: string[] | null;
   // Area (m²) entered at the CATEGORY/GROUP level. Has its OWN field so a bare "3" is never mistaken
   // for a 3-bedroom count (the shared `detail` field reads a bare 1–5 as bedrooms). Independent of
   // contextBeds so the user can set area only, beds only, or both. (user: typing 1–5 m² showed nothing.)
@@ -404,7 +408,8 @@ export function searchSummary(q: SearchQuery): string {
   else lines.push(`• ${t('City')}: ${t('Saudi Arabia')}`);
   for (const b of budgetLines(q)) lines.push(`• ${b}`);
   // Category/group-level refinements (filter UI). Each has its own field, so the labels are unambiguous.
-  if (q.contextBeds) lines.push(`• ${t('Bedrooms')}: ${q.contextBeds}`);
+  const summaryBeds = effectiveBeds(q);
+  if (summaryBeds.length) lines.push(`• ${t('Bedrooms')}: ${summaryBeds.join('، ')}`);
   if (q.contextSize) lines.push(`• ${t('Size')}: ${q.contextSize} ${t('m²')}`);
   if (q.detail) {
     // Type/agent path shares ONE detail field for BEDROOM count OR SIZE. Label by VALUE: a bedroom-
@@ -433,7 +438,8 @@ export function querySummaryLine(q: SearchQuery): string {
     const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10) || 0;
     if (amount) parts.push(`${t('SAR')} ${grouped(amount)}`);
   }
-  if (q.contextBeds) parts.push(t('{n} beds', { n: q.contextBeds }));
+  const lineBeds = effectiveBeds(q);
+  if (lineBeds.length) parts.push(t('{n} beds', { n: lineBeds.join('، ') }));
   if (q.contextSize) parts.push(t('{n} m²', { n: q.contextSize }));
   if (q.detail) {
     if (/m²/.test(q.detail)) parts.push(tDetailOption(q.detail));
@@ -645,37 +651,51 @@ function allRows(pools: Pools): Listing[] {
   return out;
 }
 
-// The bedroom constraint a query implies — or null when there's no bedroom filter. "5+" → { n: 5,
-// atLeast: true }; "1".."4" → exact. ONE source of truth shared by the client filter (runSearch)
-// AND the server fetch (fetchListingsForQuery). Two sources: (1) contextBeds — set at the
-// category/group level when no type is selected; (2) detail — the type-level bedroom chip (agent +
-// type-selected UI). contextBeds is ignored once a type is selected.
-export function bedroomSpec(q: SearchQuery): { n: number; atLeast: boolean } | null {
-  // Context-level bedrooms (filter UI, category/group level, no type selected).
-  if (!q.type && q.contextBeds) {
-    const d = q.contextBeds.trim();
-    if (/^([1-4]|5\+?)$/.test(d)) return { n: parseInt(d, 10), atLeast: d.startsWith('5') };
+// The bedroom counts selected at the filter's category/group level: the multi-select list
+// (`contextBedsList`), else the single `contextBeds` as a 1-element list, else empty. One path
+// covers single + multi everywhere (mirrors effectiveTypes). (multi-select bedrooms.)
+export function effectiveBeds(q: SearchQuery): string[] {
+  if (q.contextBedsList && q.contextBedsList.length) return q.contextBedsList;
+  return q.contextBeds ? [q.contextBeds] : [];
+}
+
+// ALL bedroom tokens the query implies (bare "1".."4"/"5+"). Two sources: (1) the filter's
+// category/group beds (effectiveBeds), used only when no specific type is selected; (2) the shared
+// `detail` field — the agent path + type-level chip. A non-bedroom type (e.g. Office, where "3" is a
+// size) is excluded. (audit: bedroom type-null hole; multi-select.)
+function bedroomTokens(q: SearchQuery): string[] {
+  if (!q.type) {
+    const fb = effectiveBeds(q).map((d) => (d || '').trim()).filter((d) => /^([1-4]|5\+?)$/.test(d));
+    if (fb.length) return fb;
   }
-  // Type-level bedrooms via the shared detail field (agent path + type-selected UI).
-  if (!q.detail) return null;
-  const d = q.detail.trim();
-  // A bare 1-4 / 5+ token is ALWAYS a bedroom count (no size string ever looks like this — sizes carry a
-  // unit, a range, or a value >5). Don't require q.type: the agent can keep "3 bedrooms" with no type
-  // ("a place to rent in Riyadh, 3 bedrooms") and it must still constrain. (audit: bedroom type-null hole.)
-  if (!/^([1-4]|5\+?)$/.test(d)) return null;
-  // Only EXCLUDE it when a non-bedroom type is explicitly kept (e.g. an Office where "3" is a size, not beds).
-  if (q.type && !detailFor(q.type).isBedrooms) return null;
+  if (q.detail) {
+    const d = q.detail.trim();
+    if (/^([1-4]|5\+?)$/.test(d) && (!q.type || detailFor(q.type).isBedrooms)) return [d];
+  }
+  return [];
+}
+
+// The PRIMARY bedroom constraint (first selected) — or null when there's no bedroom filter. "5+" →
+// { n: 5, atLeast: true }; "1".."4" → exact. Kept for the size/summary guards that only need to know
+// "is `detail` a bedroom count?". The full multi-select set drives bedroomFilter below.
+export function bedroomSpec(q: SearchQuery): { n: number; atLeast: boolean } | null {
+  const toks = bedroomTokens(q);
+  if (!toks.length) return null;
+  const d = toks[0];
   return { n: parseInt(d, 10), atLeast: d.startsWith('5') }; // "5"/"5+" is the top bucket → 5 or more
 }
 
-// Bedroom predicate: keep ONLY listings with the requested count ("5+" → 5 or more, else exact).
-// Unlike price/size, bedrooms is NEVER substituted with a "closest" value — a 6-bedroom house is a
-// different property, not a near-match for a 3-bedroom request, and showing it is exactly the bug the
-// user reported. Unknown counts (beds = 0) are excluded. (user: filter shows ONLY what I kept, period.)
+// Bedroom predicate: keep ONLY listings whose count matches ANY selected bucket (OR across the chosen
+// counts; "5+" → 5 or more, else exact). Unlike price/size, bedrooms is NEVER substituted with a
+// "closest" value — a 6-bedroom house is a different property, not a near-match for a 3-bedroom
+// request. Unknown counts (beds = 0) are excluded. (user: filter shows ONLY what I kept, period.)
 function bedroomFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
-  const spec = bedroomSpec(q);
-  if (!spec) return null;
-  return spec.atLeast ? (l) => l.beds >= spec.n : (l) => l.beds === spec.n;
+  const matchers = bedroomTokens(q).map((d) => {
+    const n = parseInt(d, 10);
+    return d.startsWith('5') ? (l: Listing) => l.beds >= n : (l: Listing) => l.beds === n;
+  });
+  if (!matchers.length) return null;
+  return (l) => matchers.some((m) => m(l));
 }
 
 // "Ezhalah!" is reserved for when listings are shown. (PRD §7.3)
@@ -1073,7 +1093,7 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
   // fuzzy typo guess. Only an exact-but-empty place gets the honest zero-state; a misspelled near-miss
   // («القرص») falls through to the «هل تقصد الرس؟» suggestion below. (user: typo = ask/did-you-mean.)
   const explicitPlace = !!lm && lm.exact === true && (lm.kind === 'district' || lm.kind === 'city' || lm.kind === 'region');
-  if (explicitPlace && countWith({ priceInput: '', priceBand: null, detail: null, contextBeds: null, contextSize: null, type: null, typeGroup: null }) === 0) {
+  if (explicitPlace && countWith({ priceInput: '', priceBand: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, type: null, types: null, typeGroup: null }) === 0) {
     return t('No listings in this location right now.');
   }
   // "Did you mean X?" — fires for: (a) a free-typed unresolved place (typo/obscure town) whose lm has
@@ -1096,7 +1116,7 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
   if (q.districts?.length && countWith({ districts: undefined }) > 0) {
     return t("No matches in that specific area — but I can find some elsewhere in the same city. Want me to widen the area?");
   }
-  if ((q.detail || q.contextBeds || q.contextSize) && countWith({ detail: null, contextBeds: null, contextSize: null }) > 0) {
+  if ((q.detail || q.contextBeds || q.contextBedsList?.length || q.contextSize) && countWith({ detail: null, contextBeds: null, contextBedsList: null, contextSize: null }) > 0) {
     return t("No matches with that exact size/bedroom count — close options exist if I drop it. Want me to?");
   }
   if (q.type && countWith({ type: null, category: q.category }) > 0) {
