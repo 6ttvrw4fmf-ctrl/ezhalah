@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import os
+import random
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -16,6 +18,36 @@ from supabase import Client, create_client
 
 # Load .env once when this module is first imported.
 load_dotenv()
+
+
+# Transient failures worth retrying instead of crashing the whole scrape. A SATURATED database returns
+# Cloudflare 522 (origin connection timed out) with an HTML body that PostgREST surfaces as
+# "JSON could not be generated"; we also retry other gateway 5xx, rate-limits, request-timeouts, and
+# connection/SSL resets. Everything else (e.g. a real 400/schema error) raises immediately so genuine
+# bugs still surface. (Added 2026-06: scrapers were dying on transient 522s during DB-overload windows.)
+_TRANSIENT_MARKERS = ("522", "520", "524", "503", "502", "504", "429", "408",
+                      "timed out", "timeout", "connection", "json could not be generated",
+                      "temporarily unavailable", "eof", "reset by peer", "server disconnected")
+
+
+def _execute(query, *, what: str = "db", tries: int = 5):
+    """Run a PostgREST query with exponential backoff + jitter on TRANSIENT errors (522 etc.), then
+    re-raise after the last attempt. Upserts/selects/updates here are idempotent, so retrying is safe."""
+    last_exc: Optional[BaseException] = None
+    for attempt in range(tries):
+        try:
+            return query.execute()
+        except Exception as exc:  # inspect, then either retry (transient) or re-raise
+            last_exc = exc
+            msg = str(exc).lower()
+            transient = any(m in msg for m in _TRANSIENT_MARKERS)
+            if not transient or attempt == tries - 1:
+                raise
+            delay = min(30.0, 2.0 ** attempt) + random.uniform(0.0, 1.0)
+            print(f"⚠ {what}: transient DB error (attempt {attempt + 1}/{tries}), "
+                  f"retrying in {delay:.1f}s — {str(exc)[:140]}", flush=True)
+            time.sleep(delay)
+    raise last_exc  # unreachable; satisfies type checkers
 
 
 def sb() -> Client:
@@ -36,16 +68,17 @@ def upsert_listing(row: dict[str, Any]) -> None:
     """
     row = dict(row)  # don't mutate the caller's dict
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
-    sb().table("listings").upsert(
-        row,
-        on_conflict="source_platform,source_id",
-    ).execute()
+    _execute(
+        sb().table("listings").upsert(row, on_conflict="source_platform,source_id"),
+        what="listings",
+    )
 
 
 def begin_run(platform: str) -> int:
     """Open a row in scrape_runs and return its id, so end_run can finalize it."""
-    res = (
-        sb().table("scrape_runs").insert({"platform": platform, "started_at": datetime.now(timezone.utc).isoformat()}).execute()
+    res = _execute(
+        sb().table("scrape_runs").insert({"platform": platform, "started_at": datetime.now(timezone.utc).isoformat()}),
+        what="scrape_runs.begin",
     )
     return int(res.data[0]["id"])
 
@@ -56,7 +89,7 @@ def upsert_aqar_residential(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _sanitize_ints(row)
-    sb().table("aqar_residential_listings").upsert(row, on_conflict="ad_number").execute()
+    _execute(sb().table("aqar_residential_listings").upsert(row, on_conflict="ad_number"), what="aqar_residential_listings")
 
 
 def upsert_aqar_commercial(row: dict[str, Any]) -> None:
@@ -66,7 +99,7 @@ def upsert_aqar_commercial(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _sanitize_ints(row)
-    sb().table("aqar_commercial_listings").upsert(row, on_conflict="ad_number").execute()
+    _execute(sb().table("aqar_commercial_listings").upsert(row, on_conflict="ad_number"), what="aqar_commercial_listings")
 
 
 def upsert_wasalt_residential(row: dict[str, Any]) -> None:
@@ -76,7 +109,7 @@ def upsert_wasalt_residential(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _sanitize_ints(row)
-    sb().table("wasalt_residential_listings").upsert(row, on_conflict="ad_number").execute()
+    _execute(sb().table("wasalt_residential_listings").upsert(row, on_conflict="ad_number"), what="wasalt_residential_listings")
 
 
 # Numeric columns by Postgres integer width. A parse glitch that overflows one of these (e.g. a bad
@@ -124,7 +157,7 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         _sanitize_price(r)
         _sanitize_ints(r)
         seen[r["ad_number"]] = r
-    sb().table(table).upsert(list(seen.values()), on_conflict="ad_number").execute()
+    _execute(sb().table(table).upsert(list(seen.values()), on_conflict="ad_number"), what=table)
 
 
 def upsert_wasalt_residential_batch(rows: list[dict[str, Any]]) -> None:
@@ -166,7 +199,7 @@ def prune_unseen(
     q = c.table(table).select("ad_number").eq("active", True)
     if source:
         q = q.eq("source", source)
-    existing = q.execute().data or []
+    existing = _execute(q, what=table + ".prune_select").data or []
     if not existing:
         return 0
     seen = set(seen_ads)
@@ -176,20 +209,23 @@ def prune_unseen(
     if len(existing) >= min_active_guard and len(gone) > max_prune_frac * len(existing):
         return -1  # collapse guard: refuse to deactivate the bulk of a catalog in one run
     for i in range(0, len(gone), 200):
-        c.table(table).update({"active": False}).in_("ad_number", gone[i:i + 200]).execute()
+        _execute(c.table(table).update({"active": False}).in_("ad_number", gone[i:i + 200]), what=table + ".prune_update")
     return len(gone)
 
 
 def end_run(run_id: int, *, ok: bool, rows_seen: int, rows_upserted: int, notes: Optional[str] = None) -> None:
-    sb().table("scrape_runs").update(
-        {
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "ok": ok,
-            "rows_seen": rows_seen,
-            "rows_upserted": rows_upserted,
-            "notes": notes,
-        }
-    ).eq("id", run_id).execute()
+    _execute(
+        sb().table("scrape_runs").update(
+            {
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "ok": ok,
+                "rows_seen": rows_seen,
+                "rows_upserted": rows_upserted,
+                "notes": notes,
+            }
+        ).eq("id", run_id),
+        what="scrape_runs.end",
+    )
 
 
 def upsert_aldarim_residential_batch(rows: list[dict[str, Any]]) -> None:
