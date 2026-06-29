@@ -1,0 +1,41 @@
+# Wasalt liveness PILOT — lightweight HEAD-first existence check, CLASSIFY-ONLY (never inactivates,
+# never deletes). Separate from the disabled full-page `wasalt-liveness.yml`. Bounded by --limit.
+# Runs once on push to the pilot branch (so we can pilot WITHOUT merging to main) and is also
+# workflow_dispatch-able. Safe + reversible: only refreshes last_seen_at for confirmed-live rows
+# and inserts a heartbeat row in wasalt_liveness_runs.
+name: Wasalt liveness pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "How many listings to check"
+        default: "800"
+  push:
+    branches: ["fix/wasalt-liveness-pilot"]
+
+concurrency:
+  group: wasalt-liveness-pilot
+  cancel-in-progress: false
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Wasalt liveness pilot (≤800, classify-only)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          SCRAPE_MIN_INTERVAL: "0.4"
+        run: |
+          python -m scrapers.wasalt.liveness --limit "${{ github.event.inputs.limit || '800' }}" --mode pilot
