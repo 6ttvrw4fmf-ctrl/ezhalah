@@ -218,18 +218,22 @@ def discover(
     city_key: str,
     *,
     max_pages: int = 1,
+    start_page: int = 1,
     max_listings: Optional[int] = None,
 ) -> Iterator[str]:
     """Yield full listing URLs (https://sa.aqar.fm/...-NNNNNNN) for the given slice.
 
     Polite by default — pulls only 1 page (~30 listings) unless you raise max_pages.
+    Pass start_page > 1 to walk a PAGE RANGE [start_page .. max_pages] only (batched deep
+    scraping, e.g. start_page=26, max_pages=50 → pages 26–50), so deeper batches don't
+    re-walk pages already covered by an earlier batch.
     """
     cat_slug = CATEGORIES[(type_key, deal_key)]
     city_ar = CITY_AR[city_key]
     seen: set[str] = set()
     yielded = 0
 
-    for page in range(1, max_pages + 1):
+    for page in range(start_page, max_pages + 1):
         path = f"/{cat_slug}/{city_ar}" + (f"/{page}" if page > 1 else "")
         url = BASE + path
         r = get(url)
