@@ -37,13 +37,13 @@ from scrapers.common import db
 WORKERS = int(os.environ.get("SCRAPE_WORKERS", "6"))
 
 
-def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int, max_listings: int) -> tuple[int, int]:
+def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int, start_page: int = 1, max_listings: int) -> tuple[int, int]:
     print(f"\n── {type_key.upper():<10} {deal_key.upper():<4} {city_key.upper():<8} "
-          f"(pages≤{max_pages}, limit≤{max_listings}, workers={WORKERS})")
+          f"(pages {start_page}–{max_pages}, limit≤{max_listings}, workers={WORKERS})")
     # Discovery is cheap (paginated search HTML) — collect the listing URLs first, then enrich them
     # in parallel. Discover is a generator with its own throttle, so this part stays polite too.
     try:
-        urls = list(D.discover(type_key, deal_key, city_key, max_pages=max_pages, max_listings=max_listings))
+        urls = list(D.discover(type_key, deal_key, city_key, max_pages=max_pages, start_page=start_page, max_listings=max_listings))
     except KeyError:
         print(f"   (no Aqar slug for {type_key}/{deal_key} — skipping)")
         return 0, 0
@@ -84,7 +84,8 @@ def main() -> int:
     p.add_argument("--type",  default="apartment", choices=sorted({k[0] for k in D.CATEGORIES}))
     p.add_argument("--deal",  default="rent",      choices=sorted({k[1] for k in D.CATEGORIES}))
     p.add_argument("--city",  default="riyadh",    choices=sorted(D.CITY_AR.keys()))
-    p.add_argument("--pages", type=int, default=1, help="max paginated search pages per slice")
+    p.add_argument("--pages", type=int, default=1, help="LAST paginated search page per slice (inclusive)")
+    p.add_argument("--start-page", type=int, default=1, help="FIRST page per slice (inclusive) — for batched deep scraping, e.g. --start-page 26 --pages 50 = pages 26–50")
     p.add_argument("--limit", type=int, default=10, help="max listings per slice")
     p.add_argument("--all-residential", action="store_true",
                    help="ignore --type/--deal; sweep all 10 residential types × rent+buy")
@@ -113,11 +114,11 @@ def main() -> int:
                 for d in ("rent", "buy"):
                     if (t, d) not in D.CATEGORIES:
                         continue
-                    s, u = scrape_slice(t, d, args.city, max_pages=args.pages, max_listings=args.limit)
+                    s, u = scrape_slice(t, d, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit)
                     total_seen += s
                     total_upserted += u
         else:
-            s, u = scrape_slice(args.type, args.deal, args.city, max_pages=args.pages, max_listings=args.limit)
+            s, u = scrape_slice(args.type, args.deal, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit)
             total_seen, total_upserted = s, u
         ok = True
         notes = None
