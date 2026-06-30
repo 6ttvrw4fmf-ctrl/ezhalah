@@ -37,6 +37,10 @@ on:
         description: "Min seconds between request-starts per host (higher = gentler; default 0.10, use 0.15+ for batches)"
         required: false
         default: "0.10"
+      max_parallel:
+        description: "Max concurrent city/shard jobs (lower = gentler on DB; default 20, use 1-2 for all-Saudi serial batches)"
+        required: false
+        default: "20"
 
 jobs:
   # Build the shard matrix. Heavy cities → 3 type-group shards each; everything else → 1 shard (all
@@ -73,6 +77,7 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
+      max-parallel: ${{ fromJSON(github.event.inputs.max_parallel || '20') }}
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
