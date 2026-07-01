@@ -14,6 +14,8 @@ signal they already have (English name, Arabic label, or a region_id int).
 from __future__ import annotations
 
 import re
+import threading
+import time
 from typing import Optional, Union
 
 from scrapers.common import db
@@ -46,19 +48,42 @@ _REGION_NORM: dict[str, int] = {}                        # norm(region_ar) → r
 _CID_AR: dict[int, str] = {}                             # catalog city_id → canonical city_ar
 
 
+_LOAD_LOCK = threading.Lock()
+
+
 def _load() -> None:
     if _CITY:
         return
-    c = db.sb()
-    cat = c.table("loc_catalog_city").select("city_norm,city_id,region_id,city_ar").execute().data or []
-    cid2reg = {r["city_id"]: r["region_id"] for r in cat}
-    for r in cat:
-        _CITY.setdefault(r["city_norm"], []).append((r["city_id"], r["region_id"]))
-        _CID_AR[r["city_id"]] = r["city_ar"]
-    for a in (c.table("loc_catalog_city_alias").select("alias_norm,city_id").execute().data or []):
-        _CITY.setdefault(a["alias_norm"], []).append((a["city_id"], cid2reg.get(a["city_id"])))
-    for r in (c.table("loc_catalog_region").select("region_id,region_ar").execute().data or []):
-        _REGION_NORM[norm_ar(r.get("region_ar"))] = r["region_id"]
+    # The catalog fetch is often the FIRST network call inside many parallel worker threads (16-shard
+    # boots), and a single transient httpx ReadError here used to kill a whole shard (aqarmonthly CI
+    # 2026-07-01). Serialize the load (one thread fetches, the rest reuse) and RETRY transient
+    # failures with backoff; only raise once the retries are exhausted. Partial state is cleared on
+    # failure so a half-built map never serves lookups.
+    with _LOAD_LOCK:
+        if _CITY:
+            return
+        last: Exception | None = None
+        for attempt in range(4):
+            try:
+                c = db.sb()
+                cat = c.table("loc_catalog_city").select("city_norm,city_id,region_id,city_ar").execute().data or []
+                cid2reg = {r["city_id"]: r["region_id"] for r in cat}
+                for r in cat:
+                    _CITY.setdefault(r["city_norm"], []).append((r["city_id"], r["region_id"]))
+                    _CID_AR[r["city_id"]] = r["city_ar"]
+                for a in (c.table("loc_catalog_city_alias").select("alias_norm,city_id").execute().data or []):
+                    _CITY.setdefault(a["alias_norm"], []).append((a["city_id"], cid2reg.get(a["city_id"])))
+                for r in (c.table("loc_catalog_region").select("region_id,region_ar").execute().data or []):
+                    _REGION_NORM[norm_ar(r.get("region_ar"))] = r["region_id"]
+                return
+            except Exception as e:  # transient network/DB hiccup → clear partials, back off, retry
+                last = e
+                _CITY.clear()
+                _REGION_NORM.clear()
+                _CID_AR.clear()
+                time.sleep(1.5 * (attempt + 1))
+        if last is not None:
+            raise last
 
 
 def city_ar_for(city_id: Optional[int]) -> Optional[str]:

@@ -230,6 +230,12 @@ def fetch_listings(s: cc.Session) -> list[dict]:
         if r.status_code != 200:
             break
         arr = r.json() or []
+        # WP can answer 200 with an ERROR OBJECT (e.g. rest_post_invalid_page_number) instead of a
+        # list; `out += dict` would extend with its string KEYS and crash `.get()` later (CI 2026-07-01).
+        # A non-list payload means "no more real pages" — stop and keep what we have.
+        if not isinstance(arr, list):
+            break
+        arr = [p for p in arr if isinstance(p, dict)]
         out += arr
         if len(arr) < 50:
             break
