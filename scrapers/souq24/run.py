@@ -75,6 +75,17 @@ WORKERS = int(os.environ.get("SOUQ24_WORKERS", "8"))
 # Hard cap on the id sweep so a future catalog growth can't run unbounded; auto-raised from browse.
 ID_CAP = int(os.environ.get("SOUQ24_ID_CAP", "1400"))
 
+# 24.com.sa's Cloudflare serves the homepage SHELL (no realestate_name) to datacenter IPs, so the
+# cloud (GitHub Actions) crawl silently saw 0 real listings every run and every ad got stale-marked
+# inactive. Route through a Saudi residential proxy (the same secret the Wasalt cloud sweeps use)
+# when configured; local runs leave these unset and hit the site directly from the home IP, which
+# works. Note: the full id sweep through the proxy is ~1.3k GETs/run of metered bandwidth — bounded
+# by ID_CAP; if that ever matters, lower the cron cadence rather than skipping ids (skipping would
+# let the 7-day stale-marker wrongly kill older-but-live ads the sweep no longer refreshes).
+PROXY = (os.environ.get("SOUQ24_PROXY_URL") or os.environ.get("SCRAPE_PROXY_URL")
+         or os.environ.get("WASALT_PROXY_URL") or "").strip()
+_PROXIES = {"http": PROXY, "https": PROXY} if PROXY else None
+
 # Arabic property-type word (from realestate_name / heading) → canonical English type.
 TYPE_MAP_AR = {
     "شقة": "Apartment", "شقه": "Apartment", "شقق": "Apartment", "استوديو": "Apartment",
@@ -171,12 +182,17 @@ def _session() -> cc.Session:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
         })
+        if _PROXIES:
+            s.proxies = _PROXIES  # Saudi residential proxy so datacenter IPs aren't served the shell
         _local.s = s
     return s
 
 
 def session() -> cc.Session:
-    return cc.Session(impersonate="chrome124")
+    s = cc.Session(impersonate="chrome124")
+    if _PROXIES:
+        s.proxies = _PROXIES  # Saudi residential proxy so datacenter IPs aren't served the shell
+    return s
 
 
 def _clean(s: str) -> str:

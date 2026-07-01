@@ -211,6 +211,7 @@ def prune_unseen(
     *,
     max_prune_frac: float = 0.85,
     min_active_guard: int = 8,
+    min_coverage: Optional[float] = None,
 ) -> int:
     """Mark active rows in `table` whose ad_number wasn't seen this crawl as inactive.
 
@@ -221,13 +222,24 @@ def prune_unseen(
         A zero-result scrape almost always means the site was down/blocked/timed out, not
         that every listing sold overnight. (This is exactly what wiped Jazan Watan + East
         Abha — the site timed out, the scrape returned 0, and the old loop deactivated all.)
-      • If the prune would deactivate more than `max_prune_frac` of the currently-active
-        rows AND there are at least `min_active_guard` of them, SKIP it. A sudden collapse
-        (e.g. scraped 5 of 200) signals a partial/failed crawl, not real churn.
+      • COLLAPSE guard: if the prune would deactivate more than `max_prune_frac` of the
+        currently-active rows AND there are at least `min_active_guard` of them, SKIP it.
+        A sudden collapse (e.g. scraped 5 of 200) signals a partial/failed crawl.
+      • PARTIAL-SCRAPE guard (coverage floor, default 0.80): only trust a prune when this
+        run RE-SAW at least `min_coverage` of the currently-active catalog. A flaky /
+        rate-limited crawl that re-saw only part of the catalog must NOT deactivate the
+        rest — the daily 7-day stale-marker (`mark_stale_listings_inactive`) removes
+        anything genuinely gone, immune to single-run coverage swings. Fixes the
+        dealapp/sanadak flip-flop churn: partial runs seeing 110–890 of ~1,200 active were
+        pruning hundreds of still-live listings that reappeared the next good run. Legit
+        churn up to (1 - min_coverage) per run still prunes immediately; larger churn is
+        deferred to the 7-day marker (the safe direction). Tune via PRUNE_MIN_COVERAGE.
 
     Returns the number of rows pruned, or -1 when a guard tripped (nothing was changed) so
     the caller can flag the run degraded.
     """
+    if min_coverage is None:
+        min_coverage = float(os.environ.get("PRUNE_MIN_COVERAGE", "0.80"))
     c = sb()
     q = c.table(table).select("ad_number").eq("active", True)
     if source:
@@ -239,8 +251,11 @@ def prune_unseen(
     if not seen:
         return -1  # nothing scraped → site almost certainly down → keep everything active
     gone = [r["ad_number"] for r in existing if r["ad_number"] not in seen]
-    if len(existing) >= min_active_guard and len(gone) > max_prune_frac * len(existing):
-        return -1  # collapse guard: refuse to deactivate the bulk of a catalog in one run
+    if len(existing) >= min_active_guard:
+        if len(gone) > max_prune_frac * len(existing):
+            return -1  # collapse guard: refuse to deactivate the bulk of a catalog in one run
+        if (len(existing) - len(gone)) / len(existing) < min_coverage:
+            return -1  # partial-scrape guard: saw too little of the catalog to trust a prune
     for i in range(0, len(gone), 200):
         _execute(c.table(table).update({"active": False}).in_("ad_number", gone[i:i + 200]), what=table + ".prune_update")
     return len(gone)
