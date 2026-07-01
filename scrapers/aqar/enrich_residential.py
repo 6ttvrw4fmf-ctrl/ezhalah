@@ -130,7 +130,10 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     reception_majlis  = _int_after_label(text, r"مجالس", r"مجلس")
     property_age      = _int_after_label(text, r"عمر\s*العقار")
     street_width_m    = _int_after_label(text, r"عرض\s*الشارع")
-    direction         = _text_after_label(text, r"الواجهة", r"واجهة\s*العقار")
+    # NOTE: direction is parsed by the SINGLE DB parser (aqar_parse, run by the
+    # `aqar_parse_bi` trigger at write time). The old label-regex here over-captured
+    # (run-on blobs), so it was removed — the trigger is now authoritative.
+    direction         = None
     residence_type    = _text_after_label(text, r"نوع\s*السكن")
     project_name      = _text_after_label(text, r"اسم\s*المشروع")
 
@@ -158,25 +161,10 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
             price_annual = v * 12
             rent_period = "monthly"
 
-    mp_m2 = re.search(r"(\d[\d,]{1,})\s*[§ر﷼]?\s*/?\s*(?:متر|م²)", text)
-    if mp_m2:
-        price_per_meter = N.to_int(mp_m2.group(1))
-
-    if transaction_type == "Buy":
-        # Aqar Buy prices show up as "1,200,000 §" / "299,000 §" / sometimes plain "1200000 §".
-        # Try several formats; sanity-check that the number is >= 50K SAR (rules out per-meter
-        # figures and stray numbers that happen to sit next to the riyal symbol).
-        for pat in (
-            r"(\d{1,3}(?:,\d{3}){2,3})\s*[§ر﷼]",  # 1,200,000 §
-            r"(\d{1,3}(?:,\d{3}){1,3})\s*[§ر﷼]",  # 299,000 §
-            r"(\d{6,9})\s*[§ر﷼]",                  # 1200000 §
-        ):
-            mp_total = re.search(pat, text)
-            if mp_total:
-                v = N.to_int(mp_total.group(1))
-                if v and v >= 50_000:
-                    price_total = v
-                    break
+    # NOTE: price_per_meter AND the Buy total price are parsed by the SINGLE DB parser
+    # (aqar_parse trigger). The old regexes here mis-grabbed the area as price/m² and the
+    # pre-discount price on discounted listings — removed; the trigger is authoritative.
+    # (Rent price_annual below stays here — it was never buggy and the trigger doesn't own it.)
 
     # The bulletproof signal is the internal route URL `/rnpl/seek?id=...` which Aqar
     # only embeds when this financing option is enabled for the listing. We check the
@@ -233,7 +221,9 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     if md_nbhd:
         neighborhood = "حي " + md_nbhd.group(1).replace("-", " ")
 
-    street_name       = _text_after_label(text, r"الشارع", r"اسم\s*الشارع")
+    # street_name: URL slug already encodes the street/neighborhood reliably; the old label
+    # regex over-captured, so it's left to the DB layer. Not promoted.
+    street_name       = None
     building_number   = _text_after_label(text, r"رقم\s*المبنى",  max_len=20)
     zip_code          = _text_after_label(text, r"الرمز\s*البريدي", max_len=20)
     additional_number = _text_after_label(text, r"الرقم\s*الإضافي", max_len=20)
@@ -254,8 +244,10 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     title = mt.group(1).strip() if mt else None
     md = re.search(r'<meta\s+name="description"\s+content="([^"]+)"', html)
     description = md.group(1).strip() if md else None
-    date_added  = _text_after_label(text, r"تاريخ\s*الإعلان", r"تاريخ\s*الإضافة")
-    last_update = _text_after_label(text, r"آخر\s*تحديث")
+    # date_added / last_update are parsed by the SINGLE DB parser (aqar_parse trigger) —
+    # the old label regex ran on into the next section. Removed here.
+    date_added  = None
+    last_update = None
 
     # ── Complete-source capture (capture-once contract) ──────────────────────────
     # Stored in the DEDICATED `source_capture` column — NOT `additional_info` (which the app selects
