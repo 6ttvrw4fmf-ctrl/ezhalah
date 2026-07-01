@@ -15,6 +15,8 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
+from scrapers.common.pii import redact_pii
+
 
 # Load .env once when this module is first imported.
 load_dotenv()
@@ -89,6 +91,7 @@ def upsert_aqar_residential(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _sanitize_ints(row)
+    _ensure_capture(row)
     _execute(sb().table("aqar_residential_listings").upsert(row, on_conflict="ad_number"), what="aqar_residential_listings")
 
 
@@ -99,6 +102,7 @@ def upsert_aqar_commercial(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _sanitize_ints(row)
+    _ensure_capture(row)
     _execute(sb().table("aqar_commercial_listings").upsert(row, on_conflict="ad_number"), what="aqar_commercial_listings")
 
 
@@ -109,6 +113,7 @@ def upsert_wasalt_residential(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _sanitize_ints(row)
+    _ensure_capture(row)
     _execute(sb().table("wasalt_residential_listings").upsert(row, on_conflict="ad_number"), what="wasalt_residential_listings")
 
 
@@ -146,6 +151,33 @@ def _sanitize_price(r: dict[str, Any]) -> None:
         r["active"] = False
 
 
+def _ensure_capture(r: dict[str, Any]) -> None:
+    """Unified raw-capture guarantee (Half A of the raw-capture standard).
+
+    Every stored row — from EVERY platform, via any upsert path — gets `raw_captured_at`
+    stamped and a non-null `source_capture` (cleaned text + image count + url path).
+    Scrapers that already build a richer PDPL-aware `source_capture` (aqar, wasalt, sanadak,
+    aqargate, …) keep theirs; we only fill the standard keys if missing. Platforms that build
+    nothing get a fallback derived from the row's own (already-cleaned) description/title,
+    PII-redacted as a safety net. `raw_html_key` / `image_storage_keys` stay NULL here — those
+    are written later by the gated object-storage mirror (Half B)."""
+    r["raw_captured_at"] = datetime.now(timezone.utc).isoformat()
+    cap = r.get("source_capture")
+    photos = r.get("photo_urls") or []
+    if not cap:
+        text = r.get("description") or r.get("title")
+        r["source_capture"] = {
+            "schema": "auto.v1-fallback",
+            "source_text": redact_pii(text) if text else None,
+            "url_path": r.get("listing_url"),
+            "image_count": len(photos),
+        }
+    elif isinstance(cap, dict):
+        cap.setdefault("image_count", len(photos))
+        cap.setdefault("url_path", r.get("listing_url"))
+        cap.setdefault("schema", "unspecified")
+
+
 def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
@@ -156,6 +188,7 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         r["last_seen_at"] = now
         _sanitize_price(r)
         _sanitize_ints(r)
+        _ensure_capture(r)
         seen[r["ad_number"]] = r
     _execute(sb().table(table).upsert(list(seen.values()), on_conflict="ad_number"), what=table)
 
