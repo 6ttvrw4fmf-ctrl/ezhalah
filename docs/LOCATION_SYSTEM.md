@@ -270,6 +270,13 @@ never hiding a better listing.** Newest‑first within a relevance tier.
   search treats everything as equally relevant and leans on the spread above.
 - **Only ever real listings** — nothing is padded or invented to fill a screen.
 
+**Priority order (LOCKED, user rule 2026‑06‑28): exact match first → platform diversity second → property‑type diversity third.**
+1. **Match the user's filters exactly** — location, Buy/Rent, Residential/Commercial, group, selected property type(s), price, bedrooms, area, and every other filter. This always wins.
+2. **Then** spread the correct matching set **across platforms**.
+3. **Then** (only when the user selected **multiple** property types) spread **across those selected types**.
+- Diversity **never** overrides relevance or a selected filter. If one platform — or one selected type — genuinely has the most/best matches, it is completely fine for it to appear more often. **Never sacrifice accuracy to look more diverse.**
+- _Status:_ tiers 1–2 are already how `rankResults` + `orderByScope` behave (relevance tiers, platform/geo diversity within a tier). Tier 3 (type diversity) only becomes active once **multi‑type selection** is built (see §5.x / the multi‑type audit).
+
 ---
 
 ## 9. Non‑negotiable rules
@@ -291,6 +298,12 @@ never hiding a better listing.** Newest‑first within a relevance tier.
    - Applies to **both the Filter and the Ezhalah AI Agent.**
    - Ask to clarify **only** when the place is genuinely ambiguous/unclear — never for a valid place that is simply empty.
    - _Worked example:_ «اللحن» (Al Lihin) is a real catalog **city** in منطقة المدينة المنورة with no current listings → the honest‑zero response is **correct**, not a bug. (Whereas a typed string that is *not* in the catalog and *not* a clear same‑place misspelling → «هل تقصد …؟» with the closest real place, or honest zero — never invent a region for it.)
+9. **An unresolved‑location listing is scoped to Saudi Arabia (country‑wide) until it resolves — not hidden.** (User rule, 2026‑06‑28.)
+   - A listing we know is in Saudi Arabia but whose **Region/City/District is not yet matched** (the review queue) must still appear in a **country‑wide** search when it passes every other filter (Buy/Rent, Residential/Commercial, group, type, bedrooms, area, price).
+   - It is **excluded** the moment the user selects a specific **Region, City, or District** — we cannot verify it belongs there.
+   - **Never invent** its Region/City/District to make it appear; it stays unresolved (NULL location, `production_ready = false`) until matched correctly.
+   - **All other filters behave exactly as before** — only the location gate changes.
+   - _Mechanism:_ the search RPC `location_search_candidates` already includes `production_ready = false` rows when **no** location scope is given (`p_cities`/`p_districts`/`p_region_ids` all NULL), and **requires** `production_ready` once any scope is set — so this rule is **already live for the review queue**. _Open:_ ~1,706 active listings are absent from the search view (`listing_native_location_v2`) entirely (resolution fully failed + not in the legacy fallback), so they are invisible even country‑wide; a catch‑all that lets them through with NULL location is **pending explicit approval** (it edits the resolution view).
 
 ---
 

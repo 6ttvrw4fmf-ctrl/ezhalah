@@ -8,7 +8,7 @@ import HeroBackground from '@/components/HeroBackground';
 import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
-import { CATEGORIES, DEALS, detailFor, priceTabsFor, type Category } from '@/data/taxonomy';
+import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { matchLocations, placeLabel, placeTitle, placeSub, placeIcon, placeKey, resolveLocation, ensureLocationIndex, type Place } from '@/data/locations';
 import { grouped, toLatinDigits } from '@/data/search';
@@ -107,8 +107,6 @@ export default function Home() {
       }
     }, 90);
   };
-  const priceRef = useRef<TextInput>(null);
-  const [priceFocus, setPriceFocus] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
@@ -189,39 +187,32 @@ export default function Home() {
   };
 
   const detail = query.type ? detailFor(query.type) : null;
+  // Context-level detail: shown at category/group level when no specific type is selected.
+  const ctx = !query.type ? detailForContext(query.category, query.typeGroup ?? null) : null;
   // Whatever the user chose (a size band) or typed (a custom number) is mirrored INTO the size box so
   // they can see it and tap in to edit it. A band shows its label minus the trailing unit (the box
   // renders "m²" on the side); a custom number shows as-is.
   const sizeIsBand = !!detail && !detail.isBedrooms && !!query.detail && detail.options.includes(query.detail);
+  // Context-level size box value: shown in the area input when no type is selected. Reads its OWN
+  // field (contextSize) so a small area like "3" displays — it's never read as a bedroom count.
+  const contextSizeValue = query.contextSize ? grouped(parseInt(query.contextSize, 10) || 0) : '';
+  // Area/Price range box display values (comma-grouped). Empty string when unset.
+  const areaMinValue = query.areaMin ? grouped(parseInt(query.areaMin, 10) || 0) : '';
+  const areaMaxValue = query.areaMax ? grouped(parseInt(query.areaMax, 10) || 0) : '';
+  const priceMinValue = query.priceMin ? grouped(parseInt(query.priceMin, 10) || 0) : '';
+  const priceMaxValue = query.priceMax ? grouped(parseInt(query.priceMax, 10) || 0) : '';
   const sizeBoxValue = !detail || detail.isBedrooms || !query.detail
     ? ''
     : sizeIsBand
       ? tDetailOption(query.detail!).replace(/\s*(m²|م²)\s*$/u, '').trim()
       : grouped(parseInt(query.detail!, 10) || 0); // free-typed number → comma-grouped
-  // Preset price bands for the chosen type + deal + size (Office for now). Null → free-type box only.
-  const priceTabs = priceTabsFor(query.type, query.deal, query.detail);
-  // Filter budget field. RENT lets the user pick the period (Monthly / Yearly) via a tiny toggle —
-  // the engine knows how to handle each, no math shown to the user. BUY is the total Purchase Budget.
-  // No price/m² tabs, no automatic conversions in the UI. (user request.)
+  // RENT lets the user pick the period (Monthly / Yearly) via a tiny toggle; the engine handles each.
   const rentPeriod: 'monthly' | 'annual' = query.rentPeriod ?? 'annual';
-  const priceLabel = query.deal === 'Rent'
-    ? (rentPeriod === 'monthly' ? 'Monthly Rent Budget' : 'Yearly Rent Budget')
-    : 'Purchase Budget';
   const cityUp = cityFocus || query.location.length > 0;
   // Show the city suggestions in whichever script the user is typing (English input → English
   // names, Arabic input → Arabic names), independent of the app's UI language. Falls back to the
   // app locale before any letters are typed.
   const sugLocale = detectLocale(query.location) ?? locale;
-  const priceUp = priceFocus || query.priceInput.length > 0 || !!query.priceBand;
-  const priceText = query.priceInput ? grouped(parseInt(query.priceInput, 10)) : '';
-  // Rent price bands are annual figures — show a "/yr" marker on the tab + mirrored box label so
-  // it's clear (Buy bands are absolute, no marker). Canonical band strings stay unmarked so search
-  // parsing is unaffected.
-  const tPriceTabDeal = (opt: string) =>
-    query.deal === 'Rent' ? `${tPriceTab(opt)}${t(' /yr')}` : tPriceTab(opt);
-  // A selected price band is mirrored into the price box too (with its SAR label); typing or the ×
-  // clears it. Bands aren't digit-editable.
-  const priceBoxValue = query.priceBand ? tPriceTabDeal(query.priceBand) : priceText;
 
   // Backdrop holds at its idle level (a touch stronger on web, per request) the whole time the user
   // fills in the form — typing or focusing a field no longer touches it. It only LIGHTENS when Search
@@ -334,7 +325,7 @@ export default function Home() {
 
           {/* Search card */}
           <View style={s.card}>
-            <Segmented options={DEALS} value={query.deal} onChange={(v) => { setQuery((q) => ({ ...q, deal: v as any, priceBand: null })); scrollDown(); }} />
+            <Segmented options={DEALS} value={query.deal} onChange={(v) => { setQuery((q) => ({ ...q, deal: v as any, priceBand: null, priceMin: null, priceMax: null, priceInput: '' })); scrollDown(); }} />
 
             {/* Location (floating label). The whole box is a tap target — tapping anywhere inside
                 (icon, label, padding) focuses the input so the user can type a city OR a neighborhood
@@ -415,7 +406,7 @@ export default function Home() {
                     key={cat}
                     label={t(cat)}
                     selected={query.category === cat}
-                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, detail: null, priceBand: null })); scrollDown(); }}
+                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, types: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, priceMin: null, priceMax: null, priceInput: '', priceBand: null })); scrollDown(); }}
                   />
                 ))}
               </View>
@@ -432,7 +423,7 @@ export default function Home() {
                       key={g.group}
                       label={t(g.group)}
                       selected={query.typeGroup === g.group}
-                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, detail: null, priceBand: null })); scrollDown(); }}
+                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, types: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, priceMin: null, priceMax: null, priceInput: '', priceBand: null })); scrollDown(); }}
                       style={s.wrapCell}
                     />
                   ))}
@@ -450,11 +441,90 @@ export default function Home() {
                     <OptionBox
                       key={ty}
                       label={t(ty)}
-                      selected={query.type === ty}
-                      onPress={() => { setQuery((q) => ({ ...q, type: q.type === ty ? null : ty, detail: q.type === ty ? null : ty === 'Room' ? '1' : null, priceBand: null })); scrollDown(); }}
+                      selected={(query.types ?? []).includes(ty)}
+                      onPress={() => { setQuery((q) => { const cur = q.types ?? []; const next = cur.includes(ty) ? cur.filter((x) => x !== ty) : [...cur, ty]; return { ...q, types: next.length ? next : null, type: null, detail: null, priceBand: null }; }); scrollDown(); }}
                       style={s.wrapCell}
                     />
                   ))}
+                </View>
+              </Reveal>
+            )}
+
+            {/* Combined optional refine section: bedrooms + area in one card */}
+            {(ctx?.showBeds || ctx?.showSize) && (
+              <Reveal style={s.pick}>
+                <View style={s.ctxBox}>
+                  <Text style={s.ctxTitle}>{t('Refine your search')}</Text>
+                  <Text style={s.ctxSub}>{t('Select bedrooms or area, or leave both empty to see all options')}</Text>
+
+                  {ctx.showBeds && (
+                    <>
+                      <Text style={s.ctxSubLabel}>{t('Bedrooms')}</Text>
+                      <View style={[s.wrap, { marginBottom: 4 }]}>
+                        {(['any', '1', '2', '3', '4', '5+'] as const).map((opt) => (
+                          <OptionBox
+                            key={opt}
+                            label={opt === 'any' ? t('Any count') : opt}
+                            selected={opt === 'any' ? !(query.contextBedsList?.length) : (query.contextBedsList ?? []).includes(opt)}
+                            onPress={() => { setQuery((q) => {
+                              if (opt === 'any') return { ...q, contextBedsList: null, contextBeds: null, priceBand: null };
+                              const cur = q.contextBedsList ?? [];
+                              const next = cur.includes(opt) ? cur.filter((x) => x !== opt) : [...cur, opt];
+                              const clearArea = next.length ? null : undefined;
+                              return { ...q, contextBedsList: next.length ? next : null, contextBeds: null,
+                                contextSize: next.length ? null : q.contextSize,
+                                areaMin: clearArea === null ? null : q.areaMin, areaMax: clearArea === null ? null : q.areaMax,
+                                priceBand: null };
+                            }); scrollDown(); }}
+                            style={s.wrapCell}
+                          />
+                        ))}
+                      </View>
+                    </>
+                  )}
+
+                  {/* AREA range (من / إلى م²) — shown only when no bedroom is selected (beds XOR area).
+                      Typing in either box clears the bedroom selection. min only → ≥, max only → ≤. */}
+                  {(!ctx.showBeds || !(query.contextBedsList?.length)) && (
+                    <>
+                      <Text style={[s.ctxSubLabel, ctx.showBeds ? { marginTop: 14 } : null]}>{t('Area (m²)')}</Text>
+                      <View style={s.rangeRow}>
+                        <View style={[s.field, s.rangeBox, query.areaMin ? s.sizeFieldOn : null]}>
+                          <Text style={s.rangeLabel}>{t('From')}</Text>
+                          <TextInput style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
+                            value={areaMinValue}
+                            onChangeText={(v) => { const d = toLatinDigits(v).replace(/\D/g, ''); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
+                          <Text style={s.sizeUnit}>{t('م²')}</Text>
+                        </View>
+                        <View style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]}>
+                          <Text style={s.rangeLabel}>{t('To')}</Text>
+                          <TextInput style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
+                            value={areaMaxValue}
+                            onChangeText={(v) => { const d = toLatinDigits(v).replace(/\D/g, ''); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
+                          <Text style={s.sizeUnit}>{t('م²')}</Text>
+                        </View>
+                      </View>
+                    </>
+                  )}
+
+                  {/* PRICE range (من / إلى ريال) — always available, independent of beds/area. HARD filter. */}
+                  <Text style={[s.ctxSubLabel, { marginTop: 14 }]}>{t('Price')}</Text>
+                  <View style={s.rangeRow}>
+                    <View style={[s.field, s.rangeBox, query.priceMin ? s.sizeFieldOn : null]}>
+                      <Text style={s.rangeLabel}>{t('From')}</Text>
+                      <TextInput style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
+                        value={priceMinValue}
+                        onChangeText={(v) => { const d = toLatinDigits(v).replace(/\D/g, ''); setQuery((q) => ({ ...q, priceMin: d || null, priceInput: '', priceBand: null })); }} />
+                      <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
+                    </View>
+                    <View style={[s.field, s.rangeBox, query.priceMax ? s.sizeFieldOn : null]}>
+                      <Text style={s.rangeLabel}>{t('To')}</Text>
+                      <TextInput style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
+                        value={priceMaxValue}
+                        onChangeText={(v) => { const d = toLatinDigits(v).replace(/\D/g, ''); setQuery((q) => ({ ...q, priceMax: d || null, priceInput: '', priceBand: null })); }} />
+                      <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
+                    </View>
+                  </View>
                 </View>
               </Reveal>
             )}
@@ -515,25 +585,7 @@ export default function Home() {
                 </Text>
               </Reveal>
             )}
-            <Pressable style={[s.field, { marginTop: 12 }]} onPress={() => priceRef.current?.focus()}>
-              <View style={s.flWrap}>
-                <Text style={[s.flLabel, priceUp && s.flLabelUp]}>{t(priceLabel)}</Text>
-                <TextInput
-                  ref={priceRef}
-                  style={[s.flInput, priceUp && s.flInputUp]}
-                  keyboardType="number-pad"
-                  value={priceBoxValue}
-                  onFocus={() => {
-                    setPriceFocus(true);
-                    // Tapping in to type a custom max clears the selected price band so the box goes
-                    // empty (not stale band text) — the user types their own amount fresh.
-                    if (query.priceBand) setQuery((q) => ({ ...q, priceBand: null }));
-                  }}
-                  onBlur={() => setPriceFocus(false)}
-                  onChangeText={(v) => setQuery((q) => ({ ...q, priceInput: toLatinDigits(v), priceBand: null }))}
-                />
-              </View>
-            </Pressable>
+            {/* Price now lives as a من/إلى range inside the «خصص بحثك أكثر» card above. */}
 
             <Tappable style={s.searchBtn} onPress={onSearch} dip={0.025}>
               <Text style={s.searchBtnText}>{t('Search')}</Text>
@@ -613,6 +665,11 @@ const s = StyleSheet.create({
   sizeFieldOn: { borderColor: colors.primary },
   sizeInput: { flex: 1, fontSize: 14, color: colors.ink, padding: 0, height: '100%', textAlign: 'left', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
   sizeUnit: { fontSize: 13.5, fontWeight: '700', color: colors.muted },
+  // من / إلى range row: two equal boxes, each "label  input  unit".
+  rangeRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  rangeBox: { flex: 1, height: 46, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rangeLabel: { fontSize: 12.5, fontWeight: '700', color: colors.muted },
+  rangeInput: { flex: 1, fontSize: 14, color: colors.ink, padding: 0, height: '100%', textAlign: 'left', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
 
   flWrap: { flex: 1, height: 52, justifyContent: 'center', position: 'relative', ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
   flLabel: { position: 'absolute', left: 0, top: 17, fontSize: 14, color: colors.muted, ...(Platform.OS === 'web' ? { cursor: 'text' as any, transitionProperty: 'top, font-size, color' as any, transitionDuration: '140ms' as any } : {}) },
@@ -627,6 +684,10 @@ const s = StyleSheet.create({
   suggDist: { fontSize: 11.5, color: colors.muted },
 
   pick: { marginTop: 12 },
+  ctxBox: { backgroundColor: colors.chipFill, borderWidth: 1, borderColor: colors.chipLine, borderRadius: 12, padding: 14 },
+  ctxTitle: { fontSize: 14, fontWeight: '700', color: colors.ink, textAlign: 'right', marginBottom: 5 },
+  ctxSub: { fontSize: 12, color: colors.muted, textAlign: 'right', lineHeight: 18, marginBottom: 14 },
+  ctxSubLabel: { fontSize: 12.5, fontWeight: '600', color: colors.muted, textAlign: 'right', marginBottom: 8 },
   row: { flexDirection: 'row', gap: 8 },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   wrapCell: { flexGrow: 1, flexBasis: '30%', minWidth: 90, flex: 0 },

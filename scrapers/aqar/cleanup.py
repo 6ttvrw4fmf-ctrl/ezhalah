@@ -1,13 +1,16 @@
 """Hard-delete dead Aqar listings older than the safety window.
 
 Runs once a week. Removes any row in `aqar_residential_listings` that:
-  • has been marked inactive by the liveness sweep (active = false), AND
+  • is inactive (active = false), AND
+  • was CONFIRMED dead by the liveness sweep — missing_count >= 3, i.e. its listing page
+    returned 404 / "ad removed" on three separate sweeps, AND
   • hasn't been seen on Aqar for more than 30 days (last_seen_at < now - 30d).
 
-The 30-day buffer is a safety net: if liveness ever has a bad day and falsely kills a real
-listing, we have a month to notice and flip `active` back to true before the row is gone for
-good. Once the window expires we assume the kill was correct and remove the row to keep the
-database lean.
+The missing_count >= 3 gate is deliberate: a row can be active=false for reasons OTHER than a
+confirmed-dead page (a legacy bulk prune, a price-typo hide, an over-aggressive import). We must
+NEVER hard-delete those — only rows the liveness HTTP check proved gone three times. Combined
+with the 30-day buffer, a falsely-killed real listing has both a month to be noticed AND a
+"was it ever actually dead?" check protecting it before the row is removed for good.
 
 Designed to be cron-driven from GitHub Actions — once a week is plenty (a week's worth of dead
 listings rarely exceeds a few thousand rows).
@@ -28,6 +31,9 @@ from scrapers.common.db import begin_run, end_run, sb
 
 
 DEFAULT_AGE_DAYS = 30
+# A row must have been confirmed dead by the liveness sweep this many times (missing_count) before
+# it is EVER eligible for hard-deletion. Protects legacy/aggressive active=false rows from removal.
+CONFIRMED_DEAD_MISSES = 3
 
 
 def main() -> None:
@@ -53,12 +59,14 @@ def main() -> None:
             client.table(table)
             .select("id", count="exact")
             .eq("active", False)
+            .gte("missing_count", CONFIRMED_DEAD_MISSES)
             .lt("last_seen_at", cutoff_iso)
             .limit(1)
             .execute()
         )
         total = head.count or 0
-        print(f"Found {total} rows inactive for >{args.age_days} days (cutoff = {cutoff_iso}).")
+        print(f"Found {total} rows confirmed-dead (missing_count>={CONFIRMED_DEAD_MISSES}) "
+              f"and inactive for >{args.age_days} days (cutoff = {cutoff_iso}).")
 
         if total == 0:
             end_run(run_id, ok=True, rows_seen=0, rows_upserted=0, notes="nothing to delete")
@@ -77,6 +85,7 @@ def main() -> None:
                 client.table(table)
                 .select("id")
                 .eq("active", False)
+                .gte("missing_count", CONFIRMED_DEAD_MISSES)
                 .lt("last_seen_at", cutoff_iso)
                 .limit(PAGE)
                 .execute()

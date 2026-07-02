@@ -230,10 +230,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // price) rather than the label text — so the same search recorded again, even after the UI language
   // flipped (which changes the label string), updates the one existing chat instead of spawning a
   // duplicate. The freshly-recorded chat becomes the active one (highlighted in the sidebar).
+  const sj = (v: unknown) => JSON.stringify(v ?? null);
   const sameQuery = (a: SearchQuery, b: SearchQuery) =>
     a.deal === b.deal && a.location.trim() === b.location.trim() && a.category === b.category &&
     a.type === b.type && a.detail === b.detail && a.priceBand === b.priceBand &&
-    a.priceInput === b.priceInput;
+    a.priceInput === b.priceInput && a.typeGroup === b.typeGroup &&
+    sj(a.types) === sj(b.types) && sj(a.contextBedsList) === sj(b.contextBedsList) &&
+    a.contextBeds === b.contextBeds && a.contextSize === b.contextSize &&
+    a.areaMin === b.areaMin && a.areaMax === b.areaMax &&
+    a.priceMin === b.priceMin && a.priceMax === b.priceMax &&
+    sj(a.districts) === sj(b.districts);
   // If the user already has a chat for this query, KEEP it (its id and its starred flag) — just
   // refresh the label/timestamp and bump it to the top. Without this, re-running the same search was
   // creating a brand-new entry and silently nuking the star. (user-reported bug.)
