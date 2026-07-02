@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -121,6 +122,13 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
     for r in rows:
         r = dict(r)
         r["last_seen_at"] = now
+        # Seen on the source THIS crawl → reset the consecutive-miss counter (prune_unseen only
+        # deactivates after `grace` consecutive misses), and reactivate it: a listing that
+        # reappears in the source is live again, so undo any earlier prune. `setdefault` so a
+        # scraper that deliberately flags a row inactive (e.g. dealapp's مباع/مؤجر "sold" badge)
+        # still wins, and _sanitize_price below can still force a price-typo row inactive.
+        r["missing_count"] = 0
+        r.setdefault("active", True)
         _sanitize_price(r)
         _sanitize_ints(r)
         seen[r["ad_number"]] = r
@@ -143,27 +151,31 @@ def prune_unseen(
     seen_ads,
     source: Optional[str] = None,
     *,
-    max_prune_frac: float = 0.85,
+    grace: int = 3,
+    max_prune_frac: float = 0.30,
     min_active_guard: int = 8,
 ) -> int:
-    """Mark active rows in `table` whose ad_number wasn't seen this crawl as inactive.
+    """Age out active rows whose ad_number wasn't seen this crawl — CONSERVATIVELY.
 
-    This replaces the hand-rolled prune loop every scraper used to carry, and adds the
-    SAFETY GUARDS those loops lacked — a failed/blocked crawl must NEVER wipe a platform:
+    A listing is NEVER deactivated for being missing from a single crawl. Instead each
+    consecutive miss bumps its `missing_count`; only once it has been missing `grace`
+    crawls IN A ROW (default 3) do we flip `active = false`. Any crawl that sees the
+    listing again resets the counter to 0 (done in the upsert), so a transient gap —
+    pagination glitch, proxy hiccup, a page that 500'd — can never kill a live listing.
 
-      • If this crawl saw 0 ad_numbers but the table still has active rows, SKIP the prune.
-        A zero-result scrape almost always means the site was down/blocked/timed out, not
-        that every listing sold overnight. (This is exactly what wiped Jazan Watan + East
-        Abha — the site timed out, the scrape returned 0, and the old loop deactivated all.)
-      • If the prune would deactivate more than `max_prune_frac` of the currently-active
-        rows AND there are at least `min_active_guard` of them, SKIP it. A sudden collapse
-        (e.g. scraped 5 of 200) signals a partial/failed crawl, not real churn.
+    Two circuit breakers on top of that, because a partial/failed crawl must NEVER cascade:
+      • 0 ad_numbers seen but the table still has active rows → SKIP entirely (site down/blocked).
+      • The set missing this crawl exceeds `max_prune_frac` (30%) of the active rows AND there
+        are at least `min_active_guard` of them → SKIP entirely, bump nothing. A sudden 30%+
+        disappearance is a broken crawl, not real churn. (The old 85% guard let awal go 63%
+        and dealapp 40% inactive in a single pass.)
 
-    Returns the number of rows pruned, or -1 when a guard tripped (nothing was changed) so
-    the caller can flag the run degraded.
+    Returns the number of rows actually DEACTIVATED this run (0 when misses were only counted),
+    or -1 when a circuit breaker tripped and nothing was changed, so the caller can flag the
+    run degraded.
     """
     c = sb()
-    q = c.table(table).select("ad_number").eq("active", True)
+    q = c.table(table).select("ad_number, missing_count").eq("active", True)
     if source:
         q = q.eq("source", source)
     existing = q.execute().data or []
@@ -172,12 +184,27 @@ def prune_unseen(
     seen = set(seen_ads)
     if not seen:
         return -1  # nothing scraped → site almost certainly down → keep everything active
-    gone = [r["ad_number"] for r in existing if r["ad_number"] not in seen]
+    gone = [r for r in existing if r["ad_number"] not in seen]
     if len(existing) >= min_active_guard and len(gone) > max_prune_frac * len(existing):
-        return -1  # collapse guard: refuse to deactivate the bulk of a catalog in one run
-    for i in range(0, len(gone), 200):
-        c.table(table).update({"active": False}).in_("ad_number", gone[i:i + 200]).execute()
-    return len(gone)
+        return -1  # collapse guard: a big fraction vanished at once → treat as a broken crawl
+    if not gone:
+        return 0
+    # Group the missing rows by their CURRENT miss count so each distinct increment is one
+    # batched UPDATE. Rows that reach `grace` this run flip inactive; the rest just tick up.
+    by_count: dict[int, list[str]] = defaultdict(list)
+    for r in gone:
+        by_count[int(r.get("missing_count") or 0)].append(r["ad_number"])
+    killed = 0
+    for m, ads in by_count.items():
+        new_missing = m + 1
+        payload: dict[str, Any] = {"missing_count": new_missing}
+        if new_missing >= grace:
+            payload["active"] = False
+        for i in range(0, len(ads), 200):
+            c.table(table).update(payload).in_("ad_number", ads[i:i + 200]).execute()
+        if new_missing >= grace:
+            killed += len(ads)
+    return killed
 
 
 def end_run(run_id: int, *, ok: bool, rows_seen: int, rows_upserted: int, notes: Optional[str] = None) -> None:
