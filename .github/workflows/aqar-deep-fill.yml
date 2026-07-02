@@ -25,6 +25,22 @@ on:
         description: "Max listings per slice (default 5000)"
         required: false
         default: "5000"
+      start_page:
+        description: "FIRST page per slice (inclusive) — batched deep scraping, e.g. 26 = pages 26..(pages)"
+        required: false
+        default: "1"
+      workers:
+        description: "Concurrent enrich workers (lower = gentler on DB; default 16, use 6-8 for careful batches)"
+        required: false
+        default: "16"
+      min_interval:
+        description: "Min seconds between request-starts per host (higher = gentler; default 0.10, use 0.15+ for batches)"
+        required: false
+        default: "0.10"
+      max_parallel:
+        description: "Max concurrent city/shard jobs (lower = gentler on DB; default 20, use 1-2 for all-Saudi serial batches)"
+        required: false
+        default: "20"
 
 jobs:
   # Build the shard matrix. Heavy cities → 3 type-group shards each; everything else → 1 shard (all
@@ -61,6 +77,7 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
+      max-parallel: ${{ fromJSON(github.event.inputs.max_parallel || '20') }}
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
@@ -79,11 +96,12 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SCRAPE_WORKERS: "16"
-          SCRAPE_MIN_INTERVAL: "0.10"
+          SCRAPE_WORKERS: ${{ github.event.inputs.workers || '16' }}
+          SCRAPE_MIN_INTERVAL: ${{ github.event.inputs.min_interval || '0.10' }}
         run: |
           python -m scrapers.aqar.run_residential \
             --city ${{ matrix.city }} \
             --types "${{ matrix.types }}" \
+            --start-page ${{ github.event.inputs.start_page || 1 }} \
             --pages ${{ github.event.inputs.pages || 150 }} \
             --limit ${{ github.event.inputs.limit || 5000 }}

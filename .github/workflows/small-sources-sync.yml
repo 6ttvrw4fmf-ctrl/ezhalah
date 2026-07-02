@@ -58,6 +58,7 @@ jobs:
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
+          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all" }
           # NOTE: muktamel is NOT here. Its pages are ~1.4MB each and it has no list API / usable
           # sitemap, so a full sequential-ID scan is ~45GB over hours — impossible on a 4h cadence.
           # It runs on its OWN weekly workflow (muktamel-sync.yml), scoped to the live ID band.
@@ -77,4 +78,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_MIN_INTERVAL: "0.3"
+          # 24.com.sa's Cloudflare serves datacenter IPs a listing-less shell, so souq24 needs the
+          # Saudi residential proxy from the cloud (reuses the Wasalt proxy secret). Every other
+          # source's scraper ignores this var, so it's harmless to expose matrix-wide.
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
         run: ${{ matrix.cmd }}

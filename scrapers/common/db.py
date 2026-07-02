@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import os
+import random
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -14,9 +16,41 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
+from scrapers.common.pii import redact_pii
+
 
 # Load .env once when this module is first imported.
 load_dotenv()
+
+
+# Transient failures worth retrying instead of crashing the whole scrape. A SATURATED database returns
+# Cloudflare 522 (origin connection timed out) with an HTML body that PostgREST surfaces as
+# "JSON could not be generated"; we also retry other gateway 5xx, rate-limits, request-timeouts, and
+# connection/SSL resets. Everything else (e.g. a real 400/schema error) raises immediately so genuine
+# bugs still surface. (Added 2026-06: scrapers were dying on transient 522s during DB-overload windows.)
+_TRANSIENT_MARKERS = ("522", "520", "524", "503", "502", "504", "429", "408",
+                      "timed out", "timeout", "connection", "json could not be generated",
+                      "temporarily unavailable", "eof", "reset by peer", "server disconnected")
+
+
+def _execute(query, *, what: str = "db", tries: int = 5):
+    """Run a PostgREST query with exponential backoff + jitter on TRANSIENT errors (522 etc.), then
+    re-raise after the last attempt. Upserts/selects/updates here are idempotent, so retrying is safe."""
+    last_exc: Optional[BaseException] = None
+    for attempt in range(tries):
+        try:
+            return query.execute()
+        except Exception as exc:  # inspect, then either retry (transient) or re-raise
+            last_exc = exc
+            msg = str(exc).lower()
+            transient = any(m in msg for m in _TRANSIENT_MARKERS)
+            if not transient or attempt == tries - 1:
+                raise
+            delay = min(30.0, 2.0 ** attempt) + random.uniform(0.0, 1.0)
+            print(f"⚠ {what}: transient DB error (attempt {attempt + 1}/{tries}), "
+                  f"retrying in {delay:.1f}s — {str(exc)[:140]}", flush=True)
+            time.sleep(delay)
+    raise last_exc  # unreachable; satisfies type checkers
 
 
 def sb() -> Client:
@@ -37,16 +71,17 @@ def upsert_listing(row: dict[str, Any]) -> None:
     """
     row = dict(row)  # don't mutate the caller's dict
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
-    sb().table("listings").upsert(
-        row,
-        on_conflict="source_platform,source_id",
-    ).execute()
+    _execute(
+        sb().table("listings").upsert(row, on_conflict="source_platform,source_id"),
+        what="listings",
+    )
 
 
 def begin_run(platform: str) -> int:
     """Open a row in scrape_runs and return its id, so end_run can finalize it."""
-    res = (
-        sb().table("scrape_runs").insert({"platform": platform, "started_at": datetime.now(timezone.utc).isoformat()}).execute()
+    res = _execute(
+        sb().table("scrape_runs").insert({"platform": platform, "started_at": datetime.now(timezone.utc).isoformat()}),
+        what="scrape_runs.begin",
     )
     return int(res.data[0]["id"])
 
@@ -57,7 +92,8 @@ def upsert_aqar_residential(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _sanitize_ints(row)
-    sb().table("aqar_residential_listings").upsert(row, on_conflict="ad_number").execute()
+    _ensure_capture(row)
+    _execute(sb().table("aqar_residential_listings").upsert(row, on_conflict="ad_number"), what="aqar_residential_listings")
 
 
 def upsert_aqar_commercial(row: dict[str, Any]) -> None:
@@ -67,7 +103,8 @@ def upsert_aqar_commercial(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _sanitize_ints(row)
-    sb().table("aqar_commercial_listings").upsert(row, on_conflict="ad_number").execute()
+    _ensure_capture(row)
+    _execute(sb().table("aqar_commercial_listings").upsert(row, on_conflict="ad_number"), what="aqar_commercial_listings")
 
 
 def upsert_wasalt_residential(row: dict[str, Any]) -> None:
@@ -77,7 +114,8 @@ def upsert_wasalt_residential(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _sanitize_ints(row)
-    sb().table("wasalt_residential_listings").upsert(row, on_conflict="ad_number").execute()
+    _ensure_capture(row)
+    _execute(sb().table("wasalt_residential_listings").upsert(row, on_conflict="ad_number"), what="wasalt_residential_listings")
 
 
 # Numeric columns by Postgres integer width. A parse glitch that overflows one of these (e.g. a bad
@@ -114,6 +152,33 @@ def _sanitize_price(r: dict[str, Any]) -> None:
         r["active"] = False
 
 
+def _ensure_capture(r: dict[str, Any]) -> None:
+    """Unified raw-capture guarantee (Half A of the raw-capture standard).
+
+    Every stored row — from EVERY platform, via any upsert path — gets `raw_captured_at`
+    stamped and a non-null `source_capture` (cleaned text + image count + url path).
+    Scrapers that already build a richer PDPL-aware `source_capture` (aqar, wasalt, sanadak,
+    aqargate, …) keep theirs; we only fill the standard keys if missing. Platforms that build
+    nothing get a fallback derived from the row's own (already-cleaned) description/title,
+    PII-redacted as a safety net. `raw_html_key` / `image_storage_keys` stay NULL here — those
+    are written later by the gated object-storage mirror (Half B)."""
+    r["raw_captured_at"] = datetime.now(timezone.utc).isoformat()
+    cap = r.get("source_capture")
+    photos = r.get("photo_urls") or []
+    if not cap:
+        text = r.get("description") or r.get("title")
+        r["source_capture"] = {
+            "schema": "auto.v1-fallback",
+            "source_text": redact_pii(text) if text else None,
+            "url_path": r.get("listing_url"),
+            "image_count": len(photos),
+        }
+    elif isinstance(cap, dict):
+        cap.setdefault("image_count", len(photos))
+        cap.setdefault("url_path", r.get("listing_url"))
+        cap.setdefault("schema", "unspecified")
+
+
 def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
@@ -131,8 +196,9 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         r.setdefault("active", True)
         _sanitize_price(r)
         _sanitize_ints(r)
+        _ensure_capture(r)
         seen[r["ad_number"]] = r
-    sb().table(table).upsert(list(seen.values()), on_conflict="ad_number").execute()
+    _execute(sb().table(table).upsert(list(seen.values()), on_conflict="ad_number"), what=table)
 
 
 def upsert_wasalt_residential_batch(rows: list[dict[str, Any]]) -> None:
@@ -154,6 +220,7 @@ def prune_unseen(
     grace: int = 3,
     max_prune_frac: float = 0.30,
     min_active_guard: int = 8,
+    min_coverage: Optional[float] = None,
 ) -> int:
     """Age out active rows whose ad_number wasn't seen this crawl — CONSERVATIVELY.
 
@@ -163,34 +230,45 @@ def prune_unseen(
     listing again resets the counter to 0 (done in the upsert), so a transient gap —
     pagination glitch, proxy hiccup, a page that 500'd — can never kill a live listing.
 
-    Two circuit breakers on top of that, because a partial/failed crawl must NEVER cascade:
-      • 0 ad_numbers seen but the table still has active rows → SKIP entirely (site down/blocked).
-      • The set missing this crawl exceeds `max_prune_frac` (30%) of the active rows AND there
-        are at least `min_active_guard` of them → SKIP entirely, bump nothing. A sudden 30%+
-        disappearance is a broken crawl, not real churn. (The old 85% guard let awal go 63%
-        and dealapp 40% inactive in a single pass.)
+    THREE circuit breakers on top of that — a partial/failed crawl must NEVER cascade:
+      • 0 ad_numbers seen but the table still has active rows → SKIP entirely (site down/blocked;
+        this is what wiped Jazan Watan + East Abha when the old loop deactivated all on a timeout).
+      • COLLAPSE guard: the set missing this crawl exceeds `max_prune_frac` (30%) of the active
+        rows AND there are ≥ `min_active_guard` of them → SKIP entirely, bump nothing. A sudden
+        30%+ disappearance is a broken crawl. (The old 85% guard let awal go 63%, dealapp 40%.)
+      • PARTIAL-SCRAPE guard (coverage floor, default 0.80): only count misses when this run
+        RE-SAW at least `min_coverage` of the active catalog. A flaky/rate-limited run that saw
+        only part of it must not touch the rest — this is what caused the dealapp/sanadak flip-flop
+        churn. Tune via PRUNE_MIN_COVERAGE. (Combined with the 3-strike counter, a listing now needs
+        both good coverage AND three misses in a row before it can go inactive.)
 
     Returns the number of rows actually DEACTIVATED this run (0 when misses were only counted),
     or -1 when a circuit breaker tripped and nothing was changed, so the caller can flag the
     run degraded.
     """
+    if min_coverage is None:
+        min_coverage = float(os.environ.get("PRUNE_MIN_COVERAGE", "0.80"))
     c = sb()
     q = c.table(table).select("ad_number, missing_count").eq("active", True)
     if source:
         q = q.eq("source", source)
-    existing = q.execute().data or []
+    existing = _execute(q, what=table + ".prune_select").data or []
     if not existing:
         return 0
     seen = set(seen_ads)
     if not seen:
         return -1  # nothing scraped → site almost certainly down → keep everything active
     gone = [r for r in existing if r["ad_number"] not in seen]
-    if len(existing) >= min_active_guard and len(gone) > max_prune_frac * len(existing):
-        return -1  # collapse guard: a big fraction vanished at once → treat as a broken crawl
+    if len(existing) >= min_active_guard:
+        if len(gone) > max_prune_frac * len(existing):
+            return -1  # collapse guard: a big fraction vanished at once → treat as a broken crawl
+        if (len(existing) - len(gone)) / len(existing) < min_coverage:
+            return -1  # partial-scrape guard: saw too little of the catalog to trust a prune
     if not gone:
         return 0
-    # Group the missing rows by their CURRENT miss count so each distinct increment is one
-    # batched UPDATE. Rows that reach `grace` this run flip inactive; the rest just tick up.
+    # Consecutive-miss: group the missing rows by their CURRENT miss count so each distinct
+    # increment is one batched UPDATE. Rows that reach `grace` misses in a row flip inactive;
+    # everything else just ticks up (and resets to 0 the next time the upsert re-sees it).
     by_count: dict[int, list[str]] = defaultdict(list)
     for r in gone:
         by_count[int(r.get("missing_count") or 0)].append(r["ad_number"])
@@ -201,22 +279,26 @@ def prune_unseen(
         if new_missing >= grace:
             payload["active"] = False
         for i in range(0, len(ads), 200):
-            c.table(table).update(payload).in_("ad_number", ads[i:i + 200]).execute()
+            _execute(c.table(table).update(payload).in_("ad_number", ads[i:i + 200]),
+                     what=table + ".prune_update")
         if new_missing >= grace:
             killed += len(ads)
     return killed
 
 
 def end_run(run_id: int, *, ok: bool, rows_seen: int, rows_upserted: int, notes: Optional[str] = None) -> None:
-    sb().table("scrape_runs").update(
-        {
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "ok": ok,
-            "rows_seen": rows_seen,
-            "rows_upserted": rows_upserted,
-            "notes": notes,
-        }
-    ).eq("id", run_id).execute()
+    _execute(
+        sb().table("scrape_runs").update(
+            {
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "ok": ok,
+                "rows_seen": rows_seen,
+                "rows_upserted": rows_upserted,
+                "notes": notes,
+            }
+        ).eq("id", run_id),
+        what="scrape_runs.end",
+    )
 
 
 def upsert_aldarim_residential_batch(rows: list[dict[str, Any]]) -> None:

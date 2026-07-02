@@ -28,7 +28,8 @@ def main() -> int:
     p.add_argument("--type",  default="apartment", choices=sorted({k[0] for k in D.CATEGORIES}))
     p.add_argument("--deal",  default="rent",      choices=sorted({k[1] for k in D.CATEGORIES}))
     p.add_argument("--city",  default="riyadh",    choices=sorted(D.CITY_AR.keys()))
-    p.add_argument("--pages", type=int, default=1, help="how many paginated search pages to walk")
+    p.add_argument("--pages", type=int, default=1, help="LAST paginated search page to walk (inclusive)")
+    p.add_argument("--start-page", type=int, default=1, help="FIRST page to walk (inclusive) — batched deep scraping, e.g. --start-page 26 --pages 50 = pages 26–50")
     p.add_argument("--limit", type=int, default=10, help="cap on total listings enriched this run")
     args = p.parse_args()
 
@@ -38,7 +39,7 @@ def main() -> int:
     seen = 0
     upserted = 0
     try:
-        for url in D.discover(args.type, args.deal, args.city, max_pages=args.pages, max_listings=args.limit):
+        for url in D.discover(args.type, args.deal, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit):
             seen += 1
             print(f"  [{seen}/{args.limit}] {url[-60:]}")
             row = E.enrich(url)
