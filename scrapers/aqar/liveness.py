@@ -1,28 +1,34 @@
-"""Aqar liveness sweep — detect dead listings and mark them inactive.
+"""Aqar/Wasalt liveness sweep — detect dead listings and mark them inactive.
 
-For every row in `aqar_residential_listings` where active=true, this fetches the listing
-URL on Aqar.sa and decides what to do:
+For every row in the target table where active=true, this checks the listing URL on the
+source site and decides what to do. Two check modes (--check-mode):
 
-  - Confirmed dead (404, 410, or HTML body says "ad removed / not available") →
-    increment `missing_count`. Once it hits the grace threshold (default 3 consecutive
-    sweeps), flip `active = false`. The row stays in the DB (we keep historical
-    listings) — the app filter (`active=true`) just hides it.
-  - Alive (200 OK with content) → reset `missing_count` to 0 and refresh
-    `last_seen_at`.
-  - Transient failure (timeout, 5xx, no response) → leave the row untouched. We
-    NEVER kill a listing because of a single network hiccup.
+  full (default — used for Aqar): fetches the WHOLE page body.
+    - Confirmed dead (404, 410, or HTML body says "ad removed / not available") →
+      increment `missing_count`. Once it hits the grace threshold (default 3 consecutive
+      sweeps), flip `active = false`.
+    - Alive (200 OK with content) → reset `missing_count` to 0, refresh `last_seen_at`.
+    - Transient failure (timeout, 5xx, no response) → leave the row untouched.
 
-The grace period is what keeps us correct even when Aqar's site has a brief outage,
-their pagination glitches, or a single curl request randomly times out: a real removed
-listing fails THREE runs in a row; a temporary blip recovers on the next run.
+  head (used for Wasalt, owner 2026-07-06): a bare HEAD request, body NEVER downloaded — a
+    few hundred bytes per listing instead of ~400KB, so a daily sweep over tens of thousands
+    of rows doesn't blow the metered Saudi proxy bandwidth. Relies on the status code ONLY
+    (200=alive, 404/410=dead) since there is no body to check DEAD_MARKERS against — this is
+    deliberately more conservative than full mode: it can only ever UNDER-detect a dead
+    listing (a soft-404 that returns 200 with a "not found" UI would be missed and just look
+    alive), never wrongly kill a live one. Same 3-strike grace, same "leave untouched on any
+    ambiguous signal" philosophy as full mode.
 
-Designed to be cron-driven from the VPS — once a day at 04:00 KSA time.
+The grace period is what keeps us correct even when the source has a brief outage, a
+pagination glitch, or a single request randomly times out: a real removed listing fails
+THREE runs in a row; a temporary blip recovers on the next run.
+
+Designed to be cron-driven. Aqar (full mode) once a day; Wasalt (head mode) can run daily
+too since it's cheap — see wasalt-liveness-light.yml.
 
 Run it locally for testing:
   python -m scrapers.aqar.liveness --limit 50
-
-On the server:
-  0 1 * * *  cd /srv/ezhalah && .venv/bin/python -m scrapers.aqar.liveness
+  python -m scrapers.aqar.liveness --table wasalt_residential_listings --check-mode head --limit 50
 """
 from __future__ import annotations
 
@@ -32,7 +38,7 @@ import time
 from datetime import datetime, timezone
 
 from scrapers.common.db import begin_run, end_run, sb
-from scrapers.common.http import get
+from scrapers.common.http import get, head
 
 
 # Phrases Aqar puts on a removed/expired listing page (both languages).
@@ -90,10 +96,13 @@ def main() -> None:
                          "listings @ ~3/s within the 6h limit; sharding finishes in ~20-30 min.")
     ap.add_argument("--shard", type=int, default=0,
                     help="Which 0-indexed bucket THIS job handles (0 .. shards-1).")
+    ap.add_argument("--check-mode", default="full", choices=["full", "head"],
+                    help="'full' fetches the whole page (Aqar default). 'head' is a bodyless HEAD "
+                         "request — near-zero bandwidth, status-code-only dead check (Wasalt).")
     args = ap.parse_args()
 
     table = args.table
-    run_id = begin_run(f"aqar_liveness:{table}:{args.shard}/{args.shards}")
+    run_id = begin_run(f"aqar_liveness:{table}:{args.check_mode}:{args.shard}/{args.shards}")
     now_iso = datetime.now(timezone.utc).isoformat()
     client = sb()
 
@@ -145,9 +154,13 @@ def main() -> None:
                 if not url:
                     continue  # no URL → can't check, skip
 
-                r = get(url, max_retries=2)
+                if args.check_mode == "head":
+                    r = head(url, max_retries=2)
+                    body = ""  # never downloaded in head mode — status code is the only signal
+                else:
+                    r = get(url, max_retries=2)
+                    body = r.text if r is not None else ""
                 status = r.status_code if r is not None else 0
-                body = r.text if r is not None else ""
 
                 if r is not None and looks_dead(status, body):
                     new_missing = (row.get("missing_count") or 0) + 1

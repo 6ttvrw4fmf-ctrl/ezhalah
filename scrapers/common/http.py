@@ -7,6 +7,8 @@ needing a real browser. We only reach for Playwright when even that fails.
 
 `session()` returns a session pinned to a recent Chrome.
 `get(url)` calls it with automatic retry/backoff and a polite per-host throttle.
+`head(url)` does the same existence check WITHOUT downloading the body — for a lightweight liveness
+sweep over many thousands of rows where full-page bandwidth would be prohibitive (owner 2026-07-06).
 """
 from __future__ import annotations
 
@@ -92,5 +94,44 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25) -> Optional[cc.Res
             time.sleep(3 * (attempt + 1))
             continue
         # 4xx (other than rate-limit) is permanent — bail out.
+        return None
+    return None
+
+
+def head(url: str, *, max_retries: int = 3, timeout: int = 20) -> Optional[cc.Response]:
+    """Cheap existence check: HEAD only, no body ever downloaded (~a few hundred bytes vs a ~400KB
+    full page). Same throttle, proxy-routing, and browser-TLS-impersonation as get() — reuses the
+    identical session so it gets past the same Cloudflare bot-check get() already gets past in
+    production (a bare, non-impersonated request to wasalt.sa was confirmed live 2026-07-06 to get
+    an immediate Cloudflare challenge page — this MUST go through session()'s chrome124 impersonation
+    + the Saudi proxy, never a plain HTTP client).
+
+    Returns the Response on 200 or a definitive 404/410 (both are usable signals for the caller).
+    Returns None on anything inconclusive (timeout, 5xx, 429, or a 403 challenge) — the caller must
+    treat None as "leave the row untouched," exactly like get()'s callers already do. 403 is treated
+    as retry-then-inconclusive here (not a hard permanent-fail like get() treats other 4xx) because
+    Cloudflare's challenge response IS a 403 and we cannot yet tell that apart from a real block —
+    when in doubt, never claim a listing is dead from an ambiguous signal."""
+    s = session()
+    proxies = None
+    if "wasalt.sa" in url or "wasalt.com" in url:
+        purl = os.environ.get("WASALT_PROXY_URL", "").strip()
+        if purl:
+            proxies = {"http": purl, "https": purl}
+    for attempt in range(max_retries):
+        _throttle(url)
+        try:
+            r = s.head(url, timeout=timeout, allow_redirects=True, proxies=proxies)
+        except Exception:
+            time.sleep(2 * (attempt + 1))
+            continue
+        if r.status_code == 200 or r.status_code in (404, 410):
+            return r  # definitive either way — no retry needed
+        if r.status_code in (429, 403, 502, 503, 504):
+            # Rate-limit, Cloudflare challenge, or a server hiccup — all inconclusive. Back off and
+            # retry; if every attempt comes back inconclusive, the caller gets None (untouched row).
+            time.sleep(3 * (attempt + 1))
+            continue
+        # Any other status is unexpected/unverified behavior — never guess dead from it.
         return None
     return None
