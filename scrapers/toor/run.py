@@ -150,6 +150,14 @@ REGA_NO_RE = re.compile(r'رقم ترخيص الإعلان[:\s]*([\d٠-٩]+)')
 REGA_ISSUE_RE = re.compile(r'تاريخ الإصدار\s*[:：]?\s*([\d٠-٩]{1,4}[/\-][\d٠-٩]{1,2}[/\-][\d٠-٩]{2,4})')
 REGA_EXPIRY_RE = re.compile(r'تاريخ الإنتهاء\s*[:：]?\s*([\d٠-٩]{1,4}[/\-][\d٠-٩]{1,2}[/\-][\d٠-٩]{2,4})')
 
+# toor.com.sa TIMES OUT for GitHub datacenter IPs (confirmed 2026-07-06: every detail fetch =
+# exc:Timeout, run wrote 0 rows). Route through the Saudi residential proxy — the same secret the
+# Wasalt/Souq24 cloud sweeps already use — so the site answers a Saudi IP. Local runs leave the var
+# unset and use the home IP directly. (fix: toor silent freeze behind a datacenter-IP block.)
+PROXY = (os.environ.get("TOOR_PROXY_URL") or os.environ.get("SCRAPE_PROXY_URL")
+         or os.environ.get("WASALT_PROXY_URL") or "").strip()
+_PROXIES = {"http": PROXY, "https": PROXY} if PROXY else None
+
 _local = threading.local()
 
 
@@ -161,12 +169,17 @@ def _session() -> cc.Session:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
         })
+        if _PROXIES:
+            s.proxies = _PROXIES
         _local.s = s
     return s
 
 
 def session() -> cc.Session:
-    return cc.Session(impersonate="chrome124")
+    s = cc.Session(impersonate="chrome124")
+    if _PROXIES:
+        s.proxies = _PROXIES
+    return s
 
 
 def _int(v: Any) -> Optional[int]:
