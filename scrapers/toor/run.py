@@ -247,15 +247,23 @@ def sitemap_urls(s: cc.Session) -> list[str]:
 def fetch_one(url: str) -> Optional[tuple[str, str]]:
     """Fetch a Toor detail page. Returns (body, url) or None on failure / empty shell."""
     s = _session()
+    last_status: object = None
+    last_len = 0
     for attempt in range(3):
         try:
             r = s.get(url, timeout=45, allow_redirects=True)
-        except Exception:
+        except Exception as e:
+            last_status, last_len = f"exc:{type(e).__name__}", 0
             time.sleep(1.2 * (attempt + 1))
             continue
         if r.status_code == 200 and len(r.text) > 200_000:
             return r.text, url
+        last_status, last_len = r.status_code, len(r.text or "")
         time.sleep(0.8 * (attempt + 1))
+    # VISIBILITY (2026-07-06): these silent Nones masked whole-run failures as green — on
+    # Cloudflare-shell/challenge days every URL failed here and the run still exited 0 with a
+    # green summary. One line per dead URL so the job log shows WHAT the source returned.
+    print(f"  ✗ toor fetch failed: status={last_status} len={last_len} {url[:90]}", flush=True)
     return None
 
 
@@ -664,6 +672,17 @@ def main() -> int:
                 if args.limit and seen >= args.limit:
                     break
         flush()
+
+        # FAIL-VISIBLY guard (2026-07-06): if the sitemap listed URLs but NOT ONE page fetched or
+        # parsed, the source is blocking/broken — a green 0-row run hid exactly this for days
+        # (pg_cron and GH Actions both stayed green while the platform silently froze). Mark the
+        # run failed and exit non-zero so the matrix job goes RED; the workflow's fail-fast:false
+        # keeps other platforms unaffected, and the prune guard already protects existing rows.
+        if not args.limit and urls and seen == 0:
+            print(f"✗ Toor: {len(urls)} sitemap URLs but 0 pages fetched/parsed — failing run for visibility")
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0,
+                       notes="all detail fetches failed (blocked/shell?) — see per-URL statuses in log")
+            return 1
 
         if args.limit:
             print(f"✓ Toor VALIDATION: {len(res)} residential + {len(com)} commercial upserted (no prune)")

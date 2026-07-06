@@ -25,7 +25,10 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 90   # covers aqarcity (~2.3k detail pages behind Cloudflare) + Sanadak; rest are fast
+    # Per-source override via matrix.tmo — souq24's ~1.3k-GET sweep through the metered Saudi proxy
+    # sometimes needs >90m (killed at exactly 90:16 on 07-03 AND 07-04, marking those RUNS
+    # "cancelled"). Default stays 90 for everyone else (covers aqarcity ~2.3k Cloudflare pages).
+    timeout-minutes: ${{ matrix.tmo || 90 }}
     strategy:
       fail-fast: false    # one source failing never blocks the others
       max-parallel: 18
@@ -58,7 +61,7 @@ jobs:
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
-          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all" }
+          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all", tmo: 150 }
           # NOTE: muktamel is NOT here. Its pages are ~1.4MB each and it has no list API / usable
           # sitemap, so a full sequential-ID scan is ~45GB over hours — impossible on a 4h cadence.
           # It runs on its OWN weekly workflow (muktamel-sync.yml), scoped to the live ID band.

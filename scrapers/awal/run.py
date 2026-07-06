@@ -469,6 +469,11 @@ def main() -> int:
 
     s = session()
     posts = fetch_listings(s)
+    # WP REST occasionally returns error strings/fragments inside the list (seen 2026-07-01:
+    # a str where a post object was expected → AttributeError crash at the link comprehension).
+    # Degrade to skipping the junk items; if NOTHING valid remains, the 0-post exit below still
+    # fails the run and the prune guard protects existing rows.
+    posts = [p for p in (posts or []) if isinstance(p, dict)]
     if not posts:
         print("✗ Awal: REST returned no listings")
         return 1
