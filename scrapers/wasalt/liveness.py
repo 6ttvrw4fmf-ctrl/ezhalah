@@ -92,7 +92,10 @@ def head_status(url: str, tries: int = 3):
 
 
 def get_verdict(url: str, tries: int = 3):
-    """Return (verdict, status, nbytes). verdict ∈ {'live','dead','failed'} — GET is the ground truth."""
+    """Return (verdict, status, nbytes, has_pdv). verdict ∈ {'live','dead','failed'} — GET is the
+    ground truth. has_pdv is None unless status==200 (only then is propertyDetailsV3 applicable) —
+    kept explicit (not back-derived from verdict) so the diagnostic detail table records exactly
+    what was observed, not an inference."""
     s = _session()
     for attempt in range(tries):
         try:
@@ -100,10 +103,10 @@ def get_verdict(url: str, tries: int = 3):
             r = s.get(url, timeout=30)
             nbytes = len(r.content or b"")
             if r.status_code in (404, 410):
-                return ("dead", r.status_code, nbytes)
+                return ("dead", r.status_code, nbytes, None)
             if r.status_code != 200:
                 if attempt == tries - 1:
-                    return ("failed", r.status_code, nbytes)  # 5xx etc. → transient, never 'dead'
+                    return ("failed", r.status_code, nbytes, None)  # 5xx etc. → transient, never 'dead'
                 _backoff(attempt)
                 continue
             m = NEXT_RE.search(r.text)
@@ -114,20 +117,20 @@ def get_verdict(url: str, tries: int = 3):
                            .get("pageProps", {}).get("propertyDetailsV3"))
                 except Exception:
                     pdv = None
-            return ("live" if pdv else "dead", r.status_code, nbytes)
+            return ("live" if pdv else "dead", r.status_code, nbytes, bool(pdv))
         except Exception:
             if attempt == tries - 1:
-                return ("failed", 0, 0)
+                return ("failed", 0, 0, None)
             _backoff(attempt)
-    return ("failed", 0, 0)
+    return ("failed", 0, 0, None)
 
 
 def check_one(row):
-    """Worker: (tbl, id, url) -> (tbl, id, verdict, head_code, nbytes)."""
+    """Worker: (tbl, id, url) -> (tbl, id, verdict, head_code, get_status, has_pdv, nbytes)."""
     tbl, lid, url = row
     hc = head_status(url)
-    verdict, _status, nbytes = get_verdict(url)
-    return (tbl, lid, verdict, hc, nbytes)
+    verdict, gstatus, nbytes, has_pdv = get_verdict(url)
+    return (tbl, lid, verdict, hc, gstatus, has_pdv, nbytes)
 
 
 def sample(limit: int):
@@ -166,8 +169,22 @@ def main() -> int:
     alive_ids: dict[str, list[int]] = {t: [] for t in TABLES}
     now_iso = datetime.now(timezone.utc).isoformat()
 
+    # DIAGNOSTIC (owner 2026-07-06): buffer a per-row record of exactly what HEAD vs GET saw, so we
+    # can design a real HEAD-first/escalate-on-ambiguity hybrid from evidence instead of guessing
+    # why head_agree was only 712/800 in the original pilot run. Written to a dedicated diagnostic
+    # table (wasalt_liveness_pilot_detail) — does not affect pilot behavior (still classify-only).
+    detail_buf: list[dict] = []
+
+    def _flush_detail():
+        if detail_buf:
+            db._execute(
+                db.sb().table("wasalt_liveness_pilot_detail").insert(list(detail_buf)),
+                what="wasalt_liveness_pilot_detail.insert",
+            )
+            detail_buf.clear()
+
     with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
-        for tbl, lid, verdict, hc, nbytes in ex.map(check_one, rows):
+        for tbl, lid, verdict, hc, gstatus, has_pdv, nbytes in ex.map(check_one, rows):
             checked += 1
             total_bytes += nbytes
             if hc is not None:
@@ -181,10 +198,17 @@ def main() -> int:
                 dead += 1  # PILOT: classify only — never inactivate, never touch the row. (rule 6)
             else:
                 failed += 1
+            detail_buf.append({
+                "tbl": tbl, "listing_id": lid, "head_status": hc, "get_status": gstatus,
+                "get_verdict": verdict, "has_property_details": has_pdv, "nbytes": nbytes,
+            })
+            if len(detail_buf) >= 100:
+                _flush_detail()
             if checked % 50 == 0:
                 el = max(1e-6, time.time() - started)
                 print(f"  [{checked}] live={live} dead={dead} failed={failed} "
                       f"({checked / el:.1f}/s, {total_bytes / 1e6:.1f}MB)", flush=True)
+    _flush_detail()
 
     # Confirmed-live ONLY → batch-refresh last_seen_at (+ reset missing_count). (rule 5)
     for tbl, ids in alive_ids.items():
