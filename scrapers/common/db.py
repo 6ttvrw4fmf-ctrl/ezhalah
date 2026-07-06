@@ -129,12 +129,45 @@ _INT8_COLS = frozenset({"price_annual", "price_total"})
 
 
 def _sanitize_ints(r: dict[str, Any]) -> None:
-    """Null any integer field whose value won't fit its Postgres column (prevents 22003 batch aborts)."""
+    """Coerce/NULL integer fields so ONE bad value can never abort the row (or its whole batch).
+
+    Two failure modes protected:
+      • overflow (22003): value doesn't fit the column width → NULL that field.
+      • bad cast (22P02): a NON-NUMERIC value in an integer column. Real incident 2026-07-06:
+        Wasalt commercial sends property_age="New" (a string) — Postgres rejected the smallint
+        cast, the WHOLE upsert failed with HTTP 400, and every listing in that batch was silently
+        dropped on every 8h sweep. Numeric strings ("5", "5.0") are coerced to int; anything
+        non-numeric → NULL. Only the numeric FILTER column is nulled — the raw source value stays
+        preserved in additional_info / source_capture, so the card still shows exactly what the
+        source published (search-engine-not-marketplace rule).
+    """
     for col, lo, hi in ((_INT2_COLS, -32768, 32767),
                         (_INT4_COLS, -2147483648, 2147483647),
                         (_INT8_COLS, -9223372036854775808, 9223372036854775807)):
         for c in col:
             v = r.get(c)
+            if v is None:
+                continue
+            if isinstance(v, bool):
+                r[c] = None          # bool is an int subclass in Python; never a real count/price
+                continue
+            if isinstance(v, str):
+                try:
+                    v = int(float(v.strip()))
+                except (ValueError, OverflowError):
+                    r[c] = None      # "New", "غير محدد", "" … → honest NULL, listing still saves
+                    continue
+                r[c] = v
+            elif isinstance(v, float):
+                try:
+                    v = int(v)
+                except (ValueError, OverflowError):  # nan / inf
+                    r[c] = None
+                    continue
+                r[c] = v
+            elif not isinstance(v, int):
+                r[c] = None          # lists/dicts/other junk can't cast either
+                continue
             if isinstance(v, int) and not (lo <= v <= hi):
                 r[c] = None
 
