@@ -1,0 +1,55 @@
+# Wasalt hybrid liveness (ENFORCE) — the bandwidth-cheap replacement for the disabled full-page
+# wasalt-liveness.yml. HEAD-first existence check; escalates to a full GET-confirm ONLY when HEAD is
+# not a clean 200; marks a listing inactive ONLY after 3 consecutive GET-confirmed-dead sweeps
+# (scrapers/wasalt/liveness.py --mode enforce). A per-run collapse guard skips ALL strikes if an
+# abnormal fraction comes back dead (proxy-wide block can't cascade). Cards are never touched — this
+# only flips the `active` flag the app already filters on.
+#
+# Scheduled via pg_cron -> trigger_gh_workflow('wasalt-liveness-hybrid.yml'), matching every other
+# workflow here (all cadence owned by Postgres so it's monitor/pausable from the DB). The old
+# wasalt-liveness.yml (full-page, ~700GB/mo, never scheduled) is kept only for rare deep audits.
+
+name: Wasalt liveness (hybrid)
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Cap rows per shard (0 = all). Use a small value for a bounded proof run."
+        required: false
+        default: "0"
+
+concurrency:
+  group: wasalt-liveness-hybrid
+  cancel-in-progress: false
+
+jobs:
+  liveness:
+    name: Hybrid liveness shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false          # one shard failing never blocks the others
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Hybrid liveness (enforce) shard ${{ matrix.shard }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          SCRAPE_MIN_INTERVAL: "0.4"
+        run: |
+          python -m scrapers.wasalt.liveness \
+            --mode enforce \
+            --shards 8 --shard ${{ matrix.shard }} \
+            --limit ${{ github.event.inputs.limit || 0 }}
