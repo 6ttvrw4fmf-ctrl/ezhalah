@@ -444,8 +444,14 @@ def main() -> int:
                         total += scrape_slice(s, deal, cat, slug, max_pages=args.pages)
         else:
             total = scrape_slice(s, args.deal, args.type, args.slug, max_pages=args.pages)
-        ok = True
-        notes = f"upserted={total}"
+        # Fail-visibly guard (owner 2026-07-07): a Wasalt sweep that fetched/upserted ZERO rows is a
+        # failure, NOT a healthy empty result — Wasalt has ~59k live listings, so a working sweep always
+        # re-sees thousands (upsert refreshes existing rows too). 0 rows means the Saudi residential
+        # proxy is down / IP-blocked and the site served an empty/bot-wall shell. Never report ok=true
+        # on 0 rows, or the run looks green in scrape_runs while nothing flows into search. Mirrors the
+        # toor guard (PR #30).
+        ok = total > 0
+        notes = f"upserted={total}" if ok else "FETCHED 0 ROWS — proxy/network block (fail-visibly guard)"
     except Exception as e:
         ok = False
         notes = str(e)[:400]
