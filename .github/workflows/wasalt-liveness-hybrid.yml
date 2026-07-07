@@ -21,7 +21,7 @@ on:
       stagger_mod:
         description: "Check only 1/N of rows per day (each row every ~N days) to cut proxy bandwidth. 1 = full fleet every day."
         required: false
-        default: "3"
+        default: "2"
 
 concurrency:
   group: wasalt-liveness-hybrid
@@ -57,4 +57,4 @@ jobs:
             --mode enforce \
             --shards 8 --shard ${{ matrix.shard }} \
             --limit ${{ github.event.inputs.limit || 0 }} \
-            --stagger-mod ${{ github.event.inputs.stagger_mod || 3 }}
+            --stagger-mod ${{ github.event.inputs.stagger_mod || 2 }}
