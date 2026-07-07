@@ -18,6 +18,10 @@ on:
         description: "Cap rows per shard (0 = all). Use a small value for a bounded proof run."
         required: false
         default: "0"
+      stagger_mod:
+        description: "Check only 1/N of rows per day (each row every ~N days) to cut proxy bandwidth. 1 = full fleet every day."
+        required: false
+        default: "2"
 
 concurrency:
   group: wasalt-liveness-hybrid
@@ -52,4 +56,5 @@ jobs:
           python -m scrapers.wasalt.liveness \
             --mode enforce \
             --shards 8 --shard ${{ matrix.shard }} \
-            --limit ${{ github.event.inputs.limit || 0 }}
+            --limit ${{ github.event.inputs.limit || 0 }} \
+            --stagger-mod ${{ github.event.inputs.stagger_mod || 2 }}
