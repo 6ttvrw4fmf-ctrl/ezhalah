@@ -106,8 +106,20 @@ def fetch_detail(slug: str) -> tuple[bool, list[dict[str, Any]]]:
     return False, []  # retries exhausted → transient; retry on a later run
 
 
-def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1) -> dict[str, int]:
+def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1,
+                 max_pending: int = 5000, allow_backfill: bool = False) -> dict[str, int]:
     c = db.sb()
+    # Circuit breaker (owner 2026-07-07): steady state is a few brand-new rows/day. A sudden large
+    # un-enriched backlog means detail_enriched was reset or a bulk backfill is in play — auto-crawling
+    # all of it through the metered Saudi proxy is exactly what exhausted the free tier (25-26 Jun). Refuse
+    # unless explicitly authorised, so a stray flag reset can never silently re-crawl ~57k rows.
+    pending = ((c.table(table).select("ad_number", count="exact", head=True)
+                .eq("active", True).eq("detail_enriched", False).execute().count) or 0)
+    if pending > max_pending and not allow_backfill:
+        print(f"⚠ CIRCUIT BREAKER: {pending} un-enriched rows in {table} (> {max_pending}). Steady state "
+              f"is a few/day — this looks like a flag reset or a backfill. Refusing to crawl the backlog "
+              f"through the metered proxy. Re-run with --allow-backfill to override.", flush=True)
+        return {"deep": 0, "empty": 0, "fail": 0, "aborted": pending}
     q = (c.table(table).select("ad_number,listing_url")
          .eq("active", True).eq("detail_enriched", False))
     # Cloud matrix sharding: 10 parallel jobs, each claims a DISJOINT slice by the last digit of
@@ -167,8 +179,14 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--shard", type=int, default=0, help="This job's shard index (0..shards-1).")
     ap.add_argument("--shards", type=int, default=1, help="Total shards (10 = cloud matrix by ad_number last digit).")
+    ap.add_argument("--max-pending", type=int, default=5000,
+                    help="Circuit breaker: abort (no proxy fetches) if more than this many un-enriched rows "
+                         "exist — a mass backlog means a flag reset, not the normal daily trickle.")
+    ap.add_argument("--allow-backfill", action="store_true",
+                    help="Override the circuit breaker to deliberately crawl a large backlog through the proxy.")
     args = ap.parse_args()
-    enrich_table(args.table, args.limit, args.workers, args.shard, args.shards)
+    enrich_table(args.table, args.limit, args.workers, args.shard, args.shards,
+                 args.max_pending, args.allow_backfill)
     return 0
 
 

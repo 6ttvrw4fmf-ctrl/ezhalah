@@ -65,7 +65,10 @@ jobs:
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
-          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all", tmo: 150 }
+          # souq24 probes ~1,300 candidate ids/run through the metered Saudi proxy for only ~52 active
+          # listings, and the sweep deliberately re-checks the whole id range (skipping ids would miss
+          # reactivated ads). So we cut its bandwidth by cadence instead: every_n_days=2 (owner 2026-07-07).
+          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all", tmo: 150, every_n_days: 2 }
           # NOTE: muktamel is NOT here. Its pages are ~1.4MB each and it has no list API / usable
           # sitemap, so a full sequential-ID scan is ~45GB over hours — impossible on a 4h cadence.
           # It runs on its OWN weekly workflow (muktamel-sync.yml), scoped to the live ID band.
@@ -89,4 +92,14 @@ jobs:
           # Saudi residential proxy from the cloud (reuses the Wasalt proxy secret). Every other
           # source's scraper ignores this var, so it's harmless to expose matrix-wide.
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
-        run: ${{ matrix.cmd }}
+        run: |
+          # Per-source cadence (owner 2026-07-07): most small sources run daily (every_n_days unset = 1),
+          # but a few (souq24) scrape every N days to cut metered-proxy bandwidth. Skip today when the
+          # epoch-day isn't a run-day for this source. A MANUAL single-source dispatch always runs
+          # (source input non-empty) so you can force a scrape on an off day.
+          N="${{ matrix.every_n_days || 1 }}"
+          if [ "$N" != "1" ] && [ -z "${{ github.event.inputs.source }}" ] && [ "$(( $(date -u +%s) / 86400 % N ))" -ne 0 ]; then
+            echo "::notice::Skipping ${{ matrix.source }} today — every-${N}-days cadence (off day). Manual single-source dispatch overrides."
+            exit 0
+          fi
+          ${{ matrix.cmd }}

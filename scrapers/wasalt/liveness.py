@@ -263,6 +263,18 @@ def run_enforce(args) -> int:
     started = time.time()
     grace = args.grace
     rows = sweep_rows(args.shards, args.shard, args.limit)
+    # Bandwidth stagger (owner 2026-07-07): instead of spending metered-proxy HEAD/GETs on ALL ~58k
+    # active rows EVERY day, spread them across `stagger_mod` days by id — each row is checked once every
+    # ~stagger_mod days, cutting daily proxy bandwidth ~stagger_mod×. Row SELECTION from the DB is
+    # unchanged (Supabase, not proxied); only the subset we spend proxy requests on shrinks. The 3-strike
+    # grace + collapse guard are untouched, so accuracy (never false-kill a live listing) is preserved —
+    # only the time to confirm a genuinely-dead listing lengthens to ~grace×stagger_mod days.
+    if args.stagger_mod and args.stagger_mod > 1:
+        idx = (args.stagger_idx if args.stagger_idx >= 0
+               else datetime.now(timezone.utc).toordinal() % args.stagger_mod)
+        rows = [r for r in rows if r[1] % args.stagger_mod == idx]
+        print(f"STAGGER: mod={args.stagger_mod} idx={idx} → {len(rows)} rows this shard today "
+              f"(each active row checked every ~{args.stagger_mod}d)", flush=True)
     print(f"ENFORCE: {len(rows)} active Wasalt rows (shard {args.shard}/{args.shards}"
           f"{', limit ' + str(args.limit) if args.limit else ''}); grace={grace} workers={args.workers}",
           flush=True)
@@ -345,6 +357,11 @@ def main() -> int:
     ap.add_argument("--shard", type=int, default=0, help="ENFORCE: which 0-indexed bucket this job handles.")
     ap.add_argument("--max-dead-frac", type=float, default=0.30,
                     help="ENFORCE collapse guard: skip ALL strikes if dead fraction exceeds this.")
+    ap.add_argument("--stagger-mod", type=int, default=1,
+                    help="ENFORCE bandwidth stagger: check only rows where id %% N == today's index, so "
+                         "each active row is checked every ~N days (1 = every row every run). Cuts proxy GB ~N×.")
+    ap.add_argument("--stagger-idx", type=int, default=-1,
+                    help="ENFORCE: which stagger bucket to check today (default -1 = auto from UTC ordinal date).")
     args = ap.parse_args()
     if args.mode == "pilot" and not args.limit:
         args.limit = 800
