@@ -20,6 +20,9 @@ Field map (Satel item → our schema):
   address.{cityEn/Ar, subCityEn/Ar(district), postalCode, lat, lng} → city/region/neighborhood + geo
   featuredImage / imageList[]  → photo_urls (filepath = public unsigned Spaces URL)
   furnishing/kitchen/acType/parking*/status/createdAt/title* → additional_info
+  status "Rented out"          → active=false + post-upsert missing_count=3 pin (leased units
+                                 stay in the API feed forever, so the seen-based prune can never
+                                 catch them; see GONE_STATUSES + _pin_sold_inactive)
 
 PDPL: the Satel API returns NO advertiser/agent name or phone — but we still defensively redact
 any phone-like token from title/description and never store contact fields.
@@ -73,6 +76,14 @@ TYPE_MAP = {
     "Warehouse": "Warehouse",
 }
 COMMERCIAL_TYPES = {"Office", "Showroom", "Shop", "Warehouse"}
+
+# Source `status` values that mean the unit is GONE from the market. Satel keeps leased units in
+# the API feed with status "Rented out" instead of removing them, so the seen-based prune can
+# never deactivate them. Live-DB audit (2026-07-09) shows exactly two distinct statuses across
+# both Satel tables: 'Available' and 'Rented out'. Gate ONLY on the confirmed gone-value,
+# compared case-insensitively on the trimmed string; ANY unknown/new status stays ACTIVE
+# (neutrality rule: never over-hide a listing on a value we haven't confirmed means off-market).
+GONE_STATUSES = {"rented out"}
 
 # Phone / WhatsApp patterns to REDACT from any free text (PDPL).
 _PHONE_RE = re.compile(
@@ -214,13 +225,14 @@ def _additional_info(p: dict, addr: dict) -> dict[str, Any]:
     return info
 
 
-def map_listing(p: dict) -> tuple[Optional[dict], str]:
+def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
+    """Map one Satel API item to a canonical row. Returns (row, category, gone)."""
     addr = p.get("address") or {}
 
     pnum = (p.get("propertyNumber") or "").strip()
     ad_id = pnum or str(p.get("_id") or "").strip()
     if not ad_id:
-        return None, "residential"
+        return None, "residential", False
 
     sub = (p.get("subCatName") or "").strip()
     property_type = TYPE_MAP.get(sub)
@@ -279,11 +291,16 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
 
     title = _redact(p.get("titleAr")) or _redact(p.get("titleEn")) or _redact(p.get("nameEn"))
 
+    # ── availability: "Rented out" means the unit is off the market (owner decision). Trimmed +
+    # case-insensitive match against the confirmed GONE_STATUSES only; anything else stays active.
+    status = (p.get("status") or "").strip()
+    gone = status.lower() in GONE_STATUSES
+
     row: dict[str, Any] = {
         "ad_number": f"{AD_PREFIX}{ad_id}",
         "listing_url": listing_url,
         "source": SOURCE,
-        "active": True,
+        "active": not gone,
         "scraped_at": datetime.now(timezone.utc).isoformat(),
         "property_type": property_type,
         "transaction_type": transaction_type,
@@ -304,7 +321,27 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "photo_urls": _photo_urls(p),
         "additional_info": _additional_info(p, addr),
     }
-    return row, category
+    return row, category, gone
+
+
+def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+    """Make source-confirmed RENTED-OUT rows survive the nightly auto_recover_false_inactive() sweep.
+
+    That pg_cron job (05:20 UTC) re-activates any active=false row with
+    coalesce(missing_count, 0) = 0 and a fresh last_seen_at — and the shared batch upsert
+    (db._wasalt_batch) unconditionally writes missing_count=0 for every row it touches, which is
+    exactly what would let rented-out listings resurrect every morning. So AFTER the batch upsert
+    we pin the gone rows to missing_count=3 (the existing prune 3-strike threshold) + active=false.
+    prune_unseen() never undoes this: it only selects active=true rows and only updates ids NOT
+    in its seen set. When a unit becomes available again, its next upsert carries active=true
+    and the upsert's own missing_count=0 reset applies — the pin is only written for ids that
+    are rented out THIS crawl."""
+    for i in range(0, len(ad_numbers), 200):
+        db._execute(
+            db.sb().table(table).update({"active": False, "missing_count": 3})
+            .in_("ad_number", ad_numbers[i:i + 200]),
+            what=table + ".sold_pin",
+        )
 
 
 def main() -> int:
@@ -327,26 +364,33 @@ def main() -> int:
 
     res: list[dict] = []
     com: list[dict] = []
+    sold_res: list[str] = []
+    sold_com: list[str] = []
+    gone_ct = 0
     seen = 0
     try:
         for p in data:
-            row, cat = map_listing(p)
+            row, cat, gone = map_listing(p)
             if not row:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
             (com if cat == "commercial" else res).append(row)
+            if gone:
+                gone_ct += 1
+                (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
             seen += 1
             if is_small and seen >= args.limit:
                 break
 
-        print(f"Mapped {len(res)} residential + {len(com)} commercial")
+        print(f"Mapped {len(res)} residential + {len(com)} commercial ({gone_ct} rented out)")
 
         if args.dry:
             for r in (res + com)[:8]:
                 print("  ", {k: r[k] for k in ("ad_number", "property_type", "transaction_type",
                                                 "city", "region", "neighborhood", "area_m2",
-                                                "bedrooms", "price_total", "price_annual", "rent_period")})
+                                                "bedrooms", "price_total", "price_annual", "rent_period",
+                                                "active")})
                 print("     url:", r["listing_url"])
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0][:90], f"({len(r['photo_urls'])} total)")
             return 0
@@ -355,10 +399,19 @@ def main() -> int:
             db.upsert_satel_residential_batch(res)
         if com:
             db.upsert_satel_commercial_batch(com)
+        # Pin rented-out rows immediately after the upsert (which reset their missing_count to 0),
+        # so the 05:20 auto-recover job can never flip them back to active. See _pin_sold_inactive.
+        if sold_res:
+            _pin_sold_inactive("satel_residential_listings", sold_res)
+        if sold_com:
+            _pin_sold_inactive("satel_commercial_listings", sold_com)
 
         pruned = 0
         if not is_small:
             # FULL run only: we fetched the COMPLETE catalog → mark unseen active rows inactive.
+            # Rented-out rows were upserted with active=False + pinned missing_count=3 above;
+            # prune_unseen never touches them (it only reads active=true rows and only updates ids
+            # ABSENT from the seen set), so passing their ad_numbers in rows_seen is harmless.
             for tbl, rows_seen in (("satel_residential_listings", res), ("satel_commercial_listings", com)):
                 if args.type != "all":
                     want = "commercial" if "commercial" in tbl else "residential"
@@ -369,12 +422,15 @@ def main() -> int:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:
                     pruned += n
-            print(f"✓ Satel: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
+            print(f"✓ Satel: {len(res)} residential + {len(com)} commercial upserted, "
+                  f"{gone_ct} rented out (inactive), {pruned} stale pruned")
         else:
-            print(f"✓ Satel VALIDATION: {len(res)} residential + {len(com)} commercial upserted (no prune)")
+            print(f"✓ Satel VALIDATION: {len(res)} residential + {len(com)} commercial upserted "
+                  f"({gone_ct} rented out) (no prune)")
 
         if run_id:
-            db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}")
+            db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
+                       notes=f"rented_out={gone_ct} pruned={pruned}")
         return 0
     except Exception as e:
         if run_id:
