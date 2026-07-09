@@ -26,6 +26,12 @@ the numeric specs. So:
 DEAL TYPE comes from property_action_category (the clean signal). مزاد (auction) → the whole
 listing is SKIPPED (user decision: NO auctions).
 
+STATUS: property_status labels تأجرت (rented out) / تم البيع (sold) mean the listing is GONE from
+the market even though the site keeps publishing it → stored with active=false + a post-upsert
+missing_count=3 pin (see GONE_STATUS_AR + _pin_sold_inactive) so the nightly auto-recover sweep
+can't resurrect it. Any other/unknown status stays ACTIVE (never over-hide), and auction statuses
+("مزاد …") are NOT gated — hiding auctions by status is not owner-approved.
+
 PDPL: this site shows no advertiser name/number in the REST content (verified in recon), but we
 still defensively redact any 05xxxxxxxx / +9665… / wa.me out of title+description and never store
 a name/number anywhere. No REGA advertising-license number is shown on this site (noted in
@@ -151,6 +157,15 @@ FEATURE_COL = {
 ACTION_BUY = ("بيع", "استثمار")
 ACTION_RENT = ("إيجار", "ايجار", "تأجير")
 ACTION_AUCTION = ("مزاد",)
+
+# property_status labels that mean the listing is GONE from the market. The status taxonomy is
+# messy — it mixes type/deal labels ("شقة إيجار", "فيلا للبيع") and promo labels ("عرض جديد",
+# "عرض ساخن", "بيت مفتوح") — so we gate ONLY on the two labels confirmed off-market in the
+# live-DB audit (2026-07-09): تأجرت (rented out) and تم البيع (sold). Exact match on the trimmed
+# term; ANY other/unknown status stays ACTIVE (neutrality rule: never over-hide a listing on a
+# value we haven't confirmed means off-market). NOTE: auction statuses ("مزاد …") are DELIBERATELY
+# not gated — the owner has not approved hiding auctions by status.
+GONE_STATUS_AR = ("تأجرت", "تم البيع")
 
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 _PHONE_RE = re.compile(r"(?:\+?9665\d{8}|05\d{8}|\b966\s?5\d{8}\b|wa\.me/\S+|واتس\S*\s*[\d٠-٩]{6,})")
@@ -344,17 +359,17 @@ def _listing_url(p: dict) -> str:
 
 
 def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured_src: Optional[str]):
-    """Return (row, category) or (None, None) if it must be skipped (auction / unmappable)."""
+    """Return (row, category, gone) or (None, None, False) if it must be skipped (auction / unmappable)."""
     actions = _names(p, "property_action_category", taxd)
     if any(any(a in name for a in ACTION_AUCTION) for name in actions):
-        return None, None  # SKIP auctions entirely
+        return None, None, False  # SKIP auctions entirely
     is_rent = any(any(a in name for a in ACTION_RENT) for name in actions)
     # if action is missing, infer rent from category words
     cat_names = _names(p, "property_category", taxd)
     if not actions and any("إيجار" in c or "ايجار" in c or "للايجار" in c for c in cat_names):
         is_rent = True
     if any("مزاد" in c for c in cat_names):  # auction also shows up in category sometimes
-        return None, None
+        return None, None, False
 
     property_type = _derive_type(cat_names) or "Land"  # default residential land when ambiguous
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
@@ -381,6 +396,10 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
 
     features_ar = _names(p, "property_features", taxd)
     status_ar = (_names(p, "property_status", taxd) or [None])[0]
+
+    # ── availability: تأجرت / تم البيع mean off-market (owner decision). Exact trimmed match
+    # against GONE_STATUS_AR only; any other/unknown status (incl. "مزاد …") stays active.
+    gone = (status_ar or "").strip() in GONE_STATUS_AR
 
     amenity_cols: dict[str, bool] = {}
     for fa in features_ar:
@@ -410,7 +429,7 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
         "ad_number": f"EA{p.get('id')}",
         "listing_url": _listing_url(p),
         "scraped_at": datetime.now(timezone.utc).isoformat(),
-        "active": True,
+        "active": not gone,
         "source": "Eastabha",
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
@@ -434,7 +453,27 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
         "additional_info": add,
         **amenity_cols,
     }
-    return row, category
+    return row, category, gone
+
+
+def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+    """Make source-confirmed SOLD/RENTED rows survive the nightly auto_recover_false_inactive() sweep.
+
+    That pg_cron job (05:20 UTC) re-activates any active=false row with
+    coalesce(missing_count, 0) = 0 and a fresh last_seen_at — and the shared batch upsert
+    (db._wasalt_batch) unconditionally writes missing_count=0 for every row it touches, which is
+    exactly what would let sold/rented listings resurrect every morning. So AFTER the batch upsert
+    we pin the gone rows to missing_count=3 (the existing prune 3-strike threshold) + active=false.
+    prune_unseen() never undoes this: it only selects active=true rows and only updates ids NOT
+    in its seen set. When a listing is later relisted, its next upsert carries active=true and
+    the upsert's own missing_count=0 reset applies — the pin is only written for ids that are
+    sold/rented THIS crawl."""
+    for i in range(0, len(ad_numbers), 200):
+        db._execute(
+            db.sb().table(table).update({"active": False, "missing_count": 3})
+            .in_("ad_number", ad_numbers[i:i + 200]),
+            what=table + ".sold_pin",
+        )
 
 
 def main() -> int:
@@ -455,6 +494,9 @@ def main() -> int:
     run_id = None if small else db.begin_run("eastabha")
     res: list[dict] = []
     com: list[dict] = []
+    sold_res: list[str] = []
+    sold_com: list[str] = []
+    gone_ct = 0
     skipped_auction = 0
     seen = 0
     try:
@@ -470,13 +512,16 @@ def main() -> int:
                 mr = get(f"{BASE}/wp-json/wp/v2/media/{fm}")
                 if mr and mr.status_code == 200:
                     featured_src = (mr.json() or {}).get("source_url")
-            row, cat = map_listing(p, taxd, detail, featured_src)
+            row, cat, gone = map_listing(p, taxd, detail, featured_src)
             if not row:
                 skipped_auction += 1
                 continue
             if args.type != "all" and cat != args.type:
                 continue
             (com if cat == "commercial" else res).append(row)
+            if gone:
+                gone_ct += 1
+                (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
             seen += 1
             if small and seen >= args.limit:
                 break
@@ -485,9 +530,18 @@ def main() -> int:
             db.upsert_eastabha_residential_batch(res)
         if com:
             db.upsert_eastabha_commercial_batch(com)
+        # Pin sold/rented rows immediately after the upsert (which reset their missing_count to 0),
+        # so the 05:20 auto-recover job can never flip them back to active. See _pin_sold_inactive.
+        if sold_res:
+            _pin_sold_inactive("eastabha_residential_listings", sold_res)
+        if sold_com:
+            _pin_sold_inactive("eastabha_commercial_listings", sold_com)
 
         pruned = 0
         if not small:  # prune unseen only on full runs (db.prune_unseen guards against 0-scrape wipes)
+            # Sold/rented rows were upserted with active=False + pinned missing_count=3 above;
+            # prune_unseen never touches them (it only reads active=true rows and only updates ids
+            # ABSENT from the seen set), so passing their ad_numbers in rows_seen is harmless.
             for tbl, rows_seen in (("eastabha_residential_listings", res), ("eastabha_commercial_listings", com)):
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Eastabha")
                 if n < 0:
@@ -496,10 +550,10 @@ def main() -> int:
                     pruned += n
 
         print(f"✓ Eastabha: {len(res)} residential + {len(com)} commercial upserted, "
-              f"{skipped_auction} auctions skipped, {pruned} stale pruned")
+              f"{gone_ct} sold/rented (inactive), {skipped_auction} auctions skipped, {pruned} stale pruned")
         if run_id:
             db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
-                       notes=f"auctions_skipped={skipped_auction} pruned={pruned}")
+                       notes=f"auctions_skipped={skipped_auction} gone={gone_ct} pruned={pruned}")
         return 0
     except Exception as e:
         if run_id:
