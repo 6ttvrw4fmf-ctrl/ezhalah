@@ -564,8 +564,18 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ 24 Souq: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}")
-        return 0
+        # Fail-visibly guard (mirrors scrapers/wasalt/run.py, owner 2026-07-07): souq24 shares the
+        # SAME dead Saudi residential proxy as Wasalt. A run that reaches here (i.e. the workflow's
+        # every_n_days skip-day check already let it through — this code path never runs on a skip
+        # day) but fetched/parsed ZERO listings across the whole id sweep is a failure, NOT a healthy
+        # empty result — souq24 always has ~30-50 live listings, so a working sweep always re-sees
+        # some. 0 rows means the proxy is down / IP-blocked and 24.com.sa served the homepage shell
+        # for every candidate id. Never report ok=true on 0 rows, or the run looks green in
+        # scrape_runs while nothing flows into search.
+        ok = seen > 0
+        notes = f"pruned={pruned}" if ok else "FETCHED 0 ROWS — proxy/network block (fail-visibly guard)"
+        db.end_run(run_id, ok=ok, rows_seen=seen, rows_upserted=seen, notes=notes)
+        return 0 if ok else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])
