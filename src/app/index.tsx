@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated as RNAnimated, Easing as RNEasing, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
+import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
 import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -71,6 +72,52 @@ function AgentBadge({ onPress, t, isRTL }: { onPress: () => void; t: (s: string)
   );
 }
 
+// Small NON-BLOCKING helper note shown under the Price / Area range inputs. It only explains a
+// confusing entry (min>max, min==max, 0 = no limit, one-sided range). Pure UI hint — it never blocks
+// the search, never changes the user's numbers, and doesn't touch the filter logic. Arabic, per owner
+// (2026-07-06). warn=true → attention styling. Applies to Price and Area identically.
+type RangeHintCfg = {
+  warnHiLo: string; none: string; zeroMin: string; zeroMax: string;
+  near: (x: string) => string; minOnly: (x: string) => string; maxOnly: (x: string) => string;
+};
+function rangeHint(
+  minStr: string | null | undefined, maxStr: string | null | undefined,
+  cfg: RangeHintCfg, fmt: (n: number) => string,
+): { text: string; warn: boolean } | null {
+  const has = (v: unknown) => v !== null && v !== undefined && String(v) !== '';
+  const minP = has(minStr), maxP = has(maxStr);
+  if (!minP && !maxP) return null;
+  const minV = minP ? (parseInt(String(minStr), 10) || 0) : null;
+  const maxV = maxP ? (parseInt(String(maxStr), 10) || 0) : null;
+  const minPos = minV !== null && minV > 0, maxPos = maxV !== null && maxV > 0;
+  if (minPos && maxPos && (minV as number) > (maxV as number)) return { text: cfg.warnHiLo, warn: true };
+  if (minPos && maxPos && minV === maxV) return { text: cfg.near(fmt(minV as number)), warn: false };
+  if (minV === 0 && maxV === 0) return { text: cfg.none, warn: false };
+  if (minPos && !maxPos) return { text: cfg.minOnly(fmt(minV as number)), warn: false };  // max empty or 0
+  if (maxPos && !minPos) return { text: cfg.maxOnly(fmt(maxV as number)), warn: false };  // min empty or 0
+  if (minV === 0 && !maxP) return { text: cfg.zeroMin, warn: false };
+  if (maxV === 0 && !minP) return { text: cfg.zeroMax, warn: false };
+  return null;
+}
+const PRICE_HINT: RangeHintCfg = {
+  warnHiLo: 'تنبيه: الحد الأدنى أعلى من الحد الأعلى. راجع السعرين قبل البحث.',
+  none: 'سيتم البحث بدون تحديد سعر.',
+  zeroMin: '0 يعني بدون حد أدنى للسعر.',
+  zeroMax: '0 يعني بدون حد أعلى للسعر.',
+  near: (x) => `سيتم البحث عن العقارات بسعر قريب من ${x} ر.س.`,
+  minOnly: (x) => `سيتم البحث عن عقارات بسعر ${x} ر.س أو أعلى.`,
+  maxOnly: (x) => `سيتم البحث عن عقارات بسعر ${x} ر.س أو أقل.`,
+};
+const AREA_HINT: RangeHintCfg = {
+  warnHiLo: 'تنبيه: الحد الأدنى للمساحة أعلى من الحد الأعلى. راجع المساحتين قبل البحث.',
+  none: 'سيتم البحث بدون تحديد مساحة.',
+  zeroMin: '0 يعني بدون حد أدنى للمساحة.',
+  zeroMax: '0 يعني بدون حد أعلى للمساحة.',
+  near: (x) => `سيتم البحث عن عقارات بمساحة قريبة من ${x} م².`,
+  minOnly: (x) => `سيتم البحث عن عقارات بمساحة ${x} م² أو أكبر.`,
+  maxOnly: (x) => `سيتم البحث عن عقارات بمساحة ${x} م² أو أقل.`,
+};
+
 export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -97,11 +144,24 @@ export default function Home() {
   // they never have to scroll the page themselves. (user request.)
   const scrollRef = useRef<ScrollView>(null);
   const endAnchorRef = useRef<View>(null);
-  const scrollDown = () => {
+  // Step anchors — picking a step smoothly reveals the NEXT one, and we scroll to THAT section (its top),
+  // never to the bottom of the page. (user: "guide to the next relevant step only, don't jump to the end.")
+  const catAnchorRef = useRef<View>(null);
+  const groupAnchorRef = useRef<View>(null);
+  const typeAnchorRef = useRef<View>(null);
+  const refineAnchorRef = useRef<View>(null);
+  const scrollDown = (target?: { current: View | null }) => {
     // Defer past the state-driven re-render so the newly revealed section is laid out first.
     setTimeout(() => {
+      const node: any = target?.current ?? endAnchorRef.current;
       if (Platform.OS === 'web') {
-        (endAnchorRef.current as any)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+        node?.scrollIntoView?.({ behavior: 'smooth', block: target ? 'start' : 'center' });
+      } else if (target?.current && scrollRef.current) {
+        target.current.measureLayout(
+          scrollRef.current as any,
+          (_x: number, y: number) => scrollRef.current?.scrollTo({ y: Math.max(0, y - 90), animated: true }),
+          () => scrollRef.current?.scrollToEnd({ animated: true }),
+        );
       } else {
         scrollRef.current?.scrollToEnd({ animated: true });
       }
@@ -189,6 +249,9 @@ export default function Home() {
   const detail = query.type ? detailFor(query.type) : null;
   // Context-level detail: shown at category/group level when no specific type is selected.
   const ctx = !query.type ? detailForContext(query.category, query.typeGroup ?? null) : null;
+  // A غرفة (Room) is a single room → bedrooms are locked to exactly 1. When Room is the SOLE selected
+  // type the bedroom chips collapse to just "1" (and the strict beds filter → bedrooms=1). (owner 2026-07-06.)
+  const roomOnly = query.types?.length === 1 && query.types[0] === 'Room';
   // Whatever the user chose (a size band) or typed (a custom number) is mirrored INTO the size box so
   // they can see it and tap in to edit it. A band shows its label minus the trailing unit (the box
   // renders "m²" on the side); a custom number shows as-is.
@@ -201,6 +264,9 @@ export default function Home() {
   const areaMaxValue = query.areaMax ? grouped(parseInt(query.areaMax, 10) || 0) : '';
   const priceMinValue = query.priceMin ? grouped(parseInt(query.priceMin, 10) || 0) : '';
   const priceMaxValue = query.priceMax ? grouped(parseInt(query.priceMax, 10) || 0) : '';
+  // Non-blocking helper notes under the Price / Area inputs (explain min>max, equal, 0=no-limit, one-sided).
+  const priceHint = rangeHint(query.priceMin, query.priceMax, PRICE_HINT, grouped);
+  const areaHint = rangeHint(query.areaMin, query.areaMax, AREA_HINT, grouped);
   const sizeBoxValue = !detail || detail.isBedrooms || !query.detail
     ? ''
     : sizeIsBand
@@ -325,7 +391,7 @@ export default function Home() {
 
           {/* Search card */}
           <View style={s.card}>
-            <Segmented options={DEALS} value={query.deal} onChange={(v) => { setQuery((q) => ({ ...q, deal: v as any, priceBand: null, priceMin: null, priceMax: null, priceInput: '' })); scrollDown(); }} />
+            <Segmented options={DEALS} value={query.deal} icons={DEAL_IMG} onChange={(v) => { setQuery((q) => ({ ...q, deal: v as any, priceBand: null, priceMin: null, priceMax: null, priceInput: '' })); scrollDown(catAnchorRef); }} />
 
             {/* Location (floating label). The whole box is a tap target — tapping anywhere inside
                 (icon, label, padding) focuses the input so the user can type a city OR a neighborhood
@@ -366,8 +432,9 @@ export default function Home() {
             {cityFocus && suggestions.length > 0 && (
               <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                 {suggestions.map((sg, i) => (
-                  <Pressable
+                  <Tappable
                     key={placeKey(sg)}
+                    dip={0.03}
                     style={[s.suggRow, i < suggestions.length - 1 && s.suggDivider]}
                     onPress={() => {
                       const label = placeLabel(sg, sugLocale);
@@ -379,10 +446,10 @@ export default function Home() {
                       // English pick → English UI, an Arabic pick → Arabic). (user request.)
                       const loc = detectLocale(label);
                       if (loc && loc !== locale) setLocale(loc);
-                      scrollDown(); // carry them down to the next step (category)
+                      scrollDown(catAnchorRef); // carry them down to the next step (category)
                     }}
                   >
-                    <Ionicons name={placeIcon(sg)} size={16} color={colors.primary} />
+                    {LOC_IMG[sg.kind] ? <Image source={LOC_IMG[sg.kind]} style={s.suggLocIcon} /> : <Ionicons name={placeIcon(sg)} size={16} color={colors.primary} />}
                     <View style={{ flex: 1 }}>
                       <Text style={s.suggCity}>{placeTitle(sg, sugLocale)}</Text>
                       {/* Arabic-only picker: subtitle = the place's Arabic city · region so the user knows
@@ -392,11 +459,12 @@ export default function Home() {
                         {placeSub(sg, sugLocale)}
                       </Text>
                     </View>
-                  </Pressable>
+                  </Tappable>
                 ))}
               </ScrollView>
             )}
 
+            <View ref={catAnchorRef} />
             {/* Category — Residential / Commercial (macro) */}
             <View style={s.pick}>
               <FieldLabel>{t('Category')}</FieldLabel>
@@ -405,13 +473,15 @@ export default function Home() {
                   <OptionBox
                     key={cat}
                     label={t(cat)}
+                    img={categoryImg(cat)}
                     selected={query.category === cat}
-                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, types: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, priceMin: null, priceMax: null, priceInput: '', priceBand: null })); scrollDown(); }}
+                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, types: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, priceMin: null, priceMax: null, priceInput: '', priceBand: null })); scrollDown(groupAnchorRef); }}
                   />
                 ))}
               </View>
             </View>
 
+            <View ref={groupAnchorRef} />
             {/* Subcategory group — a SOFT/broad intent (e.g. "Vacation & Rural"). Selecting just the
                 group searches all its clean types; picking a specific type below makes it exact. */}
             {query.category && (
@@ -422,8 +492,9 @@ export default function Home() {
                     <OptionBox
                       key={g.group}
                       label={t(g.group)}
+                      img={groupImg(g.group)}
                       selected={query.typeGroup === g.group}
-                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, types: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, priceMin: null, priceMax: null, priceInput: '', priceBand: null })); scrollDown(); }}
+                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, types: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, priceMin: null, priceMax: null, priceInput: '', priceBand: null })); scrollDown(typeAnchorRef); }}
                       style={s.wrapCell}
                     />
                   ))}
@@ -431,6 +502,7 @@ export default function Home() {
               </Reveal>
             )}
 
+            <View ref={typeAnchorRef} />
             {/* Clean property type (scoped to the chosen group) — the EXACT/hard filter. Optional:
                 leaving it unselected keeps the broad group intent. */}
             {query.typeGroup && (
@@ -441,8 +513,14 @@ export default function Home() {
                     <OptionBox
                       key={ty}
                       label={t(ty)}
+                      img={typeImg(ty)}
                       selected={(query.types ?? []).includes(ty)}
-                      onPress={() => { setQuery((q) => { const cur = q.types ?? []; const next = cur.includes(ty) ? cur.filter((x) => x !== ty) : [...cur, ty]; return { ...q, types: next.length ? next : null, type: null, detail: null, priceBand: null }; }); scrollDown(); }}
+                      onPress={() => { setQuery((q) => { const cur = q.types ?? []; const next = cur.includes(ty) ? cur.filter((x) => x !== ty) : [...cur, ty];
+                        const wasRoomOnly = cur.length === 1 && cur[0] === 'Room';
+                        const nowRoomOnly = next.length === 1 && next[0] === 'Room';
+                        return { ...q, types: next.length ? next : null, type: null, detail: null, priceBand: null,
+                          // Room = single room → force beds=1; clear the lock when the selection is no longer Room-only.
+                          contextBedsList: nowRoomOnly ? ['1'] : (wasRoomOnly ? null : q.contextBedsList), contextBeds: null }; }); scrollDown(refineAnchorRef); }}
                       style={s.wrapCell}
                     />
                   ))}
@@ -450,6 +528,7 @@ export default function Home() {
               </Reveal>
             )}
 
+            <View ref={refineAnchorRef} />
             {/* Combined optional refine section: bedrooms + area in one card */}
             {(ctx?.showBeds || ctx?.showSize) && (
               <Reveal style={s.pick}>
@@ -461,10 +540,11 @@ export default function Home() {
                     <>
                       <Text style={s.ctxSubLabel}>{t('Bedrooms')}</Text>
                       <View style={[s.wrap, { marginBottom: 4 }]}>
-                        {(['any', '1', '2', '3', '4', '5+'] as const).map((opt) => (
+                        {((roomOnly ? ['1'] : ['any', '1', '2', '3', '4', '5+']) as readonly ('any' | '1' | '2' | '3' | '4' | '5+')[]).map((opt) => (
                           <OptionBox
                             key={opt}
                             label={opt === 'any' ? t('Any count') : opt}
+                            img={BED_IMG[opt]}
                             selected={opt === 'any' ? !(query.contextBedsList?.length) : (query.contextBedsList ?? []).includes(opt)}
                             onPress={() => { setQuery((q) => {
                               if (opt === 'any') return { ...q, contextBedsList: null, contextBeds: null, priceBand: null };
@@ -487,9 +567,13 @@ export default function Home() {
                       Typing in either box clears the bedroom selection. min only → ≥, max only → ≤. */}
                   {(!ctx.showBeds || !(query.contextBedsList?.length)) && (
                     <>
-                      <Text style={[s.ctxSubLabel, ctx.showBeds ? { marginTop: 14 } : null]}>{t('Area (m²)')}</Text>
+                      <View style={[s.rangeHead, ctx.showBeds ? { marginTop: 14 } : null]}>
+                        <Image source={RANGE_ICON.areaHead} style={s.rangeHeadIcon} />
+                        <Text style={[s.ctxSubLabel, s.rangeHeadLabel]}>{t('Area (m²)')}</Text>
+                      </View>
                       <View style={s.rangeRow}>
                         <View style={[s.field, s.rangeBox, query.areaMin ? s.sizeFieldOn : null]}>
+                          <Image source={RANGE_ICON.areaFrom} style={s.rangeBoxIcon} accessibilityLabel={t('From')} />
                           <Text style={s.rangeLabel}>{t('From')}</Text>
                           <TextInput style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                             value={areaMinValue}
@@ -497,6 +581,7 @@ export default function Home() {
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
                         </View>
                         <View style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]}>
+                          <Image source={RANGE_ICON.areaTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
                           <Text style={s.rangeLabel}>{t('To')}</Text>
                           <TextInput style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                             value={areaMaxValue}
@@ -504,13 +589,20 @@ export default function Home() {
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
                         </View>
                       </View>
+                      {areaHint && (
+                        <Text style={[s.rangeNote, areaHint.warn ? s.rangeNoteWarn : null]}>{areaHint.text}</Text>
+                      )}
                     </>
                   )}
 
                   {/* PRICE range (من / إلى ريال) — always available, independent of beds/area. HARD filter. */}
-                  <Text style={[s.ctxSubLabel, { marginTop: 14 }]}>{t('Price')}</Text>
+                  <View style={[s.rangeHead, { marginTop: 14 }]}>
+                    <Image source={RANGE_ICON.priceHead} style={s.rangeHeadIcon} />
+                    <Text style={[s.ctxSubLabel, s.rangeHeadLabel]}>{t('Price')}</Text>
+                  </View>
                   <View style={s.rangeRow}>
                     <View style={[s.field, s.rangeBox, query.priceMin ? s.sizeFieldOn : null]}>
+                      <Image source={RANGE_ICON.priceFrom} style={s.rangeBoxIcon} accessibilityLabel={t('From')} />
                       <Text style={s.rangeLabel}>{t('From')}</Text>
                       <TextInput style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                         value={priceMinValue}
@@ -518,6 +610,7 @@ export default function Home() {
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
                     </View>
                     <View style={[s.field, s.rangeBox, query.priceMax ? s.sizeFieldOn : null]}>
+                      <Image source={RANGE_ICON.priceTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
                       <Text style={s.rangeLabel}>{t('To')}</Text>
                       <TextInput style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                         value={priceMaxValue}
@@ -525,6 +618,9 @@ export default function Home() {
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
                     </View>
                   </View>
+                  {priceHint && (
+                    <Text style={[s.rangeNote, priceHint.warn ? s.rangeNoteWarn : null]}>{priceHint.text}</Text>
+                  )}
                 </View>
               </Reveal>
             )}
@@ -576,6 +672,7 @@ export default function Home() {
               <Reveal style={{ marginTop: 12 }}>
                 <Segmented
                   options={['Monthly', 'Yearly']}
+                  icons={PERIOD_IMG}
                   value={rentPeriod === 'monthly' ? 'Monthly' : 'Yearly'}
                   onChange={(v) => setQuery((q) => ({ ...q, rentPeriod: v === 'Monthly' ? 'monthly' : 'annual' }))}
                 />
@@ -670,6 +767,12 @@ const s = StyleSheet.create({
   rangeBox: { flex: 1, height: 46, flexDirection: 'row', alignItems: 'center', gap: 6 },
   rangeLabel: { fontSize: 12.5, fontWeight: '700', color: colors.muted },
   rangeInput: { flex: 1, fontSize: 14, color: colors.ink, padding: 0, height: '100%', textAlign: 'left', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  // Price/Area (السعر / المساحة) filter icons restored 2026-07-04 (were lost when a git reset --hard
+  // reverted the uncommitted index.tsx wiring; the RANGE_ICON map + PNGs survived as untracked files).
+  rangeHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginBottom: 8 },
+  rangeHeadIcon: { width: 17, height: 17, resizeMode: 'contain' },
+  rangeHeadLabel: { marginBottom: 0 },
+  rangeBoxIcon: { width: 15, height: 15, resizeMode: 'contain' },
 
   flWrap: { flex: 1, height: 52, justifyContent: 'center', position: 'relative', ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
   flLabel: { position: 'absolute', left: 0, top: 17, fontSize: 14, color: colors.muted, ...(Platform.OS === 'web' ? { cursor: 'text' as any, transitionProperty: 'top, font-size, color' as any, transitionDuration: '140ms' as any } : {}) },
@@ -679,6 +782,7 @@ const s = StyleSheet.create({
 
   suggBox: { marginTop: 8, maxHeight: 268, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, backgroundColor: colors.surface, overflow: 'hidden' },
   suggRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 12 },
+  suggLocIcon: { width: 20, height: 20, resizeMode: 'contain' }, // Saudi/Region/City/District designed art (assets/images/loc)
   suggDivider: { borderBottomWidth: 1, borderBottomColor: colors.line },
   suggCity: { fontSize: 13.5, fontWeight: '600', color: colors.ink },
   suggDist: { fontSize: 11.5, color: colors.muted },
@@ -688,8 +792,11 @@ const s = StyleSheet.create({
   ctxTitle: { fontSize: 14, fontWeight: '700', color: colors.ink, textAlign: 'right', marginBottom: 5 },
   ctxSub: { fontSize: 12, color: colors.muted, textAlign: 'right', lineHeight: 18, marginBottom: 14 },
   ctxSubLabel: { fontSize: 12.5, fontWeight: '600', color: colors.muted, textAlign: 'right', marginBottom: 8 },
-  row: { flexDirection: 'row', gap: 8 },
-  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  // Non-blocking helper note under Price / Area inputs. Subtle by default; amber (attention) when warn.
+  rangeNote: { fontSize: 12, color: colors.muted, textAlign: 'right', lineHeight: 18, marginTop: 8 },
+  rangeNoteWarn: { color: colors.amberInk, fontWeight: '600' },
+  row: { flexDirection: 'row', gap: 10 },
+  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   wrapCell: { flexGrow: 1, flexBasis: '30%', minWidth: 90, flex: 0 },
 
   searchBtn: { marginTop: 11, height: 51, borderRadius: radius.field, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
