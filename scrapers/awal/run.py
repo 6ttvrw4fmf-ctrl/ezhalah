@@ -459,6 +459,26 @@ def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, bool
     return row, category, gone
 
 
+def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+    """Make source-confirmed SOLD rows survive the nightly auto_recover_false_inactive() sweep.
+
+    That pg_cron job (05:20 UTC) re-activates any active=false row with
+    coalesce(missing_count, 0) = 0 and a fresh last_seen_at — and the shared batch upsert
+    (db._wasalt_batch) unconditionally writes missing_count=0 for every row it touches, which is
+    exactly what let sold listings resurrect every morning. So AFTER the batch upsert we pin the
+    sold rows to missing_count=3 (the existing prune 3-strike threshold) + active=false.
+    prune_unseen() never undoes this: it only selects active=true rows and only updates ids NOT
+    in its seen set. When a sold listing is later relisted, its next upsert carries active=true
+    and the upsert's own missing_count=0 reset applies — the pin is only written for ids that are
+    sold THIS crawl."""
+    for i in range(0, len(ad_numbers), 200):
+        db._execute(
+            db.sb().table(table).update({"active": False, "missing_count": 3})
+            .in_("ad_number", ad_numbers[i:i + 200]),
+            what=table + ".sold_pin",
+        )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────────
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -492,6 +512,8 @@ def main() -> int:
     run_id = None if args.limit else db.begin_run("awal")
     res: list[dict] = []
     com: list[dict] = []
+    sold_res: list[str] = []
+    sold_com: list[str] = []
     gone_ct = 0
     seen = 0
     try:
@@ -504,12 +526,20 @@ def main() -> int:
             if args.type != "all" and cat != args.type:
                 continue
             (com if cat == "commercial" else res).append(row)
+            if gone:
+                (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
             seen += 1
 
         if res:
             db.upsert_awal_residential_batch(res)
         if com:
             db.upsert_awal_commercial_batch(com)
+        # Pin sold rows immediately after the upsert (which reset their missing_count to 0), so
+        # the 05:20 auto-recover job can never flip them back to active. See _pin_sold_inactive.
+        if sold_res:
+            _pin_sold_inactive("awal_residential_listings", sold_res)
+        if sold_com:
+            _pin_sold_inactive("awal_commercial_listings", sold_com)
 
         if args.limit:
             print(f"✓ Awal VALIDATION: {len(res)} residential + {len(com)} commercial upserted "
@@ -523,7 +553,9 @@ def main() -> int:
                 return 0
 
         # Full run: prune listings active before that weren't seen this crawl (we fetched the FULL
-        # catalog). Sold rows were already upserted with active=False above.
+        # catalog). Sold rows were already upserted with active=False + pinned missing_count=3
+        # above; prune_unseen never touches them (it only reads active=true rows and only updates
+        # ids missing from the seen set), so passing their ad_numbers here is harmless.
         pruned = 0
         for tbl, rows_seen in (("awal_residential_listings", res),
                                ("awal_commercial_listings", com)):
