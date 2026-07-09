@@ -9,7 +9,7 @@ import { supports } from './platforms';
 import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale } from '@/i18n';
 import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
-import { groupMembers, CLEAN_MACRO } from './propertyTypes';
+import { groupMembers, CLEAN_MACRO, SUBGROUPS } from './propertyTypes';
 
 // A parsed search. Every field optional — empty fields broaden, never dead-end. (PRD §6.1)
 export type SearchQuery = {
@@ -194,15 +194,33 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
   const hasCity = !!q.location.trim();
   const sar = t('SAR');
 
-  const whatPhrase = q.type
-    ? tWord(q.type)
-    : q.category
-      ? t('{cat} property', { cat: tWord(q.category) })
-      : t('a property');
+  // FILTER selections live in q.types (multi-select) / contextBedsList / areaMin-Max; the AGENT path
+  // uses q.type / q.detail. Read the FILTER fields first (via effectiveTypes/effectiveBeds) so the
+  // generated sentence reflects exactly what was picked — previously this only read q.type, so a filter
+  // type (e.g. ورشة) was ignored and the bubble said a generic "عقار سكني/تجاري". (user bug 2026-07-06.)
+  const selTypes = effectiveTypes(q);
+  const whatPhrase = selTypes.length
+    ? selTypes.map((x) => tWord(x)).join('، ')
+    : q.typeGroup
+      ? t(q.typeGroup)
+      : q.category
+        ? t('{cat} property', { cat: tWord(q.category) })
+        : t('a property');
 
   let detailPhrase = '';
-  if (q.detail && q.type) {
-    if (detailFor(q.type).isBedrooms) {
+  const selBeds = effectiveBeds(q);
+  const aLo = numOrNull(q.areaMin), aHi = numOrNull(q.areaMax);
+  if (selBeds.length) {
+    detailPhrase = selBeds.length === 1 && selBeds[0] === '1'
+      ? t(' with {n} bedroom', { n: selBeds[0] })
+      : t(' with {n} bedrooms', { n: selBeds.join('، ') });
+  } else if (aLo != null || aHi != null) {
+    const r = aLo != null && aHi != null ? `${t('From')} ${grouped(aLo)} ${t('To')} ${grouped(aHi)}`
+      : aLo != null ? `${t('From')} ${grouped(aLo)}` : `${t('To')} ${grouped(aHi!)}`;
+    detailPhrase = t(' around {n} m²', { n: r });
+  } else if (q.detail && (q.type || selTypes.length)) {
+    const dtype = (q.type ?? selTypes[0])!;
+    if (detailFor(dtype).isBedrooms) {
       detailPhrase = t(q.detail === '1' ? ' with {n} bedroom' : ' with {n} bedrooms', { n: q.detail });
     } else if (/m²/.test(q.detail)) {
       // A size band already carries the unit ("100–300 m²") — localize it, don't append m² again.
@@ -217,7 +235,13 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
   let pricePhrase = '';
   let tooLow = false;
   let tooLowAmount = '';
-  if (q.priceBand) {
+  const pLo = numOrNull(q.priceMin), pHi = numOrNull(q.priceMax);
+  if (pLo != null || pHi != null) {
+    // Filter من/إلى price range (HARD filter) — show verbatim, no monthly/per-m² math.
+    const rng = pLo != null && pHi != null ? `${t('From')} ${grouped(pLo)} ${t('To')} ${grouped(pHi)}`
+      : pLo != null ? `${t('From')} ${grouped(pLo)}` : `${t('To')} ${grouped(pHi!)}`;
+    pricePhrase = t(' for {a}', { a: `${rng} ${sar}` });
+  } else if (q.priceBand) {
     // A preset price band is its own complete phrase — no monthly→annual / per-m² math.
     pricePhrase = t(' for {a}', { a: tPriceTab(q.priceBand) });
   } else if (amount) {
@@ -253,11 +277,13 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
     price: tooLow ? '' : pricePhrase,
   });
 
-  const subWhat = q.type
-    ? tWord(q.type)
-    : q.category
-      ? t('{cat} properties', { cat: tWord(q.category) })
-      : t('properties');
+  const subWhat = selTypes.length
+    ? selTypes.map((x) => tWord(x)).join('، ')
+    : q.typeGroup
+      ? t(q.typeGroup)
+      : q.category
+        ? t('{cat} properties', { cat: tWord(q.category) })
+        : t('properties');
   const subPlace = hasCity ? t('in {place}', { place }) : t('across Saudi Arabia');
   const sub = tooLow
     ? t("I couldn't find anything at {amount}, but here are some similar to what you're looking for:", { amount: tooLowAmount })
@@ -395,14 +421,16 @@ function locationLines(q: SearchQuery): string[] {
 // Only fields that were actually identified are included. District / lifestyle / landmark / property-age
 // aren't captured in the query yet (they need the richer scraped listing schema), so they're omitted.
 // Platform table-prefix → human display name, for the Search Summary's "Platform" line.
+// Values are the i18n KEYS (full display forms, same as the card's sourceName) so searchSummary can t()
+// them → Arabic. (owner 2026-07-08: no English platform names anywhere in the UI.)
 const SOURCE_LABELS: Record<string, string> = {
-  aqar: 'Aqar', wasalt: 'Wasalt', aldarim: 'Aldarim', aqargate: 'Aqar Gate', alhoshan: 'Al Hoshan',
-  hajer: 'Hajer', sanadak: 'Sanadak', eastabha: 'East Abha', aqarcity: 'Aqar City', raghdan: 'Raghdan',
-  eaqartabuk: 'Candles', satel: 'Satel', sadin: 'Sadin', toor: 'Toor', mustqr: 'Mustaqarr',
-  ramzalqasim: 'Ramz Al Qassim', fursaghyr: 'Fursa Ghyr', jazwtn: 'Jazan Watan', mizlaj: 'Mizlaj',
+  aqar: 'AQAR', wasalt: 'Wasalt', aldarim: 'Aldarim Real Estate', aqargate: 'Aqar Gate', alhoshan: 'Al Hoshan',
+  hajer: 'Hajer Houses Real Estate', sanadak: 'Sanadak', eastabha: 'East Abha Real Estate', aqarcity: 'Aqar City', raghdan: 'Raghdan Real Estate',
+  eaqartabuk: 'Candles', satel: 'Satel', sadin: 'Sadin for Real Estate', toor: 'TOOR', mustqr: 'Mustaqarr Real Estate',
+  ramzalqasim: 'Ramz Al Qassim Real Estate Investment', fursaghyr: 'Fursa Ghyr Real Estate', jazwtn: 'Jazan Watan', mizlaj: 'Mizlaj Real Estate',
   muktamel: 'Muktamel', aqaratikom: 'Aqaratikom', awal: 'Awal United for Real Estate', alkhaas: 'Al Khaas',
-  abeea: 'Abeea', jurash: 'Jurash', alnokhba: 'Al Nokhba', dealapp: 'Deal App',
-  erapulse: 'Era Pulse', nowaisiry: 'Al Nowaisiry', october: '1 October', gathern: 'Gathern',
+  abeea: 'Abeea Real Estate', jurash: 'Jurash Real Estate', alnokhba: 'Al Nokhba', dealapp: 'Deal App',
+  erapulse: 'Era Pulse', nowaisiry: 'Al Nowaisiry Real Estate', october: '1 October Real Estate', gathern: 'Gathern',
 };
 
 export function searchSummary(q: SearchQuery): string {
@@ -419,7 +447,7 @@ export function searchSummary(q: SearchQuery): string {
   // Platform filter line — when the user restricted to specific platforms ("Aqar only"), show which,
   // so the filter is visibly confirmed. (user: "when I type alkhaas it must be al khaas, not aqar".)
   if (q.sources && q.sources.length) {
-    const names = q.sources.map((s) => SOURCE_LABELS[s] ?? s).join('، ');
+    const names = q.sources.map((s) => t(SOURCE_LABELS[s] ?? s)).join('، ');
     lines.push(`• ${t('Platform')}: ${names}`);
   }
   // Always show a location line. If nothing was typed/inferred, the search covers the whole Kingdom,
@@ -534,7 +562,7 @@ export function interpretPrice(rawDigits: string, deal: Deal, sizeM2?: number, i
   return { kind: 'totalBuy', echo: `${sar} ${grouped(amount)}` };
 }
 
-export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number };
+export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number; pageOffset?: number; hasMore?: boolean; matchTotal?: number };
 
 function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run
@@ -685,7 +713,7 @@ export function effectiveTypes(q: SearchQuery): string[] {
 function matchesType(l: Listing, q: SearchQuery): boolean {
   const c = cleanOf(l);
   const sel = effectiveTypes(q);
-  if (sel.length) return sel.includes(c);                 // one OR more selected clean types (OR within the group)
+  if (sel.length) return sel.some((s) => s === c || (SUBGROUPS[s]?.includes(c) ?? false)); // OR across selected clean types; a subgroup box (مرافق خدمية) matches any of its member types
   if (q.typeGroup) return groupMembers(q.typeGroup).includes(c);
   if (q.category) return (l.macro ?? CLEAN_MACRO[c] ?? 'Residential') === q.category;
   return true;
@@ -713,7 +741,7 @@ export function effectiveBeds(q: SearchQuery): string[] {
 // category/group beds (effectiveBeds), used only when no specific type is selected; (2) the shared
 // `detail` field — the agent path + type-level chip. A non-bedroom type (e.g. Office, where "3" is a
 // size) is excluded. (audit: bedroom type-null hole; multi-select.)
-function bedroomTokens(q: SearchQuery): string[] {
+export function bedroomTokens(q: SearchQuery): string[] {
   if (!q.type) {
     const fb = effectiveBeds(q).map((d) => (d || '').trim()).filter((d) => /^([1-4]|5\+?)$/.test(d));
     if (fb.length) return fb;
@@ -1111,7 +1139,10 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
   }
   // Return up to the system max (200) so "show all" reveals beyond the first 25 with NO refetch; the UI
   // shows the first 25 and only reveals the rest when the user taps «عرض جميع النتائج». (user: first 25 + show-all.)
-  const SHOW_ALL_MAX = 200;
+  // Reveal cap raised 200→1500 (owner 2026-07-08): with filter-first the fetched candidates are already
+  // the MATCHING set, so «عرض جميع النتائج» must be able to reveal ALL of them (progressively), not just
+  // the first 200. Matches the fetch cap so no matching listing is unreachable. [[filter-candidate-cap-underreturn-2026-07-08]]
+  const SHOW_ALL_MAX = 1500;
   return { heading: heading(q), notes: ns, listings: listings.slice(0, SHOW_ALL_MAX), sortNote, count, suggestion, total };
 }
 

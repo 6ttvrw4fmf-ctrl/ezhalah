@@ -4,7 +4,8 @@ import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
-import { normalizeType, queryForSelection, queryForTypes, type CleanQuery, type SourceKind } from './propertyTypes';
+import { normalizeType, queryForSelection, queryForTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind } from './propertyTypes';
+import { effectiveTypes, bedroomTokens } from './search';
 import { scoreListingProximity } from './proximity';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
@@ -239,6 +240,58 @@ function dbTypesFor(q: SearchQuery): string[] | null {
   const cq = effectiveCleanQuery(q);
   return cq && cq.rawTypes.length ? cq.rawTypes : null;
 }
+
+// FILTER-FIRST (owner 2026-07-08): the search RPC applies these BEFORE the per-platform/limit cap, so the
+// candidate window is the MATCHING set (not the newest-of-any-type slice that hid most matches). p_types is
+// the ARABIC type_ar the index stores (NOT the English rawTypes, which match 0 rows). Beds are STRICT
+// (exact 1–4, ≥5 for "5+"). Price/area are passed raw; the RPC applies the monthly ×12 via p_rent_period.
+// The client-side filters in runSearch stay as a safety net (index↔raw drift). [[filter-candidate-cap-underreturn-2026-07-08]]
+const pnum = (s: unknown): number | null => { const n = parseInt(String(s ?? '').replace(/[^\d]/g, ''), 10); return Number.isFinite(n) && n > 0 ? n : null; };
+
+// The AGENT price path stores a single budget CEILING in q.priceInput (the filter UI uses priceMin/priceMax
+// instead), and it was NEVER pushed to the RPC — so the candidate count ignored the budget (~2× inflated) and
+// cheap matches sat past the first page. Return the effective ANNUAL (rent) / TOTAL (buy) ceiling, mirroring the
+// client priceFilter's cap logic, or null when it can't map to a plain server bound (per-m², both-deals).
+function agentPriceCapAnnual(q: SearchQuery): number | null {
+  const amount = parseInt((q.priceInput || '').replace(/[^\d]/g, ''), 10);
+  if (!Number.isFinite(amount) || amount < 100) return null;
+  if (q.bothDeals) return null;                     // one cap over buy+rent — leave to the client
+  if (q.deal === 'Rent') {
+    if (q.priceIsAnnual) return amount;             // agent already annualized a daily/weekly/monthly rent
+    if (q.rentPeriod === 'annual') return amount;
+    if (q.rentPeriod === 'monthly') return amount * 12;
+    return amount <= 25_000 ? amount * 12 : amount; // agent magnitude heuristic (matches priceFilter)
+  }
+  return amount > 50_000 ? amount : null;           // Buy: only a fixed total ceiling maps (per-m² stays client-side)
+}
+
+function rpcFilterParams(q: SearchQuery) {
+  const sel = effectiveTypes(q);
+  const p_types = sel.length ? typeArForTypes(sel) : (q.typeGroup ? typeArForSelection(q.typeGroup) : null);
+  const toks = bedroomTokens(q);
+  const exact = toks.filter((d) => /^[1-4]$/.test(d)).map((d) => parseInt(d, 10));
+  const p_beds_exact = exact.length ? exact : null;
+  const p_beds_min = toks.some((d) => d.startsWith('5')) ? 5 : null;
+  // Standard filter RANGE (priceMin/priceMax) — bounds already in the displayed unit; the RPC ×12s a monthly
+  // bound. priceIsAnnual never co-occurs with the filter range, so that guard is just a no-op safety net.
+  let p_price_min = q.priceIsAnnual ? null : pnum(q.priceMin);
+  let p_price_max = q.priceIsAnnual ? null : pnum(q.priceMax);
+  if (p_price_min == null && p_price_max == null) {
+    // No explicit range → push the agent's single ceiling so the count reflects the budget. Our cap is annual;
+    // the RPC re-multiplies a rent bound by 12 for a monthly period, so divide by 12 there to cancel it.
+    const annualCap = agentPriceCapAnnual(q);
+    if (annualCap != null) p_price_max = rentPeriodParam(q) === 'شهري' ? Math.round(annualCap / 12) : annualCap;
+  }
+  return {
+    p_types,
+    p_beds_exact,
+    p_beds_min,
+    p_price_min,
+    p_price_max,
+    p_area_min: pnum(q.areaMin),
+    p_area_max: pnum(q.areaMax),
+  };
+}
 // Convert a listing's `additional_info` into the {key,label,value} rows the card's
 // AdditionalInformationPanel renders. Two shapes exist in the DB:
 //   • LEGACY (Wasalt/Aqar Gate): already an array of {label,value} → pass through.
@@ -310,8 +363,14 @@ function buildAdditionalInfo(raw: any): Array<{ key: string; label: string; valu
 // to read — and because macro_category is decoupled from the physical table (Commercial Land lives in
 // RESIDENTIAL tables, etc.), cross-table types ('both' kinds) read both and the client filters by the
 // normalized macro. Gathern + Aqar Monthly are monthly-only RESIDENTIAL sources (no commercial table).
-const RES_TABLES = ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings', 'aqargate_residential_listings', 'alhoshan_residential_listings', 'hajer_residential_listings', 'sanadak_residential_listings', 'eastabha_residential_listings', 'aqarcity_residential_listings', 'raghdan_residential_listings', 'eaqartabuk_residential_listings', 'satel_residential_listings', 'sadin_residential_listings', 'toor_residential_listings', 'mustqr_residential_listings', 'ramzalqasim_residential_listings', 'fursaghyr_residential_listings', 'jazwtn_residential_listings', 'mizlaj_residential_listings', 'muktamel_residential_listings', 'aqaratikom_residential_listings', 'awal_residential_listings', 'alkhaas_residential_listings', 'abeea_residential_listings', 'jurash_residential_listings', 'alnokhba_residential_listings', 'dealapp_residential_listings', 'erapulse_residential_listings', 'nowaisiry_residential_listings', 'october_residential_listings'];
-const COM_TABLES = ['aqar_commercial_listings', 'wasalt_commercial_listings', 'aldarim_commercial_listings', 'aqargate_commercial_listings', 'alhoshan_commercial_listings', 'hajer_commercial_listings', 'sanadak_commercial_listings', 'eastabha_commercial_listings', 'aqarcity_commercial_listings', 'raghdan_commercial_listings', 'eaqartabuk_commercial_listings', 'satel_commercial_listings', 'sadin_commercial_listings', 'toor_commercial_listings', 'mustqr_commercial_listings', 'ramzalqasim_commercial_listings', 'fursaghyr_commercial_listings', 'jazwtn_commercial_listings', 'mizlaj_commercial_listings', 'muktamel_commercial_listings', 'aqaratikom_commercial_listings', 'awal_commercial_listings', 'alkhaas_commercial_listings', 'abeea_commercial_listings', 'jurash_commercial_listings', 'alnokhba_commercial_listings', 'dealapp_commercial_listings', 'erapulse_commercial_listings', 'nowaisiry_commercial_listings', 'october_commercial_listings'];
+const RES_TABLES = ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings', 'aqargate_residential_listings', 'alhoshan_residential_listings', 'hajer_residential_listings', 'sanadak_residential_listings', 'eastabha_residential_listings', 'aqarcity_residential_listings', 'raghdan_residential_listings', 'eaqartabuk_residential_listings', 'satel_residential_listings', 'sadin_residential_listings', 'toor_residential_listings', 'mustqr_residential_listings', 'ramzalqasim_residential_listings', 'fursaghyr_residential_listings', 'jazwtn_residential_listings', 'mizlaj_residential_listings', 'muktamel_residential_listings', 'aqaratikom_residential_listings', 'awal_residential_listings', 'alkhaas_residential_listings', 'abeea_residential_listings', 'jurash_residential_listings', 'alnokhba_residential_listings', 'dealapp_residential_listings', 'erapulse_residential_listings', 'nowaisiry_residential_listings', 'october_residential_listings', 'souq24_residential_listings'];
+const COM_TABLES = ['aqar_commercial_listings', 'wasalt_commercial_listings', 'aldarim_commercial_listings', 'aqargate_commercial_listings', 'alhoshan_commercial_listings', 'hajer_commercial_listings', 'sanadak_commercial_listings', 'eastabha_commercial_listings', 'aqarcity_commercial_listings', 'raghdan_commercial_listings', 'eaqartabuk_commercial_listings', 'satel_commercial_listings', 'sadin_commercial_listings', 'toor_commercial_listings', 'mustqr_commercial_listings', 'ramzalqasim_commercial_listings', 'fursaghyr_commercial_listings', 'jazwtn_commercial_listings', 'mizlaj_commercial_listings', 'muktamel_commercial_listings', 'aqaratikom_commercial_listings', 'awal_commercial_listings', 'alkhaas_commercial_listings', 'abeea_commercial_listings', 'jurash_commercial_listings', 'alnokhba_commercial_listings', 'dealapp_commercial_listings', 'erapulse_commercial_listings', 'nowaisiry_commercial_listings', 'october_commercial_listings', 'souq24_commercial_listings'];
+
+// Gathern + Aqar Monthly are MONTHLY-ONLY sources: every listing is a monthly rental. On a monthly
+// search we therefore include ALL their rows — even ones whose raw rent_period is null — because the
+// platform's confirmed rule makes them monthly. (owner rent-period rule 2026-07-06; mirrors the
+// location_search_candidates_ar backend fix.) [[gathern-source]] [[monthly-rent]]
+const MONTHLY_ONLY_TABLE = /^(gathern|aqarmonthly)_/;
 
 function resTables(q: SearchQuery): string[] {
   // Gathern + Aqar Monthly only on explicit monthly-rent searches (see [[gathern-source]]).
@@ -320,15 +379,32 @@ function resTables(q: SearchQuery): string[] {
     : RES_TABLES;
 }
 
-// Commercial-macro raw types that physically live in residential tables. Aqar scrapes all land
-// (commercial + industrial) into its residential table. Used for the secondary RPC pass in broad
-// Commercial searches so the 1500-candidate budget isn't consumed by apartments/villas.
-const COMMERCIAL_RAW_IN_RES = [
-  'Commercial Land', 'Industrial Land', 'Hotel', 'Warehouse', 'Workshop', 'Factory',
-  'Telecom Tower', 'Commercial Building', 'Office', 'Shop', 'Kiosk', 'Showroom', 'Bank',
-  'Gas Station', 'Station', 'محطة بنزين', 'School', 'مدرسة', 'Health Center', 'Hall', 'Parking',
-  'Cinema', 'سكن عمال',
-];
+// Arabic rent-period token for the search RPC. Only a single-deal Rent search with a period chosen sends
+// one ('شهري'/'سنوي'); Buy, "rent or buy" (bothDeals), or no-period send null so the RPC applies NO period
+// filter (and Buy stays untouched). Keeps the candidate budget filled with the correct period so monthly
+// results aren't crowded out by annual. (owner rent-period rule 2026-07-06.)
+function rentPeriodParam(q: SearchQuery): string | null {
+  if (q.bothDeals || q.deal !== 'Rent') return null;
+  if (q.rentPeriod === 'monthly') return 'شهري';
+  if (q.rentPeriod === 'annual') return 'سنوي';
+  return null;
+}
+
+// Commercial-macro type_ar labels — DERIVED from propertyTypes (the single source of truth for the
+// clean-type ↔ macro ↔ type_ar mapping, kept complete by the novel-type alarm). A BROAD Commercial search
+// (macro Commercial, no specific type) must reach the ENTIRE commercial set, which spans BOTH table kinds:
+//   • commercial tables — every commercial type, INCLUDING عمارة (=Commercial Building there);
+//   • residential tables — the commercial types Aqar files under residential (أرض تجارية/أرض صناعية/فندق/
+//     مستودع/…), EXCLUDING عمارة (which is a Residential Building in a residential table).
+// عمارة is the one DUAL type_ar (Commercial vs Residential Building), disambiguated by the physical table —
+// exactly how the client's macro filter resolves it — so the two lists keep total_count == the reachable set.
+// These feed the RPC's two (tables,types) scopes in fetchListingsForQuery, replacing the old page-0-only,
+// per-platform-capped res sweep that left ~77% of broad-commercial inventory unreachable. (owner 2026-07-09)
+const COMMERCIAL_TYPE_AR_ALL = Array.from(new Set(
+  Object.keys(CLEAN_MACRO).filter((c) => CLEAN_MACRO[c] === 'Commercial').flatMap((c) => CLEAN_TO_TYPE_AR[c] ?? []),
+));
+const COMMERCIAL_TYPE_AR_COM = COMMERCIAL_TYPE_AR_ALL;                              // commercial tables: incl عمارة
+const COMMERCIAL_TYPE_AR_RES = COMMERCIAL_TYPE_AR_ALL.filter((t) => t !== 'عمارة'); // residential tables: excl عمارة
 
 // Which table KIND(s) this query reads: from the selected clean type/group's CleanQuery, else (a
 // macro-only search) from q.category. Default Residential.
@@ -350,6 +426,11 @@ function tablesFor(q: SearchQuery): string[] {
   let tables: string[] = [];
   if (kinds.includes('res')) tables.push(...resTables(q));
   if (kinds.includes('com')) tables.push(...COM_TABLES);
+  // EXTRA tables: a clean type may name specific extra tables to scan (a type misfiled into the other
+  // kind's table on one platform, e.g. مكاتب مشتركة → Office but sitting in dealapp_residential). Adds
+  // just that table so the row is reachable via its filter, without widening kinds for every platform.
+  const cq = effectiveCleanQuery(q);
+  if (cq?.extraTables?.length) for (const tb of cq.extraTables) if (!tables.includes(tb)) tables.push(tb);
   // PLATFORM filter: the user named specific platforms ("show me Gathern only"). q.sources holds
   // table prefixes; keep only those platforms' tables. (user: "show me gathern only".)
   if (q.sources && q.sources.length) {
@@ -368,25 +449,44 @@ function interleaveSources<T>(lists: T[][]): T[] {
   return out;
 }
 
-const QUERY_LIMIT = 1500; // newest N matching rows — plenty for the 25-card display + load-more
+const QUERY_LIMIT = 1500; // page size — the newest N MATCHING rows per page (filter-first); Load More pages the rest
+// How many MATCHING candidates the last main RPC call returned (before index↔raw detail drops). The store
+// reads this to advance the Load-More offset and decide hasMore, so broad searches (e.g. Riyadh villas =
+// 11,438) page through the FULL set, not just the first window. (owner 2026-07-08) [[filter-candidate-cap-underreturn-2026-07-08]]
+let _lastPageCandidates = 0;
+export const lastPageCandidates = (): number => _lastPageCandidates;
+// EXACT total matching count for the last search — the RPC's `count(*) over()` (full filtered set before
+// the page limit), so it's the same on every page. The store surfaces it as SearchResult.matchTotal for
+// the "لقينا N إعلان يطابق طلبك" headline. Falls back to the page length if the column is absent. (owner 2026-07-08)
+let _lastPageTotal = 0;
+export const lastPageTotal = (): number => _lastPageTotal;
 
 // Apply the kept NON-location filters (deal, type, rent period) to a fresh query on the right table.
 // Location scoping is added by the caller (city / region / country-wide). Keeps every branch identical
 // on the strict-contract fields. (filter contract.)
 function keptFiltersReq(q: SearchQuery, table?: string) {
-  let req = supabase!.from(table ?? tableFor(q)).select(LIST_SELECT).eq('active', true);
+  const tbl = table ?? tableFor(q);
+  let req = supabase!.from(tbl).select(LIST_SELECT).eq('active', true);
   if (!q.bothDeals) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
   const types = dbTypesFor(q);
   if (types && types.length) req = req.in('property_type', types);
   // Rent-period filter only when the deal is actually Rent — NOT for a "rent or buy" (bothDeals) search,
   // where a monthly filter would wrongly drop every Buy row (Buy has no rent_period). (audit bug.)
-  if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'monthly') req = req.eq('rent_period', 'monthly');
-  else if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'annual') req = req.or('rent_period.eq.annual,rent_period.is.null');
+  // Rules (owner 2026-07-06, mirror of the location_search_candidates_ar backend fix):
+  //  • MONTHLY: mixed platforms → strict rent_period='monthly'. Monthly-only platforms (Gathern, Aqar
+  //    Monthly) → include ALL their rows (every listing is monthly, even rows with a null raw rent_period).
+  //  • ANNUAL: strict rent_period='annual' only — a null rent_period on a mixed platform is NOT annual and
+  //    must appear in NEITHER monthly nor annual (never guess).
+  if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
+    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.eq('rent_period', 'monthly');
+  } else if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'annual') {
+    req = req.eq('rent_period', 'annual');
+  }
   return req;
 }
 
 // A candidate row from the location index (the routing layer): just enough to find the exact raw row.
-type Cand = { source_table: string; listing_id: number; platform: string };
+type Cand = { source_table: string; listing_id: number; platform: string; total_count?: number };
 
 // Round-robin the candidates by platform (preserving each platform's newest-first order) so a broad
 // search shows a balanced mix instead of the top being monopolised by the platforms that scrape most
@@ -432,8 +532,28 @@ function scopeOf(q: SearchQuery, cities: string[] | null, countryWide: boolean):
   return 'city';
 }
 
+// Fold Arabic spelling variants (hamza أإآٱ→ا, ta-marbuta ة→ه, alef-maqsura ى→ي, drop tatweel +
+// directional marks, collapse whitespace) — mirrors the DB's normalize_ar(). Used ONLY to build the
+// diversification GROUPING key so spelling twins of one city (المدينة المنورة / المدينه المنوره,
+// أبها / ابها) count as a single city when balancing result order. It NEVER touches r.l.city — the
+// property card still renders the exact scraped spelling. (owner: Option B canonicalization, 2026-07-06.)
+function normLocKey(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/[ـ‌‍‎‏‪‫‬‭‮]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function rankedKey(r: Ranked, k: string): string {
-  return k === 'platform' ? r.platform : k === 'city' ? r.city : k === 'region' ? r.region : k === 'district' ? r.district : k === 'cleanType' ? (r.l.cleanType ?? '') : '';
+  return k === 'platform' ? r.platform
+    : k === 'city' ? normLocKey(r.city)
+    : k === 'region' ? normLocKey(r.region)
+    : k === 'district' ? normLocKey(r.district)
+    : k === 'cleanType' ? (r.l.cleanType ?? '') : '';
 }
 
 // Hierarchical round-robin: group by the first key, order groups by size (densest first) then freshness,
@@ -491,27 +611,17 @@ async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[]): Promis
   return out;
 }
 
-// Secondary fetch for broad Commercial searches: pulls rows from a residential table but constrains
-// to commercial raw types only, so apartments/villas never appear in commercial results.
-async function fetchCommercialFromResTables(q: SearchQuery, tbl: string, ids: number[]): Promise<Listing[]> {
-  const out: Listing[] = [];
-  for (let i = 0; i < ids.length; i += ID_CHUNK) {
-    let req = supabase!.from(tbl).select(LIST_SELECT).eq('active', true)
-      .in('property_type', COMMERCIAL_RAW_IN_RES);
-    if (!q.bothDeals) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
-    const { data } = await req.in('id', ids.slice(i, i + ID_CHUNK)).limit(ID_CHUNK);
-    if (data) out.push(...finalize(data, 'res'));
-  }
-  return out;
-}
-
 // Per-search fetch — ROUTING LAYER (Phase 1.5). The buy/rent location index (a materialized view over
 // the raw tables, refreshed by pg_cron) is queried for the location-scoped, purpose-split, newest-first,
 // platform-diverse set of (source_table, listing_id). We then pull the FULL cards from the RAW tables by
 // id — raw stays the single source of truth; the index only maps "location search → exact raw listing".
 // Returns null on a backend error (UI shows retry), [] when the location genuinely has no listings.
 // (user spec: route rent→rent_location_index, buy→buy_location_index, then fetch details from raw.)
-export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] | null> {
+export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: number; limit?: number }): Promise<Listing[] | null> {
+  _lastPageCandidates = 0;
+  _lastPageTotal = 0;
+  const pageOffset = Math.max(0, opts?.offset ?? 0);
+  const pageLimit = opts?.limit ?? QUERY_LIMIT;
   if (!supabase) return null;
   const tables = tablesFor(q);
   if (!tables.length) return [];
@@ -565,14 +675,44 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   if (lm?.kind === 'district' && !(q.districts && q.districts.length)) return [];
 
   // 1) Ask the location index for the candidate set (newest-first, diverse, location + purpose filtered).
-  const { data: cands, error } = await supabase.rpc('location_search_candidates', {
-    p_purpose: q.bothDeals ? null : (q.deal === 'Buy' ? 'buy' : 'rent'),
+  // P0 FIX 2026-07-05: use the verified Arabic search RPC (reads the denormalized search_listings_ar,
+  // single indexed scan ~0.2s even country-wide) instead of the legacy location_search_candidates
+  // (matview joins ~1.3s) which timed out (HTTP 500) under DB load. Same output shape → card-fetch +
+  // ranking unchanged. Only p_purpose('buy'/'rent') → p_deal('بيع'/'إيجار'). p_types stays client-side.
+  // BROAD COMMERCIAL (owner 2026-07-09): the commercial matching set spans BOTH table kinds, so read it as ONE
+  // filtered, paged, COUNTED stream via the RPC's two (tables,types) scopes — scope A (p_tables) = residential
+  // tables constrained to commercial type_ar EXCL عمارة (Residential Building there); scope B = commercial tables
+  // incl عمارة (Commercial Building there). This makes total_count EXACT and lets Load-More page the WHOLE set,
+  // replacing the page-0-only, per-platform-capped res sweep that left ~77% of the inventory unreachable.
+  // `tables` here = the commercial tables (kindsFor→['com'] for a broad Commercial search).
+  const platformScope = (tbls: string[]): string[] => {
+    if (!(q.sources && q.sources.length)) return tbls;
+    const wanted = new Set(q.sources);
+    const only = tbls.filter((t) => wanted.has(t.replace(/_(residential|commercial)_listings$/, '')));
+    return only.length ? only : tbls;
+  };
+  const mainTables = isBroadCommercial ? platformScope(resTables(q)) : tables;
+  const scopeB = isBroadCommercial
+    ? { p_tables2: tables, p_types2: COMMERCIAL_TYPE_AR_COM }
+    : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
+
+  const { data: cands, error } = await supabase.rpc('location_search_candidates_ar', {
+    p_deal: q.bothDeals ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
+    p_rent_period: rentPeriodParam(q),
     p_cities: cities,
     p_districts: q.districts && q.districts.length ? q.districts : null,
-    p_tables: tables,
+    p_tables: mainTables,
     p_platforms: q.sources && q.sources.length ? q.sources : null,
-    p_per_platform: 400,
-    p_limit: QUERY_LIMIT,
+    // p_per_platform null → pure recency order, so Load-More offset paging is consistent + gap-free
+    // (per-platform diversity is still applied client-side in runSearch). (owner 2026-07-08)
+    p_per_platform: null,
+    p_limit: pageLimit,
+    p_offset: pageOffset,
+    ...rpcFilterParams(q),
+    // Broad Commercial: override rpcFilterParams' p_types (null for a broad macro search) so the residential
+    // scope is constrained to commercial type_ar; scope B carries the commercial-tables constraint. (2026-07-09)
+    ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
+    ...scopeB,
     // Region scope (bug-fix #2): pass region_id so same-name twin cities don't fuse cross-region.
     // A pinned region (twin disambiguated by the agent backstop) wins; else the resolver's region.
     p_region_ids: q.regionPin
@@ -580,6 +720,10 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
       : regionIdsFor(lm),
   });
   if (error) return null;                       // index error → retry UI, not "no matches"
+  _lastPageCandidates = (cands as Cand[] | null)?.length ?? 0;   // this page's matching-candidate count → drives Load-More offset/hasMore
+  // EXACT total match count from the RPC's count(*) over() (same on every page); fall back to this page's
+  // length if the column is missing. Captured from the MAIN call before any supplementary sweep. (owner 2026-07-08)
+  _lastPageTotal = Number((cands as any[] | null)?.[0]?.total_count ?? 0) || ((cands as Cand[] | null)?.length ?? 0);
   if (!cands || !(cands as Cand[]).length) return [];
 
   // 2) Keep the RPC's newest-first order (true last_updated recency); remember each candidate's recency
@@ -596,29 +740,11 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
       region: (c.region_ar as string) || '', city: (c.city_ar as string) || '', district: (c.district_ar as string) || '',
     });
   }
-  // Broad Commercial secondary pass: sweep res tables for commercial types stored there.
-  // A separate RPC call so the 1500-candidate budget above isn't consumed by apartments.
-  if (isBroadCommercial) {
-    const { data: resCands } = await supabase.rpc('location_search_candidates', {
-      p_purpose: q.bothDeals ? null : (q.deal === 'Buy' ? 'buy' : 'rent'),
-      p_cities: cities,
-      p_districts: q.districts && q.districts.length ? q.districts : null,
-      p_tables: resTables(q),
-      p_platforms: q.sources && q.sources.length ? q.sources : null,
-      p_per_platform: 400,
-      p_limit: QUERY_LIMIT,
-      p_region_ids: q.regionPin
-        ? (REGION_TO_ID[q.regionPin] ? [REGION_TO_ID[q.regionPin]] : null)
-        : regionIdsFor(lm),
-    });
-    if (resCands && (resCands as any[]).length) {
-      const base = cleanCands.length;
-      for (const [i, c] of (resCands as any[]).entries()) {
-        cleanCands.push({ source_table: c.source_table as string, listing_id: Number(c.listing_id), platform: c.platform as string, rank: base + i });
-        arLoc.set(`${c.source_table}:${Number(c.listing_id)}`, { region: (c.region_ar as string) || '', city: (c.city_ar as string) || '', district: (c.district_ar as string) || '' });
-      }
-    }
-  }
+  // NOTE (owner 2026-07-09): the former page-0-only broad-Commercial res sweep AND the facility-type
+  // supplementary call are GONE. Both are now covered by the main stream above — broad Commercial via the two
+  // (tables,types) scopes, and facility types via the normal filter-first path (kinds=BOTH → res+com tables,
+  // p_types = facility type_ar, p_per_platform=null, paged). Everything the user can match is now a single
+  // filtered, paged, count(*)-backed stream, so Load-More reaches the WHOLE set and total_count is exact.
 
   const byTable = new Map<string, number[]>();
   for (const c of cleanCands) {
@@ -627,15 +753,11 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
     a.push(c.listing_id);
   }
 
-  // 3) Fetch the full cards from the RAW tables by id (type/period filters applied there).
-  // Res-table candidates from a broad Commercial sweep use a commercial-type-constrained fetch so
-  // apartments never slip through.
+  // 3) Fetch the full cards from the RAW tables by id (transaction_type / property_type / rent period applied
+  // there). Broad-Commercial residential candidates are already commercial-only (RPC scope A constrained them
+  // to commercial type_ar), so the plain by-id fetch returns exactly them — no separate type re-filter needed.
   const entries = [...byTable];
-  const fetched = await Promise.all(entries.map(([tbl, ids]) =>
-    (isBroadCommercial && tbl.includes('_residential_'))
-      ? fetchCommercialFromResTables(q, tbl, ids)
-      : fetchRawByIds(q, tbl, ids)
-  ));
+  const fetched = await Promise.all(entries.map(([tbl, ids]) => fetchRawByIds(q, tbl, ids)));
   const map = new Map<string, Listing>();
   entries.forEach(([tbl], i) => { for (const l of fetched[i]) map.set(`${tbl}:${l.id}`, l); });
 
@@ -646,20 +768,30 @@ export async function fetchListingsForQuery(q: SearchQuery): Promise<Listing[] |
   for (const c of cleanCands) {
     const l = map.get(`${c.source_table}:${c.listing_id}`);
     if (!l) continue;
-    // Replace the raw location with the Arabic canonical one for DISPLAY + grouping. District falls back
-    // to '' (city-level only) when there's no confident Arabic match — we never show the English original.
+    // #1 (owner 2026-07-06, source-accurate): the CARD shows the RAW scraped location when it is already
+    // Arabic (dealapp/wasalt); for English-raw sources (aqar) it shows the Arabic-canonical value that
+    // matches the source site — never the English original. GROUPING/diversity still keys on the canonical
+    // value (canonCity/canonDistrict) so spelling variants collapse. Layout + filters unchanged.
     const ar = arLoc.get(`${c.source_table}:${c.listing_id}`);
-    if (ar) {
-      if (ar.city) l.city = ar.city;
-      l.district = ar.district || '';
-      l.regionAr = ar.region || '';
-    }
-    const city = l.city || '';
-    const region = ar?.region || CITY_TO_REGION[city] || city;
-    ranked.push({ l, platform: c.platform, city, region, district: l.district || '', rank: c.rank, source_table: c.source_table });
+    const rawCity = l.city, rawDistrict = l.district;
+    const canonCity = (ar?.city) || rawCity || '';
+    const canonDistrict = (ar?.district) || '';
+    // English raw city (aqar stores "Abha"/"Riyadh"…): prefer the resolved canonical, else map it to Arabic
+    // via CITY_AR (arCity) so the card NEVER shows Latin when a mapping is known; only truly-unmapped cities
+    // fall through to the raw value. (owner 2026-07-07: no Latin city/region on cards.) Fixes the ~41 cards
+    // whose canonical was null (unresolved) and were showing raw Latin (أبها/محايل/بلسمر/أبو عريش/…).
+    l.city = /[ء-ي]/.test(rawCity || '') ? rawCity : ((ar?.city) || arCity(rawCity) || rawCity || '');
+    l.district = /[ء-ي]/.test(rawDistrict || '') ? rawDistrict : ((ar?.district) || '');
+    l.regionAr = (ar?.region) || l.regionAr || '';
+    const region = (ar?.region) || CITY_TO_REGION[canonCity] || canonCity;
+    ranked.push({ l, platform: c.platform, city: canonCity, region, district: canonDistrict, rank: c.rank, source_table: c.source_table });
   }
   const USE_RELATION_TABLE = true;
-  const scoped = orderByScope(ranked, scopeOf(q, cities, countryWide), (q.types?.length ?? 0) > 1);
+  // multiType → spread across the picked clean types (cleanType diversity key). True for a genuine
+  // multi-select AND for a subgroup box like «مرافق خدمية» that expands to 5 member types, so its results
+  // come out as a balanced MIX of the five rather than clumped by one type. (owner 2026-07-07)
+  const multiType = (q.types?.length ?? 0) > 1 || (q.types ?? []).some((t) => (SUBGROUPS[t]?.length ?? 0) > 1);
+  const scoped = orderByScope(ranked, scopeOf(q, cities, countryWide), multiType);
   const rows = scoped.map((r) => r.l);
   // Location-RELATIONSHIP ranking (2026-06-27): when the user expressed a proximity intent
   // («قريب من مستشفى الحبيب» / «يطل على البحر»), ATTACH a boost score to every candidate so the
@@ -744,6 +876,7 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
     'erapulse_residential_listings', 'erapulse_commercial_listings',
     'nowaisiry_residential_listings', 'nowaisiry_commercial_listings',
     'october_residential_listings', 'october_commercial_listings',
+    'souq24_residential_listings', 'souq24_commercial_listings',
   ]) {
     const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).limit(1);
     if (error || !data || !data.length) continue;
