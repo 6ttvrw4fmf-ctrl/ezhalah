@@ -342,10 +342,11 @@ def fetch_one(adid: str) -> Optional[tuple[str, str]]:
     return None
 
 
-def map_listing(html: str, adid: str) -> tuple[Optional[dict], str]:
+def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
+    """Parse one /ad-details page into a canonical row. Returns (row, category, sold)."""
     schema = _listing_schema(html)
     if not schema:
-        return None, "residential"
+        return None, "residential", False
     io = schema.get("itemOffered") or {}
     addr = io.get("address") or {}
     geo = io.get("geo") or {}
@@ -431,6 +432,11 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str]:
     if "تم البيع" in head or "تم التأجير" in head:
         sold = True
     active = not sold and not price_bad
+    # Only `sold` (source-confirmed gone) is returned for the post-upsert inactive PIN in main —
+    # a row that is BOTH sold and price_bad is still pinned (sold wins: the listing is gone
+    # regardless of its price). price_bad-ONLY hides are deliberately NOT pinned: the price-hiding
+    # semantics are under a separate pending owner decision (price-fidelity rule), so they keep
+    # today's status quo — active=False now, resurrected by the 05:20 auto-recover sweep tomorrow.
 
     # ── geo / REGA / facade etc → additional_info ──
     lat = geo.get("latitude")
@@ -483,7 +489,31 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str]:
         "photo_urls": _images(schema),
         "additional_info": info,
     }
-    return row, category
+    return row, category, sold
+
+
+def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+    """Make source-confirmed SOLD rows survive the nightly auto_recover_false_inactive() sweep.
+
+    That pg_cron job (05:20 UTC) re-activates any active=false row with
+    coalesce(missing_count, 0) = 0 and a fresh last_seen_at — and the shared batch upsert
+    (db._wasalt_batch) unconditionally writes missing_count=0 for every row it touches, which is
+    exactly what let sold listings resurrect every morning. So AFTER the batch upsert we pin the
+    sold rows to missing_count=3 (the existing prune 3-strike threshold) + active=false.
+    prune_unseen() never undoes this: it only selects active=true rows and only updates ids NOT
+    in its seen set. When a sold listing is later relisted, its next upsert carries active=true
+    and the upsert's own missing_count=0 reset applies — the pin is only written for ids that are
+    sold THIS crawl.
+
+    Deal App scope: only *sold* ids (SoldOut/OutOfStock availability or a تم البيع/تم التأجير
+    badge) are pinned. price_bad-only hides are NOT pinned (pending owner decision on the
+    price-fidelity rule) — see the comment at the sold/price_bad computation in map_listing."""
+    for i in range(0, len(ad_numbers), 200):
+        db._execute(
+            db.sb().table(table).update({"active": False, "missing_count": 3})
+            .in_("ad_number", ad_numbers[i:i + 200]),
+            what=table + ".sold_pin",
+        )
 
 
 # ── main ─────────────────────────────────────────────────────────────────────────
@@ -518,6 +548,8 @@ def main() -> int:
     run_id = None if args.limit else db.begin_run("dealapp")
     res: list[dict] = []
     com: list[dict] = []
+    sold_res: list[str] = []
+    sold_com: list[str] = []
     seen_n = 0
     try:
         res_buf: list[dict] = []
@@ -539,13 +571,15 @@ def main() -> int:
                 if not result:
                     continue
                 html, adid = result
-                row, cat = map_listing(html, adid)
+                row, cat, sold = map_listing(html, adid)
                 if not row:
                     continue
                 if args.type != "all" and cat != args.type:
                     continue
                 (com_buf if cat == "commercial" else res_buf).append(row)
                 (com if cat == "commercial" else res).append(row)
+                if sold:
+                    (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
                 seen_n += 1
                 if not args.limit and len(res_buf) + len(com_buf) >= 100:
                     flush()
@@ -560,9 +594,17 @@ def main() -> int:
                 db.upsert_dealapp_commercial_batch(com)
         else:
             flush()
+        # Pin sold rows immediately after the upserts (which reset their missing_count to 0), so
+        # the 05:20 auto-recover job can never flip them back to active. See _pin_sold_inactive.
+        if sold_res:
+            _pin_sold_inactive("dealapp_residential_listings", sold_res)
+        if sold_com:
+            _pin_sold_inactive("dealapp_commercial_listings", sold_com)
+        sold_ct = len(sold_res) + len(sold_com)
 
         if args.limit:
-            print(f"✓ Deal App VALIDATION: {len(res)} residential + {len(com)} commercial upserted (no prune)")
+            print(f"✓ Deal App VALIDATION: {len(res)} residential + {len(com)} commercial upserted "
+                  f"({sold_ct} sold) (no prune)")
             for r in (res + com)[:6]:
                 print("  ", {k: r.get(k) for k in (
                     "ad_number", "property_type", "transaction_type", "city", "region",
@@ -572,6 +614,9 @@ def main() -> int:
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0][:80], f"({len(r['photo_urls'])} imgs)")
             return 0
 
+        # Sold rows were already upserted with active=False + pinned missing_count=3 above;
+        # prune_unseen never touches them (it only reads active=true rows and only updates ids
+        # missing from the seen set), so passing their ad_numbers here is harmless.
         pruned = 0
         for tbl, rows_seen in (("dealapp_residential_listings", res),
                                ("dealapp_commercial_listings", com)):
@@ -580,8 +625,10 @@ def main() -> int:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 pruned += n
-        print(f"✓ Deal App: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n, notes=f"pruned={pruned}")
+        print(f"✓ Deal App: {len(res)} residential + {len(com)} commercial upserted, "
+              f"{sold_ct} sold (inactive), {pruned} stale pruned")
+        db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n,
+                   notes=f"sold={sold_ct} pruned={pruned}")
         return 0
     except Exception as e:
         if run_id:

@@ -334,11 +334,13 @@ def _video(estate: dict) -> Optional[str]:
 
 
 # ── Mapping ────────────────────────────────────────────────────────────────────
-def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str]:
+def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, bool]:
+    """Combine the /ad summary with its /ad/<id> detail into a canonical row.
+    Returns (row, category, sold) — `sold` feeds the post-upsert inactive pin in main."""
     detail = detail or {}
     aid = ad.get("id") or detail.get("id")
     if not aid:
-        return None, "residential"
+        return None, "residential", False
     # Prefer the richer detail.estate, fall back to the summary estate.
     estate = (detail.get("estate") if isinstance(detail.get("estate"), dict) else None) \
         or (ad.get("estate") if isinstance(ad.get("estate"), dict) else {}) or {}
@@ -370,7 +372,7 @@ def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str]:
     # ── price (string "75,000") ──
     price = _int(ad.get("price") or detail.get("price"))
     if not price or price < 500:
-        return None, category
+        return None, category, False
     area = _num(estate.get("area")) or _num(dmap.get("المنطقة")) or _num(amap.get("مساحة العقار"))
     ppm = _int(ad.get("meter_price") or detail.get("price_of_meters"))
     if not ppm and price and area and not is_rent:
@@ -460,11 +462,17 @@ def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str]:
     if info.get("owner_company") is None:
         info.pop("owner_company", None)
 
+    # sold flag: the API reports is_sold on both the summary and detail records. It drives
+    # active=False here AND the post-upsert inactive pin in main (see _pin_sold_inactive) —
+    # without the pin, the shared upsert's missing_count=0 reset makes the row eligible for the
+    # nightly auto_recover_false_inactive() sweep and it resurrects every morning.
+    sold = bool(ad.get("is_sold") or detail.get("is_sold"))
+
     row: dict[str, Any] = {
         "ad_number": ad_number,
         "listing_url": listing_url,
         "source": "Aqaratikom",
-        "active": not bool(ad.get("is_sold") or detail.get("is_sold")),
+        "active": not sold,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": round(area) if area else None,
@@ -489,7 +497,27 @@ def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str]:
         "additional_info": info,
     }
     row.update(amenities)
-    return row, category
+    return row, category, sold
+
+
+def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+    """Make source-confirmed SOLD rows survive the nightly auto_recover_false_inactive() sweep.
+
+    That pg_cron job (05:20 UTC) re-activates any active=false row with
+    coalesce(missing_count, 0) = 0 and a fresh last_seen_at — and the shared batch upsert
+    (db._wasalt_batch) unconditionally writes missing_count=0 for every row it touches, which is
+    exactly what let sold listings resurrect every morning. So AFTER the batch upsert we pin the
+    sold rows to missing_count=3 (the existing prune 3-strike threshold) + active=false.
+    prune_unseen() never undoes this: it only selects active=true rows and only updates ids NOT
+    in its seen set. When a sold listing is later relisted, its next upsert carries active=true
+    and the upsert's own missing_count=0 reset applies — the pin is only written for ids that are
+    sold THIS crawl."""
+    for i in range(0, len(ad_numbers), 200):
+        db._execute(
+            db.sb().table(table).update({"active": False, "missing_count": 3})
+            .in_("ad_number", ad_numbers[i:i + 200]),
+            what=table + ".sold_pin",
+        )
 
 
 # ── Main ────────────────────────────────────────────────────────────────────────
@@ -526,6 +554,8 @@ def main() -> int:
     run_id = None if args.limit else db.begin_run("aqaratikom")
     res: list[dict] = []
     com: list[dict] = []
+    sold_res: list[str] = []
+    sold_com: list[str] = []
     seen = 0
     try:
         res_buf: list[dict] = []
@@ -540,7 +570,7 @@ def main() -> int:
                 db.upsert_aqaratikom_commercial_batch(com_buf)
                 com_buf = []
 
-        def work(ad: dict) -> Optional[tuple[dict, str]]:
+        def work(ad: dict) -> tuple[Optional[dict], str, bool]:
             det = fetch_detail(ad.get("id"))
             return map_listing(ad, det)
 
@@ -548,21 +578,31 @@ def main() -> int:
             for result in ex.map(work, ads):
                 if not result:
                     continue
-                row, cat = result
+                row, cat, sold = result
                 if not row:
                     continue
                 if args.type != "all" and cat != args.type:
                     continue
                 (com_buf if cat == "commercial" else res_buf).append(row)
                 (com if cat == "commercial" else res).append(row)
+                if sold:
+                    (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
                 seen += 1
                 if len(res_buf) + len(com_buf) >= 40:
                     flush()
                     print(f"  …{seen} upserted", flush=True)
         flush()
+        # Pin sold rows immediately after the upserts (which reset their missing_count to 0), so
+        # the 05:20 auto-recover job can never flip them back to active. See _pin_sold_inactive.
+        if sold_res:
+            _pin_sold_inactive("aqaratikom_residential_listings", sold_res)
+        if sold_com:
+            _pin_sold_inactive("aqaratikom_commercial_listings", sold_com)
+        sold_ct = len(sold_res) + len(sold_com)
 
         if args.limit:
-            print(f"✓ Aqaratikom VALIDATION: {len(res)} residential + {len(com)} commercial upserted (no prune)")
+            print(f"✓ Aqaratikom VALIDATION: {len(res)} residential + {len(com)} commercial upserted "
+                  f"({sold_ct} sold) (no prune)")
             for r in (res + com)[:8]:
                 print("  ", {k: r.get(k) for k in (
                     "ad_number", "property_type", "transaction_type", "city", "region",
@@ -572,6 +612,9 @@ def main() -> int:
             return 0
 
         # Full run: prune listings active before but not seen this crawl (we fetched the FULL catalog).
+        # Sold rows were already upserted with active=False + pinned missing_count=3 above;
+        # prune_unseen never touches them (it only reads active=true rows and only updates ids
+        # missing from the seen set), so passing their ad_numbers here is harmless.
         pruned = 0
         for tbl, rows_seen in (("aqaratikom_residential_listings", res),
                                ("aqaratikom_commercial_listings", com)):
@@ -580,8 +623,10 @@ def main() -> int:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 pruned += n
-        print(f"✓ Aqaratikom: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}")
+        print(f"✓ Aqaratikom: {len(res)} residential + {len(com)} commercial upserted, "
+              f"{sold_ct} sold (inactive), {pruned} stale pruned")
+        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
+                   notes=f"sold={sold_ct} pruned={pruned}")
         return 0
     except Exception as e:
         if run_id:
