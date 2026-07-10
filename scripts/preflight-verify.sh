@@ -55,8 +55,14 @@ else
   elif ! git cat-file -e "${BASELINE}^{commit}" 2>/dev/null; then bad "recorded baseline $BASELINE not found locally — 'git fetch --all' and retry."
   elif git merge-base --is-ancestor "$BASELINE" HEAD 2>/dev/null; then
     ok "HEAD contains the approved production baseline ($BASELINE) — no approved feature is dropped"
-    DEL="$(git diff --diff-filter=D --name-only "$BASELINE" HEAD -- src/ assets/ 2>/dev/null || true)"
-    if [ -z "$DEL" ]; then ok "no src/ or assets/ file removed vs the approved baseline"; else bad "file(s) present in the approved baseline are DELETED in HEAD (approved UI would be removed):"; echo "$DEL" | sed 's/^/       /'; fi
+    # This guard protects SHIPPED UI/assets. TEST files (*.test.ts(x), *.spec.ts(x), __tests__/) are
+    # never imported into the app bundle, so deleting one cannot remove any approved UI — excluding
+    # them stops a false "UI would be removed" refusal when a unit test is refactored/relocated (e.g.
+    # src/lib/inputHygiene.test.ts → scripts/verify-whole-number-input.ts in #58). Real src/ or assets/
+    # deletions are still caught. (git pathspec :(exclude) magic.)
+    DEL="$(git diff --diff-filter=D --name-only "$BASELINE" HEAD -- src/ assets/ \
+      ':(exclude)**/*.test.ts' ':(exclude)**/*.test.tsx' ':(exclude)**/*.spec.ts' ':(exclude)**/*.spec.tsx' ':(exclude)**/__tests__/**' 2>/dev/null || true)"
+    if [ -z "$DEL" ]; then ok "no shipped src/ or assets/ file removed vs the approved baseline (test files excluded)"; else bad "file(s) present in the approved baseline are DELETED in HEAD (approved UI would be removed):"; echo "$DEL" | sed 's/^/       /'; fi
   else
     bad "HEAD does NOT contain the approved production baseline ($BASELINE) — this is the incident. Approved commits that are in production but MISSING from HEAD (WOULD BE LOST):"
     git log --oneline "$BASELINE" "^HEAD" 2>/dev/null | sed 's/^/       /'
