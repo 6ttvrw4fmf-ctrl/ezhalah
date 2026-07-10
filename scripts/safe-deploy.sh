@@ -11,6 +11,13 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# ── PREFLIGHT (owner P0 2026-07-10): the gate that makes losing approved UI IMPOSSIBLE. It proves
+# HEAD CONTAINS the approved production baseline (nothing removed) + clean/on-main/HEAD==origin +
+# no concurrent edits. Refuse the deploy if it fails. (The individual checks below are kept as
+# defense-in-depth; preflight is the authoritative gate.) See scripts/preflight-verify.sh.
+"$(dirname "$0")/preflight-verify.sh" || { echo ""; echo "safe-deploy: REFUSED by preflight (see the ❌ above). Nothing deployed."; exit 1; }
+echo ""
+
 BRANCH=$(git branch --show-current)
 if [ "$BRANCH" != "main" ]; then
   echo "REFUSING TO DEPLOY: current branch is '$BRANCH', not 'main'."
@@ -70,6 +77,21 @@ else
   echo "WARNING: could not confirm supabase.co in the served bundle ($LIVE_BUNDLE)."
   echo "If search shows «حاول مرة ثانية» app-wide, the env vars did NOT inline — investigate before"
   echo "declaring the deploy healthy. (This is the 2026-07-10 P0 signature.)"
+fi
+
+# ── ADVANCE THE APPROVED BASELINE to the just-deployed commit, so every FUTURE preflight refuses to
+# deploy anything that doesn't contain THIS UI. This is what keeps the safety floor current. Metadata
+# only (one line + a log entry); best-effort push — a failure here never undoes the successful deploy.
+echo ""
+echo "Recording $LOCAL as the new approved production baseline..."
+{ echo "$LOCAL"; tail -n +2 docs/DEPLOY_BASELINE.txt; echo "# $(date +%F)  ${LOCAL:0:7}  deployed via safe-deploy.sh"; } > docs/DEPLOY_BASELINE.txt.tmp \
+  && mv docs/DEPLOY_BASELINE.txt.tmp docs/DEPLOY_BASELINE.txt
+if git add docs/DEPLOY_BASELINE.txt && git commit -m "chore(deploy): record approved baseline ${LOCAL:0:7}" --quiet; then
+  git push origin main --quiet 2>/dev/null \
+    && echo "Baseline advanced to ${LOCAL:0:7} and pushed." \
+    || echo "WARNING: baseline commit made locally but push failed (main moved?). Push docs/DEPLOY_BASELINE.txt manually so the next preflight is accurate."
+else
+  echo "NOTE: baseline unchanged (no diff)."
 fi
 
 echo ""
