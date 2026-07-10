@@ -63,6 +63,18 @@ production deploy. Use it as the rollback target if a future deploy needs to be 
 
 | Field | Value |
 |---|---|
+| Date | 2026-07-10 (FIX A residential-misfile recovery — see PR #51) — CURRENT LIVE |
+| Vercel deployment ID | `dpl_GbBSTViuFjJpMFm48GTN4xp1ZHiB` |
+| Production URL | `https://ezhalah-app.vercel.app` |
+| Bundle hash | `entry-0055ae2e3d06d432c90c6554da897198.js` |
+| Deployed from | `main` @ `59d411c` (PR #51 squash-merged), via `scripts/safe-deploy.sh` from a clean worktree. |
+| Contains | Everything in the entry below (through PR #48) **plus PR #51 (FIX A)**: broad + specific Residential search now also scans commercial tables for residential `type_ar` (excl عمارة), recovering the 292 genuinely-residential listings misfiled into `*_commercial_listings`. `remote.ts` only; Commercial search byte-identical. |
+| Verified post-deploy | `age: 22`. Bundle grep: project ref + `supabase.co` present (env baked in), `p_tables2` = 3 (was 2 — FIX A adds the residential scope), all UI markers present (`getListingFeedback`/`pickLoaderPlatforms`/`PanResponder`/`useReducedMotion`/`eagle-mark`/`apartments-coliving`). Browser: broad Residential Buy shows «لقينا 113,282» = 113,096 + 186 (exact Buy recovery), cards render incl. recovered types (مزرعة/أرض سكنية). Live RPC: specific فيلا residential scope-B delta = +4 (the misfiled Villa rows). Companion DB change FIX B (reachability alarm) applied live + captured in `supabase/migrations/20260710_fixb_reachability_alarm.sql`. |
+| Note (safe-deploy false-alarm) | The post-deploy `supabase.co` check WARNED because its `sleep 3` is shorter than CDN alias propagation; a manual re-check ~20s later confirmed the marker present. Consider bumping the sleep. Not a repeat of the env-var P0. |
+| SUPERSEDES the entry below | The PR #48 entry (`dpl_5Lvjeq` / `entry-9eefc6`) remains a valid healthy rollback target; superseded by this FIX A deploy. |
+
+| Field | Value |
+|---|---|
 | Date | 2026-07-10 (filter-screen UX pass — see PR #48) |
 | Vercel deployment ID | `dpl_5LvjeqEVEyiTbjWGBVAzov3zu1dk` |
 | Production URL | `https://ezhalah-app.vercel.app` (verified — see below). Note: `ezhalah.com` is listed as a Vercel-side alias for this project but currently resolves via DNS to an unrelated Next.js app, NOT this deployment — pre-existing, already-tracked domain/DNS issue (registrar/DNS level, not a code or deploy problem), unaffected by this deploy. Do not treat `ezhalah.com` as a verification target until that's fixed. |
