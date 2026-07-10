@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -14,7 +14,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
-import { Spinner, Tappable, Heartbeat } from '@/components/ui';
+import { Tappable, Heartbeat } from '@/components/ui';
+import SearchLoader from '@/components/SearchLoader';
+import FeedbackRow from '@/components/FeedbackRow';
+import { CardIn, LoadingDots } from '@/components/CardReveal';
+
+// Memoized card: during the reveal cascade the list re-renders every ~55ms — already-revealed cards
+// must skip reconciliation or 200+ cards stutter the very animation the cascade exists for (review
+// perf fix 2026-07-09). onOpen is deliberately excluded from the comparison: it's re-created each
+// render but behaves identically for the same listing.
+const MemoResultCard = memo(ResultCard, (prev, next) =>
+  prev.listing === next.listing && prev.rank === next.rank && prev.variant === next.variant);
 import HeroBackground from '@/components/HeroBackground';
 import ShareSheet from '@/components/ShareSheet';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -47,7 +57,10 @@ type ChatMsg =
   | { id: string; role: 'user'; text: string; typing?: boolean }
   | { id: string; role: 'agent'; text: string; typing?: boolean; greeting?: boolean; refine?: RefinePrompt; refineDone?: boolean }
   | { id: string; role: 'results'; text: string; result: SearchResult; typing?: boolean; slogan?: string; summary?: string }
-  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string };
+  // `query` + `resultSources` feed the search-loading animation's platform strip (which real
+  // platforms to show while searching); they never affect the search itself. `exiting` tells the
+  // loader to fade out softly just before the morph to results (owner v4: no hard cut).
+  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string; query?: SearchQuery; resultSources?: string[]; exiting?: boolean };
 
 const uid = () => 'm' + Date.now() + Math.round(Math.random() * 1e6);
 
@@ -221,8 +234,19 @@ const TYPE_TICK_MS = 24;
 const TYPE_CHARS = 2;
 const typeDuration = (s: string) => Math.max(250, Math.ceil((s?.length ?? 0) / TYPE_CHARS) * TYPE_TICK_MS);
 const SEARCH_MS = 600;
-// The "Ezhalah is thinking…" beat. A typed send overlaps this with the real respond() round-trip
-// and only waits out whatever time is left, so the first response lands within ~1–3s total.
+// Loading choreography (owner 2026-07-09 v4: the searching loader — full platform roster + calm
+// highlight wave — starts the INSTANT Search is pressed and runs through the whole real search;
+// results show the moment they're ready, no artificial holds beyond this floor). SEARCH_MIN_MS is
+// the MINIMUM visible searching-beat, counted from when the loader appears: it overlaps the bubble
+// typing + network wait and never adds once consumed. It MUST cover the full pill reveal —
+// 32 pills × 60ms stagger + 260ms fade = last pill fully landed at ~2120ms — otherwise a fast query
+// cuts the roster tail and breaks the "COMPLETE roster, never flashed away" rule (review finding).
+const SEARCH_MIN_MS = 2200;
+// Soft completion (owner v4): before morphing to results, flag the loader `exiting` and give its
+// fade-out this long — the strip glides away into the results state instead of vanishing in a frame.
+const LOADER_EXIT_MS = 450;
+// The "Ezhalah is thinking…" beat for CHAT turns (respond() may return a clarifying question, not a
+// search, so chat can't pre-flip to "searching"). Overlaps the round-trip; only the remainder waits.
 const THINK_MS = 700;
 
 // One in-flight chat turn. The Stop box cancels it: `cancelled` makes every awaited beat bail, and
@@ -239,6 +263,8 @@ const waitRun = (run: Run, ms: number) =>
 
 // Soft background fade on hover/press for the suggestion chips (web only).
 const WEB_TAP = Platform.OS === 'web' ? ({ transitionProperty: 'opacity, background-color', transitionDuration: '150ms' } as any) : null;
+// Feedback toast fade + slide (web CSS transition; native just toggles — acceptable, web ships).
+const TOAST_EASE = Platform.OS === 'web' ? ({ transitionProperty: 'opacity, transform', transitionDuration: '250ms' } as any) : null;
 
 // Typewriter — reveals the text one character at a time, spread evenly across `duration` ms (so a
 // short or long sentence both take the same ~5s), making a filter search read as if Ezhalah is
@@ -331,15 +357,32 @@ export default function Agent() {
     replay?: string;
     fresh?: string;
   }>();
-  const { user, runQuery, gated, pendingMessage, setPendingMessage, recordChatTurn, trackOpen } = useApp();
+  const { user, runQuery, loadMoreListings, gated, pendingMessage, setPendingMessage, recordChatTurn, trackOpen } = useApp();
+  // Per-message "Load More" in flight, so a double-tap can't double-fetch the same page.
+  const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [typed, setTyped] = useState('');
+  // Composer height: single line by default, grows only as text wraps (ChatGPT-style). (owner 2026-07-08)
+  const [inputH, setInputH] = useState(20);
+  const inputRef = useRef<any>(null);
   const [busy, setBusy] = useState(false);
   // True once the user hit Stop mid-display: freezes the cards already shown and hides the "more
   // precise" CTA on the stopped results. Reset on every new turn. (user request.)
   const [stopped, setStopped] = useState(false);
   // Note #5 — Share sheet visibility in AI Agent mode. The button stays in the header throughout.
   const [shareOpen, setShareOpen] = useState(false);
+  // ChatGPT-style feedback confirmation: a small «شكراً على ملاحظتك» toast at the TOP of the chat
+  // (above the conversation, below the header) that appears briefly after a 👍/👎 and auto-dismisses
+  // ~2.4s later. (owner 2026-07-09: like ChatGPT — not next to the buttons.) Fade/slide via the CSS
+  // transition pattern (RN Animated/reanimated proved unreliable for opacity on this RN-web setup).
+  const [fbToast, setFbToast] = useState(false);
+  const fbToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showFbToast = () => {
+    setFbToast(true);
+    if (fbToastTimer.current) clearTimeout(fbToastTimer.current);
+    fbToastTimer.current = setTimeout(() => setFbToast(false), 2400);
+  };
+  useEffect(() => () => { if (fbToastTimer.current) clearTimeout(fbToastTimer.current); }, []);
   // True WHILE the property cards are popping in one-by-one — so the Send button shows as a Stop button
   // for the whole reveal (not just the network wait), letting the user halt the drip. (user request.)
   const [revealing, setRevealing] = useState(false);
@@ -356,9 +399,12 @@ export default function Agent() {
   // time instead of a whole grid landing at once. (user request.) revealCount[id] = how many cards
   // are visible so far; absent = show all (used for replayed/history turns that don't type out).
   const REVEAL_STEP_MS = 130; // snappy one-by-one cascade (25 cards ≈ 3s), smooth not distracting
-  const FIRST_PAGE = 25; // show the first 25; «عرض جميع النتائج» reveals the rest (up to 200). (user 2026-06-27.)
+  const FIRST_PAGE = 10; // show the first 10; «عرض المزيد» pages the rest of the matched set. (owner 2026-07-08.)
+  // Page 0 fetches up to data/remote.ts QUERY_LIMIT (1500) MATCHING candidates (RPC filters before the cap).
+  // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
+  // (never a faked exact total) and «عرض المزيد» fetches the next real page. Once fully paged, listings.length
+  // IS the exact match count. (owner 2026-07-08: never hide a valid match behind the display limit.)
   const [revealCount, setRevealCount] = useState<Record<string, number>>({});
-  const [shownAll, setShownAll] = useState<Record<string, boolean>>({}); // result msg id → user tapped "show all results"
   const pendingRefineRef = useRef<{ q: SearchQuery; dim: string } | null>(null); // a >25 "refine" question awaiting the user's one-line answer
   const revealTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   // The results turn whose cards are still popping in one-by-one (id + total count), so a new user
@@ -379,12 +425,46 @@ export default function Agent() {
   // near the top of the viewport (keeping the message context visible), then let the cards fill in
   // below at their own pace without any further auto-scroll. (user request: controlled, smooth, cards
   // appear under the response; text fully typed BEFORE any card shows.)
-  const startReveal = (id: string, n: number) => {
-    setDoneTyping((d) => (d[id] ? d : { ...d, [id]: true }));
+  // Guard so the drip starts exactly once per results message — playListings kicks it off the moment
+  // results are ready (cards appear WHILE the intro still types, owner 2026-07-09), and markTyped's
+  // later call becomes a no-op instead of restarting the cascade.
+  const dripStartedRef = useRef<Record<string, true>>({});
+  // Reveal cards (from → to] one-by-one — shared by the FIRST page (beginCardDrip) and every
+  // «عرض المزيد» batch (owner 2026-07-09: new cards must cascade in with a soft fade+rise, never
+  // land all at once). Each mounting card animates itself (CardIn); the tick cadence provides the
+  // stagger. Uses the shared timers/active-ref so Stop and new-turn finalize keep working.
+  const dripRange = (id: string, from: number, to: number, stepMs: number, onDone?: () => void) => {
+    if (to <= from) { onDone?.(); return; }
+    revealActiveRef.current = { id, count: to };
+    setRevealing(true);
+    let shown = from;
+    const tick = () => {
+      // OWNERSHIP GUARD (review fix 2026-07-09): if a newer drip (new turn) or finalize/stop took
+      // over the shared active-ref, this cascade stops silently — it must never clear state it no
+      // longer owns (that stranded the new turn's drip). Unrevealed cards stay recoverable behind
+      // «عرض المزيد» (bufferMore).
+      if (revealActiveRef.current?.id !== id) return;
+      shown += 1;
+      setRevealCount((c) => ({ ...c, [id]: shown }));
+      if (shown < to) {
+        revealTimers.current.push(setTimeout(tick, stepMs));
+      } else {
+        revealActiveRef.current = null;
+        setRevealing(false);
+        onDone?.();
+      }
+    };
+    revealTimers.current.push(setTimeout(tick, 40)); // start right away — no empty gap
+  };
+  // Begin the one-by-one card cascade for a results message. Does NOT touch doneTyping — the intro
+  // text keeps typing above while cards fill in below; the more-message + feedback row still wait
+  // for the text (their own doneTyping gates).
+  const beginCardDrip = (id: string, n: number) => {
+    if (dripStartedRef.current[id]) return;
+    dripStartedRef.current[id] = true;
     pinModeRef.current = 'none'; // stop the bottom-follow so growing card list never yanks the view
-    if (n <= 0) { revealActiveRef.current = null; setRevealing(false); return; }
-    // Start with ZERO cards visible in the same render that reveals the text/sort line, so cards never
-    // flash in before the text is complete.
+    if (n <= 0) return;
+    // Start from ZERO in the same render so the full grid never flashes in before the cascade.
     setRevealCount((c) => ({ ...c, [id]: 0 }));
     // Gentle one-time scroll: bring the response's top ~80px from the top of the viewport. Keeps the
     // slogan + summary + intro in view with the first cards just below — never the far bottom.
@@ -392,21 +472,16 @@ export default function Agent() {
     if (typeof y === 'number') {
       setTimeout(() => scrollRef.current?.scrollTo({ y: Math.max(0, y - 80), animated: true }), 60);
     }
-    // Reveal cards one-by-one after a short beat (lets the sort line be read first). No scroll per card.
-    revealActiveRef.current = { id, count: n };
-    setRevealing(true);
-    let shown = 0;
-    const tick = () => {
-      shown += 1;
-      setRevealCount((c) => ({ ...c, [id]: shown }));
-      if (shown < n) {
-        revealTimers.current.push(setTimeout(tick, REVEAL_STEP_MS));
-      } else {
-        revealActiveRef.current = null;
-        setRevealing(false);
-      }
-    };
-    revealTimers.current.push(setTimeout(tick, 40)); // start the cascade right away — no empty gap
+    dripRange(id, 0, n, REVEAL_STEP_MS);
+  };
+  const startReveal = (id: string, n: number) => {
+    setDoneTyping((d) => (d[id] ? d : { ...d, [id]: true }));
+    if (n <= 0) {
+      if (!dripStartedRef.current[id]) { revealActiveRef.current = null; setRevealing(false); }
+      pinModeRef.current = 'none';
+      return;
+    }
+    beginCardDrip(id, n);
   };
   const markTyped = (id: string) => {
     const msg = msgs.find((m) => m.id === id);
@@ -440,7 +515,7 @@ export default function Agent() {
   const pinModeRef = useRef<'top' | 'bottom' | 'none'>('bottom');
   // Holds the query + response subheading while the request bubble types itself out, so onBubbleDone
   // can move on to the "searching…" beat and then the typed response.
-  const pendingFilterRef = useRef<{ q: SearchQuery; sub: string } | null>(null);
+  const pendingFilterRef = useRef<{ q: SearchQuery; sub: string; statusId: string } | null>(null);
   // The current in-flight turn, so the Stop box can cancel its remaining beats.
   const runRef = useRef<Run | null>(null);
   // Anti-loop state for the logged-in conversational mode. The backend is stateless — it only ever
@@ -464,6 +539,9 @@ export default function Agent() {
   // the composer. (user request: a box the user can click to stop the search.)
   const stop = () => {
     const run = runRef.current;
+    // Was a REAL search turn in flight, or only a «عرض المزيد» card cascade? (review fix 2026-07-09:
+    // stopping a mere pagination cascade must NOT claim "I've stopped the search" or hide CTAs.)
+    const hadTurn = !!run;
     if (run) {
       run.cancelled = true;
       run.timers.forEach(clearTimeout);
@@ -474,6 +552,7 @@ export default function Agent() {
     clearReveals();   // stop revealing more cards immediately — never continue toward card #15
     revealActiveRef.current = null; // forget the in-progress reveal so the NEXT message never completes it
     setRevealing(false); // Stop reverts to Send
+    if (!hadTurn) return; // cascade halted; cards stay frozen, «عرض المزيد» recovers via bufferMore
     setStopped(true); // hide the "I can get you something more precise" CTA on the stopped results
     setBusy(false);   // search no longer running
     // Drop the in-flight thinking/searching bubbles; the cards already shown stay frozen. Add Ezhalah's
@@ -498,6 +577,20 @@ export default function Agent() {
   // professional header), NOT with the slogan. The slogan lives only in the transient searching status.
   const buildScrapeIntro = (q: SearchQuery) => searchSummary(q);
 
+  // When each status bubble's SEARCHING phase became visible — playListings only waits out the
+  // REMAINDER of SEARCH_MIN_MS from this moment, so the beat overlaps the real network time instead
+  // of following it. (owner 2026-07-09: no artificial delays, results show as soon as ready.)
+  const searchingAtRef = useRef<Record<string, number>>({});
+  // Flip a chat-turn 'thinking' status into the live searching loader the moment the query is KNOWN
+  // (right before runQuery) — the pills + min-beat then overlap the fetch exactly like the
+  // filter/refine paths. Without this, chat searches only started their beat AFTER the results were
+  // already in memory, holding them the full SEARCH_MIN_MS + exit (review finding, 2026-07-09).
+  const beginSearching = (statusId: string, q: SearchQuery) => {
+    searchingAtRef.current[statusId] = searchingAtRef.current[statusId] ?? Date.now();
+    setMsgs((m) => m.map((x) => (x.id === statusId && x.role === 'status' ? { ...x, phase: 'searching', query: q } : x)));
+    toBottom();
+  };
+
   // Shared "found" choreography: the typed reply ("answer respond") → a held "Ezhalah is searching…"
   // beat → the results header + cards. `statusId` is the thinking bubble we morph into the reply.
   const playListings = async (run: Run, statusId: string, summary: string, result: SearchResult, messageText?: string) => {
@@ -505,11 +598,28 @@ export default function Agent() {
     // user's MESSAGE text (English message → English slogan) instead of the UI locale, so users
     // who chat in one language and have their UI in the other still get the matching slogan.
     const slogan = hypePhrase(getLocale(), messageText);
-    setMsgs((m) => m.map((x) => (x.id === statusId ? { id: statusId, role: 'status', phase: 'searching', slogan, summary } : x)));
+    // The searching status renders the platform-checking ANIMATION (SearchLoader), not the slogan.
+    // We still carry slogan + summary through so they appear in the RESULTS bubble below (unchanged).
+    // `resultSources` only lets result-present platforms LEAD the (frozen) pill order — it is NOT a
+    // completion signal and must never drive checkmarks (owner: no ✓ in the loader, ever).
+    const resultSources = Array.from(new Set(result.listings.map((l) => l.source).filter(Boolean)));
+    setMsgs((m) => m.map((x) => (x.id === statusId
+      ? { id: statusId, role: 'status', phase: 'searching', slogan, summary, query: result.query ?? (x.role === 'status' ? x.query : undefined), resultSources }
+      : x)));
     toBottom();
-    // Hold the searching phase long enough for BOTH the slogan and the (typewriter) Search Summary to
-    // finish typing, so the summary is fully written before it morphs into the results bubble. (user.)
-    await waitRun(run, Math.max(1500, typeDuration(slogan), typeDuration(summary)));
+    // Wait only the REMAINDER of the minimum searching beat (counted from when the searching loader
+    // became visible — at Search press for filter/refine flows). It overlapped the bubble typing +
+    // network, so in practice it's already consumed → results morph in IMMEDIATELY on resolve.
+    const since = searchingAtRef.current[statusId] ?? Date.now();
+    searchingAtRef.current[statusId] = since;
+    const remaining = SEARCH_MIN_MS - (Date.now() - since);
+    if (remaining > 0) await waitRun(run, remaining);
+    delete searchingAtRef.current[statusId];
+    if (run.cancelled) return;
+    // Soft completion (owner v4): the loader fades out gently instead of vanishing in a single
+    // frame — flag it `exiting`, give the fade its beat, then morph into the results state.
+    setMsgs((m) => m.map((x) => (x.id === statusId && x.role === 'status' ? { ...x, exiting: true } : x)));
+    await waitRun(run, LOADER_EXIT_MS);
     if (run.cancelled) return;
     // 2) RESULTS: ONE consolidated bubble in the exact order the user wants:
     //    [slogan] → [Search Summary] → [Result intro] → [Sort line] → [Property cards].
@@ -523,6 +633,67 @@ export default function Agent() {
       ),
     );
     toBottom();
+    // Cards start appearing NOW — one by one, while the intro text is still typing above (owner
+    // 2026-07-09: show the first card as soon as valid listings are ready; don't hold them hostage
+    // to the typewriter). The more-message + feedback row still wait for the text (doneTyping).
+    beginCardDrip(statusId, Math.min(FIRST_PAGE, result.listings.length));
+  };
+
+  // «عرض المزيد» (Load more) — reveal the NEXT 100 matching listings (owner 2026-07-08: "100 at a time";
+  // if fewer than 100 remain, show all remaining). Correctness rule: the RPC filters the FULL matching set
+  // BEFORE any cap, so paging always reaches every match — nothing valid is hidden behind the display limit.
+  // Each tap reveals REVEAL_STEP more from what's already fetched; when that buffer is spent and the DB still
+  // has more pages (m.result.hasMore), we fetch the next REAL page (store.loadMoreListings, gap-free via
+  // p_offset), append it de-duped, then reveal into it. So a broad search (e.g. Riyadh villas & houses =
+  // 11,438) can be walked all the way to the end. loadingMore guards a double-tap from double-fetching.
+  const REVEAL_STEP = 100;
+  // «عرض المزيد» cascade cadence — inside the owner's 40–80ms stagger window; each mounting card also
+  // fades+rises via CardIn, so the batch flows in instead of landing at once. (owner 2026-07-09.)
+  const LOAD_MORE_STEP_MS = 55;
+  // Only the VISIBLE screenful cascades one-by-one (~0.8s); the rest of the 100 mount together right
+  // after, below the fold, each still fading in via CardIn. Keeps the premium feel without 100
+  // sequential re-renders of the whole unvirtualized card list (review perf fix 2026-07-09).
+  const CASCADE_VISIBLE = 14;
+  const cascadeIn = (mid: string, from: number, target: number) => {
+    const animEnd = Math.min(from + CASCADE_VISIBLE, target);
+    dripRange(mid, from, animEnd, LOAD_MORE_STEP_MS, () => {
+      if (target > animEnd) setRevealCount((c) => ({ ...c, [mid]: target }));
+    });
+  };
+  const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>) => {
+    const mid = m.id;
+    const q = m.result.query;
+    if (runRef.current) return; // a real turn is mid-flight — never start a cascade under it (review fix)
+    const fetched = m.result.listings.length;
+    const cur = revealCount[mid] ?? Math.min(FIRST_PAGE, fetched);
+    // (A) fetched-but-unrevealed cards remain → cascade the next slice in from the buffer.
+    if (cur < fetched) {
+      cascadeIn(mid, cur, Math.min(cur + REVEAL_STEP, fetched));
+      return;
+    }
+    // (B) buffer exhausted but the DB has more → fetch the next real page, append de-duped, cascade.
+    if (!m.result.hasMore || !q || loadingMore[mid]) return;
+    setLoadingMore((s) => ({ ...s, [mid]: true }));
+    try {
+      const { listings: more, nextOffset, hasMore } = await loadMoreListings(q, m.result.pageOffset ?? 0);
+      // De-dup against the CLOSURE copy (same data the message holds) so the cascade target is exact.
+      const seen = new Set(m.result.listings.map((l) => `${l.source}:${l.id}`));
+      const add = more.filter((l) => !seen.has(`${l.source}:${l.id}`));
+      const mergedLen = fetched + add.length;
+      setMsgs((prev) =>
+        prev.map((mm) => {
+          if (mm.id !== mid || mm.role !== 'results' || !mm.result) return mm;
+          return { ...mm, result: { ...mm.result, listings: [...mm.result.listings, ...add], pageOffset: nextOffset, hasMore } };
+        }),
+      );
+      const target = Math.min(cur + REVEAL_STEP, mergedLen);
+      // If a new turn started while the page was fetching, reveal instantly (no cascade) — the drip
+      // machinery belongs to the new turn now; cards still fade in via CardIn. (review fix.)
+      if (runRef.current) setRevealCount((c) => ({ ...c, [mid]: target }));
+      else cascadeIn(mid, cur, target);
+    } finally {
+      setLoadingMore((s) => ({ ...s, [mid]: false }));
+    }
   };
 
   // «ساعدني ألقى نتائج أدق» — pick ONE missing/broad dimension and ask a single clarifying question with
@@ -608,7 +779,9 @@ export default function Agent() {
     const refined = applyRefinement(baseQ, dim, value);
     const run = makeRun(); runRef.current = run;
     const statusId = uid();
-    setMsgs((m) => [...m, { id: uid(), role: 'user', text: label }, { id: statusId, role: 'status', phase: 'thinking' }]);
+    // Guaranteed search → the searching loader (roster + wave) starts IMMEDIATELY, no thinking beat.
+    searchingAtRef.current[statusId] = Date.now();
+    setMsgs((m) => [...m, { id: uid(), role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined }]);
     toBottom();
     const result = await runQuery(refined);
     if (run.cancelled) return;
@@ -728,6 +901,7 @@ export default function Agent() {
         const forcedBroad = !!clarifyQ && askCountRef.current >= 2;
         askCountRef.current = 0;
         saidRef.current = [];
+        beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
         const result = await runQuery(turn.query);
         const reply = forcedBroad
           ? `${v === 'ar'
@@ -765,6 +939,7 @@ export default function Agent() {
         if (hasIntent && askCountRef.current >= 2) {
           askCountRef.current = 0;
           saidRef.current = [];
+          beginSearching(statusId, combined); // loader + min-beat overlap the fetch (like filter/refine)
           const result = await runQuery(combined);
           await playListings(run, statusId, buildScrapeIntro(result.query ?? combined), result, v);
           if (run.cancelled) return;
@@ -805,12 +980,16 @@ export default function Agent() {
     askCountRef.current = 0;
     saidRef.current = [];
     runRef.current = makeRun();
-    // Filter search: open at the top and let the request bubble type itself out (~5s). The
-    // "searching…" beat and the typed response follow once the bubble finishes (onBubbleDone).
+    // Filter search: open at the top and let the request bubble type itself out. The SEARCHING loader
+    // (full platform roster + highlight wave) appears IMMEDIATELY below the bubble — something is
+    // moving from the very first frame; the query itself starts once the bubble finishes
+    // (onBubbleDone). (owner 2026-07-09: the logo animation starts the moment Search is pressed.)
     pinModeRef.current = 'top';
     const { bubble, sub } = override ?? filterToChat(q);
-    pendingFilterRef.current = { q, sub };
-    setMsgs((m) => [...m, { id: uid(), role: 'user', text: bubble, typing: true }]);
+    const statusId = uid();
+    pendingFilterRef.current = { q, sub, statusId };
+    searchingAtRef.current[statusId] = Date.now();
+    setMsgs((m) => [...m, { id: uid(), role: 'user', text: bubble, typing: true }, { id: statusId, role: 'status', phase: 'searching', query: q }]);
     toTop();
   };
 
@@ -825,15 +1004,14 @@ export default function Agent() {
     pinModeRef.current = 'none';
     const run = runRef.current ?? makeRun();
     runRef.current = run;
-    const statusId = uid();
-    setMsgs((m) => [...m, { id: statusId, role: 'status', phase: 'thinking' }]);
-    toBottom();
+    // The searching status (full platform roster, highlight wave) has been on screen since Search was
+    // pressed (sendFilter) — here we just kick off the real query against that same status bubble.
+    const statusId = pending.statusId;
     void (async () => {
-      // Fetch the matching subset DURING the thinking beat — the network wait hides inside the pause
-      // the user already sees, so the choreography timing is unchanged. (runQuery is now async.)
+      // Fetch the matching subset DURING the loading animation — the network wait hides inside the
+      // thinking→searching choreography (no post-network hold: playListings morphs to results as soon
+      // as the minimum searching beat — which overlapped the fetch — has played). (owner 2026-07-09.)
       const result = await runQuery(pending.q);
-      if (run.cancelled) return;
-      await waitRun(run, THINK_MS);
       if (run.cancelled) return;
       await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
       if (run.cancelled) return;
@@ -854,11 +1032,19 @@ export default function Agent() {
     // while the per-search fetch (now async) resolves. (runQuery used to be synchronous.)
     setMsgs([
       { id: userId, role: 'user', text: bubble },
-      { id: resultsId, role: 'status', phase: 'searching', summary: buildScrapeIntro(q) },
+      { id: resultsId, role: 'status', phase: 'searching', summary: buildScrapeIntro(q), query: q },
     ]);
     pinModeRef.current = 'top';
     toTop();
     const result = await runQuery(q, false); // viewing a saved chat — don't create a new history entry
+    // Soft completion here too (review finding): history replay used to hard-cut the loader in a
+    // single frame. Flag `exiting`, give the fade its beat, THEN swap to the final results state.
+    // (History stays beat-free otherwise — no min-beat, no typewriter; this is just the fade.)
+    setMsgs([
+      { id: userId, role: 'user', text: bubble },
+      { id: resultsId, role: 'status', phase: 'searching', summary: buildScrapeIntro(q), query: q, exiting: true },
+    ]);
+    await new Promise((r) => setTimeout(r, LOADER_EXIT_MS));
     // Morph into the final results state — all cards at once, no typewriter (history view).
     setMsgs([
       { id: userId, role: 'user', text: bubble },
@@ -1029,62 +1215,12 @@ export default function Agent() {
                 );
               }
               if (m.role === 'status') {
-                // While searching, the slogan is rendered with the SAME sparkle-icon layout as in the
-                // results phase. Earlier this block omitted the icon ("plain text only") which caused
-                // a visible flicker on phase transition: the text was there during searching, then a
-                // star "popped in" beside it when results arrived. Now the icon is present from the
-                // first frame, so the transition is seamless — only the message below the slogan
-                // changes. (user request: "they are displayed then the star pops up — fix it.")
-                if (m.slogan) {
-                  const sr = msgRTL(m.slogan);
-                  return (
-                    // Searching-phase slogan + summary: anchored to the RIGHT for Arabic (alignItems
-                    // flex-end), exactly like the final results block, so it never jumps left/centre
-                    // between the searching and results phases. (user request: Arabic assistant content
-                    // always on the right.)
-                    <View key={m.id} style={{ gap: 6, alignItems: sr ? 'flex-end' : 'flex-start', width: '100%' }}>
-                      <View style={[s.reply, { flexDirection: 'row', alignItems: 'center' }]}>
-                        {!sr && (
-                          <View style={s.replyIcon}>
-                            <Ionicons name="sparkles" size={14} color={colors.primary} />
-                          </View>
-                        )}
-                        <Text style={[s.sloganText, { writingDirection: sr ? 'rtl' : 'ltr', textAlign: sr ? 'right' : 'left' }]}>{m.slogan}</Text>
-                        {sr && (
-                          <View style={s.replyIcon}>
-                            <Ionicons name="sparkles" size={14} color={colors.primary} />
-                          </View>
-                        )}
-                      </View>
-                      {m.summary ? (
-                        // The Search Summary TYPES OUT (typewriter) while Ezhalah is searching, then
-                        // persists fully-typed into the results bubble below. The searching beat waits
-                        // for it to finish (see playListings). (user request: "type it down, animation style".)
-                        <Text style={[s.summaryText, { writingDirection: sr ? 'rtl' : 'ltr', textAlign: sr ? 'right' : 'left', alignSelf: 'stretch' }]}>
-                          <Typer text={m.summary} />
-                        </Text>
-                      ) : null}
-                    </View>
-                  );
-                }
-                {
-                  // "إزهله يفكر…" / "إزهله يبحث…" must sit on the FAR RIGHT for Arabic, exactly where
-                  // every Ezhalah message appears — never centered, never left, never LTR. The outer
-                  // View anchors the whole row to the right edge (alignItems flex-end); row-reverse
-                  // puts the spinner on the right with the text flowing right-to-left to its left.
-                  // English keeps the original left-anchored layout. (user request.)
-                  const sr = locale === 'ar';
-                  return (
-                    <View key={m.id} style={{ width: '100%', alignItems: sr ? 'flex-end' : 'flex-start' }}>
-                      <View style={[s.status, sr && { flexDirection: 'row-reverse', paddingLeft: 0, paddingRight: 2 }]}>
-                        <Spinner />
-                        <Text style={[s.statusText, { writingDirection: sr ? 'rtl' : 'ltr', textAlign: sr ? 'right' : 'left' }]}>
-                          {m.phase === 'thinking' ? t('Ezhalah is thinking…') : t('Ezhalah is searching…')}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                }
+                // The calm, Perplexity-style search-loading animation: «إزهله يفكر…» → «إزهله يبحث في
+                // المنصات…» + a rotating strip of real platform pills + up to 3 filter status lines.
+                // The branded slogan + search summary are NOT shown here anymore (owner: keep loading
+                // clean/focused); they still appear in the RESULTS bubble below, unchanged. RTL is
+                // handled inside SearchLoader (the message column is LTR-pinned).
+                return <SearchLoader key={m.id} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} />;
               }
               if (m.role === 'agent') {
                 // Per-message direction: each AI reply renders in its OWN language's direction and
@@ -1097,7 +1233,7 @@ export default function Agent() {
                 const rtl = msgRTL(txt);
                 return (
                   <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: '88%' }}>
-                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', direction: (rtl ? 'rtl' : 'ltr') as any }]}>
+                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', writingDirection: (rtl ? 'rtl' : 'ltr') as any }]}>
                       <View style={s.replyIcon}>
                         <Ionicons name="sparkles" size={14} color={colors.primary} />
                       </View>
@@ -1163,23 +1299,37 @@ export default function Agent() {
                       avoid a duplicate. For searches with results: type the normal intro text. */}
                   {(() => {
                     const zeroResult = m.result.listings.length === 0;
+                    // EXACT count headline «لقينا N إعلان يطابق طلبك» from the RPC's count(*) over() (matchTotal).
+                    // Safe/exact for the standard path; the priceIsAnnual edge makes the RPC skip the price cap
+                    // (so the count would overstate) → fall back to the generic intro there. (owner: exact only if safe.)
+                    const total = m.result.matchTotal ?? m.result.listings.length;
+                    const countSafe = !m.result.query?.priceIsAnnual && total > 0;
                     const txt = zeroResult
                       ? (m.result.suggestion ?? t('No exact matches — try broadening your search.'))
-                      : m.text;
+                      : countSafe
+                        ? t('We found {n} listings matching your search.', { n: total.toLocaleString('en-US') })
+                        : m.text;
                     return (
                       <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', marginTop: 6, alignSelf: 'stretch' }]}>
                         {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
                       </Text>
                     );
                   })()}
-                  {/* Hold the property cards back until Ezhalah has finished writing the words above —
-                      listings never appear before the reply types out (user request). */}
-                  {m.typing && !doneTyping[m.id] ? null : m.result.listings.length === 0 ? (
+                  {/* Cards no longer wait for the intro text — they cascade in as soon as results are
+                      ready (beginCardDrip fires at the morph), while the reply types above (owner
+                      2026-07-09: show the first card the moment valid listings exist). The
+                      more-message + feedback row still wait for the text via their doneTyping gates. */}
+                  {m.result.listings.length === 0 ? (
                     // Zero-result: text already animated in slot above — render nothing here to avoid duplicate.
                     null
                   ) : (
                     <>
-                      <Text style={[s.rankLine, { textAlign: rtl ? 'right' : 'left', alignSelf: 'stretch' }]}>{m.result.sortNote ?? t('Ranked by closest match.')}</Text>
+                      {/* The default "مرتبة حسب الأقرب لطلبك" note was removed per owner request (2026-07-07).
+                          An EXPLICIT objective sort (newest/cheapest…) still shows its own note; the plain
+                          relevance default now shows nothing (and it waits for the text like before). */}
+                      {m.result.sortNote && !(m.typing && !doneTyping[m.id]) ? (
+                        <Text style={[s.rankLine, { textAlign: rtl ? 'right' : 'left', alignSelf: 'stretch' }]}>{m.result.sortNote}</Text>
+                      ) : null}
                       {/* All result cards render AT ONCE — the per-card pop-in animation was removed
                           per user request ("remove that, not nice"). The cards just appear, no fade,
                           no scale, no stagger. Cards stay FULL-WIDTH via alignSelf:stretch even though
@@ -1189,38 +1339,97 @@ export default function Agent() {
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
                             setRevealCount(0)). History/replay turns (not typing) show all immediately. */}
                         {m.result.listings.slice(0, revealCount[m.id] ?? (m.typing ? 0 : Math.min(FIRST_PAGE, m.result.listings.length))).map((l, i) => (
-                          <ResultCard
-                            key={l.id}
-                            listing={l}
-                            variant="compact"
-                            rank={i + 1}
-                            onOpen={() => { trackOpen(l); void openListing(l); }}
-                          />
+                          // CardIn = soft mount-in (fade + slight rise). Keyed by source:id (ids are
+                          // only unique per source table — matches the de-dup identity), so cards
+                          // already on screen NEVER re-animate — only newly-revealed ones enter softly.
+                          <CardIn key={`${l.source}:${l.id}`}>
+                            <MemoResultCard
+                              listing={l}
+                              variant="compact"
+                              rank={i + 1}
+                              onOpen={() => { trackOpen(l); void openListing(l); }}
+                            />
+                          </CardIn>
                         ))}
                       </View>
-                      {/* MORE-THAN-25 message + two actions (user 2026-06-27): a NORMAL assistant message
-                          (not a tiny note) shown only when total > 25 and we're still on the first 25.
-                          «عرض جميع النتائج» reveals the rest (up to 200), filters unchanged. «ساعدني ألقى
-                          نتائج أدق» asks ONE clarifying question then re-searches. Hidden at ≤25 or after show-all. */}
+                      {/* MORE-RESULTS message + actions (user 2026-06-27, paging owner 2026-07-08): a NORMAL
+                          assistant message shown once the first 10 are on screen and MORE matches exist.
+                          Correctness: the RPC filtered the FULL matching set before any cap, so we page it —
+                          «عرض المزيد» walks the next real DB pages (broad searches reach every match), and once
+                          the whole matched set is in the buffer «عرض جميع النتائج» reveals it in one tap. «ساعدني
+                          ألقى نتائج أدق» asks ONE clarifying question then re-searches. */}
                       {(() => {
-                        const total = m.result.total ?? m.result.listings.length;
-                        const shown = revealCount[m.id] ?? (m.typing ? 0 : Math.min(FIRST_PAGE, m.result.listings.length));
-                        if (total <= FIRST_PAGE || shownAll[m.id] || shown < FIRST_PAGE) return null;
+                        const fetched = m.result.listings.length;
+                        const shown = revealCount[m.id] ?? (m.typing ? 0 : Math.min(FIRST_PAGE, fetched));
+                        const serverMore = !!m.result.hasMore; // the DB still has more matching pages to fetch
+                        const bufferMore = shown < fetched; // fetched cards not yet revealed on screen
+                        // Show once this page's cards are on screen. Gate on (typing && !doneTyping) — the SAME
+                        // condition the cards use — NOT on `m.typing` alone: a live results message keeps typing=true
+                        // even after the intro finishes (only doneTyping flips), so gating on m.typing hid this block.
+                        // min(FIRST_PAGE, fetched): a search with <10 matches still gets its closing message.
+                        if ((m.typing && !doneTyping[m.id]) || shown < Math.min(FIRST_PAGE, fetched)) return null;
+                        // ALWAYS show a closing count message above the feedback row (owner 2026-07-09: the
+                        // message must never disappear and leave the thumbs alone). Honesty rule: when
+                        // everything matching is already on screen, say so and DROP «عرض المزيد» (a load-more
+                        // button with nothing to load would be a lie) — only «خلّنا نحدد الطلب أكثر» stays.
+                        const hasMore = serverMore || bufferMore;
+                        // fetching = THIS message's page fetch; cascading = THIS message's card drip.
+                        // Only the owning message's button shows the dots (review fix: a global flag
+                        // was falsely lighting every visible «عرض المزيد»).
+                        const fetching = !!loadingMore[m.id];
+                        const cascading = revealing && revealActiveRef.current?.id === m.id;
                         return (
-                          <View style={{ gap: 10, marginTop: 14, alignSelf: 'stretch' }}>
+                          <View style={{ gap: 8, marginTop: 14, alignSelf: 'stretch' }}>
                             <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
-                              {t('I have more than that, but I showed you the first 25 listings. Want me to show all results, or help you find more precise ones?')}
+                              {hasMore
+                                ? t('I showed you the first {n} listings. Want me to show more, or help you find more precise ones?', { n: shown.toLocaleString('en-US') })
+                                : t('I showed you all {n} matching listings. Want help finding more precise ones?', { n: shown.toLocaleString('en-US') })}
                             </Text>
-                            <View style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
-                              <Pressable style={s.mBtnPrimary} onPress={() => { setShownAll((x) => ({ ...x, [m.id]: true })); setRevealCount((c) => ({ ...c, [m.id]: Math.min(200, m.result.listings.length) })); }}>
-                                <Text style={s.mBtnPrimaryTx}>{t('Show all results')}</Text>
-                              </Pressable>
+                            {/* Tell the user exactly how Load More behaves (owner 2026-07-08): 100 at a time. */}
+                            {hasMore ? (
+                              <Text style={[s.rankLine, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', alignSelf: 'stretch' }]}>
+                                {t('I can show you 100 listings at a time.')}
+                              </Text>
+                            ) : null}
+                            {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
+                                «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches. */}
+                            <View style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
+                              {hasMore ? (
+                                // Active state = calm pulsing dots (owner 2026-07-09: the button must
+                                // visibly work, not sit static) — while THIS message's page fetches or
+                                // its new cards cascade in. Fixed min-size → zero layout shift on swap.
+                                // Disabled during any reveal or a live turn (never two drips at once).
+                                <Pressable
+                                  style={({ hovered, pressed }: any) => [s.mBtnPrimary, (hovered || pressed) && !fetching && !revealing && s.mBtnPrimaryHover]}
+                                  disabled={fetching || revealing || busy}
+                                  onPress={() => loadMore(m)}
+                                >
+                                  {fetching || cascading
+                                    ? <LoadingDots />
+                                    : <Text style={s.mBtnPrimaryTx}>{t('Load more')}</Text>}
+                                </Pressable>
+                              ) : null}
                               <Pressable style={s.mBtnAlt} onPress={() => startRefine(m.result.query)}>
-                                <Text style={s.mBtnAltTx}>{t('Help me find more precise results')}</Text>
+                                <Text style={s.mBtnAltTx}>{t('Let’s narrow it down')}</Text>
                               </Pressable>
                             </View>
                           </View>
                         );
+                      })()}
+                      {/* Response-level feedback (thumbs up/down + share) — the LAST element of the
+                          response, so the order reads: cards → «تبي أعرض لك المزيد…» message + buttons
+                          → this row. MOVED here from under each card (owner 2026-07-09: one row,
+                          directly below the more-message, nowhere else). Still shows when the
+                          more-block is hidden (few results / all shown) — it belongs to the response.
+                          Keyed by the results-message id → rates the RESPONSE, not one listing. */}
+                      {(() => {
+                        const fetched = m.result.listings.length;
+                        const shown = revealCount[m.id] ?? (m.typing ? 0 : Math.min(FIRST_PAGE, fetched));
+                        // Wait for the cards to be on screen AND the intro text to finish (cards now
+                        // cascade during typing — the thumbs must never appear before the closing
+                        // message above them).
+                        if ((m.typing && !doneTyping[m.id]) || shown < Math.min(FIRST_PAGE, fetched)) return null;
+                        return <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} />;
                       })()}
                     </>
                   )}
@@ -1273,13 +1482,19 @@ export default function Agent() {
         {/* Composer */}
         <View style={[s.composerWrap, { paddingBottom: insets.bottom + 8 }]}>
           <View style={s.col}>
-            <View style={[s.composer, { flexDirection: locale === 'ar' ? 'row-reverse' : 'row' }]}>
+            <View style={s.composer}>
               <TextInput
-                style={[s.input, { textAlign: locale === 'ar' ? 'right' : 'left' }]}
+                ref={inputRef}
+                // writingDirection RTL for Arabic (the parent col is LTR-pinned, so without this the
+                // placeholder's trailing «...» lands on the wrong side — it must read «…عنه»). (owner 2026-07-09)
+                style={[s.input, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr', height: Math.min(110, Math.max(20, inputH)) } as any]}
                 placeholder={t("Type what you're looking for...")}
                 placeholderTextColor={colors.muted}
                 value={typed}
-                onChangeText={(v) => setTyped(v)}
+                onChangeText={(v) => { setTyped(v); if (!v) setInputH(20); }}
+                // Single line by default; grows only as text wraps, capped at maxHeight (then scrolls).
+                // onContentSizeChange uses RN's own line metrics (native + web). (owner 2026-07-08)
+                onContentSizeChange={(e) => setInputH(Math.min(110, Math.max(20, e.nativeEvent.contentSize.height)))}
                 // The language does NOT flip while typing a chat message — it switches only when the
                 // message is SENT (see send(): an English message → English UI, Arabic → Arabic).
                 // Live per-character switching is reserved for the Home filter's location field.
@@ -1307,12 +1522,30 @@ export default function Agent() {
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* ChatGPT-style feedback toast — floats top-center ABOVE the conversation (below the header),
+          appears briefly after a 👍/👎 and auto-dismisses. pointerEvents none so it never blocks taps.
+          Same treatment on mobile and desktop (owner 2026-07-09). */}
+      <View pointerEvents="none" style={[s.fbToastWrap, { top: insets.top + 54 }]}>
+        <View style={[s.fbToast, { opacity: fbToast ? 1 : 0, transform: [{ translateY: fbToast ? 0 : -8 }] }, TOAST_EASE]}>
+          <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
+          <Text style={s.fbToastText}>{t('Thanks for your feedback')}</Text>
+        </View>
+      </View>
     </View>
   );
 }
 
 const s = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.screenSide, paddingBottom: 8 },
+  // ChatGPT-style feedback toast: centered pill just below the header, floating over the chat.
+  fbToastWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 200 },
+  fbToast: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine,
+    borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 14, ...cardShadow,
+  },
+  fbToastText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
   titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 7 },
@@ -1330,7 +1563,12 @@ const s = StyleSheet.create({
   // bubbles (alignSelf: 'flex-end') always end up on the RIGHT, AI replies (alignSelf: 'flex-start')
   // always on the LEFT. Only the text INSIDE each bubble follows its own writingDirection. (user
   // request: bubble position never changes per language; only text direction does.)
-  col: { width: '100%', maxWidth: MAX_W, gap: 8, direction: 'ltr' as any },
+  // LOAD-BEARING: the whole message column is pinned to LTR cross-axis so `alignSelf:'flex-end'` reliably
+  // resolves to the RIGHT (user bubble + Arabic agent replies), regardless of the app's RTL root. RN-web
+  // DROPS a raw `direction` style (it only warns), so we use `writingDirection:'ltr'`, which RN-web maps
+  // to CSS `direction:ltr` on the element. Without this the column inherits RTL and every flex-end block
+  // flips to the left. (Text inside each bubble keeps its own writingDirection so Arabic still reads RTL.)
+  col: { width: '100%', maxWidth: MAX_W, gap: 8, writingDirection: 'ltr' as any },
 
   aiex: { marginTop: 12, gap: 11 },
   greet: { marginBottom: 6 },
@@ -1368,8 +1606,10 @@ const s = StyleSheet.create({
   showMoreTxt: { fontSize: 13, fontWeight: '700', color: colors.primary },
   // The two actions under the «more than 25» message: primary (show all) + outline (refine). (user 2026-06-27.)
   mBtnRow: { flexWrap: 'wrap', gap: 8, marginTop: 2 },
-  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, backgroundColor: colors.primary },
-  mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: '#fff' },
+  // minWidth + centered content: the text↔dots swap never changes the button's size (no layout shift).
+  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, backgroundColor: colors.primary, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transitionProperty: 'background-color', transitionDuration: '150ms' } as any) : {}) },
+  mBtnPrimaryHover: { backgroundColor: colors.dark },
+  mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: '#fff', lineHeight: 18 },
   mBtnAlt: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
   mBtnAltTx: { fontSize: 13, fontWeight: '700', color: colors.primary },
   // Clickable refine answer chips (district/budget/beds/type) under a «more precise» question. (user 2026-06-27.)
@@ -1439,8 +1679,14 @@ const s = StyleSheet.create({
   // Inline row (no absolute button): input flexes, the send/stop button sits at the end, vertically
   // centered with comfortable edge padding. flexDirection is set per language at the call site so the
   // button lands on the correct side in both LTR and RTL. (user request: balanced, centered send button.)
-  composer: { alignItems: 'center', gap: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 18, paddingVertical: 5, paddingHorizontal: 8, ...cardShadow },
-  input: { flex: 1, fontSize: 14, color: colors.ink, paddingVertical: 6, paddingHorizontal: 4, maxHeight: 110, ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  // ChatGPT-style bar (owner 2026-07-08): single row, send button anchored on the far right (16px from
+  // the edge, vertically centered), thinner single-line input that grows on wrap. paddingRight 16 places
+  // the button; the input + button are flex siblings so text always stops before the button (never under).
+  // The composer sits inside the LTR-pinned `col`, so `row` (not row-reverse) is what puts the send
+  // button on the FAR RIGHT here; the input (flex:1) fills to its left and right-aligns its Arabic
+  // text next to the button. (owner 2026-07-09: send button must be far right.)
+  composer: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 18, paddingVertical: 4, paddingLeft: 16, paddingRight: 16, ...cardShadow },
+  input: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.ink, paddingVertical: 0, paddingHorizontal: 4, minHeight: 20, maxHeight: 110, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
   sendBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   stopBtn: { width: 28, height: 28, borderRadius: 9, backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center' },
   disc: { fontSize: 10.8, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 8, paddingHorizontal: 8 },

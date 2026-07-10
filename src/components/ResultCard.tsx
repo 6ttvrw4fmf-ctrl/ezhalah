@@ -92,7 +92,11 @@ export function ResultCard({
   const regionLabel = region ? (locale === 'en' ? region.en : region.ar) : '';
   // Description (P2): show the source's text ONLY when it is REAL Arabic (Aqar keeps its own as-is).
   // English or empty (Wasalt carries none) shows nothing — we never translate or invent a description.
-  const descAr = (() => { const d = (listing.description ?? '').trim(); return d && /[ء-ي]/.test(d) ? d : null; })();
+  // Force RTL base direction with a leading RLM (U+200F, zero-width) so the 3-line truncation ALWAYS ends
+  // on the RTL side — the ellipsis lands right after the last visible Arabic word ("…عنه"), never leading.
+  // Without it, a description that STARTS with LTR content (a URL / phone / emoji) flips the paragraph's
+  // base direction and pushes the clamp ellipsis to the wrong side ("… عنه"). (owner 2026-07-08)
+  const descAr = (() => { const d = (listing.description ?? '').trim(); return d && /[ء-ي]/.test(d) ? '‏' + d : null; })();
   // The scraper sometimes captured a whole junk string into `listed` (e.g. "28/04/2026 آخر تحديث منذ
   // 22 ساعة ... المشاهدات 353 ..."). Show ONLY the clean DD/MM/YYYY date; if none, fall back to a
   // localized "recently". Works in both languages, no re-scrape needed. (user request: don't show
@@ -105,6 +109,10 @@ export function ResultCard({
     return raw.length <= 12 ? raw : '';
   };
   const listedClean = cleanDate(listing.listed);
+  // #1 (source-accurate, owner 2026-07-06): show the RAW scraped type when it is already Arabic
+  // (dealapp "تاون هاوس", "ملحق علوي"…); for English-raw sources (aqar stores "Apartment") show the
+  // source-matching Arabic via the clean mapping — never English on the card. Mapping stays filter-only.
+  const typeLabel = /[ء-ي]/.test(listing.type || '') ? listing.type : t(listing.cleanType ?? listing.type);
   const { width } = useWindowDimensions();
   const horizontal = IS_WEB && width >= 820; // desktop 3-column layout
   const [expanded, setExpanded] = useState(false);
@@ -123,6 +131,8 @@ export function ResultCard({
     // Desktop (≥820px): 3 columns side-by-side. Mobile/narrow: STACK vertically (photo on top, then
     // info, then features) — the row layout crammed all 3 columns into a phone width and broke badly.
     // (user-reported: "look how it looks like in the phone, it's horrible".)
+    // NOTE: the feedback row (thumbs/share) is NOT here — owner 2026-07-09 moved it to render ONCE per
+    // results response, below the «تبي أعرض لك المزيد…» message (see agent.tsx + FeedbackRow.tsx).
     <View style={[card.wrap, { flexDirection: horizontal ? 'row' : 'column' }]}>
       {/* ─── photo block (full-width banner on mobile) ───── */}
       <Pressable onPress={onOpen} style={[card.photoCol, horizontal ? card.photoColWide : card.photoColMobile]}>
@@ -146,7 +156,7 @@ export function ResultCard({
       <Pressable onPress={onOpen} style={[card.midCol, horizontal && card.midColFlex]}>
         <View style={card.typeRow}>
           <Ionicons name="home-outline" size={13} color={colors.muted} />
-          <Text style={card.typeLabel}>{t(listing.cleanType ?? listing.type)} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
+          <Text style={card.typeLabel}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
         </View>
         <Text style={[card.title, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
           {place(t(listing.district)) || place(t(listing.city))}{listing.district ? `, ${place(t(listing.city))}` : ''}
@@ -170,7 +180,7 @@ export function ResultCard({
           {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
           {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} /> : null}
           {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${tr('m²')}`} small={t('Area')} /> : null}
-          <Stat icon="business-outline" big={t(listing.cleanType ?? listing.type)} small={t('Property Type')} />
+          <Stat icon="business-outline" big={typeLabel} small={t('Property Type')} />
           {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
         </View>
       </Pressable>

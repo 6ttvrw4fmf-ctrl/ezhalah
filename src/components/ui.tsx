@@ -1,5 +1,5 @@
-import { Platform, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
-import { useEffect } from 'react';
+import { Image, Platform, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { useEffect, useRef } from 'react';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -17,13 +17,20 @@ import { useI18n } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+const AnimatedImage = Animated.createAnimatedComponent(Image);
 // Selection ease — slow-in/slow-out (bezier) so the colour fade glides edge to edge
 // instead of snapping. Slightly longer than a tap so the eye can follow the change.
 const EASE = { duration: 280, easing: Easing.bezier(0.22, 1, 0.36, 1) };
 // Press feedback: a quick dip on finger-down, then a springy release so the button
 // settles back with a soft bounce (modern iOS feel) instead of a flat linear fade.
 const PRESS_IN = { duration: 90, easing: Easing.out(Easing.quad) };
-const RELEASE = { mass: 0.5, damping: 13, stiffness: 230 };
+const RELEASE = { mass: 0.5, damping: 11, stiffness: 230 }; // slightly bouncier release — a soft overshoot on finger-up
+// Selection "achievement" feel (owner request): on BECOMING selected, a quick scale overshoot that springs
+// back to rest, plus a green glow that blooms then settles. Subtle + premium — rewarding, not childish.
+const POP_UP = { duration: 130, easing: Easing.out(Easing.quad) };
+const POP_SETTLE = { mass: 0.5, damping: 9, stiffness: 210 };
+// Focus/hover fade for web pointer + keyboard states (skill rule #1/#2: visible focus + hover feedback).
+const FOCUS_T = { duration: 130, easing: Easing.out(Easing.quad) };
 
 // Reusable spring-press wrapper — wraps any content so a plain tappable gets the
 // same modern dip-and-bounce feedback as the styled controls below.
@@ -86,61 +93,105 @@ export function Heartbeat({
 }
 
 // Rent / Buy segmented control. Option values stay in English; only the label is localized.
-function SegButton({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
+function SegButton({ label, on, onPress, icon }: { label: string; on: boolean; onPress: () => void; icon?: any }) {
   const p = useSharedValue(on ? 1 : 0);
   const press = useSharedValue(0);
+  const focus = useSharedValue(0);
+  const pop = useSharedValue(0);             // select "achievement" pop
+  const glow = useSharedValue(on ? 1 : 0);   // green glow: blooms on select, rests while selected
+  const wasOn = useRef(on);
   useEffect(() => {
     p.value = withTiming(on ? 1 : 0, EASE);
+    if (on && !wasOn.current) {
+      pop.value = withSequence(withTiming(0.045, POP_UP), withSpring(0, POP_SETTLE));
+      glow.value = withSequence(withTiming(1.5, POP_UP), withTiming(1, EASE));
+    } else if (!on) {
+      glow.value = withTiming(0, FOCUS_T);
+    }
+    wasOn.current = on;
   }, [on, p]);
   const box = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(p.value, [0, 1], ['rgba(47,114,71,0)', colors.primary]),
-    transform: [{ scale: 1 - press.value * 0.05 }],
+    transform: [{ scale: 1 - press.value * 0.05 + pop.value }],
+    // web keyboard-focus ring (a11y) + selection glow bloom; native uses shadow* props for the same glow
+    ...(Platform.OS === 'web'
+      ? { outlineStyle: 'solid', outlineColor: colors.primary, outlineWidth: focus.value * 2.5, outlineOffset: 2,
+          boxShadow: `0px ${glow.value * 5}px ${glow.value * 14}px rgba(20,80,45,${glow.value * 0.28})` }
+      : { shadowColor: '#14502d', shadowOpacity: glow.value * 0.28, shadowRadius: glow.value * 14, shadowOffset: { width: 0, height: glow.value * 5 }, elevation: glow.value * 5 }),
   }));
   const txt = useAnimatedStyle(() => ({ color: interpolateColor(p.value, [0, 1], [colors.muted, '#ffffff']) }));
+  const tint = useAnimatedStyle(() => ({ tintColor: interpolateColor(p.value, [0, 1], [colors.muted, '#ffffff']) }));
   return (
     <AnimatedPressable
       style={[s.segBtn, box]}
       onPress={onPress}
       onPressIn={() => { press.value = withTiming(1, PRESS_IN); }}
       onPressOut={() => { press.value = withSpring(0, RELEASE); }}
+      onFocus={() => { focus.value = withTiming(1, FOCUS_T); }}
+      onBlur={() => { focus.value = withTiming(0, FOCUS_T); }}
     >
+      {icon ? <AnimatedImage source={icon} resizeMode="contain" style={[s.segIcon, tint]} /> : null}
       <Animated.Text ref={noTranslateRef} style={[s.segText, txt]}>{label}</Animated.Text>
     </AnimatedPressable>
   );
 }
 
-export function Segmented({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
+export function Segmented({ options, value, onChange, icons }: { options: string[]; value: string; onChange: (v: string) => void; icons?: Record<string, any> }) {
   const { t } = useI18n();
   return (
     <View style={s.segTrack}>
       {options.map((opt) => (
-        <SegButton key={opt} label={t(opt)} on={opt === value} onPress={() => onChange(opt)} />
+        <SegButton key={opt} label={t(opt)} on={opt === value} onPress={() => onChange(opt)} icon={icons?.[opt]} />
       ))}
     </View>
   );
 }
 
 // Tappable option box (category / type / detail) — selection fades in, press dips slightly.
-export function OptionBox({ label, selected, onPress, style }: { label: string; selected: boolean; onPress: () => void; style?: ViewStyle }) {
+export function OptionBox({ label, selected, onPress, style, img }: { label: string; selected: boolean; onPress: () => void; style?: ViewStyle; img?: any }) {
   const p = useSharedValue(selected ? 1 : 0);
   const press = useSharedValue(0);
+  const hover = useSharedValue(0);
+  const focus = useSharedValue(0);
+  const pop = useSharedValue(0);                  // select "achievement" pop
+  const glow = useSharedValue(selected ? 1 : 0);  // green glow: blooms on select, rests while selected
+  const wasSel = useRef(selected);
   useEffect(() => {
     p.value = withTiming(selected ? 1 : 0, EASE);
+    if (selected && !wasSel.current) {
+      pop.value = withSequence(withTiming(0.055, POP_UP), withSpring(0, POP_SETTLE));
+      glow.value = withSequence(withTiming(1.5, POP_UP), withTiming(1, EASE));
+    } else if (!selected) {
+      glow.value = withTiming(0, FOCUS_T);
+    }
+    wasSel.current = selected;
   }, [selected, p]);
   const box = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(p.value, [0, 1], [colors.surface, colors.primary]),
-    borderColor: interpolateColor(p.value, [0, 1], [colors.pickLine, colors.primary]),
-    transform: [{ scale: 1 - press.value * 0.045 }],
+    // hover (web pointer) tints the border toward primary while unselected — subtle "tappable" cue
+    borderColor: interpolateColor(Math.max(p.value, hover.value * (1 - p.value)), [0, 1], [colors.pickLine, colors.primary]),
+    transform: [{ scale: 1 - press.value * 0.045 + pop.value }],
+    // web keyboard-focus ring (a11y) + selection glow bloom; native uses shadow* props for the same glow
+    ...(Platform.OS === 'web'
+      ? { outlineStyle: 'solid', outlineColor: colors.primary, outlineWidth: focus.value * 2.5, outlineOffset: 2,
+          boxShadow: `0px ${glow.value * 7}px ${glow.value * 16}px rgba(20,80,45,${glow.value * 0.30})` }
+      : { shadowColor: '#14502d', shadowOpacity: glow.value * 0.30, shadowRadius: glow.value * 16, shadowOffset: { width: 0, height: glow.value * 7 }, elevation: glow.value * 6 }),
   }));
   const txt = useAnimatedStyle(() => ({ color: interpolateColor(p.value, [0, 1], [colors.ink, '#ffffff']) }));
+  const tint = useAnimatedStyle(() => ({ tintColor: interpolateColor(p.value, [0, 1], [colors.ink, '#ffffff']) }));
   return (
     <AnimatedPressable
       onPress={onPress}
       onPressIn={() => { press.value = withTiming(1, PRESS_IN); }}
       onPressOut={() => { press.value = withSpring(0, RELEASE); }}
-      style={[s.box, selected && s.boxShadow, box, style]}
+      onHoverIn={() => { hover.value = withTiming(1, FOCUS_T); }}
+      onHoverOut={() => { hover.value = withTiming(0, FOCUS_T); }}
+      onFocus={() => { focus.value = withTiming(1, FOCUS_T); }}
+      onBlur={() => { focus.value = withTiming(0, FOCUS_T); }}
+      style={[s.box, box, style]}
     >
-      <Animated.Text ref={noTranslateRef} style={[s.boxText, txt, NO_MIDWORD_BREAK]} numberOfLines={2}>{label}</Animated.Text>
+      {img ? <AnimatedImage source={img} resizeMode="contain" style={[s.optIcon, tint]} /> : null}
+      <Animated.Text ref={noTranslateRef} style={[s.boxText, selected && s.boxTextOn, txt, NO_MIDWORD_BREAK]} numberOfLines={2}>{label}</Animated.Text>
     </AnimatedPressable>
   );
 }
@@ -201,12 +252,22 @@ export function Spinner({ tint = colors.primary }: { tint?: string }) {
 
 const s = StyleSheet.create({
   segTrack: { flexDirection: 'row', backgroundColor: colors.segTrack, borderRadius: radius.pill, padding: 4, gap: 4 },
-  segBtn: { flex: 1, paddingVertical: 11, borderRadius: radius.pill, alignItems: 'center' },
+  // ≥44pt touch target (skill rule #2); centered so the taller box keeps the label optically centred.
+  segBtn: { flex: 1, minHeight: 44, paddingVertical: 12, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
+  segIcon: { width: 18, height: 18 }, // Buy/Rent + Monthly/Yearly segment icon (tinted muted→white)
   segText: { fontSize: 14.5, fontWeight: '600' },
 
-  box: { flex: 1, paddingVertical: 12, paddingHorizontal: 5, borderRadius: radius.chip, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  boxShadow: { shadowColor: '#14502d', shadowOpacity: 0.5, shadowRadius: 7, shadowOffset: { width: 0, height: 6 } },
-  boxText: { fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  // minHeight 46 → clears the 44pt touch-target floor (skill rule #2); more horizontal padding + a
+  // pointer cursor on web for a premium, obviously-tappable feel.
+  box: { flex: 1, minHeight: 46, paddingVertical: 12, paddingHorizontal: 8, borderRadius: radius.chip, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
+  // Softer, larger, green-tinted elevation for the selected chip (premium depth vs the old hard shadow).
+  boxShadow: { shadowColor: '#14502d', shadowOpacity: 0.24, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 5 },
+  boxText: { fontSize: 12.5, fontWeight: '600', lineHeight: 16, textAlign: 'center' },
+  boxTextOn: { fontWeight: '700' }, // selected state reinforced by weight, not colour alone (skill a11y rule)
+  // Filter button icon (category / group / type / bedroom) — stacked above the label, tinted ink→white
+  // on selection to match the label. Restored 2026-07-05 (render wiring was lost in the git reset; the
+  // PNGs + IMG maps in propertyIcons.ts survived). ~24px per UI/UX-skill icon sizing.
+  optIcon: { width: 24, height: 24, marginBottom: 6 },
 
   cta: { backgroundColor: colors.primary, borderRadius: radius.field, paddingVertical: 15, alignItems: 'center' },
   ctaText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },

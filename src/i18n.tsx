@@ -293,7 +293,10 @@ const AR: Record<string, string> = {
 
   // Interview option labels
   'Pool': 'مسبح',
-  'Parking': 'موقف سيارات',
+  'Parking': 'مواقف',
+  'School': 'مدرسة',
+  'Facilities': 'المرافق',
+  'Service Facilities': 'مرافق خدمية',
   'Elevator': 'مصعد',
   'Gym': 'صالة رياضية',
   'Maid room': 'غرفة خادمة',
@@ -379,6 +382,19 @@ const AR: Record<string, string> = {
   // Agent chat chrome
   'Ezhalah is searching…': 'إزهله يبحث…',
   'Ezhalah is thinking…': 'إزهله يفكر…',
+  // Search-loading animation (platform-checking strip + filter status lines)
+  'Ezhalah is searching the platforms…': 'إزهله يبحث في المنصات…',
+  'Searching all platforms…': 'يتم البحث في جميع المنصات…',
+  'Gathering the best properties…': 'نجمع أفضل العقارات…',
+  'Checking the matching properties…': 'نفحص العقارات المناسبة…',
+  'Matching the filters…': 'نطابق الفلاتر…',
+  'Reviewing sites and prices…': 'نراجع المواقع والأسعار…',
+  'Sorting the best results…': 'نرتب أفضل النتائج…',
+  'Matching the location…': 'نطابق الموقع…',
+  'Applying the filters…': 'نطبق الفلاتر…',
+  'Sorting results and mixing platforms…': 'نرتب النتائج وننوعها بين المنصات…',
+  // Per-card feedback row (thumbs up/down + share)
+  'Thanks for your feedback': 'شكراً على ملاحظتك',
   'Here is what I found:': 'هذا ما وجدته:',
   'Here is what matches what you want': 'هذا اللي يناسب طلبك',
   'I found a few properties based on your search.': 'وجدت بعض العقارات بناءً على طلبك.',
@@ -434,8 +450,16 @@ const AR: Record<string, string> = {
   'Ranked by closest match.': 'مرتبة حسب الأقرب لطلبك.',
   'Show more': 'عرض المزيد',
   'Show next': 'التالي',
-  'I have more than that, but I showed you the first 25 listings. Want me to show all results, or help you find more precise ones?': 'عندي نتائج أكثر من كذا، لكن عرضت لك أول 25 إعلان. تبي أعرض لك كل النتائج، أو أساعدك نلقى نتائج أدق؟',
+  'more than {n}': 'أكثر من {n}',
+  'I have more than that, but I showed you the first {n} listings out of {total}. Want me to show all results, or help you find more precise ones?': 'عندي نتائج أكثر من كذا، لكن عرضت لك أول {n} إعلانات من أصل {total} إعلان. تبي أعرض لك كل النتائج، أو أساعدك نلقى نتائج أدق؟',
   'Show all results': 'عرض جميع النتائج',
+  'Load more': 'عرض المزيد',
+  'Loading more…': 'جاري تحميل المزيد…',
+  'We found {n} listings matching your search.': 'لقينا {n} إعلان يطابق طلبك.',
+  'I showed you the first {n} listings. Want me to show more, or help you find more precise ones?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد، أو أساعدك نلقى نتائج أدق؟',
+  'I showed you all {n} matching listings. Want help finding more precise ones?': 'عرضت لك كل النتائج المطابقة ({n} إعلان). تبي أساعدك نلقى نتائج أدق؟',
+  'I can show you 100 listings at a time.': 'أقدر أعرض لك 100 إعلان في كل مرة.',
+  'Let’s narrow it down': 'خلّنا نحدد الطلب أكثر',
   'Help me find more precise results': 'ساعدني ألقى نتائج أدق',
   'I can get you something more precise.': 'أقدر أجيب لك نتائج أدق.',
   "Type what you're looking for...": 'اكتب ما تبحث عنه...',
@@ -521,7 +545,7 @@ const AR: Record<string, string> = {
   'Sorted by bedrooms, most first.': 'مرتّبة بعدد الغرف، من الأكثر.',
 
   // Filter search → chat (natural-language bubble + result subheading)
-  "I'm looking for {what}{detail} {verb} in {place}{price}": 'أبحث عن {what}{detail} {verb} في {place}{price}',
+  "I'm looking for {what}{detail} {verb} in {place}{price}": 'ارحب إزهله 👋، أبحث عن {what}{detail} {verb} في {place}{price}',
   '{cat} property': 'عقار {cat}',
   'a property': 'عقار',
   '{cat} properties': 'عقارات {cat}',
@@ -535,6 +559,7 @@ const AR: Record<string, string> = {
   "I couldn't find anything at {amount}, but here are some similar to what you're looking for:":
     'لم أجد شيئاً بسعر {amount}، لكن إليك بعض الخيارات المشابهة لما تبحث عنه:',
   '{a}/month': '{a}/شهرياً',
+  ' for {a}': ' بسعر {a}',
   ' for {a}/month': ' بسعر {a}/شهرياً',
   "You entered {a}/month × 12 = {b}/year, so I'm searching up to {b}. ": 'أدخلت {a}/شهرياً × 12 = {b}/سنوياً، لذا أبحث حتى {b}. ',
   ' for up to {a}/year': ' بسعر حتى {a}/سنوياً',
@@ -615,10 +640,12 @@ const AR: Record<string, string> = {
   'Muktamel':                          'مكتمل',
   'Aqaratikom':                        'عقاراتكم',
   'Awal Real Estate':                  'أوال العقارية',
+  'Awal United for Real Estate':       'أوال المتحدة العقارية', // official (their X @awaalun: «مؤسسة أوال المتحدة العقارية»)
   'Al Khaas':                          'الخاص للاستثمار العقاري',
   'Abeea Real Estate':                 'ابيعا العقارية',
   'Jurash Real Estate':                'جرش العقارية',
   'Al Nokhba':                         'النخبة العقارية',
+  'Gathern':                           'جاذر إن', // official (App Store / Google Play / @gathernApp: «Gathern | جاذر إن»)
   'Deal':                              'ديل',
   'Deal App':                          'ديل',
   '24 Souq':                           'سوق العقار ٢٤',
@@ -858,7 +885,21 @@ const AR: Record<string, string> = {
   "Note: to change your {provider} account, you'll need to delete this account and sign up again with the new one.":
     'ملاحظة: لتغيير حساب {provider}، عليك حذف هذا الحساب وإنشاء حساب جديد بالحساب الآخر.',
 
-  // About Us
+  // About Us — «من نحن» copy is the OWNER'S EXACT wording (2026-07-09); never rewrite or shorten it.
+  'Close': 'إغلاق',
+  'A Saudi property-search tool, powered by AI.': 'أداة بحث عقارية سعودية، مدعومة بالذكاء الاصطناعي.',
+  'Ezhalah is your first destination for property search in Saudi Arabia, fully powered by AI.':
+    'إزهله هي وجهتك الأولى للبحث عن عقار في المملكة العربية السعودية، مدعومة بالكامل بالذكاء الاصطناعي.',
+  'Instead of browsing dozens of sites, we gather the properties listed on most licensed real-estate platforms in the Kingdom, plus the websites of licensed real-estate companies and offices, and show them in one organized, easy place.':
+    'بدل التنقل بين عشرات المواقع، نجمع لك العقارات المدرجة من معظم المنصات العقارية المرخّصة في المملكة، إضافة إلى مواقع شركات ومكاتب عقارية مرخصة، ونعرضها في مكان واحد منظّم وسهل.',
+  'Search smart, compare fast, and contact the listing source directly. All from one screen.':
+    'ابحث بذكاء، قارن بسرعة، وتواصل مباشرة مع مصدر الإعلان. كل ذلك من شاشة واحدة.',
+  'In short: Ezhalah is a search and aggregation tool — we do not own or sell properties, we connect you to them wherever they are.':
+    'باختصار: إزهله أداة بحث وتجميع — لا نملك العقارات ولا نبيعها، بل نوصلك إليها أينما كانت.',
+  'We operate under FAL license No. XXXXXXXX.':
+    'نعمل بموجب ترخيص فال رقم XXXXXXXX.',
+  'We are committed to storing your data on servers inside the Kingdom in accordance with the Personal Data Protection Law.':
+    'نلتزم بحفظ بياناتك على خوادم داخل المملكة وفق نظام حماية البيانات الشخصية.',
   'Ezhalah is a Saudi, AI-powered property search platform. We help people find properties faster by searching Aqar, Wasalt, Aldarim and more in one place, and help those platforms reach more users by driving traffic directly to their listings.':
     'إزهله منصة سعودية للبحث العقاري مدعومة بالذكاء الاصطناعي. نساعد الناس على إيجاد العقارات بشكل أسرع بالبحث في منصات عقار ووصلت والدريم في مكان واحد، ونساعد تلك المنصات على الوصول إلى مزيد من المستخدمين بتوجيه الزيارات مباشرة إلى إعلاناتها.',
   'Our role': 'دورنا',
