@@ -12,7 +12,8 @@ import ShareSheet from '@/components/ShareSheet';
 import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { matchLocations, placeLabel, placeTitle, placeSub, placeIcon, placeKey, resolveLocation, ensureLocationIndex, type Place } from '@/data/locations';
-import { grouped, toLatinDigits } from '@/data/search';
+import { grouped } from '@/data/search';
+import { toWholeNumberDigits } from '@/lib/inputHygiene';
 import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
@@ -620,7 +621,7 @@ export default function Home() {
                           <Text style={s.rangeLabel}>{t('From')}</Text>
                           <TextInput ref={areaMinRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                             value={areaMinValue}
-                            onChangeText={(v) => { const d = toLatinDigits(v).split(/[.٫]/)[0].replace(/\D/g, ''); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
+                            onChangeText={(v) => { const d = toWholeNumberDigits(v); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
                         </Pressable>
                         <Pressable style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]} onPress={() => areaMaxRef.current?.focus()}>
@@ -628,7 +629,7 @@ export default function Home() {
                           <Text style={s.rangeLabel}>{t('To')}</Text>
                           <TextInput ref={areaMaxRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                             value={areaMaxValue}
-                            onChangeText={(v) => { const d = toLatinDigits(v).split(/[.٫]/)[0].replace(/\D/g, ''); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
+                            onChangeText={(v) => { const d = toWholeNumberDigits(v); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
                         </Pressable>
                       </View>
@@ -649,7 +650,7 @@ export default function Home() {
                       <Text style={s.rangeLabel}>{t('From')}</Text>
                       <TextInput ref={priceMinRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                         value={priceMinValue}
-                        onChangeText={(v) => { const d = toLatinDigits(v).split(/[.٫]/)[0].replace(/\D/g, ''); setQuery((q) => ({ ...q, priceMin: d || null, priceInput: '', priceBand: null })); }} />
+                        onChangeText={(v) => { const d = toWholeNumberDigits(v); setQuery((q) => ({ ...q, priceMin: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
                     </Pressable>
                     <Pressable style={[s.field, s.rangeBox, query.priceMax ? s.sizeFieldOn : null]} onPress={() => priceMaxRef.current?.focus()}>
@@ -657,7 +658,7 @@ export default function Home() {
                       <Text style={s.rangeLabel}>{t('To')}</Text>
                       <TextInput ref={priceMaxRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                         value={priceMaxValue}
-                        onChangeText={(v) => { const d = toLatinDigits(v).split(/[.٫]/)[0].replace(/\D/g, ''); setQuery((q) => ({ ...q, priceMax: d || null, priceInput: '', priceBand: null })); }} />
+                        onChangeText={(v) => { const d = toWholeNumberDigits(v); setQuery((q) => ({ ...q, priceMax: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
                     </Pressable>
                   </View>
@@ -699,7 +700,7 @@ export default function Home() {
                         if (sizeIsBand) setQuery((q) => ({ ...q, detail: null, priceBand: null }));
                       }}
                       onChangeText={(v) => {
-                        const digits = toLatinDigits(v).replace(/\D/g, '');
+                        const digits = toWholeNumberDigits(v);
                         setQuery((q) => ({ ...q, detail: digits ? digits : null, priceBand: null }));
                       }}
                     />
