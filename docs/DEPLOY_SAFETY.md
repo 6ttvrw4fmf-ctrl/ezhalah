@@ -64,14 +64,14 @@ production deploy. Use it as the rollback target if a future deploy needs to be 
 | Field | Value |
 |---|---|
 | Date | 2026-07-10 |
-| Vercel deployment ID | `dpl_D6LmqNGX8iP8kCjkQmGPZwzkgKBo` |
+| Vercel deployment ID | `dpl_6K2nJfsrBHYXBUXSzGo8xdJsfwsZ` |
 | Production URL | `https://ezhalah-app.vercel.app` |
-| Bundle hash | `entry-b12749eea6c6842efc92b8ed42814a1a.js` |
-| Deployed from | `main` @ `c9ff47d3d8999258bc26db49f3045fc01d22de92`, via `scripts/safe-deploy.sh` from a clean worktree (0 uncommitted files, local `main` == `origin/main` exactly) — first real use of the guard script |
-| Contains | PR #41 (commercial two-scope fix) + PR #43 (deploy safety tooling) + PR #42 (UI baseline: About dialog, card feedback row, search loader v4, load-more cascade, price/area range picker, property icons) + PR #44 (64 missing icon/image assets `propertyIcons.ts` needed — found because this deploy attempt failed once first; see incident addendum below) |
-| Verified post-deploy | Bundle re-fetched fresh and grepped: `p_tables2`/`p_types2` present, old buggy commercial markers absent, `getListingFeedback`/`pickLoaderPlatforms`/`PanResponder`/`useReducedMotion`/`eagle-mark`/`hero-bg` all present, new icon paths (`apartments-coliving`, `bed-1`, `filter-price`) present confirming the asset fix took effect. Live RPC call end-to-end: `total_count: 14619` for a real broad-Commercial query. |
+| Bundle hash | `entry-83f725ab4d097c7a665491f393db4385.js` |
+| Deployed from | `main` @ `d82145fa4421abfd6f1f098b38b547969424000f`, via `scripts/safe-deploy.sh` from a clean worktree (0 uncommitted files, local `main` == `origin/main` exactly) |
+| Contains | Everything in the prior baseline entry below (PR #41/#42/#43/#44) **plus PR #45** (search-loading platform-logo animation always shows the complete 32-platform roster — owner clarification: the animation is a brand/trust display of the full network, decoupled from per-query backend eligibility; previously it hid Gathern's logo on Buy searches to mirror backend rules, which the owner explicitly asked to stop doing. Backend eligibility — Buy/Rent, Gathern's monthly-rent-only gate, category — is completely unchanged) |
+| Verified post-deploy | `age: 0` (fresh, not cached). Bundle re-fetched and grepped: `p_tables2` present (commercial fix intact), `Thanks for your feedback` / `your first destination for property search` / `mBtnPrimary` all present (prior UI baseline intact). Logic-only change (no new/removed user-facing strings to grep for PR #45 itself) — verified via clean PR merge + typecheck + fast-forward from a verified `main` tip, not a live-bundle string match. |
 | Known gaps (unrelated, not a regression) | `log-click` edge function still not deployed (client-side click tracking silently no-ops — this deploy's `clicks.ts` is the OLDER pre-existing version, since click/session work was deliberately excluded from PR #42's scope); custom domain `ezhalah.com` does not point to this project — neither affects the UI baseline |
-| Main has since moved further | `origin/main` is now at `d82145f` (PR #45, a different/concurrent session's `SearchLoader.tsx`/`loaderPlatforms.ts` polish, merged 2026-07-10T07:58:15Z, **after** this deploy) — not part of what's currently live. Not a regression, just normal: a deploy is a snapshot, `main` can advance after it. Redeploy when ready to pick it up. |
+| Main has since moved further | `origin/main` is at `fb6107b` (this same PR's baseline-table doc update, #46) — no code change ahead of what's live as of this entry. |
 
 ### Incident addendum (2026-07-10): a real near-miss, caught correctly
 
