@@ -63,13 +63,19 @@ production deploy. Use it as the rollback target if a future deploy needs to be 
 
 | Field | Value |
 |---|---|
-| Date | 2026-07-09 |
-| Vercel deployment ID | `dpl_8ML9bBf2b8c7RKXe4VR4tMdbNQMe` |
+| Date | 2026-07-10 |
+| Vercel deployment ID | `dpl_D6LmqNGX8iP8kCjkQmGPZwzkgKBo` |
 | Production URL | `https://ezhalah-app.vercel.app` |
-| Bundle hash | `entry-a449b059b733ef3b03b534f46fe0d559.js` |
-| Contains | The commercial two-scope search fix (PR #41, merged) **and** every UI/UX feature built this session (About dialog, card feedback row, search loader v4, load-more cascade, price/area range picker, property icons — see PR #42) |
-| Source of truth | PR #41 (merged, `main`) + PR #42 (UI baseline sync — merge this to make `main` match the deployed bundle exactly) |
-| Known gaps (unrelated, not a regression) | `log-click` edge function not deployed (client-side click tracking silently no-ops); custom domain `ezhalah.com` does not point to this project (see the domain-routing note below) — neither affects the UI baseline |
+| Bundle hash | `entry-b12749eea6c6842efc92b8ed42814a1a.js` |
+| Deployed from | `main` @ `c9ff47d3d8999258bc26db49f3045fc01d22de92`, via `scripts/safe-deploy.sh` from a clean worktree (0 uncommitted files, local `main` == `origin/main` exactly) — first real use of the guard script |
+| Contains | PR #41 (commercial two-scope fix) + PR #43 (deploy safety tooling) + PR #42 (UI baseline: About dialog, card feedback row, search loader v4, load-more cascade, price/area range picker, property icons) + PR #44 (64 missing icon/image assets `propertyIcons.ts` needed — found because this deploy attempt failed once first; see incident addendum below) |
+| Verified post-deploy | Bundle re-fetched fresh and grepped: `p_tables2`/`p_types2` present, old buggy commercial markers absent, `getListingFeedback`/`pickLoaderPlatforms`/`PanResponder`/`useReducedMotion`/`eagle-mark`/`hero-bg` all present, new icon paths (`apartments-coliving`, `bed-1`, `filter-price`) present confirming the asset fix took effect. Live RPC call end-to-end: `total_count: 14619` for a real broad-Commercial query. |
+| Known gaps (unrelated, not a regression) | `log-click` edge function still not deployed (client-side click tracking silently no-ops — this deploy's `clicks.ts` is the OLDER pre-existing version, since click/session work was deliberately excluded from PR #42's scope); custom domain `ezhalah.com` does not point to this project — neither affects the UI baseline |
+| Main has since moved further | `origin/main` is now at `d82145f` (PR #45, a different/concurrent session's `SearchLoader.tsx`/`loaderPlatforms.ts` polish, merged 2026-07-10T07:58:15Z, **after** this deploy) — not part of what's currently live. Not a regression, just normal: a deploy is a snapshot, `main` can advance after it. Redeploy when ready to pick it up. |
+
+### Incident addendum (2026-07-10): a real near-miss, caught correctly
+
+The first attempt to deploy this exact baseline (`main` @ `25e886e`, before PR #44) **failed** — `scripts/safe-deploy.sh`'s real `expo export` build hit `Unable to resolve module ../../assets/icons/apartments-coliving.png`. Root cause: PR #42's file-scoping missed 64 binary asset files that `propertyIcons.ts` requires (they existed locally, git-tracked on the old branch, but a sampling-based check during PR #42's construction didn't catch every `require()` in the new files, and `tsc --noEmit` doesn't validate that image paths resolve — only a real build does). **Production was never affected** — Vercel does not promote a failed build to the alias, confirmed by checking the live bundle hash was unchanged immediately after the failed attempt. Fixed via PR #44 (the 64 missing files, no code changes), verified with a real local `expo export --platform web` build before merging, then redeployed successfully. This is exactly the failure mode `scripts/safe-deploy.sh` exists to catch — and it worked.
 
 **Update this table after every future production deploy.** Stale entries here are worse than no
 entry — if you deploy and don't update it, the next person (or the next Claude session) will
