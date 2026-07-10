@@ -1,0 +1,29 @@
+# Wasalt scraper unit tests — guards the empty-vs-failure classification so a real scraper failure can
+# never regress into a silent green "empty category" (owner 2026-07-10). Hermetic: stubs curl_cffi and
+# the DB layer, so it needs only pytest and runs in seconds with no secrets / network.
+name: Wasalt tests
+
+on:
+  push:
+    paths:
+      - "scrapers/wasalt/**"
+      - ".github/workflows/wasalt-tests.yml"
+  pull_request:
+    paths:
+      - "scrapers/wasalt/**"
+      - ".github/workflows/wasalt-tests.yml"
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pytest
+        run: pip install pytest
+      - name: Run Wasalt empty-vs-failure tests
+        run: python -m pytest scrapers/wasalt/tests/ -v
