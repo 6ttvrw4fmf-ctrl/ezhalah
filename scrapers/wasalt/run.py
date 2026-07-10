@@ -24,6 +24,7 @@ import os
 import re
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -175,26 +176,88 @@ def session() -> cc.Session:
     return s
 
 
-def fetch_page(s: cc.Session, deal: str, cat: str, slug: str, page: int) -> tuple[int, int, list[dict]]:
-    """Return (count, total_pages, properties[]) for one search page."""
+# ── Empty-vs-failure classification (owner 2026-07-10) ────────────────────────────────────────────
+# The ONLY way a slice is ever reported ✅-empty is REASON_OK with count==0 — i.e. we positively
+# reached wasalt.sa, parsed its __NEXT_DATA__, and found a real `searchResult` dict whose count is 0.
+# Every genuine problem (proxy dead, Cloudflare wall, HTTP error, timeout, malformed/blank JSON, or a
+# changed API that dropped `searchResult`) gets a distinct non-OK reason and is reported ❌. A failure
+# can therefore NEVER be misclassified as an empty category — the two paths do not overlap.
+REASON_OK = "ok"
+REASON_HTTP = "http_error"                 # non-200 after retries (incl. Cloudflare 403/503 blocks)
+REASON_NETWORK = "network_error"           # connection/proxy exception after retries
+REASON_TIMEOUT = "timeout"                 # request timed out after retries
+REASON_NO_NEXT_DATA = "no_next_data"       # 200 but no __NEXT_DATA__ → Cloudflare JS challenge / bot wall
+REASON_BAD_JSON = "bad_json"               # __NEXT_DATA__ present but not valid JSON
+REASON_NO_SEARCH_RESULT = "no_search_result"  # valid JSON but `searchResult` gone → API shape changed
+
+
+@dataclass
+class PageResult:
+    """Outcome of one search-page fetch. `ok` is True ONLY when a real `searchResult` was parsed;
+    `count` is then Wasalt's authoritative catalog size for the query (0 = legitimately empty)."""
+    ok: bool
+    reason: str = REASON_OK
+    detail: str = ""                       # status code / exception text — surfaced in run notes
+    count: int = 0
+    total_pages: int = 0
+    props: list = field(default_factory=list)
+
+
+def _looks_like_timeout(exc: Exception) -> bool:
+    m = str(exc).lower()
+    return "timed out" in m or "timeout" in m or "etimedout" in m
+
+
+def _shell_reason(html: str) -> str:
+    """Describe a 200 response that carried no __NEXT_DATA__ — almost always a bot wall. Naming
+    Cloudflare explicitly makes the ❌ actionable instead of a bare 'no data'."""
+    low = html.lower()
+    if "just a moment" in low or "challenge-platform" in low or "cf-chl" in low or "cf-mitigated" in low:
+        return "cloudflare-challenge"
+    if "access denied" in low or "attention required" in low:
+        return "bot-wall/access-denied"
+    return "no __NEXT_DATA__ (unexpected shell)"
+
+
+def fetch_page(s: cc.Session, deal: str, cat: str, slug: str, page: int) -> PageResult:
+    """Fetch one search page and CLASSIFY the outcome (see PageResult). Retries transient transport
+    errors (exception / non-200) up to 3×; a 200 that isn't the real app is NOT retried into a silent
+    zero — it is reported as the specific failure it is."""
     seg = "sale" if deal == "sale" else "rent"
     url = (f"{BASE}/en/{seg}/search?propertyFor={deal}&countryId=1&type={cat}"
            f"&propertyTypeData={slug}&page={page}")
     _throttle()
+    reason = REASON_NETWORK
+    detail = ""
     for attempt in range(3):
         try:
             r = s.get(url, timeout=30)
-        except Exception:
+        except Exception as e:  # connection / proxy / timeout — transient, retry
+            reason = REASON_TIMEOUT if _looks_like_timeout(e) else REASON_NETWORK
+            detail = str(e)[:160]
             time.sleep(2 * (attempt + 1)); continue
-        if r.status_code != 200:
+        if r.status_code != 200:  # 403/503 Cloudflare block, 5xx, etc. — transient, retry
+            reason, detail = REASON_HTTP, f"HTTP {r.status_code}"
             time.sleep(2 * (attempt + 1)); continue
+        # Got a 200. A 200 with no __NEXT_DATA__ is a bot-wall shell, NOT an empty category — report it
+        # as a failure immediately (retrying a persistent CF wall on the same IP just wastes bandwidth).
         m = NEXT_RE.search(r.text)
         if not m:
-            return 0, 0, []
-        sr = (json.loads(m.group(1)).get("props", {}).get("pageProps", {}).get("searchResult") or {})
+            return PageResult(ok=False, reason=REASON_NO_NEXT_DATA, detail=_shell_reason(r.text))
+        try:
+            data = json.loads(m.group(1))
+        except (ValueError, TypeError) as e:
+            return PageResult(ok=False, reason=REASON_BAD_JSON, detail=str(e)[:160])
+        sr = (data.get("props") or {}).get("pageProps", {}).get("searchResult")
+        if not isinstance(sr, dict):
+            # __NEXT_DATA__ parsed but the search payload is missing → contract changed. REAL failure,
+            # not an empty category. (Closes the old `searchResult or {}` → silent count=0 hole.)
+            return PageResult(ok=False, reason=REASON_NO_SEARCH_RESULT, detail="searchResult missing")
         props = [p for p in (sr.get("properties") or []) if isinstance(p, dict)]
-        return int(sr.get("count") or 0), int(sr.get("totalPages") or 0), props
-    return 0, 0, []
+        return PageResult(ok=True, count=int(sr.get("count") or 0),
+                          total_pages=int(sr.get("totalPages") or 0), props=props)
+    # All 3 attempts exhausted on a retryable transport error.
+    return PageResult(ok=False, reason=reason, detail=detail)
 
 
 def _attr(prop: dict, key: str) -> Any:
@@ -393,19 +456,64 @@ def upsert(row: dict, main_type: str) -> None:
     db.upsert_wasalt_residential(row)
 
 
-def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> int:
-    count, total_pages, _ = fetch_page(s, deal, cat, slug, 1)
+@dataclass
+class SliceResult:
+    """Verdict for one type-slug × deal slice. Exactly one of three states holds:
+      • failed   → could not positively reach/parse the API (real ❌ needing attention)
+      • empty    → reached the API, it truthfully reports 0 listings (legitimate ✅)
+      • else     → reached the API and upserted rows (normal ✅)."""
+    slug: str
+    deal: str
+    cat: str
+    reached: bool                          # did page 1 positively parse a searchResult?
+    count: int = 0                         # Wasalt's catalog size for this query
+    upserted: int = 0
+    reason: str = REASON_OK
+    detail: str = ""
+
+    @property
+    def failed(self) -> bool:
+        # A slice fails if we never reached the API, OR the API claims listings exist yet we upserted
+        # none (fetch/map anomaly — genuinely worth a ❌, never silently green).
+        return (not self.reached) or (self.count > 0 and self.upserted == 0)
+
+    @property
+    def empty(self) -> bool:
+        return self.reached and self.count == 0 and not self.failed
+
+
+def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> SliceResult:
+    first = fetch_page(s, deal, cat, slug, 1)
+    if not first.ok:
+        # Could NOT reach/parse Wasalt for this query — a REAL failure, never an "empty category".
+        print(f"\n── WASALT {slug.upper():<16} {deal.upper():<4} {cat.upper():<11} "
+              f"✗ FAILED [{first.reason}: {first.detail}]")
+        return SliceResult(slug, deal, cat, reached=False, reason=first.reason, detail=first.detail)
+
+    count, total_pages = first.count, first.total_pages
     pages = min(max_pages, total_pages or max_pages)
-    print(f"\n── WASALT {slug.upper():<16} {deal.upper():<4} {cat.upper():<11} count={count} pages≤{pages}")
+    tag = "EMPTY CATEGORY (count=0)" if count == 0 else f"count={count}"
+    print(f"\n── WASALT {slug.upper():<16} {deal.upper():<4} {cat.upper():<11} {tag} pages≤{pages}")
+    if count == 0:
+        # Reached the API; it truthfully reports zero listings for this niche. LEGITIMATELY EMPTY = ✅.
+        return SliceResult(slug, deal, cat, reached=True, count=0, upserted=0)
+
     is_commercial = cat == "commercial"
     upserter = db.upsert_wasalt_commercial_batch if is_commercial else db.upsert_wasalt_residential_batch
     upserted = 0
     for page in range(1, pages + 1):
-        _, _, props = fetch_page(s, deal, cat, slug, page)
-        if not props:
+        # Reuse page 1 (already fetched) instead of re-hitting the network for it.
+        pr = first if page == 1 else fetch_page(s, deal, cat, slug, page)
+        if not pr.ok:
+            # A later page failed AFTER we proved reachability on page 1 and (usually) upserted rows.
+            # Stop paginating; the slice is still ✅ if page 1 delivered — a partial deep page is not a
+            # source outage. If we ended up with nothing, `failed` (count>0, upserted==0) catches it.
+            print(f"   ⚠ page {page} failed [{pr.reason}: {pr.detail}] — stopping pagination")
+            break
+        if not pr.props:
             break
         batch = []
-        for prop in props:
+        for prop in pr.props:
             # Pass the session so map_property can fetch the detail page's additionalAttributes
             # (only on first sight of the slug — cached after that).
             row = map_property(prop, deal, s)
@@ -421,7 +529,11 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> int:
         if page % 20 == 0:
             print(f"   [{page}/{pages}] upserted so far: {upserted}")
     print(f"   ✓ {slug}/{deal}: {upserted} upserted")
-    return upserted
+    res = SliceResult(slug, deal, cat, reached=True, count=count, upserted=upserted)
+    if res.failed:
+        res.reason, res.detail = "fetched_none_despite_count", f"count={count} but 0 upserted"
+        print(f"   ✗ {slug}/{deal}: ANOMALY — {res.detail}")
+    return res
 
 
 def main() -> int:
@@ -435,30 +547,55 @@ def main() -> int:
 
     s = session()
     run_id = db.begin_run("wasalt")
+    results: list[SliceResult] = []
     total = 0
+    ok = False
+    notes = "run did not complete"
     try:
         if args.all:
             for cat, slugs in SLUGS.items():
                 for slug in slugs:
                     for deal in ("sale", "rent"):
-                        total += scrape_slice(s, deal, cat, slug, max_pages=args.pages)
+                        results.append(scrape_slice(s, deal, cat, slug, max_pages=args.pages))
         else:
-            total = scrape_slice(s, args.deal, args.type, args.slug, max_pages=args.pages)
-        # Fail-visibly guard (owner 2026-07-07): a Wasalt sweep that fetched/upserted ZERO rows is a
-        # failure, NOT a healthy empty result — Wasalt has ~59k live listings, so a working sweep always
-        # re-sees thousands (upsert refreshes existing rows too). 0 rows means the Saudi residential
-        # proxy is down / IP-blocked and the site served an empty/bot-wall shell. Never report ok=true
-        # on 0 rows, or the run looks green in scrape_runs while nothing flows into search. Mirrors the
-        # toor guard (PR #30).
-        ok = total > 0
-        notes = f"upserted={total}" if ok else "FETCHED 0 ROWS — proxy/network block (fail-visibly guard)"
+            results.append(scrape_slice(s, args.deal, args.type, args.slug, max_pages=args.pages))
+
+        # Verdict (owner 2026-07-10, replaces the 2026-07-07 `total>0` guard). GitHub Actions must
+        # distinguish three states, so the run is judged on REACHABILITY, not raw row count:
+        #   ❌ REAL FAILURE — any slice we couldn't positively reach/parse (proxy dead, Cloudflare wall,
+        #      HTTP error, timeout, blank/malformed JSON, or a vanished searchResult).
+        #   ✅ EMPTY CATEGORY — every slice reached the API and it truthfully reported 0 listings.
+        #   ✅ SUCCESS — reached the API and upserted rows.
+        # A legitimately-empty niche (farm-rent, chalet-rent, office-rent…) no longer trips a false ❌,
+        # AND a dead proxy that returns 0 rows still trips a real ❌ — because it never reaches the API.
+        total = sum(r.upserted for r in results)
+        failures = [r for r in results if r.failed]
+        empties = [r for r in results if r.empty]
+        if not results:
+            ok, notes = False, "NO SLICES RUN"
+        elif failures:
+            ok = False
+            detail = "; ".join(f"{r.slug}/{r.deal}={r.reason}({r.detail})" for r in failures[:8])
+            notes = f"REAL FAILURE — {len(failures)}/{len(results)} slice(s) failed: {detail}"
+        elif empties and total == 0:
+            ok = True
+            names = ", ".join(f"{r.slug}/{r.deal}" for r in empties[:8])
+            notes = f"OK — all {len(results)} slice(s) reached; EMPTY CATEGORY (count=0): {names}"
+        else:
+            ok = True
+            suffix = f" ({len(empties)} empty)" if empties else ""
+            notes = f"upserted={total}{suffix}"
     except Exception as e:
         ok = False
-        notes = str(e)[:400]
+        notes = f"FATAL: {str(e)[:380]}"
         print(f"\n✗ FATAL: {e}")
     finally:
-        db.end_run(run_id, ok=ok, rows_seen=total, rows_upserted=total, notes=notes)
-    print(f"\n📊 Wasalt done. {total} upserted. (run_id={run_id})")
+        db.end_run(run_id, ok=ok, rows_seen=total, rows_upserted=total, notes=notes[:400])
+    reached = sum(1 for r in results if r.reached)
+    empty_n = sum(1 for r in results if r.empty)
+    failed_n = sum(1 for r in results if r.failed)
+    print(f"\n📊 Wasalt done. {total} upserted · {reached}/{len(results)} reached · "
+          f"{empty_n} empty · {failed_n} failed. (run_id={run_id})")
     return 0 if ok else 1
 
 
