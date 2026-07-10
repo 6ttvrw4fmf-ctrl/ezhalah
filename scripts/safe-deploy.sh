@@ -67,16 +67,36 @@ npx vercel --prod --yes
 # POST-DEPLOY ASSERTION: the served bundle MUST reference the Supabase host, proving the
 # EXPO_PUBLIC_* vars were actually inlined at build time. A green Vercel build with a null client
 # is the exact failure this catches.
+#
+# This POLLS with a bounded retry loop rather than a single check. Right after `vercel --prod`, the
+# production alias can take tens of seconds to propagate the fresh bundle across Vercel's CDN, so the
+# old `sleep 3` + single curl frequently WARNED on perfectly healthy deploys (false alarm — a manual
+# re-check seconds later always found the marker; e.g. PR #48/FIX A, PR #58/dpl_2gVFqg). We now retry
+# every 5s for up to ~90s and succeed the instant `supabase.co` appears. It is WARNING-ONLY and NEVER
+# fails the script or triggers a rollback — a false negative must not block a good deploy.
+# (Env inlining is a BUILD-TIME property of the Vercel PROJECT env: if ANY served bundle references
+# supabase.co, the vars are present and every build — including this one — inlines them, so polling
+# the alias is sufficient; we don't need to resolve the exact just-deployed bundle hash.)
 echo ""
-echo "Verifying the served bundle has the Supabase config baked in..."
-sleep 3
-LIVE_BUNDLE="$(curl -s https://ezhalah-app.vercel.app/ | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
-if [ -n "$LIVE_BUNDLE" ] && curl -s "https://ezhalah-app.vercel.app/$LIVE_BUNDLE" | grep -q "supabase.co"; then
+echo "Verifying the served bundle has the Supabase config baked in (polling up to ~90s for CDN propagation)..."
+SUPA_OK=0
+LIVE_BUNDLE=""
+POLL_DEADLINE=$(( SECONDS + 90 ))
+while [ "$SECONDS" -lt "$POLL_DEADLINE" ]; do
+  LIVE_BUNDLE="$(curl -s https://ezhalah-app.vercel.app/ | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
+  if [ -n "$LIVE_BUNDLE" ] && curl -s "https://ezhalah-app.vercel.app/$LIVE_BUNDLE" | grep -q "supabase.co"; then
+    SUPA_OK=1
+    break
+  fi
+  sleep 5
+done
+if [ "$SUPA_OK" = 1 ]; then
   echo "OK: live bundle ($LIVE_BUNDLE) references supabase.co — client will initialize."
 else
-  echo "WARNING: could not confirm supabase.co in the served bundle ($LIVE_BUNDLE)."
-  echo "If search shows «حاول مرة ثانية» app-wide, the env vars did NOT inline — investigate before"
-  echo "declaring the deploy healthy. (This is the 2026-07-10 P0 signature.)"
+  echo "WARNING: could not confirm supabase.co in the served bundle after ~90s (last seen: ${LIVE_BUNDLE:-none})."
+  echo "This is warning-only and does NOT fail the deploy. If search shows «حاول مرة ثانية» app-wide, the"
+  echo "env vars did NOT inline — investigate before declaring the deploy healthy (2026-07-10 P0 signature)."
+  echo "If search works fine, this was just slow CDN propagation — re-grep the served bundle to confirm."
 fi
 
 # ── ADVANCE THE APPROVED BASELINE to the just-deployed commit, so every FUTURE preflight refuses to
