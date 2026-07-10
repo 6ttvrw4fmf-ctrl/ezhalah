@@ -200,34 +200,66 @@ DB-write gate: that gate only catches known PLACEHOLDER tokens ("Other"/"Unknown
 time; it cannot catch a scraper hardcoding an assumed-real city name (e.g. "Riyadh", "Sakaka") as a
 fallback, which is the bug shape this test exists to close.
 
-**Known blind spot** (found during adversarial mutation-testing): the false-positive filter
-suppresses an entire line if it contains any of `city_map`/`city_ar`/`city_id`/etc. anywhere in it —
-so a NEW violation added to the SAME line as an existing safe identifier (e.g.
-`city = CITY_MAP.get(raw) or "Riyadh"`) would slip through undetected. Narrow (requires deliberately
-combining both on one line) but real; not fixed here — flagged for whoever next touches this test.
+**Blind spot fixed (2026-07-10).** The original design suppressed an entire line if it contained
+`city_map`/`city_ar`/`city_id`/etc. anywhere in it — so a new violation sharing a line with an
+existing safe identifier (e.g. `city = CITY_MAP.get(raw) or "Riyadh"`) slipped through undetected.
+Rewritten as two independently-evaluated pattern classes: a literal quoted-string default
+(`city = "X"` / `city = <anything> or "X"`) is now **never** suppressed by a nearby safe identifier
+— it's dangerous regardless of what else is on the line — while an identifier-shaped match
+(`*CITY`-named dict/constant) is suppressed only when a safe identifier's own match **span
+overlaps that specific match** (position-aware), not merely appears somewhere else on the line.
+Verified: an end-to-end mutation test injecting the exact `city = CITY_MAP.get(raw_city) or
+"Riyadh"` line into a real scraper file (`scrapers/deal/run.py`, using its own real `CITY_MAP`
+identifier) is caught by the guard, then cleanly reverted with the full suite green again. A
+placeholder-value exclusion ("Other"/"Unknown"/etc. are a different, already-covered bug class) and
+a docstring/prose-line exclusion were added alongside it, both needed once the literal-string
+detection got strict enough to also start matching prose examples in this file's own docstring and
+`scrapers/wasalt/recover_other.py`'s root-cause writeup.
+
+**Newly discovered by the fix itself (2026-07-10) — NOT fixed, NOT independently verified, flagged
+here so the guard passes today without silently missing them.** The original regex never reliably
+matched `city = <a .get(...) call> or "RealCity"` — a function call between `city =` and `or` broke
+its adjacency assumption. Making the literal-default detection robust to that surfaced 4 more
+platforms with this exact bug shape, beyond Deal/Ramzalqasim/AlNokhba/Nowaisiry/Awal above:
+
+- **Jazwtn → `"Jazan"`.** Comment claims the brokerage operates only in the Jazan *region* (not
+  explicitly city). Unverified.
+- **Hajer → `"Hofuf"`.** Project memory already describes Hajer as an Al-Ahsa-area boutique
+  brokerage (Hofuf is Al-Ahsa's largest city) — plausible, but not verified against this specific
+  default the way Ramzalqasim's region constant was.
+- **Jurash → `"Khamis Mushait"`.** No single-city claim found nearby in the code. Least evidence of
+  the four that this is a legitimate constant rather than a bug.
+- **Satel → `"Riyadh"`.** **Higher concern than the other three.** Its own comment says
+  "overwhelmingly Riyadh" — explicitly *not* a single-city claim — and the condition defaults to
+  Riyadh whenever the Arabic city field is merely non-empty, regardless of what it actually says:
+  a real, different Arabic city name paired with noisy English text would be silently overridden.
+  This looks more like the Nowaisiry/Deal bug shape than a legitimate brokerage constant.
+  **Recommend prioritizing this one first** if/when this list is worked through.
 
 ### Known accepted single-city/region constants (allowlisted, cited in the test file)
 
 A hardcoded value is **not** automatically a violation when it expresses "this whole brokerage
 operates in exactly one real city/region" (a business fact) rather than "guess a city per-row when
 the source is unclear" (the actual bug). Ramzalqasim's fixed `region = "Qassim"` (Scope 1, above) is
-the precedent for this distinction. Two more claims of this shape exist and are allowlisted, but
-**neither has been independently verified** — do not treat their presence in the allowlist as proof
-they're correct, and do not extend the pattern to a new platform without the same live verification
-already done for Ramzalqasim's region constant:
+the precedent for this distinction. The claims below exist and are allowlisted, but **none has been
+independently verified** — do not treat presence in the allowlist as proof of correctness, and do
+not extend the pattern to a new platform without the same live verification already done for
+Ramzalqasim's region constant:
 
 - **Awal `"arar"` → `"Arar"`.** Code comment claims every RTCL `arar`-taxonomy listing is genuinely
   in Arar city. Owner directive 2026-07-10: "do not change the Arar branch until it is independently
   verified." No live verification has been performed.
-- **Mustqr `DEFAULT_CITY = "Hail"` / `DEFAULT_REGION = "Hail"`.** Code comment claims Mustqr is a
-  single-city Hail-based brokerage. A live sample of 20 distinct neighborhood names showed nothing
-  obviously non-Hail, but a direct check against Mustqr's own source Supabase REST API failed (no
-  valid API key available) and was not retried. Owner directive 2026-07-10: "Do not change Mustqr
-  yet. First obtain stronger evidence that it is truly single-city." **Not fixed — still unconditionally
-  assigns `city = "Hail"` to every row.** Whoever picks this up next needs either a valid credential
-  to query Mustqr's own taxonomy directly, or another independent source (e.g. their public site's
+- **Mustqr `DEFAULT_CITY = "Hail"`.** Code comment claims Mustqr is a single-city Hail-based
+  brokerage. A live sample of 20 distinct neighborhood names showed nothing obviously non-Hail, but
+  a direct check against Mustqr's own source Supabase REST API failed (no valid API key available)
+  and was not retried. Owner directive 2026-07-10: "Do not change Mustqr yet. First obtain stronger
+  evidence that it is truly single-city." **Not fixed — still unconditionally assigns
+  `city = "Hail"` to every row.** Whoever picks this up next needs either a valid credential to
+  query Mustqr's own taxonomy directly, or another independent source (e.g. their public site's
   city/area filter options) to confirm or refute the single-city claim before this can be closed out
   either way.
+- **Jazwtn, Hajer, Jurash, Satel** — see "Newly discovered" above; same treatment, not yet worked
+  through.
 
 ## Other-field placeholder audit (owner directive item 7)
 
