@@ -3,11 +3,17 @@
 // search, filters, ranking, or which listings return. Every entry is a REAL platform we scrape
 // (mirrors src/data/platforms.ts); nothing here is invented.
 //
+// LOCKED 2026-07-09 (owner clarification, Option A): the animation is a BRAND/TRUST display of the
+// COMPLETE Ezhalah network, not a literal per-query eligibility list. It always shows all 32 logos —
+// for Buy AND Rent, monthly or not, Residential or Commercial, and even when the user's own search
+// restricts to specific platforms. Backend eligibility (which tables a given query actually hits —
+// Buy/Rent, Gathern-monthly-only, a platform filter, etc.) is decided ENTIRELY by remote.ts / the
+// search RPC and is untouched by this file. See [[search-loader-perplexity-2026-07-09]] for the
+// full decision trail (this supersedes the earlier "Buy hides Gathern in the loader" rule).
+//
 // The logo require() map is deliberately DUPLICATED from ResultCard.tsx rather than shared, so the
 // result-card rendering path is never touched by this feature. If a logo asset is renamed, update it
 // in both places. All 32 platforms currently have a logo asset.
-import type { Deal, Category } from './taxonomy';
-import { platform } from './platforms';
 
 // name MUST match the `name` in PLATFORMS exactly (so platform(name) resolves allowsRent/allowsBuy).
 // i18nKey is the English source string in the AR dictionary → t(i18nKey) gives the Arabic display name
@@ -93,14 +99,6 @@ export function bumpRotation(): void {
   try { (globalThis as { localStorage?: Storage }).localStorage?.setItem(ROT_KEY, String(_rot)); } catch {}
 }
 
-export type LoaderOpts = {
-  deal: Deal;
-  bothDeals?: boolean;
-  category?: Category | null;
-  sources?: string[] | null;
-  resultSources?: string[]; // raw `source` values from the returned listings, when available
-};
-
 // Rotate an array left by `by` (non-mutating).
 function rotate<T>(arr: T[], by: number): T[] {
   if (arr.length === 0) return arr;
@@ -108,32 +106,15 @@ function rotate<T>(arr: T[], by: number): T[] {
   return [...arr.slice(k), ...arr.slice(0, k)];
 }
 
-// Choose which platforms the searching strip shows for THIS search.
-// Rules (owner 2026-07-09, supersedes the earlier 8–12 window): show the COMPLETE supported roster —
-// every platform is a trust signal, not decoration. Never invent; Buy still hides rent-only platforms
-// (Gathern — showing it on a Buy search would be dishonest); a user `sources` restriction shows only
-// those. The rotation offset now only varies the ORDER per search so the strip feels alive without
-// ever hiding a platform.
-export function pickLoaderPlatforms(opts: LoaderOpts, offset: number): LoaderPlatform[] {
-  const { deal, bothDeals, sources, resultSources } = opts;
-
-  // 1) Eligibility.
-  let pool: LoaderPlatform[];
-  if (sources && sources.length) {
-    const wanted = new Set(sources.map((s) => normalizeSource(s)).filter(Boolean) as string[]);
-    pool = PLATFORM_META.filter((p) => wanted.has(p.name));
-    if (pool.length === 0) pool = PLATFORM_META; // filter didn't resolve → fall back to the full roster
-  } else if (bothDeals) {
-    pool = PLATFORM_META.slice();
-  } else {
-    // deal-eligible only — Buy excludes rent-only platforms (Gathern), Rent keeps everything.
-    pool = PLATFORM_META.filter((p) => (deal === 'Rent' ? platform(p.name).allowsRent : platform(p.name).allowsBuy));
-  }
-
-  // 2) Platforms actually present in returned listings lead (when known), then the rest in a
-  //    per-search rotated order. ALL eligible platforms are returned — no window, no sampling.
+// Choose which platforms the searching strip shows for THIS search: ALWAYS the complete 32-platform
+// roster (LOCKED — see the file-header note). No deal filter, no category filter, no user-`sources`
+// restriction — every logo, every search, unconditionally. `resultSources` (raw source values from
+// the listings that actually came back, once known) only REORDERS the display — platforms that truly
+// contributed lead the strip — it never removes a platform. `offset` rotates the rest per search so
+// repeat searches don't always show the same visual order.
+export function pickLoaderPlatforms(resultSources: string[] | undefined, offset: number): LoaderPlatform[] {
   const inResults = new Set((resultSources ?? []).map((s) => normalizeSource(s)).filter(Boolean) as string[]);
-  const pri = pool.filter((p) => inResults.has(p.name));
-  const rest = rotate(pool.filter((p) => !inResults.has(p.name)), offset);
+  const pri = PLATFORM_META.filter((p) => inResults.has(p.name));
+  const rest = rotate(PLATFORM_META.filter((p) => !inResults.has(p.name)), offset);
   return [...pri, ...rest];
 }
