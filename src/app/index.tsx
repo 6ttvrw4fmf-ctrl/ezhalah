@@ -139,6 +139,14 @@ export default function Home() {
   const [cityFocus, setCityFocus] = useState(false);
   const [locMsg, setLocMsg] = useState(''); // Arabic-only: shown when the user types the city in English
   const cityRef = useRef<TextInput>(null);
+  // Refs so the ENTIRE Price/Area/Size box is one tap target (owner 2026-07-10): tapping anywhere in
+  // the box — icon, label, padding, unit text — focuses the input immediately, same pattern already
+  // used for the city field above (`cityRef` + its wrapping Pressable).
+  const areaMinRef = useRef<TextInput>(null);
+  const areaMaxRef = useRef<TextInput>(null);
+  const priceMinRef = useRef<TextInput>(null);
+  const priceMaxRef = useRef<TextInput>(null);
+  const sizeBoxRef = useRef<TextInput>(null);
   // Auto-advance the form: as the user fills each step (deal, location, category, type, detail,
   // price), gently scroll DOWN so the just-revealed section and the Search button come into view —
   // they never have to scroll the page themselves. (user request.)
@@ -150,22 +158,36 @@ export default function Home() {
   const groupAnchorRef = useRef<View>(null);
   const typeAnchorRef = useRef<View>(null);
   const refineAnchorRef = useRef<View>(null);
+  // How much of the PREVIOUS section stays visible above the newly-revealed one — the same amount on
+  // every step, both platforms, so the motion always reads as "slide over a bit" rather than a jump
+  // to a fresh screen. (owner 2026-07-10: "keep part of the previous section visible... every filter
+  // step, not just one.") Applied via `withAnchor` below (web: CSS scroll-margin-top) and directly in
+  // scrollDown (native: measureLayout offset) — same number, same feel, on both.
+  const SCROLL_REVEAL_OFFSET = 96;
   const scrollDown = (target?: { current: View | null }) => {
     // Defer past the state-driven re-render so the newly revealed section is laid out first.
     setTimeout(() => {
+      const sv = scrollRef.current;
       const node: any = target?.current ?? endAnchorRef.current;
+      if (!node) { sv?.scrollToEnd({ animated: true }); return; }
       if (Platform.OS === 'web') {
-        node?.scrollIntoView?.({ behavior: 'smooth', block: target ? 'start' : 'center' });
-      } else if (target?.current && scrollRef.current) {
-        target.current.measureLayout(
-          scrollRef.current as any,
-          (_x: number, y: number) => scrollRef.current?.scrollTo({ y: Math.max(0, y - 90), animated: true }),
-          () => scrollRef.current?.scrollToEnd({ animated: true }),
+        // scroll-margin-top (set on every anchor by withAnchor) makes 'start' land OFFSET px below the
+        // node's top instead of flush against the viewport edge — the previous section stays visible.
+        node.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+      } else if (sv) {
+        node.measureLayout(
+          sv as any,
+          (_x: number, y: number) => sv.scrollTo({ y: Math.max(0, y - SCROLL_REVEAL_OFFSET), animated: true }),
+          () => sv.scrollToEnd({ animated: true }),
         );
-      } else {
-        scrollRef.current?.scrollToEnd({ animated: true });
       }
     }, 90);
+  };
+  // Attaches a ref AND (web-only) sets scroll-margin-top, so every anchor gets the same gentle offset
+  // with zero extra plumbing at each call site — same pattern already used for setLtr/makeDirRef above.
+  const withAnchor = (ref: React.MutableRefObject<View | null>) => (node: any) => {
+    ref.current = node;
+    if (Platform.OS === 'web' && node?.style) node.style.scrollMarginTop = `${SCROLL_REVEAL_OFFSET}px`;
   };
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -464,7 +486,7 @@ export default function Home() {
               </ScrollView>
             )}
 
-            <View ref={catAnchorRef} />
+            <View ref={withAnchor(catAnchorRef)} />
             {/* Category — Residential / Commercial (macro) */}
             <View style={s.pick}>
               <FieldLabel>{t('Category')}</FieldLabel>
@@ -481,7 +503,7 @@ export default function Home() {
               </View>
             </View>
 
-            <View ref={groupAnchorRef} />
+            <View ref={withAnchor(groupAnchorRef)} />
             {/* Subcategory group — a SOFT/broad intent (e.g. "Vacation & Rural"). Selecting just the
                 group searches all its clean types; picking a specific type below makes it exact. */}
             {query.category && (
@@ -502,7 +524,7 @@ export default function Home() {
               </Reveal>
             )}
 
-            <View ref={typeAnchorRef} />
+            <View ref={withAnchor(typeAnchorRef)} />
             {/* Clean property type (scoped to the chosen group) — the EXACT/hard filter. Optional:
                 leaving it unselected keeps the broad group intent. */}
             {query.typeGroup && (
@@ -528,7 +550,28 @@ export default function Home() {
               </Reveal>
             )}
 
-            <View ref={refineAnchorRef} />
+            <View ref={withAnchor(refineAnchorRef)} />
+
+            {/* Rent only: tiny Monthly / Yearly toggle that tells the engine which period the typed
+                number represents. The user sees no math; they just pick what they're thinking in.
+                Hidden for Buy. MOVED above the Size filter (owner 2026-07-10) — so the user knows
+                which period a price/size they're about to type applies to, before typing it; was
+                previously dead last, right before Search. (user request.) */}
+            {query.deal === 'Rent' && (
+              <Reveal style={{ marginTop: 12 }}>
+                <Segmented
+                  options={['Monthly', 'Yearly']}
+                  icons={PERIOD_IMG}
+                  value={rentPeriod === 'monthly' ? 'Monthly' : 'Yearly'}
+                  onChange={(v) => setQuery((q) => ({ ...q, rentPeriod: v === 'Monthly' ? 'monthly' : 'annual' }))}
+                />
+                {/* Tiny inline hint under the toggle so the user knows what each period means. */}
+                <Text style={s.rentHint}>
+                  {t(rentPeriod === 'monthly' ? 'Monthly: 1–11 month lease, price/month.' : 'Annual: 12-month lease, price/year.')}
+                </Text>
+              </Reveal>
+            )}
+
             {/* Combined optional refine section: bedrooms + area in one card */}
             {(ctx?.showBeds || ctx?.showSize) && (
               <Reveal style={s.pick}>
@@ -572,22 +615,22 @@ export default function Home() {
                         <Text style={[s.ctxSubLabel, s.rangeHeadLabel]}>{t('Area (m²)')}</Text>
                       </View>
                       <View style={s.rangeRow}>
-                        <View style={[s.field, s.rangeBox, query.areaMin ? s.sizeFieldOn : null]}>
+                        <Pressable style={[s.field, s.rangeBox, query.areaMin ? s.sizeFieldOn : null]} onPress={() => areaMinRef.current?.focus()}>
                           <Image source={RANGE_ICON.areaFrom} style={s.rangeBoxIcon} accessibilityLabel={t('From')} />
                           <Text style={s.rangeLabel}>{t('From')}</Text>
-                          <TextInput style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
+                          <TextInput ref={areaMinRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                             value={areaMinValue}
                             onChangeText={(v) => { const d = toLatinDigits(v).replace(/\D/g, ''); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
-                        </View>
-                        <View style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]}>
+                        </Pressable>
+                        <Pressable style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]} onPress={() => areaMaxRef.current?.focus()}>
                           <Image source={RANGE_ICON.areaTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
                           <Text style={s.rangeLabel}>{t('To')}</Text>
-                          <TextInput style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
+                          <TextInput ref={areaMaxRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                             value={areaMaxValue}
                             onChangeText={(v) => { const d = toLatinDigits(v).replace(/\D/g, ''); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
-                        </View>
+                        </Pressable>
                       </View>
                       {areaHint && (
                         <Text style={[s.rangeNote, areaHint.warn ? s.rangeNoteWarn : null]}>{areaHint.text}</Text>
@@ -601,22 +644,22 @@ export default function Home() {
                     <Text style={[s.ctxSubLabel, s.rangeHeadLabel]}>{t('Price')}</Text>
                   </View>
                   <View style={s.rangeRow}>
-                    <View style={[s.field, s.rangeBox, query.priceMin ? s.sizeFieldOn : null]}>
+                    <Pressable style={[s.field, s.rangeBox, query.priceMin ? s.sizeFieldOn : null]} onPress={() => priceMinRef.current?.focus()}>
                       <Image source={RANGE_ICON.priceFrom} style={s.rangeBoxIcon} accessibilityLabel={t('From')} />
                       <Text style={s.rangeLabel}>{t('From')}</Text>
-                      <TextInput style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
+                      <TextInput ref={priceMinRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                         value={priceMinValue}
                         onChangeText={(v) => { const d = toLatinDigits(v).replace(/\D/g, ''); setQuery((q) => ({ ...q, priceMin: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
-                    </View>
-                    <View style={[s.field, s.rangeBox, query.priceMax ? s.sizeFieldOn : null]}>
+                    </Pressable>
+                    <Pressable style={[s.field, s.rangeBox, query.priceMax ? s.sizeFieldOn : null]} onPress={() => priceMaxRef.current?.focus()}>
                       <Image source={RANGE_ICON.priceTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
                       <Text style={s.rangeLabel}>{t('To')}</Text>
-                      <TextInput style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
+                      <TextInput ref={priceMaxRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                         value={priceMaxValue}
                         onChangeText={(v) => { const d = toLatinDigits(v).replace(/\D/g, ''); setQuery((q) => ({ ...q, priceMax: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
-                    </View>
+                    </Pressable>
                   </View>
                   {priceHint && (
                     <Text style={[s.rangeNote, priceHint.warn ? s.rangeNoteWarn : null]}>{priceHint.text}</Text>
@@ -642,8 +685,9 @@ export default function Home() {
                 </View>
                 {/* Size box — mirrors the chosen band or a free-typed number; tap in to edit it. */}
                 {!detail.isBedrooms && (
-                  <View style={[s.field, s.sizeField, query.detail ? s.sizeFieldOn : null]}>
+                  <Pressable style={[s.field, s.sizeField, query.detail ? s.sizeFieldOn : null]} onPress={() => sizeBoxRef.current?.focus()}>
                     <TextInput
+                      ref={sizeBoxRef}
                       style={s.sizeInput}
                       keyboardType="number-pad"
                       placeholder={t('Or type an exact size')}
@@ -660,36 +704,22 @@ export default function Home() {
                       }}
                     />
                     <Text style={s.sizeUnit}>{t('m²')}</Text>
-                  </View>
+                  </Pressable>
                 )}
               </Reveal>
             )}
 
-            {/* Rent only: tiny Monthly / Yearly toggle that tells the engine which period the typed
-                number represents. The user sees no math; they just pick what they're thinking in.
-                Hidden for Buy. (user request.) */}
-            {query.deal === 'Rent' && (
-              <Reveal style={{ marginTop: 12 }}>
-                <Segmented
-                  options={['Monthly', 'Yearly']}
-                  icons={PERIOD_IMG}
-                  value={rentPeriod === 'monthly' ? 'Monthly' : 'Yearly'}
-                  onChange={(v) => setQuery((q) => ({ ...q, rentPeriod: v === 'Monthly' ? 'monthly' : 'annual' }))}
-                />
-                {/* Tiny inline hint under the toggle so the user knows what each period means. */}
-                <Text style={s.rentHint}>
-                  {t(rentPeriod === 'monthly' ? 'Monthly: 1–11 month lease, price/month.' : 'Annual: 12-month lease, price/year.')}
-                </Text>
-              </Reveal>
-            )}
-            {/* Price now lives as a من/إلى range inside the «خصص بحثك أكثر» card above. */}
+            {/* Price now lives as a من/إلى range inside the «خصص بحثك أكثر» card above. Monthly/Yearly
+                MOVED above the Size filter (owner 2026-07-10) — see just before the Refine/Detail
+                block below, so the user knows which period their price/size answers apply to BEFORE
+                they type them. */}
 
             <Tappable style={s.searchBtn} onPress={onSearch} dip={0.025}>
               <Text style={s.searchBtnText}>{t('Search')}</Text>
             </Tappable>
             {/* Scroll target: each selection brings this (just below Search) into view so the user is
                 carried down through the form without scrolling. (user request.) */}
-            <View ref={endAnchorRef} style={{ height: 1 }} />
+            <View ref={withAnchor(endAnchorRef)} style={{ height: 1 }} />
           </View>
 
           {/* Onboarding header — centered icon + bold heading + lighter description, explaining the
