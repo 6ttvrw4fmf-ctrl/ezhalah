@@ -318,10 +318,13 @@ def map_listing(it: dict) -> Optional[dict]:
     city_ar = (addr.get("city") or ev.get("city_ar") or "").strip()
     if city_en in NON_SAUDI_EN or city_ar in NON_SAUDI_AR:
         return None
+    # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal "Other"
+    # sentinel this used to fall back to — it survived all the way to the frontend and rendered as
+    # the bare English word "Other" on Arabic-UI cards. N.region_for_city(None) already returns None
+    # safely. The raw Arabic signal below (city_ar/district_ar in `info`) is unchanged.
     city = (CITY_EN_MAP.get(city_en)
             or N.map_city(city_ar)
-            or N.map_city(city_en)
-            or "Other")
+            or N.map_city(city_en))
     region = N.region_for_city(city)
     neighborhood = (ev.get("district_en") or addr.get("area") or ev.get("district_ar") or "").strip() or None
 

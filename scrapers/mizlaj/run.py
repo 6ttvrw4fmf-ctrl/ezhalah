@@ -371,8 +371,11 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
         region = REGION_AR.get(str(region_ar).strip())
     if not region and city:
         region = CITY_TO_REGION.get(city)
-    if region and not city:
-        city = region  # region-only listing: surface the region as the city label
+    # Forward-fix (2026-07-10 location-data-quality audit): removed the "if region and not city:
+    # city = region" line — it surfaced the RESOLVED REGION's English label as the city (e.g.
+    # "Eastern Province" instead of an honest unresolved city, confirmed live on ad MZ30) whenever
+    # city resolution failed but region resolution succeeded. A region name is not a city; leaving
+    # `city` None here is honest, and its raw Arabic signal is unchanged for a DB-side resolver.
 
     # ── PDPL-safe text ──
     title = _redact(name) or name

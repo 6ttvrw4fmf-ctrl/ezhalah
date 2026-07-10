@@ -66,10 +66,12 @@ CITY_MAP = {
 }
 
 
-def _city(v) -> str:
+def _city(v) -> Optional[str]:
+    # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal "Other"
+    # sentinel this used to fall back to when the source had no city name at all.
     raw = _name(v)
     if not raw:
-        return "Other"
+        return None
     return CITY_MAP.get(raw, raw)
 
 _last = 0.0

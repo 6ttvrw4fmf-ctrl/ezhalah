@@ -978,6 +978,16 @@ export function isLatinOnlyInput(text: string): boolean {
 }
 export const ARABIC_ONLY_MSG = 'هذا التطبيق يدعم اللغة العربية فقط. الرجاء الكتابة بالعربية.';
 
+// Neutral, honest label for a listing whose city/district could not be resolved to a real place —
+// NEVER invent a location, and NEVER show a raw scraper junk sentinel (e.g. the literal word
+// "Other") in its place. Used by ResultCard.tsx and src/app/agent.tsx's results-summary text
+// whenever city/district both come back empty after the JUNK_LOCATION_TOKENS guard in
+// src/data/remote.ts. A direct constant (not routed through t()) so it renders identically
+// regardless of locale — the app is Arabic-first (see ARABIC_ONLY_MSG above), and an invented
+// English translation of "location unresolved" is exactly the kind of guess this string exists to
+// avoid. (2026-07-10 location-data-quality audit.)
+export const LOCATION_UNRESOLVED_AR = 'الموقع غير محدد';
+
 // A property type or category — Arabic translation, or lowercased English (matches the prior
 // "here are villas" phrasing).
 export function tWord(en: string): string {

@@ -371,7 +371,12 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     addr = ld.get("address") or {}
     raw_city = (addr.get("addressLocality") or "").strip()
     raw_region = (addr.get("addressRegion") or "").strip()
-    city = normalize.map_city(raw_city) or "Other"
+    # Forward-fix (2026-07-10 location-data-quality audit): removed the "Other" fallback AND the
+    # subsequent "if region and city == 'Other': city = region" block below it — that block used to
+    # silently surface a REGION NAME as the city label whenever city resolution failed but region
+    # resolution succeeded. A region name is not a city; an honest None is correct, and the raw
+    # Arabic signal this scraper captures elsewhere is unchanged for a DB-side resolver to use.
+    city = normalize.map_city(raw_city)
     region = None
     for ar, en in REGION_AR.items():
         if ar in raw_region:
@@ -379,8 +384,6 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
             break
     if not region:
         region = CITY_TO_REGION.get(city)
-    if region and city == "Other":
-        city = region
     district = _breadcrumb_district(bc)
 
     # ── PDPL-safe text (broker.name is DROPPED entirely; phones redacted) ──

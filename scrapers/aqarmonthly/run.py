@@ -192,7 +192,9 @@ def map_listing(g: dict, price: dict) -> dict | None:
         "price_annual":     round(monthly * 12),  # app shows price_annual / 12 = the monthly figure
         "area_m2":          N.to_int(g.get("area")),
         "bedrooms":         N.to_int(g.get("beds")),
-        "city":             city or "Other",
+        # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal
+        # "Other" sentinel — the additive resolve_slug()-derived columns already cover most rows.
+        "city":             city,
         "region":           region,
         "neighborhood":     district,
         "title":            _redact((g.get("content") or "").split("\n")[0][:120]),

@@ -382,7 +382,9 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
         (r for r in region_names if r != "المملكة العربية السعودية"), None
     )
     city = CITY_MAP_AR.get(city_ar)
-    region = (REGION_MAP_AR.get(region_ar) if region_ar else None) or CITY_TO_REGION.get(city or "") or "Asir"
+    # Forward-fix (2026-07-10 location-data-quality audit): removed the hardcoded "Asir" region
+    # default — city was already an honest None here when unresolved; region should be too.
+    region = (REGION_MAP_AR.get(region_ar) if region_ar else None) or CITY_TO_REGION.get(city or "")
 
     price = detail.get("price")
     area_m2 = detail.get("area_m2") or _content_specs((p.get("content") or {}).get("rendered", "")).get("area_m2")

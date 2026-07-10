@@ -383,7 +383,10 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     # ── location ──
     addr = ld.get("address") or {}
     raw_city = (addr.get("addressLocality") or crumb.get("city") or "").strip()
-    city = normalize.map_city(raw_city) or "Other"
+    # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal "Other"
+    # sentinel — it survived to the frontend and rendered as the bare English word "Other" on
+    # Arabic-UI cards. additional_info's own city_ar/region_ar/district_ar capture is unchanged.
+    city = normalize.map_city(raw_city)
     raw_region = (addr.get("addressRegion") or "").strip()
     region = None
     for ar, en in REGION_AR.items():
