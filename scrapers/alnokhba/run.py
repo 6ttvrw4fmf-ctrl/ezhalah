@@ -386,10 +386,12 @@ def map_listing(pid: str, body: str, gallery: list[str]) -> tuple[Optional[dict]
     bedrooms = _beds(blob) if (category == "residential" and not is_land) else None
     baths = _baths(blob) if (category == "residential" and not is_land) else None
 
+    # Forward-fix (2026-07-10 location-data-quality audit, item-7 follow-up): removed the
+    # hardcoded "Mecca"/"Makkah" city+region defaults — dormant today (this office's tiny catalog
+    # always resolves via parse_address), but the same placeholder shape as the fixed location
+    # bug elsewhere. An honest None is correct if a future listing's address doesn't parse.
     city, neighborhood = parse_address(addr_raw)
-    if not city:
-        city = "Mecca"  # Makkah-only office
-    region = normalize.region_for_city(city) or "Makkah"
+    region = normalize.region_for_city(city)
 
     ppm = None
     if area and not is_rent and price:

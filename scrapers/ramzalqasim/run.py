@@ -92,7 +92,6 @@ CITY_MAP_AR: dict[str, str] = {
 # Everything from this site is Qassim region.
 REGION_EN = "Qassim"
 REGION_AR = "القصيم"
-DEFAULT_CITY = "Unaizah"  # most listings are Unaizah; null `city` defaults here
 
 # Cardinal direction in Arabic JSON (English keywords).
 DIRECTION_EN = {
@@ -270,8 +269,12 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
     city = CITY_MAP_AR.get(raw_city_key)
     if not city:
         city = normalize.map_city(raw_city_key) if raw_city_key else None
-    if not city:
-        city = DEFAULT_CITY
+    # Forward-fix (2026-07-10 location-data-quality audit, item-7 follow-up): removed the
+    # `DEFAULT_CITY = "Unaizah"` fallback — it silently invented a specific city both when the
+    # source had NO city at all (68/184 rows, 37%, confirmed live) AND when the source gave a real
+    # city name this file's own maps simply didn't recognize, discarding that raw signal at the
+    # `city` column even though it's separately preserved in additional_info.city_ar below. An
+    # honest None is correct in both cases.
 
     district = (rec.get("district") or "").strip() or None
 
