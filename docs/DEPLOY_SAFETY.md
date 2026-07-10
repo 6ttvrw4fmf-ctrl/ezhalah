@@ -63,15 +63,32 @@ production deploy. Use it as the rollback target if a future deploy needs to be 
 
 | Field | Value |
 |---|---|
-| Date | 2026-07-10 |
-| Vercel deployment ID | `dpl_6K2nJfsrBHYXBUXSzGo8xdJsfwsZ` |
+| Date | 2026-07-10 (after the env-vars P0 — see "2026-07-10 incident #2" below) |
+| Vercel deployment ID | `dpl_812zo6bWYbq36cGmMWGgc13KFU3n` |
 | Production URL | `https://ezhalah-app.vercel.app` |
-| Bundle hash | `entry-83f725ab4d097c7a665491f393db4385.js` |
-| Deployed from | `main` @ `d82145fa4421abfd6f1f098b38b547969424000f`, via `scripts/safe-deploy.sh` from a clean worktree (0 uncommitted files, local `main` == `origin/main` exactly) |
+| Bundle hash | `entry-d45474faf1142efbec982cd3fc4a6a04.js` |
+| Deployed from | `main` @ `7d67b77`, via `scripts/safe-deploy.sh` from a clean worktree — AND with `EXPO_PUBLIC_SUPABASE_URL` + `EXPO_PUBLIC_SUPABASE_KEY` now set in the Vercel project env (production). This is the first clean-main deploy that actually has a working Supabase client. |
+| Verified post-deploy | `age: 0`. Bundle grep: `aannarbkwcymrotzwdbo` project ref present (was 0 in the broken build), `supabase.co` present, `p_tables2` present. **End-to-end browser test:** real filter search rendered «لقينا 113,060 إعلان» with actual property cards — search confirmed WORKING, not just bundle-present. |
+| SUPERSEDES the entry below | The `dpl_6K2n` / `entry-83f725ab` entry below was LIVE-BROKEN (null Supabase client, all search dead) — kept for history, not a rollback target. |
+| — historical (BROKEN) — | ~~`dpl_6K2nJfsrBHYXBUXSzGo8xdJsfwsZ` / `entry-83f725ab...` / `main`@`d82145f`~~ |
 | Contains | Everything in the prior baseline entry below (PR #41/#42/#43/#44) **plus PR #45** (search-loading platform-logo animation always shows the complete 32-platform roster — owner clarification: the animation is a brand/trust display of the full network, decoupled from per-query backend eligibility; previously it hid Gathern's logo on Buy searches to mirror backend rules, which the owner explicitly asked to stop doing. Backend eligibility — Buy/Rent, Gathern's monthly-rent-only gate, category — is completely unchanged) |
 | Verified post-deploy | `age: 0` (fresh, not cached). Bundle re-fetched and grepped: `p_tables2` present (commercial fix intact), `Thanks for your feedback` / `your first destination for property search` / `mBtnPrimary` all present (prior UI baseline intact). Logic-only change (no new/removed user-facing strings to grep for PR #45 itself) — verified via clean PR merge + typecheck + fast-forward from a verified `main` tip, not a live-bundle string match. |
 | Known gaps (unrelated, not a regression) | `log-click` edge function still not deployed (client-side click tracking silently no-ops — this deploy's `clicks.ts` is the OLDER pre-existing version, since click/session work was deliberately excluded from PR #42's scope); custom domain `ezhalah.com` does not point to this project — neither affects the UI baseline |
 | Main has since moved further | `origin/main` is at `fb6107b` (this same PR's baseline-table doc update, #46) — no code change ahead of what's live as of this entry. |
+
+### 2026-07-10 incident #2: clean-main build had no Supabase env → all search dead (P0)
+
+**Symptom:** every search (residential AND commercial, all filters) showed «يجري تحميل الإعلانات — حاول مرة ثانية بعد لحظات» ("loading, try again") and rendered zero cards. App-wide.
+
+**Root cause:** `src/lib/supabase.ts` builds the client as `(url && key) ? createClient(...) : null`, reading `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_KEY`. Those vars come from a local `.env` file that is **gitignored and never committed**. The OLD (pre-safety-rule) deploys ran `vercel --prod` from the local working tree, so `.env` was present and the vars inlined. But `scripts/safe-deploy.sh` deliberately builds from a **fresh git worktree of clean `main`, which has no `.env`** — and the **Vercel project had zero env vars set** — so `expo export` built with the vars undefined, `supabase` became `null`, and `fetchListingsForQuery` returned `null` before ever making a network call → the "try again" path fired for every query. The very "deploy from clean main" rule that fixed incident #1 is what exposed this.
+
+**Diagnosis proof:** browser console showed the app made **no** `location_search_candidates_ar` request at all (null client = no call); a hardcoded in-page fetch to the same RPC returned 200 + real data (backend fine); and the served bundle contained **zero** occurrences of the project ref / anon key (env not inlined).
+
+**Fix:** (1) added `EXPO_PUBLIC_SUPABASE_URL` + `EXPO_PUBLIC_SUPABASE_KEY` to the Vercel project env (production) — these are `EXPO_PUBLIC_` client-public values (the key is a publishable anon key), correct to store there; (2) redeployed clean `main` via `safe-deploy.sh` (the build now inlines them from Vercel's env); (3) verified end-to-end in a browser that search renders cards.
+
+**Note on rollback:** instant `vercel rollback` was NOT usable — the free plan only rolls back one deployment, and that one (`dpl_D6Lmq`, the prior clean-main build) was *also* env-less. The last env-baked deploy (`dpl_8ML9`, a dirty-tree build) was too far back to reach. This is why the real fix (Vercel env + redeploy) was the path, not rollback.
+
+**Prevention added this PR:** `scripts/safe-deploy.sh` now (a) refuses to deploy if the required `EXPO_PUBLIC_*` vars are missing from the Vercel production env, and (b) after deploy, asserts the served bundle references `supabase.co` (proving the vars inlined) — a green build with a null client is exactly what this catches.
 
 ### Incident addendum (2026-07-10): a real near-miss, caught correctly
 
