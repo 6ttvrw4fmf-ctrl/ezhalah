@@ -225,6 +225,45 @@ export function ResultCard({
   );
 }
 
+// ── Arabic display for the additional-info ENUM values (owner 2026-07-10). The panel already
+// translates the LABEL via t(); the VALUE was rendered raw, leaking English (Residential/New/East…).
+// Map only the finite enum sets found in production; FREE-TEXT (Street, Other obligations, Ad source,
+// plan/land numbers) is NEVER translated — it's real source content. The raw DB is untouched; this is
+// display-only. Yes/No is translated for any field (never a legitimate street name).
+const AR_YESNO: Record<string, string> = { yes: 'نعم', no: 'لا' };
+const AR_ENUM: Record<string, Record<string, string>> = {
+  'property usage': { residential: 'سكني', commercial: 'تجاري' },
+  furniture: { furnished: 'مفروش', 'un-furnished': 'غير مفروش', unfurnished: 'غير مفروش', 'semi-furnished': 'نصف مفروش' },
+  'property floor': { upper: 'علوي', ground: 'أرضي', basement: 'قبو' },
+  facade: {
+    east: 'شرقية', west: 'غربية', north: 'شمالية', south: 'جنوبية',
+    'north east': 'شمالية شرقية', 'north west': 'شمالية غربية',
+    'south east': 'جنوبية شرقية', 'south west': 'جنوبية غربية',
+  },
+};
+function arAttrValue(label: string, value: string): string {
+  const v = (value ?? '').trim();
+  if (!v) return value;
+  const ll = (label ?? '').trim().toLowerCase();
+  const lv = v.toLowerCase();
+  if (AR_YESNO[lv]) return AR_YESNO[lv];                                   // Electricity/Water/booleans
+  if (ll === 'age') {
+    if (lv === 'new') return 'جديد';
+    if (lv === '<1 year' || lv === 'less than 1 year') return 'أقل من سنة';
+    const plus = /^(\d+)\s*\+\s*years?$/i.exec(v); if (plus) return `أكثر من ${plus[1]} سنوات`;
+    const yrs = /^(\d+)\s*years?$/i.exec(v);
+    if (yrs) { const n = +yrs[1]; return n === 1 ? 'سنة واحدة' : n === 2 ? 'سنتان' : `${n} سنوات`; }
+    return v;
+  }
+  if (ll === 'facade') {
+    if (AR_ENUM.facade[lv]) return AR_ENUM.facade[lv];
+    const st = /^(\d+)\s*streets?$/i.exec(v); if (st) return `${st[1]} شوارع`;
+    return v;
+  }
+  const map = AR_ENUM[ll];
+  return map && map[lv] ? map[lv] : v;                                     // else: free-text, leave raw
+}
+
 // Render Wasalt's "Additional Information" rows on the card. Shows first 4 rows, with a
 // "See more" toggle that reveals the rest. Hidden entirely for Aqar (and for any Wasalt row
 // where the field hasn't been backfilled yet). Mirrors the on-site Wasalt panel design.
@@ -243,7 +282,7 @@ function AdditionalInformationPanel({ listing, t }: { listing: Listing; t: (k: s
         {visible.map((r) => (
           <View key={r.key} style={card.addlCell}>
             <Text style={card.addlLabel}>{t(r.label)}</Text>
-            <Text style={card.addlValue} numberOfLines={2}>{r.value}</Text>
+            <Text style={card.addlValue} numberOfLines={2}>{arAttrValue(r.label, r.value)}</Text>
           </View>
         ))}
       </View>
