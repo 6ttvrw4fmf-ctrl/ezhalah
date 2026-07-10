@@ -12,7 +12,7 @@ import ShareSheet from '@/components/ShareSheet';
 import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { matchLocations, placeLabel, placeTitle, placeSub, placeIcon, placeKey, resolveLocation, ensureLocationIndex, type Place } from '@/data/locations';
-import { grouped, toLatinDigits } from '@/data/search';
+import { grouped, toWholeNumberDigits } from '@/data/search';
 import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
@@ -147,6 +147,29 @@ export default function Home() {
   const priceMinRef = useRef<TextInput>(null);
   const priceMaxRef = useRef<TextInput>(null);
   const sizeBoxRef = useRef<TextInput>(null);
+  // Whole-number-only price/area boxes. toWholeNumberDigits() already truncates a decimal on paste or
+  // any single-shot value ("500.5" → "500"). But on WEB a hardware keyboard can emit "." mid-typing,
+  // and because the box is a controlled digit-only field, React resets the DOM to the digits ("500"),
+  // dropping the just-typed ".", so the next keystroke ("5") appends → "5005". This web-only keydown
+  // guard closes that gap: it blocks the decimal separator and swallows the fractional digits typed
+  // after it, so char-by-char typing also collapses to the integer part. On iOS/Android the boxes use
+  // keyboardType="number-pad" (no decimal key), so the guard never fires there. Backend/search logic
+  // are untouched — this only affects what the input box accepts.
+  const fracLock = useRef<Record<string, boolean>>({});
+  const wholeNumberKeyGuard = useCallback((field: string) => (e: any) => {
+    if (Platform.OS !== 'web') return;
+    const key: string = e?.nativeEvent?.key ?? '';
+    // Decimal separator — Latin '.' or Arabic '٫' (U+066B): reject it and mark that following digits
+    // are the fractional tail to drop.
+    if (key === '.' || key === '٫' || key === 'Decimal') { e.preventDefault?.(); fracLock.current[field] = true; return; }
+    const isDigit = key.length === 1 && /[0-9٠-٩۰-۹]/.test(key);
+    if (isDigit) { if (fracLock.current[field]) e.preventDefault?.(); return; } // swallow the fractional tail
+    // Grouping / stray punctuation the display re-inserts itself — never typed manually.
+    if (key === ',' || key === '٬' || key === ' ') { e.preventDefault?.(); return; }
+    // Backspace / Delete / Arrows / Home / End / Tab / Enter / select-all → resume normal editing.
+    fracLock.current[field] = false;
+  }, []);
+  const clearFracLock = useCallback((field: string) => { fracLock.current[field] = false; }, []);
   // Auto-advance the form: as the user fills each step (deal, location, category, type, detail,
   // price), gently scroll DOWN so the just-revealed section and the Search button come into view —
   // they never have to scroll the page themselves. (user request.)
@@ -620,7 +643,8 @@ export default function Home() {
                           <Text style={s.rangeLabel}>{t('From')}</Text>
                           <TextInput ref={areaMinRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                             value={areaMinValue}
-                            onChangeText={(v) => { const d = toLatinDigits(v).split(/[.٫]/)[0].replace(/\D/g, ''); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
+                            onKeyPress={wholeNumberKeyGuard('areaMin')} onFocus={() => clearFracLock('areaMin')} onSelectionChange={() => clearFracLock('areaMin')}
+                            onChangeText={(v) => { const d = toWholeNumberDigits(v); clearFracLock('areaMin'); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
                         </Pressable>
                         <Pressable style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]} onPress={() => areaMaxRef.current?.focus()}>
@@ -628,7 +652,8 @@ export default function Home() {
                           <Text style={s.rangeLabel}>{t('To')}</Text>
                           <TextInput ref={areaMaxRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                             value={areaMaxValue}
-                            onChangeText={(v) => { const d = toLatinDigits(v).split(/[.٫]/)[0].replace(/\D/g, ''); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
+                            onKeyPress={wholeNumberKeyGuard('areaMax')} onFocus={() => clearFracLock('areaMax')} onSelectionChange={() => clearFracLock('areaMax')}
+                            onChangeText={(v) => { const d = toWholeNumberDigits(v); clearFracLock('areaMax'); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
                         </Pressable>
                       </View>
@@ -649,7 +674,8 @@ export default function Home() {
                       <Text style={s.rangeLabel}>{t('From')}</Text>
                       <TextInput ref={priceMinRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                         value={priceMinValue}
-                        onChangeText={(v) => { const d = toLatinDigits(v).split(/[.٫]/)[0].replace(/\D/g, ''); setQuery((q) => ({ ...q, priceMin: d || null, priceInput: '', priceBand: null })); }} />
+                        onKeyPress={wholeNumberKeyGuard('priceMin')} onFocus={() => clearFracLock('priceMin')} onSelectionChange={() => clearFracLock('priceMin')}
+                        onChangeText={(v) => { const d = toWholeNumberDigits(v); clearFracLock('priceMin'); setQuery((q) => ({ ...q, priceMin: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
                     </Pressable>
                     <Pressable style={[s.field, s.rangeBox, query.priceMax ? s.sizeFieldOn : null]} onPress={() => priceMaxRef.current?.focus()}>
@@ -657,7 +683,8 @@ export default function Home() {
                       <Text style={s.rangeLabel}>{t('To')}</Text>
                       <TextInput ref={priceMaxRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                         value={priceMaxValue}
-                        onChangeText={(v) => { const d = toLatinDigits(v).split(/[.٫]/)[0].replace(/\D/g, ''); setQuery((q) => ({ ...q, priceMax: d || null, priceInput: '', priceBand: null })); }} />
+                        onKeyPress={wholeNumberKeyGuard('priceMax')} onFocus={() => clearFracLock('priceMax')} onSelectionChange={() => clearFracLock('priceMax')}
+                        onChangeText={(v) => { const d = toWholeNumberDigits(v); clearFracLock('priceMax'); setQuery((q) => ({ ...q, priceMax: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
                     </Pressable>
                   </View>
@@ -693,13 +720,17 @@ export default function Home() {
                       placeholder={t('Or type an exact size')}
                       placeholderTextColor={colors.muted}
                       value={sizeBoxValue}
+                      onKeyPress={wholeNumberKeyGuard('size')}
+                      onSelectionChange={() => clearFracLock('size')}
                       onFocus={() => {
+                        clearFracLock('size');
                         // Tapping in to type a custom size clears the selected band so the box goes
                         // empty (not stale band text) — the user types their own number fresh.
                         if (sizeIsBand) setQuery((q) => ({ ...q, detail: null, priceBand: null }));
                       }}
                       onChangeText={(v) => {
-                        const digits = toLatinDigits(v).replace(/\D/g, '');
+                        const digits = toWholeNumberDigits(v);
+                        clearFracLock('size');
                         setQuery((q) => ({ ...q, detail: digits ? digits : null, priceBand: null }));
                       }}
                     />

@@ -527,6 +527,11 @@ export function toLatinDigits(input: string): string {
   return (out.match(/\d/g) ?? []).join('');
 }
 
+// Whole-number input hygiene for the price / area filter boxes. Lives in ./numeric.ts (a pure,
+// zero-dependency module) so it can be unit-tested in isolation; re-exported here so existing
+// `@/data/search` importers keep working. See numeric.ts for the full rationale + examples.
+export { toWholeNumberDigits } from './numeric';
+
 // Magnitude-based price interpretation. (PRD §6.2) Returns null when no price entered.
 export type Price =
   | { kind: 'monthlyRent'; echo: string }
