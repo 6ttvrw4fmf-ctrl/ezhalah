@@ -36,3 +36,9 @@ CREATE INDEX IF NOT EXISTS purged_listings_archive_src_lid_idx
 -- Time-window retention/reporting.
 CREATE INDEX IF NOT EXISTS purged_listings_archive_deleted_at_idx
   ON public.purged_listings_archive (deleted_at);
+
+-- SECURITY: this is an INTERNAL audit table and must never be reachable through the public API.
+-- Enabling RLS with NO policies denies anon/authenticated entirely; the purge function
+-- (SECURITY DEFINER) still writes to it because SECURITY DEFINER bypasses RLS. Without this, a table
+-- in the `public` schema is exposed via PostgREST (the classic rls_disabled_in_public advisor error).
+ALTER TABLE public.purged_listings_archive ENABLE ROW LEVEL SECURITY;
