@@ -1,4 +1,4 @@
-ef6a3ae76c349bbb2ac7d6913aeb7d9902f8c0d0
+a6a8a37989cd166c40ee73184888911784de6548
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
@@ -6,3 +6,4 @@ ef6a3ae76c349bbb2ac7d6913aeb7d9902f8c0d0
 # Do NOT hand-edit the SHA except to record a deliberate, verified rollback target.
 #
 # 2026-07-10  ef6a3ae  Filter UX: partial-reveal scroll, Monthly/Yearly reposition, full-box tap targets (#48)
+# 2026-07-10  a6a8a37  deployed via safe-deploy.sh
