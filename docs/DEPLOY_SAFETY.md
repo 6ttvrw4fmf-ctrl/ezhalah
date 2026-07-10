@@ -63,7 +63,19 @@ production deploy. Use it as the rollback target if a future deploy needs to be 
 
 | Field | Value |
 |---|---|
-| Date | 2026-07-10 (FIX A residential-misfile recovery — see PR #51) — CURRENT LIVE |
+| Date | 2026-07-10 (whole-number input keyguard + npm test — see PR #58; plus preflight test-file fix PR #60) — CURRENT LIVE |
+| Vercel deployment ID | `dpl_2gVFqgfgu5Ar14WkoFxiFp7ubTCg` |
+| Production URL | `https://ezhalah-app.vercel.app` |
+| Bundle hash | `entry-d4d1ca9e5ec9ce51055d6a034b9338a4.js` |
+| Deployed from | `main` @ `75b8970` (PR #58 keyguard + PR #60 preflight fix, both squash-merged), via `scripts/safe-deploy.sh` from a clean worktree. |
+| Contains | Everything in the entry below (through FIX A / PR #51) **plus PR #58**: web keydown guard (`wholeNumberKeyDecision`) on all 5 price/area/size inputs so char-by-char typing of a decimal (`500.5`) collapses to the integer part (`500`, never `5005`), on top of the already-live `toWholeNumberDigits` helper; old inline test replaced by a runnable 31-assertion `npm test` (`scripts/verify-whole-number-input.ts`). **Plus PR #60**: preflight's src/-deletion guard now ignores test files (`*.test.ts(x)`, `*.spec.ts(x)`, `__tests__/`) — they never ship in the bundle — which had falsely blocked #58's test-file relocation. Frontend + deploy-tooling only; no backend/DB/RPC/search change. |
+| Verified post-deploy | Live bundle `entry-d4d1ca9e…` on `ezhalah-app.vercel.app`: `supabase.co` ×2 + project ref `aannarbkwcymrotzwdbo` ×1 + `createClient` ×4 (env baked in), `p_tables2` present (FIX A residential scope intact), keyguard markers (`fracLock`/`Decimal`) ×10. Ancestry: HEAD contains `ef6a3ae` (PR #48), `59d411c` (FIX A/#51), `1936fc0` — no approved feature dropped. **Live browser (mobile 375px), on production:** typing `500.5`→`500`, `500٫5`→`500`, paste `1,500.75`→stored `1500` (4 range inputs); real-keydown on the mounted component confirms decimal/grouping/locked-digit BLOCKED and Backspace/Delete/Arrow/End allowed + unlock (never stuck); Residential Buy «لقينا 113,342» and Commercial Buy «14,837» both render real cards with the neutrality line — identical to pre-deploy counts (zero search regression). 5th input (exact-size box) uses byte-identical `wholeNumberKeyGuard('size')` wiring (guard proven field-agnostic). |
+| Note (safe-deploy false-alarm, recurring) | The post-deploy `supabase.co` check WARNED again (its `sleep 3` < CDN alias propagation); a manual bundle re-check confirmed `supabase.co` ×2 present. Not the env-var P0. (Bumping the sleep is still worth doing.) |
+| SUPERSEDES the entry below | The FIX A entry (`dpl_GbBS…` / `entry-0055ae2e` / `59d411c`) remains a valid healthy rollback target; superseded by this deploy. NOTE: intermediate baselines `a6a8a37` and `1936fc0` (PR #57 input-hygiene helper) were deployed between FIX A and this entry via `safe-deploy.sh` but not separately recorded in this table (concurrent-session doc gap) — both are contained in the current HEAD. |
+
+| Field | Value |
+|---|---|
+| Date | 2026-07-10 (FIX A residential-misfile recovery — see PR #51) — superseded, valid rollback target |
 | Vercel deployment ID | `dpl_GbBSTViuFjJpMFm48GTN4xp1ZHiB` |
 | Production URL | `https://ezhalah-app.vercel.app` |
 | Bundle hash | `entry-0055ae2e3d06d432c90c6554da897198.js` |
