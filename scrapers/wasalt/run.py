@@ -282,9 +282,12 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
         addl_info = _base_additional_info(prop, info)
         detail_enriched = False
     raw_city = (info.get("city") or info.get("state") or "").strip()
-    # Map to our canonical label; an unmapped/garbled Wasalt spelling → "Other" (honest, won't pollute
-    # a real city search). High-volume cities are all covered in CITY_MAP.
-    city = CITY_MAP.get(raw_city) or "Other"
+    # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal "Other"
+    # sentinel this used to fall back to — it survived to the frontend and rendered as the bare
+    # English word "Other" on Arabic-UI cards. High-volume cities are all covered in CITY_MAP; the
+    # separate city_ar/district_ar columns (unaffected by this line) remain the real recoverable
+    # signal for existing junk rows.
+    city = CITY_MAP.get(raw_city)
     is_rent = deal == "rent"
     area = _attr(prop, "builtUpArea") or info.get("builtUpArea") or prop.get("floorSize")
     try:

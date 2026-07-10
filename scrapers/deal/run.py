@@ -139,9 +139,11 @@ def _name(v: Any) -> Optional[str]:
     return v if isinstance(v, str) else None
 
 
-def _city(v: Any) -> str:
+def _city(v: Any) -> Optional[str]:
+    # Forward-fix (2026-07-10 location-data-quality audit, item-7 follow-up): an honest None beats
+    # the literal "Other" sentinel this used to fall back to when the source had no city name at all.
     raw = _name(v)
-    return CITY_MAP.get(raw, raw) if raw else "Other"
+    return CITY_MAP.get(raw, raw) if raw else None
 
 
 def _int(v: Any) -> Optional[int]:

@@ -1,0 +1,29 @@
+# LIVE-DATA placeholder-location regression monitor (2026-07-10 architecture redesign, item 6).
+# Checks production data against scripts/placeholder_location_baseline.json — fails the build (and
+# logs an alert row to location_pipeline_alerts) if any platform table's placeholder-value count
+# exceeds its recorded baseline, meaning a scraper started writing "Other"/"Unknown"/etc. again.
+# See docs/LOCATION_RESOLUTION.md for why this is a baseline diff, not a time-window check.
+name: Location placeholder monitor
+
+on:
+  schedule:
+    - cron: '30 6,18 * * *'   # twice daily, offset from ops-digest (05:00/17:00 UTC) to spread load
+  workflow_dispatch: {}
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: pip install supabase python-dotenv
+      - name: Check for placeholder-location regressions
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/check_placeholder_locations.py

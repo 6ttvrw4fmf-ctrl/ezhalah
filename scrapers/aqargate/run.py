@@ -165,7 +165,10 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
             property_type = "Commercial Land"
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
 
-    city = normalize.map_city(loc.get("city") or "") or "Other"
+    # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal "Other"
+    # sentinel on this legacy column — the additive city_ar/city_id columns below already resolve
+    # most rows independently; this just closes the remaining leak on the raw-column read path.
+    city = normalize.map_city(loc.get("city") or "")
 
     # Native STRUCTURED Arabic (ADDITIVE — live city/neighborhood above untouched). Aqargate's REST
     # carries a clean {region, city, district} in Arabic → resolve catalog IDs with the region as the

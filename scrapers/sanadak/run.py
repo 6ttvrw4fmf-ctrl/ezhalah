@@ -258,7 +258,10 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
     is_rent = (o.get("listingType") or "").strip().lower() == "rent" or "إيجار" in (o.get("listingTypeText") or "")
 
     raw_city = (o.get("city") or "").strip()
-    city = CITY_AR.get(raw_city) or normalize.map_city(raw_city) or "Other"
+    # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal "Other"
+    # sentinel on this legacy column — the additive city_ar/city_id columns below already resolve
+    # most rows independently; this just closes the remaining leak on the raw-column read path.
+    city = CITY_AR.get(raw_city) or normalize.map_city(raw_city)
     region = CITY_TO_REGION.get(city)
 
     # Native STRUCTURED Arabic (ADDITIVE — live city/region/neighborhood above untouched). Sanadak's

@@ -191,9 +191,26 @@ const CITY_AR: Record<string, string> = {
   'thuwal': 'ثول', 'turabah': 'تربة', 'turaif': 'طريف',
   'umluj': 'أملج', 'unaizah': 'عنيزة', 'yanbu': 'ينبع',
 };
+// Scraper-injected junk sentinels for "resolver couldn't match a location" (2026-07-10
+// location-data-quality audit: the literal English word "Other" written by gathern/aqarcity/
+// eastabha/raghdan/fursaghyr/aqargate/aqarmonthly/sanadak/aldarim/wasalt when their city resolver
+// fails, instead of an honest NULL). Checked against the RAW value straight from the scraper table,
+// BEFORE any translation attempt. Never add a real (if unmapped) city/town name here — that would
+// blank out a legitimate location for every platform that scrapes that same place correctly; the
+// platform-specific hardcoded-default bugs (e.g. sadin defaulting to "Medina", alkhaas to "Unaizah")
+// are fixed at the scraper layer instead, not by blocklisting a real name here.
+const JUNK_LOCATION_TOKENS = new Set(['other', 'unknown', 'n/a', '', 'null', 'undefined']);
+function isJunkLocationToken(raw: string | null | undefined): boolean {
+  return JUNK_LOCATION_TOKENS.has((raw ?? '').trim().toLowerCase());
+}
+
 function arCity(en: string | null): string | null {
   if (!en) return null;
   const k = en.trim().toLowerCase();
+  // Never surface a scraper-junk sentinel as if it were a real (if untranslated) place name — this
+  // function's own final `|| en` fallback below exists for GENUINE unmapped cities, not for a token
+  // that isn't a place name at all. (2026-07-10 location-data-quality audit.)
+  if (JUNK_LOCATION_TOKENS.has(k)) return null;
   // The Saudi catalog (sa-locations.json, used by resolveLocation/matchLocations) spells many cities WITH
   // the article — "Al Khobar", "At Taif", "Al Jubail" — while CITY_AR is keyed on the bare form
   // ("khobar", "taif", "jubail"). Without the article-stripped fallback the resolver's own city output
@@ -824,7 +841,15 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     // via CITY_AR (arCity) so the card NEVER shows Latin when a mapping is known; only truly-unmapped cities
     // fall through to the raw value. (owner 2026-07-07: no Latin city/region on cards.) Fixes the ~41 cards
     // whose canonical was null (unresolved) and were showing raw Latin (أبها/محايل/بلسمر/أبو عريش/…).
-    l.city = /[ء-ي]/.test(rawCity || '') ? rawCity : ((ar?.city) || arCity(rawCity) || rawCity || '');
+    // JUNK_LOCATION_TOKENS guard (2026-07-10): a scraper-injected sentinel like the literal word
+    // "Other" has no Arabic chars, so it falls into this (non-Arabic) branch same as a real English
+    // city would — without the guard it rides the final `|| rawCity` all the way to the card. Swap
+    // it for '' up front so every fallback below (arCity's own `|| en`, and this line's own
+    // `|| rawCity`) sees an empty string instead of the junk token, and the card ends up honestly
+    // unresolved (ResultCard/agent.tsx render the neutral «الموقع غير محدد») rather than "Other". A
+    // genuine, if unmapped, raw city name is untouched — this only fires for a known junk token.
+    const safeRawCity = isJunkLocationToken(rawCity) ? '' : rawCity;
+    l.city = /[ء-ي]/.test(rawCity || '') ? rawCity : ((ar?.city) || arCity(safeRawCity) || safeRawCity || '');
     l.district = /[ء-ي]/.test(rawDistrict || '') ? rawDistrict : ((ar?.district) || '');
     l.regionAr = (ar?.region) || l.regionAr || '';
     const region = (ar?.region) || CITY_TO_REGION[canonCity] || canonCity;
@@ -982,7 +1007,11 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       cleanType: norm.clean,
       macro: norm.macro,
       deal,
-      city: r.city ?? '',
+      // JUNK_LOCATION_TOKENS guard (2026-07-10 location-data-quality audit): this path (a listing
+      // not already in the ranked-candidates cache — deep link / direct id lookup) has no arLoc/index
+      // correction at all, so a raw junk `city` would otherwise reach the card completely unguarded.
+      // A genuine, unmapped city name still passes through untouched.
+      city: isJunkLocationToken(r.city) ? '' : (r.city ?? ''),
       district: r.neighborhood ?? '',
       road: r.street_name ?? '',
       price: priceStr,

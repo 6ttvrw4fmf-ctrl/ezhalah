@@ -263,8 +263,12 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
 
     raw_city = _info_field(html, "المدينة") or ""
-    city = CITY_MAP_AR.get(raw_city) or normalize.map_city(raw_city) or "Medina"
-    region = CITY_TO_REGION.get(city) or "Madinah"
+    # Forward-fix (2026-07-10 location-data-quality audit): removed the hardcoded "Medina" city
+    # default and "Madinah" region default — these silently mislabeled non-Medina listings (confirmed
+    # live: a Buraidah/Qassim listing forced to region="Madinah"). Honest None is correct; the
+    # region_ar field below (keyed on region=="Madinah") now correctly evaluates false too.
+    city = CITY_MAP_AR.get(raw_city) or normalize.map_city(raw_city)
+    region = CITY_TO_REGION.get(city)
     raw_district = _info_field(html, "الحي") or None
 
     # Structured numbers — beds/baths/area from the card chips (cleanest), the rest from detail li's.

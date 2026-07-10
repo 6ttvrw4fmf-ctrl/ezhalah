@@ -271,12 +271,16 @@ def map_listing(item: dict) -> tuple[Optional[dict], str]:
     raw_region = (rea.get("region") or "").strip()
     raw_city = (rea.get("city") or "").strip()
     region = REGION_AR.get(raw_region)
-    city = normalize.map_city(raw_city) or "Other"
+    # Forward-fix (2026-07-10 location-data-quality audit): removed the "Other" fallback AND the
+    # subsequent "if region and city == 'Other': city = region" block below it — that block used to
+    # silently surface a REGION NAME as the city label (e.g. "Riyadh" for a rural town nowhere near
+    # Riyadh city, confirmed live on ad FG24914) whenever city resolution failed but region resolution
+    # succeeded. A region name is not a city; an honest None is correct, and the raw Arabic signal
+    # this scraper captures elsewhere is unchanged for a DB-side resolver to use.
+    city = normalize.map_city(raw_city)
     if region is None:
         # try mapping the raw city via the region label table too (some payloads put the region in `city`)
         region = REGION_AR.get(raw_city)
-    if region and city == "Other":
-        city = region
 
     photos = _photos(item)
 

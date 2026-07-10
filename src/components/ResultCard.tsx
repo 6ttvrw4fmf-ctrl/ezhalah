@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
-import { useI18n, t as tr, tPrice } from '@/i18n';
+import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
 
 const IS_WEB = Platform.OS === 'web';
@@ -158,12 +158,18 @@ export function ResultCard({
           <Ionicons name="home-outline" size={13} color={colors.muted} />
           <Text style={card.typeLabel}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
         </View>
+        {/* JUNK_LOCATION_TOKENS guard (2026-07-10 location-data-quality audit): city/district can
+            legitimately both be empty here — a scraper's own resolver failed AND remote.ts correctly
+            blanked a junk sentinel rather than passing it through raw. Show the neutral, honest
+            «الموقع غير محدد» instead of an empty title / a bare ", السعودية" — never blank, never
+            the raw junk token. A present district with no city (or vice versa) is the normal,
+            non-bug case and is untouched. */}
         <Text style={[card.title, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
-          {place(t(listing.district)) || place(t(listing.city))}{listing.district ? `, ${place(t(listing.city))}` : ''}
+          {(place(t(listing.district)) || place(t(listing.city)) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(t(listing.city)) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
         <View style={card.locRow}>
           <Ionicons name="location-outline" size={12} color={colors.primary} />
-          <Text style={card.locText}>{place(t(listing.city))}, {t('Saudi Arabia')}</Text>
+          <Text style={card.locText}>{place(t(listing.city)) || LOCATION_UNRESOLVED_AR}, {t('Saudi Arabia')}</Text>
           {regionLabel ? (
             <View style={card.regionChip}>
               <Ionicons name="compass-outline" size={10} color={colors.primary} />

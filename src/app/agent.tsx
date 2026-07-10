@@ -36,7 +36,7 @@ import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, type SearchQuery, type SearchResult } from '@/data/search';
 import type { Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
-import { useI18n, detectLocale, getLocale, t as tr, type Locale } from '@/i18n';
+import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 
 const IS_WEB = Platform.OS === 'web';
@@ -855,10 +855,17 @@ export default function Agent() {
         // can resolve later references like "the 2nd one", "#3", "the cheapest", "the Al Malqa one" —
         // restating only what's on the card, never inventing. (user training decision.)
         if (m.role === 'results') {
-          const cards = (m.result?.listings ?? []).map((l, i) =>
-            `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${l.district}, ${l.city} — ${l.price}` +
-            `${l.area ? `, ${l.area} m²` : ''}${l.beds ? `, ${l.beds} bed` : ''}, on ${l.source}`,
-          );
+          // JUNK_LOCATION_TOKENS guard, own display path (2026-07-10 location-data-quality audit):
+          // this text feeds straight into the AGENT's conversation memory (so it can later resolve
+          // "the Al Malqa one" etc.). l.city/l.district already went through remote.ts's junk guard,
+          // so a sentinel can't arrive as a literal string here, but an honestly-unresolved '' still
+          // needs a neutral label — otherwise this would show "in , " for a fully-unresolved location.
+          const cards = (m.result?.listings ?? []).map((l, i) => {
+            const locationLabel = l.district && l.city ? `${l.district}, ${l.city}`
+              : (l.district || l.city || LOCATION_UNRESOLVED_AR);
+            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel} — ${l.price}` +
+              `${l.area ? `, ${l.area} m²` : ''}${l.beds ? `, ${l.beds} bed` : ''}, on ${l.source}`;
+          });
           const text = cards.length ? `${m.text}\n${cards.join('\n')}` : m.text;
           return { role, text };
         }

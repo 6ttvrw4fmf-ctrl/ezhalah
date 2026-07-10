@@ -308,9 +308,10 @@ def map_listing(adid: int, body: str) -> tuple[Optional[dict], str]:
         ppm = round(headline / area)
 
     # ── location (this broker is Unaizah / Qassim only, but resolve generically) ──
+    # Forward-fix (2026-07-10 location-data-quality audit): removed the hardcoded "Unaizah" default —
+    # it silently invented a city for the rare listing whose source page had no location data at all.
+    # An honest None is correct here; normalize.region_for_city(None) already returns None safely.
     city = normalize.map_city(city_ar) if city_ar and city_ar.strip("_ ") else None
-    if not city:
-        city = "Unaizah"  # the office's home city; every observed listing is عنيزة
     region = normalize.region_for_city(city)
 
     # ── description / video / licence ──

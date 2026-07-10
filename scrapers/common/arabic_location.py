@@ -1,13 +1,21 @@
-"""Shared Arabic-location resolution for the Arabic-native capture upgrades.
+"""THE single shared Arabic-location resolver for every scraper (2026-07-10 architecture redesign —
+see docs/LOCATION_RESOLUTION.md). Normalizes a source Arabic city/region/district string and
+resolves it to a STABLE Saudi catalog id WITHOUT going through the English pivot.
 
-Normalizes a source Arabic city/region string and resolves it to a STABLE Saudi catalog
-(city_id, region_id) WITHOUT going through the English pivot. Used by per-platform scraper
-upgrades so every platform resolves the same way the Filter/Agent will at cutover.
+RULE (owner, 2026-07-10, permanent): no scraper may implement its own placeholder/fallback logic
+for a location field ("Other", "Unknown", a hardcoded default, or any invented value). Every
+scraper's location resolution MUST route through this module's `resolve()` (new work) or the
+pre-existing `to_catalog()`/`resolve_slug()` (unchanged, still supported for the 6 platforms
+already calling them directly). An unresolved location is ALWAYS represented as `None` fields —
+never a sentinel string. `scrapers/common/db.py`'s shared upsert path additionally enforces this
+as a backstop (`_reject_placeholder_location`) so a scraper bug can never write a placeholder to
+the database even if it forgets to call this module.
 
 TWIN-SAFE: ~300 catalog city names are ambiguous across regions (e.g. «بيش» exists in both Asir
-and Jazan). For those, this NEVER guesses — it resolves only when a region hint disambiguates,
-otherwise leaves region_id null (honest, never wrong). Callers pass `region_hint` = whatever region
-signal they already have (English name, Arabic label, or a region_id int).
+and Jazan). For those, this NEVER guesses — it resolves only when a region hint disambiguates, or
+(new) when a matching district uniquely narrows the candidate set, otherwise leaves it null
+(honest, never wrong). Callers pass `region_hint` = whatever region signal they already have
+(English name, Arabic label, or a region_id int).
 
 `norm_ar` MUST match the SQL `normalize_ar()` that built loc_catalog_city.city_norm.
 """
@@ -19,6 +27,7 @@ import time
 from typing import Optional, Union
 
 from scrapers.common import db
+from scrapers.common.placeholder_tokens import PLACEHOLDER_TOKENS, is_placeholder  # noqa: F401 (re-exported)
 
 _BIDI = "‎‏‌‍"
 
@@ -45,7 +54,9 @@ REGION_EN_TO_ID: dict[str, int] = {
 
 _CITY: dict[str, list[tuple[int, Optional[int]]]] = {}   # city_norm → [(city_id, region_id), …]
 _REGION_NORM: dict[str, int] = {}                        # norm(region_ar) → region_id
+_REGION_AR_FOR: dict[int, str] = {}                      # region_id → canonical region_ar
 _CID_AR: dict[int, str] = {}                             # catalog city_id → canonical city_ar
+_DISTRICT_BY_CITY: dict[int, set[str]] = {}              # city_id → {district_norm, …} (disambiguation only)
 
 
 _LOAD_LOCK = threading.Lock()
@@ -75,12 +86,17 @@ def _load() -> None:
                     _CITY.setdefault(a["alias_norm"], []).append((a["city_id"], cid2reg.get(a["city_id"])))
                 for r in (c.table("loc_catalog_region").select("region_id,region_ar").execute().data or []):
                     _REGION_NORM[norm_ar(r.get("region_ar"))] = r["region_id"]
+                    _REGION_AR_FOR[r["region_id"]] = r["region_ar"]
+                for r in (c.table("loc_catalog_district").select("city_id,district_norm").execute().data or []):
+                    _DISTRICT_BY_CITY.setdefault(r["city_id"], set()).add(r["district_norm"])
                 return
             except Exception as e:  # transient network/DB hiccup → clear partials, back off, retry
                 last = e
                 _CITY.clear()
                 _REGION_NORM.clear()
+                _REGION_AR_FOR.clear()
                 _CID_AR.clear()
+                _DISTRICT_BY_CITY.clear()
                 time.sleep(1.5 * (attempt + 1))
         if last is not None:
             raise last
@@ -189,32 +205,49 @@ def _hint_to_id(region_hint: Union[int, str, None]) -> Optional[int]:
     return _REGION_NORM.get(n) or _REGION_NORM.get(stripped)
 
 
+def _pick_candidate(
+    key: str, hint: Optional[int], district_norm: Optional[str] = None,
+) -> Optional[tuple[int, Optional[int]]]:
+    """Shared candidate-narrowing logic used by BOTH `to_catalog()` and `resolve()` — one codepath,
+    two call sites. Never guesses: a twin across regions only resolves via `hint` or (new)
+    `district_norm`, and ONLY when that signal narrows the candidate set to EXACTLY one city.
+    """
+    cands = _CITY.get(key)
+    if not cands:
+        return None
+    if len(cands) == 1:
+        return cands[0]
+    regions = {rid for _, rid in cands}
+    if hint is not None:
+        for cid, rid in cands:
+            if rid == hint:
+                return (cid, rid)
+    if len(regions) == 1:
+        return cands[0]              # several ids but one region → region is unambiguous
+    if district_norm:
+        # District-based disambiguation (new, 2026-07-10): a district name is an INDEPENDENT signal
+        # from the source, not a guess — only narrows when it matches districts of EXACTLY ONE of
+        # the ambiguous candidates. If two+ candidates share a district by the same name (or none
+        # do), this yields nothing and the caller stays unresolved, same as today.
+        matches = [(cid, rid) for cid, rid in cands if district_norm in _DISTRICT_BY_CITY.get(cid, ())]
+        if len(matches) == 1:
+            return matches[0]
+    return None                       # twin across regions, no/non-unique hint → don't guess
+
+
 def to_catalog(city_ar: Optional[str], region_hint: Union[int, str, None] = None) -> tuple[Optional[int], Optional[int]]:
     """Resolve a source Arabic city/region label → (city_id, region_id).
     Real city → (city_id, region_id); region label → (None, region_id); unresolved/ambiguous → (None, None).
-    `region_hint` (region_id, English name, or Arabic label) disambiguates same-name twins."""
+    `region_hint` (region_id, English name, or Arabic label) disambiguates same-name twins.
+    UNCHANGED behavior (existing callers: aqargate/aqarmonthly/aldarim/alhoshan/hajer/sanadak) — no
+    district disambiguation here; use `resolve()` for that."""
     _load()
     n = norm_ar(city_ar)
     if not n:
         return None, None
     hint = _hint_to_id(region_hint)
 
-    def pick(key: str) -> Optional[tuple[int, Optional[int]]]:
-        cands = _CITY.get(key)
-        if not cands:
-            return None
-        if len(cands) == 1:
-            return cands[0]
-        regions = {rid for _, rid in cands}
-        if hint is not None:
-            for cid, rid in cands:
-                if rid == hint:
-                    return (cid, rid)
-        if len(regions) == 1:
-            return cands[0]              # several ids but one region → region is unambiguous
-        return None                       # twin across regions, no/!matching hint → don't guess
-
-    hit = pick(n)
+    hit = _pick_candidate(n, hint)
     if hit:
         return hit
     # Strip a leading admin prefix («محافظة X» governorate / «منطقة X» region) and retry as a city.
@@ -224,7 +257,7 @@ def to_catalog(city_ar: Optional[str], region_hint: Union[int, str, None] = None
             stripped = n[len(pre):]
             break
     if stripped != n:
-        hit = pick(stripped)
+        hit = _pick_candidate(stripped, hint)
         if hit:
             return hit
     # Otherwise treat it as a region label → region_id only; failing that, fall back to an explicit
@@ -235,3 +268,68 @@ def to_catalog(city_ar: Optional[str], region_hint: Union[int, str, None] = None
 
 def region_id_for(city_ar: Optional[str], region_hint: Union[int, str, None] = None) -> Optional[int]:
     return to_catalog(city_ar, region_hint)[1]
+
+
+def resolve(
+    city_ar: Optional[str],
+    district_ar: Optional[str] = None,
+    region_hint: Union[int, str, None] = None,
+) -> dict:
+    """THE recommended entry point for NEW/migrated scrapers (2026-07-10 architecture redesign).
+    Resolves city + region + (when possible) district in one call, using the SAME never-guess
+    candidate logic as `to_catalog()` (via `_pick_candidate`), PLUS district-based disambiguation
+    for twin city names when a region_hint alone doesn't narrow it.
+
+    A scraper's OWN placeholder/fallback logic (e.g. `city = X or "Other"`) must NOT exist anywhere
+    downstream of this call — if this returns city_id=None, the caller writes None, never a sentinel.
+    `is_placeholder()` guards against a raw value that's already junk (e.g. an upstream API field
+    that itself contains the literal word "Other") — such input is treated as absent, never resolved.
+
+    Returns {city_ar, city_id, region_id, region_ar, district_ar, district_id, confidence} where
+    confidence is one of: 'city' (region-unambiguous or region-hint-confirmed), 'city+district'
+    (only resolved via district disambiguation), 'region_only', 'unresolved'.
+    """
+    _load()
+    empty = {"city_ar": None, "city_id": None, "region_id": None, "region_ar": None,
+             "district_ar": None, "district_id": None, "confidence": "unresolved"}
+    if is_placeholder(city_ar):
+        return dict(empty)
+    n = norm_ar(city_ar)
+    if not n:
+        return dict(empty)
+    hint = _hint_to_id(region_hint)
+    d_ar = None if is_placeholder(district_ar) else (district_ar or None)
+    d_norm = norm_ar(d_ar) if d_ar else None
+
+    def _finish(cid: int, rid: Optional[int], confidence: str) -> dict:
+        return {
+            "city_ar": _CID_AR.get(cid), "city_id": cid, "region_id": rid,
+            "region_ar": _REGION_AR_FOR.get(rid) if rid is not None else None,
+            "district_ar": d_ar, "district_id": None, "confidence": confidence,
+        }
+
+    # Try the plain hint-based resolution first (region-unambiguous, or region_hint confirms it).
+    hit = _pick_candidate(n, hint)
+    stripped = n
+    for pre in ("محافظه ", "منطقه "):
+        if n.startswith(pre):
+            stripped = n[len(pre):]
+            break
+    if not hit and stripped != n:
+        hit = _pick_candidate(stripped, hint)
+    if hit:
+        return _finish(hit[0], hit[1], "city")
+
+    # Region hint didn't narrow it — try district-based disambiguation before giving up.
+    if d_norm:
+        hit = _pick_candidate(n, hint, district_norm=d_norm) or (
+            _pick_candidate(stripped, hint, district_norm=d_norm) if stripped != n else None)
+        if hit:
+            return _finish(hit[0], hit[1], "city+district")
+
+    # Unresolved as a city — same region-label fallback to_catalog() uses.
+    rid = _REGION_NORM.get(n) or _REGION_NORM.get(stripped) or _REGION_NORM.get("منطقه " + n) or hint
+    if rid:
+        return {"city_ar": None, "city_id": None, "region_id": rid, "region_ar": _REGION_AR_FOR.get(rid),
+                "district_ar": d_ar, "district_id": None, "confidence": "region_only"}
+    return dict(empty) | {"district_ar": d_ar}
