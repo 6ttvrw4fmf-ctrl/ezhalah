@@ -214,17 +214,14 @@ export default function SearchLoader({
   if (offsetRef.current == null) offsetRef.current = currentRotation();
   useEffect(() => { bumpRotation(); }, []);
 
-  // The COMPLETE eligible roster, computed once from the query and FROZEN — `resultSources` arriving
-  // later (as the query resolves) must never reshuffle pills already on screen.
+  // The COMPLETE 32-platform roster (LOCKED — always the full network, regardless of query), computed
+  // once and FROZEN — `resultSources` arriving later (as the query resolves) only reorders which
+  // pills lead; it must never reshuffle or hide pills already on screen. `query` just gates WHEN the
+  // strip mounts (a search is actually underway); its contents no longer affect WHICH platforms show.
   const frozenRef = useRef<LoaderPlatform[] | null>(null);
   const platforms = useMemo<LoaderPlatform[]>(() => {
     if (frozenRef.current && frozenRef.current.length) return frozenRef.current;
-    const picked = query
-      ? pickLoaderPlatforms(
-          { deal: query.deal, bothDeals: query.bothDeals, category: query.category, sources: query.sources, resultSources },
-          offsetRef.current ?? 0,
-        )
-      : [];
+    const picked = query ? pickLoaderPlatforms(resultSources, offsetRef.current ?? 0) : [];
     if (picked.length) frozenRef.current = picked;
     return picked;
   }, [query, resultSources]);
