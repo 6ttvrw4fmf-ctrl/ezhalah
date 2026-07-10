@@ -35,10 +35,44 @@ if [ "$LOCAL" != "$REMOTE" ]; then
   exit 1
 fi
 
-echo "Working tree clean, on main, matches origin/main exactly ($LOCAL). Deploying..."
+# ENV PREFLIGHT (added 2026-07-10 after a P0: a clean-main build has NO local .env — it's
+# gitignored — so the Supabase EXPO_PUBLIC_* vars must live in the VERCEL PROJECT env, or the
+# `supabase` client builds as null and EVERY search silently returns "try again" app-wide.
+# See docs/DEPLOY_SAFETY.md "2026-07-10 incident".) These are the vars src/lib/supabase.ts reads.
+REQUIRED_ENV=("EXPO_PUBLIC_SUPABASE_URL" "EXPO_PUBLIC_SUPABASE_KEY")
+VERCEL_ENV_LS="$(npx vercel env ls production 2>/dev/null || true)"
+MISSING=""
+for v in "${REQUIRED_ENV[@]}"; do
+  echo "$VERCEL_ENV_LS" | grep -q "$v" || MISSING="$MISSING $v"
+done
+if [ -n "$MISSING" ]; then
+  echo "REFUSING TO DEPLOY: required Vercel PRODUCTION env var(s) missing:$MISSING"
+  echo "A clean-main build has no local .env (gitignored), so these MUST be set in the Vercel"
+  echo "project or the app's Supabase client builds as null and all search dies. Add them with:"
+  echo "  printf '%s' \"<value>\" | npx vercel env add <NAME> production"
+  echo "(values are in the local .env). See docs/DEPLOY_SAFETY.md."
+  exit 1
+fi
+
+echo "Clean, on main, matches origin/main, required Vercel env present ($LOCAL). Deploying..."
 npx vercel --prod --yes
 
+# POST-DEPLOY ASSERTION: the served bundle MUST reference the Supabase host, proving the
+# EXPO_PUBLIC_* vars were actually inlined at build time. A green Vercel build with a null client
+# is the exact failure this catches.
 echo ""
-echo "Deployed. Now verify the served bundle actually contains what you expect —"
-echo "see 'Verifying a deploy' in docs/DEPLOY_SAFETY.md, and update the Approved"
-echo "baseline record table in that same file with the new deployment ID + bundle hash."
+echo "Verifying the served bundle has the Supabase config baked in..."
+sleep 3
+LIVE_BUNDLE="$(curl -s https://ezhalah-app.vercel.app/ | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
+if [ -n "$LIVE_BUNDLE" ] && curl -s "https://ezhalah-app.vercel.app/$LIVE_BUNDLE" | grep -q "supabase.co"; then
+  echo "OK: live bundle ($LIVE_BUNDLE) references supabase.co — client will initialize."
+else
+  echo "WARNING: could not confirm supabase.co in the served bundle ($LIVE_BUNDLE)."
+  echo "If search shows «حاول مرة ثانية» app-wide, the env vars did NOT inline — investigate before"
+  echo "declaring the deploy healthy. (This is the 2026-07-10 P0 signature.)"
+fi
+
+echo ""
+echo "Deployed. Now verify search actually renders cards in a browser (not just the bundle), then"
+echo "update the Approved baseline record table in docs/DEPLOY_SAFETY.md with the new deployment"
+echo "ID + bundle hash. See 'Verifying a deploy' in that file."
