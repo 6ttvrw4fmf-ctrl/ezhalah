@@ -237,10 +237,13 @@ def _price(text: str) -> Optional[int]:
     return n if n >= 10_000 else None
 
 
-def _city(text: str) -> tuple[str, Optional[str]]:
+def _city(text: str) -> tuple[Optional[str], Optional[str]]:
     """(canonical English city, neighborhood). City from the مخطط/حي/town token; neighborhood = the
-    plan/quarter name (e.g. "الخير الأمراء 3541", "الجلة مخطط 520")."""
-    city = "Riyadh"
+    plan/quarter name (e.g. "الخير الأمراء 3541", "الجلة مخطط 520"). None when no token matches —
+    Nowaisiry recognizes BOTH Riyadh-area and Hail-area plan names, so it is not a single-city
+    brokerage; guessing "Riyadh" for an unrecognized plan name would silently mislabel a Hail
+    listing. An honest unresolved city beats a wrong guess."""
+    city = None
     for tok, eng in CITY_TOKENS:
         if tok in text:
             city = eng
