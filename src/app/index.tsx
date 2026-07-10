@@ -104,7 +104,7 @@ const PRICE_HINT: RangeHintCfg = {
   none: 'سيتم البحث بدون تحديد سعر.',
   zeroMin: '0 يعني بدون حد أدنى للسعر.',
   zeroMax: '0 يعني بدون حد أعلى للسعر.',
-  near: (x) => `سيتم البحث عن العقارات بسعر قريب من ${x} ر.س.`,
+  near: (x) => `سيتم البحث عن العقارات بسعر ${x} ريال بالضبط.`,   // min == max → EXACT match (backend uses inclusive bounds v>=X && v<=X)
   minOnly: (x) => `سيتم البحث عن عقارات بسعر ${x} ر.س أو أعلى.`,
   maxOnly: (x) => `سيتم البحث عن عقارات بسعر ${x} ر.س أو أقل.`,
 };
@@ -113,7 +113,7 @@ const AREA_HINT: RangeHintCfg = {
   none: 'سيتم البحث بدون تحديد مساحة.',
   zeroMin: '0 يعني بدون حد أدنى للمساحة.',
   zeroMax: '0 يعني بدون حد أعلى للمساحة.',
-  near: (x) => `سيتم البحث عن عقارات بمساحة قريبة من ${x} م².`,
+  near: (x) => `سيتم البحث عن العقارات بمساحة ${x} م² بالضبط.`,   // min == max → EXACT match (backend uses inclusive bounds v>=X && v<=X)
   minOnly: (x) => `سيتم البحث عن عقارات بمساحة ${x} م² أو أكبر.`,
   maxOnly: (x) => `سيتم البحث عن عقارات بمساحة ${x} م² أو أقل.`,
 };
@@ -620,7 +620,7 @@ export default function Home() {
                           <Text style={s.rangeLabel}>{t('From')}</Text>
                           <TextInput ref={areaMinRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                             value={areaMinValue}
-                            onChangeText={(v) => { const d = toLatinDigits(v).replace(/\D/g, ''); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
+                            onChangeText={(v) => { const d = toLatinDigits(v).split(/[.٫]/)[0].replace(/\D/g, ''); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
                         </Pressable>
                         <Pressable style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]} onPress={() => areaMaxRef.current?.focus()}>
@@ -628,7 +628,7 @@ export default function Home() {
                           <Text style={s.rangeLabel}>{t('To')}</Text>
                           <TextInput ref={areaMaxRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                             value={areaMaxValue}
-                            onChangeText={(v) => { const d = toLatinDigits(v).replace(/\D/g, ''); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
+                            onChangeText={(v) => { const d = toLatinDigits(v).split(/[.٫]/)[0].replace(/\D/g, ''); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
                         </Pressable>
                       </View>
@@ -649,7 +649,7 @@ export default function Home() {
                       <Text style={s.rangeLabel}>{t('From')}</Text>
                       <TextInput ref={priceMinRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                         value={priceMinValue}
-                        onChangeText={(v) => { const d = toLatinDigits(v).replace(/\D/g, ''); setQuery((q) => ({ ...q, priceMin: d || null, priceInput: '', priceBand: null })); }} />
+                        onChangeText={(v) => { const d = toLatinDigits(v).split(/[.٫]/)[0].replace(/\D/g, ''); setQuery((q) => ({ ...q, priceMin: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
                     </Pressable>
                     <Pressable style={[s.field, s.rangeBox, query.priceMax ? s.sizeFieldOn : null]} onPress={() => priceMaxRef.current?.focus()}>
@@ -657,7 +657,7 @@ export default function Home() {
                       <Text style={s.rangeLabel}>{t('To')}</Text>
                       <TextInput ref={priceMaxRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                         value={priceMaxValue}
-                        onChangeText={(v) => { const d = toLatinDigits(v).replace(/\D/g, ''); setQuery((q) => ({ ...q, priceMax: d || null, priceInput: '', priceBand: null })); }} />
+                        onChangeText={(v) => { const d = toLatinDigits(v).split(/[.٫]/)[0].replace(/\D/g, ''); setQuery((q) => ({ ...q, priceMax: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
                     </Pressable>
                   </View>
