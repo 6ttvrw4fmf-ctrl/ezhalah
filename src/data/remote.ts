@@ -406,6 +406,20 @@ const COMMERCIAL_TYPE_AR_ALL = Array.from(new Set(
 const COMMERCIAL_TYPE_AR_COM = COMMERCIAL_TYPE_AR_ALL;                              // commercial tables: incl عمارة
 const COMMERCIAL_TYPE_AR_RES = COMMERCIAL_TYPE_AR_ALL.filter((t) => t !== 'عمارة'); // residential tables: excl عمارة
 
+// Residential-macro type_ar labels — the MIRROR of the commercial lists above, feeding the residential
+// misfile-recovery scope B in fetchListingsForQuery (FIX A, owner 2026-07-10). A handful of genuinely
+// RESIDENTIAL listings (أرض سكنية/مزرعة/استراحة/شقة/فيلا/بيت/غرفة) are physically misfiled INTO
+// *_commercial_listings tables on some platforms. Broad Residential reads only RES_TABLES, so those rows
+// were reachable by NO Residential search (and specific searches reached them only for the clean types
+// whose CleanQuery.kinds already spans both tables). RESIDENTIAL_TYPE_AR_COM is the set we look for in the
+// COMMERCIAL tables: عمارة is EXCLUDED because in a commercial table عمارة = Commercial Building (macro
+// Commercial) — exactly how the client's macro filter resolves it — so including it would leak Commercial
+// Buildings into Residential results. This mirrors COMMERCIAL_TYPE_AR_RES excluding عمارة, in reverse.
+const RESIDENTIAL_TYPE_AR_ALL = Array.from(new Set(
+  Object.keys(CLEAN_MACRO).filter((c) => CLEAN_MACRO[c] === 'Residential').flatMap((c) => CLEAN_TO_TYPE_AR[c] ?? []),
+));
+const RESIDENTIAL_TYPE_AR_COM = RESIDENTIAL_TYPE_AR_ALL.filter((t) => t !== 'عمارة'); // com tables: excl عمارة (=Commercial Building there)
+
 // Which table KIND(s) this query reads: from the selected clean type/group's CleanQuery, else (a
 // macro-only search) from q.category. Default Residential.
 function kindsFor(q: SearchQuery): SourceKind[] {
@@ -692,9 +706,39 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     return only.length ? only : tbls;
   };
   const mainTables = isBroadCommercial ? platformScope(resTables(q)) : tables;
+
+  // RESIDENTIAL misfile recovery (FIX A, owner 2026-07-10) — the mirror of the broad-Commercial trick, in
+  // the OTHER direction. Broad Residential's scope A = RES_TABLES never reads commercial tables, so the
+  // residential rows misfiled into *_commercial_listings were fetched by no Residential search. This adds a
+  // residential scope B over the COMMERCIAL tables, constrained to the residential type_ar the search wants,
+  // covering BOTH broad Residential AND specific residential-type searches (and any future misfile into a
+  // commercial table) with no per-case code.
+  //   • عمارة is EXCLUDED (RESIDENTIAL_TYPE_AR_COM / the intersect below): in a commercial table عمارة is a
+  //     Commercial Building, so pulling it into Residential would break the Commercial-Building purity
+  //     guarantee — the exact mirror of the commercial path excluding عمارة from its residential-table scope.
+  //   • DISJOINTNESS: scope-B tables = COM_TABLES MINUS whatever scope A already reads (mainTables), so no
+  //     row is counted by both scopes (search_listings_ar has one row per listing; disjoint tables ⇒ no
+  //     double-count). For kinds:BOTH residential types (Residential Land/Farm/Rest House) scope A already
+  //     includes the commercial tables ⇒ this set is empty ⇒ scope B is skipped (no double coverage). Same
+  //     platform scope as scope A.
+  //   • Scope A's p_types is left untouched (null for broad Residential, per rpcFilterParams): constraining
+  //     it to residential labels would DROP currently-visible rows whose type_ar isn't a catalogued label
+  //     (e.g. an aqargate row with type_ar 'Compound', macro-Residential via its source-table kind).
+  const isBroadResidential = q.category === 'Residential' && !q.type && !(q.types && q.types.length) && !q.typeGroup;
+  const resSel = effectiveTypes(q);
+  const resSelectedTypeAr = resSel.length ? typeArForTypes(resSel) : (q.typeGroup ? typeArForSelection(q.typeGroup) : null);
+  const resMisfileTypes = isBroadResidential
+    ? RESIDENTIAL_TYPE_AR_COM
+    : (resSelectedTypeAr ? resSelectedTypeAr.filter((t) => RESIDENTIAL_TYPE_AR_COM.includes(t)) : []);
+  const resScopeBTables = platformScope(COM_TABLES.filter((t) => !mainTables.includes(t)));
+  const attachResScopeB = q.category === 'Residential' && !isBroadCommercial
+    && resMisfileTypes.length > 0 && resScopeBTables.length > 0;
+
   const scopeB = isBroadCommercial
     ? { p_tables2: tables, p_types2: COMMERCIAL_TYPE_AR_COM }
-    : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
+    : attachResScopeB
+      ? { p_tables2: resScopeBTables, p_types2: resMisfileTypes }
+      : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
 
   const { data: cands, error } = await supabase.rpc('location_search_candidates_ar', {
     p_deal: q.bothDeals ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
