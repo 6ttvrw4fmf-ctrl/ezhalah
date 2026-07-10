@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from supabase import Client, create_client
 
 from scrapers.common.pii import redact_pii
+from scrapers.common.placeholder_tokens import is_placeholder
 
 
 # Load .env once when this module is first imported.
@@ -93,6 +94,7 @@ def upsert_aqar_residential(row: dict[str, Any]) -> None:
     _sanitize_price(row)
     _sanitize_ints(row)
     _ensure_capture(row)
+    _reject_placeholder_location(row, table="aqar_residential_listings")
     _execute(sb().table("aqar_residential_listings").upsert(row, on_conflict="ad_number"), what="aqar_residential_listings")
 
 
@@ -104,6 +106,7 @@ def upsert_aqar_commercial(row: dict[str, Any]) -> None:
     _sanitize_price(row)
     _sanitize_ints(row)
     _ensure_capture(row)
+    _reject_placeholder_location(row, table="aqar_commercial_listings")
     _execute(sb().table("aqar_commercial_listings").upsert(row, on_conflict="ad_number"), what="aqar_commercial_listings")
 
 
@@ -115,6 +118,7 @@ def upsert_wasalt_residential(row: dict[str, Any]) -> None:
     _sanitize_price(row)
     _sanitize_ints(row)
     _ensure_capture(row)
+    _reject_placeholder_location(row, table="wasalt_residential_listings")
     _execute(sb().table("wasalt_residential_listings").upsert(row, on_conflict="ad_number"), what="wasalt_residential_listings")
 
 
@@ -212,6 +216,58 @@ def _ensure_capture(r: dict[str, Any]) -> None:
         cap.setdefault("schema", "unspecified")
 
 
+# Location columns checked on EVERY upsert path (2026-07-10 architecture redesign — see
+# docs/LOCATION_RESOLUTION.md). Scoped to columns actually present across platform tables; a
+# missing key is just `.get()` → None, a no-op. Includes both the legacy English `city`/`region`
+# columns AND the first-class Arabic `city_ar` column some platforms (wasalt, sanadak, aqargate,
+# aldarim, alhoshan, hajer, aqarmonthly) carry alongside it.
+_LOCATION_COLS = ("city", "region", "city_ar", "district_ar", "neighborhood")
+
+
+def guard_location_update(fields: dict[str, Any], *, table: str, ref: str = "") -> dict[str, Any]:
+    """PUBLIC — call this on any dict of column→value you're about to write directly via
+    `sb().table(...).update(...)` OUTSIDE the upsert helpers below (2026-07-10 architecture
+    redesign, see docs/LOCATION_RESOLUTION.md).
+
+    CORRECTION (adversarial review, 2026-07-10): the upsert helpers' own `_reject_placeholder_location`
+    is NOT actually "the one path every write goes through" — several scripts write location fields
+    via a direct `.table().update()` that bypasses upsert entirely (confirmed: scrapers/wasalt/
+    enrich_ar.py sets city_ar/district_ar/region_id this way on a DAILY schedule). Those call sites
+    must call this function explicitly on their own update payload before executing it. A missing
+    call site is a real gap, not a false alarm — if you add a new direct-write script that touches
+    city/region/district_ar/neighborhood, call this on its update dict.
+
+    Mutates and returns `fields` for convenient inline use: `c.table(t).update(guard_location_update(upd, table=t)).execute()`.
+    """
+    caught = [col for col in _LOCATION_COLS if is_placeholder(fields.get(col))]
+    if not caught:
+        return fields
+    for col in caught:
+        fields[col] = None
+    try:
+        _execute(
+            sb().table("location_pipeline_alerts").insert({
+                "alert_type": "placeholder_location_blocked",
+                "metric": len(caught),
+                "detail": f"{table}: blocked placeholder in {caught}" + (f" ({ref})" if ref else ""),
+            }),
+            what="location_pipeline_alerts.insert",
+        )
+    except Exception:
+        pass  # monitoring must never break the actual upsert
+    print(f"⚠ {table}: blocked placeholder location value in {caught} — nulled, not written", flush=True)
+    return fields
+
+
+def _reject_placeholder_location(r: dict[str, Any], *, table: str) -> None:
+    """Backstop for the upsert helpers below (`_wasalt_batch` + the 3 dedicated `upsert_*`
+    functions) — every row THOSE specific functions handle passes through here before the actual
+    Postgres write. Thin wrapper around `guard_location_update` (one check, one place) for callers
+    that already hold a full row dict rather than a partial update dict. See `guard_location_update`
+    for direct-write scripts that bypass the upsert helpers entirely."""
+    guard_location_update(r, table=table, ref=f"ad_number={r.get('ad_number')}")
+
+
 def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
@@ -230,6 +286,7 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         _sanitize_price(r)
         _sanitize_ints(r)
         _ensure_capture(r)
+        _reject_placeholder_location(r, table=table)
         seen[r["ad_number"]] = r
     _execute(sb().table(table).upsert(list(seen.values()), on_conflict="ad_number"), what=table)
 

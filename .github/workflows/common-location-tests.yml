@@ -1,0 +1,31 @@
+# Shared location-resolver + placeholder-guard unit tests (2026-07-10 architecture redesign).
+# Hermetic: no network, no secrets, ~1s runtime. This is the CODE-level guard (item 6, part 1) —
+# it fails the build if the resolver's never-guess logic or the DB-write placeholder guard ever
+# regresses. See scripts/check_placeholder_locations.py + .github/workflows/location-monitor.yml
+# for the LIVE-DATA guard (item 6, part 2) that catches an actual placeholder reaching production.
+name: Common location tests
+
+on:
+  push:
+    paths:
+      - "scrapers/common/**"
+      - ".github/workflows/common-location-tests.yml"
+  pull_request:
+    paths:
+      - "scrapers/common/**"
+      - ".github/workflows/common-location-tests.yml"
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pytest
+        run: pip install pytest
+      - name: Run shared location-resolver + placeholder-guard tests
+        run: python -m pytest scrapers/common/tests/ -v

@@ -83,6 +83,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize as N  # noqa: E402
+from scrapers.common import arabic_location as AL  # noqa: E402
 
 BASE_WEB = "https://gathern.co"
 SEARCH = "https://msapi.gathern.co/search/api/v1/search-units"
@@ -328,6 +329,15 @@ def map_listing(it: dict) -> Optional[dict]:
     region = N.region_for_city(city)
     neighborhood = (ev.get("district_en") or addr.get("area") or ev.get("district_ar") or "").strip() or None
 
+    # Centralized resolution (2026-07-10 architecture redesign — see docs/LOCATION_RESOLUTION.md):
+    # ADDITIVE, not a replacement for `city`/`region` above (those columns are English-label TEXT,
+    # a different shape than this resolver's Arabic-canonical city_id/region_id output — a full
+    # column cutover is a separate, larger migration decision). Every future consumer (a backfill,
+    # or a next-phase SQL overlay) can read these straight off additional_info instead of re-deriving
+    # them; `region` (already computed above, possibly via the narrower legacy dict) is passed as a
+    # disambiguation hint — an already-derived, trusted signal, not a guess.
+    resolved = AL.resolve(city_ar, district_ar=neighborhood, region_hint=region)
+
     beds, masters = _beds(it.get("features"))
 
     chalet_id = it.get("chalet_id")
@@ -363,6 +373,11 @@ def map_listing(it: dict) -> Optional[dict]:
         "latitude": it.get("lat"),
         "longitude": it.get("lng"),
         "amenities": [a.get("title") for a in amenities if isinstance(a, dict) and a.get("title")][:30],
+        "resolved_city_ar": resolved["city_ar"],
+        "resolved_city_id": resolved["city_id"],
+        "resolved_region_id": resolved["region_id"],
+        "resolved_district_ar": resolved["district_ar"],
+        "resolved_confidence": resolved["confidence"] if resolved["confidence"] != "unresolved" else None,
     }
     info = {k: v for k, v in info.items() if v not in (None, "", [], 0)}
 

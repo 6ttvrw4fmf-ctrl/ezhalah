@@ -207,6 +207,11 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
         reg = _region_for(city_ar)
         if reg:
             upd["region_id"] = reg
+        # Placeholder guard (2026-07-10 architecture redesign — see docs/LOCATION_RESOLUTION.md):
+        # this write goes straight through .table().update(), bypassing the upsert helpers in
+        # scrapers/common/db.py entirely (confirmed gap, adversarial review 2026-07-10) — so it
+        # must call the guard explicitly rather than relying on the upsert-path backstop.
+        db.guard_location_update(upd, table=table, ref=f"id={row['id']}")
         try:
             c.table(table).update(upd).eq("id", row["id"]).execute()
             with lock:
