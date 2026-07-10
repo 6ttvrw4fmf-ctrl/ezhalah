@@ -91,7 +91,25 @@ resolved, discovered during this redesign. Any new work must fit into ONE of the
   unmapped-by-that-platform's-own-dict) English city name, via `loc_city_map` → the same
   `loc_catalog_city`/`loc_catalog_city_alias` catalog `arabic_location.py` uses. It correctly and
   honestly skips a placeholder `city` value (no `loc_city_map` entry for "other") — this was never
-  the bug, and needs no change.
+  the bug, and needs no change. **Verified 2026-07-10 it cannot silently re-corrupt the Ramz Al
+  Qassim fix**: it keys off `lower(btrim(raw.city))` via a `JOIN LATERAL ... ON true`, so a row
+  whose raw `city` is `NULL` (the 69-row fix's exact state) produces zero lateral rows and is
+  excluded from the overlay's insert/update entirely — confirmed by manually invoking the function
+  right after the fix and re-checking all 47 affected active rows were still unresolved afterward.
+
+**Latent trap found during the Ramz Al Qassim fix (2026-07-10), not fixed here — flag for whoever
+touches `listing_native_location_v1` next:** for a platform with NO "native" columns (like
+Ramzalqasim), `v1`'s `legacy` CTE is its ONLY source, and that CTE is gated
+`WHERE listings_arabic_locations.city_ar IS NOT NULL`. Setting a row's `city_ar` to `NULL` there
+(the correct, intentional fix for an unresolved location) makes the row **entirely absent** from
+`v1` — not present-with-a-null-city, just gone. The listing still shows up correctly as unresolved
+in the app's actual search path (`search_listings_ar`, via `listing_native_location_v2`'s separate
+`unresolved_catchall` UNION branch, which independently re-adds anything in
+`active_listing_ids_v2` missing from `v1`) — so this does **not** affect what users see today. But
+any FUTURE code that queries `listing_native_location_v1` directly, expecting it to hold every
+active listing (resolved or not), would silently miss these rows rather than see them as
+unresolved. Worth a `LEFT JOIN`/coalesce fix in `v1`'s "legacy" CTE if it ever becomes a direct
+dependency for anything else.
 
 **Recommended target state (needs owner sign-off before building — a scope/ownership decision, not
 a technical one):** a NEW, PERMANENTLY SCHEDULED SQL function — structurally a sibling of
@@ -175,11 +193,18 @@ three already fixed above (Deal, Ramzalqasim, Al Nokhba):
 sweep (same regex shape as the manual sweep above) that fails the build if a NEW, unallowlisted
 instance of this pattern is introduced anywhere in `scrapers/`. Mutation-tested 2026-07-10
 (temporarily reintroduced the Nowaisiry violation; confirmed the test catches it, then restored the
-fix and confirmed green again). This is a static-analysis gate, distinct from and complementary to
-the runtime `guard_location_update()` DB-write gate: that gate only catches known PLACEHOLDER
-tokens ("Other"/"Unknown"/...) at write time; it cannot catch a scraper hardcoding an
-assumed-real city name (e.g. "Riyadh", "Sakaka") as a fallback, which is the bug shape this test
-exists to close.
+fix and confirmed green again — independently reproduced 2026-07-10 by an adversarial-review agent
+with two DIFFERENT injected violations (souq24, deal), both caught, both cleanly reverted). This is
+a static-analysis gate, distinct from and complementary to the runtime `guard_location_update()`
+DB-write gate: that gate only catches known PLACEHOLDER tokens ("Other"/"Unknown"/...) at write
+time; it cannot catch a scraper hardcoding an assumed-real city name (e.g. "Riyadh", "Sakaka") as a
+fallback, which is the bug shape this test exists to close.
+
+**Known blind spot** (found during adversarial mutation-testing): the false-positive filter
+suppresses an entire line if it contains any of `city_map`/`city_ar`/`city_id`/etc. anywhere in it —
+so a NEW violation added to the SAME line as an existing safe identifier (e.g.
+`city = CITY_MAP.get(raw) or "Riyadh"`) would slip through undetected. Narrow (requires deliberately
+combining both on one line) but real; not fixed here — flagged for whoever next touches this test.
 
 ### Known accepted single-city/region constants (allowlisted, cited in the test file)
 
