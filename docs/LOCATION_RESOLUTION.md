@@ -146,6 +146,64 @@ algorithm itself is safe (it will correctly refuse to pick when two candidates b
 both match), but its practical HIT RATE will be lower than "district coverage exists" alone would
 suggest, and will need re-verification as district coverage for twin cities improves.
 
+## Universal city-default rule (owner directive, 2026-07-10 follow-up)
+
+Following the Ramz Al Qassim 69-row backfill, the owner made the city-specific case of the rule
+above explicit and permanent:
+
+> No scraper may default a missing or unresolved location to a specific real city. If the source
+> does not provide enough evidence for an exact catalog match, store it as unresolved.
+
+A repo-wide sweep for this exact shape (`city = "<CapitalizedWord>"`, a `*CITY`-named constant fed
+into `city =`, `DEFAULT_CITY`, `city.setdefault`, `city or "<CapitalizedWord>"`) found, beyond the
+three already fixed above (Deal, Ramzalqasim, Al Nokhba):
+
+- **Nowaisiry — fixed.** `city = "Riyadh"` was the base default before a `CITY_TOKENS` scan. Since
+  `CITY_TOKENS` explicitly recognizes BOTH Riyadh-area (`الخير`, `مخطط الخير`, `حي الخير`) and
+  Hail-area (`الجلة`, `الجله`, `الأجفر`, `الاجفر`) plan names, the scraper is demonstrably
+  multi-city — an unrecognized plan name silently became "Riyadh" even for a real Hail listing.
+  Now unresolved (`None`) when no token matches.
+- **Awal — partially fixed.** `LOC_DEFAULT_CITY.get(loc_slug or "", "Sakaka")` guessed "Sakaka" for
+  the `jouf` RTCL taxonomy slug whenever the structured city field/text scan failed, and for ANY
+  other/unknown slug. Now unresolved in both cases. The `arar` → `Arar` branch is **intentionally
+  untouched** — see "Known accepted single-city/region constants" below.
+- **Mustqr — NOT fixed, pending stronger evidence.** See below.
+- **Souq24 — confirmed not a violation.** `TOWN_TO_CITY.get(...)` falls through to `None` cleanly;
+  no hardcoded final default anywhere in the chain.
+
+**Enforcement:** `scrapers/common/tests/test_no_hardcoded_city_default.py` is a repo-wide static
+sweep (same regex shape as the manual sweep above) that fails the build if a NEW, unallowlisted
+instance of this pattern is introduced anywhere in `scrapers/`. Mutation-tested 2026-07-10
+(temporarily reintroduced the Nowaisiry violation; confirmed the test catches it, then restored the
+fix and confirmed green again). This is a static-analysis gate, distinct from and complementary to
+the runtime `guard_location_update()` DB-write gate: that gate only catches known PLACEHOLDER
+tokens ("Other"/"Unknown"/...) at write time; it cannot catch a scraper hardcoding an
+assumed-real city name (e.g. "Riyadh", "Sakaka") as a fallback, which is the bug shape this test
+exists to close.
+
+### Known accepted single-city/region constants (allowlisted, cited in the test file)
+
+A hardcoded value is **not** automatically a violation when it expresses "this whole brokerage
+operates in exactly one real city/region" (a business fact) rather than "guess a city per-row when
+the source is unclear" (the actual bug). Ramzalqasim's fixed `region = "Qassim"` (Scope 1, above) is
+the precedent for this distinction. Two more claims of this shape exist and are allowlisted, but
+**neither has been independently verified** — do not treat their presence in the allowlist as proof
+they're correct, and do not extend the pattern to a new platform without the same live verification
+already done for Ramzalqasim's region constant:
+
+- **Awal `"arar"` → `"Arar"`.** Code comment claims every RTCL `arar`-taxonomy listing is genuinely
+  in Arar city. Owner directive 2026-07-10: "do not change the Arar branch until it is independently
+  verified." No live verification has been performed.
+- **Mustqr `DEFAULT_CITY = "Hail"` / `DEFAULT_REGION = "Hail"`.** Code comment claims Mustqr is a
+  single-city Hail-based brokerage. A live sample of 20 distinct neighborhood names showed nothing
+  obviously non-Hail, but a direct check against Mustqr's own source Supabase REST API failed (no
+  valid API key available) and was not retried. Owner directive 2026-07-10: "Do not change Mustqr
+  yet. First obtain stronger evidence that it is truly single-city." **Not fixed — still unconditionally
+  assigns `city = "Hail"` to every row.** Whoever picks this up next needs either a valid credential
+  to query Mustqr's own taxonomy directly, or another independent source (e.g. their public site's
+  city/area filter options) to confirm or refute the single-city claim before this can be closed out
+  either way.
+
 ## Other-field placeholder audit (owner directive item 7)
 
 The SAME bug shape (`X = <lookup> or "<placeholder>"`) was found on **70 other fields across 33
