@@ -50,9 +50,42 @@ for (const ref of FIELDS) {
   console.log(`${!regressed ? 'PASS' : 'FAIL'}  ${ref} is NOT wired bare (ref={${ref}}) — that shipped the bug`);
 }
 
+// ── iOS focus-zoom + overflow + digit-cap guards (real-iPhone findings, 2026-07-11) ──
+// iOS Safari auto-zooms the page when focusing any input with font-size < 16px; combined with the
+// RTL layout this panned the viewport so the field's text appeared detached from its box. WebKit's
+// flex min-width:auto also let the <input> overflow its box. And with no cap, the area field
+// accepted 1,008,000,000,000 م². These static checks pin all three fixes.
+for (const style of ['sizeInput', 'rangeInput']) {
+  const m = source.match(new RegExp(`${style}: \\{[^}]*\\}`));
+  const tag = m ? m[0] : '';
+  const font16 = /fontSize: 16/.test(tag);
+  if (!font16) failed++;
+  console.log(`${font16 ? 'PASS' : 'FAIL'}  s.${style} uses fontSize: 16 (prevents iOS focus auto-zoom)`);
+  const minW = /minWidth: 0/.test(tag);
+  if (!minW) failed++;
+  console.log(`${minW ? 'PASS' : 'FAIL'}  s.${style} has minWidth: 0 (prevents WebKit flex overflow)`);
+}
+const CAPS: Array<[ref: string, maxLength: string, slice: string]> = [
+  ['areaMinRef', 'maxLength={9}', ".slice(0, 7)"],
+  ['areaMaxRef', 'maxLength={9}', ".slice(0, 7)"],
+  ['priceMinRef', 'maxLength={13}', ".slice(0, 10)"],
+  ['priceMaxRef', 'maxLength={13}', ".slice(0, 10)"],
+  ['sizeBoxRef', 'maxLength={9}', ".slice(0, 7)"],
+];
+for (const [ref, maxLen, slice] of CAPS) {
+  const refIdx = source.indexOf(`ref={mergeLtrRef(${ref})}`);
+  const block = refIdx === -1 ? '' : source.slice(refIdx, source.indexOf('/>', refIdx));
+  const hasMax = block.includes(maxLen);
+  if (!hasMax) failed++;
+  console.log(`${hasMax ? 'PASS' : 'FAIL'}  ${ref} has ${maxLen} (typing cap)`);
+  const hasSlice = block.includes(slice);
+  if (!hasSlice) failed++;
+  console.log(`${hasSlice ? 'PASS' : 'FAIL'}  ${ref} handler hard-caps digits with ${slice} (paste cap)`);
+}
+
 console.log('');
 if (failed > 0) {
-  console.error(`✗ ${failed} numeric-input dir="ltr" assertion(s) FAILED — the iOS Safari bug can regress`);
+  console.error(`✗ ${failed} numeric-input assertion(s) FAILED — an iOS Safari input bug can regress`);
   process.exit(1);
 }
-console.log(`✓ all ${FIELDS.length} numeric inputs (area min/max, price min/max, size) force dir="ltr" via mergeLtrRef`);
+console.log(`✓ all ${FIELDS.length} numeric inputs force dir="ltr", use 16px font, minWidth:0, and digit caps`);
