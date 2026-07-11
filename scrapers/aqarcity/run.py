@@ -214,6 +214,64 @@ def sitemap_urls(s: cc.Session) -> list[str]:
     return out
 
 
+# ── Sequential-ID discovery (frozen-sitemap fallback) ────────────────────────
+# sitemap_urls() above is the ONLY discovery source, so when Aqar City's sitemap stops regenerating
+# (it froze at 2026-06-11 while the site kept publishing — /property/<id> is sequential and had
+# marched ~hundreds of ids past the sitemap's max), we go blind to every newer listing. This second
+# arm walks ids UPWARD from the sitemap's max and returns the LIVE /property/<id> urls it finds, to be
+# merged + de-duped with the sitemap urls before the UNCHANGED fetch→map→upsert→prune pipeline.
+#
+# Gentle + self-limiting: one warmed session, one GET per id (a 2nd settles the CF cookie before we
+# trust a "notfound"), a small delay. A real listing page — LIVE or the "منتهي" expired shell — is a
+# HIT that resets the miss run; a redirect off /property/ (…/notfoundproperty) is a MISS. It stops
+# after AQARCITY_PROBE_MAX_MISS consecutive misses (past the id frontier) or AQARCITY_PROBE_MAX_GAP
+# ids probed (hard cap). When the sitemap is fresh the walk starts at the true frontier and ends in
+# ~max_miss cheap requests finding nothing, so it is safe to run every crawl.
+def _probe_id(s: cc.Session, url: str) -> str:
+    """Classify one /property/<id> url: 'live' | 'exists' | 'notfound' | 'error' (≤2 GETs)."""
+    last = "error"
+    for _ in range(2):
+        try:
+            r = s.get(url, timeout=30, allow_redirects=True)
+        except Exception:
+            time.sleep(1.0)
+            continue
+        if "/property/" not in str(r.url) or "Page Not Found" in r.text:
+            last = "notfound"
+            continue  # a fresh session can 302→/notfound before the cookie lands — retry once
+        if "هذا الإعلان منتهي" in r.text or "application/ld+json" not in r.text:
+            return "exists"  # real id but expired/unparseable → keeps the walk alive, contributes no url
+        return "live"
+    return last
+
+
+def sequential_id_urls(s: cc.Session, start_id: int) -> list[str]:
+    """Walk /property/<id> ids above start_id; return the live listing urls (frozen-sitemap fallback)."""
+    max_gap = int(os.environ.get("AQARCITY_PROBE_MAX_GAP", "1500"))
+    max_miss = int(os.environ.get("AQARCITY_PROBE_MAX_MISS", "30"))
+    delay = float(os.environ.get("AQARCITY_PROBE_DELAY", "0.25"))
+    try:
+        s.get(f"{BASE}/", timeout=30, allow_redirects=True)  # warm the CF cookie once
+    except Exception:
+        pass
+    out: list[str] = []
+    miss = probed = 0
+    pid = start_id + 1
+    while probed < max_gap and miss < max_miss:
+        status = _probe_id(s, f"{BASE}/property/{pid}")
+        if status in ("live", "exists"):
+            miss = 0
+            if status == "live":
+                out.append(f"{BASE}/property/{pid}")
+        elif status == "notfound":
+            miss += 1
+        # 'error' → transient: don't advance the miss run
+        pid += 1
+        probed += 1
+        time.sleep(delay)
+    return out
+
+
 def fetch_one(url: str) -> Optional[tuple[str, str]]:
     """Warm the session (Cloudflare cookie) then fetch the detail page. Returns (body, url) or None."""
     s = _session()
@@ -513,6 +571,22 @@ def main() -> int:
 
     s = session()
     urls = sitemap_urls(s)
+    # Second discovery arm (frozen-sitemap fallback): walk sequential ids past the sitemap's max and
+    # MERGE them (de-duped) with the sitemap urls. Everything downstream — fetch, map, upsert, prune —
+    # is unchanged; this only widens the candidate url set. Skipped on --limit validation runs; never
+    # fatal (a walk failure falls back to sitemap-only discovery).
+    if urls and not args.limit:
+        try:
+            sm_max = max(int(re.search(r"/property/(\d+)", u).group(1)) for u in urls)
+            walked = sequential_id_urls(s, sm_max)
+            if walked:
+                before = len(urls)
+                urls = sorted({*urls, *walked},
+                              key=lambda u: int(re.search(r"/property/(\d+)", u).group(1)), reverse=True)
+                print(f"Aqarcity: id-walk found {len(walked)} live listing(s) past sitemap max {sm_max} "
+                      f"(+{len(urls) - before} new candidates) — sitemap-freeze fallback")
+        except Exception as e:
+            print(f"Aqarcity: id-walk discovery skipped ({e}); using sitemap only")
     if args.limit:
         # take newest 3× the limit so expired/notfound shells don't starve the target count
         urls = urls[: max(args.limit * 3, 30)]
