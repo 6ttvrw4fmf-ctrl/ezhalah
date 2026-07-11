@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "expo export --platform web",
+  "buildCommand": "npm run verify && expo export --platform web",
   "outputDirectory": "dist",
   "framework": null,
   "cleanUrls": true,

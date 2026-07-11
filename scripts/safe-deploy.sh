@@ -18,6 +18,17 @@ cd "$(git rev-parse --show-toplevel)"
 "$(dirname "$0")/preflight-verify.sh" || { echo ""; echo "safe-deploy: REFUSED by preflight (see the ❌ above). Nothing deployed."; exit 1; }
 echo ""
 
+# ── TAXONOMY GATE (Stage 1, 2026-07-10): OFFLINE, deterministic. Proves the single canonical source
+# src/data/taxonomy.source.json still regenerates every deployed taxonomy artifact (the TS maps in
+# propertyTypes.ts, the Python maps in normalize.py, and the 3 committed DB seed snapshots) with ZERO
+# drift, and that the deployed map is internally consistent. Any taxonomy drift blocks the deploy here
+# BEFORE Vercel is touched. This runs the IDENTICAL entrypoint Vercel runs (vercel.json buildCommand →
+# `npm run verify`), so local preflight and the build image gate on exactly the same command. The gate
+# is hermetic pure-TypeScript (no python3 / external interpreter): the normalize.py layer is parsed
+# statically, so NO layer is ever skipped here or in the build image — it fails CLOSED everywhere.
+npm run verify || { echo ""; echo "safe-deploy: REFUSED — taxonomy drift (see ❌ above). Regenerate with 'npm run verify:emit-sql' / 'npx tsx scripts/taxonomy/extract.ts', commit, and retry. Nothing deployed."; exit 1; }
+echo ""
+
 BRANCH=$(git branch --show-current)
 if [ "$BRANCH" != "main" ]; then
   echo "REFUSING TO DEPLOY: current branch is '$BRANCH', not 'main'."

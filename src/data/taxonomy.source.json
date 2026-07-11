@@ -1,0 +1,886 @@
+{
+  "$comment": "CANONICAL TAXONOMY SOURCE (Stage 1). Single source that GENERATES the TS maps in src/data/propertyTypes.ts, the Python maps in scrapers/common/normalize.py, and the DB seeds (type_label_ar, known_property_types, known_type_ar). Regenerate artifacts with scripts/taxonomy/gen.ts; the offline build gate (scripts/verify-taxonomy.ts) fails the build on any drift. Per-layer overrides preserve current cross-layer disagreements EXACTLY (see pythonCategoryOverride). Rebuild this file with `npx tsx scripts/taxonomy/extract.ts`.",
+  "$schemaVersion": 1,
+  "labels": {
+    "Agriculture Plot": "أرض زراعية",
+    "Apartment": "شقة",
+    "Bank": "بنك",
+    "Building": "عمارة",
+    "Camp": "مخيم",
+    "Chalet": "شاليه",
+    "Cinema": "سينما",
+    "Commercial Building": "مبنى تجاري",
+    "Commercial Land": "أرض تجارية",
+    "Duplex": "دوبلكس",
+    "Factory": "مصنع",
+    "Farm": "مزرعة",
+    "Floor": "دور",
+    "Gas Station": "محطة وقود",
+    "Hall": "صالة",
+    "Health Center": "مركز صحي",
+    "Hotel": "فندق",
+    "House": "بيت",
+    "Industrial Land": "أرض صناعية",
+    "Kiosk": "كشك",
+    "Land": "أرض",
+    "Office": "مكتب",
+    "Palace": "فيلا",
+    "Parking": "مواقف",
+    "Residential Building": "عمارة سكنية",
+    "Residential Land": "أرض سكنية",
+    "Rest House": "استراحة",
+    "Room": "غرفة",
+    "School": "مدرسة",
+    "Shop": "محل",
+    "Showroom": "معرض",
+    "Specialized Facilities": "منشآت متخصصة",
+    "Staff Housing": "سكن عمال",
+    "Station": "محطة",
+    "Studio": "استوديو",
+    "Telecom Tower": "برج اتصالات",
+    "Villa": "فيلا",
+    "Warehouse": "مستودع",
+    "Workshop": "ورشة"
+  },
+  "buildingAmbiguous": {
+    "raw": "Building",
+    "res": "Residential Building",
+    "com": "Commercial Building",
+    "labelAr": "عمارة"
+  },
+  "serviceFacilityOrder": [
+    "Bank",
+    "School",
+    "Health Center",
+    "Telecom Tower",
+    "Parking"
+  ],
+  "cleanTypes": [
+    {
+      "clean": "Apartment",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Apartments & Co-living"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Apartment",
+          "مبنى شقق مخدومة",
+          "ملحق علوي"
+        ],
+        "kinds": [
+          "res"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Floor",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Apartments & Co-living"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Floor"
+        ],
+        "kinds": [
+          "res"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Studio",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Apartments & Co-living"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Studio",
+          "ستوديو",
+          "شقَّة صغيرة (استوديو)",
+          "شقَّة صغيرة (استوديو)"
+        ],
+        "kinds": [
+          "res"
+        ]
+      },
+      "pythonCategoryOverride": "Commercial"
+    },
+    {
+      "clean": "Room",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Apartments & Co-living"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Room"
+        ],
+        "kinds": [
+          "res"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Residential Building",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Apartments & Co-living"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Building",
+          "مجمع سكني"
+        ],
+        "kinds": [
+          "res"
+        ]
+      },
+      "pythonCategoryOverride": "Commercial"
+    },
+    {
+      "clean": "Villa",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Villas & Houses"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Villa",
+          "Palace",
+          "تاون هاوس"
+        ],
+        "kinds": [
+          "res"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "House",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Villas & Houses"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "House"
+        ],
+        "kinds": [
+          "res"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Duplex",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Villas & Houses"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Duplex"
+        ],
+        "kinds": [
+          "res"
+        ]
+      },
+      "pythonCategoryOverride": "Commercial"
+    },
+    {
+      "clean": "Rest House",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Vacation & Rural"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Rest House"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Chalet",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Vacation & Rural"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Chalet"
+        ],
+        "kinds": [
+          "res"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Camp",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Vacation & Rural"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Camp"
+        ],
+        "kinds": [
+          "res"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Farm",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Vacation & Rural"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Farm",
+          "Agriculture Plot"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": "Commercial"
+    },
+    {
+      "clean": "Residential Land",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Residential Plots"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Residential Land",
+          "Land",
+          "حوش"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Office",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Retail & Workspace"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Office",
+          "مكاتب مشتركة"
+        ],
+        "kinds": [
+          "com"
+        ],
+        "extraTables": [
+          "dealapp_residential_listings"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Shop",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Retail & Workspace"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Shop",
+          "Kiosk",
+          "درايف ثرو"
+        ],
+        "kinds": [
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Showroom",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Retail & Workspace"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Showroom"
+        ],
+        "kinds": [
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Warehouse",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Industrial & Logistics"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Warehouse",
+          "مخازن سحابية"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Workshop",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Industrial & Logistics"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Workshop"
+        ],
+        "kinds": [
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Factory",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Industrial & Logistics"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Factory"
+        ],
+        "kinds": [
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Commercial Building",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Commercial Buildings & Facilities"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Commercial Building",
+          "Building",
+          "Hall",
+          "Cinema"
+        ],
+        "kinds": [
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Hotel",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Commercial Buildings & Facilities"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Hotel"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Gas Station",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Commercial Buildings & Facilities"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Gas Station",
+          "Station",
+          "محطة بنزين"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Staff Housing",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Commercial Buildings & Facilities"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "سكن عمال"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Service Facilities",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Commercial Buildings & Facilities"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Bank",
+          "بنك",
+          "School",
+          "مدرسة",
+          "Health Center",
+          "مركز صحي",
+          "Telecom Tower",
+          "برج اتصالات",
+          "Parking",
+          "مواقف"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Commercial Land",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Commercial & Industrial Plots"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Commercial Land"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Industrial Land",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Commercial & Industrial Plots"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Industrial Land"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Bank",
+      "macro": "Commercial",
+      "hierarchy": null,
+      "serviceFacility": true,
+      "query": {
+        "rawTypes": [
+          "Bank",
+          "بنك"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "School",
+      "macro": "Commercial",
+      "hierarchy": null,
+      "serviceFacility": true,
+      "query": {
+        "rawTypes": [
+          "School",
+          "مدرسة"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Health Center",
+      "macro": "Commercial",
+      "hierarchy": null,
+      "serviceFacility": true,
+      "query": {
+        "rawTypes": [
+          "Health Center",
+          "مركز صحي"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Telecom Tower",
+      "macro": "Commercial",
+      "hierarchy": null,
+      "serviceFacility": true,
+      "query": {
+        "rawTypes": [
+          "Telecom Tower",
+          "برج اتصالات"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Parking",
+      "macro": "Commercial",
+      "hierarchy": null,
+      "serviceFacility": true,
+      "query": {
+        "rawTypes": [
+          "Parking",
+          "مواقف"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    }
+  ],
+  "python": {
+    "typeMapAr": [
+      [
+        "شقة",
+        "Apartment"
+      ],
+      [
+        "شقه",
+        "Apartment"
+      ],
+      [
+        "فيلا",
+        "Villa"
+      ],
+      [
+        "فلة",
+        "Villa"
+      ],
+      [
+        "بيت",
+        "House"
+      ],
+      [
+        "منزل",
+        "House"
+      ],
+      [
+        "دور",
+        "Floor"
+      ],
+      [
+        "غرفة",
+        "Room"
+      ],
+      [
+        "غرفه",
+        "Room"
+      ],
+      [
+        "استراحة",
+        "Rest House"
+      ],
+      [
+        "استراحه",
+        "Rest House"
+      ],
+      [
+        "شاليه",
+        "Chalet"
+      ],
+      [
+        "مخيم",
+        "Camp"
+      ],
+      [
+        "عمارة",
+        "Building"
+      ],
+      [
+        "عماره",
+        "Building"
+      ],
+      [
+        "أرض",
+        "Residential Land"
+      ],
+      [
+        "ارض",
+        "Residential Land"
+      ],
+      [
+        "مكتب",
+        "Office"
+      ],
+      [
+        "محل",
+        "Shop"
+      ],
+      [
+        "معرض",
+        "Showroom"
+      ],
+      [
+        "مستودع",
+        "Warehouse"
+      ],
+      [
+        "ورشة",
+        "Workshop"
+      ],
+      [
+        "ورشه",
+        "Workshop"
+      ],
+      [
+        "مصنع",
+        "Factory"
+      ],
+      [
+        "مزرعة",
+        "Farm"
+      ],
+      [
+        "مزرعه",
+        "Farm"
+      ],
+      [
+        "فندق",
+        "Hotel"
+      ]
+    ],
+    "slugToType": [
+      [
+        "apartment",
+        "Apartment"
+      ],
+      [
+        "villa",
+        "Villa"
+      ],
+      [
+        "floor",
+        "Floor"
+      ],
+      [
+        "house",
+        "House"
+      ],
+      [
+        "room",
+        "Room"
+      ],
+      [
+        "building",
+        "Building"
+      ],
+      [
+        "rest_house",
+        "Rest House"
+      ],
+      [
+        "chalet",
+        "Chalet"
+      ],
+      [
+        "camp",
+        "Camp"
+      ],
+      [
+        "land",
+        "Residential Land"
+      ],
+      [
+        "shop",
+        "Shop"
+      ],
+      [
+        "office",
+        "Office"
+      ],
+      [
+        "warehouse",
+        "Warehouse"
+      ],
+      [
+        "workshop",
+        "Workshop"
+      ],
+      [
+        "factory",
+        "Factory"
+      ],
+      [
+        "hotel",
+        "Hotel"
+      ],
+      [
+        "gas_station",
+        "Gas Station"
+      ],
+      [
+        "health_center",
+        "Health Center"
+      ],
+      [
+        "farm",
+        "Farm"
+      ],
+      [
+        "commercial_building",
+        "Commercial Building"
+      ],
+      [
+        "kiosk",
+        "Kiosk"
+      ],
+      [
+        "cinema",
+        "Cinema"
+      ],
+      [
+        "parking",
+        "Parking"
+      ],
+      [
+        "bank",
+        "Bank"
+      ],
+      [
+        "school",
+        "School"
+      ],
+      [
+        "telecom_tower",
+        "Telecom Tower"
+      ]
+    ],
+    "residentialSet": [
+      "Apartment",
+      "Building",
+      "Camp",
+      "Chalet",
+      "Floor",
+      "House",
+      "Residential Land",
+      "Rest House",
+      "Room",
+      "Villa"
+    ],
+    "categoryDefault": "Commercial"
+  }
+}
