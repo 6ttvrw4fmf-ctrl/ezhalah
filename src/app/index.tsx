@@ -162,6 +162,29 @@ export default function Home() {
     if (decision.block) e.preventDefault?.();
   }, []);
   const clearFracLock = useCallback((field: string) => { fracLock.current[field] = false; }, []);
+  // The wrapping Pressable makes the whole price/area/size box tappable, but tapping directly on the
+  // nested TextInput already gives it native focus — the Pressable's onPress then fires too and used to
+  // call .focus() again on an already-focused node. On iOS Safari the on-screen keyboard's show/hide
+  // animation is tied to the focus-event timeline, so a redundant focus() call right after the real one
+  // can race that animation. Skipping the call when the target is already focused removes that race
+  // without changing behavior for the common case (tapping the padding/icon/label outside the input).
+  const focusIfNotAlready = useCallback((ref: { current: TextInput | null }) => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined' && document.activeElement === (ref.current as unknown as Element)) return;
+    ref.current?.focus();
+  }, []);
+  // iOS Safari numeric-input bug (2026-07-10): none of these 5 boxes forced a text direction, so
+  // react-native-web emitted <input dir="auto">. The whole app forces document.documentElement.dir =
+  // "rtl" (Arabic is the default locale — see i18n.tsx applyDirection()), so an EMPTY numeric field sat
+  // in an ambiguous bidi state: digits are a "weak" bidi type, and inserting one into an RTL-anchored,
+  // dir="auto" text node is a documented WebKit-specific caret/rendering defect (confirmed NOT
+  // reproducible in Chromium — the bidi/caret implementations diverge — matching the iOS-only report).
+  // Like setLtr/makeDirRef above, react-native-web does not support `direction` as a style property (it
+  // throws), so the DOM `dir` attribute is set directly via a callback ref that ALSO keeps populating the
+  // existing ref object these 5 boxes already use for `.focus()` elsewhere in this file.
+  const mergeLtrRef = useCallback((ref: { current: TextInput | null }) => (node: any) => {
+    ref.current = node;
+    if (Platform.OS === 'web' && node?.setAttribute) node.setAttribute('dir', 'ltr');
+  }, []);
   // Auto-advance the form: as the user fills each step (deal, location, category, type, detail,
   // price), gently scroll DOWN so the just-revealed section and the Search button come into view —
   // they never have to scroll the page themselves. (user request.)
@@ -630,18 +653,18 @@ export default function Home() {
                         <Text style={[s.ctxSubLabel, s.rangeHeadLabel]}>{t('Area (m²)')}</Text>
                       </View>
                       <View style={s.rangeRow}>
-                        <Pressable style={[s.field, s.rangeBox, query.areaMin ? s.sizeFieldOn : null]} onPress={() => areaMinRef.current?.focus()}>
+                        <Pressable style={[s.field, s.rangeBox, query.areaMin ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(areaMinRef)}>
                           <Image source={RANGE_ICON.areaFrom} style={s.rangeBoxIcon} accessibilityLabel={t('From')} />
                           <Text style={s.rangeLabel}>{t('From')}</Text>
-                          <TextInput ref={areaMinRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
+                          <TextInput ref={mergeLtrRef(areaMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                             value={areaMinValue}
                             onKeyPress={wholeNumberKeyGuard('areaMin')} onFocus={() => clearFracLock('areaMin')} onSelectionChange={() => clearFracLock('areaMin')} onChangeText={(v) => { clearFracLock('areaMin'); const d = toWholeNumberDigits(v); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
                         </Pressable>
-                        <Pressable style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]} onPress={() => areaMaxRef.current?.focus()}>
+                        <Pressable style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(areaMaxRef)}>
                           <Image source={RANGE_ICON.areaTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
                           <Text style={s.rangeLabel}>{t('To')}</Text>
-                          <TextInput ref={areaMaxRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
+                          <TextInput ref={mergeLtrRef(areaMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                             value={areaMaxValue}
                             onKeyPress={wholeNumberKeyGuard('areaMax')} onFocus={() => clearFracLock('areaMax')} onSelectionChange={() => clearFracLock('areaMax')} onChangeText={(v) => { clearFracLock('areaMax'); const d = toWholeNumberDigits(v); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
@@ -659,18 +682,18 @@ export default function Home() {
                     <Text style={[s.ctxSubLabel, s.rangeHeadLabel]}>{t('Price')}</Text>
                   </View>
                   <View style={s.rangeRow}>
-                    <Pressable style={[s.field, s.rangeBox, query.priceMin ? s.sizeFieldOn : null]} onPress={() => priceMinRef.current?.focus()}>
+                    <Pressable style={[s.field, s.rangeBox, query.priceMin ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(priceMinRef)}>
                       <Image source={RANGE_ICON.priceFrom} style={s.rangeBoxIcon} accessibilityLabel={t('From')} />
                       <Text style={s.rangeLabel}>{t('From')}</Text>
-                      <TextInput ref={priceMinRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
+                      <TextInput ref={mergeLtrRef(priceMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                         value={priceMinValue}
                         onKeyPress={wholeNumberKeyGuard('priceMin')} onFocus={() => clearFracLock('priceMin')} onSelectionChange={() => clearFracLock('priceMin')} onChangeText={(v) => { clearFracLock('priceMin'); const d = toWholeNumberDigits(v); setQuery((q) => ({ ...q, priceMin: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
                     </Pressable>
-                    <Pressable style={[s.field, s.rangeBox, query.priceMax ? s.sizeFieldOn : null]} onPress={() => priceMaxRef.current?.focus()}>
+                    <Pressable style={[s.field, s.rangeBox, query.priceMax ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(priceMaxRef)}>
                       <Image source={RANGE_ICON.priceTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
                       <Text style={s.rangeLabel}>{t('To')}</Text>
-                      <TextInput ref={priceMaxRef} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
+                      <TextInput ref={mergeLtrRef(priceMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted}
                         value={priceMaxValue}
                         onKeyPress={wholeNumberKeyGuard('priceMax')} onFocus={() => clearFracLock('priceMax')} onSelectionChange={() => clearFracLock('priceMax')} onChangeText={(v) => { clearFracLock('priceMax'); const d = toWholeNumberDigits(v); setQuery((q) => ({ ...q, priceMax: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
@@ -700,9 +723,9 @@ export default function Home() {
                 </View>
                 {/* Size box — mirrors the chosen band or a free-typed number; tap in to edit it. */}
                 {!detail.isBedrooms && (
-                  <Pressable style={[s.field, s.sizeField, query.detail ? s.sizeFieldOn : null]} onPress={() => sizeBoxRef.current?.focus()}>
+                  <Pressable style={[s.field, s.sizeField, query.detail ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(sizeBoxRef)}>
                     <TextInput
-                      ref={sizeBoxRef}
+                      ref={mergeLtrRef(sizeBoxRef)}
                       style={s.sizeInput}
                       keyboardType="number-pad"
                       placeholder={t('Or type an exact size')}

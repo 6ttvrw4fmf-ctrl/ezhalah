@@ -6,7 +6,8 @@ import { cityHasListings, nearbyCityWithListings, cityDisplay } from './location
 import { detailFor, priceBandRange } from './taxonomy';
 import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
 import { supports } from './platforms';
-import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale } from '@/i18n';
+import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR } from '@/i18n';
+import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { groupMembers, CLEAN_MACRO, SUBGROUPS } from './propertyTypes';
@@ -351,16 +352,27 @@ function budgetLines(q: SearchQuery): string[] {
 // ("Al Malka" → Al Malqa), the districts an area nickname covers ("North Riyadh" → …), or a landmark
 // and its nearby districts/cities ("Near KFUPM" → Dhahran / Khobar / Dammam). Falls back to the plain
 // City line when there's no resolution. Returns bullet text WITHOUT the leading "• ". (user request.)
+// Arabic locale only: a place value that still contains no Arabic character after translation/
+// catalog lookup means nothing matched (a raw scraped/typed English name, an out-of-catalog
+// district, an ambiguous-match echo, etc.) — show the existing honest "unresolved" sentinel instead
+// of leaking that raw English text into an otherwise-Arabic summary. Never touches the English UI
+// (an English place name there is correct, not a leak) and never touches empty strings (callers
+// already guard those with `if (cityLabel) ...`). See src/lib/arabicText.ts for the pure, unit-tested
+// implementation.
+function arabicOrUnresolved(s: string): string {
+  return arabicOrPlaceholder(s, getLocale(), LOCATION_UNRESOLVED_AR);
+}
+
 function locationLines(q: SearchQuery): string[] {
   const lm = q.locationMatch;
   if (!lm || lm.kind === 'none') {
-    return q.location.trim() ? [`${t('City')}: ${tPlace(q.location.trim())}`] : [];
+    return q.location.trim() ? [`${t('City')}: ${arabicOrUnresolved(tPlace(q.location.trim()))}`] : [];
   }
-  const join = (xs: string[]) => xs.join(getLocale() === 'ar' ? '، ' : ', ');
+  const join = (xs: string[]) => xs.map(arabicOrUnresolved).join(getLocale() === 'ar' ? '، ' : ', ');
   // lm.city is canonical English (engine-facing); localize it for display via the catalog-backed
   // cityDisplay (knows e.g. Dhahran→الظهران) so a district's City line isn't shown in English.
-  const cityLabel = lm.city ? cityDisplay(lm.city, getLocale()) : '';
-  const regionLabel = lm.region ? tPlace(lm.region) : '';
+  const cityLabel = lm.city ? arabicOrUnresolved(cityDisplay(lm.city, getLocale())) : '';
+  const regionLabel = lm.region ? arabicOrUnresolved(tPlace(lm.region)) : '';
   // Reassure the user ONLY when we corrected a typo'd place name. Suppress when the difference is just
   // localization (the resolver returns a localized label while the raw was the other script — e.g. the
   // agent extracted English "Riyadh" and we show "الرياض"), which is a translation, not a correction.
@@ -376,15 +388,15 @@ function locationLines(q: SearchQuery): string[] {
   }
   switch (lm.kind) {
     case 'city':
-      out.push(`${t('City')}: ${tPlace(lm.label)}`);
+      out.push(`${t('City')}: ${arabicOrUnresolved(tPlace(lm.label))}`);
       // Region disambiguates same-named cities/districts across the Kingdom. (user: include the region.)
       if (regionLabel) out.push(`${t('Region')}: ${regionLabel}`);
       break;
     case 'region':
-      out.push(`${t('Region')}: ${lm.label}`);
+      out.push(`${t('Region')}: ${arabicOrUnresolved(lm.label)}`);
       break;
     case 'district':
-      out.push(`${t('Neighborhood')}: ${dispP(lm.label)}`);
+      out.push(`${t('Neighborhood')}: ${arabicOrUnresolved(dispP(lm.label))}`);
       if (lm.ambiguous && lm.cities && lm.cities.length) {
         // The district name exists in several cities → show them all (we searched all), not one.
         out.push(`${t('Cities')}: ${join(lm.cities.map((c) => cityDisplay(c, getLocale())))}`);
@@ -402,7 +414,7 @@ function locationLines(q: SearchQuery): string[] {
       if (lm.districts.length) out.push(`${t('Districts')}: ${join(lm.districts.map(dispP))}`);
       break;
     case 'landmark':
-      out.push(`${t('Landmark')}: ${lm.landmark ?? lm.label}`);
+      out.push(`${t('Landmark')}: ${arabicOrUnresolved(lm.landmark ?? lm.label)}`);
       if (lm.districts.length) out.push(`${t('Nearby Districts')}: ${join(lm.districts.map(dispP))}`);
       if (lm.cities.length) out.push(`${t('Nearby Cities')}: ${join(lm.cities.map((c) => cityDisplay(c, getLocale())))}`);
       else if (cityLabel) out.push(`${t('City')}: ${cityLabel}`);
