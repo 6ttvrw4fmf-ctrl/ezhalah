@@ -1,0 +1,83 @@
+# Wasalt ENUMERATION liveness — the production Wasalt inactive-listing lifecycle (2026-07-12).
+#
+# Why: the old per-listing liveness (wasalt-liveness.yml, never scheduled / jobid32 paused) had to
+# HEAD/GET every one of ~59.7k active rows through the METERED Saudi proxy (~700 GB/month for full
+# GETs) — so Wasalt ran with NO inactive detection at all (0 inactivations for 30+ days, ~4.7k dead
+# listings measured still searchable on 2026-07-12).
+#
+# How this one works (two sequential steps, ONE run/day):
+#   1. ENUM  — run.py --all --pages 2000 walks EVERY list page of every slice (~2k pages ≈ 285 MB
+#      gzip ≈ ~1% of the old cost). The normal upserts refresh last_seen_at on every listing that
+#      still exists on wasalt.sa, discover new ones, and auto-reactivate returned ones. This single
+#      run also gives Wasalt a daily full data refresh (price/field updates) as a side effect.
+#   2. STRIKE — liveness.py --mode enum-strike: active rows the enumeration did NOT see get
+#      missing_count+1 (DB-only); rows missed 3 consecutive enumerations are HEAD→GET-confirmed and
+#      flip active=false ONLY on a confirmed dead. Guards: enum-coverage (≥40k rows AND ≥85% of the
+#      trailing median, else no strikes), control-group (30 known-live rows must verify live, else
+#      no flips), confirm cap 1500/run. `needs:` ensures a failed/partial enum ⇒ no strike step.
+#
+# Bandwidth: ~285 MB/day enum + ≤~45 MB/day confirms (backlog week) ≈ ~9 GB/month at daily cadence.
+# Cadence is ONE cron line: every-2-days halves it (flip latency = grace × cadence).
+name: Wasalt enum liveness
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "strike step: print would-strike/would-kill counts, write nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: wasalt-enum-liveness
+  cancel-in-progress: false
+
+jobs:
+  enum:
+    name: Full enumeration (all slices, all pages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Enumerate every slice to exhaustion
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          SCRAPE_MIN_INTERVAL: "0.3"
+        run: |
+          python -m scrapers.wasalt.run --all --pages 2000
+
+  strike:
+    name: Strike unseen + confirm-flip (3-strike, guarded)
+    needs: enum            # a failed/partial enumeration means NO strikes — fail-safe by design
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Enum-strike (guarded)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          SCRAPE_MIN_INTERVAL: "0.3"
+        run: |
+          python -m scrapers.wasalt.liveness \
+            --mode enum-strike \
+            --grace 3 \
+            --confirm-limit 1500 \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
