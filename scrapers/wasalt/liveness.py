@@ -345,9 +345,207 @@ def run_enforce(args) -> int:
     return 0
 
 
+# ── ENUM-STRIKE (the production Wasalt lifecycle, 2026-07-12) ─────────────────────────────────────
+# Replaces per-listing polling (enforce over ~59.7k rows/day) with the FULL-ENUMERATION model:
+# a daily `run.py --all --pages 2000` sweep walks every list page of every slice (~2k pages ≈ 285MB
+# gzip — ~1% of the old detail-GET cost) and, via the normal upserts, refreshes last_seen_at on every
+# listing that still exists. Liveness then falls out almost for free:
+#   STRIKE (DB-only, zero proxy bytes): active rows the completed enumeration did NOT see get
+#     missing_count += 1. Applied in DESCENDING missing_count order so one run can never
+#     double-increment a row.
+#   CONFIRM (tiny, bounded): only rows reaching --grace consecutive missed enumerations are
+#     HEAD→GET-verified with the existing check_hybrid(). GET-confirmed dead → active=false
+#     (deactivated_at trigger starts the retention clock); confirmed live → missing_count=0 +
+#     last_seen refreshed (self-healing); transient/failed → untouched, no strike consumed.
+# GUARDS (all must pass before anything flips):
+#   • enum-coverage: strikes only run against a scrape_runs row with ok=true AND rows_seen ≥
+#     --enum-min-rows AND started within --enum-window-hours AND ≥ --coverage-frac × the median of
+#     the previous qualifying enumerations. A blocked proxy / partial crawl / wasalt layout change
+#     ⇒ no qualifying run ⇒ NO strikes (fail-safe direction).
+#   • control-group: before any flip, --control-n rows the enumeration JUST saw (known-live) are
+#     verified with the same checker; if fewer than --control-min-live verify live, the CHECKER
+#     (not the listings) is broken — abort all flips. (The old 30% dead-frac guard is wrong here:
+#     a 3-strike cohort is EXPECTED to be mostly dead, so it would always trip.)
+# A live listing can therefore only be hidden if it was missed by THREE consecutive
+# coverage-verified full enumerations AND a direct GET confirmed it dead AND the checker proved
+# itself healthy on known-live controls in the same run — belt, suspenders, and a second belt.
+def _keyset_ids(tbl: str, *, mc: int, before_iso: str) -> list[int]:
+    """ids of ACTIVE rows with missing_count=mc AND last_seen_at < before_iso (keyset-paged)."""
+    out: list[int] = []
+    last = -1
+    while True:
+        page = db._execute(
+            db.sb().table(tbl).select("id")
+            .eq("active", True).eq("missing_count", mc).lt("last_seen_at", before_iso)
+            .gt("id", last).order("id", desc=False).limit(1000),
+            what=f"{tbl}.enum_strike_ids",
+        ).data or []
+        if not page:
+            return out
+        for x in page:
+            out.append(x["id"])
+            last = x["id"]
+
+
+def coverage_ok(current_rows: int, history_rows: list[int], frac: float) -> bool:
+    """Pure guard: current enumeration must reach `frac` of the median of previous qualifying runs.
+    With <2 history runs there is no baseline yet — accept (min-rows floor still applied upstream)."""
+    if len(history_rows) < 2:
+        return True
+    hist = sorted(history_rows)
+    median = hist[len(hist) // 2] if len(hist) % 2 else (hist[len(hist) // 2 - 1] + hist[len(hist) // 2]) / 2
+    return current_rows >= frac * median
+
+
+def control_ok(live: int, dead: int, failed: int, n: int, min_live: float) -> bool:
+    """Pure guard: the checker must see ≥min_live of known-live controls as live, on a mostly-decided
+    sample. Too many transient failures = can't trust the checker either."""
+    decided = live + dead
+    if decided < max(5, n // 2):
+        return False
+    return (live / decided) >= min_live
+
+
+def run_enum_strike(args) -> int:
+    started = time.time()
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # 1) The qualifying enumeration run (fail-safe: none ⇒ nothing happens).
+    q = db._execute(
+        db.sb().table("scrape_runs").select("id, started_at, rows_seen")
+        .eq("platform", "wasalt").eq("ok", True).gte("rows_seen", args.enum_min_rows)
+        .order("started_at", desc=True).limit(4),
+        what="scrape_runs.enum_candidates",
+    ).data or []
+    if not q:
+        print(f"⚠ enum-strike: no qualifying enumeration (ok=true, rows_seen≥{args.enum_min_rows}) "
+              f"found — NO strikes. (Run run.py --all --pages 2000 first.)", flush=True)
+        return 0
+    cur = q[0]
+    cutoff = datetime.now(timezone.utc).timestamp() - args.enum_window_hours * 3600
+    cur_started = datetime.fromisoformat(cur["started_at"].replace("Z", "+00:00"))
+    if cur_started.timestamp() < cutoff:
+        print(f"⚠ enum-strike: newest qualifying enumeration ({cur['started_at']}) is older than "
+              f"{args.enum_window_hours}h — NO strikes.", flush=True)
+        return 0
+    history = [int(r["rows_seen"]) for r in q[1:]]
+    if not coverage_ok(int(cur["rows_seen"]), history, args.coverage_frac):
+        print(f"⚠ enum-strike COVERAGE GUARD: rows_seen={cur['rows_seen']} < "
+              f"{args.coverage_frac} × median{history} — partial crawl, NO strikes.", flush=True)
+        return 0
+    enum_start = cur["started_at"]
+    print(f"enum-strike: qualifying enumeration run id={cur['id']} started={enum_start} "
+          f"rows_seen={cur['rows_seen']} (history={history}) grace={args.grace}"
+          f"{' [DRY-RUN]' if args.dry_run else ''}", flush=True)
+
+    # 2) STRIKE — descending missing_count so one run can never double-increment a row.
+    struck = {n: 0 for n in range(args.grace)}
+    for mc in range(args.grace - 1, -1, -1):
+        for tbl in TABLES:
+            ids = _keyset_ids(tbl, mc=mc, before_iso=enum_start)
+            struck[mc] += len(ids)
+            if args.dry_run or not ids:
+                continue
+            for i in range(0, len(ids), 200):
+                db._execute(db.sb().table(tbl).update({"missing_count": mc + 1}).in_("id", ids[i:i + 200]),
+                            what=f"{tbl}.enum_strike")
+    print(f"  strikes (unseen by enum): " +
+          ", ".join(f"mc{mc}→{mc+1}: {n}" for mc, n in sorted(struck.items())), flush=True)
+
+    # 3) CONFIRM cohort: rows at ≥grace consecutive missed enumerations (oldest last_seen first).
+    cohort: list[tuple[str, int, str, int]] = []
+    for tbl in TABLES:
+        need = args.confirm_limit - len(cohort)
+        if need <= 0:
+            break
+        rows = db._execute(
+            db.sb().table(tbl).select("id, listing_url, missing_count")
+            .eq("active", True).gte("missing_count", args.grace)
+            .order("last_seen_at", desc=False).limit(need),
+            what=f"{tbl}.enum_confirm_cohort",
+        ).data or []
+        for x in rows:
+            url = (x.get("listing_url") or "").strip()
+            if url:
+                cohort.append((tbl, x["id"], url, int(x.get("missing_count") or 0)))
+    # Control group: rows the enumeration JUST saw (known-live) — proves the checker itself works.
+    control: list[tuple[str, int, str, int]] = []
+    for tbl in TABLES:
+        rows = db._execute(
+            db.sb().table(tbl).select("id, listing_url, missing_count")
+            .eq("active", True).gte("last_seen_at", enum_start)
+            .order("id", desc=True).limit(args.control_n // len(TABLES) + 1),
+            what=f"{tbl}.enum_control",
+        ).data or []
+        for x in rows:
+            url = (x.get("listing_url") or "").strip()
+            if url:
+                control.append((tbl, x["id"], url, int(x.get("missing_count") or 0)))
+    control = control[:args.control_n]
+    print(f"  confirm cohort={len(cohort)} (cap {args.confirm_limit}), control group={len(control)}",
+          flush=True)
+
+    checked = live = dead = failed = 0
+    killed = 0
+    total_bytes = 0
+    aborted_flips = False
+    if args.dry_run:
+        print(f"  DRY-RUN: skipping network confirm; {len(cohort)} rows WOULD be HEAD/GET-verified "
+              f"(flips only for GET-confirmed dead).", flush=True)
+    elif cohort:
+        # 3a) control first — if the checker can't see known-live rows as live, trust nothing.
+        c_live = c_dead = c_failed = 0
+        with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
+            for _tbl, _lid, _cur, verdict, _g, nbytes in ex.map(check_hybrid, control):
+                total_bytes += nbytes
+                c_live += verdict == "live"; c_dead += verdict == "dead"; c_failed += verdict == "failed"
+        if not control_ok(c_live, c_dead, c_failed, len(control), args.control_min_live):
+            aborted_flips = True
+            print(f"⚠ enum-strike CONTROL GUARD: known-live controls verified live={c_live} dead={c_dead} "
+                  f"failed={c_failed} — checker/proxy unhealthy, NO flips this run.", flush=True)
+        else:
+            print(f"  control healthy: live={c_live}/{len(control)} (dead={c_dead} failed={c_failed})",
+                  flush=True)
+            # 3b) verify the cohort; flip ONLY GET-confirmed dead. live → self-heal. failed → untouched.
+            alive_ids: dict[str, list[int]] = {t: [] for t in TABLES}
+            dead_ids: dict[str, list[int]] = {t: [] for t in TABLES}
+            with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
+                for tbl, lid, _cur, verdict, _g, nbytes in ex.map(check_hybrid, cohort):
+                    checked += 1
+                    total_bytes += nbytes
+                    if verdict == "live":
+                        live += 1; alive_ids[tbl].append(lid)
+                    elif verdict == "dead":
+                        dead += 1; dead_ids[tbl].append(lid)
+                    else:
+                        failed += 1
+            for tbl, ids in alive_ids.items():
+                _flush_alive(tbl, ids, now_iso)          # missing_count=0 + fresh last_seen
+            for tbl, ids in dead_ids.items():
+                for i in range(0, len(ids), 200):
+                    db._execute(db.sb().table(tbl).update({"active": False}).in_("id", ids[i:i + 200]),
+                                what=f"{tbl}.enum_kill")
+                killed += len(ids)
+
+    runtime = round(time.time() - started, 1)
+    notes = (f"mode=enum-strike enum_run={cur['id']} enum_rows={cur['rows_seen']} "
+             f"struck={sum(struck.values())} cohort={len(cohort)} killed={killed} "
+             f"aborted_flips={aborted_flips} dry_run={args.dry_run} runtime_s={runtime}")
+    if not args.dry_run:
+        db._execute(db.sb().table("wasalt_liveness_runs").insert({
+            "finished_at": now_iso, "shard": "enum", "mode": "enum-strike",
+            "checked": checked, "live": live, "dead": dead, "failed": failed,
+            "skipped": int(aborted_flips), "bytes_downloaded": total_bytes, "notes": notes}),
+            what="wasalt_liveness_runs.insert")
+    print(f"\n✓ Wasalt enum-strike: struck={sum(struck.values())} cohort_checked={checked} "
+          f"live(self-healed)={live} killed(→inactive)={killed} failed(untouched)={failed} "
+          f"aborted_flips={aborted_flips} runtime_s={runtime}", flush=True)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Wasalt hybrid liveness (HEAD-first, GET-confirm)")
-    ap.add_argument("--mode", default="pilot", choices=["pilot", "enforce"])
+    ap.add_argument("--mode", default="pilot", choices=["pilot", "enforce", "enum-strike"])
     ap.add_argument("--limit", type=int, default=0,
                     help="Cap rows checked (0 = all). pilot defaults to 800 when unset.")
     ap.add_argument("--workers", type=int, default=4, help="Low concurrency; each worker gets its own session.")
@@ -362,9 +560,28 @@ def main() -> int:
                          "each active row is checked every ~N days (1 = every row every run). Cuts proxy GB ~N×.")
     ap.add_argument("--stagger-idx", type=int, default=-1,
                     help="ENFORCE: which stagger bucket to check today (default -1 = auto from UTC ordinal date).")
+    ap.add_argument("--enum-min-rows", type=int, default=40000,
+                    help="ENUM-STRIKE: a scrape_runs row must have rows_seen ≥ this to count as a full "
+                         "enumeration (distinguishes it from the small 3-page sweep runs).")
+    ap.add_argument("--enum-window-hours", type=int, default=36,
+                    help="ENUM-STRIKE: the qualifying enumeration must have started within this window.")
+    ap.add_argument("--coverage-frac", type=float, default=0.85,
+                    help="ENUM-STRIKE coverage guard: current enum rows_seen must reach this fraction of "
+                         "the median of previous qualifying enums, else NO strikes.")
+    ap.add_argument("--confirm-limit", type=int, default=1500,
+                    help="ENUM-STRIKE: max rows HEAD/GET-verified per run (bounds proxy bandwidth; the "
+                         "backlog simply drains across days).")
+    ap.add_argument("--control-n", type=int, default=30,
+                    help="ENUM-STRIKE: known-live control rows verified first; flips abort if they fail.")
+    ap.add_argument("--control-min-live", type=float, default=0.90,
+                    help="ENUM-STRIKE control guard: required live fraction among decided controls.")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="ENUM-STRIKE: print what would be struck/verified; write NOTHING.")
     args = ap.parse_args()
     if args.mode == "pilot" and not args.limit:
         args.limit = 800
+    if args.mode == "enum-strike":
+        return run_enum_strike(args)
     return run_enforce(args) if args.mode == "enforce" else run_pilot(args)
 
 
