@@ -27,6 +27,10 @@ on:
         description: "strike step: print would-strike/would-kill counts, write nothing"
         type: boolean
         default: false
+      confirm_limit:
+        description: "strike step: max rows HEAD/GET-verified this run (pilot uses a small cap)"
+        type: string
+        default: "1500"
 
 concurrency:
   group: wasalt-enum-liveness
@@ -36,7 +40,9 @@ jobs:
   enum:
     name: Full enumeration (all slices, all pages)
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    # Wasalt rate-limits sustained sequential fetching (measured 2026-07-12: ~5s/page from a
+    # throttled IP vs ~1s unthrottled). ~2k pages must fit even the throttled case: 2k × 5s ≈ 2.8h.
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -79,5 +85,5 @@ jobs:
           python -m scrapers.wasalt.liveness \
             --mode enum-strike \
             --grace 3 \
-            --confirm-limit 1500 \
+            --confirm-limit ${{ inputs.confirm_limit || '1500' }} \
             ${{ inputs.dry_run && '--dry-run' || '' }}
