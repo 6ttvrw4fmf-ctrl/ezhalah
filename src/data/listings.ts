@@ -226,10 +226,11 @@ export function buildPools(rows: Listing[]): Pools {
   // sees "no exact matches" instead of stale mock listings. (user request: real listings only.)
   //
   // PRESERVE the incoming order — do NOT re-sort by id. `rows` arrives from fetchListingsForQuery
-  // ALREADY ordered by `orderByScope`: diversity-primary (Region→cities→districts→platforms etc.,
-  // per the user's per-scope diversity spec) with true newest-first as the leaf tiebreaker. A blanket
-  // `sort((a,b)=>b.id-a.id)` here re-clustered every pool by raw id, which silently DISCARDED that
-  // diversity (one platform/city with the highest ids monopolised the first 25). Keeping insertion
-  // order lets the diversified ranking survive to the display. (user 2026-06-27: improve diversity.)
+  // ALREADY ordered by `orderByScope`: platform-primary (Platform→region→city→district etc., owner
+  // PERMANENT rule 2026-07-13 — supersedes the original 2026-06-27 geography-primary order) with true
+  // newest-first as the leaf tiebreaker. A blanket `sort((a,b)=>b.id-a.id)` here re-clustered every pool
+  // by raw id, which silently DISCARDED that diversity (one platform/city with the highest ids
+  // monopolised the first 25). Keeping insertion order lets the diversified ranking survive to the
+  // display. (user 2026-06-27: improve diversity; user 2026-07-13: platform diversity now primary.)
   return out;
 }

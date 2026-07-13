@@ -10,6 +10,7 @@ import { scoreListingProximity } from './proximity';
 import { cityDisplay } from './locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
+import { mergeDiversitySeed, filterBoosted, orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
 function relGroupOf(rel: string): string {
@@ -495,6 +496,21 @@ export const lastPageCandidates = (): number => _lastPageCandidates;
 let _lastPageTotal = 0;
 export const lastPageTotal = (): number => _lastPageTotal;
 
+// Per-query set of (source_table:listing_id) keys pulled forward by the page-0 platform-diversity seed
+// (owner PERMANENT rule 2026-07-13, see fetchListingsForQuery). Keyed by JSON.stringify(q) rather than a
+// single flat Set so an unrelated search started in between a page-0 fetch and a later Load-More click
+// (both real in the AI Agent, which keeps every past search's "Load More" live in the same conversation)
+// can never clobber a different search's boosted-id memory. Capped to bound memory over a long session.
+const _diversityBoostedByQuery = new Map<string, Set<string>>();
+const _DIVERSITY_QUERY_CAP = 50;
+function noteDiversityQuery(key: string, keys: Set<string>) {
+  _diversityBoostedByQuery.set(key, keys);
+  if (_diversityBoostedByQuery.size > _DIVERSITY_QUERY_CAP) {
+    const oldest = _diversityBoostedByQuery.keys().next().value;
+    if (oldest !== undefined) _diversityBoostedByQuery.delete(oldest);
+  }
+}
+
 // Apply the kept NON-location filters (deal, type, rent period) to a fresh query on the right table.
 // Location scoping is added by the caller (city / region / country-wide). Keeps every branch identical
 // on the strict-contract fields. (filter contract.)
@@ -551,8 +567,11 @@ function interleaveByPlatform(cands: Cand[]): Cand[] {
 //   City     : newest + platform diversity (no single platform monopolises the page).
 //   Region   : city diversity → platform diversity → newest (every city in the region contributes).
 //   Country  : region diversity → city diversity → platform diversity → newest (the whole Kingdom).
-type Scope = 'district' | 'city' | 'region' | 'country';
-type Ranked = { l: Listing; platform: string; city: string; region: string; district: string; rank: number; source_table: string };
+// Scope + the diversity-order algorithm itself (interleaveRanked/orderByScope) now live in the pure,
+// zero-dependency @/lib/platformDiversity module (owner 2026-07-13 platform-diversity-first-page fix) so
+// the exact reordering behavior is unit-testable without this file's react-native import chain. `Ranked`
+// is this file's concrete instantiation of the generic `RankedRow<L>`.
+type Ranked = RankedRow<Listing>;
 
 function scopeOf(q: SearchQuery, cities: string[] | null, countryWide: boolean): Scope {
   if (countryWide) return 'country';
@@ -564,71 +583,6 @@ function scopeOf(q: SearchQuery, cities: string[] | null, countryWide: boolean):
   if (cities && cities.length > 1) return 'region';
   if (q.districts && q.districts.length) return 'district';
   return 'city';
-}
-
-// Fold Arabic spelling variants (hamza أإآٱ→ا, ta-marbuta ة→ه, alef-maqsura ى→ي, drop tatweel +
-// directional marks, collapse whitespace) — mirrors the DB's normalize_ar(). Used ONLY to build the
-// diversification GROUPING key so spelling twins of one city (المدينة المنورة / المدينه المنوره,
-// أبها / ابها) count as a single city when balancing result order. It NEVER touches r.l.city — the
-// property card still renders the exact scraped spelling. (owner: Option B canonicalization, 2026-07-06.)
-function normLocKey(s: string): string {
-  return (s || '')
-    .toLowerCase()
-    .replace(/[أإآٱ]/g, 'ا')
-    .replace(/ة/g, 'ه')
-    .replace(/ى/g, 'ي')
-    .replace(/[ـ‌‍‎‏‪‫‬‭‮]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function rankedKey(r: Ranked, k: string): string {
-  return k === 'platform' ? r.platform
-    : k === 'city' ? normLocKey(r.city)
-    : k === 'region' ? normLocKey(r.region)
-    : k === 'district' ? normLocKey(r.district)
-    : k === 'cleanType' ? (r.l.cleanType ?? '') : '';
-}
-
-// Hierarchical round-robin: group by the first key, order groups by size (densest first) then freshness,
-// take one card per group per pass, and recurse with the remaining keys. At the leaf (no keys), it is
-// pure newest-first by the RPC recency rank.
-function interleaveRanked(rows: Ranked[], keys: string[]): Ranked[] {
-  if (!keys.length) return [...rows].sort((a, b) => a.rank - b.rank);
-  const [k, ...rest] = keys;
-  const groups = new Map<string, Ranked[]>();
-  for (const r of rows) {
-    const g = rankedKey(r, k) || '∅';
-    let a = groups.get(g);
-    if (!a) { a = []; groups.set(g, a); }
-    a.push(r);
-  }
-  const lists = [...groups.values()].map((g) => interleaveRanked(g, rest));
-  // Densest group leads (Riyadh before a tiny town); ties broken by the freshest listing in the group.
-  lists.sort((a, b) => b.length - a.length || a[0].rank - b[0].rank);
-  const out: Ranked[] = [];
-  for (let i = 0; out.length < rows.length; i++) {
-    let progressed = false;
-    for (const g of lists) { if (i < g.length) { out.push(g[i]); progressed = true; } }
-    if (!progressed) break;
-  }
-  return out;
-}
-
-function orderByScope(rows: Ranked[], scope: Scope, multiType = false): Ranked[] {
-  // Diversity hierarchy per scope (user 2026-06-27): Region → cities → districts → platforms; City →
-  // districts → platforms; District → platforms (price/type/freshness variety come from the recency leaf
-  // + repeat-visit rotation). Always stays INSIDE the selected scope. Country adds region at the top.
-  const base = scope === 'country' ? ['region', 'city', 'district', 'platform']
-    : scope === 'region' ? ['city', 'district', 'platform']
-    : scope === 'city' ? ['district', 'platform']
-    : scope === 'district' ? ['platform']
-    : [];
-  // Tier 3 (user rule 2026-06-28): when the user picked MULTIPLE exact types, spread across THOSE types
-  // LAST — after platform. This only re-orders the already-matched set; it never introduces an unpicked
-  // type (the rows were already constrained to the selected types by the raw fetch + matchesType).
-  const keys = multiType ? [...base, 'cleanType'] : base;
-  return interleaveRanked(rows, keys);
 }
 
 // Fetch the FULL card rows for a set of ids from ONE raw platform table, applying the kept server-side
@@ -760,18 +714,16 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
       ? { p_tables2: resScopeBTables, p_types2: resMisfileTypes }
       : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
 
-  const { data: cands, error } = await supabase.rpc('location_search_candidates_ar', {
+  // Shared filter params for BOTH the main recency-window call and the page-0 diversity-seed call below —
+  // built once so the two calls can never drift apart (a diversity-seed row must satisfy the exact same
+  // WHERE clause as the main pool, or Rule 1 — filter exactness — would be at risk).
+  const baseRpcParams = {
     p_deal: q.bothDeals ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
     p_rent_period: rentPeriodParam(q),
     p_cities: cities,
     p_districts: q.districts && q.districts.length ? q.districts : null,
     p_tables: mainTables,
     p_platforms: q.sources && q.sources.length ? q.sources : null,
-    // p_per_platform null → pure recency order, so Load-More offset paging is consistent + gap-free
-    // (per-platform diversity is still applied client-side in runSearch). (owner 2026-07-08)
-    p_per_platform: null,
-    p_limit: pageLimit,
-    p_offset: pageOffset,
     ...rpcFilterParams(q),
     // Broad Commercial: override rpcFilterParams' p_types (null for a broad macro search) so the residential
     // scope is constrained to commercial type_ar; scope B carries the commercial-tables constraint. (2026-07-09)
@@ -782,6 +734,15 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     p_region_ids: q.regionPin
       ? (REGION_TO_ID[q.regionPin] ? [REGION_TO_ID[q.regionPin]] : null)
       : regionIdsFor(lm),
+  };
+
+  const { data: cands, error } = await supabase.rpc('location_search_candidates_ar', {
+    ...baseRpcParams,
+    // p_per_platform null → pure recency order, so Load-More offset paging is consistent + gap-free
+    // (per-platform diversity is still applied client-side in runSearch). (owner 2026-07-08)
+    p_per_platform: null,
+    p_limit: pageLimit,
+    p_offset: pageOffset,
   });
   if (error) return null;                       // index error → retry UI, not "no matches"
   _lastPageCandidates = (cands as Cand[] | null)?.length ?? 0;   // this page's matching-candidate count → drives Load-More offset/hasMore
@@ -790,16 +751,62 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
   _lastPageTotal = Number((cands as any[] | null)?.[0]?.total_count ?? 0) || ((cands as Cand[] | null)?.length ?? 0);
   if (!cands || !(cands as Cand[]).length) return [];
 
+  // PLATFORM-DIVERSITY SEED — owner PERMANENT rule 2026-07-13 (Rule 2: the first page must show the
+  // widest platform mix, never let one platform crowd out others that also have matches).
+  // Root cause this fixes (SQL-verified against search_listings_ar, project aannarbkwcymrotzwdbo, on a
+  // live Rent+Apartment+Riyadh search): the main call above is ONE global window ordered by
+  // `last_updated DESC`, capped at pageLimit. When a platform's rows were all (re)scraped in the same run,
+  // they share near-identical timestamps and can occupy the ENTIRE window — e.g. aqar's batch filled every
+  // one of the first 1,500 ranked rows while wasalt (the LARGER platform for that exact filter: 6,458 vs
+  // aqar's 3,238) had its freshest matching row rank 2,076th — outside the window entirely. No client-side
+  // interleave (orderByScope/interleaveRanked) can diversify a platform it never received, so the first
+  // page rendered 100% aqar. Fix: for page 0 only, when the main window is saturated (cands.length >=
+  // pageLimit — a window that ISN'T full already contains every matching row, so no platform can be
+  // missing), issue a second small call using the RPC's existing p_per_platform windowing to pull each
+  // qualifying platform's own freshest rows regardless of global recency rank, and merge them into the
+  // pool the diversify step actually sees. Load-More is untouched (still walks the main window by its own
+  // real recency rank — offset math below is unaffected), and pulled-forward ids are remembered so a later
+  // Load-More page never re-shows the same card (see diversityBoostedKeys below).
+  let allCands: any[] = cands as any[];
+  const diversityKey = JSON.stringify(q);
+  if (pageOffset === 0 && allCands.length >= pageLimit) {
+    const DIVERSITY_SEED_PER_PLATFORM = 20;
+    const { data: seedCands } = await supabase.rpc('location_search_candidates_ar', {
+      ...baseRpcParams,
+      p_per_platform: DIVERSITY_SEED_PER_PLATFORM,
+      p_limit: 2000, // generous cap: far more than DIVERSITY_SEED_PER_PLATFORM × (every known platform)
+      p_offset: 0,
+    });
+    // Commit the boosted-key set to the map in ONE atomic write, built fresh from this call's own result
+    // rather than read-then-mutate-in-place — two page-0 fetches for the identical query (diversityKey)
+    // racing across this await could otherwise have the second call's reset silently orphan the first
+    // call's in-flight Set, losing its boosted ids from the map entirely (real, if narrow, race caught in
+    // adversarial review — the old pattern mutated a Set object fetched from the map BEFORE this await).
+    if (seedCands && (seedCands as any[]).length) {
+      const { merged, boostedKeys } = mergeDiversitySeed(allCands, seedCands as any[]);
+      allCands = merged;
+      noteDiversityQuery(diversityKey, boostedKeys);
+    } else {
+      noteDiversityQuery(diversityKey, new Set<string>());
+    }
+  } else if (pageOffset > 0) {
+    // Load-More continuation: drop any candidate already shown via a page-0 diversity seed for this exact
+    // query, so the same card never appears twice as the main window's offset later reaches that
+    // platform's true rank.
+    const priorBoostedKeys = _diversityBoostedByQuery.get(diversityKey);
+    if (priorBoostedKeys && priorBoostedKeys.size) allCands = filterBoosted(allCands, priorBoostedKeys);
+  }
+
   // 2) Keep the RPC's newest-first order (true last_updated recency); remember each candidate's recency
   //    rank, and group ids by source_table to fetch the full cards.
-  const cleanCands = (cands as any[]).map((c, i) => ({
+  const cleanCands = allCands.map((c, i) => ({
     source_table: c.source_table as string, listing_id: Number(c.listing_id), platform: c.platform as string, rank: i,
   }));
   // The index returns the ARABIC-CANONICAL location for every candidate (region_ar/city_ar/district_ar).
   // We display THAT — never the raw English/transliterated value underneath. (user: Arabic is canonical;
   // the displayed location must come only from the Arabic location DB.)
   const arLoc = new Map<string, { region: string; city: string; district: string }>();
-  for (const c of cands as any[]) {
+  for (const c of allCands) {
     arLoc.set(`${c.source_table}:${Number(c.listing_id)}`, {
       region: (c.region_ar as string) || '', city: (c.city_ar as string) || '', district: (c.district_ar as string) || '',
     });
