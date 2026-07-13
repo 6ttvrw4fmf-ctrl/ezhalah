@@ -6,7 +6,7 @@ import { cityHasListings, nearbyCityWithListings, cityDisplay } from './location
 import { detailFor, priceBandRange } from './taxonomy';
 import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
 import { supports } from './platforms';
-import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR } from '@/i18n';
+import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
@@ -120,23 +120,14 @@ export type SortKey =
   | 'ppm_asc' | 'ppm_desc'
   | 'beds_desc';
 
-// Defaults are Rent + Residential so a bare Search (nothing else chosen) returns residential
-// rentals nationwide — the filter only narrows from there, it's never required. (PRD §6.1)
-export const emptyQuery = (): SearchQuery => ({
-  deal: 'Rent',
-  location: '',
-  category: 'Residential',
-  type: null,
-  detail: null,
-  priceInput: '',
-  priceBand: null,
-  rentPeriod: 'annual',
-});
+// Moved to src/lib/searchDefaults.ts (zero-dependency, so a plain Node test can execute it) —
+// re-exported here so every existing `import { emptyQuery } from '@/data/search'` keeps working.
+export { emptyQuery } from '@/lib/searchDefaults';
 
 export const locationPhrase = (q: SearchQuery) => q.location.trim() || 'Saudi Arabia';
-const placeText = (q: SearchQuery) => (q.location.trim() ? tPlace(q.location.trim()) : t('Saudi Arabia'));
+const placeText = (q: SearchQuery) => (q.location.trim() ? arabicOrUnresolved(tPlace(q.location.trim())) : t('Saudi Arabia'));
 const verbText = (q: SearchQuery) => t(q.bothDeals ? 'to rent or buy' : q.deal === 'Rent' ? 'to rent' : 'to buy');
-const whatText = (q: SearchQuery) => tWord(q.type ?? q.category ?? 'Property');
+const whatText = (q: SearchQuery) => arabicOrTypeUnresolved(tWord(q.type ?? q.category ?? 'Property'));
 
 // A short human label for a query, used in search history. "Villa to rent in Riyadh", etc.
 export function queryLabel(q: SearchQuery): string {
@@ -201,11 +192,11 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
   // type (e.g. ورشة) was ignored and the bubble said a generic "عقار سكني/تجاري". (user bug 2026-07-06.)
   const selTypes = effectiveTypes(q);
   const whatPhrase = selTypes.length
-    ? selTypes.map((x) => tWord(x)).join('، ')
+    ? selTypes.map((x) => arabicOrTypeUnresolved(tWord(x))).join('، ')
     : q.typeGroup
-      ? t(q.typeGroup)
+      ? arabicOrTypeUnresolved(t(q.typeGroup))
       : q.category
-        ? t('{cat} property', { cat: tWord(q.category) })
+        ? t('{cat} property', { cat: arabicOrTypeUnresolved(tWord(q.category)) })
         : t('a property');
 
   let detailPhrase = '';
@@ -279,11 +270,11 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
   });
 
   const subWhat = selTypes.length
-    ? selTypes.map((x) => tWord(x)).join('، ')
+    ? selTypes.map((x) => arabicOrTypeUnresolved(tWord(x))).join('، ')
     : q.typeGroup
-      ? t(q.typeGroup)
+      ? arabicOrTypeUnresolved(t(q.typeGroup))
       : q.category
-        ? t('{cat} properties', { cat: tWord(q.category) })
+        ? t('{cat} properties', { cat: arabicOrTypeUnresolved(tWord(q.category)) })
         : t('properties');
   const subPlace = hasCity ? t('in {place}', { place }) : t('across Saudi Arabia');
   const sub = tooLow
@@ -361,6 +352,16 @@ function budgetLines(q: SearchQuery): string[] {
 // implementation.
 function arabicOrUnresolved(s: string): string {
   return arabicOrPlaceholder(s, getLocale(), LOCATION_UNRESOLVED_AR);
+}
+
+// Same idea, for property-type/category words. q.type/q.types/q.category/q.typeGroup are normally a
+// closed, fully-AR{}-translated set from the filter UI or agent parser — but the guided interview's
+// free-text "Something else" answer can set any of them to arbitrary custom text (buildQuery() in
+// src/app/interview.tsx has no dictionary-membership check), which tWord()/t() would otherwise leak
+// straight through on a miss. Guards whatText()/searchSummary()/querySummaryLine() the same way
+// arabicOrUnresolved() already guards every location line. (2026-07-13 sibling-leak audit.)
+function arabicOrTypeUnresolved(s: string): string {
+  return arabicOrPlaceholder(s, getLocale(), TYPE_UNRESOLVED_AR);
 }
 
 function locationLines(q: SearchQuery): string[] {
@@ -452,9 +453,9 @@ export function searchSummary(q: SearchQuery): string {
   // Commercial — always one or the other), so a default-button "Search" still shows what they chose.
   // (user request: "if user just clicks search by default, it shows what the button clicked at.")
   const summaryTypes = effectiveTypes(q);
-  if (summaryTypes.length) lines.push(`• ${t('Property Type')}: ${summaryTypes.map((x) => getLocale() === 'ar' ? tWord(x) : x).join('، ')}`);
-  else if (q.typeGroup) lines.push(`• ${t('Property Type')}: ${t(q.typeGroup)}`);
-  else if (q.category) lines.push(`• ${t('Property Type')}: ${t(q.category)}`);
+  if (summaryTypes.length) lines.push(`• ${t('Property Type')}: ${summaryTypes.map((x) => getLocale() === 'ar' ? arabicOrTypeUnresolved(tWord(x)) : x).join('، ')}`);
+  else if (q.typeGroup) lines.push(`• ${t('Property Type')}: ${arabicOrTypeUnresolved(t(q.typeGroup))}`);
+  else if (q.category) lines.push(`• ${t('Property Type')}: ${arabicOrTypeUnresolved(t(q.category))}`);
   lines.push(`• ${t('Transaction Type')}: ${q.bothDeals ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}`);
   // Platform filter line — when the user restricted to specific platforms ("Aqar only"), show which,
   // so the filter is visibly confirmed. (user: "when I type alkhaas it must be al khaas, not aqar".)
@@ -493,11 +494,11 @@ export function searchSummary(q: SearchQuery): string {
 export function querySummaryLine(q: SearchQuery): string {
   const parts: string[] = [];
   const lineTypes = effectiveTypes(q);
-  if (lineTypes.length) parts.push(lineTypes.map((x) => tWord(x)).join('، '));
-  else if (q.typeGroup) parts.push(t(q.typeGroup));
-  else if (q.category) parts.push(tWord(q.category));
+  if (lineTypes.length) parts.push(lineTypes.map((x) => arabicOrTypeUnresolved(tWord(x))).join('، '));
+  else if (q.typeGroup) parts.push(arabicOrTypeUnresolved(t(q.typeGroup)));
+  else if (q.category) parts.push(arabicOrTypeUnresolved(tWord(q.category)));
   parts.push(t(q.deal === 'Rent' ? 'Rent' : 'Buy'));
-  if (q.location.trim()) parts.push(tPlace(q.location.trim()));
+  if (q.location.trim()) parts.push(arabicOrUnresolved(tPlace(q.location.trim())));
   const qpLo = numOrNull(q.priceMin), qpHi = numOrNull(q.priceMax);
   if (qpLo != null || qpHi != null) {
     const r = qpLo != null && qpHi != null ? `${grouped(qpLo)}–${grouped(qpHi)}`
@@ -1198,7 +1199,7 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
       ? { cityEn: lmCity, region: q.locationMatch?.region || '', n: 0 }
       : nearbyCityWithListings(q.locationMatch?.raw || q.location, lmCity);
     if (alt) {
-      return t('We couldn’t find listings in "{place}". Did you mean {alt}?', { place: q.locationMatch?.label || q.location, alt: tPlace(alt.cityEn) });
+      return t('We couldn’t find listings in "{place}". Did you mean {alt}?', { place: q.locationMatch?.label || q.location, alt: arabicOrUnresolved(cityDisplay(alt.cityEn, getLocale())) });
     }
   }
   if ((q.priceInput || q.priceMin || q.priceMax) && countWith({ priceInput: '', priceMin: null, priceMax: null }) > 0) {

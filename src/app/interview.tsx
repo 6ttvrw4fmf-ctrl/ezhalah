@@ -7,7 +7,7 @@ import { CATEGORY_TYPES, detailFor, type Category } from '@/data/taxonomy';
 import { emptyQuery, type SearchQuery } from '@/data/search';
 import { INTERVIEW_CITIES, neighborhoodsFor } from '@/data/locations';
 import { useApp } from '@/store';
-import { useI18n, t, tWord, tBudgetMain, tBudgetSub, tDetailOption } from '@/i18n';
+import { useI18n, t, tWord, tBudgetMain, tBudgetSub, tDetailOption, isLatinOnlyInput, ARABIC_ONLY_MSG } from '@/i18n';
 
 // Guided interview — a faithful port of the prototype's modal (.m-iv). One continuous session walks
 // the Location group (city, neighborhood) then the Details group (deal, category, type, budget,
@@ -224,6 +224,10 @@ export default function Interview() {
   const [selected, setSelected] = useState<string | null>(null);
   const [customMode, setCustomMode] = useState(false);
   const [customVal, setCustomVal] = useState('');
+  // Arabic-only product: a custom-typed answer in English never proceeds (matches src/app/index.tsx's
+  // onSearch() guard) — this screen had no such guard, so an English custom answer would flow raw
+  // into t()/tWord() calls with no dictionary entry and leak into the Arabic UI (2026-07-13 audit).
+  const [customErr, setCustomErr] = useState('');
   const authPushed = useRef(false);
 
   const curQ = useMemo(() => nextStep(ans), [ans]);
@@ -257,6 +261,7 @@ export default function Interview() {
   const answer = (key: string, val: string) => {
     setCustomMode(false);
     setCustomVal('');
+    setCustomErr('');
     setSelected(null);
     setOrder((o) => (o.includes(key) ? o : [...o, key]));
     setAns((a) => ({ ...a, [key]: val }));
@@ -265,6 +270,7 @@ export default function Interview() {
   const jumpTo = (key: string) => {
     setCustomMode(false);
     setCustomVal('');
+    setCustomErr('');
     const idx = order.indexOf(key);
     if (idx < 0) return;
     const removed = order.slice(idx);
@@ -281,6 +287,7 @@ export default function Interview() {
   const back = () => {
     setCustomMode(false);
     setCustomVal('');
+    setCustomErr('');
     if (!order.length) {
       router.back();
       return;
@@ -298,6 +305,9 @@ export default function Interview() {
 
   const goNext = () => {
     if (!curQ || !(customMode && customVal.trim())) return;
+    // Arabic-only product: reject a pure-English custom answer here, ABOVE every t()/tWord() call
+    // this answer eventually reaches — same guard, same message as src/app/index.tsx's onSearch().
+    if (isLatinOnlyInput(customVal.trim())) { setCustomErr(ARABIC_ONLY_MSG); return; }
     answer(curQ.key, customVal.trim());
   };
 
@@ -309,6 +319,7 @@ export default function Interview() {
     }
     setCustomVal(val);
     setSelected(null);
+    setCustomErr('');
   };
 
   const leadText = (q: Step): string => {
@@ -438,14 +449,19 @@ export default function Interview() {
                       placeholderTextColor="#9aa6a0"
                     />
                   ) : (
-                    <Pressable style={s.lblWrap} onPress={() => { setCustomMode(true); setSelected(null); }}>
+                    <Pressable style={s.lblWrap} onPress={() => { setCustomMode(true); setSelected(null); setCustomErr(''); }}>
                       <Text style={[s.lbl, s.lblMuted]}>{t(curQ.key === 'budget' ? 'Enter your own amount' : 'Something else')}</Text>
                     </Pressable>
                   )}
                 </View>
+                {customErr ? <Text style={s.note}>{customErr}</Text> : null}
               </View>
 
-              {cityUnknown ? (
+              {/* Suppressed while customErr is showing: goNext()'s Arabic-only guard just rejected
+                  this exact answer (never called answer()), so "I'll still search using your other
+                  answers" would be false in that instant — the two notes must never stack.
+                  (2026-07-13 integration-gap fix.) */}
+              {cityUnknown && !customErr ? (
                 <Text style={s.note}>{t('"{city}" isn\'t a city I recognize, I\'ll still search using your other answers.', { city: customVal.trim() })}</Text>
               ) : null}
 

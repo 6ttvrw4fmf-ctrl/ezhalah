@@ -145,6 +145,7 @@ const AR: Record<string, string> = {
   ' /yr': ' / سنوياً',
   'Max price': 'السعر الأقصى',
   'Search': 'بحث',
+  'Clear all': 'مسح الكل',
 
   // Deals + verbs
   'Rent': 'إيجار',
@@ -194,6 +195,8 @@ const AR: Record<string, string> = {
   'Palace': 'قصر',
   'Gas Station': 'محطة وقود',
   'Health Center': 'مركز صحي',
+  'Kiosk': 'كشك',
+  'Cinema': 'سينما',
 
   // Detail labels
   'Bedrooms': 'غرف النوم',
@@ -987,6 +990,22 @@ export const ARABIC_ONLY_MSG = 'هذا التطبيق يدعم اللغة الع
 // English translation of "location unresolved" is exactly the kind of guess this string exists to
 // avoid. (2026-07-10 location-data-quality audit.)
 export const LOCATION_UNRESOLVED_AR = 'الموقع غير محدد';
+
+// Same idea as LOCATION_UNRESOLVED_AR, for a listing's PROPERTY TYPE. normalizeType()
+// (src/data/propertyTypes.ts) returns the designed sentinel clean type 'Unknown' whenever a raw
+// scraped property_type isn't in the RAW_TO_CLEAN whitelist — 'Unknown' has no AR{} translation, so
+// ResultCard.tsx's typeLabel used to silently render the literal English word "Unknown" on an
+// Arabic-locale card (2026-07-13 sibling-leak audit). Never invent a specific type; state honestly
+// that it's unspecified, same principle as LOCATION_UNRESOLVED_AR.
+export const TYPE_UNRESOLVED_AR = 'نوع غير محدد';
+
+// Same idea, for a Wasalt "Additional Information" row's LABEL (e.g. "Facade", "Ad source"). The
+// deep-fetch backfill (scrapers/wasalt/run.py, WASALT_FETCH_DETAIL=1) stores Wasalt's own detail-
+// page label text verbatim, with no dictionary-membership guard — unlike every OTHER additional-info
+// source in this codebase, which only ever emits a small set of fixed, AR{}-translated literals. A
+// label that doesn't happen to byte-match one of those literals would otherwise render in raw
+// English next to its (already-guarded) value. (2026-07-13 sibling-leak audit.)
+export const ATTRIBUTE_UNRESOLVED_AR = 'بيان غير محدد';
 
 // A property type or category — Arabic translation, or lowercased English (matches the prior
 // "here are villas" phrasing).

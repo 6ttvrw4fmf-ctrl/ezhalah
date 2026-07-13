@@ -12,7 +12,8 @@ import ShareSheet from '@/components/ShareSheet';
 import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { matchLocations, placeLabel, placeTitle, placeSub, placeIcon, placeKey, resolveLocation, ensureLocationIndex, type Place } from '@/data/locations';
-import { grouped } from '@/data/search';
+import { grouped, type SearchQuery } from '@/data/search';
+import { HOME_DEFAULT_QUERY, hasActiveFilters } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
@@ -118,6 +119,9 @@ const AREA_HINT: RangeHintCfg = {
   minOnly: (x) => `سيتم البحث عن عقارات بمساحة ${x} م² أو أكبر.`,
   maxOnly: (x) => `سيتم البحث عن عقارات بمساحة ${x} م² أو أقل.`,
 };
+
+// HOME_DEFAULT_QUERY / hasActiveFilters moved to src/lib/searchDefaults.ts (zero-dependency, so a
+// plain Node test can execute them — imported above).
 
 export default function Home() {
   const insets = useSafeAreaInsets();
@@ -451,6 +455,26 @@ export default function Home() {
 
           {/* Search card */}
           <View style={s.card}>
+            {hasActiveFilters(query) && (
+              <Reveal>
+                <Pressable
+                  style={s.clearAllBtn}
+                  hitSlop={8}
+                  onPress={() => {
+                    setQuery(() => HOME_DEFAULT_QUERY());
+                    setSuggestions([]);
+                    setLocMsg('');
+                    setCityFocus(false);
+                    // The collapsing Property-type/Refine sections can leave the user stranded mid-page —
+                    // scroll back to the top so the reset filter form is what they actually see.
+                    scrollRef.current?.scrollTo({ y: 0, animated: true });
+                  }}
+                >
+                  <Ionicons name="refresh-outline" size={14} color={colors.muted} />
+                  <Text style={s.clearAllText}>{t('Clear all')}</Text>
+                </Pressable>
+              </Reveal>
+            )}
             <Segmented options={DEALS} value={query.deal} icons={DEAL_IMG} onChange={(v) => { setQuery((q) => ({ ...q, deal: v as any, priceBand: null, priceMin: null, priceMax: null, priceInput: '' })); scrollDown(catAnchorRef); }} />
 
             {/* Location (floating label). The whole box is a tap target — tapping anywhere inside
@@ -834,6 +858,11 @@ const s = StyleSheet.create({
   rentHint: { fontSize: 11.5, color: colors.muted, marginTop: 6, paddingHorizontal: 4, lineHeight: 16 },
 
   card: { marginTop: 46, backgroundColor: colors.surface, borderRadius: radius.sheet, borderWidth: 1, borderColor: colors.fieldLine, padding: space.card, ...cardShadow },
+  // "مسح الكل" (Clear All) — only rendered when hasActiveFilters(query), so an already-empty filter
+  // never shows a clear control with nothing to clear (mirrors the location field's own per-field
+  // clear icon, which is likewise conditional on query.location.length > 0).
+  clearAllBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end', marginBottom: 10 },
+  clearAllText: { fontSize: 13, color: colors.muted, fontWeight: '600' },
   field: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 52, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, paddingHorizontal: 14, backgroundColor: colors.surface, ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
   sizeField: { marginTop: 8, height: 46 },
   sizeFieldOn: { borderColor: colors.primary },
