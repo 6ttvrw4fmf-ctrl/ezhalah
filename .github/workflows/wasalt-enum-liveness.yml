@@ -31,6 +31,10 @@ on:
         description: "strike step: max rows HEAD/GET-verified this run (pilot uses a small cap)"
         type: string
         default: "1500"
+      skip_enum:
+        description: "PILOT ONLY: skip the 4.5h enum and run the strike step against the LAST completed enum (must be <36h old, else the coverage guard refuses). For repeatable pilots."
+        type: boolean
+        default: false
 
 concurrency:
   group: wasalt-enum-liveness
@@ -39,6 +43,7 @@ concurrency:
 jobs:
   enum:
     name: Full enumeration (all slices, all pages)
+    if: ${{ !inputs.skip_enum }}      # PILOT skip: run strike against the last completed enum
     runs-on: ubuntu-latest
     # Wasalt rate-limits sustained sequential fetching (measured 2026-07-12: ~5s/page from a
     # throttled IP vs ~1s unthrottled). ~2k pages must fit even the throttled case: 2k × 5s ≈ 2.8h.
@@ -64,6 +69,10 @@ jobs:
   strike:
     name: Strike unseen + confirm-flip (3-strike, guarded)
     needs: enum            # a failed/partial enumeration means NO strikes — fail-safe by design
+    # Runs after a successful enum, OR standalone when skip_enum=true (pilot). The strike step's own
+    # coverage guard still refuses if the last enum is >36h old or below the row floor, so skipping
+    # here never bypasses the safety — it only avoids re-running the 4.5h enum for a repeat pilot.
+    if: ${{ always() && (needs.enum.result == 'success' || inputs.skip_enum) }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
