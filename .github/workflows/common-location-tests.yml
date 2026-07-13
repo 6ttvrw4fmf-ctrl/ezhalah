@@ -25,7 +25,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Install pytest
-        run: pip install pytest
-      - name: Run shared location-resolver + placeholder-guard tests
+      - name: Install pytest + scraper deps
+        # scrapers/common/tests import real scraper modules (db.py→dotenv/supabase,
+        # deal/run.py→curl_cffi), so the runtime deps must be present or pytest aborts on
+        # collection. Installs the pinned scraper requirements + pytest. (2026-07-13 CI fix.)
+        run: pip install pytest -r scrapers/requirements.txt
+      - name: Run shared location-resolver + placeholder-guard + price-fidelity tests
         run: python -m pytest scrapers/common/tests/ -v

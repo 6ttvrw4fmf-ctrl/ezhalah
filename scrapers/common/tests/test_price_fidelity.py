@@ -6,7 +6,7 @@ Guards the two confirmed display bugs:
   BUG 2 — eaqartabuk/aqarcity/mustqr/satel stored the source MONTHLY rent into price_annual without
           ×12, so the app's round(price_annual/12) card showed 1/12 of the real rent.
 
-Run: python3 -m scrapers.common.test_price_fidelity   (or: python3 scrapers/common/test_price_fidelity.py)
+Run: python -m pytest scrapers/common/tests/test_price_fidelity.py -v   (also runs in the Common location tests CI job)
 """
 from scrapers.common.normalize import to_int, annualize_rent
 
