@@ -11,6 +11,22 @@ import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
 import IntroVideo from '@/components/IntroVideo';
 
+// RC-A (hardening 2026-07-13): last-resort net. Nothing in the app caught unhandled promise
+// rejections or uncaught errors, so an async turn that escaped its handler failed silently. Log every
+// one once, so a silent wedge becomes a visible, debuggable signal (and a future Batch-0 telemetry
+// sink can forward it). Web-only registration (the primary surface); harmless no-op elsewhere.
+if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis as any).__ezhalahGlobalHandlers) {
+  (globalThis as any).__ezhalahGlobalHandlers = true;
+  globalThis.addEventListener?.('unhandledrejection', (ev: any) => {
+    // eslint-disable-next-line no-console
+    console.error('[ezhalah] unhandled promise rejection:', ev?.reason);
+  });
+  globalThis.addEventListener?.('error', (ev: any) => {
+    // eslint-disable-next-line no-console
+    console.error('[ezhalah] uncaught error:', ev?.error || ev?.message);
+  });
+}
+
 // On a wide web viewport the sidebar is a permanent column pinned to the LEFT edge of every screen
 // (same side in Arabic and English — per product decision), with the Stack filling the rest. Because
 // the document is RTL in Arabic, a plain `flexDirection: 'row'` would auto-mirror the sidebar to the
