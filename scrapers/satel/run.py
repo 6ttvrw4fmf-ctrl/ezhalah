@@ -255,7 +255,10 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
     rent_period = None
     if is_rent:
         rent_period = "monthly" if price_group == "monthly" else "annual"
-        price_annual = price
+        # Monthly rentals must store the ANNUALIZED figure (monthly×12); the app displays
+        # round(price_annual/12), so storing the raw monthly showed 1/12 of the real rent.
+        # (price-fidelity fix 2026-07-13)
+        price_annual = normalize.annualize_rent(price, "monthly") if rent_period == "monthly" else price
     else:
         price_total = price
 

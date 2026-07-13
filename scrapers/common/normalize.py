@@ -221,12 +221,33 @@ _TRANS = str.maketrans(_DIGITS_AR, "0123456789")
 
 
 def to_int(raw) -> Optional[int]:
-    """Parse '69,000', '69000', '٦٩٠٠٠', 'SAR 69,000', etc. → 69000. Returns None if no digits."""
+    """Parse '69,000', '69000', '٦٩٠٠٠', 'SAR 69,000', '150588.72' → 69000 / 150588. None if no digits.
+
+    PRICE-FIDELITY FIX (2026-07-13): the old body stripped every non-digit character, which removed the
+    DECIMAL POINT along with thousands separators — so a fractional source price like DealApp's
+    offers.price "150588.72" (= 162 ﷼/m² × 929.56 m²) became 15,058,872 (×100). A 1-decimal price
+    became ×10. This now interprets a real decimal fraction and truncates to whole riyals (sources
+    display the floored integer, e.g. DealApp shows 150,588), while still dropping thousands
+    separators (',' and Arabic '٬'), currency words and symbols exactly as before.
+    """
     if raw is None:
         return None
     s = str(raw).translate(_TRANS)
-    digits = re.sub(r"[^\d]", "", s)
-    return int(digits) if digits else None
+    # Arabic decimal separator (٫ U+066B) → '.', Arabic thousands (٬ U+066C) → drop.
+    s = s.replace("٬", "").replace("٫", ".")
+    # Keep only digits, ',' and '.'; drop currency words/symbols/spaces/letters.
+    s = re.sub(r"[^\d.,]", "", s)
+    s = s.replace(",", "")            # commas are ALWAYS thousands separators → drop
+    if not re.search(r"\d", s):
+        return None
+    # A single decimal point with 1-2 fractional digits = a real (halala) fraction → truncate to
+    # whole riyals. Anything else with dots (European '1.234.567' grouping, 3+ "decimals") → dots
+    # are grouping/noise → strip them (preserves the historical integer behaviour for those inputs).
+    m = re.match(r"^(\d+)\.(\d{1,2})$", s)
+    if m:
+        return int(m.group(1))
+    s = s.replace(".", "")
+    return int(s) if s else None
 
 
 def annualize_rent(price: Optional[int], period: Optional[str]) -> Optional[int]:
