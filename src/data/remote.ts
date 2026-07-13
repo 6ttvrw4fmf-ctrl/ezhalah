@@ -4,9 +4,12 @@ import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
-import { normalizeType, queryForSelection, queryForTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind } from './propertyTypes';
+import { normalizeType, queryForSelection, queryForTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind } from './propertyTypes';
 import { effectiveTypes, bedroomTokens } from './search';
 import { scoreListingProximity } from './proximity';
+import { cityDisplay } from './locations';
+import { arabicOrPlaceholder } from '@/lib/arabicText';
+import { TYPE_UNRESOLVED_AR } from '@/i18n';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
 function relGroupOf(rel: string): string {
@@ -1125,9 +1128,14 @@ export async function fetchPromptIdeas(): Promise<PromptIdea[] | null> {
       const cityEN = translitPlace(next.city);
       // Avoid the "حي" prefix doubling — translitPlace already strips it in the dict path.
       const districtARStripped = next.district.replace(/^حي\s+/, '');
+      // 2026-07-13 production audit: this used to interpolate the raw DB `next.city` (English,
+      // e.g. "Riyadh") straight into the Arabic half — every single AI-agent example prompt showed
+      // an English city name inside an Arabic sentence. cityDisplay() is the same guarded lookup
+      // used everywhere else in the app for this exact purpose (and self-guards its own fallback).
+      const cityAR = cityDisplay(next.city, 'ar');
       out.push({
         en: `${next.type} ${dEN} in ${districtEN}, ${cityEN}`,
-        ar: `${typeToArabic(next.type)} ${dAR} في ${districtARStripped}، ${next.city}`,
+        ar: `${typeToArabic(next.type)} ${dAR} في ${districtARStripped}، ${cityAR}`,
       });
       if (out.length >= 80) break;
     }
@@ -1135,20 +1143,13 @@ export async function fetchPromptIdeas(): Promise<PromptIdea[] | null> {
   return out;
 }
 
-// Arabic labels for our canonical residential property types. Used to build the AR prompt half.
+// Arabic label for a property type, used to build the AR prompt half.
+// 2026-07-13 production audit: this was a hand-rolled 11-case switch that had drifted out of sync
+// with the canonical EN_TO_AR map (src/data/propertyTypes.ts, 39 keys, already deploy-gated by
+// scripts/verify-taxonomy.ts) — e.g. 'Industrial Land' fell to `default: return t`, leaking the raw
+// English words into an Arabic sentence. Reusing EN_TO_AR directly means there is only ONE place
+// that maps a property type to Arabic; arabicOrPlaceholder is a safety net for any type EN_TO_AR
+// itself hasn't caught up to yet (a future new raw type), never a real translation fallback.
 function typeToArabic(t: string): string {
-  switch (t) {
-    case 'Apartment': return 'شقة';
-    case 'Villa': return 'فيلا';
-    case 'Floor': return 'دور';
-    case 'House': return 'بيت';
-    case 'Room': return 'غرفة';
-    case 'Building': return 'عمارة';
-    case 'Rest House': return 'استراحة';
-    case 'Chalet': return 'شاليه';
-    case 'Camp': return 'مخيم';
-    case 'Residential Land': return 'أرض سكنية';
-    case 'Commercial Land': return 'أرض تجارية';
-    default: return t;
-  }
+  return arabicOrPlaceholder(EN_TO_AR[t] ?? t, 'ar', TYPE_UNRESOLVED_AR);
 }
