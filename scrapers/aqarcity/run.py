@@ -541,7 +541,10 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "direction": pi.get("واجهة العقار") or None,
         "street_width_m": _int(pi.get("عرض الشارع")),
         "price_total": price if not is_rent else None,
-        "price_annual": price if is_rent else None,
+        # Monthly rentals must store the ANNUALIZED figure (monthly×12); the app displays
+        # round(price_annual/12), so storing the raw monthly showed 1/12 of the real rent.
+        # (price-fidelity fix 2026-07-13)
+        "price_annual": (normalize.annualize_rent(price, "monthly") if rent_period == "monthly" else price) if is_rent else None,
         "price_per_meter": price_per_meter,
         "rent_period": rent_period,
         "city": city,

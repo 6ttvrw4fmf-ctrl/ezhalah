@@ -221,7 +221,11 @@ def _price_fields(p: dict, is_rent: bool, is_monthly: bool) -> dict[str, Any]:
     if not n or n < 1000:
         return {}
     if is_rent:
-        return {"price_annual": n, "rent_period": "monthly" if is_monthly else "annual"}
+        # Monthly rentals must store the ANNUALIZED figure (monthly×12); the app displays
+        # round(price_annual/12), so storing the raw monthly showed 1/12 of the real rent.
+        # (price-fidelity fix 2026-07-13)
+        return {"price_annual": n * 12 if is_monthly else n,
+                "rent_period": "monthly" if is_monthly else "annual"}
     return {"price_total": n}
 
 

@@ -258,9 +258,11 @@ def _price(raw: Any, is_rent: bool) -> tuple[Optional[int], Optional[int], Optio
         if total < 1000:
             return None, None, None
         return total, None, None
-    # Rent: small values are MONTHLY rent in full SAR; large are annual.
+    # Rent: small values are MONTHLY rent in full SAR; large are annual. price_annual must hold the
+    # ANNUALIZED figure — the app displays round(price_annual/12) for monthly rentals, so storing the
+    # raw monthly here made the card show 1/12 of the real rent. (price-fidelity fix 2026-07-13)
     if v < 10000:
-        return None, v, "monthly"
+        return None, normalize.annualize_rent(v, "monthly"), "monthly"
     return None, v, "annual"
 
 
