@@ -492,7 +492,7 @@ function RnplBanner({ monthly, source, t }: { monthly?: number; source?: string;
         <Image source={AQSAT_LOGO} style={card.aqsatLogo} contentFit="contain" />
         {monthly ? (
           <Text style={card.rnplFromLine}>
-            {t('Over 12 months')} · <Text style={card.rnplFromStrong}>SAR {Number(monthly).toLocaleString('en-US')}</Text>/{t('month')}
+            {t('Over 12 months')} · <Text style={card.rnplFromStrong}>{t('SAR')} {Number(monthly).toLocaleString('en-US')}</Text>/{t('month')}
           </Text>
         ) : null}
       </View>
@@ -510,7 +510,7 @@ function RnplBanner({ monthly, source, t }: { monthly?: number; source?: string;
       </View>
       {monthly ? (
         <Text style={card.rnplFromLine}>
-          {t('from')} <Text style={card.rnplFromStrong}>SAR {Number(monthly).toLocaleString('en-US')}</Text>/{t('month')}
+          {t('from')} <Text style={card.rnplFromStrong}>{t('SAR')} {Number(monthly).toLocaleString('en-US')}</Text>/{t('month')}
         </Text>
       ) : null}
     </View>

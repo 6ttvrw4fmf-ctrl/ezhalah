@@ -632,11 +632,34 @@ function orderByScope(rows: Ranked[], scope: Scope, multiType = false): Ranked[]
 // filters (transaction_type / property_type / rent period). Chunked because a `.in('id', […])` list
 // can be long. Raw tables stay the source of truth — the index only told us WHICH rows to pull.
 const ID_CHUNK = 200;
+// RC-A (hardening 2026-07-13): supabase-js issues a plain fetch with NO request timeout, and no call
+// here ever passed an AbortSignal — so a stalled TCP / overloaded-DB request never settled, `runQuery`
+// bare-awaited it, and the «إزهله يبحث» loader spun forever with no recovery. `bounded()` wraps every
+// Supabase query builder with a timeout + AbortController: on timeout it aborts the request and
+// returns a {data:null, error} shaped exactly like a backend error, so the EXISTING `error → return
+// null → retry UI` path fires instead of hanging. 15s matches the iframe guard in browser.tsx.
+const RPC_TIMEOUT_MS = Number(process.env.EXPO_PUBLIC_RPC_TIMEOUT_MS) || 15000;
+async function bounded<T = any>(builder: any, ms = RPC_TIMEOUT_MS): Promise<{ data: T | null; error: any }> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await builder.abortSignal(ctrl.signal);
+  } catch (e: any) {
+    return { data: null, error: { message: String(e?.message || e), timeout: true } };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[]): Promise<Listing[]> {
   const kind: SourceKind = tbl.includes('_commercial') ? 'com' : 'res';
   const out: Listing[] = [];
   for (let i = 0; i < ids.length; i += ID_CHUNK) {
-    const { data } = await keptFiltersReq(q, tbl).in('id', ids.slice(i, i + ID_CHUNK)).limit(ID_CHUNK);
+    // RC-A: capture the error (was silently dropped → a chunk that 500s produced a blank/partial grid
+    // that contradicted the «لقينا N إعلان» headline). On any chunk failure, surface it so the caller
+    // returns null → retry, rather than showing a misleadingly-short result set.
+    const { data, error } = await bounded(keptFiltersReq(q, tbl).in('id', ids.slice(i, i + ID_CHUNK)).limit(ID_CHUNK));
+    if (error) throw new Error(`fetchRawByIds(${tbl}): ${error.message}`);
     if (data) out.push(...finalize(data, kind));
   }
   return out;
@@ -757,7 +780,7 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
       ? { p_tables2: resScopeBTables, p_types2: resMisfileTypes }
       : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
 
-  const { data: cands, error } = await supabase.rpc('location_search_candidates_ar', {
+  const { data: cands, error } = await bounded<Cand[]>(supabase.rpc('location_search_candidates_ar', {
     p_deal: q.bothDeals ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
     p_rent_period: rentPeriodParam(q),
     p_cities: cities,
@@ -779,8 +802,8 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     p_region_ids: q.regionPin
       ? (REGION_TO_ID[q.regionPin] ? [REGION_TO_ID[q.regionPin]] : null)
       : regionIdsFor(lm),
-  });
-  if (error) return null;                       // index error → retry UI, not "no matches"
+  }));
+  if (error) return null;                       // index error OR timeout (RC-A) → retry UI, not "no matches"
   _lastPageCandidates = (cands as Cand[] | null)?.length ?? 0;   // this page's matching-candidate count → drives Load-More offset/hasMore
   // EXACT total match count from the RPC's count(*) over() (same on every page); fall back to this page's
   // length if the column is missing. Captured from the MAIN call before any supplementary sweep. (owner 2026-07-08)
@@ -818,7 +841,12 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
   // there). Broad-Commercial residential candidates are already commercial-only (RPC scope A constrained them
   // to commercial type_ar), so the plain by-id fetch returns exactly them — no separate type re-filter needed.
   const entries = [...byTable];
-  const fetched = await Promise.all(entries.map(([tbl, ids]) => fetchRawByIds(q, tbl, ids)));
+  let fetched: Listing[][];
+  try {
+    fetched = await Promise.all(entries.map(([tbl, ids]) => fetchRawByIds(q, tbl, ids)));
+  } catch {
+    return null;   // RC-A: a raw-card chunk failed or timed out → retry UI, not a misleadingly-partial grid
+  }
   const map = new Map<string, Listing>();
   entries.forEach(([tbl], i) => { for (const l of fetched[i]) map.set(`${tbl}:${l.id}`, l); });
 
