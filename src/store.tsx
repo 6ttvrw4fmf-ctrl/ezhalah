@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } from '@/i18n';
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
+import { HOME_DEFAULT_QUERY } from '@/lib/searchDefaults';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing, lastPageCandidates, lastPageTotal } from '@/data/remote';
 import { resolveLocation, ensureLocationIndex } from '@/data/locations';
@@ -98,8 +99,10 @@ const LEGACY_HISTORY_KEY = 'history';
 
 export function AppProvider({ children }: { children: ReactNode }) {
   // The FILTER (home) defaults to Buy highlighted (user request). emptyQuery() stays Rent-default for
-  // the agent/chat base — this override is only the filter form's starting state.
-  const [query, setQueryState] = useState<SearchQuery>({ ...emptyQuery(), deal: 'Buy' });
+  // the agent/chat base — this override is only the filter form's starting state. Single source of
+  // truth with src/app/index.tsx's Clear All reset target (src/lib/searchDefaults.ts) — was a second,
+  // independent inline copy of the same literal before 2026-07-13.
+  const [query, setQueryState] = useState<SearchQuery>(HOME_DEFAULT_QUERY());
   // Ezhalah is a pure aggregator showing only REAL scraped listings. There's no whole-table load
   // anymore — each search fetches its own matching subset from Supabase (see runQuery →
   // fetchListingsForQuery). dataSource is constant 'supabase' (kept for any UI that reads it).

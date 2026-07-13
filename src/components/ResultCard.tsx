@@ -4,8 +4,9 @@ import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
-import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR } from '@/i18n';
+import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
+import { arabicOrPlaceholder } from '@/lib/arabicText';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -112,7 +113,11 @@ export function ResultCard({
   // #1 (source-accurate, owner 2026-07-06): show the RAW scraped type when it is already Arabic
   // (dealapp "تاون هاوس", "ملحق علوي"…); for English-raw sources (aqar stores "Apartment") show the
   // source-matching Arabic via the clean mapping — never English on the card. Mapping stays filter-only.
-  const typeLabel = /[ء-ي]/.test(listing.type || '') ? listing.type : t(listing.cleanType ?? listing.type);
+  const typeLabel = arabicOrPlaceholder(
+    /[ء-ي]/.test(listing.type || '') ? listing.type : t(listing.cleanType ?? listing.type),
+    locale,
+    TYPE_UNRESOLVED_AR,
+  );
   const { width } = useWindowDimensions();
   const horizontal = IS_WEB && width >= 820; // desktop 3-column layout
   const [expanded, setExpanded] = useState(false);
@@ -225,7 +230,7 @@ export function ResultCard({
         {/* Wasalt-only "Additional Information" panel — Property usage / Age / Facade / Street /
             Ad source / Plan number / Land number, etc. Aqar rows have additional_info = null and
             the panel is hidden (Aqar's card stays exactly as it was). (user request 2026-06.) */}
-        <AdditionalInformationPanel listing={listing} t={t} />
+        <AdditionalInformationPanel listing={listing} t={t} locale={locale} />
       </View>
     </View>
   );
@@ -273,7 +278,7 @@ function arAttrValue(label: string, value: string): string {
 // Render Wasalt's "Additional Information" rows on the card. Shows first 4 rows, with a
 // "See more" toggle that reveals the rest. Hidden entirely for Aqar (and for any Wasalt row
 // where the field hasn't been backfilled yet). Mirrors the on-site Wasalt panel design.
-function AdditionalInformationPanel({ listing, t }: { listing: Listing; t: (k: string, p?: any) => string }) {
+function AdditionalInformationPanel({ listing, t, locale }: { listing: Listing; t: (k: string, p?: any) => string; locale: string }) {
   const rows = listing.additional_info;
   const [open, setOpen] = useState(false);
   if (!rows || rows.length === 0) return null;
@@ -287,7 +292,7 @@ function AdditionalInformationPanel({ listing, t }: { listing: Listing; t: (k: s
       <View style={card.addlGrid}>
         {visible.map((r) => (
           <View key={r.key} style={card.addlCell}>
-            <Text style={card.addlLabel}>{t(r.label)}</Text>
+            <Text style={card.addlLabel}>{arabicOrPlaceholder(t(r.label), locale, ATTRIBUTE_UNRESOLVED_AR)}</Text>
             <Text style={card.addlValue} numberOfLines={2}>{arAttrValue(r.label, r.value)}</Text>
           </View>
         ))}
