@@ -217,7 +217,7 @@ CLEAN_TO_QUERY['Service Facilities'] = {
 // property_type), so a raw English type becomes its Arabic label and an Arabic "leak" stays itself.
 // (owner 2026-07-08: the search RPC must filter the FULL dataset by type BEFORE any cap — it matches
 // s.type_ar = any(p_types), so the client must pass the ARABIC labels, never the English rawTypes.)
-const EN_TO_AR: Record<string, string> = {
+export const EN_TO_AR: Record<string, string> = {
   'Agriculture Plot': 'أرض زراعية', 'Apartment': 'شقة', 'Bank': 'بنك', 'Building': 'عمارة', 'Camp': 'مخيم',
   'Chalet': 'شاليه', 'Cinema': 'سينما', 'Commercial Building': 'مبنى تجاري', 'Commercial Land': 'أرض تجارية',
   'Duplex': 'دوبلكس', 'Factory': 'مصنع', 'Farm': 'مزرعة', 'Floor': 'دور', 'Gas Station': 'محطة وقود', 'Hall': 'صالة',
