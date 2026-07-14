@@ -25,10 +25,7 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    # Per-source override via matrix.tmo — souq24's ~1.3k-GET sweep through the metered Saudi proxy
-    # sometimes needs >90m (killed at exactly 90:16 on 07-03 AND 07-04, marking those RUNS
-    # "cancelled"). Default stays 90 for everyone else (covers aqarcity ~2.3k Cloudflare pages).
-    timeout-minutes: ${{ matrix.tmo || 90 }}
+    timeout-minutes: 90   # covers aqarcity (~2.3k detail pages behind Cloudflare) + Sanadak; rest are fast
     strategy:
       fail-fast: false    # one source failing never blocks the others
       max-parallel: 18
@@ -45,11 +42,7 @@ jobs:
           - { source: eaqartabuk, cmd: "python -m scrapers.eaqartabuk.run --type all" }
           - { source: satel,      cmd: "python -m scrapers.satel.run --type all" }
           - { source: sadin,      cmd: "python -m scrapers.sadin.run --type all" }
-          # toor RETIRED 2026-07-06 (owner-approved): host www.toor.ooo IP-blocks datacenter + proxy
-          # (every fetch = exc:Timeout, 0 rows). Removed from the active pipeline so it is no longer
-          # scheduled/dispatched. Historical toor rows are KEPT in the DB (not deleted). scrapers/toor/
-          # remains in the repo for reference. Do NOT re-add without owner approval. See ARCHITECTURE.md
-          # "Retired platforms".
+          - { source: toor,        cmd: "python -m scrapers.toor.run --type all" }
           - { source: mustqr,      cmd: "python -m scrapers.mustqr.run --type all" }
           - { source: ramzalqasim, cmd: "python -m scrapers.ramzalqasim.run --type all" }
           - { source: fursaghyr,   cmd: "python -m scrapers.fursaghyr.run --type all" }
@@ -60,15 +53,18 @@ jobs:
           - { source: alkhaas,     cmd: "python -m scrapers.alkhaas.run --type all" }
           - { source: abeea,       cmd: "python -m scrapers.abeea.run --type all" }
           - { source: jurash,      cmd: "python -m scrapers.jurash.run --type all" }
-          - { source: alnokhba,    cmd: "python -m scrapers.alnokhba.run --type all" }
           - { source: dealapp,     cmd: "DEALAPP_MAX_FILTER_PAGES=2000 DEALAPP_WORKERS=3 python -m scrapers.dealapp.run --type all" }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
-          # souq24 probes ~1,300 candidate ids/run through the metered Saudi proxy for only ~52 active
-          # listings, and the sweep deliberately re-checks the whole id range (skipping ids would miss
-          # reactivated ads). So we cut its bandwidth by cadence instead: every_n_days=2 (owner 2026-07-07).
-          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all", tmo: 150, every_n_days: 2 }
+          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all" }
+          # NOTE: alnokhba is NOT here. Deprecated 2026-07-14 — alnokhba-services.com's domain
+          # lapsed into a parking page (HTTP 200, but a domain-resale placeholder, no
+          # property-card markup); scrape_runs went from rows_seen=5 (2026-07-07) to
+          # rows_seen=0/ok=true for 7 straight daily runs (2026-07-08..2026-07-14). See
+          # deprecated_platforms / platforms_deprecated_status and docs/ARCHITECTURE.md §12 for
+          # the full record. Do not re-add without confirming the domain serves real listings
+          # again.
           # NOTE: muktamel is NOT here. Its pages are ~1.4MB each and it has no list API / usable
           # sitemap, so a full sequential-ID scan is ~45GB over hours — impossible on a 4h cadence.
           # It runs on its OWN weekly workflow (muktamel-sync.yml), scoped to the live ID band.
@@ -92,14 +88,4 @@ jobs:
           # Saudi residential proxy from the cloud (reuses the Wasalt proxy secret). Every other
           # source's scraper ignores this var, so it's harmless to expose matrix-wide.
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
-        run: |
-          # Per-source cadence (owner 2026-07-07): most small sources run daily (every_n_days unset = 1),
-          # but a few (souq24) scrape every N days to cut metered-proxy bandwidth. Skip today when the
-          # epoch-day isn't a run-day for this source. A MANUAL single-source dispatch always runs
-          # (source input non-empty) so you can force a scrape on an off day.
-          N="${{ matrix.every_n_days || 1 }}"
-          if [ "$N" != "1" ] && [ -z "${{ github.event.inputs.source }}" ] && [ "$(( $(date -u +%s) / 86400 % N ))" -ne 0 ]; then
-            echo "::notice::Skipping ${{ matrix.source }} today — every-${N}-days cadence (off day). Manual single-source dispatch overrides."
-            exit 0
-          fi
-          ${{ matrix.cmd }}
+        run: ${{ matrix.cmd }}
