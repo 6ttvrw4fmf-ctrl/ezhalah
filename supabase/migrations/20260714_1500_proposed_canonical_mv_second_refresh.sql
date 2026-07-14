@@ -1,0 +1,125 @@
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- PROPOSED — NOT APPLIED. Design-only migration file from a read-only re-investigation of
+-- Supabase project aannarbkwcymrotzwdbo (2026-07-14, ~2 hours after the original
+-- 20260714_proposed_canonical_mv_refresh_cadence.sql commit b1ec2de on this same branch).
+-- Nothing in this file has been executed against the live project. A human reviewer must
+-- apply it deliberately (via apply_migration or a reviewed PR) after confirming the schedule
+-- choice below. Per this repo's approval-workflow rule: recommend -> WAIT for explicit sign-off.
+--
+-- THIS FILE SUPERSEDES the earlier proposal in
+-- 20260714_proposed_canonical_mv_refresh_cadence.sql (commit b1ec2de) on ONE point: that file
+-- proposed ALTERING job 16's own schedule (`cron.alter_job(16, schedule => '10 * * * *')`,
+-- hourly). This file instead proposes an ADDITIVE second job, leaving job 16 completely
+-- untouched, because it is strictly lower-risk (revert = one `cron.unschedule` call, zero
+-- chance of ever breaking the one already-working daily job) while closing the same measured
+-- gap. The underlying finding (job 16 runs once/day, before most same-day ingestion) is
+-- unchanged and re-confirmed live below; only the recommended fix mechanism changed.
+--
+-- GAP RE-VERIFIED LIVE, READ-ONLY, 2026-07-14
+-- --------------------------------------------
+-- pg_cron state (select jobid, jobname, schedule, active from cron.job where jobid=16):
+--   jobid=16  jobname='refresh-location-index'  schedule='0 2 * * *'  active=true
+-- This is still the ONLY refresh path for listing_location_index / listing_location_canonical_mv.
+--
+-- Row-level anti-join of all 62 raw *_residential_listings/*_commercial_listings tables
+-- (active=true AND transaction_type = ANY('{Buy,Rent}'), the same filter
+-- listing_location_index's own view definition uses) against listing_location_index:
+--   total active raw rows = 186,953   total mv rows = 186,643
+--   sum of measured mismatches (missing_from_mv + stale_in_mv) = 956 / 186,953 ~= 0.51%
+--   worst-case bound (assuming every unmeasured tiny-platform row also mismatched) ~= 0.94%
+-- HONEST NOTE: this is NOT the ~1.7% figure cited in some prior reporting. I could not
+-- reproduce 1.7% under row-count diff, listing_id symmetric diff, or a canonical_mv-vs-
+-- loc_district_map staleness check (that last one is exactly 0, since listing_location_index
+-- and listing_location_canonical_mv refresh back-to-back in the same cron transaction, so they
+-- never drift from EACH OTHER, only from the raw tables). 1.7% most likely describes
+-- search_listings_ar's own staleness (a separate, hourly-refreshed pipeline) rather than this
+-- object — see the companion district-gap migration file for that pipeline. Treating ~0.5-0.9%
+-- as the number for THIS object; the root cause and fix below hold regardless of which exact
+-- percentage is quoted.
+--
+-- Spot-check re-run just before writing this file (read-only, exact repro of the numbers
+-- already on record for the two dominant platforms):
+--   gathern_residential_listings : raw=20,413 mv=20,271 missing_from_mv=301 stale_in_mv=159 (2.25% of its own rows)
+--   dealapp_residential_listings : raw=1,754  mv=1,803  missing_from_mv=57  stale_in_mv=106  (9.3%)
+--   aqar_residential_listings    : raw=85,836 mv=85,708 missing_from_mv=139 stale_in_mv=11   (0.17%)
+--   wasalt_residential_listings  : raw=62,668 mv=62,607 missing_from_mv=61  stale_in_mv=0     (0.10%)
+-- These two platforms alone (gathern+dealapp) = 623 / 956 = 65.2% of the entire measured gap,
+-- because both are single-daily-run sources whose only sync of the day (04:22 dealapp via
+-- gh-small-sources, 04:40 gathern) lands AFTER the 02:00 refresh and so is invisible to the MV
+-- until the FOLLOWING day's 02:00 run.
+--
+-- Example evidence (gathern_residential_listings rows, active=true, transaction_type IN
+-- ('Buy','Rent'), scraped 2026-07-14, absent from listing_location_index at write-up time):
+--   id=1136082  last_seen_at=2026-07-14 05:04:36 UTC
+--   id=1284358  last_seen_at=2026-07-14 05:04:35 UTC
+--   id=2701799  last_seen_at=2026-07-14 05:04:34 UTC
+--   id=2701808  last_seen_at=2026-07-14 05:04:34 UTC
+--   id=806468   last_seen_at=2026-07-14 05:04:34 UTC
+--
+-- ROOT CAUSE (confirmed, unchanged from b1ec2de)
+-- ------------------------------------------------
+-- jobid 16 refreshes once/day at 02:00 UTC, BEFORE the bulk of same-day ingestion:
+--   gh-small-sources (dealapp, aqarcity, raghdan, ...)  04:22 UTC
+--   gh-gathern-daily                                     04:40 UTC
+--   gh-wasalt-enrich                                     05:00 UTC
+--   gh-aqarmonthly-daily                                 06:00 UTC
+--   gh-aqar-sweep / gh-wasalt-res (2nd, 3rd passes)      08:xx, 16:xx UTC
+-- So a listing scraped today is invisible to the canonical view until TOMORROW's 02:00 refresh
+-- -- worst case ~21-22h of staleness, concentrated in the once-a-day sources.
+--
+-- PROPOSED FIX (additive, zero risk to the existing job, fully reversible)
+-- --------------------------------------------------------------------------
+-- Add a SECOND pg_cron job, `refresh-location-index-am`, running the identical refresh/analyze
+-- statements as job 16, at 06:30 UTC -- after gh-small-sources (04:22), gh-gathern-daily
+-- (04:40), gh-wasalt-enrich (05:00) and gh-aqarmonthly-daily (06:00) have all completed. This
+-- caps worst-case staleness for every once-daily source at ~2h (down from ~21-22h) without
+-- touching job 16 at all.
+--
+-- Runtime budget: job 16's last 5 runs took 19.7s/25.6s/25.7s/31.7s/33.1s; a comparable sibling
+-- pair (job 17, hourly refresh of active_listing_ids_v2 + listing_native_location_v1) runs in
+-- ~43-45s every hour with no incident -- ample headroom under the 1200s statement_timeout for
+-- one extra run/day.
+--
+-- Naming-collision check (re-run just before writing this file, read-only):
+--   select jobid, jobname from cron.job where jobname ilike '%refresh-location-index%';
+--   -> only jobid=16 'refresh-location-index' exists today; 'refresh-location-index-am' is free.
+--
+-- TO APPLY (requires explicit owner sign-off -- do not run unattended):
+--
+--   select cron.schedule(
+--     'refresh-location-index-am',
+--     '30 6 * * *',
+--     $$
+--       set statement_timeout to '1200s';
+--       refresh materialized view concurrently public.listing_location_index;
+--       refresh materialized view concurrently public.listing_location_canonical_mv;
+--       analyze public.listing_location_index;
+--       analyze public.listing_location_canonical_mv;
+--     $$
+--   );
+--
+-- TO REVERT (one call, no side effects on job 16):
+--
+--   select cron.unschedule('refresh-location-index-am');
+--
+-- VERIFICATION QUERIES (read-only; run before AND after applying)
+-- -------------------------------------------------------------------
+-- -- 1) Confirm the job exists and is scheduled as expected:
+--    select jobid, jobname, schedule, active from cron.job where jobname = 'refresh-location-index-am';
+--
+-- -- 2) After the job has run once (>= 06:31 UTC), re-run the same per-platform symmetric diff
+-- --    used above; missing_from_mv for gathern/dealapp should drop toward 0:
+--    with raw_ids as (
+--      select id from gathern_residential_listings where active=true and transaction_type = ANY(ARRAY['Buy','Rent'])
+--    ), mv_ids as (
+--      select listing_id from listing_location_index where source_table='gathern_residential_listings'
+--    )
+--    select
+--      (select count(*) from raw_ids) as raw_count,
+--      (select count(*) from mv_ids) as mv_count,
+--      (select count(*) from raw_ids r where not exists(select 1 from mv_ids m where m.listing_id = r.id)) as missing_from_mv,
+--      (select count(*) from mv_ids m where not exists(select 1 from raw_ids r where r.id = m.listing_id)) as stale_in_mv;
+--
+-- -- 3) Confirm job 16 itself is completely unaffected (same schedule, same command, still active):
+--    select jobid, jobname, schedule, active from cron.job where jobid = 16;
+-- ═════════════════════════════════════════════════════════════════════════════════════════

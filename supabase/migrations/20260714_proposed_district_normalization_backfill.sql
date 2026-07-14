@@ -1,0 +1,133 @@
+-- ─────────────────────────────────────────────────────────────────────────────────────────
+-- PROPOSED (investigation 2026-07-14) — NOT APPLIED. Design-only per owner approval-workflow
+-- rule; do not run against prod without explicit sign-off.
+--
+-- FINDING (verified live, read-only, project aannarbkwcymrotzwdbo, 2026-07-14):
+--   Overall: 39,096 / 186,643 active listings (20.95%) have no resolved district in
+--   `listing_location_canonical_mv.district`. This is HIGHER than the ~10.2% previously
+--   reported — plausibly because wasalt's share of total inventory (63,791 / 186,643 = 34.2%
+--   of all active listings today) has grown since that prior measurement; wasalt alone supplies
+--   85% of the current gap (33,249 of 39,096 rows). Reporting the freshly-measured number here
+--   rather than forcing a match to the older figure, per instruction not to guess.
+--
+--   Per-platform breakdown (query: group by platform, split district_raw IS NULL/empty
+--   ["missing_at_source"] vs district_raw present but unmatched ["mapping_gap"]):
+--     wasalt      63,791 total | 33,249 (52.1%) no-district | ALL 33,249 = mapping_gap (0 missing at source)
+--     gathern     20,271 total |  3,623 (17.9%) no-district |  3,593 mapping_gap, 30 missing_at_source
+--     dealapp      1,991 total |    852 (42.8%) no-district |  852 mapping_gap (all)
+--     aqarmonthly  1,470 total |    385 (26.2%) no-district |  385 missing_at_source (all — field is
+--                                                              genuinely blank at scrape time)
+--     alkhaas        209 total |    209 (100%)  no-district |  209 missing_at_source (whole platform
+--                                                              has no district field at all)
+--     raghdan        336 total |    180 (53.6%) no-district |  180 missing_at_source
+--     (+ small residual counts across ~15 more platforms, mostly missing_at_source, each <130 rows)
+--   aqar (91,812 listings, the single largest platform) has 0% missing district.
+--
+--   WASALT ROOT CAUSE (85% of the gap): NOT missing at source. Every gapped wasalt row HAS a
+--   non-empty English/transliterated district_raw value (e.g. "Ar-Rimal", "An-Narjis", "Al
+--   Salamah", "Al Nuzha", "Twaeeq"). `listing_location_canonical_mv`'s district resolution is:
+--       CASE WHEN lli.district ~ '[ء-ي]' THEN lli.district ELSE dm.district_ar END
+--   i.e. if the raw text isn't Arabic, look it up in `loc_district_map` by exact
+--   (city_ar, raw_district) match. `loc_district_map` DOES already contain wasalt-relevant
+--   entries (checked: 230 English-keyed rows for الرياض, 120 for جدة, 65 for الدمام, etc.) —
+--   but keyed under a DIFFERENT, inconsistent transliteration convention than wasalt's scraper
+--   emits: e.g. map has "Al Rimal" / "Al Narjis" (uses the simple "Al " article
+--   unconditionally) while wasalt emits "Ar-Rimal" / "An-Narjis" (sun-letter-assimilated
+--   Arabic pronunciation baked into the transliteration: ال+ر → "Ar-", ال+ن → "An-"); elsewhere
+--   the map itself uses the assimilated form ("As Salamah Dist.", "An Nuzhah Dist." for جدة)
+--   while wasalt uses the non-assimilated one ("Al Salamah", "Al Nuzha") — the two data sets
+--   don't share one transliteration convention, and neither is "wrong", they're just different
+--   romanization schemes for the same Arabic districts.
+--
+--   VERIFIED FIX SIZE (exact-match only, no fuzzy/similarity guessing): normalizing BOTH sides
+--   by (1) stripping a leading definite-article variant (al/as/ar/an/ad/at/az/ash/ath/adh +
+--   separator), (2) stripping a trailing "Dist."/"District", (3) collapsing hyphens/whitespace,
+--   (4) lower-casing — then joining on (city_ar, normalized_text) — resolves:
+--       wasalt   : 11,752 / 33,249 rows (35.4% of wasalt's gap; 6.3% of the total 186,643-row base)
+--       gathern  :     30 rows (gathern's district_raw is mostly unstructured free text —
+--                                "PLAN 6", "north of Ettadhamen", "Najran University" — a
+--                                controlled-taxonomy fix does not generalize to it)
+--       dealapp  :     19 rows (same free-text-field caveat as gathern)
+--       satel    :     20 rows
+--       abeea    :     12 rows
+--       aldarim  :      3 rows
+--     TOTAL: 11,836 rows resolved deterministically (no invented values — every resolved row
+--     maps to an existing, already-curated loc_district_map.district_ar Arabic string; the
+--     normalization only changes which existing map row a raw value is matched against).
+--     This would cut the overall no-district rate from 20.95% to ~14.6% (27,260 / 186,643).
+--
+--   NOT proposing to chase the remaining wasalt residual (~21,497 rows) or the gathern/dealapp
+--   free-text fields further right now: the residual wasalt pairs and virtually all of
+--   gathern/dealapp's gap did NOT match even after aggressive normalization, meaning they are
+--   either genuinely absent from loc_district_map (a real, distinct district name that has
+--   never been transliterated/entered) or free-text noise — closing those requires either (a)
+--   sourcing verified Arabic translations for the specific missing district names (cannot be
+--   invented/guessed per data-integrity rule) or (b) a fuzzy/trigram-similarity pass
+--   (pg_trgm is already installed) that would need a confidence threshold and manual spot-check
+--   before being trusted — out of scope for a "smallest safe change" and flagged here as a
+--   separate, larger follow-up if the owner wants to pursue it.
+--
+-- PROPOSED FIX (smallest change that meaningfully closes the gap):
+--   Add ONE normalized fallback step to the existing district CASE expression, backed by a
+--   generated/normalized column (or expression index) on loc_district_map so the join stays
+--   index-backed. No changes to loc_district_map's data, no new translations invented — this
+--   only changes the MATCHING rule, not the underlying dictionary.
+--
+--   1) Add a normalization SQL function (pure, immutable, no side effects):
+--
+--        create or replace function public.norm_district_key(raw text)
+--        returns text language sql immutable as $$
+--          select lower(
+--            regexp_replace(
+--              regexp_replace(
+--                regexp_replace(trim(raw), '^(al|as|ar|an|ad|at|az|ash|ath|adh)[\s-]+', '', 'i'),
+--                '[\s.]*dist\.?$', '', 'i'),
+--              '[-\s]+', '', 'g')
+--          )
+--        $$;
+--
+--   2) Add a functional index on loc_district_map so the fallback lookup is O(log n):
+--
+--        create index if not exists loc_district_map_norm_idx
+--          on public.loc_district_map (city_ar, public.norm_district_key(raw_district));
+--
+--   3) Extend `listing_location_canonical_mv`'s district CASE with one more fallback branch
+--      (exact raw_district match first, as today; normalized match second; unresolved third):
+--
+--        CASE
+--          WHEN lli.district ~ '[ء-ي]' THEN NULLIF(btrim(lli.district), '')
+--          WHEN dm.district_ar IS NOT NULL THEN dm.district_ar               -- existing exact match
+--          ELSE dm_norm.district_ar                                          -- NEW normalized fallback
+--        END AS district
+--      with a second LEFT JOIN:
+--        LEFT JOIN loc_district_map dm_norm
+--          ON dm_norm.city_ar = cm.city_ar
+--         AND public.norm_district_key(dm_norm.raw_district) = public.norm_district_key(lli.district)
+--
+--      This requires `CREATE OR REPLACE VIEW`-then-`REFRESH MATERIALIZED VIEW` on
+--      listing_location_canonical_mv (matviews can't be ALTERed in place) — a schema change,
+--      so it should go through the normal migration+review path, not a hot patch.
+--
+-- TO APPLY (requires owner approval — do not run unattended):
+--   Run steps 1-2 above (pure additions, zero risk to existing behavior — the function and
+--   index don't change any existing query result). Step 3 (redefining the matview) should be
+--   tested against a branch/staging copy first: re-run the verification query below and confirm
+--   the "would_resolve" count matches 11,836 before promoting, then
+--   `refresh materialized view concurrently public.listing_location_canonical_mv;`.
+--
+-- VERIFICATION QUERY (read-only, already run to produce the numbers above):
+--   with gaps as (
+--     select platform, city, district_raw from listing_location_canonical_mv
+--     where district is null and district_raw is not null and btrim(district_raw) <> ''
+--   )
+--   select g.platform, count(*) from gaps g
+--   where exists (
+--     select 1 from loc_district_map dm
+--     where dm.city_ar = g.city
+--       and lower(regexp_replace(regexp_replace(regexp_replace(trim(dm.raw_district),
+--             '^(al|as|ar|an|ad|at|az|ash|ath|adh)[\s-]+','','i'),'[\s.]*dist\.?$','','i'),'[-\s]+','','g'))
+--         = lower(regexp_replace(regexp_replace(regexp_replace(trim(g.district_raw),
+--             '^(al|as|ar|an|ad|at|az|ash|ath|adh)[\s-]+','','i'),'[\s.]*dist\.?$','','i'),'[-\s]+','','g'))
+--   )
+--   group by g.platform order by count(*) desc;
+-- ─────────────────────────────────────────────────────────────────────────────────────────

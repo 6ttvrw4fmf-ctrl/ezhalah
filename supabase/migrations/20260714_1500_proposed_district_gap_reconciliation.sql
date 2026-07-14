@@ -1,0 +1,243 @@
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- PROPOSED — NOT APPLIED. Design-only migration file from a read-only re-investigation of
+-- Supabase project aannarbkwcymrotzwdbo (2026-07-14). Nothing in this file has been executed
+-- against the live project. A human reviewer must apply it deliberately (via apply_migration
+-- or a reviewed PR) after explicit owner sign-off (per this repo's approval-workflow rule).
+--
+-- CORRECTION (adversarial re-verification, 2026-07-14, before this file was ever committed):
+-- an earlier draft of this file claimed listing_location_canonical_mv was only 0.69%
+-- no-district (1,289/186,643) and used that to argue this file "supersedes" the b1ec2de
+-- proposal by disproving its scope. That 0.69% figure does NOT reproduce under independent
+-- re-measurement (tried multiple alternate definitions — null region, null city, empty-string
+-- district, city+district both null, district-null-and-searchable=true — none produce 1,289).
+-- The correct, re-verified rate is 39,096 / 186,643 = 20.95% no-district on canonical_mv itself
+-- -- which matches b1ec2de's ORIGINAL figure for this same object exactly. b1ec2de's number was
+-- right; the "correction" superseding it was wrong. See below for what's actually true and what
+-- this file still legitimately fixes.
+--
+-- THIS FILE DOES NOT SUPERSEDE b1ec2de'S canonical_mv MEASUREMENT -- it targets a DIFFERENT,
+-- separately-confirmed root cause. Regardless of canonical_mv's own (real, 20.95%) no-district
+-- rate, the ~10% gap the owner actually sees in the app comes from `search_listings_ar` (fed by
+-- a DIFFERENT pipeline: listing_native_location_v1/v2), which has its own dominant root cause: a
+-- stale downstream snapshot table (listings_arabic_locations) with no regeneration job at all --
+-- not a transliteration-matching bug. b1ec2de's transliteration finding for wasalt targets
+-- canonical_mv's own gap and is left in place, unapplied, as a possible separate follow-up;
+-- THIS file targets search_listings_ar's gap specifically, via the mechanism verified below.
+--
+-- GAP RE-VERIFIED LIVE, READ-ONLY, 2026-07-14
+-- --------------------------------------------
+-- listing_location_canonical_mv no-district rate: 39,096 / 186,643 = 20.95% (matches b1ec2de).
+-- search_listings_ar no-district rate (the table the app's search path actually reads):
+--   19,351 / 186,989 = 10.35%.
+--
+-- Independent end-to-end simulation of THIS file's real-world effect (adversarial
+-- re-verification, joining canonical_mv + listings_arabic_locations + search_listings_ar on
+-- source_table/listing_id): of the 19,366 currently no-district search_listings_ar rows, ~9,451
+-- would gain a district and only ~12 would regress under the sync proposed below -- a net ~49%
+-- reduction in the no-district count (roughly 10.36% -> ~5.3%). The fix mechanism and its dry-run
+-- counts (below) are trustworthy; only the superseded-scope narrative above was wrong.
+-- Top contributors (platform, total, no_district, pct):
+--   gathern      20,413  8,240  40.37%   dominant OUR-SIDE bug (root cause A)
+--   wasalt       63,837  5,993   9.39%   mostly enrichment backlog (root cause B, NOT fixed here)
+--   dealapp       1,946  1,908  98.05%   OUR-SIDE bug (root cause A)
+--   aqarcity      2,267    421  18.57%   partly root cause A, partly source gap
+--   aqarmonthly   1,462    386  26.40%   genuine source gap (matches canonical_mv rate; NOT fixed here)
+--   alkhaas         209    209 100.00%   genuine source gap, NOT fixable by reconciliation (root cause C)
+--   raghdan         337    194  57.57%   root cause A + some source gap
+--   abeea           142    127  89.44%   root cause A + some source gap
+-- gathern + wasalt + dealapp alone = 83.4% of the whole gap.
+--
+-- ROOT CAUSE A (confirmed, our-side bug, targeted by this migration)
+-- ---------------------------------------------------------------------
+-- `listing_native_location_v1` (feeding search_listings_ar) reads district_ar straight from the
+-- raw scraper table ONLY for an allowlist of platforms (alhoshan, aldarim, aqarmonthly,
+-- aqargate, sanadak, hajer, wasalt, aqar). Every other platform falls through to a legacy branch
+-- reading ONLY `listings_arabic_locations.district_ar`. That table's own comment says
+-- "Regenerate from listing_location_canonical_mv", but a fresh, targeted search of this project
+-- confirms there is NO cron job, SQL function, or edge function anywhere that performs this
+-- regeneration -- re-checked live just before writing this file:
+--   select jobid, jobname from cron.job
+--     where jobname ilike '%arabic_location%' or jobname ilike '%listings_arabic%';
+--   -> zero rows. It is an orphaned, one-time-populated snapshot that has fallen behind
+--   canonical_mv as new listings accumulate.
+--
+-- Example evidence (gathern listing_ids with a resolved district in canonical_mv but no row at
+-- all in listings_arabic_locations): 1584231 ('حي الملقا'), 1582072 ('حي السلامة'),
+-- 2129779 ('حي البركة'), 1399586 ('حي الحمراء'), 1282784 ('حي القصواء').
+--
+-- ROOT CAUSE B (confirmed, pipeline backlog, explicitly NOT fixed by this migration): wasalt
+-- Arabic-enrichment lag -- 5,275 / 62,668 (8.4%) of active wasalt rows have ar_fetched=false;
+-- 1,196 more are ar_fetched=true with a genuine no-district result. Increasing gh-wasalt-enrich
+-- cadence trades directly against the shared Webshare proxy budget flagged elsewhere in this
+-- project's history -- flagged as an OPEN QUESTION for the owner, not auto-changed here.
+--
+-- ROOT CAUSE C (confirmed, genuine source gap, NOT fixable by any reconciliation job): e.g.
+-- alkhaas_residential_listings, 100% of 187 active rows have neighborhood IS NULL at the raw
+-- source (sample ids 645702, 645638, 645682; only city='Unaizah' populated). aqarmonthly's ~26%
+-- gap matches canonical_mv almost exactly -- upstream-shaped, not a sync bug. Per this project's
+-- exact-location-only rule, no reconciliation job should invent this data.
+--
+-- SCHEMA FACTS VERIFIED LIVE (not assumed), 2026-07-14
+-- -------------------------------------------------------
+-- listings_arabic_locations has exactly ONE constraint:
+--   select conname, pg_get_constraintdef(oid) from pg_constraint
+--     where conrelid = 'public.listings_arabic_locations'::regclass;
+--   -> listings_arabic_locations_pkey | PRIMARY KEY (index_id)
+-- listings_arabic_locations columns (ordinal order): index_id(text), listing_id(bigint),
+--   platform(text), source_table(text), purpose(text), raw_city_en(text), city_ar(text),
+--   raw_region_en(text), region_ar(text), raw_district(text), district_ar(text),
+--   matched(boolean), review_reason(text), title(text).
+-- listing_location_canonical_mv columns include: index_id, listing_id, platform, source_table,
+--   category, purpose, region, city, district, street_name, facade_direction, last_updated,
+--   raw_created_at, raw_updated_at, title, region_raw, city_raw, district_raw, searchable,
+--   review_reason -- confirmed via pg_attribute (matviews do not appear in
+--   information_schema.columns on this project). The INSERT below maps canonical_mv's
+--   (region, city, district) -> listings_arabic_locations' (region_ar, city_ar, district_ar),
+--   and canonical_mv's (region_raw, city_raw, district_raw) -> the same-named raw_* columns,
+--   and canonical_mv.searchable -> listings_arabic_locations.matched. No invented column names.
+--
+-- DRY-RUN PROOF THAT THIS WOULD MEANINGFULLY CLOSE THE GAP (read-only, run 2026-07-14)
+-- -----------------------------------------------------------------------------------------
+-- Simulated the INSERT ... ON CONFLICT (index_id) DO UPDATE ... WHERE <cols differ> logic below
+-- exactly as a SELECT (no writes):
+--   would_upsert_total            = 13,744
+--   would_insert_new_row          =  9,575   (canonical_mv rows entirely absent from lal today)
+--   would_update_existing_row     =  4,169   (lal rows whose city_ar/region_ar/district_ar/matched
+--                                              are stale relative to canonical_mv)
+--   would_newly_populate_district = 10,879   (of the above, rows where canonical_mv has a
+--                                              district value that lal currently lacks/has null)
+-- Per-platform would_newly_populate_district (top rows, matches/reconfirms the root-cause-A
+-- evidence above for gathern=4,477, dealapp=1,101, raghdan=26 exactly):
+--   gathern 4,477 · wasalt 2,363 · aqar 1,214 · dealapp 1,101 · sanadak 625 · aqarmonthly 515 ·
+--   aqarcity 342 · mustqr 76 · aqaratikom 43 · aqargate 26 · raghdan 26 · sadin 15 ·
+--   eaqartabuk 15 · mizlaj 14 · aldarim 6
+-- NOTE: this dry run's benefit is broader than root-cause-A's allowlist platforms alone (wasalt
+-- and aqar also show up, because listings_arabic_locations is generically stale for ALL
+-- platforms, not only the non-allowlisted ones) -- a beneficial side effect, not a scoping error.
+--
+-- Delete-circuit-breaker dry run (would this ever mass-delete on first run?):
+--   lal_total = 184,176   would_delete (lal rows absent from canonical_mv today) = 7,108
+--   threshold = greatest(2000, 15% of 184,176) = 27,626.4
+--   7,108 < 27,626 -> circuit breaker would NOT trip; the delete branch would run normally and
+--   remove 7,108 rows for listings that are genuinely no longer in canonical_mv (sold/inactive/
+--   filtered out), which is correct, wanted behavior, not an anomaly.
+--
+-- PROPOSED FIX (additive; targets root cause A directly; ~65-79% of the observed gap depending
+-- on platform mix; explicitly does NOT touch root causes B or C)
+-- -------------------------------------------------------------------------------------------
+-- A nightly upsert-only sync function, modeled on the already-proven idiom used by
+-- `sync_search_listings_ar()` in this same database (INSERT ... ON CONFLICT DO UPDATE, plus a
+-- delete-count circuit breaker that alerts into `location_pipeline_alerts` instead of ever
+-- mass-deleting on a bad/incomplete refresh). Scheduled at 06:45 UTC, 15 minutes after the new
+-- second canonical_mv refresh proposed in
+-- 20260714_1500_proposed_canonical_mv_second_refresh.sql (06:30 UTC), so it always reads a
+-- same-day-fresh canonical_mv.
+--
+-- Naming-collision check (re-run just before writing this file, read-only):
+--   select jobid, jobname from cron.job where jobname ilike '%sync-listings-arabic%';
+--   -> zero rows today; 'sync-listings-arabic-locations' is free.
+--
+-- TO APPLY (requires explicit owner sign-off -- do not run unattended; two steps: create the
+-- function via apply_migration, then schedule the cron job):
+--
+-- create or replace function public.sync_listings_arabic_locations()
+-- returns table(upserted bigint, would_delete bigint, deleted bigint)
+-- language plpgsql
+-- as $function$
+-- declare
+--   v_upserted bigint;
+--   v_would_delete bigint;
+--   v_deleted bigint := 0;
+--   v_total_now bigint;
+--   v_threshold bigint;
+-- begin
+--   insert into listings_arabic_locations (
+--     index_id, listing_id, platform, source_table, purpose,
+--     raw_city_en, city_ar, raw_region_en, region_ar, raw_district, district_ar,
+--     matched, review_reason, title
+--   )
+--   select
+--     m.index_id, m.listing_id, m.platform, m.source_table, m.purpose,
+--     m.city_raw, m.city, m.region_raw, m.region, m.district_raw, m.district,
+--     m.searchable, m.review_reason, m.title
+--   from listing_location_canonical_mv m
+--   on conflict (index_id) do update set
+--     city_ar        = excluded.city_ar,
+--     region_ar      = excluded.region_ar,
+--     district_ar    = excluded.district_ar,
+--     matched        = excluded.matched,
+--     review_reason  = excluded.review_reason,
+--     raw_city_en    = excluded.raw_city_en,
+--     raw_region_en  = excluded.raw_region_en,
+--     raw_district   = excluded.raw_district,
+--     title          = excluded.title
+--   where listings_arabic_locations.city_ar     is distinct from excluded.city_ar
+--      or listings_arabic_locations.region_ar   is distinct from excluded.region_ar
+--      or listings_arabic_locations.district_ar is distinct from excluded.district_ar
+--      or listings_arabic_locations.matched     is distinct from excluded.matched;
+--   get diagnostics v_upserted = row_count;
+--
+--   select count(*) into v_would_delete from listings_arabic_locations lal
+--     where not exists (select 1 from listing_location_canonical_mv m where m.index_id = lal.index_id);
+--   select count(*) into v_total_now from listings_arabic_locations;
+--   v_threshold := greatest(2000::bigint, (v_total_now * 15 / 100));
+--
+--   if v_would_delete > v_threshold then
+--     insert into public.location_pipeline_alerts(alert_type, metric, detail)
+--       values (
+--         'lal_sync_delete_circuit_breaker',
+--         v_would_delete,
+--         format('sync_listings_arabic_locations: %s rows absent from canonical_mv exceed threshold %s (table total %s). Likely a collapsed/failed matview refresh; rows kept stale-but-present instead of mass-deleted.',
+--                v_would_delete, v_threshold, v_total_now)
+--       );
+--   else
+--     delete from listings_arabic_locations lal
+--       where not exists (select 1 from listing_location_canonical_mv m where m.index_id = lal.index_id);
+--     get diagnostics v_deleted = row_count;
+--   end if;
+--
+--   return query select v_upserted, v_would_delete, v_deleted;
+-- end;
+-- $function$;
+--
+-- select cron.schedule(
+--   'sync-listings-arabic-locations',
+--   '45 6 * * *',
+--   $$ set statement_timeout to '600s'; select public.sync_listings_arabic_locations(); $$
+-- );
+--
+-- TO REVERT:
+--   select cron.unschedule('sync-listings-arabic-locations');
+--   drop function if exists public.sync_listings_arabic_locations();
+--
+-- OPEN QUESTION FOR OWNER (root cause B -- explicitly not designed/fixed here):
+-- should gh-wasalt-enrich (currently once/day, 05:00 UTC) run more often to clear the
+-- 5,275-row ar_fetched=false backlog faster? This trades directly against the shared Webshare
+-- proxy budget already on record elsewhere in this project as the #1 cadence constraint for
+-- Wasalt jobs -- do not change that cron without the owner weighing the tradeoff.
+--
+-- VERIFICATION QUERIES (read-only; run before AND after applying)
+-- -------------------------------------------------------------------
+-- -- 1) Overall gap on the table that actually matters to the app:
+--    select count(*) total, count(*) filter (where district_ar is null) no_district,
+--           round(100.0*count(*) filter (where district_ar is null)/count(*),2) pct
+--    from search_listings_ar;
+--
+-- -- 2) Per-platform breakdown -- gathern/dealapp/raghdan/abeea/aqarcity should drop sharply
+-- --    after the sync job runs once; alkhaas/aqarmonthly should be essentially unchanged
+-- --    (genuine source gaps, root cause C); wasalt should improve only by the
+-- --    already-ar_fetched=true/still-null slice, not the ar_fetched=false backlog (root cause B):
+--    select platform, count(*) total, count(*) filter (where district_ar is null) no_district,
+--           round(100.0*count(*) filter (where district_ar is null)/count(*),2) pct
+--    from search_listings_ar group by platform order by no_district desc;
+--
+-- -- 3) Confirm the sync function itself ran and its self-reported counts:
+--    select * from public.sync_listings_arabic_locations();  -- NOTE: this actually executes the
+--    -- sync (writes); only run this after step 1's apply has been explicitly approved, never as
+--    -- part of a "verification" pass on prod.
+--
+-- -- 4) Confirm no runaway deletes occurred (circuit breaker did not need to trip):
+--    select * from location_pipeline_alerts
+--    where alert_type = 'lal_sync_delete_circuit_breaker'
+--    order by created_at desc limit 5;
+-- ═════════════════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,85 @@
+-- ─────────────────────────────────────────────────────────────────────────────────────────
+-- PROPOSED (investigation 2026-07-14) — NOT APPLIED. Design-only per owner approval-workflow
+-- rule; do not run against prod without explicit sign-off. This file documents exactly what
+-- would be executed if approved.
+--
+-- FINDING (verified live, read-only, project aannarbkwcymrotzwdbo, 2026-07-14 ~12:53 UTC):
+--   `listing_location_index` and `listing_location_canonical_mv` are materialized views
+--   refreshed by ONE pg_cron job:
+--       jobid 16  "refresh-location-index"  schedule '0 2 * * *'  (once/day, 02:00 UTC)
+--       command: refresh materialized view concurrently public.listing_location_index;
+--                refresh materialized view concurrently public.listing_location_canonical_mv;
+--                analyze both;
+--   pg_stat_user_tables confirms last_analyze for both = 2026-07-14 02:00:3x UTC, i.e. exactly
+--   this job's last run — there is no other refresh path for these two objects.
+--
+--   Nearly every scraper-ingestion cron trigger fires AFTER 02:00 UTC (checked via
+--   `select * from cron.job where command ilike '%trigger_gh_workflow%'`):
+--     01:00 aqar-liveness · 02:05/10:05/18:05 aqar-sweep · 02:15/10:15/18:15 aqar-commercial ·
+--     02:40/10:40/18:40 wasalt-residential-sweep · 02:45/10:45/18:45 wasalt-commercial-sweep ·
+--     03:00 muktamel (weekly) · 04:22 small-sources-sync (dealapp, mustqr, sanadak, raghdan,
+--     eaqartabuk, satel, sadin, …) · 04:40 gathern-sync · 05:00 wasalt-enrich ·
+--     06:00 aqarmonthly-sync.
+--   So the 02:00 refresh always captures a PRE-ingestion snapshot; the day's incoming/outgoing
+--   listings are invisible to the canonical view until the FOLLOWING day's 02:00 refresh —
+--   worst-case staleness ~24h, and it grows monotonically across the day.
+--
+--   Direct live re-aggregation (UNION ALL of the same 63 raw *_residential_listings /
+--   *_commercial_listings tables the view itself unions, same filter
+--   `active = true AND transaction_type = ANY ('{Buy,Rent}')`), compared row-for-row by
+--   index_id against `listing_location_index`, measured ~11h after the last refresh:
+--       live_total = 186,810   mv_total = 186,643
+--       live_only  = 490  (active now, not yet in the mv)
+--       mv_only    = 323  (in the mv, no longer active/matching)
+--       total drifted = 813 rows = 0.44% of live_total at the 11h mark; this is expected to
+--       climb toward the previously-reported ~1.7% by hour ~22-23, i.e. right before the next
+--       02:00 refresh — consistent with a linear/near-linear staleness accumulation.
+--
+--   Drift concentrates heavily in two platforms (76.6% of the 813 drifted rows):
+--       gathern_residential_listings : 301 live_only + 159 mv_only = 460 rows (56.6%)
+--       dealapp_residential_listings :  57 live_only + 106 mv_only = 163 rows (20.0%)
+--   These are also the two platforms whose daily scrape (04:22 / 04:40 UTC) lands in the raw
+--   tables just ~2-3h AFTER the 02:00 refresh — guaranteeing their day's batch sits unreflected
+--   in the canonical view for the full ~21-22h until the following day's refresh. Every other
+--   platform contributes far fewer drifted rows even though they are equally stale in absolute
+--   time — because gathern (short-term/monthly furnished rentals) and dealapp have the highest
+--   day-over-day listing churn of the 32 platforms.
+--
+-- ROOT CAUSE: refresh cadence (1x/day) is far slower than listing churn, AND the one daily
+-- refresh is scheduled to run BEFORE, not after, the bulk of same-day ingestion — so the gap is
+-- not merely "cadence too slow" in the abstract, it structurally never captures "today" until
+-- "tomorrow".
+--
+-- RUNTIME BUDGET CHECK (from cron.job_run_details, jobid 16, last 5 runs):
+--   2026-07-10..07-14 durations: 19.7s, 25.6s, 25.7s, 31.7s, 33.1s (slow growth with DB size).
+--   Job 17 (the existing HOURLY refresh of active_listing_ids_v2 + listing_native_location_v1,
+--   a comparable-size sibling pair) runs in ~43-45s every hour without incident. There is
+--   enormous headroom under the job's own 1200s statement_timeout to run this job far more
+--   often than daily.
+--
+-- PROPOSED FIX (smallest change, no schema/DDL changes, no new objects):
+--   Re-time the SAME existing daily refresh to run every hour, a few minutes after the sibling
+--   hourly job (jobid 17, ':00') and the location-resolution job (jobid 25, '*/10 * * * *') so
+--   they don't contend for the same rows mid-write. This caps worst-case staleness at ~1h
+--   (down from ~24h) for a cost of ~33s x 24 ≈ 13 minutes/day of extra compute — negligible
+--   next to Supabase's ap-northeast-1 compute budget, and it reuses the exact REFRESH
+--   CONCURRENTLY statements already proven safe by the current daily job (no read-locking,
+--   already idempotent).
+--
+--   If a full hourly cadence is judged too aggressive to start, the same one-line change can
+--   instead target a coarser schedule that still closes the specific gap found above without
+--   going as far as hourly, e.g. '0 */4 * * *' (4x/day) or '10 5 * * *' (once/day, but AFTER
+--   the 04:22-04:40 gathern/dealapp/small-sources ingestion window instead of before it) —
+--   either materially shrinks the worst-case window versus today's ~24h. Hourly is recommended
+--   because the runtime-budget check above shows no resource reason to prefer a coarser cadence.
+--
+-- TO APPLY (requires owner approval — do not run unattended):
+--   select cron.alter_job(16, schedule => '10 * * * *');
+--   -- verify: select jobid, schedule, jobname from cron.job where jobid = 16;
+--   -- verify next few runs land in cron.job_run_details with status = 'succeeded' and a
+--   -- duration comparable to today's ~30s baseline before declaring this done.
+--
+-- NOT proposing: rebuilding either matview, changing REFRESH CONCURRENTLY to a non-concurrent
+-- refresh, adding triggers, or touching listing_location_index's/canonical_mv's SELECT
+-- definition. This is a cadence-only change to an existing, already-scheduled job.
+-- ─────────────────────────────────────────────────────────────────────────────────────────
