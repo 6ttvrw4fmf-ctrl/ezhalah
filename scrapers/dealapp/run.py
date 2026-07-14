@@ -325,9 +325,26 @@ def _images(schema: dict) -> list[str]:
     return out[:25]
 
 
+def has_priced_schema(html: str) -> bool:
+    """True iff the ng-state schema block carries a non-empty offers.price.
+
+    PRICE-FIDELITY FIX (2026-07-14): dealapp's Angular SPA intermittently serves a SKELETON
+    response — the "real-estate-listing" schema KEY is present (so the old `"real-estate-listing"
+    in r.text` check passed) but its `offers.price` is empty/absent, apparently a server-side-
+    render caught before full hydration. fetch_one used to accept that response as final, silently
+    producing a priceless row for a listing that genuinely HAS a price. Proven live during the
+    2026-07-13/14 price-fidelity repair: retrying up to 3 times recovered a real price for 28 of 37
+    listings previously believed unfetchable/removed.
+    """
+    schema = _listing_schema(html)
+    offers = (schema or {}).get("offers") or {}
+    return bool(offers.get("price"))
+
+
 def fetch_one(adid: str) -> Optional[tuple[str, str]]:
     s = _session()
     url = f"{BASE}/ar/ad-details/{adid}"
+    last_skeleton_html: Optional[str] = None
     for attempt in range(3):
         try:
             r = s.get(url, timeout=45, allow_redirects=True)
@@ -335,11 +352,19 @@ def fetch_one(adid: str) -> Optional[tuple[str, str]]:
             time.sleep(1.0 * (attempt + 1))
             continue
         if r.status_code == 200 and "real-estate-listing" in r.text:
-            return r.text, adid
+            if has_priced_schema(r.text):
+                return r.text, adid
+            # Skeleton hit: keep the response as a fallback and retry for a fully-hydrated one.
+            last_skeleton_html = r.text
         if r.status_code in (404, 410):
             return None
         time.sleep(0.8 * (attempt + 1))
-    return None
+    # Exhausted retries without ever seeing a priced schema. Fall back to the last skeleton
+    # response we did get — map_listing's existing `_int(offers.get("price"))` already yields
+    # None for an absent price, so the listing still ingests and surfaces as "Price on request"
+    # rather than being silently dropped. Never invent a price, never let a genuinely-present
+    # listing vanish because of a transient render gap.
+    return (last_skeleton_html, adid) if last_skeleton_html else None
 
 
 def map_listing(html: str, adid: str) -> tuple[Optional[dict], str]:
