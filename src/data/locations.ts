@@ -480,9 +480,16 @@ const scopeCity = (f: string): string => { for (const [k, c] of CITY_TOKENS) if 
 
 // ── LIVE district index (read-time merge: catalog + real listing districts) ──────────────────────
 // The static catalog (sa-locations.json) misses districts that exist in real listings (e.g. "Al Doha
-// Dist." in Yanbu). We load the DB's `location_index` materialized view once per session and merge it
-// in, so any district that actually has inventory is recognized + narrowable. (user: DB is the source
-// of truth; every district stored must be searchable.)
+// Dist." in Yanbu). We load `location_index_live` (a plain, non-materialized view over the
+// actively-refreshed `listing_location_canonical_mv`) once per session and merge it in, so any
+// district that actually has inventory is recognized + narrowable. (user: DB is the source of truth;
+// every district stored must be searchable.) NOTE 2026-07-14: this used to read the `location_index`
+// MV directly, but that MV was refreshed by NO cron job (orphaned since 2026-06-23 — jobid 16's real
+// command only ever refreshed `listing_location_index` / `listing_location_canonical_mv`, never
+// `location_index`). Repointed to `location_index_live`, which reads
+// `region_raw`/`city_raw`/`district_raw` off the matview jobid 16 keeps fresh — same raw-English/
+// mixed-district shape as before, just live instead of dead. See
+// supabase/migrations/20260714_location_index_live_view.sql.
 type LiveDistrict = { district: string; city: string; region: string; n: number };
 type LiveCity = { city: string; region: string; n: number };
 let LIVE_DISTRICTS: LiveDistrict[] = [];
@@ -498,7 +505,7 @@ export async function ensureLocationIndex(): Promise<void> {
   if (_livePromise) return _livePromise;
   _livePromise = (async () => {
     try {
-      const { data } = await supabase.from('location_index').select('city,district,region,n');
+      const { data } = await supabase.from('location_index_live').select('city,district,region,n');
       if (data) {
         LIVE_DISTRICTS = data.filter((r: any) => r.city && r.district) as LiveDistrict[];
         // City→region aggregation over EVERY row (a city counts even where its district is null), so
