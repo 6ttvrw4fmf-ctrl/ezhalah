@@ -989,16 +989,21 @@ function naturalSpread<T>(items: T[], key: (x: T) => string): T[] {
   return out;
 }
 
-// THE result-display rule (user): RELEVANCE / intent first; platform & region diversity are only a
-// natural BONUS among similarly-relevant listings — never forced, never reserving slots, never hiding a
-// better listing. A BROAD overview (whole-Kingdom or whole-region) is shuffled + region-spread so it
-// varies between runs and spans Saudi naturally. A SPECIFIC search stays in pure relevance → recency
-// order — if the best matches are all one platform, that's fine. Only ever real listings, nothing made up.
+// THE result-display rule (user, UPDATED 2026-07-13 — see below): RELEVANCE / intent first; filters
+// (Rule 1) always win. Platform diversity (Rule 2) is no longer merely "a bonus that survives if it's
+// already there" — it is now enforced structurally in remote.ts's orderByScope (platform is the outermost
+// diversity key for every scope) plus a page-0 candidate-pool diversity seed, specifically BECAUSE the
+// prior "if the best matches are all one platform, that's fine" stance (still true for a genuinely
+// single-platform result — Rule 2 never invents a platform that has no match) was found, live, to let one
+// platform crowd out a LARGER platform's real matches on a SPECIFIC (non-broad) search — the exact
+// scenario this comment used to say was fine. This function's own job is unchanged: never re-shuffle or
+// undo the diversity order the upstream step already produced.
 function rankResults(listings: Listing[], q: SearchQuery, cap: number | null): Listing[] {
   // Coarse relevance tiers (closer price/size ranks higher). No price/size → one tier (all equal). WITHIN
   // each tier we PRESERVE the order the server diversity step already produced (orderByScope:
-  // region→city→district→platform per scope), so platform/district/city diversity SURVIVES to the displayed
-  // top-25 — we no longer random-shuffle here (that used to drop platform diversity on broad searches).
+  // platform→region→city→district per scope, owner 2026-07-13), so platform/district/city diversity
+  // SURVIVES to the displayed top-25 — we no longer random-shuffle here (that used to drop platform
+  // diversity on broad searches).
   // Repeat-visit variety now comes from the deterministic rotation in runSearch, not randomness. (diversity fix.)
   const tiers = new Map<number, Listing[]>();
   for (const l of listings) {
@@ -1097,10 +1102,9 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
     sortNote = t(SORT_NOTE[q.sort]);
   } else {
     const cap = budgetCap(q);
-    // Relevance / intent FIRST; platform & region diversity only a natural bonus among equally-relevant
-    // listings (never forced, never reserved, never hiding a better listing). Broad overviews are
-    // shuffled + region-spread so they vary and span Saudi; specific searches stay relevance→recency —
-    // if the best matches are all one platform, that's fine. Only real listings. (user display rule.)
+    // Relevance / intent FIRST (Rule 1, filters, already applied above); platform diversity (Rule 2,
+    // owner PERMANENT 2026-07-13) is enforced upstream in remote.ts's orderByScope and preserved here
+    // within each relevance tier — see rankResults' own comment for the full rule. Only real listings.
     listings = rankResults(listings, q, cap);
   }
   // Location-RELATIONSHIP ranking — applies to BOTH branches above. A proximity intent («قريب من مسجد» /
