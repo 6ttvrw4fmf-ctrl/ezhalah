@@ -1,0 +1,81 @@
+-- =====================================================================
+-- PREPARED, NOT APPLIED. Investigation-only deliverable.
+-- Target: Supabase project aannarbkwcymrotzwdbo (ezhalah-app, LIVE PROD)
+--
+-- CURRENT cron.job row for jobid=14 (verified 2026-07-14):
+--   jobid    : 14
+--   jobname  : 'gh-muktamel-weekly'
+--   schedule : '0 3 * * 1'                              -- weekly, Mon 03:00
+--   command  : select public.trigger_gh_workflow('muktamel-sync.yml')
+--   nodename : localhost
+--   nodeport : 5432
+--   database : postgres
+--   username : postgres
+--   active   : true
+--
+-- cron.job columns (public schema "cron", verified via information_schema):
+--   jobid bigint, schedule text, command text, nodename text, nodeport int,
+--   database text, username text, active boolean, jobname text
+--
+-- pg_cron extension version installed: 1.6.4, which ships
+-- cron.alter_job(job_id bigint, schedule text default null,
+--                 command text default null, database text default null,
+--                 username text default null, active boolean default null)
+-- Per pg_cron's documented behavior, any parameter left NULL is left
+-- UNCHANGED on the existing job row -- only the fields you pass a
+-- non-null value for are updated. This is the correct, safe, reversible,
+-- standard mechanism: it edits the job in place (same jobid, same
+-- schedule/command preserved) rather than deleting+recreating it via
+-- cron.unschedule()/cron.schedule(), so there is nothing to reconstruct
+-- to re-enable it later.
+-- =====================================================================
+
+-- Pause (reversible):
+select cron.alter_job(job_id := 14, active := false);
+
+-- Verify:
+-- select jobid, jobname, schedule, command, active from cron.job where jobid = 14;
+-- expect active = false, schedule/command/jobname unchanged.
+
+-- =====================================================================
+-- ROLLBACK / re-enable later:
+-- =====================================================================
+-- select cron.alter_job(job_id := 14, active := true);
+-- =====================================================================
+
+-- =====================================================================
+-- NOTE on why this is the "correct, safe" call and NOT a raw UPDATE:
+-- cron.job is owned by the pg_cron extension and pg_cron maintains its
+-- own in-memory job cache in the launcher background worker; going
+-- through cron.alter_job() (an extension-provided SQL function) ensures
+-- the change is picked up the same way cron.schedule()/cron.unschedule()
+-- changes are, rather than relying on undocumented cache-invalidation
+-- behavior from a raw `update cron.job set active=false where jobid=14`.
+-- A raw UPDATE happens to change the same column and would likely also
+-- work (pg_cron re-reads cron.job before firing each minute), but
+-- cron.alter_job() is the documented, supported API for this exact
+-- operation and is what should be used.
+-- =====================================================================
+
+-- =====================================================================
+-- Context (not required for the pause, informational only):
+-- muktamel already has 0 active rows in BOTH
+--   muktamel_residential_listings (20 total rows, 0 active)
+--   muktamel_commercial_listings  (0 total rows, 0 active)
+-- so pausing jobid 14 does not additionally require any active_listing_ids_v2/
+-- search_listings_ar deactivation step -- there is nothing currently active
+-- for muktamel in search. platform_cadence already has a row for
+-- 'muktamel' (expected_hours=168, note='weekly (jobid 14)') which is why
+-- check_scraper_freshness() does not fire hourly/daily alerts for it today;
+-- once jobid 14 is paused, muktamel's last_scraped_at will stop advancing
+-- and check_scraper_freshness() WILL eventually raise a stale alert for it
+-- (its exclusion list only special-cases 'deal_%', not 'muktamel_%').
+-- If muktamel is meant to go permanently silent (not just paused), the
+-- same style of check_scraper_freshness() exclusion clause documented in
+-- 2026-07-14_deprecate_alnokhba_toor.sql would need a
+-- `and tablename not like 'muktamel\_%'` line, plus (optionally, for
+-- documentation parity) a deprecated_platforms / platforms_deprecated_status
+-- row for 'muktamel'. Neither is included here since the task scope for
+-- muktamel was specifically "pause the cron job", not "deprecate the
+-- platform".
+-- =====================================================================
