@@ -34,11 +34,23 @@ import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { openListing } from '@/lib/openListing';
-import { filterToChat, searchSummary, type SearchQuery, type SearchResult } from '@/data/search';
+import { filterToChat, searchSummary, effectiveTypes, type SearchQuery, type SearchResult } from '@/data/search';
 import type { Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
+import AdvancedQuestionCard, { AdvancedQuestionLoading } from '@/components/AdvancedQuestionCard';
+import { ADVANCED_QUESTIONS, MIN_OPTIONS_TO_SHOW, type AdvancedOption } from '@/data/advancedFilters';
+
+// Advanced-question entry point (owner 2026-07-13 correction): reached from the EXISTING «خلّنا نحدد
+// الطلب أكثر» button below a results block — NEVER before first results — and ONLY for a strict
+// Residential+Apartment scope (not villas, land, commercial, or a multi-type selection that merely
+// includes شقة). Extend ADVANCED_QUESTIONS to cover more fields/types later; do not widen this gate
+// without an explicit owner instruction.
+function isApartmentOnlyScope(q: SearchQuery): boolean {
+  const types = effectiveTypes(q);
+  return q.category === 'Residential' && types.length === 1 && types[0] === 'شقة';
+}
 
 const IS_WEB = Platform.OS === 'web';
 // On the web the results tile into a wrap grid, so the conversation column is wider to give them
@@ -414,6 +426,16 @@ export default function Agent() {
   // IS the exact match count. (owner 2026-07-08: never hide a valid match behind the display limit.)
   const [revealCount, setRevealCount] = useState<Record<string, number>>({});
   const pendingRefineRef = useRef<{ q: SearchQuery; dim: string } | null>(null); // a >25 "refine" question awaiting the user's one-line answer
+  // Advanced-question overlay (عمر العقار, apartment-only for now) — a transient card shown ON TOP of
+  // the current results when «خلّنا نحدد الطلب أكثر» is tapped in an apartment scope. Answering hands
+  // off to the SAME runRefine mechanism used by the pre-existing chip flow (echoes a user bubble,
+  // re-runs search, renders a new results turn) — never a separate navigation/route.
+  const [ageFlow, setAgeFlow] = useState<
+    | { phase: 'loading' }
+    | { phase: 'asking'; dim: string; titleKey: string; options: AdvancedOption[]; unknownCount: number }
+    | null
+  >(null);
+  const ageFlowQueryRef = useRef<SearchQuery | null>(null);
   const revealTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   // The results turn whose cards are still popping in one-by-one (id + total count), so a new user
   // message can instantly finish it and stop the drip. null once the reveal completes. (user request.)
@@ -768,6 +790,10 @@ export default function Agent() {
       if (p.type) refined.type = p.type;
       if (p.typeGroup) refined.typeGroup = p.typeGroup;
       if (p.category) refined.category = p.category;
+    } else if (ADVANCED_QUESTIONS.some((c) => c.key === dim)) {
+      // Advanced-question answers (currently: property_age) — delegate to that question's own
+      // config so this stays generic as more fields are added, per the reusable-engine design.
+      return ADVANCED_QUESTIONS.find((c) => c.key === dim)!.applyAnswer(base, a);
     } else {
       const p = parseQuery(`${a} ${base.location ?? ''}`);
       if (p.type) refined.type = p.type;
@@ -798,6 +824,40 @@ export default function Agent() {
     void promptSignupSoon(run);
     setBusy(false); runRef.current = null; toBottom();
   };
+
+  // Entry point for «خلّنا نحدد الطلب أكثر» in an apartment-only scope (owner 2026-07-13): show the
+  // Claude-style loading state, resolve live-scoped option counts for the (currently single) advanced
+  // question, and either display it as a centered card or — if fewer than MIN_OPTIONS_TO_SHOW real
+  // options exist for THIS exact scope — fall through to the pre-existing narrowing chips instead of
+  // leaving the tap with no effect.
+  const startAgeFlow = async (q: SearchQuery) => {
+    setAgeFlow({ phase: 'loading' });
+    ageFlowQueryRef.current = q;
+    for (const cfg of ADVANCED_QUESTIONS) {
+      const result = await cfg.fetchOptions(q);
+      if (ageFlowQueryRef.current !== q) return; // superseded by a newer tap/turn
+      if (result.options.length >= MIN_OPTIONS_TO_SHOW) {
+        setAgeFlow({ phase: 'asking', dim: cfg.key, titleKey: cfg.titleKey, options: result.options, unknownCount: result.unknownCount });
+        return;
+      }
+    }
+    setAgeFlow(null);
+    startRefine(q);
+  };
+
+  // Picking a real option hands off to the SAME chat-turn mechanism as the existing refine chips —
+  // echoes the picked label as the user's bubble, merges it into the unchanged rest of the query, and
+  // re-searches. Skipping (an optional question) just closes the card — nothing has changed, so there
+  // is nothing to re-run.
+  const onAgeAnswer = (key: string) => {
+    if (ageFlow?.phase !== 'asking') return;
+    const opt = ageFlow.options.find((o) => o.key === key);
+    const baseQ = ageFlowQueryRef.current;
+    const dim = ageFlow.dim;
+    setAgeFlow(null);
+    if (baseQ) void runRefine(baseQ, dim, key, opt?.label ?? key);
+  };
+  const onAgeSkip = () => setAgeFlow(null);
 
   // Tap on a refine answer chip → lock that question's chips so it can't be answered twice, then run.
   const pickRefine = (msgId: string, r: RefinePrompt, opt: { label: string; value: string }) => {
@@ -1424,7 +1484,14 @@ export default function Agent() {
                                     : <Text style={s.mBtnPrimaryTx}>{t('Load more')}</Text>}
                                 </Pressable>
                               ) : null}
-                              <Pressable style={s.mBtnAlt} onPress={() => startRefine(m.result.query)}>
+                              <Pressable
+                                style={s.mBtnAlt}
+                                onPress={() => {
+                                  const q = m.result.query;
+                                  if (q && isApartmentOnlyScope(q)) void startAgeFlow(q);
+                                  else startRefine(q);
+                                }}
+                              >
                                 <Text style={s.mBtnAltTx}>{t('Let’s narrow it down')}</Text>
                               </Pressable>
                             </View>
@@ -1547,6 +1614,30 @@ export default function Agent() {
           <Text style={s.fbToastText}>{t('Thanks for your feedback')}</Text>
         </View>
       </View>
+      {/* عمر العقار advanced-question overlay (owner 2026-07-13) — a transient card over the CURRENT
+          results, reached only via «خلّنا نحدد الطلب أكثر» in an apartment-only scope. Absolutely
+          positioned over the whole screen, same visual language as the interview overlay (dimmed
+          backdrop + centered card), but rendered inline here rather than as a separate route, so
+          answering can hand off directly to runRefine and update THIS same conversation in place. */}
+      {ageFlow ? (
+        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+          {ageFlow.phase === 'loading' ? (
+            <AdvancedQuestionLoading onClose={onAgeSkip} />
+          ) : (
+            <AdvancedQuestionCard
+              titleKey={ageFlow.titleKey}
+              options={ageFlow.options}
+              unknownCount={ageFlow.unknownCount}
+              progressCur={1}
+              progressTotal={1}
+              onAnswer={onAgeAnswer}
+              onSkip={onAgeSkip}
+              onSkipAll={onAgeSkip}
+              onClose={onAgeSkip}
+            />
+          )}
+        </View>
+      ) : null}
     </View>
   );
 }
