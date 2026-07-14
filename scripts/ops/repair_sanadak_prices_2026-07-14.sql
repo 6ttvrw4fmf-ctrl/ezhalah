@@ -269,8 +269,12 @@ SET ad_number       = 'SN7200897255',
     property_type   = 'Residential Land',
     area_m2         = 630,
     bedrooms        = NULL,
-    city            = NULL,  -- 'شقراء' (Shaqra) is not in CITY_AR map; normalize.map_city() result
-                              -- not independently confirmed here — leave city NULL rather than guess
+    city            = 'Shaqra',  -- normalize.map_city('شقراء') -- pure, offline, DB-free lookup
+                                  -- (scrapers/common/normalize.py CITY_MAP_AR exact-match branch) --
+                                  -- independently re-confirmed 2026-07-14; the scraper's own
+                                  -- map_listing() logic (city = CITY_AR.get(raw) or
+                                  -- normalize.map_city(raw)) would produce this value for real,
+                                  -- so this is what a correct scrape would have stored, not a guess.
     city_ar         = 'شقراء',
     neighborhood    = 'الملك عبدالله',
     district_ar     = 'الملك عبدالله'
