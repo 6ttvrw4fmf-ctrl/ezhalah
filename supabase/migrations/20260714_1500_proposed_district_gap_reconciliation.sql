@@ -4,25 +4,38 @@
 -- against the live project. A human reviewer must apply it deliberately (via apply_migration
 -- or a reviewed PR) after explicit owner sign-off (per this repo's approval-workflow rule).
 --
--- THIS FILE SUPERSEDES the earlier proposal in
--- 20260714_proposed_district_normalization_backfill.sql (commit b1ec2de) on SCOPE: that file
--- assumed the ~10% no-district gap lived inside listing_location_canonical_mv itself and
--- proposed adding a normalized-transliteration fallback branch to canonical_mv's own district
--- CASE expression (targeting wasalt's "Ar-Rimal" vs "Al Rimal" style mismatches against
--- loc_district_map). Fresh re-verification below shows that assumption was wrong: canonical_mv
--- is only 0.69% no-district. The ~10% figure the owner actually sees in the app lives in
--- `search_listings_ar` (fed by a DIFFERENT pipeline: listing_native_location_v1/v2), and its
--- dominant root cause is a stale downstream snapshot table with no regeneration job at all --
--- not a transliteration-matching bug in canonical_mv. That earlier file's transliteration
--- finding for wasalt is not wrong on its own terms, but it was solving a much smaller,
--- differently-scoped problem (0.69% base, not 10.35%) and is left in place, unapplied, as a
--- possible smaller follow-up; THIS file is the one that closes the gap the owner actually sees.
+-- CORRECTION (adversarial re-verification, 2026-07-14, before this file was ever committed):
+-- an earlier draft of this file claimed listing_location_canonical_mv was only 0.69%
+-- no-district (1,289/186,643) and used that to argue this file "supersedes" the b1ec2de
+-- proposal by disproving its scope. That 0.69% figure does NOT reproduce under independent
+-- re-measurement (tried multiple alternate definitions — null region, null city, empty-string
+-- district, city+district both null, district-null-and-searchable=true — none produce 1,289).
+-- The correct, re-verified rate is 39,096 / 186,643 = 20.95% no-district on canonical_mv itself
+-- -- which matches b1ec2de's ORIGINAL figure for this same object exactly. b1ec2de's number was
+-- right; the "correction" superseding it was wrong. See below for what's actually true and what
+-- this file still legitimately fixes.
+--
+-- THIS FILE DOES NOT SUPERSEDE b1ec2de'S canonical_mv MEASUREMENT -- it targets a DIFFERENT,
+-- separately-confirmed root cause. Regardless of canonical_mv's own (real, 20.95%) no-district
+-- rate, the ~10% gap the owner actually sees in the app comes from `search_listings_ar` (fed by
+-- a DIFFERENT pipeline: listing_native_location_v1/v2), which has its own dominant root cause: a
+-- stale downstream snapshot table (listings_arabic_locations) with no regeneration job at all --
+-- not a transliteration-matching bug. b1ec2de's transliteration finding for wasalt targets
+-- canonical_mv's own gap and is left in place, unapplied, as a possible separate follow-up;
+-- THIS file targets search_listings_ar's gap specifically, via the mechanism verified below.
 --
 -- GAP RE-VERIFIED LIVE, READ-ONLY, 2026-07-14
 -- --------------------------------------------
--- listing_location_canonical_mv no-district rate: 1,289 / 186,643 = 0.69% (NOT ~10%).
+-- listing_location_canonical_mv no-district rate: 39,096 / 186,643 = 20.95% (matches b1ec2de).
 -- search_listings_ar no-district rate (the table the app's search path actually reads):
 --   19,351 / 186,989 = 10.35%.
+--
+-- Independent end-to-end simulation of THIS file's real-world effect (adversarial
+-- re-verification, joining canonical_mv + listings_arabic_locations + search_listings_ar on
+-- source_table/listing_id): of the 19,366 currently no-district search_listings_ar rows, ~9,451
+-- would gain a district and only ~12 would regress under the sync proposed below -- a net ~49%
+-- reduction in the no-district count (roughly 10.36% -> ~5.3%). The fix mechanism and its dry-run
+-- counts (below) are trustworthy; only the superseded-scope narrative above was wrong.
 -- Top contributors (platform, total, no_district, pct):
 --   gathern      20,413  8,240  40.37%   dominant OUR-SIDE bug (root cause A)
 --   wasalt       63,837  5,993   9.39%   mostly enrichment backlog (root cause B, NOT fixed here)
