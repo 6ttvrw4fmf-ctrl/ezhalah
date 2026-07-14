@@ -387,7 +387,15 @@ runQuery(q):  normalize (Room=1) ─► resolveLocation()/ensureLocationIndex() 
 | `sync-search-listings-ar` | jobid 28, hourly `:15` | Rebuilds `search_listings_ar` from resolver output (≤1h lag). |
 | `resolve-aqar-locations` | jobid 25, every 10 min | Aqar location resolver. |
 | `refresh_listing_native_location_v1` / `active_listing_ids_v2` | jobid 17, hourly | Location MVs (filter-before-cap). |
-| `refresh-location-index` | jobid 16, daily `02:00` | `location_index` MV (English city col) — drives **autocomplete** via `locations.ts`. |
+| `refresh-location-index` | jobid 16, daily `02:00` | Refreshes `listing_location_index` + `listing_location_canonical_mv` **only** — it does NOT refresh `location_index` (verified 2026-07-14: the job's live `cron.job.command` never mentions `location_index`; a full regex scan of every `cron.job.command` for `location_index` not preceded by `listing_` returns zero rows). |
+
+**`location_index` is retired / no longer read by the app (as of 2026-07-14).** It was refreshed by
+no job at all — `pg_stat_user_tables.last_autoanalyze` sat frozen at 2026-06-23 21:35 UTC while this
+table's name coincidentally matched jobid 16's, which actually refreshes the two matviews above.
+Autocomplete (`ensureLocationIndex()` in `locations.ts`) now reads `location_index_live` — a plain
+view (see `supabase/migrations/20260714_location_index_live_view.sql`) over `listing_location_canonical_mv`,
+which jobid 16 keeps current, so no new cron job was needed. `location_index` itself can be dropped in
+a follow-up once this repoint has been live for a safety window.
 
 - `search_listings_ar.city_ar` = raw scraped spelling (feeds card display via the RPC); `city_id` =
   canonical. **After any RPC DDL run `NOTIFY pgrst,'reload schema'`** or search returns null (no cards).
