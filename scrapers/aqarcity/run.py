@@ -154,6 +154,50 @@ def _int(v: Any) -> Optional[int]:
     return n if n else None
 
 
+def is_monthly_rental(body: str, unit: str, price: Optional[int]) -> bool:
+    """True iff this rent ad's rent_period is genuinely MONTHLY (short-term / month-to-month), false
+    for an ANNUAL lease (incl. one paid in monthly installments). `price` = offers.get("price") from
+    the JSON-LD, `unit` = priceSpecification.unitText.upper(), `body` = the page's plain-text body.
+
+    aqarcity's structured unitText is unreliably "YEAR" even for true monthly rentals, so we also
+    check for شهري/شهرياً/بالشهر in the PAGE BODY (where the lister's "1,700 شهرياً" text lives — the
+    JSON-LD description is a different, truncated copy that omits it).
+
+    PRICE-FIDELITY FIX (2026-07-14): that keyword ALSO fires on an ANNUAL lease described with a
+    monthly PAYMENT-INSTALLMENT figure (e.g. "الايجار الشهري :3000ريال ... السنوي: دفعة 38,000") —
+    شهري there describes the payment schedule, not the tenancy. For those ads `offers.price` is
+    ALREADY the annual total aqarcity itself computed; classifying 'monthly' makes the caller
+    re-annualize an already-annual figure (×12), inflating the stored price ×144 vs the true rent
+    (proven live: aqarcity ids 2292823/593790/593771 — offers.price == body-stated-monthly × 12
+    exactly). `unitText` cannot disambiguate this (it says YEAR on BOTH genuinely-monthly and
+    installment-annual ads), so instead extract the SINGLE unambiguous number the body states next
+    to a شهري marker and check it numerically against offers.price:
+      • offers.price == that number       → offers.price is the RAW monthly figure (genuinely
+                                              monthly; classify 'monthly' as before)
+      • offers.price == that number × 12  → offers.price is ALREADY the annual total; do NOT
+                                              classify 'monthly' (prevents the ×144 bug)
+      • no single unambiguous candidate, or a multi-unit/multi-price ad → fall back to the
+        original keyword-only behaviour unchanged (never guess a specific number).
+    """
+    if unit == "MONTH":
+        return True
+    body_nums = list(dict.fromkeys(n for n in (
+        _int(g) for pair in re.findall(
+            r"(\d[\d,]*(?:[.,]\d+)?)\s*(?:ريال)?\s*شهري[ًا]?|شهري[ًا]?\s*[:\s]*(\d[\d,]*(?:[.,]\d+)?)", body)
+        for g in pair if g
+    ) if n))
+    keyword_monthly = bool(re.search(r"شهري|بالشهر|في\s*الشهر|/\s*شهر", body))
+    if len(body_nums) != 1 or not price:
+        return keyword_monthly  # ambiguous (0 or >1 candidates) — unchanged fallback
+    n = body_nums[0]
+    tol = max(50, n * 0.05)
+    if abs(price - n * 12) <= tol:
+        return False  # offers.price already annual — do not double-annualize
+    if abs(price - n) <= tol:
+        return True   # offers.price is the raw monthly figure
+    return keyword_monthly  # numbers don't line up either way — unchanged fallback
+
+
 def _float(v: Any) -> Optional[float]:
     if v in (None, "", "—"):
         return None
@@ -428,13 +472,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     price = _int(offers.get("price"))
     rent_period = None
     if is_rent:
-        # aqarcity's structured unitText is unreliably "YEAR" even for true monthly rentals, so also
-        # detect شهري/شهرياً/بالشهر in the PAGE BODY (where the lister's "1,700 شهرياً" text lives —
-        # the JSON-LD description is a different, truncated copy that omits it). Verified to fire only
-        # on genuinely-monthly ads, never on buy/annual pages. (monthly-rent memo.)
-        monthly = unit == "MONTH" or bool(
-            re.search(r"شهري|بالشهر|في\s*الشهر|/\s*شهر", body))
-        rent_period = "monthly" if monthly else "annual"
+        rent_period = "monthly" if is_monthly_rental(body, unit, price) else "annual"
     area = _float(pi.get("مساحة العقار"))
     price_per_meter = round(price / area) if (price and area and not is_rent) else None
 
