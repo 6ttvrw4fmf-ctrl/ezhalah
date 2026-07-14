@@ -63,7 +63,19 @@ production deploy. Use it as the rollback target if a future deploy needs to be 
 
 | Field | Value |
 |---|---|
-| Date | 2026-07-10 (whole-number input keyguard + npm test — see PR #58; plus preflight test-file fix PR #60) — CURRENT LIVE |
+| Date | 2026-07-14 (platform-diversity first-page ranking fix — see PR #74) — CURRENT LIVE |
+| Vercel deployment ID | `dpl_5ZueLtnMQqaLzLrCHTZefPUUavtB` |
+| Production URL | `https://ezhalah-app.vercel.app` |
+| Bundle hash | `entry-ea1555d00c9041a46df3da2e8a49fb8a.js` |
+| Deployed from | `main` @ `c0304db` (PR #74 squash-merged), via `scripts/safe-deploy.sh` from a clean worktree. |
+| Contains | Owner PERMANENT rule (2026-07-13): Rule 1 filters always win; Rule 2 the first page must show a genuine platform mix, no platform crowds out others with equally-valid matches. Root cause (SQL-verified live): the single recency-ordered RPC candidate window (`QUERY_LIMIT=1500`) could be entirely filled by one platform's same-batch rescrape, pushing a LARGER platform's freshest match outside it (wasalt 6,458 matches vs aqar 3,238 for one filter, yet wasalt ranked 2,076th). Fix: a page-0-only per-platform-capped RPC seed (`mergeDiversitySeed`/`filterBoosted`, new `src/lib/platformDiversity.ts`) merges under-represented platforms into the pool under IDENTICAL filters, with Load-More dedup bookkeeping; `orderByScope` reordered to platform-first for every scope (was geography-first). Full detail: memory `project_platform-diversity-first-page-fix-2026-07-13`. |
+| Verified post-deploy | Live bundle `entry-ea1555d0…` on `ezhalah-app.vercel.app`: `supabase.co` ×2 present (re-grepped after the safe-deploy CDN-propagation false-alarm warning — known gap, see [[project_safe-deploy-cdn-propagation-wait]]-style note below). Bundle-grepped and confirmed the exact new logic shipped: `mergeDiversitySeed`/`filterBoosted` present with the atomic single-write fix from adversarial review (`Y(J,i)` / `Y(J,new Set)`, no read-then-mutate-across-await), `p_per_platform:i,p_limit:2e3,p_offset:0` (the diversity-seed RPC call) alongside the untouched `p_per_platform:null` main call, and `orderByScope`'s new key arrays `['platform','region','city','district']` / `['platform','city','district']` / `['platform','district']` all present verbatim. Pre-deploy: real-RPC end-to-end simulation against production data proved Rent+Apartment+Riyadh went from `{aqar:9,sanadak:1}` in the first 10 to one row from 10 distinct platforms, country-wide broad search surfaced 25 distinct platforms in the first 25, and a real Load-More continuation caught 20 rows that would have duplicated and confirmed the fix removes them. `tsc` 0 new errors, `npm test` 159/159 pass. |
+| Note (safe-deploy false-alarm, recurring) | The post-deploy `supabase.co` check WARNED again (known `sleep`-too-short CDN propagation gap, same class as the 2026-07-10 note below); re-grepped the served bundle ~15s later and confirmed `supabase.co` ×2 present. Not the env-var P0. |
+| SUPERSEDES the entry below | Note: this table lags actual deploy history (a pre-existing, previously-flagged doc gap — several deploys between PR #58/#60 and this one, e.g. PR #64/#71/#73, were not separately recorded here). The entry below remains a valid, older rollback target; this deploy's HEAD contains everything in it. |
+
+| Field | Value |
+|---|---|
+| Date | 2026-07-10 (whole-number input keyguard + npm test — see PR #58; plus preflight test-file fix PR #60) — superseded, valid rollback target |
 | Vercel deployment ID | `dpl_2gVFqgfgu5Ar14WkoFxiFp7ubTCg` |
 | Production URL | `https://ezhalah-app.vercel.app` |
 | Bundle hash | `entry-d4d1ca9e5ec9ce51055d6a034b9338a4.js` |
