@@ -10,7 +10,8 @@ API (no auth, no key):
        (the list item IS the full record — there's no richer detail endpoint we need.)
 
 Field map (Satel item → our schema):
-  slug                         → listing_url  https://listings.satel.sa/property/<slug>
+  propertyNumber               → listing_url  https://listings.satel.sa/property/<propertyNumber>
+                                  (NOT slug — see the price-fidelity note below; falls back to <_id>)
   propertyNumber               → ad_number  (ST<propertyNumber>; falls back to ST<_id>)
   type  Rent|Buy(Sale)         → transaction_type Rent|Buy
   catName Residential|Commercial → table routing (+ subCatName for the canonical type)
@@ -26,6 +27,20 @@ Field map (Satel item → our schema):
 
 PDPL: the Satel API returns NO advertiser/agent name or phone — but we still defensively redact
 any phone-like token from title/description and never store contact fields.
+
+Price fidelity (2026-07-14, re-verification of the "BUG2" audit): map_listing()'s price fields
+(price, priceGroup → price_total/price_annual/rent_period) were re-checked against the LIVE
+listings.satel.sa page for 7 distinct properties (STA0212/id=598777, A0177, C0052, C0072, C0075,
+V0044, C0055) and matched exactly in all 7 cases — there is no price-parsing bug. The ORIGINAL
+"price mismatch" finding for id=598777 was a false positive caused by verifying against the wrong
+URL: `listing_url` used to be built from `slug`, and listings.satel.sa does not route on slug — it
+silently 200s to a hardcoded decoy listing (title "Luxury Apartment in Riyadh", ad "SAT-001",
+Monthly SAR 4,500 / Annual SAR 48,000) for ANY slug, including ones that don't exist. That decoy
+page is what produced the apparent mismatch. `listing_url` is now built from `propertyNumber`,
+which routes correctly. See scripts/verify-satel-listing-url.ts (regression test) and
+scripts/ops/repair_satel_prices_2026-07-14.sql (DB backfill of the 203 pre-existing rows built with
+the old slug-based URL — a pure listing_url string repair; no price fields are touched because none
+were found to be wrong).
 
 Usage:  python -m scrapers.satel.run [--type residential|commercial|all] [--limit N] [--dry]
         --limit N  → small validation run (first N mapped rows, REAL upsert, NO prune)
@@ -289,8 +304,18 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
     region = DEFAULT_REGION
     neighborhood = (p.get("subCityEn") or addr.get("subCityEn") or "").strip() or None
 
-    slug = (p.get("slug") or "").strip()
-    listing_url = f"{LISTING_BASE}/{slug}" if slug else f"{LISTING_BASE}/{p.get('_id')}"
+    # IMPORTANT: keyed by propertyNumber (`pnum`, e.g. "A0212"), NOT `slug`. Satel's frontend
+    # (listings.satel.sa) only routes correctly on propertyNumber — a slug-only URL 200s but
+    # silently renders an unrelated hardcoded decoy listing (same fake "SAT-001" unit for ANY
+    # slug, including nonexistent ones) instead of 404ing. Live-verified 2026-07-14 across 7
+    # distinct properties (A0212/A0177/C0052/C0072/C0075/V0044/C0055): the propertyNumber-keyed
+    # URL renders the true page and its price matches our stored price_annual exactly; the
+    # slug-keyed URL always renders the same decoy "Luxury Apartment in Riyadh" / SAR 4,500-48,000
+    # regardless of which listing it's supposed to be. This is a clickthrough/verifiability bug,
+    # NOT a price bug — map_listing()'s price fields (below) were independently confirmed correct
+    # against the live source. See scripts/verify-satel-listing-url.ts and
+    # scripts/ops/repair_satel_prices_2026-07-14.sql for the regression test and DB backfill.
+    listing_url = f"{LISTING_BASE}/{pnum}" if pnum else f"{LISTING_BASE}/{p.get('_id')}"
 
     title = _redact(p.get("titleAr")) or _redact(p.get("titleEn")) or _redact(p.get("nameEn"))
 
