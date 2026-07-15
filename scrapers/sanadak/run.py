@@ -121,7 +121,7 @@ def fetch_one(url: str) -> Optional[tuple[dict, str, str]]:
             body = s.get(url, timeout=45, headers={"RSC": "1"}).text
         except Exception:
             time.sleep(2.0 * (attempt + 1)); continue
-        o = _extract_obj(body)
+        o = _extract_obj_for_url(body, url)
         if o:
             return o, body, url
         return None
@@ -140,10 +140,18 @@ def sitemap_urls(s: cc.Session) -> list[str]:
     return re.findall(r"<loc>([^<]*property-details[^<]*)</loc>", r.text)
 
 
-def _extract_obj(body: str, anchor: str = '"advertisementNumber"') -> Optional[dict]:
-    i = body.find(anchor)
-    if i < 0:
-        return None
+def _url_ad_number(url: str) -> Optional[str]:
+    """Sanadak's own URL convention: every /property-details/{slug}-{advertisementNumber} URL ends
+    with the page's real advertisementNumber as a trailing digit run (confirmed across every sample
+    fetched during the 2026-07-14 price-fidelity audit). Used to pick the RIGHT embedded object out
+    of the RSC flight stream (see _extract_obj_for_url) instead of trusting byte-offset ordering."""
+    m = re.search(r"(\d+)/?$", url)
+    return m.group(1) if m else None
+
+
+def _object_at(body: str, i: int) -> Optional[dict]:
+    """Brace-balance outward from byte offset `i` (which must point at/inside a JSON object) to
+    recover that one enclosing object. Pure span extraction — no notion of "the anchor" here."""
     depth = 0
     start = None
     for j in range(i, -1, -1):
@@ -169,6 +177,60 @@ def _extract_obj(body: str, anchor: str = '"advertisementNumber"') -> Optional[d
                     return json.loads(body[start:k + 1])
                 except Exception:
                     return None
+    return None
+
+
+def _extract_obj(body: str, anchor: str = '"advertisementNumber"') -> Optional[dict]:
+    """Legacy single-shot extractor: first byte-offset occurrence of `anchor` anywhere in the whole
+    flight text. Kept only for callers/tests that want "the first advertisementNumber object" with
+    no URL to disambiguate against. DO NOT use this for the live per-request page scrape — every
+    Sanadak /property-details RSC response also embeds ~5 "similar listings" carousel cards that
+    each carry their own "advertisementNumber" key, and their arrival order in the flight text is a
+    per-request race (not a fixed layout), so "first match" can silently return a sibling
+    recommendation's object instead of the page's own listing. Use _extract_obj_for_url instead."""
+    i = body.find(anchor)
+    if i < 0:
+        return None
+    return _object_at(body, i)
+
+
+def _iter_candidate_objs(body: str, anchor: str = '"advertisementNumber"'):
+    """Yield every object in the flight stream that carries an `advertisementNumber` key — the
+    primary listing PLUS every "similar listings" carousel card. Each occurrence's span is skipped
+    past after extraction so overlapping candidates aren't re-walked."""
+    i = 0
+    n = len(body)
+    while True:
+        i = body.find(anchor, i)
+        if i < 0:
+            return
+        obj = _object_at(body, i)
+        if isinstance(obj, dict):
+            yield obj
+            # advance past this object's own advertisementNumber occurrence(s) — a naive `i += 1`
+            # would just re-find the same key from inside the object we already extracted. Since we
+            # don't have the object's end offset handy here, just move past the anchor itself; the
+            # containing-object re-derivation is idempotent (same object re-yielded) but harmless —
+            # duplicates are fine because we only ever pick the FIRST candidate whose own
+            # advertisementNumber matches the URL, and re-yielding the same object twice can't change
+            # that "first-match" answer since it always agrees with itself on which id it holds.
+        i += len(anchor)
+
+
+def _extract_obj_for_url(body: str, url: str) -> Optional[dict]:
+    """THE fix for the 2026-07-14 price-fidelity bug: derive the page's own ad number from its URL
+    (Sanadak's convention: URL always ends in the real advertisementNumber), then scan every
+    candidate object in the flight stream (primary listing + every similar-listings carousel card)
+    and return the one candidate whose own advertisementNumber equals the URL's. If no candidate
+    matches — parse failure, site anomaly, URL convention broken — return None so the caller skips
+    the row (fail loud) rather than silently keeping whichever object happened to stream first."""
+    target = _url_ad_number(url)
+    if target is None:
+        return None
+    for obj in _iter_candidate_objs(body):
+        cand = obj.get("advertisementNumber")
+        if cand is not None and str(cand) == target:
+            return obj
     return None
 
 

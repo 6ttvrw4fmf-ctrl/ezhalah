@@ -266,6 +266,23 @@ def _price(raw: Any, is_rent: bool) -> tuple[Optional[int], Optional[int], Optio
     return None, v, "annual"
 
 
+# Some listings quote no real figure at all: the description literally says the price depends on
+# the tenant's business activity and/or the contract term ("السعر حسب النشاط ومدة العقد" /
+# "السعر حسب مدة العقد"). meta.price for these is a junk placeholder — live-observed values were
+# "0" (id 7327 → correctly nulled by the `v<=0` guard above), but also non-zero placeholders "150"
+# (id 7917) and "150000" (id 8092) that the magnitude heuristic happily annualized/scaled into a
+# fabricated real-looking price. Trust the source TEXT over the number here.
+# (fabricated on-request-price fix 2026-07-14; live-verified against eaqartabuk.com ids 7327/7917/8092)
+_ON_REQUEST_RE = re.compile(r"السعر\s*حسب")
+
+
+def _price_on_request(*texts: Optional[str]) -> bool:
+    for t in texts:
+        if t and _ON_REQUEST_RE.search(t):
+            return True
+    return False
+
+
 def map_listing(item: dict, mp: dict, desc_html: Optional[str]) -> tuple[Optional[dict], str]:
     pid = item.get("id")
     if not pid:
@@ -288,6 +305,13 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str]) -> tuple[Optiona
     is_rent = op == "rent" or "إيجار" in status_ar or "ايجار" in status_ar
 
     price_total, price_annual, rent_period = _price(meta.get("price"), is_rent)
+
+    # On-request pricing: the number in meta.price is a placeholder, not a real quote (see
+    # _price_on_request docstring above). Null the price rather than store a fabricated figure;
+    # transaction_type/rent_period-as-Rent-vs-Buy classification still comes from status/operation
+    # (a separate, reliable field) so we keep that — only the price itself is unknown.
+    if _price_on_request(_strip_tags(desc_html), _strip_tags(item.get("excerpt"))):
+        price_total = price_annual = rent_period = None
 
     # Area fallback chain: structured meta.area → candles-map area → parse the description text
     # (where most eaqartabuk listings actually put it, e.g. "مساحة 796").

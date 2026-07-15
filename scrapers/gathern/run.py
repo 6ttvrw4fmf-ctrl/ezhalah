@@ -6,6 +6,22 @@ for a MONTHLY (30-day) stay — Gathern's own "للإيجار الشهري" long
 (chalets/istrahas/resorts/farms/camps) are skipped; this scraper writes ONLY to
 gathern_residential_listings (there is no commercial Gathern inventory).
 
+2026-07-14 price-fidelity re-investigation (GTH212141 / id=725485, reported as "price doesn't match
+anything on the page"): re-verified map_listing()'s price extraction below against the live
+msapi search-units monthly-mode response for that unit and 6 more sampled rows — final_price/price
+IS the correct discounted 30-night monthly figure in every case (e.g. GTH212141: stored monthly=5213
+vs live monthly≈5199, a ~0.2% date-of-request drift, not a bug). There was NO parsing bug here. The
+actual bug was in the click-through layer (src/lib/openListing.ts appended a `?check_in=&check_out=`
+querystring that Gathern's page silently ignores, always rendering an unrelated single-night spot
+price — that's what made a CORRECT stored price look unreconcilable) — fixed in
+src/lib/gathernUrl.ts / src/lib/openListing.ts, not here. See scripts/ops/repair_gathern_prices_2026-07-14.sql
+for the full evidence trail and the separate (larger, still-open) staleness issue this surfaced: a
+sharded cron run only upserts a row if its unit resurfaces in that day's has_available candidate
+pool (crawl() below), so a unit that falls out of the pool never gets its scraped_at/price refreshed
+— 14,048 of 20,413 active rows carry their original 2026-06-23 backfill snapshot untouched. That's a
+cron/prune-architecture question (already flagged in .github/workflows/gathern-sync.yml's own header
+comment as a follow-up), not a fix to the price-extraction logic below.
+
 ──────────────────────────────────────────────────────────────────────────────────────────────
 THE REAL MONTHLY PRICE (the whole point of this file) — Option A, list-API-with-monthly-params:
 ──────────────────────────────────────────────────────────────────────────────────────────────
