@@ -231,3 +231,16 @@ $function$;
 -- OPEN QUESTION FOR OWNER: extend platform_subvertical_cadence to aqar (also an 8-hourly sweep with
 -- its own slug matrix) and other platforms, or ship wasalt-only first since that's the platform
 -- with the confirmed live gap? Not decided here.
+
+-- ─────────────────────────────────────────────────────────────────────────────────────────
+-- ROLLBACK (if this needs to be undone — additive only, safe to drop cleanly):
+--   BEGIN;
+--   DROP FUNCTION IF EXISTS public.check_scraper_subvertical_freshness();
+--   DROP TABLE IF EXISTS public.scraper_subvertical_freshness_alerts;
+--   DROP TABLE IF EXISTS public.platform_subvertical_cadence;
+--   COMMIT;
+-- (If step 1/2/3/4 of the wiring recommendation above were ALSO applied: first run
+-- `select cron.unschedule('subvertical-scraper-freshness-check');`, remove the
+-- 'subvertical-scraper-freshness-check' row from ops_expected_jobs, and drop the
+-- 'scraper_subvertical_freshness' union arm from ops_alerts_v1, before the DROPs above.)
+-- ─────────────────────────────────────────────────────────────────────────────────────────

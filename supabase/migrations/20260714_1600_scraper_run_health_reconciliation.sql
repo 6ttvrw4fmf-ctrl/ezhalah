@@ -244,3 +244,16 @@ $function$;
 -- function design above.
 
 commit;
+
+-- ─────────────────────────────────────────────────────────────────────────────────────────
+-- ROLLBACK (if this needs to be undone — additive only, safe to drop cleanly):
+--   BEGIN;
+--   DROP FUNCTION IF EXISTS public.reconcile_scraper_run_health();
+--   DROP TABLE IF EXISTS public.scraper_run_health_alerts;
+--   ALTER TABLE public.platform_cadence DROP COLUMN IF EXISTS is_active;
+--   COMMIT;
+-- Note: dropping is_active also discards the 8 seeded exclusion notes (toor, aqar, aqar_sweep,
+-- aqar_liveness, deal, dwelleo, semsar, aqarmonthly) — harmless, since they are pure bookkeeping
+-- with no other reader. If cron.schedule('scraper-run-health-check', ...) was separately applied
+-- per the note above, run `select cron.unschedule('scraper-run-health-check');` first.
+-- ─────────────────────────────────────────────────────────────────────────────────────────
