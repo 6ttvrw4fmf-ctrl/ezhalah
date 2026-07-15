@@ -49,7 +49,10 @@ import { ADVANCED_QUESTIONS, MIN_OPTIONS_TO_SHOW, type AdvancedOption } from '@/
 // without an explicit owner instruction.
 function isApartmentOnlyScope(q: SearchQuery): boolean {
   const types = effectiveTypes(q);
-  return q.category === 'Residential' && types.length === 1 && types[0] === 'شقة';
+  // effectiveTypes() returns canonical English keys (propertyTypes.ts), e.g. 'Apartment' — NOT the
+  // Arabic label 'شقة' (that conversion only happens later, at RPC-call time via typeArForTypes()).
+  // Comparing against 'شقة' here always evaluated false — caught live, 2026-07-15.
+  return q.category === 'Residential' && types.length === 1 && types[0] === 'Apartment';
 }
 
 const IS_WEB = Platform.OS === 'web';
