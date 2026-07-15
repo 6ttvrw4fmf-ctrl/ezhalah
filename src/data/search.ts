@@ -103,15 +103,6 @@ export type SearchQuery = {
   // price ≥ min, max → price ≤ max, both → between. Raw digit strings. HARD filter (no closest-above).
   priceMin?: string | null;
   priceMax?: string | null;
-  // Property-age advanced-filter answer («خلّنا نحدد الطلب أكثر» → عمر العقار). Absent → no age filter
-  // (the default; broadens rather than dead-ends, same as every other optional field here).
-  // isNewConstruction=true is جديد — a distinct concept from a numeric property_age, not "age 0".
-  // ageMin/ageMax cover the 5 numeric buckets (أقل من سنة = 0..0, … , ١٠+ سنوات = 10..null). The UI
-  // only ever sets ONE bucket's worth of fields at a time (see applyAnswer in advancedFilters.ts),
-  // but the RPC accepts both independently — OR-NULL safe, unknown age always stays eligible.
-  ageMin?: number | null;
-  ageMax?: number | null;
-  isNewConstruction?: boolean | null;
 };
 
 // Parse a raw digit string ("1,200" / "300" / "") → a positive number, or null when empty/invalid.
