@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from supabase import Client, create_client
 
 from scrapers.common.pii import redact_pii
-from scrapers.common.placeholder_tokens import is_placeholder
+from scrapers.common.placeholder_tokens import PLACEHOLDER_TOKENS, is_placeholder
 
 
 # Load .env once when this module is first imported.
@@ -386,6 +386,7 @@ def end_run(
     allow_empty: bool = False,
     floor: int = 0,
     degraded: bool = False,
+    check_tables: Optional[list[str]] = None,
 ) -> bool:
     """Finalize a scrape_runs row. Returns the EFFECTIVE ok actually written.
 
@@ -399,6 +400,9 @@ def end_run(
       • rows_seen == 0 and not allow_empty         → dead / blocked source
       • floor > 0 and rows_seen < floor            → suspicious partial crawl (per-platform sanity floor)
       • degraded (e.g. prune_unseen returned -1)   → an integrity guard tripped mid-run
+      • check_tables=[...] and a row this run touched fails a field-range sanity check
+        (garbage price, a placeholder location, a blank critical field — "finished successfully"
+        is not the same claim as "the rows it wrote are sane"; see mon_check_run_field_ranges)
     This only ever DEMOTES: an explicit ok=False from an except-block stays False; a healthy
     run stays True. The single legitimate empty run — gathern's commercial no-op — opts out
     with allow_empty=True. Batch-0 detector D1 (mon_detect_silent_scraper_death) alerts on the
@@ -415,6 +419,29 @@ def end_run(
         elif floor > 0 and rows_seen < floor:
             effective_ok = False
             demotions.append(f"rows_seen {rows_seen} < floor {floor} (partial crawl?)")
+        if check_tables:
+            # Monitoring must never fail an already-committed run — the rows are written either
+            # way, this only affects whether the run is HONESTLY reported as degraded.
+            try:
+                run_row = _execute(
+                    sb().table("scrape_runs").select("platform, started_at").eq("id", run_id),
+                    what="scrape_runs.select_for_check",
+                ).data[0]
+                for tbl in check_tables:
+                    field_bad = _execute(
+                        sb().rpc("mon_check_run_field_ranges", {
+                            "p_run_id": run_id,
+                            "p_platform": run_row["platform"],
+                            "p_table": tbl,
+                            "p_since": run_row["started_at"],
+                            "p_placeholder_tokens": list(PLACEHOLDER_TOKENS),
+                        }),
+                        what="mon_check_run_field_ranges",
+                    ).data
+                    if field_bad:
+                        degraded = True
+            except Exception:
+                pass
         if degraded:  # an integrity trip is never OK, even for an allow_empty run
             effective_ok = False
             demotions.append("integrity guard tripped (degraded)")

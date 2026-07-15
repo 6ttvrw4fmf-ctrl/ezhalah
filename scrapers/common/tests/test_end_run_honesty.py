@@ -128,3 +128,116 @@ def test_demotion_note_preserves_the_original_note(written):
     db.end_run(1, ok=True, rows_seen=0, rows_upserted=0, notes="pruned=3")
     notes = written["payload"]["notes"]
     assert "pruned=3" in notes and "RC-B" in notes  # original context kept, reason appended
+
+
+# ── check_tables: the post-run field-range check (2026-07-15) ────────────────────────────────────
+class _FakeFieldCheckTable:
+    """Serves both the .select().eq() lookup (run's platform/started_at) and the final
+    .update().eq() finalize call on the same 'scrape_runs' table name — tracks which chain is
+    active so .execute() returns the right shape for each."""
+
+    def __init__(self, sink, select_data):
+        self._sink = sink
+        self._select_data = select_data
+        self._mode = None
+
+    def select(self, *a, **k):
+        self._mode = "select"
+        return self
+
+    def update(self, payload):
+        self._mode = "update"
+        self._sink["payload"] = payload
+        return self
+
+    def eq(self, *a, **k):
+        return self
+
+    def execute(self):
+        if self._mode == "select":
+            return types.SimpleNamespace(data=self._select_data)
+        return types.SimpleNamespace(data=None)
+
+
+class _FakeRpc:
+    def __init__(self, result):
+        self._result = result
+
+    def execute(self):
+        return types.SimpleNamespace(data=self._result)
+
+
+def _field_check_client(sink, rpc_result, select_data=None):
+    if select_data is None:
+        select_data = [{"platform": "wasalt", "started_at": "2026-07-15T00:00:00+00:00"}]
+    table = _FakeFieldCheckTable(sink, select_data)
+
+    class _Client:
+        def table(self, name):
+            return table
+
+        def rpc(self, name, params):
+            assert name == "mon_check_run_field_ranges"
+            assert params["p_placeholder_tokens"]  # never called with an empty/missing token list
+            return _FakeRpc(rpc_result)
+
+    return _Client()
+
+
+def test_check_tables_none_is_zero_behavior_change(written):
+    # The ~34 existing call sites that never pass check_tables must see NO new code path at all.
+    ret = db.end_run(1, ok=True, rows_seen=100, rows_upserted=100)
+    assert ret is True
+    assert written["payload"]["ok"] is True
+
+
+def test_check_tables_clean_run_stays_healthy(monkeypatch):
+    sink: dict = {}
+    monkeypatch.setattr(db, "sb", lambda: _field_check_client(sink, rpc_result=False))
+    ret = db.end_run(1, ok=True, rows_seen=100, rows_upserted=100,
+                      check_tables=["wasalt_residential_listings"])
+    assert ret is True
+    assert sink["payload"]["ok"] is True
+
+
+def test_check_tables_bad_field_ranges_demotes_ok(monkeypatch):
+    sink: dict = {}
+    monkeypatch.setattr(db, "sb", lambda: _field_check_client(sink, rpc_result=True))
+    ret = db.end_run(1, ok=True, rows_seen=100, rows_upserted=100,
+                      check_tables=["wasalt_residential_listings"])
+    assert ret is False
+    assert sink["payload"]["ok"] is False
+    assert "degraded" in sink["payload"]["notes"]
+
+
+def test_check_tables_rpc_failure_never_breaks_an_already_committed_run(monkeypatch):
+    # Monitoring must never fail a run whose rows are already written — an RPC that doesn't
+    # exist yet / a transient network blip must be swallowed, not raised. sb() is called once
+    # per db.py call site: end_run's try/except spans the select+rpc pair, so a client whose
+    # .table() raises simulates that failure, then a SEPARATE sb() call for the final .update()
+    # (outside the try block) must still land normally.
+    sink: dict = {}
+    calls = {"n": 0}
+
+    class _BoomThenFine:
+        def table(self, name):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("network blip")
+            return _FakeFieldCheckTable(sink, [])
+
+    monkeypatch.setattr(db, "sb", lambda: _BoomThenFine())
+    ret = db.end_run(1, ok=True, rows_seen=100, rows_upserted=100,
+                      check_tables=["wasalt_residential_listings"])
+    assert ret is True  # the check's own failure never demotes a genuinely healthy run
+    assert sink["payload"]["ok"] is True
+
+
+def test_check_tables_placeholder_tokens_always_forwarded(monkeypatch):
+    sink: dict = {}
+    monkeypatch.setattr(db, "sb", lambda: _field_check_client(sink, rpc_result=False))
+    db.end_run(1, ok=True, rows_seen=10, rows_upserted=10,
+               check_tables=["mustqr_residential_listings"])
+    # _field_check_client's fake .rpc() already asserts p_placeholder_tokens is non-empty on
+    # every call — reaching here without an AssertionError proves it was forwarded correctly.
+    assert sink["payload"]["ok"] is True
