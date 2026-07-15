@@ -777,24 +777,25 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
 
   // Shared filter params for BOTH the main recency-window call and the page-0 diversity-seed call below —
   // built once so the two calls can never drift apart (a diversity-seed row must satisfy the exact same
-  // WHERE clause as the main pool, or Rule 1 — filter exactness — would be at risk).
+  // WHERE clause as the main pool, or Rule 1 — filter exactness — would be at risk). Spreads scopeParams
+  // (from resolveSearchScope, computed once above) rather than re-deriving cities/tables/region/scopeB
+  // locally — same single-source-of-truth reasoning as resolveSearchScope's own header comment.
+  //
+  // P0 FIX 2026-07-15: this block previously referenced `cities`, `mainTables`, `scopeB`, and `lm` as bare
+  // local variables — but resolveSearchScope() (added in the same PR) computes ALL of those internally and
+  // returns them via `scope`/`scopeParams`; nothing in this outer function scope defines those names
+  // anymore. That is a ReferenceError on every single search, thrown synchronously inside this async
+  // function, which the caller silently swallowed — the loading state never resolved, no visible error,
+  // no backend call ever made. Caught in dev via a clean local fix that was verified live but never
+  // committed before merge/deploy (process failure, not a code-review gap) — shipped broken to production,
+  // confirmed by the owner's live repro, rolled back via `vercel rollback` to the pre-PR#78 baseline. This
+  // commit is the actual fix, verified against a FRESH CLONE (not a stale worktree) before any redeploy.
   const baseRpcParams = {
-    p_deal: q.bothDeals ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
-    p_rent_period: rentPeriodParam(q),
-    p_cities: cities,
-    p_districts: q.districts && q.districts.length ? q.districts : null,
-    p_tables: mainTables,
-    p_platforms: q.sources && q.sources.length ? q.sources : null,
+    ...scopeParams,
     ...rpcFilterParams(q),
     // Broad Commercial: override rpcFilterParams' p_types (null for a broad macro search) so the residential
     // scope is constrained to commercial type_ar; scope B carries the commercial-tables constraint. (2026-07-09)
     ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
-    ...scopeB,
-    // Region scope (bug-fix #2): pass region_id so same-name twin cities don't fuse cross-region.
-    // A pinned region (twin disambiguated by the agent backstop) wins; else the resolver's region.
-    p_region_ids: q.regionPin
-      ? (REGION_TO_ID[q.regionPin] ? [REGION_TO_ID[q.regionPin]] : null)
-      : regionIdsFor(lm),
     // Property-age advanced-filter answer (2026-07-13). IMPORTANT: only included when actually answered —
     // PostgREST resolves named-parameter RPC calls by exact parameter-name match, so unconditionally
     // sending p_is_new_construction breaks EVERY search with "function not found" until the backend
