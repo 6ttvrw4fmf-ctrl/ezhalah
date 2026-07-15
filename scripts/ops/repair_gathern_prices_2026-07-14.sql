@@ -1,0 +1,179 @@
+-- =============================================================================================
+-- Gathern price/row-fidelity repair — 2026-07-14
+-- =============================================================================================
+-- DO NOT EXECUTE AGAINST PRODUCTION WITHOUT OWNER SIGN-OFF. This file is a prepared, reviewed
+-- artifact only (project rules: Approval-workflow-rule / Price-fidelity-rule — recommend, then WAIT).
+--
+-- ROOT CAUSE — re-investigated 2026-07-14, starting from a report that GTH212141's stored price
+-- (gathern_residential_listings.id=725485) "cannot be reconciled with anything on the page":
+--
+--   THIS IS NOT A SCRAPER PARSING BUG. scrapers/gathern/run.py's map_listing() (line ~307:
+--   `monthly = _num(it.get("final_price")) or _num(it.get("price")) or _num(it.get("avg_price"))`,
+--   line ~312: `price_annual = monthly * 12`) correctly reads the discounted 30-night monthly total
+--   from Gathern's own msapi search-units endpoint called in `calendar_type=monthly` mode. Live
+--   re-verification below PROVES this for GTH212141 and 3 more independently sampled rows —
+--   every one either reconciles exactly or reconciles within ordinary date-of-request drift.
+--
+--   The actual bug was in the CLICK-THROUGH/DISPLAY layer: src/lib/openListing.ts appended
+--   `?check_in=<today>&check_out=<today+30d>` to every Gathern listing_url, believing it would land
+--   the user on the priced monthly view. Live-verified 2026-07-14 that gathern.co's page ignores this
+--   querystring completely — both the bare URL and the date-appended URL render an identical
+--   single-night spot-price view unrelated to the stored monthly figure (confirmed via the page's own
+--   __NEXT_DATA__.props.pageProps.query, which only ever carries {chalet_id, unit_id} — Gathern's
+--   Next.js route never reads check_in/check_out from the querystring at all). That's what made a
+--   CORRECT stored price look unreconcilable on click-through. Fixed in this same branch:
+--   src/lib/gathernUrl.ts (gathernClickThroughUrl — now a pure identity function, no more fake date
+--   params) + src/lib/openListing.ts (routes Gathern URLs through it) + regression test
+--   scripts/verify-gathern-price-display.ts.
+--
+-- SEPARATE, LARGER ISSUE SURFACED BY THIS INVESTIGATION (not a price-parsing bug either, and NOT
+-- fixed by this script — flagged for a dedicated follow-up, same class as the already-gated Batch 3
+-- guarded-inactivation initiative): the daily Gathern cron (.github/workflows/gathern-sync.yml) runs
+-- as a 12-way city-sharded matrix. scrapers/gathern/run.py:~570 skips prune on any `--shard` run (a
+-- shard only sees its slice of cities, so it can't safely prune the rest), and a row is only upserted
+-- (including its `scraped_at`) when its unit actually reappears in that day's `has_available=true`
+-- monthly-window candidate pool. A unit that falls out of that pool (still a real, live listing —
+-- just not currently monthly-available in the API's eyes, or simply paginated past that day) never
+-- gets touched again by any shard. Confirmed live 2026-07-14:
+--   SELECT count(*) FROM gathern_residential_listings WHERE active=true AND scraped_at < '2026-06-24';
+--   → 14,048 rows (of 20,413 active), i.e. 68.8% of the table still carries its original 2026-06-23
+--   backfill snapshot, untouched by ~3 weeks of "successful" daily cron runs.
+-- These 14,048 rows are the ones whose price COULD genuinely have drifted since they were scraped
+-- (real host price changes, not a code bug) — they are the population this script treats as
+-- "affected" and backs up below. Only the handful personally live-verified below get evaluated for
+-- an UPDATE; the rest are listed as "needs manual attention" rather than corrected from any inference.
+--
+-- ── LIVE VERIFICATION EVIDENCE (2026-07-14, replaying the scraper's own API call:
+-- msapi.gathern.co/search/api/v1/search-units?lang=ar&city={id}&page={n}&calendar_type=monthly
+-- &check_in=2026-07-15&check_out=2026-08-14&has_available=true, paged until the target unit id was
+-- found or 2 consecutive empty pages) — every number below is quoted verbatim from that live JSON,
+-- nothing estimated ────────────────────────────────────────────────────────────────────────────────
+--
+-- ① GTH212141 (id=725485, Buraidah, msapi city=11) — THE ORIGINALLY REPORTED ROW:
+--   stored:  monthly_price=5213 before_discount=5666 nightly_price=189 discount_label="خصم 7%"
+--            scraped_at=2026-06-23 14:22:50, price_annual=62556 (=5213×12)
+--   live (found page 11 of 67): {"final_price":5198.92,"price":"5,198.92",
+--            "price_before_discount":"5,651","oldPrice":5651,"day_price_format":"188.37",
+--            "discount_label":"خصم 7%","nights":30,"long_stay":true}
+--   → RECONCILES. Δ final_price: 5213→5199 (0.27%); Δ before_discount: 5666→5651 (0.26%); nightly
+--     189→188.37; discount_label identical. This is ordinary date-of-request drift over the 3-week
+--     gap since scraped_at (Gathern's msapi returns a slightly different figure each day depending on
+--     the rolling 30-day window), NOT a real price change or a parsing error. NO UPDATE.
+--
+-- ② GTH141609 (id lookup: ad_number GTH141609, Medina, msapi city=14):
+--   stored:  monthly_price=3325 before_discount=6650 nightly_price=222 discount_label="خصم 50%"
+--            scraped_at=2026-06-23 14:25:26
+--   live (found page 41 of 113): {"final_price":3325,"price":"3,325",
+--            "price_before_discount":"6,650","oldPrice":6650,"day_price_format":"221.67",
+--            "discount_label":"خصم 50%","nights":30,"long_stay":true}
+--   → RECONCILES EXACTLY (3325=3325, 6650=6650, 222≈221.67 rounded, discount label identical).
+--     NO UPDATE.
+--
+-- ③ GTH199973 (ad_number GTH199973, Hail, msapi city=10):
+--   stored:  monthly_price=11542 before_discount=14250 nightly_price=475 discount_label="خصم 19%"
+--            scraped_at=2026-06-23 14:23:27
+--   live (found page 68 of 83): {"final_price":11542.5,"price":"11,542.50",
+--            "price_before_discount":"14,250","oldPrice":14250,"day_price_format":"475",
+--            "discount_label":"خصم 19%","nights":30,"long_stay":true}
+--   → RECONCILES (11542 vs 11542.5 — the stored value is the truncated int of the same live figure,
+--     matching the scraper's own `_num()` truncation behavior; before_discount/nightly/discount all
+--     identical). NO UPDATE.
+--
+-- ④ GTH210566 (ad_number GTH210566, Mecca, msapi city=6):
+--   stored:  monthly_price=9700 before_discount=(n/a) scraped_at=2026-06-23 14:22:30
+--   live: searched ALL 52 pages of Mecca's monthly-mode result set (totalCount meta=497,
+--     pageCount=50 — ran 2 pages past that to confirm 2 consecutive empty pages) — unit 210566
+--     NEVER APPEARED. It has fallen out of the daily has_available candidate pool entirely (the
+--     frozen-row/no-prune bug described above), so there is currently NO live source to confirm or
+--     correct its price against. CANNOT VERIFY → excluded from UPDATEs, listed under "needs manual
+--     attention" below. (The unit's own page still resolves per the original investigation's part-A
+--     check; only the monthly-priced search listing is unreachable.)
+--
+-- RESULT: none of the 4 personally-verified rows need a price correction — the 3 found either
+-- reconcile exactly or within date-drift noise; the 4th cannot currently be verified at all. This
+-- script therefore contains ZERO repair UPDATEs. It still performs the backup step (the full 14,048-
+-- row frozen population, in case a future verification pass DOES find a real correction to apply
+-- retroactively) and documents the "needs manual attention" population precisely.
+-- =============================================================================================
+
+BEGIN;
+
+-- ---------------------------------------------------------------------------------------------
+-- Step 1: backup EVERY affected row (all rows active=true AND scraped_at < the 2026-06-24 cutoff —
+-- the frozen-price population this investigation identified, 14,048 rows as of 2026-07-14) before
+-- anything is ever touched. Additive, create-if-not-exists — never overwrites a prior backup run.
+-- Uses the same WHERE-clause criterion rather than a hand-enumerated id list because the population
+-- is far too large (14,048 rows) to safely hand-transcribe without transcription error; the
+-- criterion itself is exact, reproducible, and matches the SELECT COUNT(*) quoted above.
+-- ---------------------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS gathern_residential_listings_backup_20260714
+  (LIKE gathern_residential_listings INCLUDING ALL);
+
+INSERT INTO gathern_residential_listings_backup_20260714
+SELECT * FROM gathern_residential_listings
+WHERE active = true
+  AND scraped_at < '2026-06-24'
+ON CONFLICT (id) DO NOTHING;
+
+-- ---------------------------------------------------------------------------------------------
+-- Step 2: repair batches (≤25 rows each, per task convention). NONE THIS ROUND — see "RESULT" above.
+-- All 4 rows personally live-verified today (2026-07-14) either reconcile with the stored value
+-- (GTH212141, GTH141609, GTH199973 — no correction needed, nothing to UPDATE) or could not be
+-- verified at all (GTH210566 — excluded, see "needs manual attention"). No UPDATE statement in this
+-- file was written from an estimate, average, or guess, per the hard rule for this task; since no
+-- verified row actually needed correcting, none is included.
+--
+-- Template for the next verification pass to follow (kept here so a future run doesn't have to
+-- reinvent the guard pattern — the WHERE clause must always include the currently-stored value so a
+-- re-run is a no-op if the row already changed):
+--
+-- UPDATE gathern_residential_listings
+-- SET price_annual = <live_final_price * 12>,
+--     additional_info = additional_info
+--       || jsonb_build_object(
+--            'monthly_price', <live_final_price>,
+--            'monthly_price_before_discount', <live_price_before_discount>,
+--            'nightly_price', <live_day_price_format>,
+--            'discount_label', <live_discount_label>
+--          )
+-- WHERE id = <id>
+--   AND additional_info->>'monthly_price' = '<currently_stored_monthly_price>';
+-- ---------------------------------------------------------------------------------------------
+
+COMMIT;
+
+-- ---------------------------------------------------------------------------------------------
+-- NEEDS MANUAL ATTENTION
+-- ---------------------------------------------------------------------------------------------
+-- (a) GTH210566 (Mecca) — live msapi monthly search exhaustively checked (52 pages, 2 consecutive
+--     empty pages past the reported pageCount) and the unit never appeared. Its price cannot
+--     currently be confirmed or corrected against any live monthly-mode source. Needs either (i) a
+--     different verification mechanism (e.g. a direct booking-calendar probe of the unit page,
+--     which is out of scope for this task and was already shown in the original investigation to
+--     render an unrelated single-night spot price, not the monthly figure) or (ii) waiting for the
+--     unit to re-enter the daily candidate pool naturally.
+--
+-- (b) The remaining ~14,044 frozen rows (14,048 total minus the 4 sampled above) were NOT
+--     individually live-verified in this task — there is no way to respect the "never guess a
+--     corrected value" rule at this scale within one pass. They are backed up in Step 1 and remain
+--     untouched. Recommended remediation path (an owner decision, same class as the still-open
+--     Batch 3 guarded-inactivation initiative — NOT executed here):
+--       SELECT id, ad_number, listing_url, city, scraped_at
+--       FROM gathern_residential_listings
+--       WHERE active = true AND scraped_at < '2026-06-24'
+--       ORDER BY scraped_at ASC;
+--     Either re-run scrapers/gathern/run.py per-city (not sharded) against this exact id list so the
+--     normal upsert path naturally corrects/re-timestamps each one, or build the cross-shard
+--     artifact-union prune already flagged as a TODO in .github/workflows/gathern-sync.yml's header
+--     comment so this stops recurring.
+-- =============================================================================================
+
+-- ---------------------------------------------------------------------------------------------
+-- Post-repair verification query (no-op today since Step 2 has no UPDATEs; kept for the next pass
+-- that does add batches):
+-- ---------------------------------------------------------------------------------------------
+-- SELECT id, ad_number, listing_url, price_annual, additional_info->>'monthly_price' AS monthly_price
+-- FROM gathern_residential_listings
+-- WHERE id IN (/* the ids updated above, once any batch is added */)
+-- ORDER BY id;
+-- =============================================================================================
