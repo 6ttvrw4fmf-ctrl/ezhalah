@@ -369,6 +369,41 @@ runQuery(q):  normalize (Room=1) ─► resolveLocation()/ensureLocationIndex() 
   `alnokhba_residential_listings_backup_20260714` and set `active=false` by exact id (never a
   blanket `WHERE`). `scrapers/alnokhba/` stays so historical listings keep their scraper
   provenance. **Do not re-add without confirming the domain serves real listings again.**
+  **muktamel** — weekly workflow (`gh-muktamel-weekly`, `cron.job` id 14) paused 2026-07-15
+  (`cron.alter_job(14, active := false)`, reversible via the symmetric call). Never completed a
+  single full-range crawl (every GitHub Actions run killed by its own 330-minute timeout mid-crawl,
+  zero progress-log lines printed); both `muktamel_residential_listings` and
+  `muktamel_commercial_listings` are already at 0 active rows, so this has no user-facing search
+  impact — it only stops burning ~5.5 GH Actions compute-hours every Monday. Historical rows kept.
+  **Re-enable only after the scraper itself is rebuilt** (its enumeration approach needs redesigning,
+  not just a longer timeout).
+  **deal** — retired 2026-06-26 (`platform_registry.status='retired'`, "excluded from search").
+  `scrapers/deal/` still exists but is not wired into any scheduled workflow or cron job; only 2
+  `scrape_runs` rows ever (last 2026-06-21, one failed on an invalid-smallint cast). 0 active rows
+  in `deal_residential_listings`/`deal_commercial_listings` today.
+  **dwelleo, semsar** — `scrapers/dwelleo/` and `scrapers/semsar/` no longer exist in this repo (code
+  removed at some point). `scrape_runs` shows dwelleo ran 4 times (last 2026-06-23, 1,540 rows on
+  its last successful run) and semsar ran once (2026-06-22, 72 rows) — genuine, working scrapers at
+  the time, not broken stubs. **No commit message, PR, or doc entry explaining the removal was found
+  in this investigation (2026-07-15).** The code deletion itself is a strong signal the removal was
+  deliberate, but the *reason* is undocumented — flagged for explicit owner confirmation rather than
+  assumed; historical listing rows from both are untouched either way.
+- **`aqar_liveness` / `aqar_sweep` scrape_runs labels** — two old `scrape_runs.platform` values with
+  a handful of `reaped: abandoned run` rows, last written mid-June. These are stale artifacts of a
+  prior logging scheme, **not** evidence that Aqar liveness is broken: the real, currently-scheduled
+  mechanism (`gh-aqar-liveness`, `cron.job` id 6, daily `01:00`, described above) is confirmed healthy
+  — `cron.job_run_details` shows `succeeded` every day through 2026-07-15. Do not treat the dead
+  `aqar_liveness`/`aqar_sweep` platform rows in `scrape_runs` as a live-alerting gap.
+- **`purge-inactive-listings`** (`cron.job` id 11, weekly Fri 22:00, `public.purge_inactive_listings()`
+  — hard-DELETEs `active=false` rows) — **disabled since ~2026-07-03**, reason not previously
+  recorded. **Recommend keeping it disabled**: re-enabling it would hard-delete the very rows this
+  pass just deliberately preserved (Toor's 23 archived rows, Alnokhba's 6). Re-enable only after
+  deciding how long an inactivated row should be kept queryable/reversible before permanent deletion
+  — this is an owner call, not something to flip back on by default.
+- **`gh-wasalt-liveness-hybrid`** (`cron.job` id 32) — disabled since 2026-07-09, **intentional**:
+  superseded by the newer enumeration-based `gh-wasalt-enum-liveness` (`cron.job` id 36), which has
+  been running daily and clean since 2026-07-13. Safe to leave off; formally retire the hybrid
+  workflow file once the enum-liveness approach has a longer track record.
 - **Ingestion sanitize (`scrapers/common/db.py`):** `_sanitize_price()` / `_sanitize_ints()` coerce
   numeric strings → int and **NULL non-numeric/bool/nan/junk** for every int column (fix 2026-07-06,
   PR #29 — a non-numeric `property_age="New"` previously failed the smallint cast and dropped the whole
