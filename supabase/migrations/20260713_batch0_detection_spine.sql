@@ -54,7 +54,8 @@ insert into public.platform_registry(platform, status, expected_cadence_hours, n
   ('satel','active',24,null), ('sadin','active',24,null), ('awal','active',24,null),
   ('souq24','active',24,null), ('erapulse','active',24,null), ('mizlaj','active',24,null),
   ('alhoshan','active',24,null), ('nowaisiry','active',24,null), ('fursaghyr','active',24,null),
-  ('jurash','active',24,null), ('october','active',24,null), ('alnokhba','active',24,'audit: ok=true/seen=0 x5 — investigate'),
+  ('jurash','active',24,null), ('october','active',24,null),
+  ('alnokhba','retired',9999,'deprecated 2026-07-14, alnokhba-services.com domain lapsed to a parking page; removed from small-sources-sync.yml matrix'),
   ('deal','retired',9999,'deprecated 2026-06-26, excluded from search'),
   ('toor','retired',9999,'retired 2026-07-06, host IP-blocks'),
   ('muktamel','retired',9999,'dormant, weekly job cancels; 0 rows ever')
