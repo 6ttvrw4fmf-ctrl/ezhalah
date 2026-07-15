@@ -421,7 +421,7 @@ function sourceName(source: string): string {
   if (s.includes('eastabha')) return 'East Abha Real Estate';
   if (s.includes('aqarcity')) return 'Aqar City';
   if (s.includes('raghdan')) return 'Raghdan Real Estate';
-  if (s.includes('eaqartabuk')) return 'Candles';
+  if (s.includes('eaqartabuk')) return 'Eqar Tabuk';
   if (s.includes('satel')) return 'Satel';
   if (s.includes('sadin')) return 'Sadin for Real Estate';
   if (s.includes('toor')) return 'TOOR';
@@ -431,7 +431,7 @@ function sourceName(source: string): string {
   if (s.includes('jazwtn')) return 'Jazan Watan';
   if (s.includes('mizlaj')) return 'Mizlaj Real Estate';
   if (s.includes('muktamel')) return 'Muktamel';
-  if (s.includes('aqaratikom')) return 'Aqaratikom';
+  if (s.includes('aqaratikom')) return 'Nawait';
   if (s.includes('awal')) return 'Awal United for Real Estate';
   if (s.includes('alkhaas')) return 'Al Khaas';
   if (s.includes('abeea')) return 'Abeea Real Estate';
