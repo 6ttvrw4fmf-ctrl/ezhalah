@@ -644,7 +644,7 @@ const AR: Record<string, string> = {
   'East Abha Real Estate':             'شرق أبها للخدمات العقارية',
   'Aqar City':                         'عقار ستي',
   'Raghdan Real Estate':               'رغدان للعقارات',
-  'Candles':                           'كاندلز عقار تبوك',
+  'Eqar Tabuk':                        'عقار تبوك', // corrected 2026-07-15: was 'Candles'/'كاندلز عقار تبوك', an invented label with no basis on the real site (eaqartabuk.com self-brands as عقار تبوك)
   'Satel':                             'ساتل العقارية',
   'Sadin for Real Estate':             'مكتب سدين للعقارات',
   'TOOR':                              'منصة توور',
@@ -654,7 +654,7 @@ const AR: Record<string, string> = {
   'Jazan Watan':                       'جازان وطن',
   'Mizlaj Real Estate':                'مؤسسة مزلاج العقارية',
   'Muktamel':                          'مكتمل',
-  'Aqaratikom':                        'عقاراتكم',
+  'Nawait':                            'نويت', // corrected 2026-07-15: was 'Aqaratikom'/'عقاراتكم' — the scraper's target (aqaratikom.com → backend nawait.sa, see scrapers/aqaratikom/run.py) now self-brands as نويت/Nawait on its live site; internal name/table keys ('Aqaratikom') are unchanged, only this display label
   'Awal Real Estate':                  'أوال العقارية',
   'Awal United for Real Estate':       'أوال المتحدة العقارية', // official (their X @awaalun: «مؤسسة أوال المتحدة العقارية»)
   'Al Khaas':                          'الخاص للاستثمار العقاري',
@@ -722,7 +722,7 @@ const AR: Record<string, string> = {
   'Number of Parkings':                 'عدد المواقف',
   'Building age (years)':               'عمر البناء (بالسنوات)',
   'Ad license number':                  'رقم رخصة الإعلان',
-  // New-platform additional-info labels (Aqarcity/Eastabha/Sanadak/Raghdan/Candles/Satel/Sadin).
+  // New-platform additional-info labels (Aqarcity/Eastabha/Sanadak/Raghdan/Eqar Tabuk/Satel/Sadin).
   'Amenities':                          'المرافق',
   'Furnishing':                         'التأثيث',
   'Kitchens':                           'المطابخ',

@@ -1058,21 +1058,21 @@ export default function Agent() {
     askCountRef.current = 0;
     saidRef.current = [];
     runRef.current = makeRun();
-    // Filter search: open at the top and let the request bubble type itself out. The SEARCHING loader
-    // (full platform roster + highlight wave) appears IMMEDIATELY below the bubble — something is
-    // moving from the very first frame; the query itself starts once the bubble finishes
-    // (onBubbleDone). (owner 2026-07-09: the logo animation starts the moment Search is pressed.)
+    // Filter search: open at the top and let the request bubble type itself out FIRST, on its own —
+    // the SEARCHING loader (full platform roster + highlight wave) does not mount until the bubble
+    // has fully finished typing (onBubbleDone). (owner 2026-07-15: reversed from the prior "loader
+    // starts the instant Search is pressed" behavior — the sentence must be fully readable before any
+    // platform logo or search animation appears, never simultaneously.)
     pinModeRef.current = 'top';
     const { bubble, sub } = override ?? filterToChat(q);
     const statusId = uid();
     pendingFilterRef.current = { q, sub, statusId };
-    searchingAtRef.current[statusId] = Date.now();
-    setMsgs((m) => [...m, { id: uid(), role: 'user', text: bubble, typing: true }, { id: statusId, role: 'status', phase: 'searching', query: q }]);
+    setMsgs((m) => [...m, { id: uid(), role: 'user', text: bubble, typing: true }]);
     toTop();
   };
 
-  // Request bubble finished typing → run the SAME beats a typed chat search gets: "Ezhalah is
-  // thinking…" → the reply (the price-math note + "Here are villa…") types out → "Ezhalah is
+  // Request bubble finished typing → NOW mount the searching loader (platform roster) and run the
+  // SAME beats a typed chat search gets: "Ezhalah is thinking…" → the reply types out → "Ezhalah is
   // searching…" → "Here is what I found:" + the cards. (user request — the filter flow used to skip
   // straight to the reply+cards; now it reads identically to the chat.)
   const onBubbleDone = () => {
@@ -1082,9 +1082,12 @@ export default function Agent() {
     pinModeRef.current = 'none';
     const run = runRef.current ?? makeRun();
     runRef.current = run;
-    // The searching status (full platform roster, highlight wave) has been on screen since Search was
-    // pressed (sendFilter) — here we just kick off the real query against that same status bubble.
+    // The searching status (full platform roster, highlight wave) mounts HERE — only after the
+    // request bubble has fully finished typing, never before or simultaneously with it.
     const statusId = pending.statusId;
+    searchingAtRef.current[statusId] = Date.now();
+    setMsgs((m) => [...m, { id: statusId, role: 'status', phase: 'searching', query: pending.q }]);
+    toBottom();
     void (async () => {
       // Fetch the matching subset DURING the loading animation — the network wait hides inside the
       // thinking→searching choreography (no post-network hold: playListings morphs to results as soon
