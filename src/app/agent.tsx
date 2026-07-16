@@ -60,6 +60,10 @@ const AGE_FILTER_TYPES = new Set<string>([
                           // scopes (الرياض/إيجار 1,127 rows, all 5 buckets; جدة/إيجار 425), self-protecting
                           // thresholds hide it elsewhere. macro=Residential, counts==search parity confirmed
                           // (الرياض cnt_3_5=220==search 220, all 220 strictly in [3,5], zero unknown).
+  'Floor',                // دور, added 2026-07-16 (final rollout step): الرياض/إيجار has a genuine 5-bucket
+                          // spread (new 280/1-2 73/3-5 446/6-9 246/10+ 200); الرياض/بيع (9,839) skews «new»
+                          // but all 5 buckets still clear MIN_REAL_BUCKET_COUNT. macro=Residential,
+                          // counts==search parity confirmed (الرياض/إيجار cnt_3_5=446==search 446, all strict).
 ]);
 function isAgeFilterScope(q: SearchQuery): boolean {
   const types = effectiveTypes(q);
