@@ -11,6 +11,17 @@ This is the STANDING ongoing counterpart to the one-time local backfill: once th
 existing ~58k rows (ar_fetched=true), this only processes the daily TRICKLE of brand-new listings, so
 it stays cheap on the cloud Saudi proxy (bounded by --limit, sharded by ad_number last digit).
 
+RETRY PASS (2026-07-16 backlog fix): definitive fetch errors (404/noNEXT/noslug) used to be marked
+ar_fetched=true with ar_data={'_err':…} and then NEVER looked at again — 738 active rows accumulated
+with city_ar/district_ar/region_id all NULL, even though 90% of them were re-captured by the list
+scraper afterwards (run.py refreshes listing_url with the CURRENT slug on every upsert, so a slug
+that drifted between capture and enrichment 404s once and would succeed on retry). Each run now also
+re-attempts a BOUNDED batch of previously-errored rows (--retry-errs, oldest ar_fetched_at first,
+>=24h between attempts on the same row). Every definitive failure increments ar_data._errn; at
+ERR_MAX_ATTEMPTS the row is parked (ar_data._parked=true) and permanently leaves the retry queue —
+truly-dead listings are owned by the liveness sweep (active=false), which also removes them here.
+The cap keeps the extra metered-proxy spend flat (<=retry_errs detail fetches per run).
+
 Run (local — user's own Saudi IP, free bandwidth):
   python -m scrapers.wasalt.enrich_ar --table wasalt_residential_listings --limit 800 --workers 6
 Cloud picks up WASALT_PROXY_URL from the env automatically (Saudi residential proxy); --limit bounds
@@ -26,7 +37,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -125,11 +136,46 @@ def _slug(url: Optional[str]) -> Optional[str]:
     return url.rsplit("/property/", 1)[-1] if url and "/property/" in url else None
 
 
+# Definitive-error retry policy: a row gets this many DEFINITIVE attempts (404/noNEXT/noslug — each
+# >=24h apart via --err-backoff-hours) before it is parked forever. Transient failures never count.
+# Truly-dead listings normally leave the queue earlier anyway: the liveness sweep flips them
+# active=false within ~3 sweeps, and the retry query only selects active rows.
+ERR_MAX_ATTEMPTS = 5
+
+
+def bump_err(err: dict, prev_ar_data: Any) -> dict:
+    """Attempt bookkeeping for a definitive enrichment error. Returns the ar_data to store: the new
+    error marker plus `_errn` (total definitive attempts so far) and, once ERR_MAX_ATTEMPTS is
+    reached, `_parked: true` — which permanently removes the row from the retry queue (the standing
+    selection filters on `ar_data->_parked is null`). Rows written before this counter existed
+    (bare `{'_err': …}`, incl. the legacy `{'_err': 'transient'}` stamps from 2026-06-25) count as
+    ONE prior attempt. Pure — unit-tested in scrapers/common/tests/test_wasalt_enrich_ar_retry.py."""
+    prev_n = 0
+    if isinstance(prev_ar_data, dict) and "_err" in prev_ar_data:
+        try:
+            prev_n = max(1, int(prev_ar_data.get("_errn") or 1))
+        except (TypeError, ValueError):
+            prev_n = 1
+    out = dict(err)
+    out["_errn"] = prev_n + 1
+    if out["_errn"] >= ERR_MAX_ATTEMPTS:
+        out["_parked"] = True
+    return out
+
+
+def retry_eligible(ar_data: Any) -> bool:
+    """Client-side mirror of the server-side retry filter (defence in depth): only a stored ERROR
+    marker that has not been parked is ever re-fetched — never a successful payload, never a parked
+    row, never a row with no ar_data."""
+    return isinstance(ar_data, dict) and "_err" in ar_data and not ar_data.get("_parked")
+
+
 def fetch_ar(slug: str) -> tuple[bool, Optional[dict], Optional[str], Optional[str]]:
     """Return (ok, ar_data, city_ar, district_ar).
     ok=False  → transient (network / 429 / 403 block / retries exhausted): leave ar_fetched=false so a
                 later run retries. ok=True with ar_data={'_err':…} → page loaded but no usable payload
-                (404/410/no __NEXT_DATA__): mark done so we don't retry forever."""
+                (404/410/no __NEXT_DATA__): mark done for THIS run; the bounded retry pass re-attempts
+                such rows (oldest-first, >=24h apart) up to ERR_MAX_ATTEMPTS, then parks them."""
     s = _session()
     for attempt in range(3):
         _throttle()
@@ -156,7 +202,8 @@ def fetch_ar(slug: str) -> tuple[bool, Optional[dict], Optional[str], Optional[s
 
 
 def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1,
-                 max_pending: int = 5000, allow_backfill: bool = False) -> dict[str, int]:
+                 max_pending: int = 5000, allow_backfill: bool = False,
+                 retry_errs: int = 100, err_backoff_hours: float = 24.0) -> dict[str, int]:
     _load_catalog()
     c = db.sb()
     # Circuit breaker (owner 2026-07-07): steady state is a few brand-new rows/day. A sudden large
@@ -184,10 +231,12 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
     def work(row: dict) -> None:
         sl = _slug(row.get("listing_url"))
         if not sl:
-            # No slug → can't fetch; mark done with an error marker so it doesn't churn forever.
+            # No slug → can't fetch; error marker + attempt counter (a later re-capture can refresh
+            # listing_url, so a few retries are worth it — they cost zero proxy fetches).
             try:
                 c.table(table).update({"ar_fetched": True, "ar_fetched_at": _now_iso(),
-                                       "ar_data": {"_err": "noslug"}}).eq("id", row["id"]).execute()
+                                       "ar_data": bump_err({"_err": "noslug"}, row.get("ar_data"))
+                                       }).eq("id", row["id"]).execute()
             except Exception:
                 pass
             with lock:
@@ -195,10 +244,14 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
             return
         ok, d, city_ar, dist_ar = fetch_ar(sl)
         if not ok:
-            # Transient — leave ar_fetched=false so a later run retries this row.
+            # Transient — row left untouched: a pending row keeps ar_fetched=false, a retry row
+            # keeps its old ar_fetched_at (stays at the front of the oldest-first retry queue).
+            # Transient failures never consume a definitive attempt.
             with lock:
                 stats["fail"] += 1
             return
+        if "_err" in d:
+            d = bump_err(d, row.get("ar_data"))
         upd: dict[str, Any] = {"ar_fetched": True, "ar_fetched_at": _now_iso(), "ar_data": d}
         if city_ar:
             upd["city_ar"] = city_ar
@@ -224,6 +277,34 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
     with ThreadPoolExecutor(max_workers=workers) as ex:
         list(ex.map(work, rows))
     print(f"   ✓ {table}: ok={stats['ok']} empty={stats['empty']} fail={stats['fail']}", flush=True)
+
+    # ── Bounded retry pass over previously-errored rows (runs AFTER the pending pass so brand-new
+    # listings always get bandwidth first; its own cap keeps proxy spend flat). Oldest failure
+    # first; each definitive re-failure refreshes ar_fetched_at, sending the row to the back of
+    # the queue for >=err_backoff_hours. Parked rows are excluded server-side forever.
+    retry_rows: list[dict] = []
+    if retry_errs > 0:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=err_backoff_hours)).isoformat()
+        rq = (c.table(table).select("id,ad_number,listing_url,ar_data")
+              .eq("active", True).eq("ar_fetched", True)
+              .not_.is_("ar_data->_err", "null")
+              .is_("ar_data->_parked", "null")
+              .lt("ar_fetched_at", cutoff))
+        if shards == 10:
+            rq = rq.like("ad_number", f"%{shard}")
+        fetched = rq.order("ar_fetched_at").limit(retry_errs).execute().data or []
+        retry_rows = [r for r in fetched if retry_eligible(r.get("ar_data"))]
+    stats["retry_attempted"] = len(retry_rows)
+    if retry_rows:
+        pre = {k: stats[k] for k in ("ok", "empty", "fail")}
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            list(ex.map(work, retry_rows))
+        stats["retry_ok"] = stats["ok"] - pre["ok"]
+        stats["retry_empty"] = stats["empty"] - pre["empty"]
+        stats["retry_fail"] = stats["fail"] - pre["fail"]
+        print(f"   ↻ {table} err-retry: attempted={len(retry_rows)} recovered={stats['retry_ok']} "
+              f"still-err={stats['retry_empty']} transient={stats['retry_fail']}", flush=True)
+
     stats["pending_before"] = pending
     return stats
 
@@ -241,6 +322,13 @@ def main() -> int:
                          "exist — a mass backlog means a flag reset, not the normal daily trickle.")
     ap.add_argument("--allow-backfill", action="store_true",
                     help="Override the circuit breaker to deliberately crawl a large backlog through the proxy.")
+    ap.add_argument("--retry-errs", type=int, default=100,
+                    help=f"Also re-attempt up to this many previously-errored rows (ar_data._err, oldest "
+                         f"first, one attempt per row per --err-backoff-hours, parked forever after "
+                         f"{ERR_MAX_ATTEMPTS} definitive failures). 0 disables. Bounds the extra metered-"
+                         f"proxy spend per run.")
+    ap.add_argument("--err-backoff-hours", type=float, default=24.0,
+                    help="Minimum hours between two attempts on the same errored row (default 24).")
     args = ap.parse_args()
     # Own platform name per table, DISTINCT from the real scraper's own 'wasalt' scrape_runs rows —
     # this is backlog-processing throughput (rows_seen = pending backlog at start), not "listings
@@ -250,7 +338,8 @@ def main() -> int:
     platform = f"wasalt_enrich_ar_{suffix}"
     run_id = db.begin_run(platform)
     stats = enrich_table(args.table, args.limit, args.workers, args.shard, args.shards,
-                          args.max_pending, args.allow_backfill)
+                          args.max_pending, args.allow_backfill,
+                          args.retry_errs, args.err_backoff_hours)
     aborted = stats.get("aborted", 0)
     ok_count, empty_count, fail_count = stats.get("ok", 0), stats.get("empty", 0), stats.get("fail", 0)
     attempted = ok_count + empty_count + fail_count
@@ -261,6 +350,7 @@ def main() -> int:
     db.end_run(
         run_id, ok=run_ok, rows_seen=stats.get("pending_before", 0), rows_upserted=ok_count + empty_count,
         notes=(f"ok={ok_count} empty={empty_count} fail={fail_count} aborted={aborted} "
+               f"retried={stats.get('retry_attempted', 0)} recovered={stats.get('retry_ok', 0)} "
                f"limit={args.limit} allow_backfill={args.allow_backfill}"),
         # allow_empty: unlike a scraper (rows_seen==0 → dead/blocked source, a real problem), this job's
         # rows_seen is the PENDING BACKLOG at start — 0 pending is the ideal steady-state once this fix
