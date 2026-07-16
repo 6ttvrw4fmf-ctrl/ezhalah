@@ -18,6 +18,14 @@ on:
         description: "Max rows per table this run (bounds proxy bandwidth; default 2000)"
         required: false
         default: "2000"
+      max_pending:
+        description: "Circuit breaker: abort with no proxy fetches if the un-fetched backlog exceeds this many rows (default 5000)"
+        required: false
+        default: "5000"
+      allow_backfill:
+        description: "Override the circuit breaker to deliberately drain a large backlog through the proxy (true/false)"
+        required: false
+        default: "false"
 
 concurrency:
   group: wasalt-enrich-ar
@@ -49,8 +57,11 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
           SCRAPE_MIN_INTERVAL: "0.3"
+          ALLOW_BACKFILL_FLAG: ${{ (github.event.inputs.allow_backfill == 'true') && '--allow-backfill' || '' }}
         run: |
           python -m scrapers.wasalt.enrich_ar \
             --table ${{ matrix.table }} \
             --limit ${{ github.event.inputs.limit || 2000 }} \
-            --workers 6
+            --workers 6 \
+            --max-pending ${{ github.event.inputs.max_pending || 5000 }} \
+            $ALLOW_BACKFILL_FLAG
