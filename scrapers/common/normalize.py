@@ -28,6 +28,15 @@ TYPE_MAP_AR = {
     "مخيم":    "Camp",
     "عمارة":   "Building",
     "عماره":   "Building",
+    # ── Mapping standardization (2026-07-16, owner-approved) ── the أرض specializations sit BEFORE
+    # the bare "أرض" key so map_type()'s substring pass (insertion-ordered) prefers the specific
+    # term in phrases ("أرض زراعية للبيع" → Farm, not Residential Land). Exact inputs were already
+    # safe (map_type_exact runs first); this ordering makes the PHRASE path agree. Values are the
+    # owner-approved fleet-wide truths: أرض تجارية keeps eastabha's Commercial Land (promoted from
+    # its override), أرض زراعية takes mustqr's Farm (matches the owner's مزرعة precedent).
+    "أرض تجارية": "Commercial Land",
+    "أرض زراعية": "Farm",
+    "ارض زراعية": "Farm",
     "أرض":     "Residential Land",
     "ارض":     "Residential Land",
     "مكتب":    "Office",
@@ -54,6 +63,16 @@ TYPE_MAP_AR = {
     "كافيه":    "Shop",          # eastabha
     "كافيه - لاونج": "Shop",     # eastabha
     "حوش":      "House",         # mustqr (Hail vocab: walled house/yard property)
+    # ── Mapping standardization (2026-07-16, owner-approved fix/mapping-standardization) ──
+    # دوبلكس/استوديو are now first-class clean types fleet-wide (searchable in both table kinds
+    # post-#98; type_label_ar/known_type_ar carry both — verified live 2026-07-16). Values are
+    # eastabha's (the platform that never folded them); the wasalt/aldarim Villa/Apartment folds
+    # in TYPE_MAP_EN below were removed in the same pass. No substring interaction with any
+    # pre-existing key (verified), so appended last per the unification convention.
+    "دوبلكس":   "Duplex",
+    "دوبليكس":  "Duplex",
+    "استوديو":  "Studio",
+    "ستوديو":   "Studio",
 }
 
 # Aqar URL slug → canonical English property type (matches Ezhalah's taxonomy).
@@ -167,13 +186,18 @@ REGION_CITIES = {
              # lockstep with the 2026-07-16 CITY_MAP_AR unification additions (all four Asir; region
              # values verbatim from eastabha's private CITY_TO_REGION, agreeing with the 99-city map
              # in scrapers/wasalt/recover_other.py):
-             "Al Namas", "Tanomah", "Dhahran Al Janub", "Al Birk"],
+             "Al Namas", "Tanomah", "Dhahran Al Janub", "Al Birk",
+             # 2026-07-16 mapping standardization: precise towns unfolded from Wasalt's
+             # Khamis Mushait / Al Baha city folds (CITY_MAP_EN above + eastabha's overrides):
+             "Sarat Abidah"],
     "Tabuk": ["Tabuk", "Duba", "Al Wajh", "Tayma"],
     "Hail": ["Hail", "Baqaa", "Al Ghazalah", "Ash Shanan"],
     "Northern Borders": ["Arar", "Rafha", "Turaif"],
     "Jazan": ["Jazan", "Sabya", "Abu Arish", "Samtah", "Baysh", "Ahad Al Masarihah"],
     "Najran": ["Najran", "Sharurah"],
-    "Al Bahah": ["Al Baha"],
+    "Al Bahah": ["Al Baha",
+                 # 2026-07-16 mapping standardization (same pass as Sarat Abidah above):
+                 "Baljurashi", "Al Aqiq"],
     "Al Jawf": ["Sakaka", "Qurayyat", "Dawmat Al Jandal"],
 }
 CITY_TO_REGION = {city: region for region, cities in REGION_CITIES.items() for city in cities}
@@ -193,8 +217,8 @@ def map_type_exact(raw_ar: Optional[str], overrides: Optional[dict[str, str]] = 
 
     `overrides` is the documented per-platform escape hatch of the 2026-07-16 normalize-unification
     (locked owner rule: never guess on a mapping conflict). It holds ONLY the keys where a platform's
-    owner-shipped mapping disagrees with — or must shadow — the shared map (e.g. eastabha stores
-    'أرض' as "Land" while the shared map says "Residential Land"). The dict is defined IN the
+    owner-shipped mapping disagrees with — or must shadow — the shared map (e.g. mustqr maps the
+    bare 'محطة' to "Gas Station", a judgment only safe in its Hail-brokerage context). The dict is defined IN the
     scraper, in one place, and is consulted by EXACT match only — never substring-expanded — so a
     platform quirk can never leak into other inputs, while every non-override lookup flows through
     (and automatically benefits from fixes to) the shared map."""
@@ -277,11 +301,15 @@ TYPE_MAP_EN = {
     # Wasalt uses DIFFERENT names than Aqar ("Office Space" not "Office", "Repair shop" not
     # "Workshop", "Station" not "Gas Station", "Booth" not "Kiosk") — without these the filter for
     # "Office" wouldn't match Wasalt's "Office Space" rows and the kept-field contract would break.
-    'Apartment': 'Apartment', 'Villa': 'Villa', 'Townhouse': 'Villa', 'Duplex': 'Villa',
+    # 2026-07-16 mapping standardization (owner-approved): 'Duplex'→'Duplex' and
+    # 'Studio'/'Small apartment (studio)'→'Studio' (both clean types searchable in res+com
+    # post-#98). The historical Villa/Apartment folds pre-dated Duplex/Studio existing as clean
+    # types and blocked the type filter from finding these rows under their real type.
+    'Apartment': 'Apartment', 'Villa': 'Villa', 'Townhouse': 'Villa', 'Duplex': 'Duplex',
     'Floor': 'Floor', 'Building': 'Building', 'Residential Building': 'Building',
     'Land': 'Residential Land', 'Residential Land': 'Residential Land', 'Plot': 'Residential Land',
     'Rest House': 'Rest House', 'Resthouse': 'Rest House', 'Chalet': 'Chalet', 'Farm': 'Farm',
-    'Room': 'Room', 'Small apartment (studio)': 'Apartment', 'Studio': 'Apartment',
+    'Room': 'Room', 'Small apartment (studio)': 'Studio', 'Studio': 'Studio',
     'Office': 'Office', 'Office Space': 'Office', 'Shop': 'Shop', 'Commercial Shop': 'Shop',
     'Warehouse': 'Warehouse', 'Showroom': 'Showroom', 'Commercial Land': 'Commercial Land',
     'Commercial Building': 'Commercial Building', 'Tower': 'Commercial Building', 'Hotel': 'Hotel',
@@ -291,7 +319,8 @@ TYPE_MAP_EN = {
     # ── Aldarim API `type` (lowercased) → canonical taxonomy type (moved verbatim from
     # scrapers/aldarim/run.py). Land's residential/commercial split stays decided by the listing's
     # category AT THE CALL SITE in the scraper (not here).
-    'land': 'Residential Land', 'villa': 'Villa', 'townhouse': 'Villa', 'duplex': 'Villa',
+    'land': 'Residential Land', 'villa': 'Villa', 'townhouse': 'Villa',
+    'duplex': 'Duplex',  # 2026-07-16 mapping standardization: was folded to Villa (see Wasalt note above)
     'mansion': 'Villa', 'apartment': 'Apartment', 'tower_apartment': 'Apartment',
     'building_apartment': 'Apartment', 'villa_apartment': 'Apartment', 'floor': 'Floor',
     'villa_floor': 'Floor', 'building': 'Building', 'farm': 'Farm', 'istraha': 'Rest House',
@@ -330,13 +359,18 @@ CITY_MAP_EN = {
     'Rabigh': 'Rabigh', 'Riyadh Al Khabra': 'Riyadh Al Khabra', 'Al Khafji': 'Khafji',
     'Dawadmi': 'Dawadmi', 'Alghat': 'Al Ghat', 'Qurayyat': 'Qurayyat', 'Sharurah': 'Sharurah',
     'Sakakah': 'Sakaka', 'Baysh': 'Baysh', 'Thadiq': 'Thadiq', 'Shaqra': 'Shaqra',
-    'Baljurashi': 'Al Baha', 'Al-Makhwah': 'Al Baha', 'Al-Aqiq': 'Al Baha', 'Darih': 'Al Baha',
+    # 2026-07-16 mapping standardization (owner-approved): keep the PRECISE town instead of folding
+    # into the nearest big city — Baljurashi and Al Aqiq are their own catalog cities (both verified
+    # in loc_catalog_city, and live Wasalt rows already resolve to them via the native city_ar
+    # path). Al-Makhwah/Darih folds stay (not in the approved list).
+    'Baljurashi': 'Baljurashi', 'Al-Makhwah': 'Al Baha', 'Al-Aqiq': 'Al Aqiq', 'Darih': 'Al Baha',
     'Nariya': 'An Nairyah', 'Aleuyun': 'Al Uyun', 'Alnabhaniyah': 'An Nabhaniyah',
     'Almajardah': 'Al Majardah', 'Al Ghazalah - Al Ghazalah': 'Al Ghazalah',
     'Al Ghazalah - Alruwduh': 'Al Ghazalah', 'Ash Shinan': 'Ash Shanan',
     'Rawdat Sudair': 'Al Majmaah', 'Ashayrah Sudair': 'Al Majmaah', 'Thuqbah': 'Khobar',
     'Al Qaisumah': 'Hafar Al Batin', 'Mahd Al Thahab': 'Mahd adh Dhahab',
-    'Sarat Ubaida': 'Khamis Mushait', "Harimla'": 'Thadiq', 'Ramah': 'Rumah', 'Darma': 'Diriyah',
+    'Sarat Ubaida': 'Sarat Abidah',  # 2026-07-16 standardization: was folded to Khamis Mushait (see Baljurashi note)
+    "Harimla'": 'Thadiq', 'Ramah': 'Rumah', 'Darma': 'Diriyah',
     # ── Aldarim city name_en → canonical label (moved verbatim from scrapers/aldarim/run.py; the
     # five keys Aldarim shared with Wasalt carried identical values, kept once above).
     'Al Madinah': 'Medina', "Ad Dir'iyah": 'Diriyah', 'Ad Diriyah': 'Diriyah',

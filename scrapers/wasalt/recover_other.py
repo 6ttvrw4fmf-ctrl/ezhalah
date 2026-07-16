@@ -166,9 +166,11 @@ RAW_TO_CANONICAL: dict[str, str] = {
     "Baysh": "Baysh",
     "Thadiq": "Thadiq",
     "Shaqra": "Shaqra",
-    "Baljurashi": "Al Baha",
+    # 2026-07-16 mapping standardization (owner-approved): precise towns, no longer folded into the
+    # nearest big city — lockstep with normalize.CITY_MAP_EN.
+    "Baljurashi": "Baljurashi",
     "Al-Makhwah": "Al Baha",
-    "Al-Aqiq": "Al Baha",
+    "Al-Aqiq": "Al Aqiq",
     "Darih": "Al Baha",
     "Nariya": "An Nairyah",
     "Aleuyun": "Al Uyun",
@@ -185,12 +187,13 @@ RAW_TO_CANONICAL: dict[str, str] = {
     "Thuqbah": "Khobar",
     "Al Qaisumah": "Hafar Al Batin",
     "Mahd Al Thahab": "Mahd adh Dhahab",
-    "Sarat Ubaida": "Khamis Mushait",
+    "Sarat Ubaida": "Sarat Abidah",  # 2026-07-16 standardization (see Baljurashi note above)
     "Harimla'": "Thadiq",
     "Ramah": "Rumah",
 }
 
-# 99-city → 13-region map (authoritative, reconciled to exact DB totals)
+# 102-city → 13-region map (authoritative, reconciled to exact DB totals; +3 precise towns in the
+# 2026-07-16 mapping standardization)
 CITY_TO_REGION: dict[str, str] = {
     "Riyadh": "Riyadh", "Al Kharj": "Riyadh", "Al Muzahimiyah": "Riyadh",
     "Diriyah": "Riyadh", "Al Majmaah": "Riyadh", "Thadiq": "Riyadh",
@@ -216,6 +219,7 @@ CITY_TO_REGION: dict[str, str] = {
     "An Nabhaniyah": "Qassim", "Al Mithnab": "Qassim", "Ash Shamasiyah": "Qassim",
     "Khamis Mushait": "Asir", "Abha": "Asir", "Mahayel": "Asir", "Al Majardah": "Asir",
     "Bisha": "Asir", "Ahad Rafidah": "Asir", "Tathlith": "Asir", "Balsamar": "Asir", "Al Namas": "Asir",
+    "Sarat Abidah": "Asir",
     "Jazan": "Jazan", "Sabya": "Jazan", "Baysh": "Jazan", "Abu Arish": "Jazan",
     "Samtah": "Jazan", "Ahad Al Masarihah": "Jazan",
     "Hail": "Hail", "Baqaa": "Hail", "Al Ghazalah": "Hail", "Ash Shanan": "Hail",
@@ -223,7 +227,7 @@ CITY_TO_REGION: dict[str, str] = {
     "Arar": "Northern Borders", "Rafha": "Northern Borders", "Turaif": "Northern Borders",
     "Sakaka": "Al Jawf", "Dawmat Al Jandal": "Al Jawf", "Qurayyat": "Al Jawf",
     "Najran": "Najran", "Sharurah": "Najran",
-    "Al Baha": "Al Bahah",
+    "Al Baha": "Al Bahah", "Baljurashi": "Al Bahah", "Al Aqiq": "Al Bahah",
 }
 
 

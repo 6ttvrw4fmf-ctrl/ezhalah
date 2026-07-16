@@ -24,6 +24,18 @@ This file is the no-regression proof, in three tiers:
 Hermetic: no network, no DB (the one DB-touching helper an end-to-end path calls,
 aldarim's to_catalog, is monkeypatched).
 
+MAPPING STANDARDIZATION 2026-07-16 (owner-approved): the unification's conflict table was
+presented to the owner the same day and the FILTER-BLOCKING rows were approved for
+standardization (owner directive: "fix any location, property-type, category, or deal mapping
+conflict that prevents listings from matching the filters"). For exactly those keys the golden
+byte-identity pins below were re-pinned from the OLD (pre-unification) value to the NEW approved
+value via the *_APPROVED_CHANGES dicts — every other key stays byte-identical to the frozen
+snapshots. The approved set: eastabha أرض family → Residential Land, أرض زراعية/ارض زراعية → Farm
+fleet-wide, أرض تجارية → Commercial Land shared, دوبلكس → Duplex + استوديو → Studio fleet-wide
+(wasalt/aldarim/mustqr folds removed), eastabha's 10 city labels → canonical fleet labels, and
+wasalt's Sarat Ubaida/Baljurashi/Al-Aqiq city folds → the precise towns. Mustqr's صالة/محطة
+overrides stay unchanged (item 8 of the table).
+
 Run: python3 -m pytest scrapers/common/tests/test_normalize_unification_golden.py -q
 """
 from __future__ import annotations
@@ -73,9 +85,12 @@ def old_eastabha_city(city_ar: str):
     return OLD_EASTABHA_CITY_MAP_AR.get(city_ar)
 
 
-def old_eastabha_derive_type(cat_names: list[str]):
-    """Verbatim port of the pre-unification eastabha _derive_type (private dict + deal-word strip)."""
-    M, DW = OLD_EASTABHA_TYPE_MAP_AR, OLD_EASTABHA_DEAL_WORDS
+def old_eastabha_derive_type(cat_names: list[str], type_map=None):
+    """Verbatim port of the pre-unification eastabha _derive_type (private dict + deal-word strip).
+    `type_map` lets the golden test replay the SAME old algorithm over the snapshot map with the
+    2026-07-16 owner-approved value changes applied (see EASTABHA_TYPE_APPROVED_CHANGES) — the
+    algorithm is frozen; only the approved key→value pins moved."""
+    M, DW = (type_map or OLD_EASTABHA_TYPE_MAP_AR), OLD_EASTABHA_DEAL_WORDS
     for raw in cat_names:
         if M.get(raw):
             return M[raw]
@@ -110,6 +125,34 @@ def old_mustqr_price_fields(n, is_rent: bool, is_monthly: bool):
     return {"price_total": n}
 
 
+# ═══ Owner-approved re-pins (2026-07-16 mapping standardization) ═══════════════════════════════
+# For THESE keys (and only these) the byte-identity contract is superseded by the owner-approved
+# standardization value; every other snapshot key must still match byte-for-byte.
+
+WASALT_TYPE_APPROVED_CHANGES = {           # owner approval 2026-07-16
+    "Duplex": "Duplex",                    # was folded to Villa
+    "Studio": "Studio",                    # was folded to Apartment
+    "Small apartment (studio)": "Studio",  # was folded to Apartment
+}
+WASALT_CITY_APPROVED_CHANGES = {           # owner approval 2026-07-16: keep the precise town
+    "Sarat Ubaida": "Sarat Abidah",        # was folded to Khamis Mushait
+    "Baljurashi": "Baljurashi",            # was folded to Al Baha
+    "Al-Aqiq": "Al Aqiq",                  # was folded to Al Baha
+}
+ALDARIM_TYPE_APPROVED_CHANGES = {"duplex": "Duplex"}   # owner approval 2026-07-16: was Villa fold
+MUSTQR_TYPE_APPROVED_CHANGES = {"دوبلكس": "Duplex"}    # owner approval 2026-07-16: was Villa fold
+EASTABHA_TYPE_APPROVED_CHANGES = {         # owner approval 2026-07-16
+    "أرض": "Residential Land", "ارض": "Residential Land",          # was routing-legacy "Land"
+    "أرض سكنية": "Residential Land", "ارض سكنية": "Residential Land",
+    "أرض زراعية": "Farm", "ارض زراعية": "Farm",                     # was "Land"; mustqr's value won
+}
+EASTABHA_CITY_APPROVED_CHANGES = {         # owner approval 2026-07-16: canonical fleet labels
+    "تثليث": "Tathlith", "محايل": "Mahayel", "المجمعة": "Al Majmaah", "الزلفي": "Al Zulfi",
+    "القويعية": "Al Quwayiyah", "تربة": "Turabah", "بقيق": "Abqaiq", "البكيرية": "Al Bukayriyah",
+    "المذنب": "Al Mithnab", "بيش": "Baysh",
+}
+
+
 # ═══ GOLDEN: wasalt ════════════════════════════════════════════════════════════════════════════
 
 # NOTE: lowercase "apartment" is deliberately absent — it's an aldarim-origin key in the shared EN
@@ -119,14 +162,16 @@ WASALT_UNMAPPED_CITY_PROBES = ["", "Atlantis", "riyadh", "الرياض"]
 
 
 def test_golden_wasalt_type_every_key_and_unmapped():
-    for sub, want in OLD_WASALT_TYPE_MAP.items():
+    for sub, old_want in OLD_WASALT_TYPE_MAP.items():
+        want = WASALT_TYPE_APPROVED_CHANGES.get(sub, old_want)
         assert (N.map_type_en(sub) or (sub or None)) == want, sub
     for sub in WASALT_UNMAPPED_TYPE_PROBES:
         assert (N.map_type_en(sub) or (sub or None)) == old_wasalt_type(sub), sub
 
 
 def test_golden_wasalt_city_every_key_and_unmapped():
-    for raw, want in OLD_WASALT_CITY_MAP.items():
+    for raw, old_want in OLD_WASALT_CITY_MAP.items():
+        want = WASALT_CITY_APPROVED_CHANGES.get(raw, old_want)
         assert N.map_city_en(raw) == want, raw
     for raw in WASALT_UNMAPPED_CITY_PROBES:
         # Old behaviour: unmapped → None (honest). Aldarim-origin EN keys are a documented delta,
@@ -172,7 +217,8 @@ ALDARIM_UNMAPPED_CITY_PROBES = ["Atlantis", "الرياض", ""]
 
 
 def test_golden_aldarim_type_every_key_and_unmapped():
-    for t, want in OLD_ALDARIM_TYPE_MAP.items():
+    for t, old_want in OLD_ALDARIM_TYPE_MAP.items():
+        want = ALDARIM_TYPE_APPROVED_CHANGES.get(t, old_want)
         assert (N.map_type_en(t) or (t.title() if t else None)) == want, t
     for t in ALDARIM_UNMAPPED_TYPE_PROBES:
         assert (N.map_type_en(t) or (t.title() if t else None)) == old_aldarim_type(t), t
@@ -269,16 +315,23 @@ EASTABHA_DERIVE_CASES = (
 
 
 def test_golden_eastabha_derive_type_all_keys_and_phrases():
+    """Replays the frozen OLD algorithm over the snapshot map WITH the 2026-07-16 owner-approved
+    value changes applied — so the أرض family keys assert the NEW approved values (Residential
+    Land / Farm / Commercial Land) and every other key/phrase stays byte-identical to before."""
     from scrapers.eastabha.run import _derive_type
 
+    standardized = {**OLD_EASTABHA_TYPE_MAP_AR, **EASTABHA_TYPE_APPROVED_CHANGES}
     for names in EASTABHA_DERIVE_CASES:
-        assert _derive_type(names) == old_eastabha_derive_type(names), names
+        assert _derive_type(names) == old_eastabha_derive_type(names, type_map=standardized), names
 
 
 def test_golden_eastabha_city_every_key():
     from scrapers.eastabha.run import CITY_OVERRIDES_AR
 
-    for city_ar, want in OLD_EASTABHA_CITY_MAP_AR.items():
+    for city_ar, old_want in OLD_EASTABHA_CITY_MAP_AR.items():
+        # 2026-07-16 owner approval: 10 historical labels re-pinned to the canonical fleet labels
+        # (all 10 verified present in production loc_city_map before adoption).
+        want = EASTABHA_CITY_APPROVED_CHANGES.get(city_ar, old_want)
         assert N.map_city(city_ar, overrides=CITY_OVERRIDES_AR) == want, city_ar
 
 
@@ -311,11 +364,16 @@ def test_golden_eastabha_map_listing_mapped_type_unchanged():
     row, cat, gone = map_listing(p, taxd, {}, None)
     assert row["property_type"] == "Apartment" and cat == "residential" and gone is False
     assert row["city"] == "Abha" and row["region"] == "Asir"
-    # Eastabha's أرض family keeps ITS historical stored value via the override (shared map says
-    # "Residential Land" — conflict case (c), owner-review list).
+    # 2026-07-16 owner approval (mapping standardization): the أرض family now stores the shared
+    # "Residential Land" — the filterable clean type — instead of the historical "Land" override
+    # (which was dropped). Routing stays residential.
     p, taxd = _eastabha_fixture("أرض سكنية")
     row, cat, _ = map_listing(p, taxd, {}, None)
-    assert row["property_type"] == "Land" and cat == "residential"
+    assert row["property_type"] == "Residential Land" and cat == "residential"
+    # …and أرض زراعية is Farm fleet-wide (mustqr's value; the owner's مزرعة precedent).
+    p, taxd = _eastabha_fixture("أرض زراعية")
+    row, cat, _ = map_listing(p, taxd, {}, None)
+    assert row["property_type"] == "Farm" and cat == "residential"
 
 
 def test_eastabha_unmapped_type_raw_preserved_never_land_default():
@@ -341,7 +399,9 @@ def test_eastabha_unmapped_type_raw_preserved_never_land_default():
 def test_golden_mustqr_type_every_key():
     from scrapers.mustqr.run import MUSTQR_TYPE_OVERRIDES
 
-    for ar, want in OLD_MUSTQR_TYPE_MAP.items():
+    for ar, old_want in OLD_MUSTQR_TYPE_MAP.items():
+        # 2026-07-16 owner approval: دوبلكس re-pinned Villa → Duplex (fold retired fleet-wide).
+        want = MUSTQR_TYPE_APPROVED_CHANGES.get(ar, old_want)
         assert N.map_type_exact(ar, overrides=MUSTQR_TYPE_OVERRIDES) == want, ar
 
 
@@ -362,12 +422,20 @@ def test_golden_mustqr_map_listing_end_to_end():
     row, _ = map_listing(p, {})
     assert row is None
 
-    # Conflict override preserved: ارض زراعية stays Farm (shared substring would say Residential Land).
+    # ارض زراعية stays Farm — the value was promoted VERBATIM from mustqr's override into the
+    # shared TYPE_MAP_AR in the 2026-07-16 mapping standardization (owner-approved), so the stored
+    # value is unchanged even though the override key is gone.
     p["type"] = "ارض زراعية"
     p["category"] = "بيع"
     row, bucket = map_listing(p, {})
     assert row["property_type"] == "Farm" and bucket == "residential"
     assert row["bedrooms"] is None  # Farm keeps the bedrooms-nulling rule
+
+    # 2026-07-16 owner approval: دوبلكس now stores Duplex (residential routing, bedrooms kept).
+    p["type"] = "دوبلكس"
+    row, bucket = map_listing(p, {})
+    assert row["property_type"] == "Duplex" and bucket == "residential"
+    assert row["bedrooms"] == 4
 
 
 # ═══ GOLDEN: numeric parsing ═══════════════════════════════════════════════════════════════════
@@ -445,10 +513,13 @@ def test_delta_en_union_cross_coverage():
 # ═══ CONTRACT: shared-map additions, overrides mechanism, no-shared-regression ═════════════════
 
 def test_contract_en_maps_are_verbatim_supersets_of_the_old_private_maps():
+    # Verbatim for every key EXCEPT the 2026-07-16 owner-approved standardization re-pins,
+    # which are asserted at their approved values instead.
+    en_type_approved = {**WASALT_TYPE_APPROVED_CHANGES, **ALDARIM_TYPE_APPROVED_CHANGES}
     for k, v in {**OLD_WASALT_TYPE_MAP, **OLD_ALDARIM_TYPE_MAP}.items():
-        assert N.TYPE_MAP_EN[k] == v, k
+        assert N.TYPE_MAP_EN[k] == en_type_approved.get(k, v), k
     for k, v in {**OLD_WASALT_CITY_MAP, **OLD_ALDARIM_CITY_MAP}.items():
-        assert N.CITY_MAP_EN[k] == v, k
+        assert N.CITY_MAP_EN[k] == WASALT_CITY_APPROVED_CHANGES.get(k, v), k
     # …and nothing beyond the two source vocabularies was invented.
     assert set(N.TYPE_MAP_EN) == set(OLD_WASALT_TYPE_MAP) | set(OLD_ALDARIM_TYPE_MAP)
     assert set(N.CITY_MAP_EN) == set(OLD_WASALT_CITY_MAP) | set(OLD_ALDARIM_CITY_MAP)
@@ -470,9 +541,13 @@ def test_contract_shared_ar_additions_promoted_verbatim():
 
 def test_contract_preexisting_shared_behaviour_unchanged_by_additions():
     """Appended keys must never change an input the shared map already resolved (they sit AFTER
-    every pre-existing key, and each was verified unreachable before promotion)."""
+    every pre-existing key, and each was verified unreachable before promotion) — EXCEPT the
+    2026-07-16 owner-approved أرض specializations, which deliberately sit BEFORE the bare أرض so
+    the specific term wins in phrases too."""
     assert N.map_type("أرض") == "Residential Land"
-    assert N.map_type("أرض تجارية") == "Residential Land"   # substring 'أرض' still wins (pre-fix parity)
+    # 2026-07-16 owner approval: أرض تجارية is now an exact shared key (eastabha's value became
+    # the shared truth) — it no longer falls through to the bare-أرض substring match.
+    assert N.map_type("أرض تجارية") == "Commercial Land"
     assert N.map_type("شقة للإيجار") == "Apartment"
     assert N.map_city("أحد رفيده") == "Ahad Rafidah"
     assert N.map_city("الظهران") == "Dhahran"                # not shadowed by ظهران الجنوب
@@ -492,6 +567,52 @@ def test_contract_overrides_are_exact_only_and_win_over_shared():
     for f in (N.map_type, N.map_type_exact, N.map_city, N.map_type_en, N.map_city_en):
         assert f("", overrides={"x": "Y"}) is None
         assert f(None, overrides={"x": "Y"}) is None
+
+
+# ═══ CONTRACT: 2026-07-16 mapping standardization (owner-approved) ═════════════════════════════
+
+def test_contract_mapping_standardization_2026_07_16():
+    """One authoritative pin for the owner-approved filter-blocking conflict fixes. If any of
+    these regress, a listing class silently stops matching its filter again — treat a failure
+    here exactly like a golden failure."""
+    # Shared Arabic truths (exact keys; verified searchable via type_label_ar/known_type_ar live).
+    for ar, want in {"أرض تجارية": "Commercial Land",
+                     "أرض زراعية": "Farm", "ارض زراعية": "Farm",
+                     "دوبلكس": "Duplex", "دوبليكس": "Duplex",
+                     "استوديو": "Studio", "ستوديو": "Studio"}.items():
+        assert N.TYPE_MAP_AR[ar] == want, ar
+        assert N.map_type_exact(ar) == want, ar
+    # The أرض specializations sit BEFORE the bare أرض key, so the substring (phrase) path agrees:
+    assert N.map_type("أرض زراعية للبيع") == "Farm"
+    assert N.map_type("ارض زراعية للايجار") == "Farm"
+    assert N.map_type("أرض للبيع") == "Residential Land"     # generic أرض phrases unchanged
+    # EN vocabularies (wasalt/aldarim folds removed):
+    assert N.map_type_en("Duplex") == "Duplex" and N.map_type_en("duplex") == "Duplex"
+    assert N.map_type_en("Studio") == "Studio"
+    assert N.map_type_en("Small apartment (studio)") == "Studio"
+    # Precise towns (wasalt city folds removed; all three verified in loc_catalog_city and
+    # live-resolving via the native city_ar path before adoption):
+    assert N.map_city_en("Sarat Ubaida") == "Sarat Abidah"
+    assert N.map_city_en("Baljurashi") == "Baljurashi"
+    assert N.map_city_en("Al-Aqiq") == "Al Aqiq"
+    assert N.region_for_city("Sarat Abidah") == "Asir"
+    assert N.region_for_city("Baljurashi") == "Al Bahah"
+    assert N.region_for_city("Al Aqiq") == "Al Bahah"
+    # The standardized keys no longer hide behind per-platform overrides…
+    from scrapers.eastabha.run import CITY_OVERRIDES_AR, TYPE_OVERRIDES_AR
+    from scrapers.mustqr.run import MUSTQR_TYPE_OVERRIDES
+
+    for k in ("أرض", "ارض", "أرض سكنية", "ارض سكنية", "أرض زراعية", "ارض زراعية",
+              "أرض تجارية", "دوبلكس", "دوبليكس", "استوديو", "ستوديو"):
+        assert k not in TYPE_OVERRIDES_AR, k
+    assert set(MUSTQR_TYPE_OVERRIDES) == {"صالة", "محطة"}  # item 8: kept unchanged, nothing else
+    # …while eastabha's 3 precise-town overrides remain (deliberately NOT promoted to shared
+    # CITY_MAP_AR: العقيق is also a common district name and would substring-match fleet-wide).
+    assert CITY_OVERRIDES_AR == {"سراة عبيدة": "Sarat Abidah", "بلجرشي": "Baljurashi",
+                                 "العقيق": "Al Aqiq"}
+    # Eastabha city labels now canonical via the shared map (overrides dropped):
+    for ar, want in EASTABHA_CITY_APPROVED_CHANGES.items():
+        assert N.map_city(ar, overrides=CITY_OVERRIDES_AR) == want, ar
 
 
 if __name__ == "__main__":
