@@ -21,3 +21,24 @@ export function arabicOrPlaceholder(text: string, locale: string, placeholder: s
   if (locale !== 'ar') return text;
   return hasArabicChar(text) ? text : placeholder;
 }
+
+/** True if the string contains at least one Latin letter (a-z/A-Z). */
+export function hasLatinLetter(s: string): boolean {
+  return /[a-zA-Z]/.test(s);
+}
+
+/**
+ * Like arabicOrPlaceholder, but for FREE-TEXT attribute values (street address, "other
+ * obligations", ad source, plan/land numbers, …) rather than a place/type LABEL. A label with no
+ * Arabic character means nothing matched (always a leak); free-text is different — a plan number
+ * ("REGA-4471") or land number has no Arabic AND no Latin letters either, and is legitimate raw
+ * source content that must pass through unchanged (never invent/never rewrite raw values). Only
+ * text with an actual Latin LETTER and no Arabic character is a real English-word leak (e.g. a
+ * scraped English street address on an otherwise-Arabic card) and gets replaced.
+ */
+export function arabicOrPlaceholderForFreeText(text: string, locale: string, placeholder: string): string {
+  if (!text) return text;
+  if (locale !== 'ar') return text;
+  if (hasArabicChar(text)) return text;
+  return hasLatinLetter(text) ? placeholder : text;
+}

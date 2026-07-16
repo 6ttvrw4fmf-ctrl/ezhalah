@@ -10,10 +10,20 @@
 // 2. scrapers/wasalt/run.py's deep-fetch backfill stores Wasalt's own raw attribute LABEL text
 //    verbatim (unlike every sibling additional-info source, which only emits a small fixed,
 //    AR{}-translated set), and src/components/ResultCard.tsx's AdditionalInformationPanel rendered
-//    that label via a bare t(r.label) with no guard — unlike the VALUE on the same row, which was
-//    already guarded.
+//    that label via a bare t(r.label) with no guard — the VALUE on the same row was only guarded
+//    for its finite ENUM set (arAttrValue()'s property-usage/furniture/floor/facade/age/yes-no
+//    maps); free-text values (street address, "other obligations", ad source, plan/land numbers)
+//    were explicitly left raw by design ("never translate real source content").
+// 3. A THIRD sibling gap (found 2026-07-16, owner report): abeea.com.sa's additional_info stores
+//    `street_address` in English (e.g. "42 Faris Al Sharqiyah Compound, Al Osool Street") —
+//    legitimate free-text per fix #2's design, but with no non-Arabic DETECTION layer, so an
+//    English address leaked straight onto an otherwise-Arabic card. A blanket arabicOrPlaceholder
+//    would wrongly blank legitimate non-Arabic free text that has NO Latin letters either (plan
+//    numbers, land numbers, ad-source IDs — pure digits/codes), so this needed a new primitive,
+//    arabicOrPlaceholderForFreeText(), that only flags text with an actual Latin LETTER and no
+//    Arabic character as a leak, leaving numeric/code free-text and genuine Arabic free-text alone.
 //
-// Both fixes reuse the SAME zero-dependency arabicOrPlaceholder() primitive (src/lib/arabicText.ts,
+// All three fixes reuse the SAME zero-dependency arabicOrPlaceholder() family (src/lib/arabicText.ts,
 // already proven directly executable — see scripts/verify-arabic-summary-fallback.ts), composed with
 // a new placeholder constant per case (TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR — both in
 // src/i18n.tsx, which can't be live-imported here for the same reason as always: heavy React
@@ -25,7 +35,7 @@
 //   node --experimental-strip-types scripts/verify-type-and-attribute-fallback.ts   (wired into `npm test`)
 
 import { readFileSync } from 'node:fs';
-import { arabicOrPlaceholder, hasArabicChar } from '../src/lib/arabicText.ts';
+import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hasArabicChar, hasLatinLetter } from '../src/lib/arabicText.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => {
@@ -49,6 +59,25 @@ eq('a real, already-translated type word passes through unchanged', arabicOrPlac
 eq('a Wasalt attribute label that misses the AR{} dict becomes the attribute placeholder, not raw English', arabicOrPlaceholder('Some Unmapped Label', 'ar', ATTRIBUTE_UNRESOLVED_AR), ATTRIBUTE_UNRESOLVED_AR);
 eq('a real, already-translated attribute label passes through unchanged', arabicOrPlaceholder('الواجهة', 'ar', ATTRIBUTE_UNRESOLVED_AR), 'الواجهة');
 check('both new placeholders are themselves genuinely Arabic (would be a no-op leak-guard otherwise)', hasArabicChar(TYPE_UNRESOLVED_AR) && hasArabicChar(ATTRIBUTE_UNRESOLVED_AR));
+
+// ── Fix #3 (2026-07-16): arabicOrPlaceholderForFreeText — real abeea.com.sa leak + numeric-code safety ──
+check('hasLatinLetter finds a Latin letter in an English street address', hasLatinLetter('42 Faris Al Sharqiyah Compound, Al Osool Street'));
+check('hasLatinLetter is false for a pure-digit plan number', !hasLatinLetter('4471'));
+check('hasLatinLetter is false for an alphanumeric-but-Latin-letter-free code (digits/punctuation only)', !hasLatinLetter('12-3456'));
+eq(
+  'the exact live abeea.com.sa English street_address leak becomes the attribute placeholder',
+  arabicOrPlaceholderForFreeText('42 Faris Al Sharqiyah Compound, Al Osool Street', 'ar', ATTRIBUTE_UNRESOLVED_AR),
+  ATTRIBUTE_UNRESOLVED_AR,
+);
+eq('a real Arabic free-text value (e.g. a street name) passes through unchanged', arabicOrPlaceholderForFreeText('شارع الأمير سلطان', 'ar', ATTRIBUTE_UNRESOLVED_AR), 'شارع الأمير سلطان');
+eq('a pure numeric plan/land number passes through unchanged (not a language leak)', arabicOrPlaceholderForFreeText('4471', 'ar', ATTRIBUTE_UNRESOLVED_AR), '4471');
+eq('empty string is a no-op', arabicOrPlaceholderForFreeText('', 'ar', ATTRIBUTE_UNRESOLVED_AR), '');
+eq('non-Arabic locale is a no-op (English address is correct there, not a leak)', arabicOrPlaceholderForFreeText('42 Faris Al Sharqiyah Compound', 'en', ATTRIBUTE_UNRESOLVED_AR), '42 Faris Al Sharqiyah Compound');
+// The primitive itself CANNOT distinguish a real English sentence from a letter-containing ID code
+// (e.g. "FAL1234567") — by design, it flags any Latin-letter/no-Arabic text. That's why the call
+// site (arAttrValue, checked via source-text below) scopes it to ONLY the "address" label, never to
+// license/plan/parcel/postal-code labels — this asserts the primitive's raw (unscoped) behavior:
+eq('the raw primitive treats a letter-containing code the same as prose (scoping happens at the call site, not here)', arabicOrPlaceholderForFreeText('FAL1234567', 'ar', ATTRIBUTE_UNRESOLVED_AR), ATTRIBUTE_UNRESOLVED_AR);
 
 // ── Source-text checks for the parts that can't be live-imported (heavy RN/search.ts deps) ─────────
 const stripWs = (s: string) => s.replace(/\s+/g, '');
@@ -109,9 +138,22 @@ check(
 );
 
 const RESULTCARD_TS = readFileSync(new URL('../src/components/ResultCard.tsx', import.meta.url), 'utf8');
+const RESULTCARD_NOWS = stripWs(RESULTCARD_TS);
 check(
   "ResultCard.tsx's AdditionalInformationPanel wraps the row label in arabicOrPlaceholder(..., ATTRIBUTE_UNRESOLVED_AR)",
-  stripWs(RESULTCARD_TS).includes('arabicOrPlaceholder(t(r.label),locale,ATTRIBUTE_UNRESOLVED_AR)'),
+  RESULTCARD_NOWS.includes('arabicOrPlaceholder(t(r.label),locale,ATTRIBUTE_UNRESOLVED_AR)'),
+);
+check(
+  "ResultCard.tsx's row value passes locale into arAttrValue() (needed for the fix #3 leak check)",
+  RESULTCARD_NOWS.includes('arAttrValue(r.label,r.value,locale)'),
+);
+check(
+  'FREE_TEXT_PROSE_LABELS is scoped to ONLY "address" — never a license/plan/parcel/postal-code label (would wrongly blank a real ID containing a letter)',
+  /FREE_TEXT_PROSE_LABELS=newSet\(\['address'\]\)/.test(RESULTCARD_NOWS),
+);
+check(
+  "arAttrValue()'s free-text fallback calls arabicOrPlaceholderForFreeText only inside the FREE_TEXT_PROSE_LABELS branch",
+  RESULTCARD_NOWS.includes('if(FREE_TEXT_PROSE_LABELS.has(ll))returnarabicOrPlaceholderForFreeText(v,locale,ATTRIBUTE_UNRESOLVED_AR);'),
 );
 
 console.log('');
