@@ -7,8 +7,10 @@ Abeea Real Estate is a Saudi-registered brokerage company operating in the Easte
 no proxy, cloud-friendly (WordPress/Houzez).
 
 Data path (auth-free, all static HTML):
-  (1) Enumerate every /en/property/<slug>/ URL from the Houzez property sitemaps
-        (property-sitemap1.xml + property-sitemap2.xml). Skip the archive root /en/property/.
+  (1) Enumerate every /en/property/<slug>/ URL from the default WP REST property list
+        (/wp-json/wp/v2/properties, paginated per_page=100 — same auth-free path hajer uses;
+        rest_base is "properties" per /wp-json/wp/v2/types). Falls back to XML sitemaps only if
+        the REST list yields nothing. Skip the archive root /en/property/.
   (2) Fetch each detail page. Two complementary, reliable blocks live in the HTML:
         • a schema.org JSON-LD blob (@type LandParcel|Apartment|House|RealEstateListing) →
             name, description, address{locality,region,postalCode}, geo{lat,lng}, image[]
@@ -69,7 +71,15 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, normalize  # noqa: E402
 
 BASE = "https://abeea.com.sa"
-SITEMAPS = [f"{BASE}/property-sitemap1.xml", f"{BASE}/property-sitemap2.xml"]
+# Primary discovery (since 2026-07-16): the default WP REST property endpoint. The Yoast property
+# sitemaps died ~2026-07-13 when the site switched SEO plugins to Rank Math — property-sitemap1/2.xml
+# now serve the themed 404 page (zero <loc> tags → the silent 0-row runs of 07-14 + 07-16), and
+# Rank Math's own sitemap module is off (robots.txt still advertises /sitemap_index.xml, also 404).
+LIST_API = f"{BASE}/wp-json/wp/v2/properties"
+# Sitemap FALLBACK, tried only when the REST list yields nothing: a static xml-sitemaps.com
+# /sitemap.xml exists (frozen at its 2026-06-20 generation date — stale but better than nothing),
+# plus the old Yoast pair in case the site ever brings them back.
+SITEMAPS = [f"{BASE}/sitemap.xml", f"{BASE}/property-sitemap1.xml", f"{BASE}/property-sitemap2.xml"]
 WORKERS = int(os.environ.get("ABEEA_WORKERS", "6"))
 
 # Houzez "Property Type" cell text → canonical English. The cell is a comma-joined list of the
@@ -187,26 +197,72 @@ def _redact(text: Optional[str]) -> Optional[str]:
     return t.strip() or None
 
 
-# ── Sitemap enumeration ───────────────────────────────────────────────────────
+# ── Discovery (REST primary, sitemap fallback) ────────────────────────────────
+def _is_property_url(u: str) -> bool:
+    """A crawlable /property/<slug>/ detail URL — excludes the archive root /en/property/."""
+    if "/property/" not in u:
+        return False
+    return u.rstrip("/").rsplit("/", 1)[-1] != "property"
+
+
+def rest_urls(s: cc.Session) -> list[str]:
+    """Primary discovery: the live WP REST property list (paginated, per_page=100)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    page = 1
+    while True:
+        try:
+            r = s.get(f"{LIST_API}?per_page=100&page={page}&_fields=link", timeout=30,
+                      headers={"Accept": "application/json"})
+        except Exception:
+            break
+        if r.status_code != 200:
+            break
+        try:
+            arr = r.json() or []
+        except Exception:
+            break
+        if not isinstance(arr, list):
+            break
+        for p in arr:
+            u = (p.get("link") or "").strip() if isinstance(p, dict) else ""
+            if _is_property_url(u) and u not in seen:
+                seen.add(u)
+                out.append(u)
+        if len(arr) < 100:  # WP paginates hard at per_page; a short page is the last one
+            break
+        page += 1
+    return out
+
+
 def sitemap_urls(s: cc.Session) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
     for sm in SITEMAPS:
         try:
-            body = s.get(sm, timeout=30).text
+            r = s.get(sm, timeout=30)
         except Exception:
             continue
-        for u in re.findall(r"<loc>([^<]+)</loc>", body):
+        if r.status_code != 200:
+            # a dead sitemap URL serves the themed 404 PAGE (HTTP 404 + full HTML body) — parsing
+            # it silently yields zero <loc> tags, which is exactly the 0-row-run failure mode.
+            continue
+        for u in re.findall(r"<loc>([^<]+)</loc>", r.text):
             u = u.strip()
-            if "/property/" not in u:
-                continue
-            # skip the archive root (…/property/ with no slug)
-            if u.rstrip("/").rsplit("/", 1)[-1] == "property":
+            if not _is_property_url(u):
                 continue
             if u not in seen:
                 seen.add(u)
                 out.append(u)
     return out
+
+
+def discover_urls(s: cc.Session) -> list[str]:
+    urls = rest_urls(s)
+    if urls:
+        return urls
+    print("⚠ Abeea: REST property list empty/unreachable — falling back to XML sitemaps")
+    return sitemap_urls(s)
 
 
 def fetch_one(url: str) -> Optional[tuple[str, str]]:
@@ -484,7 +540,7 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
-    urls = sitemap_urls(s)
+    urls = discover_urls(s)
     if args.limit:
         urls = urls[: max(args.limit * 3, 30)]
     print(f"Abeea: {len(urls)} candidate listings ({WORKERS} workers)"
