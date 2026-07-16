@@ -26,6 +26,10 @@ on:
         description: "Override the circuit breaker to deliberately drain a large backlog through the proxy (true/false)"
         required: false
         default: "false"
+      retry_errs:
+        description: "Max previously-errored rows (ar_data._err) to re-attempt this run — oldest first, >=24h backoff per row, parked after 5 definitive failures. 0 disables (default 100)"
+        required: false
+        default: "100"
 
 concurrency:
   group: wasalt-enrich-ar
@@ -64,4 +68,5 @@ jobs:
             --limit ${{ github.event.inputs.limit || 2000 }} \
             --workers 6 \
             --max-pending ${{ github.event.inputs.max_pending || 5000 }} \
+            --retry-errs ${{ github.event.inputs.retry_errs || 100 }} \
             $ALLOW_BACKFILL_FLAG
