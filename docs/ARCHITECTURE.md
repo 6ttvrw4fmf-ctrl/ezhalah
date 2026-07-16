@@ -356,19 +356,36 @@ runQuery(q):  normalize (Room=1) ─► resolveLocation()/ensureLocationIndex() 
   **Historical toor rows are KEPT** (not deleted); `scrapers/toor/` and the ResultCard toor logo stay so
   existing listings still render. DB-side monitoring removal (drop from `platform_cadence`, clear
   freshness alerts, mark retired) + post-retire verification were pending a Supabase-connector outage at
-  retirement time — see the owner-decisions ledger. **Do not re-add without owner approval.**
+  retirement time — see the owner-decisions ledger; the `deprecated_platforms` bookkeeping row ships in
+  `supabase/migrations/20260716_batch3_retirement_bookkeeping.sql` (Batch 3). **Do not re-add without
+  owner approval.**
   **alnokhba** — deprecated 2026-07-14. Source domain `alnokhba-services.com` lapsed into a
   domain-parking page: `curl` to `/properties` and `/` both return HTTP 200, but the body is a
   third-party parking placeholder (`assets.abovedomains.com/javascript/forsale.min.js`), not the
   site's listing markup. `scrape_runs` shows the last real pull was 2026-07-07 (`rows_seen=5`);
   every daily run 2026-07-08 → 2026-07-14 (7 runs) returned `ok=true, rows_seen=0` — reachable,
   but nothing to scrape, not a scraper bug. Removed from the `small-sources-sync.yml` matrix.
-  Recorded in `deprecated_platforms` / `platforms_deprecated_status` (`still_in_search=false`).
+  DB bookkeeping (`deprecated_platforms` row) was drafted 2026-07-14 but **never applied** — it
+  ships in `supabase/migrations/20260716_batch3_retirement_bookkeeping.sql` (Batch 3), after which
+  the `platforms_deprecated_status` view shows it with `still_in_search=false`.
   **Historical alnokhba rows are KEPT** (not deleted) — 1 row was already `active=false` before
   this change; the other 5 active rows were backed up to
   `alnokhba_residential_listings_backup_20260714` and set `active=false` by exact id (never a
   blanket `WHERE`). `scrapers/alnokhba/` stays so historical listings keep their scraper
   provenance. **Do not re-add without confirming the domain serves real listings again.**
+  **deal** — deprecated 2026-06-26 (row in `deprecated_platforms`, the oldest deprecation on
+  record; the experiment itself was reverted 2026-06-24). A 2-run JSON-API experiment against
+  `api.dealapp.sa` — the **same site** the healthy `dealapp` pipeline covers via its HTML/schema.org
+  path — so running both would double-list dealapp.sa inventory. **36 rows retained**
+  (`deal_residential_listings` 36 / `deal_commercial_listings` 0, verified live 2026-07-16), never
+  user-visible: 0 active rows and 0 rows in `active_listing_ids_v2` / `search_listings_ar`.
+  Freshness alerts are suppressed via the hardcoded `tablename not like 'deal\_%'` literal inside
+  `check_scraper_freshness()` — the `deprecated_platforms` row is pure bookkeeping (nothing in the
+  DB reads it; `platforms_deprecated_status` is a live **VIEW** over it, not a table — its
+  `rows_retained`/`still_in_search` columns are computed). `scrapers/deal/run.py` is KEPT with a RETIRED
+  header, and `deal` is listed in `scrapers/RETIRED_PLATFORMS.txt` so the hermetic guard test keeps
+  it out of every workflow matrix forever. **Do not re-add without owner approval** — if dealapp.sa
+  coverage needs the JSON API, evolve `scrapers/dealapp/` instead of resurrecting this slug.
 - **Ingestion sanitize (`scrapers/common/db.py`):** `_sanitize_price()` / `_sanitize_ints()` coerce
   numeric strings → int and **NULL non-numeric/bool/nan/junk** for every int column (fix 2026-07-06,
   PR #29 — a non-numeric `property_age="New"` previously failed the smallint cast and dropped the whole
@@ -421,7 +438,19 @@ wrongly remove a real listing.**
 | **`mark_stale_listings_inactive(7)`** | jobid 13 daily `04:00` | Time-based; **EXCLUDES aqar_residential + wasalt**. |
 | **`auto_recover_false_inactive()`** | jobid 30 daily `05:20` | Recovers rows that are `active=false` AND `missing_count=0` AND recently seen AND price sane. |
 | **Reactivate-on-seen** | on scrape | A row seen again resets `missing_count` and reactivates. |
-| **`purge_inactive_listings()`** | jobid 11 Friday `22:00` | Hard-deletes confirmed-dead inactive rows (with age guard). **ACTIVE.** |
+| **`purge_inactive_listings()`** | jobid 11 Friday `22:00` — **DISABLED** (`cron.job.active=false`) | Would hard-delete rows that are `active=false` + `missing_count≥3` + `deactivated_at` >7 days + price-sane (skips `wasalt_*`), **archive-first by construction** — see below. Has never purged a row. |
+
+**Hard-delete tier is OFF — soft-inactivation (`active=false`) is the only live cleanup tier**
+(verified live 2026-07-16). `cron.job` shows jobid 11 `active=false`; `cron.job_run_details` shows
+it ran exactly twice (2026-06-26 and 2026-07-03, both Fridays 22:00 UTC, both "succeeded") and
+`purged_listings_archive` has **0 rows ever** — so both runs matched nothing and no listing row has
+ever been hard-deleted by this job. It was disabled sometime between its last run (2026-07-03
+22:00 UTC) and the first missed Friday slot (2026-07-10 22:00 UTC); `cron.job` records neither
+when nor by whom. The function body itself is archive-safe: it copies each doomed row into
+`purged_listings_archive` (full `to_jsonb(row)` + source table + reason) **in the same statement**
+and deletes **only the ids the archive insert returned**, so it cannot delete a row it did not
+archive. **Re-enabling requires explicit owner approval plus a verified archive-first dry run**
+(owner rule: never permanently delete listing data without a recoverable archive).
 
 ---
 

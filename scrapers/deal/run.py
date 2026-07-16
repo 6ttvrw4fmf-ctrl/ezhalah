@@ -1,4 +1,23 @@
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# RETIRED / DEPRECATED — DO NOT RUN, DO NOT ADD TO ANY WORKFLOW MATRIX.
+#
+# Deprecated 2026-06-26 (live `deprecated_platforms` row; the experiment was reverted 2026-06-24
+# after 2 runs). This was a JSON-API experiment against api.dealapp.sa — the SAME site the active
+# `dealapp` pipeline (scrapers/dealapp/, HTML/schema.org path) covers — so running both would
+# double-list dealapp.sa inventory. Its 36 DB rows (deal_residential_listings) are retained but
+# never user-visible (0 active, 0 in active_listing_ids_v2/search_listings_ar); freshness alerts
+# are suppressed via the hardcoded `tablename not like 'deal\_%'` literal in
+# check_scraper_freshness().
+#
+# `deal` is listed in scrapers/RETIRED_PLATFORMS.txt — the hermetic guard
+# (scrapers/common/tests/test_retired_platforms_guard.py) fails CI if this slug ever re-enters a
+# workflow matrix. Un-retiring requires owner approval; if dealapp.sa coverage needs this JSON
+# API, evolve scrapers/dealapp/ instead of resurrecting this slug.
+# See docs/ARCHITECTURE.md §12 "Retired platforms".
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
 """Deal (dealapp.sa) scraper — public JSON API behind an anonymous JWT.
+
+RETIRED 2026-06-26 — see the header block above. Kept for reference only.
 
 dealapp.sa is an Ionic SPA backed by api.dealapp.sa/production. The listings endpoint needs a token,
 but ANY visitor can get one: POST /production/user/skip → the JWT comes back in the `authorization`
