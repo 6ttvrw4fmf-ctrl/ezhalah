@@ -236,66 +236,108 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.type == "commercial":
+        # Deliberately NO scrape_runs row here: this path is manual-only (the cron matrix never
+        # passes --type), and gathern's commercial no-op stays the fleet's single allow_empty run
+        # (see db.end_run's RC-B docstring).
         print("Aqar Monthly is residential-only — commercial is a no-op.")
         return 0
 
     windows = _month_windows_ms()
     print(f"Aqar Monthly — discovering daily_rentable ids… ({len(windows)} candidate 30-day windows)")
-    ids = discover_ids(max_listings=args.limit or None)
-    print(f"✓ discovered {len(ids)} daily-rentable listings")
-    if not ids:
-        print("No listings — aborting (no prune on an empty discovery).")
-        return 1
 
-    # Parallel matrix: each shard prices a deterministic stride slice ids[i::N] (own runner/IP). A
-    # sharded run sees only its slice, so it must NOT prune (see below).
-    if args.shard:
-        si, sn = (int(x) for x in args.shard.split("/"))
-        ids.sort()
-        ids = ids[si::sn]
-        print(f"  shard {si}/{sn} → {len(ids)} ids")
+    # ── scrape_runs instrumentation (Batch 1 monitoring activation, 2026-07-16) ─────────────────
+    # This scraper never called begin_run/end_run, so all 16 cron shards were invisible to every
+    # scrape_runs-based monitor (silent-death detector D1 included). House convention (gathern —
+    # the sharded matrix twin — plus abeea et al.): validation passes (--limit / --dry-run) write
+    # no run row; every real run, including EACH matrix shard, opens one. The label is plain
+    # "aqarmonthly" for every shard (gathern's matrix shards all log as plain "gathern" too); the
+    # shard id goes in notes.
+    #
+    # 0-row semantics (composes with end_run's RC-B demotion, PR #72): rows_seen = the ids this
+    # run actually price-checked (its shard slice). A slice of the ~1.5-3.8k vertical / 16 shards
+    # is ~100-240 ids — never legitimately empty while the vertical is alive — so rows_seen==0
+    # here means discovery collapsed or the source is blocked: exactly what RC-B should redden.
+    # NO allow_empty. A shard whose units are ALL fully booked upserts 0 rows but still reports
+    # rows_seen=len(ids) > 0, so that legitimately-possible case can't manufacture false-red noise.
+    run_id = None if (args.limit or args.dry_run) else db.begin_run("aqarmonthly")
 
-    rows: list[dict] = []
-    seen_ads: set[str] = set()
+    ids: list[int] = []
     counter = {"done": 0, "ok": 0}
-    lock = threading.Lock()
+    try:
+        ids = discover_ids(max_listings=args.limit or None)
+        print(f"✓ discovered {len(ids)} daily-rentable listings")
+        if not ids:
+            print("No listings — aborting (no prune on an empty discovery).")
+            if run_id is not None:
+                db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0,
+                           notes="discovery returned 0 daily-rentable ids (blocked/empty source?)")
+            return 1
 
-    def work(lid: int) -> None:
-        row = fetch_row(lid, windows)
-        with lock:
-            counter["done"] += 1
-            if row:
-                rows.append(row)
-                seen_ads.add(row["ad_number"])
-                counter["ok"] += 1
-            if counter["done"] % 100 == 0:
-                print(f"   [{counter['done']}/{len(ids)}] ok={counter['ok']}")
+        # Parallel matrix: each shard prices a deterministic stride slice ids[i::N] (own runner/IP). A
+        # sharded run sees only its slice, so it must NOT prune (see below).
+        if args.shard:
+            si, sn = (int(x) for x in args.shard.split("/"))
+            ids.sort()
+            ids = ids[si::sn]
+            print(f"  shard {si}/{sn} → {len(ids)} ids")
 
-    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        list(pool.map(work, ids))
+        rows: list[dict] = []
+        seen_ads: set[str] = set()
+        lock = threading.Lock()
 
-    print(f"✓ built {len(rows)} rows ({counter['ok']}/{len(ids)} priced)")
+        def work(lid: int) -> None:
+            row = fetch_row(lid, windows)
+            with lock:
+                counter["done"] += 1
+                if row:
+                    rows.append(row)
+                    seen_ads.add(row["ad_number"])
+                    counter["ok"] += 1
+                if counter["done"] % 100 == 0:
+                    print(f"   [{counter['done']}/{len(ids)}] ok={counter['ok']}")
 
-    if args.dry_run:
-        for r in rows[:5]:
-            print(f"   {r['ad_number']} | {r['property_type']} | {r['city']}/{r.get('neighborhood')} "
-                  f"| {r['price_annual']//12} SAR/mo | beds={r['bedrooms']} | imgs={len(r['photo_urls'])}")
-        print("(dry-run — no DB writes)")
+        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+            list(pool.map(work, ids))
+
+        print(f"✓ built {len(rows)} rows ({counter['ok']}/{len(ids)} priced)")
+
+        if args.dry_run:
+            for r in rows[:5]:
+                print(f"   {r['ad_number']} | {r['property_type']} | {r['city']}/{r.get('neighborhood')} "
+                      f"| {r['price_annual']//12} SAR/mo | beds={r['bedrooms']} | imgs={len(r['photo_urls'])}")
+            print("(dry-run — no DB writes)")
+            return 0
+
+        # Batch upsert in chunks.
+        for i in range(0, len(rows), 200):
+            db.upsert_aqarmonthly_residential_batch(rows[i:i + 200])
+        print(f"✓ upserted {len(rows)} rows into aqarmonthly_residential_listings")
+
+        # PRUNE only on a full (non-sharded) pass — a shard sees just its slice and would wrongly
+        # deactivate every other shard's rows.
+        pruned = 0
+        if args.shard:
+            print(f"✓ shard {args.shard}: no prune (partial run)")
+        else:
+            pruned = db.prune_unseen("aqarmonthly_residential_listings", seen_ads, source="Aqar Monthly")
+            if pruned < 0:
+                print("⚠ aqarmonthly prune guard tripped (0 scraped or collapse) — kept existing active")
+            else:
+                print(f"✓ pruned {pruned} stale (no-longer-available) units")
+        if run_id is not None:
+            db.end_run(run_id, ok=True, rows_seen=len(ids), rows_upserted=len(rows),
+                       degraded=pruned < 0,  # a tripped prune guard is an integrity trip → honest red
+                       notes=f"shard={args.shard or 'full'} priced={counter['ok']}/{len(ids)} "
+                             f"pruned={max(pruned, 0)}")
         return 0
-
-    # Batch upsert in chunks.
-    for i in range(0, len(rows), 200):
-        db.upsert_aqarmonthly_residential_batch(rows[i:i + 200])
-    print(f"✓ upserted {len(rows)} rows into aqarmonthly_residential_listings")
-
-    # PRUNE only on a full (non-sharded) pass — a shard sees just its slice and would wrongly
-    # deactivate every other shard's rows.
-    if args.shard:
-        print(f"✓ shard {args.shard}: no prune (partial run)")
-    else:
-        pruned = db.prune_unseen("aqarmonthly_residential_listings", seen_ads, source="Aqar Monthly")
-        print(f"✓ pruned {pruned} stale (no-longer-available) units")
-    return 0
+    except Exception as e:
+        if run_id is not None:
+            db.end_run(run_id, ok=False, rows_seen=counter["done"], rows_upserted=0,
+                       notes=str(e)[:300])
+        print(f"✗ {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
 
 
 if __name__ == "__main__":

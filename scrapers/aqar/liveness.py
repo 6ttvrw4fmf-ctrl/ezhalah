@@ -61,6 +61,22 @@ def _run_with_retry(fn, tries: int = 5):
             raise
 
 
+def shard_bounds(min_id: int, max_id: int, shards: int, shard: int) -> tuple[int, int]:
+    """This shard's contiguous ID window [lo, hi) — an even, gap-tolerant split of [min_id, max_id].
+
+    bucket = ((max_id - min_id) // shards) + 1, so shards × bucket > (max_id - min_id) and the
+    union of the windows always covers max_id itself. Anchoring at min_id (not 0) is the point
+    (fix 2026-07-16): tables whose ids START high — aqar_commercial_listings begins at ~292k —
+    used to be split from 0, which handed shard 0 a permanently row-less [0, bucket) window:
+    27/27 consecutive runs of ok=true/rows_seen=0, and post-RC-B (end_run demoting 0-row runs,
+    PR #72) that would flip to permanent FALSE-RED noise instead. Every shard now covers a slice
+    of the id range where rows actually live.
+    """
+    bucket = ((max_id - min_id) // max(1, shards)) + 1
+    lo = min_id + shard * bucket
+    return lo, lo + bucket
+
+
 def looks_dead(status: int, body: str) -> bool:
     """True iff the response confirms this listing is gone (vs a transient hiccup)."""
     if status in (404, 410):
@@ -97,14 +113,17 @@ def main() -> None:
     now_iso = datetime.now(timezone.utc).isoformat()
     client = sb()
 
-    # Compute this shard's contiguous ID window from the table's max id. Even, gap-tolerant split:
-    # bucket size = ceil((maxid+1)/shards); this shard owns [shard*bucket, (shard+1)*bucket).
-    maxid_res = client.table(table).select("id").order("id", desc=True).limit(1).execute()
+    # Compute this shard's contiguous ID window from the ACTIVE rows' [min_id, max_id] — active
+    # only, because that's the exact population the sweep below pages over, so the split tracks
+    # where checkable rows actually live. See shard_bounds() for why the window is anchored at
+    # min_id rather than 0.
+    maxid_res = client.table(table).select("id").eq("active", True).order("id", desc=True).limit(1).execute()
     max_id = (maxid_res.data[0]["id"] if maxid_res.data else 0)
-    bucket = (max_id // max(1, args.shards)) + 1
-    lo = args.shard * bucket
-    hi = lo + bucket  # exclusive upper bound
-    print(f"shard {args.shard}/{args.shards} → id range [{lo}, {hi}) of max_id={max_id}", flush=True)
+    minid_res = client.table(table).select("id").eq("active", True).order("id", desc=False).limit(1).execute()
+    min_id = (minid_res.data[0]["id"] if minid_res.data else 0)
+    lo, hi = shard_bounds(min_id, max_id, args.shards, args.shard)
+    print(f"shard {args.shard}/{args.shards} → id range [{lo}, {hi}) of active ids [{min_id}, {max_id}]",
+          flush=True)
 
     seen = 0
     killed = 0
