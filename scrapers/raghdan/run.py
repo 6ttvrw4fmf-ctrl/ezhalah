@@ -325,7 +325,12 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     specs = _desc_specs(description_raw)
 
     # ── type + category ──
-    property_type = _map_type(name, _breadcrumb_district(bc) or "") or "Residential Land"
+    mapped_type = _map_type(name, _breadcrumb_district(bc) or "")
+    # Unmapped type → STORE the raw listing name, never a guessed default (owner directive
+    # 2026-07-16: never confidently misclassify — the raw value trips the DB novel-type detector,
+    # which quarantines + alerts). The legacy value below feeds ONLY the routing/sanity rules.
+    property_type = mapped_type or "Residential Land"  # type-truth: routing-legacy only — never stored
+    stored_property_type = mapped_type or name.strip() or "unknown"
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
 
     # ── transaction type (businessFunction Sell|LeaseOut; name للبيع|للإيجار) ──
@@ -418,7 +423,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "listing_url": listing_url,
         "source": "Raghdan",
         "active": True,
-        "property_type": property_type,
+        "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": round(area) if area else None,
         "bedrooms": _sane_beds(_int(specs.get("rooms")) or _int(ld.get("numberOfRooms")),

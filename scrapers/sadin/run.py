@@ -259,7 +259,12 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
     title_raw = (og.group(1).split("|")[0].strip() if og else "") or card.get("title", "")
     desc_raw = _description(html)
 
-    property_type = _map_type(title_raw, card.get("title", ""), desc_raw or "") or "Residential Land"
+    mapped_type = _map_type(title_raw, card.get("title", ""), desc_raw or "")
+    # Unmapped type → STORE the raw title text, never a guessed default (owner directive
+    # 2026-07-16: never confidently misclassify — the raw value trips the DB novel-type detector,
+    # which quarantines + alerts). The legacy value below feeds ONLY the routing/sanity rules.
+    property_type = mapped_type or "Residential Land"  # type-truth: routing-legacy only — never stored
+    stored_property_type = mapped_type or title_raw or card.get("title", "").strip() or "unknown"
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
 
     raw_city = _info_field(html, "المدينة") or ""
@@ -377,7 +382,7 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
         "listing_url": f"{BASE}/property/{pid}",
         "source": "Sadin",
         "active": True,
-        "property_type": property_type,
+        "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": area,
         "bedrooms": beds,

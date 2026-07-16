@@ -496,13 +496,19 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
     if deal in AUCTION_DEAL_TYPES or offer.get("isAuction"):
         return None, "residential"  # skip auctions
 
-    property_type = TYPE_MAP.get(offer.get("type")) or "Residential Land"
+    type_id = offer.get("type")
+    mapped_type = TYPE_MAP.get(type_id)
+    # Unmapped type → STORE the raw source enum id, never a guessed default (owner directive
+    # 2026-07-16: never confidently misclassify — the raw value trips the DB novel-type detector,
+    # which quarantines + alerts). The legacy value below feeds ONLY the routing/sanity rules.
+    property_type = mapped_type or "Residential Land"  # type-truth: routing-legacy only — never stored
     is_rent = deal in RENT_DEAL_TYPES
     # Commercial routing: explicit commercial deal type (3/4) OR a commercial property type.
     is_com_deal = deal in (3, 4)
     category = "commercial" if (property_type in COMMERCIAL_TYPES or (is_com_deal and property_type == "Residential Land")) else "residential"
     if is_com_deal and property_type == "Residential Land":
         property_type = "Commercial Land"
+    stored_property_type = property_type if mapped_type else (str(type_id) if type_id is not None else "unknown")
 
     # ── area ──
     area = _float(offer.get("landArea")) or _float(offer.get("buildingArea"))
@@ -620,7 +626,7 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
         "listing_url": f"{BASE}/real-estates/{listing_id}",
         "source": "Muktamel",
         "active": True,
-        "property_type": property_type,
+        "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": round(area) if area else None,
         "bedrooms": _int(offer.get("bedRoomsCount")) if category == "residential" else None,

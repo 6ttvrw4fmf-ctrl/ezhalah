@@ -314,15 +314,14 @@ def _deal(body: str, realestate_name: str) -> str:
     return "Buy"  # للبيع, للتقبيل (key-money transfer), or unknown → Buy (catalog is sale-heavy)
 
 
-def _type(realestate_name: str, body: str) -> str:
+def _type(realestate_name: str, body: str) -> Optional[str]:
     name = (realestate_name or "").strip()
     if name in TYPE_MAP_AR:
         return TYPE_MAP_AR[name]
     for word, eng in TYPE_MAP_AR.items():
         if word in name:
             return eng
-    via = normalize.map_type(name)
-    return via or "Residential Land"
+    return normalize.map_type(name)  # None when unmapped — the caller preserves the raw name
 
 
 def _services(body: str) -> dict[str, bool]:
@@ -345,7 +344,12 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
     if not realestate_name:
         return None, "residential"
 
-    property_type = _type(realestate_name, body)
+    mapped_type = _type(realestate_name, body)
+    # Unmapped type → STORE the raw realestate_name, never a guessed default (owner directive
+    # 2026-07-16: never confidently misclassify — the raw value trips the DB novel-type detector,
+    # which quarantines + alerts). The legacy value below feeds ONLY the routing/sanity rules.
+    property_type = mapped_type or "Residential Land"  # type-truth: routing-legacy only — never stored
+    stored_property_type = mapped_type or realestate_name
     transaction_type = _deal(body, realestate_name)
     is_rent = transaction_type == "Rent"
 
@@ -463,7 +467,7 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
         "listing_url": f"{BASE}/{pid}/x",
         "source": "24 Souq",
         "active": True,
-        "property_type": property_type,
+        "property_type": stored_property_type,
         "transaction_type": transaction_type,
         "area_m2": area,
         "bedrooms": beds,
