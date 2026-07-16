@@ -54,8 +54,12 @@ import { ADVANCED_QUESTIONS, MIN_OPTIONS_TO_SHOW, type AdvancedOption } from '@/
 // Comparing against Arabic here always evaluated false — caught live, 2026-07-15.
 const AGE_FILTER_TYPES = new Set<string>([
   'Apartment',            // gold standard, live since 2026-07-16 (PR #101)
-  'Residential Building', // added 2026-07-16: live-verified 34% coverage, genuine 5-bucket spread
+  'Residential Building', // added 2026-07-16 (PR #114): live-verified 34% coverage, genuine 5-bucket spread
                           // (buy: new 289/1-2 34/3-5 387/6-9 569/10+ 933), counts==search parity confirmed
+  'Room',                 // غرفة, added 2026-07-16: rooms are rented — enough data only in the big rent
+                          // scopes (الرياض/إيجار 1,127 rows, all 5 buckets; جدة/إيجار 425), self-protecting
+                          // thresholds hide it elsewhere. macro=Residential, counts==search parity confirmed
+                          // (الرياض cnt_3_5=220==search 220, all 220 strictly in [3,5], zero unknown).
 ]);
 function isAgeFilterScope(q: SearchQuery): boolean {
   const types = effectiveTypes(q);
