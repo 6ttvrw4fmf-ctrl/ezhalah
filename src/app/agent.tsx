@@ -42,17 +42,24 @@ import { noTranslateRef } from '@/noTranslate';
 import AdvancedQuestionCard, { AdvancedQuestionLoading } from '@/components/AdvancedQuestionCard';
 import { ADVANCED_QUESTIONS, MIN_OPTIONS_TO_SHOW, type AdvancedOption } from '@/data/advancedFilters';
 
-// Advanced-question entry point (owner 2026-07-13 correction): reached from the EXISTING «خلّنا نحدد
-// الطلب أكثر» button below a results block — NEVER before first results — and ONLY for a strict
-// Residential+Apartment scope (not villas, land, commercial, or a multi-type selection that merely
-// includes شقة). Extend ADVANCED_QUESTIONS to cover more fields/types later; do not widen this gate
-// without an explicit owner instruction.
-function isApartmentOnlyScope(q: SearchQuery): boolean {
+// Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
+// below a results block — NEVER before first results — and ONLY for a strict single-type Residential
+// scope whose property_age data has been live-verified sufficient (owner rollout Building→Room→Floor,
+// 2026-07-16). Apartment is the reference (gold standard). A multi-type selection or any type not in
+// this set never triggers it. Add a new type ONLY after live-verifying its data quality + counts==
+// search parity, per docs/ADVANCED_FILTER_PATTERN.md. Do not widen without an explicit owner instruction.
+//
+// effectiveTypes() returns canonical ENGLISH keys (propertyTypes.ts), e.g. 'Apartment'/'Residential
+// Building' — NOT the Arabic label (that conversion happens later at RPC-call time via typeArForTypes()).
+// Comparing against Arabic here always evaluated false — caught live, 2026-07-15.
+const AGE_FILTER_TYPES = new Set<string>([
+  'Apartment',            // gold standard, live since 2026-07-16 (PR #101)
+  'Residential Building', // added 2026-07-16: live-verified 34% coverage, genuine 5-bucket spread
+                          // (buy: new 289/1-2 34/3-5 387/6-9 569/10+ 933), counts==search parity confirmed
+]);
+function isAgeFilterScope(q: SearchQuery): boolean {
   const types = effectiveTypes(q);
-  // effectiveTypes() returns canonical English keys (propertyTypes.ts), e.g. 'Apartment' — NOT the
-  // Arabic label 'شقة' (that conversion only happens later, at RPC-call time via typeArForTypes()).
-  // Comparing against 'شقة' here always evaluated false — caught live, 2026-07-15.
-  return q.category === 'Residential' && types.length === 1 && types[0] === 'Apartment';
+  return q.category === 'Residential' && types.length === 1 && AGE_FILTER_TYPES.has(types[0]);
 }
 
 const IS_WEB = Platform.OS === 'web';
@@ -1508,7 +1515,7 @@ export default function Agent() {
                                 style={s.mBtnAlt}
                                 onPress={() => {
                                   const q = m.result.query;
-                                  if (q && isApartmentOnlyScope(q)) void startAgeFlow(q);
+                                  if (q && isAgeFilterScope(q)) void startAgeFlow(q);
                                   else startRefine(q);
                                 }}
                               >
