@@ -1,0 +1,24 @@
+# Retired platform slugs — one per line.
+#
+# CONTRACT: a slug listed here must NEVER appear as an active (non-commented) `source:` entry in
+# any .github/workflows/*.yml platform matrix. Enforced by
+# scrapers/common/tests/test_retired_platforms_guard.py (hermetic, zero extra deps; runs in CI via
+# common-location-tests.yml). This guard exists because retirement did NOT stick the first time:
+# toor was removed 2026-07-06 (commit d5ca9d6, owner-approved) and PR #77 (da19962) silently
+# re-added its matrix line eight days later, putting a dead platform back on the daily cron.
+#
+# To RETIRE a platform: add its slug here + remove its matrix line (leave a NOTE comment in the
+# workflow explaining why, like the toor/alnokhba ones in small-sources-sync.yml). Historical DB
+# rows and the scrapers/<slug>/ directory are KEPT.
+# To UN-RETIRE one (owner approval required): remove the slug here in the SAME PR that re-adds
+# the matrix line, referencing the approval in the commit message.
+#
+# toor      — retired 2026-07-06 (owner-approved): toor.ooo IP-blocks datacenter + Saudi-proxy
+#             IPs; every fetch timed out, 0 rows for weeks.
+# alnokhba  — deprecated 2026-07-14: alnokhba-services.com lapsed into a domain-parking page
+#             (HTTP 200 shell, no listings); 7 straight daily runs of rows_seen=0.
+# muktamel  — paused 2026-07-15: runs on its OWN gated weekly workflow (muktamel-sync.yml), never
+#             the shared matrix; listed here so it cannot re-enter any matrix while paused.
+toor
+alnokhba
+muktamel
