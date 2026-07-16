@@ -460,7 +460,7 @@ def main() -> int:
         notes = str(e)[:400]
         print(f"\n✗ FATAL: {e}")
     finally:
-        db.end_run(run_id, ok=ok, rows_seen=total, rows_upserted=total, notes=notes)
+        db.end_run(run_id, ok=ok, rows_seen=total, rows_upserted=total, notes=notes, check_tables=["wasalt_residential_listings", "wasalt_commercial_listings"])
     print(f"\n📊 Wasalt done. {total} upserted. (run_id={run_id})")
     return 0 if ok else 1
 

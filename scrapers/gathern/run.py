@@ -596,7 +596,7 @@ def main() -> int:
         top = sorted(per_city.items(), key=lambda kv: -kv[1])[:10]
         print("  top cities:", ", ".join(f"{n}={c}" for n, c in top))
         db.end_run(run_id, ok=True, rows_seen=scanned, rows_upserted=len(rows),
-                   notes=f"cities={len(cities)} pruned={pruned}")
+                   notes=f"cities={len(cities)} pruned={pruned}", check_tables=["gathern_residential_listings"])
         return 0
     except Exception as e:
         if run_id:

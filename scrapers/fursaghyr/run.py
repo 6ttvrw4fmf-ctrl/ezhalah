@@ -374,7 +374,7 @@ def main() -> int:
         print(f"✓ Fursaghyr: {len(res)} residential + {len(com)} commercial upserted"
               + (f", {pruned} stale pruned" if not is_validation else " (validation, no prune)"))
         if run_id is not None:
-            db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}")
+            db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["fursaghyr_residential_listings", "fursaghyr_commercial_listings"])
         return 0
     except Exception as e:
         if run_id is not None:

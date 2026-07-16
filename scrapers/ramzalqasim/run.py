@@ -478,7 +478,7 @@ def main() -> int:
               f"{gone_ct} marked inactive, {pruned} stale pruned")
         if run_id:
             db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
-                        notes=f"gone={gone_ct} pruned={pruned}")
+                        notes=f"gone={gone_ct} pruned={pruned}", check_tables=["ramzalqasim_residential_listings", "ramzalqasim_commercial_listings"])
         return 0
     except Exception as e:
         if run_id:

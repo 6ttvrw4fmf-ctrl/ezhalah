@@ -421,6 +421,7 @@ def main() -> int:
             rows_seen=len(raw),
             rows_upserted=len(res) + len(com),
             notes=f"pruned={pruned}" if full_run else "validation",
+            check_tables=["mustqr_residential_listings", "mustqr_commercial_listings"],
         )
         return 0
     except Exception as e:

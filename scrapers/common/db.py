@@ -135,8 +135,14 @@ _INT8_COLS = frozenset({"price_annual", "price_total"})
 def _sanitize_ints(r: dict[str, Any]) -> None:
     """Coerce/NULL integer fields so ONE bad value can never abort the row (or its whole batch).
 
-    Two failure modes protected:
+    Three failure modes protected:
       • overflow (22003): value doesn't fit the column width → NULL that field.
+      • negative (23514, Batch 5 2026-07-16): every column here is a count/area/price, so a
+        negative is impossible-by-definition garbage (sign-flip/parse artifact). The *_listings
+        tables now carry `>= 0 OR NULL` CHECK constraints (20260716_batch5_integrity_checks.sql);
+        NULLing the field here keeps one bad value from failing its whole upsert batch, exactly
+        like the overflow path. Zero stays legal — 0 is a known faithful placeholder (price
+        fidelity rule; the 2026-07-15 repair clearance kept sub-3000-SAR placeholders as-is).
       • bad cast (22P02): a NON-NUMERIC value in an integer column. Real incident 2026-07-06:
         Wasalt commercial sends property_age="New" (a string) — Postgres rejected the smallint
         cast, the WHOLE upsert failed with HTTP 400, and every listing in that batch was silently
@@ -145,9 +151,9 @@ def _sanitize_ints(r: dict[str, Any]) -> None:
         preserved in additional_info / source_capture, so the card still shows exactly what the
         source published (search-engine-not-marketplace rule).
     """
-    for col, lo, hi in ((_INT2_COLS, -32768, 32767),
-                        (_INT4_COLS, -2147483648, 2147483647),
-                        (_INT8_COLS, -9223372036854775808, 9223372036854775807)):
+    for col, _lo, hi in ((_INT2_COLS, -32768, 32767),
+                         (_INT4_COLS, -2147483648, 2147483647),
+                         (_INT8_COLS, -9223372036854775808, 9223372036854775807)):
         for c in col:
             v = r.get(c)
             if v is None:
@@ -172,8 +178,8 @@ def _sanitize_ints(r: dict[str, Any]) -> None:
             elif not isinstance(v, int):
                 r[c] = None          # lists/dicts/other junk can't cast either
                 continue
-            if isinstance(v, int) and not (lo <= v <= hi):
-                r[c] = None
+            if isinstance(v, int) and not (0 <= v <= hi):
+                r[c] = None  # overflow OR negative — both impossible for a count/area/price
 
 
 def _sanitize_price(r: dict[str, Any]) -> None:

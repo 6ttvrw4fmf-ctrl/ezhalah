@@ -567,7 +567,7 @@ def main() -> int:
         print(f"✓ Abeea: {len(res)} residential + {len(com)} commercial upserted, "
               f"{gone_ct} sold/rented pinned inactive, {pruned} stale pruned")
         db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
-                   notes=f"gone={gone_ct} pruned={pruned}")
+                   notes=f"gone={gone_ct} pruned={pruned}", check_tables=["abeea_residential_listings", "abeea_commercial_listings"])
         return 0
     except Exception as e:
         if run_id:

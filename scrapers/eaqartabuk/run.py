@@ -471,7 +471,7 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Eaqar Tabuk: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}")
+        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["eaqartabuk_residential_listings", "eaqartabuk_commercial_listings"])
         return 0
     except Exception as e:
         if run_id:

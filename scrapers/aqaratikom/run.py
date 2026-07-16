@@ -633,7 +633,8 @@ def main() -> int:
         print(f"✓ Aqaratikom: {len(res)} residential + {len(com)} commercial upserted, "
               f"{sold_ct} sold (inactive), {pruned} stale pruned")
         db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
-                   notes=f"sold={sold_ct} pruned={pruned}")
+                   notes=f"sold={sold_ct} pruned={pruned}",
+                   check_tables=["aqaratikom_residential_listings", "aqaratikom_commercial_listings"])
         return 0
     except Exception as e:
         if run_id:
