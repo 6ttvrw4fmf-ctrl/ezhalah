@@ -171,7 +171,19 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         property_type = "Commercial Land"
 
     area = _int(L.get("area")) or _int(L.get("built_up_area"))
-    rent_price = (L.get("rent_price_annually") or L.get("rent_price_monthly"))
+    # Rent fidelity (monthly-rent contract; 2026-07-16 unification follow-up): price_annual is truly
+    # ANNUAL. The old `rent_price_annually or rent_price_monthly` fallback stored a raw MONTHLY
+    # figure as annual — the exact BUG-2 class fixed fleet-wide 2026-07-13 (eaqartabuk/aqarcity/
+    # mustqr/satel) that never propagated here. Annual wins when present; a monthly-only listing is
+    # annualized ×12 via the shared helper and tagged rent_period='monthly' so the app's
+    # round(price_annual/12) card shows the real monthly rent. PROSPECTIVE only — live-checked
+    # 2026-07-16: both active Aldarim Rent rows priced via the annual path, so no stored value changes.
+    rent_annual = _int(L.get("rent_price_annually"))
+    rent_monthly = _int(L.get("rent_price_monthly")) if rent_annual is None else None
+    if rent_monthly is not None:
+        price_annual, rent_period = normalize.annualize_rent(rent_monthly, "monthly"), "monthly"
+    else:
+        price_annual, rent_period = rent_annual, "annual"  # annual figure, or no rent price at all
 
     # Native Arabic R/C/D (ADDITIVE — live city/neighborhood above untouched). The API already carries
     # city.name_ar / district.name_ar; we just stopped discarding them. No region signal from Aldarim,
@@ -194,8 +206,8 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "halls": _int(L.get("living_rooms")),
         "reception_rooms_majlis": _int(L.get("majlis_rooms")),
         "price_total": _int(L.get("selling_price")) if not is_rent else None,
-        "price_annual": _int(rent_price) if is_rent else None,
-        "rent_period": "annual" if is_rent else None,
+        "price_annual": price_annual if is_rent else None,
+        "rent_period": rent_period if is_rent else None,
         "city": _city(L.get("city")),
         "neighborhood": (_name(L.get("district")) or "").replace(" Dist.", "").strip() or None,
         "title": L.get("name_en") or L.get("name_ar"),

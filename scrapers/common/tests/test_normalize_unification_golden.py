@@ -215,6 +215,44 @@ def test_golden_aldarim_map_listing_end_to_end(monkeypatch):
     assert cat == "commercial" and row["property_type"] == "Commercial Land"
 
 
+def test_contract_aldarim_rent_annualization_both_shapes(monkeypatch):
+    """Monthly-rent contract (fleet-wide 2026-07-13 BUG-2 fix, propagated to Aldarim 2026-07-16):
+    price_annual is truly ANNUAL. The annual figure wins when present; a monthly-only listing
+    stores ×12 via the shared annualize_rent with rent_period='monthly' (the old code stored the
+    raw monthly figure as annual). PROSPECTIVE fix — live-checked before shipping: both active
+    Aldarim Rent rows priced via the annual path, so no stored value changed."""
+    import scrapers.aldarim.run as A
+
+    monkeypatch.setattr(A, "to_catalog", lambda *a, **k: (None, None))  # DB-free
+    base = {"id": 88, "category": "residential", "purpose": "rent", "type": "apartment",
+            "availability_status": "available", "city": {"name_en": "Riyadh"}, "district": None}
+
+    # annual-only shape → stored as-is, rent_period 'annual' (byte-identical to old behaviour).
+    row, _ = A.map_listing({**base, "rent_price_annually": 50000})
+    assert row["price_annual"] == 50000 and row["rent_period"] == "annual"
+    assert row["price_total"] is None
+
+    # monthly-only shape → annualized ×12, rent_period 'monthly'; the app's round(/12) card
+    # round-trips to the real monthly rent. (Old behaviour — the discovered bug — was 3000/'annual'.)
+    row, _ = A.map_listing({**base, "rent_price_monthly": 3000})
+    assert row["price_annual"] == 36000 and row["rent_period"] == "monthly"
+    assert round(row["price_annual"] / 12) == 3000
+
+    # both present → annual wins (source-of-truth precedence unchanged).
+    row, _ = A.map_listing({**base, "rent_price_annually": 45000, "rent_price_monthly": 3000})
+    assert row["price_annual"] == 45000 and row["rent_period"] == "annual"
+
+    # neither → honest None, historical 'annual' tag for rent rows preserved.
+    row, _ = A.map_listing(dict(base))
+    assert row["price_annual"] is None and row["rent_period"] == "annual"
+
+    # Buy listing: rent fields stay None exactly as before.
+    row, _ = A.map_listing({**base, "purpose": "sell", "selling_price": 900000,
+                            "rent_price_monthly": 3000})
+    assert row["price_total"] == 900000
+    assert row["price_annual"] is None and row["rent_period"] is None
+
+
 # ═══ GOLDEN: eastabha ══════════════════════════════════════════════════════════════════════════
 
 # Every old private key as a single-name category list, plus phrase/multi-name/ordering cases that
