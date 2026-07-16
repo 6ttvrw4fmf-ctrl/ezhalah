@@ -527,7 +527,10 @@ def main() -> int:
         print("Gathern is residential-only — nothing to scrape for --type commercial.")
         if not args.limit and not args.dry_run:
             run_id = db.begin_run("gathern")
-            db.end_run(run_id, ok=True, rows_seen=0, rows_upserted=0, notes="commercial=noop")
+            # allow_empty: Gathern genuinely has no commercial inventory, so a 0-row commercial
+            # run is correct, not a failure. This is the ONE legitimate empty run in the fleet;
+            # every other 0-row run is demoted to ok=False by end_run's RC-B chokepoint.
+            db.end_run(run_id, ok=True, rows_seen=0, rows_upserted=0, notes="commercial=noop", allow_empty=True)
         return 0
 
     print(f"Gathern MONTHLY: {len(cities)} Saudi cities, stay {ci} → {co}"
