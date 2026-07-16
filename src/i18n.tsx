@@ -294,6 +294,19 @@ const AR: Record<string, string> = {
   '"{city}" isn\'t a city I recognize, I\'ll still search using your other answers.':
     '«{city}» ليست مدينة أعرفها، سأظل أبحث باستخدام إجاباتك الأخرى.',
 
+  // Advanced-filter question engine («خلّنا نحدد الطلب أكثر») — عمر العقار is the first field built on
+  // this reusable card; new fields add their own strings here, never touch this block's wording.
+  'How old is the property?': 'كم عمر العقار اللي تفضله؟',
+  'New construction': 'جديد',
+  'Less than a year': 'أقل من سنة',
+  '1–2 years': '١-٢ سنوات',
+  '3–5 years': '٣-٥ سنوات',
+  '6–9 years': '٦-٩ سنوات',
+  '10+ years': '١٠ سنوات فأكثر',
+  'Skip': 'تخطي',
+  'Skip remaining questions and search now': 'تخطي الباقي وابحث الآن',
+  'Age unknown for {count} matching listings': 'العمر غير معروف لـ {count} من العقارات المطابقة',
+
   // Interview option labels
   'Pool': 'مسبح',
   'Parking': 'مواقف',
