@@ -162,13 +162,25 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   // Residential — Apartments & Co-living
   'Apartment':           { rawTypes: ['Apartment', 'مبنى شقق مخدومة', 'ملحق علوي'], kinds: ['res'] },
   'Floor':               { rawTypes: ['Floor'], kinds: ['res'] },
-  'Studio':              { rawTypes: ['Studio', 'ستوديو', 'شقَّة صغيرة (استوديو)', STUDIO_AR_SHADDA_FIRST], kinds: ['res'] },
+  // Studio + Duplex: kinds BOTH (2026-07-16, latent invisible-listing fix — same approved precedent
+  // as Farm). normalize.py's category_for_type has neither in its residential set, so a platform that
+  // routes stored types through it (october, nowaisiry, aqar/enrich) files them into its COMMERCIAL
+  // table — where kinds ['res'] made them unreachable by every search forever. 0 such rows exist today
+  // (verified live 2026-07-16 across all 33 *_commercial_listings), so this only WIDENS reachability;
+  // correctness is kept by the client cleanType filter and the type_ar labels (دوبلكس/استوديو…) match
+  // nothing else in com tables, so there is no dilution either.
+  'Studio':              { rawTypes: ['Studio', 'ستوديو', 'شقَّة صغيرة (استوديو)', STUDIO_AR_SHADDA_FIRST], kinds: BOTH },
   'Room':                { rawTypes: ['Room'], kinds: ['res'] },
+  // Residential Building stays ['res'] DELIBERATELY (verified 2026-07-16, do not "fix" to BOTH): its
+  // raws can't be misfiled — every scraper pre-maps مجمع سكني/"Residential Building" → 'Building', and
+  // 'Building' IS in normalize.py's residential set, so python always routes it residential. Widening
+  // would instead scan com tables for عمارة, where عمارة = Commercial Building (the documented dual
+  // label), flooding the RPC candidate set + total_count with Commercial Buildings.
   'Residential Building':{ rawTypes: ['Building', 'مجمع سكني'], kinds: ['res'] },
   // Residential — Villas & Houses
   'Villa':               { rawTypes: ['Villa', 'Palace', 'تاون هاوس'], kinds: ['res'] }, // فيلا search includes raw قصر + تاون هاوس
   'House':               { rawTypes: ['House'], kinds: ['res'] },
-  'Duplex':              { rawTypes: ['Duplex'], kinds: ['res'] },
+  'Duplex':              { rawTypes: ['Duplex'], kinds: BOTH }, // BOTH: see Studio note — october maps "duplex"→'Duplex' then routes it commercial via category_for_type
   // Residential — Vacation & Rural (Rest House/Farm appear in com tables too → both)
   'Rest House':          { rawTypes: ['Rest House'], kinds: BOTH },
   'Chalet':              { rawTypes: ['Chalet'], kinds: ['res'] },

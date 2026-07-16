@@ -315,7 +315,11 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
         "Chalet": "شاليه",
         "House": "بيت",
     }
-    title_bits.append(type_ar_map.get(property_type, "عقار"))
+    # Synthesize from STORED type-truth, not the routing-legacy `property_type` (which coerces every
+    # unmapped type to "Residential Land" and would confidently title it "أرض للبيع…" — the same
+    # misclassification class the 2026-07-16 stored-type fix killed). A mapped type titles exactly as
+    # before (stored == mapped); an unmapped one falls to the honest generic "عقار".
+    title_bits.append(type_ar_map.get(stored_property_type, "عقار"))
     title_bits.append("للإيجار" if is_rent else "للبيع")
     if district:
         title_bits.append(f"- {district}")

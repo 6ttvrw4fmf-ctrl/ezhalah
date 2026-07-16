@@ -1,7 +1,11 @@
 """Supabase client + upsert helpers shared by every per-platform scraper.
 
-`sb()` returns a service-role client (bypasses RLS, can write `listings`).
-`upsert_listing(row)` writes one normalized row, deduped on (source_platform, source_id).
+`sb()` returns a service-role client (bypasses RLS).
+`upsert_<platform>_*_batch(rows)` — the REAL write path: every scheduled scraper writes into its
+own per-platform `<platform>_{residential,commercial}_listings` table via these wrappers
+(all funnel through `_wasalt_batch`, which sanitizes, captures, and batch-upserts).
+`upsert_listing(row)` is a LEGACY single-row writer into `public.listings` — deprecated, see its
+docstring; do not use it for new scrapers.
 `begin_run(platform)` / `end_run(...)` write to `scrape_runs` so we can spot a broken source fast.
 """
 from __future__ import annotations
@@ -67,8 +71,17 @@ def sb() -> Client:
 
 
 def upsert_listing(row: dict[str, Any]) -> None:
-    """Upsert one normalized row into public.listings keyed on (source_platform, source_id).
-    Always refreshes `last_seen_at` so the liveness sweep can tell what's still around.
+    """DEPRECATED — legacy/dead write path. Do NOT use for new scrapers.
+
+    Upserts one row into `public.listings` keyed on (source_platform, source_id) — the ORIGINAL
+    prototype table from before the per-platform architecture. Reality check (2026-07-16):
+    `public.listings` holds 13 rows, has ZERO scheduled callers, and nothing in search reads it;
+    the only remaining caller is the unscheduled `scrapers/aqar/run.py` (itself legacy — the live
+    Aqar pipeline writes `aqar_residential_listings` / `aqar_commercial_listings`).
+
+    The production path is one table per platform (`<platform>_{residential,commercial}_listings`)
+    written via the `upsert_<platform>_*_batch()` wrappers below (all funneling through
+    `_wasalt_batch`). Kept only so the legacy script still runs; the table is kept for audit.
     """
     row = dict(row)  # don't mutate the caller's dict
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()

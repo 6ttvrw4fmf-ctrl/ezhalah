@@ -386,6 +386,27 @@ runQuery(q):  normalize (Room=1) ─► resolveLocation()/ensureLocationIndex() 
   header, and `deal` is listed in `scrapers/RETIRED_PLATFORMS.txt` so the hermetic guard test keeps
   it out of every workflow matrix forever. **Do not re-add without owner approval** — if dealapp.sa
   coverage needs the JSON API, evolve `scrapers/dealapp/` instead of resurrecting this slug.
+  **muktamel** — weekly workflow (`gh-muktamel-weekly`, `cron.job` id 14) paused 2026-07-15
+  (`cron.alter_job(14, active := false)`, reversible via the symmetric call). Never completed a
+  single full-range crawl (every GitHub Actions run killed by its own 330-minute timeout mid-crawl,
+  zero progress-log lines printed); both `muktamel_residential_listings` and
+  `muktamel_commercial_listings` are already at 0 active rows, so this has no user-facing search
+  impact — it only stops burning ~5.5 GH Actions compute-hours every Monday. Historical rows kept.
+  **Re-enable only after the scraper itself is rebuilt** (its enumeration approach needs redesigning,
+  not just a longer timeout).
+  **dwelleo, semsar** — `scrapers/dwelleo/` and `scrapers/semsar/` no longer exist in this repo (code
+  removed at some point). `scrape_runs` shows dwelleo ran 4 times (last 2026-06-23, 1,540 rows on
+  its last successful run) and semsar ran once (2026-06-22, 72 rows) — genuine, working scrapers at
+  the time, not broken stubs. **No commit message, PR, or doc entry explaining the removal was found
+  in this investigation (2026-07-15).** The code deletion itself is a strong signal the removal was
+  deliberate, but the *reason* is undocumented — flagged for explicit owner confirmation rather than
+  assumed; historical listing rows from both are untouched either way.
+- **`aqar_liveness` / `aqar_sweep` scrape_runs labels** — two old `scrape_runs.platform` values with
+  a handful of `reaped: abandoned run` rows, last written mid-June. These are stale artifacts of a
+  prior logging scheme, **not** evidence that Aqar liveness is broken: the real, currently-scheduled
+  mechanism (`gh-aqar-liveness`, `cron.job` id 6, daily `01:00`, described above) is confirmed healthy
+  — `cron.job_run_details` shows `succeeded` every day through 2026-07-15. Do not treat the dead
+  `aqar_liveness`/`aqar_sweep` platform rows in `scrape_runs` as a live-alerting gap.
 - **Ingestion sanitize (`scrapers/common/db.py`):** `_sanitize_price()` / `_sanitize_ints()` coerce
   numeric strings → int and **NULL non-numeric/bool/nan/junk** for every int column (fix 2026-07-06,
   PR #29 — a non-numeric `property_age="New"` previously failed the smallint cast and dropped the whole
@@ -433,7 +454,7 @@ wrongly remove a real listing.**
 |---|---|---|
 | **Ingestion sanitize** | on every upsert | Bad int field → NULL (not a dropped row). §12. |
 | **Aqar liveness** | `aqar-liveness.yml`, jobid 6 daily `01:00` | 3-strike full-page GET; confirmed-dead only. |
-| **Wasalt hybrid liveness** | `wasalt-liveness-hybrid.yml`, **jobid 32 daily `03:30`** (NEW 2026-07-06) | HEAD first; escalate to GET-confirm only when HEAD ≠ 200; **live iff GET 200 AND `propertyDetailsV3` present**; dead on 404/410 or 200-without-pdv; timeout/5xx/403 → **failed, untouched**. `missing_count += 1` on confirmed-dead; **inactive only at the 3rd consecutive confirmed-dead sweep**. **Collapse guard:** if >30% of a shard is dead, strike nothing. Cards untouched (only the `active` flag). 8-shard keyset sweep; heartbeat in `wasalt_liveness_runs`. |
+| **Wasalt hybrid liveness** | `wasalt-liveness-hybrid.yml`, jobid 32 daily `03:30` — **DISABLED since 2026-07-09, intentional** (owner-approved pause): superseded by the enumeration-based `gh-wasalt-enum-liveness` (jobid 36, daily `21:00`, running clean since 2026-07-13; verified live 2026-07-16). Safe to leave off; formally retire the hybrid workflow file once enum-liveness has a longer track record. | HEAD first; escalate to GET-confirm only when HEAD ≠ 200; **live iff GET 200 AND `propertyDetailsV3` present**; dead on 404/410 or 200-without-pdv; timeout/5xx/403 → **failed, untouched**. `missing_count += 1` on confirmed-dead; **inactive only at the 3rd consecutive confirmed-dead sweep**. **Collapse guard:** if >30% of a shard is dead, strike nothing. Cards untouched (only the `active` flag). 8-shard keyset sweep; heartbeat in `wasalt_liveness_runs`. |
 | **`prune_unseen()`** | small sources | 3-strike + collapse guard (a collapsed scrape can't wipe a platform). |
 | **`mark_stale_listings_inactive(7)`** | jobid 13 daily `04:00` | Time-based; **EXCLUDES aqar_residential + wasalt**. |
 | **`auto_recover_false_inactive()`** | jobid 30 daily `05:20` | Recovers rows that are `active=false` AND `missing_count=0` AND recently seen AND price sane. |
@@ -450,7 +471,11 @@ when nor by whom. The function body itself is archive-safe: it copies each doome
 `purged_listings_archive` (full `to_jsonb(row)` + source table + reason) **in the same statement**
 and deletes **only the ids the archive insert returned**, so it cannot delete a row it did not
 archive. **Re-enabling requires explicit owner approval plus a verified archive-first dry run**
-(owner rule: never permanently delete listing data without a recoverable archive).
+(owner rule: never permanently delete listing data without a recoverable archive). Note also
+(2026-07-15 fleet health check): re-enabling would hard-delete — archive-first, but still delete
+from the live tables — the rows the retirement passes deliberately preserved as inactive history
+(Toor's archived rows, Alnokhba's 6) once they age past the 7-day window, so the retention window
+question is part of the same owner decision.
 
 ---
 

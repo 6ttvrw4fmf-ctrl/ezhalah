@@ -110,7 +110,8 @@
           "شقَّة صغيرة (استوديو)"
         ],
         "kinds": [
-          "res"
+          "res",
+          "com"
         ]
       },
       "pythonCategoryOverride": "Commercial"
@@ -203,7 +204,8 @@
           "Duplex"
         ],
         "kinds": [
-          "res"
+          "res",
+          "com"
         ]
       },
       "pythonCategoryOverride": "Commercial"

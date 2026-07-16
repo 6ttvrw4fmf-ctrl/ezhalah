@@ -2,6 +2,15 @@
 
 _Permanent technical + functional reference. Last updated: 2026‑06‑24. Live numbers in §10._
 
+> **Verified 2026‑07‑16 against live `cron.job` + `pg_class`:** the refresh cadences and the
+> "what search reads" chain in §1/§7 had drifted and are corrected below. pg_cron **job 16 is
+> daily `02:00` UTC** (not every 4 hours) and refreshes `listing_location_index` +
+> `listing_location_canonical_mv` — a layer that now feeds **autocomplete** (`location_index_live`
+> view), **not** the search read path. The live search chain is:
+> `active_listing_ids_v2` + `listing_native_location_v1` (matviews, **hourly**, job 17) →
+> `listing_native_location_v2` (live view) → `search_listings_ar` (table, synced **hourly `:15`**
+> by `sync_search_listings_ar()`, job 28) → `location_search_candidates_ar` (the RPC the app calls).
+
 Ezhalah is an **Arabic‑first, neutral property‑search aggregator** for Saudi Arabia. It does not own
 listings; it ingests them from ~32 Saudi platforms and lets users search them. This document explains
 how **location** works end‑to‑end: where the data comes from, how a search becomes results, and the
@@ -81,14 +90,14 @@ Source platforms (Aqar, Wasalt, +30)
 1) RAW scraped tables  (immutable — exactly as received: Arabic or English)
         │  UNION of 63 tables
         ▼
-2) LOCATION INDEX  (listing_location_index, materialized view)
+2) LOCATION INDEX  (listing_location_index, materialized view — daily 02:00, job 16)
         │  matched to the Arabic catalog via the 3 maps
         ▼
-3) CANONICAL STORE  (listing_location_canonical_mv — Arabic only, indexed)
-        │
+3) CANONICAL STORE  (listing_location_canonical_mv — Arabic only, indexed; feeds AUTOCOMPLETE
+        │            via the location_index_live view — corrected 2026‑07‑16: not the search read path)
         ▼
-4) RPC / SEARCH LAYER  (location_search_candidates)  ← the only thing the app queries for location
-        │
+4) RPC / SEARCH LAYER  (location_search_candidates_ar over search_listings_ar, which is synced hourly
+        │              from listing_native_location_v1/v2 — jobs 17 + 28)  ← what the app queries
         ▼
 5) APP  (filter picker + AI chat → resolve → fetch → display, all Arabic)
 ```
@@ -100,10 +109,14 @@ Source platforms (Aqar, Wasalt, +30)
   layer. Holds each listing exactly as the scraper received it. **Never hand‑edited.** Used for audit,
   debugging, and re‑processing only.
 - **Location index** (`listing_location_index`): a materialized view that UNIONs all 63 raw tables into one
-  shape (id, platform, purpose, region, city, district, street, facade, …). Refreshed every 4h.
+  shape (id, platform, purpose, region, city, district, street, facade, …). Refreshed **daily `02:00` UTC**
+  (pg_cron job 16 — verified 2026‑07‑16; an earlier revision of this doc said "every 4 hours").
 - **Canonical store** (`listing_location_canonical_mv`): the index with every location **resolved to Arabic**
   (`region`/`city`/`district` = Arabic; the raw English kept beside it as `*_raw` for audit), plus a
-  `searchable` flag and a `review_reason`. **This is what search reads.** Indexed for speed.
+  `searchable` flag and a `review_reason`. **Corrected 2026‑07‑16: this is NOT what search reads anymore** —
+  it feeds the **autocomplete** picker via the `location_index_live` view (see ARCHITECTURE.md §13). Search
+  reads the `listing_native_location_v1` → `listing_native_location_v2` → `search_listings_ar` →
+  `location_search_candidates_ar` chain described in the note at the top of this doc.
 - **RPC / search layer** (`location_search_candidates`): the single function the app calls. It filters the
   canonical store by purpose + location + platform, caps per‑platform, and returns the matching listing IDs
   **plus their Arabic location**.
@@ -244,8 +257,10 @@ This is the text‑field search, kept deliberately conservative so it fires **on
 - **Review queue** — those flagged rows (currently **1,687**) are the to‑do list: real listings whose location
   we couldn’t place. They are **never guessed into a city**; they wait until fixed. (Filter `matched = false` in
   the `listings_arabic_locations` audit table to see them.)
-- **Auto refresh** — `pg_cron` job 16 refreshes the index, then the canonical store, **every 4 hours**, so new
-  scrapes flow through automatically.
+- **Auto refresh** — `pg_cron` job 16 refreshes the index, then the canonical store, **daily at `02:00` UTC**
+  (verified 2026‑07‑16 against live `cron.job`; NOT every 4 hours). The layer search actually reads refreshes
+  faster: `listing_native_location_v1` hourly (job 17) and the `search_listings_ar` sync hourly at `:15`
+  (job 28), so new scrapes reach search within ~1 hour.
 - **Raw tables remain untouched** — all Arabic conversion happens in the **derived** layer. The scrapers keep
   writing raw; the maps re‑resolve on every refresh. A wrong match is fixed by editing a map row, **never** by
   touching raw data.
