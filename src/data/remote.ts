@@ -777,24 +777,22 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
 
   // Shared filter params for BOTH the main recency-window call and the page-0 diversity-seed call below —
   // built once so the two calls can never drift apart (a diversity-seed row must satisfy the exact same
-  // WHERE clause as the main pool, or Rule 1 — filter exactness — would be at risk).
+  // WHERE clause as the main pool, or Rule 1 — filter exactness — would be at risk). Spreads scopeParams
+  // (from resolveSearchScope, computed once above) rather than re-deriving cities/tables/region/scopeB
+  // locally — same single-source-of-truth reasoning as resolveSearchScope's own header comment.
+  //
+  // P0 HISTORY (2026-07-15): an earlier version of this block referenced `cities`/`mainTables`/`scopeB`/
+  // `lm` as bare local variables that don't exist in this function's scope (their computation lives inside
+  // resolveSearchScope). That shipped to production once — see PR #78/outage/PR #82 revert — throwing a
+  // ReferenceError on every search, silently swallowed upstream, with the loading UI stuck forever and no
+  // visible error. Verify this exact block against `git show <commit>:src/data/remote.ts` (not just the
+  // working tree) before ever calling it tested again.
   const baseRpcParams = {
-    p_deal: q.bothDeals ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
-    p_rent_period: rentPeriodParam(q),
-    p_cities: cities,
-    p_districts: q.districts && q.districts.length ? q.districts : null,
-    p_tables: mainTables,
-    p_platforms: q.sources && q.sources.length ? q.sources : null,
+    ...scopeParams,
     ...rpcFilterParams(q),
     // Broad Commercial: override rpcFilterParams' p_types (null for a broad macro search) so the residential
     // scope is constrained to commercial type_ar; scope B carries the commercial-tables constraint. (2026-07-09)
     ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
-    ...scopeB,
-    // Region scope (bug-fix #2): pass region_id so same-name twin cities don't fuse cross-region.
-    // A pinned region (twin disambiguated by the agent backstop) wins; else the resolver's region.
-    p_region_ids: q.regionPin
-      ? (REGION_TO_ID[q.regionPin] ? [REGION_TO_ID[q.regionPin]] : null)
-      : regionIdsFor(lm),
     // Property-age advanced-filter answer (2026-07-13). IMPORTANT: only included when actually answered —
     // PostgREST resolves named-parameter RPC calls by exact parameter-name match, so unconditionally
     // sending p_is_new_construction breaks EVERY search with "function not found" until the backend
