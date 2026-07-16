@@ -16,13 +16,15 @@
 // `listing_location_canonical_mv` (see supabase/migrations/20260714_location_index_live_view.sql).
 //
 // CHECKS (all offline, against src/data/locations.ts):
-//   1. ensureLocationIndex() must query `location_index_live`, not the orphaned `location_index`.
+//   1. EVERY location-index call must query `location_index_live`, not the orphaned
+//      `location_index` (hardened 2026-07-16: used to validate only the first match, so a second
+//      stale call after a correct one slipped through — proven empirically before fixing).
 //   2. The selected columns must still be exactly `city,district,region,n` — the shape every
 //      downstream consumer (LIVE_CITIES/LIVE_DISTRICTS/regionForCity/citiesInRegion/
 //      topCitiesInRegion/cityHasListings-equivalent) depends on; a silent column-shape drift here
 //      would break autocomplete without throwing.
-//   3. No other file in src/ queries the orphaned `location_index` table directly (guards against a
-//      second caller reappearing without this tripwire being updated).
+//   3. No file in src/ (locations.ts included — hardened 2026-07-16, it used to be exempt) queries
+//      the orphaned `location_index` table directly.
 // ─────────────────────────────────────────────────────────────────────────────────────────
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -51,36 +53,47 @@ function main() {
   const src = readFileSync(LOCATIONS_PATH, 'utf8');
 
   // 1) ensureLocationIndex() must target the live view, not the orphaned MV.
+  //
+  // HARDENED 2026-07-16 (batch 4): this used to validate only the FIRST matching call
+  // (`.find(...)`), so a file containing a correct location_index_live call FOLLOWED by a second,
+  // stale location_index call passed the tripwire (proven with an injected second call — check 3
+  // couldn't catch it either, because it deliberately skips this file). Now EVERY matching call is
+  // validated, and check 3 below scans this file too.
   const supabaseFromCalls = [...src.matchAll(/supabase\.from\(['"]([^'"]+)['"]\)\.select\(['"]([^'"]+)['"]\)/g)];
-  const locationCall = supabaseFromCalls.find(([, table]) => table === 'location_index_live' || table === 'location_index');
-  if (!locationCall) fail(`no supabase.from('location_index_live'|'location_index').select(...) call found in ${LOCATIONS_PATH} — has ensureLocationIndex() been refactored? Update this tripwire alongside it.`);
-  const [, table, columns] = locationCall!;
-  if (table !== 'location_index_live') {
-    fail(`ensureLocationIndex() still queries the orphaned '${table}' table (refreshed by NO cron job since 2026-06-23 — see docs/ARCHITECTURE.md §13). It must query 'location_index_live' instead.`);
+  const locationCalls = supabaseFromCalls.filter(([, table]) => table === 'location_index_live' || table === 'location_index');
+  if (locationCalls.length === 0) fail(`no supabase.from('location_index_live'|'location_index').select(...) call found in ${LOCATIONS_PATH} — has ensureLocationIndex() been refactored? Update this tripwire alongside it.`);
+  const staleCalls = locationCalls.filter(([, table]) => table !== 'location_index_live');
+  if (staleCalls.length > 0) {
+    fail(`${staleCalls.length} of ${locationCalls.length} location-index call(s) in ${LOCATIONS_PATH} still query the orphaned 'location_index' table (refreshed by NO cron job since 2026-06-23 — see docs/ARCHITECTURE.md §13). Every call must query 'location_index_live' instead.`);
   }
-  console.log(`✓ ensureLocationIndex() targets 'location_index_live' (the actively-refreshed view), not the orphaned 'location_index' MV`);
+  console.log(`✓ all ${locationCalls.length} location-index call(s) target 'location_index_live' (the actively-refreshed view), not the orphaned 'location_index' MV`);
 
   // 2) Column shape must be unchanged — every downstream consumer depends on exactly these 4 fields.
   const expectedCols = ['city', 'district', 'region', 'n'];
-  const gotCols = columns.split(',').map((c) => c.trim());
-  const sameSet = gotCols.length === expectedCols.length && expectedCols.every((c) => gotCols.includes(c));
-  if (!sameSet) {
-    fail(`location_index_live query selects [${gotCols.join(', ')}], expected exactly [${expectedCols.join(', ')}] (LIVE_CITIES/LIVE_DISTRICTS/regionForCity/citiesInRegion/topCitiesInRegion all depend on this exact shape).`);
+  for (const [, , columns] of locationCalls) {
+    const gotCols = columns.split(',').map((c) => c.trim());
+    const sameSet = gotCols.length === expectedCols.length && expectedCols.every((c) => gotCols.includes(c));
+    if (!sameSet) {
+      fail(`location_index_live query selects [${gotCols.join(', ')}], expected exactly [${expectedCols.join(', ')}] (LIVE_CITIES/LIVE_DISTRICTS/regionForCity/citiesInRegion/topCitiesInRegion all depend on this exact shape).`);
+    }
+    console.log(`✓ location_index_live query selects the exact expected columns: ${gotCols.join(', ')}`);
   }
-  console.log(`✓ location_index_live query selects the exact expected columns: ${gotCols.join(', ')}`);
 
-  // 3) No other file should query the orphaned table directly (only comments may mention its name).
+  // 3) No src/ file may query the orphaned table directly (only comments may mention its name).
+  // HARDENED 2026-07-16 (batch 4): locations.ts is no longer exempt. The regex requires the closing
+  // quote immediately after 'location_index', so the correct 'location_index_live' calls can never
+  // false-positive here — and a stale call that dodges check 1's stricter from().select() shape
+  // (e.g. a multi-line chain) is still caught by this simpler pattern.
   const offenders: string[] = [];
   for (const file of walk(join(ROOT, 'src'))) {
-    if (file === LOCATIONS_PATH) continue; // already checked above, and it's expected to mention the name in comments
     const text = readFileSync(file, 'utf8');
     const liveCodeHit = /supabase\.from\(['"]location_index['"]\)/.test(text);
     if (liveCodeHit) offenders.push(file);
   }
   if (offenders.length > 0) {
-    fail(`found live supabase.from('location_index') call(s) outside locations.ts: ${offenders.map((f) => f.replace(ROOT + '/', '')).join(', ')} — repoint these too.`);
+    fail(`found live supabase.from('location_index') call(s): ${offenders.map((f) => f.replace(ROOT + '/', '')).join(', ')} — repoint these to 'location_index_live'.`);
   }
-  console.log(`✓ no other src/ file queries the orphaned 'location_index' table directly`);
+  console.log(`✓ no src/ file queries the orphaned 'location_index' table directly`);
 
   console.log('\n✅ location_index repoint tripwire passed — deployment may proceed.');
 }
