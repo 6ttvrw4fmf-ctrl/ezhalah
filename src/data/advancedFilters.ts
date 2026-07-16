@@ -42,30 +42,26 @@ export const MIN_OPTIONS_TO_SHOW = 2;
 // project memory): there's a natural gap in the live data between ~112 and ~192-653 total listings.
 export const MIN_TOTAL_TO_SHOW = 150;
 
-// Owner 2026-07-16: a bucket only counts as a real, meaningful option once it has at least this many
-// REAL (non-null-age) listings behind it. Every bucket except cnt_new is OR-NULL-safe by design
-// (unknown-age listings stay eligible for every numeric range, per the migration's data-semantics
-// decision) — so raw `count > 0` alone doesn't mean the bucket has real age-tagged signal, only that
-// SOME listing in scope has an unknown age. Live-verified this was a real gap, not theoretical: a
-// 909-listing scope that was 98% unknown-age showed every numeric bucket as "count > 0" while the
-// real per-bucket count was ≤8.
+// Owner 2026-07-16 (finalized spec): a bucket only counts as a real, meaningful option once it has
+// at least this many listings. property_age_option_counts_ar is STRICT for every bucket (unknown-age
+// listings match none of them — see the migration), so cnt_X is already the true per-bucket signal;
+// no separate "real vs raw" adjustment is needed here anymore.
 export const MIN_REAL_BUCKET_COUNT = 5;
 
+// Owner 2026-07-16 (finalized spec, LOCKED): exactly these 5 options, «أقل من سنة» retired as a
+// separate bucket (its only real signal was property_age=0, identical to «جديد» — an indistinguishable
+// duplicate). Every bucket is a STRICT filter — unknown-age listings never match ANY of them, at both
+// count time (this RPC) and search time (location_search_candidates_ar's p_age_min/p_age_max clause).
 const AGE_BUCKETS: Array<{
   key: string;
   labelKey: string;
   count: (c: AgeOptionCounts) => number;
-  // REAL (non-null-age) count backing this bucket — cnt_new is already strict (property_age=0 only,
-  // no OR-NULL), so it needs no adjustment; every other bucket subtracts cnt_unknown to undo the
-  // OR-NULL inflation and expose the true age-tagged signal.
-  real: (c: AgeOptionCounts) => number;
 }> = [
-  { key: 'new', labelKey: 'New construction', count: (c) => c.cnt_new, real: (c) => c.cnt_new },
-  { key: 'lt1', labelKey: 'Less than a year', count: (c) => c.cnt_lt1, real: (c) => c.cnt_lt1 - c.cnt_unknown },
-  { key: '1_2', labelKey: '1–2 years', count: (c) => c.cnt_1_2, real: (c) => c.cnt_1_2 - c.cnt_unknown },
-  { key: '3_5', labelKey: '3–5 years', count: (c) => c.cnt_3_5, real: (c) => c.cnt_3_5 - c.cnt_unknown },
-  { key: '6_9', labelKey: '6–9 years', count: (c) => c.cnt_6_9, real: (c) => c.cnt_6_9 - c.cnt_unknown },
-  { key: '10p', labelKey: '10+ years', count: (c) => c.cnt_10p, real: (c) => c.cnt_10p - c.cnt_unknown },
+  { key: 'new', labelKey: 'New construction', count: (c) => c.cnt_new },
+  { key: '1_2', labelKey: '1–2 years', count: (c) => c.cnt_1_2 },
+  { key: '3_5', labelKey: '3–5 years', count: (c) => c.cnt_3_5 },
+  { key: '6_9', labelKey: '6–9 years', count: (c) => c.cnt_6_9 },
+  { key: '10p', labelKey: '10+ years', count: (c) => c.cnt_10p },
 ];
 
 // Internal-only concentration visibility (rule 6): logs which platforms back a bucket so a
@@ -90,19 +86,18 @@ const AGE_QUESTION: AdvancedQuestionConfig = {
     if (counts.cnt_total < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: 0 };
     logAgeConcentration(counts.platform_breakdown);
     const options = AGE_BUCKETS
-      // rule 4 (updated 2026-07-16): only options with a MEANINGFUL number of REAL (non-null-age)
-      // matching listings — not just count > 0 (see MIN_REAL_BUCKET_COUNT comment above for why raw
-      // count alone was misleading). The displayed `count` stays the raw cnt_X — that's still exactly
-      // what Search returns if this option is picked (unknown-age listings are meant to stay eligible
-      // at search time; this filter only decides whether the OPTION is worth offering at all).
-      .filter((b) => b.real(counts) >= MIN_REAL_BUCKET_COUNT)
+      // rule 4 (updated 2026-07-16): only options with a MEANINGFUL number of matching listings —
+      // cnt_X is already strict (unknown-age excluded), so this is the true per-bucket signal. The
+      // displayed `count` is exactly what Search returns if this option is picked — same strict
+      // predicate at both count time and search time (see property_age_option_counts_ar /
+      // location_search_candidates_ar's p_age_min/p_age_max clause).
+      .filter((b) => b.count(counts) >= MIN_REAL_BUCKET_COUNT)
       .map((b) => ({ key: b.key, label: t(b.labelKey), count: b.count(counts) }));
     return { options, unknownCount: counts.cnt_unknown };
   },
   applyAnswer(q, key) {
     switch (key) {
       case 'new': return { ...q, isNewConstruction: true, ageMin: null, ageMax: null };
-      case 'lt1': return { ...q, isNewConstruction: null, ageMin: 0, ageMax: 0 };
       case '1_2': return { ...q, isNewConstruction: null, ageMin: 1, ageMax: 2 };
       case '3_5': return { ...q, isNewConstruction: null, ageMin: 3, ageMax: 5 };
       case '6_9': return { ...q, isNewConstruction: null, ageMin: 6, ageMax: 9 };
