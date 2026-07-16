@@ -11,6 +11,17 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# ── DEPLOY LOCK (added 2026-07-16, see docs/DEPLOY_SAFETY.md "Deployment lock" — after a
+# 2026-07-15 P0 where two concurrent Claude sessions each independently deployed/rolled back
+# production within the same remediation window). Acquired FIRST, before any of the expensive
+# checks below, so a session that loses the race bails immediately instead of burning minutes on
+# preflight/taxonomy checks it can't use. Released on ANY exit path via the trap (success,
+# refusal, or error) so a failed deploy never leaves production locked for the TTL.
+HOLDER="safe-deploy:$(whoami)@$(hostname)-$$"
+scripts/deploy-lock.sh acquire "$HOLDER" "safe-deploy.sh" || exit 1
+trap 'scripts/deploy-lock.sh release "'"$HOLDER"'" >/dev/null 2>&1 || true' EXIT
+echo ""
+
 # ── PREFLIGHT (owner P0 2026-07-10): the gate that makes losing approved UI IMPOSSIBLE. It proves
 # HEAD CONTAINS the approved production baseline (nothing removed) + clean/on-main/HEAD==origin +
 # no concurrent edits. Refuse the deploy if it fails. (The individual checks below are kept as
@@ -108,6 +119,46 @@ else
   echo "This is warning-only and does NOT fail the deploy. If search shows «حاول مرة ثانية» app-wide, the"
   echo "env vars did NOT inline — investigate before declaring the deploy healthy (2026-07-10 P0 signature)."
   echo "If search works fine, this was just slow CDN propagation — re-grep the served bundle to confirm."
+fi
+
+# ── LIVE SEARCH SMOKE TEST (added 2026-07-15, after the PR #78 outage — a deploy that made the
+# EXACT search RPC below hang indefinitely, app-wide, for real users). The bundle check above only
+# proves the client CAN initialize; it says nothing about whether a real search actually completes.
+# Every prior check in this script is "was the deploy correct", not "does the deployed app work" —
+# this is the first one that actually calls the same RPC the app calls, against the just-deployed
+# production database, and demands it return within a bound. UNLIKE the bundle check, this is
+# BLOCKING: it fails the script (loud, before the baseline advances) rather than warning, because a
+# hanging/erroring search is the single most severe class of regression this repo has shipped.
+# The anon key here is the same EXPO_PUBLIC_SUPABASE_KEY already baked into the public client bundle
+# (client-public by design, see docs/DEPLOY_SAFETY.md) — not a secret, safe to reference in a script.
+echo ""
+echo "Running the live search smoke test (calls location_search_candidates_ar against production, must return within 20s)..."
+SMOKE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFhbm5hcmJrd2N5bXJvdHp3ZGJvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0MDgxMDAsImV4cCI6MjA5NTk4NDEwMH0.Z-GhSpan6otYWkc8sU43Dw5PT5T_VBUMr0IDZShCQw0"
+SMOKE_URL="https://aannarbkwcymrotzwdbo.supabase.co/rest/v1/rpc/location_search_candidates_ar"
+SMOKE_START=$SECONDS
+SMOKE_BODY='{"p_deal":"إيجار","p_rent_period":null,"p_cities":["Riyadh"],"p_districts":null,"p_tables":null,"p_platforms":null,"p_types":null,"p_tables2":null,"p_types2":null,"p_region_ids":null,"p_per_platform":null,"p_limit":5,"p_offset":0}'
+SMOKE_RESPONSE=""
+SMOKE_HTTP=""
+SMOKE_HTTP="$(curl -s -o /tmp/safe-deploy-smoke-response.json -w '%{http_code}' --max-time 20 \
+  -X POST "$SMOKE_URL" \
+  -H "apikey: $SMOKE_ANON_KEY" \
+  -H "Authorization: Bearer $SMOKE_ANON_KEY" \
+  -H "Content-Type: application/json" \
+  -d "$SMOKE_BODY" || echo "curl_failed")"
+SMOKE_ELAPSED=$(( SECONDS - SMOKE_START ))
+if [ "$SMOKE_HTTP" = "200" ] && [ -s /tmp/safe-deploy-smoke-response.json ] && ! grep -q '"message"\s*:\s*"' /tmp/safe-deploy-smoke-response.json; then
+  echo "OK: live search RPC responded ${SMOKE_ELAPSED}s (HTTP 200, valid body) — search is functionally alive."
+  rm -f /tmp/safe-deploy-smoke-response.json
+else
+  echo ""
+  echo "❌ REFUSING TO ADVANCE THE BASELINE: the live search RPC did not respond healthily."
+  echo "   HTTP status: ${SMOKE_HTTP:-none} | elapsed: ${SMOKE_ELAPSED}s | response saved: /tmp/safe-deploy-smoke-response.json"
+  echo "   This is EXACTLY the PR #78 failure signature (search silently hangs/errors for real users)."
+  echo "   The Vercel deploy already happened (this check cannot un-deploy it) — but the baseline will"
+  echo "   NOT advance, so the NEXT preflight-verify.sh will flag this commit as unapproved, and you"
+  echo "   should roll back immediately: npx vercel rollback <previous-good-deployment-url> --yes"
+  echo "   Investigate the response body, then re-run this script once genuinely fixed."
+  exit 1
 fi
 
 # ── ADVANCE THE APPROVED BASELINE to the just-deployed commit, so every FUTURE preflight refuses to

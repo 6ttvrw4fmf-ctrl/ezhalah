@@ -101,6 +101,48 @@ a first-class column for the "native" platforms) — becomes the ONE go-forward 
 credited as phasea's successor rather than a duplicate. This redesign ships the resolver module +
 enforcement gate + tests/monitoring first; the SQL overlay is the next phase, gated on this decision.
 
+## `city_ar`/`district_ar` are NOT universal columns — verified table-by-table (2026-07-16)
+
+**Only 6 platforms / 11 tables genuinely have first-class `city_ar` and `district_ar` columns** —
+confirmed 2026-07-16 via a direct `information_schema.columns` query, not inference:
+`aldarim`, `alhoshan`, `aqargate`, `aqarmonthly` (residential only — no commercial table exists),
+`hajer`, `sanadak`, `wasalt` (`wasalt`'s `city_ar` is filled out-of-band by `enrich_ar.py`, per
+above — the column exists but can be NULL). **Every other platform's `*_residential_listings` /
+`*_commercial_listings` table does not have these columns at all** — their resolved Arabic location
+(where it exists) lives in `additional_info->>'city_ar'` / `->>'district_ar'` (JSONB, not a real
+column) or in the derived tables below. `SELECT city_ar, district_ar FROM <any other platform's raw
+table>` fails with `column ... does not exist` — this is not a bug to fix, it is the actual schema.
+
+**Always go through `listing_native_location_v2`** (a plain VIEW, safe by construction — the 7
+native tables read their real columns, `souq24` is special-cased on `neighborhood`, and every other
+platform gets an explicit `NULL::text AS city_ar/district_ar` catch-all) instead of querying a raw
+platform table's `city_ar`/`district_ar` directly. Any new script, function, or ad-hoc query that
+needs a listing's resolved Arabic location — cron job, Edge Function, or a one-off SQL check run
+through an MCP tool — should read `listing_native_location_v2`, never assume the raw table has the
+column.
+
+**Known undocumented/orphaned tables (found 2026-07-16, left as-is per owner decision):**
+`buy_location_index` (114,787 rows), `rent_location_index` (68,210 rows), and
+`listing_location_canonical` (184,134 rows, distinct from the *matview* `listing_location_canonical_mv`
+described in `docs/LOCATION_SYSTEM.md` §1) all exist in production with real data, but **no
+committed migration, Postgres function, or application code builds or maintains any of them** — the
+only repo reference is a design-intent comment at `src/data/remote.ts:637` that was never
+implemented. Their origin is unknown (most likely ad-hoc SQL run directly against production,
+possibly by a concurrent session prototyping the `buy_location_index`/`rent_location_index` routing
+design described in that comment). **Do not assume these are dead or safe to query/rely on** — they
+are untracked infra. If you pick up the `remote.ts:637` design and build this out for real, replace
+this section with the real architecture and delete the orphaned tables once the real ones (or these,
+formally adopted) are in place.
+
+**The 2026-07-16 incident:** a one-time, ~52-second burst of `column city_ar/district_ar does not
+exist` errors hit ~19 non-native platforms' tables (alphabetically, `deal_*` → `toor_*`), with no
+matching `pg_cron` job, Postgres function, trigger, or Edge Function anywhere — consistent with an
+ad-hoc script (most likely built to populate the orphaned tables above) assuming every `*_listings`
+table has these columns. No data was corrupted (a `column does not exist` error aborts before any
+write executes) and no search-index drift resulted (`location_pipeline_alerts` recorded zero
+`search_v2_drift`/`v2_duplicate_pk` entries in the following 24h). Full investigation trail: project
+memory `project-city-ar-district-ar-root-cause-2026-07-16` (Supabase project `aannarbkwcymrotzwdbo`).
+
 ## For a new scraper (or migrating an existing one)
 
 1. Extract whatever raw location signal the source gives you (`city_ar`, `district_ar`, an English

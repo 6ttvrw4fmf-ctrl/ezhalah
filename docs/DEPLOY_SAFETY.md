@@ -134,20 +134,36 @@ The first attempt to deploy this exact baseline (`main` @ `25e886e`, before PR #
 entry — if you deploy and don't update it, the next person (or the next Claude session) will
 compare against the wrong baseline.
 
+## Deployment lock (added 2026-07-16)
+
+This repo's Vercel production alias can be changed by **multiple concurrent Claude/agent
+sessions**, not just one human operator — and on 2026-07-15 that caused a real incident: while one
+session was mid-revert of an unapproved deploy, a different session deployed `main` directly at a
+moment it still had the bug, re-breaking production a second time with zero coordination between
+the two. Full story: project memory `pr78-outage-rollback-2026-07-15`.
+
+`scripts/safe-deploy.sh` and `scripts/emergency-rollback.sh` (below) now acquire a mutual-exclusion
+lock (`ops_deploy_lock` table + `acquire_deploy_lock()`/`release_deploy_lock()` functions, see
+`supabase/migrations/20260716_deploy_lock.sql`) before touching the Vercel alias, and release it
+immediately after — self-expiring after 10 minutes so a crashed session can never permanently block
+deploys. If a session calls a Vercel MCP tool directly instead of going through these scripts, it
+must acquire/release the same lock manually — see `AGENTS.md` "Deployment lock" for the exact SQL.
+
 ## Emergency rollback procedure
 
 If the live UI ever regresses again (looks different, missing features, broken layout):
 
 ### Fastest — instant rollback to a known-good deployment (no rebuild)
-Vercel keeps prior deployments and can re-point the production alias to one instantly, without
-rebuilding:
+Use `scripts/emergency-rollback.sh <deployment-id-or-url>` — it acquires the deploy lock, then
+re-points the production alias to an already-built deployment instantly, no rebuild:
 ```bash
-npx vercel rollback <deployment-id-or-url> --yes
-# e.g.: npx vercel rollback dpl_8ML9bBf2b8c7RKXe4VR4tMdbNQMe --yes
+scripts/emergency-rollback.sh dpl_8ML9bBf2b8c7RKXe4VR4tMdbNQMe
 ```
 Use the deployment ID from the "Approved baseline record" table above (or a newer one if this
 document has been kept up to date since). This is the right first move in a live incident — it
-restores service in seconds while you investigate.
+restores service in seconds while you investigate. (The raw `npx vercel rollback ... --yes` command
+still works, but skips the deploy lock — only fall back to it if the script is unavailable, and
+acquire the lock manually first per `AGENTS.md`.)
 
 ### Proper fix — redeploy from the correct git state
 Instant rollback re-points to an old, immutable build artifact — it does not fix the underlying
