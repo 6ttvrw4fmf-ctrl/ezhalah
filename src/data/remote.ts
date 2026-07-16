@@ -446,7 +446,6 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
 // contribution stays internal).
 export type AgeOptionCounts = {
   cnt_new: number;
-  cnt_lt1: number;
   cnt_1_2: number;
   cnt_3_5: number;
   cnt_6_9: number;
@@ -481,7 +480,7 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
   if (!supabase) return null;
   const scope = await resolveSearchScope(q);
   if (!scope) {
-    return { cnt_new: 0, cnt_lt1: 0, cnt_1_2: 0, cnt_3_5: 0, cnt_6_9: 0, cnt_10p: 0, cnt_unknown: 0, cnt_total: 0, platform_breakdown: null };
+    return { cnt_new: 0, cnt_1_2: 0, cnt_3_5: 0, cnt_6_9: 0, cnt_10p: 0, cnt_unknown: 0, cnt_total: 0, platform_breakdown: null };
   }
   const { isBroadCommercial, ...scopeParams } = scope;
   const result = await withTimeout(
