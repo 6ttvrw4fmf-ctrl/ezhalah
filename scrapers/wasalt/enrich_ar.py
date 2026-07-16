@@ -169,7 +169,7 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
         print(f"⚠ CIRCUIT BREAKER: {pending} un-fetched rows in {table} (> {max_pending}). Steady state "
               f"is a few/day — this looks like a flag reset or a backfill. Refusing to crawl the backlog "
               f"through the metered proxy. Re-run with --allow-backfill to override.", flush=True)
-        return {"ok": 0, "empty": 0, "fail": 0, "aborted": pending}
+        return {"ok": 0, "empty": 0, "fail": 0, "aborted": pending, "pending_before": pending}
     q = (c.table(table).select("id,ad_number,listing_url")
          .eq("active", True).eq("ar_fetched", False))
     # Cloud matrix sharding: 10 parallel jobs, each claims a disjoint slice by the last digit of
@@ -224,6 +224,7 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
     with ThreadPoolExecutor(max_workers=workers) as ex:
         list(ex.map(work, rows))
     print(f"   ✓ {table}: ok={stats['ok']} empty={stats['empty']} fail={stats['fail']}", flush=True)
+    stats["pending_before"] = pending
     return stats
 
 
@@ -241,8 +242,32 @@ def main() -> int:
     ap.add_argument("--allow-backfill", action="store_true",
                     help="Override the circuit breaker to deliberately crawl a large backlog through the proxy.")
     args = ap.parse_args()
-    enrich_table(args.table, args.limit, args.workers, args.shard, args.shards,
-                 args.max_pending, args.allow_backfill)
+    # Own platform name per table, DISTINCT from the real scraper's own 'wasalt' scrape_runs rows —
+    # this is backlog-processing throughput (rows_seen = pending backlog at start), not "listings
+    # scraped this run", so mixing the two into one platform stream would corrupt the existing
+    # silent-scraper-death detector's rows_seen>0 health signal for the real scraper.
+    suffix = "commercial" if "commercial" in args.table else "residential"
+    platform = f"wasalt_enrich_ar_{suffix}"
+    run_id = db.begin_run(platform)
+    stats = enrich_table(args.table, args.limit, args.workers, args.shard, args.shards,
+                          args.max_pending, args.allow_backfill)
+    aborted = stats.get("aborted", 0)
+    ok_count, empty_count, fail_count = stats.get("ok", 0), stats.get("empty", 0), stats.get("fail", 0)
+    attempted = ok_count + empty_count + fail_count
+    # ok=False when the circuit breaker fired (0 rows processed despite a real backlog) or when more
+    # than half of attempted rows failed — both are the "reports success but does nothing useful"
+    # shape this monitoring exists to catch, not a healthy empty-queue run (attempted==0, no pending).
+    run_ok = aborted == 0 and (attempted == 0 or fail_count <= attempted / 2)
+    db.end_run(
+        run_id, ok=run_ok, rows_seen=stats.get("pending_before", 0), rows_upserted=ok_count + empty_count,
+        notes=(f"ok={ok_count} empty={empty_count} fail={fail_count} aborted={aborted} "
+               f"limit={args.limit} allow_backfill={args.allow_backfill}"),
+        # allow_empty: unlike a scraper (rows_seen==0 → dead/blocked source, a real problem), this job's
+        # rows_seen is the PENDING BACKLOG at start — 0 pending is the ideal steady-state once this fix
+        # has been running a while, not a failure. Without this, end_run's RC-B honesty demotion would
+        # wrongly flip every healthy "fully caught up" run to ok=False.
+        allow_empty=True,
+    )
     return 0
 
 
