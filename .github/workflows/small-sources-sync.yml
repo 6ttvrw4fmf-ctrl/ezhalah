@@ -25,7 +25,11 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 90   # covers aqarcity (~2.3k detail pages behind Cloudflare) + Sanadak; rest are fast
+    # Per-source override via matrix.tmo — souq24's ~1.3k-GET sweep through the metered Saudi proxy
+    # sometimes needs >90m (killed at exactly 90:16 on 07-03 AND 07-04, marking those RUNS
+    # "cancelled"). Default stays 90 for everyone else (covers aqarcity ~2.3k Cloudflare pages).
+    # (Restored 2026-07-16 — PR #77 accidentally flattened this back to a fixed 90.)
+    timeout-minutes: ${{ matrix.tmo || 90 }}
     strategy:
       fail-fast: false    # one source failing never blocks the others
       max-parallel: 18
@@ -56,7 +60,11 @@ jobs:
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
-          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all" }
+          # souq24 probes ~1,300 candidate ids/run through the metered Saudi proxy for only ~52 active
+          # listings, and the sweep deliberately re-checks the whole id range (skipping ids would miss
+          # reactivated ads). So we cut its bandwidth by cadence instead: every_n_days=2 (owner 2026-07-07).
+          # (tmo+cadence restored 2026-07-16 — PR #77 accidentally dropped both overrides.)
+          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all", tmo: 150, every_n_days: 2 }
           # NOTE: toor is NOT here. RETIRED 2026-07-06 (owner-approved, commit d5ca9d6):
           # www.toor.ooo IP-blocks datacenter + Saudi-residential-proxy IPs (every detail fetch =
           # exc:Timeout, 0 rows written for weeks), so it was removed from the active pipeline.
@@ -97,4 +105,15 @@ jobs:
           # Saudi residential proxy from the cloud (reuses the Wasalt proxy secret). Every other
           # source's scraper ignores this var, so it's harmless to expose matrix-wide.
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
-        run: ${{ matrix.cmd }}
+        run: |
+          # Per-source cadence (owner 2026-07-07): most small sources run daily (every_n_days unset = 1),
+          # but a few (souq24) scrape every N days to cut metered-proxy bandwidth. Skip today when the
+          # epoch-day isn't a run-day for this source. A MANUAL single-source dispatch always runs
+          # (source input non-empty) so you can force a scrape on an off day.
+          # (Restored 2026-07-16 — PR #77 accidentally flattened this back to a bare `run: cmd`.)
+          N="${{ matrix.every_n_days || 1 }}"
+          if [ "$N" != "1" ] && [ -z "${{ github.event.inputs.source }}" ] && [ "$(( $(date -u +%s) / 86400 % N ))" -ne 0 ]; then
+            echo "::notice::Skipping ${{ matrix.source }} today — every-${N}-days cadence (off day). Manual single-source dispatch overrides."
+            exit 0
+          fi
+          ${{ matrix.cmd }}
