@@ -147,13 +147,73 @@ check(
   "ResultCard.tsx's row value passes locale into arAttrValue() (needed for the fix #3 leak check)",
   RESULTCARD_NOWS.includes('arAttrValue(r.label,r.value,locale)'),
 );
+// 2026-07-16 Arabic-only sweep: FREE_TEXT_PROSE_LABELS widened from 'address'-only to every
+// genuine prose/status/enum label (defense-in-depth for unmapped future values) — but the code/ID
+// labels (license/plan/parcel/postal numbers) must STILL be absent, or a real ID containing a
+// Latin letter (e.g. "FAL1234567") would get wrongly blanked. Assert both directions.
+const CODE_LABELS_MUST_STAY_EXCLUDED = ['rega ad license number', 'broker fal license', 'parcel number', 'plan number', 'postal code', 'rega license issue date', 'rega license expiry date'];
 check(
-  'FREE_TEXT_PROSE_LABELS is scoped to ONLY "address" — never a license/plan/parcel/postal-code label (would wrongly blank a real ID containing a letter)',
-  /FREE_TEXT_PROSE_LABELS=newSet\(\['address'\]\)/.test(RESULTCARD_NOWS),
+  'FREE_TEXT_PROSE_LABELS still contains "address" (the original PR#104 case)',
+  /FREE_TEXT_PROSE_LABELS=newSet\(\[[^\]]*'address'/.test(RESULTCARD_NOWS),
+);
+check(
+  'FREE_TEXT_PROSE_LABELS was widened beyond address-only (status/parking type/ac type/kitchen/furnishing/etc.)',
+  /FREE_TEXT_PROSE_LABELS=newSet\(\[[^\]]*'status'[^\]]*'parkingtype'[^\]]*'actype'[^\]]*'kitchen'/.test(RESULTCARD_NOWS),
+);
+check(
+  `no code/ID label was accidentally added to FREE_TEXT_PROSE_LABELS (would wrongly blank a real license/plan/parcel/postal code): ${CODE_LABELS_MUST_STAY_EXCLUDED.filter((l) => new RegExp(`FREE_TEXT_PROSE_LABELS=newSet\\(\\[[^\\]]*'${l.replace(/ /g, '')}'`).test(RESULTCARD_NOWS)).join(', ') || 'none found (correct)'}`,
+  CODE_LABELS_MUST_STAY_EXCLUDED.every((l) => !new RegExp(`FREE_TEXT_PROSE_LABELS=newSet\\(\\[[^\\]]*'${l.replace(/ /g, '')}'`).test(RESULTCARD_NOWS)),
 );
 check(
   "arAttrValue()'s free-text fallback calls arabicOrPlaceholderForFreeText only inside the FREE_TEXT_PROSE_LABELS branch",
   RESULTCARD_NOWS.includes('if(FREE_TEXT_PROSE_LABELS.has(ll))returnarabicOrPlaceholderForFreeText(v,locale,ATTRIBUTE_UNRESOLVED_AR);'),
+);
+check(
+  "facade's own fallback branch (bypasses the generic FREE_TEXT_PROSE_LABELS check) also guards against non-Arabic garbage — dealapp's raw scraped HTML/meta-tag leak",
+  RESULTCARD_NOWS.includes('returnarabicOrPlaceholderForFreeText(v,locale,ATTRIBUTE_UNRESOLVED_AR);}constmap=AR_ENUM[ll];'),
+);
+
+// New AR_ENUM entries (2026-07-16): fixes the 'furniture'-vs-'furnishing' key-mismatch bug (satel,
+// 203 rows) and adds 4 previously-nonexistent enums (status/parking type/ac type/kitchen — all
+// satel, ~200 rows each) plus 2 small extensions (usage's agricultural/mixed; license status's
+// approved). Real, executed — imports AR_ENUM isn't possible (heavy RN deps in the same file), so
+// this is a source-text check for each exact live value → Arabic translation pair.
+check("AR_ENUM key renamed 'furniture' → 'furnishing' (was a silent dictionary-key bug — the real ADDL_FIELDS label is 'Furnishing', so the old key never matched)", RESULTCARD_NOWS.includes('furnishing:{furnished:'));
+check("furnishing: satel's exact live value 'Fully furnished' is mapped", RESULTCARD_NOWS.includes("'fullyfurnished':'مفروشبالكامل'"));
+check("furnishing: satel's exact live value 'Partially furnished' is mapped", RESULTCARD_NOWS.includes("'partiallyfurnished':'مفروشجزئياً'"));
+check("status: satel's 'Available'/'Rented out' (202 rows, previously had NO enum entry at all) are mapped", RESULTCARD_NOWS.includes("status:{available:'متاح','rentedout':'مؤجر'}"));
+check("'parking type': satel's 'underground'/'outdoor'/'shadedOutdoor' (194 rows) are mapped", RESULTCARD_NOWS.includes("'parkingtype':{underground:'تحتالأرض',outdoor:'مكشوف',shadedoutdoor:'مكشوفمظلل'}"));
+check("'ac type': satel's 'split'/'concealed'/'both' (201 rows) are mapped", RESULTCARD_NOWS.includes("'actype':{split:'سبليت',concealed:'مخفي',both:'مركزيوسبليت'}"));
+check("kitchen: satel's 'with-appliances'/'without-appliances' (199 rows) are mapped", RESULTCARD_NOWS.includes("kitchen:{'with-appliances':'مجهزبأجهزة','without-appliances':'غيرمجهزبأجهزة'}"));
+check("'property usage' extended with eaqartabuk/erapulse's 'agricultural'/'mixed'", RESULTCARD_NOWS.includes("residential:'سكني',commercial:'تجاري',agricultural:'زراعي',mixed:'مختلط'"));
+check("'license status' extended with mizlaj's raw 'approved' (27 rows)", RESULTCARD_NOWS.includes("'licensestatus':{approved:'معتمد'}"));
+
+// Card title/location line (2026-07-16, owner report — highest-visibility gap: the card's own
+// HEADLINE had no Arabic guard at all, only an empty-string '||' fallback that never caught
+// "present but not Arabic"). Live DB proof of the leak this closes: raw city values like "Eastern
+// Province" (alhoshan), "Baljurashi"/"Sarat Abidah" (wasalt), "Al Dulaimiyah" (ramzalqasim) used to
+// render straight onto the card title.
+check(
+  'ResultCard.tsx guards the city with arabicOrPlaceholder(..., LOCATION_UNRESOLVED_AR) BEFORE place() — a raw non-Arabic city (e.g. "Eastern Province") no longer reaches the card headline',
+  RESULTCARD_NOWS.includes('constcityAr=arabicOrPlaceholder(t(listing.city),locale,LOCATION_UNRESOLVED_AR);'),
+);
+check(
+  'the card title Text uses the guarded cityAr (not a bare place(t(listing.city))) for both the district-comma-city and city-only branches',
+  RESULTCARD_NOWS.includes('place(cityAr)||LOCATION_UNRESOLVED_AR')
+  && (RESULTCARD_TS.match(/place\(cityAr\)/g)?.length ?? 0) >= 2, // title branch + locText row, both fixed
+);
+check(
+  'the card title district text is also guarded (arabicOrPlaceholder wraps t(listing.district), not a bare place(t(listing.district)))',
+  RESULTCARD_NOWS.includes('place(arabicOrPlaceholder(t(listing.district),locale,LOCATION_UNRESOLVED_AR))'),
+);
+
+// agent.tsx district refine-chip (2026-07-16): q.location can be the LLM's own canonical-ENGLISH
+// city choice on the AI-agent path — was interpolated raw into an Arabic chip question.
+const AGENT_TSX = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
+const AGENT_NOWS = stripWs(AGENT_TSX);
+check(
+  'agent.tsx\'s district refine-chip question wraps q.location in arLabel() on the Arabic branch (was raw — could render "أي حي تفضّل في Riyadh؟")',
+  AGENT_NOWS.includes('ask=ar?`أيحيتفضّلفي${arLabel(q.location)}؟`:`Whichdistrictin${q.location}?`;'),
 );
 
 console.log('');

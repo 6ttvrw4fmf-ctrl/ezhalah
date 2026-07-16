@@ -742,7 +742,11 @@ export default function Agent() {
       const ds = topDistrictsForCity(q.location, 6);
       if (ds.length >= 2) {
         dim = 'district';
-        ask = ar ? `أي حي تفضّل في ${q.location}؟` : `Which district in ${q.location}?`;
+        // (fix, 2026-07-16 Arabic-only sweep) q.location can be the LLM's own canonical-ENGLISH
+        // city choice on the AI-agent path (the system prompt explicitly prefers English for known
+        // cities) — arLabel() (already used elsewhere in this file for the same reason) falls back
+        // to the unresolved placeholder instead of interpolating raw English into this Arabic chip.
+        ask = ar ? `أي حي تفضّل في ${arLabel(q.location)}؟` : `Which district in ${q.location}?`;
         options = ds.map((d) => ({ label: d, value: d }));
       }
     }

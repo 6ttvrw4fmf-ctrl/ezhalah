@@ -394,7 +394,12 @@ function locationLines(q: SearchQuery): string[] {
   const dispP = (s: string) => (getLocale() === 'en' ? translitPlace(s) : s);
   const out: string[] = [];
   if ((lm.kind === 'district' || lm.kind === 'city') && simp(lm.raw) && simp(lm.raw) !== simp(lm.label) && sameScript) {
-    out.push(`${t('You typed')}: ${lm.raw}`);
+    // (fix, 2026-07-16 Arabic-only sweep) lm.raw is the user's own free-typed echo — every sibling
+    // line in this function wraps its dynamic place text in arabicOrUnresolved(); this one didn't,
+    // so the one case this branch targets (a same-script, i.e. BOTH-non-Arabic, raw+label pair —
+    // an unresolved English spelling that never got translated) rendered raw English in the
+    // Arabic search summary instead of falling back to the unresolved placeholder.
+    out.push(`${t('You typed')}: ${arabicOrUnresolved(lm.raw)}`);
   }
   switch (lm.kind) {
     case 'city':
@@ -1212,7 +1217,10 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
       ? { cityEn: lmCity, region: q.locationMatch?.region || '', n: 0 }
       : nearbyCityWithListings(q.locationMatch?.raw || q.location, lmCity);
     if (alt) {
-      return t('We couldn’t find listings in "{place}". Did you mean {alt}?', { place: q.locationMatch?.label || q.location, alt: arabicOrUnresolved(cityDisplay(alt.cityEn, getLocale())) });
+      // (fix, 2026-07-16 Arabic-only sweep) `place` was interpolated raw — unlike `alt` right next
+      // to it in the same call — so an unresolved English location echo (q.location, or an
+      // unresolved lm.label) could render inside this Arabic zero-results suggestion.
+      return t('We couldn’t find listings in "{place}". Did you mean {alt}?', { place: arabicOrUnresolved(q.locationMatch?.label || q.location), alt: arabicOrUnresolved(cityDisplay(alt.cityEn, getLocale())) });
     }
   }
   if ((q.priceInput || q.priceMin || q.priceMax) && countWith({ priceInput: '', priceMin: null, priceMax: null }) > 0) {
