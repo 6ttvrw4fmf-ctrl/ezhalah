@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db
+from scrapers.common import db, normalize
 
 BASE = "https://wasalt.sa"
 NEXT_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
@@ -54,102 +54,17 @@ SLUGS = {
     "commercial":  ["shop", "office", "warehouse", "commercial-land", "showroom", "building", "land"],
 }
 
-# Wasalt propertySubType → our canonical taxonomy type. Wasalt uses DIFFERENT names than Aqar
-# ("Office Space" not "Office", "Repair shop" not "Workshop", "Station" not "Gas Station",
-# "Booth" not "Kiosk") — without this map the filter for "Office" wouldn't match Wasalt's
-# "Office Space" rows and the kept-field contract would break.
-TYPE_MAP = {
-    # Residential
-    "Apartment": "Apartment", "Villa": "Villa", "Townhouse": "Villa", "Duplex": "Villa",
-    "Floor": "Floor", "Building": "Building", "Residential Building": "Building",
-    "Land": "Residential Land", "Residential Land": "Residential Land", "Plot": "Residential Land",
-    "Rest House": "Rest House", "Resthouse": "Rest House", "Chalet": "Chalet", "Farm": "Farm",
-    "Room": "Room", "Small apartment (studio)": "Apartment", "Studio": "Apartment",
-    # Commercial (Wasalt's names → ours)
-    "Office": "Office", "Office Space": "Office",
-    "Shop": "Shop", "Commercial Shop": "Shop",
-    "Warehouse": "Warehouse",
-    "Showroom": "Showroom",
-    "Commercial Land": "Commercial Land",
-    "Commercial Building": "Commercial Building", "Tower": "Commercial Building",
-    "Hotel": "Hotel",
-    "Workshop": "Workshop", "Repair shop": "Workshop",
-    "Gas Station": "Gas Station", "Station": "Gas Station",
-    "Kiosk": "Kiosk", "Booth": "Kiosk",
-    "Parking": "Parking", "Car parking": "Parking",
-}
-
-# Wasalt city spelling → our canonical DB city label. Wasalt transliterates inconsistently
-# ("Aldammam", "Makkah Al Mukarramah", "Alttayif"), so this map is REQUIRED or a city search would
-# never match the Wasalt rows. Covers the observed high-volume spellings; unmapped → "Other".
-CITY_MAP = {
-    "Riyadh": "Riyadh", "Jeddah": "Jeddah", "Khobar": "Khobar", "Al Khobar": "Khobar",
-    "Makkah Al Mukarramah": "Mecca", "Makkah": "Mecca", "Mecca": "Mecca",
-    "Aldammam": "Dammam", "Al Dammam": "Dammam", "Dammam": "Dammam",
-    "Madinah": "Medina", "Al Madinah Al Munawwarah": "Medina", "Medina": "Medina",
-    "Alttayif": "Taif", "Al Taif": "Taif", "Taif": "Taif",
-    "Al Ahsa": "Hofuf", "Al Hofuf": "Hofuf", "Hofuf": "Hofuf",
-    "Alzahran": "Dhahran", "Dhahran": "Dhahran",
-    "Khamis Mushayt": "Khamis Mushait", "Khamis Mushait": "Khamis Mushait",
-    "Eanizah": "Unaizah", "Unaizah": "Unaizah", "Bariduh": "Buraidah", "Buraidah": "Buraidah",
-    "Almuzahimih": "Al Muzahimiyah", "Thawl": "Thuwal",
-    "Jubail Industrial City": "Jubail", "Jubail": "Jubail", "Al Jubail": "Jubail",
-    "Alqunafdhuh": "Al Qunfudhah", "Al Qatif": "Qatif", "Qatif": "Qatif",
-    "Jazan": "Jazan", "Abha": "Abha", "Abqaiq": "Abqaiq", "Diriyah": "Diriyah",
-    "Al Kharj": "Al Kharj", "Al Baha": "Al Baha", "Al-Namas": "Al Namas", "Najran": "Najran",
-    "Tabuk": "Tabuk", "Hail": "Hail", "Arar": "Arar", "Sakaka": "Sakaka", "Yanbu": "Yanbu",
-    # Variants discovered in the "Other" recovery pass (2026-06-21)
-    "Hayil": "Hail",
-    "Hafar Al-Batin": "Hafar Al Batin",
-    "Al Hayathem": "Al Hayathim",
-    "Al Jumum - Bahra": "Al Jumum", "Aljumum": "Al Jumum",
-    "Ahad Rafidah": "Ahad Rafidah", "Ahad Rifaydah - Al-Wadyin Station": "Ahad Rafidah",
-    "Ahad Almasarihah": "Ahad Al Masarihah",
-    "Samith": "Samtah", "Samtah - Alqafl": "Samtah",
-    "Tbwk": "Tabuk",
-    "Abu Arish - 'Abu Earish": "Abu Arish",
-    "Sibya'": "Sabya",
-    "Ar Rass": "Ar Rass",
-    "Al Jubaylah": "Jubail",
-    "Alliyth": "Al Lith",
-    "Bisha": "Bisha",
-    "Al-Majma'Ah": "Al Majmaah",
-    "Malahum": "Mahayel", "Muhayil": "Mahayel",
-    "Almudhanib": "Al Mithnab",
-    "King Abdullah Economic City": "KAEC",
-    "Biqaea'": "Baqaa",
-    "Albadayie": "Al Badai",
-    "Al-Quway'Iyah": "Al Quwayiyah", "Al Quwayiyah - Al Ruwaydah": "Al Quwayiyah",
-    "Earear": "Arar",
-    "Eafif": "Afif",
-    "Al Aflaj": "As Sulayyil", "Wadi Ad-Dawasir": "As Sulayyil",
-    "Rabigh": "Rabigh",
-    "Riyadh Al Khabra": "Riyadh Al Khabra",
-    "Al Khafji": "Khafji",
-    "Dawadmi": "Dawadmi",
-    "Alghat": "Al Ghat",
-    "Qurayyat": "Qurayyat",
-    "Sharurah": "Sharurah",
-    "Sakakah": "Sakaka",
-    "Baysh": "Baysh",
-    "Thadiq": "Thadiq",
-    "Shaqra": "Shaqra",
-    "Baljurashi": "Al Baha", "Al-Makhwah": "Al Baha", "Al-Aqiq": "Al Baha", "Darih": "Al Baha",
-    "Nariya": "An Nairyah",
-    "Aleuyun": "Al Uyun",
-    "Alnabhaniyah": "An Nabhaniyah",
-    "Almajardah": "Al Majardah",
-    "Al Ghazalah - Al Ghazalah": "Al Ghazalah", "Al Ghazalah - Alruwduh": "Al Ghazalah",
-    "Ash Shinan": "Ash Shanan",
-    "Rawdat Sudair": "Al Majmaah", "Ashayrah Sudair": "Al Majmaah",
-    "Thuqbah": "Khobar",
-    "Al Qaisumah": "Hafar Al Batin",
-    "Mahd Al Thahab": "Mahd adh Dhahab",
-    "Sarat Ubaida": "Khamis Mushait",
-    "Harimla'": "Thadiq",
-    "Ramah": "Rumah",
-    "Darma": "Diriyah",
-}
+# Wasalt propertySubType → canonical taxonomy type, and Wasalt city spelling → canonical DB city
+# label, both UNIFIED into the shared canonical maps 2026-07-16 (fix/normalize-unification): every
+# key/value that used to live in this file's private TYPE_MAP/CITY_MAP moved VERBATIM to
+# scrapers/common/normalize.py TYPE_MAP_EN / CITY_MAP_EN, so shared fixes now propagate here (Wasalt
+# is the #2 platform by volume and was bypassing every shared helper). Lookups below go through
+# normalize.map_type_en()/map_city_en() — EXACT, case-sensitive, no substring pass, so behaviour for
+# every previously-mapped input is byte-identical (golden proof:
+# scrapers/common/tests/test_normalize_unification_golden.py). Wasalt currently needs NO per-platform
+# overrides — if a future Wasalt-only mapping conflict appears, define
+# WASALT_TYPE_OVERRIDES/WASALT_CITY_OVERRIDES here and pass overrides= (contract:
+# normalize.map_type_exact docstring); never fork a private copy of the maps again.
 
 _last = 0.0
 
@@ -272,7 +187,9 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
     if not pid or not slug:
         return None
     sub = info.get("propertySubType") or ""
-    property_type = TYPE_MAP.get(sub, sub or None)
+    # Unmapped subtype → RAW preserved (never a guessed default; Batch 2 type-truth contract) —
+    # byte-identical to the old `TYPE_MAP.get(sub, sub or None)`.
+    property_type = normalize.map_type_en(sub) or (sub or None)
     # Resolve the "Additional Information" panel ONCE so we can also set the detail_enriched flag.
     if FETCH_DETAIL and s is not None:
         deep = _fetch_additional_attributes(s, slug)
@@ -287,8 +204,16 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
     # English word "Other" on Arabic-UI cards. High-volume cities are all covered in CITY_MAP; the
     # separate city_ar/district_ar columns (unaffected by this line) remain the real recoverable
     # signal for existing junk rows.
-    city = CITY_MAP.get(raw_city)
+    city = normalize.map_city_en(raw_city)
     is_rent = deal == "rent"
+    # Numeric parsing DELIBERATELY kept local (2026-07-16 normalize-unification audit): Wasalt's
+    # prices/areas/counts arrive as JSON-native numbers from __NEXT_DATA__, not display text.
+    # normalize.to_int() is for human-formatted strings and is NOT behaviour-identical on these
+    # shapes (a float with 3+ decimals would be read as European digit grouping and inflated —
+    # the mirror image of the 2026-07-13 price-fidelity bug — and scientific-notation floats would
+    # be mangled), and normalize.to_int_numeric() maps 0→None where this code keeps 0. Bare
+    # int()/int(float()) on JSON numbers is the provably-correct parse here; do not "unify" it
+    # without a golden old-vs-new comparison over real Wasalt payloads.
     area = _attr(prop, "builtUpArea") or info.get("builtUpArea") or prop.get("floorSize")
     try:
         area_m2 = int(float(area)) if area not in (None, "", "0") else None

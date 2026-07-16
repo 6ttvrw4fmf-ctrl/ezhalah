@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db
+from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
 
 # PDPL: never store advertiser contact/identity. The rest of the API item is kept.
@@ -44,35 +44,27 @@ HEADERS = {"Accept": "application/json", "Origin": "https://www.aldarim.sa",
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 PER_PAGE = 50
 
-# Aldarim `type` → our canonical taxonomy. Land's residential/commercial split is decided by category.
-TYPE_MAP = {
-    "land": "Residential Land", "villa": "Villa", "townhouse": "Villa", "duplex": "Villa",
-    "mansion": "Villa", "apartment": "Apartment", "tower_apartment": "Apartment",
-    "building_apartment": "Apartment", "villa_apartment": "Apartment", "floor": "Floor",
-    "villa_floor": "Floor", "building": "Building", "farm": "Farm", "istraha": "Rest House",
-    "compound": "Compound", "office": "Office", "store": "Shop", "storage": "Warehouse",
-    "showroom": "Showroom", "resort": "Hotel", "hotel": "Hotel",
-}
-# A few types we treat as commercial-land when category is commercial.
+# Aldarim `type` (lowercased) → canonical taxonomy, and Aldarim city name_en → canonical label:
+# both UNIFIED 2026-07-16 (fix/normalize-unification). The private TYPE_MAP/CITY_MAP that lived here
+# moved VERBATIM into scrapers/common/normalize.py TYPE_MAP_EN / CITY_MAP_EN (zero key/value
+# conflicts with Wasalt's vocabulary — Aldarim's keys are all-lowercase, Wasalt's are Title-Case),
+# so shared fixes now propagate here. Lookups go through normalize.map_type_en()/map_city_en() —
+# EXACT, case-sensitive, no substring pass — byte-identical for every previously-mapped input
+# (golden proof: scrapers/common/tests/test_normalize_unification_golden.py). Aldarim currently
+# needs NO per-platform overrides; if one ever appears, pass overrides= per the
+# normalize.map_type_exact contract instead of forking a private map.
+# A few types we treat as commercial-land when category is commercial (call-site rule, stays here).
 _LAND_TYPES = {"land"}
-
-# Aldarim's city name_en → our canonical label (so a "Mecca" search matches Aldarim's
-# "Makkah Al Mukarramah", etc.). REQUIRED or the few non-Riyadh listings are unfindable.
-CITY_MAP = {
-    "Makkah Al Mukarramah": "Mecca", "Makkah": "Mecca",
-    "Al Madinah Al Munawwarah": "Medina", "Al Madinah": "Medina",
-    "Ad Dir'iyah": "Diriyah", "Ad Diriyah": "Diriyah",
-    "Al 'ammariyah": "Al Ammariyah", "Al Khobar": "Khobar", "Aldammam": "Dammam",
-}
 
 
 def _city(v) -> Optional[str]:
     # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal "Other"
     # sentinel this used to fall back to when the source had no city name at all.
+    # Unmapped raw name passes through unchanged (byte-identical to the old CITY_MAP.get(raw, raw)).
     raw = _name(v)
     if not raw:
         return None
-    return CITY_MAP.get(raw, raw)
+    return normalize.map_city_en(raw) or raw
 
 _last = 0.0
 
@@ -114,11 +106,11 @@ def _name(v: Any) -> Optional[str]:
     return v if isinstance(v, str) else None
 
 
-def _int(v: Any) -> Optional[int]:
-    try:
-        return int(float(v)) if v not in (None, "", 0, "0") else None
-    except (TypeError, ValueError):
-        return None
+# JSON-native numeric parse, unified 2026-07-16: the identical `_int` body that lived here (and in
+# scrapers/mustqr/run.py) is now normalize.to_int_numeric — byte-for-byte the same semantics
+# (None/""/0/"0" → None, int(float(v)) otherwise), so future numeric fixes land once, not thrice.
+# normalize.to_int() would NOT be behaviour-identical on these API shapes (see its docstring).
+_int = normalize.to_int_numeric
 
 
 def _photos(L: dict) -> list[str]:
@@ -172,12 +164,26 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
     category = (L.get("category") or "residential").lower()
     is_rent = (L.get("purpose") or "").lower() in ("rent", "rental")
     t = (L.get("type") or "").lower()
-    property_type = TYPE_MAP.get(t, t.title() if t else None)
+    # Unmapped type → RAW preserved, title-cased (never a guessed default; Batch 2 type-truth
+    # contract) — byte-identical to the old `TYPE_MAP.get(t, t.title() if t else None)`.
+    property_type = normalize.map_type_en(t) or (t.title() if t else None)
     if t in _LAND_TYPES and category == "commercial":
         property_type = "Commercial Land"
 
     area = _int(L.get("area")) or _int(L.get("built_up_area"))
-    rent_price = (L.get("rent_price_annually") or L.get("rent_price_monthly"))
+    # Rent fidelity (monthly-rent contract; 2026-07-16 unification follow-up): price_annual is truly
+    # ANNUAL. The old `rent_price_annually or rent_price_monthly` fallback stored a raw MONTHLY
+    # figure as annual — the exact BUG-2 class fixed fleet-wide 2026-07-13 (eaqartabuk/aqarcity/
+    # mustqr/satel) that never propagated here. Annual wins when present; a monthly-only listing is
+    # annualized ×12 via the shared helper and tagged rent_period='monthly' so the app's
+    # round(price_annual/12) card shows the real monthly rent. PROSPECTIVE only — live-checked
+    # 2026-07-16: both active Aldarim Rent rows priced via the annual path, so no stored value changes.
+    rent_annual = _int(L.get("rent_price_annually"))
+    rent_monthly = _int(L.get("rent_price_monthly")) if rent_annual is None else None
+    if rent_monthly is not None:
+        price_annual, rent_period = normalize.annualize_rent(rent_monthly, "monthly"), "monthly"
+    else:
+        price_annual, rent_period = rent_annual, "annual"  # annual figure, or no rent price at all
 
     # Native Arabic R/C/D (ADDITIVE — live city/neighborhood above untouched). The API already carries
     # city.name_ar / district.name_ar; we just stopped discarding them. No region signal from Aldarim,
@@ -200,8 +206,8 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "halls": _int(L.get("living_rooms")),
         "reception_rooms_majlis": _int(L.get("majlis_rooms")),
         "price_total": _int(L.get("selling_price")) if not is_rent else None,
-        "price_annual": _int(rent_price) if is_rent else None,
-        "rent_period": "annual" if is_rent else None,
+        "price_annual": price_annual if is_rent else None,
+        "rent_period": rent_period if is_rent else None,
         "city": _city(L.get("city")),
         "neighborhood": (_name(L.get("district")) or "").replace(" Dist.", "").strip() or None,
         "title": L.get("name_en") or L.get("name_ar"),
