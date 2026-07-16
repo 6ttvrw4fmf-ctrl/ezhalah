@@ -1,4 +1,4 @@
-d6ed2e0f576a829445ff5e6d607ba2ed71b60afa
+1ab61d7249125360382b25df1b75423e4ba0e54f
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
@@ -31,3 +31,4 @@ d6ed2e0f576a829445ff5e6d607ba2ed71b60afa
 # 2026-07-15  016bee3  deployed via safe-deploy.sh
 # 2026-07-16  e7eb6ba  deployed via safe-deploy.sh
 # 2026-07-16  d6ed2e0  deployed via safe-deploy steps (manual, deploy-lock held via MCP)
+# 2026-07-16  1ab61d7  deployed via manually-reproduced safe-deploy.sh sequence (SUPABASE_SERVICE_ROLE_KEY not set; lock via MCP execute_sql per AGENTS.md)
