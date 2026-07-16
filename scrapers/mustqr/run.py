@@ -43,30 +43,26 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db
+from scrapers.common import db, normalize
 
 SITE = "https://mustqr.sa"
 PROJECT = "https://jzhotxuqwkpykavxpgeu.supabase.co"
 PAGE_SIZE = 1000  # Supabase PostgREST hard cap
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 
-# Mustqr property type (Arabic) → canonical English taxonomy.
-TYPE_MAP = {
-    "فيلا": "Villa",
-    "شقة": "Apartment",
-    "دور": "Floor",
-    "دوبلكس": "Villa",
-    "بيت": "House",
-    "حوش": "House",
-    "عمارة": "Building",
-    "استراحة": "Rest House",
-    "شاليه": "Chalet",
-    "أرض": "Residential Land",
-    "ارض زراعية": "Farm",
-    "صالة": "Showroom",          # event/showroom hall → commercial
-    "فندق": "Hotel",
-    "مكتب": "Office",
-    "محطة": "Gas Station",
+# Mustqr property type (Arabic) → canonical English taxonomy — UNIFIED 2026-07-16
+# (fix/normalize-unification): the 15-key private TYPE_MAP that lived here now routes through the
+# shared normalize.map_type_exact(). 10 keys were literal duplicates of shared TYPE_MAP_AR entries
+# (dropped), 'حوش'→House was promoted verbatim into the shared map, and the 4 below stay as
+# Mustqr-only EXACT-match overrides (contract: normalize.map_type_exact docstring) because their
+# owner-shipped values DIFFER from — or are contested against — what the shared layer would say
+# (locked owner rule: never guess on a mapping conflict; every conflict is listed in the
+# 2026-07-16 unification report for owner review):
+MUSTQR_TYPE_OVERRIDES = {
+    "دوبلكس": "Villa",       # eastabha maps the same word to "Duplex" — cross-platform conflict
+    "ارض زراعية": "Farm",    # shared substring pass would say "Residential Land"; eastabha says "Land"
+    "صالة": "Showroom",      # event/showroom hall → commercial; Mustqr-context judgment, not global
+    "محطة": "Gas Station",   # bare "station" — unambiguous only in Mustqr's Hail-brokerage context
 }
 COMMERCIAL_TYPES = {"Showroom", "Hotel", "Office", "Gas Station", "Warehouse", "Shop", "Building"}
 
@@ -172,11 +168,11 @@ def fetch_page(s: cc.Session, jwt: str, offset: int) -> tuple[list[dict], Option
     return [], None
 
 
-def _int(v: Any) -> Optional[int]:
-    try:
-        return int(float(v)) if v not in (None, "", 0, "0") else None
-    except (TypeError, ValueError):
-        return None
+# JSON-native numeric parse, unified 2026-07-16: the identical `_int` body that lived here (and in
+# scrapers/aldarim/run.py) is now normalize.to_int_numeric — byte-for-byte the same semantics, so
+# future numeric fixes land once. normalize.to_int() would NOT be behaviour-identical on these
+# Supabase-JSON shapes (see its docstring).
+_int = normalize.to_int_numeric
 
 
 def _redact(text: Optional[str]) -> Optional[str]:
@@ -223,9 +219,12 @@ def _price_fields(p: dict, is_rent: bool, is_monthly: bool) -> dict[str, Any]:
     if is_rent:
         # Monthly rentals must store the ANNUALIZED figure (monthly×12); the app displays
         # round(price_annual/12), so storing the raw monthly showed 1/12 of the real rent.
-        # (price-fidelity fix 2026-07-13)
-        return {"price_annual": n * 12 if is_monthly else n,
-                "rent_period": "monthly" if is_monthly else "annual"}
+        # (price-fidelity fix 2026-07-13; ×12 now via the shared normalize.annualize_rent — provably
+        # identical for the "monthly"/"annual" periods this passes, golden-tested — so future
+        # annualization fixes propagate here too.)
+        period = "monthly" if is_monthly else "annual"
+        return {"price_annual": normalize.annualize_rent(n, period),
+                "rent_period": period}
     return {"price_total": n}
 
 
@@ -235,7 +234,11 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
         return None, "residential"
 
     ar_type = (p.get("type") or "").strip()
-    property_type = TYPE_MAP.get(ar_type)
+    # Overrides first, then the shared canonical map — EXACT match only (no substring pass), so the
+    # historical skip-unmapped behaviour is preserved: a type neither layer knows is still skipped
+    # (nothing stored, nothing guessed — Batch 2 type-truth contract). Types the shared map knows
+    # but the old private map didn't (e.g. غرفة/محل/مزرعة) now map — a documented coverage GAIN.
+    property_type = normalize.map_type_exact(ar_type, overrides=MUSTQR_TYPE_OVERRIDES)
     if not property_type:
         return None, "residential"
 

@@ -40,6 +40,20 @@ TYPE_MAP_AR = {
     "مزرعة":   "Farm",
     "مزرعه":   "Farm",
     "فندق":    "Hotel",
+    # ── Unification additions (2026-07-16, fix/normalize-unification) ── Arabic aliases promoted
+    # VERBATIM from LIVE scrapers' private maps so shared coverage/fixes propagate fleet-wide. Values
+    # are existing canonical types only (no new English types). Appended at the END so map_type()'s
+    # substring pass keeps every pre-existing key's priority — a promoted key can only map inputs that
+    # previously returned None, never change an input that already mapped. Mirrored in
+    # src/data/taxonomy.source.json python.typeMapAr (the taxonomy build gate checks lockstep).
+    "شقق سكنية": "Apartment",    # eastabha
+    "شقق":      "Apartment",     # eastabha
+    "قصر":      "Villa",         # eastabha (owner decision 2026-07: Palace folds into Villa)
+    "إستراحة":  "Rest House",    # eastabha (hamza spelling variant of استراحة)
+    "محطة بنزين": "Gas Station", # eastabha
+    "كافيه":    "Shop",          # eastabha
+    "كافيه - لاونج": "Shop",     # eastabha
+    "حوش":      "House",         # mustqr (Hail vocab: walled house/yard property)
 }
 
 # Aqar URL slug → canonical English property type (matches Ezhalah's taxonomy).
@@ -122,6 +136,11 @@ CITY_MAP_AR = {
     "الباحة": "Al Baha",
     # Al Jouf region
     "سكاكا": "Sakaka", "القريات": "Qurayyat", "دومة الجندل": "Dawmat Al Jandal",
+    # ── Unification additions (2026-07-16, fix/normalize-unification) ── promoted VERBATIM from
+    # scrapers/eastabha/run.py's private CITY_MAP_AR (all four verified unreachable by the shared map
+    # before promotion, so they can only map inputs that previously returned None). Region entries
+    # added to REGION_CITIES below in lockstep. Appended LAST so existing keys keep substring priority.
+    "النماص": "Al Namas", "تنومة": "Tanomah", "ظهران الجنوب": "Dhahran Al Janub", "البرك": "Al Birk",
 }
 
 # English city → DB-canonical region. Built from CITY_MAP_AR's regional grouping so it stays in
@@ -144,7 +163,11 @@ REGION_CITIES = {
                          "Ras Tanura", "Abqaiq", "An Nairyah", "Khafji", "Sayhat", "Safwa", "Tarout",
                          "Anak", "Al Uyun"],
     "Asir": ["Abha", "Khamis Mushait", "Bisha", "Mahayel", "Ahad Rafidah", "Al Majardah",
-             "Balsamar", "Tathlith"],
+             "Balsamar", "Tathlith",
+             # lockstep with the 2026-07-16 CITY_MAP_AR unification additions (all four Asir; region
+             # values verbatim from eastabha's private CITY_TO_REGION, agreeing with the 99-city map
+             # in scrapers/wasalt/recover_other.py):
+             "Al Namas", "Tanomah", "Dhahran Al Janub", "Al Birk"],
     "Tabuk": ["Tabuk", "Duba", "Al Wajh", "Tayma"],
     "Hail": ["Hail", "Baqaa", "Al Ghazalah", "Ash Shanan"],
     "Northern Borders": ["Arar", "Rafha", "Turaif"],
@@ -164,14 +187,37 @@ def region_for_city(city: Optional[str]) -> Optional[str]:
     return CITY_TO_REGION.get(city)
 
 
-def map_type(raw_ar: str) -> Optional[str]:
-    """Look up the canonical English type from an Arabic property-type word."""
+def map_type_exact(raw_ar: Optional[str], overrides: Optional[dict[str, str]] = None) -> Optional[str]:
+    """EXACT-match type lookup (NO substring pass): per-platform `overrides` first, then the shared
+    canonical TYPE_MAP_AR.
+
+    `overrides` is the documented per-platform escape hatch of the 2026-07-16 normalize-unification
+    (locked owner rule: never guess on a mapping conflict). It holds ONLY the keys where a platform's
+    owner-shipped mapping disagrees with — or must shadow — the shared map (e.g. eastabha stores
+    'أرض' as "Land" while the shared map says "Residential Land"). The dict is defined IN the
+    scraper, in one place, and is consulted by EXACT match only — never substring-expanded — so a
+    platform quirk can never leak into other inputs, while every non-override lookup flows through
+    (and automatically benefits from fixes to) the shared map."""
     if not raw_ar:
         return None
     raw = raw_ar.strip()
-    if raw in TYPE_MAP_AR:
-        return TYPE_MAP_AR[raw]
-    # Tolerate phrases like "شقة للإيجار" by checking each word.
+    if overrides and raw in overrides:
+        return overrides[raw]
+    return TYPE_MAP_AR.get(raw)
+
+
+def map_type(raw_ar: str, overrides: Optional[dict[str, str]] = None) -> Optional[str]:
+    """Look up the canonical English type from an Arabic property-type word.
+    `overrides`: optional per-platform exact-match dict consulted FIRST (contract: see
+    map_type_exact — conflicts only, exact-only, defined in the scraper)."""
+    hit = map_type_exact(raw_ar, overrides)
+    if hit:
+        return hit
+    if not raw_ar:
+        return None
+    raw = raw_ar.strip()
+    # Tolerate phrases like "شقة للإيجار" by checking each word. (Shared keys only — overrides are
+    # exact-match by contract, so a platform quirk never substring-matches other inputs.)
     for word, eng in TYPE_MAP_AR.items():
         if word in raw:
             return eng
@@ -188,10 +234,17 @@ def _norm_ar(s: str) -> str:
             .strip())
 
 
-def map_city(raw_ar: str) -> Optional[str]:
-    """Look up the canonical English city name from an Arabic city name or URL slug."""
+def map_city(raw_ar: str, overrides: Optional[dict[str, str]] = None) -> Optional[str]:
+    """Look up the canonical English city name from an Arabic city name or URL slug.
+    `overrides`: optional per-platform exact-match dict (matched on the raw stripped string, before
+    any normalization) consulted FIRST — same contract as map_type_exact: conflicts only, defined in
+    the scraper, never normalization/substring-expanded."""
     if not raw_ar:
         return None
+    if overrides:
+        hit = overrides.get(raw_ar.strip())
+        if hit:
+            return hit
     raw = _norm_ar(raw_ar)
     # Exact match first (normalized both sides).
     for ar, eng in CITY_MAP_AR.items():
@@ -205,6 +258,113 @@ def map_city(raw_ar: str) -> Optional[str]:
             best = (na, eng)
     return best[1] if best else None
     return None
+
+
+# ═══ English-vocabulary sources (Wasalt, Aldarim) — unified 2026-07-16 (fix/normalize-unification) ═══
+# Shared canonical home for the English-keyed private maps that used to live inside
+# scrapers/wasalt/run.py and scrapers/aldarim/run.py — every key/value moved here VERBATIM
+# (no-regression proof: scrapers/common/tests/test_normalize_unification_golden.py replays the old
+# private-dict lookups and asserts byte-identical results). Matching is EXACT and case-sensitive
+# (map_type_en / map_city_en have NO substring or normalization pass, unlike the Arabic
+# map_type / map_city): "Apartment"-style Title-Case keys are Wasalt's propertySubType vocabulary,
+# "apartment"-style lowercase keys are Aldarim's lowercased API vocabulary. The two vocabularies
+# share zero literal keys with conflicting values (verified at unification time). If a future
+# platform needs a DIFFERENT value for an existing key, give that scraper a per-platform overrides
+# dict (contract: map_type_exact docstring) — do NOT change the shared value here.
+
+TYPE_MAP_EN = {
+    # ── Wasalt propertySubType → canonical taxonomy type (moved verbatim from scrapers/wasalt/run.py).
+    # Wasalt uses DIFFERENT names than Aqar ("Office Space" not "Office", "Repair shop" not
+    # "Workshop", "Station" not "Gas Station", "Booth" not "Kiosk") — without these the filter for
+    # "Office" wouldn't match Wasalt's "Office Space" rows and the kept-field contract would break.
+    'Apartment': 'Apartment', 'Villa': 'Villa', 'Townhouse': 'Villa', 'Duplex': 'Villa',
+    'Floor': 'Floor', 'Building': 'Building', 'Residential Building': 'Building',
+    'Land': 'Residential Land', 'Residential Land': 'Residential Land', 'Plot': 'Residential Land',
+    'Rest House': 'Rest House', 'Resthouse': 'Rest House', 'Chalet': 'Chalet', 'Farm': 'Farm',
+    'Room': 'Room', 'Small apartment (studio)': 'Apartment', 'Studio': 'Apartment',
+    'Office': 'Office', 'Office Space': 'Office', 'Shop': 'Shop', 'Commercial Shop': 'Shop',
+    'Warehouse': 'Warehouse', 'Showroom': 'Showroom', 'Commercial Land': 'Commercial Land',
+    'Commercial Building': 'Commercial Building', 'Tower': 'Commercial Building', 'Hotel': 'Hotel',
+    'Workshop': 'Workshop', 'Repair shop': 'Workshop', 'Gas Station': 'Gas Station',
+    'Station': 'Gas Station', 'Kiosk': 'Kiosk', 'Booth': 'Kiosk', 'Parking': 'Parking',
+    'Car parking': 'Parking',
+    # ── Aldarim API `type` (lowercased) → canonical taxonomy type (moved verbatim from
+    # scrapers/aldarim/run.py). Land's residential/commercial split stays decided by the listing's
+    # category AT THE CALL SITE in the scraper (not here).
+    'land': 'Residential Land', 'villa': 'Villa', 'townhouse': 'Villa', 'duplex': 'Villa',
+    'mansion': 'Villa', 'apartment': 'Apartment', 'tower_apartment': 'Apartment',
+    'building_apartment': 'Apartment', 'villa_apartment': 'Apartment', 'floor': 'Floor',
+    'villa_floor': 'Floor', 'building': 'Building', 'farm': 'Farm', 'istraha': 'Rest House',
+    'compound': 'Compound', 'office': 'Office', 'store': 'Shop', 'storage': 'Warehouse',
+    'showroom': 'Showroom', 'resort': 'Hotel', 'hotel': 'Hotel',
+}
+
+CITY_MAP_EN = {
+    # ── Wasalt city spelling → canonical DB city label (moved verbatim from scrapers/wasalt/run.py).
+    # Wasalt transliterates inconsistently ("Aldammam", "Makkah Al Mukarramah", "Alttayif"), so this
+    # map is REQUIRED or a city search would never match the Wasalt rows. Covers the observed
+    # high-volume spellings incl. the 2026-06-21 "Other"-recovery variants; unmapped → None (honest).
+    'Riyadh': 'Riyadh', 'Jeddah': 'Jeddah', 'Khobar': 'Khobar', 'Al Khobar': 'Khobar',
+    'Makkah Al Mukarramah': 'Mecca', 'Makkah': 'Mecca', 'Mecca': 'Mecca', 'Aldammam': 'Dammam',
+    'Al Dammam': 'Dammam', 'Dammam': 'Dammam', 'Madinah': 'Medina',
+    'Al Madinah Al Munawwarah': 'Medina', 'Medina': 'Medina', 'Alttayif': 'Taif',
+    'Al Taif': 'Taif', 'Taif': 'Taif', 'Al Ahsa': 'Hofuf', 'Al Hofuf': 'Hofuf', 'Hofuf': 'Hofuf',
+    'Alzahran': 'Dhahran', 'Dhahran': 'Dhahran', 'Khamis Mushayt': 'Khamis Mushait',
+    'Khamis Mushait': 'Khamis Mushait', 'Eanizah': 'Unaizah', 'Unaizah': 'Unaizah',
+    'Bariduh': 'Buraidah', 'Buraidah': 'Buraidah', 'Almuzahimih': 'Al Muzahimiyah',
+    'Thawl': 'Thuwal', 'Jubail Industrial City': 'Jubail', 'Jubail': 'Jubail',
+    'Al Jubail': 'Jubail', 'Alqunafdhuh': 'Al Qunfudhah', 'Al Qatif': 'Qatif', 'Qatif': 'Qatif',
+    'Jazan': 'Jazan', 'Abha': 'Abha', 'Abqaiq': 'Abqaiq', 'Diriyah': 'Diriyah',
+    'Al Kharj': 'Al Kharj', 'Al Baha': 'Al Baha', 'Al-Namas': 'Al Namas', 'Najran': 'Najran',
+    'Tabuk': 'Tabuk', 'Hail': 'Hail', 'Arar': 'Arar', 'Sakaka': 'Sakaka', 'Yanbu': 'Yanbu',
+    'Hayil': 'Hail', 'Hafar Al-Batin': 'Hafar Al Batin', 'Al Hayathem': 'Al Hayathim',
+    'Al Jumum - Bahra': 'Al Jumum', 'Aljumum': 'Al Jumum', 'Ahad Rafidah': 'Ahad Rafidah',
+    'Ahad Rifaydah - Al-Wadyin Station': 'Ahad Rafidah', 'Ahad Almasarihah': 'Ahad Al Masarihah',
+    'Samith': 'Samtah', 'Samtah - Alqafl': 'Samtah', 'Tbwk': 'Tabuk',
+    "Abu Arish - 'Abu Earish": 'Abu Arish', "Sibya'": 'Sabya', 'Ar Rass': 'Ar Rass',
+    'Al Jubaylah': 'Jubail', 'Alliyth': 'Al Lith', 'Bisha': 'Bisha', "Al-Majma'Ah": 'Al Majmaah',
+    'Malahum': 'Mahayel', 'Muhayil': 'Mahayel', 'Almudhanib': 'Al Mithnab',
+    'King Abdullah Economic City': 'KAEC', "Biqaea'": 'Baqaa', 'Albadayie': 'Al Badai',
+    "Al-Quway'Iyah": 'Al Quwayiyah', 'Al Quwayiyah - Al Ruwaydah': 'Al Quwayiyah',
+    'Earear': 'Arar', 'Eafif': 'Afif', 'Al Aflaj': 'As Sulayyil', 'Wadi Ad-Dawasir': 'As Sulayyil',
+    'Rabigh': 'Rabigh', 'Riyadh Al Khabra': 'Riyadh Al Khabra', 'Al Khafji': 'Khafji',
+    'Dawadmi': 'Dawadmi', 'Alghat': 'Al Ghat', 'Qurayyat': 'Qurayyat', 'Sharurah': 'Sharurah',
+    'Sakakah': 'Sakaka', 'Baysh': 'Baysh', 'Thadiq': 'Thadiq', 'Shaqra': 'Shaqra',
+    'Baljurashi': 'Al Baha', 'Al-Makhwah': 'Al Baha', 'Al-Aqiq': 'Al Baha', 'Darih': 'Al Baha',
+    'Nariya': 'An Nairyah', 'Aleuyun': 'Al Uyun', 'Alnabhaniyah': 'An Nabhaniyah',
+    'Almajardah': 'Al Majardah', 'Al Ghazalah - Al Ghazalah': 'Al Ghazalah',
+    'Al Ghazalah - Alruwduh': 'Al Ghazalah', 'Ash Shinan': 'Ash Shanan',
+    'Rawdat Sudair': 'Al Majmaah', 'Ashayrah Sudair': 'Al Majmaah', 'Thuqbah': 'Khobar',
+    'Al Qaisumah': 'Hafar Al Batin', 'Mahd Al Thahab': 'Mahd adh Dhahab',
+    'Sarat Ubaida': 'Khamis Mushait', "Harimla'": 'Thadiq', 'Ramah': 'Rumah', 'Darma': 'Diriyah',
+    # ── Aldarim city name_en → canonical label (moved verbatim from scrapers/aldarim/run.py; the
+    # five keys Aldarim shared with Wasalt carried identical values, kept once above).
+    'Al Madinah': 'Medina', "Ad Dir'iyah": 'Diriyah', 'Ad Diriyah': 'Diriyah',
+    "Al 'ammariyah": 'Al Ammariyah',
+}
+
+
+def map_type_en(raw: Optional[str], overrides: Optional[dict[str, str]] = None) -> Optional[str]:
+    """EXACT case-sensitive lookup for English-vocabulary sources: per-platform `overrides` first
+    (contract: map_type_exact docstring), then the shared TYPE_MAP_EN. No substring pass — English
+    words substring-match far too loosely ("Land" is inside "Commercial Land")."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    if overrides and raw in overrides:
+        return overrides[raw]
+    return TYPE_MAP_EN.get(raw)
+
+
+def map_city_en(raw: Optional[str], overrides: Optional[dict[str, str]] = None) -> Optional[str]:
+    """EXACT case-sensitive canonical-city lookup for English-vocabulary sources (same contract as
+    map_type_en). Unmapped → None: an honest None beats a guessed label (2026-07-10 forward-fix)."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    if overrides and raw in overrides:
+        return overrides[raw]
+    return CITY_MAP_EN.get(raw)
 
 
 def category_for_type(t: str) -> str:
@@ -249,6 +409,24 @@ def to_int(raw) -> Optional[int]:
     s = s.replace(".", "")
     return int(s) if s else None
 
+
+def to_int_numeric(v) -> Optional[int]:
+    """EXACT `int(float(v))` semantics for JSON-native numeric fields, shared home for the identical
+    private `_int()` helpers that lived in scrapers/aldarim/run.py and scrapers/mustqr/run.py
+    (unified 2026-07-16; body preserved byte-for-byte so behaviour is provably identical).
+
+    Treats None/""/0/"0" as no-value (these APIs use 0 as "not set"). Truncates real decimals
+    toward zero (int(float("123.456")) == 123). NOT for display-text prices — "69,000" / "SAR 69,000"
+    raise inside float() and come back None here; use to_int() for human-formatted price strings.
+    Kept SEPARATE from to_int() on purpose: to_int() treats 3+ decimals as European digit grouping
+    ("1.234" → 1234), which is correct for display text but would inflate a raw float API value —
+    the exact bug class the 2026-07-13 price-fidelity fix removed. Never swap one for the other
+    without a golden old-vs-new comparison over that scraper's real input shapes.
+    """
+    try:
+        return int(float(v)) if v not in (None, "", 0, "0") else None
+    except (TypeError, ValueError):
+        return None
 
 def annualize_rent(price: Optional[int], period: Optional[str]) -> Optional[int]:
     """Make sure rent is stored ANNUAL. Daily/weekly/monthly/quarterly → ×N. Annual or

@@ -56,7 +56,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, http  # noqa: E402
+from scrapers.common import db, http, normalize  # noqa: E402
 
 BASE = "https://eastabha.sa"
 LIST_API = f"{BASE}/wp-json/wp/v2/estate_property"
@@ -73,21 +73,30 @@ TAXONOMIES = (
 # --- property type (canonical English) from the Arabic property_category term -------------------
 # property_category mixes pure-type terms with a few deal-flavoured ones ("شقه للبيع", "إيجار",
 # "روف للبيع"); we strip the deal words first, then match the residual.
-TYPE_MAP_AR = {
-    "شقة": "Apartment", "شقه": "Apartment", "شقق سكنية": "Apartment", "شقق": "Apartment",
+#
+# UNIFIED 2026-07-16 (fix/normalize-unification): the 43-key private TYPE_MAP_AR that lived here now
+# routes through normalize.map_type_exact() — 16 keys were literal duplicates of shared TYPE_MAP_AR
+# entries (dropped), 7 (شقق سكنية/شقق/قصر/إستراحة/محطة بنزين/كافيه/كافيه - لاونج) were promoted
+# verbatim into the shared map, and the 20 below stay as Eastabha-only EXACT-match overrides
+# (contract: normalize.map_type_exact docstring). Overrides exist for two reasons, both listed in
+# the unification report for owner review (locked owner rule: never guess on a mapping conflict):
+#   • CONFLICT — Eastabha's owner-shipped value differs from the shared layer's (the أرض family is
+#     stored as "Land"/"Commercial Land" here, vs shared "Residential Land"; دوبلكس is "Duplex" here
+#     vs Mustqr's "Villa"; استوديو is "Studio" here vs Wasalt folding Studio→Apartment; صناعي/تجاري
+#     are Eastabha-context judgments).
+#   • ORDER-PRESERVING — keys the shared map only reaches via its substring pass (دور سكني,
+#     دور أرضي, عمارة عضم, محلات تجارية, محلات) or not at all (روف/روف للبيع — deliberately NOT
+#     promoted: "روف" is a substring of common words like معروف and would false-positive fleet-wide).
+#     Keeping them exact-match here keeps _derive_type()'s two-phase name scan byte-identical.
+TYPE_OVERRIDES_AR = {
     "استوديو": "Studio", "ستوديو": "Studio",
     "دوبلكس": "Duplex", "دوبليكس": "Duplex",
-    "فيلا": "Villa", "فلة": "Villa", "قصر": "Villa",
-    "بيت": "House", "منزل": "House",
-    "دور": "Floor", "دور سكني": "Floor", "دور أرضي": "Floor", "روف": "Floor", "روف للبيع": "Floor",
-    "عمارة": "Building", "عمارة عضم": "Building", "عماره": "Building",
+    "دور سكني": "Floor", "دور أرضي": "Floor", "روف": "Floor", "روف للبيع": "Floor",
+    "عمارة عضم": "Building",
     "أرض": "Land", "ارض": "Land", "أرض سكنية": "Land", "ارض سكنية": "Land",
     "أرض زراعية": "Land", "ارض زراعية": "Land", "أرض تجارية": "Commercial Land",
-    "مزرعة": "Farm", "استراحة": "Rest House", "إستراحة": "Rest House", "شاليه": "Chalet",
-    # commercial
-    "محل": "Shop", "محلات تجارية": "Shop", "محلات": "Shop", "معرض": "Showroom",
-    "مكتب": "Office", "مستودع": "Warehouse", "صناعي": "Warehouse",
-    "محطة بنزين": "Gas Station", "كافيه": "Shop", "كافيه - لاونج": "Shop", "تجاري": "Commercial Land",
+    "محلات تجارية": "Shop", "محلات": "Shop",
+    "صناعي": "Warehouse", "تجاري": "Commercial Land",
 }
 # words to strip from a category term before type lookup (deal/status noise mixed into the taxonomy)
 _DEAL_WORDS = ("للبيع", "للايجار", "للإيجار", "إيجار", "ايجار", "بيع", "مزاد", "سكنية", "سكني", "أرضي", "ارضي")
@@ -102,19 +111,34 @@ COMMERCIAL_TYPES = {
 }
 
 # --- city → canonical English + region ----------------------------------------------------------
-CITY_MAP_AR = {
-    "أبها": "Abha", "ابها": "Abha", "احد رفيده الوادين": "Ahad Rafidah", "أحد رفيدة": "Ahad Rafidah",
-    "خميس مشيط": "Khamis Mushait", "النماص": "Al Namas", "تنومة": "Tanomah", "بيشة": "Bisha",
-    "تثليث": "Tathleeth", "محايل": "Muhayil", "ظهران الجنوب": "Dhahran Al Janub", "سراة عبيدة": "Sarat Abidah",
-    "الرياض": "Riyadh", "الخرج": "Al Kharj", "الدوادمي": "Dawadmi", "المجمعة": "Majmaah",
-    "الزلفي": "Zulfi", "القويعية": "Quwaiiyah", "الدرعية": "Diriyah",
-    "جدة": "Jeddah", "مكة المكرمة": "Mecca", "مكة": "Mecca", "الطائف": "Taif", "الجموم": "Al Jumum",
-    "تربة": "Turbah", "المدينة المنورة": "Medina", "العلا": "Al Ula",
-    "الدمام": "Dammam", "الخبر": "Khobar", "الظهران": "Dhahran", "القطيف": "Qatif", "الجبيل": "Jubail",
-    "الأحساء": "Hofuf", "الاحساء": "Hofuf", "الخفجي": "Khafji", "بقيق": "Buqayq",
-    "بريدة": "Buraidah", "الرس": "Ar Rass", "البكيرية": "Bukayriyah", "المذنب": "Muthnib",
-    "تبوك": "Tabuk", "تيماء": "Tayma", "حائل": "Hail", "نجران": "Najran", "جازان": "Jazan", "بيش": "Bish",
-    "الباحة": "Al Baha", "بلجرشي": "Baljurashi", "العقيق": "Al Aqiq", "القريات": "Qurayyat", "البرك": "Al Birk",
+# UNIFIED 2026-07-16 (fix/normalize-unification): the 51-key private CITY_MAP_AR that lived here now
+# routes through normalize.map_city() — 34 keys already resolved identically via the shared map
+# (dropped), 4 (النماص/تنومة/ظهران الجنوب/البرك) were promoted verbatim into the shared map (+ their
+# Asir region entries in REGION_CITIES), and the 13 below stay as Eastabha-only EXACT-match
+# overrides because Eastabha's historical English label DIFFERS from the canonical label the shared
+# map (or another platform) uses for the same city — e.g. it stores "Majmaah" where the rest of the
+# fleet stores "Al Majmaah". Changing a stored label is a production data change, so every one of
+# these is preserved verbatim and listed in the unification report for owner review (they are a
+# real cross-platform findability gap: a city filter can't match both spellings). CITY_TO_REGION
+# below still keys off these historical labels — keep the two in sync if the owner ever
+# canonicalizes them.
+CITY_OVERRIDES_AR = {
+    # value ≠ shared CITY_MAP_AR for the same Arabic key:
+    "تثليث": "Tathleeth",    # shared: Tathlith
+    "محايل": "Muhayil",      # shared: Mahayel
+    "المجمعة": "Majmaah",    # shared: Al Majmaah
+    "الزلفي": "Zulfi",       # shared: Al Zulfi
+    "القويعية": "Quwaiiyah", # shared: Al Quwayiyah
+    "تربة": "Turbah",        # shared: Turabah
+    "بقيق": "Buqayq",        # shared: Abqaiq
+    "البكيرية": "Bukayriyah",# shared: Al Bukayriyah
+    "المذنب": "Muthnib",     # shared: Al Mithnab
+    "بيش": "Bish",           # shared: Baysh
+    # label contested across platforms (Wasalt folds these into a parent city; Eastabha keeps them
+    # as their own city) — NOT promoted to shared, owner decision needed:
+    "سراة عبيدة": "Sarat Abidah",  # wasalt: Sarat Ubaida → Khamis Mushait
+    "بلجرشي": "Baljurashi",        # wasalt: Baljurashi → Al Baha
+    "العقيق": "Al Aqiq",           # wasalt: Al-Aqiq → Al Baha
 }
 REGION_MAP_AR = {
     "عسير": "Asir", "الرياض": "Riyadh", "مكة المكرمة": "Makkah", "المدينة المنورة": "Madinah",
@@ -181,6 +205,11 @@ def _redact(s: str) -> str:
 
 
 def _num(s: Optional[str]) -> Optional[int]:
+    # DELIBERATELY kept local (2026-07-16 normalize-unification audit): this extracts the FIRST
+    # number token out of free Arabic text ("مساحة 593م شارعين" → 593). normalize.to_int() strips
+    # ALL non-digits globally, so it would concatenate every digit run in the string ("2 غرف 3 دورات"
+    # → 23) — categorically wrong for the embedded-text shapes this scraper feeds. Same for
+    # _price_from_text below (ألف/مليون magnitude words are an Eastabha-source quirk).
     if not s:
         return None
     s = str(s).translate(_AR_DIGITS).replace("٬", ",")
@@ -260,10 +289,18 @@ def _names(p: dict, tax: str, taxd: dict[str, dict[int, str]]) -> list[str]:
     return [taxd[tax][i] for i in (p.get(tax) or []) if i in taxd.get(tax, {})]
 
 
+def _lookup_type(raw: str) -> Optional[str]:
+    """EXACT-match lookup: Eastabha overrides first, then the shared canonical map. Deliberately
+    map_type_exact (NO substring pass) so _derive_type's two-phase scan below keeps its historical
+    ordering — phase 1 is exact-per-name across ALL names before any fuzzy work starts."""
+    return normalize.map_type_exact(raw, overrides=TYPE_OVERRIDES_AR)
+
+
 def _derive_type(cat_names: list[str]) -> Optional[str]:
     for raw in cat_names:
-        if TYPE_MAP_AR.get(raw):
-            return TYPE_MAP_AR[raw]
+        hit = _lookup_type(raw)
+        if hit:
+            return hit
     # strip deal/status words and retry on the residual token(s)
     for raw in cat_names:
         residual = raw
@@ -271,8 +308,9 @@ def _derive_type(cat_names: list[str]) -> Optional[str]:
             residual = residual.replace(w, " ")
         residual = re.sub(r"\s+", " ", residual).strip()
         for tok in (residual, residual.replace("ة", "ه"), residual.replace("ه", "ة")):
-            if TYPE_MAP_AR.get(tok):
-                return TYPE_MAP_AR[tok]
+            hit = _lookup_type(tok)
+            if hit:
+                return hit
         # commercial hints
         if "تجار" in raw or "محل" in raw or "مكتب" in raw or "مستودع" in raw:
             return "Commercial Land" if "ارض" in raw or "أرض" in raw else "Shop"
@@ -371,7 +409,14 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     if any("مزاد" in c for c in cat_names):  # auction also shows up in category sometimes
         return None, None, False
 
-    property_type = _derive_type(cat_names) or "Land"  # default residential land when ambiguous
+    # Batch 2 type-truth contract (owner directive 2026-07-16, applied here by the normalize
+    # unification): an UNMAPPED category must be preserved RAW — never confidently stored as the old
+    # guessed "Land" default — so the DB novel-type detector can see and quarantine it. The legacy
+    # "Land" value survives ONLY as the routing variable below (never stored), keeping the
+    # residential/commercial table routing byte-identical to the pre-fix behaviour.
+    mapped_type = _derive_type(cat_names)
+    property_type = mapped_type or "Land"  # type-truth: routing-legacy only — never stored
+    stored_property_type = mapped_type or (cat_names[0].strip() if cat_names else None) or "unknown"
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
 
     city_ar = (_names(p, "property_city", taxd) or [""])[0]
@@ -381,7 +426,10 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     region_ar = next((r for r in region_names if REGION_MAP_AR.get(r)), None) or next(
         (r for r in region_names if r != "المملكة العربية السعودية"), None
     )
-    city = CITY_MAP_AR.get(city_ar)
+    # Overrides first (Eastabha's historical labels, exact match), then the shared canonical map —
+    # which also brings map_city()'s normalization + substring tolerance to inputs the old private
+    # .get() missed (those all returned an honest None before, so this is coverage gain only).
+    city = normalize.map_city(city_ar, overrides=CITY_OVERRIDES_AR)
     # Forward-fix (2026-07-10 location-data-quality audit): removed the hardcoded "Asir" region
     # default — city was already an honest None here when unresolved; region should be too.
     region = (REGION_MAP_AR.get(region_ar) if region_ar else None) or CITY_TO_REGION.get(city or "")
@@ -433,7 +481,7 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
         "scraped_at": datetime.now(timezone.utc).isoformat(),
         "active": not gone,
         "source": "Eastabha",
-        "property_type": property_type,
+        "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": area_m2,
         "bedrooms": detail.get("bedrooms") or None,

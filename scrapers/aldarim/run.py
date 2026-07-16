@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db
+from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
 
 # PDPL: never store advertiser contact/identity. The rest of the API item is kept.
@@ -44,35 +44,27 @@ HEADERS = {"Accept": "application/json", "Origin": "https://www.aldarim.sa",
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 PER_PAGE = 50
 
-# Aldarim `type` → our canonical taxonomy. Land's residential/commercial split is decided by category.
-TYPE_MAP = {
-    "land": "Residential Land", "villa": "Villa", "townhouse": "Villa", "duplex": "Villa",
-    "mansion": "Villa", "apartment": "Apartment", "tower_apartment": "Apartment",
-    "building_apartment": "Apartment", "villa_apartment": "Apartment", "floor": "Floor",
-    "villa_floor": "Floor", "building": "Building", "farm": "Farm", "istraha": "Rest House",
-    "compound": "Compound", "office": "Office", "store": "Shop", "storage": "Warehouse",
-    "showroom": "Showroom", "resort": "Hotel", "hotel": "Hotel",
-}
-# A few types we treat as commercial-land when category is commercial.
+# Aldarim `type` (lowercased) → canonical taxonomy, and Aldarim city name_en → canonical label:
+# both UNIFIED 2026-07-16 (fix/normalize-unification). The private TYPE_MAP/CITY_MAP that lived here
+# moved VERBATIM into scrapers/common/normalize.py TYPE_MAP_EN / CITY_MAP_EN (zero key/value
+# conflicts with Wasalt's vocabulary — Aldarim's keys are all-lowercase, Wasalt's are Title-Case),
+# so shared fixes now propagate here. Lookups go through normalize.map_type_en()/map_city_en() —
+# EXACT, case-sensitive, no substring pass — byte-identical for every previously-mapped input
+# (golden proof: scrapers/common/tests/test_normalize_unification_golden.py). Aldarim currently
+# needs NO per-platform overrides; if one ever appears, pass overrides= per the
+# normalize.map_type_exact contract instead of forking a private map.
+# A few types we treat as commercial-land when category is commercial (call-site rule, stays here).
 _LAND_TYPES = {"land"}
-
-# Aldarim's city name_en → our canonical label (so a "Mecca" search matches Aldarim's
-# "Makkah Al Mukarramah", etc.). REQUIRED or the few non-Riyadh listings are unfindable.
-CITY_MAP = {
-    "Makkah Al Mukarramah": "Mecca", "Makkah": "Mecca",
-    "Al Madinah Al Munawwarah": "Medina", "Al Madinah": "Medina",
-    "Ad Dir'iyah": "Diriyah", "Ad Diriyah": "Diriyah",
-    "Al 'ammariyah": "Al Ammariyah", "Al Khobar": "Khobar", "Aldammam": "Dammam",
-}
 
 
 def _city(v) -> Optional[str]:
     # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal "Other"
     # sentinel this used to fall back to when the source had no city name at all.
+    # Unmapped raw name passes through unchanged (byte-identical to the old CITY_MAP.get(raw, raw)).
     raw = _name(v)
     if not raw:
         return None
-    return CITY_MAP.get(raw, raw)
+    return normalize.map_city_en(raw) or raw
 
 _last = 0.0
 
@@ -114,11 +106,11 @@ def _name(v: Any) -> Optional[str]:
     return v if isinstance(v, str) else None
 
 
-def _int(v: Any) -> Optional[int]:
-    try:
-        return int(float(v)) if v not in (None, "", 0, "0") else None
-    except (TypeError, ValueError):
-        return None
+# JSON-native numeric parse, unified 2026-07-16: the identical `_int` body that lived here (and in
+# scrapers/mustqr/run.py) is now normalize.to_int_numeric — byte-for-byte the same semantics
+# (None/""/0/"0" → None, int(float(v)) otherwise), so future numeric fixes land once, not thrice.
+# normalize.to_int() would NOT be behaviour-identical on these API shapes (see its docstring).
+_int = normalize.to_int_numeric
 
 
 def _photos(L: dict) -> list[str]:
@@ -172,7 +164,9 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
     category = (L.get("category") or "residential").lower()
     is_rent = (L.get("purpose") or "").lower() in ("rent", "rental")
     t = (L.get("type") or "").lower()
-    property_type = TYPE_MAP.get(t, t.title() if t else None)
+    # Unmapped type → RAW preserved, title-cased (never a guessed default; Batch 2 type-truth
+    # contract) — byte-identical to the old `TYPE_MAP.get(t, t.title() if t else None)`.
+    property_type = normalize.map_type_en(t) or (t.title() if t else None)
     if t in _LAND_TYPES and category == "commercial":
         property_type = "Commercial Land"
 
