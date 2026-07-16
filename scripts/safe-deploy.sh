@@ -17,9 +17,42 @@ cd "$(git rev-parse --show-toplevel)"
 # checks below, so a session that loses the race bails immediately instead of burning minutes on
 # preflight/taxonomy checks it can't use. Released on ANY exit path via the trap (success,
 # refusal, or error) so a failed deploy never leaves production locked for the TTL.
-HOLDER="safe-deploy:$(whoami)@$(hostname)-$$"
-scripts/deploy-lock.sh acquire "$HOLDER" "safe-deploy.sh" || exit 1
-trap 'scripts/deploy-lock.sh release "'"$HOLDER"'" >/dev/null 2>&1 || true' EXIT
+# MCP-HELD-LOCK MODE (added 2026-07-16): a Claude/MCP session holds the lock via the Supabase
+# MCP tool (the pattern deploy-lock.sh's own header and AGENTS.md prescribe, since the
+# service-role key is deliberately never present in any checkout). Setting DEPLOY_LOCK_MCP_HOLDER
+# makes this script VERIFY — via the secret-free ops_deploy_lock_status() RPC
+# (supabase/migrations/20260717_deploy_lock_mcp_status.sql) and the same client-public anon key
+# the smoke test below uses — that exactly that holder currently holds an UNEXPIRED lock, and
+# fail closed otherwise (missing/mismatched/expired lock, or any transport/parse error). The
+# release stays with the MCP session (no trap): the lock outlives the script on purpose so the
+# session can verify production BEFORE releasing. A deploy still can never proceed unlocked.
+if [ -n "${DEPLOY_LOCK_MCP_HOLDER:-}" ]; then
+  echo "Deploy lock: MCP-held mode — verifying holder '${DEPLOY_LOCK_MCP_HOLDER}' via ops_deploy_lock_status()..."
+  LOCK_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFhbm5hcmJrd2N5bXJvdHp3ZGJvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0MDgxMDAsImV4cCI6MjA5NTk4NDEwMH0.Z-GhSpan6otYWkc8sU43Dw5PT5T_VBUMr0IDZShCQw0"
+  LOCK_RESP="$(curl -sS --max-time 15 -X POST \
+    "https://aannarbkwcymrotzwdbo.supabase.co/rest/v1/rpc/ops_deploy_lock_status" \
+    -H "apikey: $LOCK_ANON_KEY" -H "Authorization: Bearer $LOCK_ANON_KEY" \
+    -H "Content-Type: application/json" -d '{}' || echo "curl_failed")"
+  LOCK_OK="$(node -e '
+    try {
+      const rows = JSON.parse(process.argv[1]);
+      const want = process.argv[2];
+      const hit = Array.isArray(rows) && rows.find((r) => r.lock_name === "production");
+      process.stdout.write(hit && hit.holder === want && hit.expired === false ? "yes" : "no");
+    } catch { process.stdout.write("no"); }
+  ' "$LOCK_RESP" "$DEPLOY_LOCK_MCP_HOLDER" 2>/dev/null || echo no)"
+  if [ "$LOCK_OK" != "yes" ]; then
+    echo "REFUSING TO DEPLOY: MCP-held lock verification failed for holder '${DEPLOY_LOCK_MCP_HOLDER}'." >&2
+    echo "Status response: $LOCK_RESP" >&2
+    echo "Acquire (or re-acquire) the lock via the Supabase MCP tool first — see AGENTS.md." >&2
+    exit 1
+  fi
+  echo "Deploy lock verified: held by '${DEPLOY_LOCK_MCP_HOLDER}' (unexpired). Release stays with the MCP session."
+else
+  HOLDER="safe-deploy:$(whoami)@$(hostname)-$$"
+  scripts/deploy-lock.sh acquire "$HOLDER" "safe-deploy.sh" || exit 1
+  trap 'scripts/deploy-lock.sh release "'"$HOLDER"'" >/dev/null 2>&1 || true' EXIT
+fi
 echo ""
 
 # ── PREFLIGHT (owner P0 2026-07-10): the gate that makes losing approved UI IMPOSSIBLE. It proves
