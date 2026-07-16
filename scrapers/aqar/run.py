@@ -59,7 +59,7 @@ def main() -> int:
         notes = str(e)
         print(f"✗ FATAL: {e}")
     finally:
-        db.end_run(run_id, ok=ok, rows_seen=seen, rows_upserted=upserted, notes=notes)
+        db.end_run(run_id, ok=ok, rows_seen=seen, rows_upserted=upserted, notes=notes, check_tables=["listings"])
 
     print(f"\n📊 Done. {upserted}/{seen} upserted. (run_id={run_id})")
     return 0 if upserted else 1

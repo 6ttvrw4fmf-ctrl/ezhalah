@@ -328,7 +328,7 @@ def main() -> int:
             db.end_run(run_id, ok=True, rows_seen=len(ids), rows_upserted=len(rows),
                        degraded=pruned < 0,  # a tripped prune guard is an integrity trip → honest red
                        notes=f"shard={args.shard or 'full'} priced={counter['ok']}/{len(ids)} "
-                             f"pruned={max(pruned, 0)}")
+                             f"pruned={max(pruned, 0)}", check_tables=["aqarmonthly_residential_listings"])
         return 0
     except Exception as e:
         if run_id is not None:

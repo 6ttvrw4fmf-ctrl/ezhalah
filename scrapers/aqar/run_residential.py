@@ -127,7 +127,7 @@ def main() -> int:
         notes = str(e)[:500]
         print(f"\n✗ FATAL: {e}")
     finally:
-        db.end_run(run_id, ok=ok, rows_seen=total_seen, rows_upserted=total_upserted, notes=notes)
+        db.end_run(run_id, ok=ok, rows_seen=total_seen, rows_upserted=total_upserted, notes=notes, check_tables=["aqar_residential_listings"])
 
     print(f"\n📊 Done. {total_upserted}/{total_seen} upserted across all slices. (run_id={run_id})")
     # Exit 0 when the run COMPLETED cleanly, even if it upserted nothing — a small town/type-group

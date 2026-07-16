@@ -487,7 +487,7 @@ def main() -> int:
                 pruned += n
         print(f"✓ Era Pulse: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
         db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
-                   notes=f"pruned={pruned}")
+                   notes=f"pruned={pruned}", check_tables=["erapulse_residential_listings", "erapulse_commercial_listings"])
         return 0
     except Exception as e:
         if run_id:

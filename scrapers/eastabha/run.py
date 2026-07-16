@@ -555,7 +555,7 @@ def main() -> int:
               f"{gone_ct} sold/rented (inactive), {skipped_auction} auctions skipped, {pruned} stale pruned")
         if run_id:
             db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
-                       notes=f"auctions_skipped={skipped_auction} gone={gone_ct} pruned={pruned}")
+                       notes=f"auctions_skipped={skipped_auction} gone={gone_ct} pruned={pruned}", check_tables=["eastabha_residential_listings", "eastabha_commercial_listings"])
         return 0
     except Exception as e:
         if run_id:

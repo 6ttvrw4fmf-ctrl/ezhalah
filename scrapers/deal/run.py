@@ -310,7 +310,7 @@ def scrape(type_filter: str, max_pages: int, dry: int) -> int:
         if res: db.upsert_deal_residential_batch(res)
         if com: db.upsert_deal_commercial_batch(com)
         print(f"✓ Deal: kept {seen}, skipped {skipped}")
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"skipped={skipped}")
+        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"skipped={skipped}", check_tables=["deal_residential_listings", "deal_commercial_listings"])
         return 0
     except Exception as e:
         if run_id:
