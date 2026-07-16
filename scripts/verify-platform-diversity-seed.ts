@@ -42,9 +42,10 @@ const aqarBatch = Array.from({ length: 30 }, (_, i) => ({
   check('boostedKeys records exactly the 3 newly-added rows', boostedKeys.size === 3);
   check('wasalt row now present in the merged pool (the actual bug being fixed)', merged.some((c) => c.platform === 'wasalt'));
   check('sanadak row now present too', merged.some((c) => c.platform === 'sanadak'));
-  // NULLS FIRST → a null last_updated sorts as "newest" (matches the RPC's own ORDER BY), so the
-  // sanadak row (null) should be first in the merged, re-sorted pool.
-  check('null last_updated sorts FIRST (NULLS FIRST), matching the RPC order', merged[0].platform === 'sanadak');
+  // NULLS LAST (owner 2026-07-16 "newest first" fix) → an unknown last_updated has no evidence of
+  // being newest, so it must sort LAST, matching the RPC's own ORDER BY ... DESC NULLS LAST. The
+  // sanadak row (null) should be the LAST element of the merged, re-sorted pool.
+  check('null last_updated sorts LAST (NULLS LAST), matching the RPC order', merged[merged.length - 1].platform === 'sanadak');
   check('aqar batch (all identical timestamps) still sorts before the older wasalt rows', merged.indexOf(merged.find((c) => c.platform === 'aqar')!) < merged.findIndex((c) => c.platform === 'wasalt'));
 }
 

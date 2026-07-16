@@ -17,8 +17,11 @@ export function candKey(c: DiversityCand): string {
 
 // Merge a small per-platform-capped "seed" fetch into the main recency-window candidate pool,
 // deduping by (source_table, listing_id) and re-deriving order to match the RPC's own
-// `ORDER BY last_updated DESC NULLS FIRST, source_table, listing_id` — so the merged pool's
+// `ORDER BY last_updated DESC NULLS LAST, source_table, listing_id` — so the merged pool's
 // position still means "true recency rank" for interleaveRanked's freshness tiebreaks.
+// NULLS LAST (owner 2026-07-16, "newest first" fix): a row with an unknown last_updated has no
+// evidence it is the newest, so it must never sort to the top (that would fabricate recency it
+// doesn't have). Unknown-date rows go LAST here, mirroring the RPC's matching NULLS LAST.
 export function mergeDiversitySeed<T extends DiversityCand>(
   mainCands: T[],
   seedCands: T[],
@@ -35,10 +38,10 @@ export function mergeDiversitySeed<T extends DiversityCand>(
     }
   }
   if (!fresh.length) return { merged: mainCands, boostedKeys };
-  const dateVal = (c: T) => (c.last_updated ? Date.parse(c.last_updated) : Infinity);
+  const dateVal = (c: T) => (c.last_updated ? Date.parse(c.last_updated) : -Infinity);
   const merged = [...mainCands, ...fresh].sort((a, b) => {
     const da = dateVal(a), db = dateVal(b);
-    if (da !== db) return db - da; // last_updated DESC (NULLS FIRST → treated as +Infinity)
+    if (da !== db) return db - da; // last_updated DESC (unknown date → -Infinity, sorts LAST — never claim an unknown-date row is newest)
     if (a.source_table !== b.source_table) return a.source_table < b.source_table ? -1 : 1;
     return a.listing_id - b.listing_id;
   });
