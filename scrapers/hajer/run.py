@@ -18,7 +18,9 @@ Field map (REM single-field label → our schema):
   أسم الحي                 → neighborhood
   المساحة / غرف النوم / دورات المياه → area_m2 / bedrooms / bathrooms
   السعر                    → price_total | price_annual
-  الحالة  مباع|مؤجر         → SKIP (sold/rented — only list available)
+  الحالة  مباع|مؤجر         → never (re)upserted + any existing row pinned inactive same crawl
+                              (active=false, missing_count=3 — see _pin_sold_inactive; keeps the
+                              nightly auto_recover_false_inactive() sweep from resurrecting it)
   واجهة / عمر / عرض الشارع / خدمات الحي → additional_info
 
 Usage:  python -m scrapers.hajer.run [--limit-test] [--type residential|commercial|all]
@@ -213,6 +215,29 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     return row, category, gone
 
 
+def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+    """Make source-confirmed SOLD/RENTED rows inactive NOW and survivors of the nightly
+    auto_recover_false_inactive() sweep.
+
+    Hajer's flow SKIPS gone rows (they are never upserted — see the `if gone: continue` in main),
+    so a listing the site explicitly marks sold/rented used to stay ACTIVE for 3 more crawls
+    until prune_unseen()'s 3-strike counter caught it as \"unseen\". This pin closes that window:
+    active=false + missing_count=3 (the existing prune 3-strike threshold) the same crawl the
+    source says gone. Writing missing_count=3 together with active=false also guarantees the row
+    can never sit in the state the 05:20 UTC auto-recover sweep resurrects (active=false AND
+    coalesce(missing_count,0)=0 AND a fresh last_seen_at — the exact state 900+ dealapp rows were
+    stuck in on 2026-07-16). prune_unseen() never undoes the pin: it only selects active=true
+    rows. When a listing is later relisted, its next upsert carries active=true and the upsert's
+    own missing_count=0 reset applies — the pin is only written for ids that are gone THIS
+    crawl."""
+    for i in range(0, len(ad_numbers), 200):
+        db._execute(
+            db.sb().table(table).update({"active": False, "missing_count": 3})
+            .in_("ad_number", ad_numbers[i:i + 200]),
+            what=table + ".sold_pin",
+        )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -225,6 +250,8 @@ def main() -> int:
     run_id = None if args.limit_test else db.begin_run("hajer")
     res: list[dict] = []
     com: list[dict] = []
+    sold_res: list[str] = []
+    sold_com: list[str] = []
     gone_ct = 0
     seen = 0
     try:
@@ -242,6 +269,8 @@ def main() -> int:
                 continue
             if gone:
                 gone_ct += 1
+                # remember the id so any EXISTING row is pinned inactive after the upserts
+                (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
                 continue  # don't list sold/rented
             if args.type != "all" and cat != args.type:
                 continue
@@ -261,6 +290,15 @@ def main() -> int:
             db.upsert_hajer_residential_batch(res)
         if com:
             db.upsert_hajer_commercial_batch(com)
+        # Pin sold/rented rows immediately after the upserts: gone rows are never upserted here,
+        # but without the pin an already-listed row stays active for 3 more crawls (prune's
+        # 3-strike) while the site explicitly says gone. See _pin_sold_inactive.
+        if sold_res:
+            _pin_sold_inactive("hajer_residential_listings", sold_res)
+        if sold_com:
+            _pin_sold_inactive("hajer_commercial_listings", sold_com)
+        # Gone rows are already active=false + missing_count=3 by now; prune_unseen never touches
+        # them (it only reads active=true rows), so their absence from the seen set is harmless.
         pruned = 0
         for tbl, rows_seen in (("hajer_residential_listings", res), ("hajer_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Hajer")
@@ -268,7 +306,7 @@ def main() -> int:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 pruned += n
-        print(f"✓ Hajer: {len(res)} residential + {len(com)} commercial upserted, {gone_ct} sold/rented skipped, {pruned} stale pruned")
+        print(f"✓ Hajer: {len(res)} residential + {len(com)} commercial upserted, {gone_ct} sold/rented pinned inactive, {pruned} stale pruned")
         db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"gone={gone_ct} pruned={pruned}")
         return 0
     except Exception as e:

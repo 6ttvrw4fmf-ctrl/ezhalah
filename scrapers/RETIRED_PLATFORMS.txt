@@ -19,6 +19,14 @@
 #             (HTTP 200 shell, no listings); 7 straight daily runs of rows_seen=0.
 # muktamel  — paused 2026-07-15: runs on its OWN gated weekly workflow (muktamel-sync.yml), never
 #             the shared matrix; listed here so it cannot re-enter any matrix while paused.
+# deal      — deprecated 2026-06-26 (live deprecated_platforms row; experiment reverted
+#             2026-06-24): a 2-run JSON-API experiment against api.dealapp.sa — the SAME site the
+#             active `dealapp` pipeline covers, so running both would double-list dealapp.sa
+#             inventory. 36 DB rows retained, never user-visible (0 active); freshness-excluded
+#             via the hardcoded `'deal\_%'` literal in check_scraper_freshness(). Listed here
+#             2026-07-16 (Batch 3) so the slug can never enter a workflow matrix. If the JSON API
+#             is ever wanted, evolve scrapers/dealapp/ instead of un-retiring this slug.
 toor
 alnokhba
 muktamel
+deal
