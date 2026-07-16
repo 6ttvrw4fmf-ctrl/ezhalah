@@ -53,14 +53,17 @@ MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 # Mustqr property type (Arabic) → canonical English taxonomy — UNIFIED 2026-07-16
 # (fix/normalize-unification): the 15-key private TYPE_MAP that lived here now routes through the
 # shared normalize.map_type_exact(). 10 keys were literal duplicates of shared TYPE_MAP_AR entries
-# (dropped), 'حوش'→House was promoted verbatim into the shared map, and the 4 below stay as
-# Mustqr-only EXACT-match overrides (contract: normalize.map_type_exact docstring) because their
-# owner-shipped values DIFFER from — or are contested against — what the shared layer would say
-# (locked owner rule: never guess on a mapping conflict; every conflict is listed in the
-# 2026-07-16 unification report for owner review):
+# (dropped) and 'حوش'→House was promoted verbatim into the shared map.
+#
+# MAPPING STANDARDIZATION 2026-07-16 (owner-approved, same-day follow-up): the conflict table was
+# reviewed and two more keys moved to the shared layer — 'ارض زراعية'→Farm was promoted VERBATIM
+# (Mustqr's value became the fleet-wide truth, matching the owner's مزرعة precedent), and the
+# 'دوبلكس'→Villa fold was RETIRED in favour of the shared 'دوبلكس'→Duplex (Duplex is a first-class
+# searchable clean type post-#98; existing stored Villa rows self-heal on the next daily crawl's
+# upsert). The 2 below stay as Mustqr-only EXACT-match overrides (contract:
+# normalize.map_type_exact docstring) — context judgments the owner kept unchanged (item 8 of the
+# standardization table):
 MUSTQR_TYPE_OVERRIDES = {
-    "دوبلكس": "Villa",       # eastabha maps the same word to "Duplex" — cross-platform conflict
-    "ارض زراعية": "Farm",    # shared substring pass would say "Residential Land"; eastabha says "Land"
     "صالة": "Showroom",      # event/showroom hall → commercial; Mustqr-context judgment, not global
     "محطة": "Gas Station",   # bare "station" — unambiguous only in Mustqr's Hail-brokerage context
 }

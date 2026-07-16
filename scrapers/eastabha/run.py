@@ -77,24 +77,28 @@ TAXONOMIES = (
 # UNIFIED 2026-07-16 (fix/normalize-unification): the 43-key private TYPE_MAP_AR that lived here now
 # routes through normalize.map_type_exact() — 16 keys were literal duplicates of shared TYPE_MAP_AR
 # entries (dropped), 7 (شقق سكنية/شقق/قصر/إستراحة/محطة بنزين/كافيه/كافيه - لاونج) were promoted
-# verbatim into the shared map, and the 20 below stay as Eastabha-only EXACT-match overrides
-# (contract: normalize.map_type_exact docstring). Overrides exist for two reasons, both listed in
-# the unification report for owner review (locked owner rule: never guess on a mapping conflict):
-#   • CONFLICT — Eastabha's owner-shipped value differs from the shared layer's (the أرض family is
-#     stored as "Land"/"Commercial Land" here, vs shared "Residential Land"; دوبلكس is "Duplex" here
-#     vs Mustqr's "Villa"; استوديو is "Studio" here vs Wasalt folding Studio→Apartment; صناعي/تجاري
-#     are Eastabha-context judgments).
+# verbatim into the shared map, and the remainder stayed as Eastabha-only EXACT-match overrides
+# (contract: normalize.map_type_exact docstring).
+#
+# MAPPING STANDARDIZATION 2026-07-16 (owner-approved, same-day follow-up): the unification's
+# conflict table was reviewed and the filter-blocking conflicts resolved fleet-wide, so 11 more
+# override keys moved to the shared layer:
+#   • أرض/ارض/أرض سكنية/ارض سكنية no longer store the legacy "Land" — the shared "Residential Land"
+#     (the actual filterable clean type) is now the truth here too.
+#   • أرض زراعية/ارض زراعية → shared "Farm" (mustqr's value; the owner's مزرعة precedent).
+#   • أرض تجارية → "Commercial Land" promoted verbatim into shared TYPE_MAP_AR.
+#   • دوبلكس/دوبليكس → "Duplex" and استوديو/ستوديو → "Studio" promoted verbatim (Eastabha's values
+#     become the fleet-wide truth; the wasalt/aldarim/mustqr Villa/Apartment folds were removed).
+# The 9 keys below remain Eastabha-only for the original two reasons:
+#   • CONTEXT JUDGMENT — صناعي→Warehouse and تجاري→Commercial Land are safe only in Eastabha's
+#     category vocabulary (never promoted; a bare تجاري fleet-wide would be a guess).
 #   • ORDER-PRESERVING — keys the shared map only reaches via its substring pass (دور سكني,
 #     دور أرضي, عمارة عضم, محلات تجارية, محلات) or not at all (روف/روف للبيع — deliberately NOT
 #     promoted: "روف" is a substring of common words like معروف and would false-positive fleet-wide).
-#     Keeping them exact-match here keeps _derive_type()'s two-phase name scan byte-identical.
+#     Keeping them exact-match here keeps _derive_type()'s two-phase name scan behaviour.
 TYPE_OVERRIDES_AR = {
-    "استوديو": "Studio", "ستوديو": "Studio",
-    "دوبلكس": "Duplex", "دوبليكس": "Duplex",
     "دور سكني": "Floor", "دور أرضي": "Floor", "روف": "Floor", "روف للبيع": "Floor",
     "عمارة عضم": "Building",
-    "أرض": "Land", "ارض": "Land", "أرض سكنية": "Land", "ارض سكنية": "Land",
-    "أرض زراعية": "Land", "ارض زراعية": "Land", "أرض تجارية": "Commercial Land",
     "محلات تجارية": "Shop", "محلات": "Shop",
     "صناعي": "Warehouse", "تجاري": "Commercial Land",
 }
@@ -103,7 +107,8 @@ _DEAL_WORDS = ("للبيع", "للايجار", "للإيجار", "إيجار", "
 
 RESIDENTIAL_TYPES = {
     "Apartment", "Villa", "Floor", "Duplex", "House", "Building", "Studio", "Rest House",
-    "Chalet", "Farm", "Land",
+    "Chalet", "Farm", "Residential Land",
+    "Land",  # routing-legacy only (the never-stored unmapped default in map_listing)
 }
 COMMERCIAL_TYPES = {
     "Shop", "Office", "Warehouse", "Showroom", "Commercial Land", "Commercial Building",
@@ -114,31 +119,23 @@ COMMERCIAL_TYPES = {
 # UNIFIED 2026-07-16 (fix/normalize-unification): the 51-key private CITY_MAP_AR that lived here now
 # routes through normalize.map_city() — 34 keys already resolved identically via the shared map
 # (dropped), 4 (النماص/تنومة/ظهران الجنوب/البرك) were promoted verbatim into the shared map (+ their
-# Asir region entries in REGION_CITIES), and the 13 below stay as Eastabha-only EXACT-match
-# overrides because Eastabha's historical English label DIFFERS from the canonical label the shared
-# map (or another platform) uses for the same city — e.g. it stores "Majmaah" where the rest of the
-# fleet stores "Al Majmaah". Changing a stored label is a production data change, so every one of
-# these is preserved verbatim and listed in the unification report for owner review (they are a
-# real cross-platform findability gap: a city filter can't match both spellings). CITY_TO_REGION
-# below still keys off these historical labels — keep the two in sync if the owner ever
-# canonicalizes them.
+# Asir region entries in REGION_CITIES).
+#
+# MAPPING STANDARDIZATION 2026-07-16 (owner-approved, same-day follow-up): the 10 historical
+# nonstandard labels (Tathleeth/Muhayil/Majmaah/Zulfi/Quwaiiyah/Turbah/Buqayq/Bukayriyah/Muthnib/
+# Bish) were dropped — the shared canonical labels (Tathlith/Mahayel/Al Majmaah/Al Zulfi/
+# Al Quwayiyah/Turabah/Abqaiq/Al Bukayriyah/Al Mithnab/Baysh) are what loc_city_map actually
+# resolves (verified against production 2026-07-16: all 10 canonical keys present; 8 of the 10 old
+# labels had NO loc_city_map entry, so their rows could never resolve via the English overlay).
+# The 3 precise-town overrides below stay: the owner resolved the wasalt-fold contest in favour of
+# the precise town (wasalt's CITY_MAP_EN folds were removed in the same pass), but the Arabic keys
+# are deliberately NOT promoted to shared CITY_MAP_AR — "العقيق" is also a common district name
+# (e.g. Riyadh's حي العقيق), and the shared map's substring pass would grab it out of longer
+# strings fleet-wide. Exact-match here keeps the mapping scoped to Eastabha's clean city taxonomy.
 CITY_OVERRIDES_AR = {
-    # value ≠ shared CITY_MAP_AR for the same Arabic key:
-    "تثليث": "Tathleeth",    # shared: Tathlith
-    "محايل": "Muhayil",      # shared: Mahayel
-    "المجمعة": "Majmaah",    # shared: Al Majmaah
-    "الزلفي": "Zulfi",       # shared: Al Zulfi
-    "القويعية": "Quwaiiyah", # shared: Al Quwayiyah
-    "تربة": "Turbah",        # shared: Turabah
-    "بقيق": "Buqayq",        # shared: Abqaiq
-    "البكيرية": "Bukayriyah",# shared: Al Bukayriyah
-    "المذنب": "Muthnib",     # shared: Al Mithnab
-    "بيش": "Bish",           # shared: Baysh
-    # label contested across platforms (Wasalt folds these into a parent city; Eastabha keeps them
-    # as their own city) — NOT promoted to shared, owner decision needed:
-    "سراة عبيدة": "Sarat Abidah",  # wasalt: Sarat Ubaida → Khamis Mushait
-    "بلجرشي": "Baljurashi",        # wasalt: Baljurashi → Al Baha
-    "العقيق": "Al Aqiq",           # wasalt: Al-Aqiq → Al Baha
+    "سراة عبيدة": "Sarat Abidah",  # wasalt now agrees (Sarat Ubaida → Sarat Abidah)
+    "بلجرشي": "Baljurashi",        # wasalt now agrees (Baljurashi → Baljurashi)
+    "العقيق": "Al Aqiq",           # wasalt now agrees (Al-Aqiq → Al Aqiq)
 }
 REGION_MAP_AR = {
     "عسير": "Asir", "الرياض": "Riyadh", "مكة المكرمة": "Makkah", "المدينة المنورة": "Madinah",
@@ -147,20 +144,22 @@ REGION_MAP_AR = {
     "الشماليه": "Northern Borders", "الحدود الشمالية": "Northern Borders",
     "المملكة العربية السعودية": None,  # the country-level term — ignore, not a region
 }
+# Re-keyed to the canonical labels in the 2026-07-16 mapping standardization (the historical
+# Tathleeth/Muhayil/Majmaah/… labels are no longer produced by any lookup above).
 CITY_TO_REGION = {
     "Abha": "Asir", "Ahad Rafidah": "Asir", "Khamis Mushait": "Asir", "Al Namas": "Asir",
-    "Tanomah": "Asir", "Bisha": "Asir", "Tathleeth": "Asir", "Muhayil": "Asir",
+    "Tanomah": "Asir", "Bisha": "Asir", "Tathlith": "Asir", "Mahayel": "Asir",
     "Dhahran Al Janub": "Asir", "Sarat Abidah": "Asir",
-    "Riyadh": "Riyadh", "Al Kharj": "Riyadh", "Dawadmi": "Riyadh", "Majmaah": "Riyadh",
-    "Zulfi": "Riyadh", "Quwaiiyah": "Riyadh", "Diriyah": "Riyadh",
-    "Jeddah": "Makkah", "Mecca": "Makkah", "Taif": "Makkah", "Al Jumum": "Makkah", "Turbah": "Makkah",
+    "Riyadh": "Riyadh", "Al Kharj": "Riyadh", "Dawadmi": "Riyadh", "Al Majmaah": "Riyadh",
+    "Al Zulfi": "Riyadh", "Al Quwayiyah": "Riyadh", "Diriyah": "Riyadh",
+    "Jeddah": "Makkah", "Mecca": "Makkah", "Taif": "Makkah", "Al Jumum": "Makkah", "Turabah": "Makkah",
     "Medina": "Madinah", "Al Ula": "Madinah",
     "Dammam": "Eastern Province", "Khobar": "Eastern Province", "Dhahran": "Eastern Province",
     "Qatif": "Eastern Province", "Jubail": "Eastern Province", "Hofuf": "Eastern Province",
-    "Khafji": "Eastern Province", "Buqayq": "Eastern Province",
-    "Buraidah": "Qassim", "Ar Rass": "Qassim", "Bukayriyah": "Qassim", "Muthnib": "Qassim",
+    "Khafji": "Eastern Province", "Abqaiq": "Eastern Province",
+    "Buraidah": "Qassim", "Ar Rass": "Qassim", "Al Bukayriyah": "Qassim", "Al Mithnab": "Qassim",
     "Tabuk": "Tabuk", "Tayma": "Tabuk", "Hail": "Hail", "Najran": "Najran",
-    "Jazan": "Jazan", "Bish": "Jazan", "Al Baha": "Al Bahah", "Baljurashi": "Al Bahah", "Al Aqiq": "Al Bahah",
+    "Jazan": "Jazan", "Baysh": "Jazan", "Al Baha": "Al Bahah", "Baljurashi": "Al Bahah", "Al Aqiq": "Al Bahah",
     "Qurayyat": "Al Jawf", "Al Birk": "Asir",
 }
 

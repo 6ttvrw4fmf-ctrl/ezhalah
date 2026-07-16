@@ -211,14 +211,16 @@ function main(): void {
       const counts: [string, number, number][] = [
         // 27 → 35 on 2026-07-16 (fix/normalize-unification): 8 Arabic aliases promoted verbatim from
         // the eastabha/mustqr private maps into TYPE_MAP_AR (+ taxonomy.source.json python.typeMapAr).
-        ['TYPE_MAP_AR', Object.keys(py.TYPE_MAP_AR).length, 35],
+        // 35 → 42 on 2026-07-16 (fix/mapping-standardization, owner-approved): أرض تجارية→Commercial
+        // Land, أرض زراعية/ارض زراعية→Farm, دوبلكس/دوبليكس→Duplex, استوديو/ستوديو→Studio.
+        ['TYPE_MAP_AR', Object.keys(py.TYPE_MAP_AR).length, 42],
         ['SLUG_TO_TYPE', Object.keys(py.SLUG_TO_TYPE).length, 26],
         ['residential_set', py.residential_set.length, 10],
       ];
       let countOk = true;
       for (const [n, got, want] of counts)
         if (got !== want) { bad(`normalize.py ${n}: parsed ${got} entries, expected ${want} (parser bug or map drift)`); countOk = false; }
-      if (countOk) ok('normalize.py shapes self-check: TYPE_MAP_AR(35), SLUG_TO_TYPE(26), residential_set(10) — parsed statically, zero external interpreter');
+      if (countOk) ok('normalize.py shapes self-check: TYPE_MAP_AR(42), SLUG_TO_TYPE(26), residential_set(10) — parsed statically, zero external interpreter');
 
       // Value-equality vs the source-generated Python maps (NFC-normalized, order-independent).
       eqMap('normalize.py TYPE_MAP_AR', gen.TYPE_MAP_AR, py.TYPE_MAP_AR);
