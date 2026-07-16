@@ -288,10 +288,12 @@ def map_listing(adid: int, body: str) -> tuple[Optional[dict], str]:
     city_ar = f.get("المدينة") or ""
     region_ar = f.get("المنطقة") or ""
 
-    property_type = SECTION_MAP_AR.get(section.strip())
-    if not property_type:
-        # fall back to the title's singular type word, else Residential Land (most listings here)
-        property_type = normalize.map_type(title_raw) or "Residential Land"
+    mapped_type = SECTION_MAP_AR.get(section.strip()) or normalize.map_type(title_raw)
+    # Unmapped type → STORE the raw section/title text, never a guessed default (owner directive
+    # 2026-07-16: never confidently misclassify — the raw value trips the DB novel-type detector,
+    # which quarantines + alerts). The legacy value below feeds ONLY the routing/sanity rules.
+    property_type = mapped_type or "Residential Land"  # type-truth: routing-legacy only — never stored
+    stored_property_type = mapped_type or section.strip() or title_raw.strip() or "unknown"
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
 
     is_rent = any(w in txn for w in RENT_WORDS)
@@ -350,7 +352,7 @@ def map_listing(adid: int, body: str) -> tuple[Optional[dict], str]:
         "listing_url": f"{BASE}/ads/{adid}",
         "source": "Al Khaas",
         "active": True,
-        "property_type": property_type,
+        "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": int(round(area)) if area else None,
         "bedrooms": bedrooms,

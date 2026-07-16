@@ -315,7 +315,12 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
     ad = o.get("advertisementNumber") or o.get("adNumber") or o.get("id")
     type_en = (o.get("propertyType") or "").strip()
     type_ar = (o.get("propertyTypeText") or "").strip()
-    property_type = TYPE_MAP.get(type_en) or TYPE_MAP_AR.get(type_ar) or "Residential Land"
+    mapped_type = TYPE_MAP.get(type_en) or TYPE_MAP_AR.get(type_ar)
+    # Unmapped type → STORE the raw source type text (Arabic first), never a guessed default (owner
+    # directive 2026-07-16: never confidently misclassify — the raw value trips the DB novel-type
+    # detector, which quarantines + alerts). The legacy value below feeds ONLY the routing/sanity rules.
+    property_type = mapped_type or "Residential Land"  # type-truth: routing-legacy only — never stored
+    stored_property_type = mapped_type or type_ar or type_en or "unknown"
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
     is_rent = (o.get("listingType") or "").strip().lower() == "rent" or "إيجار" in (o.get("listingTypeText") or "")
 
@@ -359,7 +364,7 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
         "listing_url": url,
         "source": "Sanadak",
         "active": True,
-        "property_type": property_type,
+        "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": _int(o.get("lotSize")),
         "bedrooms": _int(o.get("numberBedrooms")),

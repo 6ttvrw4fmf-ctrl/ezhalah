@@ -293,9 +293,13 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
     type_key = type_ar
     if type_key.startswith("ال") and type_key not in TYPE_MAP_AR:
         type_key = type_key[2:]
-    property_type = TYPE_MAP_AR.get(type_ar) or TYPE_MAP_AR.get(type_key) \
-        or normalize.map_type(type_ar) or normalize.map_type(f.get("tr_title", "")) \
-        or "Residential Land"
+    mapped_type = TYPE_MAP_AR.get(type_ar) or TYPE_MAP_AR.get(type_key) \
+        or normalize.map_type(type_ar) or normalize.map_type(f.get("tr_title", ""))
+    # Unmapped type → STORE the raw type/title text, never a guessed default (owner directive
+    # 2026-07-16: never confidently misclassify — the raw value trips the DB novel-type detector,
+    # which quarantines + alerts). The legacy value below feeds ONLY the routing/sanity rules.
+    property_type = mapped_type or "Residential Land"  # type-truth: routing-legacy only — never stored
+    stored_property_type = mapped_type or type_ar or f.get("tr_title", "").strip() or "unknown"
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
     is_land = property_type in LAND_TYPES
 
@@ -382,7 +386,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
         "listing_url": url,
         "source": "Jurash",
         "active": not gone,
-        "property_type": property_type,
+        "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": int(round(area)) if area else None,
         "bedrooms": bedrooms,

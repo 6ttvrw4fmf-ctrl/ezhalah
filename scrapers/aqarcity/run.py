@@ -455,7 +455,12 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     crumb = _breadcrumb_parts(bc)
 
     # ── type + category ──
-    property_type = _map_type(pi.get("التصنيف", ""), crumb.get("category", "")) or "Residential Land"
+    mapped_type = _map_type(pi.get("التصنيف", ""), crumb.get("category", ""))
+    # Unmapped type → STORE the raw التصنيف/breadcrumb text, never a guessed default (owner
+    # directive 2026-07-16: never confidently misclassify — the raw value trips the DB novel-type
+    # detector, which quarantines + alerts). The legacy value below feeds ONLY the routing/sanity rules.
+    property_type = mapped_type or "Residential Land"  # type-truth: routing-legacy only — never stored
+    stored_property_type = mapped_type or pi.get("التصنيف", "").strip() or crumb.get("category", "").strip() or "unknown"
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
 
     # ── transaction type ──
@@ -570,7 +575,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "listing_url": url,
         "source": "Aqarcity",
         "active": True,
-        "property_type": property_type,
+        "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": round(area) if area else None,
         "bedrooms": _sane_beds(_int(pi.get("عدد الغرف")) or _int((ld.get("numberOfRooms") or {}).get("value")), category),

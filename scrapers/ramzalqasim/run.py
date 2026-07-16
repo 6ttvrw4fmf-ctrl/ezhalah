@@ -214,8 +214,14 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
     if not isinstance(rid, int):
         return None, "residential", False
 
-    type_raw = (rec.get("type") or "").strip().lower()
-    property_type = TYPE_MAP_EN.get(type_raw) or "Residential Land"  # default to land for unknown
+    type_src = (rec.get("type") or "").strip()  # verbatim source value (pre-lowercase)
+    type_raw = type_src.lower()
+    mapped_type = TYPE_MAP_EN.get(type_raw)
+    # Unmapped type → STORE the raw source string, never a guessed default (owner directive
+    # 2026-07-16: never confidently misclassify — the raw value trips the DB novel-type detector,
+    # which quarantines + alerts). The legacy value below feeds ONLY the routing/sanity rules.
+    property_type = mapped_type or "Residential Land"  # type-truth: routing-legacy only — never stored
+    stored_property_type = mapped_type or type_src or "unknown"
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
 
     status_raw = (rec.get("status") or "").lower()
@@ -355,7 +361,7 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
         "listing_url": f"{BASE}/x/{rid}",
         "source": "Ramzalqasim",
         "active": not gone,
-        "property_type": property_type,
+        "property_type": stored_property_type,
         "transaction_type": transaction_type,
         "area_m2": area,
         "bedrooms": bedrooms,

@@ -353,12 +353,18 @@ def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str]:
 
     # ── type + category ──
     cat_ar = (estate.get("category") or "").strip()
-    property_type = TYPE_MAP_AR.get(cat_ar) or normalize.map_type(cat_ar) \
-        or normalize.map_type(estate.get("title") or "") or "Residential Land"
+    mapped_type = TYPE_MAP_AR.get(cat_ar) or normalize.map_type(cat_ar) \
+        or normalize.map_type(estate.get("title") or "")
+    # Unmapped type → STORE the raw category/title text, never a guessed default (owner directive
+    # 2026-07-16: never confidently misclassify — the raw value trips the DB novel-type detector,
+    # which quarantines + alerts). The legacy value below feeds ONLY the routing/sanity rules
+    # (including the commercial-usage flips), so table routing is unchanged.
+    property_type = mapped_type or "Residential Land"  # type-truth: routing-legacy only — never stored
     if property_type == "Residential Land" and is_commercial_usage:
         property_type = "Commercial Land"
     elif property_type == "Building" and is_commercial_usage:
         property_type = "Commercial Building"
+    stored_property_type = property_type if mapped_type else (cat_ar or (estate.get("title") or "").strip() or "unknown")
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
 
     # ── transaction type + rent period ──
@@ -465,7 +471,7 @@ def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str]:
         "listing_url": listing_url,
         "source": "Aqaratikom",
         "active": not bool(ad.get("is_sold") or detail.get("is_sold")),
-        "property_type": property_type,
+        "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": round(area) if area else None,
         "bedrooms": bedrooms,
