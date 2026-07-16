@@ -87,6 +87,12 @@ export function ResultCard({
   // "Al Olaya, Riyadh" instead of "حي العليا, Riyadh". AR UI: pass through unchanged. (user request:
   // "when I send in English the place should be translated.")
   const place = (raw: string) => (locale === 'en' && raw ? translitPlace(raw) : raw);
+  // English-leak guard (owner report, 2026-07-16): a raw scraped city that never matched the
+  // Arabic catalog (e.g. "Eastern Province", "Baljurashi") used to render straight onto the card's
+  // own headline — the ONLY empty-string fallback here never caught "present but not Arabic".
+  // arabicOrPlaceholder is a no-op for an empty locale-'en' t(listing.city) (place() still
+  // transliterates it below), and a no-op for any already-Arabic value.
+  const cityAr = arabicOrPlaceholder(t(listing.city), locale, LOCATION_UNRESOLVED_AR);
   // Region (e.g. "north Riyadh") extracted from the Aqar listing URL — shown as a small chip so the
   // user sees which part of the city the property is in. (user request.)
   const region = regionFromUrl(listing.source_url);
@@ -170,11 +176,11 @@ export function ResultCard({
             the raw junk token. A present district with no city (or vice versa) is the normal,
             non-bug case and is untouched. */}
         <Text style={[card.title, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
-          {(place(t(listing.district)) || place(t(listing.city)) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(t(listing.city)) || LOCATION_UNRESOLVED_AR}` : ''}
+          {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
         <View style={card.locRow}>
           <Ionicons name="location-outline" size={12} color={colors.primary} />
-          <Text style={card.locText}>{place(t(listing.city)) || LOCATION_UNRESOLVED_AR}, {t('Saudi Arabia')}</Text>
+          <Text style={card.locText}>{place(cityAr) || LOCATION_UNRESOLVED_AR}, {t('Saudi Arabia')}</Text>
           {regionLabel ? (
             <View style={card.regionChip}>
               <Ionicons name="compass-outline" size={10} color={colors.primary} />
@@ -243,21 +249,46 @@ export function ResultCard({
 // display-only. Yes/No is translated for any field (never a legitimate street name).
 const AR_YESNO: Record<string, string> = { yes: 'نعم', no: 'لا' };
 const AR_ENUM: Record<string, Record<string, string>> = {
-  'property usage': { residential: 'سكني', commercial: 'تجاري' },
-  furniture: { furnished: 'مفروش', 'un-furnished': 'غير مفروش', unfurnished: 'غير مفروش', 'semi-furnished': 'نصف مفروش' },
+  // (owner report, 2026-07-16 Arabic-only sweep) 'agricultural'/'mixed' added — eaqartabuk/erapulse
+  // raw values that fell through the enum lookup and rendered raw English.
+  'property usage': { residential: 'سكني', commercial: 'تجاري', agricultural: 'زراعي', mixed: 'مختلط' },
+  // (fix, 2026-07-16) the dict key was 'furniture' but the real ADDL_FIELDS label is 'Furnishing' —
+  // label.toLowerCase() is 'furnishing', so this map never matched and satel's raw English
+  // ('Fully furnished'/'Unfurnished'/'Partially furnished', 203 rows) rendered verbatim. Renamed
+  // the key and added the exact live value spellings (satel's, not the original 'un-furnished').
+  furnishing: {
+    furnished: 'مفروش', 'fully furnished': 'مفروش بالكامل',
+    'un-furnished': 'غير مفروش', unfurnished: 'غير مفروش',
+    'semi-furnished': 'نصف مفروش', 'partially furnished': 'مفروش جزئياً',
+  },
   'property floor': { upper: 'علوي', ground: 'أرضي', basement: 'قبو' },
   facade: {
     east: 'شرقية', west: 'غربية', north: 'شمالية', south: 'جنوبية',
     'north east': 'شمالية شرقية', 'north west': 'شمالية غربية',
     'south east': 'جنوبية شرقية', 'south west': 'جنوبية غربية',
   },
+  // Below: 4 new enums added 2026-07-16 — all satel-only, ~200 raw-English rows each with zero
+  // prior translation (no AR_ENUM entry existed for any of these labels at all).
+  status: { available: 'متاح', 'rented out': 'مؤجر' },
+  'parking type': { underground: 'تحت الأرض', outdoor: 'مكشوف', shadedoutdoor: 'مكشوف مظلل' },
+  'ac type': { split: 'سبليت', concealed: 'مخفي', both: 'مركزي وسبليت' },
+  kitchen: { 'with-appliances': 'مجهز بأجهزة', 'without-appliances': 'غير مجهز بأجهزة' },
+  // mizlaj's raw 'approved' (27 rows) — every other platform already sends this pre-translated.
+  'license status': { approved: 'معتمد' },
 };
-// FREE-TEXT labels known to be natural-language prose (an address, not a code) — these are the
-// only labels checked for an English-leak, via arabicOrPlaceholderForFreeText below. Deliberately
-// narrow: license/plan/parcel/postal "codes" (rega_ad_license_number, broker_fal_license,
-// parcel_number, plan_number, postal_code — see ADDL_FIELDS) legitimately contain Latin LETTERS as
-// part of a real ID (e.g. "FAL1234567") and must never be blanked just for containing one.
-const FREE_TEXT_PROSE_LABELS = new Set(['address']);
+// FREE-TEXT labels checked for an English-leak via arabicOrPlaceholderForFreeText below (only a
+// Latin LETTER with no Arabic char is flagged — pure numeric/code content is untouched). Covers
+// every label that is genuine prose/status text, NOT a code: license/plan/parcel/postal "codes"
+// (rega_ad_license_number, broker_fal_license, parcel_number, plan_number, postal_code — see
+// ADDL_FIELDS) legitimately contain Latin LETTERS as part of a real ID (e.g. "FAL1234567") and
+// must stay excluded, or a real license number would get wrongly blanked.
+// (Widened 2026-07-16, owner report: was 'address' only — added every other prose/status/enum
+// label as defense-in-depth, so an UNMAPPED future enum value or a stray leak on any of these
+// falls back to a placeholder instead of rendering raw, the same way 'address' already does.)
+const FREE_TEXT_PROSE_LABELS = new Set([
+  'address', 'amenities', 'property services', 'furnishing', 'property usage',
+  'status', 'parking type', 'ac type', 'kitchen', 'license status', 'warranties', 'deed location',
+]);
 function arAttrValue(label: string, value: string, locale: string): string {
   const v = (value ?? '').trim();
   if (!v) return value;
@@ -275,7 +306,11 @@ function arAttrValue(label: string, value: string, locale: string): string {
   if (ll === 'facade') {
     if (AR_ENUM.facade[lv]) return AR_ENUM.facade[lv];
     const st = /^(\d+)\s*streets?$/i.exec(v); if (st) return `${st[1]} شوارع`;
-    return v;
+    // (fix, 2026-07-16) dealapp's scraper mis-captures raw HTML/meta-tag fragments into this
+    // field (e.g. '<meta name="twitter:title" content="...') — neither the compass-direction
+    // enum nor the digit-streets regex above matches garbage/English, so it used to render
+    // verbatim. Same free-text leak guard as the generic fallback below.
+    return arabicOrPlaceholderForFreeText(v, locale, ATTRIBUTE_UNRESOLVED_AR);
   }
   const map = AR_ENUM[ll];
   if (map && map[lv]) return map[lv];

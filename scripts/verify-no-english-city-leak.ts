@@ -106,6 +106,18 @@ check(
   SEARCH_NOWS.includes('parts.push(arabicOrUnresolved(tPlace(q.location.trim())))'),
 );
 
+// 2026-07-16 Arabic-only sweep: two more sibling gaps in this same file, found by a comprehensive
+// audit — both sat right next to an already-guarded value in the same statement, which is exactly
+// why the original 2026-07-13 fix pass missed them.
+check(
+  'locationLines() "You typed: {raw}" wraps lm.raw in arabicOrUnresolved() (was raw — a same-script/both-non-Arabic raw+label pair could render unguarded English)',
+  SEARCH_NOWS.includes("out.push(`${t('Youtyped')}:${arabicOrUnresolved(lm.raw)}`)"),
+);
+check(
+  'noResultsSuggestion() "did you mean" {place} wraps q.locationMatch?.label||q.location in arabicOrUnresolved() (was raw, right next to the already-guarded {alt})',
+  SEARCH_NOWS.includes('place:arabicOrUnresolved(q.locationMatch?.label||q.location)'),
+);
+
 // Negative check, tightened to close the 2026-07-13 test-gap-audit blind spot: a FUTURE call site
 // that wraps `tPlace(x)` in `arabicOrUnresolved(...)` where `cityDisplay(...)` is semantically
 // required (x looks like a canonical city-key variable, e.g. `alt.cityEn`/`lm.city`/`fc.city`) must
