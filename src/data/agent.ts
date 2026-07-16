@@ -512,16 +512,23 @@ async function callAgentBackend(
     // know every landmark itself, and never asks "which city?" for one it could have recognized.
     await ensureLandmarks(); // make sure the DB-backed catalog is loaded before recognition
     const lmHint = landmarkHint(text);
-    const { data, error } = await supabase.functions.invoke('agent', {
-      body: {
-        text,
-        locale: getLocale(),
-        loggedIn: ctx.loggedIn,
-        order: ctx.order,
-        history: ctx.history ?? [],
-        landmarkHint: lmHint || undefined,
-      },
-    });
+    // RC-A (hardening 2026-07-13): functions.invoke has no default timeout, and the whole search turn
+    // bare-awaits this — a stalled edge call spun «إزهله يبحث» forever. Race it against a 20s ceiling
+    // (agent latency runs higher than a plain query, hence 20s vs the data layer's 15s); on timeout it
+    // rejects → the existing catch returns null → the retry path fires instead of hanging.
+    const { data, error } = (await Promise.race([
+      supabase.functions.invoke('agent', {
+        body: {
+          text,
+          locale: getLocale(),
+          loggedIn: ctx.loggedIn,
+          order: ctx.order,
+          history: ctx.history ?? [],
+          landmarkHint: lmHint || undefined,
+        },
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('agent-timeout')), 20000)),
+    ])) as { data: any; error: any };
     if (error || !data || (data as any).error || !(data as any).kind) return null;
     const d = data as any;
     if (d.kind === 'interview') return { kind: 'interview' };

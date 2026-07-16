@@ -1092,13 +1092,23 @@ export default function Agent() {
       // Fetch the matching subset DURING the loading animation — the network wait hides inside the
       // thinking→searching choreography (no post-network hold: playListings morphs to results as soon
       // as the minimum searching beat — which overlapped the fetch — has played). (owner 2026-07-09.)
-      const result = await runQuery(pending.q);
-      if (run.cancelled) return;
-      await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
-      if (run.cancelled) return;
-      setBusy(false);
-      runRef.current = null;
-      void promptSignupSoon(run); // guest used their free search (filter) → prompt sign-up
+      // RC-A (hardening 2026-07-13): the busy-clear + status-morph used to run ONLY on the success path,
+      // and this IIFE had no .catch — so a thrown turn (malformed row, or an error escaping the data
+      // layer) left the «إزهله يبحث» loader spinning forever with no recovery. Wrapped in try/catch/
+      // finally (mirrors loadMore) so the loader ALWAYS clears and a thrown turn shows an inline retry.
+      try {
+        const result = await runQuery(pending.q);
+        if (run.cancelled) return;
+        await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
+        if (run.cancelled) return;
+        void promptSignupSoon(run); // guest used their free search (filter) → prompt sign-up
+      } catch {
+        if (!run.cancelled) {
+          setMsgs((m) => m.filter((x) => x.id !== statusId).concat({ id: uid(), role: 'agent', text: 'تعذّر البحث، حاول مرة أخرى' } as ChatMsg));
+        }
+      } finally {
+        if (!run.cancelled) { setBusy(false); runRef.current = null; }
+      }
     })();
   };
 

@@ -505,7 +505,20 @@ export async function ensureLocationIndex(): Promise<void> {
   if (_livePromise) return _livePromise;
   _livePromise = (async () => {
     try {
-      const { data } = await supabase.from('location_index_live').select('city,district,region,n');
+      // RC-A (hardening 2026-07-13): bound this fetch. An unbounded stall here left _livePromise
+      // permanently pending, so every later ensureLocationIndex() / home-Search awaited a promise that
+      // never settled — a silent app-wide wedge. Abort after 15s; on failure we null _livePromise
+      // (catch below) so the next attempt retries instead of returning the dead promise.
+      // (Rebase 2026-07-16: table is location_index_live — main's PR#77 repointed the fetch to the
+      // live view; this guard wraps main's call unchanged.)
+      const _ac = new AbortController();
+      const _t = setTimeout(() => _ac.abort(), 15000);
+      let data: any = null;
+      try {
+        ({ data } = await supabase.from('location_index_live').select('city,district,region,n').abortSignal(_ac.signal));
+      } finally {
+        clearTimeout(_t);
+      }
       if (data) {
         LIVE_DISTRICTS = data.filter((r: any) => r.city && r.district) as LiveDistrict[];
         // City→region aggregation over EVERY row (a city counts even where its district is null), so
@@ -523,7 +536,11 @@ export async function ensureLocationIndex(): Promise<void> {
         _invMemo = new WeakMap(); // recompute inventory against the fresh index
       }
       _liveLoaded = true;
-    } catch { /* keep the catalog-only resolver as fallback */ }
+    } catch {
+      // RC-A: reset so a stalled/failed load retries on the next call instead of returning a dead
+      // promise; the catalog-only resolver stays the fallback in the meantime.
+      _livePromise = null;
+    }
   })();
   return _livePromise;
 }

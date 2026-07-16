@@ -1078,6 +1078,10 @@ export function tBudgetSub(opt: string): string {
 // period suffix; Western digits and the "M" magnitude stay as displayed across Saudi listings.
 export function tPrice(price: string): string {
   if (_locale !== 'ar') return price;
+  // RC-G (hardening 2026-07-13): finalize() emits 'Price on request' when a listing has no numeric
+  // price (~2,600 live rows). tPrice localized the currency/period but NOT this phrase, so it leaked
+  // the bare English string onto Arabic-only cards. Map it to the neutral Arabic equivalent here.
+  if (price === 'Price on request') return 'السعر عند الطلب';
   return price
     .replace('SAR', 'ر.س')
     .replace('/year', '/سنوياً')
@@ -1089,6 +1093,10 @@ export function tPrice(price: string): string {
 export const sar = () => t('SAR');
 // 'SAR' isn't in AR (it's a value, not chrome); give it directly.
 AR['SAR'] = 'ر.س';
+// NOTE (reconciliation 2026-07-13): the 'Unknown' property-type English leak is deliberately NOT
+// fixed here — the concurrent branch fix/arabic-display-leaks-and-clear-all owns it with a more
+// complete, more honest guard (TYPE_UNRESOLVED_AR='نوع غير محدد' + arabicOrPlaceholder() in
+// ResultCard), which this batch defers to so the two don't duplicate or override each other.
 
 // --- React provider ---------------------------------------------------------------------------
 type I18nValue = { locale: Locale; isRTL: boolean; t: typeof t; setLocale: (l: Locale) => void };
