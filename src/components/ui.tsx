@@ -1,4 +1,4 @@
-import { Image, Platform, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Image, Platform, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useEffect, useRef } from 'react';
 import Animated, {
   Easing,
@@ -37,7 +37,7 @@ const FOCUS_T = { duration: 130, easing: Easing.out(Easing.quad) };
 export function Tappable({
   children, onPress, style, dip = 0.035, disabled,
 }: {
-  children: React.ReactNode; onPress?: () => void; style?: ViewStyle | ViewStyle[];
+  children: React.ReactNode; onPress?: () => void; style?: StyleProp<ViewStyle>;
   dip?: number; disabled?: boolean;
 }) {
   const press = useSharedValue(0);
@@ -51,7 +51,7 @@ export function Tappable({
       disabled={disabled}
       onPressIn={() => { press.value = withTiming(1, PRESS_IN); }}
       onPressOut={() => { press.value = withSpring(0, RELEASE); }}
-      style={[style as any, a]}
+      style={[style, a]}
     >
       {children}
     </AnimatedPressable>
