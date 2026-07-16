@@ -83,7 +83,16 @@ export default function AdvancedQuestionCard({
               onPress={() => onAnswer(o.key)}
             >
               <Text style={s.lbl}>{o.label}</Text>
-              <Ionicons name="chevron-forward" size={16} color="#9aa6a0" />
+              {/* Right side: the live count of listings in THIS bucket (exactly what the user
+                  receives if they pick it — strict, unknown-age excluded) + the chevron. The count
+                  already travels on every AdvancedOption from the config's fetchOptions; grouped()
+                  formats it English-with-commas (numbers stay English per the locale rule). */}
+              <View style={s.optRight}>
+                <View style={s.countPill}>
+                  <Text style={s.countText}>{grouped(o.count)}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#9aa6a0" />
+              </View>
             </Pressable>
           ))}
         </View>
@@ -140,6 +149,9 @@ const s = StyleSheet.create({
   opt: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 14, paddingHorizontal: 14, borderTopWidth: 1, borderTopColor: '#f0f2f0' },
   optFirst: { borderTopWidth: 0 },
   lbl: { fontSize: 14.5, fontWeight: '500', color: '#15201b' },
+  optRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  countPill: { backgroundColor: '#eef4f0', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 2, minWidth: 34, alignItems: 'center' },
+  countText: { fontSize: 12.5, fontWeight: '700', color: '#3f5a4c', fontVariant: ['tabular-nums'] },
 
   note: { marginTop: 10, marginHorizontal: 2, fontSize: 12, color: '#6b7a72', lineHeight: 17 },
 
