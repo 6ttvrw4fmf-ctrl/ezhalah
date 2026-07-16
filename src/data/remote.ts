@@ -468,10 +468,16 @@ function tablesFor(q: SearchQuery): string[] {
   if (cq?.extraTables?.length) for (const tb of cq.extraTables) if (!tables.includes(tb)) tables.push(tb);
   // PLATFORM filter: the user named specific platforms ("show me Gathern only"). q.sources holds
   // table prefixes; keep only those platforms' tables. (user: "show me gathern only".)
+  // HARDENING (owner PERMANENT rule 2026-07-16): always assign the filtered set, even when it's EMPTY
+  // (e.g. requesting Gathern — monthly-rent-only — together with Buy, or with annual Rent: Gathern has
+  // no table in this search's kind/deal scope at all). The prior `if (only.length) tables = only` guard
+  // silently fell back to the FULL unfiltered table list on an empty intersection — masked in production
+  // only because the RPC's own independent p_platforms clause happened to also enforce this, but a real,
+  // confirmed correctness bug on its own (audit 2026-07-16). An empty table list here correctly reaches
+  // the `if (!tables.length) return [];` guard just below → honest zero, never a silent fallback.
   if (q.sources && q.sources.length) {
     const wanted = new Set(q.sources);
-    const only = tables.filter((tbl) => wanted.has(tbl.replace(/_(residential|commercial)_listings$/, '')));
-    if (only.length) tables = only;
+    tables = tables.filter((tbl) => wanted.has(tbl.replace(/_(residential|commercial)_listings$/, '')));
   }
   return tables;
 }
@@ -652,6 +658,50 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
   }
   const countryWide = isCountryWideQuery(q);
 
+  // DISTRICT-WITHOUT-CITY resolution — owner PERMANENT rule 2026-07-16. A district name alone must
+  // NEVER silently fan out across every city that happens to share it (confirmed live: «العليا» alone
+  // spans 13 distinct real cities; a chat message like "أبحث عن شقة في حي العليا" with no city named
+  // reaches here with `cities` still null and `q.districts` set, since the honest-zero check below
+  // explicitly skips whenever districts are present). Resolve which real city/cities those districts
+  // actually belong to via resolve_district_cities (grounded in the live listings themselves — NOT the
+  // noisy, frequency-based scraper-geocoding city_name_bridge table, which produced a nonsensical
+  // 60+-city fan-out when tried during this fix's design). A "real" candidate needs a meaningful share
+  // of the top match (>= max(5, 5% of the top) — filters stray/mistagged rows) so an overwhelmingly
+  // dominant district (e.g. «النرجس»: 3,590 Riyadh vs single digits elsewhere) auto-scopes cleanly
+  // instead of falsely asking for clarification. Never guess: exactly one real candidate → safe to
+  // auto-scope; zero rows at all → falls through to the existing honest-zero path below (the main RPC
+  // call will independently find nothing, since it reads the same table); anything else (0 candidates
+  // clearing the bar despite 2+ cities having SOME presence, or 2+ clearing it) is genuinely ambiguous
+  // — return [] so the deterministic clarification backstop fires, mirroring the exact same [] pattern
+  // already used above for a twin-city/twin-district locationMatch ambiguity.
+  // STRICT `cities === null` (adversarial review catch, 2026-07-16): `cities` is ALSO deliberately set to
+  // `[]` a few lines above when the locationMatch resolver already flagged a bare district as ambiguous
+  // across 2+ cities (its own independent threshold, tuned in locations.ts) — that is an intentional
+  // "already decided ambiguous, don't guess" signal, not an unresolved state. Using `(!cities ||
+  // !cities.length)` here would re-litigate that already-correct verdict through THIS block's own,
+  // differently-tuned threshold, which could disagree and silently auto-scope to a single city despite
+  // the resolver having genuinely found 2+. Checking `=== null` targets ONLY the true "never touched by
+  // any branch above" case, leaving an existing `[]` ambiguity verdict alone (it already falls through to
+  // the same clarification path via the honest-zero/ambiguous checks below).
+  if (cities === null && q.districts && q.districts.length && supabase) {
+    const { data: districtCities } = await supabase.rpc('resolve_district_cities', { p_districts: q.districts });
+    const dcRows = (districtCities as { city_ar: string; match_count: number }[] | null) ?? [];
+    if (dcRows.length === 1) {
+      cities = [dcRows[0].city_ar];
+    } else if (dcRows.length > 1) {
+      const topCount = Number(dcRows[0].match_count);
+      const threshold = Math.max(5, topCount * 0.05);
+      const realCandidates = dcRows.filter((r) => Number(r.match_count) >= threshold);
+      if (realCandidates.length === 1) {
+        cities = [realCandidates[0].city_ar];
+      } else {
+        return [];
+      }
+    }
+    // dcRows.length === 0 → no real matches anywhere for this district name; fall through, the main
+    // RPC call below will correctly return an honest zero on its own.
+  }
+
   // A place was NAMED but resolves to NO city, and it's not a district or a country-wide search →
   // honest ZERO (never substitute a nearby place). (user: real-but-empty location returns 0.)
   if ((!cities || !cities.length) && !countryWide && !(q.districts && q.districts.length) && (q.location || '').trim()) {
@@ -673,11 +723,13 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
   // incl عمارة (Commercial Building there). This makes total_count EXACT and lets Load-More page the WHOLE set,
   // replacing the page-0-only, per-platform-capped res sweep that left ~77% of the inventory unreachable.
   // `tables` here = the commercial tables (kindsFor→['com'] for a broad Commercial search).
+  // HARDENING (owner PERMANENT rule 2026-07-16): same fallback bug as tablesFor() above, fixed the same
+  // way — always return the filtered set, even empty, rather than silently falling back to `tbls`
+  // unfiltered when the platform has no table in this particular scope.
   const platformScope = (tbls: string[]): string[] => {
     if (!(q.sources && q.sources.length)) return tbls;
     const wanted = new Set(q.sources);
-    const only = tbls.filter((t) => wanted.has(t.replace(/_(residential|commercial)_listings$/, '')));
-    return only.length ? only : tbls;
+    return tbls.filter((t) => wanted.has(t.replace(/_(residential|commercial)_listings$/, '')));
   };
   const mainTables = isBroadCommercial ? platformScope(resTables(q)) : tables;
 
@@ -695,9 +747,12 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
   //     double-count). For kinds:BOTH residential types (Residential Land/Farm/Rest House) scope A already
   //     includes the commercial tables ⇒ this set is empty ⇒ scope B is skipped (no double coverage). Same
   //     platform scope as scope A.
-  //   • Scope A's p_types is left untouched (null for broad Residential, per rpcFilterParams): constraining
-  //     it to residential labels would DROP currently-visible rows whose type_ar isn't a catalogued label
-  //     (e.g. an aqargate row with type_ar 'Compound', macro-Residential via its source-table kind).
+  //   • Scope A's p_types is left untouched (null for broad Residential, per rpcFilterParams) so a genuinely
+  //     residential row with an uncatalogued type_ar isn't dropped by a p_types allowlist. Category PURITY
+  //     (excluding Commercial-macro types like أرض تجارية/أرض صناعية/فندق that are also physically stored in
+  //     residential tables) is instead enforced independently via p_category below, at the RPC layer — see
+  //     that comment for the accepted tradeoff (an uncatalogued type_ar, e.g. 'Compound', ~1 row live, is
+  //     excluded by p_category same as it would be by any allowlist; this is intentional now, not an oversight).
   const isBroadResidential = q.category === 'Residential' && !q.type && !(q.types && q.types.length) && !q.typeGroup;
   const resSel = effectiveTypes(q);
   const resSelectedTypeAr = resSel.length ? typeArForTypes(resSel) : (q.typeGroup ? typeArForSelection(q.typeGroup) : null);
@@ -729,6 +784,17 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     // scope is constrained to commercial type_ar; scope B carries the commercial-tables constraint. (2026-07-09)
     ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
     ...scopeB,
+    // CATEGORY PURITY — owner PERMANENT rule 2026-07-16. Independent, RPC-layer enforcement (against the
+    // canonical known_type_ar.macro taxonomy — the same source the deploy-time taxonomy gate keeps
+    // byte-synced with src/data/propertyTypes.ts) that a Residential search can NEVER surface a
+    // Commercial-macro row (Commercial Land/Industrial Land/Hotel/etc — confirmed live: ~14,301 such rows
+    // physically sit in residential tables) and vice versa, regardless of which p_types the caller passed
+    // or forgot to pass. This is deliberately UNCONDITIONAL (every search, not just "broad" ones) so no
+    // future code path can reintroduce this bug by skipping a p_types allowlist — the RPC itself is the
+    // backstop. «عمارة» (macro='both') passes either category; its REAL residential-vs-commercial split is
+    // still decided by table kind (p_tables vs p_tables2) exactly as before — this only ever narrows further,
+    // never re-opens that disambiguation. Root cause + full audit: [[project_filter-strictness-hardening-2026-07-16]].
+    p_category: q.category ?? null,
     // Region scope (bug-fix #2): pass region_id so same-name twin cities don't fuse cross-region.
     // A pinned region (twin disambiguated by the agent backstop) wins; else the resolver's region.
     p_region_ids: q.regionPin
