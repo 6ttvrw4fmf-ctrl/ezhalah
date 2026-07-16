@@ -11,6 +11,17 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# ── DEPLOY LOCK (added 2026-07-16, see docs/DEPLOY_SAFETY.md "Deployment lock" — after a
+# 2026-07-15 P0 where two concurrent Claude sessions each independently deployed/rolled back
+# production within the same remediation window). Acquired FIRST, before any of the expensive
+# checks below, so a session that loses the race bails immediately instead of burning minutes on
+# preflight/taxonomy checks it can't use. Released on ANY exit path via the trap (success,
+# refusal, or error) so a failed deploy never leaves production locked for the TTL.
+HOLDER="safe-deploy:$(whoami)@$(hostname)-$$"
+scripts/deploy-lock.sh acquire "$HOLDER" "safe-deploy.sh" || exit 1
+trap 'scripts/deploy-lock.sh release "'"$HOLDER"'" >/dev/null 2>&1 || true' EXIT
+echo ""
+
 # ── PREFLIGHT (owner P0 2026-07-10): the gate that makes losing approved UI IMPOSSIBLE. It proves
 # HEAD CONTAINS the approved production baseline (nothing removed) + clean/on-main/HEAD==origin +
 # no concurrent edits. Refuse the deploy if it fails. (The individual checks below are kept as
