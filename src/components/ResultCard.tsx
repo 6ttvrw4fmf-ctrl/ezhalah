@@ -6,7 +6,7 @@ import { colors, radius, cardShadow } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
 import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
-import { arabicOrPlaceholder } from '@/lib/arabicText';
+import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText } from '@/lib/arabicText';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -252,7 +252,13 @@ const AR_ENUM: Record<string, Record<string, string>> = {
     'south east': 'جنوبية شرقية', 'south west': 'جنوبية غربية',
   },
 };
-function arAttrValue(label: string, value: string): string {
+// FREE-TEXT labels known to be natural-language prose (an address, not a code) — these are the
+// only labels checked for an English-leak, via arabicOrPlaceholderForFreeText below. Deliberately
+// narrow: license/plan/parcel/postal "codes" (rega_ad_license_number, broker_fal_license,
+// parcel_number, plan_number, postal_code — see ADDL_FIELDS) legitimately contain Latin LETTERS as
+// part of a real ID (e.g. "FAL1234567") and must never be blanked just for containing one.
+const FREE_TEXT_PROSE_LABELS = new Set(['address']);
+function arAttrValue(label: string, value: string, locale: string): string {
   const v = (value ?? '').trim();
   if (!v) return value;
   const ll = (label ?? '').trim().toLowerCase();
@@ -272,7 +278,12 @@ function arAttrValue(label: string, value: string): string {
     return v;
   }
   const map = AR_ENUM[ll];
-  return map && map[lv] ? map[lv] : v;                                     // else: free-text, leave raw
+  if (map && map[lv]) return map[lv];
+  // Free-text (never translated — real source content). English-leak check (owner report,
+  // 2026-07-16: abeea.com.sa's street_address is captured in English) is scoped to genuine prose
+  // labels only, so a license/plan/parcel number containing a Latin letter is never blanked.
+  if (FREE_TEXT_PROSE_LABELS.has(ll)) return arabicOrPlaceholderForFreeText(v, locale, ATTRIBUTE_UNRESOLVED_AR);
+  return v;
 }
 
 // Render Wasalt's "Additional Information" rows on the card. Shows first 4 rows, with a
@@ -293,7 +304,7 @@ function AdditionalInformationPanel({ listing, t, locale }: { listing: Listing; 
         {visible.map((r) => (
           <View key={r.key} style={card.addlCell}>
             <Text style={card.addlLabel}>{arabicOrPlaceholder(t(r.label), locale, ATTRIBUTE_UNRESOLVED_AR)}</Text>
-            <Text style={card.addlValue} numberOfLines={2}>{arAttrValue(r.label, r.value)}</Text>
+            <Text style={card.addlValue} numberOfLines={2}>{arAttrValue(r.label, r.value, locale)}</Text>
           </View>
         ))}
       </View>
