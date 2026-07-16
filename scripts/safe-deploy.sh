@@ -161,6 +161,70 @@ else
   exit 1
 fi
 
+# ── SCHEMA-DRIFT + DUPLICATE-OVERLOAD GATE (added 2026-07-16, batch 4 — after that morning's
+# 16-minute search outage: a migration applied directly to prod via MCP, never committed to git,
+# left location_search_candidates_ar with TWO overloads, and PostgREST refused EVERY search call
+# with PGRST203 "ambiguous overload"). This calls public.ops_deploy_preflight_checks
+# (supabase/migrations/20260716_batch4_deploy_preflight_rpc.sql) with every migration identifier
+# committed to this repo (each file's leading digits AND its name — MCP-applied migrations get a
+# server-minted timestamp version that never matches a date-only filename prefix), and REFUSES to
+# advance the baseline if (a) any migration applied to prod after the 2026-07-16 recovery baseline
+# is missing from git, or (b) any public function name has more than one overload — the exact
+# PGRST203 failure shape. Same public anon key as the smoke test above. BLOCKING, with ONE
+# exception: HTTP 404 (PGRST202 — function not in the schema cache) means the RPC itself has not
+# shipped to prod yet, which is expected ONLY for the deploy that ships it, so it warns and
+# continues instead of failing; every other non-200 fails CLOSED.
+echo ""
+echo "Running the schema-drift + duplicate-overload gate (ops_deploy_preflight_checks against production)..."
+DRIFT_URL="https://aannarbkwcymrotzwdbo.supabase.co/rest/v1/rpc/ops_deploy_preflight_checks"
+DRIFT_BODY="$(node -e '
+  const fs = require("fs");
+  const files = fs.readdirSync("supabase/migrations").filter((f) => f.endsWith(".sql"));
+  const ids = new Set();
+  for (const f of files) {
+    const base = f.replace(/\.sql$/, "");
+    const m = base.match(/^([0-9]+)_(.+)$/);
+    if (m) { ids.add(m[1]); ids.add(m[2]); } else { ids.add(base); }
+  }
+  process.stdout.write(JSON.stringify({ p_repo_versions: [...ids].sort() }));
+')"
+DRIFT_HTTP="$(curl -s -o /tmp/safe-deploy-drift-response.json -w '%{http_code}' --max-time 20 \
+  -X POST "$DRIFT_URL" \
+  -H "apikey: $SMOKE_ANON_KEY" \
+  -H "Authorization: Bearer $SMOKE_ANON_KEY" \
+  -H "Content-Type: application/json" \
+  -d "$DRIFT_BODY" || echo "curl_failed")"
+if [ "$DRIFT_HTTP" = "404" ]; then
+  echo "WARNING: ops_deploy_preflight_checks not found in production (HTTP 404) — the gate RPC has"
+  echo "not shipped yet. Expected ONLY for the deploy that ships it (batch 4). Apply"
+  echo "supabase/migrations/20260716_batch4_deploy_preflight_rpc.sql so every future deploy is gated."
+elif [ "$DRIFT_HTTP" = "200" ]; then
+  DRIFT_MISSING="$(node -pe 'JSON.parse(require("fs").readFileSync("/tmp/safe-deploy-drift-response.json","utf8")).missing_in_git.length' 2>/dev/null || echo "parse_error")"
+  DRIFT_DUPS="$(node -pe 'JSON.parse(require("fs").readFileSync("/tmp/safe-deploy-drift-response.json","utf8")).duplicate_overloads.length' 2>/dev/null || echo "parse_error")"
+  if [ "$DRIFT_MISSING" = "0" ] && [ "$DRIFT_DUPS" = "0" ]; then
+    echo "OK: no uncommitted prod migrations past the baseline, no duplicate public function overloads."
+    rm -f /tmp/safe-deploy-drift-response.json
+  else
+    echo ""
+    echo "❌ REFUSING TO ADVANCE THE BASELINE: production schema drift detected."
+    echo "   missing_in_git: $DRIFT_MISSING migration(s) applied to prod but absent from this repo"
+    echo "   duplicate_overloads: $DRIFT_DUPS public function name(s) with more than one overload"
+    echo "   Full response saved: /tmp/safe-deploy-drift-response.json — details:"
+    node -e 'console.log(JSON.stringify(JSON.parse(require("fs").readFileSync("/tmp/safe-deploy-drift-response.json","utf8")), null, 2))' 2>/dev/null || cat /tmp/safe-deploy-drift-response.json
+    echo "   Duplicate overloads are the EXACT 2026-07-16 outage signature (PGRST203: PostgREST refuses"
+    echo "   every call to an ambiguous RPC — search dies app-wide), and uncommitted migrations are how"
+    echo "   that overload got there. Recover the missing SQL verbatim into supabase/migrations/ (from"
+    echo "   supabase_migrations.schema_migrations) and/or drop the stale overload, then re-run."
+    exit 1
+  fi
+else
+  echo ""
+  echo "❌ REFUSING TO ADVANCE THE BASELINE: drift gate could not run (HTTP ${DRIFT_HTTP:-none})."
+  echo "   Response (if any): /tmp/safe-deploy-drift-response.json. This check fails CLOSED — a gate"
+  echo "   that cannot run must not bless a deploy. Fix connectivity / the RPC, then re-run."
+  exit 1
+fi
+
 # ── ADVANCE THE APPROVED BASELINE to the just-deployed commit, so every FUTURE preflight refuses to
 # deploy anything that doesn't contain THIS UI. This is what keeps the safety floor current. Metadata
 # only (one line + a log entry); best-effort push — a failure here never undoes the successful deploy.
