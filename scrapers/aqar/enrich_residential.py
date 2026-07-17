@@ -56,12 +56,28 @@ def _flag(html: str, patterns: list[str]) -> bool:
     return any(re.search(p, html) for p in patterns)
 
 
+# Grouped-integer token (comma fix 2026-07-17): the old capture `(\d+)` stopped at the FIRST
+# thousands separator, so "المساحة 717,928" parsed as area_m2=717 (live ad 6693642; 6708090 gave
+# 739 for 739,100) — and the trg_aqar_parse trigger then derived Buy price_per_meter from the
+# truncated area (717928/717 → 1001 §/m² where the page says 1 §/m²). Live pages group with the
+# ASCII comma AND the Arabic thousands separator ٬ U+066C ("المساحة: ١٨٬٨٣٧٫١٩ م²", ad 6658941,
+# stored as 18) — Python's \d already matches Arabic-Indic digits and int() parses them, so ONLY
+# the separator was breaking those too. First alternative: strictly-grouped thousands
+# (1-3 digits, then [,٬]-separated 3-digit groups, not followed by another digit); fallback: the
+# old plain `\d+`. Strict 3-digit grouping means every shape the old parse handled correctly
+# still parses identically ("3,4" stays 3; malformed "717,9282" stays 717) — the ONLY behaviour
+# change is consuming real thousands-grouped numbers in full. Decimals (".", ٫ U+066B) still
+# terminate the match, truncating toward zero exactly as before (int column).
+_GROUPED_INT = r"(\d{1,3}(?:[,٬]\d{3})+(?!\d)|\d+)"
+_SEP_RE = re.compile(r"[,٬]")
+
+
 def _int_after_label(html: str, *labels: str) -> Optional[int]:
     """Find the first number that appears right after ANY of the given Arabic labels."""
     for lbl in labels:
-        m = re.search(rf"{lbl}[\s:]*?(\d+)", html)
+        m = re.search(rf"{lbl}[\s:]*?{_GROUPED_INT}", html)
         if m:
-            return int(m.group(1))
+            return int(_SEP_RE.sub("", m.group(1)))
     return None
 
 
