@@ -4,14 +4,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
-import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
+import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
 import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
 import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
-import { matchLocations, placeLabel, placeTitle, placeSub, placeIcon, placeKey, resolveLocation, ensureLocationIndex, type Place } from '@/data/locations';
+import { resolveLocation, ensureLocationIndex, type LocationResolution } from '@/data/locations';
+import { topCitiesAr, searchCitiesAr, type CityHit } from '@/data/cities';
 import { grouped, type SearchQuery } from '@/data/search';
 import { HOME_DEFAULT_QUERY, hasActiveFilters } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
@@ -140,8 +141,13 @@ export default function Home() {
   );
   const { query, setQuery, gated, user } = useApp();
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
-  const [suggestions, setSuggestions] = useState<Place[]>([]);
+  const [cityHits, setCityHits] = useState<CityHit[]>([]);
   const [cityFocus, setCityFocus] = useState(false);
+  // Debounce guard for the cities-only autocomplete (owner spec 2026-07-17): only the LATEST
+  // in-flight request may apply its result, so a slow early keystroke can never clobber a faster
+  // later one.
+  const cityReqRef = useRef(0);
+  const cityDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [locMsg, setLocMsg] = useState(''); // Arabic-only: shown when the user types the city in English
   const cityRef = useRef<TextInput>(null);
   // Refs so the ENTIRE Price/Area/Size box is one tap target (owner 2026-07-10): tapping anywhere in
@@ -256,7 +262,18 @@ export default function Home() {
     // nor know the exact district/spelling) to the closest DB match, and carry that resolution into
     // the chat so the Search Summary shows exactly what Ezhalah understood. The header/bubble use a
     // clean display location; never fail on an unknown location — fall back to the raw text. (user request.)
-    const lm = resolveLocation(query.location, loc ?? locale);
+    // CITY-ONLY FIELD (owner spec 2026-07-17): when the user TAPPED an exact result from the new
+    // City-only dropdown, `regionPin` already carries that city's real region_ar — use it directly
+    // instead of re-running the free-text resolver, which has no way to know WHICH of 2+ identically
+    // named cities (confirmed live: الباحة, الهفوف, القويعية, ...) was actually selected and could
+    // silently pick the wrong twin. Typed-but-unselected text still falls through to resolveLocation
+    // exactly as before — this is additive, not a replacement of the existing free-text behavior.
+    const lm: LocationResolution = (query.regionPin && query.location.trim())
+      ? {
+          raw: query.location, kind: 'city', city: query.location, region: query.regionPin,
+          label: query.location, districts: [], cities: [], exact: true,
+        }
+      : resolveLocation(query.location, loc ?? locale);
     const displayLoc =
       lm.kind === 'none'
         ? query.location
@@ -339,10 +356,6 @@ export default function Home() {
   // RENT lets the user pick the period (Monthly / Yearly) via a tiny toggle; the engine handles each.
   const rentPeriod: 'monthly' | 'annual' = query.rentPeriod ?? 'annual';
   const cityUp = cityFocus || query.location.length > 0;
-  // Show the city suggestions in whichever script the user is typing (English input → English
-  // names, Arabic input → Arabic names), independent of the app's UI language. Falls back to the
-  // app locale before any letters are typed.
-  const sugLocale = detectLocale(query.location) ?? locale;
 
   // Backdrop holds at its idle level (a touch stronger on web, per request) the whole time the user
   // fills in the form — typing or focusing a field no longer touches it. It only LIGHTENS when Search
@@ -462,7 +475,7 @@ export default function Home() {
                   hitSlop={8}
                   onPress={() => {
                     setQuery(() => HOME_DEFAULT_QUERY());
-                    setSuggestions([]);
+                    setCityHits([]);
                     setLocMsg('');
                     setCityFocus(false);
                     // The collapsing Property-type/Refine sections can leave the user stranded mid-page —
@@ -477,33 +490,48 @@ export default function Home() {
             )}
             <Segmented options={DEALS} value={query.deal} icons={DEAL_IMG} onChange={(v) => { setQuery((q) => ({ ...q, deal: v as any, priceBand: null, priceMin: null, priceMax: null, priceInput: '' })); scrollDown(catAnchorRef); }} />
 
-            {/* Location (floating label). The whole box is a tap target — tapping anywhere inside
-                (icon, label, padding) focuses the input so the user can type a city OR a neighborhood
-                from anywhere in the box, not just on the thin text line. */}
+            {/* City field — CITIES ONLY (owner spec 2026-07-17; District is a separate step, unchanged
+                for now). The whole box is a tap target. Focusing with no text shows the Top 6 cities
+                by live listing count; typing switches to real-time cities-only autocomplete. A tap is
+                required to commit a city — free text alone never sets `regionPin`, so a duplicate-
+                named city (e.g. الهفوف) can only be searched via the exact, disambiguated row the
+                user tapped, never guessed. */}
             <Pressable style={[s.field, { marginTop: 12 }]} onPress={() => cityRef.current?.focus()}>
               <Ionicons name="location-outline" size={18} color={colors.muted} />
               <View style={s.flWrap}>
-                <Text style={[s.flLabel, cityUp && s.flLabelUp]}>{t('Which city or neighborhood?')}</Text>
+                <Text style={[s.flLabel, cityUp && s.flLabelUp]}>{t('Which city?')}</Text>
                 <TextInput
                   ref={cityRef}
                   style={[s.flInput, cityUp && s.flInputUp]}
                   value={query.location}
                   autoCorrect={false}
-                  onFocus={() => setCityFocus(true)}
+                  onFocus={() => {
+                    setCityFocus(true);
+                    if (!query.location.trim()) void topCitiesAr().then(setCityHits);
+                  }}
                   onBlur={() => setTimeout(() => setCityFocus(false), 150)}
                   onChangeText={(v) => {
-                    setQuery((q) => ({ ...q, location: v }));
+                    // Typing invalidates any earlier exact pick — a fresh selection is required before
+                    // this city can be used to disambiguate a duplicate name again.
+                    setQuery((q) => ({ ...q, location: v, regionPin: undefined }));
                     // Arabic-only product: English typing gets NO autocomplete and an Arabic hint; the
                     // app never flips to English. The internal English↔Arabic mapping still runs on
                     // Search (for Arabic input that resolves against English DB labels). (user rule)
                     const latin = isLatinOnlyInput(v);
-                    setSuggestions(latin ? [] : matchLocations(v));
                     setLocMsg(latin ? ARABIC_ONLY_MSG : '');
+                    if (latin) { setCityHits([]); return; }
+                    const myReq = ++cityReqRef.current;
+                    if (cityDebounceRef.current) clearTimeout(cityDebounceRef.current);
+                    cityDebounceRef.current = setTimeout(() => {
+                      void searchCitiesAr(v).then((hits) => {
+                        if (cityReqRef.current === myReq) setCityHits(hits);
+                      });
+                    }, 150);
                   }}
                 />
               </View>
               {query.location.length > 0 && (
-                <Pressable onPress={() => { setQuery((q) => ({ ...q, location: '' })); setSuggestions([]); cityRef.current?.focus(); }} hitSlop={8}>
+                <Pressable onPress={() => { setQuery((q) => ({ ...q, location: '', regionPin: undefined })); setCityHits([]); cityRef.current?.focus(); }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
                 </Pressable>
               )}
@@ -513,35 +541,33 @@ export default function Home() {
               <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{locMsg}</Text>
             ) : null}
 
-            {cityFocus && suggestions.length > 0 && (
+            {cityFocus && cityHits.length > 0 && (
               <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                {suggestions.map((sg, i) => (
+                {cityHits.map((hit, i) => (
                   <Tappable
-                    key={placeKey(sg)}
+                    key={hit.cityId}
                     dip={0.03}
-                    style={[s.suggRow, i < suggestions.length - 1 && s.suggDivider]}
+                    style={[s.suggRow, i < cityHits.length - 1 && s.suggDivider]}
                     onPress={() => {
-                      const label = placeLabel(sg, sugLocale);
-                      setQuery((q) => ({ ...q, location: label }));
-                      setSuggestions([]);
+                      // The confirmed pick: exact city_ar + its real region_ar travel together in
+                      // `location`/`regionPin`, so onSearch can scope to THIS specific city even when
+                      // its name is shared by another city in a different region.
+                      setQuery((q) => ({ ...q, location: hit.cityAr, regionPin: hit.regionAr }));
+                      setCityHits([]);
                       setCityFocus(false);
-                      // Choosing a city/neighborhood is a deliberate commit, so it switches the whole
-                      // app's language to match the chosen name's script — even when signed in (an
-                      // English pick → English UI, an Arabic pick → Arabic). (user request.)
-                      const loc = detectLocale(label);
+                      // Choosing a city is a deliberate commit, so it switches the whole app's language
+                      // to match the chosen name's script (Arabic here, always). (user request.)
+                      const loc = detectLocale(hit.cityAr);
                       if (loc && loc !== locale) setLocale(loc);
                       scrollDown(catAnchorRef); // carry them down to the next step (category)
                     }}
                   >
-                    {LOC_IMG[sg.kind] ? <Image source={LOC_IMG[sg.kind]} style={s.suggLocIcon} /> : <Ionicons name={placeIcon(sg)} size={16} color={colors.primary} />}
+                    <Ionicons name="business-outline" size={16} color={colors.primary} />
                     <View style={{ flex: 1 }}>
-                      <Text style={s.suggCity}>{placeTitle(sg, sugLocale)}</Text>
-                      {/* Arabic-only picker: subtitle = the place's Arabic city · region so the user knows
-                          WHICH city's district this is (e.g. «حي العليا» → «الخبر · المنطقة الشرقية»). No
-                          English / opposite-script name. One pick still searches all raw spellings underneath. */}
-                      <Text style={s.suggDist}>
-                        {placeSub(sg, sugLocale)}
-                      </Text>
+                      <Text style={s.suggCity}>{hit.cityAr}</Text>
+                      {/* Region subtitle always shown — cheap, consistent, and the only signal that
+                          tells apart two cities that share the exact same Arabic name. */}
+                      <Text style={s.suggDist}>{hit.regionAr}</Text>
                     </View>
                   </Tappable>
                 ))}
