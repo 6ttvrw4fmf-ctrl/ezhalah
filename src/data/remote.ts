@@ -4,7 +4,7 @@ import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
-import { normalizeType, queryForSelection, queryForTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind } from './propertyTypes';
+import { normalizeType, queryForSelection, queryForTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
 import { effectiveTypes, bedroomTokens } from './search';
 import { scoreListingProximity } from './proximity';
 import { cityDisplay } from './locations';
@@ -432,8 +432,9 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
     // CATEGORY PURITY — owner PERMANENT rule 2026-07-16, merged from PR#86. Independent RPC-layer
     // enforcement (against the canonical known_type_ar.macro taxonomy) that a Residential search can
     // never surface a Commercial-macro row and vice versa, regardless of p_types. Shared here so the
-    // age-bucket option-count RPC stays in exact parity with what Search actually returns.
-    p_category: q.category ?? null,
+    // age-bucket option-count RPC stays in exact parity with what Search actually returns. Uses
+    // impliedCategory() (not raw q.category) — see its comment: closes the null-category leak.
+    p_category: impliedCategory(q),
     ...scopeB,
     isBroadCommercial,
   };
@@ -631,6 +632,22 @@ function kindsFor(q: SearchQuery): SourceKind[] {
   const cq = effectiveCleanQuery(q);
   if (cq) return cq.kinds;
   return q.category === 'Commercial' ? ['com'] : ['res'];
+}
+
+// The macro this query is EFFECTIVELY scoped to for the RPC's category-purity gate. Mirrors kindsFor's
+// own "Default Residential" fallback: when NOTHING is selected (no type, no group, no category — the
+// state reached by tapping an already-selected category pill to deselect it), kindsFor() already reads
+// ONLY residential-kind tables, but p_category used to go through as null, making the RPC's purity
+// predicate `(p_category IS NULL OR ...)` an unconditional no-op for that call. Any Commercial-macro row
+// misfiled into a residential-kind table (e.g. Aqar's أرض تجارية, ~14.4k rows — [[residential-commercial-
+// isolation-audit-2026-07-17]]) then sailed straight through, live-quantified at 1,202 rows on a single
+// realistic query. Explicitly resolving the implied macro here — instead of leaving it null — makes the
+// already-documented "Default Residential" behavior actually enforced end-to-end, not just at the table
+// level. A specific type/group selection (cq != null) is left untouched: it's already exactly scoped by
+// dbTypesFor's raw type_ar constraint, so this only tightens the one path proven to leak.
+function impliedCategory(q: SearchQuery): Macro | null {
+  if (q.category) return q.category;
+  return effectiveCleanQuery(q) ? null : 'Residential';
 }
 
 function tableFor(q: SearchQuery): string {

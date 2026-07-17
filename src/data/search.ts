@@ -743,7 +743,12 @@ function matchesType(l: Listing, q: SearchQuery): boolean {
   if (sel.length) return sel.some((s) => s === c || (SUBGROUPS[s]?.includes(c) ?? false)); // OR across selected clean types; a subgroup box (مرافق خدمية) matches any of its member types
   if (q.typeGroup) return groupMembers(q.typeGroup).includes(c);
   if (q.category) return (l.macro ?? CLEAN_MACRO[c] ?? 'Residential') === q.category;
-  return true;
+  // NOTHING selected (no type, no group, no category — reached by deselecting the category pill).
+  // remote.ts's kindsFor() only fetches residential-kind tables in this exact state ("Default
+  // Residential"), but a Commercial-macro row misfiled INTO a residential-kind table (e.g. Aqar's
+  // أرض تجارية) would previously slip past this unconditional `return true` safety net untouched.
+  // Enforce the same Residential default client-side too. (residential-commercial-isolation-audit-2026-07-17)
+  return (l.macro ?? CLEAN_MACRO[c] ?? 'Residential') === 'Residential';
 }
 
 // Every fetched row, deduped by id. The server fetch already scoped rows to the selected clean type's
