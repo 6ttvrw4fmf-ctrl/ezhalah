@@ -1,4 +1,4 @@
-8bdd26a5fa31b71adf425b9f811ff798ceb810ca
+7576669d2f78d66976698e474cd2d65493bd3c2c
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
@@ -42,3 +42,22 @@
 # 2026-07-16  8bdd26a  deployed via safe-deploy.sh-equivalent (PR #112 Arabic-only residential
 #   sweep: card-title guard, 4 new satel enum translations, dealapp facade free-text guard,
 #   2 search.ts + 1 agent.tsx interpolation fixes; deploy-lock via MCP)
+# 2026-07-17  7576669  deployed via safe-deploy.sh + manual vercel rollback promotion (dpl_DMhwSD3P6wGs9174iWKnr7J5kiBi).
+#   PR #130 null-category-leak fix (residential-commercial-isolation-audit-2026-07-17): deselecting
+#   the category pill sent p_category=null, disabling the RPC purity gate + client matchesType()
+#   safety net simultaneously, letting ~14.4k misfiled Commercial-macro rows leak into a "nothing
+#   selected" search (1,202 rows on a live Riyadh+Buy test). Fixed via impliedCategory() defaulting
+#   to Residential when nothing is selected, matching kindsFor()'s own pre-existing default. Bundles
+#   4 unrelated PRs already merged but never previously deployed: #125 (aqar comma-digit parsing),
+#   #126 (rent-period payment_monthly re-apply), #127 (aqar liveness/price_per_meter), #129
+#   (furnishing i18n dual-label fix). safe-deploy.sh's schema-drift gate blocked the AUTOMATED
+#   baseline advance (5 migrations applied to prod by other concurrent sessions, not yet in this
+#   repo checkout — 0 duplicate overloads, so NOT the PGRST203 outage class, just a bookkeeping gap;
+#   flagged separately, not fixed here) — this line records the advance manually after independent
+#   verification: (a) live anon-key RPC delta reproduced (37,686→36,483 Riyadh+Buy, matches audit),
+#   (b) 3-lens adversarial code review (correctness/product-contract/completeness) all SAFE, (c) a
+#   suspected "click-dead" page-wide hydration issue found via the Claude_Browser pane turned out to
+#   be a TESTING-TOOL ARTIFACT, not a real bug — confirmed via a real Chrome session (claude-in-chrome
+#   MCP): category pill, dropdown, and full search-to-results flow all work correctly end-to-end,
+#   confirmed for both this deploy and prior ones. (A same-session emergency rollback to 05ff2528
+#   was performed then reverted once this was established — see project memory for the full story.)
