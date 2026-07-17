@@ -28,6 +28,22 @@ def test_the_three_shapes_the_old_int_only_regex_could_never_match():
     assert parse_property_age("أكثر من 10 سنوات") == 10
 
 
+def test_wasalt_english_vocabulary():
+    # Wasalt's detail-page completionYear is English. The search-LIST API's numeric completionYear was a
+    # corrupt 1-based enum (New->1, 10+->12) that poisoned the canonical column for ~21k rows; the fix
+    # reads THIS authoritative string via the same shared parser. "New"/"<1 year" have no digit, so the
+    # numeric branch can't catch them; "10+ years" must floor to 10, not be read as a lucky bare 10.
+    assert parse_property_age("New") == 0
+    assert parse_property_age("new") == 0            # case-insensitive
+    assert parse_property_age("<1 year") == 0
+    assert parse_property_age("less than 1 year") == 0
+    assert parse_property_age("1 year") == 1
+    assert parse_property_age("10 years") == 10
+    assert parse_property_age("10+ years") == 10     # FLOOR — the value the retired view mapped to 12
+    assert parse_property_age("10+ years") != 12
+    assert parse_property_age("more than 10 years") == 10
+
+
 def test_numeric_shapes_still_parse_unchanged():
     assert parse_property_age("5") == 5
     assert parse_property_age("5 سنوات") == 5

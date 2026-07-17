@@ -520,13 +520,28 @@ _AGE_VOCAB_AR = {
 # stores 2026), a floor/room count, or a scraper default. Out-of-range -> None, never a "corrected" guess.
 _AGE_MIN, _AGE_MAX = 0, 100
 
+# The ENGLISH closed vocabulary Wasalt publishes on its detail page (`completionYear`). Kept separate
+# from the Arabic set purely for readability; both are checked. Lower-cased keys. The «N year(s)» forms
+# would also fall through to the numeric branch, but they are listed explicitly so this dict documents
+# Wasalt's exact closed set and so the open-ended floor rule is guaranteed rather than incidental:
+#   * "New" / "<1 year" -> 0  (new construction; the numeric branch can't read these — no leading digit)
+#   * "10+ years" -> 10        (bucket FLOOR, never a fabricated midpoint — same rule as the Arabic
+#     «أكثر من 10 سنوات». This retires the legacy view mapping that invented 12.)
+_AGE_VOCAB_EN = {
+    "new": 0, "<1 year": 0, "less than 1 year": 0, "under 1 year": 0,
+    "1 year": 1, "2 years": 2, "3 years": 3, "4 years": 4, "5 years": 5,
+    "6 years": 6, "7 years": 7, "8 years": 8, "9 years": 9, "10 years": 10,
+    "10+ years": 10, "more than 10 years": 10,
+}
+
 
 def parse_property_age(raw) -> Optional[int]:
     """Turn one raw «عمر العقار» value into an exact age in years, or None if it cannot be known.
 
-    Accepts BOTH shapes the portals publish, because a single site mixes them:
-      * a closed Arabic term  — «جديد» / «سنتين» / «أكثر من 10 سنوات»
-      * a leading number      — "5", "5 سنوات", "١٠ سنوات" (Arabic-Indic digits included)
+    Accepts every shape the portals publish, because a single site mixes them:
+      * a closed Arabic term   — «جديد» / «سنتين» / «أكثر من 10 سنوات»
+      * a closed English term  — "New" / "<1 year" / "10+ years"  (Wasalt's completionYear)
+      * a leading number       — "5", "5 سنوات", "١٠ سنوات" (Arabic-Indic digits included)
 
     Returns None — never a guess — for anything else, including free text, HTML, build years and
     out-of-range values. Callers MUST treat None as "unknown" and store NULL.
@@ -538,7 +553,13 @@ def parse_property_age(raw) -> Optional[int]:
     if not s:
         return None
 
-    # Exact vocabulary hit first: it is unambiguous and outranks any digit inside the phrase — without
+    # English closed vocabulary (case-insensitive) — checked first because "New"/"<1 year" have no
+    # digit and "10+ years" must floor to 10 rather than be read as a bare "10" by luck.
+    en = _AGE_VOCAB_EN.get(s.lower())
+    if en is not None:
+        return en
+
+    # Exact vocabulary hit next: it is unambiguous and outranks any digit inside the phrase — without
     # this, "أكثر من 10 سنوات" would fall through to the numeric branch and read as a precise 10 for the
     # wrong reason (and "اقل من سنة" has no digit at all).
     hit = _AGE_VOCAB_AR.get(s) if s in _AGE_VOCAB_AR else _AGE_VOCAB_AR.get(_norm_ar(s))
