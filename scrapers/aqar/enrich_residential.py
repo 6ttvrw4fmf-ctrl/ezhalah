@@ -81,6 +81,34 @@ def _int_after_label(html: str, *labels: str) -> Optional[int]:
     return None
 
 
+# The «تفاصيل الإعلان» heading opens Aqar's STRUCTURED attribute table. Everything before it is nav,
+# breadcrumbs, price and the seller's free-text description — and the description routinely states an
+# age of its own that CONTRADICTS the dropdown (live: 462 rows where the description says e.g.
+# «عمر العقار 27 سنه» while the structured field says «أكثر من 10 سنوات»). Anchoring here is what keeps
+# the two apart; an unanchored search reads whichever comes first, which is the description.
+_AGE_BLOCK_ANCHOR = "تفاصيل الإعلان"
+_AGE_LABEL_RE = re.compile(r"عمر\s*العقار[\s:]*([^\n]{0,24})")
+
+
+def _property_age_from_text(text: str) -> Optional[int]:
+    """Aqar's «عمر العقار» → an exact age in years, or None if it cannot be known.
+
+    Replaces a plain `_int_after_label(text, r"عمر\\s*العقار")`. That helper's regex could only match a
+    Latin digit, so Aqar's three NON-numeric dropdown values were unparseable by construction and became
+    NULL: live production held 21,035 ACTIVE listings whose own structured block says «جديد» with a NULL
+    age. The vocabulary itself lives in normalize.parse_property_age because it is shared across
+    platforms, not an Aqar quirk.
+    """
+    if not text:
+        return None
+    i = text.find(_AGE_BLOCK_ANCHOR)
+    if i < 0:
+        return None          # no structured block → the only «عمر العقار» here would be the seller's
+                             # free text, which is not the authoritative field. Unknown beats wrong.
+    m = _AGE_LABEL_RE.search(text, i)
+    return N.parse_property_age(m.group(1)) if m else None
+
+
 def _text_after_label(html: str, *labels: str, max_len: int = 80) -> Optional[str]:
     for lbl in labels:
         m = re.search(rf"{lbl}[\s:]*([^\n<]{{1,{max_len}}})", html)
@@ -185,7 +213,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     master_bedrooms   = _int_after_label(text, r"غرف\s*ماستر", r"غرفة\s*ماستر", r"ماستر")
     halls             = _int_after_label(text, r"صالات", r"صالة", r"غرفة\s*المعيشة", r"المعيشة")
     reception_majlis  = _int_after_label(text, r"مجالس", r"مجلس")
-    property_age      = _int_after_label(text, r"عمر\s*العقار")
+    property_age      = _property_age_from_text(text)
     street_width_m    = _int_after_label(text, r"عرض\s*الشارع")
     direction         = _text_after_label(text, r"الواجهة", r"واجهة\s*العقار")
     residence_type    = _text_after_label(text, r"نوع\s*السكن")
