@@ -178,7 +178,16 @@ check(
 // satel, ~200 rows each) plus 2 small extensions (usage's agricultural/mixed; license status's
 // approved). Real, executed — imports AR_ENUM isn't possible (heavy RN deps in the same file), so
 // this is a source-text check for each exact live value → Arabic translation pair.
-check("AR_ENUM key renamed 'furniture' → 'furnishing' (was a silent dictionary-key bug — the real ADDL_FIELDS label is 'Furnishing', so the old key never matched)", RESULTCARD_NOWS.includes('furnishing:{furnished:'));
+// (CORRECTED 2026-07-17, owner audit M1) This assertion used to pin the RENAME 'furniture' → 'furnishing'
+// and required the value map to be inline under the 'furnishing:' key. That encoded the bug: BOTH label
+// spellings are real (satel sends 'Furnishing'; wasalt + aldarim send the legacy 'Furniture'), so the
+// rename silently stranded 2,757 live wasalt/aldarim rows in raw English («الأثاث: Un-Furnished»). The
+// correct invariant is that BOTH keys exist and share ONE value map, which is what we now pin. Full
+// coverage of both labels + every live value lives in scripts/verify-furnishing-enum-both-labels.ts.
+check(
+  "AR_ENUM keeps BOTH 'furnishing' (satel) and 'furniture' (wasalt/aldarim) keys, sharing one value map — renaming either one strands the other's rows in raw English",
+  RESULTCARD_NOWS.includes('furnishing:FURNISH_VALUES_AR') && RESULTCARD_NOWS.includes('furniture:FURNISH_VALUES_AR'),
+);
 check("furnishing: satel's exact live value 'Fully furnished' is mapped", RESULTCARD_NOWS.includes("'fullyfurnished':'مفروشبالكامل'"));
 check("furnishing: satel's exact live value 'Partially furnished' is mapped", RESULTCARD_NOWS.includes("'partiallyfurnished':'مفروشجزئياً'"));
 check("status: satel's 'Available'/'Rented out' (202 rows, previously had NO enum entry at all) are mapped", RESULTCARD_NOWS.includes("status:{available:'متاح','rentedout':'مؤجر'}"));
