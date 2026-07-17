@@ -994,6 +994,12 @@ export function isLatinOnlyInput(text: string): boolean {
 }
 export const ARABIC_ONLY_MSG = 'هذا التطبيق يدعم اللغة العربية فقط. الرجاء الكتابة بالعربية.';
 
+// City-only Location field (owner spec 2026-07-17): shown when Search is pressed without a valid
+// city picked from the list — the field never accepts free text or guesses a location, so this is
+// the ONLY way to explain why the button didn't proceed. Direct constant, not routed through t(),
+// same reasoning as ARABIC_ONLY_MSG above (this field has no English mode at all).
+export const CITY_REQUIRED_MSG = 'الرجاء اختيار مدينة من القائمة.';
+
 // Neutral, honest label for a listing whose city/district could not be resolved to a real place —
 // NEVER invent a location, and NEVER show a raw scraper junk sentinel (e.g. the literal word
 // "Other") in its place. Used by ResultCard.tsx and src/app/agent.tsx's results-summary text
