@@ -75,6 +75,47 @@ def _text_after_label(html: str, *labels: str, max_len: int = 80) -> Optional[st
     return None
 
 
+# ── price_per_meter extraction (fix 2026-07-16, bug B2 — the daily flap loop) ────────────────────
+# The old pattern `(\d[\d,]{1,})\s*[§ر﷼]?\s*/?\s*(?:متر|م²)` made both the currency and the slash
+# OPTIONAL, so it matched any bare "N م²" — i.e. the AREA token. Aqar's spec row reads
+# "المساحة 717,928 م² سعر المتر 1 §": the real per-meter value comes AFTER its label, so the first
+# regex hit was the area. Harvested proof (live DB, 2026-07-16): on ad 6693642 the old parse gave
+# 717,928 (the area) where the page says سعر المتر = 1 §. For land with area > 300k m² that bogus
+# ppm tripped _sanitize_price (hide) → the trg_aqar_parse trigger stored SANE prices anyway (it
+# recomputes Buy ppm as price_total/area) → the 05:20 auto_recover_false_inactive cron saw sane
+# stored prices and resurrected the row → next day's enrich re-poisoned it: a daily flap on 18
+# live rows. The extraction is now anchored to the سعر المتر LABEL (value FOLLOWING the label);
+# a legacy rate-shaped fallback (explicit slash, "N §/متر") is kept for label-less pages, guarded
+# by reject-if-equal-to-the-area-token as defense in depth.
+_PPM_LABEL_RE = re.compile(  # (?<!متوسط ) skips market-average stats ("متوسط سعر المتر ...")
+    r"(?<!متوسط )سعر\s*المتر(?:\s*المربع)?\s*:?\s*(\d[\d,]*(?:\.\d+)?)"
+)
+_PPM_RATE_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*[§ر﷼]?\s*/\s*(?:متر|م²)")
+_AREA_TOKEN_RE = re.compile(r"المساحة(?:\s*(?:الكلية|الإجمالية))?\s*:?\s*(\d[\d,]*(?:\.\d+)?)")
+
+
+def parse_price_per_meter(text: str) -> Optional[int]:
+    """Extract the listing's سعر المتر from de-tagged page text, or None if the page shows none.
+
+    Precedence: (1) the number FOLLOWING a سعر المتر label — the canonical spec-row shape every
+    aqar page uses ("سعر المتر 1,093.74 §" / "سعر المتر : 1800﷼"); (2) an explicit rate shape
+    "N §/متر" or "N/م²" (slash REQUIRED — a bare "N م²" is an area, never a rate), rejected if the
+    value equals the page's area token. A label-anchored value is taken as-is even if it looks
+    odd — it is what the source printed (price-fidelity rule); the >300k/m² typo gate in
+    _sanitize_price stays the single arbiter of hiding."""
+    m = _PPM_LABEL_RE.search(text)
+    if m:
+        return N.to_int(m.group(1))
+    m = _PPM_RATE_RE.search(text)
+    if m:
+        v = N.to_int(m.group(1))
+        ma = _AREA_TOKEN_RE.search(text)
+        area = N.to_int(ma.group(1)) if ma else None
+        if v is not None and (area is None or v != area):
+            return v
+    return None
+
+
 def _html_to_text(html: str) -> str:
     """Strip HTML tags + collapse whitespace so 'غرف النوم<span>3</span>' becomes
     'غرف النوم 3' — which our label+number regexes can match."""
@@ -158,9 +199,9 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
             price_annual = v * 12
             rent_period = "monthly"
 
-    mp_m2 = re.search(r"(\d[\d,]{1,})\s*[§ر﷼]?\s*/?\s*(?:متر|م²)", text)
-    if mp_m2:
-        price_per_meter = N.to_int(mp_m2.group(1))
+    # Anchored to the سعر المتر label — the old any-"N م²" pattern grabbed the AREA token and
+    # caused the daily hide/recover flap on big-area land (see parse_price_per_meter above).
+    price_per_meter = parse_price_per_meter(text)
 
     if transaction_type == "Buy":
         # Aqar Buy prices show up as "1,200,000 §" / "299,000 §" / sometimes plain "1200000 §".

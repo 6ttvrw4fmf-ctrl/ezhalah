@@ -29,9 +29,11 @@ jobs:
         table:
           - aqar_residential_listings
           - aqar_commercial_listings
-        # 16 ID-buckets per table → ~78k/16 ≈ 5k listings each = ~25 min/shard. Each shard is its
-        # own GitHub machine/IP with its own throttle, so they run in parallel and the whole sweep
-        # finishes in one wave instead of timing out on a single 7-hour job.
+        # 16 ROW-COUNT-balanced buckets per table → ~86k/16 ≈ 5.4k listings each ≈ 60-80 min/shard,
+        # comfortably inside timeout-minutes: 120. Balanced by row count, NOT by id range: aqar ids
+        # are dense at the low end, so the old geometric split handed shard 0 ~81% of the rows and
+        # it was timeout-killed every day (fix 2026-07-16, bug B1 — see shard_row_window() in
+        # scrapers/aqar/liveness.py). Each shard is its own GitHub machine/IP with its own throttle.
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
       - uses: actions/checkout@v4
