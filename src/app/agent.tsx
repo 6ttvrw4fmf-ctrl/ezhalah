@@ -25,6 +25,7 @@ import { CardIn, LoadingDots } from '@/components/CardReveal';
 // render but behaves identically for the same listing.
 const MemoResultCard = memo(ResultCard, (prev, next) =>
   prev.listing === next.listing && prev.rank === next.rank && prev.variant === next.variant);
+import { isAgeFilterScope as isAgeFilterScopeFor } from '@/lib/ageFilterTypes';
 import HeroBackground from '@/components/HeroBackground';
 import ShareSheet from '@/components/ShareSheet';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -52,29 +53,10 @@ import { ADVANCED_QUESTIONS, MIN_OPTIONS_TO_SHOW, type AdvancedOption } from '@/
 // effectiveTypes() returns canonical ENGLISH keys (propertyTypes.ts), e.g. 'Apartment'/'Residential
 // Building' — NOT the Arabic label (that conversion happens later at RPC-call time via typeArForTypes()).
 // Comparing against Arabic here always evaluated false — caught live, 2026-07-15.
-const AGE_FILTER_TYPES = new Set<string>([
-  'Apartment',            // gold standard, live since 2026-07-16 (PR #101)
-  'Residential Building', // added 2026-07-16 (PR #114): live-verified 34% coverage, genuine 5-bucket spread
-                          // (buy: new 289/1-2 34/3-5 387/6-9 569/10+ 933), counts==search parity confirmed
-  'Room',                 // غرفة, added 2026-07-16: rooms are rented — enough data only in the big rent
-                          // scopes (الرياض/إيجار 1,127 rows, all 5 buckets; جدة/إيجار 425), self-protecting
-                          // thresholds hide it elsewhere. macro=Residential, counts==search parity confirmed
-                          // (الرياض cnt_3_5=220==search 220, all 220 strictly in [3,5], zero unknown).
-  'Floor',                // دور, added 2026-07-16 (final rollout step): الرياض/إيجار has a genuine 5-bucket
-                          // spread (new 280/1-2 73/3-5 446/6-9 246/10+ 200); الرياض/بيع (9,839) skews «new»
-                          // but all 5 buckets still clear MIN_REAL_BUCKET_COUNT. macro=Residential,
-                          // counts==search parity confirmed (الرياض/إيجار cnt_3_5=446==search 446, all strict).
-  'Villa',                // فيلا, added 2026-07-16 — the STRONGEST type after Apartment (data review of every
-                          // residential+commercial type): 33,167 rows, 54% coverage (highest), all 5 buckets
-                          // populated, and it clears MIN_TOTAL_TO_SHOW in 10+ cities (الرياض/بيع alone: 11,593
-                          // rows at 81% coverage — new 7,354/1-2 175/3-5 594/6-9 498/10+ 817). macro=Residential
-                          // (قصر/Palace folds into فيلا per the locked type rule). counts==search parity
-                          // confirmed on BOTH deals (buy cnt_10p=817==817; rent cnt_3_5=718==718), all strict,
-                          // wrong-category returns 0.
-]);
+// The Property Age eligibility gate lives in src/lib/ageFilterTypes.ts (zero-dep, so `npm test` can
+// assert its macros against CLEAN_MACRO — agent.tsx itself can't be imported by a plain node runner).
 function isAgeFilterScope(q: SearchQuery): boolean {
-  const types = effectiveTypes(q);
-  return q.category === 'Residential' && types.length === 1 && AGE_FILTER_TYPES.has(types[0]);
+  return isAgeFilterScopeFor(q, effectiveTypes(q));
 }
 
 const IS_WEB = Platform.OS === 'web';
