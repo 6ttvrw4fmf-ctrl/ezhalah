@@ -238,8 +238,13 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
 
     # Aqar-parity rich fields (user request: same feature row + features grid as Aqar). Wasalt
     # exposes them on prop.attributes (key/value), propertyInfo.*, and prop.featureAmenities.
-    age_raw = _attr(prop, "completionYear")  # "New" or a year-count string
-    property_age = str(age_raw) if age_raw not in (None, "") else None
+    # property_age is NOT derived here. The search-LIST API's `completionYear` attribute is a
+    # 1-based-ish ENUM offset from true years (measured 2026-07-17: "New" -> 1 not 0, "10+ years" -> 12),
+    # which silently corrupted the canonical column for ~21k rows. The AUTHORITATIVE value is the
+    # human string on the DETAIL page, resolved in enrich.py via normalize.parse_property_age(). Until a
+    # listing is detail-enriched its age is honestly unknown (NULL) — better than a wrong enum. We still
+    # carry the list-page completionYear into additional_info (below) so enrichment/audit can see it.
+    property_age = None
 
     # Direction / facade — Wasalt sometimes carries it on streetInfo[].en.facing or attributes.facing.
     direction = None

@@ -30,6 +30,7 @@ if str(ROOT.parent) not in sys.path:
 from curl_cffi import requests as cc
 
 from scrapers.common import db
+from scrapers.common import normalize as N
 
 BASE = "https://wasalt.sa"
 NEXT_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
@@ -158,6 +159,11 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
         upd: dict[str, Any] = {"detail_enriched": True, "enrich_attempted_at": stamp}
         if deep:
             upd["additional_info"] = deep
+            # Canonical property_age from the AUTHORITATIVE detail-page string (the search-list enum is
+            # corrupt — see run.py). Same shared parser every platform uses; unknown/unmapped -> NULL,
+            # never a guess. This is the only place the trustworthy string is available.
+            cy = next((r.get("value") for r in deep if r.get("key") == "completionYear"), None)
+            upd["property_age"] = N.parse_property_age(cy)
         try:
             db.sb().table(table).update(upd).eq("ad_number", row["ad_number"]).execute()
             with lock: stats["deep" if deep else "empty"] += 1
