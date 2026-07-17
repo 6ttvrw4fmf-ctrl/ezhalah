@@ -253,7 +253,19 @@ export default function Home() {
   useEffect(() => { void ensureLocationIndex(); }, []);
   // Warm the city-listing-counts index on mount so the Top-6 list is ready the instant the field is
   // focused, rather than showing an empty list for the first render of a slow connection.
-  useEffect(() => { void ensureCityFieldIndex(); }, []);
+  useEffect(() => {
+    void ensureCityFieldIndex().then(() => {
+      // EDGE CASE (found in testing): on a slow connection, this fetch can still be pending when
+      // the user has already focused AND typed a query — matchCitiesByText() would have run against
+      // a still-empty pool and (correctly, not a crash) returned []. Without this, the dropdown would
+      // stay empty forever even after the data arrives, since nothing else re-triggers the match once
+      // typing has already happened. Re-run it now against whatever text is currently live.
+      if (cityTextRef.current) {
+        const latin = isLatinOnlyInput(cityTextRef.current);
+        setCitySuggestions(latin ? [] : matchCitiesByText(cityTextRef.current));
+      }
+    });
+  }, []);
 
   const onSearch = async () => {
     // CITY-ONLY FIELD (owner spec 2026-07-17): "The user must select a valid city result. Do not

@@ -145,6 +145,10 @@ check(
   'REGRESSION (found live in testing): the Top-6-on-focus promise callback re-checks cityTextRef at resolution time before overwriting citySuggestions — without this guard, a keystroke typed right after focus can have its correctly-filtered results silently clobbered back to the stale Top 6 by the async callback resolving a moment later',
   /if \(!cityTextRef\.current\) setCitySuggestions\(topCitiesByListings\(6\)\);/.test(indexSrc) && /cityTextRef\.current = v;/.test(indexSrc),
 );
+check(
+  'REGRESSION (found live in testing): the mount-time ensureCityFieldIndex() fetch re-runs the match against cityTextRef once it resolves — without this, a user who types before a slow-connection fetch finishes would see an empty dropdown forever, since nothing else re-triggers matchCitiesByText() once the data actually arrives',
+  /void ensureCityFieldIndex\(\)\.then\(\(\) => \{[\s\S]{0,700}?if \(cityTextRef\.current\) \{[\s\S]{0,200}?setCitySuggestions\(latin \? \[\] : matchCitiesByText\(cityTextRef\.current\)\);/.test(indexSrc),
+);
 check('onChangeText clears citySelected on every keystroke (never silently reuses a stale pick)', /onChangeText=\{\(v\) => \{[\s\S]{0,300}?setCitySelected\(null\)/.test(indexSrc));
 check('onSearch blocks when citySelected is falsy, using CITY_REQUIRED_MSG (never calls the old free-text resolveLocation guessing path)', /if \(!citySelected\) \{ setLocMsg\(CITY_REQUIRED_MSG\); return; \}/.test(indexSrc));
 check('the selection handler stores the FULL CityOption in citySelected (city_id-keyed, not just the display string)', /onPress=\{\(\) => \{[\s\S]{0,200}?setQuery\(\(q\) => \(\{ \.\.\.q, location: opt\.cityAr \}\)\);\s*setCitySelected\(opt\)/.test(indexSrc));
