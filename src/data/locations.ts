@@ -631,6 +631,127 @@ export function topDistrictsForCity(cityArabic: string, limit = 6): string[] {
   return out.slice(0, limit).map((x) => x.name);
 }
 
+// ── CITY-ONLY FIELD (owner spec 2026-07-17) ──────────────────────────────────────────────────────
+// A new, deliberately SEPARATE city_id-keyed, Arabic-native picker for the redesigned Home/Filter
+// screen's Location field's City step. NOT built on the English-keyed LIVE_CITIES/matchLocations
+// machinery above (which mixes region/district/landmark/area results and matches English OR
+// Arabic) — this field must show CITIES ONLY, must match ARABIC TEXT ONLY, and must key every
+// result by city_id so two real, different cities that share a display name never collide (verified
+// live 2026-07-17: even restricted to cities with real listings, e.g. «الهفوف» exists as two
+// distinct real cities in two different regions — see the migration below for the full proof).
+// Source: public.city_listing_counts_ar, a live (not materialized — see the migration's rationale)
+// view over search_listings_ar grouped by city_id, joined to loc_catalog_city/loc_catalog_region
+// for canonical Arabic display names. See supabase/migrations/20260717150000_city_listing_counts_view.sql.
+export type CityOption = {
+  cityId: number;
+  cityAr: string;
+  regionId: number | null;
+  regionAr: string | null;
+  listingCount: number;
+};
+
+let CITY_FIELD_OPTIONS: CityOption[] = [];
+let _cityFieldLoaded = false;
+let _cityFieldPromise: Promise<CityOption[]> | null = null;
+
+// Loads the full cities-with-listings pool once per session (a few hundred rows — small enough to
+// fetch in one shot and search entirely client-side, same shape as ensureLocationIndex above).
+// Already sorted by listing_count desc so topCitiesByListings() below is just a slice.
+export async function ensureCityFieldIndex(): Promise<CityOption[]> {
+  if (_cityFieldLoaded) return CITY_FIELD_OPTIONS;
+  if (_cityFieldPromise) return _cityFieldPromise;
+  _cityFieldPromise = (async () => {
+    if (!supabase) return CITY_FIELD_OPTIONS;
+    try {
+      const _ac = new AbortController();
+      const _t = setTimeout(() => _ac.abort(), 15000);
+      let data: any = null;
+      try {
+        ({ data } = await supabase
+          .from('city_listing_counts_ar')
+          .select('city_id,city_ar,region_id,region_ar,listing_count')
+          .order('listing_count', { ascending: false })
+          .abortSignal(_ac.signal));
+      } finally {
+        clearTimeout(_t);
+      }
+      if (data) {
+        CITY_FIELD_OPTIONS = (data as any[]).map((r) => ({
+          cityId: r.city_id,
+          cityAr: r.city_ar,
+          regionId: r.region_id ?? null,
+          regionAr: r.region_ar ?? null,
+          listingCount: Number(r.listing_count) || 0,
+        }));
+        _cityFieldLoaded = true;
+      }
+    } catch {
+      // Same RC-A pattern as ensureLocationIndex: reset so a stalled/failed load retries on the
+      // next call instead of returning a dead promise forever.
+      _cityFieldPromise = null;
+    }
+    return CITY_FIELD_OPTIONS;
+  })();
+  return _cityFieldPromise;
+}
+
+// Shown immediately when the City field is focused with no text typed yet.
+export function topCitiesByListings(k = 6): CityOption[] {
+  return CITY_FIELD_OPTIONS.slice(0, k);
+}
+
+// Arabic-only prefix/substring match against city names, for the typed-autocomplete state. Reuses
+// the SAME norm() folding used everywhere else in this file (أإآٱ→ا, ة→ه, ى/ي→ي, diacritics/
+// tatweel stripped, then non-letter/digit chars dropped) — the same folding the DB's own
+// normalize_ar() applies — so "الري" matches "الرياض" exactly like a DB-side search would. Ranks
+// exact-prefix matches before substring matches, then by listing count (bigger cities first).
+export function matchCitiesByText(query: string): CityOption[] {
+  const q = norm(query);
+  if (!q) return [];
+  const scored: { opt: CityOption; rank: number }[] = [];
+  for (const opt of CITY_FIELD_OPTIONS) {
+    const n = norm(opt.cityAr);
+    if (n.startsWith(q)) scored.push({ opt, rank: 0 });
+    else if (n.includes(q)) scored.push({ opt, rank: 1 });
+  }
+  scored.sort((a, b) => a.rank - b.rank || b.opt.listingCount - a.opt.listingCount);
+  return scored.map((s) => s.opt);
+}
+
+// True when two-or-more results in the given result set share the same display name — the ONLY
+// case where the client needs to surface the (otherwise hidden) region, per the spec: "For
+// duplicate city names, use the confirmed hidden region internally so the wrong city is never
+// selected." Most results are unambiguous and need no extra label.
+export function hasNameCollision(results: CityOption[], cityAr: string): boolean {
+  return results.filter((r) => r.cityAr === cityAr).length > 1;
+}
+
+// Converts a selected CityOption into the exact same LocationResolution shape resolveLocation()
+// already produces for an exact city match (kind:'city', exact:true) — this is what makes the new
+// field a pure UI-layer swap needing ZERO changes to resolveSearchScope/remote.ts, which only ever
+// consumes this shape and never sees a raw city_id. Prefers the English city/region keys from the
+// static catalog (CITY_BY_ID/REGION_BY_ID) for consistency with every other resolver path in this
+// file; falls back to the Arabic names directly for the rare city not yet in that catalog (verified
+// live: only 1 of 423 real cities-with-listings, city_id 90001/بلسمر — arCity()'s own final
+// `|| en` passthrough in remote.ts already handles an Arabic string it doesn't recognize by
+// returning it unchanged, and REGION_TO_ID there is dual-keyed EN+AR, so either form resolves
+// correctly). Always Arabic-labeled — this field has no English display mode, per the spec's
+// Arabic-only framing.
+export function resolveCitySelection(opt: CityOption): LocationResolution {
+  const cat = CITY_BY_ID.get(opt.cityId);
+  const region = cat ? REGION_BY_ID.get(cat.regionId) : undefined;
+  return {
+    raw: opt.cityAr,
+    kind: 'city',
+    city: cat?.en ?? opt.cityAr,
+    region: region?.en ?? opt.regionAr ?? undefined,
+    label: opt.cityAr,
+    districts: [],
+    cities: [],
+    exact: true,
+  };
+}
+
 // ── Fuzzy CITY index (typo/Arabic correction) ────────────────────────────────────────────────────
 // Every way a city can be written → its canonical English DB label: the curated CITY_TOKENS map
 // (Arabic + transliterations for ~150 towns), the nationwide catalog (EN + AR), and the live cities.
