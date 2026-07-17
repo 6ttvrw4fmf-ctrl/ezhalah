@@ -248,19 +248,28 @@ export function ResultCard({
 // plan/land numbers) is NEVER translated — it's real source content. The raw DB is untouched; this is
 // display-only. Yes/No is translated for any field (never a legitimate street name).
 const AR_YESNO: Record<string, string> = { yes: 'نعم', no: 'لا' };
+// ONE furnishing value map shared by BOTH label spellings ('Furnishing' = satel, 'Furniture' = wasalt/
+// aldarim). Declared once so the two AR_ENUM keys below physically cannot drift apart — renaming one of
+// them silently stranded 2,757 wasalt/aldarim cards in raw English once already (2026-07-17).
+const FURNISH_VALUES_AR: Record<string, string> = {
+  furnished: 'مفروش', 'fully furnished': 'مفروش بالكامل',
+  'un-furnished': 'غير مفروش', unfurnished: 'غير مفروش',
+  'semi-furnished': 'نصف مفروش', 'partially furnished': 'مفروش جزئياً',
+};
 const AR_ENUM: Record<string, Record<string, string>> = {
   // (owner report, 2026-07-16 Arabic-only sweep) 'agricultural'/'mixed' added — eaqartabuk/erapulse
   // raw values that fell through the enum lookup and rendered raw English.
   'property usage': { residential: 'سكني', commercial: 'تجاري', agricultural: 'زراعي', mixed: 'مختلط' },
-  // (fix, 2026-07-16) the dict key was 'furniture' but the real ADDL_FIELDS label is 'Furnishing' —
-  // label.toLowerCase() is 'furnishing', so this map never matched and satel's raw English
-  // ('Fully furnished'/'Unfurnished'/'Partially furnished', 203 rows) rendered verbatim. Renamed
-  // the key and added the exact live value spellings (satel's, not the original 'un-furnished').
-  furnishing: {
-    furnished: 'مفروش', 'fully furnished': 'مفروش بالكامل',
-    'un-furnished': 'غير مفروش', unfurnished: 'غير مفروش',
-    'semi-furnished': 'نصف مفروش', 'partially furnished': 'مفروش جزئياً',
-  },
+  // BOTH label spellings are real and must BOTH be kept — see FURNISH_VALUES_AR below.
+  // (fix, 2026-07-16) satel's ADDL_FIELDS label is 'Furnishing' ('Fully furnished'/'Unfurnished'/
+  //   'Partially furnished', 203 rows).
+  // (fix, 2026-07-17) RENAMING to 'furnishing' silently broke the OTHER shape: wasalt + aldarim send the
+  //   legacy label 'Furniture' (2,757 live rows: Un-Furnished 2,617 / Furnished 83 / Semi-Furnished 57),
+  //   which then matched no key and rendered «الأثاث: Un-Furnished» — an Arabic label with an English
+  //   value, on the highest-volume platform. Two labels, one value map: alias them (below) so the two
+  //   additional_info shapes can never drift apart again. Do NOT rename one into the other.
+  furnishing: FURNISH_VALUES_AR,
+  furniture: FURNISH_VALUES_AR,
   'property floor': { upper: 'علوي', ground: 'أرضي', basement: 'قبو' },
   facade: {
     east: 'شرقية', west: 'غربية', north: 'شمالية', south: 'جنوبية',
@@ -285,8 +294,10 @@ const AR_ENUM: Record<string, Record<string, string>> = {
 // (Widened 2026-07-16, owner report: was 'address' only — added every other prose/status/enum
 // label as defense-in-depth, so an UNMAPPED future enum value or a stray leak on any of these
 // falls back to a placeholder instead of rendering raw, the same way 'address' already does.)
+// ('furniture' added 2026-07-17 for parity with 'furnishing' — the two are the same attribute under two
+// source label spellings, so the leak guard must cover both or the unguarded one leaks raw English.)
 const FREE_TEXT_PROSE_LABELS = new Set([
-  'address', 'amenities', 'property services', 'furnishing', 'property usage',
+  'address', 'amenities', 'property services', 'furnishing', 'furniture', 'property usage',
   'status', 'parking type', 'ac type', 'kitchen', 'license status', 'warranties', 'deed location',
 ]);
 function arAttrValue(label: string, value: string, locale: string): string {
