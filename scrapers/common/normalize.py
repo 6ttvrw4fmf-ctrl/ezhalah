@@ -480,3 +480,80 @@ def annualize_rent(price: Optional[int], period: Optional[str]) -> Optional[int]
     if "day" in p or "يوم" in p:
         return price * 365
     return price
+
+
+# ── Property age: the SHARED Saudi Arabic age vocabulary ──────────────────────────────────────────
+# WHY THIS EXISTS (2026-07-17): every scraper parsed «عمر العقار» with an int-only regex of the shape
+# `عمر\s*العقار[\s:]*?(\d+)`. That regex can only ever match a LATIN DIGIT, so the three non-numeric
+# shapes the Saudi portals actually publish — «جديد», «سنتين», «أكثر من 10 سنوات» — were unparseable
+# BY CONSTRUCTION and silently became NULL. Measured on live production: 21,035 ACTIVE aqar listings
+# whose own structured block says «جديد» were stored with property_age = NULL, and aqarcity kept only
+# «جديد» while dropping its other 12 values. Age coverage looked like a data-availability problem; it
+# was a parser problem. (Same bug class as the already-fixed wasalt "New"->0 loss.)
+#
+# The vocabulary is CLOSED and SHARED — the same terms appear across aqar, aqarcity, raghdan, souq24,
+# aqaratikom and dealapp, because it is standard Saudi real-estate phrasing rather than any one site's
+# invention. Measured closure on live data: raghdan 283/283, aqaratikom 77/77, souq24 32/32 = 100%.
+# So it lives HERE, once, and a new platform that publishes the same terms gets age for free.
+#
+# FIDELITY RULES (owner, 2026-07-17) — these are not style choices:
+#  * «جديد» -> 0. A lexical identity, not an estimate: "new" IS new construction, which is what 0 means.
+#  * «سنتين» -> 2. Lexical identity: "two years" IS 2.
+#  * OPEN-ENDED BUCKETS map to the bucket FLOOR, never a midpoint: «أكثر من 10 سنوات» -> 10. The source
+#    asserts "at least 10" and nothing more, so 10 is the only number it actually supports; inventing
+#    12 (as the live wasalt CASE ladder does) fabricates precision the source never published and
+#    breaks the standing price-fidelity rule, which governs age identically.
+#  * ANYTHING NOT IN THIS TABLE RETURNS None. Never guess. An honest unknown beats a wrong age.
+_AGE_VOCAB_AR = {
+    "جديد": 0,
+    "اقل من سنة": 0, "أقل من سنة": 0, "اقل من سنه": 0, "أقل من سنه": 0,
+    "سنة": 1, "سنه": 1,
+    "سنتين": 2, "سنتان": 2,
+    "ثلاث سنوات": 3, "اربع سنوات": 4, "أربع سنوات": 4, "خمس سنوات": 5, "ست سنوات": 6,
+    "سبع سنوات": 7, "ثمان سنوات": 8, "ثماني سنوات": 8, "تسع سنوات": 9, "عشر سنوات": 10,
+    # Open-ended -> FLOOR (see fidelity rules above). Both the numeric and the spelled-out forms.
+    "اكثر من عشر سنوات": 10, "أكثر من عشر سنوات": 10,
+    "اكثر من 10 سنوات": 10, "أكثر من 10 سنوات": 10,
+}
+
+# Plausible human age of a building, in years. Anything outside is not an age: a build YEAR (aldarim
+# stores 2026), a floor/room count, or a scraper default. Out-of-range -> None, never a "corrected" guess.
+_AGE_MIN, _AGE_MAX = 0, 100
+
+
+def parse_property_age(raw) -> Optional[int]:
+    """Turn one raw «عمر العقار» value into an exact age in years, or None if it cannot be known.
+
+    Accepts BOTH shapes the portals publish, because a single site mixes them:
+      * a closed Arabic term  — «جديد» / «سنتين» / «أكثر من 10 سنوات»
+      * a leading number      — "5", "5 سنوات", "١٠ سنوات" (Arabic-Indic digits included)
+
+    Returns None — never a guess — for anything else, including free text, HTML, build years and
+    out-of-range values. Callers MUST treat None as "unknown" and store NULL.
+    """
+    if raw is None:
+        return None
+    s = str(raw).translate(_TRANS)          # ٥ -> 5, so both digit systems take the same path
+    s = re.sub(r"\s+", " ", s).strip()
+    if not s:
+        return None
+
+    # Exact vocabulary hit first: it is unambiguous and outranks any digit inside the phrase — without
+    # this, "أكثر من 10 سنوات" would fall through to the numeric branch and read as a precise 10 for the
+    # wrong reason (and "اقل من سنة" has no digit at all).
+    hit = _AGE_VOCAB_AR.get(s) if s in _AGE_VOCAB_AR else _AGE_VOCAB_AR.get(_norm_ar(s))
+    if hit is None:
+        # Try the vocabulary against a leading phrase, since the source block often runs the next label
+        # onto the same line ("أكثر من 10 سنوات عدد الشقق 4").
+        for term, years in _AGE_VOCAB_AR.items():
+            if s.startswith(term) or _norm_ar(s).startswith(_norm_ar(term)):
+                hit = years
+                break
+    if hit is not None:
+        return hit
+
+    m = re.match(r"^(\d{1,4})\b", s)        # a LEADING number only: "5 سنوات" -> 5. Never scan ahead —
+    if not m:                               # a number later in the line belongs to the NEXT label.
+        return None
+    n = int(m.group(1))
+    return n if _AGE_MIN <= n <= _AGE_MAX else None
