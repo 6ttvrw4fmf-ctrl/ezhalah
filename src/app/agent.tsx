@@ -64,6 +64,13 @@ const AGE_FILTER_TYPES = new Set<string>([
                           // spread (new 280/1-2 73/3-5 446/6-9 246/10+ 200); الرياض/بيع (9,839) skews «new»
                           // but all 5 buckets still clear MIN_REAL_BUCKET_COUNT. macro=Residential,
                           // counts==search parity confirmed (الرياض/إيجار cnt_3_5=446==search 446, all strict).
+  'Villa',                // فيلا, added 2026-07-16 — the STRONGEST type after Apartment (data review of every
+                          // residential+commercial type): 33,167 rows, 54% coverage (highest), all 5 buckets
+                          // populated, and it clears MIN_TOTAL_TO_SHOW in 10+ cities (الرياض/بيع alone: 11,593
+                          // rows at 81% coverage — new 7,354/1-2 175/3-5 594/6-9 498/10+ 817). macro=Residential
+                          // (قصر/Palace folds into فيلا per the locked type rule). counts==search parity
+                          // confirmed on BOTH deals (buy cnt_10p=817==817; rent cnt_3_5=718==718), all strict,
+                          // wrong-category returns 0.
 ]);
 function isAgeFilterScope(q: SearchQuery): boolean {
   const types = effectiveTypes(q);
