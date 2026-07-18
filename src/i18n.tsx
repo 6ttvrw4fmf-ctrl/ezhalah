@@ -249,6 +249,8 @@ const AR: Record<string, string> = {
   'Guided search': 'بحث موجّه',
   'Rent or buy?': 'إيجار أم شراء؟',
   'Which city?': 'أي مدينة؟',
+  'Which district? (optional)': 'أي حي؟ (اختياري)',
+  'Select a city first': 'اختر المدينة أولاً',
   'Property category?': 'فئة العقار؟',
   'Property type?': 'نوع العقار؟',
   "What's your max budget?": 'ما هو حدّك الأقصى للميزانية؟',
