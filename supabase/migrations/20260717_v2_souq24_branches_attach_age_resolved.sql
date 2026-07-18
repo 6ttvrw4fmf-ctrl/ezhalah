@@ -1,0 +1,22 @@
+-- Make souq24 Property Age searchable. Applied live via MCP 2026-07-17 (guarded by the deploy lock).
+--
+-- souq24 enters listing_native_location_v2 via bespoke inline branches (NOT via v1), and v2's age
+-- LEFT JOIN to listing_age_resolved keys off v1 — so the souq24 branches hardcoded
+-- NULL::smallint AS property_age and the producer's 32 souq24 ages never reached search (souq24 rows
+-- were searchable but always ageless). FIX: in the two souq24 branches, replace the NULL age literal
+-- with a scalar subquery to listing_age_resolved (unique on source_table+listing_id → cardinality-safe).
+-- Every other column and both other branches (v1-based, unresolved_catchall) are byte-identical.
+--
+-- VERIFIED via a test view before applying (test vs live): 184,476 rows both sides, 0 rows-only-either-
+-- side, 0 NON-age column diffs, 32 age diffs ALL souq24, 0 non-souq24 age diffs. Column signature
+-- identical → CREATE OR REPLACE (no DROP CASCADE; the search-sync dependency is untouched).
+-- Post-sync: souq24 searchable age 0 → 32; index-wide 0 out-of-range; nationwide شقة parity
+-- sum(buckets)+unknown == total (81,310==81,310); wasalt unaffected (55,461).
+--
+-- Full statement is in supabase_migrations.schema_migrations version
+-- 20260717_v2_souq24_branches_attach_age_resolved (DB is source of truth for the exact 4-branch body).
+-- The ONLY change vs the prior definition: the two souq24 branches' property_age went from
+--   NULL::smallint AS property_age
+-- to
+--   ( SELECT ar.property_age FROM listing_age_resolved ar
+--      WHERE ar.source_table = '<souq24_*_listings>'::text AND ar.listing_id = s.id ) AS property_age
