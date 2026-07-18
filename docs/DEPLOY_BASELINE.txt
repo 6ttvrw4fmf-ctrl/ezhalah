@@ -55,6 +55,13 @@ e577005ea2545681834283f210631babb55c1698
 #   correctly disambiguates same-named-but-different cities end-to-end. Baseline advance done
 #   manually — the automated safe-deploy.sh drift gate found 17 migrations from other concurrent
 #   sessions not yet in this repo checkout (0 duplicate overloads, not the PGRST203 outage class).
+#   GOTCHA (caught by the owner, not by this script): `vercel --prod --yes` built this deployment
+#   and Vercel's API reported it state:READY target:production, but the ezhalah-app.vercel.app
+#   ALIAS never actually moved to it — the site kept serving the PR#130 bundle. Fixed via
+#   `npx vercel promote dpl_4EbNG1YrpYDSBEfA8xZqmbG7XnGs --yes`. See
+#   feedback_verify-served-bundle-not-just-deployment-api-status (session memory): going forward,
+#   confirm via `npx vercel inspect ezhalah-app.vercel.app` (check the id) + fetch the real served
+#   bundle before declaring a deploy live — the deployments API alone is not proof.
 # 2026-07-17  7576669  deployed via safe-deploy.sh + manual vercel rollback promotion (dpl_DMhwSD3P6wGs9174iWKnr7J5kiBi).
 #   PR #130 null-category-leak fix (residential-commercial-isolation-audit-2026-07-17): deselecting
 #   the category pill sent p_category=null, disabling the RPC purity gate + client matchesType()
