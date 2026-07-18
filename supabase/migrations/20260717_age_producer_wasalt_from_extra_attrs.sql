@@ -1,0 +1,10 @@
+-- Fix a wasalt age regression surfaced during Phase 3 (not caused by it). Applied live via MCP 2026-07-17.
+-- Phase 2 pointed search age at listing_age_resolved, which for wasalt read the CANONICAL column; PR #133
+-- made the wasalt scraper write NULL age until detail-enrich catches up, so the daily 21:00 re-scrape
+-- nulled ~50k canonical ages → search wasalt age decayed 55k → 5k (a daily sawtooth).
+-- FIX: new generic 'from_extra_attrs' producer strategy reads wasalt age from listing_extra_attrs, which
+-- parses the AUTHORITATIVE additional_info completionYear array at query time (scrape-proof; 10+ floored
+-- to 10 per PR #131). wasalt registry repointed canonical_column → from_extra_attrs. aqar stays canonical
+-- (its parser writes at scrape — verified not decaying). Restored live: wasalt 55,466 in producer,
+-- 55,461 searchable. strategy CHECK extended to include 'from_extra_attrs'.
+-- Full body in supabase_migrations.schema_migrations version 20260717_age_producer_wasalt_from_extra_attrs.
