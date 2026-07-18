@@ -1,0 +1,16 @@
+-- Phase 3: platform-agnostic Property Age producer across JSONB sources. Applied live via MCP 2026-07-17.
+-- Adds a jsonb_text strategy so a platform whose age lives in additional_info participates by INSERTing
+-- ONE registry row (key + trusted) — no bespoke code per platform. SCOPE: age only; listing_extra_attrs
+-- (14 amenity columns) untouched; DB-only (no frontend change). Full body mirrors what was applied:
+-- (1) public.age_from_text_ar(text) — SQL twin of scrapers/common/normalize.parse_property_age (PR #131),
+--     STRICT: exact closed vocab OR clean leading number (max 2 digits → build years can't match) + one
+--     optional year-word and nothing else; open-ended → FLOOR 10; Arabic-Indic digits; unknown → NULL.
+-- (2) age_source_registry gains jsonb_key + strategy CHECK allows 'jsonb_text'.
+-- (3) rebuild_age_producer() handles jsonb_text (reads additional_info->>jsonb_key via age_from_text_ar,
+--     no health gate — safety = strict parser + human trusted flag) alongside canonical_column.
+-- (4) registers aqarcity/dealapp/aqaratikom/souq24 (res+com) as jsonb_text/trusted; ramzalqasim canonical
+--     trusted=true after an 8/8 spot-check vs source text.
+-- Recovered live: aqarcity 1,681 · dealapp 1,149 (HTML/junk → NULL) · aqaratikom 82 · souq24 32 (producer;
+-- souq24 is v2-only so its age is blocked from search + is sub-threshold) · ramzalqasim 143.
+-- NOTE: exact statements recoverable from supabase_migrations.schema_migrations version
+-- 20260717_age_producer_jsonb_text_strategy_phase3 (this file documents intent; DB is source of truth).
