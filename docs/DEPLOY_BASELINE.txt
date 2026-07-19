@@ -1,10 +1,21 @@
-e577005ea2545681834283f210631babb55c1698
+609c53d2eb2eb73745dd3baa45f2a60532abb2f5
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
 # safe-deploy.sh advances this to the newly-deployed SHA after every successful production deploy.
 # Do NOT hand-edit the SHA except to record a deliberate, verified rollback target.
 #
+# 2026-07-19  609c53d  deployed via safe-deploy.sh (dpl_HtGro53SvT19VP8z7q9F6Zupotxf, alias
+#   ezhalah-app.vercel.app confirmed pointing to it; served bundle entry-6f2e8a43…js fresh age:0,
+#   supabase.co inlined, p_tables2 present, live جدة search smoke-test OK). PR #149 filter UI polish:
+#   (1) summary sentence now includes the picked District + Monthly/Yearly period, (2) missing-city
+#   Search scrolls the card to top + focuses the field, (3) city/district dropdowns drop the listing
+#   counts (Top-6 still SELECTED by count), (4) a scale-pop + green-border + checkmark confirmation on
+#   city/district select, (5) labels (أي مدينة؟ / أي حي؟ / اختياري) moved ABOVE each field, far-right RTL.
+#   Verified: npm test green, tsc 0 errors, npm run verify gate green, live prod bundle greps confirm all
+#   5 markers shipped (fieldLabelAbove, districtLabel, 'to rent monthly', '{district}, {city}',
+#   confirmFieldStyle/checkmark-circle, 'Optional'×10). Shell 2-min timeout killed the local safe-deploy
+#   process AFTER vercel --prod had already deployed; post-deploy bundle/alias/search checks re-run manually.
 # 2026-07-15/16  61194df  DELIBERATE ROLLBACK (owner-approved, "DEPLOY NOW"): the prior baseline
 #   (016bee3) was recorded via safe-deploy.sh AFTER PR #78 (42cd105) shipped — but PR #78's frontend
 #   (src/components/AdvancedQuestionCard.tsx, src/data/advancedFilters.ts, and the age-filter wiring
