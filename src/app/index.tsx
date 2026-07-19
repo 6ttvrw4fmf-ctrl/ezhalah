@@ -81,6 +81,7 @@ function AgentBadge({ onPress, t, isRTL }: { onPress: () => void; t: (s: string)
 type RangeHintCfg = {
   warnHiLo: string; none: string; zeroMin: string; zeroMax: string;
   near: (x: string) => string; minOnly: (x: string) => string; maxOnly: (x: string) => string;
+  both: (lo: string, hi: string) => string; // both bounds filled, a valid range (min < max)
 };
 function rangeHint(
   minStr: string | null | undefined, maxStr: string | null | undefined,
@@ -94,6 +95,9 @@ function rangeHint(
   const minPos = minV !== null && minV > 0, maxPos = maxV !== null && maxV > 0;
   if (minPos && maxPos && (minV as number) > (maxV as number)) return { text: cfg.warnHiLo, warn: true };
   if (minPos && maxPos && minV === maxV) return { text: cfg.near(fmt(minV as number)), warn: false };
+  // Both bounds filled with a valid range (min < max) → confirm the range so the user sees what they
+  // set (owner UI request 2026-07-19: "a note when he fills both"). warn only fires on min>max above.
+  if (minPos && maxPos) return { text: cfg.both(fmt(minV as number), fmt(maxV as number)), warn: false };
   if (minV === 0 && maxV === 0) return { text: cfg.none, warn: false };
   if (minPos && !maxPos) return { text: cfg.minOnly(fmt(minV as number)), warn: false };  // max empty or 0
   if (maxPos && !minPos) return { text: cfg.maxOnly(fmt(maxV as number)), warn: false };  // min empty or 0
@@ -109,6 +113,7 @@ const PRICE_HINT: RangeHintCfg = {
   near: (x) => `سيتم البحث عن العقارات بسعر ${x} ريال بالضبط.`,   // min == max → EXACT match (backend uses inclusive bounds v>=X && v<=X)
   minOnly: (x) => `سيتم البحث عن عقارات بسعر ${x} ر.س أو أعلى.`,
   maxOnly: (x) => `سيتم البحث عن عقارات بسعر ${x} ر.س أو أقل.`,
+  both: (lo, hi) => `سيتم البحث عن العقارات بسعر من ${lo} إلى ${hi} ر.س.`,
 };
 const AREA_HINT: RangeHintCfg = {
   warnHiLo: 'تنبيه: الحد الأدنى للمساحة أعلى من الحد الأعلى. راجع المساحتين قبل البحث.',
@@ -118,6 +123,7 @@ const AREA_HINT: RangeHintCfg = {
   near: (x) => `سيتم البحث عن العقارات بمساحة ${x} م² بالضبط.`,   // min == max → EXACT match (backend uses inclusive bounds v>=X && v<=X)
   minOnly: (x) => `سيتم البحث عن عقارات بمساحة ${x} م² أو أكبر.`,
   maxOnly: (x) => `سيتم البحث عن عقارات بمساحة ${x} م² أو أقل.`,
+  both: (lo, hi) => `سيتم البحث عن العقارات بمساحة من ${lo} إلى ${hi} م².`,
 };
 
 // HOME_DEFAULT_QUERY / hasActiveFilters moved to src/lib/searchDefaults.ts (zero-dependency, so a
@@ -1105,7 +1111,10 @@ const s = StyleSheet.create({
   flWrap: { flex: 1, height: 52, justifyContent: 'center', position: 'relative', ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
   flLabel: { position: 'absolute', left: 0, top: 17, fontSize: 14, color: colors.muted, ...(Platform.OS === 'web' ? { cursor: 'text' as any, transitionProperty: 'top, font-size, color' as any, transitionDuration: '140ms' as any } : {}) },
   flLabelUp: { top: 7, fontSize: 10, color: colors.primary, fontWeight: '600' },
-  flInput: { fontSize: 14, color: colors.ink, padding: 0, height: '100%', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  // City + District are Arabic text fields → right-align so the caret sits on the RIGHT and the
+  // Arabic value/placeholder reads correctly (the numeric area/price inputs stay LTR — rangeInput/
+  // sizeInput). Fixes the caret/placeholder appearing on the far left. (owner UI request 2026-07-19.)
+  flInput: { fontSize: 14, color: colors.ink, padding: 0, height: '100%', textAlign: 'right', writingDirection: 'rtl', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
   flInputUp: { paddingTop: 15 },
 
   suggBox: { marginTop: 8, maxHeight: 268, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, backgroundColor: colors.surface, overflow: 'hidden' },
