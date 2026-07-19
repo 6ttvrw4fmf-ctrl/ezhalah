@@ -1,4 +1,4 @@
-5c57f378af0ff2583f1958fbdc0163f93548ed25
+ee952d2921a7fca937e5189cb2ac0d59980b0076
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
@@ -26,6 +26,15 @@
 #   critical RPCs (NOT the PGRST203 outage class), so deployed via the manual safe-deploy-equivalent
 #   (lock via MCP, preflight-baseline no-deletions + taxonomy + clean/main/origin + env all re-checked)
 #   after verifying the change LOCALLY on identical code (الدمام + English 'hay' → red Arabic hint).
+# 2026-07-19  ee952d2  deployed via safe-deploy.sh-equivalent (dpl_ETsb9jLXBPm2MKE37Td5iwk9wFw2,
+#   alias ezhalah-app.vercel.app confirmed→it, bundle entry-bfead172…js fresh age:0, supabase.co inlined,
+#   p_tables2 present, live الرياض search OK). PR #151 filter UI (owner 2026-07-19): (a) City+District
+#   Arabic inputs get textAlign:right + writingDirection:rtl so the CARET + «اختر المدينة أولاً» placeholder
+#   sit on the RIGHT (were on the far left); numeric area/price inputs stay LTR. (b) rangeHint gains a
+#   `both` confirm note for a valid two-sided range (was silent when both filled; min>max warn unchanged).
+#   Frontend-only. Drift gate refused the automated advance (MCP migrations not mirrored) — 0 duplicate
+#   overloads across ALL public fns confirmed (NOT PGRST203), deployed via manual equivalent; RTL caret +
+#   right-aligned district placeholder screenshot-verified locally, rangeHint both/warn/single/exact/empty unit-checked.
 # 2026-07-15/16  61194df  DELIBERATE ROLLBACK (owner-approved, "DEPLOY NOW"): the prior baseline
 #   (016bee3) was recorded via safe-deploy.sh AFTER PR #78 (42cd105) shipped — but PR #78's frontend
 #   (src/components/AdvancedQuestionCard.tsx, src/data/advancedFilters.ts, and the age-filter wiring
