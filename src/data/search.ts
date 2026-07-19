@@ -63,6 +63,11 @@ export type SearchQuery = {
   // (user request: "North Riyadh should show listings IN North Riyadh — the agent should know
   // direct.")
   districts?: string[];
+  // Display label of the district the user PICKED in the filter's District field (the clean Arabic
+  // spelling shown in the dropdown). `districts` above carries every spelling for search recall; this
+  // is purely for the human-readable summary sentence so it can read "حي X، جدة". Filter path only —
+  // the agent free-text path leaves it undefined. (owner UI request 2026-07-18.)
+  districtLabel?: string;
   // Free-text terms matched against the listing's OWN text (street_name / title / description / facade) —
   // the street / "near a mosque|school|park" / facade search. Extracted from the user's message; if real
   // matches exist we show only them, else we keep the area + a note. Never invented. (Q3.)
@@ -134,8 +139,26 @@ export type SortKey =
 export { emptyQuery } from '@/lib/searchDefaults';
 
 export const locationPhrase = (q: SearchQuery) => q.location.trim() || 'Saudi Arabia';
-const placeText = (q: SearchQuery) => (q.location.trim() ? arabicOrUnresolved(tPlace(q.location.trim())) : t('Saudi Arabia'));
-const verbText = (q: SearchQuery) => t(q.bothDeals ? 'to rent or buy' : q.deal === 'Rent' ? 'to rent' : 'to buy');
+const placeText = (q: SearchQuery) => {
+  const city = q.location.trim();
+  if (!city) return t('Saudi Arabia');
+  const cityText = arabicOrUnresolved(tPlace(city));
+  // When the user picked a district in the filter, show it in front of the city so the summary
+  // reflects exactly what was selected: "حي X، جدة". (owner UI request 2026-07-18.)
+  const dist = q.districtLabel?.trim();
+  return dist ? t('{district}, {city}', { district: arabicOrUnresolved(tPlace(dist)), city: cityText }) : cityText;
+};
+const verbText = (q: SearchQuery) => {
+  if (q.bothDeals) return t('to rent or buy');
+  if (q.deal === 'Rent') {
+    // Reflect the Monthly / Yearly the user selected in the filter's rent-period toggle. Absent
+    // (agent free-text path never sets it) → plain "to rent". (owner UI request 2026-07-18.)
+    if (q.rentPeriod === 'monthly') return t('to rent monthly');
+    if (q.rentPeriod === 'annual') return t('to rent yearly');
+    return t('to rent');
+  }
+  return t('to buy');
+};
 const whatText = (q: SearchQuery) => arabicOrTypeUnresolved(tWord(q.type ?? q.category ?? 'Property'));
 
 // A short human label for a query, used in search history. "Villa to rent in Riyadh", etc.
@@ -470,7 +493,9 @@ export function searchSummary(q: SearchQuery): string {
   if (summaryTypes.length) lines.push(`• ${t('Property Type')}: ${summaryTypes.map((x) => getLocale() === 'ar' ? arabicOrTypeUnresolved(tWord(x)) : x).join('، ')}`);
   else if (q.typeGroup) lines.push(`• ${t('Property Type')}: ${arabicOrTypeUnresolved(t(q.typeGroup))}`);
   else if (q.category) lines.push(`• ${t('Property Type')}: ${arabicOrTypeUnresolved(t(q.category))}`);
-  lines.push(`• ${t('Transaction Type')}: ${q.bothDeals ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}`);
+  // For Rent, append the Monthly / Yearly period the user picked so the summary reflects the toggle. (owner UI request 2026-07-18.)
+  const period = q.deal === 'Rent' && q.rentPeriod ? ` (${t(q.rentPeriod === 'monthly' ? 'Monthly' : 'Yearly')})` : '';
+  lines.push(`• ${t('Transaction Type')}: ${q.bothDeals ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}${period}`);
   // Platform filter line — when the user restricted to specific platforms ("Aqar only"), show which,
   // so the filter is visibly confirmed. (user: "when I type alkhaas it must be al khaas, not aqar".)
   if (q.sources && q.sources.length) {
@@ -482,6 +507,9 @@ export function searchSummary(q: SearchQuery): string {
   const locLines = locationLines(q);
   if (locLines.length) for (const l of locLines) lines.push(`• ${l}`);
   else lines.push(`• ${t('City')}: ${t('Saudi Arabia')}`);
+  // Filter path: the District field's pick is carried in districtLabel (the location match here is the
+  // CITY), so add an explicit District line so the summary reflects the chosen neighborhood. (owner UI request.)
+  if (q.districtLabel?.trim()) lines.push(`• ${t('District')}: ${arabicOrUnresolved(tPlace(q.districtLabel.trim()))}`);
   for (const b of budgetLines(q)) lines.push(`• ${b}`);
   // Category/group-level refinements (filter UI). Each has its own field, so the labels are unambiguous.
   const summaryBeds = effectiveBeds(q);

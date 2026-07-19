@@ -292,11 +292,28 @@ export default function Home() {
     // (empty field, hand-typed text never confirmed by a tap, a stale pick since edited) blocks the
     // search with an explanation instead of falling through to any free-text resolution — there is
     // no resolveLocation()/guessing path in this field anymore.
-    if (!citySelected) { setLocMsg(CITY_REQUIRED_MSG); return; }
+    if (!citySelected) {
+      setLocMsg(CITY_REQUIRED_MSG);
+      // The validation message sits at the top (under the City field), but Search is at the bottom of
+      // the card — so bring the top into view and focus the field, otherwise the user presses Search and
+      // sees nothing change. (owner UI request 2026-07-18.)
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+      cityRef.current?.focus();
+      return;
+    }
     const lm = resolveCitySelection(citySelected);
     // District is optional. When chosen, send ALL spellings of the (hamza-folded) district so search
     // recall is complete; when not, districts:undefined → city-only search (spec: City-only is valid).
-    const q = { ...query, location: lm.label, locationMatch: lm, districts: districtSelected ? districtSelected.matchValues : undefined };
+    const q = {
+      ...query,
+      location: lm.label,
+      locationMatch: lm,
+      districts: districtSelected ? districtSelected.matchValues : undefined,
+      // Clean display spelling of the picked district → drives the summary sentence ("حي X، جدة").
+      districtLabel: districtSelected ? districtSelected.districtAr : undefined,
+      // Persist the effective rent period for Rent so the summary reflects the visible Monthly/Yearly toggle.
+      rentPeriod: query.deal === 'Rent' ? (query.rentPeriod ?? 'annual') : query.rentPeriod,
+    };
     RNAnimated.timing(heroAnim, {
       toValue: 1,
       duration: 300,
@@ -356,7 +373,41 @@ export default function Home() {
       : grouped(parseInt(query.detail!, 10) || 0); // free-typed number → comma-grouped
   // RENT lets the user pick the period (Monthly / Yearly) via a tiny toggle; the engine handles each.
   const rentPeriod: 'monthly' | 'annual' = query.rentPeriod ?? 'annual';
-  const cityUp = cityFocus || query.location.length > 0;
+
+  // Selection "achievement" confirmation for the City / District fields (owner UI request 2026-07-18):
+  // on confirming a pick the field does a subtle scale pop, its border settles to green, and a green
+  // checkmark scales/fades in — so choosing a location feels like completing a step. Mirrors the
+  // OptionBox/Segmented "pop + settle" vocabulary; driven with RN Animated on the JS driver (web is the
+  // ship target and we animate border colour, which the native driver can't).
+  const cityPop = useRef(new RNAnimated.Value(0)).current;       // 0→1→0 one-shot scale pulse
+  const citySel = useRef(new RNAnimated.Value(0)).current;       // 0/1 persistent: green border + checkmark
+  const districtPop = useRef(new RNAnimated.Value(0)).current;
+  const districtSel = useRef(new RNAnimated.Value(0)).current;
+  const confirmPop = useCallback((pop: RNAnimated.Value) => {
+    pop.setValue(0);
+    RNAnimated.sequence([
+      RNAnimated.timing(pop, { toValue: 1, duration: 130, easing: RNEasing.out(RNEasing.quad), useNativeDriver: false }),
+      RNAnimated.spring(pop, { toValue: 0, stiffness: 210, damping: 9, mass: 0.5, useNativeDriver: false }),
+    ]).start();
+  }, []);
+  useEffect(() => {
+    RNAnimated.timing(citySel, { toValue: citySelected ? 1 : 0, duration: citySelected ? 220 : 140, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: false }).start();
+    if (citySelected) confirmPop(cityPop);
+  }, [citySelected, citySel, cityPop, confirmPop]);
+  useEffect(() => {
+    RNAnimated.timing(districtSel, { toValue: districtSelected ? 1 : 0, duration: districtSelected ? 220 : 140, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: false }).start();
+    if (districtSelected) confirmPop(districtPop);
+  }, [districtSelected, districtSel, districtPop, confirmPop]);
+  // Field style while/after a pick is confirmed: a scale overshoot (one-shot) + the border easing to
+  // green (persistent while selected). `sel` is the 0/1 persistent value, `pop` the one-shot pulse.
+  const confirmFieldStyle = (pop: RNAnimated.Value, sel: RNAnimated.Value) => ({
+    transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [1, 1.02] }) }],
+    borderColor: sel.interpolate({ inputRange: [0, 1], outputRange: [colors.fieldLine, colors.primary] }),
+  });
+  const checkStyle = (sel: RNAnimated.Value) => ({
+    opacity: sel,
+    transform: [{ scale: sel.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) }],
+  });
 
   // Backdrop holds at its idle level (a touch stronger on web, per request) the whole time the user
   // fills in the form — typing or focusing a field no longer touches it. It only LIGHTENS when Search
@@ -494,19 +545,17 @@ export default function Home() {
             )}
             <Segmented options={DEALS} value={query.deal} icons={DEAL_IMG} onChange={(v) => { setQuery((q) => ({ ...q, deal: v as any, priceBand: null, priceMin: null, priceMax: null, priceInput: '' })); scrollDown(catAnchorRef); }} />
 
-            {/* Location (floating label). The whole box is a tap target — tapping anywhere inside
-                (icon, label, padding) focuses the input so the user can type a city OR a neighborhood
-                from anywhere in the box, not just on the thin text line. */}
-            {/* CITY-ONLY FIELD (owner spec 2026-07-17): "أي مدينة؟" replaces the old combined
-                city-or-neighborhood field. District is explicitly out of scope for this pass — this
-                field now searches and displays CITIES ONLY, never regions/districts/landmarks/areas. */}
-            <Pressable style={[s.field, { marginTop: 12 }]} onPress={() => cityRef.current?.focus()}>
+            {/* CITY-ONLY FIELD (owner spec 2026-07-17): "أي مدينة؟". Field now searches/displays CITIES
+                ONLY, never regions/districts/landmarks/areas. The label sits ABOVE the field, far-right
+                (RTL) — a static header, not a floating placeholder. (owner UI request 2026-07-18.)
+                The whole box is a tap target — tapping anywhere inside focuses the input. */}
+            <Text style={[s.fieldLabelAbove, { marginTop: 12 }]}>{t('Which city?')}</Text>
+            <AnimatedPressable style={[s.field, confirmFieldStyle(cityPop, citySel)]} onPress={() => cityRef.current?.focus()}>
               <Ionicons name="location-outline" size={18} color={colors.muted} />
               <View style={s.flWrap}>
-                <Text style={[s.flLabel, cityUp && s.flLabelUp]}>{t('Which city?')}</Text>
                 <TextInput
                   ref={cityRef}
-                  style={[s.flInput, cityUp && s.flInputUp]}
+                  style={s.flInput}
                   value={query.location}
                   autoCorrect={false}
                   onFocus={() => {
@@ -549,12 +598,18 @@ export default function Home() {
                   }}
                 />
               </View>
+              {/* Confirmed pick → a green checkmark scales/fades in (owner UI request). */}
+              {citySelected ? (
+                <RNAnimated.View style={checkStyle(citySel)} pointerEvents="none">
+                  <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+                </RNAnimated.View>
+              ) : null}
               {query.location.length > 0 && (
                 <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(6)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
                 </Pressable>
               )}
-            </Pressable>
+            </AnimatedPressable>
 
             {locMsg ? (
               <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{locMsg}</Text>
@@ -601,19 +656,25 @@ export default function Home() {
                 canonical city_id. Empty focus → Top-6 by active-listing count; typing → the COMPLETE
                 canonical district catalog for that city (incl. zero-listing). Another city's districts
                 can never appear (data is fetched per city_id); changing the city clears it. Optional. */}
-            <Pressable
-              style={[s.field, { marginTop: 12 }, !citySelected && { opacity: 0.5 }]}
+            {/* Static label above, far-right (RTL): "أي حي؟" with a lighter "اختياري" beside it — the
+                optional-ness is its own label, not baked into the field placeholder. (owner UI request.) */}
+            <Text style={[s.fieldLabelAbove, { marginTop: 12 }]}>
+              {t('Which neighborhood?')}
+              {'  '}
+              <Text style={s.fieldLabelOptional}>{t('Optional')}</Text>
+            </Text>
+            <AnimatedPressable
+              style={[s.field, confirmFieldStyle(districtPop, districtSel), !citySelected && { opacity: 0.5 }]}
               onPress={() => { if (citySelected) districtRef.current?.focus(); }}
             >
               <Image source={LOC_IMG.district} style={{ width: 18, height: 18, resizeMode: 'contain' }} />
               <View style={s.flWrap}>
-                <Text style={[s.flLabel, (!!districtText || !!districtSelected) && s.flLabelUp]}>
-                  {citySelected ? t('Which district? (optional)') : t('Select a city first')}
-                </Text>
                 <TextInput
                   ref={districtRef}
                   editable={!!citySelected}
-                  style={[s.flInput, (!!districtText || !!districtSelected) && s.flInputUp]}
+                  style={s.flInput}
+                  placeholder={citySelected ? '' : t('Select a city first')}
+                  placeholderTextColor={colors.muted}
                   value={districtText}
                   autoCorrect={false}
                   onFocus={() => {
@@ -641,6 +702,12 @@ export default function Home() {
                   }}
                 />
               </View>
+              {/* Confirmed pick → a green checkmark scales/fades in (owner UI request). */}
+              {districtSelected ? (
+                <RNAnimated.View style={checkStyle(districtSel)} pointerEvents="none">
+                  <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+                </RNAnimated.View>
+              ) : null}
               {districtText.length > 0 && (
                 <Pressable onPress={() => {
                   districtTextRef.current = '';
@@ -652,7 +719,7 @@ export default function Home() {
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
                 </Pressable>
               )}
-            </Pressable>
+            </AnimatedPressable>
 
             {citySelected && districtFocus && districtSuggestions.length > 0 && (
               <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
@@ -671,12 +738,10 @@ export default function Home() {
                   >
                     <Image source={LOC_IMG.district} style={s.suggLocIcon} />
                     <View style={{ flex: 1 }}>
+                      {/* Top-6 are still chosen by active-listing count, but the count itself is no
+                          longer shown — just the district name. Every row (incl. zero-listing catalog
+                          districts) is rendered unconditionally and selectable. (owner UI request 2026-07-18.) */}
                       <Text style={s.suggCity}>{opt.districtAr}</Text>
-                      {/* Count shown only for districts that HAVE active listings; zero-listing catalog
-                          districts are still selectable (they just return an honest empty result). */}
-                      {opt.listingCount > 0 ? (
-                        <Text style={s.suggDist}>{grouped(opt.listingCount)}</Text>
-                      ) : null}
                     </View>
                   </Tappable>
                 ))}
@@ -1021,6 +1086,10 @@ const s = StyleSheet.create({
   rangeHeadLabel: { marginBottom: 0 },
   rangeBoxIcon: { width: 15, height: 15, resizeMode: 'contain' },
 
+  // Static field label sitting ABOVE the City / District inputs, aligned to the far right for the
+  // Arabic RTL layout, with consistent spacing. (owner UI request 2026-07-18.)
+  fieldLabelAbove: { fontSize: 13, fontWeight: '700', color: colors.primary, textAlign: 'right', writingDirection: 'rtl', marginBottom: 7, marginHorizontal: 2 },
+  fieldLabelOptional: { fontSize: 11.5, fontWeight: '600', color: colors.muted },
   flWrap: { flex: 1, height: 52, justifyContent: 'center', position: 'relative', ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
   flLabel: { position: 'absolute', left: 0, top: 17, fontSize: 14, color: colors.muted, ...(Platform.OS === 'web' ? { cursor: 'text' as any, transitionProperty: 'top, font-size, color' as any, transitionDuration: '140ms' as any } : {}) },
   flLabelUp: { top: 7, fontSize: 10, color: colors.primary, fontWeight: '600' },

@@ -98,8 +98,12 @@ check(
   SEARCH_NOWS.includes('alt:arabicOrUnresolved(cityDisplay(alt.cityEn,getLocale()))'),
 );
 check(
-  'placeText() (search-history label) wraps tPlace() in arabicOrUnresolved()',
-  SEARCH_NOWS.includes("constplaceText=(q:SearchQuery)=>(q.location.trim()?arabicOrUnresolved(tPlace(q.location.trim()))"),
+  // placeText() was expanded (owner UI request 2026-07-18) to prepend the picked district before the
+  // city ("حي X، جدة") — both the city and the district value must still pass through arabicOrUnresolved()
+  // so an out-of-catalog English place can never leak into the Arabic summary.
+  'placeText() wraps BOTH the city and the district in arabicOrUnresolved(tPlace(...))',
+  SEARCH_NOWS.includes('constcityText=arabicOrUnresolved(tPlace(city))')
+    && SEARCH_NOWS.includes('district:arabicOrUnresolved(tPlace(dist))'),
 );
 check(
   'querySummaryLine() wraps tPlace() in arabicOrUnresolved()',

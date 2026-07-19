@@ -150,7 +150,10 @@ check(
   /void ensureCityFieldIndex\(\)\.then\(\(\) => \{[\s\S]{0,700}?if \(cityTextRef\.current\) \{[\s\S]{0,200}?setCitySuggestions\(latin \? \[\] : matchCitiesByText\(cityTextRef\.current\)\);/.test(indexSrc),
 );
 check('onChangeText clears citySelected on every keystroke (never silently reuses a stale pick)', /onChangeText=\{\(v\) => \{[\s\S]{0,300}?setCitySelected\(null\)/.test(indexSrc));
-check('onSearch blocks when citySelected is falsy, using CITY_REQUIRED_MSG (never calls the old free-text resolveLocation guessing path)', /if \(!citySelected\) \{ setLocMsg\(CITY_REQUIRED_MSG\); return; \}/.test(indexSrc));
+check('onSearch blocks when citySelected is falsy, using CITY_REQUIRED_MSG (never calls the old free-text resolveLocation guessing path)', /if \(!citySelected\) \{[\s\S]{0,600}?setLocMsg\(CITY_REQUIRED_MSG\);[\s\S]{0,600}?return;/.test(indexSrc));
+// Owner UI request 2026-07-18: a blocked search must scroll the page to the top so the (top-of-card)
+// validation message is actually visible — the Search button is at the bottom.
+check('a blocked search scrolls to the top so the validation message is visible', /if \(!citySelected\) \{[\s\S]{0,320}?scrollRef\.current\?\.scrollTo\(\{ y: 0/.test(indexSrc));
 check('the selection handler stores the FULL CityOption in citySelected (city_id-keyed, not just the display string)', /onPress=\{\(\) => \{[\s\S]{0,200}?setQuery\(\(q\) => \(\{ \.\.\.q, location: opt\.cityAr \}\)\);\s*setCitySelected\(opt\)/.test(indexSrc));
 
 check('i18n.tsx defines CITY_REQUIRED_MSG as a genuine Arabic string', /export const CITY_REQUIRED_MSG = '[^']*[ء-ي][^']*';/.test(i18nSrc));
