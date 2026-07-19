@@ -627,7 +627,7 @@ const AR: Record<string, string> = {
   'No listings in that price range — there are matches outside it. Want me to remove the price filter?':
     'ما فيه إعلانات في نطاق السعر هذا — فيه نتائج خارجه. أزيل فلتر السعر؟',
   'Refine your search': 'خصص بحثك أكثر',
-  'Select bedrooms or area, or leave both empty to see all options': 'اختر عدد غرف النوم أو المساحة، أو اتركها فاضية لعرض كل الخيارات',
+  'Select bedrooms and/or area, or leave both empty to see all options': 'اختر عدد غرف النوم و/أو المساحة، أو اتركها فاضية لعرض كل الخيارات',
   'Any count': 'أي عدد',
   'Beds': 'غرف',
   'Baths': 'حمامات',
