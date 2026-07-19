@@ -11,6 +11,7 @@ import { cityDisplay } from './locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { mergeDiversitySeed, filterBoosted, orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
+import saLocations from './sa-locations.json';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
 function relGroupOf(rel: string): string {
@@ -208,6 +209,27 @@ function isJunkLocationToken(raw: string | null | undefined): boolean {
   return JUNK_LOCATION_TOKENS.has((raw ?? '').trim().toLowerCase());
 }
 
+// Bug-fix (P0, audit `duplicate-city-false-empty` 2026-07-18): CITY_AR above is a hand-maintained
+// dictionary that has drifted out of sync with the catalog's actual spellings — e.g. it has 'hofuf'
+// but the catalog spells the city "Al Hafuf"; it has 'al quwayiyah' but the catalog spells it "Al
+// Quway'iyah" (apostrophe); it has 'al baha'/'al bahah' but one of the two real الباحة catalog rows
+// is bare "Bahah" (no article). Any city whose catalog spelling doesn't happen to match a hand-typed
+// CITY_AR key fell through to `|| en`, sending the untranslated ENGLISH name to the Arabic-indexed
+// search RPC → a false, silent "no listings" for a real city (confirmed live: 758/280/740 hidden
+// rows for these three; up to ~1,003 twin-named catalog cities share this gap).
+//
+// Fix: derive a second lookup DIRECTLY from sa-locations.json's own [city_id, region_id, name_en,
+// name_ar] rows — the catalog already carries the correct Arabic spelling for every city it lists,
+// so this can never drift out of sync the way a separate hand-typed dictionary can. Built once at
+// module load (4,581 rows, negligible cost). Where a handful of catalog rows share the same English
+// name with two DIFFERING Arabic spellings (39 cases, all minor transliteration variants like
+// الأخضر/الاخضر — not different cities), first-occurrence wins, deterministically.
+const CITY_AR_FROM_CATALOG: Record<string, string> = {};
+for (const row of (saLocations as unknown as { cities: [number, number, string, string][] }).cities) {
+  const key = row[2].trim().toLowerCase();
+  if (!(key in CITY_AR_FROM_CATALOG)) CITY_AR_FROM_CATALOG[key] = row[3];
+}
+
 function arCity(en: string | null): string | null {
   if (!en) return null;
   const k = en.trim().toLowerCase();
@@ -220,7 +242,10 @@ function arCity(en: string | null): string | null {
   // ("khobar", "taif", "jubail"). Without the article-stripped fallback the resolver's own city output
   // missed the map and the ENGLISH name reached the RPC (which matches the Arabic `city` column) → 0
   // results for WHOLE cities (الخبر 6089, etc.) in BOTH Filter and Chat. (city-canonical fix 2026-06-27.)
-  return CITY_AR[k] || CITY_AR[k.replace(/^(?:al|at|ad|as|ar|az|an|ash)\s+/, '')] || en;
+  const stripped = k.replace(/^(?:al|at|ad|as|ar|az|an|ash)\s+/, '');
+  return CITY_AR[k] || CITY_AR[stripped]
+    || CITY_AR_FROM_CATALOG[k] || CITY_AR_FROM_CATALOG[stripped]
+    || en;
 }
 
 // Region name → region_id, mirrors loc_catalog_region (13 stable rows). Used to pass p_region_ids to
