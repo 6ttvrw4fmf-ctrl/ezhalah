@@ -41,6 +41,9 @@ check('Top-6 = districts with active listings only (listingCount > 0)', /listing
 check('autocomplete searches the COMPLETE cached catalog for the city', /export function matchDistrictsByCityId/.test(locSrc));
 check('empty focus shows Top-6 via topDistrictsForCityId', /topDistrictsForCityId\(cid, 6\)/.test(indexSrc));
 check('typing filters within the chosen city via matchDistrictsByCityId', /matchDistrictsByCityId\(citySelected\.cityId, v\)/.test(indexSrc));
+// Arabic-only: typing the district in English yields NO autocomplete and the same Arabic hint the City
+// field shows (owner UI request 2026-07-18) — every district name is Arabic, so there's nothing to match.
+check('English district input shows the Arabic-only hint and clears suggestions', /const latin = isLatinOnlyInput\(v\);[\s\S]{0,220}?setDistrictSuggestions\(latin \? \[\][\s\S]{0,220}?setDistrictMsg\(latin \? ARABIC_ONLY_MSG/.test(indexSrc));
 
 // ── Dropdown shows the Top-6 WITHOUT listing numbers (owner UI request 2026-07-18). Top-6 is still
 //    SELECTED by active-listing count (asserted above, in locations.ts), but the count is no longer

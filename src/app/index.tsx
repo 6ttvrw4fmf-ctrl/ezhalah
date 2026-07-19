@@ -157,6 +157,7 @@ export default function Home() {
   const [districtSuggestions, setDistrictSuggestions] = useState<DistrictOption[]>([]);
   const [districtSelected, setDistrictSelected] = useState<DistrictOption | null>(null);
   const [districtFocus, setDistrictFocus] = useState(false);
+  const [districtMsg, setDistrictMsg] = useState(''); // Arabic-only: shown when the user types the district in English
   const districtRef = useRef<TextInput>(null);
   const districtTextRef = useRef('');
   // One place to wipe all district state — called wherever the city changes/clears.
@@ -166,6 +167,7 @@ export default function Home() {
     setDistrictSelected(null);
     setDistrictSuggestions([]);
     setDistrictFocus(false);
+    setDistrictMsg('');
   };
   const cityRef = useRef<TextInput>(null);
   // Mirrors query.location synchronously (state updates are async/batched) so the Top-6-on-focus
@@ -697,8 +699,12 @@ export default function Home() {
                     // Editing invalidates a prior pick — a typed-but-unconfirmed district is never searched.
                     setDistrictSelected(null);
                     if (!citySelected) return;
-                    // Empty → Top-6; text → search the COMPLETE canonical catalog for THIS city only.
-                    setDistrictSuggestions(matchDistrictsByCityId(citySelected.cityId, v));
+                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, 6)); setDistrictMsg(''); return; }
+                    // Arabic-only product: English typing gets NO autocomplete and the same Arabic hint the
+                    // City field shows — every district name here is Arabic, so there is nothing to match. (owner UI request.)
+                    const latin = isLatinOnlyInput(v);
+                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, v));
+                    setDistrictMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
               </View>
@@ -713,6 +719,7 @@ export default function Home() {
                   districtTextRef.current = '';
                   setDistrictText('');
                   setDistrictSelected(null);
+                  setDistrictMsg('');
                   if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, 6));
                   districtRef.current?.focus();
                 }} hitSlop={8}>
@@ -720,6 +727,10 @@ export default function Home() {
                 </Pressable>
               )}
             </AnimatedPressable>
+
+            {districtMsg ? (
+              <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{districtMsg}</Text>
+            ) : null}
 
             {citySelected && districtFocus && districtSuggestions.length > 0 && (
               <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
@@ -734,6 +745,7 @@ export default function Home() {
                       setDistrictSelected(opt);
                       setDistrictSuggestions([]);
                       setDistrictFocus(false);
+                      setDistrictMsg('');
                     }}
                   >
                     <Image source={LOC_IMG.district} style={s.suggLocIcon} />
