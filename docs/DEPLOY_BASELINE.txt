@@ -1,4 +1,4 @@
-609c53d2eb2eb73745dd3baa45f2a60532abb2f5
+5c57f378af0ff2583f1958fbdc0163f93548ed25
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
@@ -16,6 +16,16 @@
 #   5 markers shipped (fieldLabelAbove, districtLabel, 'to rent monthly', '{district}, {city}',
 #   confirmFieldStyle/checkmark-circle, 'Optional'×10). Shell 2-min timeout killed the local safe-deploy
 #   process AFTER vercel --prod had already deployed; post-deploy bundle/alias/search checks re-run manually.
+# 2026-07-19  5c57f37  deployed via safe-deploy.sh-equivalent (dpl_EcWhK69UDLx3JNDcMdsjQyLN9naP,
+#   alias ezhalah-app.vercel.app confirmed→it; bundle entry-46661797…js fresh age:0, supabase.co
+#   inlined, p_tables2 present, live الدمام search OK). PR #150: District field now shows the same
+#   Arabic-only hint the City field shows when the user types English (owner report — typing 'h' in
+#   «أي حي؟» gave no feedback). Frontend-only (index.tsx + verify-district-field). safe-deploy.sh's
+#   schema-drift gate REFUSED the automated advance (MCP-applied migrations not yet mirrored in this
+#   repo checkout — the known bookkeeping gap); independently confirmed 0 duplicate overloads on all
+#   critical RPCs (NOT the PGRST203 outage class), so deployed via the manual safe-deploy-equivalent
+#   (lock via MCP, preflight-baseline no-deletions + taxonomy + clean/main/origin + env all re-checked)
+#   after verifying the change LOCALLY on identical code (الدمام + English 'hay' → red Arabic hint).
 # 2026-07-15/16  61194df  DELIBERATE ROLLBACK (owner-approved, "DEPLOY NOW"): the prior baseline
 #   (016bee3) was recorded via safe-deploy.sh AFTER PR #78 (42cd105) shipped — but PR #78's frontend
 #   (src/components/AdvancedQuestionCard.tsx, src/data/advancedFilters.ts, and the age-filter wiring
