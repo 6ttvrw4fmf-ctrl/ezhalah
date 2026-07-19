@@ -42,8 +42,11 @@ check('autocomplete searches the COMPLETE cached catalog for the city', /export 
 check('empty focus shows Top-6 via topDistrictsForCityId', /topDistrictsForCityId\(cid, 6\)/.test(indexSrc));
 check('typing filters within the chosen city via matchDistrictsByCityId', /matchDistrictsByCityId\(citySelected\.cityId, v\)/.test(indexSrc));
 
-// ── Zero-listing districts stay findable (count shown only when > 0, but row still selectable) ──
-check('zero-listing districts are still rendered (count is conditional, row is not)', /opt\.listingCount > 0 \? \(/.test(indexSrc));
+// ── Dropdown shows the Top-6 WITHOUT listing numbers (owner UI request 2026-07-18). Top-6 is still
+//    SELECTED by active-listing count (asserted above, in locations.ts), but the count is no longer
+//    displayed; every row (incl. zero-listing catalog districts) renders its name unconditionally. ──
+check('district dropdown no longer displays the listing count', !/grouped\(opt\.listingCount\)/.test(indexSrc) && !/\{opt\.listingCount\}/.test(indexSrc));
+check('every district row renders its name unconditionally (zero-listing districts still selectable)', /<Text style=\{s\.suggCity\}>\{opt\.districtAr\}<\/Text>/.test(indexSrc));
 
 console.log(failed === 0 ? '\n✓ all district-field assertions passed' : `\n✗ ${failed} district-field assertion(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

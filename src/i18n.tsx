@@ -152,8 +152,15 @@ const AR: Record<string, string> = {
   'Buy': 'شراء',
   'to rent': 'للإيجار',
   'to buy': 'للبيع',
+  // Rent verb with the payment period the user picked (Monthly / Yearly) so the summary sentence
+  // reflects the toggle exactly — "أبحث عن شقة للإيجار الشهري في جدة". (owner UI request 2026-07-18.)
+  'to rent monthly': 'للإيجار الشهري',
+  'to rent yearly': 'للإيجار السنوي',
   'to rent or buy': 'للإيجار أو الشراء',
   'Rent or Buy': 'إيجار أو شراء',
+  // District, and the "district، city" place phrase used when the user picked a district in the filter.
+  'District': 'الحي',
+  '{district}, {city}': '{district}، {city}',
   '{a}/year': '{a}/سنوياً',
 
   // Categories
@@ -250,6 +257,7 @@ const AR: Record<string, string> = {
   'Rent or buy?': 'إيجار أم شراء؟',
   'Which city?': 'أي مدينة؟',
   'Which district? (optional)': 'أي حي؟ (اختياري)',
+  'Optional': 'اختياري',
   'Select a city first': 'اختر المدينة أولاً',
   'Property category?': 'فئة العقار؟',
   'Property type?': 'نوع العقار؟',
