@@ -700,6 +700,79 @@ export function topCitiesByListings(k = 6): CityOption[] {
   return CITY_FIELD_OPTIONS.slice(0, k);
 }
 
+// ── District field (city_id-scoped) — mirrors the City field. ────────────────────────────────────
+// Data comes from the district_options_ar(city_id) RPC, which returns the COMPLETE canonical district
+// catalog for ONE city (incl. zero-listing districts, so every valid district stays findable), with
+// live active-listing counts for the Top-6 popularity ranking, and match_values = every raw spelling
+// of a hamza-twin (الصفا/الصفاء) so a pick searches ALL variants — full recall WITHOUT changing the
+// global search tokenizer. Loaded once per city (on selection) and cached, same shape as the city pool.
+export type DistrictOption = {
+  districtAr: string;    // display: the most-popular spelling of the (hamza-folded) district
+  listingCount: number;  // active listings in THIS city; 0 = a valid catalog district, still searchable
+  matchValues: string[]; // every spelling to send to p_districts (twin-safe recall)
+};
+
+const _districtCache = new Map<number, DistrictOption[]>();
+const _districtPromises = new Map<number, Promise<DistrictOption[]>>();
+
+// Load (once, cached) the full district catalog for a city_id. Never falls back to another city.
+export async function ensureDistrictOptions(cityId: number): Promise<DistrictOption[]> {
+  const cached = _districtCache.get(cityId);
+  if (cached) return cached;
+  const inflight = _districtPromises.get(cityId);
+  if (inflight) return inflight;
+  const p = (async () => {
+    if (!supabase) return [];
+    try {
+      const _ac = new AbortController();
+      const _t = setTimeout(() => _ac.abort(), 15000);
+      let data: any = null;
+      try {
+        ({ data } = await supabase.rpc('district_options_ar', { p_city_id: cityId }).abortSignal(_ac.signal));
+      } finally {
+        clearTimeout(_t);
+      }
+      if (data) {
+        const opts: DistrictOption[] = (data as any[]).map((r) => ({
+          districtAr: r.district_ar,
+          listingCount: Number(r.listing_count) || 0,
+          matchValues: Array.isArray(r.match_values) && r.match_values.length ? r.match_values : [r.district_ar],
+        }));
+        _districtCache.set(cityId, opts);
+        return opts;
+      }
+      return [];
+    } catch {
+      _districtPromises.delete(cityId); // same retry-on-failure pattern as ensureCityFieldIndex
+      return [];
+    }
+  })();
+  _districtPromises.set(cityId, p);
+  return p;
+}
+
+// Top-6 suggestions on empty focus: ONLY districts with active listings, ranked by count (the RPC
+// already returns rows ordered by listing_count desc, so this is a filter + slice).
+export function topDistrictsForCityId(cityId: number, k = 6): DistrictOption[] {
+  return (_districtCache.get(cityId) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
+}
+
+// Typing: search the COMPLETE canonical catalog for THIS city (incl. zero-listing districts) by Arabic
+// substring, using the SAME norm() folding as the city field. Empty query → the Top-6 suggestions.
+export function matchDistrictsByCityId(cityId: number, query: string): DistrictOption[] {
+  const all = _districtCache.get(cityId) ?? [];
+  const q = norm(query);
+  if (!q) return all.filter((d) => d.listingCount > 0).slice(0, 6);
+  const scored: { opt: DistrictOption; rank: number }[] = [];
+  for (const opt of all) {
+    const n = norm(opt.districtAr);
+    if (n.startsWith(q)) scored.push({ opt, rank: 0 });
+    else if (n.includes(q)) scored.push({ opt, rank: 1 });
+  }
+  scored.sort((a, b) => a.rank - b.rank || b.opt.listingCount - a.opt.listingCount);
+  return scored.slice(0, 30).map((s) => s.opt);
+}
+
 // Arabic-only prefix/substring match against city names, for the typed-autocomplete state. Reuses
 // the SAME norm() folding used everywhere else in this file (أإآٱ→ا, ة→ه, ى/ي→ي, diacritics/
 // tatweel stripped, then non-letter/digit chars dropped) — the same folding the DB's own

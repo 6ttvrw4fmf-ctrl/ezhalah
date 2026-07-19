@@ -11,7 +11,7 @@ import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
 import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
-import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption } from '@/data/locations';
+import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption } from '@/data/locations';
 import { grouped, type SearchQuery } from '@/data/search';
 import { HOME_DEFAULT_QUERY, hasActiveFilters } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
@@ -150,6 +150,23 @@ export default function Home() {
   const [citySelected, setCitySelected] = useState<CityOption | null>(null);
   const [cityFocus, setCityFocus] = useState(false);
   const [locMsg, setLocMsg] = useState(''); // Arabic-only: shown when the user types the city in English
+  // District: strictly under City, disabled until a city is chosen, scoped to citySelected.cityId.
+  // districtSelected is the source of truth passed to search (its matchValues → p_districts); it is
+  // cleared on every city change/keystroke so a stale cross-city district can never leak.
+  const [districtText, setDistrictText] = useState('');
+  const [districtSuggestions, setDistrictSuggestions] = useState<DistrictOption[]>([]);
+  const [districtSelected, setDistrictSelected] = useState<DistrictOption | null>(null);
+  const [districtFocus, setDistrictFocus] = useState(false);
+  const districtRef = useRef<TextInput>(null);
+  const districtTextRef = useRef('');
+  // One place to wipe all district state — called wherever the city changes/clears.
+  const clearDistrict = () => {
+    districtTextRef.current = '';
+    setDistrictText('');
+    setDistrictSelected(null);
+    setDistrictSuggestions([]);
+    setDistrictFocus(false);
+  };
   const cityRef = useRef<TextInput>(null);
   // Mirrors query.location synchronously (state updates are async/batched) so the Top-6-on-focus
   // promise callback above can check the TRUE current text at resolution time, not a stale closure.
@@ -277,7 +294,9 @@ export default function Home() {
     // no resolveLocation()/guessing path in this field anymore.
     if (!citySelected) { setLocMsg(CITY_REQUIRED_MSG); return; }
     const lm = resolveCitySelection(citySelected);
-    const q = { ...query, location: lm.label, locationMatch: lm, districts: undefined };
+    // District is optional. When chosen, send ALL spellings of the (hamza-folded) district so search
+    // recall is complete; when not, districts:undefined → city-only search (spec: City-only is valid).
+    const q = { ...query, location: lm.label, locationMatch: lm, districts: districtSelected ? districtSelected.matchValues : undefined };
     RNAnimated.timing(heroAnim, {
       toValue: 1,
       duration: 300,
@@ -462,6 +481,7 @@ export default function Home() {
                     setCitySelected(null);
                     setLocMsg('');
                     setCityFocus(false);
+                    clearDistrict();
                     // The collapsing Property-type/Refine sections can leave the user stranded mid-page —
                     // scroll back to the top so the reset filter form is what they actually see.
                     scrollRef.current?.scrollTo({ y: 0, animated: true });
@@ -514,6 +534,7 @@ export default function Home() {
                     // Any edit invalidates a prior tap — a stale selection must never be silently
                     // reused (spec: "never guess a location").
                     setCitySelected(null);
+                    clearDistrict(); // editing the city disables + clears District (no cross-city carry-over)
                     if (!v) {
                       // Cleared back to empty → the Top 6 list, same as a fresh focus.
                       setCitySuggestions(topCitiesByListings(6));
@@ -529,7 +550,7 @@ export default function Home() {
                 />
               </View>
               {query.location.length > 0 && (
-                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); setCitySuggestions(topCitiesByListings(6)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
+                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(6)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
                 </Pressable>
               )}
@@ -553,6 +574,10 @@ export default function Home() {
                       setCitySuggestions([]);
                       setCityFocus(false);
                       setLocMsg('');
+                      // New city → drop any prior district and warm THIS city's district catalog so the
+                      // District field (now enabled) shows its Top-6 instantly on first focus.
+                      clearDistrict();
+                      void ensureDistrictOptions(opt.cityId);
                       scrollDown(catAnchorRef); // carry them down to the next step (category)
                     }}
                   >
@@ -565,6 +590,92 @@ export default function Home() {
                           case showing it is the only way the user can tell them apart. */}
                       {hasNameCollision(citySuggestions, opt.cityAr) && opt.regionAr ? (
                         <Text style={s.suggDist}>{opt.regionAr}</Text>
+                      ) : null}
+                    </View>
+                  </Tappable>
+                ))}
+              </ScrollView>
+            )}
+
+            {/* DISTRICT — strictly under City. Disabled until a city is chosen; scoped to that city's
+                canonical city_id. Empty focus → Top-6 by active-listing count; typing → the COMPLETE
+                canonical district catalog for that city (incl. zero-listing). Another city's districts
+                can never appear (data is fetched per city_id); changing the city clears it. Optional. */}
+            <Pressable
+              style={[s.field, { marginTop: 12 }, !citySelected && { opacity: 0.5 }]}
+              onPress={() => { if (citySelected) districtRef.current?.focus(); }}
+            >
+              <Image source={LOC_IMG.district} style={{ width: 18, height: 18, resizeMode: 'contain' }} />
+              <View style={s.flWrap}>
+                <Text style={[s.flLabel, (!!districtText || !!districtSelected) && s.flLabelUp]}>
+                  {citySelected ? t('Which district? (optional)') : t('Select a city first')}
+                </Text>
+                <TextInput
+                  ref={districtRef}
+                  editable={!!citySelected}
+                  style={[s.flInput, (!!districtText || !!districtSelected) && s.flInputUp]}
+                  value={districtText}
+                  autoCorrect={false}
+                  onFocus={() => {
+                    if (!citySelected) return;
+                    setDistrictFocus(true);
+                    // Empty focus → Top-6 popular districts in the chosen city. Same race-guard as the
+                    // city field: the options load async (though usually pre-warmed on city select), so
+                    // re-check the live text via districtTextRef before showing the Top-6.
+                    if (!districtTextRef.current) {
+                      const cid = citySelected.cityId;
+                      void ensureDistrictOptions(cid).then(() => {
+                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, 6));
+                      });
+                    }
+                  }}
+                  onBlur={() => setTimeout(() => setDistrictFocus(false), 150)}
+                  onChangeText={(v) => {
+                    districtTextRef.current = v;
+                    setDistrictText(v);
+                    // Editing invalidates a prior pick — a typed-but-unconfirmed district is never searched.
+                    setDistrictSelected(null);
+                    if (!citySelected) return;
+                    // Empty → Top-6; text → search the COMPLETE canonical catalog for THIS city only.
+                    setDistrictSuggestions(matchDistrictsByCityId(citySelected.cityId, v));
+                  }}
+                />
+              </View>
+              {districtText.length > 0 && (
+                <Pressable onPress={() => {
+                  districtTextRef.current = '';
+                  setDistrictText('');
+                  setDistrictSelected(null);
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, 6));
+                  districtRef.current?.focus();
+                }} hitSlop={8}>
+                  <Ionicons name="close-circle" size={18} color={colors.muted} />
+                </Pressable>
+              )}
+            </Pressable>
+
+            {citySelected && districtFocus && districtSuggestions.length > 0 && (
+              <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                {districtSuggestions.map((opt, i) => (
+                  <Tappable
+                    key={opt.districtAr + '#' + i}
+                    dip={0.03}
+                    style={[s.suggRow, i < districtSuggestions.length - 1 && s.suggDivider]}
+                    onPress={() => {
+                      districtTextRef.current = opt.districtAr;
+                      setDistrictText(opt.districtAr);
+                      setDistrictSelected(opt);
+                      setDistrictSuggestions([]);
+                      setDistrictFocus(false);
+                    }}
+                  >
+                    <Image source={LOC_IMG.district} style={s.suggLocIcon} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.suggCity}>{opt.districtAr}</Text>
+                      {/* Count shown only for districts that HAVE active listings; zero-listing catalog
+                          districts are still selectable (they just return an honest empty result). */}
+                      {opt.listingCount > 0 ? (
+                        <Text style={s.suggDist}>{grouped(opt.listingCount)}</Text>
                       ) : null}
                     </View>
                   </Tappable>
