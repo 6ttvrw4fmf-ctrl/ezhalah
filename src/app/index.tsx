@@ -857,7 +857,7 @@ export default function Home() {
               <Reveal style={s.pick}>
                 <View style={s.ctxBox}>
                   <Text style={s.ctxTitle}>{t('Refine your search')}</Text>
-                  <Text style={s.ctxSub}>{t('Select bedrooms or area, or leave both empty to see all options')}</Text>
+                  <Text style={s.ctxSub}>{t('Select bedrooms and/or area, or leave both empty to see all options')}</Text>
 
                   {ctx.showBeds && (
                     <>
@@ -873,10 +873,8 @@ export default function Home() {
                               if (opt === 'any') return { ...q, contextBedsList: null, contextBeds: null, priceBand: null };
                               const cur = q.contextBedsList ?? [];
                               const next = cur.includes(opt) ? cur.filter((x) => x !== opt) : [...cur, opt];
-                              const clearArea = next.length ? null : undefined;
                               return { ...q, contextBedsList: next.length ? next : null, contextBeds: null,
                                 contextSize: next.length ? null : q.contextSize,
-                                areaMin: clearArea === null ? null : q.areaMin, areaMax: clearArea === null ? null : q.areaMax,
                                 priceBand: null };
                             }); scrollDown(); }}
                             style={s.wrapCell}
@@ -886,9 +884,9 @@ export default function Home() {
                     </>
                   )}
 
-                  {/* AREA range (من / إلى م²) — shown only when no bedroom is selected (beds XOR area).
-                      Typing in either box clears the bedroom selection. min only → ≥, max only → ≤. */}
-                  {(!ctx.showBeds || !(query.contextBedsList?.length)) && (
+                  {/* AREA range (من / إلى م²) — always shown alongside bedrooms (both supported by the RPC).
+                      min only → ≥, max only → ≤. */}
+                  {ctx?.showSize && (
                     <>
                       <View style={[s.rangeHead, ctx.showBeds ? { marginTop: 14 } : null]}>
                         <Image source={RANGE_ICON.areaHead} style={s.rangeHeadIcon} />
@@ -904,7 +902,7 @@ export default function Home() {
                               hard-caps the stored digits too, covering PASTE (maxLength can't police programmatic sets). */}
                           <TextInput ref={mergeLtrRef(areaMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
                             value={areaMinValue}
-                            onKeyPress={wholeNumberKeyGuard('areaMin')} onFocus={() => clearFracLock('areaMin')} onSelectionChange={() => clearFracLock('areaMin')} onChangeText={(v) => { clearFracLock('areaMin'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
+                            onKeyPress={wholeNumberKeyGuard('areaMin')} onFocus={() => clearFracLock('areaMin')} onSelectionChange={() => clearFracLock('areaMin')} onChangeText={(v) => { clearFracLock('areaMin'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
                         </Pressable>
                         <Pressable style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(areaMaxRef)}>
@@ -912,7 +910,7 @@ export default function Home() {
                           <Text style={s.rangeLabel}>{t('To')}</Text>
                           <TextInput ref={mergeLtrRef(areaMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
                             value={areaMaxValue}
-                            onKeyPress={wholeNumberKeyGuard('areaMax')} onFocus={() => clearFracLock('areaMax')} onSelectionChange={() => clearFracLock('areaMax')} onChangeText={(v) => { clearFracLock('areaMax'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
+                            onKeyPress={wholeNumberKeyGuard('areaMax')} onFocus={() => clearFracLock('areaMax')} onSelectionChange={() => clearFracLock('areaMax')} onChangeText={(v) => { clearFracLock('areaMax'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
                         </Pressable>
                       </View>

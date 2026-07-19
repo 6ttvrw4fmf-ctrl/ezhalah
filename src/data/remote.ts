@@ -447,7 +447,7 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   return {
     p_deal: q.bothDeals ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
     p_rent_period: rentPeriodParam(q),
-    p_cities: cities,
+    p_cities: cities && cities.length ? cities : null,
     p_districts: q.districts && q.districts.length ? q.districts : null,
     p_tables: mainTables,
     p_platforms: q.sources && q.sources.length ? q.sources : null,
