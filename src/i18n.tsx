@@ -318,6 +318,12 @@ const AR: Record<string, string> = {
   'Skip': 'تخطي',
   'Skip remaining questions and search now': 'تخطي الباقي وابحث الآن',
   'Age unknown for {count} matching listings': 'العمر غير معروف لـ {count} من العقارات المطابقة',
+  // «المرشد» sheet redesign (2026-07-17): live-count header, per-option counts, and the CTA that
+  // always carries the exact number it will show. Numbers stay Western digits (project rule).
+  'listings match your search': 'عقار يطابق بحثك',
+  '{count} listings': '{count} عقار',
+  'Show results ({count})': 'عرض النتائج ({count})',
+  'Question {cur} of {total}': 'سؤال {cur} من {total}',
 
   // Interview option labels
   'Pool': 'مسبح',
