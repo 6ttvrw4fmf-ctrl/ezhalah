@@ -52,7 +52,9 @@ select public.refresh_rnpl_flags();
 do $$
 begin
   if exists (select 1 from pg_extension where extname = 'pg_cron') then
-    perform cron.unschedule('refresh-rnpl-flags') where exists (select 1 from cron.job where jobname = 'refresh-rnpl-flags');
+    if exists (select 1 from cron.job where jobname = 'refresh-rnpl-flags') then
+      perform cron.unschedule('refresh-rnpl-flags');
+    end if;
     perform cron.schedule('refresh-rnpl-flags', '20 * * * *', 'select public.refresh_rnpl_flags();');
   end if;
 end $$;
