@@ -45,6 +45,17 @@ export type Listing = {
   project_name?: string | null;
   driver_room?: boolean;
   rega_location_verified?: boolean;
+  // Guest rating (0–10) + review count — populated ONLY for sources that publish them (Gathern's
+  // marketplace reviews). null/undefined for every other platform → the card's rating element is
+  // skipped entirely, so no other platform's card changes. (Gathern Tier-1.)
+  rating?: number | null;
+  reviews_count?: number | null;
+  // Gathern-only display fallback for the district headline: the source's own Arabic district
+  // token (additional_info.district_ar, e.g. "حي العليا"), used ONLY when the canonical location
+  // index has no district for the row and the raw neighborhood isn't Arabic. Never used for grouping
+  // (that stays keyed on the canonical index value); display-only, city-name-guarded. undefined for
+  // every non-Gathern source. (Gathern Tier-1.)
+  districtArFallback?: string | null;
   // Wasalt-only "Additional Information" panel — label/value pairs rendered on the card.
   // Aqar rows leave this null and skip the panel. (user: rich Wasalt facts on the card.)
   additional_info?: { key: string; label: string; value: string }[] | null;

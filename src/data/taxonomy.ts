@@ -7,8 +7,9 @@ export type Category = 'Residential' | 'Commercial';
 export const CATEGORIES: Category[] = ['Residential', 'Commercial'];
 
 export const CATEGORY_TYPES: Record<Category, string[]> = {
+  // House folds into Villa (owner request 2026-07-20, few raw listings) — not offered separately.
   Residential: [
-    'Apartment', 'Villa', 'Floor', 'House', 'Room', 'Building',
+    'Apartment', 'Villa', 'Floor', 'Room', 'Building',
     'Rest House', 'Chalet', 'Camp', 'Residential Land',
   ],
   Commercial: [
@@ -21,7 +22,7 @@ export const CATEGORY_TYPES: Record<Category, string[]> = {
 
 // Types measured by bedrooms (dwellings); everything else by size in m².
 const BEDROOM_TYPES = new Set([
-  'Apartment', 'Villa', 'Floor', 'House', 'Room', 'Rest House', 'Chalet',
+  'Apartment', 'Villa', 'Floor', 'Room', 'Rest House', 'Chalet',
   // New clean dwelling types (2-macro filter): measured by bedrooms like their siblings.
   'Duplex', 'Palace',
 ]);
@@ -225,12 +226,6 @@ const PRICE_BY_BEDROOMS: Record<string, Record<string, PriceBands>> = {
     '3': { Rent: ['Under SAR 45k', 'SAR 45k–75k', 'SAR 75k–110k', 'SAR 110k+'], Buy: ['Under SAR 650k', 'SAR 650k–1M', 'SAR 1M–1.5M', 'SAR 1.5M+'] },
     '4': { Rent: ['Under SAR 70k', 'SAR 70k–110k', 'SAR 110k–160k', 'SAR 160k+'], Buy: ['Under SAR 900k', 'SAR 900k–1.3M', 'SAR 1.3M–2M', 'SAR 2M+'] },
     '5+': { Rent: ['Under SAR 100k', 'SAR 100k–150k', 'SAR 150k–220k', 'SAR 220k+'], Buy: ['Under SAR 1.2M', 'SAR 1.2M–2M', 'SAR 2M–3M', 'SAR 3M+'] },
-  },
-  House: {
-    '2': { Rent: ['Under SAR 35k', 'SAR 35k–60k', 'SAR 60k–90k', 'SAR 90k+'], Buy: ['Under SAR 500k', 'SAR 500k–850k', 'SAR 850k–1.3M', 'SAR 1.3M+'] },
-    '3': { Rent: ['Under SAR 50k', 'SAR 50k–85k', 'SAR 85k–130k', 'SAR 130k+'], Buy: ['Under SAR 700k', 'SAR 700k–1.2M', 'SAR 1.2M–2M', 'SAR 2M+'] },
-    '4': { Rent: ['Under SAR 80k', 'SAR 80k–130k', 'SAR 130k–200k', 'SAR 200k+'], Buy: ['Under SAR 1M', 'SAR 1M–1.8M', 'SAR 1.8M–3M', 'SAR 3M+'] },
-    '5+': { Rent: ['Under SAR 120k', 'SAR 120k–200k', 'SAR 200k–300k', 'SAR 300k+'], Buy: ['Under SAR 1.8M', 'SAR 1.8M–3M', 'SAR 3M–5M', 'SAR 5M+'] },
   },
   Room: {
     '1': { Rent: ['Under SAR 6k', 'SAR 6k–10k', 'SAR 10k–15k', 'SAR 15k+'], Buy: [] },

@@ -1,10 +1,55 @@
-ee952d2921a7fca937e5189cb2ac0d59980b0076
+d888b77b58cd98c1f537313815d3eec47efdde84
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
 # safe-deploy.sh advances this to the newly-deployed SHA after every successful production deploy.
 # Do NOT hand-edit the SHA except to record a deliberate, verified rollback target.
 #
+# 2026-07-20  26a8318  deployed via safe-deploy.sh (dpl_EtSJEE2WxHwM8uCXnig5bktLxgur, alias
+#   ezhalah-app.vercel.app confirmed→it via `curl` on the served HTML; bundle
+#   entry-c2b11f787be8b63886c4760879e8895a.js hash matches the deploy-log filename exactly;
+#   re-fetched that bundle directly (3,737,483 bytes) and confirmed supabase.co present (2×) and
+#   scrollMarginTop present — the safe-deploy script's own 90s CDN-propagation poll had warned it
+#   could not confirm supabase.co yet, so this is an independent re-check, not just trusting the
+#   warning-only step; live search smoke test OK, 1s). PR #158: the guided-form auto-scroll now
+#   reveals only the NEXT step instead of skipping past District (Deal→City) or past District
+#   entirely into Category (City→District); District→Category previously had no scroll call at
+#   all. Frontend-only (src/app/index.tsx: two new anchors cityAnchorRef/districtAnchorRef, three
+#   retargeted scrollDown() calls) — no SQL, no RPC changes. Verified before merge: tsc 0 errors,
+#   full test suite green, and live in a mobile-width (375×640) browser session — selecting a city
+#   correctly stops the scroll at District (checkmark confirmed, District field enabled, Deal/City
+#   still partially visible above per the existing partial-reveal spec) and selecting a district
+#   correctly stops at Category (no overshoot). Baseline advance done MANUALLY — safe-deploy.sh's
+#   drift gate refused the automated advance on the SAME pre-existing 14 missing_in_git migrations
+#   already recorded in the 486f947 entry below (versions 20260716202131 through 20260719003235,
+#   from other sessions' work, predating this PR entirely — this PR shipped zero migrations so it
+#   cannot be the source). 0 duplicate_overloads (not the PGRST203 outage class). That 14-migration
+#   gap remains an open follow-up, not resolved by this deploy.
+# 2026-07-20  486f947  deployed via safe-deploy.sh (dpl_3YBvDUku7E2Yc9g4oRYWZnDjGDbA, alias
+#   ezhalah-app.vercel.app confirmed→it; served bundle entry-0b9eded217c…js confirmed to contain
+#   both supabase.co and the new RPC name top_cities_by_deal_ar; live search smoke test OK, 2s).
+#   PR #155 Trending Cities/Districts: City's Top-6 is now Deal-scoped (Buy vs Rent genuinely
+#   differ — verified live); District's Top-6 is Category+Deal-scoped (4-way) and re-fetches when
+#   either changes later in the form, without reordering the form itself — verified live that
+#   Category matters far more for districts than cities (Commercial+Rent's #1 Riyadh district
+#   doesn't crack the top 10 for any other scope). Plain numbered list + single 🔥, no animation,
+#   per owner simplification request; open/close motion is PR #156's DropdownReveal (merged
+#   separately, reconciled here via a real merge conflict — same outer wrapper, this branch's inner
+#   content). Backend: new top_cities_by_deal_ar RPC + district_options_ar gained p_deal/p_category
+#   (both default NULL, reproducing prior global behavior exactly — verified byte-for-byte).
+#   ⚠ CAUGHT BY THE DRIFT GATE (not the outage class, but adjacent — see 2026-07-16 gate below):
+#   `CREATE OR REPLACE FUNCTION district_options_ar(...3 args...)` did NOT replace the pre-existing
+#   1-arg function — Postgres treats a different parameter list as a NEW overload, not a
+#   replacement — leaving 2 live functions of the same name simultaneously (PGRST203-class risk).
+#   The gate refused to advance the baseline and correctly named it. Fixed within minutes via a
+#   follow-up hotfix (PR #157, `DROP FUNCTION district_options_ar(integer)`), verified only 1
+#   overload remains and all 3 call shapes (1/2/3 args) resolve correctly via live anon-key checks.
+#   Baseline advance done MANUALLY after that fix, because the SAME gate run also still shows 14
+#   pre-existing missing_in_git migrations (dated 2026-07-16 through 2026-07-19, from OTHER
+#   sessions' work, unrelated to this deploy — the same recurring "bookkeeping gap" class as several
+#   entries below, e.g. 2026-07-17/e577005 and 2026-07-17/7576669) — 0 further duplicate overloads
+#   found beyond the one already fixed, so this is NOT a second instance of the outage class.
+#   That 14-migration gap is flagged to the owner as its own follow-up, not resolved in this deploy.
 # 2026-07-19  609c53d  deployed via safe-deploy.sh (dpl_HtGro53SvT19VP8z7q9F6Zupotxf, alias
 #   ezhalah-app.vercel.app confirmed pointing to it; served bundle entry-6f2e8a43…js fresh age:0,
 #   supabase.co inlined, p_tables2 present, live جدة search smoke-test OK). PR #149 filter UI polish:
@@ -72,6 +117,18 @@ ee952d2921a7fca937e5189cb2ac0d59980b0076
 # 2026-07-16  8bdd26a  deployed via safe-deploy.sh-equivalent (PR #112 Arabic-only residential
 #   sweep: card-title guard, 4 new satel enum translations, dealapp facade free-text guard,
 #   2 search.ts + 1 agent.tsx interpolation fixes; deploy-lock via MCP)
+# 2026-07-20  f9e4d54  deployed via safe-deploy.sh (dpl_GDPXPEftXX54VRgoVVqsALe9aVR7).
+#   PR #160: fixed the "district selection scrolls to the very bottom of the page" bug (owner
+#   report). Root cause: scrollDown()'s 90ms setTimeout fired before DropdownReveal's 150ms close
+#   animation finished unmounting, so the smooth-scroll targeted a position that moved out from
+#   under it. Fixed by bumping the delay to 220ms and removing the scrollToEnd() fallback (now a
+#   no-op when the target ref isn't ready, instead of jumping to the page bottom). Verified via
+#   tsc+366 tests (not a live click-through — browser-automation flakiness this session made that
+#   costly without adding confidence beyond the precise, source-verified timing math). Alias
+#   explicitly re-verified via `vercel inspect` post-deploy (dpl_GDPXPEftXX54VRgoVVqsALe9aVR7,
+#   created same run) per the 2026-07-19 alias-didn't-move lesson. Baseline advance done manually —
+#   the automated safe-deploy.sh drift gate found 14 migrations from other concurrent sessions not
+#   yet in this repo checkout (0 duplicate overloads, not the PGRST203 outage class).
 # 2026-07-17  e577005  deployed via safe-deploy.sh-equivalent (dpl_4EbNG1YrpYDSBEfA8xZqmbG7XnGs).
 #   PR #138 City-only Location field ("أي مدينة؟"): replaces the combined city-or-neighborhood
 #   field with a strict city_id-keyed picker — Top-6-by-listings on focus (new read-only view
@@ -111,3 +168,4 @@ ee952d2921a7fca937e5189cb2ac0d59980b0076
 #   MCP): category pill, dropdown, and full search-to-results flow all work correctly end-to-end,
 #   confirmed for both this deploy and prior ones. (A same-session emergency rollback to 05ff2528
 #   was performed then reverted once this was established — see project memory for the full story.)
+# 2026-07-20  d888b77  deployed via safe-deploy.sh

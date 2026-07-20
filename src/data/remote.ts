@@ -11,6 +11,7 @@ import { cityDisplay } from './locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { mergeDiversitySeed, filterBoosted, orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
+import saLocations from './sa-locations.json';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
 function relGroupOf(rel: string): string {
@@ -208,6 +209,27 @@ function isJunkLocationToken(raw: string | null | undefined): boolean {
   return JUNK_LOCATION_TOKENS.has((raw ?? '').trim().toLowerCase());
 }
 
+// Bug-fix (P0, audit `duplicate-city-false-empty` 2026-07-18): CITY_AR above is a hand-maintained
+// dictionary that has drifted out of sync with the catalog's actual spellings — e.g. it has 'hofuf'
+// but the catalog spells the city "Al Hafuf"; it has 'al quwayiyah' but the catalog spells it "Al
+// Quway'iyah" (apostrophe); it has 'al baha'/'al bahah' but one of the two real الباحة catalog rows
+// is bare "Bahah" (no article). Any city whose catalog spelling doesn't happen to match a hand-typed
+// CITY_AR key fell through to `|| en`, sending the untranslated ENGLISH name to the Arabic-indexed
+// search RPC → a false, silent "no listings" for a real city (confirmed live: 758/280/740 hidden
+// rows for these three; up to ~1,003 twin-named catalog cities share this gap).
+//
+// Fix: derive a second lookup DIRECTLY from sa-locations.json's own [city_id, region_id, name_en,
+// name_ar] rows — the catalog already carries the correct Arabic spelling for every city it lists,
+// so this can never drift out of sync the way a separate hand-typed dictionary can. Built once at
+// module load (4,581 rows, negligible cost). Where a handful of catalog rows share the same English
+// name with two DIFFERING Arabic spellings (39 cases, all minor transliteration variants like
+// الأخضر/الاخضر — not different cities), first-occurrence wins, deterministically.
+const CITY_AR_FROM_CATALOG: Record<string, string> = {};
+for (const row of (saLocations as unknown as { cities: [number, number, string, string][] }).cities) {
+  const key = row[2].trim().toLowerCase();
+  if (!(key in CITY_AR_FROM_CATALOG)) CITY_AR_FROM_CATALOG[key] = row[3];
+}
+
 function arCity(en: string | null): string | null {
   if (!en) return null;
   const k = en.trim().toLowerCase();
@@ -220,7 +242,35 @@ function arCity(en: string | null): string | null {
   // ("khobar", "taif", "jubail"). Without the article-stripped fallback the resolver's own city output
   // missed the map and the ENGLISH name reached the RPC (which matches the Arabic `city` column) → 0
   // results for WHOLE cities (الخبر 6089, etc.) in BOTH Filter and Chat. (city-canonical fix 2026-06-27.)
-  return CITY_AR[k] || CITY_AR[k.replace(/^(?:al|at|ad|as|ar|az|an|ash)\s+/, '')] || en;
+  const stripped = k.replace(/^(?:al|at|ad|as|ar|az|an|ash)\s+/, '');
+  return CITY_AR[k] || CITY_AR[stripped]
+    || CITY_AR_FROM_CATALOG[k] || CITY_AR_FROM_CATALOG[stripped]
+    || en;
+}
+
+// Every Arabic-canonical CITY name we know (hand dict + full catalog), used ONLY by the Gathern
+// district-fallback guard below to reject a value that is actually a city sitting in the district
+// slot. Built once at module load from the same two sources arCity() trusts. (Gathern Tier-1.)
+const KNOWN_CITY_AR_SET: Set<string> = new Set<string>([
+  ...Object.values(CITY_AR),
+  ...Object.values(CITY_AR_FROM_CATALOG),
+].map((s) => (s ?? '').trim()).filter(Boolean));
+
+// Gathern-only district fallback: when the canonical location index has NO district for a row (≈4,147
+// live) and the raw neighborhood isn't Arabic, the card shows «الحي غير محدد» even though the source's
+// own additional_info.district_ar (e.g. "حي العليا") is already stored. Surface THAT — display-only,
+// never for grouping (canonical index stays the match key). Conservative city-name guard: the value
+// must be a real Arabic token, must not equal this row's own city_ar, and must not itself be a known
+// city name. Returns null for every non-Gathern source (naturally byte-identical elsewhere). (Tier-1.)
+function gathernDistrictFallback(source: any, rawInfo: any): string | null {
+  if (!(typeof source === 'string' && source.toLowerCase().includes('gathern'))) return null;
+  if (!rawInfo || typeof rawInfo !== 'object' || Array.isArray(rawInfo)) return null;
+  const d = String(rawInfo.district_ar ?? '').trim();
+  if (!d || !/[ء-ي]/.test(d)) return null;                    // must be a real Arabic district token
+  const cityAr = String(rawInfo.city_ar ?? '').trim();
+  if (cityAr && d === cityAr) return null;                     // equals this row's city → not a district
+  if (KNOWN_CITY_AR_SET.has(d)) return null;                  // a known city name in the district slot → reject
+  return d;
 }
 
 // Region name → region_id, mirrors loc_catalog_region (13 stable rows). Used to pass p_region_ids to
@@ -422,7 +472,7 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   return {
     p_deal: q.bothDeals ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
     p_rent_period: rentPeriodParam(q),
-    p_cities: cities,
+    p_cities: cities && cities.length ? cities : null,
     p_districts: q.districts && q.districts.length ? q.districts : null,
     p_tables: mainTables,
     p_platforms: q.sources && q.sources.length ? q.sources : null,
@@ -593,21 +643,50 @@ const ADDL_FIELDS: Array<[string, string]> = [
   ['availability_status', 'Status'],
   ['address', 'Address'],
   ['street_address', 'Address'],
+  // ── Gathern Tier-1 additions (APPENDED — never reorder the above; these keys exist ONLY in
+  //    Gathern's additional_info, and buildAdditionalInfo() further gates them to source=Gathern so
+  //    NO other platform's panel can change). Order = display priority within the Gathern panel.
+  ['unit_type_ar', 'Sub-type'],                          // شقة / استديو / غرفة
+  ['furnished', 'Furnished'],                            // boolean true → "Yes"/"نعم"
+  ['discount_label', 'Discount'],                        // "خصم 20%" (Arabic, shown as-is)
+  ['monthly_price_before_discount', 'Monthly before discount (SAR)'],
+  ['nightly_price', 'Nightly rate (SAR)'],
+  ['amenities', 'Amenities'],                            // real Arabic labels only (see gate below)
 ];
-function buildAdditionalInfo(raw: any): Array<{ key: string; label: string; value: string }> | null {
+// The Gathern-only keys appended to ADDL_FIELDS above. buildAdditionalInfo skips them unless the row's
+// source is Gathern, so a future/other platform that happened to store one of these keys would NOT get
+// a new field — guaranteeing every non-Gathern card stays byte-identical. (Gathern Tier-1.)
+const GATHERN_ONLY_ADDL_KEYS = new Set<string>([
+  'unit_type_ar', 'furnished', 'discount_label', 'monthly_price_before_discount', 'nightly_price', 'amenities',
+]);
+function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; label: string; value: string }> | null {
   if (!raw) return null;
   if (Array.isArray(raw)) {
     const rows = raw.filter((r: any) => r && r.label && r.value);
     return rows.length ? rows : null;
   }
   if (typeof raw !== 'object') return null;
+  const isGathern = typeof source === 'string' && source.toLowerCase().includes('gathern');
   const out: Array<{ key: string; label: string; value: string }> = [];
   const seen = new Set<string>();
   for (const [key, label] of ADDL_FIELDS) {
+    // Gathern-only keys never surface on any other source → non-Gathern output is unchanged.
+    if (GATHERN_ONLY_ADDL_KEYS.has(key) && !isGathern) continue;
     if (seen.has(label)) continue;
     let v: any = raw[key];
     if (v === null || v === undefined || v === '' || v === '0' || v === false) continue;
-    if (Array.isArray(v)) { v = v.filter(Boolean).join('، '); if (!v) continue; }
+    if (Array.isArray(v)) {
+      let arr = v.filter(Boolean);
+      // 'amenities' self-heals: Gathern's CURRENT store is numeric junk (["60","3",…] from the old
+      // amenities[].title). Only surface once it's an array of REAL Arabic labels (post re-crawl);
+      // reject anything without an Arabic letter or that is purely a number. (Gathern Tier-1.)
+      if (key === 'amenities') {
+        arr = arr.filter((x: any) => typeof x === 'string' && /[ء-ي]/.test(x) && !/^\d+$/.test(x.trim()));
+        if (!arr.length) continue;
+      }
+      v = arr.join('، ');
+      if (!v) continue;
+    }
     else if (typeof v === 'boolean') v = 'Yes';
     else if (typeof v === 'object') continue;
     else v = String(v).trim();
@@ -1078,7 +1157,10 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     // genuine, if unmapped, raw city name is untouched — this only fires for a known junk token.
     const safeRawCity = isJunkLocationToken(rawCity) ? '' : rawCity;
     l.city = /[ء-ي]/.test(rawCity || '') ? rawCity : ((ar?.city) || arCity(safeRawCity) || safeRawCity || '');
-    l.district = /[ء-ي]/.test(rawDistrict || '') ? rawDistrict : ((ar?.district) || '');
+    // Gathern Tier-1: when the canonical index has NO district and the raw neighborhood isn't Arabic,
+    // fall back to the source's own Arabic district token (l.districtArFallback, Gathern-only &
+    // city-name-guarded in finalize). null for every other source → `|| ''` keeps them byte-identical.
+    l.district = /[ء-ي]/.test(rawDistrict || '') ? rawDistrict : ((ar?.district) || l.districtArFallback || '');
     l.regionAr = (ar?.region) || l.regionAr || '';
     const region = (ar?.region) || CITY_TO_REGION[canonCity] || canonCity;
     ranked.push({ l, platform: c.platform, city: canonCity, region, district: canonDistrict, rank: c.rank, source_table: c.source_table });
@@ -1229,6 +1311,17 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
         ? `SAR ${amount.toLocaleString('en-US')}${deal === 'Rent' ? (isMonthlyRent ? '/mo' : '/yr') : ''}`
         : 'Price on request';
     const photo = Array.isArray(r.photo_urls) && r.photo_urls.length > 0 ? r.photo_urls[0] : '';
+    // Raw additional_info as a plain object (Gathern/new-platform shape). Aqar leaves it null; Wasalt/
+    // Aqar Gate store the LEGACY array shape — neither is an object, so `rawInfo` is null for them and
+    // every field derived from it below stays null → no non-Gathern card changes. (Gathern Tier-1.)
+    const rawInfo = r.additional_info && typeof r.additional_info === 'object' && !Array.isArray(r.additional_info)
+      ? r.additional_info : null;
+    // Guest rating (0–10) + review count — Gathern marketplace fields. null for every other platform
+    // (the key simply isn't present), so ResultCard renders no rating element for them. (Gathern Tier-1.)
+    const ratingNum = rawInfo && rawInfo.rating != null ? Number(rawInfo.rating) : NaN;
+    const rating = Number.isFinite(ratingNum) ? ratingNum : null;
+    const reviewsNum = rawInfo && rawInfo.reviews_count != null ? Number(rawInfo.reviews_count) : NaN;
+    const reviews_count = Number.isFinite(reviewsNum) ? reviewsNum : null;
     return {
       id: Number(r.id),
       type: r.property_type ?? 'Apartment',
@@ -1267,7 +1360,10 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       project_name: r.project_name ?? null,
       driver_room: !!r.driver_room,
       rega_location_verified: !!r.rega_location_verified,
-      additional_info: buildAdditionalInfo(r.additional_info),
+      rating,
+      reviews_count,
+      districtArFallback: gathernDistrictFallback(r.source, rawInfo),
+      additional_info: buildAdditionalInfo(r.additional_info, r.source),
       photos: Array.isArray(r.photo_urls) ? r.photo_urls : [],
       rent_now_pay_later: !!r.rent_now_pay_later,
       rent_now_pay_later_monthly: r.rent_now_pay_later_monthly ?? null,

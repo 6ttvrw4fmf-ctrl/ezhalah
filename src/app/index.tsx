@@ -6,12 +6,13 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
-import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal } from '@/components/ui';
+import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
 import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption } from '@/data/locations';
+import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, type SearchQuery } from '@/data/search';
 import { HOME_DEFAULT_QUERY, hasActiveFilters } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
@@ -231,6 +232,8 @@ export default function Home() {
   const endAnchorRef = useRef<View>(null);
   // Step anchors — picking a step smoothly reveals the NEXT one, and we scroll to THAT section (its top),
   // never to the bottom of the page. (user: "guide to the next relevant step only, don't jump to the end.")
+  const cityAnchorRef = useRef<View>(null);
+  const districtAnchorRef = useRef<View>(null);
   const catAnchorRef = useRef<View>(null);
   const groupAnchorRef = useRef<View>(null);
   const typeAnchorRef = useRef<View>(null);
@@ -243,10 +246,21 @@ export default function Home() {
   const SCROLL_REVEAL_OFFSET = 96;
   const scrollDown = (target?: { current: View | null }) => {
     // Defer past the state-driven re-render so the newly revealed section is laid out first.
+    // MUST outlast DropdownReveal's close animation (ui.tsx DROPDOWN_CLOSE.duration = 150ms): picking
+    // a City/District suggestion closes that dropdown AND calls scrollDown in the same tick. The
+    // dropdown stays fully mounted (occupying its normal layout height) until its fade-out finishes,
+    // then unmounts instantly, shifting every section below it upward. At the old 90ms delay this fired
+    // BEFORE that unmount, so the browser's smooth-scroll targeted a position that moved out from under
+    // it 60ms later — observed live as the page jumping to the very bottom instead of stopping at the
+    // next section (owner report 2026-07-20, "when I choose the district it takes me fully down").
+    // 220ms clears the 150ms close animation with margin; still fast enough to feel instant.
     setTimeout(() => {
       const sv = scrollRef.current;
-      const node: any = target?.current ?? endAnchorRef.current;
-      if (!node) { sv?.scrollToEnd({ animated: true }); return; }
+      const node: any = target?.current;
+      // No target (or not yet mounted) → do nothing rather than guess. The old fallback jumped to the
+      // very bottom of the page (scrollToEnd) whenever a ref wasn't ready, which is a worse outcome
+      // than not scrolling at all — never re-add a "when in doubt, jump to the end" fallback here.
+      if (!node) return;
       if (Platform.OS === 'web') {
         // scroll-margin-top (set on every anchor by withAnchor) makes 'start' land OFFSET px below the
         // node's top instead of flush against the viewport edge — the previous section stays visible.
@@ -255,10 +269,10 @@ export default function Home() {
         node.measureLayout(
           sv as any,
           (_x: number, y: number) => sv.scrollTo({ y: Math.max(0, y - SCROLL_REVEAL_OFFSET), animated: true }),
-          () => sv.scrollToEnd({ animated: true }),
+          () => {}, // measurement failed (unmounted/detached) — do nothing, same reasoning as above.
         );
       }
-    }, 90);
+    }, 220);
   };
   // Attaches a ref AND (web-only) sets scroll-margin-top, so every anchor gets the same gentle offset
   // with zero extra plumbing at each call site — same pattern already used for setLtr/makeDirRef above.
@@ -276,21 +290,53 @@ export default function Home() {
   // Warm the live district index when the home opens, so a typed district that exists in real
   // inventory (e.g. "Al Doha Dist." in Yanbu) is recognized by the time the user searches.
   useEffect(() => { void ensureLocationIndex(); }, []);
-  // Warm the city-listing-counts index on mount so the Top-6 list is ready the instant the field is
-  // focused, rather than showing an empty list for the first render of a slow connection.
+  // Warm the DEAL-SCOPED city-listing-counts pool whenever Deal changes (incl. the initial mount,
+  // since query.deal always starts as a concrete 'Buy'/'Rent' — never null). Deal is picked BEFORE
+  // City in this form, so it's always known here; Category is picked AFTER City/District, so a
+  // Category-aware ranking can't reach this field without moving Category earlier in the flow — a
+  // bigger UX change the owner declined (2026-07-20). Deal-only is what this data can support today.
   useEffect(() => {
-    void ensureCityFieldIndex().then(() => {
-      // EDGE CASE (found in testing): on a slow connection, this fetch can still be pending when
-      // the user has already focused AND typed a query — matchCitiesByText() would have run against
-      // a still-empty pool and (correctly, not a crash) returned []. Without this, the dropdown would
-      // stay empty forever even after the data arrives, since nothing else re-triggers the match once
-      // typing has already happened. Re-run it now against whatever text is currently live.
+    void ensureCityFieldIndex(query.deal).then(() => {
+      // EDGE CASE (found in testing, generalizes to every deal change too): a fetch can still be
+      // pending when the user has already focused AND typed a query — matchCitiesByText() would have
+      // run against a still-empty/stale-deal pool and (correctly, not a crash) returned []/old
+      // results. Without this, the dropdown would stay stale forever once the fresh data arrives.
+      // Re-run against whatever text is currently live, or — if the field is showing its empty-focus
+      // Top-6 — refresh that list too, so flipping Buy↔Rent visibly reorders it (owner request:
+      // replay only "when the section first appears or when the rankings change").
       if (cityTextRef.current) {
         const latin = isLatinOnlyInput(cityTextRef.current);
-        setCitySuggestions(latin ? [] : matchCitiesByText(cityTextRef.current));
+        setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, cityTextRef.current));
+      } else if (cityFocus) {
+        setCitySuggestions(topCitiesByListings(query.deal, 6));
       }
     });
-  }, []);
+    // Deliberately NOT depending on cityFocus/citySelected — this effect should fire only on a real
+    // Deal change (or mount), not on every focus/blur toggle; cityFocus is read for its value AT that
+    // moment via closure, which is exactly what's wanted (see comment above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query.deal]);
+
+  // Same reactive refresh for District, scoped to the currently-selected city — and ALSO to Category
+  // (owner decision 2026-07-20, after proving live that Category matters more for districts than for
+  // cities): even though Category is picked after District in this form, the moment the user sets it
+  // — or changes Deal — District's Top-6 re-fetches for the now-more-complete scope. query.category is
+  // null until then, which the RPC treats as "broader/default ranking" (Deal-only), exactly as before.
+  // Only meaningful once a city is picked; a no-op otherwise (ensureDistrictOptions is never called
+  // without one).
+  useEffect(() => {
+    if (!citySelected) return;
+    const cid = citySelected.cityId;
+    void ensureDistrictOptions(cid, query.deal, query.category).then(() => {
+      if (districtTextRef.current) {
+        const latin = isLatinOnlyInput(districtTextRef.current);
+        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, query.category, districtTextRef.current));
+      } else if (districtFocus) {
+        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, query.category, 6));
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query.deal, query.category, citySelected]);
 
   const onSearch = async () => {
     // CITY-ONLY FIELD (owner spec 2026-07-17): "The user must select a valid city result. Do not
@@ -551,8 +597,9 @@ export default function Home() {
                 </Pressable>
               </Reveal>
             )}
-            <Segmented options={DEALS} value={query.deal} icons={DEAL_IMG} onChange={(v) => { setQuery((q) => ({ ...q, deal: v as any, priceBand: null, priceMin: null, priceMax: null, priceInput: '' })); scrollDown(catAnchorRef); }} />
+            <Segmented options={DEALS} value={query.deal} icons={DEAL_IMG} onChange={(v) => { setQuery((q) => ({ ...q, deal: v as any, priceBand: null, priceMin: null, priceMax: null, priceInput: '' })); scrollDown(cityAnchorRef); }} />
 
+            <View ref={withAnchor(cityAnchorRef)} />
             {/* CITY-ONLY FIELD (owner spec 2026-07-17): "أي مدينة؟". Field now searches/displays CITIES
                 ONLY, never regions/districts/landmarks/areas. The label sits ABOVE the field, far-right
                 (RTL) — a static header, not a floating placeholder. (owner UI request 2026-07-18.)
@@ -579,8 +626,8 @@ export default function Home() {
                     // in sync on every keystroke below) at resolution time, not the value captured in
                     // this closure at focus time.
                     if (!query.location) {
-                      void ensureCityFieldIndex().then(() => {
-                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(6));
+                      void ensureCityFieldIndex(query.deal).then(() => {
+                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(query.deal, 6));
                       });
                     }
                   }}
@@ -594,14 +641,14 @@ export default function Home() {
                     clearDistrict(); // editing the city disables + clears District (no cross-city carry-over)
                     if (!v) {
                       // Cleared back to empty → the Top 6 list, same as a fresh focus.
-                      setCitySuggestions(topCitiesByListings(6));
+                      setCitySuggestions(topCitiesByListings(query.deal, 6));
                       setLocMsg('');
                       return;
                     }
                     // Arabic-only product: English typing gets NO autocomplete and an Arabic hint —
                     // there is nothing to match against, since every city name here is Arabic. (user rule)
                     const latin = isLatinOnlyInput(v);
-                    setCitySuggestions(latin ? [] : matchCitiesByText(v));
+                    setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, v));
                     setLocMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -613,7 +660,7 @@ export default function Home() {
                 </RNAnimated.View>
               ) : null}
               {query.location.length > 0 && (
-                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(6)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
+                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(query.deal, 6)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
                 </Pressable>
               )}
@@ -623,42 +670,67 @@ export default function Home() {
               <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{locMsg}</Text>
             ) : null}
 
-            {cityFocus && citySuggestions.length > 0 && (
-              <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                {citySuggestions.map((opt, i) => (
-                  <Tappable
-                    key={opt.cityId}
-                    dip={0.03}
-                    style={[s.suggRow, i < citySuggestions.length - 1 && s.suggDivider]}
-                    onPress={() => {
-                      cityTextRef.current = opt.cityAr;
-                      setQuery((q) => ({ ...q, location: opt.cityAr }));
-                      setCitySelected(opt);
-                      setCitySuggestions([]);
-                      setCityFocus(false);
-                      setLocMsg('');
-                      // New city → drop any prior district and warm THIS city's district catalog so the
-                      // District field (now enabled) shows its Top-6 instantly on first focus.
-                      clearDistrict();
-                      void ensureDistrictOptions(opt.cityId);
-                      scrollDown(catAnchorRef); // carry them down to the next step (category)
-                    }}
-                  >
-                    <Image source={LOC_IMG.city} style={s.suggLocIcon} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.suggCity}>{opt.cityAr}</Text>
-                      {/* Region stays hidden per spec ("use the confirmed hidden region internally")
-                          UNLESS two results in this exact list share a display name — a real,
-                          verified case (e.g. الهفوف exists as two distinct real cities) — in which
-                          case showing it is the only way the user can tell them apart. */}
-                      {hasNameCollision(citySuggestions, opt.cityAr) && opt.regionAr ? (
-                        <Text style={s.suggDist}>{opt.regionAr}</Text>
-                      ) : null}
-                    </View>
-                  </Tappable>
-                ))}
-              </ScrollView>
-            )}
+            {/* Merge note (2026-07-20): outer open/close wrapper is PR #156's DropdownReveal; inner
+                Trending-vs-plain-list split is this branch's content. Content is byte-identical to
+                each side's own version — only the boundary between them moved. */}
+            <DropdownReveal visible={cityFocus && citySuggestions.length > 0}>
+              {(() => {
+                // Trending treatment ONLY for the empty-focus Top-6 — a typed/filtered result set keeps
+                // today's plain list (a fast-scan moment, not a "discovery" one). Derived, not separate
+                // state: the Top-6 is precisely what's showing whenever there's no typed text.
+                const isTop6 = !query.location;
+                const cityOnPress = (opt: CityOption) => {
+                  cityTextRef.current = opt.cityAr;
+                  setQuery((q) => ({ ...q, location: opt.cityAr }));
+                  setCitySelected(opt);
+                  setCitySuggestions([]);
+                  setCityFocus(false);
+                  setLocMsg('');
+                  // New city → drop any prior district; the [query.deal, query.category, citySelected]
+                  // effect above warms THIS city's district catalog so District shows its Top-6 instantly.
+                  clearDistrict();
+                  scrollDown(districtAnchorRef); // carry them down to the next step (district)
+                };
+                return (
+                  <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                    {isTop6 ? (
+                      <>
+                        <TrendingHeader title={t('Trending cities now')} />
+                        <TrendingRows
+                          items={citySuggestions.map((opt) => ({
+                            key: String(opt.cityId),
+                            label: opt.cityAr,
+                            sublabel: hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
+                          }))}
+                          onPress={(_item, i) => cityOnPress(citySuggestions[i])}
+                        />
+                      </>
+                    ) : (
+                      citySuggestions.map((opt, i) => (
+                        <Tappable
+                          key={opt.cityId}
+                          dip={0.03}
+                          style={[s.suggRow, i < citySuggestions.length - 1 && s.suggDivider]}
+                          onPress={() => cityOnPress(opt)}
+                        >
+                          <Image source={LOC_IMG.city} style={s.suggLocIcon} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.suggCity}>{opt.cityAr}</Text>
+                            {/* Region stays hidden per spec ("use the confirmed hidden region internally")
+                                UNLESS two results in this exact list share a display name — a real,
+                                verified case (e.g. الهفوف exists as two distinct real cities) — in which
+                                case showing it is the only way the user can tell them apart. */}
+                            {hasNameCollision(citySuggestions, opt.cityAr) && opt.regionAr ? (
+                              <Text style={s.suggDist}>{opt.regionAr}</Text>
+                            ) : null}
+                          </View>
+                        </Tappable>
+                      ))
+                    )}
+                  </ScrollView>
+                );
+              })()}
+            </DropdownReveal>
 
             {/* DISTRICT — strictly under City. Disabled until a city is chosen; scoped to that city's
                 canonical city_id. Empty focus → Top-6 by active-listing count; typing → the COMPLETE
@@ -666,6 +738,7 @@ export default function Home() {
                 can never appear (data is fetched per city_id); changing the city clears it. Optional. */}
             {/* Static label above, far-right (RTL): "أي حي؟" with a lighter "اختياري" beside it — the
                 optional-ness is its own label, not baked into the field placeholder. (owner UI request.) */}
+            <View ref={withAnchor(districtAnchorRef)} />
             <Text style={[s.fieldLabelAbove, { marginTop: 12 }]}>
               {t('Which neighborhood?')}
               {'  '}
@@ -693,8 +766,8 @@ export default function Home() {
                     // re-check the live text via districtTextRef before showing the Top-6.
                     if (!districtTextRef.current) {
                       const cid = citySelected.cityId;
-                      void ensureDistrictOptions(cid).then(() => {
-                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, 6));
+                      void ensureDistrictOptions(cid, query.deal, query.category).then(() => {
+                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, query.category, 6));
                       });
                     }
                   }}
@@ -705,11 +778,11 @@ export default function Home() {
                     // Editing invalidates a prior pick — a typed-but-unconfirmed district is never searched.
                     setDistrictSelected(null);
                     if (!citySelected) return;
-                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, 6)); setDistrictMsg(''); return; }
+                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, 6)); setDistrictMsg(''); return; }
                     // Arabic-only product: English typing gets NO autocomplete and the same Arabic hint the
                     // City field shows — every district name here is Arabic, so there is nothing to match. (owner UI request.)
                     const latin = isLatinOnlyInput(v);
-                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, v));
+                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, query.deal, query.category, v));
                     setDistrictMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -726,7 +799,7 @@ export default function Home() {
                   setDistrictText('');
                   setDistrictSelected(null);
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, 6));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, 6));
                   districtRef.current?.focus();
                 }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
@@ -738,33 +811,53 @@ export default function Home() {
               <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{districtMsg}</Text>
             ) : null}
 
-            {citySelected && districtFocus && districtSuggestions.length > 0 && (
-              <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                {districtSuggestions.map((opt, i) => (
-                  <Tappable
-                    key={opt.districtAr + '#' + i}
-                    dip={0.03}
-                    style={[s.suggRow, i < districtSuggestions.length - 1 && s.suggDivider]}
-                    onPress={() => {
-                      districtTextRef.current = opt.districtAr;
-                      setDistrictText(opt.districtAr);
-                      setDistrictSelected(opt);
-                      setDistrictSuggestions([]);
-                      setDistrictFocus(false);
-                      setDistrictMsg('');
-                    }}
-                  >
-                    <Image source={LOC_IMG.district} style={s.suggLocIcon} />
-                    <View style={{ flex: 1 }}>
-                      {/* Top-6 are still chosen by active-listing count, but the count itself is no
-                          longer shown — just the district name. Every row (incl. zero-listing catalog
-                          districts) is rendered unconditionally and selectable. (owner UI request 2026-07-18.) */}
-                      <Text style={s.suggCity}>{opt.districtAr}</Text>
-                    </View>
-                  </Tappable>
-                ))}
-              </ScrollView>
-            )}
+            {/* Merge note (2026-07-20): outer open/close wrapper is PR #156's DropdownReveal; inner
+                Trending-vs-plain-list split is this branch's content — same pattern as City above. */}
+            <DropdownReveal visible={citySelected != null && districtFocus && districtSuggestions.length > 0}>
+              {(() => {
+                // Same derived Top-6-vs-typed split as the City field above.
+                const isTop6 = !districtText;
+                const districtOnPress = (opt: DistrictOption) => {
+                  districtTextRef.current = opt.districtAr;
+                  setDistrictText(opt.districtAr);
+                  setDistrictSelected(opt);
+                  setDistrictSuggestions([]);
+                  setDistrictFocus(false);
+                  setDistrictMsg('');
+                  scrollDown(catAnchorRef); // carry them down to the next step (category)
+                };
+                return (
+                  <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                    {isTop6 && citySelected ? (
+                      <>
+                        <TrendingHeader title={`${t('Trending districts in')} ${citySelected.cityAr}`} />
+                        <TrendingRows
+                          items={districtSuggestions.map((opt, i) => ({ key: `${opt.districtAr}#${i}`, label: opt.districtAr }))}
+                          onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
+                        />
+                      </>
+                    ) : (
+                      districtSuggestions.map((opt, i) => (
+                        <Tappable
+                          key={opt.districtAr + '#' + i}
+                          dip={0.03}
+                          style={[s.suggRow, i < districtSuggestions.length - 1 && s.suggDivider]}
+                          onPress={() => districtOnPress(opt)}
+                        >
+                          <Image source={LOC_IMG.district} style={s.suggLocIcon} />
+                          <View style={{ flex: 1 }}>
+                            {/* Top-6 are still chosen by active-listing count, but the count itself is no
+                                longer shown — just the district name. Every row (incl. zero-listing catalog
+                                districts) is rendered unconditionally and selectable. (owner UI request 2026-07-18.) */}
+                            <Text style={s.suggCity}>{opt.districtAr}</Text>
+                          </View>
+                        </Tappable>
+                      ))
+                    )}
+                  </ScrollView>
+                );
+              })()}
+            </DropdownReveal>
 
             <View ref={withAnchor(catAnchorRef)} />
             {/* Category — Residential / Commercial (macro) */}
@@ -857,7 +950,7 @@ export default function Home() {
               <Reveal style={s.pick}>
                 <View style={s.ctxBox}>
                   <Text style={s.ctxTitle}>{t('Refine your search')}</Text>
-                  <Text style={s.ctxSub}>{t('Select bedrooms or area, or leave both empty to see all options')}</Text>
+                  <Text style={s.ctxSub}>{t('Select bedrooms and/or area, or leave both empty to see all options')}</Text>
 
                   {ctx.showBeds && (
                     <>
@@ -873,10 +966,8 @@ export default function Home() {
                               if (opt === 'any') return { ...q, contextBedsList: null, contextBeds: null, priceBand: null };
                               const cur = q.contextBedsList ?? [];
                               const next = cur.includes(opt) ? cur.filter((x) => x !== opt) : [...cur, opt];
-                              const clearArea = next.length ? null : undefined;
                               return { ...q, contextBedsList: next.length ? next : null, contextBeds: null,
                                 contextSize: next.length ? null : q.contextSize,
-                                areaMin: clearArea === null ? null : q.areaMin, areaMax: clearArea === null ? null : q.areaMax,
                                 priceBand: null };
                             }); scrollDown(); }}
                             style={s.wrapCell}
@@ -886,9 +977,9 @@ export default function Home() {
                     </>
                   )}
 
-                  {/* AREA range (من / إلى م²) — shown only when no bedroom is selected (beds XOR area).
-                      Typing in either box clears the bedroom selection. min only → ≥, max only → ≤. */}
-                  {(!ctx.showBeds || !(query.contextBedsList?.length)) && (
+                  {/* AREA range (من / إلى م²) — always shown alongside bedrooms (both supported by the RPC).
+                      min only → ≥, max only → ≤. */}
+                  {ctx?.showSize && (
                     <>
                       <View style={[s.rangeHead, ctx.showBeds ? { marginTop: 14 } : null]}>
                         <Image source={RANGE_ICON.areaHead} style={s.rangeHeadIcon} />
@@ -904,7 +995,7 @@ export default function Home() {
                               hard-caps the stored digits too, covering PASTE (maxLength can't police programmatic sets). */}
                           <TextInput ref={mergeLtrRef(areaMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
                             value={areaMinValue}
-                            onKeyPress={wholeNumberKeyGuard('areaMin')} onFocus={() => clearFracLock('areaMin')} onSelectionChange={() => clearFracLock('areaMin')} onChangeText={(v) => { clearFracLock('areaMin'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
+                            onKeyPress={wholeNumberKeyGuard('areaMin')} onFocus={() => clearFracLock('areaMin')} onSelectionChange={() => clearFracLock('areaMin')} onChangeText={(v) => { clearFracLock('areaMin'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
                         </Pressable>
                         <Pressable style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(areaMaxRef)}>
@@ -912,7 +1003,7 @@ export default function Home() {
                           <Text style={s.rangeLabel}>{t('To')}</Text>
                           <TextInput ref={mergeLtrRef(areaMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
                             value={areaMaxValue}
-                            onKeyPress={wholeNumberKeyGuard('areaMax')} onFocus={() => clearFracLock('areaMax')} onSelectionChange={() => clearFracLock('areaMax')} onChangeText={(v) => { clearFracLock('areaMax'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, contextBeds: null, contextBedsList: null, priceBand: null })); }} />
+                            onKeyPress={wholeNumberKeyGuard('areaMax')} onFocus={() => clearFracLock('areaMax')} onSelectionChange={() => clearFracLock('areaMax')} onChangeText={(v) => { clearFracLock('areaMax'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
                         </Pressable>
                       </View>

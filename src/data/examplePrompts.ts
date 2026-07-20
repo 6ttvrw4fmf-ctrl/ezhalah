@@ -84,22 +84,34 @@ function ensureDynamic(): Promise<PromptIdea[] | null> {
 // request is in flight — once the dynamic ideas land, the next mount uses 100% real inventory.
 // (user-reported: chip said "Villa in Khobar with a garden" but we haven't scraped Khobar yet →
 // search returned 0. Fix: never show a chip we can't fulfill.)
+//
+// The FIRST render must be deterministic (this app is statically exported, then hydrated on the
+// client — Expo Router "output: static"). sampleExamples() calls Math.random(), so calling it
+// during render made the static-export pass and the client's initial hydration pass compute two
+// DIFFERENT shuffles of the same pool, which React detects as a text mismatch (error #418) and
+// discards the server HTML for this subtree. Fix: the initial value is the pool's plain first-N
+// slice (identical on server and client, no RNG involved), and the real shuffle happens once,
+// client-only, in the mount effect below — after hydration is already done, so there's nothing
+// left to reconcile against. This keeps the "fresh random set every mount" behavior; it just no
+// longer runs before the browser has something to compare its own render against.
 export function useExamplePrompts(locale: 'en' | 'ar', n: number): string[] {
-  const [, force] = useState(0);
+  const want = Math.min(n, 12);
+  const stat = locale === 'ar' ? AR_POOL : EN_POOL;
+  const [labels, setLabels] = useState<string[]>(() => stat.slice(0, want));
   useEffect(() => {
     let alive = true;
-    const cb = () => { if (alive) force((v) => v + 1); };
+    const pick = () => {
+      const dyn = (dynamicCache ?? []).map((i) => (locale === 'ar' ? i.ar : i.en));
+      const pool = dyn.length >= want ? dyn : stat;
+      setLabels(sampleExamples(pool, want));
+    };
+    pick(); // client-only reshuffle, post-hydration — safe to randomize now
+    const cb = () => { if (alive) pick(); };
     subs.add(cb);
     void ensureDynamic();
     return () => { alive = false; subs.delete(cb); };
-  }, []);
-  const dyn = (dynamicCache ?? []).map((i) => (locale === 'ar' ? i.ar : i.en));
-  const want = Math.min(n, 12);
-  if (dyn.length >= want) return sampleExamples(dyn, want);
-  // First paint before the DB fetch returns — show the static curated pool just so the grid isn't
-  // empty for the first ~300 ms. Subsequent mounts hit the cache and return 100% live data.
-  const stat = locale === 'ar' ? AR_POOL : EN_POOL;
-  return sampleExamples(stat, want);
+  }, [locale, want]);
+  return labels;
 }
 
 // Lightweight icon picker: scans the prompt for a topic keyword (Arabic or English) and returns the
