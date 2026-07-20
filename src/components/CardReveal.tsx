@@ -21,13 +21,16 @@ const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
 
 // Soft entry for a newly-mounted property card: fade + ~10px rise over 260ms. The reveal drip mounts
 // cards ~55ms apart, so the cadence itself provides the stagger the owner asked for (40–80ms).
-export function CardIn({ children }: { children: React.ReactNode }) {
+// Optional `delay` (ms, default 0) lets a caller stagger a whole batch that mounts at once instead of
+// progressively — used by TrendingList for its Top-6 rows, which all mount together on focus.
+export function CardIn({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
   const reduced = useReducedMotion();
   const v = useSharedValue(0);
   useEffect(() => {
-    v.value = withTiming(1, { duration: reduced ? 150 : 260, easing: EASE_OUT });
+    v.value = 0;
+    v.value = withDelay(reduced ? 0 : delay, withTiming(1, { duration: reduced ? 150 : 260, easing: EASE_OUT }));
     return () => cancelAnimation(v);
-  }, [v, reduced]);
+  }, [v, reduced, delay]);
   const a = useAnimatedStyle(() => ({
     opacity: v.value,
     transform: reduced ? [] : [{ translateY: (1 - v.value) * 10 }],

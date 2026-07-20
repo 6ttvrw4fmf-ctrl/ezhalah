@@ -12,6 +12,7 @@ import ShareSheet from '@/components/ShareSheet';
 import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption } from '@/data/locations';
+import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, type SearchQuery } from '@/data/search';
 import { HOME_DEFAULT_QUERY, hasActiveFilters } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
@@ -276,21 +277,48 @@ export default function Home() {
   // Warm the live district index when the home opens, so a typed district that exists in real
   // inventory (e.g. "Al Doha Dist." in Yanbu) is recognized by the time the user searches.
   useEffect(() => { void ensureLocationIndex(); }, []);
-  // Warm the city-listing-counts index on mount so the Top-6 list is ready the instant the field is
-  // focused, rather than showing an empty list for the first render of a slow connection.
+  // Warm the DEAL-SCOPED city-listing-counts pool whenever Deal changes (incl. the initial mount,
+  // since query.deal always starts as a concrete 'Buy'/'Rent' — never null). Deal is picked BEFORE
+  // City in this form, so it's always known here; Category is picked AFTER City/District, so a
+  // Category-aware ranking can't reach this field without moving Category earlier in the flow — a
+  // bigger UX change the owner declined (2026-07-20). Deal-only is what this data can support today.
   useEffect(() => {
-    void ensureCityFieldIndex().then(() => {
-      // EDGE CASE (found in testing): on a slow connection, this fetch can still be pending when
-      // the user has already focused AND typed a query — matchCitiesByText() would have run against
-      // a still-empty pool and (correctly, not a crash) returned []. Without this, the dropdown would
-      // stay empty forever even after the data arrives, since nothing else re-triggers the match once
-      // typing has already happened. Re-run it now against whatever text is currently live.
+    void ensureCityFieldIndex(query.deal).then(() => {
+      // EDGE CASE (found in testing, generalizes to every deal change too): a fetch can still be
+      // pending when the user has already focused AND typed a query — matchCitiesByText() would have
+      // run against a still-empty/stale-deal pool and (correctly, not a crash) returned []/old
+      // results. Without this, the dropdown would stay stale forever once the fresh data arrives.
+      // Re-run against whatever text is currently live, or — if the field is showing its empty-focus
+      // Top-6 — refresh that list too, so flipping Buy↔Rent visibly reorders it (owner request:
+      // replay only "when the section first appears or when the rankings change").
       if (cityTextRef.current) {
         const latin = isLatinOnlyInput(cityTextRef.current);
-        setCitySuggestions(latin ? [] : matchCitiesByText(cityTextRef.current));
+        setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, cityTextRef.current));
+      } else if (cityFocus) {
+        setCitySuggestions(topCitiesByListings(query.deal, 6));
       }
     });
-  }, []);
+    // Deliberately NOT depending on cityFocus/citySelected — this effect should fire only on a real
+    // Deal change (or mount), not on every focus/blur toggle; cityFocus is read for its value AT that
+    // moment via closure, which is exactly what's wanted (see comment above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query.deal]);
+
+  // Same reactive refresh for District, scoped to the currently-selected city. Only meaningful once
+  // a city is picked; a no-op otherwise (ensureDistrictOptions is never called without one).
+  useEffect(() => {
+    if (!citySelected) return;
+    const cid = citySelected.cityId;
+    void ensureDistrictOptions(cid, query.deal).then(() => {
+      if (districtTextRef.current) {
+        const latin = isLatinOnlyInput(districtTextRef.current);
+        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, districtTextRef.current));
+      } else if (districtFocus) {
+        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, 6));
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query.deal, citySelected]);
 
   const onSearch = async () => {
     // CITY-ONLY FIELD (owner spec 2026-07-17): "The user must select a valid city result. Do not
@@ -579,8 +607,8 @@ export default function Home() {
                     // in sync on every keystroke below) at resolution time, not the value captured in
                     // this closure at focus time.
                     if (!query.location) {
-                      void ensureCityFieldIndex().then(() => {
-                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(6));
+                      void ensureCityFieldIndex(query.deal).then(() => {
+                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(query.deal, 6));
                       });
                     }
                   }}
@@ -594,14 +622,14 @@ export default function Home() {
                     clearDistrict(); // editing the city disables + clears District (no cross-city carry-over)
                     if (!v) {
                       // Cleared back to empty → the Top 6 list, same as a fresh focus.
-                      setCitySuggestions(topCitiesByListings(6));
+                      setCitySuggestions(topCitiesByListings(query.deal, 6));
                       setLocMsg('');
                       return;
                     }
                     // Arabic-only product: English typing gets NO autocomplete and an Arabic hint —
                     // there is nothing to match against, since every city name here is Arabic. (user rule)
                     const latin = isLatinOnlyInput(v);
-                    setCitySuggestions(latin ? [] : matchCitiesByText(v));
+                    setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, v));
                     setLocMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -613,7 +641,7 @@ export default function Home() {
                 </RNAnimated.View>
               ) : null}
               {query.location.length > 0 && (
-                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(6)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
+                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(query.deal, 6)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
                 </Pressable>
               )}
@@ -623,42 +651,63 @@ export default function Home() {
               <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{locMsg}</Text>
             ) : null}
 
-            {cityFocus && citySuggestions.length > 0 && (
-              <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                {citySuggestions.map((opt, i) => (
-                  <Tappable
-                    key={opt.cityId}
-                    dip={0.03}
-                    style={[s.suggRow, i < citySuggestions.length - 1 && s.suggDivider]}
-                    onPress={() => {
-                      cityTextRef.current = opt.cityAr;
-                      setQuery((q) => ({ ...q, location: opt.cityAr }));
-                      setCitySelected(opt);
-                      setCitySuggestions([]);
-                      setCityFocus(false);
-                      setLocMsg('');
-                      // New city → drop any prior district and warm THIS city's district catalog so the
-                      // District field (now enabled) shows its Top-6 instantly on first focus.
-                      clearDistrict();
-                      void ensureDistrictOptions(opt.cityId);
-                      scrollDown(catAnchorRef); // carry them down to the next step (category)
-                    }}
-                  >
-                    <Image source={LOC_IMG.city} style={s.suggLocIcon} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.suggCity}>{opt.cityAr}</Text>
-                      {/* Region stays hidden per spec ("use the confirmed hidden region internally")
-                          UNLESS two results in this exact list share a display name — a real,
-                          verified case (e.g. الهفوف exists as two distinct real cities) — in which
-                          case showing it is the only way the user can tell them apart. */}
-                      {hasNameCollision(citySuggestions, opt.cityAr) && opt.regionAr ? (
-                        <Text style={s.suggDist}>{opt.regionAr}</Text>
-                      ) : null}
-                    </View>
-                  </Tappable>
-                ))}
-              </ScrollView>
-            )}
+            {cityFocus && citySuggestions.length > 0 && (() => {
+              // Trending treatment ONLY for the empty-focus Top-6 — a typed/filtered result set keeps
+              // today's plain list (a fast-scan moment, not a "discovery" one). Derived, not separate
+              // state: the Top-6 is precisely what's showing whenever there's no typed text.
+              const isTop6 = !query.location;
+              const cityOnPress = (opt: CityOption) => {
+                cityTextRef.current = opt.cityAr;
+                setQuery((q) => ({ ...q, location: opt.cityAr }));
+                setCitySelected(opt);
+                setCitySuggestions([]);
+                setCityFocus(false);
+                setLocMsg('');
+                // New city → drop any prior district; the [query.deal, citySelected] effect above
+                // warms THIS city's district catalog so the District field shows its Top-6 instantly.
+                clearDistrict();
+                scrollDown(catAnchorRef); // carry them down to the next step (category)
+              };
+              return (
+                <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                  {isTop6 ? (
+                    <>
+                      <TrendingHeader title={t('Trending cities now')} runKey={`city:${query.deal}`} />
+                      <TrendingRows
+                        runKey={`city:${query.deal}`}
+                        items={citySuggestions.map((opt) => ({
+                          key: String(opt.cityId),
+                          label: opt.cityAr,
+                          sublabel: hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
+                        }))}
+                        onPress={(_item, i) => cityOnPress(citySuggestions[i])}
+                      />
+                    </>
+                  ) : (
+                    citySuggestions.map((opt, i) => (
+                      <Tappable
+                        key={opt.cityId}
+                        dip={0.03}
+                        style={[s.suggRow, i < citySuggestions.length - 1 && s.suggDivider]}
+                        onPress={() => cityOnPress(opt)}
+                      >
+                        <Image source={LOC_IMG.city} style={s.suggLocIcon} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.suggCity}>{opt.cityAr}</Text>
+                          {/* Region stays hidden per spec ("use the confirmed hidden region internally")
+                              UNLESS two results in this exact list share a display name — a real,
+                              verified case (e.g. الهفوف exists as two distinct real cities) — in which
+                              case showing it is the only way the user can tell them apart. */}
+                          {hasNameCollision(citySuggestions, opt.cityAr) && opt.regionAr ? (
+                            <Text style={s.suggDist}>{opt.regionAr}</Text>
+                          ) : null}
+                        </View>
+                      </Tappable>
+                    ))
+                  )}
+                </ScrollView>
+              );
+            })()}
 
             {/* DISTRICT — strictly under City. Disabled until a city is chosen; scoped to that city's
                 canonical city_id. Empty focus → Top-6 by active-listing count; typing → the COMPLETE
@@ -693,8 +742,8 @@ export default function Home() {
                     // re-check the live text via districtTextRef before showing the Top-6.
                     if (!districtTextRef.current) {
                       const cid = citySelected.cityId;
-                      void ensureDistrictOptions(cid).then(() => {
-                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, 6));
+                      void ensureDistrictOptions(cid, query.deal).then(() => {
+                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, 6));
                       });
                     }
                   }}
@@ -705,11 +754,11 @@ export default function Home() {
                     // Editing invalidates a prior pick — a typed-but-unconfirmed district is never searched.
                     setDistrictSelected(null);
                     if (!citySelected) return;
-                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, 6)); setDistrictMsg(''); return; }
+                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, 6)); setDistrictMsg(''); return; }
                     // Arabic-only product: English typing gets NO autocomplete and the same Arabic hint the
                     // City field shows — every district name here is Arabic, so there is nothing to match. (owner UI request.)
                     const latin = isLatinOnlyInput(v);
-                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, v));
+                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, query.deal, v));
                     setDistrictMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -726,7 +775,7 @@ export default function Home() {
                   setDistrictText('');
                   setDistrictSelected(null);
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, 6));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, 6));
                   districtRef.current?.focus();
                 }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
@@ -738,33 +787,52 @@ export default function Home() {
               <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{districtMsg}</Text>
             ) : null}
 
-            {citySelected && districtFocus && districtSuggestions.length > 0 && (
-              <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                {districtSuggestions.map((opt, i) => (
-                  <Tappable
-                    key={opt.districtAr + '#' + i}
-                    dip={0.03}
-                    style={[s.suggRow, i < districtSuggestions.length - 1 && s.suggDivider]}
-                    onPress={() => {
-                      districtTextRef.current = opt.districtAr;
-                      setDistrictText(opt.districtAr);
-                      setDistrictSelected(opt);
-                      setDistrictSuggestions([]);
-                      setDistrictFocus(false);
-                      setDistrictMsg('');
-                    }}
-                  >
-                    <Image source={LOC_IMG.district} style={s.suggLocIcon} />
-                    <View style={{ flex: 1 }}>
-                      {/* Top-6 are still chosen by active-listing count, but the count itself is no
-                          longer shown — just the district name. Every row (incl. zero-listing catalog
-                          districts) is rendered unconditionally and selectable. (owner UI request 2026-07-18.) */}
-                      <Text style={s.suggCity}>{opt.districtAr}</Text>
-                    </View>
-                  </Tappable>
-                ))}
-              </ScrollView>
-            )}
+            {citySelected && districtFocus && districtSuggestions.length > 0 && (() => {
+              // Same derived Top-6-vs-typed split as the City field above.
+              const isTop6 = !districtText;
+              const districtOnPress = (opt: DistrictOption) => {
+                districtTextRef.current = opt.districtAr;
+                setDistrictText(opt.districtAr);
+                setDistrictSelected(opt);
+                setDistrictSuggestions([]);
+                setDistrictFocus(false);
+                setDistrictMsg('');
+              };
+              return (
+                <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                  {isTop6 ? (
+                    <>
+                      <TrendingHeader
+                        title={`${t('Trending districts in')} ${citySelected.cityAr}`}
+                        runKey={`district:${citySelected.cityId}:${query.deal}`}
+                      />
+                      <TrendingRows
+                        runKey={`district:${citySelected.cityId}:${query.deal}`}
+                        items={districtSuggestions.map((opt, i) => ({ key: `${opt.districtAr}#${i}`, label: opt.districtAr }))}
+                        onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
+                      />
+                    </>
+                  ) : (
+                    districtSuggestions.map((opt, i) => (
+                      <Tappable
+                        key={opt.districtAr + '#' + i}
+                        dip={0.03}
+                        style={[s.suggRow, i < districtSuggestions.length - 1 && s.suggDivider]}
+                        onPress={() => districtOnPress(opt)}
+                      >
+                        <Image source={LOC_IMG.district} style={s.suggLocIcon} />
+                        <View style={{ flex: 1 }}>
+                          {/* Top-6 are still chosen by active-listing count, but the count itself is no
+                              longer shown — just the district name. Every row (incl. zero-listing catalog
+                              districts) is rendered unconditionally and selectable. (owner UI request 2026-07-18.) */}
+                          <Text style={s.suggCity}>{opt.districtAr}</Text>
+                        </View>
+                      </Tappable>
+                    ))
+                  )}
+                </ScrollView>
+              );
+            })()}
 
             <View ref={withAnchor(catAnchorRef)} />
             {/* Category — Residential / Commercial (macro) */}

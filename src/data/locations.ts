@@ -10,6 +10,14 @@ import { supabase } from '@/lib/supabase';
 import { CITY_AR_DISPLAY, CITY_TOKENS, cityTokensReverseLookup } from '@/lib/cityDisplay';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { LOCATION_UNRESOLVED_AR } from '@/i18n';
+import type { Deal } from './taxonomy';
+
+// 'Buy'/'Rent' → the Arabic deal_ar value stored on search_listings_ar (same mapping remote.ts
+// uses inline for the main search RPC) — the single conversion point for the Top-6 city/district
+// scoping below.
+function dealAr(deal: Deal): string {
+  return deal === 'Buy' ? 'بيع' : 'إيجار';
+}
 
 export type PlaceKind = 'country' | 'region' | 'city' | 'district';
 
@@ -650,54 +658,63 @@ export type CityOption = {
   listingCount: number;
 };
 
-let CITY_FIELD_OPTIONS: CityOption[] = [];
-let _cityFieldLoaded = false;
-let _cityFieldPromise: Promise<CityOption[]> | null = null;
+// Keyed by Deal ('Buy'/'Rent') — the Top-6 + typed-autocomplete pool is scoped to the deal the user
+// already picked (Deal is chosen BEFORE City in the form, so it's always known here). Category
+// (Residential/Commercial) is picked AFTER City/District in the current form order, so it is NOT
+// available at this point — a true Category×Deal ranking would need Category moved earlier, which
+// the owner explicitly declined (2026-07-20); Deal-only is the scoping this data can actually
+// support today. See supabase/migrations/20260720_trending_cities_districts_by_deal.sql.
+const CITY_FIELD_POOLS = new Map<Deal, CityOption[]>();
+const _cityFieldPromises = new Map<Deal, Promise<CityOption[]>>();
 
-// Loads the full cities-with-listings pool once per session (a few hundred rows — small enough to
-// fetch in one shot and search entirely client-side, same shape as ensureLocationIndex above).
-// Already sorted by listing_count desc so topCitiesByListings() below is just a slice.
-export async function ensureCityFieldIndex(): Promise<CityOption[]> {
-  if (_cityFieldLoaded) return CITY_FIELD_OPTIONS;
-  if (_cityFieldPromise) return _cityFieldPromise;
-  _cityFieldPromise = (async () => {
-    if (!supabase) return CITY_FIELD_OPTIONS;
+// Loads the deal-scoped cities-with-listings pool once per deal per session (a few hundred rows at
+// most — small enough to fetch in one shot and search entirely client-side, same shape as
+// ensureLocationIndex above). Already sorted by listing_count desc so topCitiesByListings() below
+// is just a slice.
+export async function ensureCityFieldIndex(deal: Deal): Promise<CityOption[]> {
+  const cached = CITY_FIELD_POOLS.get(deal);
+  if (cached) return cached;
+  const inflight = _cityFieldPromises.get(deal);
+  if (inflight) return inflight;
+  const p = (async () => {
+    if (!supabase) return [];
     try {
       const _ac = new AbortController();
       const _t = setTimeout(() => _ac.abort(), 15000);
       let data: any = null;
       try {
         ({ data } = await supabase
-          .from('city_listing_counts_ar')
-          .select('city_id,city_ar,region_id,region_ar,listing_count')
-          .order('listing_count', { ascending: false })
+          .rpc('top_cities_by_deal_ar', { p_deal: dealAr(deal) })
           .abortSignal(_ac.signal));
       } finally {
         clearTimeout(_t);
       }
       if (data) {
-        CITY_FIELD_OPTIONS = (data as any[]).map((r) => ({
+        const opts: CityOption[] = (data as any[]).map((r) => ({
           cityId: r.city_id,
           cityAr: r.city_ar,
           regionId: r.region_id ?? null,
           regionAr: r.region_ar ?? null,
           listingCount: Number(r.listing_count) || 0,
         }));
-        _cityFieldLoaded = true;
+        CITY_FIELD_POOLS.set(deal, opts);
+        return opts;
       }
+      return [];
     } catch {
       // Same RC-A pattern as ensureLocationIndex: reset so a stalled/failed load retries on the
       // next call instead of returning a dead promise forever.
-      _cityFieldPromise = null;
+      _cityFieldPromises.delete(deal);
+      return [];
     }
-    return CITY_FIELD_OPTIONS;
   })();
-  return _cityFieldPromise;
+  _cityFieldPromises.set(deal, p);
+  return p;
 }
 
 // Shown immediately when the City field is focused with no text typed yet.
-export function topCitiesByListings(k = 6): CityOption[] {
-  return CITY_FIELD_OPTIONS.slice(0, k);
+export function topCitiesByListings(deal: Deal, k = 6): CityOption[] {
+  return (CITY_FIELD_POOLS.get(deal) ?? []).slice(0, k);
 }
 
 // ── District field (city_id-scoped) — mirrors the City field. ────────────────────────────────────
@@ -712,14 +729,20 @@ export type DistrictOption = {
   matchValues: string[]; // every spelling to send to p_districts (twin-safe recall)
 };
 
-const _districtCache = new Map<number, DistrictOption[]>();
-const _districtPromises = new Map<number, Promise<DistrictOption[]>>();
+// Keyed by `${cityId}:${deal}` — same Deal-only scoping rationale as the city pool above. Note the
+// canonical CATALOG (which districts exist at all, incl. zero-listing ones) is deal-agnostic and
+// unaffected; only the popularity ranking / listing_count used for the Top-6 slice changes per deal.
+const _districtCache = new Map<string, DistrictOption[]>();
+const _districtPromises = new Map<string, Promise<DistrictOption[]>>();
+const districtCacheKey = (cityId: number, deal: Deal) => `${cityId}:${deal}`;
 
-// Load (once, cached) the full district catalog for a city_id. Never falls back to another city.
-export async function ensureDistrictOptions(cityId: number): Promise<DistrictOption[]> {
-  const cached = _districtCache.get(cityId);
+// Load (once, cached per city+deal) the full district catalog for a city_id. Never falls back to
+// another city.
+export async function ensureDistrictOptions(cityId: number, deal: Deal): Promise<DistrictOption[]> {
+  const key = districtCacheKey(cityId, deal);
+  const cached = _districtCache.get(key);
   if (cached) return cached;
-  const inflight = _districtPromises.get(cityId);
+  const inflight = _districtPromises.get(key);
   if (inflight) return inflight;
   const p = (async () => {
     if (!supabase) return [];
@@ -728,7 +751,9 @@ export async function ensureDistrictOptions(cityId: number): Promise<DistrictOpt
       const _t = setTimeout(() => _ac.abort(), 15000);
       let data: any = null;
       try {
-        ({ data } = await supabase.rpc('district_options_ar', { p_city_id: cityId }).abortSignal(_ac.signal));
+        ({ data } = await supabase
+          .rpc('district_options_ar', { p_city_id: cityId, p_deal: dealAr(deal) })
+          .abortSignal(_ac.signal));
       } finally {
         clearTimeout(_t);
       }
@@ -738,29 +763,29 @@ export async function ensureDistrictOptions(cityId: number): Promise<DistrictOpt
           listingCount: Number(r.listing_count) || 0,
           matchValues: Array.isArray(r.match_values) && r.match_values.length ? r.match_values : [r.district_ar],
         }));
-        _districtCache.set(cityId, opts);
+        _districtCache.set(key, opts);
         return opts;
       }
       return [];
     } catch {
-      _districtPromises.delete(cityId); // same retry-on-failure pattern as ensureCityFieldIndex
+      _districtPromises.delete(key); // same retry-on-failure pattern as ensureCityFieldIndex
       return [];
     }
   })();
-  _districtPromises.set(cityId, p);
+  _districtPromises.set(key, p);
   return p;
 }
 
 // Top-6 suggestions on empty focus: ONLY districts with active listings, ranked by count (the RPC
 // already returns rows ordered by listing_count desc, so this is a filter + slice).
-export function topDistrictsForCityId(cityId: number, k = 6): DistrictOption[] {
-  return (_districtCache.get(cityId) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
+export function topDistrictsForCityId(cityId: number, deal: Deal, k = 6): DistrictOption[] {
+  return (_districtCache.get(districtCacheKey(cityId, deal)) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
 }
 
 // Typing: search the COMPLETE canonical catalog for THIS city (incl. zero-listing districts) by Arabic
 // substring, using the SAME norm() folding as the city field. Empty query → the Top-6 suggestions.
-export function matchDistrictsByCityId(cityId: number, query: string): DistrictOption[] {
-  const all = _districtCache.get(cityId) ?? [];
+export function matchDistrictsByCityId(cityId: number, deal: Deal, query: string): DistrictOption[] {
+  const all = _districtCache.get(districtCacheKey(cityId, deal)) ?? [];
   const q = norm(query);
   if (!q) return all.filter((d) => d.listingCount > 0).slice(0, 6);
   const scored: { opt: DistrictOption; rank: number }[] = [];
@@ -778,11 +803,11 @@ export function matchDistrictsByCityId(cityId: number, query: string): DistrictO
 // tatweel stripped, then non-letter/digit chars dropped) — the same folding the DB's own
 // normalize_ar() applies — so "الري" matches "الرياض" exactly like a DB-side search would. Ranks
 // exact-prefix matches before substring matches, then by listing count (bigger cities first).
-export function matchCitiesByText(query: string): CityOption[] {
+export function matchCitiesByText(deal: Deal, query: string): CityOption[] {
   const q = norm(query);
   if (!q) return [];
   const scored: { opt: CityOption; rank: number }[] = [];
-  for (const opt of CITY_FIELD_OPTIONS) {
+  for (const opt of CITY_FIELD_POOLS.get(deal) ?? []) {
     const n = norm(opt.cityAr);
     if (n.startsWith(q)) scored.push({ opt, rank: 0 });
     else if (n.includes(q)) scored.push({ opt, rank: 1 });
