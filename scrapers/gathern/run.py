@@ -70,8 +70,10 @@ Field map (Gathern item → our schema):
   event_data.district_en|address.area→ neighborhood
   space                              → area_m2
   features ("N غرف نوم")             → bedrooms ; ("N سرير ماستر") → master_bedrooms
+  features (real Arabic labels)      → additional_info.amenities (تلفزيون/انترنت/مصعد/موقف سيارة/…)
+  amenities[bathtub-01.png].count    → bathrooms
   boxGalleryAll | coverphoto         → photo_urls
-  lat/lng, code, rating, amenities   → additional_info
+  lat/lng, code, rating              → additional_info
 
 PDPL: Gathern bookings go through Gathern, so list cards expose NO host name or phone — there is
 nothing to redact. We still defensively strip any phone that appears in title/description.
@@ -268,6 +270,52 @@ def _beds(features: Optional[list]) -> tuple[Optional[int], Optional[int]]:
             masters if masters and 0 < masters <= 20 else None)
 
 
+# The list response's features[] is a MIX of structural rows and REAL amenity labels, e.g.
+#   ["مساحة الوحدة 65 م2", "", "1 غرف نوم", "1 سرير ماستر", "تلفزيون", "انترنت", "مصعد",
+#    "موقف سيارة", "دخول ذاتي", ...]
+# The structural rows (unit area / bedrooms / master beds) already live in dedicated columns, so we
+# keep ONLY the genuine amenity labels here. (Live-verified 2026-07-20 against msapi search-units.)
+def _amenity_labels(features: Optional[list]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for f in features or []:
+        if not isinstance(f, str):
+            continue
+        label = f.strip()
+        if not label:
+            continue
+        if "مساحة الوحدة" in label:      # "مساحة الوحدة 65 م2" — the unit-area row → area_m2 column
+            continue
+        if _BEDS_RE.search(label):        # "1 غرف نوم" → bedrooms column
+            continue
+        if _MASTER_RE.search(label):      # "1 سرير ماستر" → master_bedrooms column
+            continue
+        if label in seen:
+            continue
+        seen.add(label)
+        out.append(label)
+    return out[:30]
+
+
+# Bathroom count from the list response's amenities[] — a list of {icon, count, title} objects where
+# each icon is a CDN url ending in a fixed filename. The bathtub-01.png object's `count` is the number
+# of bathrooms (e.g. {"icon": ".../bathtub-01.png", "count": 1, "title": "1"}). Only set when that icon
+# is present with a positive count — never fabricated. (Live-verified 2026-07-20.)
+def _bathrooms(amenities: Optional[list]) -> Optional[int]:
+    for a in amenities or []:
+        if not isinstance(a, dict):
+            continue
+        icon = a.get("icon")
+        if isinstance(icon, str) and icon.rsplit("/", 1)[-1].split("?", 1)[0] == "bathtub-01.png":
+            c = a.get("count")
+            if isinstance(c, bool):       # guard: bool is a subclass of int
+                return None
+            if isinstance(c, (int, float)) and c > 0:
+                return int(c)
+            return None
+    return None
+
+
 def _photos(it: dict) -> list[str]:
     urls: list[str] = []
     seen: set[str] = set()
@@ -369,7 +417,7 @@ def map_listing(it: dict) -> Optional[dict]:
     if title:
         title = f"{title} — {type_ar} مفروشة للإيجار الشهري".strip(" —") if type_ar else title
 
-    amenities = it.get("amenities") or []
+    bathrooms = _bathrooms(it.get("amenities"))
     info: dict[str, Any] = {
         "furnished": True,
         "rental_basis": "monthly",
@@ -388,7 +436,11 @@ def map_listing(it: dict) -> Optional[dict]:
         "capacity": (it.get("quickOptions") or {}).get("persons_count") or None,
         "latitude": it.get("lat"),
         "longitude": it.get("lng"),
-        "amenities": [a.get("title") for a in amenities if isinstance(a, dict) and a.get("title")][:30],
+        # REAL Arabic amenity labels from the list response's features[] (تلفزيون/انترنت/مصعد/موقف
+        # سيارة/دخول ذاتي/…). Previously this stored amenities[].title, which is a NUMERIC count string
+        # (["60","3","1","1"]) — junk. Structural rows (area/bedrooms/master beds) are excluded (they
+        # have dedicated columns). (Live-verified 2026-07-20.)
+        "amenities": _amenity_labels(it.get("features")),
         "resolved_city_ar": resolved["city_ar"],
         "resolved_city_id": resolved["city_id"],
         "resolved_region_id": resolved["region_id"],
@@ -406,6 +458,7 @@ def map_listing(it: dict) -> Optional[dict]:
         "transaction_type": "Rent",
         "area_m2": _num(it.get("space")),
         "bedrooms": beds,
+        "bathrooms": bathrooms,
         "master_bedrooms": masters,
         "price_annual": price_annual,
         "price_total": None,

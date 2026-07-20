@@ -248,6 +248,31 @@ function arCity(en: string | null): string | null {
     || en;
 }
 
+// Every Arabic-canonical CITY name we know (hand dict + full catalog), used ONLY by the Gathern
+// district-fallback guard below to reject a value that is actually a city sitting in the district
+// slot. Built once at module load from the same two sources arCity() trusts. (Gathern Tier-1.)
+const KNOWN_CITY_AR_SET: Set<string> = new Set<string>([
+  ...Object.values(CITY_AR),
+  ...Object.values(CITY_AR_FROM_CATALOG),
+].map((s) => (s ?? '').trim()).filter(Boolean));
+
+// Gathern-only district fallback: when the canonical location index has NO district for a row (≈4,147
+// live) and the raw neighborhood isn't Arabic, the card shows «الحي غير محدد» even though the source's
+// own additional_info.district_ar (e.g. "حي العليا") is already stored. Surface THAT — display-only,
+// never for grouping (canonical index stays the match key). Conservative city-name guard: the value
+// must be a real Arabic token, must not equal this row's own city_ar, and must not itself be a known
+// city name. Returns null for every non-Gathern source (naturally byte-identical elsewhere). (Tier-1.)
+function gathernDistrictFallback(source: any, rawInfo: any): string | null {
+  if (!(typeof source === 'string' && source.toLowerCase().includes('gathern'))) return null;
+  if (!rawInfo || typeof rawInfo !== 'object' || Array.isArray(rawInfo)) return null;
+  const d = String(rawInfo.district_ar ?? '').trim();
+  if (!d || !/[ء-ي]/.test(d)) return null;                    // must be a real Arabic district token
+  const cityAr = String(rawInfo.city_ar ?? '').trim();
+  if (cityAr && d === cityAr) return null;                     // equals this row's city → not a district
+  if (KNOWN_CITY_AR_SET.has(d)) return null;                  // a known city name in the district slot → reject
+  return d;
+}
+
 // Region name → region_id, mirrors loc_catalog_region (13 stable rows). Used to pass p_region_ids to
 // the RPC so same-name twin cities (e.g. «الهفوف» Eastern vs Riyadh) never fuse across regions.
 // Bug-fix #2 (audit `engine-no-region-scoping-twin-fusion`): the RPC matches city_ar only, so without
@@ -564,21 +589,50 @@ const ADDL_FIELDS: Array<[string, string]> = [
   ['availability_status', 'Status'],
   ['address', 'Address'],
   ['street_address', 'Address'],
+  // ── Gathern Tier-1 additions (APPENDED — never reorder the above; these keys exist ONLY in
+  //    Gathern's additional_info, and buildAdditionalInfo() further gates them to source=Gathern so
+  //    NO other platform's panel can change). Order = display priority within the Gathern panel.
+  ['unit_type_ar', 'Sub-type'],                          // شقة / استديو / غرفة
+  ['furnished', 'Furnished'],                            // boolean true → "Yes"/"نعم"
+  ['discount_label', 'Discount'],                        // "خصم 20%" (Arabic, shown as-is)
+  ['monthly_price_before_discount', 'Monthly before discount (SAR)'],
+  ['nightly_price', 'Nightly rate (SAR)'],
+  ['amenities', 'Amenities'],                            // real Arabic labels only (see gate below)
 ];
-function buildAdditionalInfo(raw: any): Array<{ key: string; label: string; value: string }> | null {
+// The Gathern-only keys appended to ADDL_FIELDS above. buildAdditionalInfo skips them unless the row's
+// source is Gathern, so a future/other platform that happened to store one of these keys would NOT get
+// a new field — guaranteeing every non-Gathern card stays byte-identical. (Gathern Tier-1.)
+const GATHERN_ONLY_ADDL_KEYS = new Set<string>([
+  'unit_type_ar', 'furnished', 'discount_label', 'monthly_price_before_discount', 'nightly_price', 'amenities',
+]);
+function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; label: string; value: string }> | null {
   if (!raw) return null;
   if (Array.isArray(raw)) {
     const rows = raw.filter((r: any) => r && r.label && r.value);
     return rows.length ? rows : null;
   }
   if (typeof raw !== 'object') return null;
+  const isGathern = typeof source === 'string' && source.toLowerCase().includes('gathern');
   const out: Array<{ key: string; label: string; value: string }> = [];
   const seen = new Set<string>();
   for (const [key, label] of ADDL_FIELDS) {
+    // Gathern-only keys never surface on any other source → non-Gathern output is unchanged.
+    if (GATHERN_ONLY_ADDL_KEYS.has(key) && !isGathern) continue;
     if (seen.has(label)) continue;
     let v: any = raw[key];
     if (v === null || v === undefined || v === '' || v === '0' || v === false) continue;
-    if (Array.isArray(v)) { v = v.filter(Boolean).join('، '); if (!v) continue; }
+    if (Array.isArray(v)) {
+      let arr = v.filter(Boolean);
+      // 'amenities' self-heals: Gathern's CURRENT store is numeric junk (["60","3",…] from the old
+      // amenities[].title). Only surface once it's an array of REAL Arabic labels (post re-crawl);
+      // reject anything without an Arabic letter or that is purely a number. (Gathern Tier-1.)
+      if (key === 'amenities') {
+        arr = arr.filter((x: any) => typeof x === 'string' && /[ء-ي]/.test(x) && !/^\d+$/.test(x.trim()));
+        if (!arr.length) continue;
+      }
+      v = arr.join('، ');
+      if (!v) continue;
+    }
     else if (typeof v === 'boolean') v = 'Yes';
     else if (typeof v === 'object') continue;
     else v = String(v).trim();
@@ -1043,7 +1097,10 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     // genuine, if unmapped, raw city name is untouched — this only fires for a known junk token.
     const safeRawCity = isJunkLocationToken(rawCity) ? '' : rawCity;
     l.city = /[ء-ي]/.test(rawCity || '') ? rawCity : ((ar?.city) || arCity(safeRawCity) || safeRawCity || '');
-    l.district = /[ء-ي]/.test(rawDistrict || '') ? rawDistrict : ((ar?.district) || '');
+    // Gathern Tier-1: when the canonical index has NO district and the raw neighborhood isn't Arabic,
+    // fall back to the source's own Arabic district token (l.districtArFallback, Gathern-only &
+    // city-name-guarded in finalize). null for every other source → `|| ''` keeps them byte-identical.
+    l.district = /[ء-ي]/.test(rawDistrict || '') ? rawDistrict : ((ar?.district) || l.districtArFallback || '');
     l.regionAr = (ar?.region) || l.regionAr || '';
     const region = (ar?.region) || CITY_TO_REGION[canonCity] || canonCity;
     ranked.push({ l, platform: c.platform, city: canonCity, region, district: canonDistrict, rank: c.rank, source_table: c.source_table });
@@ -1194,6 +1251,17 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
         ? `SAR ${amount.toLocaleString('en-US')}${deal === 'Rent' ? (isMonthlyRent ? '/mo' : '/yr') : ''}`
         : 'Price on request';
     const photo = Array.isArray(r.photo_urls) && r.photo_urls.length > 0 ? r.photo_urls[0] : '';
+    // Raw additional_info as a plain object (Gathern/new-platform shape). Aqar leaves it null; Wasalt/
+    // Aqar Gate store the LEGACY array shape — neither is an object, so `rawInfo` is null for them and
+    // every field derived from it below stays null → no non-Gathern card changes. (Gathern Tier-1.)
+    const rawInfo = r.additional_info && typeof r.additional_info === 'object' && !Array.isArray(r.additional_info)
+      ? r.additional_info : null;
+    // Guest rating (0–10) + review count — Gathern marketplace fields. null for every other platform
+    // (the key simply isn't present), so ResultCard renders no rating element for them. (Gathern Tier-1.)
+    const ratingNum = rawInfo && rawInfo.rating != null ? Number(rawInfo.rating) : NaN;
+    const rating = Number.isFinite(ratingNum) ? ratingNum : null;
+    const reviewsNum = rawInfo && rawInfo.reviews_count != null ? Number(rawInfo.reviews_count) : NaN;
+    const reviews_count = Number.isFinite(reviewsNum) ? reviewsNum : null;
     return {
       id: Number(r.id),
       type: r.property_type ?? 'Apartment',
@@ -1232,7 +1300,10 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       project_name: r.project_name ?? null,
       driver_room: !!r.driver_room,
       rega_location_verified: !!r.rega_location_verified,
-      additional_info: buildAdditionalInfo(r.additional_info),
+      rating,
+      reviews_count,
+      districtArFallback: gathernDistrictFallback(r.source, rawInfo),
+      additional_info: buildAdditionalInfo(r.additional_info, r.source),
       photos: Array.isArray(r.photo_urls) ? r.photo_urls : [],
       rent_now_pay_later: !!r.rent_now_pay_later,
       rent_now_pay_later_monthly: r.rent_now_pay_later_monthly ?? null,
