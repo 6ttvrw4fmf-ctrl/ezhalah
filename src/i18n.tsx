@@ -324,7 +324,7 @@ const AR: Record<string, string> = {
   'Do you prefer listings with installment options?': 'تفضّل عقارات تتيح التقسيط / الدفع لاحقًا؟',
   'Offers installments': 'يقبل التقسيط',
   'What amenities matter to you?': 'ما المرافق المهمة لك؟',
-  'Furnished': 'مفروش',
+  // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
   'How many bathrooms?': 'كم عدد دورات المياه؟',
   'Any number': 'أي عدد',
   '1+': '+١',
