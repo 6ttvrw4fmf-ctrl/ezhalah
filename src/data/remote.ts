@@ -498,6 +498,60 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
   return (data as AgeOptionCounts[])[0];
 }
 
+// Annual-Rent apartment guided flow (2026-07-20): one scope-respecting count row that powers the RNPL,
+// amenities, and min-bathrooms questions. `cnt_total_base` = the scope total BEFORE this question's own
+// selection (drives the ≥150 gate). The per-option counts (cnt_rnpl/kitchen/parking/elevator/furnished,
+// cnt_bath1..4) are STRICT standalone availabilities within that base — they IGNORE the passed
+// p_amenities/p_bath_min so a chip's number stays stable as the user toggles. `cnt_selected` DOES honor
+// the passed p_amenities (strict) + p_bath_min (strict >= N, unknown excluded) — that is the live count
+// shown on the amenities continue button. Same scope resolution + predicate as the search RPC, so the
+// number always equals what Search returns. RPC error/timeout → null (caller skips the question).
+export type GuidedCounts = {
+  cnt_total_base: number;
+  cnt_rnpl: number;
+  cnt_kitchen: number;
+  cnt_parking: number;
+  cnt_elevator: number;
+  cnt_furnished: number;
+  cnt_bath1: number;
+  cnt_bath2: number;
+  cnt_bath3: number;
+  cnt_bath4: number;
+  cnt_selected: number;
+};
+
+export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<GuidedCounts | null> {
+  if (!supabase) return null;
+  const scope = await resolveSearchScope(q);
+  if (!scope) return null;
+  const { isBroadCommercial, ...scopeParams } = scope;
+  const result = await withTimeout(
+    supabase.rpc('apartment_guided_counts_ar', {
+      ...scopeParams,
+      ...rpcFilterParams(q),
+      ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
+      ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
+      ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
+      ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
+      ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
+      ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
+    }),
+    AGE_COUNT_TIMEOUT_MS,
+  );
+  if ('timedOut' in result) return null;
+  const { data, error } = result;
+  if (error || !data || !(data as GuidedCounts[]).length) return null;
+  return (data as GuidedCounts[])[0];
+}
+
+// Live count for the amenities continue button: re-runs the guided count with the tentative amenity
+// selection merged in and returns just `cnt_selected`. Returns null on error so the card can hold the
+// previous number rather than flashing a wrong one.
+export async function fetchGuidedLiveCount(q: SearchQuery, amenities: string[], bathMin: number | null): Promise<number | null> {
+  const counts = await fetchApartmentGuidedCounts({ ...q, amenities: amenities.length ? amenities : null, bathMin });
+  return counts ? counts.cnt_selected : null;
+}
+
 // Convert a listing's `additional_info` into the {key,label,value} rows the card's
 // AdditionalInformationPanel renders. Two shapes exist in the DB:
 //   • LEGACY (Wasalt/Aqar Gate): already an array of {label,value} → pass through.
@@ -885,6 +939,12 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
     ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
     ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
+    // Annual-Rent apartment guided flow (2026-07-20). p_amenities + p_bath_min already exist on the
+    // live RPC signature (unlike p_is_new_construction, which once needed its migration first), so
+    // sending them is safe. STRICT: p_amenities requires each token present; p_bath_min excludes
+    // unknown-bathroom rows (the strict-bathrooms migration removes the `s.bathrooms is null` pass).
+    ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
+    ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
   };
 
   // RC-A rebase note (2026-07-16): main's baseRpcParams block above is the P0-fixed parameter source

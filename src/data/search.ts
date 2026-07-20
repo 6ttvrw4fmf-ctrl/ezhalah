@@ -117,6 +117,12 @@ export type SearchQuery = {
   ageMin?: number | null;
   ageMax?: number | null;
   isNewConstruction?: boolean | null;
+  // Annual-Rent apartment guided flow (2026-07-20). `amenities` = STRICT required tokens sent to the
+  // RPC's p_amenities block (kitchen/parking/elevator/furnished/rnpl) — a listing must have EACH one
+  // (null/false excluded); absent/empty → no amenity constraint. `bathMin` = STRICT minimum bathrooms
+  // (confirmed >= N; unknown-bathroom listings excluded — owner 2026-07-20). Both optional, OR-safe.
+  amenities?: string[] | null;
+  bathMin?: number | null;
 };
 
 // Parse a raw digit string ("1,200" / "300" / "") → a positive number, or null when empty/invalid.
