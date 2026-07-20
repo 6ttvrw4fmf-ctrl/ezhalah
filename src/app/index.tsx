@@ -13,6 +13,7 @@ import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Cate
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
+import { TrendingChips } from '@/components/TrendingChips';
 import { grouped, type SearchQuery } from '@/data/search';
 import { HOME_DEFAULT_QUERY, hasActiveFilters } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
@@ -180,6 +181,15 @@ export default function Home() {
   // Mirrors query.location synchronously (state updates are async/batched) so the Top-6-on-focus
   // promise callback above can check the TRUE current text at resolution time, not a stale closure.
   const cityTextRef = useRef('');
+  // Rent period the user has toggled (Monthly/Yearly) — drives the period-scoped Trending lists AND
+  // the search summary. Buy has no period. Declared HIGH (above the warm effects below) because those
+  // effects depend on it. (Was previously derived lower down; moved up 2026-07-21.)
+  const rentPeriod: 'monthly' | 'annual' = query.rentPeriod ?? 'annual';
+  // payment_monthly truth for the Trending-scope RPCs: monthly→true, annual→false, Buy→null (no filter).
+  const paymentMonthly: boolean | null = query.deal === 'Rent' ? rentPeriod === 'monthly' : null;
+  // Proactive period-scoped Trending quick-picks shown above the City field (owner request 2026-07-21).
+  const [trendCities, setTrendCities] = useState<CityOption[]>([]);
+  const [trendDistricts, setTrendDistricts] = useState<DistrictOption[]>([]);
   // Refs so the ENTIRE Price/Area/Size box is one tap target (owner 2026-07-10): tapping anywhere in
   // the box — icon, label, padding, unit text — focuses the input immediately, same pattern already
   // used for the city field above (`cityRef` + its wrapping Pressable).
@@ -296,7 +306,10 @@ export default function Home() {
   // Category-aware ranking can't reach this field without moving Category earlier in the flow — a
   // bigger UX change the owner declined (2026-07-20). Deal-only is what this data can support today.
   useEffect(() => {
-    void ensureCityFieldIndex(query.deal).then(() => {
+    void ensureCityFieldIndex(query.deal, paymentMonthly).then(() => {
+      // Proactive period-scoped Trending chips above the City field (owner 2026-07-21). Refreshed on
+      // every Deal OR Rent-period change so flipping Monthly↔Yearly visibly re-ranks the list.
+      setTrendCities(topCitiesByListings(query.deal, paymentMonthly, 6));
       // EDGE CASE (found in testing, generalizes to every deal change too): a fetch can still be
       // pending when the user has already focused AND typed a query — matchCitiesByText() would have
       // run against a still-empty/stale-deal pool and (correctly, not a crash) returned []/old
@@ -306,16 +319,16 @@ export default function Home() {
       // replay only "when the section first appears or when the rankings change").
       if (cityTextRef.current) {
         const latin = isLatinOnlyInput(cityTextRef.current);
-        setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, cityTextRef.current));
+        setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, cityTextRef.current));
       } else if (cityFocus) {
-        setCitySuggestions(topCitiesByListings(query.deal, 6));
+        setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, 6));
       }
     });
     // Deliberately NOT depending on cityFocus/citySelected — this effect should fire only on a real
-    // Deal change (or mount), not on every focus/blur toggle; cityFocus is read for its value AT that
-    // moment via closure, which is exactly what's wanted (see comment above).
+    // Deal/period change (or mount), not on every focus/blur toggle; cityFocus is read for its value AT
+    // that moment via closure, which is exactly what's wanted (see comment above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.deal]);
+  }, [query.deal, paymentMonthly]);
 
   // Same reactive refresh for District, scoped to the currently-selected city — and ALSO to Category
   // (owner decision 2026-07-20, after proving live that Category matters more for districts than for
@@ -325,18 +338,20 @@ export default function Home() {
   // Only meaningful once a city is picked; a no-op otherwise (ensureDistrictOptions is never called
   // without one).
   useEffect(() => {
-    if (!citySelected) return;
+    if (!citySelected) { setTrendDistricts([]); return; }
     const cid = citySelected.cityId;
-    void ensureDistrictOptions(cid, query.deal, query.category).then(() => {
+    void ensureDistrictOptions(cid, query.deal, query.category, paymentMonthly).then(() => {
+      // Proactive period-scoped Trending district chips (shown once a city is picked).
+      setTrendDistricts(topDistrictsForCityId(cid, query.deal, query.category, paymentMonthly, 6));
       if (districtTextRef.current) {
         const latin = isLatinOnlyInput(districtTextRef.current);
-        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, query.category, districtTextRef.current));
+        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, query.category, paymentMonthly, districtTextRef.current));
       } else if (districtFocus) {
-        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, query.category, 6));
+        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, query.category, paymentMonthly, 6));
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.deal, query.category, citySelected]);
+  }, [query.deal, query.category, citySelected, paymentMonthly]);
 
   const onSearch = async () => {
     // CITY-ONLY FIELD (owner spec 2026-07-17): "The user must select a valid city result. Do not
@@ -368,6 +383,12 @@ export default function Home() {
       // Persist the effective rent period for Rent so the summary reflects the visible Monthly/Yearly toggle.
       rentPeriod: query.deal === 'Rent' ? (query.rentPeriod ?? 'annual') : query.rentPeriod,
     };
+    navigateWithQuery(q);
+  };
+
+  // Shared "play the here-we-go backdrop lift, then open results" navigation — used by the Search
+  // button (above) and by the proactive Trending chips below (which search immediately on tap).
+  const navigateWithQuery = (q: SearchQuery) => {
     RNAnimated.timing(heroAnim, {
       toValue: 1,
       duration: 300,
@@ -379,6 +400,49 @@ export default function Home() {
         return;
       }
       router.push({ pathname: '/agent', params: { filter: JSON.stringify(q) } });
+    });
+  };
+
+  // Trending CITY chip → jump straight to that city's results for the current deal + period. Clears any
+  // district (city-only), but CARRIES the current category — exactly like pressing Search does — so the
+  // shortcut behaves consistently with the rest of the form. Reflects the pick in the form too, so
+  // returning shows it. (owner 2026-07-21.)
+  const onTrendCity = (opt: CityOption) => {
+    const lm = resolveCitySelection(opt);
+    cityTextRef.current = opt.cityAr;
+    setQuery((prev) => ({ ...prev, location: opt.cityAr }));
+    setCitySelected(opt);
+    setCitySuggestions([]);
+    setCityFocus(false);
+    setLocMsg('');
+    clearDistrict();
+    navigateWithQuery({
+      ...query,
+      location: lm.label,
+      locationMatch: lm,
+      districts: undefined,
+      districtLabel: undefined,
+      rentPeriod: query.deal === 'Rent' ? rentPeriod : query.rentPeriod,
+    });
+  };
+
+  // Trending DISTRICT chip → search that city + district for the current deal + period. Only reachable
+  // once a city is selected (the chip row switches from cities to that city's districts).
+  const onTrendDistrict = (opt: DistrictOption) => {
+    if (!citySelected) return;
+    const lm = resolveCitySelection(citySelected);
+    districtTextRef.current = opt.districtAr;
+    setDistrictText(opt.districtAr);
+    setDistrictSelected(opt);
+    setDistrictSuggestions([]);
+    setDistrictFocus(false);
+    navigateWithQuery({
+      ...query,
+      location: lm.label,
+      locationMatch: lm,
+      districts: opt.matchValues,
+      districtLabel: opt.districtAr,
+      rentPeriod: query.deal === 'Rent' ? rentPeriod : query.rentPeriod,
     });
   };
 
@@ -425,8 +489,7 @@ export default function Home() {
     : sizeIsBand
       ? tDetailOption(query.detail!).replace(/\s*(m²|م²)\s*$/u, '').trim()
       : grouped(parseInt(query.detail!, 10) || 0); // free-typed number → comma-grouped
-  // RENT lets the user pick the period (Monthly / Yearly) via a tiny toggle; the engine handles each.
-  const rentPeriod: 'monthly' | 'annual' = query.rentPeriod ?? 'annual';
+  // (rentPeriod / paymentMonthly are derived higher up now — the warm effects above depend on them.)
 
   // Selection "achievement" confirmation for the City / District fields (owner UI request 2026-07-18):
   // on confirming a pick the field does a subtle scale pop, its border settles to green, and a green
@@ -600,6 +663,49 @@ export default function Home() {
             <Segmented options={DEALS} value={query.deal} icons={DEAL_IMG} onChange={(v) => { setQuery((q) => ({ ...q, deal: v as any, priceBand: null, priceMin: null, priceMax: null, priceInput: '' })); scrollDown(cityAnchorRef); }} />
 
             <View ref={withAnchor(cityAnchorRef)} />
+
+            {/* Rent period (Monthly / Yearly) — MOVED here, directly above the City field (owner request
+                2026-07-21, superseding the 07-10 placement above the Refine card): the user picks the
+                period FIRST, then the Trending chips + City/District suggestions all reflect it. Rent-only
+                (Buy has no period). Still tells the engine which period a later typed price/size means. */}
+            {query.deal === 'Rent' && (
+              <Reveal style={{ marginTop: 12 }}>
+                <Segmented
+                  options={['Monthly', 'Yearly']}
+                  icons={PERIOD_IMG}
+                  value={rentPeriod === 'monthly' ? 'Monthly' : 'Yearly'}
+                  onChange={(v) => setQuery((q) => ({ ...q, rentPeriod: v === 'Monthly' ? 'monthly' : 'annual' }))}
+                />
+                <Text style={s.rentHint}>
+                  {t(rentPeriod === 'monthly' ? 'Monthly: 1–11 month lease, price/month.' : 'Annual: 12-month lease, price/year.')}
+                </Text>
+              </Reveal>
+            )}
+
+            {/* Proactive period-scoped Trending quick-picks (owner request 2026-07-21). Cities until one
+                is chosen, then that city's districts. Tapping runs the search immediately. Hidden while
+                the matching field is focused (its own dropdown shows the trending list then) and once a
+                district is picked. Keyed by period (+ city) so it re-animates when the list changes. */}
+            {query.deal === 'Rent' && !cityFocus && !districtFocus && (
+              (!citySelected && trendCities.length > 0) ? (
+                <Reveal key={`tc-${rentPeriod}`} style={{ marginTop: 12 }}>
+                  <TrendingChips
+                    title={t('Trending cities now')}
+                    items={trendCities.map((c) => ({ key: String(c.cityId), label: c.cityAr }))}
+                    onPress={(_item, idx) => onTrendCity(trendCities[idx])}
+                  />
+                </Reveal>
+              ) : (citySelected && !districtSelected && trendDistricts.length > 0) ? (
+                <Reveal key={`td-${rentPeriod}-${citySelected.cityId}`} style={{ marginTop: 12 }}>
+                  <TrendingChips
+                    title={`${t('Trending districts in')} ${citySelected.cityAr}`}
+                    items={trendDistricts.map((d, i) => ({ key: `${d.districtAr}#${i}`, label: d.districtAr }))}
+                    onPress={(_item, idx) => onTrendDistrict(trendDistricts[idx])}
+                  />
+                </Reveal>
+              ) : null
+            )}
+
             {/* CITY-ONLY FIELD (owner spec 2026-07-17): "أي مدينة؟". Field now searches/displays CITIES
                 ONLY, never regions/districts/landmarks/areas. The label sits ABOVE the field, far-right
                 (RTL) — a static header, not a floating placeholder. (owner UI request 2026-07-18.)
@@ -626,8 +732,8 @@ export default function Home() {
                     // in sync on every keystroke below) at resolution time, not the value captured in
                     // this closure at focus time.
                     if (!query.location) {
-                      void ensureCityFieldIndex(query.deal).then(() => {
-                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(query.deal, 6));
+                      void ensureCityFieldIndex(query.deal, paymentMonthly).then(() => {
+                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, 6));
                       });
                     }
                   }}
@@ -641,14 +747,14 @@ export default function Home() {
                     clearDistrict(); // editing the city disables + clears District (no cross-city carry-over)
                     if (!v) {
                       // Cleared back to empty → the Top 6 list, same as a fresh focus.
-                      setCitySuggestions(topCitiesByListings(query.deal, 6));
+                      setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, 6));
                       setLocMsg('');
                       return;
                     }
                     // Arabic-only product: English typing gets NO autocomplete and an Arabic hint —
                     // there is nothing to match against, since every city name here is Arabic. (user rule)
                     const latin = isLatinOnlyInput(v);
-                    setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, v));
+                    setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, v));
                     setLocMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -660,7 +766,7 @@ export default function Home() {
                 </RNAnimated.View>
               ) : null}
               {query.location.length > 0 && (
-                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(query.deal, 6)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
+                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, 6)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
                 </Pressable>
               )}
@@ -766,8 +872,8 @@ export default function Home() {
                     // re-check the live text via districtTextRef before showing the Top-6.
                     if (!districtTextRef.current) {
                       const cid = citySelected.cityId;
-                      void ensureDistrictOptions(cid, query.deal, query.category).then(() => {
-                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, query.category, 6));
+                      void ensureDistrictOptions(cid, query.deal, query.category, paymentMonthly).then(() => {
+                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, query.category, paymentMonthly, 6));
                       });
                     }
                   }}
@@ -778,11 +884,11 @@ export default function Home() {
                     // Editing invalidates a prior pick — a typed-but-unconfirmed district is never searched.
                     setDistrictSelected(null);
                     if (!citySelected) return;
-                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, 6)); setDistrictMsg(''); return; }
+                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, paymentMonthly, 6)); setDistrictMsg(''); return; }
                     // Arabic-only product: English typing gets NO autocomplete and the same Arabic hint the
                     // City field shows — every district name here is Arabic, so there is nothing to match. (owner UI request.)
                     const latin = isLatinOnlyInput(v);
-                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, query.deal, query.category, v));
+                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, query.deal, query.category, paymentMonthly, v));
                     setDistrictMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -799,7 +905,7 @@ export default function Home() {
                   setDistrictText('');
                   setDistrictSelected(null);
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, 6));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, paymentMonthly, 6));
                   districtRef.current?.focus();
                 }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
@@ -924,26 +1030,6 @@ export default function Home() {
             )}
 
             <View ref={withAnchor(refineAnchorRef)} />
-
-            {/* Rent only: tiny Monthly / Yearly toggle that tells the engine which period the typed
-                number represents. The user sees no math; they just pick what they're thinking in.
-                Hidden for Buy. MOVED above the Size filter (owner 2026-07-10) — so the user knows
-                which period a price/size they're about to type applies to, before typing it; was
-                previously dead last, right before Search. (user request.) */}
-            {query.deal === 'Rent' && (
-              <Reveal style={{ marginTop: 12 }}>
-                <Segmented
-                  options={['Monthly', 'Yearly']}
-                  icons={PERIOD_IMG}
-                  value={rentPeriod === 'monthly' ? 'Monthly' : 'Yearly'}
-                  onChange={(v) => setQuery((q) => ({ ...q, rentPeriod: v === 'Monthly' ? 'monthly' : 'annual' }))}
-                />
-                {/* Tiny inline hint under the toggle so the user knows what each period means. */}
-                <Text style={s.rentHint}>
-                  {t(rentPeriod === 'monthly' ? 'Monthly: 1–11 month lease, price/month.' : 'Annual: 12-month lease, price/year.')}
-                </Text>
-              </Reveal>
-            )}
 
             {/* Combined optional refine section: bedrooms + area in one card */}
             {(ctx?.showBeds || ctx?.showSize) && (
