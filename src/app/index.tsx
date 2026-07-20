@@ -246,10 +246,21 @@ export default function Home() {
   const SCROLL_REVEAL_OFFSET = 96;
   const scrollDown = (target?: { current: View | null }) => {
     // Defer past the state-driven re-render so the newly revealed section is laid out first.
+    // MUST outlast DropdownReveal's close animation (ui.tsx DROPDOWN_CLOSE.duration = 150ms): picking
+    // a City/District suggestion closes that dropdown AND calls scrollDown in the same tick. The
+    // dropdown stays fully mounted (occupying its normal layout height) until its fade-out finishes,
+    // then unmounts instantly, shifting every section below it upward. At the old 90ms delay this fired
+    // BEFORE that unmount, so the browser's smooth-scroll targeted a position that moved out from under
+    // it 60ms later — observed live as the page jumping to the very bottom instead of stopping at the
+    // next section (owner report 2026-07-20, "when I choose the district it takes me fully down").
+    // 220ms clears the 150ms close animation with margin; still fast enough to feel instant.
     setTimeout(() => {
       const sv = scrollRef.current;
-      const node: any = target?.current ?? endAnchorRef.current;
-      if (!node) { sv?.scrollToEnd({ animated: true }); return; }
+      const node: any = target?.current;
+      // No target (or not yet mounted) → do nothing rather than guess. The old fallback jumped to the
+      // very bottom of the page (scrollToEnd) whenever a ref wasn't ready, which is a worse outcome
+      // than not scrolling at all — never re-add a "when in doubt, jump to the end" fallback here.
+      if (!node) return;
       if (Platform.OS === 'web') {
         // scroll-margin-top (set on every anchor by withAnchor) makes 'start' land OFFSET px below the
         // node's top instead of flush against the viewport edge — the previous section stays visible.
@@ -258,10 +269,10 @@ export default function Home() {
         node.measureLayout(
           sv as any,
           (_x: number, y: number) => sv.scrollTo({ y: Math.max(0, y - SCROLL_REVEAL_OFFSET), animated: true }),
-          () => sv.scrollToEnd({ animated: true }),
+          () => {}, // measurement failed (unmounted/detached) — do nothing, same reasoning as above.
         );
       }
-    }, 90);
+    }, 220);
   };
   // Attaches a ref AND (web-only) sets scroll-margin-top, so every anchor gets the same gentle offset
   // with zero extra plumbing at each call site — same pattern already used for setLtr/makeDirRef above.
