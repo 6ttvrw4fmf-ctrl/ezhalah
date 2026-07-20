@@ -232,6 +232,8 @@ export default function Home() {
   const endAnchorRef = useRef<View>(null);
   // Step anchors — picking a step smoothly reveals the NEXT one, and we scroll to THAT section (its top),
   // never to the bottom of the page. (user: "guide to the next relevant step only, don't jump to the end.")
+  const cityAnchorRef = useRef<View>(null);
+  const districtAnchorRef = useRef<View>(null);
   const catAnchorRef = useRef<View>(null);
   const groupAnchorRef = useRef<View>(null);
   const typeAnchorRef = useRef<View>(null);
@@ -584,8 +586,9 @@ export default function Home() {
                 </Pressable>
               </Reveal>
             )}
-            <Segmented options={DEALS} value={query.deal} icons={DEAL_IMG} onChange={(v) => { setQuery((q) => ({ ...q, deal: v as any, priceBand: null, priceMin: null, priceMax: null, priceInput: '' })); scrollDown(catAnchorRef); }} />
+            <Segmented options={DEALS} value={query.deal} icons={DEAL_IMG} onChange={(v) => { setQuery((q) => ({ ...q, deal: v as any, priceBand: null, priceMin: null, priceMax: null, priceInput: '' })); scrollDown(cityAnchorRef); }} />
 
+            <View ref={withAnchor(cityAnchorRef)} />
             {/* CITY-ONLY FIELD (owner spec 2026-07-17): "أي مدينة؟". Field now searches/displays CITIES
                 ONLY, never regions/districts/landmarks/areas. The label sits ABOVE the field, far-right
                 (RTL) — a static header, not a floating placeholder. (owner UI request 2026-07-18.)
@@ -675,7 +678,7 @@ export default function Home() {
                   // New city → drop any prior district; the [query.deal, query.category, citySelected]
                   // effect above warms THIS city's district catalog so District shows its Top-6 instantly.
                   clearDistrict();
-                  scrollDown(catAnchorRef); // carry them down to the next step (category)
+                  scrollDown(districtAnchorRef); // carry them down to the next step (district)
                 };
                 return (
                   <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
@@ -724,6 +727,7 @@ export default function Home() {
                 can never appear (data is fetched per city_id); changing the city clears it. Optional. */}
             {/* Static label above, far-right (RTL): "أي حي؟" with a lighter "اختياري" beside it — the
                 optional-ness is its own label, not baked into the field placeholder. (owner UI request.) */}
+            <View ref={withAnchor(districtAnchorRef)} />
             <Text style={[s.fieldLabelAbove, { marginTop: 12 }]}>
               {t('Which neighborhood?')}
               {'  '}
@@ -809,6 +813,7 @@ export default function Home() {
                   setDistrictSuggestions([]);
                   setDistrictFocus(false);
                   setDistrictMsg('');
+                  scrollDown(catAnchorRef); // carry them down to the next step (category)
                 };
                 return (
                   <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
