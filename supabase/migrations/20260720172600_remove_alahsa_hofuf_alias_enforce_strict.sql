@@ -1,0 +1,18 @@
+-- Found while verifying the al_ahsa cluster removal (migration
+-- 20260720172500_remove_al_ahsa_city_cluster_enforce_strict): a SEPARATE mechanism,
+-- loc_catalog_city_alias, had a row aliasing "الاحساء" (normalized) directly to city_id=12
+-- (الهفوف) — a different table than loc_city_cluster, but the same underlying effect: searching
+-- الأحساء (its own real catalog city, id=3677, 1508 real listings) also pulled in ALL of الهفوف's
+-- 712 listings via the RPC's city_ids resolution (normalize_ar('الاحساء') matched this alias row,
+-- adding city_id=12 to the resolved city_ids set alongside 3677). Live-verified: searching الأحساء
+-- returned 2220 (1508 + 712) instead of its own 1508 before this fix. Removing this alias row
+-- fully completes the owner's 2026-07-20 "make it strict too" decision for these two real, distinct
+-- cities — no other alias rows exist for city_id in (12, 2748, 3677) (checked).
+--
+-- Post-fix live verification: المبرز alone = 5 (was 763). الهفوف alone = 712 (390 own +
+-- 322 rows whose OWN raw city_ar text literally reads "الاحساء و الهفوف" — a genuine, source-given
+-- composite label naming both places, correctly preserved via composite_match_city_ids()'s
+-- unrelated label-parsing logic). الأحساء alone = 1830 (1508 own + the SAME 322 genuinely
+-- dual-labeled rows) — the only remaining overlap between these cities is real listings whose own
+-- description names both places, not an artificial city-level merge.
+delete from public.loc_catalog_city_alias where alias_norm = normalize_ar('الاحساء') and city_id = 12;
