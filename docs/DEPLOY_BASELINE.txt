@@ -1,4 +1,4 @@
-f9e4d546b9187fbed9e67761f9da60f34430df3e
+d888b77b58cd98c1f537313815d3eec47efdde84
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
@@ -168,3 +168,4 @@ f9e4d546b9187fbed9e67761f9da60f34430df3e
 #   MCP): category pill, dropdown, and full search-to-results flow all work correctly end-to-end,
 #   confirmed for both this deploy and prior ones. (A same-session emergency rollback to 05ff2528
 #   was performed then reverted once this was established — see project memory for the full story.)
+# 2026-07-20  d888b77  deployed via safe-deploy.sh
