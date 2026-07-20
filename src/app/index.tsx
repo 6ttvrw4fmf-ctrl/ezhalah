@@ -6,7 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
-import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal } from '@/components/ui';
+import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
 import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
@@ -623,7 +623,7 @@ export default function Home() {
               <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{locMsg}</Text>
             ) : null}
 
-            {cityFocus && citySuggestions.length > 0 && (
+            <DropdownReveal visible={cityFocus && citySuggestions.length > 0}>
               <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                 {citySuggestions.map((opt, i) => (
                   <Tappable
@@ -658,7 +658,7 @@ export default function Home() {
                   </Tappable>
                 ))}
               </ScrollView>
-            )}
+            </DropdownReveal>
 
             {/* DISTRICT — strictly under City. Disabled until a city is chosen; scoped to that city's
                 canonical city_id. Empty focus → Top-6 by active-listing count; typing → the COMPLETE
@@ -738,7 +738,7 @@ export default function Home() {
               <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{districtMsg}</Text>
             ) : null}
 
-            {citySelected && districtFocus && districtSuggestions.length > 0 && (
+            <DropdownReveal visible={citySelected != null && districtFocus && districtSuggestions.length > 0}>
               <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                 {districtSuggestions.map((opt, i) => (
                   <Tappable
@@ -764,7 +764,7 @@ export default function Home() {
                   </Tappable>
                 ))}
               </ScrollView>
-            )}
+            </DropdownReveal>
 
             <View ref={withAnchor(catAnchorRef)} />
             {/* Category — Residential / Commercial (macro) */}
