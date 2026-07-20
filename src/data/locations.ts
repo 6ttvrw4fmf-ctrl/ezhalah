@@ -10,7 +10,7 @@ import { supabase } from '@/lib/supabase';
 import { CITY_AR_DISPLAY, CITY_TOKENS, cityTokensReverseLookup } from '@/lib/cityDisplay';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { LOCATION_UNRESOLVED_AR } from '@/i18n';
-import type { Deal } from './taxonomy';
+import type { Category, Deal } from './taxonomy';
 
 // 'Buy'/'Rent' → the Arabic deal_ar value stored on search_listings_ar (same mapping remote.ts
 // uses inline for the main search RPC) — the single conversion point for the Top-6 city/district
@@ -729,17 +729,24 @@ export type DistrictOption = {
   matchValues: string[]; // every spelling to send to p_districts (twin-safe recall)
 };
 
-// Keyed by `${cityId}:${deal}` — same Deal-only scoping rationale as the city pool above. Note the
-// canonical CATALOG (which districts exist at all, incl. zero-listing ones) is deal-agnostic and
-// unaffected; only the popularity ranking / listing_count used for the Top-6 slice changes per deal.
+// Keyed by `${cityId}:${deal}:${category}` — District is category-aware (unlike the City pool
+// above, which is Deal-only): a live scope-divergence check (owner-commissioned, 2026-07-20) proved
+// Category matters far more for districts than for cities — Commercial+Rent's own top district
+// doesn't crack the top 10 for any of the other 3 scopes. `category` is `null` until the user picks
+// Residential/Commercial (it's chosen AFTER District in this form — the owner explicitly declined
+// reordering the form to fix that); null means "broader/default" (Deal-only) ranking, exactly the
+// prior behavior, until Category is known — then the [query.deal, query.category, citySelected]
+// effect in index.tsx re-fetches and live-refreshes the Top-6 for the now-complete scope. Note the
+// canonical CATALOG (which districts exist at all, incl. zero-listing ones) is scope-agnostic and
+// unaffected; only the popularity ranking / listing_count used for the Top-6 slice changes.
 const _districtCache = new Map<string, DistrictOption[]>();
 const _districtPromises = new Map<string, Promise<DistrictOption[]>>();
-const districtCacheKey = (cityId: number, deal: Deal) => `${cityId}:${deal}`;
+const districtCacheKey = (cityId: number, deal: Deal, category: Category | null) => `${cityId}:${deal}:${category ?? ''}`;
 
-// Load (once, cached per city+deal) the full district catalog for a city_id. Never falls back to
-// another city.
-export async function ensureDistrictOptions(cityId: number, deal: Deal): Promise<DistrictOption[]> {
-  const key = districtCacheKey(cityId, deal);
+// Load (once, cached per city+deal+category) the full district catalog for a city_id. Never falls
+// back to another city.
+export async function ensureDistrictOptions(cityId: number, deal: Deal, category: Category | null): Promise<DistrictOption[]> {
+  const key = districtCacheKey(cityId, deal, category);
   const cached = _districtCache.get(key);
   if (cached) return cached;
   const inflight = _districtPromises.get(key);
@@ -752,7 +759,7 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal): Promise
       let data: any = null;
       try {
         ({ data } = await supabase
-          .rpc('district_options_ar', { p_city_id: cityId, p_deal: dealAr(deal) })
+          .rpc('district_options_ar', { p_city_id: cityId, p_deal: dealAr(deal), p_category: category })
           .abortSignal(_ac.signal));
       } finally {
         clearTimeout(_t);
@@ -778,14 +785,14 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal): Promise
 
 // Top-6 suggestions on empty focus: ONLY districts with active listings, ranked by count (the RPC
 // already returns rows ordered by listing_count desc, so this is a filter + slice).
-export function topDistrictsForCityId(cityId: number, deal: Deal, k = 6): DistrictOption[] {
-  return (_districtCache.get(districtCacheKey(cityId, deal)) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
+export function topDistrictsForCityId(cityId: number, deal: Deal, category: Category | null, k = 6): DistrictOption[] {
+  return (_districtCache.get(districtCacheKey(cityId, deal, category)) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
 }
 
 // Typing: search the COMPLETE canonical catalog for THIS city (incl. zero-listing districts) by Arabic
 // substring, using the SAME norm() folding as the city field. Empty query → the Top-6 suggestions.
-export function matchDistrictsByCityId(cityId: number, deal: Deal, query: string): DistrictOption[] {
-  const all = _districtCache.get(districtCacheKey(cityId, deal)) ?? [];
+export function matchDistrictsByCityId(cityId: number, deal: Deal, category: Category | null, query: string): DistrictOption[] {
+  const all = _districtCache.get(districtCacheKey(cityId, deal, category)) ?? [];
   const q = norm(query);
   if (!q) return all.filter((d) => d.listingCount > 0).slice(0, 6);
   const scored: { opt: DistrictOption; rank: number }[] = [];

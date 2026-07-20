@@ -27,10 +27,8 @@ const PRESS_IN = { duration: 90, easing: Easing.out(Easing.quad) };
 const RELEASE = { mass: 0.5, damping: 11, stiffness: 230 }; // slightly bouncier release — a soft overshoot on finger-up
 // Selection "achievement" feel (owner request): on BECOMING selected, a quick scale overshoot that springs
 // back to rest, plus a green glow that blooms then settles. Subtle + premium — rewarding, not childish.
-// Exported so other one-shot "pop into place" moments (e.g. TrendingList's rank badges) reuse the exact
-// same motion instead of a second, slightly-different set of constants.
-export const POP_UP = { duration: 130, easing: Easing.out(Easing.quad) };
-export const POP_SETTLE = { mass: 0.5, damping: 9, stiffness: 210 };
+const POP_UP = { duration: 130, easing: Easing.out(Easing.quad) };
+const POP_SETTLE = { mass: 0.5, damping: 9, stiffness: 210 };
 // Focus/hover fade for web pointer + keyboard states (skill rule #1/#2: visible focus + hover feedback).
 const FOCUS_T = { duration: 130, easing: Easing.out(Easing.quad) };
 

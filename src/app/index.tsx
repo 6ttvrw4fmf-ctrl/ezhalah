@@ -304,21 +304,26 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query.deal]);
 
-  // Same reactive refresh for District, scoped to the currently-selected city. Only meaningful once
-  // a city is picked; a no-op otherwise (ensureDistrictOptions is never called without one).
+  // Same reactive refresh for District, scoped to the currently-selected city — and ALSO to Category
+  // (owner decision 2026-07-20, after proving live that Category matters more for districts than for
+  // cities): even though Category is picked after District in this form, the moment the user sets it
+  // — or changes Deal — District's Top-6 re-fetches for the now-more-complete scope. query.category is
+  // null until then, which the RPC treats as "broader/default ranking" (Deal-only), exactly as before.
+  // Only meaningful once a city is picked; a no-op otherwise (ensureDistrictOptions is never called
+  // without one).
   useEffect(() => {
     if (!citySelected) return;
     const cid = citySelected.cityId;
-    void ensureDistrictOptions(cid, query.deal).then(() => {
+    void ensureDistrictOptions(cid, query.deal, query.category).then(() => {
       if (districtTextRef.current) {
         const latin = isLatinOnlyInput(districtTextRef.current);
-        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, districtTextRef.current));
+        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, query.category, districtTextRef.current));
       } else if (districtFocus) {
-        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, 6));
+        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, query.category, 6));
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.deal, citySelected]);
+  }, [query.deal, query.category, citySelected]);
 
   const onSearch = async () => {
     // CITY-ONLY FIELD (owner spec 2026-07-17): "The user must select a valid city result. Do not
@@ -663,8 +668,8 @@ export default function Home() {
                 setCitySuggestions([]);
                 setCityFocus(false);
                 setLocMsg('');
-                // New city → drop any prior district; the [query.deal, citySelected] effect above
-                // warms THIS city's district catalog so the District field shows its Top-6 instantly.
+                // New city → drop any prior district; the [query.deal, query.category, citySelected]
+                // effect above warms THIS city's district catalog so District shows its Top-6 instantly.
                 clearDistrict();
                 scrollDown(catAnchorRef); // carry them down to the next step (category)
               };
@@ -672,9 +677,8 @@ export default function Home() {
                 <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                   {isTop6 ? (
                     <>
-                      <TrendingHeader title={t('Trending cities now')} runKey={`city:${query.deal}`} />
+                      <TrendingHeader title={t('Trending cities now')} />
                       <TrendingRows
-                        runKey={`city:${query.deal}`}
                         items={citySuggestions.map((opt) => ({
                           key: String(opt.cityId),
                           label: opt.cityAr,
@@ -742,8 +746,8 @@ export default function Home() {
                     // re-check the live text via districtTextRef before showing the Top-6.
                     if (!districtTextRef.current) {
                       const cid = citySelected.cityId;
-                      void ensureDistrictOptions(cid, query.deal).then(() => {
-                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, 6));
+                      void ensureDistrictOptions(cid, query.deal, query.category).then(() => {
+                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, query.category, 6));
                       });
                     }
                   }}
@@ -754,11 +758,11 @@ export default function Home() {
                     // Editing invalidates a prior pick — a typed-but-unconfirmed district is never searched.
                     setDistrictSelected(null);
                     if (!citySelected) return;
-                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, 6)); setDistrictMsg(''); return; }
+                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, 6)); setDistrictMsg(''); return; }
                     // Arabic-only product: English typing gets NO autocomplete and the same Arabic hint the
                     // City field shows — every district name here is Arabic, so there is nothing to match. (owner UI request.)
                     const latin = isLatinOnlyInput(v);
-                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, query.deal, v));
+                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, query.deal, query.category, v));
                     setDistrictMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -775,7 +779,7 @@ export default function Home() {
                   setDistrictText('');
                   setDistrictSelected(null);
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, 6));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, 6));
                   districtRef.current?.focus();
                 }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
@@ -802,12 +806,8 @@ export default function Home() {
                 <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                   {isTop6 ? (
                     <>
-                      <TrendingHeader
-                        title={`${t('Trending districts in')} ${citySelected.cityAr}`}
-                        runKey={`district:${citySelected.cityId}:${query.deal}`}
-                      />
+                      <TrendingHeader title={`${t('Trending districts in')} ${citySelected.cityAr}`} />
                       <TrendingRows
-                        runKey={`district:${citySelected.cityId}:${query.deal}`}
                         items={districtSuggestions.map((opt, i) => ({ key: `${opt.districtAr}#${i}`, label: opt.districtAr }))}
                         onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
                       />
