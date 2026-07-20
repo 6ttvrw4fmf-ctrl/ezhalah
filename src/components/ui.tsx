@@ -1,9 +1,10 @@
 import { Image, Platform, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Animated, {
   Easing,
   cancelAnimation,
   interpolateColor,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -15,6 +16,7 @@ import Animated, {
 import { colors, radius } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const AnimatedImage = Animated.createAnimatedComponent(Image);
@@ -66,6 +68,47 @@ export function Reveal({ children, style }: { children: React.ReactNode; style?:
   useEffect(() => { v.value = withTiming(1, EASE); }, [v]);
   const a = useAnimatedStyle(() => ({ opacity: v.value, transform: [{ translateY: (1 - v.value) * 10 }] }));
   return <Animated.View style={[style as any, a]}>{children}</Animated.View>;
+}
+
+// Open/close animation for the City + District autocomplete dropdowns (owner request 2026-07-19):
+// today they're a plain `{cond && <ScrollView>…}`, so they snap in and vanish instantly on both ends.
+// This wraps that SAME markup, unchanged, with a quick fade + a very slight upward settle on open
+// (mirrors Reveal's own direction, just smaller/faster — a dropdown should feel snappier than a full
+// panel), and the mirror image on close. No bounce/scale/spring — timing-only, same easing family as
+// the rest of the app. `visible` replaces the old `{cond && …}` gate; children are cached while open
+// so a state change that clears the list's content (e.g. selecting a row) doesn't blank the box out
+// from under its own closing fade.
+const DROPDOWN_OPEN = { duration: 180, easing: Easing.bezier(0.22, 1, 0.36, 1) };
+const DROPDOWN_CLOSE = { duration: 150, easing: Easing.bezier(0.22, 1, 0.36, 1) };
+export function DropdownReveal({ visible, children, style }: { visible: boolean; children: React.ReactNode; style?: ViewStyle | ViewStyle[] }) {
+  const reduced = useReducedMotion();
+  const v = useSharedValue(visible ? 1 : 0);
+  const [mounted, setMounted] = useState(visible);
+  const [frozen, setFrozen] = useState(children);
+
+  useEffect(() => {
+    if (visible) setFrozen(children);
+  }, [visible, children]);
+
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      v.value = withTiming(1, reduced ? { duration: 0, easing: DROPDOWN_OPEN.easing } : DROPDOWN_OPEN);
+    } else {
+      v.value = withTiming(0, reduced ? { duration: 0, easing: DROPDOWN_CLOSE.easing } : DROPDOWN_CLOSE, (finished) => {
+        if (finished) runOnJS(setMounted)(false);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  const a = useAnimatedStyle(() => ({ opacity: v.value, transform: [{ translateY: (1 - v.value) * 6 }] }));
+  if (!mounted) return null;
+  return (
+    <Animated.View style={[style as any, a]} pointerEvents={visible ? 'auto' : 'none'}>
+      {frozen}
+    </Animated.View>
+  );
 }
 
 // Gentle "heartbeat" pulse — a soft double-thump (lub-dub) then a rest, looping forever, so the

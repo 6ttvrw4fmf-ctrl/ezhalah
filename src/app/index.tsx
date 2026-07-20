@@ -6,7 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
-import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal } from '@/components/ui';
+import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
 import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
@@ -656,62 +656,67 @@ export default function Home() {
               <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{locMsg}</Text>
             ) : null}
 
-            {cityFocus && citySuggestions.length > 0 && (() => {
-              // Trending treatment ONLY for the empty-focus Top-6 — a typed/filtered result set keeps
-              // today's plain list (a fast-scan moment, not a "discovery" one). Derived, not separate
-              // state: the Top-6 is precisely what's showing whenever there's no typed text.
-              const isTop6 = !query.location;
-              const cityOnPress = (opt: CityOption) => {
-                cityTextRef.current = opt.cityAr;
-                setQuery((q) => ({ ...q, location: opt.cityAr }));
-                setCitySelected(opt);
-                setCitySuggestions([]);
-                setCityFocus(false);
-                setLocMsg('');
-                // New city → drop any prior district; the [query.deal, query.category, citySelected]
-                // effect above warms THIS city's district catalog so District shows its Top-6 instantly.
-                clearDistrict();
-                scrollDown(catAnchorRef); // carry them down to the next step (category)
-              };
-              return (
-                <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                  {isTop6 ? (
-                    <>
-                      <TrendingHeader title={t('Trending cities now')} />
-                      <TrendingRows
-                        items={citySuggestions.map((opt) => ({
-                          key: String(opt.cityId),
-                          label: opt.cityAr,
-                          sublabel: hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
-                        }))}
-                        onPress={(_item, i) => cityOnPress(citySuggestions[i])}
-                      />
-                    </>
-                  ) : (
-                    citySuggestions.map((opt, i) => (
-                      <Tappable
-                        key={opt.cityId}
-                        dip={0.03}
-                        style={[s.suggRow, i < citySuggestions.length - 1 && s.suggDivider]}
-                        onPress={() => cityOnPress(opt)}
-                      >
-                        <Image source={LOC_IMG.city} style={s.suggLocIcon} />
-                        <View style={{ flex: 1 }}>
-                          <Text style={s.suggCity}>{opt.cityAr}</Text>
-                          {/* Region stays hidden per spec ("use the confirmed hidden region internally")
-                              UNLESS two results in this exact list share a display name — a real,
-                              verified case (e.g. الهفوف exists as two distinct real cities) — in which
-                              case showing it is the only way the user can tell them apart. */}
-                          {hasNameCollision(citySuggestions, opt.cityAr) && opt.regionAr ? (
-                            <Text style={s.suggDist}>{opt.regionAr}</Text>
-                          ) : null}
-                        </View>
-                      </Tappable>
-                    ))
-                  )}
-                </ScrollView>
-              );
-            })()}
+            {/* Merge note (2026-07-20): outer open/close wrapper is PR #156's DropdownReveal; inner
+                Trending-vs-plain-list split is this branch's content. Content is byte-identical to
+                each side's own version — only the boundary between them moved. */}
+            <DropdownReveal visible={cityFocus && citySuggestions.length > 0}>
+              {(() => {
+                // Trending treatment ONLY for the empty-focus Top-6 — a typed/filtered result set keeps
+                // today's plain list (a fast-scan moment, not a "discovery" one). Derived, not separate
+                // state: the Top-6 is precisely what's showing whenever there's no typed text.
+                const isTop6 = !query.location;
+                const cityOnPress = (opt: CityOption) => {
+                  cityTextRef.current = opt.cityAr;
+                  setQuery((q) => ({ ...q, location: opt.cityAr }));
+                  setCitySelected(opt);
+                  setCitySuggestions([]);
+                  setCityFocus(false);
+                  setLocMsg('');
+                  // New city → drop any prior district; the [query.deal, query.category, citySelected]
+                  // effect above warms THIS city's district catalog so District shows its Top-6 instantly.
+                  clearDistrict();
+                  scrollDown(catAnchorRef); // carry them down to the next step (category)
+                };
+                return (
+                  <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                    {isTop6 ? (
+                      <>
+                        <TrendingHeader title={t('Trending cities now')} />
+                        <TrendingRows
+                          items={citySuggestions.map((opt) => ({
+                            key: String(opt.cityId),
+                            label: opt.cityAr,
+                            sublabel: hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
+                          }))}
+                          onPress={(_item, i) => cityOnPress(citySuggestions[i])}
+                        />
+                      </>
+                    ) : (
+                      citySuggestions.map((opt, i) => (
+                        <Tappable
+                          key={opt.cityId}
+                          dip={0.03}
+                          style={[s.suggRow, i < citySuggestions.length - 1 && s.suggDivider]}
+                          onPress={() => cityOnPress(opt)}
+                        >
+                          <Image source={LOC_IMG.city} style={s.suggLocIcon} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.suggCity}>{opt.cityAr}</Text>
+                            {/* Region stays hidden per spec ("use the confirmed hidden region internally")
+                                UNLESS two results in this exact list share a display name — a real,
+                                verified case (e.g. الهفوف exists as two distinct real cities) — in which
+                                case showing it is the only way the user can tell them apart. */}
+                            {hasNameCollision(citySuggestions, opt.cityAr) && opt.regionAr ? (
+                              <Text style={s.suggDist}>{opt.regionAr}</Text>
+                            ) : null}
+                          </View>
+                        </Tappable>
+                      ))
+                    )}
+                  </ScrollView>
+                );
+              })()}
+            </DropdownReveal>
 
             {/* DISTRICT — strictly under City. Disabled until a city is chosen; scoped to that city's
                 canonical city_id. Empty focus → Top-6 by active-listing count; typing → the COMPLETE
@@ -791,48 +796,52 @@ export default function Home() {
               <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{districtMsg}</Text>
             ) : null}
 
-            {citySelected && districtFocus && districtSuggestions.length > 0 && (() => {
-              // Same derived Top-6-vs-typed split as the City field above.
-              const isTop6 = !districtText;
-              const districtOnPress = (opt: DistrictOption) => {
-                districtTextRef.current = opt.districtAr;
-                setDistrictText(opt.districtAr);
-                setDistrictSelected(opt);
-                setDistrictSuggestions([]);
-                setDistrictFocus(false);
-                setDistrictMsg('');
-              };
-              return (
-                <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                  {isTop6 ? (
-                    <>
-                      <TrendingHeader title={`${t('Trending districts in')} ${citySelected.cityAr}`} />
-                      <TrendingRows
-                        items={districtSuggestions.map((opt, i) => ({ key: `${opt.districtAr}#${i}`, label: opt.districtAr }))}
-                        onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
-                      />
-                    </>
-                  ) : (
-                    districtSuggestions.map((opt, i) => (
-                      <Tappable
-                        key={opt.districtAr + '#' + i}
-                        dip={0.03}
-                        style={[s.suggRow, i < districtSuggestions.length - 1 && s.suggDivider]}
-                        onPress={() => districtOnPress(opt)}
-                      >
-                        <Image source={LOC_IMG.district} style={s.suggLocIcon} />
-                        <View style={{ flex: 1 }}>
-                          {/* Top-6 are still chosen by active-listing count, but the count itself is no
-                              longer shown — just the district name. Every row (incl. zero-listing catalog
-                              districts) is rendered unconditionally and selectable. (owner UI request 2026-07-18.) */}
-                          <Text style={s.suggCity}>{opt.districtAr}</Text>
-                        </View>
-                      </Tappable>
-                    ))
-                  )}
-                </ScrollView>
-              );
-            })()}
+            {/* Merge note (2026-07-20): outer open/close wrapper is PR #156's DropdownReveal; inner
+                Trending-vs-plain-list split is this branch's content — same pattern as City above. */}
+            <DropdownReveal visible={citySelected != null && districtFocus && districtSuggestions.length > 0}>
+              {(() => {
+                // Same derived Top-6-vs-typed split as the City field above.
+                const isTop6 = !districtText;
+                const districtOnPress = (opt: DistrictOption) => {
+                  districtTextRef.current = opt.districtAr;
+                  setDistrictText(opt.districtAr);
+                  setDistrictSelected(opt);
+                  setDistrictSuggestions([]);
+                  setDistrictFocus(false);
+                  setDistrictMsg('');
+                };
+                return (
+                  <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                    {isTop6 && citySelected ? (
+                      <>
+                        <TrendingHeader title={`${t('Trending districts in')} ${citySelected.cityAr}`} />
+                        <TrendingRows
+                          items={districtSuggestions.map((opt, i) => ({ key: `${opt.districtAr}#${i}`, label: opt.districtAr }))}
+                          onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
+                        />
+                      </>
+                    ) : (
+                      districtSuggestions.map((opt, i) => (
+                        <Tappable
+                          key={opt.districtAr + '#' + i}
+                          dip={0.03}
+                          style={[s.suggRow, i < districtSuggestions.length - 1 && s.suggDivider]}
+                          onPress={() => districtOnPress(opt)}
+                        >
+                          <Image source={LOC_IMG.district} style={s.suggLocIcon} />
+                          <View style={{ flex: 1 }}>
+                            {/* Top-6 are still chosen by active-listing count, but the count itself is no
+                                longer shown — just the district name. Every row (incl. zero-listing catalog
+                                districts) is rendered unconditionally and selectable. (owner UI request 2026-07-18.) */}
+                            <Text style={s.suggCity}>{opt.districtAr}</Text>
+                          </View>
+                        </Tappable>
+                      ))
+                    )}
+                  </ScrollView>
+                );
+              })()}
+            </DropdownReveal>
 
             <View ref={withAnchor(catAnchorRef)} />
             {/* Category — Residential / Commercial (macro) */}
