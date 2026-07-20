@@ -134,27 +134,45 @@ check('locations.ts exports ensureCityFieldIndex/topCitiesByListings/matchCities
   'export function hasNameCollision',
   'export function resolveCitySelection',
 ].every((sig) => locationsSrc.includes(sig)));
-check("locations.ts's city_listing_counts_ar fetch selects city_id,city_ar,region_id,region_ar,listing_count", /\.from\('city_listing_counts_ar'\)\s*\n\s*\.select\('city_id,city_ar,region_id,region_ar,listing_count'\)/.test(locationsSrc));
+// Context-aware Top Cities/Districts (owner request 2026-07-20): the plain city_listing_counts_ar
+// view (a single GLOBAL ranking, no deal/category awareness) was replaced by the deal-scoped
+// top_cities_by_deal_ar(p_deal) RPC — verified live the two genuinely differ (Buy vs Rent swap
+// Khobar/Madinah ahead of Dammam/Makkah). Category×Deal (4-way) was ruled out: Category is picked
+// AFTER City/District in this form, so it isn't known yet at this step (owner decision, same date).
+check("locations.ts's city pool fetch is scoped by deal via top_cities_by_deal_ar(p_deal)", /\.rpc\('top_cities_by_deal_ar', \{ p_deal: dealAr\(deal\) \}\)/.test(locationsSrc));
+check('locations.ts no longer reads the global, deal-blind city_listing_counts_ar view for the field pool', !locationsSrc.includes(".from('city_listing_counts_ar')"));
+// 2026-07-20: district_options_ar now also takes p_category — a live scope-divergence check proved
+// Category matters more for districts than cities, so District (unlike City) is Category+Deal aware.
+check('district_options_ar RPC calls now pass p_deal AND p_category (district Top-6 is Category+Deal-scoped, unlike the Deal-only city one)', /\.rpc\('district_options_ar', \{ p_city_id: cityId, p_deal: dealAr\(deal\), p_category: category \}\)/.test(locationsSrc));
 
 check('index.tsx no longer imports the old Place-based combined-field helpers (matchLocations/placeLabel/placeTitle/placeSub/placeIcon/placeKey/resolveLocation)', [
   'matchLocations', 'placeLabel', 'placeTitle', 'placeSub', 'placeIcon', 'placeKey', 'resolveLocation',
 ].every((sym) => !new RegExp(`\\b${sym}\\b`).test(indexSrc.replace(/\/\/.*$/gm, ''))));
 check('index.tsx placeholder text is "Which city?" (renders أي مدينة؟), not the old combined-field label', indexSrc.includes("t('Which city?')") && !indexSrc.includes("t('Which city or neighborhood?')"));
-check('onFocus with empty text shows the Top 6 (topCitiesByListings(6))', /onFocus=\{\(\) => \{[\s\S]{0,1300}?topCitiesByListings\(6\)/.test(indexSrc));
+// query.deal threading (owner request 2026-07-20): every Top-6 call site now passes query.deal
+// alongside k — Deal is chosen before City in the form, so it's always known here.
+check('onFocus with empty text shows the deal-scoped Top 6 (topCitiesByListings(query.deal, 6))', /onFocus=\{\(\) => \{[\s\S]{0,1300}?topCitiesByListings\(query\.deal, 6\)/.test(indexSrc));
 check(
   'REGRESSION (found live in testing): the Top-6-on-focus promise callback re-checks cityTextRef at resolution time before overwriting citySuggestions — without this guard, a keystroke typed right after focus can have its correctly-filtered results silently clobbered back to the stale Top 6 by the async callback resolving a moment later',
-  /if \(!cityTextRef\.current\) setCitySuggestions\(topCitiesByListings\(6\)\);/.test(indexSrc) && /cityTextRef\.current = v;/.test(indexSrc),
+  /if \(!cityTextRef\.current\) setCitySuggestions\(topCitiesByListings\(query\.deal, 6\)\);/.test(indexSrc) && /cityTextRef\.current = v;/.test(indexSrc),
 );
 check(
-  'REGRESSION (found live in testing): the mount-time ensureCityFieldIndex() fetch re-runs the match against cityTextRef once it resolves — without this, a user who types before a slow-connection fetch finishes would see an empty dropdown forever, since nothing else re-triggers matchCitiesByText() once the data actually arrives',
-  /void ensureCityFieldIndex\(\)\.then\(\(\) => \{[\s\S]{0,700}?if \(cityTextRef\.current\) \{[\s\S]{0,200}?setCitySuggestions\(latin \? \[\] : matchCitiesByText\(cityTextRef\.current\)\);/.test(indexSrc),
+  'REGRESSION (found live in testing, now also gates on deal change): the deal-scoped ensureCityFieldIndex() fetch re-runs the match against cityTextRef once it resolves — without this, a user who types before a slow-connection fetch finishes would see an empty dropdown forever, since nothing else re-triggers matchCitiesByText() once the data actually arrives',
+  /void ensureCityFieldIndex\(query\.deal\)\.then\(\(\) => \{[\s\S]{0,700}?if \(cityTextRef\.current\) \{[\s\S]{0,200}?setCitySuggestions\(latin \? \[\] : matchCitiesByText\(query\.deal, cityTextRef\.current\)\);/.test(indexSrc),
+);
+check(
+  'NEW (owner request 2026-07-20): flipping Buy<->Rent live-refreshes an already-open Top-6 list instead of leaving a stale ranking on screen',
+  /\}, \[query\.deal\]\);/.test(indexSrc) && /else if \(cityFocus\) \{\s*setCitySuggestions\(topCitiesByListings\(query\.deal, 6\)\);/.test(indexSrc),
 );
 check('onChangeText clears citySelected on every keystroke (never silently reuses a stale pick)', /onChangeText=\{\(v\) => \{[\s\S]{0,300}?setCitySelected\(null\)/.test(indexSrc));
 check('onSearch blocks when citySelected is falsy, using CITY_REQUIRED_MSG (never calls the old free-text resolveLocation guessing path)', /if \(!citySelected\) \{[\s\S]{0,600}?setLocMsg\(CITY_REQUIRED_MSG\);[\s\S]{0,600}?return;/.test(indexSrc));
 // Owner UI request 2026-07-18: a blocked search must scroll the page to the top so the (top-of-card)
 // validation message is actually visible — the Search button is at the bottom.
 check('a blocked search scrolls to the top so the validation message is visible', /if \(!citySelected\) \{[\s\S]{0,320}?scrollRef\.current\?\.scrollTo\(\{ y: 0/.test(indexSrc));
-check('the selection handler stores the FULL CityOption in citySelected (city_id-keyed, not just the display string)', /onPress=\{\(\) => \{[\s\S]{0,200}?setQuery\(\(q\) => \(\{ \.\.\.q, location: opt\.cityAr \}\)\);\s*setCitySelected\(opt\)/.test(indexSrc));
+// 2026-07-20: the city-row tap handler moved into a named `cityOnPress` closure (shared by both the
+// Trending-leaderboard rows and the plain typed-filter rows) instead of an inline JSX onPress — same
+// behavior, different wrapping. Check the closure body directly rather than the old inline shape.
+check('the selection handler stores the FULL CityOption in citySelected (city_id-keyed, not just the display string)', /const cityOnPress = \(opt: CityOption\) => \{[\s\S]{0,200}?setQuery\(\(q\) => \(\{ \.\.\.q, location: opt\.cityAr \}\)\);\s*setCitySelected\(opt\)/.test(indexSrc));
 
 check('i18n.tsx defines CITY_REQUIRED_MSG as a genuine Arabic string', /export const CITY_REQUIRED_MSG = '[^']*[ء-ي][^']*';/.test(i18nSrc));
 

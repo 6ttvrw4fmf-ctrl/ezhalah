@@ -257,6 +257,8 @@ const AR: Record<string, string> = {
   'Rent or buy?': 'إيجار أم شراء؟',
   'Which city?': 'أي مدينة؟',
   'Which district? (optional)': 'أي حي؟ (اختياري)',
+  'Trending cities now': 'الأكثر رواجًا الآن',
+  'Trending districts in': 'الأحياء الأكثر رواجًا في',
   'Optional': 'اختياري',
   'Select a city first': 'اختر المدينة أولاً',
   'Property category?': 'فئة العقار؟',
