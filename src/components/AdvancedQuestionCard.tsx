@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Reveal } from '@/components/ui';
@@ -56,6 +57,12 @@ export type AdvancedQuestionCardProps = {
   onSkip: () => void;
   onSkipAll: () => void;
   onClose: () => void;
+  // 'multi' renders toggle chips + a live-count continue button (amenities/RNPL); default 'single'.
+  mode?: 'single' | 'multi';
+  // multi only: apply the confirmed chip selection (empty = no preference) and advance.
+  onMultiConfirm?: (keys: string[]) => void;
+  // multi only: live combined count for a tentative selection → shown on the continue button.
+  liveCount?: (keys: string[]) => Promise<number | null>;
 };
 
 // Centered, single-question card: title, tappable options, an unknown-data disclosure caption, and a
@@ -64,15 +71,29 @@ export type AdvancedQuestionCardProps = {
 // directly.
 export default function AdvancedQuestionCard({
   titleKey, options, unknownCount, progressCur, progressTotal, onAnswer, onSkip, onSkipAll, onClose,
+  mode, onMultiConfirm, liveCount,
 }: AdvancedQuestionCardProps) {
   const { t } = useI18n();
+  const progress = progressTotal > 1 ? (
+    <View style={s.progTrack}>
+      <View style={[s.progFill, { width: `${(progressCur / progressTotal) * 100}%` }]} />
+    </View>
+  ) : null;
+  // Multi-select chip card (amenities / RNPL): toggle chips, live count on the continue button, a
+  // «لا يهمني» no-preference skip. Presentational — the chip keys/labels/live count all come from the
+  // config, so this stays generic across every future multi question.
+  if (mode === 'multi' && onMultiConfirm && liveCount) {
+    return (
+      <Shell onClose={onClose}>
+        {progress}
+        <MultiChips titleKey={titleKey} options={options} liveCount={liveCount}
+          onConfirm={onMultiConfirm} onSkip={onSkip} />
+      </Shell>
+    );
+  }
   return (
     <Shell onClose={onClose}>
-      {progressTotal > 1 ? (
-        <View style={s.progTrack}>
-          <View style={[s.progFill, { width: `${(progressCur / progressTotal) * 100}%` }]} />
-        </View>
-      ) : null}
+      {progress}
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <Text style={s.qt}>{t(titleKey)}</Text>
         <View style={s.list}>
@@ -114,6 +135,58 @@ export default function AdvancedQuestionCard({
   );
 }
 
+// Multi-select chip body: local selection + a live count that re-resolves on every toggle (empty
+// selection = the current scope total), so the continue button always shows what Search will return.
+// Holds the last good number on a failed/racey fetch rather than flashing a wrong one.
+function MultiChips({
+  titleKey, options, liveCount, onConfirm, onSkip,
+}: {
+  titleKey: string;
+  options: AdvancedOption[];
+  liveCount: (keys: string[]) => Promise<number | null>;
+  onConfirm: (keys: string[]) => void;
+  onSkip: () => void;
+}) {
+  const { t } = useI18n();
+  const [sel, setSel] = useState<string[]>([]);
+  const [count, setCount] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    liveCount(sel).then((n) => { if (live && n != null) setCount(n); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel.join(',')]);
+  const toggle = (k: string) => setSel((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]));
+  return (
+    <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+      <Text style={s.qt}>{t(titleKey)}</Text>
+      <View style={s.list}>
+        {options.map((o, i) => {
+          const on = sel.includes(o.key);
+          return (
+            <Pressable key={o.key} style={[s.opt, i === 0 && s.optFirst, on && s.optOn]} onPress={() => toggle(o.key)}>
+              <View style={s.chipLeft}>
+                <Ionicons name={on ? 'checkmark-circle' : 'ellipse-outline'} size={20} color={on ? '#2f7247' : '#c4cdc7'} />
+                <Text style={[s.lbl, on && s.lblOn]}>{o.label}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+      <View style={s.foot}>
+        <Pressable style={s.continueBtn} onPress={() => onConfirm(sel)}>
+          <Text style={s.continueText}>
+            {count != null ? t('Show {count} apartments', { count: grouped(count) }) : t('Show next')}
+          </Text>
+        </Pressable>
+        <Pressable style={s.skipAllLink} onPress={onSkip}>
+          <Text style={s.skipAllText}>{t('No preference')}</Text>
+        </Pressable>
+      </View>
+    </ScrollView>
+  );
+}
+
 const s = StyleSheet.create({
   overlay: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.45)' },
@@ -152,6 +225,13 @@ const s = StyleSheet.create({
   optRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   countPill: { backgroundColor: '#eef4f0', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 2, minWidth: 34, alignItems: 'center' },
   countText: { fontSize: 12.5, fontWeight: '700', color: '#3f5a4c', fontVariant: ['tabular-nums'] },
+
+  // Multi-select chip states + live-count continue button (annual-rent amenities/RNPL card).
+  optOn: { backgroundColor: '#eef6f0' },
+  chipLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 },
+  lblOn: { color: '#1d4a37', fontWeight: '700' },
+  continueBtn: { backgroundColor: '#2f7247', borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  continueText: { color: '#fff', fontSize: 14.5, fontWeight: '700' },
 
   note: { marginTop: 10, marginHorizontal: 2, fontSize: 12, color: '#6b7a72', lineHeight: 17 },
 

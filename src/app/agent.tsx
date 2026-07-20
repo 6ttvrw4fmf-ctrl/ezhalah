@@ -41,7 +41,7 @@ import { useApp } from '@/store';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 import AdvancedQuestionCard, { AdvancedQuestionLoading } from '@/components/AdvancedQuestionCard';
-import { ADVANCED_QUESTIONS, MIN_OPTIONS_TO_SHOW, type AdvancedOption } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, MIN_OPTIONS_TO_SHOW, type AdvancedOption, type AdvancedQuestionConfig } from '@/data/advancedFilters';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
 // below a results block — NEVER before first results — and ONLY for a strict single-type Residential
@@ -439,10 +439,16 @@ export default function Agent() {
   // re-runs search, renders a new results turn) — never a separate navigation/route.
   const [ageFlow, setAgeFlow] = useState<
     | { phase: 'loading' }
-    | { phase: 'asking'; dim: string; titleKey: string; options: AdvancedOption[]; unknownCount: number }
+    | { phase: 'asking'; stepIndex: number; cfg: AdvancedQuestionConfig; titleKey: string; options: AdvancedOption[]; unknownCount: number }
     | null
   >(null);
+  // The query accumulates answers as the chained flow advances; the token supersedes a stale async
+  // fetch when a newer tap/turn restarts the flow; `changed` gates the single end-of-flow re-search
+  // (skip-everything → close, don't re-run); `labels` collects picked labels for the summary bubble.
   const ageFlowQueryRef = useRef<SearchQuery | null>(null);
+  const ageFlowTokenRef = useRef(0);
+  const ageFlowChangedRef = useRef(false);
+  const ageFlowLabelsRef = useRef<string[]>([]);
   const revealTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   // The results turn whose cards are still popping in one-by-one (id + total count), so a new user
   // message can instantly finish it and stop the drip. null once the reveal completes. (user request.)
@@ -801,9 +807,13 @@ export default function Agent() {
       if (p.type) refined.type = p.type;
       if (p.typeGroup) refined.typeGroup = p.typeGroup;
       if (p.category) refined.category = p.category;
+    } else if (dim === '__guided__') {
+      // The chained guided flow (2026-07-20) already merged every answered step into `base` via each
+      // config's applyAnswer/applyMulti — so search it exactly as accumulated, no further refinement.
+      return base;
     } else if (ADVANCED_QUESTIONS.some((c) => c.key === dim)) {
-      // Advanced-question answers (currently: property_age) — delegate to that question's own
-      // config so this stays generic as more fields are added, per the reusable-engine design.
+      // Advanced-question answers — delegate to that question's own config so this stays generic as
+      // more fields are added, per the reusable-engine design.
       return ADVANCED_QUESTIONS.find((c) => c.key === dim)!.applyAnswer(base, a);
     } else {
       const p = parseQuery(`${a} ${base.location ?? ''}`);
@@ -836,39 +846,87 @@ export default function Agent() {
     setBusy(false); runRef.current = null; toBottom();
   };
 
-  // Entry point for «خلّنا نحدد الطلب أكثر» in an apartment-only scope (owner 2026-07-13): show the
-  // Claude-style loading state, resolve live-scoped option counts for the (currently single) advanced
-  // question, and either display it as a centered card or — if fewer than MIN_OPTIONS_TO_SHOW real
-  // options exist for THIS exact scope — fall through to the pre-existing narrowing chips instead of
-  // leaving the tap with no effect.
-  const startAgeFlow = async (q: SearchQuery) => {
-    setAgeFlow({ phase: 'loading' });
-    ageFlowQueryRef.current = q;
-    for (const cfg of ADVANCED_QUESTIONS) {
+  // Walk ADVANCED_QUESTIONS from `fromIndex`, showing the first that qualifies for the CURRENT
+  // accumulated query (multi needs ≥1 option, single needs MIN_OPTIONS_TO_SHOW). Reaching the end
+  // finishes the flow. `token` supersedes a stale async fetch if a newer tap restarts the flow.
+  const advanceGuided = async (fromIndex: number, token: number) => {
+    for (let i = fromIndex; i < ADVANCED_QUESTIONS.length; i++) {
+      const q = ageFlowQueryRef.current;
+      if (!q || ageFlowTokenRef.current !== token) return;
+      const cfg = ADVANCED_QUESTIONS[i];
       const result = await cfg.fetchOptions(q);
-      if (ageFlowQueryRef.current !== q) return; // superseded by a newer tap/turn
-      if (result.options.length >= MIN_OPTIONS_TO_SHOW) {
-        setAgeFlow({ phase: 'asking', dim: cfg.key, titleKey: cfg.titleKey, options: result.options, unknownCount: result.unknownCount });
+      if (ageFlowTokenRef.current !== token) return;
+      if (result.options.length >= (cfg.mode === 'multi' ? 1 : MIN_OPTIONS_TO_SHOW)) {
+        setAgeFlow({ phase: 'asking', stepIndex: i, cfg, titleKey: cfg.titleKey, options: result.options, unknownCount: result.unknownCount });
         return;
       }
     }
-    setAgeFlow(null);
-    startRefine(q);
+    finishGuided(token);
   };
 
-  // Picking a real option hands off to the SAME chat-turn mechanism as the existing refine chips —
-  // echoes the picked label as the user's bubble, merges it into the unchanged rest of the query, and
-  // re-searches. Skipping (an optional question) just closes the card — nothing has changed, so there
-  // is nothing to re-run.
+  // End of the chained flow: if the user answered ≥1 step, re-search the accumulated query in ONE
+  // combined turn (same runRefine mechanism, __guided__ passes it through unchanged); if they skipped
+  // everything, just close — the base results already on screen are unchanged.
+  const finishGuided = (token: number) => {
+    if (ageFlowTokenRef.current !== token) return;
+    const q = ageFlowQueryRef.current;
+    setAgeFlow(null);
+    if (q && ageFlowChangedRef.current) void runRefine(q, '__guided__', '', ageFlowLabelsRef.current.join('، '));
+  };
+
+  // Entry point for «خلّنا نحدد الطلب أكثر» in an apartment scope (owner 2026-07-13; chained flow
+  // 2026-07-20): installments → age → amenities → bathrooms, accumulating into one query with a single
+  // search at the end. If NOTHING qualifies for this exact scope, fall through to the pre-existing
+  // narrowing chips so the tap is never a no-op.
+  const startAgeFlow = async (q: SearchQuery) => {
+    const token = ++ageFlowTokenRef.current;
+    ageFlowQueryRef.current = q;
+    ageFlowChangedRef.current = false;
+    ageFlowLabelsRef.current = [];
+    setAgeFlow({ phase: 'loading' });
+    for (let i = 0; i < ADVANCED_QUESTIONS.length; i++) {
+      const cfg = ADVANCED_QUESTIONS[i];
+      const result = await cfg.fetchOptions(q);
+      if (ageFlowTokenRef.current !== token) return; // superseded by a newer tap/turn
+      if (result.options.length >= (cfg.mode === 'multi' ? 1 : MIN_OPTIONS_TO_SHOW)) {
+        setAgeFlow({ phase: 'asking', stepIndex: i, cfg, titleKey: cfg.titleKey, options: result.options, unknownCount: result.unknownCount });
+        return;
+      }
+    }
+    if (ageFlowTokenRef.current === token) { setAgeFlow(null); startRefine(q); }
+  };
+
+  // Single-select answer (age / min-bathrooms): record the label, merge via the config, advance.
   const onAgeAnswer = (key: string) => {
     if (ageFlow?.phase !== 'asking') return;
-    const opt = ageFlow.options.find((o) => o.key === key);
-    const baseQ = ageFlowQueryRef.current;
-    const dim = ageFlow.dim;
-    setAgeFlow(null);
-    if (baseQ) void runRefine(baseQ, dim, key, opt?.label ?? key);
+    const { cfg, stepIndex, options } = ageFlow;
+    const q = ageFlowQueryRef.current;
+    if (!q) return;
+    ageFlowQueryRef.current = cfg.applyAnswer(q, key);
+    ageFlowChangedRef.current = true;
+    const opt = options.find((o) => o.key === key);
+    if (opt?.label) ageFlowLabelsRef.current.push(opt.label);
+    void advanceGuided(stepIndex + 1, ageFlowTokenRef.current);
   };
-  const onAgeSkip = () => setAgeFlow(null);
+
+  // Multi-select confirm (amenities / RNPL): merge the picked chips (empty = no change), advance.
+  const onAgeMultiConfirm = (keys: string[]) => {
+    if (ageFlow?.phase !== 'asking') return;
+    const { cfg, stepIndex, options } = ageFlow;
+    const q = ageFlowQueryRef.current;
+    if (!q) return;
+    if (keys.length && cfg.applyMulti) {
+      ageFlowQueryRef.current = cfg.applyMulti(q, keys);
+      ageFlowChangedRef.current = true;
+      for (const k of keys) { const o = options.find((x) => x.key === k); if (o?.label) ageFlowLabelsRef.current.push(o.label); }
+    }
+    void advanceGuided(stepIndex + 1, ageFlowTokenRef.current);
+  };
+
+  // Skip THIS question → advance to the next; skip-all → finish now; X (close) → abandon the flow.
+  const onAgeSkip = () => { if (ageFlow?.phase === 'asking') void advanceGuided(ageFlow.stepIndex + 1, ageFlowTokenRef.current); };
+  const onAgeSkipAll = () => finishGuided(ageFlowTokenRef.current);
+  const onAgeClose = () => { ageFlowTokenRef.current++; setAgeFlow(null); };
 
   // Tap on a refine answer chip → lock that question's chips so it can't be answered twice, then run.
   const pickRefine = (msgId: string, r: RefinePrompt, opt: { label: string; value: string }) => {
@@ -1646,18 +1704,23 @@ export default function Agent() {
       {ageFlow ? (
         <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
           {ageFlow.phase === 'loading' ? (
-            <AdvancedQuestionLoading onClose={onAgeSkip} />
+            <AdvancedQuestionLoading onClose={onAgeClose} />
           ) : (
             <AdvancedQuestionCard
               titleKey={ageFlow.titleKey}
               options={ageFlow.options}
               unknownCount={ageFlow.unknownCount}
-              progressCur={1}
-              progressTotal={1}
+              progressCur={ageFlow.stepIndex + 1}
+              progressTotal={ADVANCED_QUESTIONS.length}
+              mode={ageFlow.cfg.mode}
               onAnswer={onAgeAnswer}
+              onMultiConfirm={onAgeMultiConfirm}
+              liveCount={(keys) => (ageFlow.cfg.liveCount && ageFlowQueryRef.current
+                ? ageFlow.cfg.liveCount(ageFlowQueryRef.current, keys)
+                : Promise.resolve(null))}
               onSkip={onAgeSkip}
-              onSkipAll={onAgeSkip}
-              onClose={onAgeSkip}
+              onSkipAll={onAgeSkipAll}
+              onClose={onAgeClose}
             />
           )}
         </View>

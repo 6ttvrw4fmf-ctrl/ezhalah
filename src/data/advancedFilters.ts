@@ -1,5 +1,6 @@
 import type { SearchQuery } from './search';
-import { fetchPropertyAgeOptionCounts, type AgeOptionCounts } from './remote';
+import { effectiveTypes } from './search';
+import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, fetchGuidedLiveCount, type AgeOptionCounts, type GuidedCounts } from './remote';
 import { t } from '@/i18n';
 
 // Reusable advanced-question engine («خلّنا نحدد الطلب أكثر»). عمر العقار (below) is the first and, for
@@ -28,8 +29,18 @@ export type AdvancedQuestionResult = {
 export type AdvancedQuestionConfig = {
   key: string;
   titleKey: string; // i18n key for the card's question title
+  // 'single' (default) = the age/bathrooms bucket card: tap one option → applyAnswer → advance.
+  // 'multi' = the amenities/RNPL chip card: toggle any chips, live count on the continue button,
+  // applyMulti(q, selectedKeys) merges them, and the second alternative is always "no preference".
+  // A multi question is eligible with >= 1 option (single needs MIN_OPTIONS_TO_SHOW). (2026-07-20)
+  mode?: 'single' | 'multi';
   fetchOptions: (q: SearchQuery) => Promise<AdvancedQuestionResult>;
   applyAnswer: (q: SearchQuery, optionKey: string) => SearchQuery;
+  // multi only: merge a set of picked chip keys into the query in one step (unselected = no change).
+  applyMulti?: (q: SearchQuery, keys: string[]) => SearchQuery;
+  // multi only: live combined count for a tentative chip selection (drives the continue button). null
+  // on error → the card holds the last good number rather than flashing a wrong one.
+  liveCount?: (q: SearchQuery, keys: string[]) => Promise<number | null>;
 };
 
 // Fewer than this many real (count > 0) options → the caller falls back to whatever else it does for
@@ -107,7 +118,104 @@ const AGE_QUESTION: AdvancedQuestionConfig = {
   },
 };
 
-// The engine's question queue — exactly one entry today by explicit owner instruction ("start with
-// عمر العقار only; do not build the other advanced questions yet"). Each future field adds one config
-// object here, in the order it should be asked.
-export const ADVANCED_QUESTIONS: AdvancedQuestionConfig[] = [AGE_QUESTION];
+// ── Annual-Rent apartment guided flow (owner 2026-07-20) ─────────────────────────────────────────
+// Three more questions join عمر العقار, gated to a single-Apartment / Residential / Rent / ANNUAL
+// scope. Monthly rent shows NO guided questions; Buy uses its own flow and never includes Furnished
+// (that scoping lives in each question's fetchOptions via isAnnualRentApartment). Age keeps its own
+// broader 7-type eligibility (AGE_QUESTION above) — it is simply first-after-RNPL in the queue.
+function isAnnualRentApartment(q: SearchQuery): boolean {
+  const types = effectiveTypes(q);
+  return types.length === 1 && types[0] === 'Apartment'
+    && q.category === 'Residential' && q.deal === 'Rent' && q.rentPeriod !== 'monthly';
+}
+
+// Union the picked chip keys into q.amenities (strict RPC tokens: kitchen/parking/elevator/furnished/rnpl).
+function mergeAmenities(q: SearchQuery, keys: string[]): string[] {
+  return [...new Set([...(q.amenities ?? []), ...keys])];
+}
+function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
+  return keys.length ? { ...q, amenities: mergeAmenities(q, keys) } : q;
+}
+
+// Build a chip (multi) question's options from the guided counts: only chips with real (> 0)
+// availability appear; below the ≥150 scope gate, or on a failed count, no options → engine skips.
+// unknownCount is 0 (chips are strict positive filters — no unknown bucket to disclose).
+function chipOptions(
+  counts: GuidedCounts | null,
+  chips: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }>,
+): AdvancedQuestionResult {
+  if (!counts || counts.cnt_total_base < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: 0 };
+  const options = chips
+    .filter((ch) => ch.count(counts) > 0)
+    .map((ch) => ({ key: ch.key, label: t(ch.labelKey), count: ch.count(counts) }));
+  return { options, unknownCount: 0 };
+}
+
+// Step 1 — RNPL / installments («استأجر الآن وادفع لاحقًا»). ONE strict chip: tap = require a
+// source-advertised installment option (rent_now_pay_later=true); untapped = no preference. NEUTRAL
+// metadata filter only — no payment calc, estimate, ranking, or advice. Placed FIRST in the queue.
+const RNPL_QUESTION: AdvancedQuestionConfig = {
+  key: 'rnpl',
+  titleKey: 'Do you prefer listings with installment options?',
+  mode: 'multi',
+  async fetchOptions(q) {
+    if (!isAnnualRentApartment(q)) return { options: [], unknownCount: 0 };
+    return chipOptions(await fetchApartmentGuidedCounts(q),
+      [{ key: 'rnpl', labelKey: 'Offers installments', count: (c) => c.cnt_rnpl }]);
+  },
+  applyAnswer: (q, key) => addAmenities(q, [key]),
+  applyMulti: (q, keys) => addAmenities(q, keys),
+  liveCount: (q, keys) => fetchGuidedLiveCount(q, mergeAmenities(q, keys), q.bathMin ?? null),
+};
+
+// Step 3 — amenities (Kitchen · Parking · Elevator · Furnished). Multi strict chips; Furnished is a
+// strict amenity token here (NOT the lenient p_furnished), so "Furnished" means confirmed furnished.
+const AMENITIES_QUESTION: AdvancedQuestionConfig = {
+  key: 'amenities',
+  titleKey: 'What amenities matter to you?',
+  mode: 'multi',
+  async fetchOptions(q) {
+    if (!isAnnualRentApartment(q)) return { options: [], unknownCount: 0 };
+    return chipOptions(await fetchApartmentGuidedCounts(q), [
+      { key: 'kitchen',   labelKey: 'Kitchen',   count: (c) => c.cnt_kitchen },
+      { key: 'parking',   labelKey: 'Parking',   count: (c) => c.cnt_parking },
+      { key: 'elevator',  labelKey: 'Elevator',  count: (c) => c.cnt_elevator },
+      { key: 'furnished', labelKey: 'Furnished', count: (c) => c.cnt_furnished },
+    ]);
+  },
+  applyAnswer: (q, key) => addAmenities(q, [key]),
+  applyMulti: (q, keys) => addAmenities(q, keys),
+  liveCount: (q, keys) => fetchGuidedLiveCount(q, mergeAmenities(q, keys), q.bathMin ?? null),
+};
+
+// Step 4 — minimum bathrooms. Single-select ladder (Skip = "Any"); STRICT (>= N, unknown-bathroom
+// listings excluded — owner 2026-07-20). Tiers below MIN_REAL_BUCKET_COUNT are hidden by the scope.
+const BATHROOMS_QUESTION: AdvancedQuestionConfig = {
+  key: 'bathrooms',
+  titleKey: 'How many bathrooms?',
+  mode: 'single',
+  async fetchOptions(q) {
+    if (!isAnnualRentApartment(q)) return { options: [], unknownCount: 0 };
+    const counts = await fetchApartmentGuidedCounts(q);
+    if (!counts || counts.cnt_total_base < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: 0 };
+    const options = ([
+      { key: '1', labelKey: '1+', count: counts.cnt_bath1 },
+      { key: '2', labelKey: '2+', count: counts.cnt_bath2 },
+      { key: '3', labelKey: '3+', count: counts.cnt_bath3 },
+      { key: '4', labelKey: '4+', count: counts.cnt_bath4 },
+    ] as const)
+      .filter((tier) => tier.count >= MIN_REAL_BUCKET_COUNT)
+      .map((tier) => ({ key: tier.key, label: t(tier.labelKey), count: tier.count }));
+    return { options, unknownCount: 0 };
+  },
+  applyAnswer: (q, key) => ({ ...q, bathMin: parseInt(key, 10) || null }),
+};
+
+// The engine's question queue — asked in this exact order for Apartment → Annual Rent (owner
+// 2026-07-20): installments → property age → amenities → minimum bathrooms. Each self-gates in its
+// fetchOptions (age is broader; the other three are annual-apartment only), so a scope that fails a
+// step's gate simply skips it. AdvancedQuestionCard + the agent.tsx orchestration stay generic —
+// driven entirely by `mode`, never by a question's identity.
+export const ADVANCED_QUESTIONS: AdvancedQuestionConfig[] = [
+  RNPL_QUESTION, AGE_QUESTION, AMENITIES_QUESTION, BATHROOMS_QUESTION,
+];

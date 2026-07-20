@@ -318,6 +318,21 @@ const AR: Record<string, string> = {
   'Skip': 'تخطي',
   'Skip remaining questions and search now': 'تخطي الباقي وابحث الآن',
   'Age unknown for {count} matching listings': 'العمر غير معروف لـ {count} من العقارات المطابقة',
+  // Annual-Rent apartment guided flow (2026-07-20): RNPL (installments) · amenities · min bathrooms.
+  // Kitchen/Parking/Elevator + «استأجر الآن وادفع لاحقًا» reuse existing keys below; only the new
+  // question titles, the Furnished chip, the bathroom ladder, and the live-count CTA are added here.
+  'Do you prefer listings with installment options?': 'تفضّل عقارات تتيح التقسيط / الدفع لاحقًا؟',
+  'Offers installments': 'يقبل التقسيط',
+  'What amenities matter to you?': 'ما المرافق المهمة لك؟',
+  // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
+  'How many bathrooms?': 'كم عدد دورات المياه؟',
+  'Any number': 'أي عدد',
+  '1+': '+١',
+  '2+': '+٢',
+  '3+': '+٣',
+  '4+': '+٤',
+  'Show {count} apartments': 'عرض {count} شقة',
+  'No preference': 'لا يهمني',
 
   // Interview option labels
   'Pool': 'مسبح',
