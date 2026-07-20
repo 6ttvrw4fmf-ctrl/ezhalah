@@ -104,6 +104,15 @@ export function ResultCard({
   // Without it, a description that STARTS with LTR content (a URL / phone / emoji) flips the paragraph's
   // base direction and pushes the clamp ellipsis to the wrong side ("… عنه"). (owner 2026-07-08)
   const descAr = (() => { const d = (listing.description ?? '').trim(); return d && /[ء-ي]/.test(d) ? '‏' + d : null; })();
+  // Gathern Tier-1: Gathern is the only source that carries a rich Arabic listing.title AND no
+  // description (0% desc), so we surface the title in the description slot — but ONLY for Gathern, so
+  // no other platform's layout changes. Same RLM (U+200F) base-direction guard as descAr above.
+  const isGathern = (listing.source || '').toLowerCase().includes('gathern');
+  const titleAr = (() => { const s = (listing.title ?? '').trim(); return s && /[ء-ي]/.test(s) ? '‏' + s : null; })();
+  // Guest rating (0–10) — present ONLY for sources that publish reviews (Gathern). null everywhere
+  // else → the rating element renders nothing, so no other platform's card changes. (Gathern Tier-1.)
+  const ratingVal = typeof listing.rating === 'number' && Number.isFinite(listing.rating) ? listing.rating : null;
+  const reviewsCount = typeof listing.reviews_count === 'number' && listing.reviews_count > 0 ? listing.reviews_count : null;
   // The scraper sometimes captured a whole junk string into `listed` (e.g. "28/04/2026 آخر تحديث منذ
   // 22 ساعة ... المشاهدات 353 ..."). Show ONLY the clean DD/MM/YYYY date; if none, fall back to a
   // localized "recently". Works in both languages, no re-scrape needed. (user request: don't show
@@ -189,10 +198,24 @@ export function ResultCard({
           ) : null}
         </View>
         <Text style={card.price} numberOfLines={1}>{tPrice(listing.price)}</Text>
+        {/* Guest rating — renders ONLY when the listing carries one (Gathern). e.g. ★ 9.9 (59 تقييم) */}
+        {ratingVal != null ? (
+          <View style={card.ratingRow}>
+            <Ionicons name="star" size={13} color="#f5a623" />
+            <Text style={card.ratingText}>
+              {ratingVal}
+              {reviewsCount != null ? <Text style={card.ratingCount}>{`  (${t('{n} reviews', { n: reviewsCount })})`}</Text> : null}
+            </Text>
+          </View>
+        ) : null}
         {listing.rent_now_pay_later ? <RnplBanner monthly={listing.rent_now_pay_later_monthly ?? undefined} source={listing.source} t={t} /> : null}
         {descAr ? (
           <Text style={[card.desc, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={3}>{descAr}</Text>
-        ) : null}
+        ) : (isGathern && titleAr ? (
+          // Gathern has no description → show its rich Arabic title here instead. Gated to Gathern so
+          // no other platform (which shows nothing here when descAr is null) is affected.
+          <Text style={[card.desc, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={2}>{titleAr}</Text>
+        ) : null)}
         <View style={card.statsRow}>
           {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
           {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} /> : null}
@@ -638,6 +661,11 @@ const card = StyleSheet.create({
   },
   regionChipText: { fontSize: 10.5, color: colors.primary, fontWeight: '700' },
   price: { fontSize: 16.5, fontWeight: '800', color: colors.primary, marginTop: 2 },
+  // Guest-rating chip (Gathern) — star + score, with a muted review-count suffix. Sits just under
+  // the price; only rendered when the listing actually carries a rating. (Gathern Tier-1.)
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
+  ratingText: { fontSize: 12.5, fontWeight: '700', color: colors.dark },
+  ratingCount: { fontSize: 11, fontWeight: '500', color: colors.muted },
 
   // EJARI × ريلز "Rent now, pay later" branded banner — light EJARI blue background, two-line
   // layout (brand row on top, "from SAR X/mo" subline below). Premium feel — rounded corners,

@@ -751,6 +751,13 @@ const AR: Record<string, string> = {
   'Deed location':                      'موقع الصك',
   'Status':                             'الحالة',
   'Address':                            'العنوان',
+  // Gathern Tier-1 additional-info labels (Gathern-only keys) + guest-rating review count.
+  'Sub-type':                           'نوع الوحدة',
+  'Furnished':                          'مفروش',
+  'Discount':                           'الخصم',
+  'Monthly before discount (SAR)':      'السعر الشهري قبل الخصم (ريال)',
+  'Nightly rate (SAR)':                 'السعر الليلي (ريال)',
+  '{n} reviews':                        '{n} تقييم',
   'Yes':                               'نعم',
   'bd': 'غرفة',
   'Type': 'النوع',
