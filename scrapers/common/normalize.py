@@ -17,8 +17,8 @@ TYPE_MAP_AR = {
     "شقه":     "Apartment",
     "فيلا":    "Villa",
     "فلة":     "Villa",
-    "بيت":     "House",
-    "منزل":    "House",
+    "بيت":     "Villa",
+    "منزل":    "Villa",
     "دور":     "Floor",
     "غرفة":    "Room",
     "غرفه":    "Room",
@@ -62,7 +62,7 @@ TYPE_MAP_AR = {
     "محطة بنزين": "Gas Station", # eastabha
     "كافيه":    "Shop",          # eastabha
     "كافيه - لاونج": "Shop",     # eastabha
-    "حوش":      "House",         # mustqr (Hail vocab: walled house/yard property)
+    "حوش":      "Villa",         # mustqr (Hail vocab: walled house/yard property) — House folded into Villa 2026-07-20
     # ── Mapping standardization (2026-07-16, owner-approved fix/mapping-standardization) ──
     # دوبلكس/استوديو are now first-class clean types fleet-wide (searchable in both table kinds
     # post-#98; type_label_ar/known_type_ar carry both — verified live 2026-07-16). Values are
@@ -80,7 +80,7 @@ SLUG_TO_TYPE = {
     "apartment":  "Apartment",
     "villa":      "Villa",
     "floor":      "Floor",
-    "house":      "House",
+    "house":      "Villa",
     "room":       "Room",
     "building":   "Building",
     "rest_house": "Rest House",
@@ -404,7 +404,7 @@ def map_city_en(raw: Optional[str], overrides: Optional[dict[str, str]] = None) 
 def category_for_type(t: str) -> str:
     """Residential vs Commercial — same split the app's filter uses."""
     residential = {
-        "Apartment", "Villa", "Floor", "House", "Room", "Building",
+        "Apartment", "Villa", "Floor", "Room", "Building",
         "Rest House", "Chalet", "Camp", "Residential Land",
     }
     return "Residential" if t in residential else "Commercial"

@@ -165,24 +165,7 @@
         "rawTypes": [
           "Villa",
           "Palace",
-          "تاون هاوس"
-        ],
-        "kinds": [
-          "res"
-        ]
-      },
-      "pythonCategoryOverride": null
-    },
-    {
-      "clean": "House",
-      "macro": "Residential",
-      "hierarchy": {
-        "macro": "Residential",
-        "group": "Villas & Houses"
-      },
-      "serviceFacility": false,
-      "query": {
-        "rawTypes": [
+          "تاون هاوس",
           "House"
         ],
         "kinds": [
@@ -674,11 +657,11 @@
       ],
       [
         "بيت",
-        "House"
+        "Villa"
       ],
       [
         "منزل",
-        "House"
+        "Villa"
       ],
       [
         "دور",
@@ -806,7 +789,7 @@
       ],
       [
         "حوش",
-        "House"
+        "Villa"
       ],
       [
         "دوبلكس",
@@ -840,7 +823,7 @@
       ],
       [
         "house",
-        "House"
+        "Villa"
       ],
       [
         "room",
@@ -937,7 +920,6 @@
       "Camp",
       "Chalet",
       "Floor",
-      "House",
       "Residential Land",
       "Rest House",
       "Room",
