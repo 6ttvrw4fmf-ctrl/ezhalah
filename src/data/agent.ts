@@ -80,7 +80,7 @@ const CURRENCY_RATES: Record<string, number> = {
 
 const TYPE_SYNONYMS: Record<string, string> = {
   flat: 'Apartment', apt: 'Apartment', studio: 'Apartment', penthouse: 'Apartment', duplex: 'Floor',
-  mansion: 'Villa', palace: 'Villa', townhouse: 'House', home: 'House', dwelling: 'House',
+  mansion: 'Villa', palace: 'Villa', townhouse: 'Villa', home: 'Villa', dwelling: 'Villa',
   tower: 'Building', block: 'Building', plot: 'Residential Land', cabin: 'Chalet',
   workspace: 'Office', clinic: 'Office', storage: 'Warehouse', depot: 'Warehouse',
   store: 'Shop', retail: 'Shop', boutique: 'Shop', gallery: 'Showroom', garage: 'Workshop',
@@ -162,8 +162,8 @@ const AR_CITY: Record<string, string> = {
   'الدرعية': 'Diriyah', 'الدلم': 'Al Dilam', 'المجمعة': 'Al Majmaah', 'الزلفي': 'Zulfi', 'الغاط': 'Al Ghat', 'ثادق': 'Thadiq', 'حريملاء': 'Huraymila', 'رماح': 'Rumah', 'المزاحمية': 'Al Muzahimiyah', 'ضرما': 'Dhurma', 'القويعية': 'Al Quwayiyah', 'الدوادمي': 'Al Dawadmi', 'شقراء': 'Shaqra', 'عفيف': 'Afif', 'الحريق': 'Al Hariq', 'حوطة بني تميم': 'Hotat Bani Tamim', 'الحوطة': 'Al Hawtah', 'الأفلاج': 'Al Aflaj', 'وادي الدواسر': 'Wadi Al Dawasir', 'السليل': 'Al Sulayyil',
 };
 const AR_TYPE: Record<string, string> = {
-  'شقة': 'Apartment', 'شقه': 'Apartment', 'فيلا': 'Villa', 'فلة': 'Villa', 'دور': 'Floor', 'بيت': 'House',
-  'منزل': 'House', 'غرفة': 'Room', 'غرفه': 'Room', 'عمارة': 'Building', 'عماره': 'Building',
+  'شقة': 'Apartment', 'شقه': 'Apartment', 'فيلا': 'Villa', 'فلة': 'Villa', 'دور': 'Floor', 'بيت': 'Villa',
+  'منزل': 'Villa', 'غرفة': 'Room', 'غرفه': 'Room', 'عمارة': 'Building', 'عماره': 'Building',
   'استراحة': 'Rest House', 'استراحه': 'Rest House', 'شاليه': 'Chalet', 'مكتب': 'Office',
   'مستودع': 'Warehouse', 'محل': 'Shop', 'معرض': 'Showroom', 'مصنع': 'Factory', 'ورشة': 'Workshop',
   'مزرعة': 'Farm', 'مزرعه': 'Farm', 'مخيم': 'Camp', 'أرض': 'Residential Land', 'ارض': 'Residential Land',

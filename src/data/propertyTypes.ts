@@ -26,7 +26,7 @@ export type SubGroup = { group: string; types: string[] };
 export const HIERARCHY: Record<Macro, SubGroup[]> = {
   Residential: [
     { group: 'Apartments & Co-living', types: ['Apartment', 'Floor', 'Studio', 'Room', 'Residential Building'] },
-    { group: 'Villas & Houses',        types: ['Villa', 'House', 'Duplex'] }, // قصر/Palace folds into Villa (locked rule; 0 raw Palace listings) — not a separate option
+    { group: 'Villas & Houses',        types: ['Villa', 'Duplex'] }, // قصر/Palace AND House fold into Villa (locked rule; House has few raw listings) — neither is a separate option
     { group: 'Vacation & Rural',       types: ['Rest House', 'Chalet', 'Camp', 'Farm'] },
     { group: 'Residential Plots',      types: ['Residential Land'] },
   ],
@@ -93,7 +93,7 @@ const STUDIO_AR_SHADDA_FIRST = '\u0634\u0642\u0651\u064E\u0629 \u0635\u063A\u064
 const RAW_TO_CLEAN: Record<string, string> = {
   // Residential dwellings (pass-through)
   'Apartment': 'Apartment', 'Floor': 'Floor', 'Room': 'Room',
-  'Villa': 'Villa', 'House': 'House', 'Duplex': 'Duplex', 'Palace': 'Villa', // قصر folds into فيلا (displayed + searched as Villa)
+  'Villa': 'Villa', 'House': 'Villa', 'Duplex': 'Duplex', 'Palace': 'Villa', // قصر + بيت (House) fold into فيلا (searched as Villa; card still shows the raw scraped text)
   'Rest House': 'Rest House', 'Chalet': 'Chalet', 'Camp': 'Camp',
   // Studio (incl. Arabic leaks + the known non-NFC byte-variant, see STUDIO_AR_SHADDA_FIRST above)
   'Studio': 'Studio', 'ستوديو': 'Studio', 'شقَّة صغيرة (استوديو)': 'Studio', [STUDIO_AR_SHADDA_FIRST]: 'Studio',
@@ -178,8 +178,7 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   // label), flooding the RPC candidate set + total_count with Commercial Buildings.
   'Residential Building':{ rawTypes: ['Building', 'مجمع سكني'], kinds: ['res'] },
   // Residential — Villas & Houses
-  'Villa':               { rawTypes: ['Villa', 'Palace', 'تاون هاوس'], kinds: ['res'] }, // فيلا search includes raw قصر + تاون هاوس
-  'House':               { rawTypes: ['House'], kinds: ['res'] },
+  'Villa':               { rawTypes: ['Villa', 'Palace', 'تاون هاوس', 'House'], kinds: ['res'] }, // فيلا search includes raw قصر + تاون هاوس + بيت (House folded in — few raw listings, owner request 2026-07-20)
   'Duplex':              { rawTypes: ['Duplex'], kinds: BOTH }, // BOTH: see Studio note — october maps "duplex"→'Duplex' then routes it commercial via category_for_type
   // Residential — Vacation & Rural (Rest House/Farm appear in com tables too → both)
   'Rest House':          { rawTypes: ['Rest House'], kinds: BOTH },
