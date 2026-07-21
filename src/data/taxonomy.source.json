@@ -258,7 +258,25 @@
       "serviceFacility": false,
       "query": {
         "rawTypes": [
-          "Farm",
+          "Farm"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": "Commercial"
+    },
+    {
+      "clean": "Agriculture Plot",
+      "macro": "Residential",
+      "hierarchy": {
+        "macro": "Residential",
+        "group": "Vacation & Rural"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
           "Agriculture Plot"
         ],
         "kinds": [

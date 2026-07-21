@@ -167,6 +167,7 @@ const AR_TYPE: Record<string, string> = {
   'استراحة': 'Rest House', 'استراحه': 'Rest House', 'شاليه': 'Chalet', 'مكتب': 'Office',
   'مستودع': 'Warehouse', 'محل': 'Shop', 'معرض': 'Showroom', 'مصنع': 'Factory', 'ورشة': 'Workshop',
   'مزرعة': 'Farm', 'مزرعه': 'Farm', 'مخيم': 'Camp', 'أرض': 'Residential Land', 'ارض': 'Residential Land',
+  'أرض زراعية': 'Agriculture Plot', 'ارض زراعية': 'Agriculture Plot',
 };
 const RES_TYPES = new Set(CATEGORY_TYPES.Residential);
 const AR_BUY = /(شراء|للبيع|تمليك|اشتري|أشتري|بيع)/;

@@ -605,9 +605,12 @@ toor). Freshness monitoring closes the "cron succeeded but wrote nothing" gap.
   labels (e.g. `امارة مكة-الطائف` mis-resolved), catalog duplicates (الهفوف, فرسان each with two
   city_ids), hamza-less catalog spellings (`ابها`, `الاحساء`), Souq24 exact-join NULLs. Search recall is
   already spelling-insensitive; these are display/grouping cosmetics only.
-- **Property-type hierarchy details:** whether `أرض زراعية` (agricultural land) and `أرض` (generic land)
-  should be their own filter buttons; Bank / Telecom Tower grouping. (`مكاتب مشتركة` = shared offices is
+- **Property-type hierarchy details:** whether `أرض` (generic land, still bundled into Residential Land)
+  should be its own filter button; Bank / Telecom Tower grouping. (`مكاتب مشتركة` = shared offices is
   currently the only unreachable raw type — an Office row misfiled in the residential table; ask owner.)
+  **RESOLVED 2026-07-21:** `أرض زراعية` (Agriculture Plot) is now its own clean type/filter button,
+  split out of Farm (owner decision — it outnumbered real Farm listings 5:1, so the merged "Farm"
+  button mostly surfaced bare agricultural land, not actual farm properties).
 - **Rent scaling:** monthly price ×12 handling vs Gathern's pre-annualized `price_annual`.
 - **PRD §13 business items:** revenue model (CPC-first decided), **REGA license number** (`XXXXXXXX`
   placeholder in About/Settings — needs the real number), signed partner data agreements, PDPL retention
