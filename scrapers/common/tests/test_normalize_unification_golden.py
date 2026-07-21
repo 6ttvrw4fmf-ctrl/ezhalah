@@ -140,11 +140,15 @@ WASALT_CITY_APPROVED_CHANGES = {           # owner approval 2026-07-16: keep the
     "Al-Aqiq": "Al Aqiq",                  # was folded to Al Baha
 }
 ALDARIM_TYPE_APPROVED_CHANGES = {"duplex": "Duplex"}   # owner approval 2026-07-16: was Villa fold
-MUSTQR_TYPE_APPROVED_CHANGES = {"دوبلكس": "Duplex"}    # owner approval 2026-07-16: was Villa fold
+MUSTQR_TYPE_APPROVED_CHANGES = {
+    "دوبلكس": "Duplex",                    # owner approval 2026-07-16: was Villa fold
+    "بيت": "Villa", "حوش": "Villa",        # owner approval 2026-07-20: House folded into Villa (PR#165)
+}
 EASTABHA_TYPE_APPROVED_CHANGES = {         # owner approval 2026-07-16
     "أرض": "Residential Land", "ارض": "Residential Land",          # was routing-legacy "Land"
     "أرض سكنية": "Residential Land", "ارض سكنية": "Residential Land",
     "أرض زراعية": "Farm", "ارض زراعية": "Farm",                     # was "Land"; mustqr's value won
+    "بيت": "Villa", "منزل": "Villa",       # owner approval 2026-07-20: House folded into Villa (PR#165)
 }
 EASTABHA_CITY_APPROVED_CHANGES = {         # owner approval 2026-07-16: canonical fleet labels
     "تثليث": "Tathlith", "محايل": "Mahayel", "المجمعة": "Al Majmaah", "الزلفي": "Al Zulfi",
@@ -482,7 +486,7 @@ def test_delta_mustqr_gains_shared_exact_types():
     from scrapers.mustqr.run import MUSTQR_TYPE_OVERRIDES
 
     gains = {"غرفة": "Room", "محل": "Shop", "معرض": "Showroom", "مستودع": "Warehouse",
-             "مزرعة": "Farm", "منزل": "House", "قصر": "Villa"}
+             "مزرعة": "Farm", "منزل": "Villa", "قصر": "Villa"}  # منزل: House→Villa fold (owner 2026-07-20, PR#165)
     for ar, want in gains.items():
         assert old_mustqr_type(ar) is None, ar
         assert N.map_type_exact(ar, overrides=MUSTQR_TYPE_OVERRIDES) == want, ar
@@ -529,7 +533,7 @@ def test_contract_shared_ar_additions_promoted_verbatim():
     # 8 type aliases (7 eastabha + 1 mustqr) + 4 eastabha cities, values preserved verbatim.
     for ar, want in {"شقق سكنية": "Apartment", "شقق": "Apartment", "قصر": "Villa",
                      "إستراحة": "Rest House", "محطة بنزين": "Gas Station", "كافيه": "Shop",
-                     "كافيه - لاونج": "Shop", "حوش": "House"}.items():
+                     "كافيه - لاونج": "Shop", "حوش": "Villa"}.items():  # حوش: House→Villa fold (owner 2026-07-20, PR#165)
         assert N.TYPE_MAP_AR[ar] == want, ar
     for ar, want in {"النماص": "Al Namas", "تنومة": "Tanomah",
                      "ظهران الجنوب": "Dhahran Al Janub", "البرك": "Al Birk"}.items():
