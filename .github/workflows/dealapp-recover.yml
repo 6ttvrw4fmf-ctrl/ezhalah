@@ -1,0 +1,51 @@
+# Deal App inactive-row recovery — re-checks every active=false dealapp row against its real
+# /ad-details page and reactivates the ones Deal App itself still publishes as InStock.
+# Strictly additive: never sets active=false. Rationale + audit trail: owner decision 2026-07-21
+# (source audit found the age-swept inactive stock to be overwhelmingly live-at-source; the
+# crawler's partial enumeration means auto_recover_false_inactive can't resurrect them).
+#
+# Scheduled weekly (Mon 03:00 UTC) via pg_cron → trigger_gh_workflow('dealapp-recover.yml'),
+# same dispatch pattern as every other scraper job. Manual dispatch for the one-time backfill.
+
+name: Dealapp recover
+
+on:
+  workflow_dispatch:
+    inputs:
+      table:
+        description: "Table to recover (all | dealapp_residential_listings | dealapp_commercial_listings)"
+        default: "all"
+      limit:
+        description: "Cap rows per table (0 = all)"
+        default: "0"
+
+concurrency:
+  group: dealapp-recover
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Recover inactive dealapp rows
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+
+      - name: Recovery sweep
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python -m scrapers.dealapp.recover \
+            --table ${{ github.event.inputs.table || 'all' }} \
+            --limit ${{ github.event.inputs.limit || '0' }} \
+            --workers 4
