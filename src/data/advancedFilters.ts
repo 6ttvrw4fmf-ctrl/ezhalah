@@ -25,11 +25,13 @@ export type AdvancedQuestionResult = {
   unknownCount: number;      // disclosed as a caption when > 0; never a selectable option
 };
 
-// THE CONTRACT BOUNDARY — a question supplies exactly these seven fields, nothing else.
+// THE CONTRACT BOUNDARY — a question supplies exactly these eight fields, nothing else.
 export type AdvancedQuestion = {
   id: string;                                   // stable identity, e.g. 'property_age'
   titleKey: string;                             // i18n key — the headline
   descriptionKey?: string;                      // i18n key — optional one-line subtitle
+  brandImage?: string;                          // optional asset TOKEN (e.g. 'ejari-rnpl') — the card's
+                                                // own registry maps it to an image and owns the slot/style
   selection: 'single' | 'multi';                // arity — the ONLY behavioural switch
   eligibility: (q: SearchQuery) => boolean;      // the question's own scope gate (never at a call site)
   resolveOptions: (q: SearchQuery) => Promise<AdvancedQuestionResult>; // live options for the scope
@@ -124,11 +126,13 @@ function guidedOptions(
 }
 
 // Installments (RNPL) — one strict chip. NEUTRAL metadata filter only (no payment calc/estimate/
-// ranking/advice). Placed first.
+// ranking/advice). Placed first. Carries the official EJARI×رايز partnership badge (owner 2026-07-21)
+// via the brandImage TOKEN — the card owns the asset + slot; this config only names it.
 const RNPL_QUESTION: AdvancedQuestion = {
   id: 'rnpl',
   titleKey: 'Do you prefer listings with installment options?',
-  descriptionKey: 'Results update as you choose',
+  descriptionKey: 'Rent now and pay monthly instead of one annual payment',
+  brandImage: 'ejari-rnpl',
   selection: 'multi',
   eligibility: isAnnualRentApartment,
   async resolveOptions(q) {

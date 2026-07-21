@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Reveal } from '@/components/ui';
 import { LoadingDots } from '@/components/CardReveal';
@@ -47,9 +48,17 @@ export function AdvancedQuestionLoading({ onClose }: { onClose: () => void }) {
   );
 }
 
+// Card-owned brand-asset registry — a question names an asset by TOKEN (its brandImage config field);
+// the card alone maps token → image and owns the one shared slot + styling it renders in. RN requires
+// static require() calls, which is also why the mapping must live here and not in question config.
+const BRAND_IMAGES: Record<string, ReturnType<typeof require>> = {
+  'ejari-rnpl': require('../../assets/images/ejari-rnpl.png'),
+};
+
 export type AdvancedQuestionCardProps = {
   titleKey: string;
   descriptionKey?: string;
+  brandImage?: string;            // asset token resolved via the card's own BRAND_IMAGES registry
   selection: 'single' | 'multi';
   options: AdvancedOption[];      // already pre-filtered to the meaningful-option floor by the config
   unknownCount: number;
@@ -84,7 +93,7 @@ function OptionRow({ option, selected, selection, first, onPress }: {
 }
 
 export default function AdvancedQuestionCard({
-  titleKey, descriptionKey, selection, options, unknownCount, progressCur, progressTotal,
+  titleKey, descriptionKey, brandImage, selection, options, unknownCount, progressCur, progressTotal,
   liveCount, onConfirm, onSkip, onSkipAll, onClose,
 }: AdvancedQuestionCardProps) {
   const { t } = useI18n();
@@ -118,13 +127,23 @@ export default function AdvancedQuestionCard({
   return (
     <Shell onClose={onClose}>
       {progressTotal > 1 ? (
-        <View style={s.progTrack}>
-          <Animated.View style={[s.progFill, { width: fillWidth }]} />
+        <View style={s.progRow}>
+          <View style={s.progTrack}>
+            <Animated.View style={[s.progFill, { width: fillWidth }]} />
+          </View>
+          <Text style={s.progNum}>
+            {t('Question {cur} of {total}', { cur: progressCur, total: progressTotal })}
+          </Text>
         </View>
       ) : null}
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <Text style={s.qt}>{t(titleKey)}</Text>
         {descriptionKey ? <Text style={s.desc}>{t(descriptionKey)}</Text> : null}
+        {brandImage && BRAND_IMAGES[brandImage] ? (
+          <View style={s.brandStrip}>
+            <Image source={BRAND_IMAGES[brandImage]} style={s.brandImg} contentFit="contain" />
+          </View>
+        ) : null}
         <View style={s.list}>
           {options.map((o, i) => (
             <OptionRow key={o.key} option={o} selected={sel.includes(o.key)} selection={selection}
@@ -146,7 +165,11 @@ export default function AdvancedQuestionCard({
             </Pressable>
             {progressTotal > 1 ? (
               <Pressable style={s.skipLink} onPress={onSkipAll} hitSlop={8}>
-                <Text style={s.skipAllTxt}>{t('Skip remaining questions and search now')}</Text>
+                <Text style={s.skipAllTxt}>
+                  {progressTotal - progressCur > 0
+                    ? t('Skip remaining ({count}) and search now', { count: progressTotal - progressCur })
+                    : t('Skip remaining questions and search now')}
+                </Text>
               </Pressable>
             ) : null}
           </View>
@@ -168,14 +191,25 @@ const s = StyleSheet.create({
   barTitle: { fontFamily: font.family.bold, fontSize: 14, color: colors.dark },
   xBtn: { width: 30, height: 30, borderRadius: radius.pill, backgroundColor: colors.segTrack, alignItems: 'center', justifyContent: 'center' },
 
-  progTrack: { height: 3, backgroundColor: colors.line, marginHorizontal: space.card, marginBottom: 4, borderRadius: 3, overflow: 'hidden' },
+  progRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: space.card, marginBottom: 4 },
+  progTrack: { flex: 1, height: 3, backgroundColor: colors.line, borderRadius: 3, overflow: 'hidden' },
   progFill: { height: '100%', backgroundColor: colors.dark, borderRadius: 3 },
+  progNum: { fontFamily: font.family.semibold, fontSize: 11.5, color: colors.muted, fontVariant: ['tabular-nums'] },
 
   loadingBody: { paddingHorizontal: space.card, paddingVertical: 36, alignItems: 'center', justifyContent: 'center' },
 
   body: { paddingHorizontal: space.card, paddingTop: space.base, paddingBottom: 18 },
   qt: { fontFamily: font.family.bold, fontSize: 18, color: colors.ink, lineHeight: 24, paddingHorizontal: 2, paddingTop: 6 },
   desc: { fontFamily: font.family.regular, fontSize: 12.5, color: colors.muted, paddingHorizontal: 2, paddingTop: 4 },
+
+  // Shared brand-image slot — one fixed position (under the subtitle, above the options) and one
+  // style for ANY question that names a brandImage token. The PNG carries its own branding; the
+  // strip is a neutral token-only frame.
+  brandStrip: {
+    marginTop: 10, alignItems: 'center', justifyContent: 'center', paddingVertical: 8,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field,
+  },
+  brandImg: { width: 150, height: 46 },
 
   list: { marginTop: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 13, paddingHorizontal: 13, borderTopWidth: 1, borderTopColor: colors.line },

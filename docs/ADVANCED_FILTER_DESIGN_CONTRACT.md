@@ -21,6 +21,7 @@ export type AdvancedQuestion = {
   id: string;                                   // stable key, e.g. 'property_age'
   title: string;                                // i18n key — the headline
   description?: string;                          // i18n key — optional one-line subtitle
+  brandImage?: string;                           // optional asset TOKEN (owner 2026-07-21, e.g. 'ejari-rnpl')
   selection: 'single' | 'multi';                // arity — the ONLY behavioural switch
   eligibility: (scope: SearchQuery) => boolean;  // ONE unified scope gate (see §9)
   resolveOptions: (scope: SearchQuery) => Promise<AdvancedOption[]>; // [{key,label,count}], live, pre-filtered
@@ -30,10 +31,13 @@ export type AdvancedQuestion = {
 export type AdvancedOption = { key: string; label: string; count: number }; // label = i18n-resolved text
 ```
 
-A question supplies **exactly these seven fields — nothing else.** No `mode`-specific render hooks, no
+A question supplies **exactly these eight fields — nothing else.** No `mode`-specific render hooks, no
 `liveCount` fn (the card derives the live count from `resolveOptions` + `apply`), no styles, no icons,
-no copy beyond `title`/`description`/option `label`s. `single` gets `selectedKeys.length ≤ 1`; `multi`
-gets `≥ 0`. Everything visual and behavioural below is owned by the shared component.
+no copy beyond `title`/`description`/option `label`s. `brandImage` is a **string token only** — the
+card owns a private token→asset registry (`BRAND_IMAGES`), the single slot it renders in (under the
+subtitle, above the options), and its one shared style; a question may never pass an asset, a
+`require()`, or a style. `single` gets `selectedKeys.length ≤ 1`; `multi` gets `≥ 0`. Everything
+visual and behavioural below is owned by the shared component.
 
 ---
 
@@ -43,11 +47,13 @@ gets `≥ 0`. Everything visual and behavioural below is owned by the shared com
 ┌───────────────────────────────────────────┐
 │  ✦  Ezhalah AI Agent                    ✕  │  Shell top-bar (fixed)
 ├───────────────────────────────────────────┤
-│  ▓▓▓▓▓▓▓▓░░░░░░░░░░░░░                       │  Progress bar (§3)
+│  ▓▓▓▓▓▓▓▓░░░░░░░░░░░  Question {c} of {t}   │  Progress bar + numeric caption (§3)
 │                                             │
 │  {title}                                    │  Title  (h-question)
 │  {description}                              │  Subtitle (optional, muted)
-│                                             │
+│  ┌─────────────────────────────────────┐   │
+│  │            {brandImage}              │   │  Brand strip (optional, §1 token; card-owned slot)
+│  └─────────────────────────────────────┘   │
 │  ┌─────────────────────────────────────┐   │
 │  │ ◉/☑  {label}                  {count}│   │  Option row — ONE template (§8)
 │  │ ○/☐  {label}                  {count}│   │  leading indicator · label · trailing count
@@ -58,7 +64,7 @@ gets `≥ 0`. Everything visual and behavioural below is owned by the shared com
 │  ┌─────────────────────────────────────┐   │
 │  │            Show {N}                  │   │  Footer primary — live count (§4)
 │  └─────────────────────────────────────┘   │
-│   Skip            Skip all & search now     │  Footer secondary (§7)
+│   Skip       Skip remaining ({n}) & search  │  Footer secondary (§7)
 └───────────────────────────────────────────┘
 ```
 
@@ -76,6 +82,9 @@ gets `≥ 0`. Everything visual and behavioural below is owned by the shared com
   question's `eligibility` + a cheap options probe once at flow start), **not** the static array length.
 - **Numerator = the 1-based ordinal among the questions that will actually show.**
 - The bar **animates** its width between steps.
+- **Numeric caption** (owner 2026-07-21): `Question {cur} of {total}` renders beside the bar on every
+  card, and the skip-all link discloses the remaining count — `Skip remaining ({n}) and search now` —
+  so the user always sees how many questions are left. English digits, tabular-nums (§8 locale rule).
 - Hidden entirely when only one question is eligible.
 - Never shows a fraction that can't reach 100% (the current `2/4` bug is banned by this section).
 
