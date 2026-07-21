@@ -24,13 +24,6 @@
 -- pg_get_functiondef immediately before writing this migration, per the RPC full-body-replace
 -- hazard rule) — only this one predicate changed. Parameter list is UNCHANGED (same signature), so
 -- this is a true REPLACE, not a new overload.
---
--- No backslash-escaping used in the LIKE patterns below on purpose: PostgreSQL's LIKE has no
--- default escape character (must be declared explicitly via `... ESCAPE '\'`, see this repo's own
--- 20260721095938_fix_search_cities_like_escaping_and_negative_limit.sql for the pattern) — an
--- un-declared `\_` would be interpreted literally and never match. Not needed here anyway: the
--- pattern is our own fixed literal, not attacker-controlled input, and an unescaped `_` wildcard
--- still correctly matches the literal underscore in every real table name.
 -- =============================================================================================
 
 CREATE OR REPLACE FUNCTION public.location_search_candidates_ar(p_deal text DEFAULT NULL::text, p_cities text[] DEFAULT NULL::text[], p_districts text[] DEFAULT NULL::text[], p_tables text[] DEFAULT NULL::text[], p_platforms text[] DEFAULT NULL::text[], p_per_platform integer DEFAULT NULL::integer, p_limit integer DEFAULT 5000, p_region_ids integer[] DEFAULT NULL::integer[], p_types text[] DEFAULT NULL::text[], p_price_min numeric DEFAULT NULL::numeric, p_price_max numeric DEFAULT NULL::numeric, p_rent_period text DEFAULT NULL::text, p_area_min integer DEFAULT NULL::integer, p_area_max integer DEFAULT NULL::integer, p_beds_exact integer[] DEFAULT NULL::integer[], p_beds_min integer DEFAULT NULL::integer, p_bath_min integer DEFAULT NULL::integer, p_furnished boolean DEFAULT NULL::boolean, p_age_max integer DEFAULT NULL::integer, p_tenant text DEFAULT NULL::text, p_directions text[] DEFAULT NULL::text[], p_has_license boolean DEFAULT NULL::boolean, p_amenities text[] DEFAULT NULL::text[], p_offset integer DEFAULT 0, p_tables2 text[] DEFAULT NULL::text[], p_types2 text[] DEFAULT NULL::text[], p_age_min integer DEFAULT NULL::integer, p_bath_exact integer[] DEFAULT NULL::integer[], p_street_width_min smallint DEFAULT NULL::smallint, p_street_width_max smallint DEFAULT NULL::smallint, p_floor_min integer DEFAULT NULL::integer, p_floor_max integer DEFAULT NULL::integer, p_is_new_construction boolean DEFAULT NULL::boolean, p_category text DEFAULT NULL::text)
