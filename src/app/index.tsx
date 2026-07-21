@@ -13,7 +13,6 @@ import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Cate
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
-import { TrendingChips } from '@/components/TrendingChips';
 import { grouped, type SearchQuery } from '@/data/search';
 import { HOME_DEFAULT_QUERY, hasActiveFilters } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
@@ -187,9 +186,6 @@ export default function Home() {
   const rentPeriod: 'monthly' | 'annual' = query.rentPeriod ?? 'annual';
   // payment_monthly truth for the Trending-scope RPCs: monthly→true, annual→false, Buy→null (no filter).
   const paymentMonthly: boolean | null = query.deal === 'Rent' ? rentPeriod === 'monthly' : null;
-  // Proactive period-scoped Trending quick-picks shown above the City field (owner request 2026-07-21).
-  const [trendCities, setTrendCities] = useState<CityOption[]>([]);
-  const [trendDistricts, setTrendDistricts] = useState<DistrictOption[]>([]);
   // Refs so the ENTIRE Price/Area/Size box is one tap target (owner 2026-07-10): tapping anywhere in
   // the box — icon, label, padding, unit text — focuses the input immediately, same pattern already
   // used for the city field above (`cityRef` + its wrapping Pressable).
@@ -307,9 +303,6 @@ export default function Home() {
   // bigger UX change the owner declined (2026-07-20). Deal-only is what this data can support today.
   useEffect(() => {
     void ensureCityFieldIndex(query.deal, paymentMonthly).then(() => {
-      // Proactive period-scoped Trending chips above the City field (owner 2026-07-21). Refreshed on
-      // every Deal OR Rent-period change so flipping Monthly↔Yearly visibly re-ranks the list.
-      setTrendCities(topCitiesByListings(query.deal, paymentMonthly, 6));
       // EDGE CASE (found in testing, generalizes to every deal change too): a fetch can still be
       // pending when the user has already focused AND typed a query — matchCitiesByText() would have
       // run against a still-empty/stale-deal pool and (correctly, not a crash) returned []/old
@@ -338,11 +331,9 @@ export default function Home() {
   // Only meaningful once a city is picked; a no-op otherwise (ensureDistrictOptions is never called
   // without one).
   useEffect(() => {
-    if (!citySelected) { setTrendDistricts([]); return; }
+    if (!citySelected) return;
     const cid = citySelected.cityId;
     void ensureDistrictOptions(cid, query.deal, query.category, paymentMonthly).then(() => {
-      // Proactive period-scoped Trending district chips (shown once a city is picked).
-      setTrendDistricts(topDistrictsForCityId(cid, query.deal, query.category, paymentMonthly, 6));
       if (districtTextRef.current) {
         const latin = isLatinOnlyInput(districtTextRef.current);
         setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, query.category, paymentMonthly, districtTextRef.current));
@@ -400,49 +391,6 @@ export default function Home() {
         return;
       }
       router.push({ pathname: '/agent', params: { filter: JSON.stringify(q) } });
-    });
-  };
-
-  // Trending CITY chip → jump straight to that city's results for the current deal + period. Clears any
-  // district (city-only), but CARRIES the current category — exactly like pressing Search does — so the
-  // shortcut behaves consistently with the rest of the form. Reflects the pick in the form too, so
-  // returning shows it. (owner 2026-07-21.)
-  const onTrendCity = (opt: CityOption) => {
-    const lm = resolveCitySelection(opt);
-    cityTextRef.current = opt.cityAr;
-    setQuery((prev) => ({ ...prev, location: opt.cityAr }));
-    setCitySelected(opt);
-    setCitySuggestions([]);
-    setCityFocus(false);
-    setLocMsg('');
-    clearDistrict();
-    navigateWithQuery({
-      ...query,
-      location: lm.label,
-      locationMatch: lm,
-      districts: undefined,
-      districtLabel: undefined,
-      rentPeriod: query.deal === 'Rent' ? rentPeriod : query.rentPeriod,
-    });
-  };
-
-  // Trending DISTRICT chip → search that city + district for the current deal + period. Only reachable
-  // once a city is selected (the chip row switches from cities to that city's districts).
-  const onTrendDistrict = (opt: DistrictOption) => {
-    if (!citySelected) return;
-    const lm = resolveCitySelection(citySelected);
-    districtTextRef.current = opt.districtAr;
-    setDistrictText(opt.districtAr);
-    setDistrictSelected(opt);
-    setDistrictSuggestions([]);
-    setDistrictFocus(false);
-    navigateWithQuery({
-      ...query,
-      location: lm.label,
-      locationMatch: lm,
-      districts: opt.matchValues,
-      districtLabel: opt.districtAr,
-      rentPeriod: query.deal === 'Rent' ? rentPeriod : query.rentPeriod,
     });
   };
 
@@ -680,30 +628,6 @@ export default function Home() {
                   {t(rentPeriod === 'monthly' ? 'Monthly: 1–11 month lease, price/month.' : 'Annual: 12-month lease, price/year.')}
                 </Text>
               </Reveal>
-            )}
-
-            {/* Proactive period-scoped Trending quick-picks (owner request 2026-07-21). Cities until one
-                is chosen, then that city's districts. Tapping runs the search immediately. Hidden while
-                the matching field is focused (its own dropdown shows the trending list then) and once a
-                district is picked. Keyed by period (+ city) so it re-animates when the list changes. */}
-            {query.deal === 'Rent' && !cityFocus && !districtFocus && (
-              (!citySelected && trendCities.length > 0) ? (
-                <Reveal key={`tc-${rentPeriod}`} style={{ marginTop: 12 }}>
-                  <TrendingChips
-                    title={t('Trending cities now')}
-                    items={trendCities.map((c) => ({ key: String(c.cityId), label: c.cityAr }))}
-                    onPress={(_item, idx) => onTrendCity(trendCities[idx])}
-                  />
-                </Reveal>
-              ) : (citySelected && !districtSelected && trendDistricts.length > 0) ? (
-                <Reveal key={`td-${rentPeriod}-${citySelected.cityId}`} style={{ marginTop: 12 }}>
-                  <TrendingChips
-                    title={`${t('Trending districts in')} ${citySelected.cityAr}`}
-                    items={trendDistricts.map((d, i) => ({ key: `${d.districtAr}#${i}`, label: d.districtAr }))}
-                    onPress={(_item, idx) => onTrendDistrict(trendDistricts[idx])}
-                  />
-                </Reveal>
-              ) : null
             )}
 
             {/* CITY-ONLY FIELD (owner spec 2026-07-17): "أي مدينة؟". Field now searches/displays CITIES
