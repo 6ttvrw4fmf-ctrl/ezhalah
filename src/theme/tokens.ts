@@ -28,6 +28,7 @@ export const colors = {
   amberBg: '#fdf6ec',
   amberInk: '#92591a',
   whatsApp: '#25d366',
+  scrim: 'rgba(8,18,12,0.45)', // modal/overlay backdrop
 } as const;
 
 // Per-platform brand colors. Keys match Platform.name. (PRD §8.1)

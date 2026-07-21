@@ -333,6 +333,10 @@ const AR: Record<string, string> = {
   '4+': '+٤',
   'Show {count} apartments': 'عرض {count} شقة',
   'No preference': 'لا يهمني',
+  // Advanced Filter Design Contract (2026-07-20): generic footer + subtitle shared by every question.
+  'Show {count} results': 'عرض {count} نتيجة',
+  'Show results': 'عرض النتائج',
+  'Results update as you choose': 'تُحدَّث النتائج مع كل اختيار',
 
   // Interview option labels
   'Pool': 'مسبح',
