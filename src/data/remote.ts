@@ -652,12 +652,13 @@ const ADDL_FIELDS: Array<[string, string]> = [
   ['monthly_price_before_discount', 'Monthly before discount (SAR)'],
   ['nightly_price', 'Nightly rate (SAR)'],
   ['amenities', 'Amenities'],                            // real Arabic labels only (see gate below)
+  ['suitability', 'Suitable for'],                       // Gathern detail page: عوائل و عزاب (families / singles)
 ];
 // The Gathern-only keys appended to ADDL_FIELDS above. buildAdditionalInfo skips them unless the row's
 // source is Gathern, so a future/other platform that happened to store one of these keys would NOT get
 // a new field — guaranteeing every non-Gathern card stays byte-identical. (Gathern Tier-1.)
 const GATHERN_ONLY_ADDL_KEYS = new Set<string>([
-  'unit_type_ar', 'furnished', 'discount_label', 'monthly_price_before_discount', 'nightly_price', 'amenities',
+  'unit_type_ar', 'furnished', 'discount_label', 'monthly_price_before_discount', 'nightly_price', 'amenities', 'suitability',
 ]);
 function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; label: string; value: string }> | null {
   if (!raw) return null;
