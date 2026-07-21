@@ -90,8 +90,13 @@ def session() -> cc.Session:
     return s
 
 
-def fetch_page(s: cc.Session, deal: str, cat: str, slug: str, page: int) -> tuple[int, int, list[dict]]:
-    """Return (count, total_pages, properties[]) for one search page."""
+def fetch_page(s: cc.Session, deal: str, cat: str, slug: str, page: int) -> tuple[int, int, list[dict], bool]:
+    """Return (count, total_pages, properties[], valid) for one search page.
+
+    `valid` is True only when the response carried a parseable __NEXT_DATA__ searchResult —
+    the signal that Wasalt's app actually answered. A bot-wall/consent shell or an exhausted
+    proxy never produces that structure, so (0, 0, [], False) from those stays distinguishable
+    from a genuine "this category has zero listings" answer (0, 0, [], True)."""
     seg = "sale" if deal == "sale" else "rent"
     url = (f"{BASE}/en/{seg}/search?propertyFor={deal}&countryId=1&type={cat}"
            f"&propertyTypeData={slug}&page={page}")
@@ -105,11 +110,11 @@ def fetch_page(s: cc.Session, deal: str, cat: str, slug: str, page: int) -> tupl
             time.sleep(2 * (attempt + 1)); continue
         m = NEXT_RE.search(r.text)
         if not m:
-            return 0, 0, []
+            return 0, 0, [], False
         sr = (json.loads(m.group(1)).get("props", {}).get("pageProps", {}).get("searchResult") or {})
         props = [p for p in (sr.get("properties") or []) if isinstance(p, dict)]
-        return int(sr.get("count") or 0), int(sr.get("totalPages") or 0), props
-    return 0, 0, []
+        return int(sr.get("count") or 0), int(sr.get("totalPages") or 0), props, True
+    return 0, 0, [], False
 
 
 def _attr(prop: dict, key: str) -> Any:
@@ -326,15 +331,16 @@ def upsert(row: dict, main_type: str) -> None:
     db.upsert_wasalt_residential(row)
 
 
-def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> int:
-    count, total_pages, _ = fetch_page(s, deal, cat, slug, 1)
+def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[int, int, bool]:
+    """Sweep one type-slug × deal. Returns (upserted, source_count, page1_valid)."""
+    count, total_pages, _, page1_valid = fetch_page(s, deal, cat, slug, 1)
     pages = min(max_pages, total_pages or max_pages)
     print(f"\n── WASALT {slug.upper():<16} {deal.upper():<4} {cat.upper():<11} count={count} pages≤{pages}")
     is_commercial = cat == "commercial"
     upserter = db.upsert_wasalt_commercial_batch if is_commercial else db.upsert_wasalt_residential_batch
     upserted = 0
     for page in range(1, pages + 1):
-        _, _, props = fetch_page(s, deal, cat, slug, page)
+        _, _, props, _ = fetch_page(s, deal, cat, slug, page)
         if not props:
             break
         batch = []
@@ -354,7 +360,7 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> int:
         if page % 20 == 0:
             print(f"   [{page}/{pages}] upserted so far: {upserted}")
     print(f"   ✓ {slug}/{deal}: {upserted} upserted")
-    return upserted
+    return upserted, count, page1_valid
 
 
 def main() -> int:
@@ -369,28 +375,41 @@ def main() -> int:
     s = session()
     run_id = db.begin_run("wasalt")
     total = 0
+    legit_empty = False
     try:
         if args.all:
             for cat, slugs in SLUGS.items():
                 for slug in slugs:
                     for deal in ("sale", "rent"):
-                        total += scrape_slice(s, deal, cat, slug, max_pages=args.pages)
+                        up, _count, _valid = scrape_slice(s, deal, cat, slug, max_pages=args.pages)
+                        total += up
         else:
-            total = scrape_slice(s, args.deal, args.type, args.slug, max_pages=args.pages)
+            total, src_count, page1_valid = scrape_slice(s, args.deal, args.type, args.slug, max_pages=args.pages)
+            # A single-category run may legitimately be empty: Wasalt itself can carry zero
+            # listings for a slug (farm has zero, always has). That is only believable when the
+            # app actually answered (page1_valid: parsed __NEXT_DATA__) AND its own count said 0 —
+            # a bot-wall/proxy failure produces an unparseable shell (valid=False) and still fails.
+            # A valid page claiming count>0 while we upserted 0 is a parse/mapping break: still fails.
+            legit_empty = total == 0 and page1_valid and src_count == 0
         # Fail-visibly guard (owner 2026-07-07): a Wasalt sweep that fetched/upserted ZERO rows is a
         # failure, NOT a healthy empty result — Wasalt has ~59k live listings, so a working sweep always
         # re-sees thousands (upsert refreshes existing rows too). 0 rows means the Saudi residential
         # proxy is down / IP-blocked and the site served an empty/bot-wall shell. Never report ok=true
         # on 0 rows, or the run looks green in scrape_runs while nothing flows into search. Mirrors the
-        # toor guard (PR #30).
-        ok = total > 0
-        notes = f"upserted={total}" if ok else "FETCHED 0 ROWS — proxy/network block (fail-visibly guard)"
+        # toor guard (PR #30). The one exception is the verified-empty single category above (2026-07-21).
+        ok = total > 0 or legit_empty
+        if legit_empty:
+            notes = f"source reports 0 listings for {args.slug}/{args.deal} (valid page, empty category)"
+        elif ok:
+            notes = f"upserted={total}"
+        else:
+            notes = "FETCHED 0 ROWS — proxy/network block (fail-visibly guard)"
     except Exception as e:
         ok = False
         notes = str(e)[:400]
         print(f"\n✗ FATAL: {e}")
     finally:
-        db.end_run(run_id, ok=ok, rows_seen=total, rows_upserted=total, notes=notes, check_tables=["wasalt_residential_listings", "wasalt_commercial_listings"])
+        db.end_run(run_id, ok=ok, rows_seen=total, rows_upserted=total, notes=notes, allow_empty=legit_empty, check_tables=["wasalt_residential_listings", "wasalt_commercial_listings"])
     print(f"\n📊 Wasalt done. {total} upserted. (run_id={run_id})")
     return 0 if ok else 1
 
