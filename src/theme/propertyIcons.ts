@@ -29,6 +29,7 @@ export const TYPE_IMG: Record<string, any> = {
   'Camp':                 require('../../assets/icons/camp.png'),
   'Residential Land':     require('../../assets/icons/residential-land.png'),
   'Farm':                 require('../../assets/icons/farm.png'),
+  'Agriculture Plot':     require('../../assets/icons/farms.png'), // split from Farm 2026-07-21; pre-sliced asset, previously unused
   'Office':               require('../../assets/icons/office.png'),
   'Shop':                 require('../../assets/icons/shop.png'),
   'Showroom':             require('../../assets/icons/showroom.png'),

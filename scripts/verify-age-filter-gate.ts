@@ -52,7 +52,7 @@ check(
 );
 
 // Non-eligible types must never offer the question, regardless of category.
-for (const t of ['Land', 'Farm', 'Chalet', 'Studio', 'Duplex', 'Shop'])
+for (const t of ['Land', 'Farm', 'Agriculture Plot', 'Chalet', 'Studio', 'Duplex', 'Shop'])
   check(`${t} (not enabled) never fires`, !isAgeFilterScope({ category: 'Residential' }, [t]) && !isAgeFilterScope({ category: 'Commercial' }, [t]));
 
 // Multi-type and no-type scopes have no single age distribution to ask about.

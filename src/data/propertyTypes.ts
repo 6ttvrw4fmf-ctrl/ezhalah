@@ -27,7 +27,7 @@ export const HIERARCHY: Record<Macro, SubGroup[]> = {
   Residential: [
     { group: 'Apartments & Co-living', types: ['Apartment', 'Floor', 'Studio', 'Room', 'Residential Building'] },
     { group: 'Villas & Houses',        types: ['Villa', 'Duplex'] }, // قصر/Palace AND House fold into Villa (locked rule; House has few raw listings) — neither is a separate option
-    { group: 'Vacation & Rural',       types: ['Rest House', 'Chalet', 'Camp', 'Farm'] },
+    { group: 'Vacation & Rural',       types: ['Rest House', 'Chalet', 'Camp', 'Farm', 'Agriculture Plot'] }, // Agriculture Plot split from Farm 2026-07-21 (owner: Agriculture Plot outnumbers Farm 5:1, was masking real farm listings under one button)
     { group: 'Residential Plots',      types: ['Residential Land'] },
   ],
   Commercial: [
@@ -99,8 +99,9 @@ const RAW_TO_CLEAN: Record<string, string> = {
   'Studio': 'Studio', 'ستوديو': 'Studio', 'شقَّة صغيرة (استوديو)': 'Studio', [STUDIO_AR_SHADDA_FIRST]: 'Studio',
   // Serviced-apartment building → Apartment
   'مبنى شقق مخدومة': 'Apartment',
-  // Farm + agriculture → Farm (Residential, anywhere)
-  'Farm': 'Farm', 'Agriculture Plot': 'Farm',
+  // Farm (Residential, anywhere). Agriculture Plot split into its own clean type 2026-07-21 (owner
+  // decision — it outnumbered Farm 5:1 live, so a merged "Farm" button mostly surfaced bare land).
+  'Farm': 'Farm', 'Agriculture Plot': 'Agriculture Plot',
   // Land family
   'Residential Land': 'Residential Land', 'Land': 'Residential Land',
   'Commercial Land': 'Commercial Land', 'Industrial Land': 'Industrial Land',
@@ -184,7 +185,8 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   'Rest House':          { rawTypes: ['Rest House'], kinds: BOTH },
   'Chalet':              { rawTypes: ['Chalet'], kinds: ['res'] },
   'Camp':                { rawTypes: ['Camp'], kinds: ['res'] },
-  'Farm':                { rawTypes: ['Farm', 'Agriculture Plot'], kinds: BOTH },
+  'Farm':                { rawTypes: ['Farm'], kinds: BOTH },
+  'Agriculture Plot':    { rawTypes: ['Agriculture Plot'], kinds: BOTH }, // split from Farm 2026-07-21 (owner: 1,254 vs 259 live, was masking real farms)
   // Residential — Plots (Residential Land + generic Land; appears in com tables too → both)
   'Residential Land':    { rawTypes: ['Residential Land', 'Land', 'حوش'], kinds: BOTH },
   // Commercial — Retail & Workspace
