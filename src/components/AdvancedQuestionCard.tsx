@@ -1,17 +1,21 @@
-import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Reveal } from '@/components/ui';
 import { LoadingDots } from '@/components/CardReveal';
 import { useI18n } from '@/i18n';
 import { grouped } from '@/data/search';
+import { colors, radius, space, font, cardShadow } from '@/theme/tokens';
 import type { AdvancedOption } from '@/data/advancedFilters';
 
-// The reusable card shell — overlay + backdrop + bar + progress, shared by both the loading state
-// and the resolved question state so the transition between the two (and between successive
-// questions later, once more fields exist) never flashes a different container. Any FIELD-SPECIFIC
-// content lives in the caller (agent.tsx's age-flow orchestration, via AdvancedQuestionConfig) — this
-// file must stay generic across every future advanced question, per owner instruction.
+// THE ONE Advanced Filter card — governed by docs/ADVANCED_FILTER_DESIGN_CONTRACT.md. It owns 100% of
+// the chrome/layout/progress/footer/spacing/typography/motion/skip/counts/interaction. A question
+// supplies only title/description/options/selection; this component NEVER branches on a question id —
+// only on `selection` (single = radio, one pick; multi = checkbox, many). Every question therefore
+// looks and behaves identically: select rows, then confirm via the footer «Show {N}».
+
+// Shared overlay shell (top bar + backdrop), reused by the loading state and the question state so the
+// container never jumps between them.
 function Shell({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   const { t } = useI18n();
   return (
@@ -20,11 +24,11 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
       <Reveal style={s.card}>
         <View style={s.bar}>
           <View style={s.titleWrap}>
-            <Ionicons name="sparkles" size={16} color="#2f7247" />
+            <Ionicons name="sparkles" size={16} color={colors.primary} />
             <Text style={s.barTitle} numberOfLines={1}>{t('Ezhalah AI Agent')}</Text>
           </View>
           <Pressable onPress={onClose} style={s.xBtn} hitSlop={6}>
-            <Ionicons name="close" size={18} color="#56635c" />
+            <Ionicons name="close" size={18} color={colors.muted} />
           </Pressable>
         </View>
         {children}
@@ -33,15 +37,11 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
   );
 }
 
-// Shown while the current question's live counts are being resolved (network round-trip). Reuses
-// the same pulsing dots already used for «عرض المزيد» so the "smooth reveal/loading" requirement
-// doesn't introduce a new animation primitive. Kept inside the same Shell so nothing visually jumps
-// once the real card mounts.
 export function AdvancedQuestionLoading({ onClose }: { onClose: () => void }) {
   return (
     <Shell onClose={onClose}>
       <View style={s.loadingBody}>
-        <LoadingDots color="#2f7247" />
+        <LoadingDots color={colors.primary} />
       </View>
     </Shell>
   );
@@ -49,195 +49,151 @@ export function AdvancedQuestionLoading({ onClose }: { onClose: () => void }) {
 
 export type AdvancedQuestionCardProps = {
   titleKey: string;
-  options: AdvancedOption[]; // already filtered to count > 0 by the config's fetchOptions
+  descriptionKey?: string;
+  selection: 'single' | 'multi';
+  options: AdvancedOption[];      // already pre-filtered to the meaningful-option floor by the config
   unknownCount: number;
-  progressCur: number;
-  progressTotal: number;
-  onAnswer: (key: string) => void;
-  onSkip: () => void;
-  onSkipAll: () => void;
-  onClose: () => void;
-  // 'multi' renders toggle chips + a live-count continue button (amenities/RNPL); default 'single'.
-  mode?: 'single' | 'multi';
-  // multi only: apply the confirmed chip selection (empty = no preference) and advance.
-  onMultiConfirm?: (keys: string[]) => void;
-  // multi only: live combined count for a tentative selection → shown on the continue button.
-  liveCount?: (keys: string[]) => Promise<number | null>;
+  progressCur: number;           // 1-based ordinal among the questions that will actually show
+  progressTotal: number;         // count of ELIGIBLE questions for this scope (not the static array)
+  liveCount: (keys: string[]) => Promise<number | null>; // footer «Show {N}» for a tentative selection
+  onConfirm: (keys: string[]) => void; // commit the selection (empty = no preference) and advance/search
+  onSkip: () => void;                   // skip THIS question
+  onSkipAll: () => void;                // commit accumulated + search now
+  onClose: () => void;                  // abandon
 };
 
-// Centered, single-question card: title, tappable options, an unknown-data disclosure caption, and a
-// «تخطي» skip button. Purely presentational — every word and count it renders comes from the
-// AdvancedQuestionConfig/engine, so this component never special-cases عمر العقار (or any other field)
-// directly.
+// One row template — identical for single and multi. Leading indicator (radio vs checkbox) + label +
+// trailing live count pill. Selected rows share one highlight.
+function OptionRow({ option, selected, selection, first, onPress }: {
+  option: AdvancedOption; selected: boolean; selection: 'single' | 'multi'; first: boolean; onPress: () => void;
+}) {
+  const icon = selection === 'multi'
+    ? (selected ? 'checkbox' : 'square-outline')
+    : (selected ? 'radio-button-on' : 'radio-button-off');
+  return (
+    <Pressable style={[s.row, first && s.rowFirst, selected && s.rowOn]} onPress={onPress}>
+      <View style={s.rowLead}>
+        <Ionicons name={icon} size={20} color={selected ? colors.primary : colors.pickLine} />
+        <Text style={[s.label, selected && s.labelOn]} numberOfLines={1}>{option.label}</Text>
+      </View>
+      <View style={s.countPill}>
+        <Text style={s.countText}>{grouped(option.count)}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
 export default function AdvancedQuestionCard({
-  titleKey, options, unknownCount, progressCur, progressTotal, onAnswer, onSkip, onSkipAll, onClose,
-  mode, onMultiConfirm, liveCount,
+  titleKey, descriptionKey, selection, options, unknownCount, progressCur, progressTotal,
+  liveCount, onConfirm, onSkip, onSkipAll, onClose,
 }: AdvancedQuestionCardProps) {
   const { t } = useI18n();
-  const progress = progressTotal > 1 ? (
-    <View style={s.progTrack}>
-      <View style={[s.progFill, { width: `${(progressCur / progressTotal) * 100}%` }]} />
-    </View>
-  ) : null;
-  // Multi-select chip card (amenities / RNPL): toggle chips, live count on the continue button, a
-  // «لا يهمني» no-preference skip. Presentational — the chip keys/labels/live count all come from the
-  // config, so this stays generic across every future multi question.
-  if (mode === 'multi' && onMultiConfirm && liveCount) {
-    return (
-      <Shell onClose={onClose}>
-        {progress}
-        <MultiChips titleKey={titleKey} options={options} liveCount={liveCount}
-          onConfirm={onMultiConfirm} onSkip={onSkip} />
-      </Shell>
-    );
-  }
+  const [sel, setSel] = useState<string[]>([]);
+  const [count, setCount] = useState<number | null>(null);
+
+  // Animated progress fill — the ONLY motion, shared by every question so single/multi never differ.
+  const progress = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(progress, {
+      toValue: progressTotal > 0 ? progressCur / progressTotal : 0,
+      duration: 280, useNativeDriver: false,
+    }).start();
+  }, [progressCur, progressTotal, progress]);
+  const fillWidth = progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
+
+  // Live footer count for the current tentative selection (empty = the scope total). Holds the last
+  // good number on a failed/racey fetch rather than flashing a wrong one.
+  useEffect(() => {
+    let alive = true;
+    liveCount(sel).then((n) => { if (alive && n != null) setCount(n); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel.join(',')]);
+
+  const pick = (key: string) => setSel((cur) => {
+    if (selection === 'single') return cur[0] === key ? [] : [key]; // radio: replace / tap-again clears
+    return cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]; // checkbox: toggle
+  });
+
   return (
     <Shell onClose={onClose}>
-      {progress}
+      {progressTotal > 1 ? (
+        <View style={s.progTrack}>
+          <Animated.View style={[s.progFill, { width: fillWidth }]} />
+        </View>
+      ) : null}
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <Text style={s.qt}>{t(titleKey)}</Text>
+        {descriptionKey ? <Text style={s.desc}>{t(descriptionKey)}</Text> : null}
         <View style={s.list}>
           {options.map((o, i) => (
-            <Pressable
-              key={o.key}
-              style={[s.opt, i === 0 && s.optFirst]}
-              onPress={() => onAnswer(o.key)}
-            >
-              <Text style={s.lbl}>{o.label}</Text>
-              {/* Right side: the live count of listings in THIS bucket (exactly what the user
-                  receives if they pick it — strict, unknown-age excluded) + the chevron. The count
-                  already travels on every AdvancedOption from the config's fetchOptions; grouped()
-                  formats it English-with-commas (numbers stay English per the locale rule). */}
-              <View style={s.optRight}>
-                <View style={s.countPill}>
-                  <Text style={s.countText}>{grouped(o.count)}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color="#9aa6a0" />
-              </View>
-            </Pressable>
+            <OptionRow key={o.key} option={o} selected={sel.includes(o.key)} selection={selection}
+              first={i === 0} onPress={() => pick(o.key)} />
           ))}
         </View>
         {unknownCount > 0 ? (
           <Text style={s.note}>{t('Age unknown for {count} matching listings', { count: grouped(unknownCount) })}</Text>
         ) : null}
         <View style={s.foot}>
-          <Pressable style={s.skipLink} onPress={onSkip}>
-            <Text style={s.skipText}>{t('Skip')}</Text>
+          <Pressable style={s.primaryBtn} onPress={() => onConfirm(sel)}>
+            <Text style={s.primaryTxt}>
+              {count != null ? t('Show {count} results', { count: grouped(count) }) : t('Show results')}
+            </Text>
           </Pressable>
-          {progressTotal > 1 ? (
-            <Pressable style={s.skipAllLink} onPress={onSkipAll}>
-              <Text style={s.skipAllText}>{t('Skip remaining questions and search now')}</Text>
+          <View style={s.footRow}>
+            <Pressable style={s.skipLink} onPress={onSkip} hitSlop={8}>
+              <Text style={s.skipTxt}>{t('Skip')}</Text>
             </Pressable>
-          ) : null}
+            {progressTotal > 1 ? (
+              <Pressable style={s.skipLink} onPress={onSkipAll} hitSlop={8}>
+                <Text style={s.skipAllTxt}>{t('Skip remaining questions and search now')}</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
       </ScrollView>
     </Shell>
   );
 }
 
-// Multi-select chip body: local selection + a live count that re-resolves on every toggle (empty
-// selection = the current scope total), so the continue button always shows what Search will return.
-// Holds the last good number on a failed/racey fetch rather than flashing a wrong one.
-function MultiChips({
-  titleKey, options, liveCount, onConfirm, onSkip,
-}: {
-  titleKey: string;
-  options: AdvancedOption[];
-  liveCount: (keys: string[]) => Promise<number | null>;
-  onConfirm: (keys: string[]) => void;
-  onSkip: () => void;
-}) {
-  const { t } = useI18n();
-  const [sel, setSel] = useState<string[]>([]);
-  const [count, setCount] = useState<number | null>(null);
-  useEffect(() => {
-    let live = true;
-    liveCount(sel).then((n) => { if (live && n != null) setCount(n); });
-    return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel.join(',')]);
-  const toggle = (k: string) => setSel((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]));
-  return (
-    <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
-      <Text style={s.qt}>{t(titleKey)}</Text>
-      <View style={s.list}>
-        {options.map((o, i) => {
-          const on = sel.includes(o.key);
-          return (
-            <Pressable key={o.key} style={[s.opt, i === 0 && s.optFirst, on && s.optOn]} onPress={() => toggle(o.key)}>
-              <View style={s.chipLeft}>
-                <Ionicons name={on ? 'checkmark-circle' : 'ellipse-outline'} size={20} color={on ? '#2f7247' : '#c4cdc7'} />
-                <Text style={[s.lbl, on && s.lblOn]}>{o.label}</Text>
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
-      <View style={s.foot}>
-        <Pressable style={s.continueBtn} onPress={() => onConfirm(sel)}>
-          <Text style={s.continueText}>
-            {count != null ? t('Show {count} apartments', { count: grouped(count) }) : t('Show next')}
-          </Text>
-        </Pressable>
-        <Pressable style={s.skipAllLink} onPress={onSkip}>
-          <Text style={s.skipAllText}>{t('No preference')}</Text>
-        </Pressable>
-      </View>
-    </ScrollView>
-  );
-}
-
 const s = StyleSheet.create({
-  overlay: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 },
-  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.45)' },
+  overlay: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.screenSide },
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.scrim },
   card: {
-    width: '100%',
-    maxWidth: 360,
-    maxHeight: '100%',
-    backgroundColor: '#fbfbfa',
-    borderRadius: 20,
-    overflow: 'hidden',
-    borderLeftWidth: 6,
-    borderLeftColor: '#1d4a37',
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 40,
-    shadowOffset: { width: 0, height: 24 },
-    elevation: 16,
+    width: '100%', maxWidth: 360, maxHeight: '100%', backgroundColor: colors.paper,
+    borderRadius: radius.sheet, overflow: 'hidden', borderLeftWidth: 6, borderLeftColor: colors.dark, ...cardShadow,
   },
-  bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 10 },
+  bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: space.card, paddingTop: space.card, paddingBottom: 10 },
   titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1 },
-  barTitle: { fontSize: 14, fontWeight: '700', color: '#1d4a37' },
-  xBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#f1f3f1', alignItems: 'center', justifyContent: 'center' },
+  barTitle: { fontFamily: font.family.bold, fontSize: 14, color: colors.dark },
+  xBtn: { width: 30, height: 30, borderRadius: radius.pill, backgroundColor: colors.segTrack, alignItems: 'center', justifyContent: 'center' },
 
-  progTrack: { height: 3, backgroundColor: '#e9ece9', marginHorizontal: 16, marginBottom: 4, borderRadius: 3, overflow: 'hidden' },
-  progFill: { height: '100%', backgroundColor: '#1d4a37', borderRadius: 3 },
+  progTrack: { height: 3, backgroundColor: colors.line, marginHorizontal: space.card, marginBottom: 4, borderRadius: 3, overflow: 'hidden' },
+  progFill: { height: '100%', backgroundColor: colors.dark, borderRadius: 3 },
 
-  loadingBody: { paddingHorizontal: 16, paddingVertical: 36, alignItems: 'center', justifyContent: 'center' },
+  loadingBody: { paddingHorizontal: space.card, paddingVertical: 36, alignItems: 'center', justifyContent: 'center' },
 
-  body: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 18 },
-  qt: { fontSize: 18, fontWeight: '700', color: '#15201b', lineHeight: 24, paddingHorizontal: 2, paddingTop: 6, paddingBottom: 12 },
+  body: { paddingHorizontal: space.card, paddingTop: space.base, paddingBottom: 18 },
+  qt: { fontFamily: font.family.bold, fontSize: 18, color: colors.ink, lineHeight: 24, paddingHorizontal: 2, paddingTop: 6 },
+  desc: { fontFamily: font.family.regular, fontSize: 12.5, color: colors.muted, paddingHorizontal: 2, paddingTop: 4 },
 
-  list: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e7ebe8', borderRadius: 14, overflow: 'hidden' },
-  opt: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 14, paddingHorizontal: 14, borderTopWidth: 1, borderTopColor: '#f0f2f0' },
-  optFirst: { borderTopWidth: 0 },
-  lbl: { fontSize: 14.5, fontWeight: '500', color: '#15201b' },
-  optRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  countPill: { backgroundColor: '#eef4f0', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 2, minWidth: 34, alignItems: 'center' },
-  countText: { fontSize: 12.5, fontWeight: '700', color: '#3f5a4c', fontVariant: ['tabular-nums'] },
+  list: { marginTop: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, overflow: 'hidden' },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 13, paddingHorizontal: 13, borderTopWidth: 1, borderTopColor: colors.line },
+  rowFirst: { borderTopWidth: 0 },
+  rowOn: { backgroundColor: colors.tint },
+  rowLead: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 },
+  label: { fontFamily: font.family.medium, fontSize: 14.5, color: colors.ink, flexShrink: 1 },
+  labelOn: { fontFamily: font.family.bold, color: colors.dark },
+  countPill: { backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 2, minWidth: 34, alignItems: 'center' },
+  countText: { fontFamily: font.family.bold, fontSize: 12.5, color: colors.primary, fontVariant: ['tabular-nums'] },
 
-  // Multi-select chip states + live-count continue button (annual-rent amenities/RNPL card).
-  optOn: { backgroundColor: '#eef6f0' },
-  chipLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 },
-  lblOn: { color: '#1d4a37', fontWeight: '700' },
-  continueBtn: { backgroundColor: '#2f7247', borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
-  continueText: { color: '#fff', fontSize: 14.5, fontWeight: '700' },
-
-  note: { marginTop: 10, marginHorizontal: 2, fontSize: 12, color: '#6b7a72', lineHeight: 17 },
+  note: { marginTop: 10, marginHorizontal: 2, fontFamily: font.family.regular, fontSize: 12, color: colors.muted, lineHeight: 17 },
 
   foot: { marginTop: 16, gap: 10 },
-  skipLink: { borderWidth: 1, borderColor: '#d6e8db', backgroundColor: '#eef6f0', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  skipText: { color: '#1d4a37', fontSize: 14, fontWeight: '700' },
-  skipAllLink: { paddingVertical: 6, alignItems: 'center' },
-  skipAllText: { color: '#7b8a82', fontSize: 12.5, fontWeight: '600' },
+  primaryBtn: { backgroundColor: colors.primary, borderRadius: radius.chip, paddingVertical: 13, alignItems: 'center' },
+  primaryTxt: { fontFamily: font.family.bold, fontSize: 14.5, color: colors.surface },
+  footRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 2 },
+  skipLink: { paddingVertical: 4, flexShrink: 1 },
+  skipTxt: { fontFamily: font.family.semibold, fontSize: 13.5, color: colors.dark },
+  skipAllTxt: { fontFamily: font.family.medium, fontSize: 12.5, color: colors.muted },
 });

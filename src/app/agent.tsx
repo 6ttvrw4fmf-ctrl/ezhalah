@@ -25,7 +25,6 @@ import { CardIn, LoadingDots } from '@/components/CardReveal';
 // render but behaves identically for the same listing.
 const MemoResultCard = memo(ResultCard, (prev, next) =>
   prev.listing === next.listing && prev.rank === next.rank && prev.variant === next.variant);
-import { isAgeFilterScope as isAgeFilterScopeFor } from '@/lib/ageFilterTypes';
 import HeroBackground from '@/components/HeroBackground';
 import ShareSheet from '@/components/ShareSheet';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -41,7 +40,7 @@ import { useApp } from '@/store';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 import AdvancedQuestionCard, { AdvancedQuestionLoading } from '@/components/AdvancedQuestionCard';
-import { ADVANCED_QUESTIONS, MIN_OPTIONS_TO_SHOW, type AdvancedOption, type AdvancedQuestionConfig } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, minOptionsFor, liveResultCount, type AdvancedOption, type AdvancedQuestion } from '@/data/advancedFilters';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
 // below a results block — NEVER before first results — and ONLY for a strict single-type Residential
@@ -55,8 +54,11 @@ import { ADVANCED_QUESTIONS, MIN_OPTIONS_TO_SHOW, type AdvancedOption, type Adva
 // Comparing against Arabic here always evaluated false — caught live, 2026-07-15.
 // The Property Age eligibility gate lives in src/lib/ageFilterTypes.ts (zero-dep, so `npm test` can
 // assert its macros against CLEAN_MACRO — agent.tsx itself can't be imported by a plain node runner).
-function isAgeFilterScope(q: SearchQuery): boolean {
-  return isAgeFilterScopeFor(q, effectiveTypes(q));
+// The guided flow is offered when ANY advanced question is eligible for the scope — each question owns
+// its own eligibility gate now (see docs/ADVANCED_FILTER_DESIGN_CONTRACT.md). Otherwise the tap falls
+// through to the pre-existing plain refine chips.
+function anyGuidedEligible(q: SearchQuery): boolean {
+  return ADVANCED_QUESTIONS.some((question) => question.eligibility(q));
 }
 
 const IS_WEB = Platform.OS === 'web';
@@ -439,16 +441,18 @@ export default function Agent() {
   // re-runs search, renders a new results turn) — never a separate navigation/route.
   const [ageFlow, setAgeFlow] = useState<
     | { phase: 'loading' }
-    | { phase: 'asking'; stepIndex: number; cfg: AdvancedQuestionConfig; titleKey: string; options: AdvancedOption[]; unknownCount: number }
+    | { phase: 'asking'; planIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number; progressCur: number; progressTotal: number }
     | null
   >(null);
-  // The query accumulates answers as the chained flow advances; the token supersedes a stale async
-  // fetch when a newer tap/turn restarts the flow; `changed` gates the single end-of-flow re-search
-  // (skip-everything → close, don't re-run); `labels` collects picked labels for the summary bubble.
+  // The query accumulates answers as the flow advances; `token` supersedes a stale async fetch when a
+  // newer tap/turn restarts the flow; `changed` gates the single end-of-flow re-search (skip-everything
+  // → close); `labels` collects picked labels for the summary bubble; `plan` is the eligible+qualifying
+  // question set resolved up front, so the progress bar reflects the questions that will actually show.
   const ageFlowQueryRef = useRef<SearchQuery | null>(null);
   const ageFlowTokenRef = useRef(0);
   const ageFlowChangedRef = useRef(false);
   const ageFlowLabelsRef = useRef<string[]>([]);
+  const ageFlowPlanRef = useRef<Array<{ question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number }>>([]);
   const revealTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   // The results turn whose cards are still popping in one-by-one (id + total count), so a new user
   // message can instantly finish it and stop the drip. null once the reveal completes. (user request.)
@@ -811,10 +815,9 @@ export default function Agent() {
       // The chained guided flow (2026-07-20) already merged every answered step into `base` via each
       // config's applyAnswer/applyMulti — so search it exactly as accumulated, no further refinement.
       return base;
-    } else if (ADVANCED_QUESTIONS.some((c) => c.key === dim)) {
-      // Advanced-question answers — delegate to that question's own config so this stays generic as
-      // more fields are added, per the reusable-engine design.
-      return ADVANCED_QUESTIONS.find((c) => c.key === dim)!.applyAnswer(base, a);
+    } else if (ADVANCED_QUESTIONS.some((c) => c.id === dim)) {
+      // Advanced-question answers — delegate to that question's own config (generic, per the contract).
+      return ADVANCED_QUESTIONS.find((c) => c.id === dim)!.apply(base, [a]);
     } else {
       const p = parseQuery(`${a} ${base.location ?? ''}`);
       if (p.type) refined.type = p.type;
@@ -846,27 +849,31 @@ export default function Agent() {
     setBusy(false); runRef.current = null; toBottom();
   };
 
-  // Walk ADVANCED_QUESTIONS from `fromIndex`, showing the first that qualifies for the CURRENT
-  // accumulated query (multi needs ≥1 option, single needs MIN_OPTIONS_TO_SHOW). Reaching the end
-  // finishes the flow. `token` supersedes a stale async fetch if a newer tap restarts the flow.
-  const advanceGuided = async (fromIndex: number, token: number) => {
-    for (let i = fromIndex; i < ADVANCED_QUESTIONS.length; i++) {
-      const q = ageFlowQueryRef.current;
-      if (!q || ageFlowTokenRef.current !== token) return;
-      const cfg = ADVANCED_QUESTIONS[i];
-      const result = await cfg.fetchOptions(q);
-      if (ageFlowTokenRef.current !== token) return;
-      if (result.options.length >= (cfg.mode === 'multi' ? 1 : MIN_OPTIONS_TO_SHOW)) {
-        setAgeFlow({ phase: 'asking', stepIndex: i, cfg, titleKey: cfg.titleKey, options: result.options, unknownCount: result.unknownCount });
-        return;
+  // Present plan[planIndex]. Once the query has been narrowed by an answer, re-resolve for LIVE counts;
+  // a planned question that drops below its option floor after narrowing is skipped. `progressCur/Total`
+  // are 1-based over the PLAN (the questions that actually show). `token` supersedes a stale flow.
+  const presentGuided = async (planIndex: number, token: number) => {
+    const plan = ageFlowPlanRef.current;
+    for (let i = planIndex; i < plan.length; i++) {
+      const question = plan[i].question;
+      let options = plan[i].options;
+      let unknownCount = plan[i].unknownCount;
+      if (ageFlowChangedRef.current) {
+        const q = ageFlowQueryRef.current;
+        if (!q || ageFlowTokenRef.current !== token) return;
+        const r = await question.resolveOptions(q);
+        if (ageFlowTokenRef.current !== token) return;
+        options = r.options; unknownCount = r.unknownCount;
+        if (options.length < minOptionsFor(question.selection)) continue; // narrowed out → skip
       }
+      setAgeFlow({ phase: 'asking', planIndex: i, question, options, unknownCount, progressCur: i + 1, progressTotal: plan.length });
+      return;
     }
     finishGuided(token);
   };
 
-  // End of the chained flow: if the user answered ≥1 step, re-search the accumulated query in ONE
-  // combined turn (same runRefine mechanism, __guided__ passes it through unchanged); if they skipped
-  // everything, just close — the base results already on screen are unchanged.
+  // End of the flow: if the user answered ≥1 step, re-search the accumulated query in ONE combined turn
+  // (runRefine's __guided__ passes it through unchanged); if they skipped everything, just close.
   const finishGuided = (token: number) => {
     if (ageFlowTokenRef.current !== token) return;
     const q = ageFlowQueryRef.current;
@@ -874,57 +881,43 @@ export default function Agent() {
     if (q && ageFlowChangedRef.current) void runRefine(q, '__guided__', '', ageFlowLabelsRef.current.join('، '));
   };
 
-  // Entry point for «خلّنا نحدد الطلب أكثر» in an apartment scope (owner 2026-07-13; chained flow
-  // 2026-07-20): installments → age → amenities → bathrooms, accumulating into one query with a single
-  // search at the end. If NOTHING qualifies for this exact scope, fall through to the pre-existing
-  // narrowing chips so the tap is never a no-op.
+  // Entry point for «خلّنا نحدد الطلب أكثر». Build the PLAN once — the eligible questions whose initial
+  // options clear the floor — so the progress bar reflects reality, then present them select-then-confirm.
+  // Nothing qualifies → fall through to the pre-existing refine chips so the tap is never a no-op.
   const startAgeFlow = async (q: SearchQuery) => {
     const token = ++ageFlowTokenRef.current;
     ageFlowQueryRef.current = q;
     ageFlowChangedRef.current = false;
     ageFlowLabelsRef.current = [];
+    ageFlowPlanRef.current = [];
     setAgeFlow({ phase: 'loading' });
-    for (let i = 0; i < ADVANCED_QUESTIONS.length; i++) {
-      const cfg = ADVANCED_QUESTIONS[i];
-      const result = await cfg.fetchOptions(q);
-      if (ageFlowTokenRef.current !== token) return; // superseded by a newer tap/turn
-      if (result.options.length >= (cfg.mode === 'multi' ? 1 : MIN_OPTIONS_TO_SHOW)) {
-        setAgeFlow({ phase: 'asking', stepIndex: i, cfg, titleKey: cfg.titleKey, options: result.options, unknownCount: result.unknownCount });
-        return;
-      }
-    }
-    if (ageFlowTokenRef.current === token) { setAgeFlow(null); startRefine(q); }
+    const eligible = ADVANCED_QUESTIONS.filter((question) => question.eligibility(q));
+    const probes = await Promise.all(eligible.map((question) => question.resolveOptions(q)));
+    if (ageFlowTokenRef.current !== token) return; // superseded by a newer tap/turn
+    ageFlowPlanRef.current = eligible
+      .map((question, i) => ({ question, options: probes[i].options, unknownCount: probes[i].unknownCount }))
+      .filter((p) => p.options.length >= minOptionsFor(p.question.selection));
+    if (!ageFlowPlanRef.current.length) { setAgeFlow(null); startRefine(q); return; }
+    void presentGuided(0, token);
   };
 
-  // Single-select answer (age / min-bathrooms): record the label, merge via the config, advance.
-  const onAgeAnswer = (key: string) => {
+  // Confirm the current question's selection (empty = no preference) and advance/search. ONE handler
+  // for single and multi — `keys` has ≤1 entry for single, ≥0 for multi.
+  const onAgeConfirm = (keys: string[]) => {
     if (ageFlow?.phase !== 'asking') return;
-    const { cfg, stepIndex, options } = ageFlow;
+    const { question, planIndex, options } = ageFlow;
     const q = ageFlowQueryRef.current;
     if (!q) return;
-    ageFlowQueryRef.current = cfg.applyAnswer(q, key);
-    ageFlowChangedRef.current = true;
-    const opt = options.find((o) => o.key === key);
-    if (opt?.label) ageFlowLabelsRef.current.push(opt.label);
-    void advanceGuided(stepIndex + 1, ageFlowTokenRef.current);
-  };
-
-  // Multi-select confirm (amenities / RNPL): merge the picked chips (empty = no change), advance.
-  const onAgeMultiConfirm = (keys: string[]) => {
-    if (ageFlow?.phase !== 'asking') return;
-    const { cfg, stepIndex, options } = ageFlow;
-    const q = ageFlowQueryRef.current;
-    if (!q) return;
-    if (keys.length && cfg.applyMulti) {
-      ageFlowQueryRef.current = cfg.applyMulti(q, keys);
+    if (keys.length) {
+      ageFlowQueryRef.current = question.apply(q, keys);
       ageFlowChangedRef.current = true;
       for (const k of keys) { const o = options.find((x) => x.key === k); if (o?.label) ageFlowLabelsRef.current.push(o.label); }
     }
-    void advanceGuided(stepIndex + 1, ageFlowTokenRef.current);
+    void presentGuided(planIndex + 1, ageFlowTokenRef.current);
   };
 
-  // Skip THIS question → advance to the next; skip-all → finish now; X (close) → abandon the flow.
-  const onAgeSkip = () => { if (ageFlow?.phase === 'asking') void advanceGuided(ageFlow.stepIndex + 1, ageFlowTokenRef.current); };
+  // Skip THIS question → next; skip-all → finish now; X (close) → abandon the flow.
+  const onAgeSkip = () => { if (ageFlow?.phase === 'asking') void presentGuided(ageFlow.planIndex + 1, ageFlowTokenRef.current); };
   const onAgeSkipAll = () => finishGuided(ageFlowTokenRef.current);
   const onAgeClose = () => { ageFlowTokenRef.current++; setAgeFlow(null); };
 
@@ -1570,7 +1563,7 @@ export default function Agent() {
                                 style={s.mBtnAlt}
                                 onPress={() => {
                                   const q = m.result.query;
-                                  if (q && isAgeFilterScope(q)) void startAgeFlow(q);
+                                  if (q && anyGuidedEligible(q)) void startAgeFlow(q);
                                   else startRefine(q);
                                 }}
                               >
@@ -1707,17 +1700,17 @@ export default function Agent() {
             <AdvancedQuestionLoading onClose={onAgeClose} />
           ) : (
             <AdvancedQuestionCard
-              titleKey={ageFlow.titleKey}
+              titleKey={ageFlow.question.titleKey}
+              descriptionKey={ageFlow.question.descriptionKey}
+              selection={ageFlow.question.selection}
               options={ageFlow.options}
               unknownCount={ageFlow.unknownCount}
-              progressCur={ageFlow.stepIndex + 1}
-              progressTotal={ADVANCED_QUESTIONS.length}
-              mode={ageFlow.cfg.mode}
-              onAnswer={onAgeAnswer}
-              onMultiConfirm={onAgeMultiConfirm}
-              liveCount={(keys) => (ageFlow.cfg.liveCount && ageFlowQueryRef.current
-                ? ageFlow.cfg.liveCount(ageFlowQueryRef.current, keys)
+              progressCur={ageFlow.progressCur}
+              progressTotal={ageFlow.progressTotal}
+              liveCount={(keys) => (ageFlowQueryRef.current
+                ? liveResultCount(ageFlow.question.apply(ageFlowQueryRef.current, keys))
                 : Promise.resolve(null))}
+              onConfirm={onAgeConfirm}
               onSkip={onAgeSkip}
               onSkipAll={onAgeSkipAll}
               onClose={onAgeClose}
