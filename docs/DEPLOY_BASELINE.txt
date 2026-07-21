@@ -1,4 +1,4 @@
-2060e64e92fafb97e24bc41bb78b1946d0e3281f
+8c3280eadff9a78e76989c822a38c7d0ca71581e
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
@@ -187,3 +187,4 @@
 #   confirmed for both this deploy and prior ones. (A same-session emergency rollback to 05ff2528
 #   was performed then reverted once this was established — see project memory for the full story.)
 # 2026-07-20  d888b77  deployed via safe-deploy.sh
+# 2026-07-21  8c3280e  deployed via safe-deploy.sh
