@@ -87,6 +87,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import os
 import re
 import sys
@@ -251,6 +252,92 @@ def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tupl
             time.sleep(2 * (attempt + 1)); continue   # empty/non-JSON body → retry
         return j.get("items") or [], (j.get("_meta") or {})
     return [], {}
+
+
+# ── DETAIL-PAGE ENRICHMENT (Tier 2) ──────────────────────────────────────────────────────────────
+# The search LIST endpoint carries NO description and NO families/singles suitability — those exist
+# only on each unit's own page (gathern.co/view/{chalet}/unit/{id}), a public, unauthenticated Next.js
+# page whose __NEXT_DATA__ JSON blob holds serverData.data.{description, chalet_for_text}. Probed
+# 2026-07-21: 77/80 HTTP 200 (3× 404 = dead units), ZERO blocks at ~2 req/s, ~170 KB each, BOTH fields
+# present on 77/77. We fetch ONE page per unit — expensive vs the list feed — so this is a SEPARATE,
+# bounded --backfill-details mode, never part of the fast crawl: each run fills up to N rows that still
+# lack a description, so scheduled runs fill the ~25k catalog incrementally and new units get picked up.
+_ND_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
+
+
+def detail_session() -> cc.Session:
+    """Plain browser session for the HTML detail pages (the API session's json/source headers are for
+    msapi only). Matches the 2026-07-21 probe that fetched 77/80 cleanly."""
+    s = cc.Session(impersonate="chrome124")
+    s.headers.update({"Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
+    return s
+
+
+def fetch_detail(s: cc.Session, listing_url: str) -> dict:
+    """Fetch a Gathern unit's detail page → {description, suitability} (VERBATIM source text, phones
+    redacted per PDPL). Returns {} on 404/block/parse-fail — never raises, never fabricates."""
+    if not listing_url:
+        return {}
+    _throttle()
+    for attempt in range(3):
+        try:
+            r = s.get(listing_url, timeout=30)
+        except Exception:
+            time.sleep(2 * (attempt + 1)); continue
+        if r.status_code == 404:
+            return {}  # dead unit — nothing to fetch
+        if r.status_code == 429 or r.status_code >= 500:
+            time.sleep(3 * (attempt + 1)); continue
+        if r.status_code != 200:
+            return {}
+        m = _ND_RE.search(r.text)
+        if not m:
+            return {}
+        try:
+            data = json.loads(m.group(1))
+        except Exception:
+            return {}
+        d = (((data.get("props") or {}).get("pageProps") or {}).get("serverData") or {}).get("data") or {}
+        out: dict[str, Any] = {}
+        desc = d.get("description")
+        if isinstance(desc, str) and desc.strip():
+            out["description"] = _redact(desc.strip())          # verbatim, only phones stripped
+        suit = d.get("chalet_for_text") or d.get("chalet_for_text_with_label")
+        if isinstance(suit, str) and suit.strip():
+            out["suitability"] = suit.strip()                   # e.g. "عوائل و عزاب" (families / singles)
+        return out
+    return {}
+
+
+def backfill_details(s: cc.Session, limit: int) -> tuple[int, int]:
+    """Fill description + additional_info.suitability for up to `limit` ACTIVE Gathern rows that still
+    lack a description. Idempotent (re-runs skip filled rows) + bounded — schedule it to fill the
+    catalog over time. Merges suitability into the existing additional_info; sets the description column."""
+    client = db.sb()
+    res = (client.table("gathern_residential_listings")
+           .select("ad_number, listing_url, additional_info")
+           .eq("source", SOURCE).eq("active", True)
+           .is_("description", "null").limit(limit).execute())
+    rows = (res.data if res else None) or []
+    updated = 0
+    for r in rows:
+        d = fetch_detail(s, r.get("listing_url") or "")
+        if not d:
+            continue
+        info = r.get("additional_info")
+        if not isinstance(info, dict):
+            info = {}
+        if d.get("suitability"):
+            info["suitability"] = d["suitability"]
+        payload: dict[str, Any] = {"additional_info": info}
+        if d.get("description"):
+            payload["description"] = d["description"]
+        try:
+            client.table("gathern_residential_listings").update(payload).eq("ad_number", r["ad_number"]).execute()
+            updated += 1
+        except Exception as e:
+            print("  ⚠ update failed", r.get("ad_number"), str(e)[:80])
+    return len(rows), updated
 
 
 def _beds(features: Optional[list]) -> tuple[Optional[int], Optional[int]]:
@@ -557,7 +644,20 @@ def main() -> int:
                     help="i/N — run only the i-th of N deterministic city shards (parallel matrix); skips prune")
     ap.add_argument("--max-pages", type=int, default=0, help="cap pages per city (0 = until empty)")
     ap.add_argument("--dry-run", action="store_true", help="map + print, no DB write")
+    ap.add_argument("--backfill-details", action="store_true",
+                    help="Tier 2: fetch detail pages to fill description + suitability for active rows "
+                         "still missing a description (bounded by --limit, default 500). Separate from "
+                         "the crawl; idempotent + resumable.")
     args = ap.parse_args()
+
+    # ── Tier-2 detail backfill: a SEPARATE, bounded pass (NOT the crawl). Fills description +
+    #    suitability for active rows that still lack a description; re-run / schedule to fill the rest.
+    if args.backfill_details:
+        ds = detail_session()
+        seen, updated = backfill_details(ds, args.limit or 500)
+        print(f"✓ Gathern detail backfill: {updated}/{seen} active rows enriched with description + "
+              f"suitability (rows still missing a description; re-run to continue).")
+        return 0
 
     ci, co = _monthly_window()
     s = session()

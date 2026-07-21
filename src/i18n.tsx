@@ -776,6 +776,7 @@ const AR: Record<string, string> = {
   'Discount':                           'الخصم',
   'Monthly before discount (SAR)':      'السعر الشهري قبل الخصم (ريال)',
   'Nightly rate (SAR)':                 'السعر الليلي (ريال)',
+  'Suitable for':                       'مناسب لـ',
   '{n} reviews':                        '{n} تقييم',
   'Yes':                               'نعم',
   'bd': 'غرفة',
