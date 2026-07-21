@@ -256,12 +256,43 @@ const KNOWN_CITY_AR_SET: Set<string> = new Set<string>([
   ...Object.values(CITY_AR_FROM_CATALOG),
 ].map((s) => (s ?? '').trim()).filter(Boolean));
 
+// Bug-fix (P2, post-deploy Filter QA sweep 2026-07-20): KNOWN_CITY_AR_SET above is flat/nationwide, so
+// it wrongly rejects a genuine district whose name also happens to match an UNRELATED town/city name
+// elsewhere in the country (Saudi district vocabulary reuses common words like العليا/الروضة both as
+// neighborhood names inside major cities AND as standalone small-town names elsewhere). Confirmed live:
+// 89 Tabuk (تبوك) rows carry district_ar='العليا' — a real, catalogued Tabuk district (sa-locations.json
+// districts row city_id=1, name_ar='حي العليا') — silently discarded because 'العليا' is ALSO a
+// catalog city name in an unrelated region. Fix: before applying the nationwide city-name rejection,
+// check whether the value is a genuine catalogued district of THIS ROW'S OWN city (حي-prefix-insensitive)
+// — if so, it's accepted regardless of any unrelated same-name city existing elsewhere.
+const CITY_AR_TO_IDS: Record<string, number[]> = {};
+for (const row of (saLocations as unknown as { cities: [number, number, string, string][] }).cities) {
+  const key = row[3].trim();
+  (CITY_AR_TO_IDS[key] ??= []).push(row[0]);
+}
+const stripHayPrefix = (s: string) => s.trim().replace(/^حي\s+/, '').trim();
+const DISTRICTS_BY_CITY_ID: Record<number, Set<string>> = {};
+for (const row of (saLocations as unknown as { districts: [number, number, string, string][] }).districts) {
+  const cityId = row[1];
+  (DISTRICTS_BY_CITY_ID[cityId] ??= new Set()).add(stripHayPrefix(row[3]));
+}
+function isCataloguedDistrictOfCity(cityAr: string, d: string): boolean {
+  const districtKey = stripHayPrefix(d);
+  for (const cityId of CITY_AR_TO_IDS[cityAr] ?? []) {
+    if (DISTRICTS_BY_CITY_ID[cityId]?.has(districtKey)) return true;
+  }
+  return false;
+}
+
 // Gathern-only district fallback: when the canonical location index has NO district for a row (≈4,147
 // live) and the raw neighborhood isn't Arabic, the card shows «الحي غير محدد» even though the source's
 // own additional_info.district_ar (e.g. "حي العليا") is already stored. Surface THAT — display-only,
 // never for grouping (canonical index stays the match key). Conservative city-name guard: the value
 // must be a real Arabic token, must not equal this row's own city_ar, and must not itself be a known
-// city name. Returns null for every non-Gathern source (naturally byte-identical elsewhere). (Tier-1.)
+// city name — UNLESS it's a genuine catalogued district of this row's own city (see
+// isCataloguedDistrictOfCity above), in which case it's accepted regardless of a same-name collision
+// elsewhere in the country. Returns null for every non-Gathern source (naturally byte-identical
+// elsewhere). (Tier-1.)
 function gathernDistrictFallback(source: any, rawInfo: any): string | null {
   if (!(typeof source === 'string' && source.toLowerCase().includes('gathern'))) return null;
   if (!rawInfo || typeof rawInfo !== 'object' || Array.isArray(rawInfo)) return null;
@@ -269,6 +300,7 @@ function gathernDistrictFallback(source: any, rawInfo: any): string | null {
   if (!d || !/[ء-ي]/.test(d)) return null;                    // must be a real Arabic district token
   const cityAr = String(rawInfo.city_ar ?? '').trim();
   if (cityAr && d === cityAr) return null;                     // equals this row's city → not a district
+  if (cityAr && isCataloguedDistrictOfCity(cityAr, d)) return d; // a real district of THIS city → accept
   if (KNOWN_CITY_AR_SET.has(d)) return null;                  // a known city name in the district slot → reject
   return d;
 }
