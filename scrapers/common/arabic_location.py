@@ -188,7 +188,28 @@ def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None)
     if not best:
         return {"city_ar": None, "city_id": None, "region_id": region_id, "district_ar": district_ar, "confidence": "unresolved"}
     cid, rid = best
-    return {"city_ar": _CID_AR.get(cid), "city_id": cid, "region_id": rid or region_id,
+    city_ar_val = _CID_AR.get(cid)
+    if district_ar and city_ar_val:
+        # Bug found live 2026-07-21: Aqar's own slug embeds district+city(+امارة/منطقة marker)
+        # back-to-back with no delimiter (e.g. «...حي-المهدية-الرياض-...»), so the up-to-3-token
+        # capture above can swallow the city name and/or an admin marker as trailing "district"
+        # tokens — e.g. district_ar came out "حي المهدية الرياض" instead of "حي المهدية". Strip a
+        # TRAILING run of tokens that are either the just-resolved city name or a known admin marker
+        # (never a LEADING token, so a district whose own name happens to equal the city name, e.g.
+        # "حي المحالة" in المحالة city, is preserved — just de-duplicated to one occurrence instead
+        # of erased). Keeps at minimum "حي" + one content word.
+        dist_tokens = district_ar.split()
+        city_tokens = city_ar_val.split()
+        while len(dist_tokens) > 2:
+            if len(dist_tokens) > len(city_tokens) and dist_tokens[-len(city_tokens):] == city_tokens:
+                dist_tokens = dist_tokens[:-len(city_tokens)]
+                continue
+            if dist_tokens[-1] in ("امارة", "منطقة", "منطقه"):
+                dist_tokens = dist_tokens[:-1]
+                continue
+            break
+        district_ar = " ".join(dist_tokens)
+    return {"city_ar": city_ar_val, "city_id": cid, "region_id": rid or region_id,
             "district_ar": district_ar, "confidence": "slug"}
 
 
