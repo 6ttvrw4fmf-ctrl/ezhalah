@@ -1,4 +1,4 @@
-8c3280eadff9a78e76989c822a38c7d0ca71581e
+4acb247a117f18a4bb1cbc990ff02f91cfb8f80c
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
@@ -188,3 +188,14 @@
 #   was performed then reverted once this was established — see project memory for the full story.)
 # 2026-07-20  d888b77  deployed via safe-deploy.sh
 # 2026-07-21  8c3280e  deployed via safe-deploy.sh
+# 2026-07-23  4acb247  deployed via safe-deploy.sh (PR #187, advanced-filter card redesign: numeric
+#   question progress + EJARI×رايز brand strip + pay-monthly subtitle). All gates passed (preflight,
+#   taxonomy, live search smoke 1s/HTTP200); the AUTOMATED baseline advance was blocked only by the
+#   schema-drift bookkeeping gate: 3 migrations applied to prod but not yet on main — 20260721105222
+#   harden_search_category_purity_both_macro_types (this session's own PR #181, open),
+#   20260721105827 gathern_district_recovery_from_additional_info (PR #174), 20260721112816
+#   seed_gathern_hayy_districts_into_catalog (PR #182). 0 duplicate overloads (NOT the PGRST203
+#   outage class). Advance recorded manually after verifying the served bundle at
+#   https://ezhalah-app.vercel.app/ (entry-9af2d249015d9f3c9be12a685c3e9750.js) contains all 4 new
+#   code markers (ejari-rnpl ×3, Question {cur} of {total} ×2, Skip remaining ({count}) ×2,
+#   pay-monthly key ×2).
