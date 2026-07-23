@@ -11,13 +11,30 @@ frontend live: `scripts/safe-deploy.sh`, any manual `vercel` command, any Vercel
 future scheduled routine/agent. The canonical Vercel project is `ezhalah-app`
 (projectId `prj_CLp9BxNzT4RmWL9Is1KjHoQlSAlX`, org `team_0lVrGRoJbCRIWovPNkfnmwJ7`).
 
-Enforcement is in the tooling, not just here: `safe-deploy.sh` refuses to deploy unless
-`.vercel/project.json` is provably linked to `ezhalah-app`, and after `vercel --prod` it asserts
-that `ezhalah-app.vercel.app` is actually serving the just-deployed build (else it fails and prints
-the `vercel promote` command). `preflight-verify.sh` re-checks the link. If any deploy path is ever
-added that does NOT route through these scripts, it MUST carry the same two guards. There is no
-`ezhalah.com`/other-project frontend deploy — the apex domain serves an unrelated app and is out of
-scope (project memory `ezhalah-com-domain-not-serving-this-app`).
+Enforcement is in the tooling, not just here. The link + alias predicates live in ONE place,
+`scripts/deploy-target-guard.sh` (constants `DTG_EXPECT_PROJECT_*` + `dtg_link_is_canonical` +
+`dtg_alias_serves`), which BOTH `safe-deploy.sh` and `preflight-verify.sh` source — so they cannot
+drift. `safe-deploy.sh` refuses to deploy unless `.vercel/project.json` is provably linked to
+`ezhalah-app`, and after `vercel --prod` it asserts (via `dtg_alias_serves`) that
+`ezhalah-app.vercel.app` is actually serving the exact just-deployed bundle — else it FAILS and
+prints the `vercel promote` command, never reporting success on an alias that didn't move.
+`preflight-verify.sh` re-checks the link.
+
+This is regression-tested and CI-enforced permanently:
+- `scripts/verify-deploy-target-guard.ts` (in `npm test`) proves canonical→allowed, any other
+  project→refused, exact-bundle match→ok, alias-didn't-move→refused, AND that the shipping scripts
+  still source the shared guard (no re-inlined divergent copy).
+- `scripts/verify-no-vercel-bypass.ts` (in `npm test`) fails if a raw `vercel --prod|deploy|promote|
+  alias|rollback` (or `deploy_to_vercel`) command appears in ANY tracked file outside the sanctioned
+  deploy scripts — so no future script/workflow/automation can deploy the frontend without routing
+  through `safe-deploy.sh`. A genuinely new sanctioned entrypoint must carry the same guards AND be
+  added to that file's allowlist (a deliberate, reviewed change).
+- `.github/workflows/deploy-guard-ci.yml` runs both on every PR and every push to `main`.
+
+If any deploy path is ever added that does NOT route through these scripts, it MUST carry the same
+guards (and will otherwise trip the no-bypass check). There is no `ezhalah.com`/other-project
+frontend deploy — the apex domain serves an unrelated app and is out of scope (project memory
+`ezhalah-com-domain-not-serving-this-app`).
 
 # Deploy rule (P0, non-negotiable — 2026-07-09)
 

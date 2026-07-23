@@ -19,14 +19,17 @@
 # ─────────────────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
+# Single source of truth for the production-target lock (same predicates safe-deploy.sh uses and
+# scripts/verify-deploy-target-guard.ts regression-tests — they can never drift apart).
+. scripts/deploy-target-guard.sh
 FAIL=0
 ok(){   printf '  ✓ %s\n' "$*"; }
 bad(){  printf '  ❌ %s\n' "$*"; FAIL=1; }
 warn(){ printf '  ⚠ %s\n' "$*"; }
 
 BASELINE_FILE="docs/DEPLOY_BASELINE.txt"
-PROJECT_ID="${VERCEL_PROJECT_ID:-prj_CLp9BxNzT4RmWL9Is1KjHoQlSAlX}"
-TEAM_ID="${VERCEL_TEAM_ID:-team_0lVrGRoJbCRIWovPNkfnmwJ7}"
+PROJECT_ID="${VERCEL_PROJECT_ID:-$DTG_EXPECT_PROJECT_ID}"
+TEAM_ID="${VERCEL_TEAM_ID:-$DTG_EXPECT_ORG_ID}"
 
 echo "── (4) source of truth: on main, clean, HEAD == origin/main ──────────────────"
 git fetch origin main --quiet
@@ -42,14 +45,10 @@ echo "── (target) production alias locked to ezhalah-app.vercel.app ──�
 # this checkout's Vercel link is the canonical project BEFORE any deploy path can run `vercel --prod`.
 if [ ! -f .vercel/project.json ]; then
   bad ".vercel/project.json missing — not linked to a Vercel project; a deploy could go off-target."
+elif dtg_link_is_canonical .; then
+  ok "Vercel link = $DTG_EXPECT_PROJECT_NAME ($DTG_EXPECT_PROJECT_ID) → $DTG_CANONICAL_URL"
 else
-  LINK_ID="$(node -e 'try{process.stdout.write(String(require("./.vercel/project.json").projectId||""))}catch{process.stdout.write("")}' 2>/dev/null || echo "")"
-  LINK_NAME="$(node -e 'try{process.stdout.write(String(require("./.vercel/project.json").projectName||""))}catch{process.stdout.write("")}' 2>/dev/null || echo "")"
-  if [ "$LINK_ID" = "$PROJECT_ID" ] && [ "$LINK_NAME" = "ezhalah-app" ]; then
-    ok "Vercel link = ezhalah-app ($PROJECT_ID) → https://ezhalah-app.vercel.app"
-  else
-    bad "Vercel link is WRONG: name=${LINK_NAME:-<none>} id=${LINK_ID:-<none>} (expected ezhalah-app / $PROJECT_ID). Production goes ONLY to ezhalah-app.vercel.app."
-  fi
+  bad "Vercel link is WRONG: name=$(dtg_read_link_field . projectName || echo '<none>') id=$(dtg_read_link_field . projectId || echo '<none>') (expected $DTG_EXPECT_PROJECT_NAME / $DTG_EXPECT_PROJECT_ID). Production goes ONLY to $DTG_CANONICAL_URL."
 fi
 
 echo "── (5) no concurrent session modifying the same files ────────────────────────"
