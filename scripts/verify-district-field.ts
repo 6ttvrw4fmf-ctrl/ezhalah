@@ -32,8 +32,10 @@ check('clearDistrict called on ≥4 city-mutation sites', (indexSrc.match(/clear
 // District's Top-6 on a Buy<->Rent flip AND on a later Residential<->Commercial pick — Category is
 // chosen after District in this form, but the owner asked District to refresh retroactively once it's
 // known, rather than reordering the form), so the warm-up fires once per real scope change instead
-// of duplicating a fetch the effect would immediately re-trigger anyway.
-check('city-select (via citySelected) warms THIS city’s districts by city_id, Category+Deal-scoped', /useEffect\(\(\) => \{\s*if \(!citySelected\) return;\s*const cid = citySelected\.cityId;\s*void ensureDistrictOptions\(cid, query\.deal, query\.category\)/.test(indexSrc));
+// of duplicating a fetch the effect would immediately re-trigger anyway. Extended 2026-07-21
+// (PR#167/#175, LIVE) to also thread paymentMonthly (Rent's Monthly/Yearly toggle), so the same
+// effect/warm-up also live-refreshes District's Top-6 on a Monthly<->Yearly flip.
+check('city-select (via citySelected) warms THIS city’s districts by city_id, Category+Deal+period-scoped', /useEffect\(\(\) => \{\s*if \(!citySelected\) return;\s*const cid = citySelected\.cityId;\s*void ensureDistrictOptions\(cid, query\.deal, query\.category, paymentMonthly\)/.test(indexSrc));
 check('editing the district text invalidates a prior pick', /setDistrictText\(v\);[\s\S]{0,240}?setDistrictSelected\(null\)/.test(indexSrc));
 
 // ── Search payload: send match_values (full recall), never the raw normalized token ─────────────
@@ -51,8 +53,8 @@ check('district options come from the district_options_ar RPC, Category+Deal-sco
 check('RPC result carries match_values (twin-safe recall)', /match_values/.test(locSrc));
 check('Top-6 = districts with active listings only (listingCount > 0)', /listingCount > 0\)\.slice\(0, k\)/.test(locSrc));
 check('autocomplete searches the COMPLETE cached catalog for the city', /export function matchDistrictsByCityId/.test(locSrc));
-check('empty focus shows the Category+Deal-scoped Top-6 via topDistrictsForCityId', /topDistrictsForCityId\(cid, query\.deal, query\.category, 6\)/.test(indexSrc));
-check('typing filters within the chosen city+scope via matchDistrictsByCityId', /matchDistrictsByCityId\(citySelected\.cityId, query\.deal, query\.category, v\)/.test(indexSrc));
+check('empty focus shows the Category+Deal+period-scoped Top-6 via topDistrictsForCityId', /topDistrictsForCityId\(cid, query\.deal, query\.category, paymentMonthly, 6\)/.test(indexSrc));
+check('typing filters within the chosen city+scope via matchDistrictsByCityId', /matchDistrictsByCityId\(citySelected\.cityId, query\.deal, query\.category, paymentMonthly, v\)/.test(indexSrc));
 // Arabic-only: typing the district in English yields NO autocomplete and the same Arabic hint the City
 // field shows (owner UI request 2026-07-18) — every district name is Arabic, so there's nothing to match.
 check('English district input shows the Arabic-only hint and clears suggestions', /const latin = isLatinOnlyInput\(v\);[\s\S]{0,220}?setDistrictSuggestions\(latin \? \[\][\s\S]{0,220}?setDistrictMsg\(latin \? ARABIC_ONLY_MSG/.test(indexSrc));
