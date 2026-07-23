@@ -97,6 +97,33 @@ if [ "$LOCAL" != "$REMOTE" ]; then
   exit 1
 fi
 
+# ── PRODUCTION TARGET LOCK (owner P0, non-negotiable — 2026-07-21): the ONLY production frontend
+# URL is https://ezhalah-app.vercel.app. `vercel --prod` below deploys to whatever Vercel project
+# `.vercel/project.json` is linked to — and a worktree that got a stray `vercel link`, or a fresh
+# worktree linked to the wrong/new project, would deploy the app SOMEWHERE ELSE while the
+# post-deploy check kept reading the (unchanged, still-valid) ezhalah-app.vercel.app bundle and
+# reported success. Refuse unless the link is provably the canonical ezhalah-app project.
+EXPECT_PROJECT_ID="prj_CLp9BxNzT4RmWL9Is1KjHoQlSAlX"
+EXPECT_PROJECT_NAME="ezhalah-app"
+if [ ! -f .vercel/project.json ]; then
+  echo "REFUSING TO DEPLOY: .vercel/project.json is missing — this checkout is not linked to a Vercel"
+  echo "project, so 'vercel --prod' would prompt/pick interactively and could deploy off-target."
+  echo "Link it to the canonical project first (copy the non-secret projectId/orgId from the main"
+  echo "checkout's .vercel/project.json), then retry. Target must be $EXPECT_PROJECT_NAME."
+  exit 1
+fi
+LINK_ID="$(node -e 'try{process.stdout.write(String(require("./.vercel/project.json").projectId||""))}catch{process.stdout.write("")}' 2>/dev/null || echo "")"
+LINK_NAME="$(node -e 'try{process.stdout.write(String(require("./.vercel/project.json").projectName||""))}catch{process.stdout.write("")}' 2>/dev/null || echo "")"
+if [ "$LINK_ID" != "$EXPECT_PROJECT_ID" ] || [ "$LINK_NAME" != "$EXPECT_PROJECT_NAME" ]; then
+  echo "REFUSING TO DEPLOY: this checkout is linked to the WRONG Vercel project."
+  echo "  expected: name=$EXPECT_PROJECT_NAME id=$EXPECT_PROJECT_ID"
+  echo "  linked:   name=${LINK_NAME:-<none>} id=${LINK_ID:-<none>}"
+  echo "Production frontend deploys go ONLY to https://ezhalah-app.vercel.app (owner rule 2026-07-21)."
+  echo "Re-link to the canonical project before deploying — never deploy against a different link."
+  exit 1
+fi
+echo "Target lock OK: linked to $EXPECT_PROJECT_NAME ($EXPECT_PROJECT_ID) → https://ezhalah-app.vercel.app"
+
 # ENV PREFLIGHT (added 2026-07-10 after a P0: a clean-main build has NO local .env — it's
 # gitignored — so the Supabase EXPO_PUBLIC_* vars must live in the VERCEL PROJECT env, or the
 # `supabase` client builds as null and EVERY search silently returns "try again" app-wide.
@@ -117,7 +144,12 @@ if [ -n "$MISSING" ]; then
 fi
 
 echo "Clean, on main, matches origin/main, required Vercel env present ($LOCAL). Deploying..."
-npx vercel --prod --yes
+# Capture the unique deployment URL vercel prints, so we can PROVE the canonical alias actually
+# received THIS build (not just that ezhalah-app.vercel.app serves some valid old bundle).
+DEPLOY_LOG="$(mktemp)"
+npx vercel --prod --yes | tee "$DEPLOY_LOG"
+DEPLOYED_URL="$(grep -oE 'https://[a-z0-9.-]+\.vercel\.app' "$DEPLOY_LOG" | tail -1 || true)"
+rm -f "$DEPLOY_LOG"
 
 # POST-DEPLOY ASSERTION: the served bundle MUST reference the Supabase host, proving the
 # EXPO_PUBLIC_* vars were actually inlined at build time. A green Vercel build with a null client
@@ -152,6 +184,45 @@ else
   echo "This is warning-only and does NOT fail the deploy. If search shows «حاول مرة ثانية» app-wide, the"
   echo "env vars did NOT inline — investigate before declaring the deploy healthy (2026-07-10 P0 signature)."
   echo "If search works fine, this was just slow CDN propagation — re-grep the served bundle to confirm."
+fi
+
+# ── CANONICAL-URL PROPAGATION ASSERTION (owner P0 2026-07-21): prove https://ezhalah-app.vercel.app
+# is actually serving THE BUILD WE JUST DEPLOYED, not merely a valid-looking older one. Compares the
+# fresh deployment's entry-bundle hash to what the canonical alias serves. A mismatch after the full
+# poll window is the unambiguous "the alias didn't move / deployed off-target" signature (the exact
+# 2026-07 class of incident: vercel --prod reports READY but the production alias never advanced —
+# fix is `vercel promote <deployment>`). Only runs when we could parse the deployment URL.
+echo ""
+if [ -n "${DEPLOYED_URL:-}" ]; then
+  echo "Verifying https://ezhalah-app.vercel.app is serving THIS deployment ($DEPLOYED_URL)..."
+  NEW_BUNDLE="$(curl -s "$DEPLOYED_URL" | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
+  if [ -z "$NEW_BUNDLE" ]; then
+    echo "WARNING: could not read the fresh deployment's entry bundle from $DEPLOYED_URL — skipping"
+    echo "the propagation match. Manually confirm https://ezhalah-app.vercel.app reflects your change."
+  else
+    ALIAS_MATCH=0
+    DEADLINE=$(( SECONDS + 90 ))
+    while [ "$SECONDS" -lt "$DEADLINE" ]; do
+      ALIAS_BUNDLE="$(curl -s https://ezhalah-app.vercel.app/ | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
+      if [ "$ALIAS_BUNDLE" = "$NEW_BUNDLE" ]; then ALIAS_MATCH=1; break; fi
+      sleep 5
+    done
+    if [ "$ALIAS_MATCH" = 1 ]; then
+      echo "OK: https://ezhalah-app.vercel.app is serving the just-deployed bundle ($NEW_BUNDLE). Target confirmed."
+    else
+      echo "❌ TARGET FAILURE: https://ezhalah-app.vercel.app is NOT serving the deployment you just made."
+      echo "   deployed bundle:      $NEW_BUNDLE  (at $DEPLOYED_URL)"
+      echo "   canonical URL serving: ${ALIAS_BUNDLE:-<none>}"
+      echo "   The production alias did not advance to this deployment. Promote it explicitly:"
+      echo "     npx vercel promote $DEPLOYED_URL --yes"
+      echo "   then re-verify. Do NOT report this deploy as live until the canonical URL matches."
+      exit 1
+    fi
+  fi
+else
+  echo "WARNING: could not parse the deployment URL from 'vercel --prod' output — cannot auto-verify"
+  echo "canonical-URL propagation. Manually confirm https://ezhalah-app.vercel.app reflects your change"
+  echo "(compare its served entry-*.js hash to the new deployment)."
 fi
 
 # ── LIVE SEARCH SMOKE TEST (added 2026-07-15, after the PR #78 outage — a deploy that made the

@@ -2,6 +2,23 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.
 
+# Production target (P0, non-negotiable — 2026-07-21)
+
+**The production frontend lives at ONE URL only: `https://ezhalah-app.vercel.app`.** When the owner
+says "deploy" / "test deploy" / "push it live," it means THIS URL — never a preview URL, never a
+different Vercel project, never a different alias. This applies to every path that could put the
+frontend live: `scripts/safe-deploy.sh`, any manual `vercel` command, any Vercel MCP tool, and any
+future scheduled routine/agent. The canonical Vercel project is `ezhalah-app`
+(projectId `prj_CLp9BxNzT4RmWL9Is1KjHoQlSAlX`, org `team_0lVrGRoJbCRIWovPNkfnmwJ7`).
+
+Enforcement is in the tooling, not just here: `safe-deploy.sh` refuses to deploy unless
+`.vercel/project.json` is provably linked to `ezhalah-app`, and after `vercel --prod` it asserts
+that `ezhalah-app.vercel.app` is actually serving the just-deployed build (else it fails and prints
+the `vercel promote` command). `preflight-verify.sh` re-checks the link. If any deploy path is ever
+added that does NOT route through these scripts, it MUST carry the same two guards. There is no
+`ezhalah.com`/other-project frontend deploy — the apex domain serves an unrelated app and is out of
+scope (project memory `ezhalah-com-domain-not-serving-this-app`).
+
 # Deploy rule (P0, non-negotiable — 2026-07-09)
 
 If it's visible to users, it must be committed, pushed, and merged to `main` before it's ever
