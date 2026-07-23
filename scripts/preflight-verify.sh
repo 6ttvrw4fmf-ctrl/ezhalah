@@ -37,6 +37,21 @@ if [ -n "$DIRTY" ]; then bad "working tree NOT clean — local-only/uncommitted 
 HEAD_SHA="$(git rev-parse HEAD)"; ORIGIN_SHA="$(git rev-parse origin/main)"
 [ "$HEAD_SHA" = "$ORIGIN_SHA" ] && ok "HEAD == origin/main ($HEAD_SHA)" || bad "HEAD ($HEAD_SHA) != origin/main ($ORIGIN_SHA) — push/pull so prod matches a commit really on GitHub."
 
+echo "── (target) production alias locked to ezhalah-app.vercel.app ────────────────"
+# Owner P0 (2026-07-21): the ONLY production frontend URL is https://ezhalah-app.vercel.app. Prove
+# this checkout's Vercel link is the canonical project BEFORE any deploy path can run `vercel --prod`.
+if [ ! -f .vercel/project.json ]; then
+  bad ".vercel/project.json missing — not linked to a Vercel project; a deploy could go off-target."
+else
+  LINK_ID="$(node -e 'try{process.stdout.write(String(require("./.vercel/project.json").projectId||""))}catch{process.stdout.write("")}' 2>/dev/null || echo "")"
+  LINK_NAME="$(node -e 'try{process.stdout.write(String(require("./.vercel/project.json").projectName||""))}catch{process.stdout.write("")}' 2>/dev/null || echo "")"
+  if [ "$LINK_ID" = "$PROJECT_ID" ] && [ "$LINK_NAME" = "ezhalah-app" ]; then
+    ok "Vercel link = ezhalah-app ($PROJECT_ID) → https://ezhalah-app.vercel.app"
+  else
+    bad "Vercel link is WRONG: name=${LINK_NAME:-<none>} id=${LINK_ID:-<none>} (expected ezhalah-app / $PROJECT_ID). Production goes ONLY to ezhalah-app.vercel.app."
+  fi
+fi
+
 echo "── (5) no concurrent session modifying the same files ────────────────────────"
 if [ -f .git/index.lock ]; then bad "a git operation is in progress (.git/index.lock) — another process is active. Wait and retry."; else ok "no in-progress git operation / lock"; fi
 CONC=0
