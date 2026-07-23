@@ -1054,6 +1054,15 @@ export const CITY_REQUIRED_MSG = 'الرجاء اختيار مدينة من ال
 // avoid. (2026-07-10 location-data-quality audit.)
 export const LOCATION_UNRESOLVED_AR = 'الموقع غير محدد';
 
+// Same idea as LOCATION_UNRESOLVED_AR, but specifically for a listing's DISTRICT/neighborhood. Shown on
+// the card headline when a listing matched a CITY but has NO district that resolved into our canonical
+// location index — so the card is HONEST that we don't have a matched (filterable) district for it,
+// rather than either silently blanking the district (looks like missing data) or surfacing an unmatched
+// raw source token (a road/landmark that returns zero when filtered). With remote.ts gating the card's
+// district to matched-only, "a district shown on the card" now always means "matched & filterable".
+// (owner 2026-07-21: "make the card honest and consistent".)
+export const DISTRICT_UNRESOLVED_AR = 'الحي غير محدد';
+
 // Same idea as LOCATION_UNRESOLVED_AR, for a listing's PROPERTY TYPE. normalizeType()
 // (src/data/propertyTypes.ts) returns the designed sentinel clean type 'Unknown' whenever a raw
 // scraped property_type isn't in the RAW_TO_CLEAN whitelist — 'Unknown' has no AR{} translation, so

@@ -212,8 +212,14 @@ check(
   && (RESULTCARD_TS.match(/place\(cityAr\)/g)?.length ?? 0) >= 2, // title branch + locText row, both fixed
 );
 check(
-  'the card title district text is also guarded (arabicOrPlaceholder wraps t(listing.district), not a bare place(t(listing.district)))',
-  RESULTCARD_NOWS.includes('place(arabicOrPlaceholder(t(listing.district),locale,LOCATION_UNRESOLVED_AR))'),
+  // Refactored 2026-07-21 (owner "make the card honest and consistent"): the district is still guarded by
+  // arabicOrPlaceholder (never a bare place(t(listing.district)) leak), but the headline is now composed in
+  // a `locationTitle` const and an UNMATCHED district falls back to DISTRICT_UNRESOLVED_AR («الحي غير محدد»)
+  // instead of showing a raw source token — display now agrees with the filter (remote.ts gates it).
+  'the card title district text is guarded via arabicOrPlaceholder (never a bare place(t(listing.district))), and an unmatched district honestly falls back to DISTRICT_UNRESOLVED_AR',
+  RESULTCARD_NOWS.includes('arabicOrPlaceholder(t(listing.district),locale,')
+  && !RESULTCARD_NOWS.includes('place(t(listing.district))')
+  && RESULTCARD_NOWS.includes('DISTRICT_UNRESOLVED_AR'),
 );
 
 // agent.tsx district refine-chip (2026-07-16): q.location can be the LLM's own canonical-ENGLISH

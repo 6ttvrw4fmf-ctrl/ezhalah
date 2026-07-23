@@ -1158,10 +1158,16 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     // genuine, if unmapped, raw city name is untouched — this only fires for a known junk token.
     const safeRawCity = isJunkLocationToken(rawCity) ? '' : rawCity;
     l.city = /[ء-ي]/.test(rawCity || '') ? rawCity : ((ar?.city) || arCity(safeRawCity) || safeRawCity || '');
-    // Gathern Tier-1: when the canonical index has NO district and the raw neighborhood isn't Arabic,
-    // fall back to the source's own Arabic district token (l.districtArFallback, Gathern-only &
-    // city-name-guarded in finalize). null for every other source → `|| ''` keeps them byte-identical.
-    l.district = /[ء-ي]/.test(rawDistrict || '') ? rawDistrict : ((ar?.district) || l.districtArFallback || '');
+    // Honest+consistent card district (owner 2026-07-21): the card surfaces a district ONLY when the
+    // listing actually MATCHED one in the canonical index (canonDistrict). When matched, prefer the exact
+    // source text (raw Arabic neighborhood, else the Gathern source fallback) so the card stays faithful
+    // to the platform; when NOT matched, leave it blank so ResultCard renders «الحي غير محدد» instead of
+    // an unmatched raw token (a road/landmark that returns zero when filtered). canonDistrict — the
+    // grouping/filter key pushed below — is unchanged, so what the card SHOWS now always agrees with what
+    // the filter MATCHES. (Previously this preferred the raw neighborhood even when it never resolved.)
+    l.district = canonDistrict
+      ? (/[ء-ي]/.test(rawDistrict || '') ? rawDistrict : (l.districtArFallback || canonDistrict))
+      : '';
     l.regionAr = (ar?.region) || l.regionAr || '';
     const region = (ar?.region) || CITY_TO_REGION[canonCity] || canonCity;
     ranked.push({ l, platform: c.platform, city: canonCity, region, district: canonDistrict, rank: c.rank, source_table: c.source_table });
