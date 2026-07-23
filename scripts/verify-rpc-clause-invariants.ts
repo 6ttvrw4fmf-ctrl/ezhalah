@@ -42,6 +42,11 @@ const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
     marker: /nulls\s+last/i,
     why: 'PR#120: unknown-date rows must sort LAST, not first.',
   },
+  {
+    name: 'furnished filter is NULL-strict (consistent with the amenities furnished token)',
+    marker: /p_furnished\s+is null or s\.furnished\s*=\s*p_furnished/i,
+    why: 'Bug C (2026-07-23): p_furnished must exclude furnished-unknown rows like every other strict boolean and the amenities path (both return 31,394). NULL-permissive returned 72,483 (furnished IS NOT FALSE).',
+  },
 ];
 
 // A clause that must NOT come back: the pre-fix rent-period predicate keyed on lease length + a hardcoded
@@ -51,6 +56,11 @@ const FORBIDDEN: { name: string; marker: RegExp; why: string }[] = [
     name: "stale rent-period clause (rent_period_ar + hardcoded platform in ('gathern','aqarmonthly'))",
     marker: /p_rent_period\s*=\s*'شهري'[\s\S]{0,120}?platform\s+in\s*\(\s*'gathern'\s*,\s*'aqarmonthly'\s*\)/i,
     why: 'This is the reverted, lease-length-based bucket. Rent period must bucket on payment_monthly.',
+  },
+  {
+    name: 'NULL-permissive furnished predicate (Bug C regression)',
+    marker: /p_furnished\s+is null or s\.furnished is null/i,
+    why: 'Reintroduces Bug C: p_furnished would keep furnished-unknown rows (72,483) instead of the strict 31,394 the amenities path returns.',
   },
 ];
 
