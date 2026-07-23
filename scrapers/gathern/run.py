@@ -299,45 +299,101 @@ def fetch_detail(s: cc.Session, listing_url: str) -> dict:
             return {}
         d = (((data.get("props") or {}).get("pageProps") or {}).get("serverData") or {}).get("data") or {}
         out: dict[str, Any] = {}
-        desc = d.get("description")
-        if isinstance(desc, str) and desc.strip():
-            out["description"] = _redact(desc.strip())          # verbatim, only phones stripped
+
+        def _txt(v: Any) -> Optional[str]:
+            return _redact(v.strip()) if isinstance(v, str) and v.strip() else None
+
+        def _posint(v: Any) -> Optional[int]:
+            return int(v) if isinstance(v, int) and not isinstance(v, bool) and v > 0 else None
+
+        # 'description' → the description COLUMN; everything else below → additional_info. All VERBATIM
+        # source text (phones redacted per PDPL). host_info is intentionally NOT captured (host PII).
+        desc = _txt(d.get("description"))
+        if desc:
+            out["description"] = desc
         suit = d.get("chalet_for_text") or d.get("chalet_for_text_with_label")
         if isinstance(suit, str) and suit.strip():
-            out["suitability"] = suit.strip()                   # e.g. "عوائل و عزاب" (families / singles)
+            out["suitability"] = suit.strip()                   # "عوائل و عزاب" (families / singles)
+        rules = [_redact(x.strip()) for x in (d.get("reserve_conditions") or []) if isinstance(x, str) and x.strip()]
+        rules = [x for x in rules if x]
+        if rules:
+            out["house_rules"] = rules[:15]                     # booking / house conditions
+        ci = _txt(d.get("checkinHour")); co = _txt(d.get("checkoutHour"))
+        if ci:
+            out["check_in"] = ci                                # "03:00 مساءً"
+        if co:
+            out["check_out"] = co
+        cap = _posint(d.get("capacity"))
+        if cap:
+            out["guest_capacity"] = cap
+        bc = _posint(d.get("booking_count"))
+        if bc:
+            out["booking_count"] = bc
+        vc = _posint(d.get("views_count"))
+        if vc:
+            out["views_count"] = vc
+        rt = _txt(d.get("rate_text"))
+        if rt:
+            out["rate_text"] = rt                               # "رائع" (rating word)
+        secs: list[dict] = []
+        for sec in (d.get("extraDescription") or []):
+            if not isinstance(sec, dict):
+                continue
+            h = (sec.get("header") or "").strip()
+            c = sec.get("content")
+            if isinstance(c, list):
+                c = " ".join(str(x) for x in c if x)
+            c = _redact(str(c or "")).strip() if c else ""
+            if h or c:
+                secs.append({"header": h, "content": c[:600]})
+        if secs:
+            out["extra_sections"] = secs[:10]                   # structured extra description blocks
         return out
     return {}
 
 
-def backfill_details(s: cc.Session, limit: int) -> tuple[int, int]:
-    """Fill description + additional_info.suitability for up to `limit` ACTIVE Gathern rows that still
-    lack a description. Idempotent (re-runs skip filled rows) + bounded — schedule it to fill the
-    catalog over time. Merges suitability into the existing additional_info; sets the description column."""
+def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
+                     shards: Optional[int] = None) -> tuple[int, int]:
+    """Fill description (column) + the rich detail fields (additional_info) for ACTIVE Gathern rows that
+    still lack a description. Idempotent — re-runs skip already-filled rows. Optional stride-shard i/N
+    spreads the work across parallel runners: every shard pulls the SAME ordered missing-description
+    worklist, then processes rows[i::N]. limit=0 → the shard's whole slice (what the workflow uses)."""
     client = db.sb()
-    res = (client.table("gathern_residential_listings")
-           .select("ad_number, listing_url, additional_info")
-           .eq("source", SOURCE).eq("active", True)
-           .is_("description", "null").limit(limit).execute())
-    rows = (res.data if res else None) or []
+    work: list[dict] = []
+    offset = 0
+    while True:  # PostgREST caps at 1000 rows/request — page the full worklist
+        res = (client.table("gathern_residential_listings")
+               .select("ad_number, listing_url, additional_info")
+               .eq("source", SOURCE).eq("active", True)
+               .is_("description", "null").order("id").range(offset, offset + 999).execute())
+        batch = (res.data if res else None) or []
+        work.extend(batch)
+        if len(batch) < 1000:
+            break
+        offset += 1000
+    if shard is not None and shards:
+        work = work[shard::shards]  # stride partition spreads big + small evenly across runners
+    if limit:
+        work = work[:limit]
     updated = 0
-    for r in rows:
+    for r in work:
         d = fetch_detail(s, r.get("listing_url") or "")
         if not d:
             continue
+        desc = d.pop("description", None)
         info = r.get("additional_info")
         if not isinstance(info, dict):
             info = {}
-        if d.get("suitability"):
-            info["suitability"] = d["suitability"]
+        info.update(d)  # suitability, house_rules, check_in/out, guest_capacity, booking/views, rate_text, extra_sections
         payload: dict[str, Any] = {"additional_info": info}
-        if d.get("description"):
-            payload["description"] = d["description"]
+        if desc:
+            payload["description"] = desc
         try:
             client.table("gathern_residential_listings").update(payload).eq("ad_number", r["ad_number"]).execute()
             updated += 1
         except Exception as e:
             print("  ⚠ update failed", r.get("ad_number"), str(e)[:80])
-    return len(rows), updated
+    return len(work), updated
 
 
 def _beds(features: Optional[list]) -> tuple[Optional[int], Optional[int]]:
@@ -654,9 +710,12 @@ def main() -> int:
     #    suitability for active rows that still lack a description; re-run / schedule to fill the rest.
     if args.backfill_details:
         ds = detail_session()
-        seen, updated = backfill_details(ds, args.limit or 500)
-        print(f"✓ Gathern detail backfill: {updated}/{seen} active rows enriched with description + "
-              f"suitability (rows still missing a description; re-run to continue).")
+        _bshard = _bshards = None
+        if args.shard:  # reuse the crawl's i/N flag to spread the backfill across the runner matrix
+            _bshard, _bshards = (int(x) for x in args.shard.split("/"))
+        seen, updated = backfill_details(ds, args.limit or 0, shard=_bshard, shards=_bshards)
+        print(f"✓ Gathern detail backfill{(' shard ' + args.shard) if args.shard else ''}: "
+              f"{updated}/{seen} active rows enriched (description + rich detail fields).")
         return 0
 
     ci, co = _monthly_window()

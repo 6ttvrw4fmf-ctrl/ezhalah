@@ -1,0 +1,46 @@
+# Gathern detail backfill — fills description + the rich detail-page fields (families/singles
+# suitability, house rules, check-in/out hours, guest capacity, booking/views counts, rating word,
+# extra description sections) that the fast list crawl (gathern-sync.yml) does NOT fetch.
+#
+# WHY a SEPARATE workflow: these fields live only on each unit's own page (gathern.co/view/…), one
+# HTTP request per unit — far heavier than the list feed. So it runs on its own cadence, NEVER inside
+# the crawl. 12 parallel shards (one runner = one IP each) each take a stride (rows[i::12]) of the
+# ACTIVE rows still missing a description. Idempotent + resumable — re-dispatching just continues
+# filling whatever's still empty. Probed 2026-07-21: 77/80 HTTP 200, ZERO blocks at ~2 req/s → free,
+# no proxies. At ~24k active rows / 12 shards ≈ 2k rows/shard × ~1.3s ≈ ~45 min per shard.
+#
+# Dispatch manually (Actions → "Gathern detail backfill" → Run workflow), or wire pg_cron →
+# workflow_dispatch like gathern-sync for an ongoing top-up of newly-scraped units.
+name: Gathern detail backfill
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: gathern-backfill-details
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false          # one shard failing never blocks the others
+      max-parallel: 12
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Gathern detail backfill shard ${{ matrix.shard }}/12
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_MIN_INTERVAL: "0.4"
+        run: python -m scrapers.gathern.run --backfill-details --shard ${{ matrix.shard }}/12
