@@ -166,8 +166,25 @@ const AR_TYPE: Record<string, string> = {
   'منزل': 'Villa', 'غرفة': 'Room', 'غرفه': 'Room', 'عمارة': 'Building', 'عماره': 'Building',
   'استراحة': 'Rest House', 'استراحه': 'Rest House', 'شاليه': 'Chalet', 'مكتب': 'Office',
   'مستودع': 'Warehouse', 'محل': 'Shop', 'معرض': 'Showroom', 'مصنع': 'Factory', 'ورشة': 'Workshop',
-  'مزرعة': 'Farm', 'مزرعه': 'Farm', 'مخيم': 'Camp', 'أرض': 'Residential Land', 'ارض': 'Residential Land',
+  'مزرعة': 'Farm', 'مزرعه': 'Farm', 'مخيم': 'Camp',
+  // Long-tail raw types folded into an existing clean type (owner-approved mappings — see
+  // propertyTypes.ts CLEAN_TO_QUERY/RAW_TO_CLEAN). Card still shows the raw scraped text; this only
+  // affects which clean type free-text search resolves to.
+  'كشك': 'Shop', 'درايف ثرو': 'Shop',
+  'صالة': 'Commercial Building', 'سينما': 'Commercial Building',
+  'محطة': 'Gas Station',
+  'مكاتب مشتركة': 'Office',
+  'مخازن سحابية': 'Warehouse',
+  'ملحق علوي': 'Apartment', 'مبنى شقق مخدومة': 'Apartment',
+  'مجمع سكني': 'Residential Building',
+  'حوش': 'Residential Land',
+  // SPECIALIZATIONS FIRST: this loop (see parseQuery below) does `text.includes(ar)` and breaks on
+  // the first hit in insertion order, so a more specific phrase MUST be listed before any shorter
+  // generic phrase it contains as a literal prefix -- 'أرض زراعية' contains 'أرض', so it has to come
+  // before the bare 'أرض'/'ارض' entries below or it can never be reached. (Found live 2026-07-23:
+  // the original أرض-زراعية fix was silently dead code because of exactly this ordering.)
   'أرض زراعية': 'Agriculture Plot', 'ارض زراعية': 'Agriculture Plot',
+  'أرض': 'Residential Land', 'ارض': 'Residential Land',
 };
 const RES_TYPES = new Set(CATEGORY_TYPES.Residential);
 const AR_BUY = /(شراء|للبيع|تمليك|اشتري|أشتري|بيع)/;
