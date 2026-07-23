@@ -1,0 +1,33 @@
+# Permanent release-QA gate for the production-target lock (owner P0 2026-07-21).
+# Runs on every PR and every push to main so the deploy-target protection cannot be weakened,
+# and no raw Vercel production-deploy command can be introduced, without CI going red.
+name: Deploy-target guard
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Production-target lock + no-bypass
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # git grep needs the full tree; drift checks read tracked files
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - name: Regression test — ezhalah-app is the only allowed deploy target
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-deploy-target-guard.ts
+      - name: No-bypass — every prod deploy must route through safe-deploy.sh
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-no-vercel-bypass.ts

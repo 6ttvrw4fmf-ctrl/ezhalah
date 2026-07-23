@@ -11,6 +11,11 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# Single source of truth for the production-target lock (constants + pure predicates). The exact
+# same predicates are re-checked by preflight-verify.sh and exercised by the permanent regression
+# test scripts/verify-deploy-target-guard.ts, so this guard can never silently drift.
+. scripts/deploy-target-guard.sh
+
 # ── DEPLOY LOCK (added 2026-07-16, see docs/DEPLOY_SAFETY.md "Deployment lock" — after a
 # 2026-07-15 P0 where two concurrent Claude sessions each independently deployed/rolled back
 # production within the same remediation window). Acquired FIRST, before any of the expensive
@@ -103,26 +108,22 @@ fi
 # worktree linked to the wrong/new project, would deploy the app SOMEWHERE ELSE while the
 # post-deploy check kept reading the (unchanged, still-valid) ezhalah-app.vercel.app bundle and
 # reported success. Refuse unless the link is provably the canonical ezhalah-app project.
-EXPECT_PROJECT_ID="prj_CLp9BxNzT4RmWL9Is1KjHoQlSAlX"
-EXPECT_PROJECT_NAME="ezhalah-app"
 if [ ! -f .vercel/project.json ]; then
   echo "REFUSING TO DEPLOY: .vercel/project.json is missing — this checkout is not linked to a Vercel"
   echo "project, so 'vercel --prod' would prompt/pick interactively and could deploy off-target."
   echo "Link it to the canonical project first (copy the non-secret projectId/orgId from the main"
-  echo "checkout's .vercel/project.json), then retry. Target must be $EXPECT_PROJECT_NAME."
+  echo "checkout's .vercel/project.json), then retry. Target must be $DTG_EXPECT_PROJECT_NAME."
   exit 1
 fi
-LINK_ID="$(node -e 'try{process.stdout.write(String(require("./.vercel/project.json").projectId||""))}catch{process.stdout.write("")}' 2>/dev/null || echo "")"
-LINK_NAME="$(node -e 'try{process.stdout.write(String(require("./.vercel/project.json").projectName||""))}catch{process.stdout.write("")}' 2>/dev/null || echo "")"
-if [ "$LINK_ID" != "$EXPECT_PROJECT_ID" ] || [ "$LINK_NAME" != "$EXPECT_PROJECT_NAME" ]; then
+if ! dtg_link_is_canonical .; then
   echo "REFUSING TO DEPLOY: this checkout is linked to the WRONG Vercel project."
-  echo "  expected: name=$EXPECT_PROJECT_NAME id=$EXPECT_PROJECT_ID"
-  echo "  linked:   name=${LINK_NAME:-<none>} id=${LINK_ID:-<none>}"
-  echo "Production frontend deploys go ONLY to https://ezhalah-app.vercel.app (owner rule 2026-07-21)."
+  echo "  expected: name=$DTG_EXPECT_PROJECT_NAME id=$DTG_EXPECT_PROJECT_ID"
+  echo "  linked:   name=$(dtg_read_link_field . projectName || echo '<none>') id=$(dtg_read_link_field . projectId || echo '<none>')"
+  echo "Production frontend deploys go ONLY to $DTG_CANONICAL_URL (owner rule 2026-07-21)."
   echo "Re-link to the canonical project before deploying — never deploy against a different link."
   exit 1
 fi
-echo "Target lock OK: linked to $EXPECT_PROJECT_NAME ($EXPECT_PROJECT_ID) → https://ezhalah-app.vercel.app"
+echo "Target lock OK: linked to $DTG_EXPECT_PROJECT_NAME ($DTG_EXPECT_PROJECT_ID) → $DTG_CANONICAL_URL"
 
 # ENV PREFLIGHT (added 2026-07-10 after a P0: a clean-main build has NO local .env — it's
 # gitignored — so the Supabase EXPO_PUBLIC_* vars must live in the VERCEL PROJECT env, or the
@@ -204,7 +205,9 @@ if [ -n "${DEPLOYED_URL:-}" ]; then
     DEADLINE=$(( SECONDS + 90 ))
     while [ "$SECONDS" -lt "$DEADLINE" ]; do
       ALIAS_BUNDLE="$(curl -s https://ezhalah-app.vercel.app/ | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
-      if [ "$ALIAS_BUNDLE" = "$NEW_BUNDLE" ]; then ALIAS_MATCH=1; break; fi
+      # dtg_alias_serves: succeeds ONLY when the canonical alias serves the exact just-deployed
+      # bundle (same predicate the regression test asserts) — never on an empty/stale read.
+      if dtg_alias_serves "$NEW_BUNDLE" "$ALIAS_BUNDLE"; then ALIAS_MATCH=1; break; fi
       sleep 5
     done
     if [ "$ALIAS_MATCH" = 1 ]; then
