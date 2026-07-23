@@ -91,7 +91,25 @@ resolved, discovered during this redesign. Any new work must fit into ONE of the
   unmapped-by-that-platform's-own-dict) English city name, via `loc_city_map` → the same
   `loc_catalog_city`/`loc_catalog_city_alias` catalog `arabic_location.py` uses. It correctly and
   honestly skips a placeholder `city` value (no `loc_city_map` entry for "other") — this was never
-  the bug, and needs no change.
+  the bug, and needs no change. **Verified 2026-07-10 it cannot silently re-corrupt the Ramz Al
+  Qassim fix**: it keys off `lower(btrim(raw.city))` via a `JOIN LATERAL ... ON true`, so a row
+  whose raw `city` is `NULL` (the 69-row fix's exact state) produces zero lateral rows and is
+  excluded from the overlay's insert/update entirely — confirmed by manually invoking the function
+  right after the fix and re-checking all 47 affected active rows were still unresolved afterward.
+
+**Latent trap found during the Ramz Al Qassim fix (2026-07-10), not fixed here — flag for whoever
+touches `listing_native_location_v1` next:** for a platform with NO "native" columns (like
+Ramzalqasim), `v1`'s `legacy` CTE is its ONLY source, and that CTE is gated
+`WHERE listings_arabic_locations.city_ar IS NOT NULL`. Setting a row's `city_ar` to `NULL` there
+(the correct, intentional fix for an unresolved location) makes the row **entirely absent** from
+`v1` — not present-with-a-null-city, just gone. The listing still shows up correctly as unresolved
+in the app's actual search path (`search_listings_ar`, via `listing_native_location_v2`'s separate
+`unresolved_catchall` UNION branch, which independently re-adds anything in
+`active_listing_ids_v2` missing from `v1`) — so this does **not** affect what users see today. But
+any FUTURE code that queries `listing_native_location_v1` directly, expecting it to hold every
+active listing (resolved or not), would silently miss these rows rather than see them as
+unresolved. Worth a `LEFT JOIN`/coalesce fix in `v1`'s "legacy" CTE if it ever becomes a direct
+dependency for anything else.
 
 **Recommended target state (needs owner sign-off before building — a scope/ownership decision, not
 a technical one):** a NEW, PERMANENTLY SCHEDULED SQL function — structurally a sibling of
@@ -187,6 +205,103 @@ cities specifically is still sparse, not because collisions are structurally imp
 algorithm itself is safe (it will correctly refuse to pick when two candidates both have data and
 both match), but its practical HIT RATE will be lower than "district coverage exists" alone would
 suggest, and will need re-verification as district coverage for twin cities improves.
+
+## Universal city-default rule (owner directive, 2026-07-10 follow-up)
+
+Following the Ramz Al Qassim 69-row backfill, the owner made the city-specific case of the rule
+above explicit and permanent:
+
+> No scraper may default a missing or unresolved location to a specific real city. If the source
+> does not provide enough evidence for an exact catalog match, store it as unresolved.
+
+A repo-wide sweep for this exact shape (`city = "<CapitalizedWord>"`, a `*CITY`-named constant fed
+into `city =`, `DEFAULT_CITY`, `city.setdefault`, `city or "<CapitalizedWord>"`) found, beyond the
+three already fixed above (Deal, Ramzalqasim, Al Nokhba):
+
+- **Nowaisiry — fixed.** `city = "Riyadh"` was the base default before a `CITY_TOKENS` scan. Since
+  `CITY_TOKENS` explicitly recognizes BOTH Riyadh-area (`الخير`, `مخطط الخير`, `حي الخير`) and
+  Hail-area (`الجلة`, `الجله`, `الأجفر`, `الاجفر`) plan names, the scraper is demonstrably
+  multi-city — an unrecognized plan name silently became "Riyadh" even for a real Hail listing.
+  Now unresolved (`None`) when no token matches.
+- **Awal — partially fixed.** `LOC_DEFAULT_CITY.get(loc_slug or "", "Sakaka")` guessed "Sakaka" for
+  the `jouf` RTCL taxonomy slug whenever the structured city field/text scan failed, and for ANY
+  other/unknown slug. Now unresolved in both cases. The `arar` → `Arar` branch is **intentionally
+  untouched** — see "Known accepted single-city/region constants" below.
+- **Mustqr — NOT fixed, pending stronger evidence.** See below.
+- **Souq24 — confirmed not a violation.** `TOWN_TO_CITY.get(...)` falls through to `None` cleanly;
+  no hardcoded final default anywhere in the chain.
+
+**Enforcement:** `scrapers/common/tests/test_no_hardcoded_city_default.py` is a repo-wide static
+sweep (same regex shape as the manual sweep above) that fails the build if a NEW, unallowlisted
+instance of this pattern is introduced anywhere in `scrapers/`. Mutation-tested 2026-07-10
+(temporarily reintroduced the Nowaisiry violation; confirmed the test catches it, then restored the
+fix and confirmed green again — independently reproduced 2026-07-10 by an adversarial-review agent
+with two DIFFERENT injected violations (souq24, deal), both caught, both cleanly reverted). This is
+a static-analysis gate, distinct from and complementary to the runtime `guard_location_update()`
+DB-write gate: that gate only catches known PLACEHOLDER tokens ("Other"/"Unknown"/...) at write
+time; it cannot catch a scraper hardcoding an assumed-real city name (e.g. "Riyadh", "Sakaka") as a
+fallback, which is the bug shape this test exists to close.
+
+**Blind spot fixed (2026-07-10).** The original design suppressed an entire line if it contained
+`city_map`/`city_ar`/`city_id`/etc. anywhere in it — so a new violation sharing a line with an
+existing safe identifier (e.g. `city = CITY_MAP.get(raw) or "Riyadh"`) slipped through undetected.
+Rewritten as two independently-evaluated pattern classes: a literal quoted-string default
+(`city = "X"` / `city = <anything> or "X"`) is now **never** suppressed by a nearby safe identifier
+— it's dangerous regardless of what else is on the line — while an identifier-shaped match
+(`*CITY`-named dict/constant) is suppressed only when a safe identifier's own match **span
+overlaps that specific match** (position-aware), not merely appears somewhere else on the line.
+Verified: an end-to-end mutation test injecting the exact `city = CITY_MAP.get(raw_city) or
+"Riyadh"` line into a real scraper file (`scrapers/deal/run.py`, using its own real `CITY_MAP`
+identifier) is caught by the guard, then cleanly reverted with the full suite green again. A
+placeholder-value exclusion ("Other"/"Unknown"/etc. are a different, already-covered bug class) and
+a docstring/prose-line exclusion were added alongside it, both needed once the literal-string
+detection got strict enough to also start matching prose examples in this file's own docstring and
+`scrapers/wasalt/recover_other.py`'s root-cause writeup.
+
+**Newly discovered by the fix itself (2026-07-10) — NOT fixed, NOT independently verified, flagged
+here so the guard passes today without silently missing them.** The original regex never reliably
+matched `city = <a .get(...) call> or "RealCity"` — a function call between `city =` and `or` broke
+its adjacency assumption. Making the literal-default detection robust to that surfaced 4 more
+platforms with this exact bug shape, beyond Deal/Ramzalqasim/AlNokhba/Nowaisiry/Awal above:
+
+- **Jazwtn → `"Jazan"`.** Comment claims the brokerage operates only in the Jazan *region* (not
+  explicitly city). Unverified.
+- **Hajer → `"Hofuf"`.** Project memory already describes Hajer as an Al-Ahsa-area boutique
+  brokerage (Hofuf is Al-Ahsa's largest city) — plausible, but not verified against this specific
+  default the way Ramzalqasim's region constant was.
+- **Jurash → `"Khamis Mushait"`.** No single-city claim found nearby in the code. Least evidence of
+  the four that this is a legitimate constant rather than a bug.
+- **Satel → `"Riyadh"`.** **Higher concern than the other three.** Its own comment says
+  "overwhelmingly Riyadh" — explicitly *not* a single-city claim — and the condition defaults to
+  Riyadh whenever the Arabic city field is merely non-empty, regardless of what it actually says:
+  a real, different Arabic city name paired with noisy English text would be silently overridden.
+  This looks more like the Nowaisiry/Deal bug shape than a legitimate brokerage constant.
+  **Recommend prioritizing this one first** if/when this list is worked through.
+
+### Known accepted single-city/region constants (allowlisted, cited in the test file)
+
+A hardcoded value is **not** automatically a violation when it expresses "this whole brokerage
+operates in exactly one real city/region" (a business fact) rather than "guess a city per-row when
+the source is unclear" (the actual bug). Ramzalqasim's fixed `region = "Qassim"` (Scope 1, above) is
+the precedent for this distinction. The claims below exist and are allowlisted, but **none has been
+independently verified** — do not treat presence in the allowlist as proof of correctness, and do
+not extend the pattern to a new platform without the same live verification already done for
+Ramzalqasim's region constant:
+
+- **Awal `"arar"` → `"Arar"`.** Code comment claims every RTCL `arar`-taxonomy listing is genuinely
+  in Arar city. Owner directive 2026-07-10: "do not change the Arar branch until it is independently
+  verified." No live verification has been performed.
+- **Mustqr `DEFAULT_CITY = "Hail"`.** Code comment claims Mustqr is a single-city Hail-based
+  brokerage. A live sample of 20 distinct neighborhood names showed nothing obviously non-Hail, but
+  a direct check against Mustqr's own source Supabase REST API failed (no valid API key available)
+  and was not retried. Owner directive 2026-07-10: "Do not change Mustqr yet. First obtain stronger
+  evidence that it is truly single-city." **Not fixed — still unconditionally assigns
+  `city = "Hail"` to every row.** Whoever picks this up next needs either a valid credential to
+  query Mustqr's own taxonomy directly, or another independent source (e.g. their public site's
+  city/area filter options) to confirm or refute the single-city claim before this can be closed out
+  either way.
+- **Jazwtn, Hajer, Jurash, Satel** — see "Newly discovered" above; same treatment, not yet worked
+  through.
 
 ## Other-field placeholder audit (owner directive item 7)
 

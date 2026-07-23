@@ -119,8 +119,11 @@ CITY_AR = {
     "القريات": "Qurayyat", "طريف": "Turaif", "رفحاء": "Rafha",
 }
 # RTCL location taxonomy slug → default city when the text doesn't name one. "arar" listings are
-# all in Arar; "jouf" listings name their own city in the text (default Sakaka = Al Jouf capital).
-LOC_DEFAULT_CITY = {"arar": "Arar", "jouf": "Sakaka"}
+# claimed to be all in Arar — unverified pending owner sign-off (docs/LOCATION_RESOLUTION.md),
+# left as-is. "jouf" listings are supposed to name their own city in the text; when that parse
+# fails (or the slug is anything else/unknown) there is no reliable single-city fallback for Al
+# Jouf, so the city is left unresolved rather than guessed at "Sakaka".
+LOC_DEFAULT_CITY = {"arar": "Arar"}
 
 # Gallery image junk to exclude.
 _BAD_IMG = ("logo", "icon", "placeholder", "no-image", "no_image", "spinner", "avatar",
@@ -378,7 +381,7 @@ def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, bool
                 raw_city = raw_city or ar
                 break
     if not city:
-        city = LOC_DEFAULT_CITY.get(loc_slug or "", "Sakaka")
+        city = LOC_DEFAULT_CITY.get(loc_slug or "")
     region = normalize.region_for_city(city) or (
         "Northern Borders" if city in ("Arar", "Turaif", "Rafha") else "Al Jawf")
 
