@@ -17,9 +17,9 @@ const agentSrc = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
 let failed = 0;
 const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); };
 
-// ── The config boundary — a question supplies ONLY the seven allowed fields ──────────────────────
-check('AdvancedQuestion declares exactly the 7 contract fields (id/title/description?/selection/eligibility/resolveOptions/apply)',
-  /export type AdvancedQuestion = \{[\s\S]*?\bid:[\s\S]*?titleKey:[\s\S]*?descriptionKey\?:[\s\S]*?selection:[\s\S]*?eligibility:[\s\S]*?resolveOptions:[\s\S]*?\bapply:[\s\S]*?\};/.test(advSrc));
+// ── The config boundary — a question supplies ONLY the eight allowed fields ──────────────────────
+check('AdvancedQuestion declares exactly the 8 contract fields (id/title/description?/brandImage?/selection/eligibility/resolveOptions/apply)',
+  /export type AdvancedQuestion = \{[\s\S]*?\bid:[\s\S]*?titleKey:[\s\S]*?descriptionKey\?:[\s\S]*?brandImage\?:[\s\S]*?selection:[\s\S]*?eligibility:[\s\S]*?resolveOptions:[\s\S]*?\bapply:[\s\S]*?\};/.test(advSrc));
 check('the old per-mode API is GONE — no mode/fetchOptions/applyAnswer/applyMulti/liveCount on questions',
   !/\bmode:\s*'(single|multi)'/.test(advSrc) && !/fetchOptions\s*[:(]/.test(advSrc)
   && !/applyAnswer\b/.test(advSrc) && !/applyMulti\b/.test(advSrc) && !/\bliveCount:/.test(advSrc));
@@ -64,6 +64,15 @@ check('a live count pill renders on EVERY option row (both modes)',
   /countPill/.test(cardSrc) && /grouped\(option\.count\)/.test(cardSrc));
 check('progress is animated and shared',
   /Animated\.timing/.test(cardSrc) && /progFill/.test(cardSrc));
+check('numeric progress caption (Question {cur} of {total}) renders beside the bar for every question',
+  /Question \{cur\} of \{total\}/.test(cardSrc) && /progNum/.test(cardSrc));
+check('skip-all link discloses how many questions remain',
+  /Skip remaining \(\{count\}\) and search now/.test(cardSrc));
+
+// ── Brand image: card-owned registry + one shared slot; questions supply only a string TOKEN ─────
+check('brand images are card-owned: registry in the card, single shared slot, token-only config',
+  /BRAND_IMAGES/.test(cardSrc) && /brandStrip/.test(cardSrc)
+  && !/require\(/.test(advSrc) && /brandImage: 'ejari-rnpl'/.test(advSrc));
 
 // ── Select-then-confirm interaction for ALL ──────────────────────────────────────────────────────
 check('every question is select-then-confirm: rows select, the footer commits',

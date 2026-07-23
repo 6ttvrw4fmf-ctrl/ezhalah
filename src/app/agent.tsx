@@ -1702,6 +1702,7 @@ export default function Agent() {
             <AdvancedQuestionCard
               titleKey={ageFlow.question.titleKey}
               descriptionKey={ageFlow.question.descriptionKey}
+              brandImage={ageFlow.question.brandImage}
               selection={ageFlow.question.selection}
               options={ageFlow.options}
               unknownCount={ageFlow.unknownCount}

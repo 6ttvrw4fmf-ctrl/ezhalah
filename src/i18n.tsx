@@ -337,6 +337,11 @@ const AR: Record<string, string> = {
   'Show {count} results': 'عرض {count} نتيجة',
   'Show results': 'عرض النتائج',
   'Results update as you choose': 'تُحدَّث النتائج مع كل اختيار',
+  // Card redesign (owner 2026-07-21): numeric question progress + remaining-count skip link, and the
+  // RNPL question's pay-monthly-not-yearly subtitle (neutral, descriptive — never advice).
+  'Question {cur} of {total}': 'السؤال {cur} من {total}',
+  'Skip remaining ({count}) and search now': 'تخطي الباقي ({count}) وابحث الآن',
+  'Rent now and pay monthly instead of one annual payment': 'استأجر الآن وادفع شهريًا بدلًا من دفعة سنوية واحدة',
 
   // Interview option labels
   'Pool': 'مسبح',
