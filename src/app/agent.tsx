@@ -1040,8 +1040,13 @@ export default function Agent() {
         saidRef.current = [];
         beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
         const result = await runQuery(turn.query);
+        // Bug fix (English-leak audit, 2026-07-18): this was comparing `v` — the user's raw MESSAGE
+        // TEXT — against the literal string 'ar', which is never true for a real Arabic sentence, so
+        // the English branch fired almost unconditionally. `loc ?? locale` is the same "effective
+        // language for this turn" expression already used two lines above to drive setLocale — this
+        // is a language check, not a message-content check.
         const reply = forcedBroad
-          ? `${v === 'ar'
+          ? `${(loc ?? locale) === 'ar'
               ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
               : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query)}`
           : buildScrapeIntro(result.query ?? turn.query);
