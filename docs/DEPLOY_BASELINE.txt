@@ -1,4 +1,4 @@
-4acb247a117f18a4bb1cbc990ff02f91cfb8f80c
+b4ecf56
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
@@ -199,3 +199,8 @@
 #   https://ezhalah-app.vercel.app/ (entry-9af2d249015d9f3c9be12a685c3e9750.js) contains all 4 new
 #   code markers (ejari-rnpl ×3, Question {cur} of {total} ×2, Skip remaining ({count}) ×2,
 #   pay-monthly key ×2).
+
+# 2026-07-24: advanced 4acb247(#187) -> b4ecf56(#195) after safe-deploy of #188-#195.
+#   Deploy dpl_88VQi2MABH3aeGpt3D21ZpTx4Nw2 READY; canonical alias verified serving this build
+#   (#194-specific agent synonyms present in the live bundle). CLI hit a transient ETIMEDOUT
+#   on status-poll AFTER the deploy succeeded, so this baseline advance is done manually.
