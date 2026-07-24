@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -401,6 +402,12 @@ export default function Agent() {
   const [stopped, setStopped] = useState(false);
   // Note #5 — Share sheet visibility in AI Agent mode. The button stays in the header throughout.
   const [shareOpen, setShareOpen] = useState(false);
+  // Share button press feel — reuses ModeSwitch's own spring constants (stiffness 260, damping 26,
+  // mass 0.7) so the header's two controls share one motion language (design review 2026-07-24;
+  // mirrors the same redesign applied to the home screen's share button for cross-screen consistency).
+  const shareScale = useRef(new Animated.Value(1)).current;
+  const shareSpring = (toValue: number) =>
+    Animated.spring(shareScale, { toValue, stiffness: 260, damping: 26, mass: 0.7, useNativeDriver: Platform.OS !== 'web' }).start();
   // ChatGPT-style feedback confirmation: a small «شكراً على ملاحظتك» toast at the TOP of the chat
   // (above the conversation, below the header) that appears briefly after a 👍/👎 and auto-dismisses
   // ~2.4s later. (owner 2026-07-09: like ChatGPT — not next to the buttons.) Fade/slide via the CSS
@@ -1316,8 +1323,19 @@ export default function Agent() {
         <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
         {/* Note #5 — Share is ALWAYS visible the moment the user is in AI Agent mode. Not gated on
             results, not gated on a completed search. Throughout the entire experience. (user request.) */}
-        <Pressable onPress={() => setShareOpen(true)} style={s.shareIcon} hitSlop={8}>
-          <Ionicons name="share-social-outline" size={20} color={colors.ink} />
+        {/* Redesigned to match the home screen's share button (design review 2026-07-24) — same
+            tint fill/hairline/height/radius as ModeSwitch's own track, so the pill + share cluster
+            reads as one continuous control across both screens, not just within one. */}
+        <Pressable
+          onPress={() => setShareOpen(true)}
+          style={({ pressed }) => [s.shareIcon, pressed && s.shareIconPressed]}
+          hitSlop={8}
+          onPressIn={() => shareSpring(0.94)}
+          onPressOut={() => shareSpring(1)}
+        >
+          <Animated.View style={{ transform: [{ scale: shareScale }] }}>
+            <Ionicons name="share-outline" size={18} color={colors.chipIcon} />
+          </Animated.View>
         </Pressable>
       </View>
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
@@ -1725,7 +1743,18 @@ const s = StyleSheet.create({
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
   title: { fontSize: 14, fontWeight: '700', color: colors.ink },
   // Note #5 — share icon sits beside the Filter pill in the agent header.
-  shareIcon: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', marginLeft: 4 },
+  shareIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 4,
+    backgroundColor: colors.tint,
+    borderWidth: 1,
+    borderColor: colors.tintLine,
+  },
+  shareIconPressed: { opacity: 0.85 },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },
 
   scroll: { paddingHorizontal: space.screenSide, alignItems: 'center', paddingTop: 4 },

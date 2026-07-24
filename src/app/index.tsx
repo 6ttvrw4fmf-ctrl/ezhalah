@@ -257,6 +257,11 @@ export default function Home() {
   };
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  // Share button press feel — reuses ModeSwitch's own spring constants (stiffness 260, damping 26,
+  // mass 0.7) so the header's two controls share one motion language (design review 2026-07-24).
+  const shareScale = useRef(new RNAnimated.Value(1)).current;
+  const shareSpring = (toValue: number) =>
+    RNAnimated.spring(shareScale, { toValue, stiffness: 260, damping: 26, mass: 0.7, useNativeDriver: Platform.OS !== 'web' }).start();
 
   // Filter search funnels into the Ezhalah chat with listings inline (prototype parity — there is
   // no separate results page). The agent reads ?filter=… and runs it once on open. Pressing Search
@@ -540,8 +545,19 @@ export default function Home() {
               <RNAnimated.View style={reveal(badgeAnim, 10)}>
                 <ModeSwitch active="filter" onSwitch={() => router.push('/agent')} t={t} />
               </RNAnimated.View>
-              <Pressable style={s.shareBtn} hitSlop={8} onPress={onShare}>
-                <Ionicons name="share-social-outline" size={21} color={colors.ink} />
+              {/* Redesigned to rhyme with ModeSwitch's own track (same tint fill/hairline/height/
+                  radius) so the pill + share button read as one control cluster, not two unrelated
+                  widgets (design review 2026-07-24, synthesized from 3 independent proposals). */}
+              <Pressable
+                style={({ pressed }) => [s.shareBtn, pressed && s.shareBtnPressed]}
+                hitSlop={8}
+                onPress={onShare}
+                onPressIn={() => shareSpring(0.94)}
+                onPressOut={() => shareSpring(1)}
+              >
+                <RNAnimated.View style={{ transform: [{ scale: shareScale }] }}>
+                  <Ionicons name="share-outline" size={18} color={colors.chipIcon} />
+                </RNAnimated.View>
               </Pressable>
             </View>
           </View>
@@ -1134,7 +1150,17 @@ const s = StyleSheet.create({
   word: { fontSize: 12, fontWeight: '700', letterSpacing: 1.2, color: colors.ink },
   // The bar is forced LTR (see s.top), so `marginStart: 'auto'` pushes the badge away from the
   // left-pinned hamburger toward the share button on the right.
-  shareBtn: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  shareBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.tint,
+    borderWidth: 1,
+    borderColor: colors.tintLine,
+  },
+  shareBtnPressed: { opacity: 0.85 },
 
   hero: { alignItems: 'center', marginTop: 12, marginHorizontal: 4 },
   heroTitle: { fontSize: 31, fontWeight: '700', color: colors.primary, letterSpacing: -0.6, textAlign: 'center', lineHeight: 34 },
