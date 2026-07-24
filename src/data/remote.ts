@@ -397,8 +397,6 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   let cities: string[] | null = null;
   if (q.regionPin && (q.location || '').trim()) {
     cities = [arCity(q.location) || q.location];
-  } else if (lm?.ambiguous && lm.cities && lm.cities.length > 1) {
-    cities = [];
   } else if (lm?.exact && lm.kind === 'city' && lm.city) {
     cities = [arCity(lm.city) || lm.city];
   } else if (lm?.kind === 'region' && lm.cities && lm.cities.length) {
@@ -415,9 +413,15 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   // district name alone must NEVER silently fan out across every city that happens to share it
   // (confirmed live: «العليا» alone spans 13 distinct real cities). Resolve which real city/cities
   // those districts actually belong to via resolve_district_cities (grounded in the live listings
-  // themselves). STRICT `cities === null` (not `!cities.length`) — `cities` is also deliberately `[]`
-  // above when locationMatch already flagged an unrelated ambiguity; that verdict must not be
-  // re-litigated through this block's differently-tuned threshold.
+  // themselves). STRICT `cities === null` (not `!cities.length`) — an ALREADY-DISAMBIGUATED locationMatch
+  // (the `lm?.ambiguous` branch above, restricted to its own identified candidate cities) leaves
+  // `cities` non-null, so that verdict is never re-litigated through this block's differently-tuned
+  // threshold. FIXED 2026-07-24 (found live): an earlier version of the ambiguous branch set
+  // `cities = []` (→ p_cities:null, i.e. UNRESTRICTED) instead of the candidate list, and because
+  // `q.districts` is non-empty in this exact case, the honest-zero guard a few lines below (which only
+  // fires when districts is empty) never caught it either — a bare multi-city district reached via the
+  // AI-agent chat path (agent.tsx's 2-strike fallback) silently searched every city nationwide instead
+  // of restricting to the real candidates or honest-zeroing.
   if (cities === null && q.districts && q.districts.length && supabase) {
     const { data: districtCities } = await supabase.rpc('resolve_district_cities', { p_districts: q.districts });
     const dcRows = (districtCities as { city_ar: string; match_count: number }[] | null) ?? [];

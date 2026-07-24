@@ -1,3 +1,38 @@
+-- Harden location_search_candidates_ar's category-purity check for 'both'-macro types — 2026-07-21
+-- =============================================================================================
+-- Context (read-only audit 2026-07-17, project_residential-commercial-isolation-audit-2026-07-17):
+-- known_type_ar has exactly 2 rows with macro='both' — عمارة (Building, ~9,200 live rows) and
+-- غير معروف (unknown, ~3 rows). The RPC's purity clause is:
+--   (k.macro = p_category OR k.macro = 'both')
+-- For a 'both'-macro row this is an unconditional pass regardless of p_category — the RPC trusts
+-- the CALLER's p_tables scoping to have already restricted to the right table-kind, with zero
+-- independent check of its own. Today's shipped frontend never actually triggers this (it hardcodes
+-- Residential Building -> RES_TABLES only, Commercial Building -> COM_TABLES only, and the two
+-- misfile-recovery sweeps explicitly exclude عمارة), so this was audited as LATENT, not live-
+-- reachable. But the RPC is public (callable with the shipped anon key by anyone), so a caller that
+-- passes p_category alone (or a mismatched p_tables) gets no defense-in-depth at all for these rows.
+--
+-- Fix: derive table-kind INDEPENDENTLY from the row's own s.source_table suffix (every one of the
+-- 54 live source tables ends in exactly '_residential_listings' or '_commercial_listings' — verified
+-- live, zero exceptions, 2026-07-21) rather than trusting p_tables. A 'both'-macro row now only
+-- passes a non-null p_category if its OWN table-kind actually matches that category. An
+-- unrecognized p_category value (anything other than 'Residential'/'Commercial') falls back to the
+-- OLD permissive behavior for 'both' rows only — never a behavior change for a value the app
+-- doesn't send today.
+--
+-- Everything else in the function is byte-for-byte identical to the live definition (pulled via
+-- pg_get_functiondef immediately before writing this migration, per the RPC full-body-replace
+-- hazard rule) — only this one predicate changed. Parameter list is UNCHANGED (same signature), so
+-- this is a true REPLACE, not a new overload.
+--
+-- No backslash-escaping used in the LIKE patterns below on purpose: PostgreSQL's LIKE has no
+-- default escape character (must be declared explicitly via `... ESCAPE '\'`, see this repo's own
+-- 20260721095938_fix_search_cities_like_escaping_and_negative_limit.sql for the pattern) — an
+-- un-declared `\_` would be interpreted literally and never match. Not needed here anyway: the
+-- pattern is our own fixed literal, not attacker-controlled input, and an unescaped `_` wildcard
+-- still correctly matches the literal underscore in every real table name.
+-- =============================================================================================
+
 CREATE OR REPLACE FUNCTION public.location_search_candidates_ar(p_deal text DEFAULT NULL::text, p_cities text[] DEFAULT NULL::text[], p_districts text[] DEFAULT NULL::text[], p_tables text[] DEFAULT NULL::text[], p_platforms text[] DEFAULT NULL::text[], p_per_platform integer DEFAULT NULL::integer, p_limit integer DEFAULT 5000, p_region_ids integer[] DEFAULT NULL::integer[], p_types text[] DEFAULT NULL::text[], p_price_min numeric DEFAULT NULL::numeric, p_price_max numeric DEFAULT NULL::numeric, p_rent_period text DEFAULT NULL::text, p_area_min integer DEFAULT NULL::integer, p_area_max integer DEFAULT NULL::integer, p_beds_exact integer[] DEFAULT NULL::integer[], p_beds_min integer DEFAULT NULL::integer, p_bath_min integer DEFAULT NULL::integer, p_furnished boolean DEFAULT NULL::boolean, p_age_max integer DEFAULT NULL::integer, p_tenant text DEFAULT NULL::text, p_directions text[] DEFAULT NULL::text[], p_has_license boolean DEFAULT NULL::boolean, p_amenities text[] DEFAULT NULL::text[], p_offset integer DEFAULT 0, p_tables2 text[] DEFAULT NULL::text[], p_types2 text[] DEFAULT NULL::text[], p_age_min integer DEFAULT NULL::integer, p_bath_exact integer[] DEFAULT NULL::integer[], p_street_width_min smallint DEFAULT NULL::smallint, p_street_width_max smallint DEFAULT NULL::smallint, p_floor_min integer DEFAULT NULL::integer, p_floor_max integer DEFAULT NULL::integer, p_is_new_construction boolean DEFAULT NULL::boolean, p_category text DEFAULT NULL::text)
  RETURNS TABLE(source_table text, listing_id bigint, platform text, last_updated timestamp with time zone, region_ar text, city_ar text, district_ar text, total_count bigint)
  LANGUAGE sql
@@ -44,6 +79,10 @@ AS $function$
                  k.macro = p_category
                  or (
                    k.macro = 'both'
+                   -- Independent table-kind check (2026-07-21 hardening) — do not trust p_tables
+                   -- alone for 'both'-macro types (عمارة/غير معروف). Every live source_table ends in
+                   -- exactly one of these two suffixes (verified, zero exceptions). An unrecognized
+                   -- p_category value falls back to the prior permissive behavior for 'both' rows.
                    and (case p_category
                           when 'Residential' then s.source_table like '%_residential_listings'
                           when 'Commercial'  then s.source_table like '%_commercial_listings'
@@ -124,3 +163,13 @@ AS $function$
   )
   order by last_updated desc nulls last, source_table, listing_id;
 $function$;
+
+-- =============================================================================================
+-- ROLLBACK: re-apply the original clause (byte-identical to the pre-2026-07-21 live definition):
+--   and (p_category is null
+--        or exists (
+--          select 1 from known_type_ar k
+--          where k.type_ar = s.type_ar and (k.macro = p_category or k.macro = 'both')
+--        ))
+-- in place of the hardened block above, leaving every other line unchanged.
+-- =============================================================================================
