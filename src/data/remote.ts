@@ -543,6 +543,14 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
       ...scopeParams,
       ...rpcFilterParams(q),
       ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
+      // Carry forward any earlier-answered guided-flow question (e.g. RNPL) — found live 2026-07-24:
+      // without this, the age-bucket badges shown here silently ignored an already-selected amenities
+      // filter, showing counts far larger than what Search (and apartment_guided_counts_ar, which
+      // already receives these) actually returns for the same combination. Same pattern as
+      // fetchApartmentGuidedCounts() below; the RPC's own p_amenities/p_bath_min default to NULL
+      // (no-op) so an unanswered question never affects a call that omits them.
+      ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
+      ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
     }),
     AGE_COUNT_TIMEOUT_MS,
   );
