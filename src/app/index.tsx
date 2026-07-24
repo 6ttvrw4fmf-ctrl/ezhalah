@@ -556,7 +556,7 @@ export default function Home() {
                 onPressOut={() => shareSpring(1)}
               >
                 <RNAnimated.View style={{ transform: [{ scale: shareScale }] }}>
-                  <Ionicons name="share-outline" size={18} color={colors.chipIcon} />
+                  <Ionicons name="share-outline" size={19} color={colors.chipIcon} />
                 </RNAnimated.View>
               </Pressable>
             </View>
@@ -1150,15 +1150,22 @@ const s = StyleSheet.create({
   word: { fontSize: 12, fontWeight: '700', letterSpacing: 1.2, color: colors.ink },
   // The bar is forced LTR (see s.top), so `marginStart: 'auto'` pushes the badge away from the
   // left-pinned hamburger toward the share button on the right.
+  // Redesigned to match the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius,
+  // soft green-tinted lift) so the pill + share read as one control cluster (owner redesign 2026-07-24 r2).
   shareBtn: {
-    width: 40,
-    height: 40,
+    width: 46,
+    height: 46,
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.tint,
     borderWidth: 1,
     borderColor: colors.tintLine,
+    ...cardShadow,
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
   },
   shareBtnPressed: { opacity: 0.85 },
 
