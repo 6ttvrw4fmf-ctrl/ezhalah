@@ -616,10 +616,23 @@ export function parseQuery(text: string): SearchQuery {
     }
   }
   if (foundType) {
-    // Normalize to the clean type (same as the edge + filter paths).
-    const norm = normalizeType(foundType, foundCat === 'Commercial' ? 'com' : 'res');
-    q.type = norm.clean === 'Unknown' ? null : norm.clean;
-    q.category = norm.macro;
+    if (isCleanType(foundType)) {
+      // AR_TYPE/TYPE_SYNONYMS can resolve directly to an already-CLEAN type name (e.g. AR_TYPE's
+      // 'مجمع سكني' -> 'Residential Building') — use it directly with its real macro, exactly like
+      // queryFromBackend already does above (line ~408), instead of re-running it through
+      // normalizeType(), which expects a RAW type and has no reason to carry a self-mapping entry
+      // for every clean name. Found live 2026-07-24: 'Residential Building' has no such self-entry,
+      // so it fell through normalizeType()'s kind-based Unknown fallback, silently dropping the type
+      // filter AND flipping category to Commercial (foundCat above is wrong for it too — RES_TYPES
+      // only knows the legacy raw 'Building', not the clean 'Residential Building').
+      q.type = foundType;
+      q.category = CLEAN_MACRO[foundType];
+    } else {
+      // Normalize to the clean type (same as the edge + filter paths).
+      const norm = normalizeType(foundType, foundCat === 'Commercial' ? 'com' : 'res');
+      q.type = norm.clean === 'Unknown' ? null : norm.clean;
+      q.category = norm.macro;
+    }
   }
 
   const beds = t.match(/(\d+)\s*(?:bed|bedroom|br)\b/) ?? text.match(/(\d+)\s*(?:غرف|غرفة|غرفه)/);
