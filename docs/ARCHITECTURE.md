@@ -605,12 +605,21 @@ toor). Freshness monitoring closes the "cron succeeded but wrote nothing" gap.
   labels (e.g. `امارة مكة-الطائف` mis-resolved), catalog duplicates (الهفوف, فرسان each with two
   city_ids), hamza-less catalog spellings (`ابها`, `الاحساء`), Souq24 exact-join NULLs. Search recall is
   already spelling-insensitive; these are display/grouping cosmetics only.
-- **Property-type hierarchy details:** whether `أرض` (generic land, still bundled into Residential Land)
-  should be its own filter button; Bank / Telecom Tower grouping. (`مكاتب مشتركة` = shared offices is
-  currently the only unreachable raw type — an Office row misfiled in the residential table; ask owner.)
+- **Property-type hierarchy details:** Bank / Telecom Tower grouping. (`مكاتب مشتركة` = shared offices
+  was an unreachable raw type in the AI agent's free-text recognition — fixed 2026-07-23, see below.)
   **RESOLVED 2026-07-21:** `أرض زراعية` (Agriculture Plot) is now its own clean type/filter button,
   split out of Farm (owner decision — it outnumbered real Farm listings 5:1, so the merged "Farm"
   button mostly surfaced bare agricultural land, not actual farm properties).
+  **RESOLVED 2026-07-23 (raw/undeveloped land):** whether generic/raw `أرض` (bare, unqualified "land" —
+  the bucket `أرض خام`/`أرض بيضاء`/vacant-land listings would fall into) should be its own filter
+  button. Investigated: no such term exists anywhere in the codebase or live data (0 rows for every
+  candidate spelling checked); it consistently falls into `Residential Land` via the generic `أرض`
+  substring/exact-match fallback, uniformly across ingestion, the taxonomy, and both AI-agent
+  surfaces — not a bug, a working default. Three source platforms (Muktamel, Era Pulse, a retired
+  Deal integration) distinguish raw land in their own data models before Ezhalah's ingestion collapses
+  it, so real raw-land listings likely exist today, indistinguishable from ordinary residential plots.
+  **Owner decision: leave as-is** — no split, no code change (project memory
+  `project_rawland-classification-decision-2026-07-23`).
 - **Rent scaling:** monthly price ×12 handling vs Gathern's pre-annualized `price_annual`.
 - **PRD §13 business items:** revenue model (CPC-first decided), **REGA license number** (`XXXXXXXX`
   placeholder in About/Settings — needs the real number), signed partner data agreements, PDPL retention
