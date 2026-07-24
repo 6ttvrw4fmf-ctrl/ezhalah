@@ -27,6 +27,7 @@ const MemoResultCard = memo(ResultCard, (prev, next) =>
   prev.listing === next.listing && prev.rank === next.rank && prev.variant === next.variant);
 import HeroBackground from '@/components/HeroBackground';
 import ShareSheet from '@/components/ShareSheet';
+import ModeSwitch from '@/components/ModeSwitch';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard, PopIn } from '@/components/ResultCard';
 import { parseQuery, respond } from '@/data/agent';
@@ -1306,26 +1307,13 @@ export default function Agent() {
         ) : (
           <View style={{ width: 6 }} />
         )}
-        {/* Landing state (only the agent's greeting so far) → "✨ Ezhalah AI Agent". Once the USER sends
-            a message or a filter search produces results, the header collapses to just the brand
-            "Ezhalah" with no sparkle. The greeting is role 'agent', so it doesn't count as "started".
-            (user request: "after he sends a message just show Ezhalah, remove the star".) */}
-        {(() => {
-          const started = msgs.some((m) => m.role === 'user' || m.role === 'results');
-          return (
-            <View style={s.titleWrap}>
-              {!started && <Ionicons name="sparkles" size={16} color={colors.primary} />}
-              <Text ref={noTranslateRef} style={s.title}>{started ? t('Ezhalah') : t('Ezhalah AI Agent')}</Text>
-            </View>
-          );
-        })()}
+        {/* Brand — always just "إزهله" here now: the ModeSwitch pill's raised «المساعد الذكي» tab
+            identifies the screen, so the old collapsing "✨ Ezhalah AI Agent"→"Ezhalah" title and the
+            small تصفية button are both replaced by the shared two-tab control (same spot as home's,
+            so switching reads as one continuous control). (owner top-nav redesign, 2026-07-24.) */}
+        <Text ref={noTranslateRef} style={s.title}>{t('Ezhalah')}</Text>
         <View style={{ flex: 1 }} />
-        {/* Precise tab removed from the header (user request) — refining now happens inline, via the
-            "I can get you something more precise." button under the results. */}
-        <Pressable onPress={() => router.replace('/')} style={s.filterBtn} hitSlop={8}>
-          <Ionicons name="options-outline" size={15} color={colors.primary} />
-          <Text style={s.filterText}>{t('Filter')}</Text>
-        </Pressable>
+        <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
         {/* Note #5 — Share is ALWAYS visible the moment the user is in AI Agent mode. Not gated on
             results, not gated on a completed search. Throughout the entire experience. (user request.) */}
         <Pressable onPress={() => setShareOpen(true)} style={s.shareIcon} hitSlop={8}>
@@ -1735,13 +1723,10 @@ const s = StyleSheet.create({
   fbToastText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
-  titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   title: { fontSize: 14, fontWeight: '700', color: colors.ink },
-  filterBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12 },
   // Note #5 — share icon sits beside the Filter pill in the agent header.
   shareIcon: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', marginLeft: 4 },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },
-  filterText: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
 
   scroll: { paddingHorizontal: space.screenSide, alignItems: 'center', paddingTop: 4 },
   // Tight, connected vertical rhythm — the whole search flow (summary → phrase → searching →
