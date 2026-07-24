@@ -538,16 +538,10 @@ export default function Home() {
               </View>
             ) : null}
             <View style={s.topRight}>
-              {/* Two-tab ModeSwitch pill [تصفية | المساعد الذكي] — replaces the old AI-only badge so
-                  BOTH search modes are always visible; تصفية is the raised tab here. Same spot on the
-                  /agent screen, so switching reads as one continuous control. (owner redesign 2026-07-24;
-                  keeps the 2026-06-22 rule: the AI entry point shows on mobile too.) */}
-              <RNAnimated.View style={reveal(badgeAnim, 10)}>
-                <ModeSwitch active="filter" onSwitch={() => router.push('/agent')} t={t} />
-              </RNAnimated.View>
-              {/* Redesigned to rhyme with ModeSwitch's own track (same tint fill/hairline/height/
-                  radius) so the pill + share button read as one control cluster, not two unrelated
-                  widgets (design review 2026-07-24, synthesized from 3 independent proposals). */}
+              {/* Header keeps just Share now — the Filter / AI Agent ModeSwitch moved DOWN into the
+                  hero composition (below) so the eye flows headline → choose mode → search card,
+                  instead of the control floating in the corner. Share balances the brand on the left.
+                  (owner redesign 2026-07-24 r3.) */}
               <Pressable
                 style={({ pressed }) => [s.shareBtn, pressed && s.shareBtnPressed]}
                 hitSlop={8}
@@ -569,6 +563,13 @@ export default function Home() {
             {/* Note #1 — tagline below the description. */}
             <RNAnimated.Text style={[s.heroTagline, reveal(subAnim, 10)]}>{t('Ezhalah, and may your luck be good.')}</RNAnimated.Text>
           </View>
+
+          {/* Filter / AI Agent — the hero's focal choice: centered between the headline and the search
+              card so opening Ezhalah reads as "pick how you search," then flows into the card. Moved
+              here from the top-right corner. (owner redesign 2026-07-24 r3.) */}
+          <RNAnimated.View style={[s.modeWrap, reveal(badgeAnim, 12)]}>
+            <ModeSwitch active="filter" onSwitch={() => router.push('/agent')} t={t} />
+          </RNAnimated.View>
 
           {/* Search card */}
           <View style={s.card}>
@@ -1170,13 +1171,15 @@ const s = StyleSheet.create({
   shareBtnPressed: { opacity: 0.85 },
 
   hero: { alignItems: 'center', marginTop: 12, marginHorizontal: 4 },
+  // The Filter / AI Agent control, centered in the hero flow between the tagline and the card.
+  modeWrap: { alignSelf: 'center', marginTop: 20 },
   heroTitle: { fontSize: 31, fontWeight: '700', color: colors.primary, letterSpacing: -0.6, textAlign: 'center', lineHeight: 34 },
   heroSub: { fontSize: 13.5, fontWeight: '600', color: colors.dark, textAlign: 'center', marginTop: 5, lineHeight: 20 },
   heroTagline: { fontSize: 12.5, fontWeight: '700', color: colors.primary, textAlign: 'center', marginTop: 8, fontStyle: 'italic' },
   // Small inline hint under the Rent Monthly/Yearly toggle — explains the period the user picked.
   rentHint: { fontSize: 11.5, color: colors.muted, marginTop: 6, paddingHorizontal: 4, lineHeight: 16 },
 
-  card: { marginTop: 46, backgroundColor: colors.surface, borderRadius: radius.sheet, borderWidth: 1, borderColor: colors.fieldLine, padding: space.card, ...cardShadow },
+  card: { marginTop: 22, backgroundColor: colors.surface, borderRadius: radius.sheet, borderWidth: 1, borderColor: colors.fieldLine, padding: space.card, ...cardShadow },
   // "مسح الكل" (Clear All) — only rendered when hasActiveFilters(query), so an already-empty filter
   // never shows a clear control with nothing to clear (mirrors the location field's own per-field
   // clear icon, which is likewise conditional on query.location.length > 0).
