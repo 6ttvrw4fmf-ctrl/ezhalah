@@ -26,7 +26,11 @@ jobs:
     timeout-minutes: 180
     strategy:
       fail-fast: false          # one shard failing never blocks the others
-      max-parallel: 12
+      # Gathern rate-limits (HTTP 429) above ~2 req/s from datacenter IPs — 12 shards at once tripped it
+      # and stalled the tail ~89% (2026-07-23 diagnosis: 11× 429 in run 30081788882). Cap concurrency to
+      # 2 shards; with SCRAPE_MIN_INTERVAL below that keeps the aggregate near the ~1 req/s the manual
+      # probe sustained with ZERO blocks. Still covers all 12 stride-shards, just over more waves.
+      max-parallel: 2
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
@@ -42,5 +46,5 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SCRAPE_MIN_INTERVAL: "0.4"
+          SCRAPE_MIN_INTERVAL: "0.9"   # ~1 req/s per shard × 2 concurrent ≈ the block-free probe rate
         run: python -m scrapers.gathern.run --backfill-details --shard ${{ matrix.shard }}/12
