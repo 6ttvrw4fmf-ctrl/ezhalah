@@ -1334,7 +1334,7 @@ export default function Agent() {
           onPressOut={() => shareSpring(1)}
         >
           <Animated.View style={{ transform: [{ scale: shareScale }] }}>
-            <Ionicons name="share-outline" size={18} color={colors.chipIcon} />
+            <Ionicons name="share-outline" size={19} color={colors.chipIcon} />
           </Animated.View>
         </Pressable>
       </View>
@@ -1743,9 +1743,11 @@ const s = StyleSheet.create({
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
   title: { fontSize: 14, fontWeight: '700', color: colors.ink },
   // Note #5 — share icon sits beside the Filter pill in the agent header.
+  // Matches the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius, soft lift) so
+  // the pill + share read as one cluster across both screens (owner redesign 2026-07-24 r2).
   shareIcon: {
-    width: 40,
-    height: 40,
+    width: 46,
+    height: 46,
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1753,6 +1755,11 @@ const s = StyleSheet.create({
     backgroundColor: colors.tint,
     borderWidth: 1,
     borderColor: colors.tintLine,
+    ...cardShadow,
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
   },
   shareIconPressed: { opacity: 0.85 },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },
