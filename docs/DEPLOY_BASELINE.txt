@@ -1,4 +1,4 @@
-b4ecf56
+0b3afee
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
@@ -204,3 +204,22 @@ b4ecf56
 #   Deploy dpl_88VQi2MABH3aeGpt3D21ZpTx4Nw2 READY; canonical alias verified serving this build
 #   (#194-specific agent synonyms present in the live bundle). CLI hit a transient ETIMEDOUT
 #   on status-poll AFTER the deploy succeeded, so this baseline advance is done manually.
+# 2026-07-24: advanced b4ecf56(#195) -> 0b3afee (#193 test-only + #196 baseline-doc) after
+#   safe-deploy.sh deployed main 0b3afee to production. Deploy dpl_G42FNc933BgeWWTaKVWD1oksPGwk
+#   READY; canonical alias verified serving THIS deployment (get_deployment + `vercel inspect
+#   ezhalah-app.vercel.app` both resolve to dpl_G42FN, githubCommitSha=0b3afee); bundle unchanged
+#   (entry-a8a24e543a11a3474c02c5faa680cbf7.js — #193/#196 carry no web-bundle delta) with
+#   supabase.co inlined (re-checked; the deploy's 90s poll had a transient warn); live search RPC
+#   36,094 rows. The automated baseline advance was again blocked ONLY by the schema-drift
+#   bookkeeping gate (0 duplicate_overloads — NOT the PGRST203 outage class), so it is recorded
+#   manually. This PR (chore/recover-6-drifted-migrations) ALSO closes that gap: it recovers ALL
+#   SIX drifted migrations verbatim into supabase/migrations/ (20260721105222 harden_search_
+#   category_purity, 20260721105827 gathern_district_recovery [byte-identical branch original],
+#   20260721112816 seed_gathern_hayy_districts [byte-identical branch original], 20260723171335
+#   registry_kind_classification, 20260723171449 monitors_filter_kind_source, 20260723171528
+#   legacy_alert_tables_filter_kind_source) — 4 recovered byte-perfect from schema_migrations
+#   (md5-verified end-to-end via a temporary anon RPC, now dropped) + 2 from their PR branches.
+#   Post-recovery the live drift gate shows missing_in_git down from 6 -> the six cleared; one
+#   NEWER item remains (20260724132204 property_age_option_counts_ar_add_amenities_bathmin) from a
+#   DIFFERENT concurrent session's 2026-07-24 filter-audit work — to be mirrored by that session,
+#   not this PR.
