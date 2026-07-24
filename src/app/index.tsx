@@ -9,6 +9,7 @@ import HeroBackground from '@/components/HeroBackground';
 import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
+import ModeSwitch from '@/components/ModeSwitch';
 import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption } from '@/data/locations';
@@ -39,41 +40,9 @@ const AnimatedPressable = RNAnimated.createAnimatedComponent(Pressable);
 const setLtr = (node: any) => {
   if (Platform.OS === 'web' && node?.setAttribute) node.setAttribute('dir', 'ltr');
 };
-// Keep the AgentBadge's own internal icon/text arrangement following the app locale even though
-// its parent row is forced LTR — pass the locale's direction back onto the badge element.
-const makeDirRef = (dir: 'ltr' | 'rtl') => (node: any) => {
-  if (Platform.OS === 'web' && node?.setAttribute) node.setAttribute('dir', dir);
-};
-
-// The "Ezhalah AI Agent" badge — the hero call-to-action in the top bar. It gently breathes: the
-// tinted fill + border drift between two greens on a loop, and the sparkles twinkle (fade + scale)
-// so the eye is drawn to it. Driven by React Native's Animated.loop, which loops reliably on web
-// (reanimated's infinite withRepeat does not).
-function AgentBadge({ onPress, t, isRTL }: { onPress: () => void; t: (s: string) => string; isRTL: boolean }) {
-  const pulse = useRef(new RNAnimated.Value(0)).current;
-  useEffect(() => {
-    const half = (toValue: number) =>
-      RNAnimated.timing(pulse, { toValue, duration: 1300, easing: RNEasing.inOut(RNEasing.quad), useNativeDriver: false });
-    const loop = RNAnimated.loop(RNAnimated.sequence([half(1), half(0)]));
-    loop.start();
-    return () => loop.stop();
-  }, [pulse]);
-  const bg = pulse.interpolate({ inputRange: [0, 1], outputRange: ['#e8f6ee', '#d3efdf'] });
-  const border = pulse.interpolate({ inputRange: [0, 1], outputRange: ['#cfe8d6', '#9fd4b3'] });
-  const starOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] });
-  const starScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.18] });
-  return (
-    <AnimatedPressable ref={makeDirRef(isRTL ? 'rtl' : 'ltr')} style={[s.agentMini, { backgroundColor: bg, borderColor: border }]} onPress={onPress}>
-      <RNAnimated.View style={{ opacity: starOpacity, transform: [{ scale: starScale }] }}>
-        <Ionicons name="sparkles" size={20} color={colors.primary} />
-      </RNAnimated.View>
-      <View style={s.agentMiniTx}>
-        <Text ref={noTranslateRef} style={s.agentMiniT}>{t('Ezhalah AI Agent')}</Text>
-        <Text style={s.agentMiniS}>{t("Tell me what you want and I'll find it")}</Text>
-      </View>
-    </AnimatedPressable>
-  );
-}
+// The old breathing "Ezhalah AI Agent" badge (and its makeDirRef helper) lived here — replaced by
+// the shared two-tab ModeSwitch pill (src/components/ModeSwitch.tsx), which shows BOTH search modes
+// at once in the top bar. (owner top-nav redesign, 2026-07-24.)
 
 // Small NON-BLOCKING helper note shown under the Price / Area range inputs. It only explains a
 // confusing entry (min>max, min==max, 0 = no limit, one-sided range). Pure UI hint — it never blocks
@@ -224,7 +193,7 @@ export default function Home() {
   // in an ambiguous bidi state: digits are a "weak" bidi type, and inserting one into an RTL-anchored,
   // dir="auto" text node is a documented WebKit-specific caret/rendering defect (confirmed NOT
   // reproducible in Chromium — the bidi/caret implementations diverge — matching the iOS-only report).
-  // Like setLtr/makeDirRef above, react-native-web does not support `direction` as a style property (it
+  // Like setLtr above, react-native-web does not support `direction` as a style property (it
   // throws), so the DOM `dir` attribute is set directly via a callback ref that ALSO keeps populating the
   // existing ref object these 5 boxes already use for `.focus()` elsewhere in this file.
   const mergeLtrRef = useCallback((ref: { current: TextInput | null }) => (node: any) => {
@@ -281,7 +250,7 @@ export default function Home() {
     }, 220);
   };
   // Attaches a ref AND (web-only) sets scroll-margin-top, so every anchor gets the same gentle offset
-  // with zero extra plumbing at each call site — same pattern already used for setLtr/makeDirRef above.
+  // with zero extra plumbing at each call site — same pattern already used for setLtr above.
   const withAnchor = (ref: React.MutableRefObject<View | null>) => (node: any) => {
     ref.current = node;
     if (Platform.OS === 'web' && node?.style) node.style.scrollMarginTop = `${SCROLL_REVEAL_OFFSET}px`;
@@ -564,10 +533,12 @@ export default function Home() {
               </View>
             ) : null}
             <View style={s.topRight}>
-              {/* The "Ezhalah AI Agent" badge now shows on MOBILE too (not just docked/desktop) so the
-                  AI agent is visible everywhere — parity with the website. (user request 2026-06-22.) */}
+              {/* Two-tab ModeSwitch pill [تصفية | المساعد الذكي] — replaces the old AI-only badge so
+                  BOTH search modes are always visible; تصفية is the raised tab here. Same spot on the
+                  /agent screen, so switching reads as one continuous control. (owner redesign 2026-07-24;
+                  keeps the 2026-06-22 rule: the AI entry point shows on mobile too.) */}
               <RNAnimated.View style={reveal(badgeAnim, 10)}>
-                <AgentBadge onPress={() => router.push('/agent')} t={t} isRTL={isRTL} />
+                <ModeSwitch active="filter" onSwitch={() => router.push('/agent')} t={t} />
               </RNAnimated.View>
               <Pressable style={s.shareBtn} hitSlop={8} onPress={onShare}>
                 <Ionicons name="share-social-outline" size={21} color={colors.ink} />
@@ -1163,10 +1134,6 @@ const s = StyleSheet.create({
   word: { fontSize: 12, fontWeight: '700', letterSpacing: 1.2, color: colors.ink },
   // The bar is forced LTR (see s.top), so `marginStart: 'auto'` pushes the badge away from the
   // left-pinned hamburger toward the share button on the right.
-  agentMini: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1.5, borderRadius: 16, paddingVertical: 9, paddingStart: 12, paddingEnd: 15, ...cardShadow, shadowOpacity: 0.1, shadowRadius: 10 },
-  agentMiniTx: { gap: 1.5 },
-  agentMiniT: { fontSize: 12.5, fontWeight: '800', color: colors.ink },
-  agentMiniS: { fontSize: 9.5, fontWeight: '500', color: colors.accentLeaf },
   shareBtn: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
 
   hero: { alignItems: 'center', marginTop: 12, marginHorizontal: 4 },

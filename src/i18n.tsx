@@ -93,6 +93,9 @@ const AR: Record<string, string> = {
   'Sign in': 'تسجيل الدخول',
   'Save your searches': 'احفظ عمليات بحثك',
   'Filter': 'تصفية',
+  // Top-nav ModeSwitch pill's AI tab — deliberately shorter than the full 'Ezhalah AI Agent' badge
+  // title so the two-tab control stays compact. (top-nav redesign, 2026-07-24.)
+  'Smart Assistant': 'المساعد الذكي',
 
   // Home
   'Find your place': 'اعثر على مكانك',
