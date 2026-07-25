@@ -4,13 +4,15 @@
 #
 # WHY a SEPARATE workflow: these fields live only on each unit's own page (gathern.co/view/…), one
 # HTTP request per unit — far heavier than the list feed. So it runs on its own cadence, NEVER inside
-# the crawl. 12 parallel shards (one runner = one IP each) each take a stride (rows[i::12]) of the
-# ACTIVE rows still missing a description. Idempotent + resumable — re-dispatching just continues
-# filling whatever's still empty. Probed 2026-07-21: 77/80 HTTP 200, ZERO blocks at ~2 req/s → free,
-# no proxies. At ~24k active rows / 12 shards ≈ 2k rows/shard × ~1.3s ≈ ~45 min per shard.
+# the crawl. Idempotent + resumable — re-dispatching just continues filling whatever's still empty.
 #
-# Dispatch manually (Actions → "Gathern detail backfill" → Run workflow), or wire pg_cron →
-# workflow_dispatch like gathern-sync for an ongoing top-up of newly-scraped units.
+# CONCURRENCY = 1 (no shard matrix). 2026-07-24 diagnosis: Gathern rate-limits (HTTP 429) as soon as
+# MORE THAN ONE runner/IP fetches detail pages at once — the old 12-shard matrix stalled the tail at
+# ~89% (11× 429 in run 30081788882), and even 2 shards @0.9s still tripped it (8 then 20 blocks in
+# runs 30093444733 / 30094829420). A single runner at ~1 req/s sustained 44 consecutive fetches with
+# ZERO blocks in the manual probe. The worklist is now ordered freshest-first (run.py: last_seen_at
+# DESC), so the dead-404 tail (delisted units — nothing to fetch) sinks to the end and the fillable
+# rows go first. ~2.5k missing rows × ~1.4s ≈ ~60 min in one pass; the 180-min timeout has ample room.
 name: Gathern detail backfill
 
 on:
@@ -24,15 +26,6 @@ jobs:
   backfill:
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    strategy:
-      fail-fast: false          # one shard failing never blocks the others
-      # Gathern rate-limits (HTTP 429) above ~2 req/s from datacenter IPs — 12 shards at once tripped it
-      # and stalled the tail ~89% (2026-07-23 diagnosis: 11× 429 in run 30081788882). Cap concurrency to
-      # 2 shards; with SCRAPE_MIN_INTERVAL below that keeps the aggregate near the ~1 req/s the manual
-      # probe sustained with ZERO blocks. Still covers all 12 stride-shards, just over more waves.
-      max-parallel: 2
-      matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -42,9 +35,9 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
-      - name: Gathern detail backfill shard ${{ matrix.shard }}/12
+      - name: Gathern detail backfill (single gentle runner)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SCRAPE_MIN_INTERVAL: "0.9"   # ~1 req/s per shard × 2 concurrent ≈ the block-free probe rate
-        run: python -m scrapers.gathern.run --backfill-details --shard ${{ matrix.shard }}/12
+          SCRAPE_MIN_INTERVAL: "1.0"   # ~1 req/s single runner = the block-free rate the probe proved
+        run: python -m scrapers.gathern.run --backfill-details

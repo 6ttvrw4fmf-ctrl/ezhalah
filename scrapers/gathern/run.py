@@ -362,10 +362,17 @@ def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
     work: list[dict] = []
     offset = 0
     while True:  # PostgREST caps at 1000 rows/request — page the full worklist
+        # Order freshest-first (last_seen_at DESC): rows still appearing in the live feed almost always
+        # still HAVE a fetchable description, while the oldest ids are disproportionately dead 404s
+        # (delisted units — nothing to fetch, they just re-fail every run). Fresh-first front-loads the
+        # fillable work so a partial/interrupted run captures the valuable rows and the dead tail sinks
+        # to the end. (id is the tie-breaker for a stable total order across the paged .range() calls.)
         res = (client.table("gathern_residential_listings")
                .select("ad_number, listing_url, additional_info")
                .eq("source", SOURCE).eq("active", True)
-               .is_("description", "null").order("id").range(offset, offset + 999).execute())
+               .is_("description", "null")
+               .order("last_seen_at", desc=True).order("id")
+               .range(offset, offset + 999).execute())
         batch = (res.data if res else None) or []
         work.extend(batch)
         if len(batch) < 1000:
