@@ -1203,11 +1203,18 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
       for (const r of scoped) r.l.proximityBoost = scoreListingProximity(blobOf(r.l), q.proximity!);
     } else {
       // ON: precomputed listing_location_relations via the loc_rel_rank RPC.
+      // p.name has its category noun stripped (proximity.ts: "مستشفى الحبيب" -> name "الحبيب", for
+      // display/dedup), but listing_location_relations.specific_landmark_norm always KEEPS the noun
+      // ("مستشفى الحبيب") — sending the stripped name means it can never match, so the RPC always
+      // returns boost=0 for named landmarks (found live 2026-07-25). Reconstruct the noun-inclusive
+      // form the same way p.text already does (phrase + noun + name), by stripping just the phrase
+      // prefix back off p.text. Category-only asks (p.name empty) stay null so the RPC's separate
+      // category-tier fallback still applies instead of matching a bare noun against no landmark.
       const intents = q.proximity!.map((p) => ({
         group: relGroupOf(p.relationship),
         phrase: p.phrase,
         category_en: p.category || null,
-        name: p.name || null,
+        name: p.name ? (p.text.slice(p.phrase.length).trim() || p.name) : null,
       }));
       const st  = scoped.map((r) => r.source_table);
       const ids = scoped.map((r) => r.l.id);
