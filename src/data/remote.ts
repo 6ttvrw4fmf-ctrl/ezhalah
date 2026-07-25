@@ -1189,7 +1189,10 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
   // come out as a balanced MIX of the five rather than clumped by one type. (owner 2026-07-07)
   const multiType = (q.types?.length ?? 0) > 1 || (q.types ?? []).some((t) => (SUBGROUPS[t]?.length ?? 0) > 1);
   const scoped = orderByScope(ranked, scopeOf(q, scope.p_cities, isCountryWideQuery(q)), multiType);
-  const rows = scoped.map((r) => r.l);
+  // Diversification (orderByScope) reorders `scoped` away from pure recency, so the true RPC recency
+  // rank (r.rank, 0 = newest) must travel WITH each listing — sortListings()'s newest/oldest sort has
+  // nothing else to key off once `rows` is just bare Listings. (sort=newest/oldest fix, 2026-07-25.)
+  const rows = scoped.map((r) => ({ ...r.l, recencyRank: r.rank }));
   // Location-RELATIONSHIP ranking (2026-06-27): when the user expressed a proximity intent
   // («قريب من مستشفى الحبيب» / «يطل على البحر»), ATTACH a boost score to every candidate so the
   // ranking step in runSearch can lead with the listings that express that same relationship+entity.
