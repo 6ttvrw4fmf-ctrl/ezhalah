@@ -534,8 +534,57 @@ def upsert_october_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("october_commercial_listings", rows)
 
 
+# additional_info keys OWNED by the Tier-2 `--backfill-details` pass (detail-page fields the LIST
+# crawl never produces). The crawl rebuilds additional_info from scratch, so a plain full-row upsert
+# would drop these on every sighting — the same wipe as the description column (PR #210). Crawl keys
+# and these are disjoint, so we carry them forward from the stored row before upserting.
+_GATHERN_DETAIL_AI_KEYS = (
+    "suitability", "house_rules", "check_in", "check_out",
+    "guest_capacity", "booking_count", "views_count", "rate_text", "extra_sections",
+)
+
+
+def _carry_forward_ai(rows: list[dict[str, Any]], stored: dict[str, dict], keys) -> None:
+    """PURE: copy `keys` from stored[ad_number] into each row's additional_info WITHOUT overwriting
+    what the crawl produced (fresh crawl values stay authoritative). Mutates rows in place."""
+    for r in rows:
+        old = stored.get(r.get("ad_number"))
+        if not isinstance(old, dict):
+            continue
+        carry = {k: old[k] for k in keys if k in old}
+        if not carry:
+            continue
+        info = r.get("additional_info")
+        info = dict(info) if isinstance(info, dict) else {}
+        r["additional_info"] = {**carry, **info}  # crawl values win on any (disjoint) overlap
+
+
+def _preserve_gathern_detail_ai(table: str, rows: list[dict[str, Any]]) -> None:
+    """Read-modify-write: fetch the stored additional_info for these ad_numbers and carry the
+    backfill-owned detail keys forward, so the crawl's fresh blob doesn't wipe them.
+    ponytail: small race vs a concurrent backfill write; fine — crawl and backfill are separate
+    scheduled jobs and backfill only touches desc-NULL rows. Upgrade to a Postgres `||` upsert RPC
+    if they ever run together."""
+    ads = [r["ad_number"] for r in rows if r.get("ad_number")]
+    if not ads:
+        return
+    stored: dict[str, dict] = {}
+    for i in range(0, len(ads), 200):
+        res = _execute(sb().table(table).select("ad_number, additional_info").in_("ad_number", ads[i:i + 200]),
+                       what=table + ".ai_preserve_select")
+        for row in (res.data or []):
+            ai = row.get("additional_info")
+            if isinstance(ai, dict):
+                stored[row["ad_number"]] = ai
+    _carry_forward_ai(rows, stored, _GATHERN_DETAIL_AI_KEYS)
+
+
 def upsert_gathern_residential_batch(rows: list[dict[str, Any]]) -> None:
-    """Gathern (gathern.co) MONTHLY furnished residential units only (source='Gathern')."""
+    """Gathern (gathern.co) MONTHLY furnished residential units only (source='Gathern').
+
+    Carries the Tier-2 detail fields forward first (see _preserve_gathern_detail_ai) so the crawl's
+    full-row upsert doesn't wipe additional_info — same class of bug as the description wipe (PR #210)."""
+    _preserve_gathern_detail_ai("gathern_residential_listings", rows)
     _wasalt_batch("gathern_residential_listings", rows)
 
 
