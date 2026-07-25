@@ -345,6 +345,17 @@ function budgetLines(q: SearchQuery): string[] {
   const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10) || 0;
   if (!amount) return orig;
 
+  // bothDeals ('Rent or Buy', deal unknown) must show the SAME flat, un-annualized cap priceFilter()/
+  // budgetCap() actually enforce (their own `!q.bothDeals` guard skips the ×12 read entirely — "the
+  // same cap is applied to Buy listings too, so a rent×12 ceiling would wrongly exclude them"). Framing
+  // it as "Monthly Rent"/an annualized figure here would show a budget the engine never applies (found
+  // live 2026-07-25: a bothDeals search with e.g. budget 20,000 filtered listings to a SAR 20,000 flat
+  // cap while the summary claimed a SAR 240,000/year budget). budgetLines() must stay in sync with
+  // those two functions' bothDeals handling.
+  if (q.bothDeals) {
+    if (amount < 200) return orig; // unrealistic — engine broadens, nothing to show
+    return [...orig, `${t('Budget')}: ${sar} ${grouped(amount)}`];
+  }
   if (q.deal === 'Rent') {
     if (amount < 200 && !q.priceIsAnnual) return orig; // unrealistic — engine broadens, nothing to show
     const yearly = `${t('Budget')}: ${t('{a}/year', { a: `${sar} ${grouped(amount)}` })}`;

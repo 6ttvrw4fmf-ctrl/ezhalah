@@ -444,7 +444,7 @@ const AR: Record<string, string> = {
   'Checking the matching properties…': 'نفحص العقارات المناسبة…',
   'Matching the filters…': 'نطابق الفلاتر…',
   'Reviewing sites and prices…': 'نراجع المواقع والأسعار…',
-  'Sorting the best results…': 'نرتب أفضل النتائج…',
+  'Preparing the results…': 'نجهز النتائج…',
   'Matching the location…': 'نطابق الموقع…',
   'Applying the filters…': 'نطبق الفلاتر…',
   'Sorting results and mixing platforms…': 'نرتب النتائج وننوعها بين المنصات…',

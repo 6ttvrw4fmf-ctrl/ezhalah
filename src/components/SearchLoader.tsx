@@ -47,7 +47,7 @@ const SEARCH_TITLES = [
   'Checking the matching properties…',
   'Matching the filters…',
   'Reviewing sites and prices…',
-  'Sorting the best results…',
+  'Preparing the results…',
 ] as const;
 const TITLE_ROTATE_MS = 2400;
 
