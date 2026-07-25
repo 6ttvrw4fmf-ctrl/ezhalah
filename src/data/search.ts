@@ -883,26 +883,44 @@ const SORT_NOTE: Record<SortKey, string> = {
   beds_desc: 'Sorted by bedrooms, most first.',
 };
 
-// Digits-only value of a listing's display price ("SAR 1,200,000/yr" → 1200000). Used only for
-// OBJECTIVE sorting — never to judge a listing.
-const priceOf = (l: Listing): number => parseInt((l.price.match(/\d/g) ?? []).join(''), 10) || 0;
+// Digits-only value of a listing's display price ("SAR 1,200,000/yr" → 1200000), or NaN when the
+// price is unknown ("Price on request") — reuses listingPriceValue's existing NaN-for-no-digits
+// contract (the same pattern priceFilter/withinValue already rely on) instead of silently coercing an
+// unknown price to 0. Used only for OBJECTIVE sorting — never to judge a listing.
+const priceOf = (l: Listing): number => listingPriceValue(l.price);
+
+// Ascending/descending by a possibly-NaN value — an unknown value (no price, no area) always sorts to
+// the END regardless of direction, never treated as the cheapest/lowest. (found live 2026-07-25: the
+// old `priceOf(a) - priceOf(b)` coerced "Price on request" to SAR 0, ranking it #1 under "cheapest
+// first" ahead of every genuinely priced listing.)
+const byValue = (get: (l: Listing) => number, dir: 1 | -1) => (a: Listing, b: Listing) => {
+  const va = get(a), vb = get(b);
+  const na = Number.isNaN(va), nb = Number.isNaN(vb);
+  if (na || nb) return na === nb ? 0 : na ? 1 : -1;
+  return dir * (va - vb);
+};
 
 // Re-order the (already filtered) listings by an OBJECTIVE key the user asked for. Returns a NEW
 // array; default freshness order is untouched when no sort is set. Strictly factual — there is no
 // "best"/"popular" branch, by design (non-advisory). (user training decision.)
 function sortListings(list: Listing[], sort: SortKey): Listing[] {
   const out = [...list];
-  const recency = (l: Listing) => RECENCY[l.listed] ?? 99; // 0 = newest
-  const ppm = (l: Listing) => (l.area > 0 ? priceOf(l) / l.area : Infinity);
+  // recencyRank (0 = newest) is the true RPC order, set in remote.ts once a candidate's real fetched
+  // Listing is built; RECENCY[l.listed] is a fallback for mock/placeholder listings only (their
+  // `listed` IS one of LISTED_SEQ's 5 tokens). A real listing's `listed` is a raw scraped date string
+  // that never matches a LISTED_SEQ token — that mismatch made both comparators a permanent no-op
+  // against real data before recencyRank existed (found live 2026-07-25).
+  const recency = (l: Listing) => l.recencyRank ?? RECENCY[l.listed] ?? 99;
+  const ppm = (l: Listing) => (l.area > 0 ? priceOf(l) / l.area : NaN);
   switch (sort) {
     case 'newest':    out.sort((a, b) => recency(a) - recency(b)); break;
     case 'oldest':    out.sort((a, b) => recency(b) - recency(a)); break;
-    case 'price_asc': out.sort((a, b) => priceOf(a) - priceOf(b)); break;
-    case 'price_desc':out.sort((a, b) => priceOf(b) - priceOf(a)); break;
+    case 'price_asc': out.sort(byValue(priceOf, 1)); break;
+    case 'price_desc':out.sort(byValue(priceOf, -1)); break;
     case 'area_asc':  out.sort((a, b) => a.area - b.area); break;
     case 'area_desc': out.sort((a, b) => b.area - a.area); break;
-    case 'ppm_asc':   out.sort((a, b) => ppm(a) - ppm(b)); break;
-    case 'ppm_desc':  out.sort((a, b) => ppm(b) - ppm(a)); break;
+    case 'ppm_asc':   out.sort(byValue(ppm, 1)); break;
+    case 'ppm_desc':  out.sort(byValue(ppm, -1)); break;
     case 'beds_desc': out.sort((a, b) => b.beds - a.beds); break;
   }
   return out;

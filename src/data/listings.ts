@@ -23,7 +23,13 @@ export type Listing = {
   // Rent billing period: 'monthly' | 'annual' (null for Buy / mock data). When 'monthly', `price` is
   // the per-month figure; otherwise yearly. Drives the per-month filter + the /mo vs /yr label. (user.)
   rentPeriod?: string | null;
-  listed: string; // human recency
+  listed: string; // human recency (display only — NOT sortable, see recencyRank)
+  // True RPC recency rank for real fetched listings (0 = newest, per the RPC's `last_updated desc`
+  // order) — set in remote.ts before diversification reorders `rows`. Undefined for mock/placeholder
+  // listings, which fall back to the `listed` token lookup in sortListings(). (sort=newest/oldest fix,
+  // found live 2026-07-25: `listed` here is a raw scraped date string, never one of the mock catalog's
+  // 5 LISTED_SEQ tokens, so the old RECENCY[listed] lookup was a permanent no-op for real data.)
+  recencyRank?: number;
   photo: string;
   // Real URL on the source platform — when present, the in-app browser redirects the
   // user OUT to this page. Absent for the bundled mock catalog (synthetic preview only).
