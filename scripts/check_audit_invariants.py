@@ -34,10 +34,11 @@ import ssl
 import sys
 import urllib.request
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://aannarbkwcymrotzwdbo.supabase.co")
+SUPABASE_URL = os.environ.get("SUPABASE_URL") or "https://aannarbkwcymrotzwdbo.supabase.co"
 # Publishable (anon) key — PUBLIC, shipped in the web bundle; same precedent as safe-deploy.sh's
-# hard-coded key. Overridable via env for key rotation. Used only to call the public agent endpoint.
-PUBLISHABLE_KEY = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_vXzwxdpfrzmbwtbR5aXcKA_cMUO8hVB")
+# hard-coded key. `or` (not the get() default) so an EMPTY env var — what an unset GitHub secret
+# `${{ secrets.X }}` injects — falls back to the hard-coded key instead of shadowing it with "".
+PUBLISHABLE_KEY = os.environ.get("SUPABASE_PUBLISHABLE_KEY") or "sb_publishable_vXzwxdpfrzmbwtbR5aXcKA_cMUO8hVB"
 
 KNOWN_NOT_READY_REASONS = ("blank_source_city", "city_unresolved_to_id")
 
