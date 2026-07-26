@@ -290,9 +290,8 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
     if baths is not None and baths > 20:
         baths = None
 
+    # No source per-m² rate → NULL, never price_total/area_m2 (aqar PR#216, scrapers PR#217).
     price_per_meter = None
-    if price_total and area_m2:
-        price_per_meter = round(price_total / area_m2)
 
     # city / region / neighborhood — Satel is overwhelmingly Riyadh; normalize messy cityEn values.
     raw_city_en = (p.get("cityEn") or addr.get("cityEn") or "").strip()

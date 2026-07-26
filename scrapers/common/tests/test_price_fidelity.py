@@ -127,17 +127,29 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DERIVE_RE = re.compile(
     r"^\s*(?:price_total|price_per_meter|price_annual|total|meter)\s*=.*[*/]\s*(?:area|land_area)\b"
 )
-_NO_DERIVE_SCRAPERS = ("jazwtn", "raghdan", "fursaghyr", "muktamel")
+
+def _scraper_sources():
+    """Every scraper module that could write a price column — NO allowlist.
+
+    An enumerated list is what let this bug sit in 17 scrapers at once: each was fixed or reviewed
+    in isolation while the rest kept fabricating. Scanning the whole tree means a NEW scraper is
+    covered the day it lands, without anyone remembering to add it here.
+    """
+    root = _REPO_ROOT / "scrapers"
+    for path in sorted(root.glob("*/run.py")) + sorted(root.glob("*/enrich*.py")):
+        yield path.relative_to(root).as_posix(), path
 
 
-def test_no_price_column_is_derived_from_area():
+def test_no_price_column_is_derived_from_area_ANYWHERE():
     bad = []
-    for slug in _NO_DERIVE_SCRAPERS:
-        src = (_REPO_ROOT / "scrapers" / slug / "run.py").read_text(encoding="utf-8")
-        for i, line in enumerate(src.splitlines(), 1):
+    for rel, path in _scraper_sources():
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if _DERIVE_RE.match(line):
-                bad.append(f"{slug}/run.py:{i}: {line.strip()}")
-    assert not bad, "price column derived from area:\n  " + "\n  ".join(bad)
+                bad.append(f"{rel}:{i}: {line.strip()}")
+    assert not bad, (
+        "a price column is being DERIVED from an area — it must hold what the source published:\n  "
+        + "\n  ".join(bad)
+    )
 
 
 def test_the_guard_actually_catches_the_shapes_it_must():

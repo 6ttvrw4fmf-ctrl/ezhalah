@@ -305,9 +305,9 @@ def map_listing(adid: int, body: str) -> tuple[Optional[dict], str]:
     headline = price or som
 
     area = _to_float(f.get("المساحة"))
+    # alkhaas publishes no per-m² rate; it is left NULL rather than derived from headline/area.
+    # Deriving would fabricate a figure the source never printed (aqar PR#216, scrapers PR#217).
     ppm = None
-    if headline and area and not is_rent and area > 0:
-        ppm = round(headline / area)
 
     # ── location (this broker is Unaizah / Qassim only, but resolve generically) ──
     # Forward-fix (2026-07-10 location-data-quality audit): removed the hardcoded "Unaizah" default —

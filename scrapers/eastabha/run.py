@@ -436,9 +436,8 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     price = detail.get("price")
     area_m2 = detail.get("area_m2") or _content_specs((p.get("content") or {}).get("rendered", "")).get("area_m2")
     age = _content_specs((p.get("content") or {}).get("rendered", "")).get("property_age")
+    # No source per-m² rate → NULL, never price/area_m2 (aqar PR#216, scrapers PR#217).
     ppm = None
-    if price and area_m2:
-        ppm = round(price / area_m2)
 
     title = _redact(_clean((p.get("title") or {}).get("rendered", "")))
     description = _redact(_clean((p.get("content") or {}).get("rendered", "")))[:4000] or None

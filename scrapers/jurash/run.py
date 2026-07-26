@@ -321,11 +321,8 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
     if area is None:
         am = AREA_RE.search(f.get("tr_description") or "")
         area = _to_float(am.group(1)) if am else None
+    # No source per-m² rate on either branch → NULL, never price/area (aqar PR#216, PR#217).
     price_per_meter = None
-    if price and area and not is_rent and not is_land:
-        price_per_meter = round(price / area)
-    elif is_land and price and area:
-        price_per_meter = round(price / area)
 
     # ── beds / baths (residential, sane range) ──
     bedrooms = baths = None

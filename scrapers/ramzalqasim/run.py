@@ -356,9 +356,8 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
     # price_per_meter for buys with area+total.
     price_total = price if not is_rent else None
     price_annual = price if is_rent else None
+    # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
     price_per_meter = None
-    if price_total and area_f and area_f > 0:
-        price_per_meter = int(round(price_f / area_f))
 
     row: dict[str, Any] = {
         "ad_number": f"RQ{rid}",

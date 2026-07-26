@@ -303,9 +303,8 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
         return None, category
 
     area = _int(p.get("area"))
+    # No source per-m² rate → NULL, never sale/area (aqar PR#216, scrapers PR#217).
     ppm = None
-    if area and not is_rent and sale:
-        ppm = round(sale / area) if area else None
 
     # ── faceted fields ──
     bedrooms = _int(p.get("bedrooms")) if category == "residential" else None

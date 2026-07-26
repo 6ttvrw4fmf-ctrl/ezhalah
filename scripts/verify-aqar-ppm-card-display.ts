@@ -50,7 +50,7 @@ check('tPrice maps the price-less sentinel to «السعر عند الطلب»',
 //                                                && listing.pricePerMeter !== 1
 type Row = { ad: string; price: string; pricePerMeter: number | null };
 const showsPpm = (l: Row): boolean =>
-  l.price === 'Price on request' && l.pricePerMeter != null && l.pricePerMeter !== 1;
+  l.price === 'Price on request' && l.pricePerMeter != null && l.pricePerMeter > 1;
 
 // The Arabic line the card composes, ported from the JSX:
 //   {t('Price Per m²')} <Text …>{t('SAR')} {Number(ppm).toLocaleString('en-US')}</Text>
@@ -67,6 +67,10 @@ const ROWS: Row[] = [
   { ad: 'priced',  price: 'SAR 540,000',      pricePerMeter: 900 },
   // a listing with no published rate keeps today's behaviour exactly
   { ad: 'norate',  price: 'Price on request', pricePerMeter: null },
+  // Real rows that WERE rendering «سعر المتر ر.س 0» in production on 2026-07-26: dealapp derived
+  // the rate as round(total/area), then a later gate nulled the total and left the 0 behind.
+  { ad: 'dealapp-4575693', price: 'Price on request', pricePerMeter: 0 },
+  { ad: 'dealapp-1291533', price: 'Price on request', pricePerMeter: 0 },
 ];
 
 check('published rate renders on a price-less listing (ad 6237931)', showsPpm(ROWS[0]));
@@ -79,14 +83,16 @@ check('«سعر المتر 1» placeholder is WITHHELD (ad 6668714 keeps «ال�
       'a 1 SAR/m² token with no total is the seller\'s "call me" marker, not a market rate');
 check('a listing WITH a real price never shows the rate line', !showsPpm(ROWS[5]));
 check('a listing with no published rate is unchanged', !showsPpm(ROWS[6]));
+check('a 0 rate is WITHHELD, never rendered as «سعر المتر ر.س 0» (live dealapp 4575693)', !showsPpm(ROWS[7]));
+check('a second real 0-rate row is withheld too (live dealapp 1291533)', !showsPpm(ROWS[8]));
 
 // ── 3. anti-drift: the port must still match the shipped JSX ───────────────────────────────────
 check('ResultCard still gates on the price-less sentinel',
       /listing\.price\s*===\s*'Price on request'/.test(CARD));
 check('ResultCard still gates on a non-null pricePerMeter',
       /listing\.pricePerMeter\s*!=\s*null/.test(CARD));
-check('ResultCard still withholds the literal 1 placeholder',
-      /listing\.pricePerMeter\s*!==\s*1/.test(CARD));
+check('ResultCard still withholds the 1 placeholder AND non-positive rates (0, negatives)',
+      /listing\.pricePerMeter\s*>\s*1/.test(CARD));
 check('ResultCard renders the rate with the Arabic label + currency helpers',
       /t\('Price Per m²'\)/.test(CARD) && /t\('SAR'\)/.test(CARD));
 

@@ -393,9 +393,8 @@ def map_listing(pid: str, body: str, gallery: list[str]) -> tuple[Optional[dict]
     city, neighborhood = parse_address(addr_raw)
     region = normalize.region_for_city(city)
 
+    # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
     ppm = None
-    if area and not is_rent and price:
-        ppm = int(round(price / area))
 
     title = _redact(title_raw)
     description = _redact(desc_raw)

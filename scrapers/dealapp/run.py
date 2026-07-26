@@ -427,7 +427,10 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     if baths is not None and (baths <= 0 or baths > 30):
         baths = None
     ppm = _num((_spec_value(html, "سعر المتر") or "").replace("ريال", ""))
-    price_per_meter = round(ppm) if ppm else (round(price / area) if (price and area and not is_rent) else None)
+    # Source-published «سعر المتر» only. The old price/area fallback fabricated a rate — and
+    # because a later gate can null price_total, it left rows showing «سعر المتر ر.س 0» on a
+    # price-less card (5 live rows, 2026-07-26). (aqar PR#216, scrapers PR#217.)
+    price_per_meter = round(ppm) if ppm else None
 
     # Advertiser data-entry errors on Deal App produce billion-riyal prices (e.g. a land ad with
     # سعر المتر = 800,000 ﷼/m² × 57,500 m² = 46,000,000,000). A per-meter price above 300k SAR/m² or a

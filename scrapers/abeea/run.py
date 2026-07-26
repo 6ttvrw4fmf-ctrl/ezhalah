@@ -419,9 +419,9 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
     halls = _to_int(items.get("Living Room") or items.get("Living Rooms"))
 
     # ── price per meter ──
+    # Source-published "Price per meter" only — no price/area fallback, so a listing that does
+    # not print a rate keeps NULL rather than a fabricated one (aqar PR#216, scrapers PR#217).
     ppm = None
-    if not is_rent and price and area:
-        ppm = round(price / area)
     pm = re.search(r"[Pp]rice per meter\s*:\s*([\d,]+)", ld.get("description") or "")
     if pm:
         cand = _to_int(pm.group(1))

@@ -532,7 +532,8 @@ def map_listing(body: str, url: str, sitemap_image: Optional[str] = None) -> tup
     if price is not None and price < 1000:
         # Reject implausibly tiny prices (display glitch / unit confusion).
         price = None
-    price_per_meter = round(price / area) if (price and area and is_buy) else None
+    # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
+    price_per_meter = None
 
     # ── REGA license + dates ──
     rega_no = None

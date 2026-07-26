@@ -414,12 +414,12 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
         age_text = None
 
     # price_per_meter: the site's "سعر المتر" cell is reliable for land but for some buildings it
-    # echoes the TOTAL price (e.g. ppm==price) — drop those and derive from price/area instead.
+    # echoes the TOTAL price (e.g. ppm==price) — drop those, and leave the rate NULL.
     ppm = _to_int(specs.get("سعر المتر"))
     if ppm and price and ppm >= price:
         ppm = None
-    if not ppm and price and area and not is_rent:
-        ppm = round(price / area)
+    # No price/area fallback: a missing rate stays NULL rather than being fabricated
+    # (aqar PR#216, scrapers PR#217). The source «سعر المتر» read above is the only input.
     # Final sanity: a per-meter figure that still exceeds the total (tiny area / bad area) is bogus.
     if ppm and price and ppm > price:
         ppm = None

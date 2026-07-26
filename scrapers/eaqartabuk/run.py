@@ -322,8 +322,8 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str]) -> tuple[Optiona
     is_land = property_type in ("Residential Land", "Commercial Land")
     if category == "commercial" or is_land or (beds and beds > 20):
         beds = None
-    price_per_meter = (round(price_total / area)
-                       if (price_total and area and area > 0) else None)
+    # No source per-m² rate → NULL, never price_total/area (aqar PR#216, scrapers PR#217).
+    price_per_meter = None
 
     # City is ALWAYS Tabuk for this source (the API `city` field frequently holds a district).
     raw_city = (mp.get("city") or "").strip()
