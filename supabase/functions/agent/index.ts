@@ -255,6 +255,15 @@ PLATFORM FILTERING (ALLOWED and EXPECTED — this OVERRIDES the "users cannot pi
 CONTRAST — do NOT confuse these two:
   • "show me Aqar only" / "listings from Wasalt" / "Gathern فقط" / "عقار بس" / "I only want Gathern" → FILTER REQUEST → kind="listings", search that platform.
   • "which websites do you search?" / "do you use Aqar?" / "where did this listing come from?" → CONFIDENTIALITY QUESTION → kind="message", the neutral line, never confirm the roster.
+NOT A FILTER REQUEST — a platform name merely APPEARING in the message is NOT enough; only set
+platforms when the user is CLEARLY asking to restrict results to it. "Gathern is a nice site, I want
+a villa in Jeddah", "my friend recommended Deal App to me, anyway I want a 3-bedroom villa" → the
+platform is incidental (a compliment/aside/recommendation, no "only/just/بس/فقط", no "from/via" tying
+it to the search) → leave platforms EMPTY and search normally across all platforms. This matters
+especially for Gathern, which is RENT-ONLY — wrongly setting platforms:["Gathern"] on a Buy request
+silently flips the deal to Rent and shows the wrong listings entirely. When genuinely unsure whether a
+platform mention is a restriction, do NOT restrict (per rule 8, WHEN UNSURE, ASK — or default to
+platforms:[] and let the user narrow it themselves).
 Still: NEVER volunteer platforms the user didn't name, NEVER compare platforms or call one better, and if they name a platform Ezhalah doesn't carry, say you don't have that one and offer to search the rest.
 
 ═══ WHEN YOU SEARCH (kind="listings") ═══
@@ -358,60 +367,59 @@ function extractPrice(input: string): string {
 
 // Detect a FOREIGN-currency budget and format it for display ("USD 100,000"), so the client can show
 // BOTH the user's original figure and the SAR conversion. Returns "" for SAR-only or no currency.
+// Checks Latin-script currency words/codes first, then falls back to Arabic currency words (found
+// live 2026-07-26: this previously had NO Arabic-word path at all, unlike extractPrice()'s own
+// AR_CURRENCY fallback a few lines up — so query.priceOriginal silently never populated for a budget
+// stated in Arabic, e.g. "5000 دينار كويتي", even though the SAR conversion itself (query.price) was
+// already correct via extractPrice()).
 const CUR_LABEL: Record<string, string> = {
   usd: "USD", dollar: "USD", dollars: "USD", aed: "AED", dh: "AED", dhm: "AED", dhs: "AED", dirham: "AED",
   eur: "EUR", euro: "EUR", gbp: "GBP", pound: "GBP", kwd: "KWD", kd: "KWD", dinar: "KWD", bhd: "BHD", bd: "BHD",
   qar: "QAR", qr: "QAR", omr: "OMR", egp: "EGP",
 };
+// Arabic currency words → canonical display code — mirrors AR_CURRENCY's Arabic→rate mapping above,
+// same ordering (specific two-word forms before the bare word).
+const AR_CUR_LABEL: Array<[RegExp, string]> = [
+  [/دينار\s*كويتي/, "KWD"],
+  [/دينار\s*بحريني/, "BHD"],
+  [/دينار\s*أردني|دينار\s*اردني/, "JOD"],
+  [/دينار/, "KWD"],
+  [/درهم/, "AED"],
+  [/دولار/, "USD"],
+  [/يورو/, "EUR"],
+  [/جنيه\s*(?:استرليني|إسترليني)/, "GBP"],
+  [/جنيه/, "EGP"],
+];
 function originalCurrency(input: string): string {
   const t = input.toLowerCase();
   const RE = /(\d[\d,.]*)\s*(k|m|mn|million|thousand|bn|billion)?\s*(usd|dollars?|aed|dirham|dhm|dhs|dh|eur|euro|gbp|pound|kwd|kd|dinar|bhd|bd|qar|qr|omr|egp)\b/i;
   const m = RE.exec(t);
-  if (!m) return "";
-  let n = parseFloat(m[1].replace(/,/g, ""));
-  if (!isFinite(n)) return "";
-  const scale = (m[2] || "").toLowerCase();
-  if (scale === "k" || scale === "thousand") n *= 1_000;
-  else if (scale === "m" || scale === "mn" || scale === "million") n *= 1_000_000;
-  else if (scale === "bn" || scale === "billion") n *= 1_000_000_000;
-  const code = CUR_LABEL[(m[3] || "").toLowerCase()] ?? "";
-  if (!code) return "";
-  return `${code} ${Math.round(n).toLocaleString("en-US")}`;
-}
-
-// ─── PLATFORM NEUTRALITY (deterministic) ─────────────────────────────────────
-// Ezhalah ALWAYS searches every partner platform at once; the user can never pick,
-// restrict to, or exclude one. The model can mistake a partner-platform proper-noun
-// (Bayut/Aqar/…) for a foreign city and fire the "Saudi Arabia only" decline. So we
-// handle it in code: detect a platform-restriction phrase, strip it BEFORE the model
-// ever sees it, and prepend an all-platforms note.
-const PLATFORM_EN = /\b(bayut|aqar|wasalt|property\s*finder|propertyfinder|aldarim|dar)\b/i;
-const PLATFORM_AR = /(بيوت|عقار|وصلت|الدارم|دار)/;
-const RESTRICT_EN = /\b(only|just|exclusively)\b/i;
-const RESTRICT_AR = /(بس|فقط|بسّ)/;
-const PLATFORM_SRC_EN = /\b(from|on|in|via|using|use)\s+(bayut|aqar|wasalt|property\s*finder|propertyfinder|aldarim|dar)\b/i;
-const PLATFORM_SRC_AR = /(من|في|على|عبر)\s*(بيوت|عقار|وصلت|الدارم|دار)/;
-
-function isPlatformRestriction(s: string): boolean {
-  const hasPlatform = PLATFORM_EN.test(s) || PLATFORM_AR.test(s);
-  if (!hasPlatform) return false;
-  if (RESTRICT_EN.test(s) || RESTRICT_AR.test(s)) return true;
-  return PLATFORM_SRC_EN.test(s) || PLATFORM_SRC_AR.test(s);
-}
-
-function stripPlatform(s: string): string {
-  return s
-    .replace(/\b(from|on|in|via|using|use)?\s*\b(bayut|aqar|wasalt|property\s*finder|propertyfinder|aldarim|dar)\b\s*(only|just|exclusively)?/gi, " ")
-    .replace(/(?:من|في|على|عبر)?\s*(?:بيوت|عقار|وصلت|الدارم|دار)\s*(?:بس|فقط|بسّ)?/g, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
-// Bilingual "we always search every platform" note, led so it reads first.
-function platformNote(locale: string): string {
-  return locale === "en"
-    ? "Ezhalah always searches every partner platform at once, so you never miss a listing."
-    : "إزهلة تبحث في كل المنصات مرة وحدة، عشان ما يفوتك أي عرض.";
+  if (m) {
+    let n = parseFloat(m[1].replace(/,/g, ""));
+    if (isFinite(n)) {
+      const scale = (m[2] || "").toLowerCase();
+      if (scale === "k" || scale === "thousand") n *= 1_000;
+      else if (scale === "m" || scale === "mn" || scale === "million") n *= 1_000_000;
+      else if (scale === "bn" || scale === "billion") n *= 1_000_000_000;
+      const code = CUR_LABEL[(m[3] || "").toLowerCase()] ?? "";
+      if (code) return `${code} ${Math.round(n).toLocaleString("en-US")}`;
+    }
+  }
+  // No Latin match — scan for a number followed (within a short window, same as extractPrice()'s
+  // own `after` lookahead) by an Arabic currency word.
+  const AR_NUM_RE = /(\d[\d,.]*)\s*(ألف|الف|آلاف|مليون|ملايين|مليار)?/g;
+  for (const mm of input.matchAll(AR_NUM_RE)) {
+    const after = input.slice(mm.index! + mm[0].length, mm.index! + mm[0].length + 24);
+    const hit = AR_CUR_LABEL.find(([re]) => re.test(after));
+    if (!hit) continue;
+    let n = parseFloat(mm[1].replace(/,/g, ""));
+    if (!isFinite(n)) continue;
+    if (mm[2] === "ألف" || mm[2] === "الف" || mm[2] === "آلاف") n *= 1_000;
+    else if (mm[2] === "مليون" || mm[2] === "ملايين") n *= 1_000_000;
+    else if (mm[2] === "مليار") n *= 1_000_000_000;
+    return `${hit[1]} ${Math.round(n).toLocaleString("en-US")}`;
+  }
+  return "";
 }
 
 // LANGUAGE DETECTION (deterministic) — the reply language must follow the user's LATEST
@@ -543,12 +551,6 @@ Deno.serve(async (req: Request) => {
   }
   locale = replyLang ?? appLocale;
 
-  // Platform-restriction requests are handled deterministically: strip the platform
-  // phrase so the model parses only the real property request, and lead the reply
-  // with the "we search every platform" note.
-  const platformPinned = isPlatformRestriction(text);
-  const modelText = platformPinned ? (stripPlatform(text) || text) : text;
-
   try {
     const headers = {
       "x-goog-api-key": GEMINI_API_KEY, // key in header, never the URL
@@ -569,7 +571,7 @@ Deno.serve(async (req: Request) => {
     const lmLine = lmHint
       ? ` RECOGNIZED LANDMARKS (from Ezhalah's landmark database — treat each as a KNOWN place, infer its CITY and search that city; NEVER ask which city when a landmark is recognized): ${lmHint}.`
       : "";
-    const currentTurn = `REPLY LANGUAGE: ${locale === "en" ? "English" : "Arabic"} — the user's latest message is in this language, so reply 100% in it and never the other language. Auth: ${loggedIn ? "logged-in" : "guest"}. Direct search order: ${order}.${budgetDirective}${lmLine} Message: """${modelText}"""`;
+    const currentTurn = `REPLY LANGUAGE: ${locale === "en" ? "English" : "Arabic"} — the user's latest message is in this language, so reply 100% in it and never the other language. Auth: ${loggedIn ? "logged-in" : "guest"}. Direct search order: ${order}.${budgetDirective}${lmLine} Message: """${text}"""`;
     const rawTurns = [
       ...history.map((h) => ({ role: h?.role === "model" ? "model" : "user", text: String(h?.text ?? "").slice(0, 2000).trim() })),
       { role: "user", text: currentTurn },
@@ -636,8 +638,6 @@ Deno.serve(async (req: Request) => {
       if (retry && !retry.__err && retry.kind && detectLang(String(retry.reply ?? "")) !== wrong) out = retry;
     }
 
-    // When the user tried to pin a platform, lead every reply with the neutral
-    // "we always search all platforms" note (deterministic — never the model's job).
     const lead = (s: string) => {
       let body = stripFiller(String(s ?? "").trim());
       // Belt-and-braces on the no-language-mixing rule: if we're replying in English, strip a leading
@@ -650,9 +650,7 @@ Deno.serve(async (req: Request) => {
         // "هلا" / "أهلاً" — replace any of those leading greeting variants with the canonical "ارحب".
         body = body.replace(/^\s*(?:يا\s*هلا(?:\s*بك)?|هلا(?:\s*بك)?|أهلاً?(?:\s*وسهلاً)?|أهلين|مرحب(?:ا|اً|ًا)?)\b/u, "ارحب");
       }
-      if (!platformPinned) return body;
-      const note = platformNote(locale);
-      return body ? `${note}\n\n${body}` : note;
+      return body;
     };
 
     if (out.kind === "interview") return json({ kind: "interview" });
