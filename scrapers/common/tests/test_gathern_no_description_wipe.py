@@ -30,8 +30,10 @@ import scrapers.gathern.run as _run  # noqa: E402
 from scrapers.gathern.run import map_listing  # noqa: E402
 
 # map_listing() calls arabic_location.resolve(), which lazy-loads a dataset from the DB on first use.
-# Stub it so the test stays hermetic (we're asserting the payload shape, not location resolution).
-_run.AL.resolve = lambda *a, **k: {
+# Stub it via the monkeypatch fixture (auto-reverted) so the test stays hermetic AND never leaks the
+# stub into other tests' resolve() — a module-level assignment here silently broke
+# test_arabic_location_resolve.py under the full-suite run.
+_STUB_RESOLVE = lambda *a, **k: {
     "city_ar": None, "city_id": None, "region_id": None, "district_ar": None, "confidence": "unresolved",
 }
 
@@ -47,7 +49,8 @@ _ITEM = {
 }
 
 
-def test_crawl_row_has_no_description_key():
+def test_crawl_row_has_no_description_key(monkeypatch):
+    monkeypatch.setattr(_run.AL, "resolve", _STUB_RESOLVE)
     row = map_listing(_ITEM)
     assert row is not None, "fixture should map to a valid residential row"
     assert row["ad_number"] == "GTH999999"
@@ -59,5 +62,9 @@ def test_crawl_row_has_no_description_key():
 
 
 if __name__ == "__main__":
-    test_crawl_row_has_no_description_key()
+    # Standalone run (throwaway process): a plain setattr shim stands in for the monkeypatch fixture.
+    class _MP:
+        def setattr(self, obj, name, val):
+            setattr(obj, name, val)
+    test_crawl_row_has_no_description_key(_MP())
     print("ok")
