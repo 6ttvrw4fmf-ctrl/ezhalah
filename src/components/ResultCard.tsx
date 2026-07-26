@@ -211,10 +211,14 @@ export function ResultCard({
             free text (ad 6696403 «المطلوب / مليون و500» on 510 m² ≈ 2,941/m²), i.e. 1 is the
             seller's "call me" token. Those 36 are WITHHELD (the card keeps «السعر عند الطلب»); no
             stored value is ever altered, and every other value — including fractional 1.09–1.97
-            rates — surfaces verbatim. */}
+            rates — surfaces verbatim.
+            The gate is `> 1`, not `!== 1`: price_per_meter is an int4 column, and on platforms that
+            USED to derive the rate as round(total/area) a later gate could null the total and leave
+            a 0 behind — which rendered «سعر المتر ر.س 0» on 5 live dealapp cards (found 2026-07-26,
+            scrapers fixed in PR#218). `> 1` withholds 0 and negatives as well as the placeholder. */}
         {listing.price === 'Price on request'
           && listing.pricePerMeter != null
-          && listing.pricePerMeter !== 1 ? (
+          && listing.pricePerMeter > 1 ? (
           <Text style={card.pricePerMeter} numberOfLines={1}>
             {t('Price Per m²')} <Text style={card.pricePerMeterStrong}>{t('SAR')} {Number(listing.pricePerMeter).toLocaleString('en-US')}</Text>
           </Text>

@@ -380,9 +380,9 @@ def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
     if not price or price < 500:
         return None, category, False
     area = _num(estate.get("area")) or _num(dmap.get("المنطقة")) or _num(amap.get("مساحة العقار"))
+    # Source-published rate only (meter_price / price_of_meters). No price/area fallback:
+    # a missing rate stays NULL rather than being fabricated (aqar PR#216, scrapers PR#217).
     ppm = _int(ad.get("meter_price") or detail.get("price_of_meters"))
-    if not ppm and price and area and not is_rent:
-        ppm = round(price / area)
 
     # ── faceted property fields ──
     bedroom = _int(estate.get("bedroom")) or _int(amap.get("عدد الغرف"))

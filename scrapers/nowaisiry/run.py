@@ -331,7 +331,8 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
             b = N.to_int(wm.group(1) or wm.group(2))
             baths = b if (b and 0 < b <= 20) else None
 
-    ppm = round(price / area) if (price and area and not is_rent) else None
+    # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
+    ppm = None
 
     # plot number / plan number → additional_info (NOT a person id).
     plot_no = None

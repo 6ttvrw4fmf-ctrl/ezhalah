@@ -479,7 +479,8 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     if is_rent:
         rent_period = "monthly" if is_monthly_rental(body, unit, price) else "annual"
     area = _float(pi.get("مساحة العقار"))
-    price_per_meter = round(price / area) if (price and area and not is_rent) else None
+    # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
+    price_per_meter = None
 
     # ── location ──
     addr = ld.get("address") or {}

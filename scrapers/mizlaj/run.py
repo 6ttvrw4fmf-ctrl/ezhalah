@@ -320,9 +320,9 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
     # price_per_meter arrives as a DECIMAL string ("2946.17") — round the float, don't _int()
     # it (which would strip the dot → 294617). Derive from price/area when absent.
     ppm_raw = _num(md.get("price_per_meter") or listing.get("price_per_meter"))
+    # Source-published rate only. No price/area fallback — a missing rate stays NULL rather than
+    # being fabricated (aqar PR#216, scrapers PR#217).
     ppm = round(ppm_raw) if ppm_raw else None
-    if not ppm and price and area and not is_rent:
-        ppm = round(price / area)
 
     # ── REGA advertisement (property fields ONLY — never employee PII) ──
     rega = _approved_rega(listing)

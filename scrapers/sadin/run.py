@@ -327,7 +327,8 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
                 break
     if price is not None and price < 1000:
         price = None
-    price_per_meter = round(price / area) if (price and area and not is_rent) else None
+    # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
+    price_per_meter = None
 
     # Street frontage / width from description (e.g. "على شارع … بعرض 16م").
     sw = None
