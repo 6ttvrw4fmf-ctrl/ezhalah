@@ -1,0 +1,31 @@
+# Nightly production-audit invariants (2026-07-24). Runs the checks a daily audit was skipping:
+#   1. every not-ready row has a verified reason bucket (0 unexplained)
+#   2. the Awal scraper is still alive (price=0 is expected/by-design, not a failure)
+#   3. the live AI Agent classifies a fixed Arabic query correctly and replies in Arabic
+# Fails the run + logs a row to location_pipeline_alerts on any violation (same mechanism as
+# location-placeholder-monitor.yml). See scripts/check_audit_invariants.py for the why of each check.
+name: Audit invariants
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # nightly 03:00 UTC (offset from the sync/liveness crons)
+  workflow_dispatch: {}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: pip install supabase python-dotenv certifi
+      - name: Run production-audit invariants
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/check_audit_invariants.py
