@@ -1,0 +1,65 @@
+# Gathern liveness sweep — detail-page 404 check that ages delisted units out of search.
+#
+# WHY a dedicated pass (not prune / mark_stale): Gathern has no working inactivation path. prune_unseen
+# is never called (the crawl only runs sharded, every shard skips prune); mark_stale_listings_inactive
+# can't fire (its coverage gate needs one run to see >=50% of the catalog, which the sharded monthly
+# crawl never does); and last_seen_at staleness is not a valid delisting signal anyway — a fully-booked
+# LIVE unit drops out of the has_available feed and goes stale just like a delisted one. Only the detail
+# page tells them apart (404 = gone, 200 = live). See scrapers/gathern/liveness.py.
+#
+# OWNER-GATED — deliberately NOT on a cron / pg_cron schedule. It runs only when the owner dispatches
+# it, and even then DRY-RUN by default (apply=false → reports what it WOULD do, writes nothing). Set
+# apply=true only after reviewing a dry-run. The 3-strike grace means the first apply run kills nothing
+# (every active row starts at missing_count=0); a unit must 404 on three separate apply runs to go
+# inactive. Do NOT bulk-inactivate ad-hoc; respect the deletion-safety resurrection pins.
+#
+# SINGLE RUNNER — never a shard matrix. Gathern rate-limits detail pages GLOBALLY (429 above ~2 req/s
+# across ALL IPs), so parallel shards would just trip 429s (that is what stalled the Tier-2 backfill).
+
+name: Gathern liveness
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Actually write missing_count / active=false (false = dry-run report only)"
+        type: boolean
+        default: false
+      limit:
+        description: "Max oldest-stale rows to probe this run (0 = all stale)"
+        default: "3000"
+      min_stale_days:
+        description: "Only probe rows not seen in the feed for this many days"
+        default: "3"
+      grace:
+        description: "Consecutive 404 sweeps before a unit is marked inactive"
+        default: "3"
+
+concurrency:
+  group: gathern-liveness
+  cancel-in-progress: false   # never interrupt a sweep mid-run
+
+jobs:
+  liveness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Gathern liveness sweep (${{ inputs.apply && 'APPLY' || 'dry-run' }})
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_MIN_INTERVAL: "1.0"
+        run: |
+          python -m scrapers.gathern.liveness \
+            --limit ${{ inputs.limit }} \
+            --min-stale-days ${{ inputs.min_stale_days }} \
+            --grace ${{ inputs.grace }} \
+            ${{ inputs.apply && '--apply' || '' }}
