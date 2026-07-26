@@ -739,9 +739,25 @@ Deno.serve(async (req: Request) => {
         const said = (s: string) => !!s && hay.includes(arNorm(s));
 
         if (ck === "region_or_city") {
-          const wantsCity = /\bمدينة\b/.test(text);
-          const wantsRegion = /\bمنطقة\b/.test(text);
-          if (wantsRegion && !wantsCity) regionPin = `منطقة ${nm}`;
+          // JS \b is only defined relative to ASCII \w — it never matches Arabic script, so the old
+          // /\bمدينة\b/ / /\bمنطقة\b/ could NEVER match any Arabic text, making this whole branch dead
+          // for every real user (found live 2026-07-25). Use Unicode-aware boundaries instead
+          // ((?<![\p{L}\p{N}])...(?![\p{L}\p{N}])) — plain .includes() would false-positive on a place
+          // name that happens to CONTAIN one of these words fused with no space, e.g. «المدينة المنورة»
+          // (Madinah) contains «مدينة», «المنطقة الشرقية» (Eastern Province) contains «منطقة»; the
+          // lookaround correctly excludes both since the preceding character there is a letter (from
+          // «ال»), not a boundary.
+          const wantsCity = /(?<![\p{L}\p{N}])مدينة(?![\p{L}\p{N}])/u.test(text);
+          const wantsRegion = /(?<![\p{L}\p{N}])منطقة(?![\p{L}\p{N}])/u.test(text);
+          // regionPin's contract (see its declaration above) is "pin a TWIN CITY to one region" — it
+          // was never meant for "search the whole region" and resolveSearchScope() has no way to tell
+          // the two apart (found live 2026-07-25: reusing it here silently narrowed a whole-region
+          // request down to the one city sharing the region's name, hiding every other city in it).
+          // Set `location` instead, reusing the client's already-correct resolution paths: an explicit
+          // "منطقة X" resolves as a REGION (locations.ts's own resolveLocation, independent of this
+          // function); a bare city name resolves as an exact single city. Never touch regionPin here.
+          if (wantsRegion && !wantsCity) location = `منطقة ${nm}`;
+          else if (wantsCity && !wantsRegion) location = nm;
           else if (!wantsCity && !wantsRegion && !alreadyAsked) {
             return json({ kind: "message", reply: `«${nm}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${nm} ولا منطقة ${nm} كاملة؟` });
           }

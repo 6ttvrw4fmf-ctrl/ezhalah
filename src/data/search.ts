@@ -1271,7 +1271,20 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
   // fuzzy typo guess. Only an exact-but-empty place gets the honest zero-state; a misspelled near-miss
   // («القرص») falls through to the «هل تقصد الرس؟» suggestion below. (user: typo = ask/did-you-mean.)
   const explicitPlace = !!lm && lm.exact === true && (lm.kind === 'district' || lm.kind === 'city' || lm.kind === 'region');
-  if (explicitPlace && countWith({ priceInput: '', priceBand: null, priceMin: null, priceMax: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, type: null, types: null, typeGroup: null }) === 0) {
+  // `pools` only ever holds the CURRENT query's already server-filtered fetch (never a broader
+  // reference set — see buildPools()/store.tsx), so once the server has already zero-filtered on
+  // price/beds/size/district/type, countWith() is checking an empty pool no matter what field it
+  // clears — it always returns 0. That made this branch fire (falsely blaming the LOCATION) for ANY
+  // zero-result search that named a real place, even when a co-occurring filter (price, etc.) was the
+  // actual cause and the location genuinely has live inventory (found live 2026-07-25: Bishah has 35
+  // apartments for sale, but a price filter alone triggered "no listings in this location right now").
+  // Only trust the empty pool as proof the LOCATION itself is empty when it's the only thing being
+  // asked — i.e. no other relaxable filter is active. Otherwise fall through to the honest generic
+  // fallback below rather than assert a specific cause this check cannot actually verify.
+  const hasOtherFilters = !!(q.priceInput || q.priceBand || q.priceMin != null || q.priceMax != null
+    || (q.districts && q.districts.length) || q.detail || q.contextBeds || (q.contextBedsList && q.contextBedsList.length)
+    || q.contextSize || q.areaMin != null || q.areaMax != null || q.type || (q.types && q.types.length) || q.typeGroup);
+  if (explicitPlace && !hasOtherFilters && countWith({ priceInput: '', priceBand: null, priceMin: null, priceMax: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, type: null, types: null, typeGroup: null }) === 0) {
     return t('No listings in this location right now.');
   }
   // "Did you mean X?" — fires for: (a) a free-typed unresolved place (typo/obscure town) whose lm has
