@@ -64,13 +64,28 @@ test('AI mode — free-text query classifies correctly, replies in Arabic', asyn
   await page.getByText('الوكيل الذكي', { exact: true }).click(); // switch to AI mode
   const composer = page.getByPlaceholder('اكتب ما تبحث عنه...');
   await expect(composer).toBeVisible();
-  await composer.fill('أبغى شقة للإيجار السنوي في الرياض');
+  // District-qualified so the agent resolves directly to a search (a bare city that is ALSO a region
+  // — e.g. الرياض — correctly triggers a city-vs-region clarification instead; see the clarification
+  // test below). Verified live: this query returns a full summary + ~986 results.
+  await composer.fill('أبغى شقة للإيجار السنوي في حي النرجس بالرياض');
   await composer.press('Enter');
 
-  // The agent's search summary must render with the right classification, all Arabic.
-  await expect(page.getByText('ملخص البحث').first()).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByText('شقة').first()).toBeVisible();       // type
-  await expect(page.getByText('الرياض').first()).toBeVisible();    // city
-  await expect(page.getByText(/للإيجار/).first()).toBeVisible();   // deal = Rent
-  await expect(page.getByText(FOUND).first()).toBeVisible();       // results shown
+  // Wait for the results line (only appears after the full classify + search), then read the page
+  // text ONCE and assert all classification tokens — avoids racing the streaming per-token render.
+  await expect(page.getByText(FOUND).first()).toBeVisible({ timeout: 60_000 });
+  const body = await page.locator('body').innerText();
+  expect(body).toContain('ملخص البحث'); // Arabic summary rendered
+  expect(body).toContain('شقة');        // type = Apartment
+  expect(body).toContain('الرياض');     // city = Riyadh
+  expect(body).toMatch(/للإيجار/);      // deal = Rent
+});
+
+test('AI mode — a city that is also a region asks to disambiguate (no wrong guess)', async ({ page }) => {
+  await home(page);
+  await page.getByText('الوكيل الذكي', { exact: true }).click();
+  const composer = page.getByPlaceholder('اكتب ما تبحث عنه...');
+  await composer.fill('شقة للإيجار في الرياض');
+  await composer.press('Enter');
+  // «الرياض» is both a city and a region → the agent must ASK, not silently pick one (anti-guess).
+  await expect(page.getByText(/مدينة الرياض ولا منطقة الرياض/).first()).toBeVisible({ timeout: 60_000 });
 });
