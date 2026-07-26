@@ -475,7 +475,10 @@ function SourceBadge({ source }: { source: string }) {
   // Batch 7 — text-chips until the user supplies logos.
   if (s.includes('aqaratikom')) return <Image source={AQARATIKOM_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('awal')) return <Image source={AWAL_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('alkhaas')) return <Image source={ALKHAAS_LOGO} style={card.hostBadge} contentFit="contain" />;
+  // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
+  // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
+  // logo, found live 2026-07-25). Also match the no-space form in case that ever appears.
+  if (s.includes('al khaas') || s.includes('alkhaas')) return <Image source={ALKHAAS_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('abeea')) return <Image source={ABEEA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('jurash')) return <Image source={JURASH_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alnokhba')) return <Image source={ALNOKHBA_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -513,7 +516,10 @@ function sourceName(source: string): string {
   if (s.includes('muktamel')) return 'Muktamel';
   if (s.includes('aqaratikom')) return 'Nawait';
   if (s.includes('awal')) return 'Awal United for Real Estate';
-  if (s.includes('alkhaas')) return 'Al Khaas';
+  // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
+  // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
+  // logo, found live 2026-07-25). Also match the no-space form in case that ever appears.
+  if (s.includes('al khaas') || s.includes('alkhaas')) return 'Al Khaas';
   if (s.includes('abeea')) return 'Abeea Real Estate';
   if (s.includes('jurash')) return 'Jurash Real Estate';
   if (s.includes('alnokhba')) return 'Al Nokhba';
@@ -546,9 +552,14 @@ function sourceHost(source: string): string {
   if (s.includes('jazwtn')) return 'jazwtn.sa';
   if (s.includes('mizlaj')) return 'mizlaj.com.sa';
   if (s.includes('muktamel')) return 'muktamel.com';
-  if (s.includes('aqaratikom')) return 'aqaratikom.com';
+  // Real Aqaratikom listing_url is always nawait.sa (confirmed live, 0 exceptions) — matches
+  // sourceName()'s own 'Nawait' label for the same source string. (found live 2026-07-25.)
+  if (s.includes('aqaratikom')) return 'nawait.sa';
   if (s.includes('awal')) return 'awaalun.com';
-  if (s.includes('alkhaas')) return 'alkhaas.net';
+  // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
+  // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
+  // logo, found live 2026-07-25). Also match the no-space form in case that ever appears.
+  if (s.includes('al khaas') || s.includes('alkhaas')) return 'alkhaas.net';
   if (s.includes('abeea')) return 'abeea.com.sa';
   if (s.includes('jurash')) return 'jurash.sa';
   if (s.includes('alnokhba')) return 'alnokhba-services.com';
