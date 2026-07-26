@@ -1341,7 +1341,18 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       typeof amount === 'number'
         ? `SAR ${amount.toLocaleString('en-US')}${deal === 'Rent' ? (isMonthlyRent ? '/mo' : '/yr') : ''}`
         : 'Price on request';
-    const photo = Array.isArray(r.photo_urls) && r.photo_urls.length > 0 ? r.photo_urls[0] : '';
+    // Aqar (both residential & commercial) scrapes its own "no photo" placeholder graphic
+    // (villa-default.png, at one of a couple CDN sizes, sometimes with a corrupted trailing
+    // backslash) as a literal photo_urls entry - filter it out so a listing with only this
+    // placeholder falls through to the app's own neutral "No photo available" state instead
+    // of showing Aqar's stock icon as if it were the real photo, and a listing with real
+    // photos elsewhere in the array surfaces those instead of the placeholder occupying
+    // index 0. Confirmed live 2026-07-26: ~6.7% of active aqar_residential_listings had this
+    // as their displayed photo; 0 occurrences on any other platform.
+    const realPhotoUrls = Array.isArray(r.photo_urls)
+      ? r.photo_urls.filter((u: unknown) => typeof u === 'string' && !u.includes('/props/villa-default.png'))
+      : [];
+    const photo = realPhotoUrls.length > 0 ? realPhotoUrls[0] : '';
     // Raw additional_info as a plain object (Gathern/new-platform shape). Aqar leaves it null; Wasalt/
     // Aqar Gate store the LEGACY array shape — neither is an object, so `rawInfo` is null for them and
     // every field derived from it below stays null → no non-Gathern card changes. (Gathern Tier-1.)
@@ -1399,7 +1410,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       reviews_count,
       districtArFallback: gathernDistrictFallback(r.source, rawInfo),
       additional_info: buildAdditionalInfo(r.additional_info, r.source),
-      photos: Array.isArray(r.photo_urls) ? r.photo_urls : [],
+      photos: realPhotoUrls,
       rent_now_pay_later: !!r.rent_now_pay_later,
       rent_now_pay_later_monthly: r.rent_now_pay_later_monthly ?? null,
       features: {

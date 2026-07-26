@@ -447,6 +447,27 @@ def _amenity_labels(features: Optional[list]) -> list[str]:
     return out[:30]
 
 
+# Boolean amenity columns, derived from the SAME real Arabic labels _amenity_labels() already
+# captures — found live 2026-07-26: map_listing() never set these 7 columns at all, so Postgres'
+# column_default=false applied unconditionally, contradicting the listing's own declared amenities
+# (e.g. GTH259901 has "مصعد" + "موقف سيارة" in additional_info.amenities yet elevator=parking=false).
+# ONLY the labels below have an exact, unambiguous, live-verified match (checked against every
+# distinct amenity label Gathern actually publishes, 2026-07-26) — every other one of the 7 columns
+# (kitchen/air_conditioner/maid_room/private_entrance) has NO corresponding label in the real data at
+# all, so it is left alone (still false) rather than guessed. In particular "دخول ذاتي" (self check-in)
+# is NOT the same concept as private_entrance (a physically separate entrance) and is deliberately not
+# mapped to it — conflating the two would assert a fact the source never actually published.
+_AMENITY_FLAG_LABELS: dict[str, str] = {
+    "elevator": "مصعد",
+    "parking": "موقف سيارة",
+    "driver_room": "غرفة سائقين",
+}
+
+
+def _amenity_flags(labels: list[str]) -> dict[str, bool]:
+    return {col: label in labels for col, label in _AMENITY_FLAG_LABELS.items()}
+
+
 # Bathroom count from the list response's amenities[] — a list of {icon, count, title} objects where
 # each icon is a CDN url ending in a fixed filename. The bathtub-01.png object's `count` is the number
 # of bathrooms (e.g. {"icon": ".../bathtub-01.png", "count": 1, "title": "1"}). Only set when that icon
@@ -568,6 +589,7 @@ def map_listing(it: dict) -> Optional[dict]:
         title = f"{title} — {type_ar} مفروشة للإيجار الشهري".strip(" —") if type_ar else title
 
     bathrooms = _bathrooms(it.get("amenities"))
+    amenity_labels = _amenity_labels(it.get("features"))
     info: dict[str, Any] = {
         "furnished": True,
         "rental_basis": "monthly",
@@ -590,7 +612,7 @@ def map_listing(it: dict) -> Optional[dict]:
         # سيارة/دخول ذاتي/…). Previously this stored amenities[].title, which is a NUMERIC count string
         # (["60","3","1","1"]) — junk. Structural rows (area/bedrooms/master beds) are excluded (they
         # have dedicated columns). (Live-verified 2026-07-20.)
-        "amenities": _amenity_labels(it.get("features")),
+        "amenities": amenity_labels,
         "resolved_city_ar": resolved["city_ar"],
         "resolved_city_id": resolved["city_id"],
         "resolved_region_id": resolved["region_id"],
@@ -624,6 +646,7 @@ def map_listing(it: dict) -> Optional[dict]:
         "photo_urls": _photos(it),
         "rega_location_verified": False,
         "additional_info": info,
+        **_amenity_flags(amenity_labels),
     }
 
 
