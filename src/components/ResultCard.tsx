@@ -198,6 +198,27 @@ export function ResultCard({
           ) : null}
         </View>
         <Text style={card.price} numberOfLines={1}>{tPrice(listing.price)}</Text>
+        {/* Source-published «سعر المتر», e.g. «سعر المتر 175 ر.س». Shown ONLY when the source printed
+            no total/annual price — i.e. exactly the listings whose price line reads «السعر عند الطلب»
+            — so it adds information where there was none and never competes with a real price.
+            'Price on request' is the literal sentinel finalize() emits for a price-less row
+            (src/data/remote.ts), which tPrice maps to «السعر عند الطلب» (src/i18n.tsx).
+            PLACEHOLDER RULE (evidence, live aqar 2026-07-26): a page printing «سعر المتر 1» with NO
+            total is not quoting 1 SAR/m². On aqar the printed rate and printed total are locked
+            together (98.5% of 12,465 priced Buy rows satisfy total ≈ area × rate), so a genuine
+            1 SAR/m² ALWAYS arrives with a corroborating total — all 16 such rows have one. The 36
+            rows that print 1 with no total instead name completely different prices in their own
+            free text (ad 6696403 «المطلوب / مليون و500» on 510 m² ≈ 2,941/m²), i.e. 1 is the
+            seller's "call me" token. Those 36 are WITHHELD (the card keeps «السعر عند الطلب»); no
+            stored value is ever altered, and every other value — including fractional 1.09–1.97
+            rates — surfaces verbatim. */}
+        {listing.price === 'Price on request'
+          && listing.pricePerMeter != null
+          && listing.pricePerMeter !== 1 ? (
+          <Text style={card.pricePerMeter} numberOfLines={1}>
+            {t('Price Per m²')} <Text style={card.pricePerMeterStrong}>{t('SAR')} {Number(listing.pricePerMeter).toLocaleString('en-US')}</Text>
+          </Text>
+        ) : null}
         {/* Guest rating — renders ONLY when the listing carries one (Gathern). e.g. ★ 9.9 (59 تقييم) */}
         {ratingVal != null ? (
           <View style={card.ratingRow}>
@@ -677,6 +698,12 @@ const card = StyleSheet.create({
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
   ratingText: { fontSize: 12.5, fontWeight: '700', color: colors.dark },
   ratingCount: { fontSize: 11, fontWeight: '500', color: colors.muted },
+
+  // Source-published «سعر المتر» subline, rendered directly under the price line on listings that
+  // have no total price. Deliberately quieter than `price` (muted, smaller) so it reads as
+  // supporting information the source happened to publish, never as the listing's headline price.
+  pricePerMeter: { fontSize: 11.5, color: colors.muted, fontWeight: '500', marginTop: 2 },
+  pricePerMeterStrong: { fontWeight: '700', color: colors.ink },
 
   // EJARI × ريلز "Rent now, pay later" branded banner — light EJARI blue background, two-line
   // layout (brand row on top, "from SAR X/mo" subline below). Premium feel — rounded corners,

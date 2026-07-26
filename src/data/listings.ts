@@ -13,6 +13,14 @@ export type Listing = {
   // real fetched listings; used for display + region grouping. Mock listings leave it undefined.
   regionAr?: string;
   price: string; // pre-formatted display string
+  // SOURCE-PUBLISHED «سعر المتر» (price per m²), exactly as the platform printed it — never derived
+  // from price/area. Set only when the source actually publishes one; null otherwise. The card shows
+  // it ONLY on listings that have no total/annual price, so a page that prints a per-meter rate but
+  // no total still tells the user something instead of a bare «السعر عند الطلب». (2026-07-26 fidelity
+  // fix: trg_aqar_parse used to overwrite this column with round(price_total/area_m2) and null it
+  // whenever there was no total.) MUST NOT be folded into `price` — that string is parsed back to a
+  // number by listingPriceValue() and drives the hard price filter and the cheapest/priciest sort.
+  pricePerMeter?: number | null;
   area: number; // m²
   beds: number; // 0 = not a dwelling
   source: string; // platform name

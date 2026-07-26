@@ -176,3 +176,42 @@ def test_market_average_stats_are_skipped():
     text = ("متوسط سعر المتر 3,500 § في هذا الحي المزيد تفاصيل الإعلان المساحة 400 م² "
             "سعر المتر 2,000 §")
     assert parse_price_per_meter(text) == 2_000
+
+
+# ── The rows trg_aqar_parse used to destroy (fidelity fix, 2026-07-26) ─────────────────────────
+# Harvested verbatim from live source_capture->>'source_text'. Both are Buy listings that publish a
+# «سعر المتر» in the STRUCTURED «تفاصيل الإعلان» spec row while publishing NO total price. Before the
+# fix, trg_aqar_parse hit its `else NEW.price_per_meter := null` arm on exactly this shape (no total
+# ⇒ nothing to divide) and discarded the parsed value — 822 residential + 255 commercial live rows.
+# These goldens pin the parser side of that contract; the trigger side is pinned offline by
+# scripts/verify-aqar-trigger-preserves-source-ppm.ts.
+G_6237931 = ("استكشف خيارات التمويل متوسط أسعار أراضي للبيع في حي الوادي تفاصيل الإعلان "
+             "الواجهة 3 شوارع المساحة 3,666 م² سعر المتر 175 § المميزات توفر الماء توفر الكهرباء "
+             "توفر صرف صحي معلومات الإعلان رقم الإعلان 6237931")
+
+G_6246621 = ("استكشف خيارات التمويل متوسط أسعار أراضي للبيع في حي النظيم تفاصيل الإعلان "
+             "الواجهة شرق عرض الشارع 50 م المساحة 238,000 م² سعر المتر 50 § المميزات "
+             "توفر الكهرباء معلومات الإعلان رقم الإعلان 6246621")
+
+
+def test_buy_page_with_rate_but_no_total_keeps_the_published_rate():
+    """ad 6237931 — the exact shape the trigger nulled: a published rate, no total price."""
+    assert parse_price_per_meter(G_6237931) == 175
+
+
+def test_large_area_land_with_rate_but_no_total():
+    """ad 6246621 — same shape on 238,000 m² land. Note the market-average phrase sits BEFORE the
+    spec row on both pages, so the (?<!متوسط ) guard is load-bearing here, not decorative."""
+    assert parse_price_per_meter(G_6246621) == 50
+
+
+def test_published_rate_is_never_the_derived_quotient():
+    """The anti-regression that matters: what the parser returns must be the number the PAGE
+    printed, never round(total/area). Both goldens have no total at all, so any value that could
+    be produced by arithmetic on this page is by definition wrong."""
+    for text, printed, area in ((G_6237931, 175, 3_666), (G_6246621, 50, 238_000)):
+        got = parse_price_per_meter(text)
+        assert got == printed
+        # the page prints no total, so there is nothing to divide — guard against a future
+        # "helpful" fallback quietly reintroducing derivation.
+        assert got != area
