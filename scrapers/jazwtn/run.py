@@ -9,7 +9,7 @@ Two listing shapes:
   • LAND PLOTS ("للبيع قطعة رقم … مخطط …" / "أرض سكنية") — total area (إجمالي المساحة) + a
     📌/💰/🔑 bullet description giving plan/block/lot numbers, per-m² price (often tiered:
     "850 ريال للمتر" single-frontage / "1,000 ريال للمتر" corner — we take the LOWEST as the
-    base price_per_meter), street frontage, landmarks, features. price_total = per-m² × area.
+    base price_per_meter), street frontage, landmarks, features. price_total ONLY from a printed total.
   • UNITS ("شقة/فيلا/دور/روف … N غرف") — area (مساحة : N م²) + a descriptive paragraph + bedroom
     count from the title ("5 غرف"). Bathrooms ("N دورات مياة") + amenities from the description.
     Total price used only when explicitly stated.
@@ -20,7 +20,7 @@ Field map (Jazwtn → our schema):
   أرض/قطعة · شقة · فيلا · روف · دور …      → property_type (TYPE rules) + res/com routing
   N غرف (title)                           → bedrooms (units only; null for land/commercial)
   مساحة / إجمالي المساحة                   → area_m2
-  "… ريال للمتر" (lowest tier)            → price_per_meter ; × area → price_total (land)
+  "… ريال للمتر" (lowest tier)            → price_per_meter (never multiplied into a total)
   جيزان / جازان (+ region)                → city / region (Jazan focus)
   حي … (title / description)              → neighborhood
   📌/💰/🔑 bullet block                    → description (Arabic, phone-redacted)
@@ -361,8 +361,10 @@ def map_listing(body: str, url: str, featured: Optional[str]) -> tuple[Optional[
         cand = _magnitude(_to_int(tm.group(1)), tm.group(2))
         if cand and cand >= 1000:
             price_total = cand
-    if price_total is None and price_per_meter and area:
-        price_total = int(round(price_per_meter * area))
+    # NO fallback total. If the ad printed no «السعر الكلي», there is no total to store — computing
+    # price_per_meter × area would fabricate a figure the source never printed into a source-named
+    # column (listing-fidelity rule; same violation fixed for aqar in PR#216). The row keeps its
+    # published per-m² rate, and ResultCard renders «سعر المتر» on any card with no total.
 
     # ── bedrooms (units only) / bathrooms ──
     bedrooms = None

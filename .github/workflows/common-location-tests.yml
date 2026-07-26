@@ -8,19 +8,23 @@ name: Common location tests
 on:
   push:
     paths:
-      - "scrapers/common/**"
-      # The suite imports scrapers/aqar/enrich_residential.py (test_aqar_ppm_parse.py), so a PR
-      # touching the aqar enricher must run it — without this path it ran ZERO tests and the
-      # price_per_meter goldens were unenforced on exactly the file they guard. (2026-07-26)
-      - "scrapers/aqar/**"
+      # Whole scrapers/ tree, deliberately. The suite reaches OUTSIDE scrapers/common: it imports
+      # aqar/enrich_residential.py + fursaghyr/run.py, and the no-derivation guard reads
+      # jazwtn|raghdan|fursaghyr|muktamel/run.py. Enumerating those paths is how the aqar goldens
+      # ended up running on ZERO PRs touching the very file they guard (found 2026-07-26); the
+      # enumeration would rot again on the next scraper added. The suite is hermetic and ~1s, so
+      # running it on any scraper change is strictly cheaper than maintaining the list.
+      - "scrapers/**"
       - ".github/workflows/common-location-tests.yml"
   pull_request:
     paths:
-      - "scrapers/common/**"
-      # The suite imports scrapers/aqar/enrich_residential.py (test_aqar_ppm_parse.py), so a PR
-      # touching the aqar enricher must run it — without this path it ran ZERO tests and the
-      # price_per_meter goldens were unenforced on exactly the file they guard. (2026-07-26)
-      - "scrapers/aqar/**"
+      # Whole scrapers/ tree, deliberately. The suite reaches OUTSIDE scrapers/common: it imports
+      # aqar/enrich_residential.py + fursaghyr/run.py, and the no-derivation guard reads
+      # jazwtn|raghdan|fursaghyr|muktamel/run.py. Enumerating those paths is how the aqar goldens
+      # ended up running on ZERO PRs touching the very file they guard (found 2026-07-26); the
+      # enumeration would rot again on the next scraper added. The suite is hermetic and ~1s, so
+      # running it on any scraper change is strictly cheaper than maintaining the list.
+      - "scrapers/**"
       - ".github/workflows/common-location-tests.yml"
   workflow_dispatch: {}
 

@@ -111,3 +111,77 @@ if __name__ == "__main__":
     test_eaqartabuk_bug2_still_fixed()
     test_eaqartabuk_bug3_on_request_price_not_fabricated()
     print("OK — price-fidelity regression tests pass (to_int decimals + monthly ×12 round-trip)")
+
+
+# ── No price column may be DERIVED from an area (2026-07-26) ───────────────────────────────────
+# A price column must hold what the source published. Both directions are the same violation:
+#   price_total      = price_per_meter * area   → fabricates a total the ad never printed
+#   price_per_meter  = price_total   / area     → fabricates a rate  the ad never printed
+# Precedent: aqar PR#216, where trg_aqar_parse() derived ppm as round(price_total/area_m2) and put
+# 42,758 fabricated + 3,479 contradicting values into production. These four scrapers did the same
+# in Python; this guard fails the build if any of them starts doing it again.
+import re
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_DERIVE_RE = re.compile(
+    r"^\s*(?:price_total|price_per_meter|price_annual|total|meter)\s*=.*[*/]\s*(?:area|land_area)\b"
+)
+_NO_DERIVE_SCRAPERS = ("jazwtn", "raghdan", "fursaghyr", "muktamel")
+
+
+def test_no_price_column_is_derived_from_area():
+    bad = []
+    for slug in _NO_DERIVE_SCRAPERS:
+        src = (_REPO_ROOT / "scrapers" / slug / "run.py").read_text(encoding="utf-8")
+        for i, line in enumerate(src.splitlines(), 1):
+            if _DERIVE_RE.match(line):
+                bad.append(f"{slug}/run.py:{i}: {line.strip()}")
+    assert not bad, "price column derived from area:\n  " + "\n  ".join(bad)
+
+
+def test_the_guard_actually_catches_the_shapes_it_must():
+    """A guard that cannot fail is worthless — pin it against the exact lines just removed."""
+    for line in (
+        "        price_total = round(raw_price * area)",
+        "                price_per_meter = round(raw_price / area)",
+        "        price_total = int(round(price_per_meter * area))",
+        "        total = meter * area",
+        "        price_total = round(price * area)",
+    ):
+        assert _DERIVE_RE.match(line), f"guard missed a real derivation: {line!r}"
+    for line in (
+        # fursaghyr's magnitude probe: computed for a threshold test, never stored → allowed
+        "    price_for_check = total or (meter * area if (meter and area and meter < 50000) else meter)",
+        "    area = _int(rea.get('land_area'))",
+        "            price_per_meter = raw_price",
+        "        # We do NOT compute total = rate * area, nor rate = total / area",
+    ):
+        assert not _DERIVE_RE.match(line), f"guard false-positived on: {line!r}"
+
+
+def test_fursaghyr_micro_price_gate_still_judges_magnitude_not_the_bare_rate():
+    """Removing the total synthesis must not silently DROP listings.
+
+    The gate at fursaghyr/run.py returns None (discards the row). It used to test the synthesized
+    total; if it were left testing whichever field is populated, an honest cheap land ad with only
+    a per-m² rate would be judged as `meter < 1000` and thrown away. Real shape: FG24914
+    (meter 33 / area 620 → magnitude 20,460, must be KEPT).
+    """
+    from scrapers.fursaghyr.run import map_listing
+
+    def item(i, **rea):
+        return {"id": i, "rea": {"property_type": "أرض", "purpose": "بيع", **rea}}
+
+    # source total present → stored verbatim, never recomputed (1052 * 437.5 = 460,250 coincidence)
+    row, _ = map_listing(item(1, land_area=437.5, meter_price=1052, total_price=460250))
+    assert row["price_total"] == 460250
+
+    # rate only, no source total → row KEPT, and no total invented
+    row, _ = map_listing(item(2, land_area=620, meter_price=33))
+    assert row is not None, "honest cheap-land row was dropped by the micro-price gate"
+    assert row["price_total"] is None, "a total was fabricated from the per-m² rate"
+
+    # genuinely implausible magnitude → still dropped
+    row, _ = map_listing(item(3, land_area=1, meter_price=500))
+    assert row is None
