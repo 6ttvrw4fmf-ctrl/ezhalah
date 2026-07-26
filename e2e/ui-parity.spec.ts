@@ -29,6 +29,24 @@ async function runSearch(page: Page) {
   await expect(page.getByText(FOUND).first()).toBeVisible({ timeout: 60_000 });
 }
 
+// Select a property group then a type — this reveals the refine card (bedrooms + area + price).
+async function pickGroupType(page: Page, group: string, type: string) {
+  await page.getByText(group, { exact: true }).click();
+  await page.getByText(type, { exact: true }).click();
+}
+
+// The four range inputs all use placeholder "—", in DOM order: areaMin, areaMax, priceMin, priceMax.
+const rangeInput = (page: Page, i: number) => page.getByPlaceholder('—').nth(i);
+
+// Run the search and wait for the agent summary (deterministic — appears regardless of whether the
+// result-count line has finished its transient fetch). Used by the refine-permutation tests, which
+// assert the FILTER WAS APPLIED (via URL), not a specific result count.
+async function runSearchToSummary(page: Page) {
+  await page.getByText('بحث', { exact: true }).click();
+  await page.waitForURL('**/agent**');
+  await expect(page.getByText('ملخص البحث').first()).toBeVisible({ timeout: 60_000 });
+}
+
 test('Filter mode — Buy in Riyadh returns Arabic results', async ({ page }) => {
   await home(page);
   await page.getByText('شراء', { exact: true }).click(); // Buy (default, click to be explicit)
@@ -88,4 +106,35 @@ test('AI mode — a city that is also a region asks to disambiguate (no wrong gu
   await composer.press('Enter');
   // «الرياض» is both a city and a region → the agent must ASK, not silently pick one (anti-guess).
   await expect(page.getByText(/مدينة الرياض ولا منطقة الرياض/).first()).toBeVisible({ timeout: 60_000 });
+});
+
+// ── Refine-filter permutations: bedrooms, area, price. Each proves the control is applied end-to-end
+// (asserted from the /agent filter URL — deterministic regardless of result count) AND returns results.
+
+test('Filter mode — bedrooms filter (3) is applied and returns results', async ({ page }) => {
+  await home(page);
+  await pickCity(page, 'الرياض');
+  await pickGroupType(page, 'الفلل والبيوت', 'فيلا');
+  await page.getByText('3', { exact: true }).click(); // bedroom chip
+  await runSearchToSummary(page);
+  expect(decodeURIComponent(page.url())).toContain('"contextBedsList":["3"]');
+});
+
+test('Filter mode — price max is applied and returns results', async ({ page }) => {
+  await home(page);
+  await page.getByText('شراء', { exact: true }).click(); // Buy
+  await pickCity(page, 'الرياض');
+  await pickGroupType(page, 'الشقق والسكن المشترك', 'شقة');
+  await rangeInput(page, 3).fill('5000000');  // priceMax = 5,000,000 ر.س
+  await runSearchToSummary(page);
+  expect(decodeURIComponent(page.url())).toContain('"priceMax":"5000000"');
+});
+
+test('Filter mode — area min is applied and returns results', async ({ page }) => {
+  await home(page);
+  await pickCity(page, 'الرياض');
+  await pickGroupType(page, 'الشقق والسكن المشترك', 'شقة');
+  await rangeInput(page, 0).fill('100');       // areaMin = 100 م²
+  await runSearchToSummary(page);
+  expect(decodeURIComponent(page.url())).toContain('"areaMin":"100"');
 });
