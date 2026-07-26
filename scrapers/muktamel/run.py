@@ -522,16 +522,19 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
         # stores rent as a single figure; treat per-year as annual, else flag monthly.
         rent_period = "annual" if offer.get("isRentPerYear") else "monthly"
         price_annual = price
-    elif property_type in LAND_TYPES and price and area and price <= 100_000:
-        # LAND: offer.price is the SAR-per-m² RATE, not the total — compute total = rate × area.
-        # The ≤100k guard skips the rare land row that already carries an absolute total (no real
-        # per-m² land rate exceeds 100k), so we never multiply a total by the area. (PDPL/price audit.)
+    elif property_type in LAND_TYPES and price and price <= 100_000:
+        # LAND: offer.price is the SAR-per-m² RATE, not a total. Store it as the rate and leave
+        # price_total NULL — the source publishes no total here. The ≤100k guard only ROUTES the
+        # number to the right column (no real per-m² land rate exceeds 100k, so a larger figure is
+        # an absolute total); it never alters the value.
+        # NOTE the missing `and area`: this branch must NOT depend on landArea. With it, a land row
+        # lacking landArea fell through to the else and stored a per-m² RATE in price_total — a
+        # worse breach than the one being removed.
         price_per_meter = price
-        price_total = round(price * area)
     else:
+        # Everything else: offer.price is the TOTAL. Deriving price_per_meter = price / area would
+        # fabricate a rate the source never printed (listing-fidelity rule; aqar PR#216).
         price_total = price
-        if price and area:
-            price_per_meter = round(price / area)
 
     # ── location ──
     addr_json = parsed.get("addressJson")

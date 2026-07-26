@@ -254,16 +254,18 @@ def map_listing(item: dict) -> tuple[Optional[dict], str]:
     meter = _int(rea.get("meter_price"))
     total = _int(rea.get("total_price"))
 
-    # Many listings only carry meter_price + land_area → derive total_price = meter * area
-    # ONLY when meter is in a plausible per-m² range (< 50k SAR/m²). Above that the field is
-    # almost certainly the total price mis-labeled by the publisher (e.g. villa with
-    # meter_price=750000), in which case we leave price columns null and keep the raw value
-    # in additional_info.meter_price for forensic inspection.
-    if total is None and meter and area and meter < 50000:
-        total = meter * area
+    # price_total is `rea.total_price` VERBATIM or nothing. We do NOT synthesize it from
+    # meter_price × land_area: that fabricates a figure the source never printed into a
+    # source-named column (listing-fidelity rule; same violation fixed for aqar in PR#216).
+    # `meter_price` is still stored as price_per_meter below when it is a plausible rate.
+    # (Live check 2026-07-26: this synthesis was already unreachable — all 19 live items either
+    # carry total_price or have meter_price >= 55,000, above the rate threshold.)
 
-    # SANITY: reject implausible micro-prices
-    price_for_check = total if total else meter
+    # SANITY: reject implausible micro-prices. This gate must keep judging the listing's
+    # MAGNITUDE, not just whichever field happens to be populated — gating on a bare per-m² rate
+    # would DROP honest cheap land outright (real shape: FG24914 meter 33 / area 620). So the
+    # product is computed here purely as a magnitude probe and never stored anywhere.
+    price_for_check = total or (meter * area if (meter and area and meter < 50000) else meter)
     if price_for_check is not None and price_for_check < 1000:
         return None, category
 

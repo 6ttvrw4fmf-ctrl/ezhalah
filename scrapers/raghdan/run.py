@@ -14,10 +14,19 @@ each detail page. Each active page embeds <script type="application/ld+json"> bl
     Storage URLs with embedded ?alt=media&token=… → public), AND a broker{RealEstateAgent name+addr}.
   • BreadcrumbList → city / district.
 
-PRICE SEMANTICS (verified by survey):
-  • Buy + LAND (ارض): offers.price is the PER-METER rate → total = price × area, price_per_meter = price.
-  • Buy + building/apartment/etc.: offers.price is the TOTAL → price_per_meter = total / area.
+PRICE SEMANTICS (re-verified 2026-07-26 against 227 live Firestore docs):
+  • Buy + LAND (ارض): offers.price is the PER-METER rate → price_per_meter ONLY.
+  • Buy + building/apartment/etc.: offers.price is the TOTAL → price_total ONLY.
   • Rent: offers.price is the ANNUAL total.
+  We store ONLY the number the source published, in the column it belongs to, and leave the other
+  NULL. We do NOT compute total = rate × area, nor rate = total / area: both fabricate a figure the
+  source never printed into a source-named column (listing-fidelity rule; same violation fixed for
+  aqar in PR#216). A land card with no total is not price-less — ResultCard renders the published
+  «سعر المتر» whenever the price line would read «السعر عند الطلب».
+  NOTE: the Firestore document also carries `landTotalPrice` for land rows. Reading it would give
+  those rows a REAL source total, but it needs a second egress host + owner approval, so it is a
+  deliberate follow-up rather than a silent fallback here (a fallback is exactly where the multiply
+  would creep back).
 
 DESCRIPTION free-text carries structured specs (no agent contact):
   "المساحة 148.62 م²، عدد الغرف 4، العمر: جديد، الواجهة: شرقية"
@@ -355,20 +364,22 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
             price_annual = raw_price
             rent_period = "annual"
         elif property_type in LAND_TYPES:
-            # Buy + land: offers.price is the PER-METER rate.
+            # Buy + land: offers.price is the PER-METER rate. Store it as the rate and leave
+            # price_total NULL — the source did not print a total here (see PRICE SEMANTICS above).
             price_per_meter = raw_price
-            if area:
-                price_total = round(raw_price * area)
         else:
-            # Buy + building/unit: offers.price is the TOTAL.
+            # Buy + building/unit: offers.price is the TOTAL. Store it as the total and leave
+            # price_per_meter NULL — deriving it would fabricate a rate the source never printed.
             price_total = raw_price
-            if area:
-                price_per_meter = round(raw_price / area)
 
     # SANITY: reject absurdly low TOTAL sale prices (data-entry slips) — keep the row but null price.
+    # Scope is deliberately unchanged: it gates a TOTAL only. It used to also null price_per_meter,
+    # but the two can no longer co-occur (land sets the rate, buildings set the total), so that arm
+    # was dead. A land row's rate is NOT magnitude-gated here — it is stored exactly as published;
+    # withholding an implausible-looking source value would be a judgement call, and the «سعر المتر 1»
+    # placeholder case is handled at DISPLAY (ResultCard), where it alters no stored data.
     if price_total is not None and price_total < 1000:
         price_total = None
-        price_per_meter = None
     if price_annual is not None and price_annual < 1000:
         price_annual = None
 
