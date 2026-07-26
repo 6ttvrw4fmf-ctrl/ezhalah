@@ -1,0 +1,38 @@
+# Production-UI parity (2026-07-24). Deterministic Playwright run against the live production app —
+# the reliable replacement for coordinate-based browser checks. Drives Filter mode (Buy / Rent+Monthly
+# / type) and AI mode, asserting real Arabic results + correct classification. Nightly + on-demand.
+name: UI parity (Playwright)
+
+on:
+  schedule:
+    - cron: '30 3 * * *'   # nightly, just after audit-invariants (03:00)
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Target URL (defaults to production)'
+        required: false
+        default: 'https://ezhalah-app.vercel.app'
+
+jobs:
+  ui-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright + browser
+        run: |
+          npm i -D @playwright/test@^1.49
+          npx playwright install --with-deps chromium
+      - name: Run UI parity tests
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url || 'https://ezhalah-app.vercel.app' }}
+        run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-trace
+          path: test-results/
+          retention-days: 7

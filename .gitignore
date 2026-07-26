@@ -46,3 +46,8 @@ example
 __pycache__/
 *.pyc
 scrapers/.env
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
