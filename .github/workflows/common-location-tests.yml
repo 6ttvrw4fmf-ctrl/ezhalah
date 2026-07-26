@@ -9,10 +9,18 @@ on:
   push:
     paths:
       - "scrapers/common/**"
+      # The suite imports scrapers/aqar/enrich_residential.py (test_aqar_ppm_parse.py), so a PR
+      # touching the aqar enricher must run it — without this path it ran ZERO tests and the
+      # price_per_meter goldens were unenforced on exactly the file they guard. (2026-07-26)
+      - "scrapers/aqar/**"
       - ".github/workflows/common-location-tests.yml"
   pull_request:
     paths:
       - "scrapers/common/**"
+      # The suite imports scrapers/aqar/enrich_residential.py (test_aqar_ppm_parse.py), so a PR
+      # touching the aqar enricher must run it — without this path it ran ZERO tests and the
+      # price_per_meter goldens were unenforced on exactly the file they guard. (2026-07-26)
+      - "scrapers/aqar/**"
       - ".github/workflows/common-location-tests.yml"
   workflow_dispatch: {}
 

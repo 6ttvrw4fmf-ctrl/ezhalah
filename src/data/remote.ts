@@ -1301,6 +1301,9 @@ const LIST_SELECT = [
   'property_type', 'transaction_type',
   'city', 'neighborhood',
   'price_annual', 'price_total', 'rent_period',
+  // Source-published «سعر المتر». Present on all 63 platform tables. Shown on the card only when
+  // the listing has no total/annual price (2026-07-26 aqar fidelity fix).
+  'price_per_meter',
   'area_m2', 'bedrooms', 'bathrooms',
   'master_bedrooms', 'halls', 'reception_rooms_majlis',
   'property_age', 'direction', 'street_name', 'residence_type', 'project_name',
@@ -1364,6 +1367,10 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       district: r.neighborhood ?? '',
       road: r.street_name ?? '',
       price: priceStr,
+      // Passed through VERBATIM — no rounding, no unit conversion, no derivation. The decision of
+      // whether to SHOW it (and the «سعر المتر 1» placeholder rule) lives in ResultCard, so this
+      // field always means "what the source published", nothing else.
+      pricePerMeter: typeof r.price_per_meter === 'number' ? r.price_per_meter : null,
       area: r.area_m2 ?? 0,
       beds: r.bedrooms ?? 0,
       // CRITICAL: source comes from the DB row, never hardcoded — the card's logo, "Hosted on X",
