@@ -26,6 +26,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          # SUPABASE_PUBLISHABLE_KEY intentionally omitted — the agent check falls back to the
+          # hard-coded PUBLIC publishable key. Set this secret only if the key is ever rotated.
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/check_audit_invariants.py
