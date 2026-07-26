@@ -617,7 +617,10 @@ def map_listing(it: dict) -> Optional[dict]:
         "region": region,
         "neighborhood": neighborhood,
         "title": title,
-        "description": None,
+        # NO description key here — the LIST feed has none, and this is a full-row upsert
+        # (on_conflict=ad_number). Emitting "description": None made every re-crawl SET
+        # description=NULL, wiping the Tier-2 --backfill-details text on any unit still in the feed.
+        # Omitting the key leaves the column out of the UPDATE, so the backfilled value survives.
         "photo_urls": _photos(it),
         "rega_location_verified": False,
         "additional_info": info,
