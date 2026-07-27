@@ -26,7 +26,16 @@
 #             via the hardcoded `'deal\_%'` literal in check_scraper_freshness(). Listed here
 #             2026-07-16 (Batch 3) so the slug can never enter a workflow matrix. If the JSON API
 #             is ever wanted, evolve scrapers/dealapp/ instead of un-retiring this slug.
+# jazwtn   — retired 2026-07-27 (owner-approved): jazwtn.sa IP-blocks GitHub Actions runner
+#             ranges. 6/6 consecutive failed runs from 2026-07-23, always on the first request
+#             (sitemap) with curl(35) "Connection reset by peer"; the SAME URL returns HTTP 200 /
+#             68,410 bytes in 0.26s from a non-runner IP, so the site and the scraper code are
+#             both fine — only the egress IP is blocked (same class as toor). 137 DB rows are
+#             KEPT ACTIVE and user-visible; the sitemap held 138 URLs with newest lastmod
+#             2026-07-13, so nothing new was being missed at retirement. Un-retiring requires a
+#             non-runner egress IP (residential proxy), not just re-adding the matrix line.
 toor
 alnokhba
 muktamel
 deal
+jazwtn
