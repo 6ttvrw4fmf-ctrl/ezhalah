@@ -24,7 +24,7 @@
 # halved after the owner reported the DataImpulse 10 GB balance overrun on 2026-07-27, where
 # attribution showed THIS job was 92% of all metered-proxy row volume (1,554,318 of 1,684,193 rows
 # since 07-09). Rationale + revert in
-# supabase/migrations/20260727150000_wasalt_enum_liveness_every_2_days.sql.
+# supabase/migrations/20260727154828_wasalt_enum_liveness_every_2_days.sql.
 # Flip latency = grace × cadence ⇒ retiring a vanished listing now takes ~6 days, not ~3.
 name: Wasalt enum liveness
 
