@@ -361,8 +361,16 @@ function rpcFilterParams(q: SearchQuery) {
     p_price_max,
     p_area_min: pnum(q.areaMin),
     p_area_max: pnum(q.areaMax),
+    // Real server-side ordering (2026-07-27 fix) for the sort keys the RPC now understands — it then
+    // orders the FULL matching set before LIMIT/OFFSET, not just the recency-capped page. 'newest'/
+    // undefined need no param (NULL reproduces the RPC's own default order). ppm_asc/ppm_desc stay
+    // client-side-only (RPC has no derived-ppm sort — see the migration's own comment on why that's
+    // deliberate); sortListings() in search.ts still re-sorts the fetched page for those two, same as
+    // before this fix.
+    ...(RPC_SORT_KEYS.has(q.sort as string) ? { p_sort_by: q.sort } : {}),
   };
 }
+const RPC_SORT_KEYS = new Set(['oldest', 'price_asc', 'price_desc', 'area_asc', 'area_desc', 'beds_desc']);
 
 export type SearchScope = {
   p_deal: string | null;
@@ -1079,7 +1087,13 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
   // Load-More page never re-shows the same card (see diversityBoostedKeys below).
   let allCands: any[] = cands as any[];
   const diversityKey = JSON.stringify(q);
-  if (pageOffset === 0 && allCands.length >= pageLimit) {
+  // Skip entirely when an objective RPC sort is active (price/area/beds/oldest, 2026-07-27 fix):
+  // mergeDiversitySeed() hardcodes a last_updated-DESC re-sort of the merged pool, which would
+  // silently clobber the true price/area/beds ordering the RPC just computed. The bug this seed
+  // fixes (one platform's batch-scraped rows saturating a RECENCY window) also doesn't apply to a
+  // price/area/beds sort in the first place — those aren't clustered by scrape run.
+  const objectiveRpcSort = RPC_SORT_KEYS.has(q.sort as string);
+  if (!objectiveRpcSort && pageOffset === 0 && allCands.length >= pageLimit) {
     const DIVERSITY_SEED_PER_PLATFORM = 20;
     const { data: seedCands } = await supabase.rpc('location_search_candidates_ar', {
       ...baseRpcParams,
