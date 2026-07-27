@@ -369,9 +369,17 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
         "area_m2": _int(o.get("lotSize")),
         "bedrooms": _int(o.get("numberBedrooms")),
         "bathrooms": _int(o.get("numberBathrooms")),
+        # Rent-period truth (2026-07-27 audit): Sanadak's own RSC payload carries rentTypeText
+        # ('شهر'/'سنة') for every rental — it was already captured into source_capture but the
+        # stored row hardcoded 'annual', so a 2,500/شهر listing displayed as 2,500/YEAR (47+ live
+        # rows). Map it: 'شهر' → rent_period='monthly' (flows to payment_monthly=true via sync) and
+        # price_annual = price*12 — the established annualization convention (gathern/aqarmonthly),
+        # so the app's price_annual/12 display shows the source's monthly price EXACTLY. Anything
+        # else (سنة, absent) stays annual with the price as published. A never-seen 'يوم' would stay
+        # annual + trip the sub-12k price audit rather than being silently guessed at.
         "price_total": price if not is_rent else None,
-        "price_annual": price if is_rent else None,
-        "rent_period": "annual" if is_rent else None,
+        "price_annual": (price * 12 if (o.get("rentTypeText") or "").strip() == "شهر" and price else price) if is_rent else None,
+        "rent_period": ("monthly" if (o.get("rentTypeText") or "").strip() == "شهر" else "annual") if is_rent else None,
         "city": city,
         "region": region,
         "neighborhood": o.get("district") or None,

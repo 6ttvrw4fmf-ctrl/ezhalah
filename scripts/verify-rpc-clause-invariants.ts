@@ -47,6 +47,36 @@ const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
     marker: /p_furnished\s+is null or s\.furnished\s*=\s*p_furnished/i,
     why: 'Bug C (2026-07-23): p_furnished must exclude furnished-unknown rows like every other strict boolean and the amenities path (both return 31,394). NULL-permissive returned 72,483 (furnished IS NOT FALSE).',
   },
+  {
+    name: 'tenant filter is NULL-strict',
+    marker: /p_tenant\s+is null or s\.tenant_ar\s*=\s*p_tenant/i,
+    why: '2026-07-27 audit: the permissive form returned 75,014 rows for p_tenant=>عوائل instead of the strict 5,751 — tenant-unknown rows must not pass an explicit tenant filter.',
+  },
+  {
+    name: 'directions filter is NULL-strict and vocabulary-canonicalized (norm_direction_ar on BOTH sides)',
+    marker: /norm_direction_ar\(s\.direction_ar\)\s+in\s*\(select norm_direction_ar\(d\)/i,
+    why: '2026-07-27 audit: direction_ar holds two vocabulary families (شمال 14,869 vs شمالية 40); a literal match makes one family unreachable, and the old NULL-permissive clause returned 67,439 instead of 14,869.',
+  },
+  {
+    name: 'street-width filter is NULL-strict (street_width_m IS NOT NULL required)',
+    marker: /s\.street_width_m is not null/i,
+    why: '2026-07-27 audit: NULL-permissive returned 89,819 for p_street_width_min=>20 instead of the strict 20,112.',
+  },
+  {
+    name: 'floor filter is NULL-strict (floor_number IS NOT NULL required)',
+    marker: /s\.floor_number is not null/i,
+    why: '2026-07-27 audit: NULL-permissive returned 108,880 for p_floor_min=>3 instead of the strict 3,661 (96.6% false positives — floor coverage is only 4.9%).',
+  },
+  {
+    name: "amenity token 'rent_now_pay_later' is an explicit alias of 'rnpl'",
+    marker: /'rent_now_pay_later'\s*=\s*any\(p_amenities\)\)\s*or s\.rent_now_pay_later/i,
+    why: "2026-07-27 audit: the literal token silently degraded to an UNFILTERED search (75,492 instead of 15,199).",
+  },
+  {
+    name: 'unknown amenity tokens fail CLOSED (vocabulary guard present)',
+    marker: /not exists \(select 1 from unnest\(p_amenities\) tok/i,
+    why: 'An unrecognized amenity token must never silently widen a search to "no filter" — it must match nothing, so the mistake is visible the first time it ships.',
+  },
 ];
 
 // A clause that must NOT come back: the pre-fix rent-period predicate keyed on lease length + a hardcoded
@@ -61,6 +91,26 @@ const FORBIDDEN: { name: string; marker: RegExp; why: string }[] = [
     name: 'NULL-permissive furnished predicate (Bug C regression)',
     marker: /p_furnished\s+is null or s\.furnished is null/i,
     why: 'Reintroduces Bug C: p_furnished would keep furnished-unknown rows (72,483) instead of the strict 31,394 the amenities path returns.',
+  },
+  {
+    name: 'NULL-permissive tenant predicate',
+    marker: /or s\.tenant_ar is null or/i,
+    why: 'Reintroduces the 2026-07-27 defect: tenant-unknown rows pass an explicit tenant filter (75,014 instead of 5,751).',
+  },
+  {
+    name: 'NULL-permissive directions predicate',
+    marker: /or s\.direction_ar is null or/i,
+    why: 'Reintroduces the 2026-07-27 defect: direction-unknown rows pass an explicit direction filter (67,439 instead of 14,869).',
+  },
+  {
+    name: 'NULL-permissive street-width predicate',
+    marker: /or s\.street_width_m is null\s+or/i,
+    why: 'Reintroduces the 2026-07-27 defect: width-unknown rows pass an explicit street-width filter (89,819 instead of 20,112).',
+  },
+  {
+    name: 'NULL-permissive floor predicate',
+    marker: /or s\.floor_number is null\s+or/i,
+    why: 'Reintroduces the 2026-07-27 defect: floor-unknown rows pass an explicit floor filter (108,880 instead of 3,661).',
   },
 ];
 

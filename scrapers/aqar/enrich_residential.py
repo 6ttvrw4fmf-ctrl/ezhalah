@@ -229,11 +229,23 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # (the Saudi norm); None for Buy. (user request: "per month = charged monthly, not yearly".)
     rent_period: Optional[str] = "annual" if transaction_type == "Rent" else None
 
-    mp_yr = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*سنوي", text)
+    # Cross-listing contamination guard (2026-07-27 audit, live-proven on 6723041): the de-tagged
+    # page text INCLUDES the related-listings strip at the bottom, so on a PRICE-LESS listing the
+    # first «N §/سنوي» match came from a DIFFERENT listing's strip card (stored 1,500 belonged to a
+    # حي الحزم الجنوبي listing, not this one). The listing's own price headline sits BEFORE the
+    # «تفاصيل الإعلان» section header — search only that prefix when the marker exists (legacy
+    # full-text fallback otherwise); a price-less page then stays honestly NULL. Also strip the
+    # RNPL financing teaser («… ابتداءً من N § شهريا») first: N is an installment, not the rent,
+    # and «شهريا» matches the شهري pattern (3 live rows stored installment×12 as price_annual —
+    # the installment already has its own home in rent_now_pay_later_monthly).
+    price_text = text.split(_AGE_BLOCK_ANCHOR, 1)[0] if _AGE_BLOCK_ANCHOR in text else text
+    price_text = re.sub(r"ابتداء\S*\s*من\s*\d[\d,]*\s*[§ر﷼]?\s*شهري\w*", " ", price_text)
+
+    mp_yr = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*سنوي", price_text)
     if mp_yr:
         price_annual = N.to_int(mp_yr.group(1))
 
-    mp_mo = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*شهري", text)
+    mp_mo = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*شهري", price_text)
     if not price_annual and mp_mo:
         # No yearly price, but a "/شهري" figure → this is a genuinely MONTHLY rental. Tag it and store
         # the annualized figure too (monthly × 12) so sorting/compare still works. The app divides it
@@ -250,13 +262,15 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     if transaction_type == "Buy":
         # Aqar Buy prices show up as "1,200,000 §" / "299,000 §" / sometimes plain "1200000 §".
         # Try several formats; sanity-check that the number is >= 50K SAR (rules out per-meter
-        # figures and stray numbers that happen to sit next to the riyal symbol).
+        # figures and stray numbers that happen to sit next to the riyal symbol). Searched on
+        # price_text (pre-«تفاصيل الإعلان» prefix) — same cross-listing strip guard as rent above:
+        # a price-less Buy page must stay NULL, not inherit a related-listing card's price.
         for pat in (
             r"(\d{1,3}(?:,\d{3}){2,3})\s*[§ر﷼]",  # 1,200,000 §
             r"(\d{1,3}(?:,\d{3}){1,3})\s*[§ر﷼]",  # 299,000 §
             r"(\d{6,9})\s*[§ر﷼]",                  # 1200000 §
         ):
-            mp_total = re.search(pat, text)
+            mp_total = re.search(pat, price_text)
             if mp_total:
                 v = N.to_int(mp_total.group(1))
                 if v and v >= 50_000:
