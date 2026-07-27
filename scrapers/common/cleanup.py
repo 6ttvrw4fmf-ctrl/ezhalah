@@ -41,6 +41,12 @@ def _aqar_wasalt_markers(body: str) -> bool:
 def _never(body: str) -> bool:
     return False  # 404-only platforms: a delisted unit returns a real HTTP 404; every 200 is treated LIVE
 
+def _aqarcity_expired(body: str) -> bool:
+    # aqarcity SOFT-expires: an expired listing serves HTTP 200 with the banner «الإعلان منتهي ...»
+    # ("this ad is expired and no longer available"). Live listings (200) never carry it. Verified
+    # 2026-07-27: 8/8 inactive pages had it, 12/12 active pages did NOT.
+    return "الإعلان منتهي" in body
+
 PLATFORMS: dict[str, dict] = {
     "aqar":   {"tables": ["aqar_residential_listings", "aqar_commercial_listings"],     "dead_marker": _aqar_wasalt_markers},
     "wasalt": {"tables": ["wasalt_residential_listings", "wasalt_commercial_listings"], "dead_marker": _aqar_wasalt_markers},
@@ -48,6 +54,9 @@ PLATFORMS: dict[str, dict] = {
     # serves 200. So delete ONLY on a hard 404 — a booked-but-listed 200 is never deleted, and a
     # relisted unit that comes back 200 is self-healed. Verified on 8 inactive+2 active URLs 2026-07-27.
     "gathern": {"tables": ["gathern_residential_listings"], "dead_marker": _never},
+    # aqarcity: soft-expire (200 + «الإعلان منتهي» banner). Delete only when that banner is present;
+    # every other 200 is live → self-heal.
+    "aqarcity": {"tables": ["aqarcity_residential_listings", "aqarcity_commercial_listings"], "dead_marker": _aqarcity_expired},
 }
 
 DEFAULT_POLICY = {
