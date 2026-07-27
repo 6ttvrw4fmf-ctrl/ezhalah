@@ -137,6 +137,24 @@ def test_gathern_is_404_only_booked_200_never_deleted():
     assert s2["deleted"] == 1 and c2.deleted["gathern_residential_listings"] == [2]   # only a hard 404 deletes
 
 
+def test_aqarcity_expired_marker_deletes_clean_200_self_heals():
+    dm = C.PLATFORMS["aqarcity"]["dead_marker"]
+    assert dm("... الإعلان منتهي ولم يعد متاحًا ...") is True     # expired banner → dead
+    assert dm("شقة للبيع في جدة — 500000 ريال") is False          # normal live listing → not dead
+    # live (200, no banner) → self-heal, never deleted
+    c = _install({"aqarcity_residential_listings": [_cand(1)]}, POL(),
+                 probe=lambda url: (200, "شقة للبيع 500000 ريال"),
+                 platform="aqarcity", tables=("aqarcity_residential_listings",), dead_marker=None)
+    s = C.run("aqarcity", force=True)
+    assert s["deleted"] == 0 and s["reactivated"] == 1 and c.deleted == {}
+    # expired (200 + banner) → delete
+    c2 = _install({"aqarcity_residential_listings": [_cand(2)]}, POL(),
+                  probe=lambda url: (200, "الإعلان منتهي أو غير مطابق للشروط"),
+                  platform="aqarcity", tables=("aqarcity_residential_listings",), dead_marker=None)
+    s2 = C.run("aqarcity", force=True)
+    assert s2["deleted"] == 1 and c2.deleted["aqarcity_residential_listings"] == [2]
+
+
 def test_verdict_status_mapping():
     dm = lambda b: b == "DEAD"
     assert C.verdict(404, "", dm) == "dead"
