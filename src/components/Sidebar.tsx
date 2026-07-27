@@ -17,6 +17,7 @@ import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import HeroBackground from '@/components/HeroBackground';
 import { useApp, type HistoryItem } from '@/store';
 import { queryLabel } from '@/data/search';
+import { sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { useI18n } from '@/i18n';
 import { pickName, initialsOf } from '@/lib/nameSync';
 import { noTranslateRef } from '@/noTranslate';
@@ -189,7 +190,11 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       animateOut(() => { onClose(); router.replace('/auth'); });
       return;
     }
-    setQuery(() => c.query);
+    // STRICT allowlist into the shared store the Filter home binds to — agent-only fields
+    // (bothDeals/sources/keywords/sort/count/type/priceInput/…) must never ride into a later
+    // filter search. The chat replay below still gets the FULL query via router params.
+    // (audit item 2, 2026-07-27.)
+    setQuery(() => sanitizeForFilterRestore(c.query));
     setActiveChat(c.id); // highlight this row as the current chat
     // Search-based chats replay their filter; chat-only entries (empty query) just open the agent
     // fresh — chat messages aren't stored, so there's nothing to replay. (user request.)
