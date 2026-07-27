@@ -3,7 +3,8 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { CATEGORY_TYPES, detailFor, type Category } from '@/data/taxonomy';
+import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
+import { groupsFor, groupMembers, isCleanType, type Macro } from '@/data/propertyTypes';
 import { emptyQuery, type SearchQuery } from '@/data/search';
 import { INTERVIEW_CITIES, neighborhoodsFor } from '@/data/locations';
 import { useApp } from '@/store';
@@ -61,12 +62,13 @@ const CANON_GROUP: Record<string, 'Location' | 'Details'> = {
   neighborhood: 'Location',
   deal: 'Details',
   category: 'Details',
+  typeGroup: 'Details',
   type: 'Details',
   budget: 'Details',
   size: 'Details',
 };
 
-const ALL_KEYS = ['city', 'neighborhood', 'deal', 'category', 'type', 'budget', 'size', 's_amenities', 's_use'];
+const ALL_KEYS = ['city', 'neighborhood', 'deal', 'category', 'typeGroup', 'type', 'budget', 'size', 's_amenities', 's_use'];
 
 const KNOWN_CITIES = [
   ...INTERVIEW_CITIES,
@@ -81,7 +83,13 @@ function primaryStep(a: Answers): Step | null {
   }
   if (a.deal === undefined) return { key: 'deal', group: 'Details', title: 'Rent or Buy?', opts: ['Rent', 'Buy'] };
   if (a.category === undefined) return { key: 'category', group: 'Details', title: 'Property category?', opts: ['Residential', 'Commercial'] };
-  if (a.category !== SKIP && a.type === undefined) return { key: 'type', group: 'Details', title: 'Property type?', opts: CATEGORY_TYPES[a.category as Category] ?? [] };
+  // Category → group → type: the SAME canonical hierarchy the Filter home renders (one source of
+  // truth — the stale CATEGORY_TYPES list is retired; it offered dead types like Building/Kiosk and
+  // misfiled مزرعة under Commercial). Skipping the group skips the type question too (broad search).
+  if (a.category !== SKIP && a.typeGroup === undefined)
+    return { key: 'typeGroup', group: 'Details', title: 'Property group?', opts: groupsFor(a.category as Macro).map((g) => g.group) };
+  if (a.category !== SKIP && real(a.typeGroup) && a.type === undefined)
+    return { key: 'type', group: 'Details', title: 'Property type?', opts: groupMembers(a.typeGroup) };
   if (a.budget === undefined)
     return {
       key: 'budget',
@@ -91,8 +99,12 @@ function primaryStep(a: Answers): Step | null {
       opts: a.deal === 'Buy' ? BUY_BUDGET : RENT_BUDGET,
     };
   if (a.size === undefined) {
-    const isBed = real(a.type) ? detailFor(a.type).isBedrooms : true;
-    const opts = real(a.type) ? (isBed ? BED_OPTS : detailFor(a.type).options) : BED_OPTS;
+    // Canonical applicability — the SAME rules as the Filter home: a picked type answers via
+    // detailFor (Land/Warehouse/… are size-only, never bedrooms); otherwise the category/group
+    // context answers via detailForContext (Commercial and land groups → size, not bedrooms).
+    const ctx = detailForContext(real(a.category) ? (a.category as string) : 'Residential', real(a.typeGroup) ? a.typeGroup : null);
+    const isBed = real(a.type) ? detailFor(a.type).isBedrooms : (ctx?.showBeds ?? true);
+    const opts = real(a.type) && !isBed ? detailFor(a.type).options : isBed ? BED_OPTS : ['Under 500 m²', '500–1,000 m²', '1,000–2,000 m²', '2,000+ m²'];
     return { key: 'size', group: 'Details', title: isBed ? 'How many bedrooms?' : 'Size?', opts };
   }
   return null;
@@ -118,7 +130,10 @@ function buildQuery(a: Answers): SearchQuery {
   if (real(a.neighborhood)) q.location = `${a.neighborhood}, ${a.city}`;
   else if (real(a.city)) q.location = a.city;
   if (real(a.category)) q.category = a.category as Category;
-  if (real(a.type)) q.type = a.type;
+  if (real(a.typeGroup)) q.typeGroup = a.typeGroup;
+  // Only CLEAN types reach the query (hierarchy options always are; a custom-typed answer that isn't
+  // a clean type broadens instead of dead-ending — matchesType would reject every row otherwise).
+  if (real(a.type) && isCleanType(a.type)) q.type = a.type;
   if (real(a.size)) q.detail = /bed/i.test(a.size) ? a.size.replace(/\s*beds?/i, '').trim() : a.size;
   if (real(a.budget)) q.priceInput = (a.budget.match(/\d/g) ?? []).join('');
   return q;
@@ -151,14 +166,18 @@ function interviewToChat(a: Answers, isRTL: boolean): { bubble: string; sub: str
   const comma = isRTL ? '، ' : ', ';
   const whatPhrase = real(a.type)
     ? tWord(a.type)
-    : real(a.category)
-      ? t('{cat} property', { cat: tWord(a.category) })
-      : t('a property');
+    : real(a.typeGroup)
+      ? t(a.typeGroup)
+      : real(a.category)
+        ? t('{cat} property', { cat: tWord(a.category) })
+        : t('a property');
   const subWhat = real(a.type)
     ? tWord(a.type)
-    : real(a.category)
-      ? t('{cat} properties', { cat: tWord(a.category) })
-      : t('properties');
+    : real(a.typeGroup)
+      ? t(a.typeGroup)
+      : real(a.category)
+        ? t('{cat} properties', { cat: tWord(a.category) })
+        : t('properties');
 
   const verbWord = real(a.deal) ? t(a.deal === 'Buy' ? 'to buy' : 'to rent') : '';
   const verbSeg = verbWord ? ' ' + verbWord : '';
