@@ -232,6 +232,29 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
     halls_or_majlis = _i(_attr(prop, "noOfLivingRooms") or _attr(prop, "livingRooms") or _attr(prop, "noOfHalls"))
     sale_price = info.get("salePrice") or info.get("conversionPrice")
     rent_price = info.get("expectedRent")
+    # Rent-period truth (2026-07-27 audit): Wasalt publishes per-frequency pricing in
+    # propertyInfo.rentFreq {monthly:{amount,default_freq}, yearly:{amount,default_freq}} on BOTH
+    # the search-list and detail payloads (live-verified). The old mapping hardcoded
+    # rent_period='annual' and took expectedRent as-is, which (a) mislabeled source-default-MONTHLY
+    # rentals as yearly and (b) for monthly-ONLY listings stored the per-month amount as a per-YEAR
+    # price (live-proven: 5807133 renders only "3,000 /Month" yet was stored price_annual=3000 with
+    # payment_monthly=false). New truth follows the source's DEFAULT product:
+    #   - default_freq monthly → rent_period='monthly' (flows to payment_monthly=true via the
+    #     existing sync, no DB change), price_annual = monthly_amount*12 — the established
+    #     annualization convention (gathern/aqarmonthly), so the app's price_annual/12 display
+    #     shows the source's monthly headline EXACTLY (price fidelity at the card).
+    #   - otherwise → rent_period='annual', price_annual = the source's yearly amount as published
+    #     (falls back to legacy expectedRent when rentFreq is absent — byte-identical behaviour).
+    rent_is_monthly = False
+    if is_rent:
+        rent_freq = info.get("rentFreq") or {}
+        rf_monthly = rent_freq.get("monthly") or {}
+        rf_yearly = rent_freq.get("yearly") or {}
+        if rf_monthly.get("default_freq") and rf_monthly.get("amount"):
+            rent_is_monthly = True
+            rent_price = int(rf_monthly["amount"]) * 12
+        elif rf_yearly.get("amount"):
+            rent_price = rf_yearly["amount"]
     # Property photos are served by Cloudflare Images, keyed by listing id + image filename. The
     # bare cdn.wasalt.sa/<uuid> guess 404s — the real path is imagedelivery.net/<acct>/production/
     # properties/<id>/images/<uuid>.jpg/<transform>. (verified against the live <img src>.)
@@ -295,7 +318,7 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
         "project_name": project_name,
         "price_annual": int(rent_price) if (is_rent and rent_price) else None,
         "price_total": int(sale_price) if (not is_rent and sale_price) else None,
-        "rent_period": "annual" if is_rent else None,
+        "rent_period": ("monthly" if rent_is_monthly else "annual") if is_rent else None,
         "city": city,
         "neighborhood": info.get("zone") or info.get("address"),
         "title": info.get("title"),

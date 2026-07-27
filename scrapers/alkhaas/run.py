@@ -336,6 +336,21 @@ def map_listing(adid: int, body: str) -> tuple[Optional[dict], str]:
 
     title = _redact(title_raw) or title_raw
 
+    # District from the ad TITLE (2026-07-27 audit): alkhaas.net's spec table has NO الحي row —
+    # the district exists ONLY as free text in the title («للبيع فيلا بحي المحمدية», live-verified
+    # on /ads/1000 and /ads/1004; 174/209 titles carry a «بحي X» phrase). The old code hardcoded
+    # neighborhood=None, leaving district coverage at 0% forever. Capture the VERBATIM source text
+    # (1-2 words after بحي/حي; a trailing token equal to the city name is dropped); no match → NULL,
+    # never guessed. Downstream, the card only ever shows a district after the normal catalog-match
+    # gate (card-district-gates-on-match rule), so an imperfect capture can not surface wrong text.
+    neighborhood = None
+    nb_m = re.search(r"(?:^|(?<=\s))ب?حي\s+([^\s,،.]+(?:\s+[^\s,،.]+)?)", title_raw or "")
+    if nb_m:
+        nb_words = nb_m.group(1).split()
+        if len(nb_words) > 1 and city_ar and nb_words[-1] == city_ar.strip():
+            nb_words = nb_words[:-1]
+        neighborhood = " ".join(nb_words) or None
+
     info: dict[str, Any] = {
         "section_ar": section or None,
         "transaction_ar": txn or None,
@@ -363,7 +378,7 @@ def map_listing(adid: int, body: str) -> tuple[Optional[dict], str]:
         "rent_period": "annual" if is_rent else None,
         "city": city,
         "region": region,
-        "neighborhood": None,
+        "neighborhood": neighborhood,
         "rega_location_verified": bool(rega_license),
         "video_url": video_url,
         "title": title,

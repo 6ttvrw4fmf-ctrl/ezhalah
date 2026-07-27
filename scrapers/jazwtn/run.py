@@ -153,6 +153,16 @@ _BAD_IMG = ("logo", "icon", "placeholder", "no-image", "no_image", "spinner", "a
 
 _local = threading.local()
 
+# jazwtn.sa (GoDaddy shared hosting, 184.168.116.58) began resetting connections from GitHub
+# Actions datacenter IPs on 2026-07-23 (curl 35 recv-reset / curl 28 connect-timeout) while serving
+# residential IPs normally — 4+ straight silent no-op runs (found by the 2026-07-27 audit: 126.8h
+# stale). Route through the same Saudi residential proxy the Wasalt/souq24 cloud jobs already use
+# when configured (~138 pages/day of metered bandwidth — trivial); local runs leave these unset and
+# hit the site directly, which works.
+PROXY = (os.environ.get("JAZWTN_PROXY_URL") or os.environ.get("SCRAPE_PROXY_URL")
+         or os.environ.get("WASALT_PROXY_URL") or "").strip()
+_PROXIES = {"http": PROXY, "https": PROXY} if PROXY else None
+
 
 def _session() -> cc.Session:
     s = getattr(_local, "s", None)
@@ -162,12 +172,17 @@ def _session() -> cc.Session:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
         })
+        if _PROXIES:
+            s.proxies = _PROXIES  # Saudi residential proxy — datacenter IPs get connection-reset
         _local.s = s
     return s
 
 
 def session() -> cc.Session:
-    return cc.Session(impersonate="chrome124")
+    s = cc.Session(impersonate="chrome124")
+    if _PROXIES:
+        s.proxies = _PROXIES  # Saudi residential proxy — datacenter IPs get connection-reset
+    return s
 
 
 def _to_int(v: Any) -> Optional[int]:
@@ -464,17 +479,29 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
-    entries = sitemap_entries(s)
-    if args.limit:
-        entries = entries[: max(args.limit * 2, 30)]
-    print(f"Jazwtn: {len(entries)} candidate listings ({WORKERS} workers)"
-          f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
-
+    # begin_run BEFORE the sitemap fetch (2026-07-27 audit): the 07-23→07-27 host-block outage
+    # produced ZERO scrape_runs rows for 4 days because the unguarded sitemap GET crashed the
+    # process before begin_run ever ran — monitoring watched a platform that never even reported
+    # failing. From here on, any crash (including the sitemap fetch) lands in the except-arm's
+    # end_run(ok=False) and is visible.
     run_id = None if args.limit else db.begin_run("jazwtn")
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
     try:
+        entries: list[tuple[str, Optional[str]]] = []
+        for attempt in range(3):  # same 3-attempt policy fetch_one already has
+            try:
+                entries = sitemap_entries(s)
+                break
+            except Exception:
+                if attempt == 2:
+                    raise
+                time.sleep(5 * (attempt + 1))
+        if args.limit:
+            entries = entries[: max(args.limit * 2, 30)]
+        print(f"Jazwtn: {len(entries)} candidate listings ({WORKERS} workers)"
+              f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
         res_buf: list[dict] = []
         com_buf: list[dict] = []
 
