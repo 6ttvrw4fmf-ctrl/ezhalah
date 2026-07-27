@@ -44,12 +44,25 @@ let KEYS_BY_LEN: string[] | null = null;
 let loadPromise: Promise<void> | null = null;
 
 function buildIndex() {
-  const m = new Map<string, Landmark>();
+  const groups = new Map<string, Landmark[]>();
   for (const lm of ALL_LANDMARKS) {
     for (const raw of [lm.landmark_name, ...(lm.aliases ?? [])]) {
       const k = norm(raw);
-      if (k && !m.has(k)) m.set(k, lm);
+      if (!k) continue;
+      const g = groups.get(k);
+      if (g) g.push(lm); else groups.set(k, [lm]);
     }
+  }
+  const m = new Map<string, Landmark>();
+  for (const [k, group] of groups) {
+    // An alias that resolves to 2+ DIFFERENT cities is genuinely ambiguous (e.g. "Salam Park" exists
+    // in both Riyadh and Abha) — never silently guess which one the user means. Drop it from the index
+    // entirely so the agent falls through to its normal location-disambiguation flow instead of
+    // confidently committing to a possibly-wrong city (found live 2026-07-27: 132 such collisions,
+    // reachable via the AI Agent chat, whose prompt explicitly trusts a recognized landmark and never
+    // asks which city). Same normalized key across 2+ rows that agree on city is fine — keep it.
+    if (new Set(group.map((lm) => lm.city)).size > 1) continue;
+    m.set(k, group[0]);
   }
   INDEX = m;
   KEYS_BY_LEN = [...m.keys()].sort((a, b) => b.length - a.length);
