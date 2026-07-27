@@ -63,11 +63,22 @@ def _alert(client, alert_type: str, metric: int, detail: str) -> None:
 
 
 def get_counts(client) -> dict:
-    """The heavy location counts, computed server-side by audit_location_counts() which raises its own
-    statement_timeout — counting listing_native_location_v2 / the drift view via plain PostgREST
-    `count=exact` intermittently trips the short per-request timeout (57014), esp. during a matview
-    refresh. One RPC call returns not_ready_total / not_ready_unexplained / search_index_drift."""
-    return client.rpc("audit_location_counts").execute().data or {}
+    """The heavy location counts, PRECOMPUTED every 30 min by the pg_cron job 'refresh-mon-audit-counts'
+    into the 1-row mon_audit_counts table. Reading that row is instant, so this never trips the
+    per-request statement_timeout (57014) that counting listing_native_location_v2 / the drift view
+    live does under matview-refresh contention. Also guards freshness: a stale row = the cron is
+    broken, so the counts can't be trusted → raise, which fails the run."""
+    rows = client.table("mon_audit_counts").select(
+        "not_ready_total,not_ready_unexplained,search_index_drift,computed_at").limit(1).execute().data
+    if not rows:
+        raise RuntimeError("mon_audit_counts is empty — the refresh cron has never run.")
+    row = rows[0]
+    from datetime import datetime, timezone
+    ts = datetime.fromisoformat(row["computed_at"].replace("Z", "+00:00"))
+    age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+    if age_h > 3:
+        raise RuntimeError(f"mon_audit_counts is stale ({age_h:.1f}h old) — the refresh cron may be broken.")
+    return row
 
 
 def check_not_ready(client, counts: dict) -> bool:
@@ -171,9 +182,16 @@ def main() -> int:
     client = db.sb()
     results = []
     if args.only in (None, "not_ready", "stale_index"):
-        counts = get_counts(client)  # one server-side RPC feeds both count-based checks
-        if args.only in (None, "not_ready"):   results.append(check_not_ready(client, counts))
-        if args.only in (None, "stale_index"): results.append(check_stale_index(client, counts))
+        try:
+            counts = get_counts(client)  # instant read of the pre-computed 1-row table
+        except Exception as e:
+            print(f"FAIL audit counts unavailable: {e}")
+            _alert(client, "audit_counts_unavailable", 0, str(e))
+            results.append(False)
+            counts = None
+        if counts is not None:
+            if args.only in (None, "not_ready"):   results.append(check_not_ready(client, counts))
+            if args.only in (None, "stale_index"): results.append(check_stale_index(client, counts))
     if args.only in (None, "awal"):        results.append(check_awal(client))
     if args.only is None:                  results.append(check_agent(client))
     return 0 if all(results) else 1
