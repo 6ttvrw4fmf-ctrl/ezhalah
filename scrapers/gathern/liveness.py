@@ -125,6 +125,16 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true",
                     help="ACTUALLY write missing_count / active=false. Without it this is a DRY RUN "
                          "that changes nothing and only reports what would happen.")
+    ap.add_argument("--kill-cap", type=int, default=0,
+                    help="ANOMALY GUARD (2026-07-27): max rows one run may inactivate. 0 = auto "
+                         "(max(150, 2%% of currently-active rows)). A batch above the cap is "
+                         "QUARANTINED: missing_count still records the strikes, but NO row is "
+                         "flipped inactive and the run is marked ok=false for owner review. "
+                         "Added after a first-ever 776-row kill batch landed with all 3 grace "
+                         "strikes consumed within ~1 hour (3 back-to-back apply runs) — a "
+                         "transient site-wide 404 event could mass-kill live listings the same "
+                         "way, invisibly. Pass an explicit cap to intentionally release a "
+                         "reviewed backlog.")
     args = ap.parse_args()
 
     client = sb()
@@ -138,9 +148,17 @@ def main() -> int:
     print(f"Gathern liveness [{mode}]: {len(work)} active rows stale >{args.min_stale_days}d "
           f"(grace={args.grace}, ~{MIN_INTERVAL:.1f}s/req)", flush=True)
 
+    # Resolve the anomaly cap up front (count query is cheap; head-only).
+    kill_cap = args.kill_cap
+    if kill_cap <= 0:
+        active_now = (client.table(TABLE).select("id", count="exact", head=True)
+                      .eq("source", SOURCE).eq("active", True).execute().count or 0)
+        kill_cap = max(150, active_now * 2 // 100)
+
     s = detail_session()
     seen = dead = alive = transient = killed = struck = 0
     alive_ids: list[int] = []
+    kill_pending: list[tuple[int, int]] = []  # (row id, new_missing) — flipped ONLY after the cap gate
     started = time.time()
 
     def _flush_alive() -> None:
@@ -160,14 +178,15 @@ def main() -> int:
 
             if action in ("kill", "strike"):
                 dead += 1
-                upd: dict[str, Any] = {"missing_count": new_missing}
                 if action == "kill":
-                    upd["active"] = False
                     killed += 1
+                    # Kills are DEFERRED to the end-of-run cap gate below — a mass-kill batch must
+                    # never land row-by-row before its size is known (anomaly guard, 2026-07-27).
+                    kill_pending.append((row["id"], new_missing))
                 else:
                     struck += 1
-                if args.apply:
-                    client.table(TABLE).update(upd).eq("id", row["id"]).execute()
+                    if args.apply:
+                        client.table(TABLE).update({"missing_count": new_missing}).eq("id", row["id"]).execute()
             elif action == "alive":
                 alive += 1
                 alive_ids.append(row["id"])
@@ -185,12 +204,32 @@ def main() -> int:
     finally:
         _flush_alive()
 
+    # ── Anomaly cap gate (2026-07-27): the kill batch lands as one reviewed decision, not a drip ──
+    anomaly = args.apply and len(kill_pending) > kill_cap
+    applied_kills = 0
+    if args.apply and kill_pending:
+        if anomaly:
+            # QUARANTINE: record the earned strike (missing_count) so history is truthful, but flip
+            # NOTHING inactive. The rows re-classify as kills next run and hit this gate again until
+            # the owner reviews and re-runs with an explicit --kill-cap.
+            for i in range(0, len(kill_pending), 200):
+                for rid, nm in kill_pending[i:i + 200]:
+                    client.table(TABLE).update({"missing_count": nm}).eq("id", rid).execute()
+        else:
+            for rid, nm in kill_pending:
+                client.table(TABLE).update({"missing_count": nm, "active": False}).eq("id", rid).execute()
+            applied_kills = len(kill_pending)
+
     verb = "inactivated" if args.apply else "WOULD inactivate"
-    notes = (f"{mode} scanned={seen} dead={dead} {verb}={killed} strike={struck} "
-             f"alive={alive} transient={transient}")
+    kill_shown = applied_kills if args.apply else len(kill_pending)
+    notes = (f"{mode} scanned={seen} dead={dead} {verb}={kill_shown} strike={struck} "
+             f"alive={alive} transient={transient} kill_cap={kill_cap}")
+    if anomaly:
+        notes = (f"ANOMALY-CAPPED would_inactivate={len(kill_pending)} cap={kill_cap} — 0 rows "
+                 f"inactivated; owner review required. " + notes)
     print(f"\n✓ Gathern liveness done. {notes}", flush=True)
     # An empty stale worklist is legitimately healthy (everything fresh), not a dead source.
-    end_run(run_id, ok=True, rows_seen=seen, rows_upserted=killed if args.apply else 0,
+    end_run(run_id, ok=not anomaly, rows_seen=seen, rows_upserted=applied_kills,
             notes=notes, allow_empty=(len(work) == 0))
     return 0
 
