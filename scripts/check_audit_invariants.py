@@ -103,6 +103,24 @@ def check_awal(client) -> bool:
     return False
 
 
+def check_stale_index(client) -> bool:
+    """True = OK. search_listings_ar (the table the search RPC reads) is a rebuilt snapshot of
+    listing_native_location_v2; when the rebuild lags/breaks, a listing can be indexed under a
+    DIFFERENT city/region than the resolver now says — a الرياض search then returns e.g. an أبو عريش
+    listing (self-healed 2026-07-26). At rest the layers are identical (0 drift), so we tolerate only
+    a small transient mid-refresh window and alert on material drift."""
+    max_drift = int(os.environ.get("STALE_INDEX_MAX") or "50")
+    n = client.table("mon_search_index_city_drift").select("listing_id", count="exact").limit(1).execute().count or 0
+    if n <= max_drift:
+        print(f"OK  stale-index drift: {n} listings where search index city/region != resolver (<= {max_drift} tolerated).")
+        return True
+    detail = (f"{n} listings in search_listings_ar are indexed under a different city/region than "
+              f"listing_native_location_v2 resolves — the search index is stale (rebuild may be broken).")
+    print(f"FAIL stale-index drift: {detail}")
+    _alert(client, "search_index_city_drift", n, detail)
+    return False
+
+
 def _call_agent(text: str) -> dict:
     body = json.dumps({"text": text, "locale": "ar", "loggedIn": False, "order": False, "history": []}).encode()
     req = urllib.request.Request(
@@ -145,7 +163,7 @@ def check_agent(client=None) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", choices=["agent", "not_ready", "awal"], help="run one check")
+    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index"], help="run one check")
     args = ap.parse_args()
 
     if args.only == "agent":
@@ -154,9 +172,10 @@ def main() -> int:
     from scrapers.common import db  # lazy: needs SUPABASE_SERVICE_ROLE_KEY (CI only)
     client = db.sb()
     results = []
-    if args.only in (None, "not_ready"): results.append(check_not_ready(client))
-    if args.only in (None, "awal"):      results.append(check_awal(client))
-    if args.only is None:                results.append(check_agent(client))
+    if args.only in (None, "not_ready"):   results.append(check_not_ready(client))
+    if args.only in (None, "awal"):        results.append(check_awal(client))
+    if args.only in (None, "stale_index"): results.append(check_stale_index(client))
+    if args.only is None:                  results.append(check_agent(client))
     return 0 if all(results) else 1
 
 
