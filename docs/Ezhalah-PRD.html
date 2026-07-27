@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ezhalah — Product Requirements Document</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --green: #1d4a37;
+    --green2: #2f7247;
+    --green-bg: #eef6f0;
+    --ink: #15201b;
+    --body: #34403a;
+    --muted: #6b7a72;
+    --line: #e2e8e4;
+    --amber-bg: #fdf6ec;
+    --amber-br: #f3e2c6;
+    --amber-tx: #92591a;
+    --paper: #fbfbfa;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    margin: 0; background: #e9ebe8; color: var(--body);
+    font-family: "Poppins", system-ui, sans-serif; font-size: 14px; line-height: 1.62;
+  }
+  .page {
+    background: #fff; width: 850px; margin: 22px auto; padding: 70px 76px;
+    box-shadow: 0 10px 40px -16px rgba(20,40,30,.22);
+  }
+  /* ---------- type ---------- */
+  h1, h2, h3, h4 { font-family: "Poppins", sans-serif; color: var(--ink); line-height: 1.2; }
+  .doc-title { font-size: 42px; font-weight: 800; letter-spacing: -.02em; margin: 0; }
+  h2 { font-size: 25px; font-weight: 700; margin: 0 0 4px; letter-spacing: -.01em; }
+  h3 { font-size: 17px; font-weight: 700; margin: 26px 0 8px; color: var(--green); }
+  h4 { font-size: 14px; font-weight: 700; margin: 18px 0 6px; color: var(--ink); }
+  p { margin: 0 0 12px; text-wrap: pretty; }
+  strong { color: var(--ink); font-weight: 600; }
+  a { color: var(--green2); }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin: 0 0 6px; }
+  li::marker { color: var(--green2); }
+  .lead { font-size: 16px; color: var(--body); }
+  .serif { font-family: "Source Serif 4", Georgia, serif; }
+
+  /* ---------- cover ---------- */
+  .cover { min-height: 920px; display: flex; flex-direction: column; }
+  .cover-mark {
+    width: 58px; height: 58px; border-radius: 16px; background: var(--green);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 26px; letter-spacing: -.03em;
+  }
+  .cover-top { display: flex; align-items: center; gap: 15px; }
+  .cover-word { font-size: 22px; font-weight: 800; letter-spacing: .14em; color: var(--ink); }
+  .cover-mid { margin-top: auto; }
+  .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: var(--green2); margin-bottom: 16px; }
+  .cover-sub { font-size: 19px; color: var(--muted); margin-top: 18px; max-width: 560px; line-height: 1.5; }
+  .cover-meta { margin-top: 64px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; border-top: 2px solid var(--ink); padding-top: 22px; }
+  .cover-meta .k { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .cover-meta .v { font-size: 14px; font-weight: 600; color: var(--ink); margin-top: 3px; }
+
+  /* ---------- section header ---------- */
+  .sec-head { border-bottom: 2px solid var(--ink); padding-bottom: 14px; margin-bottom: 26px; display: flex; align-items: baseline; gap: 14px; }
+  .sec-num { font-size: 13px; font-weight: 800; color: #fff; background: var(--green); border-radius: 7px; padding: 3px 10px; letter-spacing: .04em; flex-shrink: 0; align-self: center; }
+
+  /* ---------- callouts ---------- */
+  .note { background: var(--green-bg); border: 1px solid #d6e8db; border-radius: 12px; padding: 15px 18px; margin: 16px 0; }
+  .note.amber { background: var(--amber-bg); border-color: var(--amber-br); }
+  .note .nt { font-weight: 700; color: var(--green); font-size: 13px; display: block; margin-bottom: 4px; }
+  .note.amber .nt { color: var(--amber-tx); }
+  .note p:last-child { margin-bottom: 0; }
+
+  .pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: var(--green-bg); color: var(--green); border: 1px solid #d6e8db; }
+  .pill.p1 { background: #e7f0ff; color: #1d4ed8; border-color: #cfe0ff; }
+  .pill.p2 { background: #fef3e2; color: #b45309; border-color: #f6e0bd; }
+  .pill.p3 { background: #f1f3f1; color: #555; border-color: #e2e5e2; }
+
+  /* ---------- tables ---------- */
+  table { width: 100%; border-collapse: collapse; margin: 14px 0 18px; font-size: 13px; }
+  th { text-align: left; background: var(--green); color: #fff; font-weight: 600; padding: 9px 12px; font-size: 12px; letter-spacing: .02em; }
+  th:first-child { border-radius: 8px 0 0 0; }
+  th:last-child { border-radius: 0 8px 0 0; }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:nth-child(even) td { background: #f7faf8; }
+  td .k { font-weight: 600; color: var(--ink); }
+
+  /* ---------- feature cards ---------- */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
+  .card { border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; background: #fff; }
+  .card h4 { margin: 0 0 6px; color: var(--green); }
+  .card p { font-size: 13px; margin: 0; color: var(--body); }
+  .card .ico { width: 34px; height: 34px; border-radius: 9px; background: var(--green-bg); color: var(--green); display: flex; align-items: center; justify-content: center; margin-bottom: 10px; font-size: 18px; }
+
+  /* flow steps */
+  .flow { counter-reset: step; margin: 16px 0; }
+  .flow .step { display: flex; gap: 14px; padding: 12px 0; border-bottom: 1px dashed var(--line); }
+  .flow .step:last-child { border-bottom: none; }
+  .flow .step::before {
+    counter-increment: step; content: counter(step);
+    flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--green); color: #fff;
+    font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center;
+  }
+  .flow .step .st { font-weight: 600; color: var(--ink); }
+  .flow .step .sd { font-size: 13px; color: var(--muted); }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 16px 0; }
+  .kpi { border: 1px solid var(--line); border-left: 4px solid var(--green2); border-radius: 10px; padding: 13px 16px; }
+  .kpi .m { font-size: 13px; font-weight: 700; color: var(--ink); }
+  .kpi .t { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+  .toc a { display: flex; justify-content: space-between; text-decoration: none; color: var(--ink); padding: 9px 0; border-bottom: 1px solid var(--line); font-weight: 500; }
+  .toc a .n { color: var(--muted); font-weight: 600; }
+  .toc a:hover { color: var(--green2); }
+
+  .foot { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
+
+  @media print {
+    body { background: #fff; }
+    .page { box-shadow: none; margin: 0; width: 100%; padding: 48px 54px; page-break-after: always; }
+    .page:last-child { page-break-after: auto; }
+    .no-print { display: none; }
+    h3, h4 { break-after: avoid; }
+    table, .card, .note, .kpi { break-inside: avoid; }
+  }
+  .bar { position: sticky; top: 0; background: var(--ink); color: #fff; padding: 10px 18px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; z-index: 10; }
+  .bar button { background: var(--green2); color: #fff; border: none; border-radius: 8px; padding: 8px 18px; font-weight: 600; font-family: inherit; font-size: 13px; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div class="bar no-print">
+  <span>Ezhalah — Product Requirements Document</span>
+  <button onclick="window.print()">Save as PDF / Print</button>
+</div>
+
+<!-- ============ COVER ============ -->
+<div class="page cover">
+  <div class="cover-top">
+    <div class="cover-mark">عـ</div>
+    <span class="cover-word">EZHALAH</span>
+  </div>
+  <div class="cover-mid">
+    <div class="eyebrow">Product Requirements Document</div>
+    <h1 class="doc-title">The smarter way to find<br />property in Saudi Arabia.</h1>
+    <p class="cover-sub">An AI-powered property search platform that unifies Aqar, Bayut, Gathern, Property Finder, Wasalt and Aldarim into one conversational search — and drives qualified traffic back to those platforms.</p>
+  </div>
+  <div class="cover-meta">
+    <div><div class="k">Document</div><div class="v">PRD v1.0 — MVP</div></div>
+    <div><div class="k">Status</div><div class="v">MVP Prototype</div></div>
+    <div><div class="k">Market</div><div class="v">Kingdom of Saudi Arabia</div></div>
+    <div><div class="k">Platform</div><div class="v">iOS (mobile-first)</div></div>
+    <div><div class="k">Category</div><div class="v">PropTech / Search aggregator</div></div>
+    <div><div class="k">Date</div><div class="v" id="today">—</div></div>
+  </div>
+</div>
+
+<!-- ============ TOC + SUMMARY ============ -->
+<div class="page">
+  <div class="sec-head"><span class="sec-num">00</span><h2>Contents &amp; executive summary</h2></div>
+
+  <div class="toc">
+    <a href="#s1"><span>1 — Overview &amp; vision</span><span class="n">01</span></a>
+    <a href="#s2"><span>2 — Problem &amp; opportunity</span><span class="n">02</span></a>
+    <a href="#s3"><span>3 — Goals &amp; non-goals</span><span class="n">03</span></a>
+    <a href="#s4"><span>4 — Personas</span><span class="n">04</span></a>
+    <a href="#s5"><span>5 — Feature specifications</span><span class="n">05</span></a>
+    <a href="#s6"><span>6 — Core user flows</span><span class="n">08</span></a>
+    <a href="#s7"><span>7 — AI Agent: rules &amp; behavior</span><span class="n">11</span></a>
+    <a href="#s8"><span>8 — Data model &amp; sources</span><span class="n">13</span></a>
+    <a href="#s9"><span>9 — Business model</span><span class="n">14</span></a>
+    <a href="#s10"><span>10 — Legal, licensing &amp; compliance</span><span class="n">15</span></a>
+    <a href="#s11"><span>11 — Success metrics (KPIs)</span><span class="n">16</span></a>
+    <a href="#s12"><span>12 — Roadmap &amp; phases</span><span class="n">17</span></a>
+    <a href="#s13"><span>13 — Open questions</span><span class="n">18</span></a>
+  </div>
+
+  <h3>Executive summary</h3>
+  <p>Saudi renters and buyers today juggle <strong>six or more</strong> separate property apps — Aqar, Bayut, Gathern, Property Finder, Wasalt and Aldarim — each with its own search, filters and listings. Finding the right property means repeating the same search across every app and mentally de-duplicating the results.</p>
+  <p><strong>Ezhalah</strong> collapses that into a single, AI-native search. A user describes what they want in plain language (Arabic or English) — or answers a short guided interview — and Ezhalah returns a ranked, unified set of listings sourced from all connected platforms. Tapping any result opens the original listing on its source platform, sending that platform a qualified, high-intent visitor.</p>
+  <div class="note">
+    <span class="nt">Positioning</span>
+    <p>Ezhalah is a <strong>search and discovery layer only</strong>. It does not own, list, sell, rent, or transact any property, and it takes no commission. It is a neutral aggregator that benefits users (one search) and partner platforms (qualified traffic) alike.</p>
+  </div>
+</div>
+
+<!-- ============ 1. OVERVIEW ============ -->
+<div class="page" id="s1">
+  <div class="sec-head"><span class="sec-num">01</span><h2>Overview &amp; vision</h2></div>
+
+  <h3>Vision</h3>
+  <p class="lead serif">"Type what you want. Ezhalah searches every major Saudi property platform and brings the matches back in seconds."</p>
+  <p>Ezhalah aims to be the <strong>default starting point</strong> for any property search in Saudi Arabia — the layer a user opens first, before going to any individual platform. By being AI-native and neutral, Ezhalah removes the friction of fragmented search while respecting the listing platforms it depends on.</p>
+
+  <h3>Product principles</h3>
+  <div class="grid2">
+    <div class="card"><div class="ico">🔍</div><h4>One search, every source</h4><p>A single query searches Aqar, Bayut, Gathern, Property Finder, Wasalt and Aldarim simultaneously.</p></div>
+    <div class="card"><div class="ico">💬</div><h4>Conversational by default</h4><p>Users type naturally or answer a short guided interview — no rigid forms required.</p></div>
+    <div class="card"><div class="ico">⚖️</div><h4>Neutral &amp; non-advisory</h4><p>Ezhalah never recommends, ranks by opinion, or advises. It shows listings; the user decides.</p></div>
+    <div class="card"><div class="ico">↗️</div><h4>Traffic, not transactions</h4><p>Every listing tap drives a qualified visitor to the source platform. Ezhalah never intermediates a deal.</p></div>
+  </div>
+
+  <h3>Scope of this document</h3>
+  <p>This PRD specifies the <strong>MVP</strong> as designed in the interactive prototype: a mobile-first (iOS) experience covering search, the Ezhalah AI Agent, the guided question interview, authentication, the sidebar/chat-history, settings, and supporting pages. Backend services, data-ingestion pipelines, and partner API integrations are described at a requirements level and are out of scope for the prototype itself.</p>
+</div>
+
+<!-- ============ 2. PROBLEM ============ -->
+<div class="page" id="s2">
+  <div class="sec-head"><span class="sec-num">02</span><h2>Problem &amp; opportunity</h2></div>
+
+  <h3>The problem</h3>
+  <ul>
+    <li><strong>Fragmentation.</strong> Listings are scattered across 6+ platforms with no single search. Users repeat the same query everywhere.</li>
+    <li><strong>Inconsistent filtering.</strong> Each platform structures categories, property types, and price/size differently, making cross-platform comparison hard.</li>
+    <li><strong>Search fatigue.</strong> Rigid filter forms force users to know exactly what they want before they can search.</li>
+    <li><strong>No natural-language entry.</strong> A user who simply wants "a villa in north Riyadh for my family of five" has to translate that into a series of dropdowns.</li>
+  </ul>
+
+  <h3>The opportunity</h3>
+  <p>Two sides both gain from an aggregation layer:</p>
+  <table>
+    <tr><th>Side</th><th>Today</th><th>With Ezhalah</th></tr>
+    <tr><td class="k">Seekers (renters/buyers)</td><td>Search 6 apps separately; mentally merge results.</td><td>One conversational search returns unified, ranked results.</td></tr>
+    <tr><td class="k">Listing platforms</td><td>Compete for the same users; pay to acquire traffic.</td><td>Receive qualified, high-intent visitors routed straight to their listings.</td></tr>
+  </table>
+  <div class="note">
+    <span class="nt">Why now</span>
+    <p>Saudi Arabia's Vision 2030 housing push, REGA's regulated listing ecosystem (FAL licensing), high smartphone penetration, and mature Arabic-capable LLMs make an AI-native, compliant aggregation layer viable for the first time.</p>
+  </div>
+</div>
+
+<!-- ============ 3. GOALS ============ -->
+<div class="page" id="s3">
+  <div class="sec-head"><span class="sec-num">03</span><h2>Goals &amp; non-goals</h2></div>
+
+  <h3>Goals (MVP)</h3>
+  <ol>
+    <li>Let a user find relevant listings across all six sources from a <strong>single query</strong> — typed naturally or via the guided interview.</li>
+    <li>Deliver an <strong>AI Agent</strong> that understands free text, fixes typos, converts currencies/units, and stays strictly on-topic.</li>
+    <li>Route every listing tap to its <strong>original source platform</strong> (in-app browser) without intermediating.</li>
+    <li>Provide lightweight <strong>accounts</strong> (phone OTP via WhatsApp, Apple, Google) gated behind a single sign-up wall after the first search.</li>
+    <li>Maintain a Claude-style <strong>chat history</strong> sidebar so signed-in users can revisit and refine prior searches.</li>
+    <li>Operate within <strong>REGA</strong> and <strong>PDPL</strong> requirements as a neutral search platform.</li>
+  </ol>
+
+  <h3>Non-goals (explicitly out of scope for MVP)</h3>
+  <ul>
+    <li><strong>No transactions.</strong> Ezhalah does not facilitate payments, contracts, deposits, or commissions.</li>
+    <li><strong>No owned inventory.</strong> Ezhalah never lists its own properties.</li>
+    <li><strong>No recommendations or advice.</strong> The agent never says which property is "best" or gives buying/financial advice.</li>
+    <li><strong>No agent/brokerage tooling</strong> (CRM, lead management) in MVP.</li>
+    <li><strong>No web/Android</strong> client in MVP — iOS mobile-first only.</li>
+  </ul>
+</div>
+
+<!-- ============ 4. PERSONAS ============ -->
+<div class="page" id="s4">
+  <div class="sec-head"><span class="sec-num">04</span><h2>Personas</h2></div>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Salem — the family renter</h4>
+      <p><strong>32, Riyadh.</strong> Needs a 4–5 bedroom villa near schools. Opens 3–4 apps every evening. Wants to type "villa in North Riyadh for 5 people" and just see options. Values speed and not repeating himself.</p>
+    </div>
+    <div class="card">
+      <h4>Noura — the first-time buyer</h4>
+      <p><strong>28, Jeddah.</strong> Budget-conscious, unsure of districts. Benefits from the guided interview and budget helper ("what can I get for SAR 500,000?"). Needs reassurance, not advice.</p>
+    </div>
+    <div class="card">
+      <h4>Faisal — the investor</h4>
+      <p><strong>45, Dammam.</strong> Hunts commercial land and warehouses by price-per-meter. Types specific figures, sometimes in other currencies. Wants exact size/price math done for him.</p>
+    </div>
+    <div class="card">
+      <h4>Partner platforms</h4>
+      <p><strong>Aqar, Bayut, Gathern, Property Finder, Wasalt, Aldarim.</strong> Want incremental, high-intent traffic to their listings without ceding the customer relationship or paying blind ad spend.</p>
+    </div>
+  </div>
+
+  <h3>Primary jobs-to-be-done</h3>
+  <ul>
+    <li>"When I'm looking for a place, I want to search everywhere at once, so I don't miss listings or repeat myself."</li>
+    <li>"When I don't know exactly what I want, I want to be asked the right questions, so I still get good results."</li>
+    <li>"When I find a listing, I want to open it on the real platform, so I can trust it and contact the advertiser."</li>
+  </ul>
+</div>
+
+<!-- ============ 5. FEATURES ============ -->
+<div class="page" id="s5">
+  <div class="sec-head"><span class="sec-num">05</span><h2>Feature specifications</h2></div>
+  <p>The MVP is organized into the feature areas below. Priority: <span class="pill p1">P0 must-have</span> &nbsp; <span class="pill p2">P1 should-have</span> &nbsp; <span class="pill p3">P2 nice-to-have</span></p>
+
+  <h3>5.1 — Filter search <span class="pill p1">P0</span></h3>
+  <p>The default home screen. A structured, cascading search card over a Saudi skyline backdrop.</p>
+  <ul>
+    <li><strong>Transaction toggle:</strong> Rent / Buy. Drives price labels and which listings appear.</li>
+    <li><strong>City / neighborhood field</strong> with city-first autocomplete (typing "r" surfaces Riyadh districts; "k" surfaces Khobar — never mixed).</li>
+    <li><strong>Category → Property type cascade.</strong> Two categories (Residential, Commercial), each opening its scoped type list as clear, tappable boxes.</li>
+    <li><strong>Type-specific detail:</strong> bedrooms for dwellings; realistic size-in-meters ranges (plus a free numeric input) for land/commercial/farm.</li>
+    <li><strong>Price field</strong> with automatic thousands separators and magnitude-based interpretation (monthly vs annual rent; total vs price-per-meter for buy), with the calculation shown back to the user.</li>
+  </ul>
+
+  <h3>5.2 — Category &amp; type taxonomy <span class="pill p1">P0</span></h3>
+  <table>
+    <tr><th>Category</th><th>Property types</th></tr>
+    <tr><td class="k">Residential</td><td>Apartment, Villa, Floor, House, Room, Building, Residential Land, Rest House, Chalet</td></tr>
+    <tr><td class="k">Commercial</td><td>Office, Warehouse, Shop, Showroom, Workshop, Factory, Commercial Land, Industrial Land, Farm, Agriculture Plot, Camp</td></tr>
+  </table>
+  <p class="serif" style="font-size:13px;color:var(--muted)">Mirrors the structure used by Aqar &amp; Bayut. Size ranges scale realistically per type (e.g. Industrial Land &gt; Commercial Land &gt; Residential Land; Factories &gt; Warehouses &gt; Shops).</p>
+
+  <h3>5.3 — Ezhalah AI Agent <span class="pill p1">P0</span></h3>
+  <p>A conversational search mode (detailed in §7). Accepts free-text queries, replies like a real assistant, then presents matching listings. Reachable from the top-right header.</p>
+</div>
+
+<div class="page">
+  <h3>5.4 — Guided question interview <span class="pill p1">P0</span></h3>
+  <p>Triggered by "Want more accurate results" or by asking the agent to "ask me questions." A staged, conversational interview rather than a single long form.</p>
+  <ul>
+    <li><strong>Grouped stages:</strong> Location (city → neighborhood) then Details (Rent/Buy → category → type → budget → size). Only un-answered fields are asked; anything provided in the filter or query is pre-filled as a tappable chip.</li>
+    <li><strong>Conversational hand-offs:</strong> between groups Ezhalah posts a chat recap ("Good — I see what you're after. City: Riyadh, neighborhood: Al Narjis. Just a few more…") that types out like an AI.</li>
+    <li><strong>Per-question controls:</strong> tap an option to advance instantly; a "Something else" row to type a custom answer (with smart type-resolution, e.g. "flat" → Apartment); a centered, bold green <strong>Skip</strong> button; and a Back button (hidden on a group's first question).</li>
+    <li><strong>Skip = no filter.</strong> Skipped fields are simply omitted and broadened — the user always gets results and never hits a dead end.</li>
+    <li><strong>Editable answers:</strong> pre-filled chips and answered chips can be tapped to change them (e.g. switch Rent → Buy).</li>
+    <li><strong>Installments availability (source metadata):</strong> for annual-rent listings, an optional "offers installments / rent-now-pay-later" filter — a faithful pass-through of a boolean the <em>source</em> listing itself advertises. Surfaced only when the source states it, filtered solely on that flag, shown as a neutral badge. Ezhalah does not compute, estimate, originate, broker, rank, or advise on any payment plan; coverage is source-dependent and the filter never implies the option is unavailable elsewhere.</li>
+  </ul>
+
+  <h3>5.5 — Results &amp; listing cards <span class="pill p1">P0</span></h3>
+  <ul>
+    <li>Compact horizontal cards: thumbnail, city · district, deal · type · size · beds, price, and "listed … · source."</li>
+    <li>Ranked most-recent; listing dates sequenced (today → 1 year). Save (heart) per card.</li>
+    <li>Heading speaks as Ezhalah ("Ezhalah! Here are…"), with broadened-field notes when fields were skipped.</li>
+    <li>Tapping a card opens the <strong>in-app browser</strong> showing the listing on its source platform (full-screen, with the platform's domain, branding, photos, specs, description, and Call / WhatsApp actions).</li>
+  </ul>
+
+  <h3>5.6 — Authentication <span class="pill p1">P0</span></h3>
+  <ul>
+    <li>Sign-up wall appears after the first search (and re-appears 1 minute after dismissal until the user signs in).</li>
+    <li>Methods: <strong>phone (OTP via WhatsApp)</strong>, <strong>Continue with Apple</strong> (Face ID + Hide/Share email), <strong>Continue with Google</strong> (account chooser).</li>
+    <li>Per-country phone validation (Saudi, UAE, Qatar, Bahrain, Kuwait, Oman) with correct prefixes/lengths and the GCC country dropdown.</li>
+    <li>Identity display: phone → "User 3081" (last 4 digits); Apple/Google → real name + email.</li>
+  </ul>
+
+  <h3>5.7 — Sidebar &amp; chat history <span class="pill p2">P1</span></h3>
+  <ul>
+    <li>Appears only after sign-in: logo + New Chat, scrollable history grouped Starred / Today / Yesterday / Last 7 Days / Last 30 Days.</li>
+    <li>Each chat labeled with the user's own wording; 3-dot menu to Star / Delete; active chat highlighted. Starred pins to top; unstarred expire after 30 days.</li>
+    <li>Bottom: Settings, Support, About Us, AR/EN toggle, and the user row (avatar + identity) — tapping it opens Settings.</li>
+  </ul>
+</div>
+
+<div class="page">
+  <h3>5.8 — Settings <span class="pill p2">P1</span></h3>
+  <ul>
+    <li>Opens as a popup over the app (background visible).</li>
+    <li>Display name (editable), and method-specific identity: phone (Change → re-enter number → WhatsApp OTP), or Apple/Google account (read-only, with a note that changing it requires deleting and re-creating the account).</li>
+    <li>Logged-in device (shown, no per-device logout), a single Log out button, and Delete account (confirmation popup).</li>
+  </ul>
+
+  <h3>5.9 — Share <span class="pill p2">P1</span></h3>
+  <p>iOS-style share sheet from the header: app preview card, app row (WhatsApp, Messages, X, Mail, Notes), and Copy Link, with the share text "Ezhalah — one place to explore all listings and more in seconds. Try now."</p>
+
+  <h3>5.10 — Support &amp; About <span class="pill p2">P1</span></h3>
+  <ul>
+    <li><strong>Support</strong> (popup): support@ezhalah.com (account, searches, technical), info@ezhalah.com (business, partnerships, media). Response time: typically 72 hours, up to 1 week.</li>
+    <li><strong>About Us</strong> (popup): platform description, "our role" (search only, no ownership/transactions/commission), REGA FAL license, third-party-listing disclaimer, and PDPL data/privacy statement.</li>
+  </ul>
+
+  <h3>5.11 — Feedback <span class="pill p2">P1</span></h3>
+  <p>After a fully-completed guided interview, a "Were these helpful?" 👍 / 👎 row appears below the results (only on the final result set, not intermediate ones).</p>
+
+  <h3>5.12 — Localization &amp; safe-area <span class="pill p2">P1</span></h3>
+  <ul>
+    <li>AR / EN toggle (Arabic is the primary market language; full RTL is a fast-follow).</li>
+    <li>iPhone-accurate layout: status-bar scrim, home-indicator safe area, single-screen fit for the home/filter view, and a ChatGPT-style keyboard dock for the AI chat.</li>
+  </ul>
+</div>
+
+<!-- ============ 6. FLOWS ============ -->
+<div class="page" id="s6">
+  <div class="sec-head"><span class="sec-num">06</span><h2>Core user flows</h2></div>
+
+  <h3>6.1 — Filter search → results</h3>
+  <div class="flow">
+    <div class="step"><div><div class="st">Choose Rent or Buy</div><div class="sd">Sets price semantics and result pool.</div></div></div>
+    <div class="step"><div><div class="st">Enter city / neighborhood (optional)</div><div class="sd">City-first autocomplete; can be left blank → Saudi Arabia.</div></div></div>
+    <div class="step"><div><div class="st">Pick Category → Property type (optional)</div><div class="sd">Residential/Commercial → scoped type boxes.</div></div></div>
+    <div class="step"><div><div class="st">Set bedrooms / size &amp; price (optional)</div><div class="sd">Type a number or pick a range; commas + unit math applied.</div></div></div>
+    <div class="step"><div><div class="st">Tap Search</div><div class="sd">Ezhalah states the interpreted query, shows "searching," then ranked cards. Empty fields are broadened.</div></div></div>
+  </div>
+  <div class="note"><span class="nt">Defaults</span><p>Every field is optional. An empty Rent search returns "a property to rent in Saudi Arabia" — a nationwide mix. More answers = more precise; fewer = broader. The user never reaches a dead end.</p></div>
+
+  <h3>6.2 — Price interpretation logic</h3>
+  <table>
+    <tr><th>Mode</th><th>Entered amount</th><th>Interpreted as</th></tr>
+    <tr><td class="k">Rent</td><td>≤ SAR 25,000</td><td>Monthly → ×12 shown as annual ("SAR 8,000/mo → SAR 96,000/yr")</td></tr>
+    <tr><td class="k">Rent</td><td>&gt; SAR 25,000</td><td>Annual total</td></tr>
+    <tr><td class="k">Buy</td><td>≤ SAR 50,000</td><td>Price per m² → × size shown as total</td></tr>
+    <tr><td class="k">Buy</td><td>&gt; SAR 50,000</td><td>Total price</td></tr>
+    <tr><td class="k">Any</td><td>Unrealistic (0, 1, far too low)</td><td>"I couldn't find anything at that price — but here are some similar."</td></tr>
+  </table>
+</div>
+
+<div class="page">
+  <h3>6.3 — AI Agent search</h3>
+  <div class="flow">
+    <div class="step"><div><div class="st">User types a free-text query</div><div class="sd">e.g. "I want a villa in Riyadh with a pool" — Arabic or English.</div></div></div>
+    <div class="step"><div><div class="st">Ezhalah classifies &amp; cleans</div><div class="sd">On-topic? Fix typos ("vila"→"villa"), convert currency/units, detect advice/off-topic.</div></div></div>
+    <div class="step"><div><div class="st">Ezhalah replies in-character</div><div class="sd">A short, neutral acknowledgement (with any "Did you mean…?" / conversion note).</div></div></div>
+    <div class="step"><div><div class="st">Results render in the chat</div><div class="sd">5 ranked cards inline; the newest activity scrolls into view.</div></div></div>
+    <div class="step"><div><div class="st">Refine via guided questions</div><div class="sd">"Want more accurate results" launches the staged interview.</div></div></div>
+  </div>
+
+  <h3>6.4 — Guided interview (conversational)</h3>
+  <div class="flow">
+    <div class="step"><div><div class="st">Ezhalah is thinking… (~5s)</div><div class="sd">A thinking beat pins to the top of the chat before questions open.</div></div></div>
+    <div class="step"><div><div class="st">Location group</div><div class="sd">City → neighborhood. Pre-filled answers shown as chips; only missing fields asked.</div></div></div>
+    <div class="step"><div><div class="st">Recap message</div><div class="sd">"Good — I see what you're after. City: …, neighborhood: …" typed out as a chat message.</div></div></div>
+    <div class="step"><div><div class="st">Details group</div><div class="sd">Rent/Buy → category → type → budget → size, each with Skip / Back / "Something else."</div></div></div>
+    <div class="step"><div><div class="st">Searching → final results + feedback</div><div class="sd">Builds an "I'm looking for…" summary from answered fields only, then shows results with a 👍/👎 row.</div></div></div>
+  </div>
+
+  <h3>6.5 — Auth gate &amp; resume</h3>
+  <div class="flow">
+    <div class="step"><div><div class="st">First search completes (signed out)</div><div class="sd">Input locks to a green "Sign up / Log in to continue" button; sign-up popup appears shortly after.</div></div></div>
+    <div class="step"><div><div class="st">User signs up / logs in</div><div class="sd">Phone OTP (WhatsApp), Apple (Face ID), or Google. Identity captured.</div></div></div>
+    <div class="step"><div><div class="st">App unlocks &amp; auto-resumes</div><div class="sd">If the user had tapped "Want more accurate results," the interview resumes automatically post-login.</div></div></div>
+  </div>
+</div>
+
+<!-- ============ 7. AI RULES ============ -->
+<div class="page" id="s7">
+  <div class="sec-head"><span class="sec-num">07</span><h2>AI Agent: rules &amp; behavior</h2></div>
+  <p>The agent is powered by an LLM with a strict system contract. It must feel like a capable assistant while remaining a neutral search tool.</p>
+
+  <h3>7.1 — Hard rules</h3>
+  <div class="note amber">
+    <span class="nt">Never</span>
+    <p>Recommend a property · say which is "best / better / good value / a great deal" · give buying or financial advice · make a decision for the user · invent or verify listing facts.</p>
+  </div>
+  <div class="note">
+    <span class="nt">Always</span>
+    <p>Identify as Ezhalah · stay scoped to Saudi real estate · acknowledge the user naturally, then present matching listings for them to choose · correct typos and units before searching · stay neutral.</p>
+  </div>
+  <div class="note">
+    <span class="nt">May — neutral pass-through</span>
+    <p>Display and filter on financing / installment options that a <strong>source listing itself advertises</strong> (e.g. rent-now-pay-later), as neutral factual metadata — surfaced verbatim, filtered only on the source's own flag (the same principle as reporting a listing's price or area). This does <strong>not</strong> relax any "Never": Ezhalah still must not recommend or rank financing offers, compute or estimate payments / instalment amounts / interest / affordability, originate or broker financing, redirect to a lender or payment processor, or give buying or financial advice. It surfaces only the <em>existence</em> of the option as stated by the source.</p>
+  </div>
+
+  <h3>7.2 — Behavior matrix</h3>
+  <table>
+    <tr><th>User input</th><th>Ezhalah response</th><th>Shows listings?</th></tr>
+    <tr><td>Real-estate query ("villa in Riyadh")</td><td>"Ezhalah! Here are…" + cards</td><td>Yes</td></tr>
+    <tr><td>Typo ("vila in riyad")</td><td>"Did you mean 'villa in Riyadh'?" then searches</td><td>Yes (corrected)</td></tr>
+    <tr><td>Foreign currency / unit ("20,000 dirhams", "5000 sqft")</td><td>"20,000 AED ≈ SAR 20,400." then searches</td><td>Yes (converted)</td></tr>
+    <tr><td>Advice / comparison ("where should I buy, here or there?")</td><td>"I can only show listings — I can't recommend. I can show a mix of both areas if you'd like."</td><td>No (until specified)</td></tr>
+    <tr><td>Off-topic ("what's the weather?")</td><td>"I can only help you find real estate across Saudi Arabia. What are you looking for?"</td><td>No</td></tr>
+    <tr><td>Distress / harmful</td><td>Brief, caring redirect, then steers back to real estate.</td><td>No</td></tr>
+    <tr><td>Financing filter ("places with installments / rent now pay later")</td><td>Applies the source-advertised installments filter and shows matching listings — no payment math, no advice.</td><td>Yes (filtered)</td></tr>
+    <tr><td>Financing math ("what would the monthly payment be?")</td><td>"I can't work out payment amounts or give financial advice — I only show which listings advertise installments. You can check the terms with the source."</td><td>No (until re-scoped)</td></tr>
+  </table>
+
+  <h3>7.3 — Language &amp; tone</h3>
+  <ul>
+    <li>Warm, concise, plain text — no markdown, no emoji in agent replies.</li>
+    <li>Bilingual (Arabic / English); detects the user's language and responds in kind.</li>
+    <li>Off-topic replies never use the word "Ezhalah!" as a results header (kept exclusively for when listings are shown).</li>
+  </ul>
+  <div class="note"><span class="nt">Implementation note</span><p>The prototype calls an LLM at runtime for classification + reply, with a deterministic heuristic fallback (typo map, currency/unit tables, on-topic regex) so behavior degrades gracefully if the model is unavailable.</p></div>
+</div>
+
+<!-- ============ 8. DATA ============ -->
+<div class="page" id="s8">
+  <div class="sec-head"><span class="sec-num">08</span><h2>Data model &amp; sources</h2></div>
+
+  <h3>8.1 — Source platforms</h3>
+  <table>
+    <tr><th>Platform</th><th>Domain</th><th>Rent</th><th>Buy</th></tr>
+    <tr><td class="k">Aqar</td><td>sa.aqar.fm</td><td>Yes</td><td>Yes</td></tr>
+    <tr><td class="k">Bayut</td><td>bayut.sa</td><td>Yes</td><td>Yes</td></tr>
+    <tr><td class="k">Gathern</td><td>gathern.co</td><td>Yes</td><td><strong>No (rent-only)</strong></td></tr>
+    <tr><td class="k">Property Finder</td><td>propertyfinder.sa</td><td>Yes</td><td>Yes</td></tr>
+    <tr><td class="k">Wasalt</td><td>wasalt.sa</td><td>Yes</td><td>Yes</td></tr>
+    <tr><td class="k">Aldarim</td><td>aldarim.sa</td><td>Yes</td><td>Yes</td></tr>
+  </table>
+  <p class="serif" style="font-size:13px;color:var(--muted)">Gathern is a short-term-rental platform and must never surface in Buy results. Source mix is enforced per transaction type.</p>
+
+  <h3>8.2 — Listing object (per result)</h3>
+  <table>
+    <tr><th>Field</th><th>Example</th><th>Notes</th></tr>
+    <tr><td class="k">type</td><td>Villa</td><td>From the type taxonomy</td></tr>
+    <tr><td class="k">deal</td><td>Rent / Buy</td><td>Drives source eligibility</td></tr>
+    <tr><td class="k">city · district · road</td><td>Riyadh · Al Narjis · King Salman Rd</td><td>Title is city → district → road</td></tr>
+    <tr><td class="k">price</td><td>SAR 95,000/year</td><td>Formatted with separators &amp; period</td></tr>
+    <tr><td class="k">area / beds / baths</td><td>250 m² / 5 / 4</td><td>Baths derived where absent</td></tr>
+    <tr><td class="k">source</td><td>Bayut</td><td>Determines in-app browser branding + domain</td></tr>
+    <tr><td class="k">listed</td><td>today … 1 year ago</td><td>Sequenced for recency ranking</td></tr>
+    <tr><td class="k">photo</td><td>image URL</td><td>Category-appropriate imagery</td></tr>
+  </table>
+
+  <h3>8.3 — Data ingestion (production requirement)</h3>
+  <p>Production Ezhalah requires a normalization pipeline that ingests listings from each partner (via official API, feed, or sanctioned integration), maps them onto the unified taxonomy above, de-duplicates cross-platform, and keeps a freshness signal for ranking. <strong>Partner data agreements are a prerequisite to launch.</strong></p>
+</div>
+
+<!-- ============ 9. BUSINESS ============ -->
+<div class="page" id="s9">
+  <div class="sec-head"><span class="sec-num">09</span><h2>Business model</h2></div>
+  <p>Ezhalah monetizes the <strong>qualified traffic</strong> it sends to partner platforms, without ever touching a transaction or commission.</p>
+
+  <h3>Candidate revenue streams</h3>
+  <table>
+    <tr><th>Model</th><th>How it works</th><th>Stage</th></tr>
+    <tr><td class="k">Pay-per-referral / CPC</td><td>Partners pay for each qualified, high-intent visitor routed to their listing.</td><td>Primary, launch</td></tr>
+    <tr><td class="k">Performance referral</td><td>Higher fee for visits that convert to a contact/lead on the partner side.</td><td>Phase 2</td></tr>
+    <tr><td class="k">Featured placement</td><td>Partners pay for eligible listings to rank higher — clearly labeled, never disguised as a recommendation.</td><td>Phase 2</td></tr>
+    <tr><td class="k">Premium seeker tier</td><td>Power-user features (saved searches, alerts, unlimited history) as a subscription.</td><td>Phase 3</td></tr>
+  </table>
+  <div class="note amber">
+    <span class="nt">Guardrail</span>
+    <p>Any paid placement must remain compatible with the agent's neutrality rule: Ezhalah may <em>surface</em> sponsored listings but must never <em>recommend</em> or imply one property is better than another.</p>
+  </div>
+  <div class="note">
+    <span class="nt">To be confirmed</span>
+    <p>Exact pricing per click/referral, partner commercial terms, and whether launch is CPC or CPA are open commercial decisions — see §13.</p>
+  </div>
+</div>
+
+<!-- ============ 10. LEGAL ============ -->
+<div class="page" id="s10">
+  <div class="sec-head"><span class="sec-num">10</span><h2>Legal, licensing &amp; compliance</h2></div>
+
+  <h3>10.1 — Role &amp; disclaimers (in-product)</h3>
+  <ul>
+    <li><strong>Search platform only.</strong> Ezhalah does not own, list, sell, or rent property, does not facilitate transactions, and collects no commission. (Stated on the About page.)</li>
+    <li><strong>Third-party listings.</strong> All listings are sourced from partner platforms; Ezhalah does not own or verify any listing. Users are told to confirm details directly with the source before any decision.</li>
+    <li><strong>No advice.</strong> The agent's neutrality rules (§7) are themselves a compliance control — Ezhalah gives no investment or purchase advice.</li>
+  </ul>
+
+  <h3>10.2 — REGA / FAL licensing</h3>
+  <p>Ezhalah operates under a REGA FAL license (number <strong>to be inserted</strong>), issued by the General Authority for Real Estate. The licensing scope for a search/aggregation platform vs. a brokerage must be confirmed with REGA, including how aggregated listings and outbound routing are treated.</p>
+
+  <h3>10.3 — Data &amp; privacy (PDPL)</h3>
+  <ul>
+    <li>Compliant with Saudi Arabia's Personal Data Protection Law (PDPL).</li>
+    <li>All user data stored on <strong>Saudi servers</strong> (data residency).</li>
+    <li>Ezhalah does not sell user data.</li>
+    <li>Minimal data collection: phone/identity for auth, search history for the signed-in experience.</li>
+  </ul>
+  <div class="note"><span class="nt">Pre-launch checklist</span><p>Finalize REGA license number &amp; scope · execute partner data agreements · confirm WhatsApp Business API for OTP · privacy policy &amp; terms · PDPL data-processing records · Apple/Google sign-in entitlements.</p></div>
+</div>
+
+<!-- ============ 11. KPIs ============ -->
+<div class="page" id="s11">
+  <div class="sec-head"><span class="sec-num">11</span><h2>Success metrics (KPIs)</h2></div>
+
+  <h3>North-star</h3>
+  <div class="note"><span class="nt">North-star metric</span><p><strong>Qualified listing tap-throughs</strong> routed to partner platforms per week — the unit of value for both users (found something worth opening) and partners (received a high-intent visitor).</p></div>
+
+  <h3>Supporting metrics</h3>
+  <div class="kpi-grid">
+    <div class="kpi"><div class="m">Search → result rate</div><div class="t">% of searches that return results the user engages with.</div></div>
+    <div class="kpi"><div class="m">Tap-through rate</div><div class="t">% of result sets where ≥1 listing is opened.</div></div>
+    <div class="kpi"><div class="m">Query type mix</div><div class="t">Filter vs AI-agent vs guided-interview usage.</div></div>
+    <div class="kpi"><div class="m">Sign-up conversion</div><div class="t">% of first-search users who complete auth.</div></div>
+    <div class="kpi"><div class="m">Interview completion</div><div class="t">% who finish the guided questions vs drop off.</div></div>
+    <div class="kpi"><div class="m">Returning-search rate</div><div class="t">Signed-in users starting a new chat within 7/30 days.</div></div>
+    <div class="kpi"><div class="m">Agent accuracy</div><div class="t">On-topic classification &amp; typo/unit fixes (👍/👎 feedback).</div></div>
+    <div class="kpi"><div class="m">Partner coverage</div><div class="t">Share of results contributed by each source.</div></div>
+  </div>
+
+  <h3>Guardrail metrics</h3>
+  <ul>
+    <li><strong>Neutrality violations:</strong> zero tolerance — any "recommend/best" output is a defect.</li>
+    <li><strong>Gathern-in-Buy leakage:</strong> must remain zero.</li>
+    <li><strong>Dead-end searches:</strong> % of searches returning no results (target ≈ 0 via broadening).</li>
+  </ul>
+</div>
+
+<!-- ============ 12. ROADMAP ============ -->
+<div class="page" id="s12">
+  <div class="sec-head"><span class="sec-num">12</span><h2>Roadmap &amp; phases</h2></div>
+
+  <h3>Phase 0 — Prototype <span class="pill">Done</span></h3>
+  <p>Interactive iOS prototype: filter search, AI Agent, guided interview, auth flows, sidebar/history, settings, support/about, share, in-app browser. (This document describes that build.)</p>
+
+  <h3>Phase 1 — MVP launch <span class="pill p1">Next</span></h3>
+  <ul>
+    <li>Real data ingestion + normalization for all six partners (pending agreements).</li>
+    <li>Live LLM agent with production guardrails &amp; logging.</li>
+    <li>Production auth (WhatsApp OTP, Apple, Google) + PDPL-compliant Saudi hosting.</li>
+    <li>REGA license finalized &amp; displayed.</li>
+    <li>CPC/referral tracking + partner reporting.</li>
+  </ul>
+
+  <h3>Phase 2 — Growth</h3>
+  <ul>
+    <li>Full Arabic RTL; Android &amp; web clients.</li>
+    <li>Saved searches &amp; alerts; richer history.</li>
+    <li>Featured placement (neutral, labeled) &amp; performance-referral billing.</li>
+    <li>Map view; commute/POI context.</li>
+  </ul>
+
+  <h3>Phase 3 — Scale</h3>
+  <ul>
+    <li>Premium seeker subscription.</li>
+    <li>Expanded sources &amp; (optionally) a third "Agricultural" category once inventory justifies it.</li>
+    <li>Personalized (still non-advisory) result ordering.</li>
+  </ul>
+</div>
+
+<!-- ============ 13. OPEN QUESTIONS ============ -->
+<div class="page" id="s13">
+  <div class="sec-head"><span class="sec-num">13</span><h2>Open questions</h2></div>
+  <p>Items requiring your decision or external confirmation before/at launch:</p>
+  <table>
+    <tr><th>#</th><th>Question</th><th>Owner</th></tr>
+    <tr><td>1</td><td>Launch revenue model — CPC vs CPA, and the per-unit price?</td><td>Commercial</td></tr>
+    <tr><td>2</td><td>REGA FAL license number &amp; confirmed scope for an aggregator?</td><td>Legal</td></tr>
+    <tr><td>3</td><td>Which partners have signed data/traffic agreements, and on what terms?</td><td>BD / Partnerships</td></tr>
+    <tr><td>4</td><td>Source of listings at launch — official APIs, feeds, or another sanctioned method?</td><td>Eng / BD</td></tr>
+    <tr><td>5</td><td>WhatsApp Business API account for OTP secured?</td><td>Eng</td></tr>
+    <tr><td>6</td><td>Exact currency/unit conversion source &amp; refresh cadence (live FX vs fixed)?</td><td>Product</td></tr>
+    <tr><td>7</td><td>Featured-placement policy — how to stay neutral while monetizing ranking?</td><td>Product / Legal</td></tr>
+    <tr><td>8</td><td>Arabic RTL &amp; Android/web timing — MVP or fast-follow?</td><td>Product</td></tr>
+    <tr><td>9</td><td>Data-retention windows (history, accounts) under PDPL?</td><td>Legal / Eng</td></tr>
+  </table>
+
+  <div class="note">
+    <span class="nt">Notes back to me</span>
+    <p>Tell me the answers to any of the above and I'll fold them into v1.1. I can also produce: a one-page investor summary, a screen-by-screen spec with annotated mockups, or an engineering handoff package — just say which.</p>
+  </div>
+
+  <div class="foot">
+    <span>Ezhalah — Product Requirements Document · v1.0 (MVP)</span>
+    <span>Confidential</span>
+  </div>
+</div>
+
+<script>
+  document.getElementById('today').textContent = new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
+</script>
+</body>
+</html>
