@@ -38,9 +38,16 @@ from scrapers.aqar.liveness import DEAD_MARKERS as AQAR_DEAD_MARKERS
 def _aqar_wasalt_markers(body: str) -> bool:
     return any(m in body for m in AQAR_DEAD_MARKERS)
 
+def _never(body: str) -> bool:
+    return False  # 404-only platforms: a delisted unit returns a real HTTP 404; every 200 is treated LIVE
+
 PLATFORMS: dict[str, dict] = {
     "aqar":   {"tables": ["aqar_residential_listings", "aqar_commercial_listings"],     "dead_marker": _aqar_wasalt_markers},
     "wasalt": {"tables": ["wasalt_residential_listings", "wasalt_commercial_listings"], "dead_marker": _aqar_wasalt_markers},
+    # gathern (monthly rentals): a delisted unit serves a server 404; a live OR merely-booked unit
+    # serves 200. So delete ONLY on a hard 404 — a booked-but-listed 200 is never deleted, and a
+    # relisted unit that comes back 200 is self-healed. Verified on 8 inactive+2 active URLs 2026-07-27.
+    "gathern": {"tables": ["gathern_residential_listings"], "dead_marker": _never},
 }
 
 DEFAULT_POLICY = {

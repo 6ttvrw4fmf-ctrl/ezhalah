@@ -122,6 +122,21 @@ def test_dry_run_reports_but_deletes_nothing():
     assert not c.inserted.get("cleanup_deletion_log")           # and nothing logged as deleted
 
 
+def test_gathern_is_404_only_booked_200_never_deleted():
+    # gathern registered with the _never marker → a 200 (live OR booked-but-listed) must NOT delete.
+    assert C.PLATFORMS["gathern"]["dead_marker"]("anything, even 'not available for these dates'") is False
+    c = _install({"gathern_residential_listings": [_cand(1)]}, POL(),
+                 probe=lambda url: (200, "booked · لليلة 400 ريال"),
+                 platform="gathern", tables=("gathern_residential_listings",), dead_marker=None)
+    s = C.run("gathern", force=True)
+    assert s["deleted"] == 0 and s["reactivated"] == 1 and c.deleted == {}     # booked 200 → self-heal, never deleted
+    c2 = _install({"gathern_residential_listings": [_cand(2)]}, POL(),
+                  probe=lambda url: (404, ""),
+                  platform="gathern", tables=("gathern_residential_listings",), dead_marker=None)
+    s2 = C.run("gathern", force=True)
+    assert s2["deleted"] == 1 and c2.deleted["gathern_residential_listings"] == [2]   # only a hard 404 deletes
+
+
 def test_verdict_status_mapping():
     dm = lambda b: b == "DEAD"
     assert C.verdict(404, "", dm) == "dead"
