@@ -130,6 +130,11 @@ const RAW_TO_CLEAN: Record<string, string> = {
   'مخازن سحابية': 'Warehouse',         // cloud / self-storage, titled مستودع
   'درايف ثرو': 'Shop',                // drive-thru kiosk (كشك)
   'حوش': 'Residential Land',           // walled yard / plot, titled ارض
+  // Match-their-architecture sweep (2026-07-27): real raw types with zero taxonomy entry, each
+  // verified live-in-DB before mapping (never guessed). [[feedback_ambiguous-mapping-ask-first-rule]]
+  'إستراحة': 'Rest House',              // aqarcity hamza spelling variant of استراحة (11 rows, res table)
+  'مجمع': 'Residential Building',       // sanadak bare form of مجمع سكني (8 rows, res table)
+  'برج': 'Residential Building',        // sanadak bare tower, distinct from برج اتصالات (1 row, res table)
 };
 
 // Normalize ONE raw type into {macro, clean}. `kind` = the table the row came from (res/com),
@@ -177,12 +182,14 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   // 'Building' IS in normalize.py's residential set, so python always routes it residential. Widening
   // would instead scan com tables for عمارة, where عمارة = Commercial Building (the documented dual
   // label), flooding the RPC candidate set + total_count with Commercial Buildings.
-  'Residential Building':{ rawTypes: ['Building', 'مجمع سكني'], kinds: ['res'] },
+  // مجمع/برج added 2026-07-27: sanadak bare forms, verified live as res-table-only (8 + 1 rows) —
+  // same reasoning as مجمع سكني above, kinds stays ['res'].
+  'Residential Building':{ rawTypes: ['Building', 'مجمع سكني', 'مجمع', 'برج'], kinds: ['res'] },
   // Residential — Villas & Houses
   'Villa':               { rawTypes: ['Villa', 'Palace', 'تاون هاوس', 'House'], kinds: ['res'] }, // فيلا search includes raw قصر + تاون هاوس + بيت (House folded in — few raw listings, owner request 2026-07-20)
   'Duplex':              { rawTypes: ['Duplex'], kinds: BOTH }, // BOTH: see Studio note — october maps "duplex"→'Duplex' then routes it commercial via category_for_type
   // Residential — Vacation & Rural (Rest House/Farm appear in com tables too → both)
-  'Rest House':          { rawTypes: ['Rest House'], kinds: BOTH },
+  'Rest House':          { rawTypes: ['Rest House', 'إستراحة'], kinds: BOTH }, // إستراحة = aqarcity hamza spelling variant of استراحة (11 rows, res table, verified live 2026-07-27)
   'Chalet':              { rawTypes: ['Chalet'], kinds: ['res'] },
   'Camp':                { rawTypes: ['Camp'], kinds: ['res'] },
   'Farm':                { rawTypes: ['Farm'], kinds: BOTH },
