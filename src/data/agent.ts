@@ -322,14 +322,23 @@ function resolveSourcesFromText(text: string): string[] {
   return Array.from(out);
 }
 // Apply a platform filter (and Gathern's monthly implication) onto a query built from any path.
-// Two signals are unioned: (1) platform names the EDGE resolved & CARRIES ACROSS TURNS (so "yes" to
-// "did you mean Deal App?" still filters to Deal App), and (2) names in the raw current message (the
-// offline-fallback path). Both run through resolveSourcesFromText to map any spelling → table prefix.
-// (user: "deal doesn't show when I type it" — the name was in a prior turn; rely on the edge field.)
+// When the edge already gave its own platform-restriction judgment (edgePlatforms is a real array,
+// even an empty one), trust it verbatim — that judgment already applies the "incidental mention ≠
+// restriction" nuance from its prompt (e.g. "Gathern's location is nice, I want a villa in Jeddah"
+// must NOT restrict to Gathern). ALSO regex-scanning the raw text on top would silently re-add a
+// platform the model correctly decided not to restrict to, defeating that exact prompt fix (found
+// live 2026-07-27: the online path still returned platforms:["Gathern"] for that repro because this
+// function unioned in a bare-mention regex hit regardless of the model's own empty decision).
+// The raw-text regex scan is only the source of truth when there is NO edge decision at all — the
+// pure offline parseQuery() fallback path, called with just (q, userText). (user: "deal doesn't show
+// when I type it" — a platform named in a PRIOR turn is carried via edgePlatforms, not re-typed.)
 function applySourceFilter(q: SearchQuery, userText: string, edgePlatforms?: string[]): void {
   const set = new Set<string>();
-  for (const p of edgePlatforms ?? []) for (const s of resolveSourcesFromText(p)) set.add(s);
-  for (const s of resolveSourcesFromText(userText)) set.add(s);
+  if (edgePlatforms !== undefined) {
+    for (const p of edgePlatforms) for (const s of resolveSourcesFromText(p)) set.add(s);
+  } else {
+    for (const s of resolveSourcesFromText(userText)) set.add(s);
+  }
   const sources = Array.from(set);
   if (!sources.length) return;
   q.sources = sources;
