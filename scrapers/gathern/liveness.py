@@ -1,0 +1,199 @@
+"""Gathern liveness sweep — detect delisted units and mark them inactive. OWNER-GATED.
+
+Gathern has NO working inactivation path (verified 2026-07-25: missing_count = 0 for all ~25.6k
+active rows; the >7-day-stale bands are 80–90% HTTP-404 yet still active=true):
+  • prune_unseen() is never called — the crawl only ever runs sharded and every shard skips prune;
+  • mark_stale_listings_inactive can't fire — its coverage gate needs one run to see ≥50% of the
+    catalog, which the sharded monthly crawl never does;
+  • and last_seen_at staleness is not a valid delisting signal anyway: a fully-booked LIVE unit drops
+    out of the has_available monthly feed and goes stale exactly like a delisted one.
+
+So this checks the DETAIL PAGE directly — the only valid Gathern liveness signal:
+  • 404 / 410 → increment missing_count; at `grace` consecutive misses flip active=false.
+  • 200 OK    → alive: reset missing_count=0 and refresh last_seen_at (this also RESCUES a live-but-
+                fully-booked unit that mark_stale would wrongly kill on staleness alone).
+  • anything else (429 / 5xx / timeout / no response) → leave the row untouched (never kill on a blip).
+
+NOTE: we must read the raw status ourselves — scrapers.common.http.get() and gathern.run.fetch_detail()
+both collapse a 404 into None/{}, indistinguishable from a transient failure, which would make every
+dead unit look merely "transient". We reuse gathern's impersonated detail_session() and inspect the
+status code.
+
+EFFICIENCY + SIGNAL: only rows whose last_seen_at is already stale (default >3 days) are probed. A row
+seen in the monthly feed within the freshness window was just served as bookable by the live API, so
+it is alive by construction (probe 2026-07-25: 20/20 such rows → HTTP 200) — re-fetching it only burns
+Gathern's tight global detail-page budget. Oldest-stale first, bounded per run by --limit.
+
+SAFETY (deletion-safety + resurrection pins — see reference_scraper-repo-and-inactivation-mechanisms):
+  • DRY-RUN BY DEFAULT. Writes NOTHING unless --apply is passed. The workflow is workflow_dispatch
+    only (no cron) with apply=false default, so a flag can only ever flip after an explicit owner run.
+  • 3-strike grace: every active row starts at missing_count=0, so the FIRST --apply run kills nothing
+    (0→1); a unit must 404 on THREE separate --apply runs before it goes inactive.
+  • Killed rows are pinned at missing_count=grace (≥3), so the guarded auto_recover_false_inactive()
+    (revives only missing_count<3) can't spuriously resurrect them; a genuine return to the monthly
+    feed still reactivates the row via the crawl upsert (active=True, missing_count=0).
+  • Gathern rate-limits detail pages GLOBALLY (429 above ~2 req/s across ALL IPs), so this runs as a
+    SINGLE runner at SCRAPE_MIN_INTERVAL≈1.0 — never a shard matrix.
+
+  python -m scrapers.gathern.liveness --limit 50                # dry-run report on 50 oldest-stale
+  python -m scrapers.gathern.liveness --limit 3000 --apply      # actually strike (owner-gated)
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
+
+from scrapers.common.db import begin_run, end_run, sb
+from scrapers.gathern.run import SOURCE, detail_session
+
+TABLE = "gathern_residential_listings"
+MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "1.0"))  # ~1 req/s: Gathern 429s above ~2
+
+
+def looks_dead(status: int) -> bool:
+    """True iff the detail page confirms the unit is gone. Gathern serves a hard 404 (occasionally
+    410) for a delisted unit — unlike Aqar, there is no 200-with-dead-marker page."""
+    return status in (404, 410)
+
+
+def classify(status: int, missing_count: Optional[int], grace: int) -> tuple[str, int]:
+    """Pure decision for one probe → (action, new_missing_count).
+      404/410 → 'strike' (bump) or 'kill' (bump reached grace); 200 → 'alive' (reset);
+      anything else → 'transient' (leave missing_count as-is, touch nothing)."""
+    mc = missing_count or 0
+    if looks_dead(status):
+        nm = mc + 1
+        return ("kill" if nm >= grace else "strike"), nm
+    if status == 200:
+        return "alive", 0
+    return "transient", mc
+
+
+def _throttle(_last: list[float] = [0.0]) -> None:
+    """Space request STARTS ≥ MIN_INTERVAL apart (single-threaded, so a plain sleep is enough)."""
+    wait = _last[0] + MIN_INTERVAL - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+    _last[0] = time.monotonic()
+
+
+def probe(s, url: str, retries: int = 3) -> int:
+    """Return the real HTTP status (200/404/410/…), retrying only transient 429/5xx; 0 = no verdict."""
+    for attempt in range(retries):
+        _throttle()
+        try:
+            r = s.get(url, timeout=25, allow_redirects=True)
+        except Exception:
+            time.sleep(2 * (attempt + 1)); continue
+        if r.status_code == 429 or r.status_code >= 500:
+            time.sleep(3 * (attempt + 1)); continue
+        return r.status_code
+    return 0
+
+
+def _collect_stale(client, cutoff_iso: str, limit: int) -> list[dict]:
+    """Read-only worklist: active rows whose last_seen_at is already stale, oldest first. Collected in
+    full BEFORE any write so flipping active=false mid-sweep can't shift an offset window and skip rows."""
+    work: list[dict] = []
+    offset = 0
+    page = 1000
+    while True:
+        q = (client.table(TABLE).select("id, ad_number, listing_url, missing_count")
+             .eq("source", SOURCE).eq("active", True).lt("last_seen_at", cutoff_iso)
+             .order("last_seen_at", desc=False).order("id", desc=False)
+             .range(offset, offset + page - 1))
+        batch = q.execute().data or []
+        work.extend(batch)
+        if limit and len(work) >= limit:
+            return work[:limit]
+        if len(batch) < page:
+            return work
+        offset += page
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Gathern detail-page liveness sweep (owner-gated)")
+    ap.add_argument("--limit", type=int, default=0, help="probe at most N oldest-stale rows (0 = all stale)")
+    ap.add_argument("--grace", type=int, default=3, help="consecutive 404 sweeps before active=false")
+    ap.add_argument("--min-stale-days", type=int, default=3,
+                    help="only probe rows not seen in the feed for this many days (recently-fed rows "
+                         "are alive by construction)")
+    ap.add_argument("--apply", action="store_true",
+                    help="ACTUALLY write missing_count / active=false. Without it this is a DRY RUN "
+                         "that changes nothing and only reports what would happen.")
+    args = ap.parse_args()
+
+    client = sb()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=args.min_stale_days)).isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    mode = "APPLY" if args.apply else "DRY-RUN"
+    platform = "gathern_liveness"
+    run_id = begin_run(platform)
+
+    work = _collect_stale(client, cutoff, args.limit)
+    print(f"Gathern liveness [{mode}]: {len(work)} active rows stale >{args.min_stale_days}d "
+          f"(grace={args.grace}, ~{MIN_INTERVAL:.1f}s/req)", flush=True)
+
+    s = detail_session()
+    seen = dead = alive = transient = killed = struck = 0
+    alive_ids: list[int] = []
+    started = time.time()
+
+    def _flush_alive() -> None:
+        if args.apply and alive_ids:
+            for i in range(0, len(alive_ids), 200):
+                client.table(TABLE).update({"last_seen_at": now_iso, "missing_count": 0}) \
+                    .in_("id", alive_ids[i:i + 200]).execute()
+        alive_ids.clear()
+
+    try:
+        for row in work:
+            url = (row.get("listing_url") or "").strip()
+            if not url:
+                continue
+            seen += 1
+            action, new_missing = classify(probe(s, url), row.get("missing_count"), args.grace)
+
+            if action in ("kill", "strike"):
+                dead += 1
+                upd: dict[str, Any] = {"missing_count": new_missing}
+                if action == "kill":
+                    upd["active"] = False
+                    killed += 1
+                else:
+                    struck += 1
+                if args.apply:
+                    client.table(TABLE).update(upd).eq("id", row["id"]).execute()
+            elif action == "alive":
+                alive += 1
+                alive_ids.append(row["id"])
+                if len(alive_ids) >= 200:
+                    _flush_alive()
+            else:
+                transient += 1
+
+            if seen % 50 == 0:
+                rate = seen / (time.time() - started or 1)
+                print(f"  [{seen}] dead={dead} (kill={killed} strike={struck}) alive={alive} "
+                      f"transient={transient} ({rate:.1f}/s)", flush=True)
+    except KeyboardInterrupt:
+        print("\nInterrupted — finalizing.", flush=True)
+    finally:
+        _flush_alive()
+
+    verb = "inactivated" if args.apply else "WOULD inactivate"
+    notes = (f"{mode} scanned={seen} dead={dead} {verb}={killed} strike={struck} "
+             f"alive={alive} transient={transient}")
+    print(f"\n✓ Gathern liveness done. {notes}", flush=True)
+    # An empty stale worklist is legitimately healthy (everything fresh), not a dead source.
+    end_run(run_id, ok=True, rows_seen=seen, rows_upserted=killed if args.apply else 0,
+            notes=notes, allow_empty=(len(work) == 0))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
