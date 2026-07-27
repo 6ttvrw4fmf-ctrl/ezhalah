@@ -295,6 +295,14 @@ def _lookup_type(raw: str) -> Optional[str]:
     return normalize.map_type_exact(raw, overrides=TYPE_OVERRIDES_AR)
 
 
+def _residual(raw: str) -> str:
+    """Strip deal/status noise words, leaving whatever type-signal token(s) remain (if any)."""
+    residual = raw
+    for w in _DEAL_WORDS:
+        residual = residual.replace(w, " ")
+    return re.sub(r"\s+", " ", residual).strip()
+
+
 def _derive_type(cat_names: list[str]) -> Optional[str]:
     for raw in cat_names:
         hit = _lookup_type(raw)
@@ -302,10 +310,7 @@ def _derive_type(cat_names: list[str]) -> Optional[str]:
             return hit
     # strip deal/status words and retry on the residual token(s)
     for raw in cat_names:
-        residual = raw
-        for w in _DEAL_WORDS:
-            residual = residual.replace(w, " ")
-        residual = re.sub(r"\s+", " ", residual).strip()
+        residual = _residual(raw)
         for tok in (residual, residual.replace("ة", "ه"), residual.replace("ه", "ة")):
             hit = _lookup_type(tok)
             if hit:
@@ -415,7 +420,15 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     # residential/commercial table routing byte-identical to the pre-fix behaviour.
     mapped_type = _derive_type(cat_names)
     property_type = mapped_type or "Land"  # type-truth: routing-legacy only — never stored
-    stored_property_type = mapped_type or (cat_names[0].strip() if cat_names else None) or "unknown"
+    # A cat_name that's PURELY a deal/status word (e.g. "إيجار") carries zero type signal beyond what
+    # transaction_type/is_rent already captures — falling back to it as the "raw" type misleadingly
+    # shows a deal word as if it were a property type (found live 2026-07-27: 4 listings stored
+    # property_type="إيجار", duplicating transaction_type with no new information). Only fall back to
+    # a raw cat_name that still has real residual signal after stripping deal words (same check
+    # _derive_type already does above); otherwise "unknown" — never guess, but never dress up a deal
+    # word as a type either.
+    raw_fallback = next((c.strip() for c in cat_names if _residual(c)), None)
+    stored_property_type = mapped_type or raw_fallback or "unknown"
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
 
     city_ar = (_names(p, "property_city", taxd) or [""])[0]

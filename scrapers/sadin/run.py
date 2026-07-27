@@ -257,6 +257,13 @@ def _description(html: str) -> Optional[str]:
 def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optional[dict], str]:
     og = re.search(r'property="og:title"\s+content="([^"]+)"', html)
     title_raw = (og.group(1).split("|")[0].strip() if og else "") or card.get("title", "")
+    # A detail-page fetch can occasionally land on the login wall instead of the real property page
+    # (session/bot-gate) — its og:title is literally "Login or Create Account", and every other field
+    # (description, price, area) comes back empty too, so this was stored as a fake listing with no
+    # real content (found live 2026-07-27, id 4948043/SD4HO6O). Skip it entirely rather than storing a
+    # garbage row — a later crawl run picks up the real page once it's reachable again.
+    if title_raw.strip() == "الدخول أو إنشاء حساب":
+        return None, ""
     desc_raw = _description(html)
 
     mapped_type = _map_type(title_raw, card.get("title", ""), desc_raw or "")
