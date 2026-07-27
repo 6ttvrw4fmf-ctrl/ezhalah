@@ -52,6 +52,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -123,6 +124,74 @@ _CUT_MARKERS = (
     "واتساب", "واتس", "جوال", "الجوال", "اسم المعلن", "المعلن", "الوسيط", "المسوق",
     "اسم المالك", "للطلب", "للمعاينة", "حياك", "رقم الاعلان للتواصل",
 )
+
+
+# ── signup-wall sentinel (2026-07-27) ─────────────────────────────────────────────────────────
+# dealapp.sa serves a REGISTRATION INTERSTITIAL ("صفحة التسجيل", ~86KB) after a burst of rapid
+# /ad-details requests — HTTP 200, sticky per-IP, and NOT cleared by short backoff. It carries no
+# ng-state listing schema, so _listing_schema() already returns None and every consumer falls to
+# "unknown" (fetch_one -> None, recover._classify -> "unknown" -> row UNTOUCHED). That is the
+# correct outcome and this sentinel does not change it. What it adds is VISIBILITY: without it a
+# wall episode is indistinguishable from "these ads are all unparseable", so a throttling event
+# silently inflates the unknown bucket instead of reporting itself.
+#
+# HARD RULE: a walled response is neither alive nor dead. It must never reach a liveness verdict.
+_WALL_MARKERS = ("صفحة التسجيل", "/ar/auth/register", "registration-page")
+_wall_hits = 0
+_wall_lock = threading.Lock()
+
+
+def is_signup_wall(html: str) -> bool:
+    """True iff this response is dealapp's registration interstitial rather than an ad page.
+
+    Deliberately requires the ABSENCE of a listing schema block: a real ad page that merely links
+    to /ar/auth/register in its chrome must never be misread as a wall.
+    """
+    if not html:
+        return False
+    if "real-estate-listing" in html:
+        return False
+    return any(m in html for m in _WALL_MARKERS)
+
+
+def note_wall_hit() -> None:
+    global _wall_hits
+    with _wall_lock:
+        _wall_hits += 1
+
+
+def wall_hits() -> int:
+    with _wall_lock:
+        return _wall_hits
+
+
+def reset_wall_hits() -> None:
+    global _wall_hits
+    with _wall_lock:
+        _wall_hits = 0
+
+
+def report_wall_episode(job: str, attempted: int) -> int:
+    """Raise an ops alert if this job hit the signup wall, and return the hit count for run notes.
+
+    Severity: a wall that swallows >=25% of attempted fetches has materially degraded coverage for
+    the run (P1); a smaller burst is noise-level throttling worth seeing but not paging on (P2).
+    Dedup is per-UTC-day so a recurring wall re-alerts daily instead of once forever.
+    """
+    hits = wall_hits()
+    if not hits:
+        return 0
+    share = hits / attempted if attempted else 1.0
+    sev = "P1" if share >= 0.25 else "P2"
+    day = datetime.now(timezone.utc).date().isoformat()
+    print(f"⚠ dealapp signup wall hit {hits}x of {attempted} fetches ({share:.0%}) — "
+          f"those responses were NOT given a liveness verdict", flush=True)
+    db.raise_alert(
+        sev, "dealapp_signup_wall", "dealapp", f"dealapp_signup_wall:{job}:{day}",
+        {"job": job, "wall_hits": hits, "attempted": attempted, "share": round(share, 4),
+         "effect": "walled responses excluded from liveness verdicts; coverage under-reported"},
+    )
+    return hits
 
 
 _local = threading.local()
@@ -352,6 +421,13 @@ def fetch_one(adid: str) -> Optional[tuple[str, str]]:
             r = s.get(url, timeout=45, allow_redirects=True)
         except Exception:
             time.sleep(1.0 * (attempt + 1))
+            continue
+        if is_signup_wall(r.text):
+            # Registration interstitial, not an ad page. Count it and retry, but NEVER return it:
+            # a walled response must not become a skeleton fallback either, or a throttling episode
+            # would ingest as a priceless row / be read as a liveness answer.
+            note_wall_hit()
+            time.sleep(1.5 * (attempt + 1))
             continue
         if r.status_code == 200 and "real-estate-listing" in r.text:
             if has_priced_schema(r.text):
@@ -659,8 +735,9 @@ def main() -> int:
                 pruned += n
         print(f"✓ Deal App: {len(res)} residential + {len(com)} commercial upserted, "
               f"{sold_ct} sold (inactive), {pruned} stale pruned")
+        walls = report_wall_episode("scrape", len(ids))
         db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n,
-                   notes=f"sold={sold_ct} pruned={pruned}",
+                   notes=f"sold={sold_ct} pruned={pruned} wall={walls}",
                    check_tables=["dealapp_residential_listings", "dealapp_commercial_listings"])
         return 0
     except Exception as e:

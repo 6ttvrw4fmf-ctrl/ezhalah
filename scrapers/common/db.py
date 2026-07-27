@@ -100,6 +100,21 @@ def begin_run(platform: str) -> int:
     return int(res.data[0]["id"])
 
 
+def raise_alert(sev: str, kind: str, platform: str, dedup: str, detail: dict[str, Any]) -> None:
+    """Raise an ops alert through the existing mon_raise() entry point (dedups on `dedup` while an
+    identical unresolved alert is open; surfaces in the monitoring_dashboard view).
+
+    Never fatal: a scraper must not die because the alert write failed.
+    """
+    try:
+        sb().rpc("mon_raise", {
+            "p_sev": sev, "p_kind": kind, "p_platform": platform,
+            "p_dedup": dedup, "p_detail": detail,
+        }).execute()
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠ alert write failed ({kind}/{platform}): {e}", flush=True)
+
+
 def upsert_aqar_residential(row: dict[str, Any]) -> None:
     """Upsert one Aqar residential row, keyed on `ad_number`."""
     row = dict(row)
