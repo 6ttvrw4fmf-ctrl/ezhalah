@@ -62,27 +62,25 @@ def _alert(client, alert_type: str, metric: int, detail: str) -> None:
         pass  # exit code is the primary signal; the alert row is best-effort
 
 
-def check_not_ready(client) -> bool:
-    """True = OK. Every not-ready row must be a known reason bucket (0 unexplained)."""
-    T = "listing_native_location_v2"
-    total = client.table(T).select("listing_id", count="exact").eq("production_ready", False).limit(1).execute().count or 0
-    # Unexplained = not-ready DESPITE a fully resolved city (city_ar present AND city_id present).
-    q = (
-        client.table(T).select("platform,listing_id", count="exact")
-        .eq("production_ready", False)
-        .not_.is_("city_id", "null")
-        .not_.is_("city_ar", "null")
-        .neq("city_ar", "")
-        .limit(20).execute()
-    )
-    unexplained = q.count or 0
+def get_counts(client) -> dict:
+    """The heavy location counts, computed server-side by audit_location_counts() which raises its own
+    statement_timeout — counting listing_native_location_v2 / the drift view via plain PostgREST
+    `count=exact` intermittently trips the short per-request timeout (57014), esp. during a matview
+    refresh. One RPC call returns not_ready_total / not_ready_unexplained / search_index_drift."""
+    return client.rpc("audit_location_counts").execute().data or {}
+
+
+def check_not_ready(client, counts: dict) -> bool:
+    """True = OK. Every not-ready row must be a known reason bucket (0 unexplained = no not-ready row
+    that ALREADY has a fully resolved city)."""
+    total = counts.get("not_ready_total", 0)
+    unexplained = counts.get("not_ready_unexplained", 0)
     if unexplained == 0:
         print(f"OK  not-ready invariant: {total} not-ready rows, 0 unexplained "
               f"(all buckets in {KNOWN_NOT_READY_REASONS}).")
         return True
-    platforms = sorted({r.get("platform") for r in (q.data or [])})
     detail = (f"{unexplained} not-ready rows have a resolved city yet stay not-ready "
-              f"(unexplained reason). platforms sample: {platforms}")
+              f"(unexplained reason bucket).")
     print(f"FAIL not-ready invariant: {detail}")
     _alert(client, "not_ready_unexplained_reason", unexplained, detail)
     return False
@@ -103,14 +101,14 @@ def check_awal(client) -> bool:
     return False
 
 
-def check_stale_index(client) -> bool:
+def check_stale_index(client, counts: dict) -> bool:
     """True = OK. search_listings_ar (the table the search RPC reads) is a rebuilt snapshot of
     listing_native_location_v2; when the rebuild lags/breaks, a listing can be indexed under a
     DIFFERENT city/region than the resolver now says — a الرياض search then returns e.g. an أبو عريش
     listing (self-healed 2026-07-26). At rest the layers are identical (0 drift), so we tolerate only
     a small transient mid-refresh window and alert on material drift."""
     max_drift = int(os.environ.get("STALE_INDEX_MAX") or "50")
-    n = client.table("mon_search_index_city_drift").select("listing_id", count="exact").limit(1).execute().count or 0
+    n = counts.get("search_index_drift", 0)
     if n <= max_drift:
         print(f"OK  stale-index drift: {n} listings where search index city/region != resolver (<= {max_drift} tolerated).")
         return True
@@ -172,9 +170,11 @@ def main() -> int:
     from scrapers.common import db  # lazy: needs SUPABASE_SERVICE_ROLE_KEY (CI only)
     client = db.sb()
     results = []
-    if args.only in (None, "not_ready"):   results.append(check_not_ready(client))
+    if args.only in (None, "not_ready", "stale_index"):
+        counts = get_counts(client)  # one server-side RPC feeds both count-based checks
+        if args.only in (None, "not_ready"):   results.append(check_not_ready(client, counts))
+        if args.only in (None, "stale_index"): results.append(check_stale_index(client, counts))
     if args.only in (None, "awal"):        results.append(check_awal(client))
-    if args.only in (None, "stale_index"): results.append(check_stale_index(client))
     if args.only is None:                  results.append(check_agent(client))
     return 0 if all(results) else 1
 
