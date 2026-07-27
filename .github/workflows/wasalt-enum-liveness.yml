@@ -5,19 +5,27 @@
 # GETs) — so Wasalt ran with NO inactive detection at all (0 inactivations for 30+ days, ~4.7k dead
 # listings measured still searchable on 2026-07-12).
 #
-# How this one works (two sequential steps, ONE run/day):
+# How this one works (two sequential steps, ONE run per scheduled day — every 2 days since 07-27):
 #   1. ENUM  — run.py --all --pages 2000 walks EVERY list page of every slice (~2k pages ≈ 285 MB
 #      gzip ≈ ~1% of the old cost). The normal upserts refresh last_seen_at on every listing that
 #      still exists on wasalt.sa, discover new ones, and auto-reactivate returned ones. This single
-#      run also gives Wasalt a daily full data refresh (price/field updates) as a side effect.
+#      run also gives Wasalt a full data refresh (price/field updates) as a side effect — now every
+#      2 days for the long tail; the 8-hourly res/com sweeps still refresh each slice's top pages 3x/day.
 #   2. STRIKE — liveness.py --mode enum-strike: active rows the enumeration did NOT see get
 #      missing_count+1 (DB-only); rows missed 3 consecutive enumerations are HEAD→GET-confirmed and
 #      flip active=false ONLY on a confirmed dead. Guards: enum-coverage (≥40k rows AND ≥85% of the
 #      trailing median, else no strikes), control-group (30 known-live rows must verify live, else
 #      no flips), confirm cap 1500/run. `needs:` ensures a failed/partial enum ⇒ no strike step.
 #
-# Bandwidth: ~285 MB/day enum + ≤~45 MB/day confirms (backlog week) ≈ ~9 GB/month at daily cadence.
-# Cadence is ONE cron line: every-2-days halves it (flip latency = grace × cadence).
+# Bandwidth: ~285 MB per enum + ≤~45 MB confirms (backlog week) ≈ ~9 GB/month at DAILY cadence,
+# ~4.5 GB/month at the EVERY-2-DAYS cadence in force since 2026-07-27.
+# Cadence is ONE cron line — pg_cron jobid 36 `gh-wasalt-enum-liveness`, NOT a `schedule:` block here
+# (pg_cron dispatches this workflow via trigger_gh_workflow). Now `0 21 */2 * *`, was `0 21 * * *`:
+# halved after the owner reported the DataImpulse 10 GB balance overrun on 2026-07-27, where
+# attribution showed THIS job was 92% of all metered-proxy row volume (1,554,318 of 1,684,193 rows
+# since 07-09). Rationale + revert in
+# supabase/migrations/20260727154828_wasalt_enum_liveness_every_2_days.sql.
+# Flip latency = grace × cadence ⇒ retiring a vanished listing now takes ~6 days, not ~3.
 name: Wasalt enum liveness
 
 on:

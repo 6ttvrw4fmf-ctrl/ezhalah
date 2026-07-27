@@ -1,0 +1,55 @@
+-- Wasalt enum-liveness: daily -> EVERY 2 DAYS (metered-proxy bandwidth, owner-flagged 2026-07-27).
+--
+-- WHY: the owner reported DataImpulse usage has exceeded the purchased 10 GB. Attribution from
+-- scrape_runs (07-09 15:38, when DataImpulse became WASALT_PROXY_URL, -> 07-27) shows this ONE job
+-- is the dominant consumer:
+--
+--   wasalt (all jobs)                        1,891 runs   1,684,193 rows via proxy
+--     -- of which the 21:00 enum singletons     15 runs   1,554,318 rows  <-- 92%
+--   wasalt_enrich_ar_residential                69 runs       6,093 rows
+--   wasalt_enrich_ar_commercial                  69 runs         350 rows
+--   souq24 (chains WASALT_PROXY_URL)             11 runs         552 rows
+--
+-- Each enum run walks every list page of every slice (run.py --all --pages 2000): 90k-121k rows,
+-- ~1,000-1,300 page fetches, 4-5.3h wall-clock, EVERY DAY since 2026-07-12.
+-- wasalt-enum-liveness.yml states its own budget in-file: ~285 MB/day enum + <=~45 MB/day confirms
+-- ~= ~9 GB/month at daily cadence -- i.e. by design this single job consumes a 10 GB prepaid
+-- balance in about one month. Halving the cadence halves that, which is the lever the workflow
+-- itself documents ("Cadence is ONE cron line: every-2-days halves it").
+--
+-- COST OF THIS CHANGE: dead-listing flip latency = grace x cadence, so 3 sweeps x 2 days = ~6 days
+-- instead of ~3 to retire a listing that disappeared from wasalt.sa. Nothing else degrades:
+--   * The enum doubles as Wasalt's full data refresh (price/field updates), so refresh latency also
+--     goes 1 -> 2 days. The 8-hourly res/com sweeps (jobid 4/5, unchanged) still refresh the top
+--     pages of every slice 3x/day, so actively-listed inventory stays current; it is the long tail
+--     past the sweep page caps that refreshes every 2 days now.
+--   * Safety is unaffected. liveness.py --mode enum-strike keeps grace=3, its collapse guard
+--     (>30% dead => strike nothing), the enum-coverage floor (>=40k rows AND >=85% of the trailing
+--     median, else no strikes), the 30-row control group, and the 1500/run confirm cap. A stale or
+--     partial enum still means NO strikes. Fails safe in the keep-the-listing direction.
+--   * The strike step's own guard refuses if the last enum is >36h old. At a 48h cadence the strike
+--     step runs in the SAME workflow run as its enum (needs: enum), so it always sees a fresh one --
+--     the guard is not tripped by this change.
+--
+-- NOT chosen as the first lever: lowering --pages 2000 would under-enumerate and trip the >=40k
+-- coverage floor, stalling the whole lifecycle instead of just slowing it.
+--
+-- CRON SEMANTICS: '0 21 */2 * *' is day-of-month stepping, so it fires on the 1st, 3rd, ... 31st.
+-- After a 31-day month that yields two consecutive days (31st then the 1st). That is harmless here
+-- -- one extra enum every other month, never a skipped one -- and it is the same every-2-days
+-- pattern already used elsewhere in this schedule. A true 48h interval would need a timestamp
+-- ledger, which is not worth the machinery for this.
+--
+-- REVERT: re-issue the same select with '0 21 * * *'. cron.schedule() upserts by jobname, so this
+-- updates jobid 36 in place rather than creating a second job.
+--
+-- OPEN (does NOT block this change): per-request bytes have never been measured, so the GB figures
+-- above are estimates. At the workflow's ~145 KB gzip/page the 15 enum runs are ~2.3 GB, which does
+-- not reach 10 GB; if DataImpulse meters DECOMPRESSED bytes (Entry 1 measured ~941 KB/page) the same
+-- runs are ~15 GB, which would explain the overrun. One instrumented run settles it. Halving the
+-- cadence is the right move under either reading.
+select cron.schedule(
+  'gh-wasalt-enum-liveness',
+  '0 21 */2 * *',
+  $$select public.trigger_gh_workflow('wasalt-enum-liveness.yml')$$
+);
