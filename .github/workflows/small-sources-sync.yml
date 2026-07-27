@@ -74,18 +74,14 @@ jobs:
           # platform re-enters an active matrix. Do NOT re-add without owner approval (un-retire
           # by removing the slug from RETIRED_PLATFORMS.txt in the same PR). See ARCHITECTURE.md
           # "Retired platforms".
-          # NOTE: jazwtn is NOT here. RETIRED 2026-07-27 (owner-approved): jazwtn.sa IP-blocks
-          # GitHub Actions runner ranges. Its leg failed 6/6 consecutive runs from 2026-07-23,
-          # always on the FIRST request (sitemap_entries -> s.get(SITEMAP), scrapers/jazwtn/run.py
-          # :218) with `curl: (35) Recv failure: Connection reset by peer` ~24s in — a TCP reset,
-          # not a parse error. Same URL from a non-runner IP returns HTTP 200 / 68,410 bytes in
-          # 0.26s, so the site is healthy and the code is correct; only the egress IP is blocked.
-          # Same failure class as toor. Data impact ~0 at retirement: the sitemap advertised 138
-          # project URLs against our 137 active rows, and its newest <lastmod> was 2026-07-13, so
-          # nothing new was being missed. The 137 rows are KEPT active and searchable (they are
-          # protected from mark_stale_listings_inactive by its circuit breaker + the `alive` guard,
-          # which cannot fire while the scraper has no ok=true run). To un-retire, a non-runner
-          # egress IP (residential proxy) is required — re-adding this line alone will not work.
+          # jazwtn UN-RETIRED 2026-07-27 (owner-instructed, same day): the retirement note below
+          # said "a non-runner egress IP (residential proxy) is required — re-adding this line
+          # alone will not work". PR#230 delivered exactly that: scrapers/jazwtn/run.py now routes
+          # through JAZWTN_PROXY_URL / SCRAPE_PROXY_URL / WASALT_PROXY_URL (the job-level secret
+          # below, same Saudi residential egress the souq24/wasalt legs use) and records a
+          # scrape_runs row BEFORE the sitemap fetch, so a re-block fails LOUD, not silently.
+          # If this leg fails again WITH the proxy, re-retire — the code path is then truly dead.
+          - { source: jazwtn,      cmd: "python -m scrapers.jazwtn.run --type all" }
           # NOTE: alnokhba is NOT here. Deprecated 2026-07-14 — alnokhba-services.com's domain
           # lapsed into a parking page (HTTP 200, but a domain-resale placeholder, no
           # property-card markup); scrape_runs went from rows_seen=5 (2026-07-07) to
