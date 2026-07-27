@@ -13,6 +13,9 @@ retry and skeleton discipline as the main scraper via fetch_one) and:
     (active=true, missing_count=0, last_seen_at=now — the page IS a sighting).
   • SoldOut/OutOfStock availability or a تم البيع/تم التأجير badge → stays inactive (genuinely gone).
   • 404/410, persistent skeleton, or no parseable schema           → UNTOUCHED (unknown ≠ alive).
+  • signup wall (صفحة التسجيل registration interstitial)           → UNTOUCHED + counted/alerted
+    (see run.is_signup_wall / run.report_wall_episode: 200-with-no-schema, sticky per-IP; a
+    throttling episode must never read as either alive or dead).
 This job NEVER sets active=false on anything — recovery is strictly additive.
 
 Usage:  python -m scrapers.dealapp.recover [--table dealapp_residential_listings|
@@ -27,7 +30,12 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from scrapers.common.db import begin_run, end_run, sb
-from scrapers.dealapp.run import _listing_schema, fetch_one
+from scrapers.dealapp.run import (
+    _listing_schema,
+    fetch_one,
+    is_signup_wall,
+    report_wall_episode,
+)
 
 TABLES = ["dealapp_residential_listings", "dealapp_commercial_listings"]
 PAGE = 1000          # supabase select page size
@@ -55,6 +63,11 @@ def _inactive_rows(table: str, limit: int) -> list[dict]:
 
 def _classify(html: str) -> str:
     """'live' | 'sold' | 'unknown' — mirrors map_listing's active/sold rules exactly."""
+    # Signup wall (see run.is_signup_wall): a registration interstitial is neither alive nor dead.
+    # fetch_one already refuses to return one, so this is defence in depth — it keeps the invariant
+    # true at the classification boundary even if the fetch path is changed later.
+    if is_signup_wall(html):
+        return "unknown"
     schema = _listing_schema(html)
     if not schema:
         return "unknown"
@@ -123,8 +136,9 @@ def main() -> int:
             st = recover_table(t, args.limit, args.workers)
             for k in totals:
                 totals[k] += st[k]
+        walls = report_wall_episode("recover", totals["checked"])
         notes = (f"recovered={totals['recovered']} sold={totals['sold']} "
-                 f"unknown={totals['unknown']} of checked={totals['checked']}")
+                 f"unknown={totals['unknown']} of checked={totals['checked']} wall={walls}")
     except Exception as e:  # noqa: BLE001
         ok = False
         notes = str(e)[:400]
