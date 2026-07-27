@@ -320,6 +320,7 @@
     <li><strong>Per-question controls:</strong> tap an option to advance instantly; a "Something else" row to type a custom answer (with smart type-resolution, e.g. "flat" → Apartment); a centered, bold green <strong>Skip</strong> button; and a Back button (hidden on a group's first question).</li>
     <li><strong>Skip = no filter.</strong> Skipped fields are simply omitted and broadened — the user always gets results and never hits a dead end.</li>
     <li><strong>Editable answers:</strong> pre-filled chips and answered chips can be tapped to change them (e.g. switch Rent → Buy).</li>
+    <li><strong>Installments availability (source metadata):</strong> for annual-rent listings, an optional "offers installments / rent-now-pay-later" filter — a faithful pass-through of a boolean the <em>source</em> listing itself advertises. Surfaced only when the source states it, filtered solely on that flag, shown as a neutral badge. Ezhalah does not compute, estimate, originate, broker, rank, or advise on any payment plan; coverage is source-dependent and the filter never implies the option is unavailable elsewhere.</li>
   </ul>
 
   <h3>5.5 — Results &amp; listing cards <span class="pill p1">P0</span></h3>
@@ -439,6 +440,10 @@
     <span class="nt">Always</span>
     <p>Identify as Ezhalah · stay scoped to Saudi real estate · acknowledge the user naturally, then present matching listings for them to choose · correct typos and units before searching · stay neutral.</p>
   </div>
+  <div class="note">
+    <span class="nt">May — neutral pass-through</span>
+    <p>Display and filter on financing / installment options that a <strong>source listing itself advertises</strong> (e.g. rent-now-pay-later), as neutral factual metadata — surfaced verbatim, filtered only on the source's own flag (the same principle as reporting a listing's price or area). This does <strong>not</strong> relax any "Never": Ezhalah still must not recommend or rank financing offers, compute or estimate payments / instalment amounts / interest / affordability, originate or broker financing, redirect to a lender or payment processor, or give buying or financial advice. It surfaces only the <em>existence</em> of the option as stated by the source.</p>
+  </div>
 
   <h3>7.2 — Behavior matrix</h3>
   <table>
@@ -449,6 +454,8 @@
     <tr><td>Advice / comparison ("where should I buy, here or there?")</td><td>"I can only show listings — I can't recommend. I can show a mix of both areas if you'd like."</td><td>No (until specified)</td></tr>
     <tr><td>Off-topic ("what's the weather?")</td><td>"I can only help you find real estate across Saudi Arabia. What are you looking for?"</td><td>No</td></tr>
     <tr><td>Distress / harmful</td><td>Brief, caring redirect, then steers back to real estate.</td><td>No</td></tr>
+    <tr><td>Financing filter ("places with installments / rent now pay later")</td><td>Applies the source-advertised installments filter and shows matching listings — no payment math, no advice.</td><td>Yes (filtered)</td></tr>
+    <tr><td>Financing math ("what would the monthly payment be?")</td><td>"I can't work out payment amounts or give financial advice — I only show which listings advertise installments. You can check the terms with the source."</td><td>No (until re-scoped)</td></tr>
   </table>
 
   <h3>7.3 — Language &amp; tone</h3>
