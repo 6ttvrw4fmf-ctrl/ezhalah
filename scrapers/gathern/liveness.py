@@ -115,6 +115,51 @@ def _collect_stale(client, cutoff_iso: str, limit: int) -> list[dict]:
         offset += page
 
 
+# ── Cross-session write lock (2026-07-27) ────────────────────────────────────────────────────────
+# Reuses the repo's existing deploy-lock RPCs (supabase/migrations/20260716_deploy_lock.sql) under a
+# DISTINCT lock_name so a liveness --apply never blocks (or is blocked by) a frontend deploy.
+LOCK_NAME = "gathern_liveness_apply"
+_LOCK_TTL_SECONDS = 7200  # 2h — comfortably covers a full sweep; a crashed run self-releases by TTL
+
+
+def _apply_lock_holder() -> str:
+    """Stable-per-run holder id: the GH Actions run id in CI, else host-process id for a local run."""
+    run = os.environ.get("GITHUB_RUN_ID")
+    return f"gathern_liveness:{('ci:' + run) if run else 'local'}:{os.getpid()}"
+
+
+def _acquire_apply_lock(client, holder: str, ttl: int) -> Optional[bool]:
+    """Try to take the shared apply lock. Returns True (acquired), False (someone else holds an
+    unexpired lock), or None on a DB error — the caller MUST fail closed on None (never write unlocked)."""
+    try:
+        res = client.rpc("acquire_deploy_lock", {
+            "p_lock_name": LOCK_NAME, "p_holder": holder,
+            "p_ttl_seconds": ttl, "p_note": "gathern liveness --apply sweep",
+        }).execute()
+    except Exception as e:
+        print(f"  lock acquire RPC error: {str(e)[:140]}", flush=True)
+        return None
+    return bool(res.data)  # a returned row = we hold it; empty = held elsewhere (unexpired)
+
+
+def _release_apply_lock(client, holder: str) -> None:
+    """Best-effort release; the RPC only releases if `holder` still matches (no-op if our TTL lapsed)."""
+    try:
+        client.rpc("release_deploy_lock", {"p_lock_name": LOCK_NAME, "p_holder": holder}).execute()
+    except Exception as e:
+        print(f"  lock release RPC error (will self-expire): {str(e)[:140]}", flush=True)
+
+
+def _apply_lock_holder_info(client) -> str:
+    """Current holder, for the 'someone else has it' message (service role bypasses the table's RLS)."""
+    try:
+        r = (client.table("ops_deploy_lock").select("holder, expires_at, note")
+             .eq("lock_name", LOCK_NAME).execute())
+        return str(r.data[0]) if r.data else "(unknown — just released?)"
+    except Exception:
+        return "(unknown)"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Gathern detail-page liveness sweep (owner-gated)")
     ap.add_argument("--limit", type=int, default=0, help="probe at most N oldest-stale rows (0 = all stale)")
@@ -143,6 +188,29 @@ def main() -> int:
     mode = "APPLY" if args.apply else "DRY-RUN"
     platform = "gathern_liveness"
     run_id = begin_run(platform)
+
+    # A DRY RUN is read-only and needs no lock (two can run concurrently, harmlessly). But --apply
+    # MUST be single-writer: on 2026-07-27 two sessions ran the same liveness --apply within the hour
+    # against this shared project. Take the lock, or refuse to run a second concurrent apply.
+    # ponytail: the TTL is the only crash backstop (no try/finally) — fine for a rare owner-gated op;
+    # a killed run's lock self-expires, or release it by hand:
+    #   select release_deploy_lock('gathern_liveness_apply', '<holder printed below>');
+    holder = _apply_lock_holder()
+    holding_lock = False
+    if args.apply:
+        acq = _acquire_apply_lock(client, holder, _LOCK_TTL_SECONDS)
+        if acq is None:  # DB error acquiring → fail CLOSED, never write unlocked
+            print("✗ liveness apply lock: DB error acquiring — refusing to --apply.", flush=True)
+            end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes="apply aborted — lock acquire error")
+            return 1
+        if not acq:  # an unexpired lock is held elsewhere → do not run a second concurrent apply
+            held = _apply_lock_holder_info(client)
+            print(f"⚠ another session holds the '{LOCK_NAME}' lock — refusing --apply. Holder: {held}", flush=True)
+            end_run(run_id, ok=True, rows_seen=0, rows_upserted=0,
+                    notes=f"apply skipped — lock held ({held})", allow_empty=True)
+            return 0
+        holding_lock = True
+        print(f"✓ acquired '{LOCK_NAME}' apply lock (holder={holder}, ttl={_LOCK_TTL_SECONDS}s)", flush=True)
 
     work = _collect_stale(client, cutoff, args.limit)
     print(f"Gathern liveness [{mode}]: {len(work)} active rows stale >{args.min_stale_days}d "
@@ -231,6 +299,8 @@ def main() -> int:
     # An empty stale worklist is legitimately healthy (everything fresh), not a dead source.
     end_run(run_id, ok=not anomaly, rows_seen=seen, rows_upserted=applied_kills,
             notes=notes, allow_empty=(len(work) == 0))
+    if holding_lock:
+        _release_apply_lock(client, holder)
     return 0
 
 
