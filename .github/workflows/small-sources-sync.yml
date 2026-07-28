@@ -83,11 +83,20 @@ jobs:
           # "Retired platforms".
           # jazwtn UN-RETIRED 2026-07-27 (owner-instructed, same day): the retirement note below
           # said "a non-runner egress IP (residential proxy) is required — re-adding this line
-          # alone will not work". PR#230 delivered exactly that: scrapers/jazwtn/run.py now routes
-          # through JAZWTN_PROXY_URL / SCRAPE_PROXY_URL / WASALT_PROXY_URL (the job-level secret
-          # below, same Saudi residential egress the souq24/wasalt legs use) and records a
-          # scrape_runs row BEFORE the sitemap fetch, so a re-block fails LOUD, not silently.
-          # If this leg fails again WITH the proxy, re-retire — the code path is then truly dead.
+          # alone will not work". PR#230 delivered that proxy egress, and it records a scrape_runs
+          # row BEFORE the sitemap fetch so a re-block fails LOUD, not silently.
+          #
+          # 2026-07-28: the proxy fallback was REMOVED. Two fixes shipped for the same 07-23 root
+          # cause within 24h — the proxy (PR#230) and the curl_cffi 0.7.4->0.15.0 fingerprint bump
+          # (PR#245) — and the proxy became the failing half: every run since 07-27 15:16 died with
+          # `curl (35) TLS connect error: invalid library (OPENSSL_internal)`, a CONNECT-tunnel
+          # failure, not a rejection by jazwtn.sa. Measured 07-28 with 0.15.0 straight at the
+          # origin: `/` -> 200/204,697B and `/sitemap.xml` -> 200/1,768B. So this leg now goes
+          # DIRECT; JAZWTN_PROXY_URL / SCRAPE_PROXY_URL remain explicit opt-ins if the
+          # datacenter-IP block returns. It no longer inherits WASALT_PROXY_URL (provisioned for
+          # Wasalt, metered, and empirically broken for this host).
+          # If this leg fails again DIRECT with a reset, set JAZWTN_PROXY_URL to a WORKING proxy
+          # (verify the tunnel first) or re-retire — do not re-point it at the wasalt secret.
           - { source: jazwtn,      cmd: "python -m scrapers.jazwtn.run --type all" }
           # NOTE: alnokhba is NOT here. Deprecated 2026-07-14 — alnokhba-services.com's domain
           # lapsed into a parking page (HTTP 200, but a domain-resale placeholder, no
