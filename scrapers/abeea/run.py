@@ -322,6 +322,17 @@ def _map_type(type_text: str) -> tuple[str, bool]:
     return canon, (canon in COMMERCIAL_TYPES)
 
 
+def _select_area(is_land: bool, items: dict[str, str]) -> Optional[int]:
+    """Pick the right size field from the Houzez detail-wrap items — LIVING/BUILT size (Property
+    Size / Size) for non-land listings, LAND size (Land Area) for land listings. A villa/apartment
+    page can print BOTH; the field the correct kind isn't in must never win (found live 2026-07-28:
+    villa ABRE151 stored 360 m² [Land Area] while the page's own Property Size was 510 m² — 29%
+    too low, wrong kind of area)."""
+    if is_land:
+        return _to_int(items.get("Land Area") or items.get("Property Size") or items.get("Size"))
+    return _to_int(items.get("Property Size") or items.get("Size") or items.get("Land Area"))
+
+
 def _district_from(slug: str, title: str) -> Optional[str]:
     for src in (title, slug.replace("-", " ")):
         m = DISTRICT_SLUG_RE.search(src)
@@ -402,7 +413,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
         price = None
 
     # ── area ──
-    area = _to_int(items.get("Land Area") or items.get("Property Size") or items.get("Size"))
+    area = _select_area(is_land, items)
     # JSON-LD description sometimes carries a more precise "Area: 214.44m2"
     if not area:
         dm = re.search(r"Area\s*:\s*([\d,.]+)\s*m", ld.get("description") or "", re.I)
