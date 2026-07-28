@@ -196,6 +196,16 @@ def _float(v: Any) -> Optional[float]:
         return None
 
 
+def _select_area(property_type: str, offer: dict) -> Optional[float]:
+    """Pick the right size field from the offer payload — BUILT/LIVING size (buildingArea) for
+    non-land listings, LAND size (landArea) for land listings. A villa/house page can carry BOTH;
+    the field the correct kind isn't in must never win (2026-07-28 audit: the old unconditional
+    "landArea or buildingArea" order always stored the plot size for every property type)."""
+    if property_type in LAND_TYPES:
+        return _float(offer.get("landArea")) or _float(offer.get("buildingArea"))
+    return _float(offer.get("buildingArea")) or _float(offer.get("landArea"))
+
+
 def _redact(text: Optional[str]) -> Optional[str]:
     if not text:
         return None
@@ -511,7 +521,7 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
     stored_property_type = property_type if mapped_type else (str(type_id) if type_id is not None else "unknown")
 
     # ── area ──
-    area = _float(offer.get("landArea")) or _float(offer.get("buildingArea"))
+    area = _select_area(property_type, offer)
 
     # ── price ──
     price = _int(offer.get("price"))
