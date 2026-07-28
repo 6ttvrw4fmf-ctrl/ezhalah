@@ -51,7 +51,14 @@ jobs:
           - { source: fursaghyr,   cmd: "python -m scrapers.fursaghyr.run --type all" }
           - { source: mizlaj,      cmd: "python -m scrapers.mizlaj.run --type all" }
           - { source: aqaratikom,  cmd: "python -m scrapers.aqaratikom.run --type all" }
-          - { source: awal,        cmd: "python -m scrapers.awal.run --type all" }
+          # NOTE: awal is NOT here. RETIRED 2026-07-28 (owner-approved) — awaalun.com lapsed into
+          # a GoDaddy domain-parking page: /wp-json/wp/v2/rtcl_listing and individual /property/
+          # URLs both return HTTP 200 but the body is a 114-133 byte redirect stub to /lander
+          # (window._trfd ap:"parking", NS DOMAINCONTROL.COM) — reachable, serves no listings.
+          # Last real pull 2026-07-26 04:23 (rows_seen=128). Same failure class as alnokhba.
+          # Historical awal rows are KEPT in the DB (51, not deleted) and scrapers/awal/ remains so
+          # existing listings still render. See deprecated_platforms and docs/ARCHITECTURE.md §12.
+          # Do not re-add without confirming the domain serves real listings again.
           - { source: alkhaas,     cmd: "python -m scrapers.alkhaas.run --type all" }
           - { source: abeea,       cmd: "python -m scrapers.abeea.run --type all" }
           - { source: jurash,      cmd: "python -m scrapers.jurash.run --type all" }
