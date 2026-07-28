@@ -265,10 +265,20 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         # figures and stray numbers that happen to sit next to the riyal symbol). Searched on
         # price_text (pre-«تفاصيل الإعلان» prefix) — same cross-listing strip guard as rent above:
         # a price-less Buy page must stay NULL, not inherit a related-listing card's price.
+        # NOTE the currency class differs on the LAST pattern — this is deliberate, not an oversight.
+        # The first two require comma-grouped digits, so a bare identifier can never match them and
+        # the loose «ر» is harmless there. The third matches an UNGROUPED 6-9 digit run, which is
+        # exactly the shape of a REGA advertisement licence: the page prints
+        #     «رخصة الإعلان 7100267943 رابط رخصة الإعلان»
+        # and with «ر» in the class, `(\d{6,9})\s*[§ر﷼]` captured the licence's last 9 digits from the
+        # ر of the FOLLOWING word «رابط» — storing 100267943 as the price. 303 live rows landed in
+        # [100,000,000-101,000,000) that way (a 128 m² Jeddah apartment priced at 100.2M), and
+        # price_per_meter was then derived from it. Requiring a real currency SYMBOL (§/﷼) here kills
+        # the whole class; the ≥50,000 floor and the price_text anchoring below are kept unchanged.
         for pat in (
             r"(\d{1,3}(?:,\d{3}){2,3})\s*[§ر﷼]",  # 1,200,000 §
             r"(\d{1,3}(?:,\d{3}){1,3})\s*[§ر﷼]",  # 299,000 §
-            r"(\d{6,9})\s*[§ر﷼]",                  # 1200000 §
+            r"(\d{6,9})\s*[§﷼]",                   # 1200000 § — symbol ONLY, never a bare «ر»
         ):
             mp_total = re.search(pat, price_text)
             if mp_total:
