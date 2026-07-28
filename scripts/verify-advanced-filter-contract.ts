@@ -84,5 +84,16 @@ check('progress denominator = ageFlow.progressTotal (the eligible set), NOT the 
 check('agent builds a plan, presents via one confirm handler, and enters via anyGuidedEligible',
   /ageFlowPlanRef/.test(agentSrc) && /presentGuided/.test(agentSrc) && /onAgeConfirm/.test(agentSrc) && /anyGuidedEligible/.test(agentSrc));
 
+// ── Auto-open after an eligible Filter search (owner 2026-07-28) ─────────────────────────────────
+// A تصفية search hands off to the results view where the questions hide behind a button under the
+// cards; a filter user never finds them. The filter-completion path must auto-open the SAME shared
+// flow for eligible scopes — using the no-refine-fallback form so an empty plan closes silently
+// rather than popping a refine chip the user never asked for.
+check('startAgeFlow takes a fallbackToRefine flag and only pops refine chips when it is set',
+  /const startAgeFlow = async \(q: SearchQuery, fallbackToRefine = true\)/.test(agentSrc)
+  && /if \(fallbackToRefine\) startRefine\(q\)/.test(agentSrc));
+check('filter search auto-opens the guided flow for eligible scopes, WITHOUT the refine fallback',
+  /if \(anyGuidedEligible\(guidedQ\)\) void startAgeFlow\(guidedQ, false\)/.test(agentSrc));
+
 console.log(failed === 0 ? '\n✓ all advanced-filter contract assertions passed' : `\n✗ ${failed} contract assertion(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);
