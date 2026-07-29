@@ -316,6 +316,47 @@ def _purpose(html: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
+# Rent period the page itself declares — dealapp has no structured period field, so `rent_period`
+# was previously hardcoded to "annual" unconditionally, silently storing a daily/weekly/monthly rate
+# as if it were yearly (found live 2026-07-28: ad DA468049 priced "500 ريال" but the page's own text
+# reads "إيجار يومي" — daily — while price_annual was stored as 500, understating the true annual
+# cost ~365x; 160 active Rent rows system-wide show the same implausibly-low-for-annual signature).
+# Scoped to a window around each "إيجار" occurrence (not the whole page) so an unrelated "شهري"/
+# "يومي" elsewhere on the page (a newsletter signup, an unrelated widget) can't false-positive.
+# Multiplier annualizes to SAR/year; rent_period keeps this scraper's existing "annual"/"monthly"
+# vocabulary (no other scraper in this codebase uses a finer-grained value) — a daily/weekly source
+# rate is recorded as "monthly" (not annual) since that's this schema's only non-annual bucket.
+_PERIOD_WINDOW_RE = re.compile(r"إيجار")
+_DAILY_RE = re.compile(r"يومي|باليوم")
+_WEEKLY_RE = re.compile(r"أسبوعي|بالأسبوع")
+_MONTHLY_RE = re.compile(r"شهري|بالشهر")
+
+
+def _rent_period_window(html: str) -> str:
+    for m in _PERIOD_WINDOW_RE.finditer(html):
+        win = html[m.end():m.end() + 30]
+        if _DAILY_RE.search(win):
+            return "daily"
+        if _WEEKLY_RE.search(win):
+            return "weekly"
+        if _MONTHLY_RE.search(win):
+            return "monthly"
+    return "annual"
+
+
+def _rent_annualize(price: Optional[int], html: str) -> tuple[Optional[int], Optional[str]]:
+    if price is None:
+        return None, None
+    period = _rent_period_window(html)
+    if period == "daily":
+        return price * 365, "monthly"
+    if period == "weekly":
+        return price * 52, "monthly"
+    if period == "monthly":
+        return price * 12, "monthly"
+    return price, "annual"
+
+
 def _images(schema: dict) -> list[str]:
     imgs = schema.get("image")
     out: list[str] = []
@@ -416,6 +457,7 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     price = _int(offers.get("price"))
     if price is not None and price < 100:
         price = None
+    price_annual, rent_period = _rent_annualize(price, html) if is_rent else (None, None)
 
     # ── area / rooms / baths / price-per-meter from the visible spec table ──
     area = _num((_spec_value(html, "المساحة") or "").replace("م²", ""))
@@ -513,9 +555,9 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
         "bathrooms": baths,
         "street_width_m": street_w,
         "price_total": price if not is_rent else None,
-        "price_annual": price if is_rent else None,
+        "price_annual": price_annual,
         "price_per_meter": price_per_meter,
-        "rent_period": "annual" if is_rent else None,
+        "rent_period": rent_period,
         "city": city,
         "region": region,
         "neighborhood": district,

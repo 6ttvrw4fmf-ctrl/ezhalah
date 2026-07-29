@@ -134,8 +134,16 @@ def _strip(s: str) -> str:
 def _num(s: Optional[str]) -> Optional[int]:
     if not s:
         return None
-    t = str(s).translate(normalize._TRANS).replace("٬", ",").replace(",", "")
-    m = re.search(r"\d+", t)
+    t = str(s).translate(normalize._TRANS).replace("٬", ",")
+    # Prefer a fully thousands-grouped number (comma OR period as separator, 3-digit groups) so
+    # "2.600.000" (period-grouped, found live 2026-07-28 on ad SDX3ZNP) parses as 2,600,000, not just
+    # its leading "2" — mirrors the grouped-digit fix already applied to aqar's area parser. A plain
+    # decimal like "125.5" has only 1 trailing digit, so it never matches this stricter pattern and
+    # falls through to the original plain-\d+ behavior unchanged.
+    m = re.search(r"\d{1,3}(?:[,.]\d{3})+(?!\d)", t)
+    if m:
+        return int(m.group(0).replace(",", "").replace(".", ""))
+    m = re.search(r"\d+", t.replace(",", ""))
     return int(m.group(0)) if m else None
 
 
@@ -250,8 +258,57 @@ def _description(html: str) -> Optional[str]:
     if i < 0:
         return None
     sub = html[i: i + 6000]
-    m = re.search(r'<div class="text">(.*?)</div>', sub, re.S)
+    # sadin.com.sa's markup moved from class="text" to class="property-description" (found live
+    # 2026-07-28: the old selector matched 0/3 sampled live pages, so a fresh crawl today would get
+    # desc_raw=None and silently store no price at all — a coverage outage, not a wrong-value bug).
+    # Try the current class first, keep the old one as a fallback in case an older cached/mirrored
+    # page still uses it.
+    m = re.search(r'<div class="property-description">(.*?)</div>', sub, re.S) \
+        or re.search(r'<div class="text">(.*?)</div>', sub, re.S)
     return _strip(m.group(1)) if m else None
+
+
+def _is_per_meter(before: str, after: str) -> bool:
+    # A per-metre rate can be labeled EITHER after the number ("4,250 ريال للمتر") OR before it
+    # ("المتر: 4000 ريال") — found live 2026-07-28 on ad SDX3ZNP: only the `after` side was checked,
+    # so "المتر: 4000 ريال" (label BEFORE the number) slipped past this guard and its per-meter rate
+    # (4,000) was stored as the total price instead of the real total (2,600,000, a 650x
+    # understatement) because the real total lacked a trailing "ريال" token.
+    if re.match(r"\s*(?:للمتر|/?\s*م2?|/?\s*م²|للمتر\s*المربع)", after):
+        return True
+    return bool(re.search(r"(?:سعر\s*)?المتر\s*(?:المربع)?\s*[:：]?\s*$", before))
+
+
+def _extract_price(desc_raw: Optional[str]) -> Optional[int]:
+    """Best-effort TOTAL price from the description free-text. The lister free-text frequently
+    quotes a per-METRE price ("السعر: 4,250 ريال للمتر") right next to the total ("السعر الإجمالي:
+    2,647,750 ريال"), so we must (1) prefer an explicit "السعر الإجمالي/السعر الكلي" figure, and
+    (2) reject any per-metre figure, labeled either before or after the number (_is_per_meter).
+    Returns None if only a per-metre price exists (never store a per-metre number as a total)."""
+    if not desc_raw:
+        return None
+    # 1) explicit total / asking price (المطلوب/الإجمالي/الكلي win over rental-income figures).
+    # "ريال" is optional here — found live 2026-07-28: "المطلوب: 2.600.000" (no trailing "ريال" at
+    # all) was invisible to a strict "...ريال" requirement, so this labeled total went unmatched
+    # while a much smaller unlabeled-but-"ريال"-suffixed per-meter figure elsewhere in the same
+    # description won by default. The label itself ("asking"/"total"/"overall") is already a strong
+    # enough price signal without also requiring the currency word.
+    for pat in (r"(?:السعر\s*)?(?:المطلوب|الإجمالي|الاجمالي|الكلي)[^0-9]{0,20}([\d,٬\.]{4,})(?:\s*ريال)?",
+                r"(?:بسعر|السعر|بـ)\s*[:：]?\s*([\d,٬\.]{4,})\s*ريال(?!\s*(?:للمتر|/?\s*م))"):
+        for pm in re.finditer(pat, desc_raw):
+            if _is_per_meter(desc_raw[max(0, pm.start(1) - 20):pm.start(1)], desc_raw[pm.end():]):
+                continue
+            return _num(pm.group(1))
+    # 2) bare "N ريال" anywhere, but skip per-metre quotes AND rental-income/return figures
+    #    (عائد/دخل/إيجار سنوي — these are NOT the sale price).
+    INCOME = ("عائد", "الدخل", "دخل", "إيجار", "ايجار", "تأجير")
+    for pm in re.finditer(r"([\d,٬\.]{4,})\s*ريال", desc_raw):
+        before = desc_raw[max(0, pm.start() - 35): pm.start()]
+        if _is_per_meter(desc_raw[max(0, pm.start() - 20):pm.start()], desc_raw[pm.end():]) \
+                or any(w in before for w in INCOME):
+            continue
+        return _num(pm.group(1))
+    return None
 
 
 def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optional[dict], str]:
@@ -302,36 +359,9 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
     if area is not None and (area < 10 or area > 5_000_000):
         area = None
 
-    # Best-effort TOTAL price from the description free-text. The lister free-text frequently quotes a
-    # per-METRE price ("السعر: 4,250 ريال للمتر") right next to the total ("السعر الإجمالي: 2,647,750
-    # ريال"), so we must (1) prefer an explicit "السعر الإجمالي/السعر الكلي" figure, and (2) reject any
-    # "… ريال للمتر / للمتر المربع / /م²" per-metre figure. Price stays NULL if only a per-metre price
-    # exists (don't store a per-metre number as a total).
-    price = None
-    if desc_raw:
-        def _is_per_meter(after: str) -> bool:
-            return bool(re.match(r"\s*(?:للمتر|/?\s*م2?|/?\s*م²|للمتر\s*المربع)", after))
-
-        # 1) explicit total / asking price (المطلوب/الإجمالي/الكلي win over rental-income figures)
-        for pat in (r"السعر\s*(?:المطلوب|الإجمالي|الاجمالي|الكلي)[^0-9]{0,20}([\d,٬\.]{4,})\s*ريال",
-                    r"(?:بسعر|السعر|بـ)\s*[:：]?\s*([\d,٬\.]{4,})\s*ريال(?!\s*(?:للمتر|/?\s*م))"):
-            for pm in re.finditer(pat, desc_raw):
-                if _is_per_meter(desc_raw[pm.end():]):
-                    continue
-                price = _num(pm.group(1))
-                break
-            if price:
-                break
-        # 2) bare "N ريال" anywhere, but skip per-metre quotes AND rental-income/return figures
-        #    (عائد/دخل/إيجار سنوي — these are NOT the sale price).
-        if price is None:
-            INCOME = ("عائد", "الدخل", "دخل", "إيجار", "ايجار", "تأجير")
-            for pm in re.finditer(r"([\d,٬\.]{4,})\s*ريال", desc_raw):
-                before = desc_raw[max(0, pm.start() - 35): pm.start()]
-                if _is_per_meter(desc_raw[pm.end():]) or any(w in before for w in INCOME):
-                    continue
-                price = _num(pm.group(1))
-                break
+    # Best-effort TOTAL price from the description free-text (see _extract_price for the full logic
+    # + fidelity history).
+    price = _extract_price(desc_raw)
     if price is not None and price < 1000:
         price = None
     # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).

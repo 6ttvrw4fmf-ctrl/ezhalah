@@ -182,12 +182,16 @@ def test_the_guard_actually_catches_the_shapes_it_must():
 
 
 def test_fursaghyr_micro_price_gate_still_judges_magnitude_not_the_bare_rate():
-    """Removing the total synthesis must not silently DROP listings.
+    """The micro-price gate must keep judging the listing's real MAGNITUDE (source total, or the
+    rate×area fallback when no source total exists), never a bare unmultiplied rate — that would
+    throw away honest cheap land (real shape: FG24914, meter 33 / area 620 → magnitude 20,460).
 
-    The gate at fursaghyr/run.py returns None (discards the row). It used to test the synthesized
-    total; if it were left testing whichever field is populated, an honest cheap land ad with only
-    a per-m² rate would be judged as `meter < 1000` and thrown away. Real shape: FG24914
-    (meter 33 / area 620 → magnitude 20,460, must be KEPT).
+    REVERSED 2026-07-28 (owner decision): fursaghyr.com never displays rea.total_price on its own
+    pages, only a per-m² rate — so when total_price is missing, price_total now falls back to
+    rate×area (a plausible rate) or the bare rate itself (an implausible one, likely already a raw
+    total in the wrong field — see scrapers/common/tests/test_fursaghyr_total_price_fallback.py for
+    the full fix). This test previously asserted the OLD "never synthesize" behavior (price_total
+    stayed None here) — that assertion is now the opposite of the current, intentional contract.
     """
     from scrapers.fursaghyr.run import map_listing
 
@@ -198,10 +202,10 @@ def test_fursaghyr_micro_price_gate_still_judges_magnitude_not_the_bare_rate():
     row, _ = map_listing(item(1, land_area=437.5, meter_price=1052, total_price=460250))
     assert row["price_total"] == 460250
 
-    # rate only, no source total → row KEPT, and no total invented
+    # rate only, no source total → row KEPT, and price_total = rate×area (owner-approved fallback)
     row, _ = map_listing(item(2, land_area=620, meter_price=33))
     assert row is not None, "honest cheap-land row was dropped by the micro-price gate"
-    assert row["price_total"] is None, "a total was fabricated from the per-m² rate"
+    assert row["price_total"] == 33 * 620, "rate×area fallback should have populated price_total"
 
     # genuinely implausible magnitude → still dropped
     row, _ = map_listing(item(3, land_area=1, meter_price=500))

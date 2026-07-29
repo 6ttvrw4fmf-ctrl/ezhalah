@@ -468,13 +468,27 @@ def test_to_int_and_to_int_numeric_must_not_be_swapped():
     assert N.to_int_numeric("69,000") is None   # …is NOT a JSON-numeric shape
 
 
-def test_golden_mustqr_price_fields_identical():
+# ═══ Superseded 2026-07-28 (owner-approved price-fidelity fix) ═════════════════════════════════
+# The pre-fix mustqr `_price_fields(p, is_rent, is_monthly)` took `is_monthly` as an EXTERNAL,
+# caller-computed argument that defaulted to False whenever the source's `price_type` field was
+# missing — live-confirmed wrong on ~22% of active Rent rows (both sampled null-price_type rows were
+# genuinely monthly per the site's own label, silently stored un-annualized, understating the true
+# annual cost ~12x). The fixed function dropped the `is_monthly` parameter entirely and now decides
+# internally from `p.get("price_type")`, falling back to a magnitude heuristic (a SAR figure under
+# 10,000 is implausible as a real annual lease) only when `price_type` is absent. So byte-identity
+# with the old signature no longer applies — this re-pin proves the NEW function still agrees with
+# the old one for every input where `price_type` is EXPLICIT (the only case the old signature could
+# faithfully represent), and documents the missing-price_type case as an intentional divergence
+# (covered by scrapers/common/tests/test_mustqr_price_type_fallback.py, not here).
+def test_golden_mustqr_price_fields_identical_when_price_type_explicit():
     from scrapers.mustqr.run import _price_fields
 
     for raw in [None, 0, "0", 500, 999, 1000, 1700, 2700, "2700", 150588, 10**7]:
         for is_rent in (False, True):
             for is_monthly in (False, True):
-                assert _price_fields({"price": raw}, is_rent, is_monthly) == \
+                price_type = "شهري" if is_monthly else "سنوي"
+                p = {"price": raw, "price_type": price_type} if is_rent else {"price": raw}
+                assert _price_fields(p, is_rent) == \
                     old_mustqr_price_fields(old_int(raw), is_rent, is_monthly), (raw, is_rent, is_monthly)
 
 
