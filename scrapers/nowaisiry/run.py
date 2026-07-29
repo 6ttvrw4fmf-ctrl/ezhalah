@@ -322,7 +322,10 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
     # bedrooms / bathrooms only for the finished floors (units), from the free text.
     bedrooms = baths = None
     if not is_land and category == "residential":
-        bm = re.search(r"([\d٠-٩]{1,2})\s*غرف", own_text)
+        # Requires "نوم" (sleep/bed) immediately after — a bare "N غرف" is a generic total-room
+        # count that can include a majlis/living room in Saudi listing prose, not bedrooms
+        # specifically (owner decision 2026-07-28).
+        bm = re.search(r"([\d٠-٩]{1,2})\s*غرف\s*نوم", own_text)
         if bm:
             n = N.to_int(bm.group(1))
             bedrooms = n if (n and 0 < n <= 20) else None

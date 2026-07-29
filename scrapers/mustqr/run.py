@@ -267,12 +267,10 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
     is_commercial = (usage == "تجاري") or (property_type in COMMERCIAL_TYPES)
     bucket = "commercial" if is_commercial else "residential"
 
-    bedrooms = _int(p.get("rooms"))
-    # Sanity: commercial / land never has bedrooms; cap absurd counts.
-    if is_commercial or property_type in {"Residential Land", "Farm"}:
-        bedrooms = None
-    elif bedrooms and bedrooms > 20:
-        bedrooms = None
+    # "rooms" is a generic total-room-count field, never bedroom-specific, and no source evidence
+    # (API response, docstring, or live page) confirms it excludes majlis/living rooms. Owner
+    # decision 2026-07-28: null rather than store an unverifiable figure.
+    bedrooms = None
 
     area = _int(p.get("area_sqm"))
 

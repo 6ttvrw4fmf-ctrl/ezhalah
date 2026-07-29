@@ -122,7 +122,11 @@ ADV_REG_RE = re.compile(r"المعلن\s*العقاري\s*[:：]?\s*(\d{5,})")
 # video links (TikTok / YouTube) embedded in the body
 VIDEO_RE = re.compile(r'href="(https?://[^"]*(?:tiktok|youtu\.be|youtube)[^"]*)"', re.I)
 # bedrooms / bathrooms hints in the free-text body (best-effort, residential only)
-BEDS_RE = re.compile(r"([\d٠-٩]{1,2})\s*غرف")
+# Requires the "نوم" (sleep/bed) qualifier — a bare "N غرف" is a generic total-room count that can
+# include a majlis/living room in Saudi listing prose, not bedrooms specifically (owner decision
+# 2026-07-28; live-tested samples on this platform did carry "غرف نوم" explicitly, so this narrows
+# false-positive risk without losing real coverage).
+BEDS_RE = re.compile(r"([\d٠-٩]{1,2})\s*غرف(?:\s*نوم)")
 BATHS_RE = re.compile(r"([\d٠-٩]{1,2})\s*دور(?:ات|تي?ن?)\s*(?:مياه|مياة|المياه)")
 
 _BAD_IMG = ("logo", "icon", "placeholder", "no-image", "no_image", "favicon",

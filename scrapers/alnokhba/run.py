@@ -263,13 +263,20 @@ def _map_type(text: str) -> str:
 
 
 def _beds(text: str) -> Optional[int]:
+    # Requires "نوم" (sleep/bed) immediately after the room-count phrase — a bare "N غرف" is a
+    # generic total-room count that can include a majlis/living room in Saudi listing prose, not
+    # bedrooms specifically. This site has no structured bedrooms field at all, so free text mined
+    # without this qualifier is the only signal; owner decision 2026-07-28 narrows it to reduce
+    # false-positive risk rather than nulling entirely (unlike jazwtn, whose text never carries this
+    # qualifier at all).
     m = BEDS_RE.search(text)
-    if m:
+    if m and re.match(r"\s*نوم", text[m.end():]):
         n = _to_int(m.group(1))
         if n and 0 < n <= 20:
             return n
     for word, val in AR_WORD_NUM.items():
-        if re.search(word + r"\s*غرف", text):
+        wm = re.search(word, text)
+        if wm and re.match(r"\s*نوم", text[wm.end():]):
             return val
     return None
 

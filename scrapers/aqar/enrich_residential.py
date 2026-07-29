@@ -208,7 +208,12 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     area_m2           = _int_after_label(text, r"المساحة\s*(?:الكلية|الإجمالية)?", r"\bالمساحة\b")
     interior_space_m2 = _int_after_label(text, r"المساحة\s*الداخلية", r"مساحة\s*البناء")
     outdoor_area_m2   = _int_after_label(text, r"المساحة\s*الخارجية", r"مساحة\s*خارجية")
-    bedrooms          = _int_after_label(text, r"غرف\s*النوم", r"عدد\s*الغرف")
+    # "عدد الغرف" (a generic total-room-count fallback) removed 2026-07-28 — same unconditional-
+    # fallback shape as the abeea/muktamel area_m2 bug (PR#259): "غرف النوم" is bedroom-specific and
+    # trusted, but silently falling back to a total-room count when it's absent mislabels total
+    # rooms as bedrooms. Owner decision: leave NULL when the page doesn't state bedrooms specifically
+    # rather than guess from a generic room count.
+    bedrooms          = _int_after_label(text, r"غرف\s*النوم")
     bathrooms         = _int_after_label(text, r"دورات\s*المياه", r"الحمامات", r"حمامات")
     master_bedrooms   = _int_after_label(text, r"غرف\s*ماستر", r"غرفة\s*ماستر", r"ماستر")
     halls             = _int_after_label(text, r"صالات", r"صالة", r"غرفة\s*المعيشة", r"المعيشة")

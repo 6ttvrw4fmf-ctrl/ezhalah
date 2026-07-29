@@ -451,14 +451,6 @@ def _images(ld: Optional[dict], body: str) -> list[str]:
     return (fulls + thumbs)[:25]
 
 
-def _sane_beds(n: Optional[int], category: str) -> Optional[int]:
-    """Bedrooms only make sense for residential listings within a human range. Guards against the
-    source emitting a garbage numberOfRooms (e.g. 23000 on an office)."""
-    if n is None or category == "commercial" or n <= 0 or n > 20:
-        return None
-    return n
-
-
 def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     if "هذا الإعلان منتهي" in body or "Page Not Found" in body:
         return None, "residential"
@@ -594,7 +586,11 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": round(area) if area else None,
-        "bedrooms": _sane_beds(_int(pi.get("عدد الغرف")) or _int((ld.get("numberOfRooms") or {}).get("value")), category),
+        # Both "عدد الغرف" and schema.org's numberOfRooms are generic total-room-count fields, never
+        # bedroom-specific — aqarcity exposes no separate bedroom field at all (live-confirmed
+        # 2026-07-28: zero of 3 sampled pages carry a "غرف النوم" label anywhere). Owner decision:
+        # null rather than store an unverifiable total-room figure as bedroom count.
+        "bedrooms": None,
         "bathrooms": _int(pi.get("عدد دورات المياه")),
         "property_age": 0 if pi.get("عمر العقار") in ("جديد", "جديده") else None,
         "direction": pi.get("واجهة العقار") or None,

@@ -333,10 +333,12 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
     street_width = _num(rega.get("street_width"))
     plan_number = rega.get("plan_number")
     land_number = rega.get("land_number")
-    rooms = _int(rega.get("number_of_rooms"))
-
-    # ── bedrooms (residential only, sane range) ──
-    bedrooms = rooms if (rooms and category == "residential" and 0 < rooms <= 20) else None
+    # ── bedrooms ──
+    # rega.number_of_rooms is REGA's generic total-room-count field, never bedroom-specific — the
+    # variable was even named "rooms" before being stored as "bedrooms". mizlaj's own live pages
+    # label this figure "عدد الغرف" (number of rooms), never "غرف النوم" (bedrooms). Owner decision
+    # 2026-07-28: null rather than store an unverifiable total-room figure.
+    bedrooms = None
 
     # ── property age / facade ──
     age = listing.get("property_age")

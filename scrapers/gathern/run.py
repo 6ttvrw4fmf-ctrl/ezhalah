@@ -152,7 +152,10 @@ NON_SAUDI_EN = {"Cairo", "Alexandria", "Hurghada", "Sharm El Sheikh", "Dubai", "
 NON_SAUDI_AR = {"القاهرة", "الإسكندرية", "الاسكندرية", "الغردقة", "شرم الشيخ", "دبي", "أبوظبي",
                 "الدوحة", "المنامة", "الكويت", "مسقط", "عمان", "بيروت", "اسطنبول", "إسطنبول"}
 
-_BEDS_RE = re.compile(r"(\d+)\s*غرف")          # "1 غرف نوم"
+# Requires "نوم" (sleep/bed) — a bare "N غرف" is a generic total-room count, not bedrooms
+# specifically (owner decision 2026-07-28; mirrors the stricter _MASTER_RE pattern just below,
+# which already required its full multi-word qualifier).
+_BEDS_RE = re.compile(r"(\d+)\s*غرف\s*نوم")          # "1 غرف نوم"
 _MASTER_RE = re.compile(r"(\d+)\s*سرير\s*ماستر")  # "1 سرير ماستر"
 
 # PDPL: list cards carry no PII, but defensively strip any phone that surfaces in title/desc.

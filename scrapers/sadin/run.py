@@ -340,8 +340,12 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
     region = CITY_TO_REGION.get(city)
     raw_district = _info_field(html, "الحي") or None
 
-    # Structured numbers — beds/baths/area from the card chips (cleanest), the rest from detail li's.
-    beds = card.get("beds")
+    # Structured numbers — baths/area from the card chips (cleanest), the rest from detail li's.
+    # `card.get("beds")` is captured from a bare "غرف" chip (no "نوم" qualifier) — a generic
+    # total-room count, never bedroom-specific; sadin.com.sa never displays a "غرف النوم" label
+    # anywhere (live-confirmed 2026-07-28). Owner decision: null rather than store an unverifiable
+    # total-room figure as bedroom count.
+    beds = None
     baths = card.get("baths")
     area = card.get("area")
     floors = _num(_li_field(html, "عدد الطوابق"))
@@ -350,10 +354,6 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
     furnishing = _li_field(html, "حالة الأثاث")
     date_added = _li_field(html, "تاريخ الإضافة")
 
-    # SANITY: bedrooms null for land/commercial or absurd counts.
-    if category == "commercial" or property_type in ("Residential Land", "Commercial Land", "Farm") \
-            or (beds is not None and (beds <= 0 or beds > 20)):
-        beds = None
     if baths is not None and baths <= 0:
         baths = None
     if area is not None and (area < 10 or area > 5_000_000):

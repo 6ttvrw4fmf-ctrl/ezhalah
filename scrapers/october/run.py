@@ -209,10 +209,13 @@ def map_item(item: dict, s: cc.Session) -> Optional[tuple[dict, str]]:
         photos = specs["photo_urls"]
 
     category = N.category_for_type(property_type)
-    beds = specs.get("bedrooms")
+    # specs["bedrooms"] is schema.org's numberOfRooms — a generic total-room count, not
+    # bedroom-specific ("excluding bathrooms and closets" per the spec, but majlis/living rooms are
+    # NOT excluded). No source field on this platform is bedroom-scoped. Owner decision 2026-07-28:
+    # null rather than store an unverifiable total-room figure.
+    beds = None
     baths = specs.get("bathrooms")
     if category == "commercial" or property_type in ("Residential Land", "Commercial Land", "Building"):
-        beds = None
         baths = None
 
     row = {
