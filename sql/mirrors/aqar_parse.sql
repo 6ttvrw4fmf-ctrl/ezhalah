@@ -2,7 +2,9 @@
 -- object is already applied in production and has no repo migration base.
 -- Do not re-apply blindly; to change it, follow the RPC full-body-replace rule
 -- (rebuild from pg_get_functiondef of the LIVE object, needle-edit, migrate).
--- Dumped byte-exact via anon REST on 2026-07-27; md5 (no trailing newline): 14a5cba4505c99bb17d594707103562d
+-- Refreshed 2026-07-29 after the floor-fidelity migrations (region no-freetext-fallback,
+-- '^\d{1,2}$' floor anchor, «أرضي»->0) + the word-price fallback; verified byte-exact against
+-- pg_get_functiondef; md5 of everything below this header block: d4e6422dc5d8f9bcfad87448ef319c4c
 CREATE OR REPLACE FUNCTION public.aqar_parse(txt text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -10,10 +12,11 @@ CREATE OR REPLACE FUNCTION public.aqar_parse(txt text)
 AS $function$
 declare
   region text; head text; prices bigint[]; v_disc int; v_price bigint; v_orig bigint; v_area int;
+  v_floor_raw text;
 begin
   if txt is null then return '{}'::jsonb; end if;
   txt := translate(txt, '٠١٢٣٤٥٦٧٨٩', '0123456789');
-  region := coalesce(substring(txt from 'تفاصيل الإعلان(.*)'), txt);
+  region := substring(txt from 'تفاصيل الإعلان(.*)');  -- NULL (not txt) when the structured block is absent
   head   := split_part(txt, 'تفاصيل الإعلان', 1);
 
   select array_agg(v order by ord) into prices from (
@@ -24,7 +27,22 @@ begin
   if v_disc is not null and coalesce(array_length(prices,1),0) >= 2 then v_orig := prices[1]; v_price := prices[2];
   elsif coalesce(array_length(prices,1),0) >= 1 then v_price := prices[1]; end if;
 
-  v_area := nullif(regexp_replace(coalesce((regexp_match(_aqar_between(region, 'المساحة(?!\s*حسب)'), '\d[\d,]*'))[1], ''), ',', '', 'g'), '')::int;
+  -- Word-price fallback (2026-07-29): when the source states no §/ريال/﷼ price but writes it in words
+  -- («المطلوب 380 الف», «مليون و 150 الف»), recover it. Only fires when v_price is still NULL, so a real
+  -- §-price is never overridden.
+  if v_price is null then v_price := public.aqar_word_price(txt); end if;
+
+  -- area: numeric cast (no int overflow) + plausibility gate — a phone/ID after «المساحة» is NOT an area.
+  v_area := (
+    select case when v >= 1 and v <= 10000000 then v::int end
+    from (
+      select nullif(regexp_replace(coalesce((regexp_match(_aqar_between(region, 'المساحة(?!\s*حسب)'), '\d[\d,]*'))[1], ''), ',', '', 'g'), '')::numeric as v
+    ) s
+  );
+
+  -- floor: strict full-value match only. «أرضي» (ground) is a lexical identity for 0; a bare 1-2 digit
+  -- value passes; anything else (a false-friend match inside «...الدوري», «علوي», run-on text) → NULL.
+  v_floor_raw := _aqar_between(region, 'الدور');
 
   return jsonb_strip_nulls(jsonb_build_object(
     'direction',        _aqar_between(region, 'الواجهة'),
@@ -37,11 +55,11 @@ begin
     'deed_area_m2',     regexp_replace(coalesce((regexp_match(_aqar_between(region, 'المساحة حسب الصك'), '\d[\d.,]*'))[1],''), ',', '', 'g'),
     'views_count',      regexp_replace(coalesce((regexp_match(_aqar_between(region, 'المشاهدات'), '\d[\d,]*'))[1],''), ',', '', 'g'),
     'tenant_category',  _aqar_between(region, 'الفئة'),
-    'floor_number',     (regexp_match(_aqar_between(region, 'الدور'), '\d+'))[1],
+    'floor_number',     case when v_floor_raw ~ '^[اأ]رضي$' then '0'
+                             else (regexp_match(v_floor_raw, '^\d{1,2}$'))[1] end,
     'num_apartments',   (regexp_match(_aqar_between(region, 'عدد الشقق'), '\d+'))[1],
     'furnished',        case when txt ~ 'مؤثث|مفروش' then true else null end,
     'area_m2',          v_area, 'price', v_price, 'price_original', v_orig, 'discount_pct', v_disc
   ));
 end
 $function$
-
