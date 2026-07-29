@@ -229,7 +229,14 @@ def fetch_listings(s: cc.Session) -> list[dict]:
             break
         if r.status_code != 200:
             break
-        arr = r.json() or []
+        # A 200 is not a promise of JSON: on 2026-07-27 the domain was parked and every page
+        # answered 200 text/html with a 133-byte redirect stub, so the bare r.json() raised
+        # JSONDecodeError and killed the process. Treat an unparseable body like any other
+        # "no more real pages" signal and let the caller's 0-post check fail the run cleanly.
+        try:
+            arr = r.json() or []
+        except Exception:
+            break
         # WP can answer 200 with an ERROR OBJECT (e.g. rest_post_invalid_page_number) instead of a
         # list; `out += dict` would extend with its string KEYS and crash `.get()` later (CI 2026-07-01).
         # A non-list payload means "no more real pages" — stop and keep what we have.
@@ -488,27 +495,11 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
-    posts = fetch_listings(s)
-    # WP REST occasionally returns error strings/fragments inside the list (seen 2026-07-01:
-    # a str where a post object was expected → AttributeError crash at the link comprehension).
-    # Degrade to skipping the junk items; if NOTHING valid remains, the 0-post exit below still
-    # fails the run and the prune guard protects existing rows.
-    posts = [p for p in (posts or []) if isinstance(p, dict)]
-    if not posts:
-        print("✗ Awal: REST returned no listings")
-        return 1
-    if args.limit:
-        posts = posts[: args.limit]
-    print(f"Awal: {len(posts)} listings from WP REST ({WORKERS} workers)"
-          f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
-
-    # fetch detail pages (images + sold flag) in parallel, keyed by link
-    links = [p.get("link") for p in posts if p.get("link")]
-    bodies: dict[str, Optional[str]] = {}
-    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        for body, link in ex.map(fetch_detail, links):
-            bodies[link] = body
-
+    # begin_run BEFORE the REST fetch (2026-07-28 audit, same defect jazwtn fixed on 07-27): when
+    # awaalun.com was parked on 07-27 the unguarded r.json() crashed the process before begin_run
+    # ever ran, so TWO days of failures produced ZERO scrape_runs rows — run-based monitoring saw a
+    # platform that never even reported failing, and only the freshness job noticed. From here on
+    # any crash (including the fetch) lands in the except-arm's end_run(ok=False) and is visible.
     run_id = None if args.limit else db.begin_run("awal")
     res: list[dict] = []
     com: list[dict] = []
@@ -517,6 +508,28 @@ def main() -> int:
     gone_ct = 0
     seen = 0
     try:
+        posts = fetch_listings(s)
+        # WP REST occasionally returns error strings/fragments inside the list (seen 2026-07-01:
+        # a str where a post object was expected → AttributeError crash at the link comprehension).
+        # Degrade to skipping the junk items; if NOTHING valid remains, the 0-post raise below
+        # fails the run and the prune guard protects existing rows.
+        posts = [p for p in (posts or []) if isinstance(p, dict)]
+        if not posts:
+            # Raise rather than return: the except-arm owns end_run(ok=False), so a dead/parked
+            # source is recorded as a failed run instead of a silent exit.
+            raise RuntimeError("REST returned no listings (source down, parked, or blocked)")
+        if args.limit:
+            posts = posts[: args.limit]
+        print(f"Awal: {len(posts)} listings from WP REST ({WORKERS} workers)"
+              f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
+
+        # fetch detail pages (images + sold flag) in parallel, keyed by link
+        links = [p.get("link") for p in posts if p.get("link")]
+        bodies: dict[str, Optional[str]] = {}
+        with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+            for body, link in ex.map(fetch_detail, links):
+                bodies[link] = body
+
         for p in posts:
             row, cat, gone = map_listing(p, bodies.get(p.get("link")))
             if not row:

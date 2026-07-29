@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Nightly production-audit invariants (2026-07-24) — the checks a daily audit was skipping.
 
-Runs THREE live-production checks and exits non-zero + logs a row to location_pipeline_alerts if
+Runs FOUR live-production checks and exits non-zero + logs a row to location_pipeline_alerts if
 any fails (same "build fails + ops dashboard" mechanism as scripts/check_placeholder_locations.py):
 
   1. NOT-READY REASON INVARIANT — every production_ready=false row in listing_native_location_v2
@@ -11,13 +11,16 @@ any fails (same "build fails + ops dashboard" mechanism as scripts/check_placeho
      has a verified reason" invariant (owner request 2026-07-24). Verified live the same day: 1,070
      not-ready = 787 blank-city + 283 city-unresolved, 0 unexplained.
 
-  2. AWAL SCRAPER LIVENESS — Awal (awaalun.com) is an auction/listing office that publishes NO
-     prices, so price coverage is 0/N BY DESIGN (scrapers/awal/run.py hard-codes price=NULL; three
-     live source pages confirmed zero price markup, 2026-07-24). So 0 prices is EXPECTED and must
-     NOT be flagged. What we DO watch: that the scraper is still alive (active listings > 0) — a
-     drop to 0 means the crawler broke, which IS a real signal.
+  2. AWAL RETIRED-STATE (inverted 2026-07-28) — awaalun.com lapsed into a domain-parking page, so
+     the scraper was retired (#252) and its 51 link-rotted listings inactivated (#255). 0 active
+     rows is now CORRECT; we alert if rows come BACK without a deliberate un-retirement.
 
-  3. LIVE AI AGENT — POST fixed Arabic queries to the production `agent` edge function and assert
+  3. UNVERIFIED-INACTIVATION INVARIANT (2026-07-28) — no listing may be deactivated without a
+     liveness signal. Every source-verified kill path writes missing_count >= 3; only the
+     time-based mark_stale sweep wrote 0, and it false-killed 59 verified-alive dealapp listings
+     before its flip was removed. Must read 0.
+
+  4. LIVE AI AGENT — POST fixed Arabic queries to the production `agent` edge function and assert
      the classification is right (deal / city / type) and the reply is Arabic. This is the live
      end-to-end AI test the audit was missing.
 
@@ -98,17 +101,31 @@ def check_not_ready(client, counts: dict) -> bool:
 
 
 def check_awal(client) -> bool:
-    """True = OK. Awal price=0 is by design; we only alert if the scraper died (0 active)."""
+    """True = OK. RETIRED 2026-07-28 — this check is now INVERTED.
+
+    awaalun.com lapsed into a GoDaddy domain-parking page: the WP REST catalogue and every
+    individual /property/ URL return HTTP 200 with a ~114-133 byte redirect stub to /lander. The
+    scraper was retired (#252) and the 51 link-rotted listings were inactivated with the
+    source-confirmed pin missing_count=3 (#255, owner-approved) after 8/8 sampled URLs were
+    re-fetched and confirmed parked.
+
+    So 0 active rows is now the CORRECT state, and the old assertion (active > 0, "the scraper
+    appears to have stopped") would fail every night forever. What is worth watching instead is the
+    opposite: rows coming BACK without a decision to un-retire, which would mean either the retired
+    scraper is running again or something reactivated dead stock. If awaalun.com genuinely returns,
+    un-retire deliberately and restore this check to its original sense.
+    """
     active = 0
     for tbl in ("awal_residential_listings", "awal_commercial_listings"):
         active += client.table(tbl).select("listing_url", count="exact").eq("active", True).limit(1).execute().count or 0
-    if active > 0:
-        print(f"OK  awal liveness: {active} active listings (price coverage 0 is EXPECTED — "
-              f"awaalun.com publishes no prices; scraper leaves NULL by design).")
+    if active == 0:
+        print("OK  awal retired: 0 active listings, as expected (awaalun.com is a parked domain; "
+              "scraper retired #252, listings inactivated #255).")
         return True
-    detail = "awal has 0 active listings — the awaalun.com scraper appears to have stopped."
-    print(f"FAIL awal liveness: {detail}")
-    _alert(client, "awal_scraper_dead", 0, detail)
+    detail = (f"awal has {active} ACTIVE listings but the platform is retired and awaalun.com is a "
+              f"parked domain — something re-activated dead stock or the retired scraper ran.")
+    print(f"FAIL awal retired-state: {detail}")
+    _alert(client, "awal_reactivated_while_retired", active, detail)
     return False
 
 
@@ -127,6 +144,39 @@ def check_stale_index(client, counts: dict) -> bool:
               f"listing_native_location_v2 resolves — the search index is stale (rebuild may be broken).")
     print(f"FAIL stale-index drift: {detail}")
     _alert(client, "search_index_city_drift", n, detail)
+    return False
+
+
+def check_unverified_inactivations(client) -> bool:
+    """True = OK. NO listing may be deactivated without a liveness signal.
+
+    Every source-verified kill path writes missing_count >= 3 (prune_unseen's 3-strike grace, the
+    sold-pin, the aqar/wasalt liveness passes, the awal link-rot inactivation). The ONLY path that
+    ever wrote 0 was the time-based mark_stale_listings_inactive sweep, which is plpgsql and so can
+    never re-fetch a listing_url to check. On 2026-07-28 it deactivated 59 dealapp_commercial rows
+    that were verified ALIVE at source (12/12 sampled returned availability=InStock). That flip was
+    removed the same day; this check is the tripwire that keeps it removed.
+
+    So `active=false AND missing_count<3` in the last 24h == an unverified kill, by construction.
+    Expect non-zero for up to 24h after the fix ships (today's 59 are still in the window); a
+    non-zero reading after that is a real regression.
+    """
+    rows = client.table("mon_unverified_inactivations_24h").select(
+        "unverified_inactivations_24h").limit(1).execute().data
+    if not rows:
+        detail = "mon_unverified_inactivations_24h returned no row — the invariant view is missing."
+        print(f"FAIL unverified-inactivation invariant: {detail}")
+        _alert(client, "unverified_inactivation_view_missing", 0, detail)
+        return False
+    n = rows[0].get("unverified_inactivations_24h") or 0
+    if n == 0:
+        print("OK  unverified-inactivation invariant: 0 listings deactivated without a liveness "
+              "signal (missing_count >= 3 on every kill).")
+        return True
+    detail = (f"{n} listing(s) were deactivated in the last 24h with missing_count < 3 — i.e. WITHOUT "
+              f"the source being re-fetched. Some path is killing listings it never verified.")
+    print(f"FAIL unverified-inactivation invariant: {detail}")
+    _alert(client, "unverified_inactivation", n, detail)
     return False
 
 
@@ -172,7 +222,8 @@ def check_agent(client=None) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index"], help="run one check")
+    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index", "unverified_kill"],
+                    help="run one check")
     args = ap.parse_args()
 
     if args.only == "agent":
@@ -193,6 +244,7 @@ def main() -> int:
             if args.only in (None, "not_ready"):   results.append(check_not_ready(client, counts))
             if args.only in (None, "stale_index"): results.append(check_stale_index(client, counts))
     if args.only in (None, "awal"):        results.append(check_awal(client))
+    if args.only in (None, "unverified_kill"): results.append(check_unverified_inactivations(client))
     if args.only is None:                  results.append(check_agent(client))
     return 0 if all(results) else 1
 

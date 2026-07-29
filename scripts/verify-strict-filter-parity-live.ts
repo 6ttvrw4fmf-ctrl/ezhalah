@@ -108,6 +108,22 @@ async function main() {
   ]);
   check('Farm + Agriculture Plot stay additively separable', farm + agri === both && farm > 0 && agri > 0, `${farm}+${agri}==${both}`);
 
+  // ── ANNUAL RENT IS SOURCE-PUBLISHED, NEVER INFERRED (audit 2026-07-28) ────────────────────────
+  // The RPC used to read "not monthly ⇒ annual" (`p_rent_period='سنوي' and s.payment_monthly=false`),
+  // which swept in every rent row whose source published NO period. Those rows were counted in the
+  // «لقينا N إعلان» headline and consumed paging slots, but the card fetch is strict
+  // (src/data/remote.ts:899 `.eq('rent_period','annual')` — owner rule at :894-895, "a null
+  // rent_period is NOT annual … never guess"), so they could never render: the last Load-More page
+  // came back short. Ground truth here is deliberately `rent_period_ar`, the SOURCE-published period.
+  const [annualRpc, annualGt, annualNullPeriod] = await Promise.all([
+    rpcCount({ p_deal: RENT, p_rent_period: 'سنوي' }),
+    tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=eq.${enc('سنوي')}`),
+    tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=is.null`),
+  ]);
+  check('annual rent counts only SOURCE-published annual (no inferred period)',
+    annualRpc === annualGt && annualGt > 0,
+    `rpc=${annualRpc} ground=${annualGt} (null-period rent rows excluded: ${annualNullPeriod})`);
+
   console.log(failed === 0
     ? '\n✓ strict-filter live parity holds — RPC total_count equals strict ground truth on every fixed filter'
     : `\n✗ ${failed} strict-filter parity check(s) FAILED against production`);

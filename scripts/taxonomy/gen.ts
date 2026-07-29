@@ -112,6 +112,12 @@ export function genKnownTypeAr(s: Source): { type_ar: string; macro: string }[] 
     const macros = new Set([...cleans].map((c) => macroByClean[c]).filter(Boolean));
     rows.push({ type_ar: label, macro: macros.size === 1 ? [...macros][0] : 'both' });
   }
+  // The honest-unknown sentinel is part of the canon: normalizeType writes «غير معروف» when a raw
+  // type has no defensible mapping, and the RPC's both-macro table-kind gate categorizes it at read
+  // time. It is NOT a clean-type emission, so the reverse map above never produces it — but the seed
+  // TRUNCATEs on re-apply, so omitting it here would delete the sentinel from the live allowlist and
+  // turn every sentinel row into a vocabulary violation. (audit item 6, 2026-07-27.)
+  rows.push({ type_ar: 'غير معروف', macro: 'both' });
   return rows.sort((a, b) => (a.type_ar < b.type_ar ? -1 : 1));
 }
 
