@@ -81,7 +81,10 @@ TYPE_MAP_AR = {
     "شاليه": "Chalet", "مخيم": "Camp", "عمارة": "Building", "عماره": "Building", "برج": "Building",
     "مبنى شقق مفروشة": "Building", "مبنى": "Building", "عمائر": "Building",
     "ارض": "Residential Land", "أرض": "Residential Land", "ارض سكنية": "Residential Land",
-    "ارض زراعية": "Residential Land", "مزرعة": "Farm", "مزرعه": "Farm",
+    # أرض زراعية is its OWN clean type since the 2026-07-21 Farm/Agriculture-Plot split — never
+    # folded into Residential Land. (canon unification, audit item 7d, 2026-07-27.)
+    "ارض زراعية": "Agriculture Plot", "أرض زراعية": "Agriculture Plot",
+    "مزرعة": "Farm", "مزرعه": "Farm",
     "دوبلكس": "Villa", "روف": "Floor", "بنتهاوس": "Apartment", "استوديو": "Apartment",
     # commercial
     "مكتب": "Office", "محل": "Shop", "معرض": "Showroom", "مستودع": "Warehouse",
@@ -436,8 +439,11 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     # ── property type (Arabic → English) ──
     type_ar = (aprops.get("propertyType") or "").strip()
     property_type = TYPE_MAP_AR.get(type_ar) or normalize.map_type(type_ar)
+    # NO substring guessing and NO 'Other' fallback (audit item 7d, 2026-07-27): an unmapped raw
+    # type stays as-is → the sentinel/novel-type quarantine reviews it instead of a silent
+    # misclassification («ارض …» variants used to be blanket-guessed as Residential Land).
     if not property_type:
-        property_type = "Residential Land" if "ارض" in type_ar or "أرض" in type_ar else (type_ar or "Other")
+        property_type = type_ar or None
 
     # ── usage chip drives residential/commercial routing (authoritative for land) ──
     usage = _spec_value(html, "استخدامات العقار")

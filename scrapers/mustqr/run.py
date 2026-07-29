@@ -71,6 +71,11 @@ COMMERCIAL_TYPES = {"Showroom", "Hotel", "Office", "Gas Station", "Warehouse", "
 
 # Mustqr stores neighborhood.region as a compass bucket relative to Hail city, not a KSA region.
 # The whole brokerage is Hail-based, so every row maps to city=Hail, region=Hail.
+# VERIFIED FROM DATA (audit item 7, 2026-07-27): every live neighborhood that name-collides with a
+# non-Hail catalog city (السويفلة/القاعد/الودي/النقرة/النيصية/قفار/…) is ALSO an attested Hail-city
+# district in loc_canonical_district(city_id=10) — the collisions are namesake villages elsewhere,
+# not evidence of non-Hail listings. The hardcode is contract-correct; re-verify if mustqr ever
+# expands beyond Hail (a neighborhood NOT attested as a Hail district would be the signal).
 DEFAULT_CITY = "Hail"
 DEFAULT_REGION = "Hail"
 
@@ -354,11 +359,10 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
         "additional_info": extras,
     }
     row.update(_price_fields(p, is_rent))
-    if row.get("area_m2") and row.get("price_total"):
-        try:
-            row["price_per_meter"] = round(row["price_total"] / row["area_m2"])
-        except ZeroDivisionError:
-            pass
+    # price_per_meter is NEVER derived (listing-fidelity rule): mustqr's API publishes no ppm field,
+    # so the field stays NULL. The old round(price_total/area_m2) derivation fabricated 621 live
+    # values — removed 2026-07-27 (audit item 4); scripts/verify-no-derived-price.ts guards the
+    # whole fleet against this pattern re-appearing.
 
     return row, bucket
 

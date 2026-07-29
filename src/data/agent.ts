@@ -9,7 +9,7 @@
 
 import { emptyQuery, toLatinDigits, grouped, type SearchQuery } from './search';
 import { parseProximity, proximityKeywords, type ProximityIntent } from './proximity';
-import { CATEGORY_TYPES, type Category } from './taxonomy';
+import { type Category } from './taxonomy';
 import { t, getLocale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
 import { landmarkHint, ensureLandmarks } from './landmarks';
@@ -78,18 +78,22 @@ const CURRENCY_RATES: Record<string, number> = {
   qar: 1.03, qr: 1.03, omr: 9.75, egp: 0.08,
 };
 
+// English free-text synonyms → CLEAN types only (canon = propertyTypes CLEAN_MACRO). studio/duplex
+// used to mis-map to Apartment/Floor before Studio/Duplex became clean types; 'tower'/'block' used to
+// map to the retired ambiguous 'Building' — removed rather than guessed (an unmapped word simply
+// doesn't set a type, which broadens honestly). (audit items 1/5, 2026-07-27)
 const TYPE_SYNONYMS: Record<string, string> = {
-  flat: 'Apartment', apt: 'Apartment', studio: 'Apartment', penthouse: 'Apartment', duplex: 'Floor',
+  flat: 'Apartment', apt: 'Apartment', studio: 'Studio', penthouse: 'Apartment', duplex: 'Duplex',
   mansion: 'Villa', palace: 'Villa', townhouse: 'Villa', home: 'Villa', dwelling: 'Villa',
-  tower: 'Building', block: 'Building', plot: 'Residential Land', cabin: 'Chalet',
+  plot: 'Residential Land', cabin: 'Chalet',
   workspace: 'Office', clinic: 'Office', storage: 'Warehouse', depot: 'Warehouse',
   store: 'Shop', retail: 'Shop', boutique: 'Shop', gallery: 'Showroom', garage: 'Workshop',
   plant: 'Factory', ranch: 'Farm', orchard: 'Agriculture Plot', campsite: 'Camp',
 };
 
-const ALL_TYPES = (Object.entries(CATEGORY_TYPES) as [Category, string[]][]).flatMap(([cat, types]) =>
-  types.map((t) => [t, cat] as [string, Category]),
-);
+// One source of truth: every clean type + its macro, straight from the live hierarchy
+// (stale CATEGORY_TYPES retired — audit item 1, 2026-07-27).
+const ALL_TYPES = Object.entries(CLEAN_MACRO).map(([t, cat]) => [t, cat] as [string, Category]);
 
 // Cities the free-text parser recognizes in English queries. Longer names first so "Al Khobar"
 // matches before "Khobar". Kept focused (production hands free text to the LLM agent, PRD §13).
@@ -186,7 +190,7 @@ const AR_TYPE: Record<string, string> = {
   'أرض زراعية': 'Agriculture Plot', 'ارض زراعية': 'Agriculture Plot',
   'أرض': 'Residential Land', 'ارض': 'Residential Land',
 };
-const RES_TYPES = new Set(CATEGORY_TYPES.Residential);
+const RES_TYPES = new Set(Object.entries(CLEAN_MACRO).filter(([, c]) => c === 'Residential').map(([t]) => t));
 const AR_BUY = /(شراء|للبيع|تمليك|اشتري|أشتري|بيع)/;
 const AR_RENT = /(إيجار|ايجار|للإيجار|للايجار|استئجار|تأجير)/;
 const AR_REALESTATE = new RegExp(

@@ -142,7 +142,8 @@ const AR: Record<string, string> = {
   'Residential Plots': 'الأراضي السكنية',
   'Retail & Workspace': 'التجزئة والمكاتب',
   'Industrial & Logistics': 'الصناعة واللوجستيات',
-  'Commercial Buildings & Facilities': 'المباني والمرافق التجارية',
+  // Owner's canonical group name (audit item 7a, 2026-07-27) — was «المباني والمرافق التجارية».
+  'Commercial Buildings & Facilities': 'المباني والمرافق',
   'Commercial & Industrial Plots': 'الأراضي التجارية والصناعية',
   'Price': 'السعر',
   ' /yr': ' / سنوياً',
@@ -266,6 +267,12 @@ const AR: Record<string, string> = {
   'Select a city first': 'اختر المدينة أولاً',
   'Property category?': 'فئة العقار؟',
   'Property type?': 'نوع العقار؟',
+  // Interview's group question (audit item 1) — same wording family as the Filter home's «مجموعة العقار».
+  'Property group?': 'مجموعة العقار؟',
+  // Period-flip price clear note (audit item 3): the unit of a typed price inverted, so keeping the
+  // number would silently mean something else — cleared + explained instead.
+  'Price limits were cleared because the price unit changed (monthly ↔ yearly) — please re-enter them.':
+    'تم مسح حدود السعر لأن وحدة السعر تغيّرت (شهري ↔ سنوي) — الرجاء إدخالها من جديد.',
   "What's your max budget?": 'ما هو حدّك الأقصى للميزانية؟',
   "What's your rent budget?": 'ما هي ميزانية الإيجار لديك؟',
   'Skip — show me more options': 'تخطَّ — أرني المزيد من الخيارات',

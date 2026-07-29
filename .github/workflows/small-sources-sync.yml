@@ -51,7 +51,14 @@ jobs:
           - { source: fursaghyr,   cmd: "python -m scrapers.fursaghyr.run --type all" }
           - { source: mizlaj,      cmd: "python -m scrapers.mizlaj.run --type all" }
           - { source: aqaratikom,  cmd: "python -m scrapers.aqaratikom.run --type all" }
-          - { source: awal,        cmd: "python -m scrapers.awal.run --type all" }
+          # NOTE: awal is NOT here. RETIRED 2026-07-28 (owner-approved) — awaalun.com lapsed into
+          # a GoDaddy domain-parking page: /wp-json/wp/v2/rtcl_listing and individual /property/
+          # URLs both return HTTP 200 but the body is a 114-133 byte redirect stub to /lander
+          # (window._trfd ap:"parking", NS DOMAINCONTROL.COM) — reachable, serves no listings.
+          # Last real pull 2026-07-26 04:23 (rows_seen=128). Same failure class as alnokhba.
+          # Historical awal rows are KEPT in the DB (51, not deleted) and scrapers/awal/ remains so
+          # existing listings still render. See deprecated_platforms and docs/ARCHITECTURE.md §12.
+          # Do not re-add without confirming the domain serves real listings again.
           - { source: alkhaas,     cmd: "python -m scrapers.alkhaas.run --type all" }
           - { source: abeea,       cmd: "python -m scrapers.abeea.run --type all" }
           - { source: jurash,      cmd: "python -m scrapers.jurash.run --type all" }
@@ -76,11 +83,20 @@ jobs:
           # "Retired platforms".
           # jazwtn UN-RETIRED 2026-07-27 (owner-instructed, same day): the retirement note below
           # said "a non-runner egress IP (residential proxy) is required — re-adding this line
-          # alone will not work". PR#230 delivered exactly that: scrapers/jazwtn/run.py now routes
-          # through JAZWTN_PROXY_URL / SCRAPE_PROXY_URL / WASALT_PROXY_URL (the job-level secret
-          # below, same Saudi residential egress the souq24/wasalt legs use) and records a
-          # scrape_runs row BEFORE the sitemap fetch, so a re-block fails LOUD, not silently.
-          # If this leg fails again WITH the proxy, re-retire — the code path is then truly dead.
+          # alone will not work". PR#230 delivered that proxy egress, and it records a scrape_runs
+          # row BEFORE the sitemap fetch so a re-block fails LOUD, not silently.
+          #
+          # 2026-07-28: the proxy fallback was REMOVED. Two fixes shipped for the same 07-23 root
+          # cause within 24h — the proxy (PR#230) and the curl_cffi 0.7.4->0.15.0 fingerprint bump
+          # (PR#245) — and the proxy became the failing half: every run since 07-27 15:16 died with
+          # `curl (35) TLS connect error: invalid library (OPENSSL_internal)`, a CONNECT-tunnel
+          # failure, not a rejection by jazwtn.sa. Measured 07-28 with 0.15.0 straight at the
+          # origin: `/` -> 200/204,697B and `/sitemap.xml` -> 200/1,768B. So this leg now goes
+          # DIRECT; JAZWTN_PROXY_URL / SCRAPE_PROXY_URL remain explicit opt-ins if the
+          # datacenter-IP block returns. It no longer inherits WASALT_PROXY_URL (provisioned for
+          # Wasalt, metered, and empirically broken for this host).
+          # If this leg fails again DIRECT with a reset, set JAZWTN_PROXY_URL to a WORKING proxy
+          # (verify the tunnel first) or re-retire — do not re-point it at the wasalt secret.
           - { source: jazwtn,      cmd: "python -m scrapers.jazwtn.run --type all" }
           # NOTE: alnokhba is NOT here. Deprecated 2026-07-14 — alnokhba-services.com's domain
           # lapsed into a parking page (HTTP 200, but a domain-resale placeholder, no
