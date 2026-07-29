@@ -38,6 +38,23 @@ LICENCE_TEXT = (
     "الموقع رقم الإعلان 6631224 نسخ رخصة الإعلان 7100267943 رابط رخصة الإعلان الرابط مصدر الإعلان"
 )
 
+# The licence also appears under labels the SELLER types into the free-text description, and with a
+# «72…» prefix as well as «71…». A label-anchored gate found only 23 of the 68 rows in the second
+# cohort for exactly this reason, so the parser must be immune to the WORDING, not just one phrase.
+# All strings below are lifted from real stored captures (ids 12627, 13070, 13350, 21688, 21920,
+# 22030, 22092, 22292). Two of them also state the true asking price in words, which is what the
+# corrupted rows should have carried.
+LICENCE_LABEL_VARIANTS = [
+    "رقم الاعلان : 7200730445\nمخطط ٣٠٩٦",
+    "البيع  250 الف\nترخيص اعلان \n7200999535\nرخصة فال \n120001968",
+    ": 1200027783\nترخيص الإعلان: 7200892112",
+    "📝ترخيص إعلاني رقم: 7200863135📝",
+    "رقم الترخيص: 7200895863\nالمطلوب:  2.400.000",
+    "ترخيص اعلاني 7200932785",
+    "رقم الترخيص:  7200871783 \nالمطلوب:1.500.000",
+    "رقم ترخيص الإعلان: 7200809588\nكود العرض: A398",
+]
+
 
 def _first_price(text: str, patterns) -> int | None:
     for pat in patterns:
@@ -60,6 +77,24 @@ def test_the_bug_was_real():
     Without this, a future refactor could 'pass' the test above by breaking price parsing entirely.
     """
     assert _first_price(LICENCE_TEXT, BUY_PATTERNS_BEFORE) == 100267943
+
+
+def test_licence_label_variants_are_not_prices():
+    """Immune to the WORDING, not just «رخصة الإعلان» — and to the «72…» prefix.
+
+    These are the real captures behind the 68-row second cohort (PR#266) — every one of those rows
+    stored a ~200,9xx,xxx "price" equal to the tail of the licence number visible in these strings.
+
+    Only the shipped pattern is asserted here, NOT a negative control. Deliberate: in most of these
+    the token AFTER the digits is «المطلوب» / «مخطط» / «كود», not a ر-word, so the snippet alone does
+    not reproduce the old match — those rows were parsed from an EARLIER capture and then frozen by
+    trg_aqar_parse's fullparse_done short-circuit, so the surviving text no longer shows the match
+    site. test_the_bug_was_real() carries the negative control on the one capture that does.
+    What these strings DO pin is the property that matters going forward: the licence appears under
+    many seller-written labels and with either prefix, and none of them may ever yield a price.
+    """
+    for text in LICENCE_LABEL_VARIANTS:
+        assert _first_price(text, BUY_PATTERNS) is None, text
 
 
 def test_genuine_prices_still_parse():
