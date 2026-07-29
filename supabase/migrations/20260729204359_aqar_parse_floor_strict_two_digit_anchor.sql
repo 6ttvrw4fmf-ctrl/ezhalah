@@ -1,18 +1,27 @@
--- MIRROR of the LIVE production object (audit item 7f). NOT a migration — this
--- object is already applied in production and has no repo migration base.
--- Do not re-apply blindly; to change it, follow the RPC full-body-replace rule
--- (rebuild from pg_get_functiondef of the LIVE object, needle-edit, migrate).
--- Refreshed 2026-07-29 after the floor-fidelity migrations (region no-freetext-fallback,
--- '^\d{1,2}$' floor anchor, «أرضي»->0) + the word-price fallback; verified byte-exact against
--- pg_get_functiondef; md5 of everything below this header block: d4e6422dc5d8f9bcfad87448ef319c4c
-CREATE OR REPLACE FUNCTION public.aqar_parse(txt text)
- RETURNS jsonb
- LANGUAGE plpgsql
- IMMUTABLE
-AS $function$
+-- 2026-07-29 (follow-up to aqar_parse_region_no_freetext_fallback): floor_number was still garbage
+-- on rows WHERE the structured block exists but has no «الدور» row. Root cause live-proven on ad
+-- 6431756 (id 78910, stored floor_number=4500000): the label pattern 'الدور' is un-anchored, so it
+-- matched INSIDE «شارع عباس الدوري» (a street name in the page's similar-ads tail, which is part of
+-- `region` since it sits after «تفاصيل الإعلان»), and the old loose '\d+' then scanned ahead and
+-- captured the NEIGHBORING AD'S PRICE as a floor number. Similar rows stored 1,700,000 / 22,000 /
+-- 207 as "floors".
+--
+-- Fix: a genuine aqar spec row renders as «الدور N» where the captured value (after _aqar_between's
+-- trim/collapse + next-label lookahead) is EXACTLY the bare number. Require '^\d{1,2}$' — a full-value
+-- 1-2 digit match (0-99, far above any real Saudi building). A false-friend match inside «الدوري»
+-- captures «ي, حي ...» and now fails to NULL; any run-on/garbage tail also fails to NULL. Honest
+-- unknown beats a fabricated floor.
+--
+-- NOTE: superseded in the same session by 20260729204833_aqar_parse_floor_ardi_ground_zero.sql,
+-- which keeps this anchor and additionally maps the closed non-numeric value «أرضي» (ground) -> 0.
+-- Kept as its own migration to mirror the recorded prod history exactly.
+create or replace function public.aqar_parse(txt text)
+ returns jsonb
+ language plpgsql
+ immutable
+as $function$
 declare
   region text; head text; prices bigint[]; v_disc int; v_price bigint; v_orig bigint; v_area int;
-  v_floor_raw text;
 begin
   if txt is null then return '{}'::jsonb; end if;
   txt := translate(txt, '٠١٢٣٤٥٦٧٨٩', '0123456789');
@@ -40,10 +49,6 @@ begin
     ) s
   );
 
-  -- floor: strict full-value match only. «أرضي» (ground) is a lexical identity for 0; a bare 1-2 digit
-  -- value passes; anything else (a false-friend match inside «...الدوري», «علوي», run-on text) → NULL.
-  v_floor_raw := _aqar_between(region, 'الدور');
-
   return jsonb_strip_nulls(jsonb_build_object(
     'direction',        _aqar_between(region, 'الواجهة'),
     'last_update',      _aqar_between(region, 'آخر تحديث'),
@@ -55,11 +60,10 @@ begin
     'deed_area_m2',     regexp_replace(coalesce((regexp_match(_aqar_between(region, 'المساحة حسب الصك'), '\d[\d.,]*'))[1],''), ',', '', 'g'),
     'views_count',      regexp_replace(coalesce((regexp_match(_aqar_between(region, 'المشاهدات'), '\d[\d,]*'))[1],''), ',', '', 'g'),
     'tenant_category',  _aqar_between(region, 'الفئة'),
-    'floor_number',     case when v_floor_raw ~ '^[اأ]رضي$' then '0'
-                             else (regexp_match(v_floor_raw, '^\d{1,2}$'))[1] end,
+    'floor_number',     (regexp_match(_aqar_between(region, 'الدور'), '^\d{1,2}$'))[1],
     'num_apartments',   (regexp_match(_aqar_between(region, 'عدد الشقق'), '\d+'))[1],
     'furnished',        case when txt ~ 'مؤثث|مفروش' then true else null end,
     'area_m2',          v_area, 'price', v_price, 'price_original', v_orig, 'discount_pct', v_disc
   ));
 end
-$function$
+$function$;

@@ -1,15 +1,14 @@
--- MIRROR of the LIVE production object (audit item 7f). NOT a migration — this
--- object is already applied in production and has no repo migration base.
--- Do not re-apply blindly; to change it, follow the RPC full-body-replace rule
--- (rebuild from pg_get_functiondef of the LIVE object, needle-edit, migrate).
--- Refreshed 2026-07-29 after the floor-fidelity migrations (region no-freetext-fallback,
--- '^\d{1,2}$' floor anchor, «أرضي»->0) + the word-price fallback; verified byte-exact against
--- pg_get_functiondef; md5 of everything below this header block: d4e6422dc5d8f9bcfad87448ef319c4c
-CREATE OR REPLACE FUNCTION public.aqar_parse(txt text)
- RETURNS jsonb
- LANGUAGE plpgsql
- IMMUTABLE
-AS $function$
+-- 2026-07-29 (companion to aqar_parse_floor_strict_two_digit_anchor): aqar's «الدور» spec value is
+-- non-numeric on 5,950 active rows, and the vocabulary is CLOSED (measured live): «علوي» 3,461 rows,
+-- «أرضي» 2,484 rows, nothing else. «أرضي» (ground) → 0 is a lexical identity, not an estimate — the
+-- same rule as «جديد»→0 for property age and the identical mapping the wasalt branch of
+-- listing_extra_attrs already applies ('Ground' → 0). «علوي» (upper) names NO specific floor, so it
+-- stays NULL — mapping it to any number would fabricate precision the source never published.
+create or replace function public.aqar_parse(txt text)
+ returns jsonb
+ language plpgsql
+ immutable
+as $function$
 declare
   region text; head text; prices bigint[]; v_disc int; v_price bigint; v_orig bigint; v_area int;
   v_floor_raw text;
@@ -62,4 +61,4 @@ begin
     'area_m2',          v_area, 'price', v_price, 'price_original', v_orig, 'discount_pct', v_disc
   ));
 end
-$function$
+$function$;
