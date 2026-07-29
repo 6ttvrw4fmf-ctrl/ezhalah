@@ -194,7 +194,12 @@ def map_listing(g: dict, price: dict) -> dict | None:
         "source":           "Aqar Monthly",
         "price_annual":     round(monthly * 12),  # app shows price_annual / 12 = the monthly figure
         "area_m2":          N.to_int(g.get("area")),
-        "bedrooms":         N.to_int(g.get("beds")),
+        # "beds" is a furnished/short-stay field (this is a daily-rental vertical) — conventionally
+        # physical sleeping-bed count (sofa-beds, bunk beds, extra beds for guest capacity), not
+        # bedroom-ROOM count; these routinely diverge for furnished units. A sibling "rooms" field
+        # exists in the same API response but is never read either — no bedroom-specific signal
+        # exists here. Owner decision 2026-07-28: null rather than store an unverifiable figure.
+        "bedrooms":         None,
         # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal
         # "Other" sentinel — the additive resolve_slug()-derived columns already cover most rows.
         "city":             city,

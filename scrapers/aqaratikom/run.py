@@ -385,7 +385,10 @@ def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
     ppm = _int(ad.get("meter_price") or detail.get("price_of_meters"))
 
     # ── faceted property fields ──
-    bedroom = _int(estate.get("bedroom")) or _int(amap.get("عدد الغرف"))
+    # "عدد الغرف" fallback (REGA authority_details, a generic total-room-count field) removed
+    # 2026-07-28 — estate.bedroom is a genuine bedroom-specific API field and trusted alone; same
+    # unconditional-fallback shape as the abeea/muktamel area_m2 bug (PR#259) otherwise.
+    bedroom = _int(estate.get("bedroom"))
     bedrooms = bedroom if (bedroom and category == "residential" and 0 < bedroom <= 30) else None
     bathrooms = _int(dmap.get("عدد دورة المياه") or dmap.get("عدد دورات المياه"))
     halls = _int(dmap.get("عدد الصالات"))

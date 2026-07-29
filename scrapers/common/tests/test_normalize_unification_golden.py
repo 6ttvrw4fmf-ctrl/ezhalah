@@ -418,7 +418,10 @@ def test_golden_mustqr_map_listing_end_to_end():
     assert bucket == "residential"
     assert row["property_type"] == "Villa"
     assert row["price_annual"] == 30000 and row["rent_period"] == "monthly"  # 2500×12 (2026-07-13 fix)
-    assert row["city"] == "Hail" and row["bedrooms"] == 4
+    # bedrooms=None (2026-07-28 fix): mustqr's "rooms" field is a generic total-room count, never
+    # bedroom-specific — was previously stored as-is (4 here). See
+    # scrapers/common/tests/test_bedrooms_null_out_conflated_platforms.py for the full fix.
+    assert row["city"] == "Hail" and row["bedrooms"] is None
 
     # Unmapped type (neither overrides nor shared): row still SKIPPED — nothing stored, nothing
     # guessed (historical behaviour, stricter than raw-preservation; documented in the report).
@@ -435,11 +438,11 @@ def test_golden_mustqr_map_listing_end_to_end():
     assert row["property_type"] == "Farm" and bucket == "residential"
     assert row["bedrooms"] is None  # Farm keeps the bedrooms-nulling rule
 
-    # 2026-07-16 owner approval: دوبلكس now stores Duplex (residential routing, bedrooms kept).
+    # 2026-07-16 owner approval: دوبلكس now stores Duplex (residential routing).
     p["type"] = "دوبلكس"
     row, bucket = map_listing(p, {})
     assert row["property_type"] == "Duplex" and bucket == "residential"
-    assert row["bedrooms"] == 4
+    assert row["bedrooms"] is None  # 2026-07-28: bedrooms nulled fleet-wide on this platform
 
 
 # ═══ GOLDEN: numeric parsing ═══════════════════════════════════════════════════════════════════

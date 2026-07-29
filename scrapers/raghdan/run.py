@@ -309,13 +309,6 @@ def _desc_specs(desc: str) -> dict[str, str]:
     return out
 
 
-def _sane_beds(n: Optional[int], category: str, property_type: str) -> Optional[int]:
-    """Bedrooms only for residential non-land within a human range (guards garbage like 150)."""
-    if n is None or category == "commercial" or property_type in LAND_TYPES or n <= 0 or n > 20:
-        return None
-    return n
-
-
 def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     if "هذا الإعلان" in body and "منتهي" in body:
         return None, "residential"
@@ -437,8 +430,11 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": round(area) if area else None,
-        "bedrooms": _sane_beds(_int(specs.get("rooms")) or _int(ld.get("numberOfRooms")),
-                               category, property_type),
+        # Both "عدد الغرف" (specs.rooms) and schema.org's numberOfRooms are generic total-room-count
+        # fields, never bedroom-specific — raghdan exposes no separate bedroom field, and its
+        # REGA-sourced pages never display one either (live-confirmed 2026-07-28: 0/3 sampled pages
+        # carry a "غرف النوم" label). Owner decision: null rather than store an unverifiable figure.
+        "bedrooms": None,
         "property_age": property_age,
         "direction": specs.get("facade") or None,
         "price_total": price_total,

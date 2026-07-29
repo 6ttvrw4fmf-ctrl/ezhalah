@@ -216,7 +216,12 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": _int(ar.get("propertyArea")),
-        "bedrooms": _int(ar.get("numberOfRooms")),
+        # numberOfRooms is REGA's generic room count, not bedroom-specific — aqargate never exposes
+        # a separate bedroom field (unlike wasalt's REGA payload, which carries a distinct
+        # noOfBedrooms). Storing it as `bedrooms` mislabels total rooms as bedroom count; owner
+        # decision 2026-07-28: null rather than store an unverifiable figure (live-confirmed wrong
+        # on ad 5435594 — DB said 11 bedrooms, the listing's own description said 5).
+        "bedrooms": None,
         "bathrooms": _int(ar.get("numberOfBathrooms")),
         "price_total": _int(price) if not is_rent else None,
         "price_annual": rent_annual,

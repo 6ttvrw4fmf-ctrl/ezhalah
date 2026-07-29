@@ -462,16 +462,16 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     # ── area / rooms / baths / price-per-meter from the visible spec table ──
     area = _num((_spec_value(html, "المساحة") or "").replace("م²", ""))
     area_m2 = round(area) if area else None
-    beds = _int(io.get("numberOfRooms")) or _spec_int(html, "عدد الغرف")
+    # numberOfRooms / "عدد الغرف" are generic total-room-count fields, never bedroom-specific — this
+    # was already known for land/commercial/Building (the site reports e.g. 30 "rooms" for a whole
+    # عمارة), but the SAME ambiguity holds for Apartment/Villa too: live-confirmed 2026-07-28 on ad
+    # 558063 — DB stored bedrooms=6 from this field, the listing's own description enumerates only
+    # 3 actual bedrooms (majlis/laundry counted alongside them in the "6"). Owner decision: null
+    # unconditionally rather than store an unverifiable figure for any category.
+    beds = None
     baths = _spec_int(html, "عدد الحمامات") or _spec_int(html, "دورات المياه")
-    # For land/commercial AND whole-buildings, "rooms" is not a bedroom count (it's units/total) —
-    # null it so it never pollutes the bedroom filter (the site reports e.g. 30 for عمارة).
-    if (category == "commercial"
-            or property_type in ("Residential Land", "Commercial Land", "Building")):
-        beds = None
+    if category == "commercial" or property_type in ("Residential Land", "Commercial Land", "Building"):
         baths = None
-    if beds is not None and (beds <= 0 or beds > 30):
-        beds = None
     if baths is not None and (baths <= 0 or baths > 30):
         baths = None
     ppm = _num((_spec_value(html, "سعر المتر") or "").replace("ريال", ""))

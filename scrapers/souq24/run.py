@@ -401,11 +401,11 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
     specs = _spec_table(body)
     area = _to_float(specs.get("المساحة"))
     area = round(area) if area else None
-    beds = _to_int(specs.get("عدد الغرف"))
-    if is_land or category == "commercial":
-        beds = None
-    if beds is not None and (beds <= 0 or beds > 30):
-        beds = None
+    # "عدد الغرف" is a generic total-room-count label, never bedroom-specific — souq24 has no
+    # separate bathroom field either (no sibling signal the site distinguishes room types at all).
+    # Live-confirmed 2026-07-28: 0/3 sampled pages carry a "غرف النوم" label. Owner decision: null
+    # rather than store an unverifiable total-room figure as bedroom count.
+    beds = None
     facade = specs.get("الواجهة") or None
     if facade in ("غير محدد", "", "-"):
         facade = None

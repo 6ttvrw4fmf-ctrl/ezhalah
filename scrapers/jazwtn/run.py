@@ -133,8 +133,6 @@ TOTAL_RE = re.compile(
     r"(?:السعر\s+الكلي|السعر\s+الإجمالي|السعر\s+الاجمالي|سعر\s+البيع|السعر)\s*[:؛]?\s*"
     r"([\d٠-٩][\d٠-٩.,]*)\s*(ألف|الف|مليون)?"
 )
-# bedrooms from the title, e.g. "5 غرف" / "٦ غرف" / "غرفتين"
-BEDS_RE = re.compile(r"([\d٠-٩]{1,2})\s*غرف")
 # bathrooms from the description, e.g. "3 دورات مياة" / "دورتين مياه"
 BATHS_RE = re.compile(r"([\d٠-٩]{1,2})\s*دورات?\s*(?:مياه|مياة|المياه)")
 # plan / lot / block numbers (additional_info)
@@ -396,13 +394,14 @@ def map_listing(body: str, url: str, featured: Optional[str]) -> tuple[Optional[
     # published per-m² rate, and ResultCard renders «سعر المتر» on any card with no total.
 
     # ── bedrooms (units only) / bathrooms ──
+    # BEDS_RE matches a bare "N غرف" (rooms) in the title — never bedroom-specific, and live-
+    # confirmed wrong 2026-07-28: 3/3 sampled listings had a SMALLER, more disaggregated room count
+    # in the page's own itemized "المميزات" features list (which separately enumerates majlis/
+    # dining-hall) than what the title's loose phrasing implied — the title figure isn't even
+    # internally consistent with the site's own more detailed breakdown, and neither number carries
+    # a "نوم" (bedroom) qualifier at all. No reliable bedroom-specific signal exists on this
+    # platform. Owner decision: null rather than store an unverifiable, proven-wrong figure.
     bedrooms = None
-    if not is_land and category == "residential":
-        bm = BEDS_RE.search(title_raw)
-        if bm:
-            n = _to_int(bm.group(1))
-            if n and 0 < n <= 20:
-                bedrooms = n
     baths = None
     if category == "residential" and not is_land:
         bm = BATHS_RE.search(txt)
