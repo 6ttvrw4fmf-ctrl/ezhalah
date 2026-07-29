@@ -80,6 +80,9 @@ COMMERCIAL_TYPES = {
 }
 # Usage labels (propertyType.name_ar) that flip a LAND or BUILDING to commercial.
 COMMERCIAL_USAGE = {"تجاري", "استعمال مختلط", "صناعي"}
+# Land/fuel-station rows have no meaningful "building age" — REGA occasionally carries a stray age
+# value on a miscoded land parcel (live-confirmed on ad 630031, a راس بلك land row); never store it.
+AGELESS_TYPES = {"Residential Land", "Commercial Land", "Gas Station"}
 
 # Arabic region label (map-data location.region or detail region object) → canonical English region.
 REGION_AR = {
@@ -157,11 +160,6 @@ def session() -> cc.Session:
         "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
     })
     return s
-
-
-def _int(v: Any) -> Optional[int]:
-    n = normalize.to_int(v)
-    return n if n else None
 
 
 def _num(v: Any) -> Optional[float]:
@@ -341,8 +339,15 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
     bedrooms = None
 
     # ── property age / facade ──
-    age = listing.get("property_age")
-    property_age = _int(age) if (age is not None and str(age).strip() != "") else None
+    # Read the REGA-licensed advertisement's property_age (an authoritative Arabic-vocabulary
+    # string: "سنة"/"سنتين"/"اكثر من عشر سنوات"), never listing.get("property_age") — the broker's
+    # own unverified free int. Live-verified 2026-07-17: 3/5 sampled rows were wrong when read from
+    # the broker field (630022: broker=12 vs REGA "اكثر من عشر سنوات"=10; 630024: broker=3 vs REGA
+    # "سنتين"=2). No REGA age -> honest NULL; never fall back to the unverifiable broker int.
+    property_age = (
+        None if property_type in AGELESS_TYPES
+        else normalize.parse_property_age(rega.get("property_age"))
+    )
     face_en = listing.get("property_face") or rega.get("property_face")
     direction = None
     if face_en:
@@ -414,6 +419,7 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
         "rega_license_end_date": rega.get("ad_license_end_date"),
         "rega_license_status": rega_status,
         "rega_property_area": rega.get("property_area"),
+        "rega_property_age": rega.get("property_age"),
         "street_width_m": street_width,
         "plan_number": plan_number,
         "land_number": land_number,
