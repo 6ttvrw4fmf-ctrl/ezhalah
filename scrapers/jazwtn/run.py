@@ -153,12 +153,26 @@ _local = threading.local()
 
 # jazwtn.sa (GoDaddy shared hosting, 184.168.116.58) began resetting connections from GitHub
 # Actions datacenter IPs on 2026-07-23 (curl 35 recv-reset / curl 28 connect-timeout) while serving
-# residential IPs normally — 4+ straight silent no-op runs (found by the 2026-07-27 audit: 126.8h
-# stale). Route through the same Saudi residential proxy the Wasalt/souq24 cloud jobs already use
-# when configured (~138 pages/day of metered bandwidth — trivial); local runs leave these unset and
-# hit the site directly, which works.
-PROXY = (os.environ.get("JAZWTN_PROXY_URL") or os.environ.get("SCRAPE_PROXY_URL")
-         or os.environ.get("WASALT_PROXY_URL") or "").strip()
+# residential IPs normally. Two independent fixes were shipped for that ONE root cause within 24h:
+# the proxy egress below (2026-07-27, PR#230) and the curl_cffi 0.7.4 -> 0.15.0 bump that replaced a
+# 2-year-stale chrome124 TLS fingerprint (2026-07-27, PR#245 — see scrapers/requirements.txt, which
+# records 0.15.0 getting HTTP 200/68,410B where 0.7.4 got curl(35), same host+IP).
+#
+# The proxy is now the thing BREAKING it. Since 2026-07-27 15:16 every cloud run dies with
+#   curl: (35) TLS connect error: error:00000000:invalid library (0):OPENSSL_internal
+# which is a proxy-tunnel failure, not a rejection by jazwtn.sa — 137 listings have been stale for
+# 6 days. Measured 2026-07-28 with curl_cffi 0.15.0 straight at the origin, no proxy:
+#   https://jazwtn.sa/            -> HTTP 200, 204,697 bytes  (impersonate=chrome124)
+#   https://jazwtn.sa/sitemap.xml -> HTTP 200, 1,768 bytes    (every impersonate target tried)
+# The host is alive and answers the scraper's own sitemap entry point. Occasional curl(35) resets
+# still happen and clear on retry — ordinary shared-hosting rate-limiting, which the retry loops
+# below already absorb.
+#
+# So: do NOT silently inherit WASALT_PROXY_URL. That secret is provisioned for Wasalt, is metered,
+# and empirically fails the CONNECT tunnel for this host. A jazwtn-specific proxy stays available as
+# an EXPLICIT opt-in for when the datacenter-IP block returns. Worst case of going direct is the
+# 2026-07-23 reset, i.e. exactly today's outcome and no worse; best case jazwtn simply recovers.
+PROXY = (os.environ.get("JAZWTN_PROXY_URL") or os.environ.get("SCRAPE_PROXY_URL") or "").strip()
 _PROXIES = {"http": PROXY, "https": PROXY} if PROXY else None
 
 

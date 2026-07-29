@@ -6,19 +6,11 @@ export const DEALS: Deal[] = ['Rent', 'Buy'];
 export type Category = 'Residential' | 'Commercial';
 export const CATEGORIES: Category[] = ['Residential', 'Commercial'];
 
-export const CATEGORY_TYPES: Record<Category, string[]> = {
-  // House folds into Villa (owner request 2026-07-20, few raw listings) — not offered separately.
-  Residential: [
-    'Apartment', 'Villa', 'Floor', 'Room', 'Building',
-    'Rest House', 'Chalet', 'Camp', 'Residential Land',
-  ],
-  Commercial: [
-    'Office', 'Warehouse', 'Shop', 'Showroom', 'Workshop', 'Factory',
-    'Commercial Land', 'Industrial Land', 'Farm', 'Agriculture Plot',
-    'Hotel', 'Commercial Building', 'Gas Station', 'Health Center',
-    'Kiosk', 'Cinema', 'Parking', 'Bank', 'School', 'Telecom Tower',
-  ],
-};
+// CATEGORY_TYPES RETIRED (audit item 1, 2026-07-27): it was a stale second taxonomy — it offered dead
+// types (Building/Kiosk/Cinema → guaranteed-zero results), misfiled مزرعة/أرض زراعية under Commercial
+// (contradicting owner decision D3 and the RPC purity gate), and lacked Studio/Duplex/Residential
+// Building. The ONE source of truth for category → group → type is propertyTypes.ts HIERARCHY
+// (groupsFor/groupMembers/CLEAN_MACRO); the interview, agent parser, and Filter home all consume it.
 
 // Types measured by bedrooms (dwellings); everything else by size in m².
 const BEDROOM_TYPES = new Set([

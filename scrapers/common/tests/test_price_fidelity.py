@@ -124,8 +124,15 @@ import re
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+# Widened 2026-07-27 (audit item 4): the original pattern required a BARE-NAME target at line start
+# and a literal `area` divisor, so mustqr's dict-style
+#   row["price_per_meter"] = round(row["price_total"] / row["area_m2"])
+# sailed straight past it (621 fabricated live values). Now the target may be bare OR row["…"]-style,
+# anywhere on the line, and the arithmetic operand matches area/land_area/area_m2 in bare or
+# bracketed form.
 _DERIVE_RE = re.compile(
-    r"^\s*(?:price_total|price_per_meter|price_annual|total|meter)\s*=.*[*/]\s*(?:area|land_area)\b"
+    r"""^\s*(?:\w+\[["'])?(?:price_total|price_per_meter|price_annual|total|meter)(?:["']\])?"""
+    r"""\s*=(?!=).*[*/].*\b(?:area|land_area|area_m2)\b"""
 )
 
 def _scraper_sources():
@@ -160,6 +167,8 @@ def test_the_guard_actually_catches_the_shapes_it_must():
         "        price_total = int(round(price_per_meter * area))",
         "        total = meter * area",
         "        price_total = round(price * area)",
+        # mustqr's exact dict-style derivation (missed by the pre-2026-07-27 bare-name anchor; 621 live rows)
+        '        row["price_per_meter"] = round(row["price_total"] / row["area_m2"])',
     ):
         assert _DERIVE_RE.match(line), f"guard missed a real derivation: {line!r}"
     for line in (

@@ -37,7 +37,7 @@ import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } 
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, effectiveTypes, type SearchQuery, type SearchResult } from '@/data/search';
-import type { Category } from '@/data/taxonomy';
+import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
@@ -778,7 +778,14 @@ export default function Agent() {
       const ceil = q.deal === 'Buy' ? [500_000, 1_000_000, 2_000_000, 5_000_000] : [30_000, 50_000, 80_000, 150_000];
       options = ceil.map((c) => ({ label: budgetLabel(c, ar), value: String(c) }));
     }
-    if (!dim && !q.detail) {
+    // Bedrooms are asked ONLY where the canonical applicability rules (the same detailFor/
+    // detailForContext the Filter home uses) say they exist — never for land/warehouse/factory/
+    // workshop/etc. Asking there caused the "3" answer to be misparsed as a 3 m² area filter.
+    // (audit item 5, owner rule 2026-07-27.)
+    const bedsApplicable = q.type
+      ? detailFor(q.type).isBedrooms
+      : (detailForContext(q.category ?? 'Residential', q.typeGroup ?? null)?.showBeds ?? true);
+    if (!dim && !q.detail && bedsApplicable) {
       dim = 'beds';
       ask = ar ? 'كم غرفة نوم تبغى؟' : 'How many bedrooms?';
       options = ['1', '2', '3', '4', '5'].map((n) => ({ label: bedsLabel(n, ar), value: n }));
