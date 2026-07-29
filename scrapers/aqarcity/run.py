@@ -154,6 +154,21 @@ def _int(v: Any) -> Optional[int]:
     return n if n else None
 
 
+def _price_round(v: Any) -> Optional[int]:
+    """Like _int(), but ROUNDS a fractional price instead of truncating — aqarcity's own site rounds
+    its displayed price badge (found live 2026-07-28: JSON-LD offers.price=380021.85, the page's own
+    price badge shows "380,022"; the shared normalize.to_int()/_int() truncates to 380021, a 1 SAR
+    mismatch against what the source actually shows). Scoped to this ONE field — normalize.to_int()
+    is intentionally truncating for other platforms (documented there for DealApp's own floor
+    display convention) and must not be changed globally."""
+    if v is None:
+        return None
+    try:
+        return round(float(v))
+    except (TypeError, ValueError):
+        return _int(v)
+
+
 def is_monthly_rental(body: str, unit: str, price: Optional[int]) -> bool:
     """True iff this rent ad's rent_period is genuinely MONTHLY (short-term / month-to-month), false
     for an ANNUAL lease (incl. one paid in monthly installments). `price` = offers.get("price") from
@@ -474,7 +489,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     if "للبيع" in title_raw:
         is_rent = False
 
-    price = _int(offers.get("price"))
+    price = _price_round(offers.get("price"))
     rent_period = None
     if is_rent:
         rent_period = "monthly" if is_monthly_rental(body, unit, price) else "annual"

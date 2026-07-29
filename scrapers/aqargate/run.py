@@ -148,6 +148,23 @@ def _additional_info(ar: dict) -> list[dict[str, Any]]:
     return rows
 
 
+def _rent_annualize(
+    rent: Optional[int], has_annual_field: bool, title_text: str,
+) -> tuple[Optional[int], Optional[str]]:
+    """rent_period was previously hardcoded "annual" unconditionally — this scraper had zero logic
+    to detect a monthly rental even though the source's own WordPress title already carries the
+    signal (found live 2026-07-28: ad AG51935's title reads "...للإيجار الشهري..." — monthly — yet
+    was stored price_annual=16,000/rent_period='annual', understating the true annual cost ~12x;
+    confirmed not a one-off via `title ilike '%شهري%' and rent_period='annual'`). landTotalAnnualRent
+    is an explicit annual-rate field when present, so it's trusted as-is; the monthly-title detection
+    only applies to the propertyPrice fallback, which carries no period info of its own."""
+    if rent is None:
+        return None, None
+    if not has_annual_field and "شهري" in title_text:
+        return rent * 12, "monthly"
+    return rent, "annual"
+
+
 def map_listing(p: dict) -> tuple[Optional[dict], str]:
     meta = p.get("property_meta") or {}
     ar = meta.get("advertisement_response") or {}
@@ -186,6 +203,10 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
 
     price = ar.get("propertyPrice") or ar.get("landTotalPrice")
     rent = ar.get("landTotalAnnualRent") or ar.get("propertyPrice")
+    title_text = (p.get("title") or {}).get("rendered") or ""
+    rent_annual, rent_period = _rent_annualize(
+        _int(rent), has_annual_field=ar.get("landTotalAnnualRent") is not None, title_text=title_text,
+    ) if is_rent else (None, None)
     thumb = p.get("thumbnail")
     row = {
         "ad_number": f"AG{pid.replace('AG-', '').replace('AG', '')}",
@@ -198,8 +219,8 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "bedrooms": _int(ar.get("numberOfRooms")),
         "bathrooms": _int(ar.get("numberOfBathrooms")),
         "price_total": _int(price) if not is_rent else None,
-        "price_annual": _int(rent) if is_rent else None,
-        "rent_period": "annual" if is_rent else None,
+        "price_annual": rent_annual,
+        "rent_period": rent_period,
         "city": city,
         "neighborhood": loc.get("district") or None,
         "title": (p.get("title") or {}).get("rendered"),

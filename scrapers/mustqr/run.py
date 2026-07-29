@@ -213,7 +213,7 @@ def _video_url(videos: Any) -> Optional[str]:
     return None
 
 
-def _price_fields(p: dict, is_rent: bool, is_monthly: bool) -> dict[str, Any]:
+def _price_fields(p: dict, is_rent: bool) -> dict[str, Any]:
     """price > price_som > price_had. Reject < 1000."""
     raw = p.get("price") or p.get("price_som") or p.get("price_had")
     n = _int(raw)
@@ -225,7 +225,20 @@ def _price_fields(p: dict, is_rent: bool, is_monthly: bool) -> dict[str, Any]:
         # (price-fidelity fix 2026-07-13; ×12 now via the shared normalize.annualize_rent — provably
         # identical for the "monthly"/"annual" periods this passes, golden-tested — so future
         # annualization fixes propagate here too.)
-        period = "monthly" if is_monthly else "annual"
+        price_type = p.get("price_type")
+        if price_type == "شهري":
+            period = "monthly"
+        elif price_type == "سنوي":
+            period = "annual"
+        else:
+            # price_type missing (~22% of active Rent rows, live 2026-07-28) previously defaulted
+            # silently to "annual" and stored the raw figure un-annualized — understating the true
+            # annual cost ~12x whenever the raw figure was actually a monthly rate (live-confirmed:
+            # both sampled null-price_type rows were monthly per the site's own "الايجار الشهري"
+            # label, magnitudes 2,000/2,500 SAR). Fall back to the magnitude heuristic already
+            # established for exactly this ambiguity elsewhere in this codebase
+            # (eaqartabuk/run.py:_price — a small SAR figure is implausible as an annual lease).
+            period = "monthly" if n < 10000 else "annual"
         return {"price_annual": normalize.annualize_rent(n, period),
                 "rent_period": period}
     return {"price_total": n}
@@ -248,7 +261,6 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
     # Category: بيع/إيجار/استثمار → Buy or Rent (استثمار = investment, treat as Buy).
     category = (p.get("category") or "").strip()
     is_rent = category == "إيجار"
-    is_monthly = (p.get("price_type") == "شهري")
     usage = (p.get("usage_type") or "").strip()
 
     # Commercial routing: explicit commercial usage_type OR commercial-only property type.
@@ -341,7 +353,7 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
         "video_url": video_url,
         "additional_info": extras,
     }
-    row.update(_price_fields(p, is_rent, is_monthly))
+    row.update(_price_fields(p, is_rent))
     if row.get("area_m2") and row.get("price_total"):
         try:
             row["price_per_meter"] = round(row["price_total"] / row["area_m2"])

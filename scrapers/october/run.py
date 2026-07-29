@@ -130,6 +130,9 @@ def _detail_specs(s: cc.Session, url: str, pid: str) -> dict:
             pv = N.to_int(offers.get("price"))
             if pv:
                 out["price"] = pv
+            unit = ((offers.get("priceSpecification") or {}).get("unitCode") or "").strip().upper()
+            if unit:
+                out["price_unit_code"] = unit
             break
 
     # Fallback: mine the escaped RSC object (anchored on this listing's id) for anything JSON-LD lacked.
@@ -146,6 +149,22 @@ def _detail_specs(s: cc.Session, url: str, pid: str) -> dict:
             if p:
                 out["price"] = int(p.group(1))
     return out
+
+
+# schema.org unitCode → periods-per-year, for annualizing a Rent price. This scraper previously had
+# NO period concept at all — every Rent price went straight into price_annual un-annualized (found
+# live 2026-07-28: ad OCT44471 is priced 4,000 SAR with the source's own JSON-LD
+# `priceSpecification.unitCode: "MON"` — i.e. 4,000 SAR/MONTH — but was stored as price_annual=4,000,
+# understating the true ~48,000 SAR/year rent by ~12x; this was 100% of october's currently-priced
+# Rent catalog, not an edge case).
+_UNIT_PERIODS_PER_YEAR = {"DAY": 365, "WEE": 52, "MON": 12, "ANN": 1}
+
+
+def _rent_annualize(price: Optional[int], unit_code: str) -> Optional[int]:
+    periods = _UNIT_PERIODS_PER_YEAR.get(unit_code)
+    if price is None or periods is None:
+        return price
+    return round(price * periods)
 
 
 def map_item(item: dict, s: cc.Session) -> Optional[tuple[dict, str]]:
@@ -180,6 +199,12 @@ def map_item(item: dict, s: cc.Session) -> Optional[tuple[dict, str]]:
     price = N.to_int(offers.get("price")) or specs.get("price")   # index has sale prices; rent prices come from detail
     if price is not None and price < 100:
         price = None
+    price_annual = price
+    if transaction_type == "Rent" and specs.get("price") is not None:
+        # unit_code only applies when `price` actually came from the detail page (specs) — the
+        # index-level offers.price is a sale price by convention (see comment above) and never
+        # carries this scraper's rent-period signal.
+        price_annual = _rent_annualize(price, specs.get("price_unit_code", ""))
     if specs.get("photo_urls"):
         photos = specs["photo_urls"]
 
@@ -204,7 +229,7 @@ def map_item(item: dict, s: cc.Session) -> Optional[tuple[dict, str]]:
         "bedrooms": beds,
         "bathrooms": baths,
         "price_total": price if transaction_type == "Buy" else None,
-        "price_annual": price if transaction_type == "Rent" else None,
+        "price_annual": price_annual if transaction_type == "Rent" else None,
         "photo_urls": photos,
         "title": _redact(name),
         "description": specs.get("description"),
