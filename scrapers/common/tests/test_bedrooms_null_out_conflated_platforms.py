@@ -4,16 +4,18 @@ majlis/living room in Saudi listing convention), null `bedrooms` rather than sto
 number.
 
 A 34-platform live audit (following the abeea/muktamel area_m2 fix, PR#259) found roughly half of
-all scrapers stored a generic "N rooms" figure as bedroom count. Three platforms had CONFIRMED live
+all scrapers stored a generic "N rooms" figure as bedroom count. Four platforms had CONFIRMED live
 numeric mismatches on real active listings: aqargate (5435594: DB=11, listing's own description
 enumerates 5 real bedrooms), dealapp (558063: DB=6, description enumerates only 3), jazwtn (3/3
-sampled rows wrong). alhoshan is a fourth confirmed case but is NOT covered by this pass — its
-`specs.bedrooms` needs a differently-shaped fix, flagged for separate follow-up.
+sampled rows wrong), and alhoshan (AH1012: DB=10, description enumerates 5 — added in a follow-up
+pass once its differently-shaped root cause was understood: `specs.bedrooms` is a real API field,
+but alhoshan.sa's own front end renders it under the generic label "الغرف", not a bedroom-specific
+one, per the site's own embedded i18n dictionary).
 
 Three shapes of fix were applied, by platform:
   1. NULL entirely — no bedroom-specific field exists anywhere on the source:
-     aqargate, aqarcity, aqarmonthly, dealapp, jazwtn, mizlaj, mustqr, october, raghdan, sadin,
-     souq24.
+     aqargate, aqarcity, aqarmonthly, alhoshan, dealapp, jazwtn, mizlaj, mustqr, october, raghdan,
+     sadin, souq24.
   2. Tighten the extraction regex to REQUIRE the "نوم" (bedroom) qualifier instead of a bare "غرف"
      (rooms) match — live testing showed these generally DO carry the qualifier, so this narrows
      false-positive risk without losing real coverage:
@@ -44,6 +46,12 @@ def _src(platform: str) -> str:
 
 # ═══ 1. NULL-entirely platforms — source-text assertions (the ambiguous field is gone, bedrooms is
 # unconditionally None at the write site) ═══════════════════════════════════════════════════════
+
+def test_alhoshan_specs_bedrooms_no_longer_feeds_bedrooms():
+    text = _src("alhoshan")
+    assert '"bedrooms": _int(specs.get("bedrooms")),' not in text
+    assert '"bedrooms": None,' in text
+
 
 def test_aqargate_numberOfRooms_no_longer_feeds_bedrooms():
     text = _src("aqargate")
@@ -164,6 +172,7 @@ def test_nowaisiry_requires_noom_qualifier():
 
 
 if __name__ == "__main__":
+    test_alhoshan_specs_bedrooms_no_longer_feeds_bedrooms()
     test_aqargate_numberOfRooms_no_longer_feeds_bedrooms()
     test_aqarcity_no_longer_derives_bedrooms_dead_helper_removed()
     test_aqarmonthly_beds_field_no_longer_feeds_bedrooms()

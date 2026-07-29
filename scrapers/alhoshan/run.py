@@ -227,7 +227,15 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": _int(specs.get("area")),
-        "bedrooms": _int(specs.get("bedrooms")),
+        # specs.bedrooms IS a real API field, but alhoshan.sa's own front end renders it under the
+        # generic label "الغرف" ("Rooms") — confirmed via the site's own embedded i18n dictionary
+        # ("specBedrooms":"الغرف"; a second, unused key "bedrooms":"غرف النوم" exists but the
+        # rendered spec grid never uses it). Live-confirmed wrong 2026-07-28 on ad AH1012: DB stored
+        # 10 (this field) while the page's own free-text description explicitly enumerates 5 real
+        # bedrooms. Same "total rooms mislabeled as bedrooms" pattern as the other nulled platforms
+        # (PR#263) — the JSON key name alone isn't proof of bedroom-specificity. Owner decision:
+        # null rather than store an unverifiable figure.
+        "bedrooms": None,
         "bathrooms": _int(specs.get("bathrooms")),
         "price_total": _int(price) if not is_rent else None,
         "price_annual": _int(price) if is_rent else None,
