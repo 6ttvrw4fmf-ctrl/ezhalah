@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Nightly production-audit invariants (2026-07-24) — the checks a daily audit was skipping.
 
-Runs FOUR live-production checks and exits non-zero + logs a row to location_pipeline_alerts if
+Runs FIVE live-production checks and exits non-zero + logs a row to location_pipeline_alerts if
 any fails (same "build fails + ops dashboard" mechanism as scripts/check_placeholder_locations.py):
 
   1. NOT-READY REASON INVARIANT — every production_ready=false row in listing_native_location_v2
@@ -180,6 +180,34 @@ def check_unverified_inactivations(client) -> bool:
     return False
 
 
+def check_aqar_price_not_licence(client) -> bool:
+    """True = OK. No aqar listing's price may equal the 9-digit tail of its own REGA licence number.
+
+    The Buy fallback pattern `(\\d{6,9})\\s*[§ر﷼]` treated the bare Arabic letter «ر» as a currency
+    mark, so on «... رخصة الإعلان 7200922371 رابط ...» it captured the licence tail 200922371 and stored
+    it as the price. Two cohorts were repaired (PR#257 «71…», PR#266 «72…»); the parser now requires a
+    real §/﷼ symbol. This is the prefix-agnostic tripwire: license_number is parsed independently of
+    the price, so license_number = '7' || price is the price wearing the licence's digits — never a
+    coincidence. Compares two columns only, so it is cheap enough to run every night.
+    """
+    rows = client.table("mon_aqar_price_equals_licence_tail").select(
+        "price_equals_licence_tail").limit(1).execute().data
+    if not rows:
+        detail = "mon_aqar_price_equals_licence_tail returned no row — the invariant view is missing."
+        print(f"FAIL aqar licence-price invariant: {detail}")
+        _alert(client, "aqar_licence_price_view_missing", 0, detail)
+        return False
+    n = rows[0].get("price_equals_licence_tail") or 0
+    if n == 0:
+        print("OK  aqar licence-price invariant: 0 rows whose price equals their own licence tail.")
+        return True
+    detail = (f"{n} active aqar listing(s) have price == the 9-digit tail of their own REGA licence "
+              f"number — the bare-«ر» capture bug has recurred.")
+    print(f"FAIL aqar licence-price invariant: {detail}")
+    _alert(client, "aqar_price_equals_licence_tail", n, detail)
+    return False
+
+
 def _call_agent(text: str) -> dict:
     body = json.dumps({"text": text, "locale": "ar", "loggedIn": False, "order": False, "history": []}).encode()
     req = urllib.request.Request(
@@ -222,7 +250,7 @@ def check_agent(client=None) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index", "unverified_kill"],
+    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index", "unverified_kill", "aqar_licence_price"],
                     help="run one check")
     args = ap.parse_args()
 
@@ -245,6 +273,7 @@ def main() -> int:
             if args.only in (None, "stale_index"): results.append(check_stale_index(client, counts))
     if args.only in (None, "awal"):        results.append(check_awal(client))
     if args.only in (None, "unverified_kill"): results.append(check_unverified_inactivations(client))
+    if args.only in (None, "aqar_licence_price"): results.append(check_aqar_price_not_licence(client))
     if args.only is None:                  results.append(check_agent(client))
     return 0 if all(results) else 1
 
