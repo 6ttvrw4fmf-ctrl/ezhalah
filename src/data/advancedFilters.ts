@@ -111,6 +111,16 @@ function isAnnualRentApartment(q: SearchQuery): boolean {
     && q.category === 'Residential' && q.deal === 'Rent' && q.rentPeriod !== 'monthly';
 }
 
+// Amenities + bathrooms also apply to BUY apartments (owner follow-up 2026-07-27) — same single-Apartment
+// Residential scope, on Annual Rent OR Buy (NOT monthly short-stay, which carries no structured attributes).
+// RNPL stays Rent-only, and Furnished stays Rent-only (Buy furnished ≈2%; owner: no Furnished on Buy) —
+// enforced in AMENITIES_QUESTION.resolveOptions, not here.
+function isApartmentAttributeScope(q: SearchQuery): boolean {
+  const types = effectiveTypes(q);
+  if (!(types.length === 1 && types[0] === 'Apartment' && q.category === 'Residential')) return false;
+  return q.deal === 'Buy' || (q.deal === 'Rent' && q.rentPeriod !== 'monthly');
+}
+
 // Merge picked strict amenity tokens (kitchen/parking/elevator/furnished/rnpl) into q.amenities.
 function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
   return keys.length ? { ...q, amenities: [...new Set([...(q.amenities ?? []), ...keys])] } : q;
@@ -148,14 +158,16 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
   titleKey: 'What amenities matter to you?',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
-  eligibility: isAnnualRentApartment,
+  eligibility: isApartmentAttributeScope,
   async resolveOptions(q) {
-    return guidedOptions(await fetchApartmentGuidedCounts(q), [
-      { key: 'kitchen',   labelKey: 'Kitchen',   count: (c) => c.cnt_kitchen },
-      { key: 'parking',   labelKey: 'Parking',   count: (c) => c.cnt_parking },
-      { key: 'elevator',  labelKey: 'Elevator',  count: (c) => c.cnt_elevator },
-      { key: 'furnished', labelKey: 'Furnished', count: (c) => c.cnt_furnished },
-    ]);
+    const defs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
+      { key: 'kitchen',  labelKey: 'Kitchen',  count: (c) => c.cnt_kitchen },
+      { key: 'parking',  labelKey: 'Parking',  count: (c) => c.cnt_parking },
+      { key: 'elevator', labelKey: 'Elevator', count: (c) => c.cnt_elevator },
+    ];
+    // Furnished chip: Annual Rent only (Buy furnished ≈2%; owner: no Furnished filter on Buy).
+    if (isAnnualRentApartment(q)) defs.push({ key: 'furnished', labelKey: 'Furnished', count: (c) => c.cnt_furnished });
+    return guidedOptions(await fetchApartmentGuidedCounts(q), defs);
   },
   apply: addAmenities,
 };
@@ -165,7 +177,7 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
   id: 'bathrooms',
   titleKey: 'How many bathrooms?',
   selection: 'single',
-  eligibility: isAnnualRentApartment,
+  eligibility: isApartmentAttributeScope,
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
       { key: '1', labelKey: '1+', count: (c) => c.cnt_bath1 },

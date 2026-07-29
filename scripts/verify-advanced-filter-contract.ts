@@ -44,8 +44,14 @@ check("age's eligibility lives in its own config, and agent.tsx no longer holds 
 check('one shared per-option floor (MIN_REAL_OPTION_COUNT via meaningful()); the >0-chips vs >=5-buckets split is banned',
   /MIN_REAL_OPTION_COUNT/.test(advSrc) && /function meaningful/.test(advSrc)
   && !/MIN_REAL_BUCKET_COUNT/.test(advSrc) && !/\.count\(counts\)\s*>\s*0/.test(advSrc));
-check('the three annual questions gate on isAnnualRentApartment',
-  (advSrc.match(/eligibility:\s*isAnnualRentApartment/g) || []).length >= 3);
+// RNPL is a rent concept → rent-only. Amenities + bathrooms are physical attributes → they extend to
+// BUY apartments too (owner follow-up 2026-07-27), via isApartmentAttributeScope (deal Buy OR annual Rent).
+check('RNPL gates rent-only (isAnnualRentApartment); amenities + bathrooms extend to Buy (isApartmentAttributeScope)',
+  /RNPL_QUESTION[\s\S]{0,400}eligibility:\s*isAnnualRentApartment/.test(advSrc)
+  && (advSrc.match(/eligibility:\s*isApartmentAttributeScope/g) || []).length >= 2
+  && /function isApartmentAttributeScope[\s\S]{0,400}q\.deal\s*===\s*'Buy'[\s\S]{0,120}q\.deal\s*===\s*'Rent'/.test(advSrc));
+check('Furnished chip stays Rent-only — never offered on Buy (owner: Buy furnished ≈2%)',
+  /isAnnualRentApartment\(q\)\)\s*defs\.push\(\{\s*key:\s*'furnished'/.test(advSrc));
 
 // ── ONE card, no per-question branching, tokens only ─────────────────────────────────────────────
 check('the card branches on selection ONLY — never on a question id',
