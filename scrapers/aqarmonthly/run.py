@@ -185,7 +185,10 @@ def map_listing(g: dict, price: dict) -> dict | None:
         "ad_number":        f"AQM{g['id']}",
         "listing_url":      f"https://sa.aqar.fm/{uri}",
         "active":           True,
-        "property_type":    CATEGORY_TYPE.get(g.get("category"), "Apartment"),
+        # An UNKNOWN category id must not default to Apartment (that fabricates a type). None →
+        # normalize maps it to the honest «غير معروف» sentinel and the novel-type alarm quarantines
+        # the new id for review. (audit item 7, owner rule 2026-07-27.)
+        "property_type":    CATEGORY_TYPE.get(g.get("category")),
         "transaction_type": "Rent",
         "rent_period":      "monthly",
         "source":           "Aqar Monthly",

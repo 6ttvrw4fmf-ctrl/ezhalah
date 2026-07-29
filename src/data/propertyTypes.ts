@@ -240,6 +240,10 @@ CLEAN_TO_QUERY['Service Facilities'] = {
 export const EN_TO_AR: Record<string, string> = {
   'Agriculture Plot': 'أرض زراعية', 'Apartment': 'شقة', 'Bank': 'بنك', 'Building': 'عمارة', 'Camp': 'مخيم',
   'Chalet': 'شاليه', 'Cinema': 'سينما', 'Commercial Building': 'مبنى تجاري', 'Commercial Land': 'أرض تجارية',
+  // 'Compound' (2026-07-28): aqargate/run.py translates the source's «مجمع» to English before storing, so
+  // without a reverse entry sync_search_listings_ar's Latin-guard replaced a REAL source type with the
+  // «غير معروف» sentinel. Adds no new vocabulary — 'مجمع' is already a Residential Building rawType above.
+  'Compound': 'مجمع',
   'Duplex': 'دوبلكس', 'Factory': 'مصنع', 'Farm': 'مزرعة', 'Floor': 'دور', 'Gas Station': 'محطة وقود', 'Hall': 'صالة',
   'Health Center': 'مركز صحي', 'Hotel': 'فندق', 'House': 'بيت', 'Industrial Land': 'أرض صناعية', 'Kiosk': 'كشك',
   'Land': 'أرض', 'Office': 'مكتب', 'Palace': 'فيلا', 'Parking': 'مواقف', 'Residential Building': 'عمارة سكنية',

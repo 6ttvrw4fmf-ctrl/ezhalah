@@ -119,12 +119,17 @@ function checkSnapshot(rev: Map<string, string[]>): void {
   }
   const seed = parseSeedPairs(readFileSync(KNOWN_TYPE_AR_SEED, 'utf8'));
   const problems: string[] = [];
+  // The honest-unknown sentinel is a canon row the reverse map never derives (it's not a clean-type
+  // emission). The seed MUST carry it — the seed TRUNCATEs on re-apply, and dropping the sentinel
+  // would orphan every «غير معروف» row into a vocabulary violation. (audit item 6, 2026-07-27.)
+  if (seed.get('غير معروف') !== 'both') problems.push(`sentinel missing/wrong: «غير معروف» must be ('both') in the seed`);
   for (const [label, cleans] of rev) {
     const want = macroFor(cleans);
     if (!seed.has(label)) problems.push(`+ map added, snapshot missing: «${label}»`);
     else if (seed.get(label) !== want) problems.push(`≠ macro drift: «${label}» snapshot=${seed.get(label)} map=${want}`);
   }
-  for (const label of seed.keys()) if (!rev.has(label)) problems.push(`- map dropped, snapshot stale: «${label}»`);
+  for (const label of seed.keys())
+    if (!rev.has(label) && label !== 'غير معروف') problems.push(`- map dropped, snapshot stale: «${label}»`);
   if (problems.length)
     bad(`sql/known_type_ar.generated.sql out of sync with propertyTypes.ts (DB allowlist would drift):\n   ` +
       problems.join('\n   ') + `\n   FIX: run \`npm run verify:emit-sql\`, commit, and re-apply to the DB.`);

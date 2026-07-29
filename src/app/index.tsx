@@ -256,6 +256,9 @@ export default function Home() {
     if (Platform.OS === 'web' && node?.style) node.style.scrollMarginTop = `${SCROLL_REVEAL_OFFSET}px`;
   };
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Monthly↔Yearly flip cleared typed price bounds (unit changed) — drives the one-line explanation
+  // under the period toggle; hides itself once the user types a new price. (audit item 3.)
+  const [periodPriceCleared, setPeriodPriceCleared] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   // Share button press feel — reuses ModeSwitch's own spring constants (stiffness 260, damping 26,
   // mass 0.7) so the header's two controls share one motion language (design review 2026-07-24).
@@ -610,11 +613,27 @@ export default function Home() {
                   options={['Monthly', 'Yearly']}
                   icons={PERIOD_IMG}
                   value={rentPeriod === 'monthly' ? 'Monthly' : 'Yearly'}
-                  onChange={(v) => setQuery((q) => ({ ...q, rentPeriod: v === 'Monthly' ? 'monthly' : 'annual' }))}
+                  onChange={(v) => {
+                    const next = v === 'Monthly' ? 'monthly' : 'annual';
+                    // Monthly↔Yearly inverts what a typed price MEANS (3,000/شهري ≠ 3,000/سنوي).
+                    // Same rule as the Buy↔Rent toggle above: never silently keep bounds whose unit
+                    // just changed — clear them and say why. (audit item 3, owner rule 2026-07-27.)
+                    setQuery((q) => {
+                      if ((q.rentPeriod ?? 'annual') === next) return q;
+                      const hadPrice = !!(q.priceMin || q.priceMax || q.priceInput || q.priceBand);
+                      setPeriodPriceCleared(hadPrice);
+                      return hadPrice
+                        ? { ...q, rentPeriod: next, priceMin: null, priceMax: null, priceInput: '', priceBand: null }
+                        : { ...q, rentPeriod: next };
+                    });
+                  }}
                 />
                 <Text style={s.rentHint}>
                   {t(rentPeriod === 'monthly' ? 'Monthly: 1–11 month lease, price/month.' : 'Annual: 12-month lease, price/year.')}
                 </Text>
+                {periodPriceCleared && !query.priceMin && !query.priceMax && !query.priceInput ? (
+                  <Text style={[s.rangeNote, s.rangeNoteWarn]}>{t('Price limits were cleared because the price unit changed (monthly ↔ yearly) — please re-enter them.')}</Text>
+                ) : null}
               </Reveal>
             )}
 
