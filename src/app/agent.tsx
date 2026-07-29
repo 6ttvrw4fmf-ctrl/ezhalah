@@ -896,10 +896,12 @@ export default function Agent() {
     if (q && ageFlowChangedRef.current) void runRefine(q, '__guided__', '', ageFlowLabelsRef.current.join('، '));
   };
 
-  // Entry point for «خلّنا نحدد الطلب أكثر». Build the PLAN once — the eligible questions whose initial
-  // options clear the floor — so the progress bar reflects reality, then present them select-then-confirm.
-  // Nothing qualifies → fall through to the pre-existing refine chips so the tap is never a no-op.
-  const startAgeFlow = async (q: SearchQuery) => {
+  // Entry point for «خلّنا نحدد الطلب أكثر» (and the auto-open after an eligible Filter search). Build
+  // the PLAN once — the eligible questions whose initial options clear the floor — so the progress bar
+  // reflects reality, then present them select-then-confirm. Nothing qualifies → fall through to the
+  // pre-existing refine chips so a manual TAP is never a no-op. The AUTO path passes fallbackToRefine=
+  // false: a filter user didn't ask to narrow, so an empty plan must close silently, never pop a chip.
+  const startAgeFlow = async (q: SearchQuery, fallbackToRefine = true) => {
     const token = ++ageFlowTokenRef.current;
     ageFlowQueryRef.current = q;
     ageFlowChangedRef.current = false;
@@ -912,7 +914,7 @@ export default function Agent() {
     ageFlowPlanRef.current = eligible
       .map((question, i) => ({ question, options: probes[i].options, unknownCount: probes[i].unknownCount }))
       .filter((p) => p.options.length >= minOptionsFor(p.question.selection));
-    if (!ageFlowPlanRef.current.length) { setAgeFlow(null); startRefine(q); return; }
+    if (!ageFlowPlanRef.current.length) { setAgeFlow(null); if (fallbackToRefine) startRefine(q); return; }
     void presentGuided(0, token);
   };
 
@@ -1175,6 +1177,13 @@ export default function Agent() {
         if (run.cancelled) return;
         await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
         if (run.cancelled) return;
+        // A تصفية (Filter) search hands off to this results view, where the advanced questions are only
+        // reachable via the «خلّنا نحدد الطلب أكثر» button buried under the cards — so a filter user of an
+        // annual-rent apartment scope never finds them. Auto-open the SAME shared guided flow once results
+        // are on screen (owner 2026-07-28). Eligible scopes only, fully skippable/closable, and NO
+        // refine-chip fallback — the filter user didn't ask to narrow, so an empty plan closes silently.
+        const guidedQ = result.query ?? pending.q;
+        if (anyGuidedEligible(guidedQ)) void startAgeFlow(guidedQ, false);
         void promptSignupSoon(run); // guest used their free search (filter) → prompt sign-up
       } catch {
         if (!run.cancelled) {
