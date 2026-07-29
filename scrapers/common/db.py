@@ -194,6 +194,19 @@ def _sanitize_ints(r: dict[str, Any]) -> None:
             if isinstance(v, int) and not (0 <= v <= hi):
                 r[c] = None  # overflow OR negative — both impossible for a count/area/price
 
+    # area plausibility (2026-07-29): a fourth failure mode alongside overflow/negative/bad-cast above —
+    # a value that fits the column fine but is still physically impossible for a single unit. Real
+    # incident: DealApp's _spec_value() label-scanner can match a share-preview <meta> blurb where the
+    # area and price text sit on one line with no HTML tag between them, and the digit-stripping step
+    # fuses them into one number (e.g. area "162" + price "620,000" -> area_m2=162620000). No Saudi
+    # residential unit (including land) is 1,000,000+ m² (100 ha); NULL it — the listing's other fields
+    # (price, location, …) are unaffected and still correct, so hiding the whole row would be wrong here
+    # (contrast _sanitize_price below, which hides the row because the SOURCE page shows the same bogus
+    # price — this is different: the source page is fine, only our own extraction fused two fields).
+    area = r.get("area_m2")
+    if isinstance(area, int) and area > 1_000_000:
+        r["area_m2"] = None
+
 
 def _sanitize_price(r: dict[str, Any]) -> None:
     """HIDE listings whose price is a clear advertiser typo — total > 1B SAR, per-meter > 300k SAR/m²,

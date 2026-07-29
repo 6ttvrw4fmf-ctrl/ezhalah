@@ -289,7 +289,16 @@ def _breadcrumb_city_ar(schema: dict) -> Optional[str]:
 
 def _spec_value(html: str, label: str) -> Optional[str]:
     """Value rendered next to a visible spec label (المساحة / عدد الغرف / …). Window-scan + strip
-    tags, take the first short non-markup segment after the label."""
+    tags, take the first short non-markup segment after the label.
+
+    Only searches past `</head>`: the site's OpenGraph/Twitter share-preview <meta> tags embed a
+    compact blurb like "...المساحة / 162م\\n💰السعر / 620،000﷼..." with BOTH the area and price on
+    one line and no HTML tag between them. The tag-based segment splitter below never fires on that
+    (only a newline separates them), so the whole blob came back as one "value" and _num()'s
+    digit-stripping fused "162" + "620,000" into area_m2=162620000 (confirmed live, 2026-07-29:
+    id 956972/2295991/1846258/1274844). The real spec table only ever renders in <body>."""
+    body_start = html.find("</head>")
+    html = html[body_start:] if body_start != -1 else html
     for m in re.finditer(re.escape(label), html):
         win = html[m.end():m.end() + 400]
         txt = re.sub(r"<[^>]+>", " | ", win)
