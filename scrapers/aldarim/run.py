@@ -22,6 +22,7 @@ import argparse
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -111,6 +112,35 @@ def _name(v: Any) -> Optional[str]:
 # (None/""/0/"0" → None, int(float(v)) otherwise), so future numeric fixes land once, not thrice.
 # normalize.to_int() would NOT be behaviour-identical on these API shapes (see its docstring).
 _int = normalize.to_int_numeric
+
+
+# Ageless types never carry a property_age even when the seller typed one (mizlaj PR#265 precedent).
+AGELESS_TYPES = {"Residential Land", "Commercial Land", "Gas Station"}
+
+
+def _age_from_year_built(v) -> Optional[int]:
+    """aldarim's `year_built` → an exact age in years, or None.
+
+    The API field is seller FREE-ENTRY that aldarim.sa renders as «العمر» (Age) — live-verified
+    2026-07-30 (/en/properties/43143 shows «العمر:24 سنة» for year_built="24"). Shapes observed
+    across every active row:
+      * "0"            — the API's not-provided sentinel (133/167 rows; their live pages show no age
+                         at all) → None. The old `if L.get("year_built")` guard let the truthy STRING
+                         "0" through and fabricated property_age=0 («جديد») for all of them.
+      * "2000".."2026" — a build year → age = scrape-year − year (a next-year build floors to 0:
+                         new/under construction).
+      * "1" / "24"     — an age typed directly (not a plausible year) → the shared bounds gate.
+    Anything else (e.g. "500") is unknowable → None, never a guess."""
+    try:
+        n = int(str(v).strip())
+    except (TypeError, ValueError):
+        return None
+    if n <= 0:
+        return None
+    year_now = datetime.now(timezone.utc).year
+    if 1900 <= n <= year_now + 2:
+        return max(0, year_now - n)
+    return normalize.parse_property_age(n)
 
 
 def _photos(L: dict) -> list[str]:
@@ -212,7 +242,8 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "neighborhood": (_name(L.get("district")) or "").replace(" Dist.", "").strip() or None,
         "title": L.get("name_en") or L.get("name_ar"),
         "photo_urls": _photos(L),
-        "property_age": str(L.get("year_built")) if L.get("year_built") else None,
+        "property_age": None if property_type in AGELESS_TYPES
+                        else _age_from_year_built(L.get("year_built")),
         "rega_location_verified": bool(L.get("rega_ad_number")),
         "additional_info": _additional_info(L),
         # Feature-grid booleans the card renders with icons — mapped from Aldarim's flags/counts so the
