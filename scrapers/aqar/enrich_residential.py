@@ -245,13 +245,19 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # the installment already has its own home in rent_now_pay_later_monthly).
     price_text = text.split(_AGE_BLOCK_ANCHOR, 1)[0] if _AGE_BLOCK_ANCHOR in text else text
     price_text = re.sub(r"ابتداء\S*\s*من\s*\d[\d,]*\s*[§ر﷼]?\s*شهري\w*", " ", price_text)
+    # RNPL pages sell an ANNUAL lease paid in monthly installments — any «N شهري» figure there is the
+    # installment, never the listing's rent period. The teaser-strip above only catches the «ابتداءً
+    # من» form; this flag guards installment lines printed WITHOUT that prefix, which used to classify
+    # the listing as monthly with price_annual = installment×12 (8 legacy rows; bug-hunt 2026-07-30).
+    # `/rnpl/` is the bulletproof signal (Aqar embeds it only when financing is enabled).
+    is_rnpl_page = "/rnpl/" in html
 
     mp_yr = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*سنوي", price_text)
     if mp_yr:
         price_annual = N.to_int(mp_yr.group(1))
 
     mp_mo = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*شهري", price_text)
-    if not price_annual and mp_mo:
+    if not price_annual and mp_mo and not is_rnpl_page:
         # No yearly price, but a "/شهري" figure → this is a genuinely MONTHLY rental. Tag it and store
         # the annualized figure too (monthly × 12) so sorting/compare still works. The app divides it
         # back by 12 for the monthly display.

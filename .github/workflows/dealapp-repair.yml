@@ -1,0 +1,50 @@
+# Deal App legacy fidelity repair — re-fetches candidate ads (pre-2026-07-14 rows + x100-price /
+# concatenated-area signatures) and re-parses them with the CURRENT production parser, so the two
+# legacy corruption classes (decimal-stripped x100 prices, description digit-concat areas) are
+# replaced by the live source values. Fidelity-safe: values come only from the live page; no local
+# arithmetic. See scrapers/dealapp/repair.py header (bug-hunt 2026-07-30).
+#
+# MANUAL DISPATCH ONLY — a one-shot repair, not a recurring job.
+
+name: Dealapp repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Cap candidates per table (0 = all)"
+        default: "0"
+      dry_run:
+        description: "true = fetch+parse+report only, write nothing"
+        default: "false"
+
+concurrency:
+  group: dealapp-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: Re-fetch + re-parse legacy dealapp rows
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+
+      - name: Repair sweep
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python -m scrapers.dealapp.repair \
+            --limit ${{ github.event.inputs.limit || '0' }} \
+            --workers 6 \
+            $([ "${{ github.event.inputs.dry_run }}" = "true" ] && echo --dry-run)
