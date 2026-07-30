@@ -370,6 +370,15 @@ function rpcFilterParams(q: SearchQuery) {
     ...(RPC_SORT_KEYS.has(q.sort as string) ? { p_sort_by: q.sort } : {}),
   };
 }
+
+// Filter params for the COUNT RPCs (property_age_option_counts_ar / apartment_guided_counts_ar).
+// Neither accepts p_sort_by — counts have no ordering — and PostgREST resolves named-param RPC calls
+// by EXACT parameter-name match, so leaking it made BOTH counts calls 404 (PGRST202) the moment the
+// user had an explicit sort active, silently killing the whole guided flow (bug-hunt 2026-07-30).
+function rpcCountFilterParams(q: SearchQuery) {
+  const { p_sort_by: _drop, ...rest } = rpcFilterParams(q) as ReturnType<typeof rpcFilterParams> & { p_sort_by?: string };
+  return rest;
+}
 const RPC_SORT_KEYS = new Set(['oldest', 'price_asc', 'price_desc', 'area_asc', 'area_desc', 'beds_desc']);
 
 export type SearchScope = {
@@ -549,7 +558,7 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
   const result = await withTimeout(
     supabase.rpc('property_age_option_counts_ar', {
       ...scopeParams,
-      ...rpcFilterParams(q),
+      ...rpcCountFilterParams(q),
       ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
       // Carry forward any earlier-answered guided-flow question (e.g. RNPL) — found live 2026-07-24:
       // without this, the age-bucket badges shown here silently ignored an already-selected amenities
@@ -598,7 +607,7 @@ export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<Guided
   const result = await withTimeout(
     supabase.rpc('apartment_guided_counts_ar', {
       ...scopeParams,
-      ...rpcFilterParams(q),
+      ...rpcCountFilterParams(q),
       ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
       ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
       ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),

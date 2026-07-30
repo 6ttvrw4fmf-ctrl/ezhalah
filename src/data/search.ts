@@ -729,6 +729,25 @@ function withinValue(price: string, min: number, max: number): boolean {
   return !Number.isNaN(v) && v >= min && v <= max;
 }
 
+// TRUE when this query carries a filter that only THIS engine applies (the RPC never sees it), so the
+// RPC's count(*) over() OVERSTATES the real result set and the exact «لقينا N إعلان» headline would
+// lie (bug-hunt 2026-07-30: 9,647 claimed vs 134 actual on a per-m² Buy budget). The three client-only
+// narrowers, mirroring their own gates above/below verbatim:
+//   • per-m² Buy budget — single priceInput ≤50k on Buy is read as SAR/m² (priceFilter);
+//   • legacy exact-size band ±15% — contextSize / non-bedroom detail without explicit areaMin/Max;
+//   • agent keywords — substring-matched over title/description here only.
+export function hasClientOnlyNarrowing(q: SearchQuery): boolean {
+  if (q.keywords && q.keywords.length) return true;
+  if (numOrNull(q.areaMin) == null && numOrNull(q.areaMax) == null
+      && (q.contextSize || (q.detail && !bedroomSpec(q)))) return true;
+  if (q.deal === 'Buy' && numOrNull(q.priceMin) == null && numOrNull(q.priceMax) == null && !q.priceBand) {
+    const digits = (q.priceInput.match(/\d/g) ?? []).join('');
+    const amount = digits ? parseInt(digits, 10) : 0;
+    if (amount >= 100 && amount <= 50_000) return true;
+  }
+  return false;
+}
+
 // Parse a detail value into an area range in m² — or null when it's a bedroom count (not a size).
 // A size BAND ("Under 300 m²", "300–600 m²", "1,000+ m²") → its explicit range; a single exact size
 // ("200", "139 m²") → ±15% tolerance, since exact areas are rarely available. (user request: filter
@@ -1231,7 +1250,11 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
   // (visitOffset advances per visit, persisted by the caller), rotate a 25-window over the TOP-quality
   // pool so a return visitor sees DIFFERENT high-quality listings — deterministic, never random, always
   // inside the same filters. First visit (offset 0) shows the top 25 as usual.
-  if (opts?.visitOffset && total > 25) {
+  // NEVER rotate an explicitly-sorted result set (bug-hunt 2026-07-30): sortListings just ordered the
+  // full set by the user's objective key (cheapest/newest/…), so a rotated window would show rank #26
+  // first under a «مرتبة حسب الأقل سعراً» note — a visible lie. Rotation is for the default relevance
+  // order only.
+  if (!q.sort && opts?.visitOffset && total > 25) {
     const POOL = Math.min(total, 100);
     const off = (opts.visitOffset * 25) % POOL;
     if (off > 0) listings = [...listings.slice(off, POOL), ...listings.slice(0, off), ...listings.slice(POOL)];

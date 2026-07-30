@@ -101,5 +101,15 @@ check('startAgeFlow takes a fallbackToRefine flag and only pops refine chips whe
 check('filter search auto-opens the guided flow for eligible scopes, WITHOUT the refine fallback',
   /if \(anyGuidedEligible\(guidedQ\)\) void startAgeFlow\(guidedQ, false\)/.test(agentSrc));
 
+// ── Count RPCs must never receive p_sort_by (bug-hunt 2026-07-30) ────────────────────────────────
+// PostgREST resolves RPCs by exact param-name match; leaking p_sort_by 404s BOTH counts calls the
+// moment a sort is active, silently killing the guided flow. The count call sites must spread the
+// sort-free helper, never rpcFilterParams directly.
+const remoteSrc = readFileSync(join(root, 'src/data/remote.ts'), 'utf8');
+check('both count RPCs spread rpcCountFilterParams (sort-free), never rpcFilterParams',
+  /property_age_option_counts_ar',\s*\{\s*\.\.\.scopeParams,\s*\.\.\.rpcCountFilterParams\(q\)/.test(remoteSrc)
+  && /apartment_guided_counts_ar',\s*\{\s*\.\.\.scopeParams,\s*\.\.\.rpcCountFilterParams\(q\)/.test(remoteSrc)
+  && /const \{ p_sort_by: _drop, \.\.\.rest \}/.test(remoteSrc));
+
 console.log(failed === 0 ? '\n✓ all advanced-filter contract assertions passed' : `\n✗ ${failed} contract assertion(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

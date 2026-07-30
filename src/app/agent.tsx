@@ -36,7 +36,7 @@ import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { openListing } from '@/lib/openListing';
-import { filterToChat, searchSummary, effectiveTypes, type SearchQuery, type SearchResult } from '@/data/search';
+import { filterToChat, searchSummary, effectiveTypes, hasClientOnlyNarrowing, type SearchQuery, type SearchResult } from '@/data/search';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
@@ -1058,7 +1058,7 @@ export default function Agent() {
         beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
         const result = await runQuery(turn.query);
         const reply = forcedBroad
-          ? `${v === 'ar'
+          ? `${getLocale() !== 'en'
               ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
               : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query)}`
           : buildScrapeIntro(result.query ?? turn.query);
@@ -1475,7 +1475,8 @@ export default function Agent() {
                     // Safe/exact for the standard path; the priceIsAnnual edge makes the RPC skip the price cap
                     // (so the count would overstate) → fall back to the generic intro there. (owner: exact only if safe.)
                     const total = m.result.matchTotal ?? m.result.listings.length;
-                    const countSafe = !m.result.query?.priceIsAnnual && total > 0;
+                    const countSafe = !m.result.query?.priceIsAnnual && total > 0
+                      && !(m.result.query && hasClientOnlyNarrowing(m.result.query));
                     const txt = zeroResult
                       ? (m.result.suggestion ?? t('No exact matches — try broadening your search.'))
                       : countSafe
