@@ -480,15 +480,14 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     # price-less card (5 live rows, 2026-07-26). (aqar PR#216, scrapers PR#217.)
     price_per_meter = round(ppm) if ppm else None
 
-    # Advertiser data-entry errors on Deal App produce billion-riyal prices (e.g. a land ad with
-    # سعر المتر = 800,000 ﷼/m² × 57,500 m² = 46,000,000,000). A per-meter price above 300k SAR/m² or a
-    # total above 1B is not a real market price. We HIDE these (active=False below) rather than show a
-    # priceless card — the dealapp.sa page still shows the bogus number, so a "Price on request" card
-    # would contradict the page. Hiding keeps card price === the price the user sees after clicking.
-    price_bad = bool((price_per_meter and price_per_meter > 300_000) or (price and price > 1_000_000_000))
-    if price_bad:
-        price = None
-        price_per_meter = None
+    # OWNER RULE (2026-07-30, extreme-price verify-then-preserve — resolves the old price_bad
+    # pending decision): an unrealistic-looking price is NEVER invalid by assumption. These values
+    # come verbatim from the source payload (offers.price / سعر المتر) — dealapp itself publishes
+    # them (verified live: ad 548642 carries "price": 3550000000 with سعر المتر 100,000 ﷼/m²).
+    # Preserve them EXACTLY and keep the listing active; do not cap, null, hide, or deactivate.
+    # Only a PROVEN pipeline-introduced error (misplaced decimal, duplicated digits, phone/licence
+    # captured as price, unit conversion) may be repaired — none applies here.
+    # (The old plausibility hide also caused a daily flap: crawl hid → 05:20 sweep resurrected.)
 
     # ── location: breadcrumb Arabic city is the best map_city input; addressRegion is the DISTRICT ──
     city_ar = _breadcrumb_city_ar(schema)
@@ -510,12 +509,8 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     head = html[: html.find("real-estate")] if "real-estate" in html else ""
     if "تم البيع" in head or "تم التأجير" in head:
         sold = True
-    active = not sold and not price_bad
-    # Only `sold` (source-confirmed gone) is returned for the post-upsert inactive PIN in main —
-    # a row that is BOTH sold and price_bad is still pinned (sold wins: the listing is gone
-    # regardless of its price). price_bad-ONLY hides are deliberately NOT pinned: the price-hiding
-    # semantics are under a separate pending owner decision (price-fidelity rule), so they keep
-    # today's status quo — active=False now, resurrected by the 05:20 auto-recover sweep tomorrow.
+    active = not sold
+    # Only `sold` (source-confirmed gone) is returned for the post-upsert inactive PIN in main.
 
     # ── geo / REGA / facade etc → additional_info ──
     lat = geo.get("latitude")
@@ -586,8 +581,9 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     sold THIS crawl.
 
     Deal App scope: only *sold* ids (SoldOut/OutOfStock availability or a تم البيع/تم التأجير
-    badge) are pinned. price_bad-only hides are NOT pinned (pending owner decision on the
-    price-fidelity rule) — see the comment at the sold/price_bad computation in map_listing."""
+    badge) are pinned. (The old price_bad hide was removed 2026-07-30 per the owner's
+    extreme-price verify-then-preserve rule — source-published prices are stored exactly and
+    the listing stays active; see the price section in map_listing.)"""
     for i in range(0, len(ad_numbers), 200):
         db._execute(
             db.sb().table(table).update({"active": False, "missing_count": 3})
