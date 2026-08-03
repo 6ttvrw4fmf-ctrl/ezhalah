@@ -287,18 +287,31 @@ def _breadcrumb_city_ar(schema: dict) -> Optional[str]:
     return None
 
 
+def _breadcrumb_district_ar(schema: dict, city_ar: Optional[str]) -> Optional[str]:
+    """The listing's OWN title (schema breadcrumb position 3) is "<type/deal> - <district_ar> - <city_ar>",
+    e.g. "شقة للإيجار - الراشدية - مكة المكرمة" — the middle segment is dealapp's own ARABIC district for
+    THIS listing, and it agrees with the (English) schema addressRegion, just in Arabic. We take THIS.
+    NOT schema.org address.addressRegion (English, and frequently the wrong "Riyadh" default). NOT the page's
+    `.location` element either — verified unreliable (it can name a different/adjacent district than the
+    listing's own title, e.g. .location='حي الشرائع' on a listing titled 'الراشدية'). Returns the Arabic
+    district verbatim, or None → honest «الحي غير محدد». Never English.
+    (feedback_english-district-to-arabic-mapping-standard)"""
+    city = (city_ar or "").strip()
+    bc = schema.get("_breadcrumb") or {}
+    for it in (bc.get("itemListElement") or []):
+        if it.get("position") == 3:
+            title = (it.get("name") or "").strip()
+            parts = [p.strip() for p in re.split(r"\s+[-–]\s+", title) if p.strip()]
+            if len(parts) >= 3:                     # "<type/deal> - <district> - <city>"
+                cand = parts[1]                     # the middle segment is the district
+                if re.search(r"[ء-ي]", cand) and cand != city:
+                    return cand
+    return None
+
+
 def _spec_value(html: str, label: str) -> Optional[str]:
     """Value rendered next to a visible spec label (المساحة / عدد الغرف / …). Window-scan + strip
-    tags, take the first short non-markup segment after the label.
-
-    Only searches past `</head>`: the site's OpenGraph/Twitter share-preview <meta> tags embed a
-    compact blurb like "...المساحة / 162م\\n💰السعر / 620،000﷼..." with BOTH the area and price on
-    one line and no HTML tag between them. The tag-based segment splitter below never fires on that
-    (only a newline separates them), so the whole blob came back as one "value" and _num()'s
-    digit-stripping fused "162" + "620,000" into area_m2=162620000 (confirmed live, 2026-07-29:
-    id 956972/2295991/1846258/1274844). The real spec table only ever renders in <body>."""
-    body_start = html.find("</head>")
-    html = html[body_start:] if body_start != -1 else html
+    tags, take the first short non-markup segment after the label."""
     for m in re.finditer(re.escape(label), html):
         win = html[m.end():m.end() + 400]
         txt = re.sub(r"<[^>]+>", " | ", win)
@@ -489,14 +502,15 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     # price-less card (5 live rows, 2026-07-26). (aqar PR#216, scrapers PR#217.)
     price_per_meter = round(ppm) if ppm else None
 
-    # OWNER RULE (2026-07-30, extreme-price verify-then-preserve — resolves the old price_bad
-    # pending decision): an unrealistic-looking price is NEVER invalid by assumption. These values
-    # come verbatim from the source payload (offers.price / سعر المتر) — dealapp itself publishes
-    # them (verified live: ad 548642 carries "price": 3550000000 with سعر المتر 100,000 ﷼/m²).
-    # Preserve them EXACTLY and keep the listing active; do not cap, null, hide, or deactivate.
-    # Only a PROVEN pipeline-introduced error (misplaced decimal, duplicated digits, phone/licence
-    # captured as price, unit conversion) may be repaired — none applies here.
-    # (The old plausibility hide also caused a daily flap: crawl hid → 05:20 sweep resurrected.)
+    # Advertiser data-entry errors on Deal App produce billion-riyal prices (e.g. a land ad with
+    # سعر المتر = 800,000 ﷼/m² × 57,500 m² = 46,000,000,000). A per-meter price above 300k SAR/m² or a
+    # total above 1B is not a real market price. We HIDE these (active=False below) rather than show a
+    # priceless card — the dealapp.sa page still shows the bogus number, so a "Price on request" card
+    # would contradict the page. Hiding keeps card price === the price the user sees after clicking.
+    price_bad = bool((price_per_meter and price_per_meter > 300_000) or (price and price > 1_000_000_000))
+    if price_bad:
+        price = None
+        price_per_meter = None
 
     # ── location: breadcrumb Arabic city is the best map_city input; addressRegion is the DISTRICT ──
     city_ar = _breadcrumb_city_ar(schema)
@@ -507,7 +521,11 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
         # last resort: try the English locality through the AR map (it won't match) — leave None
         city = None
     region = normalize.region_for_city(city)
-    district = (addr.get("addressRegion") or "").strip() or None
+    # District: the SOURCE's own Arabic from the page's .location line ("حي …"). We deliberately do NOT
+    # use schema.org address.addressRegion — it is English and frequently a wrong default ("Riyadh"),
+    # which was silently storing English/incorrect districts. No Arabic on the page → honest null.
+    # (feedback_english-district-to-arabic-mapping-standard: never show English; unsure → «الحي غير محدد».)
+    district = _breadcrumb_district_ar(schema, city_ar)
     postal = (addr.get("postalCode") or "").strip() or None
 
     # ── active / sold ──
@@ -518,8 +536,12 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     head = html[: html.find("real-estate")] if "real-estate" in html else ""
     if "تم البيع" in head or "تم التأجير" in head:
         sold = True
-    active = not sold
-    # Only `sold` (source-confirmed gone) is returned for the post-upsert inactive PIN in main.
+    active = not sold and not price_bad
+    # Only `sold` (source-confirmed gone) is returned for the post-upsert inactive PIN in main —
+    # a row that is BOTH sold and price_bad is still pinned (sold wins: the listing is gone
+    # regardless of its price). price_bad-ONLY hides are deliberately NOT pinned: the price-hiding
+    # semantics are under a separate pending owner decision (price-fidelity rule), so they keep
+    # today's status quo — active=False now, resurrected by the 05:20 auto-recover sweep tomorrow.
 
     # ── geo / REGA / facade etc → additional_info ──
     lat = geo.get("latitude")
@@ -590,9 +612,8 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     sold THIS crawl.
 
     Deal App scope: only *sold* ids (SoldOut/OutOfStock availability or a تم البيع/تم التأجير
-    badge) are pinned. (The old price_bad hide was removed 2026-07-30 per the owner's
-    extreme-price verify-then-preserve rule — source-published prices are stored exactly and
-    the listing stays active; see the price section in map_listing.)"""
+    badge) are pinned. price_bad-only hides are NOT pinned (pending owner decision on the
+    price-fidelity rule) — see the comment at the sold/price_bad computation in map_listing."""
     for i in range(0, len(ad_numbers), 200):
         db._execute(
             db.sb().table(table).update({"active": False, "missing_count": 3})
