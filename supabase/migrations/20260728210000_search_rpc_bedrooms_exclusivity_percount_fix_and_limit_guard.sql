@@ -39,20 +39,33 @@
 -- migration follows) — three needle-edits, fail-closed if any needle isn't found exactly the expected
 -- number of times, identical 35-arg signature so no second overload is created and no GRANT reissue is
 -- needed (grants persist across a same-signature CREATE OR REPLACE).
+--
+-- CORRECTED 2026-08-03 (before this migration was ever applied — caught in review, never deployed):
+-- the original needle_beds/replacement_beds here were parenthesis-unbalanced. needle_beds consumed
+-- the outer wrapping ")" of the `and ( (A) or (B) or (C) )` clause (i.e. matched through BOTH the
+-- C-arm's own close AND the wrapper's close), while replacement_beds re-wrapped the new CASE in its
+-- own fresh, self-contained parens — so the literal `and (` immediately preceding the needle, which
+-- was relying on the needle's trailing paren to close it, was left permanently unclosed. Reproduced
+-- live in a pg_temp sandbox (read-only, no data touched) with the original literals:
+-- `ERROR 42601: syntax error at or near "select"` on execute — this migration, applied as originally
+-- written, would have hard-failed and left location_search_candidates_ar undefined. Fixed the same way
+-- as the identical pattern in the two counts RPCs (20260803160000_counts_rpc_beds_priority_case_
+-- hardening.sql, applied AFTER this bug was found here — see that file's own note): needle now stops
+-- at the single close of the C arm (self-balanced with the preceding `and (`), and the replacement is
+-- a bare `case … end` with no wrapping parens of its own, relying on the untouched `and ( … )` wrapper
+-- to close it. Re-validated in a pg_temp sandbox after the fix — compiles clean.
 do $rpcfix$
 declare
   v_src text;
   v_new text;
   needle_beds text := '(coalesce(cardinality(p_beds_exact), 0) = 0 and p_beds_min is null)
            or (coalesce(cardinality(p_beds_exact), 0) > 0 and s.bedrooms = any(p_beds_exact))
-           or (p_beds_min   is not null and s.bedrooms >= p_beds_min))';
-  replacement_beds text := '(
-             case
+           or (p_beds_min   is not null and s.bedrooms >= p_beds_min)';
+  replacement_beds text := 'case
                when coalesce(cardinality(p_beds_exact), 0) > 0 then s.bedrooms = any(p_beds_exact)
                when p_beds_min is not null then s.bedrooms >= p_beds_min
                else true
-             end
-           )';
+             end';
   needle_count_inner text := 'm.effective_price, m.area_m2, m.bedrooms,
                row_number() over (';
   replacement_count_inner text := 'm.effective_price, m.area_m2, m.bedrooms,
