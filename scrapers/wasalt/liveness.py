@@ -139,14 +139,17 @@ def get_verdict(url: str, tries: int = 3):
 
 
 def check_hybrid(row):
-    """ENFORCE worker: (tbl, id, url, cur_missing) -> (tbl, id, cur_missing, verdict, used_get, nbytes).
-    HEAD 200 short-circuits to 'live' with NO GET; anything else escalates to a GET-confirm."""
+    """ENFORCE worker: (tbl, id, url, cur_missing) ->
+    (tbl, id, cur_missing, verdict, used_get, nbytes, head_code, get_code).
+    HEAD 200 short-circuits to 'live' with NO GET; anything else escalates to a GET-confirm.
+    head_code/get_code are carried out (not just the verdict) so a kill can be re-checked later from
+    the status that actually caused it — 404 vs 200-without-propertyDetailsV3 are different evidence."""
     tbl, lid, url, cur = row
     hc = head_status(url)
     if hc == 200:
-        return (tbl, lid, cur, "live", False, 0)
-    verdict, _st, nbytes = get_verdict(url)
-    return (tbl, lid, cur, verdict, True, nbytes)
+        return (tbl, lid, cur, "live", False, 0, hc, None)
+    verdict, st, nbytes = get_verdict(url)
+    return (tbl, lid, cur, verdict, True, nbytes, hc, st)
 
 
 def check_one(row):
@@ -207,6 +210,25 @@ def sweep_rows(shards: int, shard: int, limit: int):
                 if url:
                     out.append((tbl, x["id"], url, int(x.get("missing_count") or 0)))
     return out[:limit] if limit else out
+
+
+def _flush_detail(rows: list[dict]) -> None:
+    """Per-row evidence for every listing the confirm step decided on, into the existing
+    `wasalt_liveness_pilot_detail` table (head/get status + verdict + bytes).
+
+    Why: enum-strike inactivates ~1.2-1.5k rows per run but used to persist only AGGREGATE counts in
+    `wasalt_liveness_runs`, so "was that kill correct?" could not be answered from our own data —
+    it needed an outside oracle (wasalt's sitemap) re-fetched by hand. One row per decision makes
+    every inactivation independently re-checkable afterwards.
+
+    Best-effort: an audit-log write must never fail or roll back a liveness run."""
+    for i in range(0, len(rows), 500):
+        try:
+            db._execute(db.sb().table("wasalt_liveness_pilot_detail").insert(rows[i:i + 500]),
+                        what="wasalt_liveness_pilot_detail.insert")
+        except Exception as exc:  # noqa: BLE001 — logging must not break the lifecycle
+            print(f"⚠ detail-log insert failed (non-fatal, {len(rows[i:i + 500])} rows): "
+                  f"{str(exc)[:160]}", flush=True)
 
 
 def _flush_alive(tbl: str, ids: list[int], now_iso: str) -> None:
@@ -285,7 +307,7 @@ def run_enforce(args) -> int:
     dead_rows: list[tuple[str, int, int]] = []  # (tbl, id, cur_missing) — confirmed dead this run
 
     with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
-        for tbl, lid, cur, verdict, used_get, nbytes in ex.map(check_hybrid, rows):
+        for tbl, lid, cur, verdict, used_get, nbytes, _hc, _gc in ex.map(check_hybrid, rows):
             checked += 1
             total_bytes += nbytes
             if verdict == "live":
@@ -357,6 +379,10 @@ def run_enforce(args) -> int:
 #     HEAD→GET-verified with the existing check_hybrid(). GET-confirmed dead → active=false
 #     (deactivated_at trigger starts the retention clock); confirmed live → missing_count=0 +
 #     last_seen refreshed (self-healing); transient/failed → untouched, no strike consumed.
+#   EVIDENCE: every confirm decision is written to `wasalt_liveness_pilot_detail` (listing, HEAD
+#     status, GET status, verdict, bytes) so any inactivation can be re-checked from our own data
+#     later. Aggregate counts alone can't answer "was that kill right?" — proving the 2026-08-02
+#     cohort needed wasalt's sitemap re-fetched by hand. Best-effort: a failed log never blocks a run.
 # GUARDS (all must pass before anything flips):
 #   • enum-coverage: strikes only run against a scrape_runs row with ok=true AND rows_seen ≥
 #     --enum-min-rows AND started within --enum-window-hours AND ≥ --coverage-frac × the median of
@@ -496,7 +522,7 @@ def run_enum_strike(args) -> int:
         # 3a) control first — if the checker can't see known-live rows as live, trust nothing.
         c_live = c_dead = c_failed = 0
         with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
-            for _tbl, _lid, _cur, verdict, _g, nbytes in ex.map(check_hybrid, control):
+            for _tbl, _lid, _cur, verdict, _g, nbytes, _hc, _gc in ex.map(check_hybrid, control):
                 total_bytes += nbytes
                 c_live += verdict == "live"; c_dead += verdict == "dead"; c_failed += verdict == "failed"
         if not control_ok(c_live, c_dead, c_failed, len(control), args.control_min_live):
@@ -509,16 +535,25 @@ def run_enum_strike(args) -> int:
             # 3b) verify the cohort; flip ONLY GET-confirmed dead. live → self-heal. failed → untouched.
             alive_ids: dict[str, list[int]] = {t: [] for t in TABLES}
             dead_ids: dict[str, list[int]] = {t: [] for t in TABLES}
+            detail: list[dict] = []
             with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
-                for tbl, lid, _cur, verdict, _g, nbytes in ex.map(check_hybrid, cohort):
+                for tbl, lid, _cur, verdict, used_get, nbytes, hc, gc in ex.map(check_hybrid, cohort):
                     checked += 1
                     total_bytes += nbytes
+                    detail.append({
+                        "tbl": tbl, "listing_id": lid, "head_status": hc, "get_status": gc,
+                        "get_verdict": verdict, "nbytes": nbytes,
+                        # Only meaningful when a GET actually ran: a HEAD-200 short-circuit never
+                        # looked at the body, so "was propertyDetailsV3 there?" is unknown, not False.
+                        "has_property_details": (verdict == "live") if used_get else None,
+                    })
                     if verdict == "live":
                         live += 1; alive_ids[tbl].append(lid)
                     elif verdict == "dead":
                         dead += 1; dead_ids[tbl].append(lid)
                     else:
                         failed += 1
+            _flush_detail(detail)   # evidence first: written even if a flip below fails
             for tbl, ids in alive_ids.items():
                 _flush_alive(tbl, ids, now_iso)          # missing_count=0 + fresh last_seen
             for tbl, ids in dead_ids.items():
