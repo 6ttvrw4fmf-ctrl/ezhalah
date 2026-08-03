@@ -12,9 +12,40 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from scrapers.aqarcity.run import map_listing as aqarcity_map  # noqa: E402
 from scrapers.aqargate.run import _price_int, _rent_annualize  # noqa: E402
 from scrapers.eaqartabuk.run import _price as eaqar_price  # noqa: E402
 from scrapers.sadin.run import _extract_price  # noqa: E402
+
+
+# Trimmed from the REAL aqarcity page /property/28170 (live 2026-08-03): JSON-LD offers.price
+# carries the per-metre rate (19.5) and the JSON-LD description TRUNCATES the annual figure
+# («الإيجار السنوي : 50…»), while the page displays the true annual in its price badge
+# (btnPriceHead «50,115») and the full description. The head's truncated copy appears FIRST in
+# document order — the exact shape that defeated a first-match parse on 14/18 live rows.
+AQARCITY_TRUNCATED_LD_PAGE = """
+<html><head>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Product",
+"name":"ارض للإيجار في النماص حي المنتزة الشمالي",
+"description":"أرض سكنية للإيجار على المدى الطويل الإيجار السنوي : 50… رخصة فال",
+"offers":{"@type":"Offer","priceCurrency":"SAR","price":19.5,
+"availability":"https://schema.org/InStock","url":"https://www.aqarcity.net/property/28170",
+"priceSpecification":{"@type":"UnitPriceSpecification","price":19.5,"priceCurrency":"SAR","unitText":"YEAR"}}}</script>
+<script type="application/ld+json">{"@type":"BreadcrumbList","itemListElement":[
+{"@type":"ListItem","position":1,"name":"الرئيسية"},
+{"@type":"ListItem","position":2,"name":"عسير"},
+{"@type":"ListItem","position":3,"name":"النماص"},
+{"@type":"ListItem","position":4,"name":"ارض"}]}</script>
+</head><body>
+<span class="w-auto btnPriceHead" >50,115  <span class="riyal-icon"></span></span>
+<p>مساحة الارض : 2570 م</p><p>الإيجار السنوي : 50,115 ريال</p>
+<div class="pi-item"><div class="pi-item__label"><i class="fas fa-dot-circle"></i>التصنيف </div>
+<div class="pi-item__value">ارض سكنية</div></div>
+<div class="pi-item"><div class="pi-item__label"><i class="fas fa-dot-circle"></i>مساحة العقار </div>
+<div class="pi-item__value">2570</div></div>
+<div class="pi-item"><div class="pi-item__label"><i class="fas fa-dot-circle"></i>اجمالي الايجار السنوي للأرض </div>
+<div class="pi-item__value">50115</div></div>
+</body></html>"""
 
 
 def test_aqargate_price_rounds_like_the_page_badge():
@@ -51,6 +82,17 @@ def test_eaqartabuk_two_figures_in_one_price_field_are_never_concatenated():
     assert eaqar_price("580", is_rent=False) == (580000, None, None)
     # A single decimal figure is ONE figure, not two (the dot must not split it).
     assert eaqar_price("150000.0", is_rent=False) == (150000, None, None)
+
+
+def test_aqarcity_land_rent_uses_the_displayed_annual_not_the_ld_per_meter():
+    # The badge/description show 50,115; JSON-LD offers.price is the 19.5 per-metre rate and the
+    # head's truncated description copy («50…») must NOT poison the candidate scan.
+    row, category = aqarcity_map(AQARCITY_TRUNCATED_LD_PAGE, "https://www.aqarcity.net/property/28170")
+    assert row is not None and category == "residential"
+    assert row["transaction_type"] == "Rent"
+    assert row["price_annual"] == 50115, row["price_annual"]
+    assert row["price_per_meter"] == 20  # the rounded per-metre rate, kept in its own column
+    assert row["price_total"] is None
 
 
 def test_sadin_lam_lam_meter_form_yields_the_displayed_total():

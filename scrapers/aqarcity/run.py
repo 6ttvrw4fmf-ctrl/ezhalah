@@ -491,19 +491,26 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
 
     # Land-rent JSON-LD trap (live 2026-08-03, 18 rows source-verified): for some rent ads the
     # JSON-LD offers.price carries the source's per-metre rate while the page itself displays the
-    # annual total in its own text («الإيجار السنوي : 50,115»). Store what the page displays;
-    # keep the per-metre rate in its own column. Applied ONLY on exact proof — the displayed
-    # figure ÷ area must re-produce offers.price under the same badge rounding, so a normal ad
-    # whose body merely repeats its (already-correct) price can never trip this.
+    # annual total (price badge «btnPriceHead», the pi-table «اجمالي الايجار السنوي», and the
+    # description «الإيجار السنوي : 50,115»). Store what the page displays; keep the per-metre
+    # rate in its own column. Applied ONLY on exact proof — the displayed figure ÷ area must
+    # re-produce offers.price under the same badge rounding, so a normal ad whose body merely
+    # repeats its (already-correct) price can never trip this.
+    # Candidates are collected from EVERY display location, badge first, because the page's own
+    # <head> JSON-LD embeds a TRUNCATED description copy («الإيجار السنوي : 50…») that document-
+    # order re.search() hits first — live 2026-08-03, 14/18 rows: the truncated "50" failed the
+    # proof gate and the per-metre figure survived. First candidate that passes the proof wins.
     if is_rent and price and area:
-        m = re.search(r"الإيجار\s*السنوي\s*:?\s*([\d,٬.]+)", body)
-        if m:
+        cands = re.findall(r'btnPriceHead[^>]*>\s*([\d,٬.]+)', body)
+        cands += re.findall(r"ال[إا]يجار\s*السنوي\s*(?:للأرض)?\s*:?\s*([\d,٬.]+)", body)
+        for c in cands:
             try:
-                body_annual = _price_round(float(m.group(1).replace(",", "").replace("٬", "")))
+                cand = _price_round(float(c.replace(",", "").replace("٬", "")))
             except (TypeError, ValueError):
-                body_annual = None
-            if body_annual and body_annual > price and _price_round(body_annual / area) == price:
-                price_per_meter, price = price, body_annual
+                continue
+            if cand and cand > price and _price_round(cand / area) == price:
+                price_per_meter, price = price, cand
+                break
 
     # ── location ──
     addr = ld.get("address") or {}
