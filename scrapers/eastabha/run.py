@@ -410,6 +410,16 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     cat_names = _names(p, "property_category", taxd)
     if not actions and any("إيجار" in c or "ايجار" in c or "للايجار" in c for c in cat_names):
         is_rent = True
+    # Some ads carry NEITHER an action nor a category (live id 595411, 2026-08-03: «✨ شقق مؤثثة
+    # للإيجار – سنة دراسية أو شهري ✨» had both empty and defaulted to Buy). Fall back to the title
+    # the source itself writes deal-first; للبيع wins over للإيجار when both appear (mixed offers).
+    # A شهري title marks the rent monthly — annualized ×12 below, the standard contract.
+    title_rent_monthly = False
+    if not actions and not cat_names and not is_rent:
+        _t = _clean((p.get("title") or {}).get("rendered", ""))
+        if ("للإيجار" in _t or "للايجار" in _t) and "للبيع" not in _t:
+            is_rent = True
+            title_rent_monthly = "شهري" in _t
     if any("مزاد" in c for c in cat_names):  # auction also shows up in category sometimes
         return None, None, False
 
@@ -499,9 +509,9 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
         "bathrooms": detail.get("bathrooms") or None,
         "property_age": age,
         "price_total": price if not is_rent else None,
-        "price_annual": price if is_rent else None,
+        "price_annual": (normalize.annualize_rent(price, "monthly") if (title_rent_monthly and price) else price) if is_rent else None,
         "price_per_meter": ppm,
-        "rent_period": "annual" if is_rent else None,
+        "rent_period": ("monthly" if title_rent_monthly else "annual") if is_rent else None,
         "city": city,
         "region": region,
         "neighborhood": district_ar,

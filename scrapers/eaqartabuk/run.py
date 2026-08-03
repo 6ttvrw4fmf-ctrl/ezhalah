@@ -249,6 +249,13 @@ def _enrich(pid: int) -> tuple[dict, Optional[str]]:
 
 def _price(raw: Any, is_rent: bool) -> tuple[Optional[int], Optional[int], Optional[str]]:
     """→ (price_total, price_annual, rent_period). Applies the magnitude heuristic."""
+    # Two DISTINCT figures squashed into one price field are ambiguous — never pick one and never
+    # concatenate. Live id 598669 (2026-08-03): a multi-unit building listing two unit rents
+    # (2,500 + 1,800) yielded price_annual=18,002,500 («1800»+«2500» glued); the page displays no
+    # single price at all. Null it — the deal/type fields stay, only the price is unknowable.
+    groups = {g.replace(",", "").replace("٬", "") for g in re.findall(r"\d[\d,٬.]*", str(raw or ""))}
+    if len(groups) > 1:
+        return None, None, None
     v = _int(raw)
     if not v or v <= 0:
         return None, None, None
