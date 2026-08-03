@@ -210,6 +210,7 @@ type BackendQuery = {
   priceOriginal?: string; // the user's original foreign-currency budget, e.g. "USD 100,000"
   bothDeals?: boolean;
   priceIsAnnual?: boolean;
+  rentPeriod?: string; // explicit rental period the user stated («الشهري», or a monthly/annual budget basis) — maps to q.rentPeriod
   sort?: string; // objective ordering the user asked for (newest/price_asc/area_desc/…)
   count?: number; // how many listings the user asked to see (1–15)
   platforms?: string[]; // platform display names the user restricted to (carried across turns by the model)
@@ -414,6 +415,13 @@ function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts
   q.deal = b.deal === 'Buy' ? 'Buy' : 'Rent';
   if (b.bothDeals === true) q.bothDeals = true; // agent searched without knowing rent/buy → show both
   if (b.priceIsAnnual === true) q.priceIsAnnual = true; // agent annualized a daily/weekly/monthly rent
+  // Explicit rental-period signal from the edge («للإيجار الشهري», or a monthly/annual budget basis):
+  // without this the emptyQuery() default ('annual') silently searched the ANNUAL pool for an
+  // explicitly-monthly request — a 100% intent inversion (senior audit run #3, 2026-08-03: 0 of the
+  // 6,909 monthly Riyadh apartments were reachable by asking for them). An unstated period keeps the
+  // default — the same annual default the Filter form opens with (agent ≡ filter parity). Set BEFORE
+  // applySourceFilter so the Gathern monthly-only override still wins.
+  if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual') q.rentPeriod = b.rentPeriod;
   q.location = typeof b.location === 'string' ? b.location.trim() : '';
 
   const ty = typeof b.type === 'string' && b.type.trim() ? b.type.trim() : null;
