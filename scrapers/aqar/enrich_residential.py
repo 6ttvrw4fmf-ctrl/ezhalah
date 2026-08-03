@@ -81,6 +81,28 @@ def _int_after_label(html: str, *labels: str) -> Optional[int]:
     return None
 
 
+def _int_after_label_in_spec_table(text: str, *labels: str) -> Optional[int]:
+    """Like `_int_after_label`, but restricted to Aqar's structured «تفاصيل الإعلان» block (same
+    anchor `_property_age_from_text` uses below) — for room-count fields whose Arabic label words
+    (دورات المياه / ماستر / صالة / مجلس) also show up in the seller's free-text description, ABOVE
+    the anchor, in a completely different role. In free text the natural Arabic order is
+    NUMBER-then-label ("3 حمامات" = 3 bathrooms), so an unanchored "label THEN number" match there
+    grabs whatever unrelated figure happens to follow the label word, not a room count. Confirmed
+    live: ad 6689949 bathrooms=550 — description reads "...مطبخ 3 حمامات \n550 الف ريال" (a
+    DIFFERENT unit's price, on the next line); ad 6657497 master_bedrooms=1900 — description reads
+    "🛏️ الماستر: 1900 ريال شهرياً" (a room-type's monthly rent, and this listing's structured table
+    has no غرف ماستر field at all); ad 6579190 halls=206 — description reads "مساحة كل صالة 206 م"
+    (area per hall, equal to area_m2). Anchoring to the structured block only — exactly like
+    property_age already does — means the label can only match Aqar's own spec-table row, or
+    nothing (field genuinely absent from that listing's structured table)."""
+    if not text:
+        return None
+    i = text.find(_AGE_BLOCK_ANCHOR)
+    if i < 0:
+        return None
+    return _int_after_label(text[i:], *labels)
+
+
 # The «تفاصيل الإعلان» heading opens Aqar's STRUCTURED attribute table. Everything before it is nav,
 # breadcrumbs, price and the seller's free-text description — and the description routinely states an
 # age of its own that CONTRADICTS the dropdown (live: 462 rows where the description says e.g.
@@ -213,11 +235,11 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # trusted, but silently falling back to a total-room count when it's absent mislabels total
     # rooms as bedrooms. Owner decision: leave NULL when the page doesn't state bedrooms specifically
     # rather than guess from a generic room count.
-    bedrooms          = _int_after_label(text, r"غرف\s*النوم")
-    bathrooms         = _int_after_label(text, r"دورات\s*المياه", r"الحمامات", r"حمامات")
-    master_bedrooms   = _int_after_label(text, r"غرف\s*ماستر", r"غرفة\s*ماستر", r"ماستر")
-    halls             = _int_after_label(text, r"صالات", r"صالة", r"غرفة\s*المعيشة", r"المعيشة")
-    reception_majlis  = _int_after_label(text, r"مجالس", r"مجلس")
+    bedrooms          = _int_after_label_in_spec_table(text, r"غرف\s*النوم")
+    bathrooms         = _int_after_label_in_spec_table(text, r"دورات\s*المياه", r"الحمامات", r"حمامات")
+    master_bedrooms   = _int_after_label_in_spec_table(text, r"غرف\s*ماستر", r"غرفة\s*ماستر", r"ماستر")
+    halls             = _int_after_label_in_spec_table(text, r"صالات", r"صالة", r"غرفة\s*المعيشة", r"المعيشة")
+    reception_majlis  = _int_after_label_in_spec_table(text, r"مجالس", r"مجلس")
     property_age      = _property_age_from_text(text)
     street_width_m    = _int_after_label(text, r"عرض\s*الشارع")
     direction         = _text_after_label(text, r"الواجهة", r"واجهة\s*العقار")
