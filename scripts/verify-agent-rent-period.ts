@@ -10,6 +10,8 @@
 // The fix, three layers this guard pins:
 //   1. edge contract: rent_period ∈ {"", "monthly", "annual"} in prompt OUTPUT + Gemini SCHEMA
 //      (+ required), set ONLY on the user's explicit wording («الشهري»/«بالشهر»/«السنوي»/«بالسنة»).
+//      Deploy lesson (v94 outage, 2026-08-03): Gemini's structured-output validator REJECTS an
+//      empty string inside an enum — the unstated value must be "none", mirroring pricing_basis.
 //   2. edge mapping: query.rentPeriod from out.rent_period, falling back to a monthly_rent/
 //      annual_rent BUDGET basis (a stated budget period is an explicit period); Rent-only;
 //      unstated stays undefined (client Filter-parity default).
@@ -35,11 +37,11 @@ const defaults = readFileSync(new URL('../src/lib/searchDefaults.ts', import.met
 check('prompt OUTPUT object lists rent_period',
   edge.includes('{ kind, reply, deal, location, type, detail, price, pricing_basis, rent_period, sort, count, platforms }'));
 check('prompt documents rent_period as the rental-POOL filter, separate from pricing_basis',
-  edge.includes('rent_period: "monthly" | "annual" | ""') && edge.includes('SEPARATE from pricing_basis'));
+  edge.includes('rent_period: "monthly" | "annual" | "none"') && edge.includes('SEPARATE from pricing_basis'));
 check('prompt covers the period-only no-budget case («شقق للإيجار الشهري في الرياض»)',
   edge.includes('period-only request with no budget'));
-check('SCHEMA declares rent_period with the closed enum',
-  /rent_period:\s*\{\s*type:\s*"STRING",\s*enum:\s*\[""\s*,\s*"monthly"\s*,\s*"annual"\]\s*\}/.test(edge));
+check('SCHEMA declares rent_period with the closed enum (Gemini rejects an empty enum member — "none", never "")',
+  /rent_period:\s*\{\s*type:\s*"STRING",\s*enum:\s*\["none"\s*,\s*"monthly"\s*,\s*"annual"\]\s*\}/.test(edge));
 check('SCHEMA required includes rent_period',
   /required:\s*\[[^\]]*"rent_period"[^\]]*\]/.test(edge));
 
