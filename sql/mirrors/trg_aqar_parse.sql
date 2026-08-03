@@ -1,8 +1,9 @@
--- MIRROR of the LIVE production object (audit item 7f). NOT a migration — this
--- object is already applied in production and has no repo migration base.
--- Do not re-apply blindly; to change it, follow the RPC full-body-replace rule
--- (rebuild from pg_get_functiondef of the LIVE object, needle-edit, migrate).
--- Dumped byte-exact via anon REST on 2026-07-27; md5 (no trailing newline): 63ff2da54258adda91313f7c4043d8e6
+-- MIRROR of the LIVE production object. NOT a migration — applied in production with no repo
+-- migration base. To change it, follow the RPC full-body-replace rule (rebuild from
+-- pg_get_functiondef of the LIVE object, needle-edit, migrate).
+-- Refreshed 2026-08-03 (senior audit run #3): picks up the 2026-07-28 fidelity-guard
+-- (phone/REGA-artifact price band -> NULL) and structured-area blocks the previous dump predated.
+-- Verified byte-exact; md5 of everything below this header block: e17f5534ac34789465be8b11534665bd
 CREATE OR REPLACE FUNCTION public.trg_aqar_parse()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -40,7 +41,25 @@ begin
     if parsed_price is not null then
       NEW.price_total := parsed_price;         -- trigger fully owns Buy total (source-parsed)
     end if;
+    -- FIDELITY GUARD (2026-07-28, P0): the Python enrich fallback pattern `(\d{6,9})` before a bare
+    -- «ر» can capture a broker PHONE (05x -> 5xxxxxxxx) or a REGA/ID artifact (~100.2M) as a "price".
+    -- aqar_parse only accepts §/ريال/﷼-marked prices, so when it did NOT confirm one (parsed_price
+    -- null) AND the surviving value sits in a proven non-price band, it is garbage, never a real SAR
+    -- total -> drop it (an honest NULL beats a fabricated price). §-confirmed prices stay exempt
+    -- (parsed_price not null). See scripts/verify-no-phone-shaped-price.ts.
+    if parsed_price is null
+       and (NEW.price_total between 100000000 and 101000000
+         or NEW.price_total between 500000000 and 599999999) then
+      NEW.price_total := null;
+    end if;
   end if;
+
+  -- AREA (2026-07-28, P0): prefer aqar_parse's STRUCTURED «المساحة» (region after «تفاصيل الإعلان»)
+  -- over the incoming value — the Python enrich scanned the WHOLE page, so a seller's free-text
+  -- description could override the official area. Fall back to the incoming value only when the
+  -- structured details block has no area.
+  NEW.area_m2 := coalesce(public.safe_int(p->>'area_m2'), NEW.area_m2);
+
   -- price_per_meter is deliberately NOT touched here. It is a SOURCE-PUBLISHED field («سعر المتر»)
   -- parsed by scrapers/aqar/enrich_residential.py:141 parse_price_per_meter() and supplied on the
   -- incoming row. Any assignment in this trigger can only overwrite source truth with arithmetic.
@@ -50,4 +69,3 @@ begin
   return NEW;
 end
 $function$
-
