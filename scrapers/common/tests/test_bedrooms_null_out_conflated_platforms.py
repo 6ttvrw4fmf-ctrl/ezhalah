@@ -126,17 +126,27 @@ def test_souq24_room_spec_no_longer_feeds_beds():
 
 def test_aqar_primary_kept_fallback_removed():
     text = (SCRAPERS_DIR / "aqar" / "enrich_residential.py").read_text(encoding="utf-8")
-    assert 'bedrooms          = _int_after_label(text, r"غرف\\s*النوم")' in text
+    # 2026-08-03: switched from _int_after_label to _int_after_label_in_spec_table (anchored to the
+    # «تفاصيل الإعلان» block) — same free-text-leak fix already applied to bathrooms/master_bedrooms/
+    # halls/reception_rooms_majlis (1,960 live rows found with the same unanchored-match signature).
+    # The "غرف النوم" primary label and the dropped "عدد الغرف" fallback are unchanged by that fix.
+    assert 'bedrooms          = _int_after_label_in_spec_table(text, r"غرف\\s*النوم")' in text
     assert 'r"غرف\\s*النوم", r"عدد\\s*الغرف")' not in text
 
-    # The extraction function itself (_int_after_label) is real and DB-independent — exercise it.
+    # The extraction function itself (_int_after_label_in_spec_table) is real and DB-independent —
+    # exercise it directly, same cases as before plus the anchoring behavior.
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "aqar_enrich_residential", SCRAPERS_DIR / "aqar" / "enrich_residential.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    assert mod._int_after_label("شقة فيها غرف النوم 3 وحمامين", r"غرف\s*النوم") == 3
-    assert mod._int_after_label("شقة فيها عدد الغرف 5", r"غرف\s*النوم") is None
+    anchor = "تفاصيل الإعلان"
+    assert mod._int_after_label_in_spec_table(
+        f"شقة فيها غرف النوم 3 وحمامين {anchor} غرف النوم 3", r"غرف\s*النوم") == 3
+    assert mod._int_after_label_in_spec_table(
+        f"شقة فيها عدد الغرف 5 {anchor} غرف النوم 3", r"غرف\s*النوم") == 3
+    assert mod._int_after_label_in_spec_table(
+        f"شقة فيها غرف النوم 3 وحمامين {anchor} عدد الغرف 5", r"غرف\s*النوم") is None
 
 
 def test_aqaratikom_primary_kept_fallback_removed():

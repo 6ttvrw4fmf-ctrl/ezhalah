@@ -440,7 +440,8 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   // AI-agent chat path (agent.tsx's 2-strike fallback) silently searched every city nationwide instead
   // of restricting to the real candidates or honest-zeroing.
   if (cities === null && q.districts && q.districts.length && supabase) {
-    const { data: districtCities } = await supabase.rpc('resolve_district_cities', { p_districts: q.districts });
+    const { data: districtCities, error: districtCitiesError } = await supabase.rpc('resolve_district_cities', { p_districts: q.districts });
+    if (districtCitiesError) return null;        // RPC failure ≠ genuine zero matches — give up, don't fall through unrestricted
     const dcRows = (districtCities as { city_ar: string; match_count: number }[] | null) ?? [];
     if (dcRows.length === 1) {
       cities = [dcRows[0].city_ar];
@@ -860,16 +861,23 @@ function interleaveSources<T>(lists: T[][]): T[] {
 }
 
 const QUERY_LIMIT = 1500; // page size — the newest N MATCHING rows per page (filter-first); Load More pages the rest
-// How many MATCHING candidates the last main RPC call returned (before index↔raw detail drops). The store
-// reads this to advance the Load-More offset and decide hasMore, so broad searches (e.g. Riyadh villas =
-// 11,438) page through the FULL set, not just the first window. (owner 2026-07-08) [[filter-candidate-cap-underreturn-2026-07-08]]
-let _lastPageCandidates = 0;
-export const lastPageCandidates = (): number => _lastPageCandidates;
-// EXACT total matching count for the last search — the RPC's `count(*) over()` (full filtered set before
-// the page limit), so it's the same on every page. The store surfaces it as SearchResult.matchTotal for
-// the "لقينا N إعلان يطابق طلبك" headline. Falls back to the page length if the column is absent. (owner 2026-07-08)
-let _lastPageTotal = 0;
-export const lastPageTotal = (): number => _lastPageTotal;
+// Result shape for fetchListingsForQuery. pageCandidates = how many MATCHING candidates the main RPC call
+// returned this page (before index↔raw detail drops) — the store uses it to advance the Load-More offset
+// and decide hasMore, so broad searches (e.g. Riyadh villas = 11,438) page through the FULL set, not just
+// the first window. (owner 2026-07-08) [[filter-candidate-cap-underreturn-2026-07-08]]
+// pageTotal = EXACT total matching count for the search — the RPC's `count(*) over()` (full filtered set
+// before the page limit), same on every page. The store surfaces it as SearchResult.matchTotal for the
+// "لقينا N إعلان يطابق طلبك" headline. Falls back to the page length if the column is absent. (owner 2026-07-08)
+//
+// These used to be module-global (_lastPageCandidates/_lastPageTotal) written mid-function and read by the
+// caller via lastPageCandidates()/lastPageTotal() getters right after their own await — but the function
+// keeps awaiting several more async steps after writing them (diversity seed / raw-card fetch / proximity
+// RPC), so a SECOND concurrent fetchListingsForQuery() call (real: runQuery + loadMoreListings can overlap)
+// could clobber the globals before the FIRST call's caller read them. Same hazard class as the sibling
+// diversityBoostedKeys Set (see the race note below, ~1104). Fixed the same way that fix's simpler sibling
+// would be fixed: no shared mutable state at all — return the values directly, scoped to this call's own
+// closure, so there's nothing to race. (owner 2026-08-03 concurrency fix)
+export type FetchListingsResult = { listings: Listing[] | null; pageCandidates: number; pageTotal: number };
 
 // Per-query set of (source_table:listing_id) keys pulled forward by the page-0 platform-diversity seed
 // (owner PERMANENT rule 2026-07-13, see fetchListingsForQuery). Keyed by JSON.stringify(q) rather than a
@@ -1003,15 +1011,15 @@ async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[]): Promis
 // id — raw stays the single source of truth; the index only maps "location search → exact raw listing".
 // Returns null on a backend error (UI shows retry), [] when the location genuinely has no listings.
 // (user spec: route rent→rent_location_index, buy→buy_location_index, then fetch details from raw.)
-export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: number; limit?: number }): Promise<Listing[] | null> {
-  _lastPageCandidates = 0;
-  _lastPageTotal = 0;
+export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: number; limit?: number }): Promise<FetchListingsResult> {
+  let pageCandidates = 0;
+  let pageTotal = 0;
   const pageOffset = Math.max(0, opts?.offset ?? 0);
   const pageLimit = opts?.limit ?? QUERY_LIMIT;
-  if (!supabase) return null;
+  if (!supabase) return { listings: null, pageCandidates, pageTotal };
   // Location/table/region scope — shared with the advanced-filter option-count RPCs (resolveSearchScope).
   const scope = await resolveSearchScope(q);
-  if (!scope) return [];
+  if (!scope) return { listings: [], pageCandidates, pageTotal };
   const { isBroadCommercial, ...scopeParams } = scope;
 
   // 1) Ask the location index for the candidate set (newest-first, diverse, location + purpose filtered).
@@ -1071,12 +1079,12 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     p_limit: pageLimit,
     p_offset: pageOffset,
   }));
-  if (error) return null;                       // index error OR timeout (RC-A) → retry UI, not "no matches"
-  _lastPageCandidates = (cands as Cand[] | null)?.length ?? 0;   // this page's matching-candidate count → drives Load-More offset/hasMore
+  if (error) return { listings: null, pageCandidates, pageTotal };   // index error OR timeout (RC-A) → retry UI, not "no matches"
+  pageCandidates = (cands as Cand[] | null)?.length ?? 0;   // this page's matching-candidate count → drives Load-More offset/hasMore
   // EXACT total match count from the RPC's count(*) over() (same on every page); fall back to this page's
   // length if the column is missing. Captured from the MAIN call before any supplementary sweep. (owner 2026-07-08)
-  _lastPageTotal = Number((cands as any[] | null)?.[0]?.total_count ?? 0) || ((cands as Cand[] | null)?.length ?? 0);
-  if (!cands || !(cands as Cand[]).length) return [];
+  pageTotal = Number((cands as any[] | null)?.[0]?.total_count ?? 0) || ((cands as Cand[] | null)?.length ?? 0);
+  if (!cands || !(cands as Cand[]).length) return { listings: [], pageCandidates, pageTotal };
 
   // PLATFORM-DIVERSITY SEED — owner PERMANENT rule 2026-07-13 (Rule 2: the first page must show the
   // widest platform mix, never let one platform crowd out others that also have matches).
@@ -1165,7 +1173,7 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
   try {
     fetched = await Promise.all(entries.map(([tbl, ids]) => fetchRawByIds(q, tbl, ids)));
   } catch {
-    return null;   // RC-A: a raw-card chunk failed or timed out → retry UI, not a misleadingly-partial grid
+    return { listings: null, pageCandidates, pageTotal };   // RC-A: a raw-card chunk failed or timed out → retry UI, not a misleadingly-partial grid
   }
   const map = new Map<string, Listing>();
   entries.forEach(([tbl], i) => { for (const l of fetched[i]) map.set(`${tbl}:${l.id}`, l); });
@@ -1263,7 +1271,7 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     }
   }
   cacheListings(rows);
-  return rows;
+  return { listings: rows, pageCandidates, pageTotal };
 }
 
 // Resolve a single listing by id (in-app browser deep-links / a listing not in the current subset).

@@ -77,6 +77,21 @@ const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
     marker: /not exists \(select 1 from unnest\(p_amenities\) tok/i,
     why: 'An unrecognized amenity token must never silently widen a search to "no filter" — it must match nothing, so the mistake is visible the first time it ships.',
   },
+  {
+    name: 'bedrooms filter is exclusive (CASE), p_beds_exact and p_beds_min never union',
+    marker: /case\s+when coalesce\(cardinality\(p_beds_exact\), 0\) > 0 then s\.bedrooms = any\(p_beds_exact\)\s+when p_beds_min is not null then s\.bedrooms >= p_beds_min/i,
+    why: '2026-07-28 audit: the old flat OR let a caller who sets BOTH p_beds_exact and p_beds_min get the union of both, not either/or — live-verified to return bedrooms=3 unioned with every value ≥10 (including a 29,800-bedroom outlier row) for p_beds_exact:=[3], p_beds_min:=10.',
+  },
+  {
+    name: 'per-platform total_count is computed pre-cap (same window pass as row_number, before rn <= p_per_platform)',
+    marker: /m\.bedrooms,\s*count\(\*\) over \(\) as total_count,\s*row_number\(\) over \(/i,
+    why: '2026-07-28 audit: total_count in the p_per_platform branch was computed AFTER the diversification cap — live-verified 54 instead of the true 35,535 for the same filter (Riyadh/Residential/بيع, p_per_platform:=5).',
+  },
+  {
+    name: 'p_limit is clamped non-negative (greatest(p_limit, 0)), matching the existing p_offset guard',
+    marker: /limit greatest\(p_limit,\s*0\) offset greatest\(p_offset,\s*0\)/i,
+    why: "2026-07-28 audit: p_offset already guards itself but p_limit didn't — a negative p_limit raised a hard 'LIMIT must not be negative' Postgres error instead of degrading like p_limit:=0 already does (0 rows, no error).",
+  },
 ];
 
 // A clause that must NOT come back: the pre-fix rent-period predicate keyed on lease length + a hardcoded
@@ -112,6 +127,21 @@ const FORBIDDEN: { name: string; marker: RegExp; why: string }[] = [
     marker: /or s\.floor_number is null\s+or/i,
     why: 'Reintroduces the 2026-07-27 defect: floor-unknown rows pass an explicit floor filter (108,880 instead of 3,661).',
   },
+  {
+    name: 'bedrooms flat-OR union leak (p_beds_exact and p_beds_min not mutually exclusive)',
+    marker: /any\(p_beds_exact\)\)\s*\n?\s*or \(p_beds_min\s+is not null and s\.bedrooms >= p_beds_min\)/i,
+    why: '2026-07-28 audit: reintroduces the union leak — a caller setting both p_beds_exact and p_beds_min gets bedrooms=3 unioned with everything ≥10 instead of an exclusive either/or.',
+  },
+  {
+    name: 'per-platform total_count computed post-cap (over the diversification-capped rowset)',
+    marker: /count\(\*\) over\(\) as total_count, t\.effective_price/i,
+    why: '2026-07-28 audit: reintroduces the count bug — total_count reflects the p_per_platform-capped set (e.g. 54) instead of the true pre-cap match count (e.g. 35,535).',
+  },
+  {
+    name: 'p_limit unclamped (bare "limit p_limit", no greatest() guard)',
+    marker: /limit p_limit offset greatest\(p_offset,\s*0\)/i,
+    why: '2026-07-28 audit: reintroduces the crash — a negative p_limit raises a hard Postgres error instead of degrading gracefully like p_limit:=0 already does.',
+  },
 ];
 
 // Supabase applies migrations in version order (the leading numeric prefix). Replicate that ordering so
@@ -133,13 +163,89 @@ const check = (label: string, ok: boolean) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`);
 };
 
-const defineRe = new RegExp(`create\\s+or\\s+replace\\s+function\\s+(public\\.)?${RPC}\\s*\\(`, 'i');
+// A STATIC definer writes the full `CREATE OR REPLACE FUNCTION ... AS $function$ ... $function$` body
+// literally in the migration file — the file's raw text IS the new effective body.
+const staticDefineRe = new RegExp(`create\\s+or\\s+replace\\s+function\\s+(public\\.)?${RPC}\\s*\\(`, 'i');
+// A DYNAMIC (needle-edit) definer — the pattern this repo's hazard rule recommends, and the ONLY way to
+// safely patch one clause of a huge full-body-replace RPC without risking a stale-copy revert — pulls
+// pg_get_functiondef() at apply time, string-replaces one or more needles, then `execute`s the result.
+// It never writes the full body literally, so it can't be detected (or verified) by literal marker
+// matching; it must be REPLAYED (needle → replacement, in the order the file applies them) against the
+// body accumulated from prior migrations. See 20260728140000_type_label_compound_and_annual_rent_strictness.sql
+// for the first instance of this pattern on this RPC, and this file's own history: a checker that treats
+// only static definers as "effective" silently reports PASS against a body that dynamic migrations have
+// since moved past — false confidence is worse than no check.
+const dynamicDefineRe = /proname\s*=\s*'location_search_candidates_ar'[\s\S]*?execute\s+v_new\s*;/i;
+
+// Extract `name text := '...(sql-escaped '' string)...'` declarations from a dynamic migration, so
+// `replace(v_src, needle_x, replacement_x)` calls that reference them by name can be resolved.
+function extractDeclaredVars(text: string): Map<string, string> {
+  const vars = new Map<string, string>();
+  const re = /(\w+)\s+text\s*:=\s*'((?:[^']|'')*)'/gs;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) vars.set(m[1], m[2].replace(/''/g, "'"));
+  return vars;
+}
+
+// Find every `v_new := replace( <src>, <needle>, <replacement> )` call in file order, where <src> is the
+// identifier `v_src` or `v_new`, and <needle>/<replacement> are each either a bare identifier (resolved
+// via declaredVars) or an inline SQL string literal. A hand-rolled scan (not a single regex) because the
+// needle/replacement text itself can contain commas and parens, which breaks naive comma-splitting.
+function extractReplaceCalls(text: string): { src: string; needleArg: string; replacementArg: string }[] {
+  const calls: { src: string; needleArg: string; replacementArg: string }[] = [];
+  const callRe = /v_new\s*:=\s*replace\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = callRe.exec(text))) {
+    let i = callRe.lastIndex; // just past the opening '('
+    let depth = 1;
+    let inString = false;
+    const start = i;
+    for (; i < text.length && depth > 0; i++) {
+      const c = text[i];
+      if (inString) {
+        if (c === "'") {
+          if (text[i + 1] === "'") { i++; continue; } // escaped '' inside a string
+          inString = false;
+        }
+      } else if (c === "'") inString = true;
+      else if (c === '(') depth++;
+      else if (c === ')') depth--;
+    }
+    const inner = text.slice(start, i - 1); // text between the outer parens, exclusive
+    // Split into top-level args (commas outside strings/nested parens).
+    const args: string[] = [];
+    let depth2 = 0, inString2 = false, argStart = 0;
+    for (let j = 0; j < inner.length; j++) {
+      const c = inner[j];
+      if (inString2) {
+        if (c === "'") { if (inner[j + 1] === "'") { j++; continue; } inString2 = false; }
+      } else if (c === "'") inString2 = true;
+      else if (c === '(') depth2++;
+      else if (c === ')') depth2--;
+      else if (c === ',' && depth2 === 0) { args.push(inner.slice(argStart, j)); argStart = j + 1; }
+    }
+    args.push(inner.slice(argStart));
+    if (args.length === 3) {
+      calls.push({ src: args[0].trim(), needleArg: args[1].trim(), replacementArg: args[2].trim() });
+    }
+  }
+  return calls;
+}
+
+// Resolve a replace() argument: an inline 'literal' (SQL-unescaped) or a bare identifier looked up in vars.
+function resolveArg(arg: string, vars: Map<string, string>): string | undefined {
+  if (arg.startsWith("'")) return arg.slice(1, -1).replace(/''/g, "'");
+  return vars.get(arg);
+}
 
 const files = readdirSync(MIGRATIONS_DIR)
   .filter((f) => f.endsWith('.sql'))
   .sort(compareMigrations);
 
-const definers = files.filter((f) => defineRe.test(readFileSync(join(MIGRATIONS_DIR, f), 'utf8')));
+const definers = files.filter((f) => {
+  const text = readFileSync(join(MIGRATIONS_DIR, f), 'utf8');
+  return staticDefineRe.test(text) || dynamicDefineRe.test(text);
+});
 
 check(`at least one migration defines ${RPC} (found ${definers.length})`, definers.length > 0);
 if (!definers.length) {
@@ -147,11 +253,55 @@ if (!definers.length) {
   process.exit(1);
 }
 
-// The LAST definer wins on a full replay — that body is the effective definition.
+// Replay EVERY definer in order — static definers replace the body wholesale; dynamic definers apply
+// their needle→replacement chain on top of whatever body prior migrations left behind. This is what
+// makes "effective" actually mean "what a real migration replay produces," not just "the last file that
+// happens to contain a literal CREATE OR REPLACE".
+let body = '';
+let replayOk = true;
+for (const f of definers) {
+  const text = readFileSync(join(MIGRATIONS_DIR, f), 'utf8');
+  if (staticDefineRe.test(text)) {
+    body = text;
+    continue;
+  }
+  // Dynamic definer: replay its needle→replacement chain against the accumulated body.
+  const vars = extractDeclaredVars(text);
+  const calls = extractReplaceCalls(text);
+  if (!calls.length) {
+    check(`${f}: dynamic definer has a parseable replace() chain`, false);
+    console.error(`   ↳ Matched the dynamic-definer pattern but no v_new := replace(...) calls could be parsed. Cannot replay — treating as UNVERIFIED.`);
+    replayOk = false;
+    continue;
+  }
+  for (const call of calls) {
+    const needle = resolveArg(call.needleArg, vars);
+    const replacement = resolveArg(call.replacementArg, vars);
+    if (needle === undefined || replacement === undefined) {
+      check(`${f}: replace() call args resolve (needle/replacement)`, false);
+      console.error(`   ↳ Could not resolve "${call.needleArg}" / "${call.replacementArg}" to a literal or declared var.`);
+      replayOk = false;
+      continue;
+    }
+    const found = body.includes(needle);
+    check(`${f}: needle found in accumulated body (${needle.slice(0, 50).replace(/\s+/g, ' ')}...)`, found);
+    if (!found) {
+      console.error(`   ↳ This dynamic migration's needle isn't present in the body replayed from prior migrations — either the replay is wrong, or this migration's own fail-closed guard would abort at apply time too. Either way, the effective body from this point on is UNVERIFIED.`);
+      replayOk = false;
+      continue;
+    }
+    body = body.replaceAll(needle, replacement); // Postgres replace() is global, not first-occurrence-only
+  }
+}
+
 const effective = definers[definers.length - 1];
-const body = readFileSync(join(MIGRATIONS_DIR, effective), 'utf8');
 console.log(`\n→ effective ${RPC} definition after replay: ${effective}`);
-console.log(`  (${definers.length} migration(s) define it: ${definers.join(', ')})\n`);
+console.log(`  (${definers.length} migration(s) define/patch it: ${definers.join(', ')})`);
+if (!replayOk) {
+  console.error(`\n✗ Dynamic-migration replay failed partway — invariant results below may be checked against a WRONG body. Fix the replay (or the migration) before trusting this run.\n`);
+} else {
+  console.log('');
+}
 
 for (const inv of REQUIRED) {
   const ok = inv.marker.test(body);

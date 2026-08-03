@@ -4,7 +4,7 @@ import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } fro
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
 import { HOME_DEFAULT_QUERY } from '@/lib/searchDefaults';
 import { buildPools, type Listing } from '@/data/listings';
-import { fetchListingsForQuery, fetchListingById, getCachedListing, lastPageCandidates, lastPageTotal } from '@/data/remote';
+import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
 import { resolveLocation, ensureLocationIndex } from '@/data/locations';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
@@ -378,9 +378,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Fetch ONLY this query's matching subset from Supabase (city + type + deal pushed server-side),
         // then run the full client engine on it. Replaces the old "load the whole table" approach that
         // timed out at 21k+ rows. null = backend error (flag it so the UI shows retry, not "no matches").
-        const rows = await fetchListingsForQuery(q);
-        const pageCand = lastPageCandidates(); // matching candidates in page 0 → Load-More cursor
-        const pageTotal = lastPageTotal(); // EXACT full match count (count(*) over()) → "لقينا N إعلان" headline
+        // pageCandidates/pageTotal come back straight off this call's own result (no shared module state
+        // that a concurrent fetchListingsForQuery() call could clobber before we read it — 2026-08-03 fix).
+        const { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q);
         // Repeat-visit rotation offset: a per-filter counter persisted in localStorage so returning to the
         // SAME filter (deal + location/districts) later surfaces a DIFFERENT high-quality first 25, never the
         // exact same set — while staying strictly inside the filters. Device-local (guests included);
@@ -409,8 +409,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // page + the advanced cursor; the caller appends (de-duped) to the shown list.
       loadMoreListings: async (q: SearchQuery, offset: number) => {
         const PAGE_MORE = 500;
-        const rows = await fetchListingsForQuery(q, { offset, limit: PAGE_MORE });
-        const cand = lastPageCandidates();
+        const { listings: rows, pageCandidates: cand } = await fetchListingsForQuery(q, { offset, limit: PAGE_MORE });
         const r = runSearch(q, buildPools(rows ?? []));
         return { listings: r.listings, nextOffset: offset + cand, hasMore: cand >= PAGE_MORE };
       },
