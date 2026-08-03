@@ -239,10 +239,17 @@ def _magnitude(num: Optional[int], unit: Optional[str]) -> Optional[int]:
 
 
 # ── Sitemap enumeration ───────────────────────────────────────────────────────
-def sitemap_entries(s: cc.Session) -> list[tuple[str, Optional[str]]]:
-    """Return [(listing_url, featured_image|None)] for every /projects/<slug>/ except the
-    archive-root /projects/ URL."""
-    body = s.get(SITEMAP, timeout=30).text
+# jazwtn.sa's edge is FLAKY, not hard-blocking (2026-08-03, senior audit run #3): the same
+# /projects-sitemap.xml URL returned 200/68,410 bytes and then curl(35) connection-reset seconds
+# apart from the SAME residential IP, and the 08-03 GH run got an HTTP-success body that parsed to
+# ZERO /projects/ URLs (a WAF decoy page). The old single-shot `s.get(SITEMAP)` made the whole crawl
+# a coin flip on that one request: a reset window → crash (08-02), a decoy body → silent 0-candidate
+# run (08-03). Same lesson as 07-28: never conclude "blocked" from one response — retry across TLS
+# fingerprints, and treat an entry-less body as a FAILED attempt, never as a healthy empty catalog.
+_SITEMAP_IMPERSONATES = ("chrome124", "chrome131", "chrome136", "safari184", None)
+
+
+def _parse_sitemap(body: str) -> list[tuple[str, Optional[str]]]:
     out: list[tuple[str, Optional[str]]] = []
     seen: set[str] = set()
     for block in re.findall(r"<url>(.*?)</url>", body, re.S):
@@ -259,6 +266,36 @@ def sitemap_entries(s: cc.Session) -> list[tuple[str, Optional[str]]]:
         img_m = re.search(r"<image:loc>([^<]+)</image:loc>", block)
         out.append((url, img_m.group(1).strip() if img_m else None))
     return out
+
+
+def sitemap_entries(s: cc.Session) -> list[tuple[str, Optional[str]]]:
+    """Return [(listing_url, featured_image|None)] for every /projects/<slug>/ except the
+    archive-root /projects/ URL. Retries across TLS fingerprints with backoff; raises after
+    exhausting them so the run is marked failed (the prune guard keeps existing stock safe)."""
+    last_err: Optional[Exception] = None
+    for attempt, imp in enumerate(_SITEMAP_IMPERSONATES):
+        try:
+            sess = s if attempt == 0 else cc.Session(impersonate=imp) if imp else cc.Session()
+            if attempt and _PROXIES:
+                sess.proxies = _PROXIES
+            r = sess.get(SITEMAP, timeout=30)
+            body = r.text
+            entries = _parse_sitemap(body)
+            if entries:
+                if attempt:
+                    print(f"  sitemap recovered on retry {attempt + 1} "
+                          f"(impersonate={imp}, {len(body)} bytes, {len(entries)} entries)")
+                return entries
+            # HTTP success with zero /projects/ URLs = WAF decoy, not an empty catalog.
+            print(f"  sitemap attempt {attempt + 1} (impersonate={imp}): HTTP {r.status_code}, "
+                  f"{len(body)} bytes, 0 entries — decoy body, retrying")
+        except Exception as e:  # curl 28/35 resets land here
+            last_err = e
+            print(f"  sitemap attempt {attempt + 1} (impersonate={imp}) failed: {e}")
+        time.sleep(4 * (attempt + 1))
+    raise RuntimeError(
+        f"jazwtn sitemap: no entries after {len(_SITEMAP_IMPERSONATES)} fingerprint attempts"
+        + (f" (last error: {last_err})" if last_err else " (all attempts returned decoy bodies)"))
 
 
 def fetch_one(entry: tuple[str, Optional[str]]) -> Optional[tuple[str, str, Optional[str]]]:
