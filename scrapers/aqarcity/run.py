@@ -489,6 +489,22 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
     price_per_meter = None
 
+    # Land-rent JSON-LD trap (live 2026-08-03, 18 rows source-verified): for some rent ads the
+    # JSON-LD offers.price carries the source's per-metre rate while the page itself displays the
+    # annual total in its own text («الإيجار السنوي : 50,115»). Store what the page displays;
+    # keep the per-metre rate in its own column. Applied ONLY on exact proof — the displayed
+    # figure ÷ area must re-produce offers.price under the same badge rounding, so a normal ad
+    # whose body merely repeats its (already-correct) price can never trip this.
+    if is_rent and price and area:
+        m = re.search(r"الإيجار\s*السنوي\s*:?\s*([\d,٬.]+)", body)
+        if m:
+            try:
+                body_annual = _price_round(float(m.group(1).replace(",", "").replace("٬", "")))
+            except (TypeError, ValueError):
+                body_annual = None
+            if body_annual and body_annual > price and _price_round(body_annual / area) == price:
+                price_per_meter, price = price, body_annual
+
     # ── location ──
     addr = ld.get("address") or {}
     raw_city = (addr.get("addressLocality") or crumb.get("city") or "").strip()

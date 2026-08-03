@@ -329,7 +329,10 @@ def _is_per_meter(before: str, after: str) -> bool:
     # understatement) because the real total lacked a trailing "ريال" token.
     if re.match(r"\s*(?:للمتر|/?\s*م2?|/?\s*م²|للمتر\s*المربع)", after):
         return True
-    return bool(re.search(r"(?:سعر\s*)?المتر\s*(?:المربع)?\s*[:：]?\s*$", before))
+    # «للمتر» (li-l-metr) drops the alif of «المتر», so the plain المتر pattern missed it — found
+    # live 2026-08-03 on ad 598978: «المطلوب للمتر 5555 ريال الإجمالي 5,000,000 ريال» stored 5555
+    # (the per-metre rate) as the total instead of the explicitly displayed 5,000,000.
+    return bool(re.search(r"(?:سعر\s*)?(?:لل|ال)متر\s*(?:المربع)?\s*[:：]?\s*$", before))
 
 
 def _extract_price(desc_raw: Optional[str]) -> Optional[int]:

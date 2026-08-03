@@ -176,7 +176,13 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     cap = {"rem_fields": f, "wp_id": p.get("id"), "link": p.get("link"),
            "title": _clean((p.get("title") or {}).get("rendered", ""))}
 
-    price = _num(f.get("السعر"))
+    raw_price = (f.get("السعر") or "").strip()
+    price = _num(raw_price)
+    # Some REM price fields quote a PER-METRE rate («1000 للمتر. ر.س», live 2026-08-03, 6 rows).
+    # The page displays that number as its price, so price_total/annual keep it verbatim
+    # (copy-paste-the-display rule, owner 2026-08-03) — but the per-metre semantic is recorded in
+    # its own column so the rate is honest and queryable rather than silently read as a total.
+    price_per_meter = price if ("للمتر" in raw_price) else None
 
     extra = []
     for label, key in (("واجهة العقار", "Facade"), ("عمر العقار", "Age"),
@@ -197,6 +203,7 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         "bathrooms": _num(f.get("عدد دورات المياه")),
         "price_total": price if not is_rent else None,
         "price_annual": price if is_rent else None,
+        "price_per_meter": price_per_meter,
         "rent_period": "annual" if is_rent else None,
         "city": city,
         "region": region,
