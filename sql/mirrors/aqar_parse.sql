@@ -1,10 +1,7 @@
--- MIRROR of the LIVE production object (audit item 7f). NOT a migration — this
--- object is already applied in production and has no repo migration base.
--- Do not re-apply blindly; to change it, follow the RPC full-body-replace rule
--- (rebuild from pg_get_functiondef of the LIVE object, needle-edit, migrate).
--- Refreshed 2026-07-29 after the floor-fidelity migrations (region no-freetext-fallback,
--- '^\d{1,2}$' floor anchor, «أرضي»->0) + the word-price fallback; verified byte-exact against
--- pg_get_functiondef; md5 of everything below this header block: d4e6422dc5d8f9bcfad87448ef319c4c
+-- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
+-- Refreshed 2026-08-03 (senior run #3 continuation): adds the per-meter-rate exclusion
+-- (rate-qualified price expressions stripped from the head before the price scan).
+-- Verified byte-exact; md5 of everything below this header block: 00f675b3620becc41c4fdabc0ee325d4
 CREATE OR REPLACE FUNCTION public.aqar_parse(txt text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -18,6 +15,10 @@ begin
   txt := translate(txt, '٠١٢٣٤٥٦٧٨٩', '0123456789');
   region := substring(txt from 'تفاصيل الإعلان(.*)');  -- NULL (not txt) when the structured block is absent
   head   := split_part(txt, 'تفاصيل الإعلان', 1);
+  -- Per-meter RATES are not totals (2026-08-03): remove rate-qualified price expressions from the
+  -- head before scanning, so «سعر المتر 4100 ريال» / «8000 ريال للمتر» can never become price_total.
+  head := regexp_replace(head, '(?:سعر\s*)?المتر[\s:]{0,6}\d[\d,]*(?:\.\d+)?\s*(?:§|ريال|﷼)', ' ', 'g');
+  head := regexp_replace(head, '\d[\d,]*(?:\.\d+)?\s*(?:§|ريال|﷼)\s*(?:لل|ال)?\s*متر', ' ', 'g');
 
   select array_agg(v order by ord) into prices from (
      select round((regexp_replace((t.g)[1], ',', '', 'g'))::numeric)::bigint as v, ord

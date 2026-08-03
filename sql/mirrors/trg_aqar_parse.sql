@@ -1,9 +1,7 @@
--- MIRROR of the LIVE production object. NOT a migration — applied in production with no repo
--- migration base. To change it, follow the RPC full-body-replace rule (rebuild from
--- pg_get_functiondef of the LIVE object, needle-edit, migrate).
--- Refreshed 2026-08-03 (senior audit run #3): picks up the 2026-07-28 fidelity-guard
--- (phone/REGA-artifact price band -> NULL) and structured-area blocks the previous dump predated.
--- Verified byte-exact; md5 of everything below this header block: e17f5534ac34789465be8b11534665bd
+-- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
+-- Refreshed 2026-08-03 (senior run #3 continuation): fidelity guard gains the unconfirmed
+-- token band (parsed_price NULL + price_total 1–9999 → NULL).
+-- Verified byte-exact; md5 of everything below this header block: 4ac2b9680be6b3ed9d6dcbd30d84f7fa
 CREATE OR REPLACE FUNCTION public.trg_aqar_parse()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -49,7 +47,8 @@ begin
     -- (parsed_price not null). See scripts/verify-no-phone-shaped-price.ts.
     if parsed_price is null
        and (NEW.price_total between 100000000 and 101000000
-         or NEW.price_total between 500000000 and 599999999) then
+         or NEW.price_total between 500000000 and 599999999
+         or NEW.price_total between 1 and 9999) then
       NEW.price_total := null;
     end if;
   end if;
