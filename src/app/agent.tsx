@@ -42,7 +42,7 @@ import { useApp } from '@/store';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 import AdvancedQuestionCard, { AdvancedQuestionLoading } from '@/components/AdvancedQuestionCard';
-import { ADVANCED_QUESTIONS, minOptionsFor, liveResultCount, type AdvancedOption, type AdvancedQuestion } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, eligibleQuestions, minOptionsFor, liveResultCount, type AdvancedOption, type AdvancedQuestion } from '@/data/advancedFilters';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
 // below a results block — NEVER before first results — and ONLY for a strict single-type Residential
@@ -60,7 +60,7 @@ import { ADVANCED_QUESTIONS, minOptionsFor, liveResultCount, type AdvancedOption
 // its own eligibility gate now (see docs/ADVANCED_FILTER_DESIGN_CONTRACT.md). Otherwise the tap falls
 // through to the pre-existing plain refine chips.
 function anyGuidedEligible(q: SearchQuery): boolean {
-  return ADVANCED_QUESTIONS.some((question) => question.eligibility(q));
+  return eligibleQuestions(q).length > 0;
 }
 
 const IS_WEB = Platform.OS === 'web';
@@ -908,7 +908,7 @@ export default function Agent() {
     ageFlowLabelsRef.current = [];
     ageFlowPlanRef.current = [];
     setAgeFlow({ phase: 'loading' });
-    const eligible = ADVANCED_QUESTIONS.filter((question) => question.eligibility(q));
+    const eligible = eligibleQuestions(q);
     const probes = await Promise.all(eligible.map((question) => question.resolveOptions(q)));
     if (ageFlowTokenRef.current !== token) return; // superseded by a newer tap/turn
     ageFlowPlanRef.current = eligible
