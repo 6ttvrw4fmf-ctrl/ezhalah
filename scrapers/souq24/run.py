@@ -67,6 +67,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.arabic_location import to_catalog  # noqa: E402
 
 BASE = "https://24.com.sa"
 SITEMAP = f"{BASE}/sitemap.xml"
@@ -388,6 +389,18 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
         city = normalize.map_city(title_city) or TOWN_TO_CITY.get(title_city)
     region = normalize.region_for_city(city)
 
+    # Catalog fallback (2026-08-04): map_city()'s small private CITY_MAP_AR dict misses real catalog
+    # cities it was simply never given a key for (e.g. «الجله»/«العارضه», real single-match towns —
+    # SQ24-1127/SQ24-1028). When the English `city` stays unresolved, try the full catalog resolver
+    # (souq24 has no independent region signal of its own, so region_hint is whatever `region`
+    # resolved to above — usually None here) — never a guess, only a single unambiguous catalog
+    # match is accepted (see to_catalog()). Additive only: this table has no city_id/region_id
+    # column, so the result is captured in additional_info for a future location-resolution pass to
+    # pick up; the existing city/region/neighborhood columns the card renders from are untouched.
+    catalog_city_id = catalog_region_id = None
+    if not city and raw_city:
+        catalog_city_id, catalog_region_id = to_catalog(raw_city, region_hint=region)
+
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
     is_land = property_type in ("Residential Land", "Commercial Land")
 
@@ -459,6 +472,8 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
         "rega_ad_license_number": rega_no,
         "rega_license_issue_date": _clean(issue_m.group(1)) if issue_m else None,
         "rega_license_expiry_date": _clean(expiry_m.group(1)) if expiry_m else None,
+        "catalog_city_id": catalog_city_id,
+        "catalog_region_id": catalog_region_id,
     }
     info = {k: v for k, v in info.items() if v not in (None, "", "—")}
 

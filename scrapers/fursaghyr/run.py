@@ -36,6 +36,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+from scrapers.common.arabic_location import to_catalog
 
 BASE = "https://fursaghyr.com"
 LIST = f"{BASE}/wp-json/fgh/v1/properties"
@@ -306,6 +307,17 @@ def map_listing(item: dict) -> tuple[Optional[dict], str]:
         # try mapping the raw city via the region label table too (some payloads put the region in `city`)
         region = REGION_AR.get(raw_city)
 
+    # Catalog fallback (2026-08-04): map_city()'s small private CITY_MAP_AR dict misses real catalog
+    # cities it was simply never given a key for (e.g. «بلجرشي», a real, single-match Al Bahah town,
+    # FG27232). When the English `city` stays unresolved, try the full catalog resolver — region_hint
+    # disambiguates twin city names — never a guess, only a single unambiguous catalog match is
+    # accepted (see to_catalog()). Additive only: this table has no city_id/region_id column, so the
+    # result is captured in additional_info for a future location-resolution pass to pick up; the
+    # existing city/region/neighborhood columns the card renders from are untouched.
+    catalog_city_id = catalog_region_id = None
+    if not city and raw_city:
+        catalog_city_id, catalog_region_id = to_catalog(raw_city, region_hint=region)
+
     photos = _photos(item)
 
     title = _redact(item.get("title"))
@@ -342,7 +354,9 @@ def map_listing(item: dict) -> tuple[Optional[dict], str]:
         "rega_location_verified": bool(rea.get("license_number")),
         "title": title,
         "photo_urls": photos,
-        "additional_info": _additional_info(item, rea),
+        "additional_info": _additional_info(item, rea) | (
+            {"catalog_city_id": catalog_city_id, "catalog_region_id": catalog_region_id}
+            if catalog_city_id is not None else {}),
     }
     row.update(_utility_flags(rea.get("utilities")))
     return row, category

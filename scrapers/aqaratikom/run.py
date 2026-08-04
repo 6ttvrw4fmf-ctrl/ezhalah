@@ -56,6 +56,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.arabic_location import to_catalog  # noqa: E402
 
 BASE = "https://nawait.sa/api/v1"
 LIST_URL = f"{BASE}/ad"
@@ -432,6 +433,19 @@ def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
     region_ar = (amap.get("المنطقة/رقم المنطقة") or "").strip()
     region = REGION_AR.get(region_ar) or normalize.region_for_city(city)
 
+    # Catalog fallback (2026-08-04): map_city()'s small private CITY_MAP_AR dict misses real catalog
+    # cities it was simply never given a key for (e.g. «ضمد»-style small towns; «الحسى»/«الحسي» is a
+    # twin across Riyadh/Eastern that only the region signal from the source disambiguates,
+    # AQTKaf38ffaa1eae). When the English `city` stays unresolved, try the full catalog resolver
+    # (region_hint = this listing's own known region) — never a guess, only a single unambiguous
+    # catalog match is accepted (see to_catalog()). Additive only: this table has no city_id/
+    # region_id column, so the result is captured in additional_info for a future location-
+    # resolution pass to pick up; the existing city/region/neighborhood columns the card renders
+    # from are untouched.
+    catalog_city_id = catalog_region_id = None
+    if not city and city_ar:
+        catalog_city_id, catalog_region_id = to_catalog(city_ar, region_hint=region)
+
     # ── REGA license ──
     rega_lic = (detail.get("license_number") or amap.get("رقم ترخيص الإعلان"))
     rega_lic = str(rega_lic).strip() if rega_lic else None
@@ -466,6 +480,8 @@ def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         "longitude": _num(estate.get("long")),
         "owner_company": _company_or_none(ad.get("owner_name") or detail.get("owner_name")),
         "is_featured": bool(ad.get("is_featured")),
+        "catalog_city_id": catalog_city_id,
+        "catalog_region_id": catalog_region_id,
     }
     info = {k: v for k, v in info.items() if v not in (None, "", [], False) or k == "owner_company"}
     if info.get("owner_company") is None:
