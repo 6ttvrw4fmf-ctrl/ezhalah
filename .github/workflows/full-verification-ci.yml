@@ -44,8 +44,18 @@ jobs:
         with:
           node-version: "24"
           cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
       - name: Install dependencies
         run: npm ci
+      - name: Install scraper Python deps
+        # Three guards in `npm test` shell out to the real scraper modules —
+        # verify-sanadak-rsc-object-match, verify-no-derived-price and
+        # verify-scraper-type-tokens-mapped — and scrapers/*/run.py imports curl_cffi at module
+        # level, so without the pinned requirements they die on import rather than on an
+        # assertion. Same reason and same install line as common-location-tests.yml.
+        run: pip install -r scrapers/requirements.txt
       - name: Run all regression guards
         run: npm test
 
