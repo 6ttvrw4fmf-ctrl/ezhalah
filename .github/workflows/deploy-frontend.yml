@@ -35,8 +35,19 @@ on:
         type: string
       confirm:
         description: 'Type DEPLOY to confirm shipping main to ezhalah-app.vercel.app'
-        required: true
+        # Not `required` at the form level because a dry run ships nothing and should not have to
+        # type it. The confirmation gate below still hard-fails a REAL deploy without the exact word,
+        # and that gate — not this field — is the actual protection.
+        required: false
+        default: ""
         type: string
+      dry_run:
+        description: "Verify secrets, Vercel token and target lock, then STOP without deploying"
+        # AGENTS.md: "Never deploy to test the deployment pipeline." This is how you confirm the
+        # credentials and the target lock are healthy without shipping anything.
+        required: false
+        default: false
+        type: boolean
 
 # One production deploy at a time. The Supabase deploy lock is the real cross-session guard (it also
 # covers deploys started from a laptop); this is the cheap in-GitHub backstop.
@@ -54,6 +65,11 @@ jobs:
       - name: Confirmation gate
         # A misclick in the Actions UI must not ship production.
         run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "DRY RUN — verification only. The deploy step is skipped; nothing ships."
+            echo "Reason: ${{ inputs.reason }}"
+            exit 0
+          fi
           if [ "${{ inputs.confirm }}" != "DEPLOY" ]; then
             echo "::error::Refusing — the 'confirm' input must be exactly DEPLOY (got: '${{ inputs.confirm }}')."
             exit 1
@@ -110,7 +126,60 @@ jobs:
             > .vercel/project.json
           echo "Linked to $DTG_EXPECT_PROJECT_NAME → $DTG_CANONICAL_URL"
 
+      - name: Verify credentials and target lock (never deploys)
+        # Runs on BOTH paths. On a dry run it is the whole point; on a real deploy it turns a
+        # wrong-scope token into a clear message here instead of a confusing failure three minutes
+        # into safe-deploy.sh. Read-only: `whoami` and `env ls` cannot ship anything, and neither is
+        # a production-deploy verb, so this does not trip verify-no-vercel-bypass.
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          . scripts/deploy-target-guard.sh
+          if ! dtg_link_is_canonical .; then
+            echo "::error::Target lock FAILED — this checkout is not linked to $DTG_EXPECT_PROJECT_NAME."
+            exit 1
+          fi
+          echo "✓ target lock: linked to $DTG_EXPECT_PROJECT_NAME ($DTG_EXPECT_PROJECT_ID)"
+
+          echo "--- Vercel token identity ---"
+          npx vercel whoami --token "$VERCEL_TOKEN"
+
+          echo "--- required PRODUCTION env vars ---"
+          # A clean-main build has no local .env (gitignored), so these must live in the Vercel
+          # project or the Supabase client builds as null and all search dies app-wide
+          # (docs/DEPLOY_SAFETY.md, 2026-07-10 incident). safe-deploy.sh checks this too; failing
+          # here means a dry run can prove it without a deploy.
+          npx vercel env ls production --token "$VERCEL_TOKEN" > /tmp/vercel-env.txt || {
+            echo "::error::Could not read Vercel production env — is VERCEL_TOKEN scoped to the right team?"
+            exit 1
+          }
+          missing=""
+          for v in EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_KEY; do
+            grep -q "$v" /tmp/vercel-env.txt || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required Vercel PRODUCTION env var(s):$missing"
+            exit 1
+          fi
+          echo "✓ required production env vars present"
+
+      - name: Dry run complete — nothing deployed
+        if: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "### ✅ Dry run passed — nothing was deployed"
+            echo ""
+            echo "- Repository secrets present"
+            echo "- Vercel token authenticates"
+            echo "- Target lock resolves to \`ezhalah-app\`"
+            echo "- Required production env vars present"
+            echo ""
+            echo "Re-run with **dry_run unchecked** and \`confirm: DEPLOY\` to ship."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Deploy via the sanctioned guarded entrypoint
+        if: ${{ !inputs.dry_run }}
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}              # authenticates the Vercel CLI
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}              # deploy lock
