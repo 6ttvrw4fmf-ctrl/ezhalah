@@ -64,3 +64,34 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(fn):
             fn(); print(f"PASS {name}")
     print("✓ aqar soft-close detection pinned (two-factor, priced pages never killed)")
+
+
+# ── liveness price refresh (owner-approved 2026-08-04) ───────────────────────────────────────────
+# liveness already downloads every active page daily and used to DISCARD the body — which is why
+# 43,112 aqar rows (54.5%) still carried prices from the 2026-07-01 backfill while last_seen_at
+# reported them fresh. It now re-reads the published price from that same body.
+from scrapers.aqar.liveness import price_from_body  # noqa: E402
+
+
+def test_price_is_read_from_the_published_offer():
+    assert price_from_body('<script>{"offers":{"price":440000}}</script>') == 440000
+    assert price_from_body('{"price":"520041.38"}') == 520041   # decimals round to the stored int
+    assert price_from_body('{"price": 8900000 }') == 8900000
+
+
+def test_no_published_price_returns_none_so_the_stored_value_is_kept():
+    # The safety property: a closed ad / «طلب تسويق» / unrecognised render must NEVER null a price.
+    assert price_from_body(CLOSED) is None
+    assert price_from_body('<h1>أرض للبيع</h1><span>طلب تسويق</span>') is None
+    assert price_from_body('') is None
+    assert price_from_body('{"price":0}') is None      # 0 is not a published price
+    assert price_from_body('{"price":"abc"}') is None
+
+
+def test_refresh_never_derives_a_price():
+    # PRICE = SOURCE: the refresh copies the source's own number — there is no arithmetic here.
+    import inspect
+    from scrapers.aqar import liveness
+    src = inspect.getsource(liveness.price_from_body)
+    assert "*" not in src.split('"""')[-1], "no multiplication may appear in the price refresh"
+    assert "area" not in src.lower(), "price must never be computed from area"

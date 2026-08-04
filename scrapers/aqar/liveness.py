@@ -27,6 +27,7 @@ On the server:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 import time
@@ -184,6 +185,36 @@ def looks_closed(body: str) -> bool:
     return not has_offer
 
 
+_LD_PRICE_RE = re.compile(r'"price"\s*:\s*"?(\d+(?:\.\d+)?)"?')
+
+# Cap price writes per sweep. The first run after this lands could touch tens of thousands of
+# rows (43,112 aqar rows had never been re-read since capture); a bounded trickle keeps a sweep
+# from turning into a mass-write, and the remainder is simply picked up by the next day's run.
+PRICE_REFRESH_CAP = int(os.environ.get("AQAR_LIVENESS_PRICE_CAP", "500"))
+
+
+def price_from_body(body: str) -> Optional[int]:
+    """The listing's CURRENTLY PUBLISHED price, read from its JSON-LD offer.
+
+    PRICE = SOURCE (owner invariant 2026-08-04): this is a COPY of what the source publishes —
+    never a computation. The JSON-LD `offers.price` was verified against the visible price badge
+    on 150+ live aqar pages during the 2026-08-04 repair (they agreed on every page where both
+    were present), which is why it is trusted as the refresh signal here.
+
+    Returns None when the page publishes no price (closed ad, «طلب تسويق», or a render we don't
+    recognise) — and the caller then leaves the stored value ALONE rather than nulling it, so a
+    single odd render can never wipe a good price.
+    """
+    m = _LD_PRICE_RE.search(body)
+    if not m:
+        return None
+    try:
+        v = int(round(float(m.group(1))))
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
 def looks_dead(status: int, body: str) -> bool:
     """True iff the response confirms this listing is gone (vs a transient hiccup)."""
     if status in (404, 410):
@@ -254,6 +285,12 @@ def main() -> None:
     transient = 0
     pending_kill = 0  # missing this run but not yet past grace
     alive_ids: list[int] = []  # batched "still alive" ids → one UPDATE per 200 (see flush below)
+    price_updated = 0   # prices re-read from the page we already fetched (owner-approved 2026-08-04)
+    price_capped = 0    # changes seen past PRICE_REFRESH_CAP — next sweep picks them up
+    # aqar only: aqar's JSON-LD offers.price is the published sale price. wasalt rows are swept by
+    # this same script but their price comes from the wasalt API payload, so JSON-LD is not their
+    # source of truth and must not overwrite it.
+    price_refresh_on = table.startswith("aqar_")
     started = time.time()
 
     try:
@@ -268,7 +305,7 @@ def main() -> None:
         while window is not None:
             q = (
                 client.table(table)
-                .select("id, ad_number, listing_url, missing_count")
+                .select("id, ad_number, listing_url, missing_count, transaction_type, price_total")
                 .eq("active", True)
                 .gt("id", last_id)
                 .order("id", desc=False)
@@ -309,6 +346,28 @@ def main() -> None:
                     # writes were timing out mid-sweep, error 57014). (fix: liveness 57014 failure.)
                     alive_ids.append(row["id"])
                     refreshed += 1
+
+                    # PRICE REFRESH (owner-approved 2026-08-04). We already hold the current page
+                    # — discarding it was why 43,112 aqar rows (54.5%) still carried prices from
+                    # the 2026-07-01 backfill while last_seen_at reported them fresh. Re-read the
+                    # published price here so freshness and price stop disagreeing.
+                    # Scope is deliberately narrow: aqar BUY rows only. aqar's JSON-LD offers.price
+                    # is the sale price (verified against the visible badge on 150+ pages during the
+                    # 2026-08-04 repair); for rentals the same field's period is ambiguous, so those
+                    # are left to the enricher, which knows سنوي/شهري. Never writes NULL over an
+                    # existing price, and never writes when unchanged.
+                    if price_refresh_on and (row.get("transaction_type") == "Buy"):
+                        new_price = price_from_body(body)
+                        old_price = row.get("price_total")
+                        if new_price and old_price is not None and int(old_price) != new_price:
+                            if price_updated < PRICE_REFRESH_CAP:
+                                _run_with_retry(lambda i=row["id"], p=new_price:
+                                                client.table(table)
+                                                .update({"price_total": p}).eq("id", i).execute())
+                                price_updated += 1
+                            else:
+                                price_capped += 1
+
                     if len(alive_ids) >= 200:
                         batch = list(alive_ids)
                         _run_with_retry(lambda ids=batch: client.table(table)
@@ -344,7 +403,8 @@ def main() -> None:
 
     notes = (
         f"refreshed={refreshed} killed={killed} "
-        f"pending_kill={pending_kill} transient={transient}"
+        f"pending_kill={pending_kill} transient={transient} "
+        f"price_updated={price_updated} price_capped={price_capped}"
     )
     print(f"\n✓ Liveness sweep done. scanned={seen} {notes}")
     end_run(run_id, ok=True, rows_seen=seen, rows_upserted=killed, notes=notes)
