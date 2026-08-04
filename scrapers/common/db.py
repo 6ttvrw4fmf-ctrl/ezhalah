@@ -233,6 +233,31 @@ def _ensure_capture(r: dict[str, Any]) -> None:
         cap.setdefault("image_count", len(photos))
         cap.setdefault("url_path", r.get("listing_url"))
         cap.setdefault("schema", "unspecified")
+    _fold_price_evidence(r)
+
+
+def _fold_price_evidence(r: dict[str, Any]) -> None:
+    """PRICE = SOURCE invariant, layer 1 (owner rule 2026-08-04): preserve, at ingestion, the
+    proof of WHAT THE SOURCE PUBLISHED, so a stored price can be corroborated later without
+    re-fetching the page.
+
+    A scraper declares its evidence by putting `price_evidence` on the row (build it with
+    normalize.price_evidence()). This folds it into `source_capture["price_evidence"]` and drops
+    the top-level key, which is NOT a column. Nothing else about the row changes — the evidence
+    is a witness, never an input to the stored price.
+
+    Why this matters, concretely: on 2026-08-04 wasalt's 7 ppm-as-total rows were provable in
+    seconds because wasalt already captures `propertyInfo.salePrice`, while 48 aqar truncations
+    needed 600+ live page fetches to prove because aqar captured no structured price at all.
+    Evidence turns a forensic project into a SQL query — and it is what
+    mon_detect_price_source_mismatch() reads.
+    """
+    ev = r.pop("price_evidence", None)
+    if not ev:
+        return
+    cap = r.get("source_capture")
+    if isinstance(cap, dict):
+        cap.setdefault("price_evidence", ev)
 
 
 # Location columns checked on EVERY upsert path (2026-07-10 architecture redesign — see
