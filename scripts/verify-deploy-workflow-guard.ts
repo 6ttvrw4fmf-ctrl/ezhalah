@@ -84,6 +84,23 @@ check(/inputs\.confirm/.test(wf) && /!=\s*"DEPLOY"/.test(wf),
   'confirmation gate requires the literal DEPLOY input',
   'workflow must require an explicit DEPLOY confirmation input before deploying');
 
+// ── 6b. If a dry-run escape hatch exists, it must be wired so the DEPLOY path is the one that is
+// skipped — never the safety checks. A dry run that still reached safe-deploy.sh, or an inverted
+// condition that skipped the deploy on a REAL run, would both be silent disasters. Only enforced
+// when the input exists, so removing the dry-run feature entirely stays allowed.
+if (/dry_run:/.test(wf)) {
+  const deployStep = wf.match(/- name:[^\n]*\n(?:\s+.*\n)*?\s+run:\s*scripts\/safe-deploy\.sh/);
+  check(
+    deployStep !== null && /if:\s*\$\{\{\s*!\s*inputs\.dry_run\s*\}\}/.test(deployStep[0]),
+    'dry_run skips the DEPLOY step (never the safety checks)',
+    'a dry_run input exists but the safe-deploy.sh step is not gated on `if: ${{ !inputs.dry_run }}` —\n' +
+      '     a dry run must be incapable of reaching the deploy, and a real run must never skip it',
+  );
+  check(/inputs\.dry_run\s*\}\}"?\s*=\s*"true"/.test(wf) || /"\$\{\{ inputs\.dry_run \}\}" = "true"/.test(wf),
+    'dry_run is explicitly compared to the string "true" in the confirmation gate',
+    'the confirmation gate must test dry_run explicitly rather than relying on shell truthiness');
+}
+
 // ── 7. The guard constants themselves still name the one production project. ─────────────────
 if (existsSync(GUARD)) {
   const g = readFileSync(GUARD, 'utf8');
