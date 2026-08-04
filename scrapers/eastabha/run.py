@@ -339,6 +339,17 @@ def parse_detail(html_text: str) -> dict[str, Any]:
         pm = re.search(r'class="price_area">(.*?)</div>', html_text, re.S)
         if pm:
             out["price"] = _price_from_text(pm.group(1))
+    # WP Residence renders the qualifier next to the price («ريال للمتر» in the price_label span /
+    # urlencoded data-price) on land ads — the displayed number is a PER-METER rate. Per the owner's
+    # copy-the-display rule (hajer, 2026-08-03): price keeps the displayed figure verbatim, and the
+    # per-meter semantic is recorded in its own column so it is honest and queryable rather than
+    # silently read as a total (live 2026-08-03: 8/8 token rows, e.g. 3,000 «للمتر» on a 5,505 m² plot).
+    disp = up.unquote(_attr("data-price", html_text) or "")
+    if not disp:
+        pl = re.search(r'class="price_area">(.*?)</div>', html_text, re.S)
+        disp = pl.group(1) if pl else ""
+    if out.get("price") and re.search(r"(?:لل|ال)\s*متر", disp):
+        out["price_per_meter"] = out["price"]
     # geo
     g = re.search(r'data-cur_lat="([\d.\-]+)"\s+data-cur_long="([\d.\-]+)"', html_text)
     if g and g.group(1) not in ("", "0"):
@@ -459,8 +470,9 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     price = detail.get("price")
     area_m2 = detail.get("area_m2") or _content_specs((p.get("content") or {}).get("rendered", "")).get("area_m2")
     age = _content_specs((p.get("content") or {}).get("rendered", "")).get("property_age")
-    # No source per-m² rate → NULL, never price/area_m2 (aqar PR#216, scrapers PR#217).
-    ppm = None
+    # Source per-m² rate ONLY when the page's own price label carries the «للمتر» qualifier
+    # (parse_detail records it); otherwise NULL, never price/area_m2 (aqar PR#216, scrapers PR#217).
+    ppm = detail.get("price_per_meter")
 
     title = _redact(_clean((p.get("title") or {}).get("rendered", "")))
     description = _redact(_clean((p.get("content") or {}).get("rendered", "")))[:4000] or None

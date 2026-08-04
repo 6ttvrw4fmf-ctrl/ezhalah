@@ -244,6 +244,12 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "bedrooms": None,
         "bathrooms": _int(ar.get("numberOfBathrooms")),
         "price_total": _price_int(price) if not is_rent else None,
+        # On Buy LAND ads REGA publishes landTotalPrice = propertyPrice × propertyArea exactly
+        # (31/31 live-verified 2026-08-03) — i.e. propertyPrice is the UNIT rate («سعر الوحدة» in the
+        # page's own REGA table) that the badge displays as the price. Copy-the-display rule keeps
+        # price_total as the displayed figure; the per-meter semantic is recorded honestly here.
+        "price_per_meter": _price_int(ar.get("propertyPrice"))
+            if (not is_rent and ar.get("landTotalPrice") is not None) else None,
         "price_annual": rent_annual,
         "rent_period": rent_period,
         "city": city,

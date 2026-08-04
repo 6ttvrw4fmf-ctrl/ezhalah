@@ -115,8 +115,13 @@ def rem_fields(html_text: str) -> dict[str, str]:
         html_text, re.S,
     ):
         label = _clean(m.group(1))
-        vals = re.findall(r'rem-single-field-value[^>]*>(.*?)</span>', m.group(2), re.S)
-        out[label] = _clean(vals[-1]) if vals else ""
+        # REM nests spans inside the value («<span class="rem-price-amount">550.00 <span
+        # class="rem-currency-symbol">ر.س</span></span> - 600 الف …»), so a lazy (.*?)</span>
+        # stopped at the FIRST inner close and truncated range maxes + الف magnitude words from
+        # source_capture (live 2026-08-03, HJ1435). Capture the whole remaining segment (already
+        # bounded at the next field title by the outer regex) and tag-strip instead.
+        vm = re.search(r'rem-single-field-value[^>]*>(.*)$', m.group(2), re.S)
+        out[label] = _clean(re.sub(r"<[^>]+>", " ", vm.group(1))) if vm else ""
     return out
 
 

@@ -511,7 +511,7 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     # Source-published «سعر المتر» only. The old price/area fallback fabricated a rate — and
     # because a later gate can null price_total, it left rows showing «سعر المتر ر.س 0» on a
     # price-less card (5 live rows, 2026-07-26). (aqar PR#216, scrapers PR#217.)
-    price_per_meter = round(ppm) if ppm else None
+    price_per_meter = (round(ppm) or None) if ppm else None  # round(0.25)→0 is not a rate; store honest NULL
 
     # OWNER RULE (2026-07-30, extreme-price verify-then-preserve — RE-AFFIRMED by the owner
     # 2026-08-03: «whatever is in those platforms keep it how it is, even if small to large we are
