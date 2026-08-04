@@ -1,0 +1,80 @@
+# Full verification gate (2026-08-04).
+#
+# WHY THIS EXISTS: `npm test` — 43 regression guards covering the PRICE = SOURCE invariants, the
+# Region -> City -> District boundary, taxonomy/canon sync, the RPC filter contract and the Arabic
+# UX rules — was NOT executed by ANY workflow. Verified at the time with:
+#     grep -rn "npm test\|npm run test" .github/workflows/   ->   no match
+# So 41 of 43 safety guards ran only on a developer's machine and gated nothing. A PR could break
+# every price invariant in the product and CI would still be green.
+#
+# That is unacceptable on its own, and it is disqualifying for automatic merging: "merge when CI is
+# green" is only safe when green actually means the invariants held. These two jobs are what make
+# the required-status-check list on `main` meaningful.
+#
+# Both jobs are offline-safe: nothing here needs a secret, a database or network egress beyond the
+# npm registry. The two guards that DO need live credentials
+# (verify-strict-filter-parity-live, verify-residential-misfile-recovery) are deliberately not part
+# of `npm test` and are not run here.
+name: Full verification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  npm-test:
+    # NOTE: this job name is referenced by the branch-protection required-status-check list.
+    # Renaming it silently drops the gate — change both together.
+    name: Full verification suite (npm test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # several guards use `git grep` / read tracked files across the tree
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: npm ci
+      - name: Install scraper Python deps
+        # Three guards in `npm test` shell out to the real scraper modules —
+        # verify-sanadak-rsc-object-match, verify-no-derived-price and
+        # verify-scraper-type-tokens-mapped — and scrapers/*/run.py imports curl_cffi at module
+        # level, so without the pinned requirements they die on import rather than on an
+        # assertion. Same reason and same install line as common-location-tests.yml.
+        run: pip install -r scrapers/requirements.txt
+      - name: Run all regression guards
+        run: npm test
+
+  taxonomy-verify:
+    # NOTE: this job name is referenced by the branch-protection required-status-check list.
+    name: Taxonomy + location index (npm run verify)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Taxonomy drift + location-index tripwire
+        # safe-deploy.sh runs this too, but only at deploy time — by then a drifting PR is already
+        # merged. Catching it on the PR is the point.
+        run: npm run verify
