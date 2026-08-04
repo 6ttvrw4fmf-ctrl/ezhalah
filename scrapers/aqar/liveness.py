@@ -27,6 +27,7 @@ On the server:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -154,6 +155,35 @@ def reconcile_orphaned_stubs(client, platform: str, *, older_than_hours: int = O
     return n
 
 
+def looks_closed(body: str) -> bool:
+    """True iff this 200-OK page is aqar's SOFT-CLOSED state (2026-08-04).
+
+    Aqar does not 404 a closed ad. It serves HTTP 200 with the price slot replaced by a red
+    «مغلق» badge, and strips the `offers` node out of the RealEstateListing JSON-LD. None of the
+    DEAD_MARKERS phrases appear, so looks_dead() fell through to the alive branch — which refreshes
+    last_seen_at AND resets missing_count, so these rows could never reach the 3-strike threshold.
+    A 115-page live sample (2026-08-04) found 17 closed / 21 unpublished / 77 live, i.e. ~14.8% of
+    the active population was being reported as healthy forever.
+
+    TWO-FACTOR ON PURPOSE. The bare word «مغلق» also appears in LIVE listings' own descriptions
+    («مطبخ مغلق» = closed kitchen, «مجمع سكني مغلق» = gated compound) — 7 of the 77 live pages in
+    that sample. Requiring BOTH the badge markup AND the missing offers node means a false kill
+    needs two independent signals to drift at once. Badge-alone was 0/77 live and 17/17 closed.
+
+    «طلب تسويق» (marketing-request) pages are deliberately NOT treated as closed: the ad exists,
+    the owner simply publishes no price. Those stay active with an honest «السعر عند الطلب».
+    """
+    if "مغلق" not in body:
+        return False
+    # Factor 1: the badge, not the word — the description text never carries this markup.
+    badge = re.search(r"(?:badge|chip|tag|status)[^<>]{0,80}مغلق|مغلق[^<>]{0,40}</(?:span|div|p)>", body)
+    if not badge:
+        return False
+    # Factor 2: a live ad always publishes an offers node; a closed one has none.
+    has_offer = '"offers"' in body or '"price"' in body
+    return not has_offer
+
+
 def looks_dead(status: int, body: str) -> bool:
     """True iff the response confirms this listing is gone (vs a transient hiccup)."""
     if status in (404, 410):
@@ -164,7 +194,7 @@ def looks_dead(status: int, body: str) -> bool:
     for marker in DEAD_MARKERS:
         if marker in body:
             return True
-    return False
+    return looks_closed(body)
 
 
 def main() -> None:
