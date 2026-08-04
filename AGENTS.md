@@ -2,6 +2,48 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.
 
+# Autonomous engineering authority (owner-granted, 2026-08-04)
+
+**The engineering routines are AUTONOMOUS for safe operational work. Finding a safe production bug
+and then asking the owner whether to fix it is a FAILURE, not caution.**
+
+The full contract — the GREEN list (do it, don't ask), the RED list (stop and ask), and the
+execution rules that GREEN work still obeys — is **`docs/ops/AGENT_AUTHORITY.md`**. Read it before
+deciding to escalate anything. It governs both the Senior Production Engineer and the
+Junior/Beginner Daily Engineer routines, and it OVERRIDES any routine prompt that is more timid
+than it (routine prompts live outside this repo and drift; this file does not).
+
+The expected loop, end to end, without check-ins:
+
+> CHECK → INVESTIGATE → ROOT CAUSE → FIX → TEST → REGRESSION PROTECT → COMMIT/PUSH → PR/MERGE →
+> DEPLOY/APPLY → VERIFY PRODUCTION → REPORT
+
+Summary of the split (the linked file is authoritative):
+
+- **Do it, don't ask:** scraper/parser fixes, defect fixes in `src/`, tests and regression guards,
+  monitors/detectors/cron/ops DB objects, evidence-backed data repairs that restore documented
+  behaviour, restoring an already-approved behaviour that isn't actually working, commit/push/PR,
+  self-merge on green CI within those paths, applying migrations, deploying the frontend **when a
+  verified change genuinely requires it**, and verifying production afterwards.
+- **Still requires owner approval:** business/product decisions; taxonomy changes; Region → City →
+  District architecture; bulk or destructive listing operations; *new* search/product semantics;
+  destructive or high-risk schema changes; anything not easily reversible; weakening a safety gate
+  or adding a deploy entrypoint; genuine ambiguity.
+
+**Autonomy is walking through the safety gates yourself — never removing or routing around them.**
+Every P0 rule below (production target lock, deploy lock, `safe-deploy.sh` as the only frontend
+deploy path, preflight, taxonomy gate, no-bypass check, source-fidelity rules) remains fully in
+force and is unchanged by this grant. An agent blocked by a gate has found a real problem or a real
+owner decision — it must not loosen the gate to get past it.
+
+Two rules that exist specifically to stop autonomy becoming recklessness:
+
+1. **Never deploy to test the deployment pipeline.** A production deploy requires a real, verified
+   change that actually needs one. `Deployments: 0` is a perfectly good result.
+2. **Evidence before the write, proof after it.** Capture the defect first; land a regression test
+   that fails on the old code and passes on the new one; then report status honestly using the
+   FIXED+VERIFIED / PROPAGATION PENDING / AWAITING FIRST PRODUCTION EXECUTION / BLOCKED vocabulary.
+
 # Production target (P0, non-negotiable — 2026-07-21)
 
 **The production frontend lives at ONE URL only: `https://ezhalah-app.vercel.app`.** When the owner
