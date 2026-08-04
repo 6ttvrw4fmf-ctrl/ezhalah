@@ -1,0 +1,136 @@
+# Production frontend deploy — the SAME guarded entrypoint, reachable without a laptop.
+#
+# WHY THIS EXISTS. Deploys were CLI-only (`scripts/safe-deploy.sh` from a local checkout with a
+# Vercel login on disk), so the frontend could only ship from one machine. It drifted 27 commits
+# behind main for five days while four user-facing fixes sat merged-but-invisible, purely because
+# nobody was at that laptop. This workflow gives the same script a home that the owner (and the
+# engineering routines) can reach from anywhere.
+#
+# WHAT IT IS NOT. It is NOT auto-deploy-on-push, and it must never become that. docs/DEPLOY_SAFETY.md
+# records why this repo deliberately does not use Vercel's Git integration: a deploy must be a
+# deliberate act, taken against a known-good main, holding the deploy lock. `workflow_dispatch` keeps
+# that property — a human or an agent decides, on purpose, one deploy at a time.
+#
+# HOW IT STAYS SAFE. This job runs `scripts/safe-deploy.sh` and nothing else. It contains no raw
+# `vercel` command, so scripts/verify-no-vercel-bypass.ts stays green and this file gains no special
+# privilege. Every existing guard therefore still runs, in the same order, and still fails closed:
+#   deploy lock (via deploy-lock.sh, using the existing SUPABASE_* secrets)
+#   preflight-verify.sh — on main, clean tree, HEAD == origin/main, approved-baseline containment
+#   npm run verify      — taxonomy + location-index gates (identical to vercel.json buildCommand)
+#   production target lock — .vercel/project.json must be the canonical ezhalah-app project
+#   Vercel production env preflight (EXPO_PUBLIC_SUPABASE_URL / _KEY present)
+#   post-deploy alias assertion — proves ezhalah-app.vercel.app serves THIS exact bundle
+#
+# scripts/verify-deploy-workflow-guard.ts asserts, in CI, that this file keeps all of the above:
+# dispatch-only, checks out main, routes through safe-deploy.sh, and pins the canonical project.
+
+name: Deploy frontend (production)
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why this deploy is needed (recorded in the deploy-lock note and the run log)"
+        required: true
+        type: string
+      confirm:
+        description: 'Type DEPLOY to confirm shipping main to ezhalah-app.vercel.app'
+        required: true
+        type: string
+
+# One production deploy at a time. The Supabase deploy lock is the real cross-session guard (it also
+# covers deploys started from a laptop); this is the cheap in-GitHub backstop.
+concurrency:
+  group: deploy-frontend-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: safe-deploy.sh → ezhalah-app.vercel.app
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Confirmation gate
+        # A misclick in the Actions UI must not ship production.
+        run: |
+          if [ "${{ inputs.confirm }}" != "DEPLOY" ]; then
+            echo "::error::Refusing — the 'confirm' input must be exactly DEPLOY (got: '${{ inputs.confirm }}')."
+            exit 1
+          fi
+          echo "Deploy reason: ${{ inputs.reason }}"
+
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          # ALWAYS main, never the dispatching ref — dispatching from a feature branch must still
+          # deploy main, exactly as the P0 deploy rule requires.
+          ref: main
+          # Full history: preflight-verify.sh runs merge-base/ancestry checks against the recorded
+          # approved baseline. A shallow clone makes those checks unresolvable.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"   # matches the Vercel project's nodeVersion
+          cache: npm
+
+      - name: Install dependencies
+        # `npm ci` (not --omit=dev): safe-deploy.sh runs `npm run verify`, which needs tsx.
+        run: npm ci
+
+      - name: Require the deploy secrets up-front
+        # Fail with a readable message instead of a confusing Vercel/curl error 3 minutes in.
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          missing=""
+          [ -n "$VERCEL_TOKEN" ] || missing="$missing VERCEL_TOKEN"
+          [ -n "$SUPABASE_URL" ] || missing="$missing SUPABASE_URL"
+          [ -n "$SUPABASE_SERVICE_ROLE_KEY" ] || missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing"
+            echo "Add them under Settings → Secrets and variables → Actions. Nothing was deployed."
+            exit 1
+          fi
+          echo "All required secrets present."
+
+      - name: Link this checkout to the canonical Vercel project
+        # .vercel/ is gitignored (it must never be committed), so a fresh CI checkout has no link and
+        # safe-deploy.sh would correctly refuse. We write it from the SAME constants the shared guard
+        # asserts, so the target lock still verifies it rather than trusting it. There is exactly one
+        # production project — ezhalah-app — and no path here can create or target another.
+        run: |
+          . scripts/deploy-target-guard.sh
+          mkdir -p .vercel
+          printf '{"projectId":"%s","orgId":"%s","projectName":"%s"}\n' \
+            "$DTG_EXPECT_PROJECT_ID" "$DTG_EXPECT_ORG_ID" "$DTG_EXPECT_PROJECT_NAME" \
+            > .vercel/project.json
+          echo "Linked to $DTG_EXPECT_PROJECT_NAME → $DTG_CANONICAL_URL"
+
+      - name: Deploy via the sanctioned guarded entrypoint
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}              # authenticates the Vercel CLI
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}              # deploy lock
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # safe-deploy.sh builds its own holder string and calls deploy-lock.sh; the TTL is the one
+          # knob it reads from the environment. 600s is the default and is tight for a cold CI build
+          # (npm ci + expo export + alias polling), so give it room — the lock still self-expires so
+          # a killed runner can never wedge production.
+          DEPLOY_LOCK_TTL_SECONDS: "1800"
+        run: scripts/safe-deploy.sh
+
+      - name: Report
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "### ✅ Deployed to https://ezhalah-app.vercel.app" >> "$GITHUB_STEP_SUMMARY"
+            echo "Alias assertion passed inside safe-deploy.sh — the canonical URL is serving this build." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### ❌ Deploy did not complete" >> "$GITHUB_STEP_SUMMARY"
+            echo "safe-deploy.sh fails closed: if it refused, **nothing was deployed** and production is untouched." >> "$GITHUB_STEP_SUMMARY"
+            echo "If it deployed but the alias did not move, the log above prints the exact promote command to run." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Reason given: ${{ inputs.reason }}" >> "$GITHUB_STEP_SUMMARY"

@@ -31,3 +31,11 @@ jobs:
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-deploy-target-guard.ts
       - name: No-bypass — every prod deploy must route through safe-deploy.sh
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-no-vercel-bypass.ts
+      # The agent-triggerable deploy workflow (2026-08-04) is only safe while it stays
+      # dispatch-only, checks out main, routes through safe-deploy.sh and pins the canonical
+      # project. These two guards are in `npm test` as well, but npm test is NOT run by any
+      # workflow — so without them here they would never actually gate a PR.
+      - name: Deploy workflow keeps every safety property
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-deploy-workflow-guard.ts
+      - name: Agent autonomy grant keeps its limits (RED list intact)
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-agent-authority-contract.ts
