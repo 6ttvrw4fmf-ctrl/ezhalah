@@ -48,6 +48,32 @@ deploy unless you're on `main`, the working tree is 100% clean, and local `main`
 `origin/main` exactly. If it refuses, fix the underlying git state (commit → push → PR → merge) —
 do not bypass it.
 
+**GitHub Actions deploy bridge (added 2026-08-04):** `.github/workflows/deploy.yml` is a
+manual-trigger-only (`workflow_dispatch`) wrapper around `scripts/safe-deploy.sh` — same script,
+same gates (deploy lock, preflight, taxonomy, target lock, env check, post-deploy verification,
+drift gate), zero bypass, CI-enforced by `scripts/verify-no-vercel-bypass.ts`. Full runbook:
+`docs/DEPLOY_SAFETY.md` "GitHub Actions deploy bridge". This is how you ship a frontend fix without
+a terminal:
+
+- **When to trigger it yourself (Daily or Senior routine):** the fix is already merged to `main`
+  (you did not just merge it yourself as part of this same run unless Hard Rule 3 / the Senior
+  routine's own merge authority explicitly allows it), it's a `src/` or `supabase/functions/`
+  change with no other open concerns, and you have GitHub Actions `workflow_dispatch` permission on
+  this repo. Call the GitHub MCP `actions_run_trigger` tool: `method: run_workflow`,
+  `workflow_id: "deploy.yml"`, `ref: "main"`, `inputs: {"reason": "<what and why>", "holder": "<your
+  routine name + date>"}`. Then report the run URL and result — do not ask the owner to press the
+  button themselves if you were able to dispatch it.
+- **If dispatch fails with a permission error** (e.g. "Resource not accessible by integration"):
+  your session does not currently hold `actions:write` on this repo — this was the case for every
+  session tested as of 2026-08-04. Fall back to asking the owner to trigger it (GitHub UI: Actions →
+  "Deploy to production" → Run workflow), exactly as before this bridge existed. Say so plainly;
+  do not silently skip the deploy or claim it happened.
+- **Not every fix needs this.** A DB-only migration ships via the Supabase MCP deploy-lock protocol
+  directly (see "Deployment lock" below) — never via this workflow. A `scrapers/**`-only change
+  needs no deploy step at all: merging to `main` is enough, the existing scraper workflows always
+  run whatever is on `main`. Only dispatch `deploy.yml` for a change that actually needs a Vercel
+  build to take effect.
+
 # Deployment lock (P0, non-negotiable — 2026-07-16)
 
 **Multiple Claude/agent sessions can run against this repo and this Supabase project at the same

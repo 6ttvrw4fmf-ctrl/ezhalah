@@ -54,8 +54,14 @@ if [ -n "${DEPLOY_LOCK_MCP_HOLDER:-}" ]; then
   fi
   echo "Deploy lock verified: held by '${DEPLOY_LOCK_MCP_HOLDER}' (unexpired). Release stays with the MCP session."
 else
-  HOLDER="safe-deploy:$(whoami)@$(hostname)-$$"
-  scripts/deploy-lock.sh acquire "$HOLDER" "safe-deploy.sh" || exit 1
+  # DEPLOY_LOCK_HOLDER / DEPLOY_LOCK_NOTE (added 2026-08-04 for the GitHub Actions deploy bridge,
+  # see .github/workflows/deploy.yml): optional overrides for the lock's holder/note, so a
+  # dispatched CI run records WHO triggered it and WHY in ops_deploy_lock instead of an opaque
+  # runner hostname. Fully backward compatible — unset, this is byte-identical to the prior
+  # behavior a human running this from a terminal has always gotten.
+  HOLDER="${DEPLOY_LOCK_HOLDER:-safe-deploy:$(whoami)@$(hostname)-$$}"
+  NOTE="${DEPLOY_LOCK_NOTE:-safe-deploy.sh}"
+  scripts/deploy-lock.sh acquire "$HOLDER" "$NOTE" || exit 1
   trap 'scripts/deploy-lock.sh release "'"$HOLDER"'" >/dev/null 2>&1 || true' EXIT
 fi
 echo ""

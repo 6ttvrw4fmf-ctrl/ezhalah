@@ -1,0 +1,131 @@
+# GitHub Actions deploy bridge (added 2026-08-04) — see docs/DEPLOY_SAFETY.md "GitHub Actions
+# deploy bridge" and AGENTS.md "Deploy rule" for the full writeup.
+#
+# This workflow does NOT implement any deploy logic of its own. It is a thin, auditable wrapper
+# around scripts/safe-deploy.sh — the one sanctioned production-deploy entrypoint — so an engineer
+# (human or an authorized agent routine) can ship a verified, already-merged fix to
+# https://ezhalah-app.vercel.app without opening a terminal. Every existing gate in safe-deploy.sh
+# still runs, in the same order, with nothing skipped or weakened:
+#   deploy lock -> preflight-verify.sh (baseline/target/concurrency checks) -> npm run verify
+#   (taxonomy + location-index drift) -> branch/clean/origin checks -> production-target lock
+#   (ezhalah-app ONLY) -> Vercel production-env preflight -> the deploy itself -> post-deploy bundle
+#   check -> canonical-alias propagation check -> live search smoke test -> schema-drift /
+#   duplicate-overload gate -> approved-baseline advance.
+#
+# scripts/verify-no-vercel-bypass.ts (run on every push/PR via deploy-guard-ci.yml) proves no
+# tracked file outside the sanctioned deploy scripts can invoke a raw production-deploy command —
+# this workflow doesn't either; every step below only ever calls scripts/safe-deploy.sh.
+#
+# Manual trigger ONLY (workflow_dispatch). Never wired to push/schedule — a deploy is a deliberate
+# act, always after a fix is merged to main and verified, per the standing "verify before ship"
+# rule. Runs the deploy lock in its own "direct" mode (scripts/deploy-lock.sh, keyed off the
+# SUPABASE_SERVICE_ROLE_KEY secret below) since a GitHub Actions runner is not an MCP session — see
+# scripts/safe-deploy.sh's DEPLOY_LOCK_MCP_HOLDER branch for why that mode doesn't apply here.
+name: Deploy to production
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why are you deploying? (recorded as the deploy-lock note + in this run's summary)"
+        required: true
+        type: string
+      holder:
+        description: 'Who/what is deploying — e.g. "daily-engineer-2026-08-05", "senior-engineer-run-6", or your name (recorded as the deploy-lock holder)'
+        required: true
+        type: string
+
+permissions:
+  contents: write   # scripts/safe-deploy.sh commits + pushes the advanced docs/DEPLOY_BASELINE.txt
+                     # on a successful deploy — this is the ONLY write this workflow's own token
+                     # performs; everything else is read + the Vercel/Supabase calls below.
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false   # never cancel a deploy mid-flight; a second dispatch queues instead
+
+jobs:
+  deploy:
+    name: safe-deploy.sh (every existing gate, nothing bypassed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout main (full history — preflight needs it for ancestor/merge-base checks)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Ensure we are really on a local 'main' tracking origin/main
+        # actions/checkout@v4 can leave a detached HEAD depending on event context; safe-deploy.sh
+        # requires `git branch --show-current` == "main" AND HEAD == origin/main exactly (the same
+        # precondition a human running `git checkout main && git pull` would have) — make that
+        # literally true rather than relying on checkout's default ref behavior.
+        run: git checkout -B main origin/main
+
+      - name: Setup Node 24 (matches deploy-guard-ci.yml / this repo's CI baseline)
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure git identity (for safe-deploy.sh's baseline-advance commit at the end)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Verify required secrets are present (fail fast, plain-English message)
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        run: |
+          missing=""
+          [ -z "${VERCEL_TOKEN:-}" ] && missing="$missing VERCEL_TOKEN"
+          [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ] && missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+          [ -z "${SUPABASE_URL:-}" ] && missing="$missing SUPABASE_URL"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required GitHub Actions secret(s):$missing"
+            echo "Add them at: repo Settings -> Secrets and variables -> Actions -> New repository secret."
+            echo "Nothing was deployed — this check runs before any deploy-lock/preflight/build step."
+            exit 1
+          fi
+          echo "All required secrets are present."
+
+      - name: Link this checkout to the canonical Vercel project (non-secret IDs)
+        # projectId/orgId/projectName are NOT secrets — they're already committed in the clear in
+        # AGENTS.md and scripts/deploy-target-guard.sh (DTG_EXPECT_*). .vercel/ is gitignored (it's
+        # normally a machine-local link file), so a fresh CI checkout must recreate it before
+        # scripts/safe-deploy.sh's target-lock check can pass. This is the ONLY project this
+        # workflow is allowed to link to — do not change these values without also updating
+        # scripts/deploy-target-guard.sh (the single source of truth both files read from).
+        run: |
+          mkdir -p .vercel
+          cat > .vercel/project.json <<'JSON'
+          {"projectId":"prj_CLp9BxNzT4RmWL9Is1KjHoQlSAlX","orgId":"team_0lVrGRoJbCRIWovPNkfnmwJ7","projectName":"ezhalah-app"}
+          JSON
+
+      - name: Run scripts/safe-deploy.sh (the one sanctioned production-deploy entrypoint)
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DEPLOY_LOCK_HOLDER: ${{ inputs.holder }}
+          DEPLOY_LOCK_NOTE: ${{ inputs.reason }}
+        run: bash scripts/safe-deploy.sh
+
+      - name: Run summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy run"
+            echo "- Triggered by: \`${{ github.actor }}\`"
+            echo "- Holder: \`${{ inputs.holder }}\`"
+            echo "- Reason: ${{ inputs.reason }}"
+            echo "- Result: \`${{ job.status }}\`"
+            echo ""
+            echo "See the job log above for the full safe-deploy.sh transcript (every gate it ran,"
+            echo "and — on success — the post-deploy verification output)."
+          } >> "$GITHUB_STEP_SUMMARY"

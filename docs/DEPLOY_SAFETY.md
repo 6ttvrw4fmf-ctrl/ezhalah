@@ -41,6 +41,45 @@ Before running any production deploy, confirm ALL of the following:
 **Use `scripts/safe-deploy.sh` instead of running `vercel --prod` directly** — it enforces checks
 1, 2, and 6 automatically and refuses to deploy if they fail.
 
+## GitHub Actions deploy bridge (added 2026-08-04)
+
+You do not need a terminal to run `scripts/safe-deploy.sh` anymore. `.github/workflows/deploy.yml`
+is a thin, manual-trigger-only (`workflow_dispatch`) wrapper that runs the exact same script, in
+GitHub's own runner, with every gate above still enforced — it contains no deploy logic of its own,
+it only calls `scripts/safe-deploy.sh`. `scripts/verify-no-vercel-bypass.ts` (CI-enforced on every
+push/PR) proves this stays true: no workflow or script can ship the frontend any other way.
+
+**To deploy:**
+1. Confirm the fix you want live is already merged to `main` (this workflow always deploys `main`
+   HEAD — it has no branch input, by design, matching "deploy only from a clean merged main").
+2. Trigger the workflow — either:
+   - **GitHub UI:** Actions tab → "Deploy to production" → Run workflow → fill in `reason` and
+     `holder` → Run workflow.
+   - **An authorized agent session** (Daily/Senior engineering routine, or any session with GitHub
+     Actions `workflow_dispatch` permission on this repo): call the GitHub MCP `actions_run_trigger`
+     tool (`method: run_workflow`, `workflow_id: deploy.yml`, `ref: main`, `inputs: {reason, holder}`) —
+     or `gh workflow run deploy.yml -f reason="..." -f holder="..."` if `gh` is available. See
+     AGENTS.md "Deploy rule" for when a routine should do this on its own vs. ask the owner.
+3. Watch the run. On success, the job summary + log show every gate that passed and the final
+   post-deploy verification (bundle check, canonical-alias propagation, live search smoke test,
+   schema-drift gate). On failure, the log names the exact `❌` — nothing was deployed if any gate
+   before "Deploying..." refused; if a post-deploy check fails, the deploy already happened and the
+   log says so explicitly (never silently reports success on a half-verified deploy).
+
+**Required GitHub Actions secrets** (repo Settings → Secrets and variables → Actions):
+`VERCEL_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. The latter two are already used by
+every scraper workflow in `.github/workflows/`; `VERCEL_TOKEN` is deploy-only — if it's missing,
+the workflow fails immediately with a plain-English message naming exactly what's missing, before
+touching the deploy lock or anything else.
+
+**Does not deploy DB-only or scraper-only changes.** A migration with no frontend impact goes
+live via the Supabase MCP deploy-lock protocol directly (see "Deployment lock" below) — no Vercel
+build needed. A scraper-only change (`scrapers/**`) needs no deploy step at all: merging to `main`
+is sufficient, since the existing cron/`workflow_dispatch` scraper workflows always run whatever is
+on `main`. Only reach for this bridge when the fix touches `src/`, `supabase/functions/` (edge
+functions bundled into the deployed app), or anything else that only takes effect through a Vercel
+build.
+
 ## Verifying a deploy
 
 After any production deploy, confirm it actually served what you expect — do not assume:
