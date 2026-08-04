@@ -1,5 +1,5 @@
 import type { SearchQuery } from './search';
-import { effectiveTypes } from './search';
+import { effectiveTypes, hasClientOnlyNarrowing } from './search';
 import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, type AgeOptionCounts, type GuidedCounts } from './remote';
 import { isAgeFilterScope as isAgeFilterScopeFor } from '@/lib/ageFilterTypes';
 import { t } from '@/i18n';
@@ -179,14 +179,32 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
   selection: 'single',
   eligibility: isApartmentAttributeScope,
   async resolveOptions(q) {
-    return guidedOptions(await fetchApartmentGuidedCounts(q), [
+    // Only rungs ABOVE the current answer can narrow. apartment_guided_counts_ar computes cnt_bath1..4
+    // over the `scoped` CTE, which ALREADY has the user's previous p_bath_min applied — so with
+    // bathMin=3 live, cnt_bath1 == cnt_bath2 == cnt_bath3 == 1,117 (probed 2026-08-04), i.e. the lower
+    // rungs are duplicates of the current state, not offers. Offering them made the card promise 1,117
+    // and (pre-fix) deliver 2,984 — see the apply() note below. Dropping them leaves only the rungs
+    // that mean something; when none do, `minOptionsFor('single')` retires the question entirely.
+    const floor = q.bathMin ?? 0;
+    const rungs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
       { key: '1', labelKey: '1+', count: (c) => c.cnt_bath1 },
       { key: '2', labelKey: '2+', count: (c) => c.cnt_bath2 },
       { key: '3', labelKey: '3+', count: (c) => c.cnt_bath3 },
       { key: '4', labelKey: '4+', count: (c) => c.cnt_bath4 },
-    ]);
+    ];
+    return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((d) => parseInt(d.key, 10) > floor));
   },
-  apply: (q, keys) => (keys[0] ? { ...q, bathMin: parseInt(keys[0], 10) || null } : q),
+  // INTERSECT, never replace (bug fix 2026-08-04). Every option's `count` is defined by the contract as
+  // "exactly what Search returns if picked", and it is computed WITH the previous answer applied — so an
+  // answer that relaxes the previous one would deliver a set larger than the number the user tapped.
+  // Live pre-fix repro: narrow to «٣+» (1,117 results) → re-open «خلّنا نحدد الطلب أكثر» → the «١+» pill
+  // reads 1,117 → tapping it installed bathMin=1 and returned 2,984, of which 1,867 had FEWER bathrooms
+  // than the user had asked for (breaking strict-options too, not just count honesty). Math.max keeps
+  // the card monotone: the answer can only ever narrow, so the pill's number always holds.
+  apply: (q, keys) => {
+    const n = parseInt(keys[0] ?? '', 10);
+    return Number.isFinite(n) && n > 0 ? { ...q, bathMin: Math.max(n, q.bathMin ?? 0) } : q;
+  },
 };
 
 // The queue — asked in this order; each self-gates via its own eligibility() + resolveOptions(). The
@@ -195,3 +213,24 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
 export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
   RNPL_QUESTION, AGE_QUESTION, AMENITIES_QUESTION, BATHROOMS_QUESTION,
 ];
+
+// THE engine gate — every caller asks HERE which questions may run, so no call site re-derives it.
+//
+// Beyond each question's own eligibility(), there is one ENGINE-WIDE precondition: every option this
+// engine renders carries a live `count` that the contract defines as "exactly what Search returns if
+// picked", and every one of those counts comes from a count RPC. When the query carries a narrower
+// that only the CLIENT applies — an agent keyword, a legacy size band, a per-m² Buy budget — the RPC
+// never sees it, so every count (and the «اعرض N نتيجة» footer, which is the same RPC) is computed
+// over a strictly larger set than the user will actually receive. Measured live 2026-08-04: 475
+// promised vs ~28 delivered on an age bucket; 9,314 vs 324 in the worst probe.
+//
+// This is the same lie the exact «لقينا N إعلان» headline used to tell (9,647 vs 134, bug-hunt
+// 2026-07-30) and it is suppressed there by this exact predicate (agent.tsx). The narrowers cannot be
+// pushed to the RPC — per-m² budgets and substring keyword matching are not RPC features — so an
+// honest count is unavailable, and a question whose counts cannot be honest must not be asked. The
+// callers' existing "nothing qualifies" path already handles it: a manual tap falls through to the
+// plain refine chips (which promise no numbers), and the auto path closes silently.
+export function eligibleQuestions(q: SearchQuery): AdvancedQuestion[] {
+  if (hasClientOnlyNarrowing(q)) return [];
+  return ADVANCED_QUESTIONS.filter((question) => question.eligibility(q));
+}

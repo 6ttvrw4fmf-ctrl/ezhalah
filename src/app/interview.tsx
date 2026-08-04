@@ -16,7 +16,25 @@ import { useI18n, t, tWord, tBudgetMain, tBudgetSub, tDetailOption, isLatinOnlyI
 // `filter` param. Empty/skipped fields broaden the search rather than dead-end it (PRD §6.1).
 
 const SKIP = '__skip';
-const real = (v?: string) => !!v && v !== SKIP && v !== 'Other';
+// "Doesn't matter" is the amenities question's own skip option (see SECONDARY below) — it is a
+// no-preference answer, so it must never be treated as a stated one (it was previously echoed back
+// to the user as if it were a chosen extra).
+const NO_PREFERENCE = "Doesn't matter";
+const real = (v?: string) => !!v && v !== SKIP && v !== 'Other' && v !== NO_PREFERENCE;
+
+// Must-have amenity answer → the STRICT English amenity token the search RPC understands. The live
+// vocabulary of location_search_candidates_ar's p_amenities block is exactly: elevator, parking,
+// kitchen, ac, maid_room, driver_room, private_entrance, furnished, rnpl/rent_now_pay_later
+// (read off pg_get_functiondef, 2026-08-04) — and an UNKNOWN token matches nothing by design, so a
+// guessed slug would silently zero out every result. Pool and Gym have no column in
+// search_listings_ar at all, so they are deliberately absent here: per PRD §6.1 an unmappable answer
+// BROADENS the search rather than dead-ending it. (Whether to keep offering two options we cannot
+// filter on is a product call — surfaced to the owner, not decided here.)
+const AMENITY_TOKEN: Record<string, string> = {
+  Parking: 'parking',
+  Elevator: 'elevator',
+  'Maid room': 'maid_room',
+};
 
 type Opt = string | { main: string; sub: string };
 type Step = { key: string; group?: 'Location' | 'Details'; title: string; sub?: string; opts: Opt[] };
@@ -136,6 +154,11 @@ function buildQuery(a: Answers): SearchQuery {
   if (real(a.type) && isCleanType(a.type)) q.type = a.type;
   if (real(a.size)) q.detail = /bed/i.test(a.size) ? a.size.replace(/\s*beds?/i, '').trim() : a.size;
   if (real(a.budget)) q.priceInput = (a.budget.match(/\d/g) ?? []).join('');
+  // Must-have amenity (bug fix 2026-08-04): the interview asked for one, echoed it back in the user's
+  // own bubble, and then searched with NO amenity constraint — buildQuery never wrote q.amenities, so
+  // p_amenities was never sent and the answer did nothing at all. Only mapped tokens are sent; an
+  // unmapped answer (Pool/Gym — no such column exists) broadens, exactly as a skipped field does.
+  if (real(a.s_amenities) && AMENITY_TOKEN[a.s_amenities]) q.amenities = [AMENITY_TOKEN[a.s_amenities]];
   return q;
 }
 
