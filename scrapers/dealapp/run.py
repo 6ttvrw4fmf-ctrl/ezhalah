@@ -446,6 +446,15 @@ def fetch_one(adid: str) -> Optional[tuple[str, str]]:
     return (last_skeleton_html, adid) if last_skeleton_html else None
 
 
+def _resolve_city(city_ar: Optional[str]) -> Optional[str]:
+    """Arabic breadcrumb city -> canonical English city name. `CITY_FALLBACK_AR` values are
+    ALREADY canonical English (Riyadh, Jeddah, ...) — never re-wrap them through map_city(),
+    which only matches Arabic and would silently no-op (deep-location-audit 2026-08-04)."""
+    if not city_ar:
+        return None
+    return normalize.map_city(city_ar) or CITY_FALLBACK_AR.get(city_ar) or None
+
+
 def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     """Parse one /ad-details page into a canonical row. Returns (row, category, sold) —
     `sold` feeds the post-upsert inactive pin in main (see _pin_sold_inactive)."""
@@ -528,12 +537,7 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
 
     # ── location: breadcrumb Arabic city is the best map_city input; addressRegion is the DISTRICT ──
     city_ar = _breadcrumb_city_ar(schema)
-    city = normalize.map_city(city_ar) if city_ar else None
-    if not city and city_ar:
-        city = normalize.map_city(CITY_FALLBACK_AR.get(city_ar, "")) or None
-    if not city:
-        # last resort: try the English locality through the AR map (it won't match) — leave None
-        city = None
+    city = _resolve_city(city_ar)
     region = normalize.region_for_city(city)
     # District: the SOURCE's own Arabic from the page's .location line ("حي …"). We deliberately do NOT
     # use schema.org address.addressRegion — it is English and frequently a wrong default ("Riyadh"),
