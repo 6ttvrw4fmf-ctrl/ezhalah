@@ -267,6 +267,26 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # the installment already has its own home in rent_now_pay_later_monthly).
     price_text = text.split(_AGE_BLOCK_ANCHOR, 1)[0] if _AGE_BLOCK_ANCHOR in text else text
     price_text = re.sub(r"ابتداء\S*\s*من\s*\d[\d,]*\s*[§ر﷼]?\s*شهري\w*", " ", price_text)
+    # PRICE = SOURCE, layer 2+4 (owner invariant 2026-08-04). Everything below scans price_text,
+    # and price_text is NOT the price element — it is the whole pre-«تفاصيل الإعلان» prefix, which
+    # carries the seller's free-text blurb. Two real classes were repaired live on 2026-08-04
+    # because of that:
+    #   • PROSE NUMBERS became the price — «الدخل السنوي 67,500» on an ad priced 3,700,000;
+    #     «مؤجر بالكامل بإجمالي دخل 594,000» on one priced 6,500,000; «يوجد رهن بقيمة 70,000»
+    #     (a mortgage) on one priced 4,000,000. 47 rows, ratios 10x-200x.
+    #   • A PER-METRE RATE became the total — «سعر المتر 5,000» stored as the whole price.
+    # The DB trigger already strips rate expressions (migration 20260803185847), but that fix is
+    # half a fix: trg_aqar_parse only OVERWRITES price_total when aqar_parse returns non-null, so
+    # on a rate-only ad the scraper's value survives unopposed. Strip the same shapes here.
+    #
+    # Income/mortgage/instalment prose is removed by LABEL — these labels mark a number that is
+    # explicitly NOT the asking price. Anything not recognised is left alone: the aim is to remove
+    # known non-prices, never to guess which number is the price.
+    price_text = re.sub(r"(?:سعر\s*)?(?:ال)?متر[\s:]{0,6}\d[\d,]*(?:\.\d+)?\s*(?:§|ريال|﷼)", " ", price_text)
+    price_text = re.sub(r"\d[\d,]*(?:\.\d+)?\s*(?:§|ريال|﷼)\s*(?:لل|ال)?\s*متر", " ", price_text)
+    price_text = re.sub(
+        r"(?:الدخل|دخل|عائد|إيراد|ايراد|رهن|قسط|دفعة|تأمين|عربون|عمولة)"
+        r"[^0-9\n]{0,25}\d[\d,]*(?:\.\d+)?\s*(?:§|ريال|﷼)?", " ", price_text)
     # RNPL pages sell an ANNUAL lease paid in monthly installments — any «N شهري» figure there is the
     # installment, never the listing's rent period. The teaser-strip above only catches the «ابتداءً
     # من» form; this flag guards installment lines printed WITHOUT that prefix, which used to classify
@@ -442,6 +462,20 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         "price_total":             price_total,
         "price_per_meter":         price_per_meter,
         "rent_period":             rent_period,
+        # PRICE = SOURCE evidence (owner invariant 2026-08-04). aqar publishes no structured price
+        # field — the number lives only in the rendered price slot — so the evidence IS that slot's
+        # text, verbatim. This is what makes a truncation provable from the DB alone: the 48 rows
+        # repaired on 2026-08-04 stored 440 while their own price slot read «440,000», and proving
+        # that needed 600+ live page fetches because no evidence had been kept.
+        # Folded into source_capture["price_evidence"] by db._fold_price_evidence().
+        "price_evidence":          N.price_evidence(
+            field="price slot (rendered text)",
+            raw=(price_text or "").strip()[:120] or None,
+            stored=price_total if price_total is not None else price_annual,
+            kind="total" if price_total is not None else "annual",
+            unit="total",
+            origin="spec_table",
+        ),
         "rent_now_pay_later":         rent_now_pay_later,
         "rent_now_pay_later_monthly": rent_now_pay_later_monthly,
         # location

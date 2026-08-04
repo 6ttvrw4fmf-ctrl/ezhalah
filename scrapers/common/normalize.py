@@ -578,3 +578,54 @@ def parse_property_age(raw) -> Optional[int]:
         return None
     n = int(m.group(1))
     return n if _AGE_MIN <= n <= _AGE_MAX else None
+
+
+# ── PRICE = SOURCE evidence (owner invariant, 2026-08-04) ────────────────────────────────────────
+# «THE PRICE ON THE SOURCE WEBSITE = THE PRICE EZHALAH STORES.» Layer 1 of that invariant is
+# EVIDENCE: every scraper records what the source itself published, next to the value we stored,
+# so any later disagreement is provable from the database alone — no re-fetch, no forensics.
+#
+# Built here (one shape, fleet-wide) and folded into source_capture["price_evidence"] by
+# db._fold_price_evidence(). Read by mon_detect_price_source_mismatch().
+#
+# The evidence is a WITNESS, never an input: nothing in the pipeline may compute a stored price
+# from it. If the source publishes no price, record that fact (found=False) rather than omitting
+# the key — "the source showed nothing" is itself evidence, and it is what separates an honest
+# «السعر عند الطلب» from a value we failed to read.
+def price_evidence(
+    *,
+    field: Optional[str] = None,
+    raw: Any = None,
+    stored: Optional[int] = None,
+    kind: str = "total",
+    unit: str = "total",
+    origin: str = "structured",
+) -> dict[str, Any]:
+    """Describe where a stored price came from, in the source's own terms.
+
+    field  — the source's key/selector the number was read from ("offers.price",
+             "propertyInfo.salePrice", "المساحة spec cell", …). The audit trail.
+    raw    — the source's value EXACTLY as published, before any coercion (keep the string:
+             "520.000" and "520,000" and 520000 are different evidence).
+    stored — what we ended up storing, so a mismatch is visible without a join.
+    kind   — total | annual | monthly | per_meter: WHICH price this is.
+    unit   — total | per_meter: guards the class that caused the wasalt/aqar bugs, where a
+             per-square-metre rate was stored as if it were the whole price.
+    origin — structured | api | spec_table. NEVER "description": prose prices are banned
+             (they carry rents, mortgages and deposits — 47 live rows were corrupted that way).
+    """
+    if origin == "description":
+        raise ValueError(
+            "price_evidence(origin='description') is banned — a price may never be read from "
+            "prose (owner invariant 2026-08-04). Use the source's structured price field, or "
+            "store no price at all."
+        )
+    return {
+        "field": field,
+        "raw": raw if raw is None or isinstance(raw, (str, int, float)) else str(raw),
+        "stored": stored,
+        "kind": kind,
+        "unit": unit,
+        "origin": origin,
+        "found": raw is not None,
+    }
