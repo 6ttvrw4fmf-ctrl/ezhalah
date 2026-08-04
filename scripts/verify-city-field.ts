@@ -160,7 +160,7 @@ check(
 );
 check(
   'REGRESSION (found live in testing, now also gates on deal AND period change): the deal+period-scoped ensureCityFieldIndex() fetch re-runs the match against cityTextRef once it resolves — without this, a user who types before a slow-connection fetch finishes would see an empty dropdown forever, since nothing else re-triggers matchCitiesByText() once the data actually arrives',
-  /void ensureCityFieldIndex\(query\.deal, paymentMonthly\)\.then\(\(\) => \{[\s\S]{0,700}?if \(cityTextRef\.current\) \{[\s\S]{0,200}?setCitySuggestions\(latin \? \[\] : matchCitiesByText\(query\.deal, paymentMonthly, cityTextRef\.current\)\);/.test(indexSrc),
+  /void ensureCityFieldIndex\(query\.deal, paymentMonthly\)\.then\(\(pool\) => \{[\s\S]{0,700}?if \(cityTextRef\.current\) \{[\s\S]{0,200}?setCitySuggestions\(latin \? \[\] : matchCitiesByText\(query\.deal, paymentMonthly, cityTextRef\.current\)\);/.test(indexSrc),
 );
 check(
   'NEW (owner request 2026-07-20, extended 2026-07-21 to also gate on rent-period change): flipping Buy<->Rent or Monthly<->Yearly live-refreshes an already-open Top-6 list instead of leaving a stale ranking on screen',
