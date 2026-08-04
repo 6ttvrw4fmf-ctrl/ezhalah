@@ -184,6 +184,23 @@ def _company_or_none(name: Optional[str]) -> Optional[str]:
 _HOOD_RE = re.compile(r"حي\s+([^,،]+)")
 _CITY_RE = re.compile(r"مدينة\s+([^,،]+)")
 _REGION_RE = re.compile(r"منطقة\s+([^,،]+)")
+# When the source has no comma between hood and city ("حي الروضة بريدة"), _HOOD_RE's greedy
+# [^,،]+ swallows the city name into the "district" (e.g. "الروضة بريدة" instead of "الروضة").
+# Strip a trailing KNOWN Qassim city-name suffix to undo that — optionally preceded by "محافظة"
+# (governorate), an admin-locality marker like "مدينة"/"منطقة" that's already stripped elsewhere
+# (e.g. "غرناطة محافظة النبهانبة" -> "غرناطة").
+_CITY_SUFFIX_RE = re.compile(
+    r"\s*[-–]?\s*(?:محافظة\s+)?(" + "|".join(map(re.escape, QASSIM_CITY_WORDS)) + r")\s*$"
+)
+
+
+def _strip_hood_city_suffix(hood: str) -> str:
+    """Undo the city-name-glued-onto-hood contamination — but ONLY when a real district name
+    remains after stripping. A hood that legitimately IS a city word on its own (e.g. Buraidah's
+    own "حي البصر" district — "البصر" is also a QASSIM_CITY_WORDS key) must never be wiped to
+    nothing, so an empty/no-op strip falls back to the original hood untouched."""
+    stripped = _CITY_SUFFIX_RE.sub("", hood).strip()
+    return stripped or hood
 
 
 def parse_location(
@@ -208,7 +225,8 @@ def parse_location(
         city = N.map_city(raw_city) or QASSIM_CITY_WORDS.get(raw_city)
     m = _HOOD_RE.search(loc)
     if m:
-        neighborhood = m.group(1).strip() or None
+        hood = m.group(1).strip()
+        neighborhood = _strip_hood_city_suffix(hood) if hood else None
     m = _REGION_RE.search(loc)
     if m:
         rr = m.group(1).strip()
@@ -243,6 +261,8 @@ def build_hood_city_index(items: list[dict]) -> dict[str, str]:
         raw_city = cm.group(1).strip()
         city = N.map_city(raw_city) or QASSIM_CITY_WORDS.get(raw_city)
         hood = hm.group(1).strip()
+        if hood:
+            hood = _strip_hood_city_suffix(hood)
         if city and hood and hood not in idx:
             idx[hood] = city
     return idx

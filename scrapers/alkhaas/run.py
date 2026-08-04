@@ -129,6 +129,40 @@ VIDEO_RE = re.compile(r'href="(https?://[^"]*(?:tiktok|youtu\.be|youtube)[^"]*)"
 BEDS_RE = re.compile(r"([\d٠-٩]{1,2})\s*غرف(?:\s*نوم)")
 BATHS_RE = re.compile(r"([\d٠-٩]{1,2})\s*دور(?:ات|تي?ن?)\s*(?:مياه|مياة|المياه)")
 
+# District from the ad title (see map_listing comment). حي ("neighborhood") is the common form;
+# مخطط ("subdivision plan") is a second common form on this platform (2026-08-04 audit: 13/29
+# sampled null-district titles used it, e.g. "للبيع ارض بمخطط الرحاب") — same 1-2-word capture.
+DISTRICT_RE = re.compile(
+    r"(?:^|(?<=\s))(?:ب?حي|ب?مخطط)\s+([^\s,،.]+(?:\s+[^\s,،.]+)?)"
+)
+# Leading/trailing punctuation a captured word can carry when it sits next to parens/quotes in the
+# free-text title (e.g. "بحي الوهلان ( الجوز )" → a stray "(" token).
+_DISTRICT_PUNCT = "()[]{}«»\"'.,،؛:!؟-"
+
+
+def extract_district(title_raw: Optional[str], city_ar: Optional[str]) -> Optional[str]:
+    """Capture the VERBATIM district text (1-2 words after بحي/حي/مخطط); no match → None, never
+    guessed. Strips trailing noise the capture regex has no way to exclude up front — a plot number
+    ("رقم" / "رقم 1"), a bare trailing digit, stray parenthetical punctuation, or the city name
+    fused on with the "in <city>" ب- preposition ("بعنيزة") — see map_listing for the full rationale
+    and live examples. Downstream, the card only shows a district after the catalog-match gate, so
+    an imperfect capture can not surface wrong text."""
+    nb_m = DISTRICT_RE.search(title_raw or "")
+    if not nb_m:
+        return None
+    nb_words = [w.strip(_DISTRICT_PUNCT) for w in nb_m.group(1).split()]
+    nb_words = [w for w in nb_words if w]
+    city_nm = city_ar.strip() if city_ar else ""
+    while len(nb_words) > 1 and (
+        nb_words[-1].isdigit()
+        or nb_words[-1].startswith("رقم")
+        or nb_words[-1] == city_nm
+        or nb_words[-1] == "ب" + city_nm
+    ):
+        nb_words.pop()
+    return " ".join(nb_words) or None
+
+
 _BAD_IMG = ("logo", "icon", "placeholder", "no-image", "no_image", "favicon",
             "/public/images/", "ico.png", "pic5.png")
 
@@ -340,20 +374,12 @@ def map_listing(adid: int, body: str) -> tuple[Optional[dict], str]:
 
     title = _redact(title_raw) or title_raw
 
-    # District from the ad TITLE (2026-07-27 audit): alkhaas.net's spec table has NO الحي row —
-    # the district exists ONLY as free text in the title («للبيع فيلا بحي المحمدية», live-verified
-    # on /ads/1000 and /ads/1004; 174/209 titles carry a «بحي X» phrase). The old code hardcoded
-    # neighborhood=None, leaving district coverage at 0% forever. Capture the VERBATIM source text
-    # (1-2 words after بحي/حي; a trailing token equal to the city name is dropped); no match → NULL,
-    # never guessed. Downstream, the card only ever shows a district after the normal catalog-match
-    # gate (card-district-gates-on-match rule), so an imperfect capture can not surface wrong text.
-    neighborhood = None
-    nb_m = re.search(r"(?:^|(?<=\s))ب?حي\s+([^\s,،.]+(?:\s+[^\s,،.]+)?)", title_raw or "")
-    if nb_m:
-        nb_words = nb_m.group(1).split()
-        if len(nb_words) > 1 and city_ar and nb_words[-1] == city_ar.strip():
-            nb_words = nb_words[:-1]
-        neighborhood = " ".join(nb_words) or None
+    # District from the ad TITLE (2026-07-27 audit, extended 2026-08-04): alkhaas.net's spec table
+    # has NO الحي row — the district exists ONLY as free text in the title («للبيع فيلا بحي
+    # المحمدية», live-verified on /ads/1000 and /ads/1004; 174/209 titles carry a «بحي X» phrase,
+    # and a further 13/29 of the null-district titles instead use «مخطط X» — see extract_district).
+    # The old code hardcoded neighborhood=None, leaving district coverage at 0% forever.
+    neighborhood = extract_district(title_raw, city_ar)
 
     info: dict[str, Any] = {
         "section_ar": section or None,
