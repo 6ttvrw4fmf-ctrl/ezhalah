@@ -19,33 +19,39 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import yaml
-
 REPO = Path(__file__).resolve().parent.parent.parent.parent
 RUN_PY = (REPO / "scrapers" / "gathern" / "run.py").read_text(encoding="utf-8")
-WORKFLOW_PATH = REPO / ".github" / "workflows" / "gathern-sync.yml"
-WORKFLOW_RAW = WORKFLOW_PATH.read_text(encoding="utf-8")
-WORKFLOW = yaml.safe_load(WORKFLOW_RAW)
+WORKFLOW_RAW = (REPO / ".github" / "workflows" / "gathern-sync.yml").read_text(encoding="utf-8")
+
+# Parsed as text on purpose: CI's scraper image has no PyYAML, and adding a dependency to assert on
+# a 60-line workflow is not worth it. Every assertion below anchors on a distinctive literal, so a
+# meaningful edit still trips it.
+
+
+def _job_block(name: str) -> str:
+    """The YAML text of one top-level job (2-space indented under `jobs:`)."""
+    m = re.search(rf"^  {re.escape(name)}:$(.*?)(?=^  \S+:$|\Z)", WORKFLOW_RAW, re.M | re.S)
+    return m.group(1) if m else ""
 
 
 # ── the workflow half of the contract ────────────────────────────────────────────────────────────
 def test_a_prune_job_exists_and_waits_for_every_shard() -> None:
-    jobs = WORKFLOW["jobs"]
-    assert "prune" in jobs, (
+    prune = _job_block("prune")
+    assert prune, (
         "gathern-sync.yml has no prune job. A sharded crawl NEVER prunes, so without this job "
         "gathern stops ageing out sold/booked listings entirely — the 2026-07-27 regression."
     )
-    needs = jobs["prune"]["needs"]
-    needs = [needs] if isinstance(needs, str) else needs
-    assert "sync" in needs, "the prune job must run after the shards, or it unions nothing"
+    assert re.search(r"^\s*needs:\s*\[?\s*sync", prune, re.M), (
+        "the prune job must run after the shards (needs: sync), or it unions nothing"
+    )
 
 
 def test_prune_expects_exactly_the_matrix_width() -> None:
     """If the matrix is rewidened, --expect-shards must move with it or the prune fails closed."""
-    shards = WORKFLOW["jobs"]["sync"]["strategy"]["matrix"]["shard"]
-    steps = WORKFLOW["jobs"]["prune"]["steps"]
-    run_cmds = " ".join(s.get("run", "") for s in steps)
-    m = re.search(r"--expect-shards\s+(\d+)", run_cmds)
+    ms = re.search(r"shard:\s*\[([^\]]+)\]", WORKFLOW_RAW)
+    assert ms, "could not read the shard matrix"
+    shards = [x for x in ms.group(1).split(",") if x.strip()]
+    m = re.search(r"--expect-shards\s+(\d+)", _job_block("prune"))
     assert m, "the prune job must pass --expect-shards so a partial union can never prune"
     assert int(m.group(1)) == len(shards), (
         f"--expect-shards {m.group(1)} != matrix width {len(shards)}. These must agree: too high and "
@@ -55,24 +61,22 @@ def test_prune_expects_exactly_the_matrix_width() -> None:
 
 
 def test_every_shard_emits_its_seen_set_and_uploads_it() -> None:
-    steps = WORKFLOW["jobs"]["sync"]["steps"]
-    run_cmds = " ".join(s.get("run", "") for s in steps)
-    assert "--emit-seen" in run_cmds, "shards must write their seen ad_numbers for the union"
-    uploads = [s for s in steps if "upload-artifact" in str(s.get("uses", ""))]
-    assert uploads, "shard seen-sets must be uploaded as artifacts or the prune job cannot read them"
-    assert uploads[0]["with"].get("if-no-files-found") == "error", (
+    sync = _job_block("sync")
+    assert "--emit-seen" in sync, "shards must write their seen ad_numbers for the union"
+    assert "upload-artifact" in sync, (
+        "shard seen-sets must be uploaded as artifacts or the prune job cannot read them"
+    )
+    assert re.search(r"if-no-files-found:\s*error", sync), (
         "if-no-files-found must be 'error': a shard that crawled but wrote no seen-file would "
         "otherwise silently shrink the union, and its cities would look unseen."
     )
 
 
 def test_prune_job_downloads_all_shard_artifacts() -> None:
-    steps = WORKFLOW["jobs"]["prune"]["steps"]
-    dl = [s for s in steps if "download-artifact" in str(s.get("uses", ""))]
-    assert dl, "the prune job must download the shard artifacts"
-    with_ = dl[0]["with"]
-    assert with_.get("merge-multiple") is True, "all shard files must land in ONE directory"
-    assert "gathern-seen" in str(with_.get("pattern", "")), "must pattern-match the shard artifacts"
+    prune = _job_block("prune")
+    assert "download-artifact" in prune, "the prune job must download the shard artifacts"
+    assert re.search(r"merge-multiple:\s*true", prune), "all shard files must land in ONE directory"
+    assert re.search(r"pattern:\s*gathern-seen", prune), "must pattern-match the shard artifacts"
 
 
 # ── the scraper half of the contract ─────────────────────────────────────────────────────────────
