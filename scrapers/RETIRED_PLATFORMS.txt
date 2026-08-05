@@ -40,3 +40,4 @@ toor
 alnokhba
 muktamel
 deal
+awal  # domain parked + link-rot inactivated 2026-07-28 (PR#252/#255); 0 active rows

@@ -1,4 +1,4 @@
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
 // agent — Ezhalah real AI Agent (PRD §7, §13) — Google Gemini
 //
 // Turns a free-text message (Arabic-first) into a structured classification the
@@ -189,15 +189,23 @@ PLATFORM CONFIDENTIALITY (STRICT). The names of the source platforms are CONFIDE
 Then either invite them back to their search or ask the next useful question.
 EXCEPTION — USER-NAMED PLATFORM FILTER: if the user THEMSELVES names a platform in order to RESTRICT their search to it ("show me Aqar only", "listings from Wasalt", "Gathern فقط"), that is NOT the confidential-roster question — honor it as a search filter and you MAY echo that one platform's name back (see PLATFORMS ═══ PLATFORM FILTERING). The confidentiality rule above still fully applies to the "which sites do you search / where did you find this / do you scrape" questions: never volunteer the roster, never reveal platforms the user did not name, never disclose which platform an individual result came from unless the user filtered to it.
 
-OUTPUT — return ONLY a JSON object: { kind, reply, deal, location, type, detail, price, pricing_basis, sort, count, platforms }.
+OUTPUT — return ONLY a JSON object: { kind, reply, deal, location, type, detail, price, pricing_basis, rent_period, sort, count, platforms }.
 - kind: "listings" = search NOW; "message" = say something or ask ONE question; "interview" = only if the user explicitly asks to be guided step by step.
 - reply: the text the user sees — short, warm, Saudi.
 - deal: "Rent" (for rent), "Buy" (for sale), or "Both" — use "Both" when you are searching but rent-vs-buy is still unknown (you've already used your question); it shows BOTH. Do NOT default to "Rent" when you don't know.
 - location: the user's intended Saudi place. PREFER a canonical English city from the CITIES list when the user named one (or a clear district/landmark inside one). IF the user named a small town / less-famous place that is NOT in the CITIES list, output it AS THE USER WROTE IT (Arabic verbatim — e.g. "ذبحة"/"الهياثم"/"الوجه"). NEVER remap an unknown place to a phonetically-similar known city ("ذبحة" → "Abha" is FORBIDDEN). The app validates against the full Saudi catalog (~4,581 cities, much larger than this list). "" only when truly unknown after honest attempt.
 - type: ONE canonical English type from the TYPES list (map synonyms). "" if unknown.
 - detail: bedrooms ("1","2","3","4","5+") for residential & leisure; size in square meters for commercial/land/farm. "" if unknown.
-- price: digits only, SAR. "" if none.
+- price: the BUDGET CEILING, digits only, SAR — this is the only price field; the app applies it as a
+  MAXIMUM (there is no separate minimum). If the user gives an explicit RANGE ("from 300k to 1.5m",
+  "بين 300 الف و 1.5 مليون", "من 300,000 الى 1,500,000"), use the HIGHER number, never the lower one —
+  reporting the lower bound silently turns a mid/high-budget search into a cheap-only search (found
+  live 2026-07-27: "من 300,000 الى 1,500,000" reported price="300000", so the app searched ≤300,000 SAR
+  and returned a 254,000 SAR listing — below the user's own stated floor, the opposite price band from
+  what they asked for). One plain number ("under 500k", "500 ألف") still maps to that number as-is.
+  "" if no price mentioned at all.
 - pricing_basis: the exact period/basis of the price — "daily_rent","weekly_rent","monthly_rent","quarterly_rent","annual_rent","full_price","price_per_sqm", or "none". Capture the period EXACTLY as the user said it (the app converts any rent period to an annual figure).
+- rent_period: "monthly" | "annual" | "none" — the RENTAL-POOL filter, set ONLY when the user explicitly states the rental period itself: «للإيجار الشهري» / «إيجار شهري» / «بالشهر» → "monthly"; «الإيجار السنوي» / «بالسنة» → "annual". This is SEPARATE from pricing_basis (which describes the BUDGET number's period) — a period-only request with no budget («شقق للإيجار الشهري في الرياض») MUST still set rent_period. A budget stated per month implies rent_period "monthly" too. Leave "none" when the user never states a period.
 - count: how many listings the user asked to see, as a number 1–15; "0" if they didn't say. "show me 10"→"10", "just one"/"give me an apartment"→"1", "top 3"→"3", "20"/"50"→"15" (the cap). Never fabricate listings to reach it.
 - platforms: an ARRAY of the EXACT platform names (from RECOGNIZED PLATFORM NAMES) the user restricted their search to. Empty array [] when they didn't name one. CRITICAL — CARRY IT ACROSS TURNS: once the user picks a platform (or confirms one you asked about, e.g. you ask "did you mean Deal App?" and they reply "yes"), set platforms:["Deal App"] on the SEARCH turn even though the confirming message itself ("yes") doesn't repeat the name. Keep it set on follow-up searches in the same chat until they change/clear it. Use the canonical English name exactly as in the list (e.g. "Deal App", "Aqar", "Gathern", "Al Khaas"). This is how the app limits results to that platform.
 - sort: the OBJECTIVE order the user asked for, else "none" (default = newest first). "newest"/"oldest" (most/least recent), "price_asc"/"price_desc" (cheapest/most expensive, e.g. "from lowest price", "الأرخص"), "area_asc"/"area_desc" (smallest/largest, e.g. "biggest first", "الأكبر مساحة"), "ppm_asc"/"ppm_desc" (lowest/highest price per m²), "beds_desc" (most bedrooms first). Subjective requests ("best", "most popular", "recommended") are NOT a sort — use "none" and never imply a quality ranking. Map "cheap/أرخص/أرخص أول" → price_asc, "biggest/أكبر" → area_desc, "newest/أحدث/الأجدد" → newest.
@@ -336,10 +344,19 @@ const AR_CURRENCY: Array<[RegExp, number]> = [
   [/ريال|ريالات|﷼/, 1],
 ];
 
+// An explicit RANGE ("من 300,000 الى 1,500,000" / "بين 300 ألف و 1.5 مليون" / "from 300k to 1.5m" /
+// "between 300,000 and 1,500,000" / "300000-1500000") — the two-sided connector, not just a bare "و".
+// JS \b is only defined relative to ASCII \w, so it NEVER matches a boundary next to Arabic script
+// (the same defect as the region_or_city Arabic-boundary bug elsewhere in this file) — a plain
+// /\bمن\b/ would silently never match any real Arabic text. Unicode-aware lookarounds instead; \b is
+// still correct for the English connectors (ASCII words only).
+const RANGE_RE = /(?<![\p{L}\p{N}])من(?![\p{L}\p{N}])[\s\S]{0,40}?(?<![\p{L}\p{N}])(?:الى|إلى)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])بين(?![\p{L}\p{N}])[\s\S]{0,60}?(?<![\p{L}\p{N}])و(?![\p{L}\p{N}])|\bfrom\b[\s\S]{0,40}?\bto\b|\bbetween\b[\s\S]{0,60}?\band\b|\d\s*-\s*\d/imu;
+
 function extractPrice(input: string): string {
   const t = input.toLowerCase();
   const NUM_RE =
     /(\d[\d,.]*)\s*(?:(k|m|mn|million|thousand|bn|billion)(?![a-z]))?\s*(sar|sr|riyal|usd|\$|dollar|aed|dirham|dhm|dhs|dh|eur|€|euro|gbp|£|pound|kwd|kd|dinar|bhd|bd|qar|qr|omr|egp)?/gi;
+  const candidates: number[] = [];
   for (const mm of t.matchAll(NUM_RE)) {
     const after = t.slice(mm.index! + mm[0].length, mm.index! + mm[0].length + 24);
     // A number followed by a SIZE/area unit is a SIZE, not money — skip it. We tolerate up to ~16
@@ -360,9 +377,20 @@ function extractPrice(input: string): string {
     if (cur) rate = CURRENCY_RATES[cur] ?? 0;
     if (!rate) { for (const [re, r] of AR_CURRENCY) { if (re.test(after)) { rate = r; break; } } }
     if (rate && rate !== 1) n = Math.round(n * rate);
-    if (n >= 100) return String(Math.round(n));
+    if (n >= 100) candidates.push(Math.round(n));
   }
-  return "";
+  if (!candidates.length) return "";
+  // This function's single price slot has no separate minimum — it's always applied as a CEILING (see
+  // the SYSTEM prompt's `price` field docs and the client's agentPriceCapAnnual()). Historically this
+  // returned the FIRST valid money figure encountered, so an explicit range ("من 300,000 الى
+  // 1,500,000") returned the LOWER bound (300,000) as the ceiling — turning a 300k-1.5m budget search
+  // into a ≤300k-only search (found live 2026-07-27: a 254,000 SAR listing came back, below the user's
+  // own stated floor). When 2+ valid candidates exist AND the text reads as an explicit range, use the
+  // HIGHEST one instead. A single number (the overwhelmingly common case) is unaffected; multiple
+  // numbers with no range phrasing keep the original first-match behavior (unrelated figures elsewhere
+  // in the message must not silently become the budget).
+  if (candidates.length > 1 && RANGE_RE.test(input)) return String(Math.max(...candidates));
+  return String(candidates[0]);
 }
 
 // Detect a FOREIGN-currency budget and format it for display ("USD 100,000"), so the client can show
@@ -475,6 +503,7 @@ const SCHEMA = {
       type: "STRING",
       enum: ["daily_rent", "weekly_rent", "monthly_rent", "quarterly_rent", "annual_rent", "full_price", "price_per_sqm", "none"],
     },
+    rent_period: { type: "STRING", enum: ["none", "monthly", "annual"] },
     sort: {
       type: "STRING",
       enum: ["none", "newest", "oldest", "price_asc", "price_desc", "area_asc", "area_desc", "ppm_asc", "ppm_desc", "beds_desc"],
@@ -482,7 +511,7 @@ const SCHEMA = {
     count: { type: "STRING" },
     platforms: { type: "ARRAY", items: { type: "STRING" } },
   },
-  required: ["kind", "reply", "deal", "location", "type", "detail", "price", "pricing_basis", "sort", "count", "platforms"],
+  required: ["kind", "reply", "deal", "location", "type", "detail", "price", "pricing_basis", "rent_period", "sort", "count", "platforms"],
 };
 
 Deno.serve(async (req: Request) => {
@@ -689,6 +718,18 @@ Deno.serve(async (req: Request) => {
       const rentMult: Record<string, number> = { daily_rent: 365, weekly_rent: 52, monthly_rent: 12, quarterly_rent: 4, annual_rent: 1 };
       if (basis in rentMult) { deal = "Rent"; bothDeals = false; }
       else if (basis === "full_price" || basis === "price_per_sqm") { deal = "Buy"; bothDeals = false; }
+      // EXPLICIT rental-period filter (senior audit run #3, 2026-08-03): «للإيجار الشهري» must search
+      // the MONTHLY pool — before this, the client's emptyQuery() default ('annual') silently searched
+      // annual-only for an explicitly-monthly request (100% intent inversion). Two explicit signals
+      // only: the model's rent_period (the user's own wording) and a budget whose basis is monthly/
+      // annual. Unstated stays undefined → the client keeps its Filter-parity default. Daily/weekly/
+      // quarterly budgets annualize the NUMBER but don't remap the pool (conservative).
+      let rentPeriod: "monthly" | "annual" | undefined;
+      const rp = String(out.rent_period ?? "");
+      if (rp === "monthly" || rp === "annual") rentPeriod = rp;
+      else if (basis === "monthly_rent") rentPeriod = "monthly";
+      else if (basis === "annual_rent") rentPeriod = "annual";
+      if (deal !== "Rent") rentPeriod = undefined;
       // Rent is compared ANNUALLY — convert the stated period to a yearly figure (daily ×365,
       // weekly ×52, monthly ×12, quarterly ×4) so the client filters on an annual budget.
       let price = detPrice || modelPrice;
@@ -780,13 +821,27 @@ Deno.serve(async (req: Request) => {
         }
       }
 
+      // The model's own reply SENTENCE is free-form and inconsistently mentions a SIZE the user gave —
+      // it always lands in query.detail and therefore always shows in the deterministic "Search Summary"
+      // block, but the sentence itself sometimes omits it (found live 2026-07-27: "فيلا 500 متر" showed
+      // "Size: 500 m²" in the summary while the reply sentence never said 500 at all). Same fix pattern as
+      // extractPrice() above: don't trust the model to be exhaustive, backstop it deterministically. The
+      // bedroom-shape regex mirrors the client's own detail-is-bedrooms-vs-size check (src/data/search.ts).
+      const detailStr = typeof out.detail === "string" ? out.detail.trim() : "";
+      const isSizeDetail = detailStr !== "" && !/^([1-4]|5\+?)$/.test(detailStr);
+      let replyOut = lead(out.reply);
+      if (isSizeDetail && !replyOut.includes(detailStr)) {
+        replyOut = locale === "en" ? `${replyOut} (${detailStr} m²)` : `${replyOut} (${detailStr} م²)`;
+      }
+
       return json({
         kind: "listings",
-        reply: lead(out.reply),
+        reply: replyOut,
         query: {
           deal,
           bothDeals,
           priceIsAnnual,
+          rentPeriod,
           location,
           regionPin,
           districtPin,

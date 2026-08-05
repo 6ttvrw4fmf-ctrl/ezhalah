@@ -34,7 +34,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from scrapers.common.db import sb, upsert_dealapp_commercial_batch, upsert_dealapp_residential_batch
-from scrapers.dealapp.run import fetch_one, map_listing
+from scrapers.dealapp.run import _pin_sold_inactive, fetch_one, map_listing
 
 TABLES = {
     "dealapp_residential_listings": "residential",
@@ -94,6 +94,7 @@ def main() -> int:
 
         by_ad = {re.sub(r"\D", "", str(r["ad_number"])): r for r in cands if r.get("ad_number")}
         buf: list[dict] = []
+        sold_ads: list[str] = []
 
         def flush() -> None:
             nonlocal buf
@@ -108,7 +109,7 @@ def main() -> int:
                     grand["gone"] += 1  # 404/410 or unreachable — liveness is recover/prune's job
                     continue
                 html, _ = result
-                row, cat, _sold = map_listing(html, adid)
+                row, cat, sold = map_listing(html, adid)
                 if not row:
                     grand["fetch_fail"] += 1
                     continue
@@ -122,9 +123,22 @@ def main() -> int:
                     grand["changed_area"] += 1
                 grand["repaired"] += 1
                 buf.append(row)
+                if sold:
+                    # The re-fetch found a source-confirmed SOLD/RENTED ad among candidates (repair
+                    # only re-fetches currently-ACTIVE rows, so this is a state change, not a no-op).
+                    # Without this pin, upsert_dealapp_*_batch's shared _wasalt_batch path writes
+                    # active=False + missing_count=0 (the batch upsert always resets missing_count),
+                    # which is exactly the unverified-kill signature auto_recover_false_inactive()
+                    # resurrects every morning — the same defect class Batch 3 fixed in run.py's
+                    # own sold path (see test_sold_pin_coverage.py), but repair.py (added 2026-07-30,
+                    # after that guard) was never wired to the pin and silently regressed it.
+                    sold_ads.append(row["ad_number"])
                 if len(buf) >= BATCH:
                     flush()
         flush()
+        if sold_ads and not args.dry_run:
+            _pin_sold_inactive(table, sold_ads)
+            grand["sold_pinned"] = grand.get("sold_pinned", 0) + len(sold_ads)
 
     print(f"REPAIR {'DRY-RUN ' if args.dry_run else ''}done (started {started}): {grand}", flush=True)
     return 0

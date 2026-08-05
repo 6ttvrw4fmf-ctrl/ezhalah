@@ -31,3 +31,17 @@ jobs:
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-deploy-target-guard.ts
       - name: No-bypass — every prod deploy must route through safe-deploy.sh
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-no-vercel-bypass.ts
+      # The agent-triggerable deploy workflow (2026-08-04) is only safe while it stays
+      # dispatch-only, checks out main, routes through safe-deploy.sh and pins the canonical
+      # project. These two guards are in `npm test` as well, but npm test is NOT run by any
+      # workflow — so without them here they would never actually gate a PR.
+      - name: Deploy workflow keeps every safety property
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-deploy-workflow-guard.ts
+      - name: Agent autonomy grant keeps its limits (RED list intact)
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-agent-authority-contract.ts
+      # The autonomy grant permits self-merge on green CI. That is only safe while "green" means the
+      # 43 regression guards actually ran — on 2026-08-04 they did not run in CI at all. This guard
+      # lives HERE (a job that already gates every PR) so it cannot be silently removed along with
+      # the suite it protects.
+      - name: The full guard suite actually gates a PR
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-ci-enforces-full-suite.ts

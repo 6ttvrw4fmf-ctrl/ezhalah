@@ -40,6 +40,11 @@ export const PLATFORMS: Platform[] = [
   { name: 'Jurash', domain: 'jurash.sa', brand: 'Jurash Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Al Nokhba', domain: 'alnokhba-services.com', brand: 'Al Nokhba', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Gathern', domain: 'gathern.co', brand: 'Gathern', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // Aqar Monthly = Aqar's DailyRenting (short-stay/monthly) vertical, same site (sa.aqar.fm), own
+  // source/table — architecturally identical to Gathern (monthly-only, no commercial table). Without
+  // this entry, platform()'s permissive fallback (allowsBuy: true) would let it leak into Buy results
+  // if remote.ts's table-fetch gate ever changed. See remote.ts MONTHLY_ONLY_TABLE / resTables.
+  { name: 'Aqar Monthly', domain: 'sa.aqar.fm', brand: 'عقار · Aqar (شهري)', phone: '+966 5X XXX 1180', allowsRent: true, allowsBuy: false },
   { name: 'Deal App', domain: 'dealapp.sa', brand: 'Deal App', phone: '+966 5X XXX 7700', allowsRent: true, allowsBuy: true },
   { name: '24 Souq', domain: '24.com.sa', brand: '24 Souq', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Era Pulse', domain: 'erapulse.sa', brand: 'Era Pulse', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },

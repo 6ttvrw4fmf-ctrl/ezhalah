@@ -67,7 +67,6 @@ from scrapers.common import db, normalize  # noqa: E402
 
 SOURCE = "Satel"
 AD_PREFIX = "ST"
-DEFAULT_REGION = "Riyadh"  # Satel is a Riyadh company; almost everything is Riyadh.
 
 BASE = "https://apiv2.satel.sa"
 LISTING_BASE = "https://listings.satel.sa/property"
@@ -240,6 +239,22 @@ def _additional_info(p: dict, addr: dict) -> dict[str, Any]:
     return info
 
 
+def _resolve_city_region(raw_city_ar: str, raw_city_en: str) -> Optional[str]:
+    """Canonical English city from Satel's messy cityAr/cityEn pair. cityEn is noisy ("Al
+    Riyadh", "RIYADH") → default to Riyadh only when there's no other signal. A truthy-but-
+    unmapped raw_city_ar must NOT be overridden with a Riyadh guess — honest None beats a wrong
+    match (deep-location-matching-audit 2026-08-04; currently 0 live rows hit the None branch,
+    hardening only — satel's whole feed is genuinely Riyadh today)."""
+    city = normalize.map_city(raw_city_ar) or normalize.map_city(raw_city_en)
+    if city:
+        return city
+    if raw_city_ar:
+        return None  # real, unmapped Arabic signal — never overwrite with a Riyadh guess
+    if not raw_city_en or "riyadh" in raw_city_en.lower():
+        return "Riyadh"
+    return raw_city_en or "Riyadh"
+
+
 def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
     """Map one Satel API item to a canonical row. Returns (row, category, gone)."""
     addr = p.get("address") or {}
@@ -296,11 +311,8 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
     # city / region / neighborhood — Satel is overwhelmingly Riyadh; normalize messy cityEn values.
     raw_city_en = (p.get("cityEn") or addr.get("cityEn") or "").strip()
     raw_city_ar = (p.get("cityAr") or addr.get("cityAr") or "").strip()
-    city = normalize.map_city(raw_city_ar) or normalize.map_city(raw_city_en)
-    if not city:
-        # cityEn is noisy ("Al Riyadh", "RIYADH", Arabic) → default to Riyadh.
-        city = "Riyadh" if (not raw_city_en or "riyadh" in raw_city_en.lower() or raw_city_ar) else (raw_city_en or "Riyadh")
-    region = DEFAULT_REGION
+    city = _resolve_city_region(raw_city_ar, raw_city_en)
+    region = normalize.region_for_city(city)  # derive from the actual city, never hardcode
     neighborhood = (p.get("subCityEn") or addr.get("subCityEn") or "").strip() or None
 
     # IMPORTANT: keyed by propertyNumber (`pnum`, e.g. "A0212"), NOT `slug`. Satel's frontend
@@ -328,7 +340,6 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
         "listing_url": listing_url,
         "source": SOURCE,
         "active": not gone,
-        "scraped_at": datetime.now(timezone.utc).isoformat(),
         "property_type": property_type,
         "transaction_type": transaction_type,
         "area_m2": area_m2,

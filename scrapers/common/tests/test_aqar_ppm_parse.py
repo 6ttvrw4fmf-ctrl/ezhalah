@@ -103,16 +103,20 @@ def test_flap_6708090_new_reads_the_label_old_read_the_area():
 
 
 def test_flap_rows_no_longer_trip_the_sanitize_gate():
-    """End-to-end assertion of the flap mechanics: the OLD parse crossed _sanitize_price's
-    300k/m² typo gate (active=False → hide → recover → flap); the NEW parse must not."""
+    """Owner-approved re-pin (2026-08-03, senior audit run #3): _sanitize_price's active=False gate
+    was REMOVED entirely per the extreme-price verify-then-preserve rule — a source-published price
+    is never grounds to hide a listing, so the hide→recover flap this test documented is now
+    structurally impossible: NO price value may flip active on any upsert path (old-parse values
+    included). The parse-correctness half of the original assertion lives on in the surrounding
+    tests; the gate half now asserts the gate stays dead for both parses."""
     for g in (G_6693642, G_6708090):
         old_row = {"active": True, "price_per_meter": _old_parse(g)}
         _sanitize_price(old_row)
-        assert old_row["active"] is False, "old parse must trip the gate (that WAS the flap)"
+        assert old_row["active"] is True, "no price value may flip active — the gate is gone"
 
         new_row = {"active": True, "price_per_meter": parse_price_per_meter(g)}
         _sanitize_price(new_row)
-        assert new_row["active"] is True, "new parse must NOT trip the gate"
+        assert new_row["active"] is True
 
 
 # ── Canonical spec-row pages: new = label value; old grabbed the area here too ──────────────────

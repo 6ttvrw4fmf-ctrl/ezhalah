@@ -8,8 +8,6 @@
 -- 0 (city_id, district_norm) collisions, 0 bad cities, 0 intra-batch dups.
 -- EXCLUDED (reported, stay NULL): district==own-city forms (8), roads/مخطط/وادي/شاطئ landmarks
 -- (bucket C, standing owner rule), compound/sentence strings (~17 forms).
--- APPLY SEQUENCE (run under deploy lock): this INSERT → refresh_loc_canonical_district()
--- → refresh_district_recovery() → sync_search_listings_ar() (twice; second run must be (n,0)).
 INSERT INTO loc_catalog_district (city_id, district_ar, district_norm)
 VALUES
   -- GROUP 1: towns-as-districts of the parent city

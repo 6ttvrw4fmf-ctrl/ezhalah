@@ -93,7 +93,15 @@ def session() -> cc.Session:
 
 
 def _clean(s: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", ihtml.unescape(s or ""))).strip()
+    s = ihtml.unescape(s or "")
+    # rem_fields() bounds a field's value at the START of the next field's title marker text
+    # (the lookahead in its outer regex), not at the end of that marker's OPENING TAG — so the
+    # captured segment always ends with the next field's dangling `<strong class="` prefix, which
+    # has no closing `>` and survives the tag-strip below untouched (live 2026-08-05: hajer's
+    # المدينة field stored "الأحساء <strong class=\"" as city_ar, breaking catalog resolution for
+    # every active row). Drop a trailing unclosed tag fragment before stripping complete tags.
+    s = re.sub(r"<[^>]*$", " ", s)
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", s)).strip()
 
 
 def _num(s: Optional[str]) -> Optional[int]:
@@ -115,8 +123,13 @@ def rem_fields(html_text: str) -> dict[str, str]:
         html_text, re.S,
     ):
         label = _clean(m.group(1))
-        vals = re.findall(r'rem-single-field-value[^>]*>(.*?)</span>', m.group(2), re.S)
-        out[label] = _clean(vals[-1]) if vals else ""
+        # REM nests spans inside the value («<span class="rem-price-amount">550.00 <span
+        # class="rem-currency-symbol">ر.س</span></span> - 600 الف …»), so a lazy (.*?)</span>
+        # stopped at the FIRST inner close and truncated range maxes + الف magnitude words from
+        # source_capture (live 2026-08-03, HJ1435). Capture the whole remaining segment (already
+        # bounded at the next field title by the outer regex) and tag-strip instead.
+        vm = re.search(r'rem-single-field-value[^>]*>(.*)$', m.group(2), re.S)
+        out[label] = _clean(re.sub(r"<[^>]+>", " ", vm.group(1))) if vm else ""
     return out
 
 
@@ -176,7 +189,13 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     cap = {"rem_fields": f, "wp_id": p.get("id"), "link": p.get("link"),
            "title": _clean((p.get("title") or {}).get("rendered", ""))}
 
-    price = _num(f.get("السعر"))
+    raw_price = (f.get("السعر") or "").strip()
+    price = _num(raw_price)
+    # Some REM price fields quote a PER-METRE rate («1000 للمتر. ر.س», live 2026-08-03, 6 rows).
+    # The page displays that number as its price, so price_total/annual keep it verbatim
+    # (copy-paste-the-display rule, owner 2026-08-03) — but the per-metre semantic is recorded in
+    # its own column so the rate is honest and queryable rather than silently read as a total.
+    price_per_meter = price if ("للمتر" in raw_price) else None
 
     extra = []
     for label, key in (("واجهة العقار", "Facade"), ("عمر العقار", "Age"),
@@ -197,6 +216,7 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         "bathrooms": _num(f.get("عدد دورات المياه")),
         "price_total": price if not is_rent else None,
         "price_annual": price if is_rent else None,
+        "price_per_meter": price_per_meter,
         "rent_period": "annual" if is_rent else None,
         "city": city,
         "region": region,

@@ -279,7 +279,7 @@ export default function Home() {
   // Category-aware ranking can't reach this field without moving Category earlier in the flow — a
   // bigger UX change the owner declined (2026-07-20). Deal-only is what this data can support today.
   useEffect(() => {
-    void ensureCityFieldIndex(query.deal, paymentMonthly).then(() => {
+    void ensureCityFieldIndex(query.deal, paymentMonthly).then((pool) => {
       // EDGE CASE (found in testing, generalizes to every deal change too): a fetch can still be
       // pending when the user has already focused AND typed a query — matchCitiesByText() would have
       // run against a still-empty/stale-deal pool and (correctly, not a crash) returned []/old
@@ -292,6 +292,36 @@ export default function Home() {
         setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, cityTextRef.current));
       } else if (cityFocus) {
         setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, 6));
+      }
+      // REHYDRATION (bug fix 2026-08-04): returning to this screen after a search REMOUNTS it —
+      // query.location persists in the app context (the field still shows the city), but
+      // citySelected is local state and comes back null, so pressing Search on an untouched,
+      // previously-VERIFIED city was rejected with "select a city from the list" until the user
+      // cleared + re-picked the very city already on screen.
+      // Restoring it here is NOT free-text guessing (spec: "never guess a location"):
+      //  • If the rich resolution survived (query.locationMatch, kind:'city' exact — it does NOT
+      //    survive the /agent?filter=… URL round-trip, which serializes only the simple fields;
+      //    live-proven 2026-08-04), the candidate must round-trip resolveCitySelection() to that
+      //    same resolution (city AND region) — disambiguating real same-name twins (e.g. الهفوف).
+      //  • Without it, the persisted text must EXACTLY equal the label of exactly ONE catalog city
+      //    in the pool — nothing fuzzy, nothing partial, and a twin label (2 candidates) restores
+      //    nothing. An exact, unique, catalog-attested label is a determination, not a guess: the
+      //    only city it can search is the one displayed in the field.
+      // 0 or 2+ candidates → no rehydration, the user re-picks exactly as before.
+      const lm = query.locationMatch;
+      const lmOk = !!lm && lm.kind === 'city' && lm.exact === true && !!query.location && query.location === lm.label;
+      if (lmOk || (!lm && !!query.location)) {
+        const cands = pool.filter((o) => o.cityAr === query.location);
+        const match = lmOk
+          ? cands.filter((o) => {
+              const r = resolveCitySelection(o);
+              return r.city === lm!.city && r.region === lm!.region;
+            })
+          : cands;
+        if (match.length === 1) {
+          cityTextRef.current = match[0].cityAr;
+          setCitySelected((prev) => prev ?? match[0]);
+        }
       }
     });
     // Deliberately NOT depending on cityFocus/citySelected — this effect should fire only on a real

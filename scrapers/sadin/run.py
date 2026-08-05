@@ -5,18 +5,20 @@
 the Saudi-only rule. ~64 listings. No auth, no proxy, no JSON API / sitemap — everything is in the
 initial server-rendered HTML.
 
-Data path (HTML parse, NO API):
-  • GET /properties/all  → the full ~64-card catalog (pagination is client-side, all cards are in the
-    initial HTML). Each card = a `deals-block-one` div with the property title (→ type), the
-    href="/property/{ID}" (5-char alnum id), and a clean `more-details` chip list:
-    "N غرف" (beds) · "N حمامات" (baths) · "Nم²" (area). The card chips are the most RELIABLE
-    structured beds/baths/area on the whole site (the detail page only carries them in free-text).
-  • GET /properties/forSale and /properties/forRent → which ids are sale vs rent (deal tagging).
-  • GET /property/{ID} → detail page for: city (المدينة), district (الحي), floors (عدد الطوابق),
-    kitchens (عدد المطابخ), halls/majlis (عدد الصالات), furnishing (حالة الأثاث), services
-    (خدمات العقار → amenity columns), FAL + REGA ad-licence numbers + issue/expiry dates,
-    og:title (clean property name), description free-text (وصف العقار, best-effort price + street
-    width), and the photo gallery under /static/properties/{ID}/.
+Data path (HTML parse, NO API — "v4" redesign live since ~2026-07-26, scraper updated 2026-07-30):
+  • GET /properties (+?page=N pagination; the pager carries NO rel="next" as of 2026-08-04 — the
+    crawl stops when a page yields no NEW /property/{ID} links) → `<article class="property-card">` cards:
+    title (h3), href="/property/{ID}" (5-char alnum id), deal badge (للبيع/للإيجار),
+    `property-facts` chips as `<b>VALUE</b><span>LABEL</span>` pairs (م² area, غرف, حمامات), and
+    the `property-location` line "CITY · DISTRICT" — now the ONLY structured city/district on the
+    site (the old detail-page المدينة/الحي rows are gone).
+  • GET /properties?purpose=sale and ?purpose=rent (old /properties/forSale|forRent 301 here) →
+    sale/rent id sets; the detail page's `<dt>الغرض</dt>` overrides when present.
+  • GET /property/{ID} → `<dt>/<dd>` pairs: الغرض (deal), نوع العقار (REAL kind now — pre-redesign
+    this label held the deal), المساحة, التوفر, REGA ad-licence number + issue/expiry, رخصة فال;
+    plus og:title, description free-text (وصف العقار → best-effort price + street width), photo
+    gallery under /media/properties/{ID}/ (was /static/). PDPL: `إدارة العقار` (person name) is
+    NEVER read or stored; phone/WhatsApp tokens are redacted as before.
 
 Property TYPE comes from the title/description Arabic words (شقة/فيلا/عمارة/أرض/استراحة/محل/معرض …);
 the detail page's "نوع العقار" field actually holds the DEAL type (للبيع/إيجار), not the kind.
@@ -47,9 +49,14 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, normalize  # noqa: E402
 
 BASE = "https://www.sadin.com.sa"
-LIST_ALL = f"{BASE}/properties/all"
-LIST_SALE = f"{BASE}/properties/forSale"
-LIST_RENT = f"{BASE}/properties/forRent"
+# 2026-07 site redesign ("v4", found live 2026-07-30 after 4 days of 0-card runs): /properties/all
+# 301s to /properties, /properties/forSale|forRent 301 to /properties?purpose=sale|rent, cards moved
+# from `deals-block-one` divs to `<article class="property-card">`, and list pages are now
+# SERVER-side paginated (?page=N) instead of one full catalog page. NOTE: the rel="next" link that
+# redesign shipped with is GONE as of 2026-08-04 — see _pages() for why nothing may depend on it.
+LIST_ALL = f"{BASE}/properties"
+LIST_SALE = f"{BASE}/properties?purpose=sale"
+LIST_RENT = f"{BASE}/properties?purpose=rent"
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 
 # Arabic property-kind word (from the card/og title or description) → canonical English type.
@@ -182,43 +189,90 @@ def _map_type(*texts: str) -> Optional[str]:
 
 
 # ── List pages ────────────────────────────────────────────────────────────────
+def _page_url(url: str, page: int) -> str:
+    if page <= 1:
+        return url
+    return f"{url}{'&' if '?' in url else '?'}page={page}"
+
+
+def _pages(s: cc.Session, url: str, max_pages: int = 40):
+    """Yield each list page's HTML, following the redesign's server-side ?page=N pagination.
+
+    Stops when a page contributes no NEW /property/{ID} links — max_pages is a runaway guard.
+
+    There used to be a second stop condition here, `if 'rel="next"' not in html: return`. It broke
+    silently when sadin.com.sa changed its pager: as of 2026-08-04 the site serves NO rel="next" on
+    ANY page (verified live: pages 1, 2, 3 and 11 all return 0 occurrences), so the crawl returned
+    after page 1 and collected 9 of the 82 listings sadin publishes — an 89% intake loss that every
+    run still recorded as ok=true. The remaining condition is site-agnostic and terminates correctly
+    on today's markup: pages 1/2 share 0 ids (9 unique each), and page 11 yields 0 links, which ends
+    the loop. Do not re-add a stop that depends on a specific pager marker — the catalogue itself is
+    the only reliable signal that there is nothing left to read."""
+    seen: set[str] = set()
+    for p in range(1, max_pages + 1):
+        _throttle()
+        try:
+            html = s.get(_page_url(url, p), timeout=40).text
+        except Exception:
+            return
+        ids = set(re.findall(r'href="/property/([A-Za-z0-9]{4,8})"', html))
+        if p > 1 and not (ids - seen):
+            return
+        seen |= ids
+        yield html
+
+
 def _ids(s: cc.Session, url: str) -> list[str]:
-    _throttle()
-    try:
-        html = s.get(url, timeout=40).text
-    except Exception:
-        return []
-    return list(dict.fromkeys(re.findall(r'href="/property/([A-Za-z0-9]{4,8})"', html)))
+    out: list[str] = []
+    for html in _pages(s, url):
+        for pid in re.findall(r'href="/property/([A-Za-z0-9]{4,8})"', html):
+            if pid not in out:
+                out.append(pid)
+    return out
 
 
-def fetch_catalog(s: cc.Session) -> tuple[dict[str, dict], set[str], set[str]]:
-    """Return (cards_by_id, sale_ids, rent_ids).
+def parse_catalog_cards(html: str, cards: dict[str, dict]) -> None:
+    """Parse one redesigned list page's `<article class="property-card">` blocks into cards.
 
-    cards_by_id[ID] = {title, beds, baths, area} parsed from each /properties/all card chip list.
-    """
-    _throttle()
-    html = s.get(LIST_ALL, timeout=40).text
-    cards: dict[str, dict] = {}
-    for b in re.split(r'(?=<div class="deals-block-one")', html):
+    cards[ID] = {title, beds, baths, area, city_txt, district_txt}. The redesign's
+    `property-facts` chips are `<b>VALUE</b><span>LABEL</span>` pairs, and the card's
+    `property-location` line ("المدينة المنورة · حي العريض") is now the ONLY structured
+    city/district on the site (the old detail-page المدينة/الحي rows are gone)."""
+    for b in re.split(r'(?=<article class="property-card)', html):
         m = re.search(r'href="/property/([A-Za-z0-9]{4,8})"', b)
-        if not m:
+        if not m or not b.startswith('<article'):
             continue
         pid = m.group(1)
         if pid in cards:
             continue
-        tm = re.search(r"<h4>\s*<a[^>]*>(.*?)</a>", b, re.S)
+        tm = re.search(r"<h3>\s*<a[^>]*>(.*?)</a>", b, re.S)
         title = _strip(tm.group(1)) if tm else ""
-        chips = re.findall(r"<li><i[^>]*></i>([^<]+)</li>", b)
         beds = baths = area = None
-        for c in chips:
-            c = c.strip()
-            if "غرف" in c or "غرفة" in c:
-                beds = _num(c)
-            elif "حمام" in c or "دورات" in c:
-                baths = _num(c)
-            elif "م²" in c or "م2" in c or "متر" in c:
-                area = _num(c)
-        cards[pid] = {"title": title, "beds": beds, "baths": baths, "area": area}
+        for val, lab in re.findall(r"<li>.*?<b>([\d,٬\.]+)</b>\s*<span>([^<]*)</span>", b, re.S):
+            lab = lab.strip()
+            if "م²" in lab or "م2" in lab or "متر" in lab:
+                area = _num(val)
+            elif "نوم" in lab or "غرف" in lab or "غرفة" in lab:
+                beds = _num(val)
+            elif "حمام" in lab or "دورات" in lab:
+                baths = _num(val)
+        city_txt = district_txt = None
+        lm = re.search(r'property-location[^>]*>.*?</svg>\s*([^<]+)<', b, re.S)
+        if lm:
+            parts = [p.strip() for p in lm.group(1).split("·")]
+            if parts and parts[0]:
+                city_txt = parts[0]
+            if len(parts) > 1 and parts[1]:
+                district_txt = parts[1]
+        cards[pid] = {"title": title, "beds": beds, "baths": baths, "area": area,
+                      "city_txt": city_txt, "district_txt": district_txt}
+
+
+def fetch_catalog(s: cc.Session) -> tuple[dict[str, dict], set[str], set[str]]:
+    """Return (cards_by_id, sale_ids, rent_ids) across every paginated /properties page."""
+    cards: dict[str, dict] = {}
+    for html in _pages(s, LIST_ALL):
+        parse_catalog_cards(html, cards)
     sale = set(_ids(s, LIST_SALE))
     rent = set(_ids(s, LIST_RENT))
     return cards, sale, rent
@@ -237,10 +291,17 @@ def _info_field(html: str, label: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
+def _dd_field(html: str, label: str) -> Optional[str]:
+    """Parse the 2026-07 redesign's `<dt>LABEL</dt><dd>VALUE</dd>` rows (بيانات الإعلان والترخيص)."""
+    m = re.search(r"<dt>\s*" + re.escape(label) + r"\s*</dt>\s*<dd[^>]*>\s*([^<]+?)\s*</dd>", html)
+    return m.group(1).strip() if m else None
+
+
 def _photos(html: str, pid: str) -> list[str]:
     urls: list[str] = []
     seen: set[str] = set()
-    for u in re.findall(r'(?:src|href)="(/static/properties/[^"]+\.(?:png|jpe?g|webp))"', html, re.I):
+    # 2026-07 redesign moved the gallery from /static/properties/ to /media/properties/ — accept both.
+    for u in re.findall(r'(?:src|href)="(/(?:static|media)/properties/[^"]+\.(?:png|jpe?g|webp))"', html, re.I):
         if u in seen:
             continue
         seen.add(u)
@@ -276,7 +337,10 @@ def _is_per_meter(before: str, after: str) -> bool:
     # understatement) because the real total lacked a trailing "ريال" token.
     if re.match(r"\s*(?:للمتر|/?\s*م2?|/?\s*م²|للمتر\s*المربع)", after):
         return True
-    return bool(re.search(r"(?:سعر\s*)?المتر\s*(?:المربع)?\s*[:：]?\s*$", before))
+    # «للمتر» (li-l-metr) drops the alif of «المتر», so the plain المتر pattern missed it — found
+    # live 2026-08-03 on ad 598978: «المطلوب للمتر 5555 ريال الإجمالي 5,000,000 ريال» stored 5555
+    # (the per-metre rate) as the total instead of the explicitly displayed 5,000,000.
+    return bool(re.search(r"(?:سعر\s*)?(?:لل|ال)متر\s*(?:المربع)?\s*[:：]?\s*$", before))
 
 
 def _extract_price(desc_raw: Optional[str]) -> Optional[int]:
@@ -323,7 +387,15 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
         return None, ""
     desc_raw = _description(html)
 
-    mapped_type = _map_type(title_raw, card.get("title", ""), desc_raw or "")
+    # Redesign detail pages carry the REAL kind in `<dt>نوع العقار</dt>` (the pre-redesign page's
+    # "نوع العقار" held the DEAL and is a dead selector now, so this is None on old markup). The
+    # deal moved to `<dt>الغرض</dt>` — prefer it over list-membership tagging when present: it is
+    # per-listing source truth and immune to a silently-broken purpose-page enumeration.
+    dd_type = _dd_field(html, "نوع العقار")
+    deal_dd = _dd_field(html, "الغرض")
+    if deal_dd:
+        is_rent = "جار" in deal_dd  # إيجار/للإيجار; للبيع stays buy
+    mapped_type = _map_type(dd_type or "", title_raw, card.get("title", ""), desc_raw or "")
     # Unmapped type → STORE the raw title text, never a guessed default (owner directive
     # 2026-07-16: never confidently misclassify — the raw value trips the DB novel-type detector,
     # which quarantines + alerts). The legacy value below feeds ONLY the routing/sanity rules.
@@ -331,14 +403,17 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
     stored_property_type = mapped_type or title_raw or card.get("title", "").strip() or "unknown"
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
 
-    raw_city = _info_field(html, "المدينة") or ""
+    # Redesign: the detail-page المدينة/الحي rows are gone; the catalog card's property-location
+    # line ("المدينة المنورة · حي العريض") is now the structured source (exact source text, PR#182
+    # fidelity rules apply downstream). Old-page selectors kept first — harmless None on new markup.
+    raw_city = _info_field(html, "المدينة") or card.get("city_txt") or ""
     # Forward-fix (2026-07-10 location-data-quality audit): removed the hardcoded "Medina" city
     # default and "Madinah" region default — these silently mislabeled non-Medina listings (confirmed
     # live: a Buraidah/Qassim listing forced to region="Madinah"). Honest None is correct; the
     # region_ar field below (keyed on region=="Madinah") now correctly evaluates false too.
     city = CITY_MAP_AR.get(raw_city) or normalize.map_city(raw_city)
     region = CITY_TO_REGION.get(city)
-    raw_district = _info_field(html, "الحي") or None
+    raw_district = _info_field(html, "الحي") or card.get("district_txt") or None
 
     # Structured numbers — baths/area from the card chips (cleanest), the rest from detail li's.
     # `card.get("beds")` is captured from a bare "غرف" chip (no "نوم" qualifier) — a generic
@@ -348,6 +423,8 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
     beds = None
     baths = card.get("baths")
     area = card.get("area")
+    if area is None:
+        area = _num(_dd_field(html, "المساحة"))  # redesign detail dt/dd, e.g. "500 م²"
     floors = _num(_li_field(html, "عدد الطوابق"))
     kitchens = _num(_li_field(html, "عدد المطابخ"))
     halls = _num(_li_field(html, "عدد الصالات"))
@@ -374,11 +451,12 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
         if sm:
             sw = _num(sm.group(1))
 
-    # Licences.
-    fal = _info_field(html, "رقم رخصة فال")
-    rega_no = _info_field(html, "رقم ترخيص الإعلان")
-    rega_issue = _info_field(html, "تاريخ إصدار الترخيص")
-    rega_expiry = _info_field(html, "تاريخ إنتهاء الترخيص")
+    # Licences — old inline rows first, then the redesign's dt/dd labels (رخصة فال / تاريخ الإصدار /
+    # تاريخ الانتهاء).
+    fal = _info_field(html, "رقم رخصة فال") or _dd_field(html, "رخصة فال")
+    rega_no = _info_field(html, "رقم ترخيص الإعلان") or _dd_field(html, "رقم ترخيص الإعلان")
+    rega_issue = _info_field(html, "تاريخ إصدار الترخيص") or _dd_field(html, "تاريخ الإصدار")
+    rega_expiry = _info_field(html, "تاريخ إنتهاء الترخيص") or _dd_field(html, "تاريخ الانتهاء")
 
     # Services → amenity columns.
     amenities: dict[str, bool] = {}

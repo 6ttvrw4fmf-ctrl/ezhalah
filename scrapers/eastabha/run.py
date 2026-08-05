@@ -339,6 +339,17 @@ def parse_detail(html_text: str) -> dict[str, Any]:
         pm = re.search(r'class="price_area">(.*?)</div>', html_text, re.S)
         if pm:
             out["price"] = _price_from_text(pm.group(1))
+    # WP Residence renders the qualifier next to the price («ريال للمتر» in the price_label span /
+    # urlencoded data-price) on land ads — the displayed number is a PER-METER rate. Per the owner's
+    # copy-the-display rule (hajer, 2026-08-03): price keeps the displayed figure verbatim, and the
+    # per-meter semantic is recorded in its own column so it is honest and queryable rather than
+    # silently read as a total (live 2026-08-03: 8/8 token rows, e.g. 3,000 «للمتر» on a 5,505 m² plot).
+    disp = up.unquote(_attr("data-price", html_text) or "")
+    if not disp:
+        pl = re.search(r'class="price_area">(.*?)</div>', html_text, re.S)
+        disp = pl.group(1) if pl else ""
+    if out.get("price") and re.search(r"(?:لل|ال)\s*متر", disp):
+        out["price_per_meter"] = out["price"]
     # geo
     g = re.search(r'data-cur_lat="([\d.\-]+)"\s+data-cur_long="([\d.\-]+)"', html_text)
     if g and g.group(1) not in ("", "0"):
@@ -410,6 +421,16 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     cat_names = _names(p, "property_category", taxd)
     if not actions and any("إيجار" in c or "ايجار" in c or "للايجار" in c for c in cat_names):
         is_rent = True
+    # Some ads carry NEITHER an action nor a category (live id 595411, 2026-08-03: «✨ شقق مؤثثة
+    # للإيجار – سنة دراسية أو شهري ✨» had both empty and defaulted to Buy). Fall back to the title
+    # the source itself writes deal-first; للبيع wins over للإيجار when both appear (mixed offers).
+    # A شهري title marks the rent monthly — annualized ×12 below, the standard contract.
+    title_rent_monthly = False
+    if not actions and not cat_names and not is_rent:
+        _t = _clean((p.get("title") or {}).get("rendered", ""))
+        if ("للإيجار" in _t or "للايجار" in _t) and "للبيع" not in _t:
+            is_rent = True
+            title_rent_monthly = "شهري" in _t
     if any("مزاد" in c for c in cat_names):  # auction also shows up in category sometimes
         return None, None, False
 
@@ -449,8 +470,9 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     price = detail.get("price")
     area_m2 = detail.get("area_m2") or _content_specs((p.get("content") or {}).get("rendered", "")).get("area_m2")
     age = _content_specs((p.get("content") or {}).get("rendered", "")).get("property_age")
-    # No source per-m² rate → NULL, never price/area_m2 (aqar PR#216, scrapers PR#217).
-    ppm = None
+    # Source per-m² rate ONLY when the page's own price label carries the «للمتر» qualifier
+    # (parse_detail records it); otherwise NULL, never price/area_m2 (aqar PR#216, scrapers PR#217).
+    ppm = detail.get("price_per_meter")
 
     title = _redact(_clean((p.get("title") or {}).get("rendered", "")))
     description = _redact(_clean((p.get("content") or {}).get("rendered", "")))[:4000] or None
@@ -489,7 +511,6 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     row = {
         "ad_number": f"EA{p.get('id')}",
         "listing_url": _listing_url(p),
-        "scraped_at": datetime.now(timezone.utc).isoformat(),
         "active": not gone,
         "source": "Eastabha",
         "property_type": stored_property_type,
@@ -499,9 +520,9 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
         "bathrooms": detail.get("bathrooms") or None,
         "property_age": age,
         "price_total": price if not is_rent else None,
-        "price_annual": price if is_rent else None,
+        "price_annual": (normalize.annualize_rent(price, "monthly") if (title_rent_monthly and price) else price) if is_rent else None,
         "price_per_meter": ppm,
-        "rent_period": "annual" if is_rent else None,
+        "rent_period": ("monthly" if title_rent_monthly else "annual") if is_rent else None,
         "city": city,
         "region": region,
         "neighborhood": district_ar,

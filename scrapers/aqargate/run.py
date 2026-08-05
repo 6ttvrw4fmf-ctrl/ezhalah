@@ -105,6 +105,21 @@ def _int(v: Any) -> Optional[int]:
         return None
 
 
+def _price_int(v: Any) -> Optional[int]:
+    """Price-specific _int: ROUNDS HALF-UP instead of truncating. aqargate's own page badge rounds
+    its price meta for display the PHP number_format way (live 2026-08-03: meta 2388.79 → badge
+    «2,389», 388.52 → «389», 14.5 → «15», 703.5 → «704»); int(float()) floored these to 1 SAR
+    under the displayed price. Python's round() is banker's (14.5→14) — not what the site shows,
+    hence the explicit +0.5 floor."""
+    try:
+        if v in (None, "", 0, "0"):
+            return None
+        x = float(v)
+        return int(x + 0.5) if x >= 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _text(v: Any) -> Optional[str]:
     if isinstance(v, list):
         return v[0] if v else None
@@ -202,10 +217,15 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
             _arc.pop(_k, None)
 
     price = ar.get("propertyPrice") or ar.get("landTotalPrice")
-    rent = ar.get("landTotalAnnualRent") or ar.get("propertyPrice")
+    # propertyPrice is the DISPLAYED figure (fave_property_price mirrors it on the page badge).
+    # landTotalAnnualRent is the source backend's own price×area derivation on land ads — live
+    # 2026-08-03, ids 583516/583517: page displays 150,000 (propertyPrice) while
+    # landTotalAnnualRent=90,000,000 = 150,000×600m². Display wins; the derived field is only a
+    # fallback when no displayed price exists.
+    rent = ar.get("propertyPrice") or ar.get("landTotalAnnualRent")
     title_text = (p.get("title") or {}).get("rendered") or ""
     rent_annual, rent_period = _rent_annualize(
-        _int(rent), has_annual_field=ar.get("landTotalAnnualRent") is not None, title_text=title_text,
+        _price_int(rent), has_annual_field=ar.get("landTotalAnnualRent") is not None, title_text=title_text,
     ) if is_rent else (None, None)
     thumb = p.get("thumbnail")
     row = {
@@ -223,7 +243,13 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         # on ad 5435594 — DB said 11 bedrooms, the listing's own description said 5).
         "bedrooms": None,
         "bathrooms": _int(ar.get("numberOfBathrooms")),
-        "price_total": _int(price) if not is_rent else None,
+        "price_total": _price_int(price) if not is_rent else None,
+        # On Buy LAND ads REGA publishes landTotalPrice = propertyPrice × propertyArea exactly
+        # (31/31 live-verified 2026-08-03) — i.e. propertyPrice is the UNIT rate («سعر الوحدة» in the
+        # page's own REGA table) that the badge displays as the price. Copy-the-display rule keeps
+        # price_total as the displayed figure; the per-meter semantic is recorded honestly here.
+        "price_per_meter": _price_int(ar.get("propertyPrice"))
+            if (not is_rent and ar.get("landTotalPrice") is not None) else None,
         "price_annual": rent_annual,
         "rent_period": rent_period,
         "city": city,

@@ -41,6 +41,7 @@ from curl_cffi import requests as cc
 
 from scrapers.common import db
 from scrapers.common import normalize as N
+from scrapers.common import arabic_location as AL
 from scrapers.common.arabic_location import resolve_slug
 
 GQL = "https://sa.aqar.fm/graphql"
@@ -117,7 +118,7 @@ FIND_Q = ("query($drf:DailyRentingFilter,$size:Int,$from:Int){ Search{ "
 
 DETAIL_Q = ("query($id:Int!,$s:Float!,$e:Float!){ "
             "Listing{ get(id:$id){ id category beds area rooms capacity furnished content content_en uri imgs "
-            "location_city location_district location_region location_street city_id district_id } } "
+            "address location_city location_district location_region location_street city_id district_id } } "
             "DailyRenting{ getCalculatedBookingPriceWithDiscount(listing_id:$id, start_date:$s, end_date:$e){ "
             "discounted_price total_price } } }")
 
@@ -152,6 +153,32 @@ def _redact(t: str | None) -> str | None:
     return re.sub(r"(\+?\d[\d\s\-]{7,}\d)", "", t).strip()
 
 
+def _district_from_address(address: str | None, city_id: int | None) -> str | None:
+    """Fallback district extraction from Aqar's GraphQL `address` field — a clean, comma-delimited
+    "[street?, district?, city]" string — for the rows where the URI slug omits the word «حي»,
+    so resolve_slug()'s \\bحي\\s+ regex finds nothing (2026-08-04 audit: ~330/388 aqarmonthly
+    null-district search_listings_ar rows, e.g. AQM5946944 address="شارع العمرة, الصحافة, الرياض").
+
+    Catalog-validated against arabic_location's own loaded `_DISTRICT_BY_CITY` (city_id →
+    {district_norm,…}) — UNLIKE resolve_slug()'s «حي X» capture, which stores the raw regex match
+    with no catalog check at all. An uncatalogued/ambiguous candidate is discarded, never stored
+    (never invent/guess a location — canonical rule 3)."""
+    if not address or not city_id:
+        return None
+    segs = [s.strip() for s in re.split(r"[,،]", address) if s.strip()]
+    if len(segs) < 2:
+        return None
+    candidate, city_seg = segs[-2], segs[-1]
+    if AL.norm_ar(candidate) == AL.norm_ar(city_seg):
+        return None  # district==city shape → source has no real district (honest null, matches
+                      # the already-decided gathern district==own-city policy)
+    valid = AL._DISTRICT_BY_CITY.get(city_id, ())
+    for form in (candidate, "حي " + candidate):
+        if AL.norm_ar(form) in valid:
+            return form
+    return None
+
+
 def map_listing(g: dict, price: dict) -> dict | None:
     uri = g.get("uri") or ""
     if not uri:
@@ -180,6 +207,9 @@ def map_listing(g: dict, price: dict) -> dict | None:
     # or district «المدينة» no longer mis-map the city). source_capture = the full detail minus PII
     # (descriptions phone-redacted; the detail exposes no broker contact field). Numbers unchanged.
     loc = resolve_slug(uri)
+    # Fallback ONLY — the slug's «حي X» capture wins when present (unchanged behavior); the
+    # address-derived, catalog-validated candidate fills the gap when the slug had no «حي» at all.
+    district_ar_val = loc["district_ar"] or _district_from_address(g.get("address"), loc["city_id"])
     capture = {k: (_redact(v) if k in ("content", "content_en") else v) for k, v in g.items()}
     return {
         "ad_number":        f"AQM{g['id']}",
@@ -210,7 +240,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
         "photo_urls":       imgs,
         # ── Arabic-native (additive, shadow) + complete-source capture ──────────
         "city_ar":          loc["city_ar"],
-        "district_ar":      loc["district_ar"],
+        "district_ar":      district_ar_val,
         "city_id":          loc["city_id"],
         "region_id":        loc["region_id"],
         "source_capture":   capture,

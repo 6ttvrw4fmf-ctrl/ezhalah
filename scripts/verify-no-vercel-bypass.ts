@@ -10,6 +10,7 @@
 //
 // Sanctioned (allowed to invoke/reference the raw command): the deploy pipeline itself and docs.
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 const PATTERN = String.raw`(vercel[[:space:]]+(--prod|deploy|promote|alias|rollback))|deploy_to_vercel`;
 
@@ -29,12 +30,37 @@ if (r.status !== 0 && r.status !== 1) {
   process.exit(1);
 }
 
+// The harness permission policy is the ONE place the literal tool name may legitimately appear
+// without being an invocation — because listing it under `permissions.deny` BLOCKS it, which is the
+// opposite of a bypass. (`deploy_to_vercel` also creates a NEW Vercel project from a file tree, so
+// denying it is how the "never create another production project" rule is enforced at the harness.)
+// Naming it under `permissions.allow` WOULD be a real bypass, so that is still caught below.
+const POLICY_FILE = '.claude/settings.json';
+function policyFileIsSafe(): boolean {
+  try {
+    const p = JSON.parse(readFileSync(POLICY_FILE, 'utf8'));
+    const allow: string[] = p?.permissions?.allow ?? [];
+    const deny: string[] = p?.permissions?.deny ?? [];
+    const named = (arr: string[]) => arr.some((e) => /deploy_to_vercel|vercel\s+(--prod|deploy|promote|alias|rollback)/.test(e));
+    if (named(allow)) {
+      console.error(`\n❌ no-vercel-bypass: ${POLICY_FILE} ALLOWS a raw Vercel deploy tool.`);
+      console.error('   The harness must never permit a deploy that skips scripts/safe-deploy.sh.');
+      return false;
+    }
+    return named(deny); // only excused when it is there to BLOCK the tool
+  } catch {
+    return false; // unparseable policy → do not excuse it
+  }
+}
+const policySafe = policyFileIsSafe();
+
 const offenders = (r.stdout || '')
   .split('\n')
   .filter(Boolean)
   .filter((line) => {
     const file = line.slice(0, line.indexOf(':'));
     if (SANCTIONED.has(file)) return false;   // deploy pipeline may reference the command
+    if (file === POLICY_FILE && policySafe) return false; // deny-list entry = a block, not a bypass
     if (file.endsWith('.md')) return false;     // docs may mention it
     if (file.startsWith('docs/')) return false; // docs may mention it
     if (file.startsWith('supabase/migrations/')) return false; // migration comments reference it

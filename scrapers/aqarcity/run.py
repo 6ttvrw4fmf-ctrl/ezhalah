@@ -489,6 +489,29 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
     price_per_meter = None
 
+    # Land-rent JSON-LD trap (live 2026-08-03, 18 rows source-verified): for some rent ads the
+    # JSON-LD offers.price carries the source's per-metre rate while the page itself displays the
+    # annual total (price badge «btnPriceHead», the pi-table «اجمالي الايجار السنوي», and the
+    # description «الإيجار السنوي : 50,115»). Store what the page displays; keep the per-metre
+    # rate in its own column. Applied ONLY on exact proof — the displayed figure ÷ area must
+    # re-produce offers.price under the same badge rounding, so a normal ad whose body merely
+    # repeats its (already-correct) price can never trip this.
+    # Candidates are collected from EVERY display location, badge first, because the page's own
+    # <head> JSON-LD embeds a TRUNCATED description copy («الإيجار السنوي : 50…») that document-
+    # order re.search() hits first — live 2026-08-03, 14/18 rows: the truncated "50" failed the
+    # proof gate and the per-metre figure survived. First candidate that passes the proof wins.
+    if is_rent and price and area:
+        cands = re.findall(r'btnPriceHead[^>]*>\s*([\d,٬.]+)', body)
+        cands += re.findall(r"ال[إا]يجار\s*السنوي\s*(?:للأرض)?\s*:?\s*([\d,٬.]+)", body)
+        for c in cands:
+            try:
+                cand = _price_round(float(c.replace(",", "").replace("٬", "")))
+            except (TypeError, ValueError):
+                continue
+            if cand and cand > price and _price_round(cand / area) == price:
+                price_per_meter, price = price, cand
+                break
+
     # ── location ──
     addr = ld.get("address") or {}
     raw_city = (addr.get("addressLocality") or crumb.get("city") or "").strip()

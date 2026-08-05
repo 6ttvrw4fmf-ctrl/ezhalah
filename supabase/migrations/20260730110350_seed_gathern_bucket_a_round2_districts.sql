@@ -4,9 +4,6 @@
 -- with the EXACT gathern spelling (resolver keys off norm_district_tok of the raw input), city-attested,
 -- ON CONFLICT DO NOTHING. 10 forms / 17 live listings. Preflighted 2026-07-30: none already-canonical,
 -- zero (city_id, district_norm) collisions.
--- Nominated by scripts/nominate-gathern-districts.ts (official-dataset gate + bucket-A «حي» policy).
--- APPLY SEQUENCE (run under deploy lock): this INSERT → refresh_loc_canonical_district()
--- → refresh_district_recovery() → sync_search_listings_ar() (twice; second run must be (n,0)).
 INSERT INTO loc_catalog_district (city_id, district_ar, district_norm)
 VALUES
   (1542, 'حي بني هريرة',    normalize_ar('حي بني هريرة')),    -- الباحة n=4

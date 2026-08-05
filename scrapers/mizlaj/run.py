@@ -55,6 +55,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.arabic_location import to_catalog  # noqa: E402
 
 BASE = "https://mizlaj.com.sa"
 MAP_DATA = f"{BASE}/api/guest/listings/map-data"
@@ -384,6 +385,18 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
     # city resolution failed but region resolution succeeded. A region name is not a city; leaving
     # `city` None here is honest, and its raw Arabic signal is unchanged for a DB-side resolver.
 
+    # Catalog fallback (2026-08-04): map_city()'s small private CITY_MAP_AR dict misses real catalog
+    # cities it was simply never given a key for (e.g. «ضمد» — a real, single-match Jazan town, MZ74
+    # above). When the English `city` stays unresolved, try the full catalog resolver — region_hint
+    # disambiguates twin city names (e.g. «القيصومة» exists in both Qassim and Eastern Province,
+    # MZ30) — never a guess, only a single unambiguous catalog match is accepted (see to_catalog()).
+    # Additive only: this table has no city_id/region_id column, so the result is captured in
+    # additional_info for a future location-resolution pass to pick up; the existing city/region/
+    # neighborhood columns the card renders from are untouched.
+    catalog_city_id = catalog_region_id = None
+    if not city and city_ar:
+        catalog_city_id, catalog_region_id = to_catalog(city_ar, region_hint=region)
+
     # ── PDPL-safe text ──
     title = _redact(name) or name
     description = _redact(listing.get("description"))
@@ -426,6 +439,8 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
         "latitude": _num(lat),
         "longitude": _num(lng),
         "is_featured": bool(md.get("is_featured") or listing.get("is_featured")),
+        "catalog_city_id": catalog_city_id,
+        "catalog_region_id": catalog_region_id,
     }
     info = {k: v for k, v in info.items() if v not in (None, "", "—", [])}
 

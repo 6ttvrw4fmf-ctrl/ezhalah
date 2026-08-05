@@ -42,7 +42,7 @@ import { useApp } from '@/store';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 import AdvancedQuestionCard, { AdvancedQuestionLoading } from '@/components/AdvancedQuestionCard';
-import { ADVANCED_QUESTIONS, minOptionsFor, liveResultCount, type AdvancedOption, type AdvancedQuestion } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, eligibleQuestions, minOptionsFor, liveResultCount, type AdvancedOption, type AdvancedQuestion } from '@/data/advancedFilters';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
 // below a results block — NEVER before first results — and ONLY for a strict single-type Residential
@@ -60,7 +60,7 @@ import { ADVANCED_QUESTIONS, minOptionsFor, liveResultCount, type AdvancedOption
 // its own eligibility gate now (see docs/ADVANCED_FILTER_DESIGN_CONTRACT.md). Otherwise the tap falls
 // through to the pre-existing plain refine chips.
 function anyGuidedEligible(q: SearchQuery): boolean {
-  return ADVANCED_QUESTIONS.some((question) => question.eligibility(q));
+  return eligibleQuestions(q).length > 0;
 }
 
 const IS_WEB = Platform.OS === 'web';
@@ -908,7 +908,7 @@ export default function Agent() {
     ageFlowLabelsRef.current = [];
     ageFlowPlanRef.current = [];
     setAgeFlow({ phase: 'loading' });
-    const eligible = ADVANCED_QUESTIONS.filter((question) => question.eligibility(q));
+    const eligible = eligibleQuestions(q);
     const probes = await Promise.all(eligible.map((question) => question.resolveOptions(q)));
     if (ageFlowTokenRef.current !== token) return; // superseded by a newer tap/turn
     ageFlowPlanRef.current = eligible
@@ -1177,13 +1177,10 @@ export default function Agent() {
         if (run.cancelled) return;
         await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
         if (run.cancelled) return;
-        // A تصفية (Filter) search hands off to this results view, where the advanced questions are only
-        // reachable via the «خلّنا نحدد الطلب أكثر» button buried under the cards — so a filter user of an
-        // annual-rent apartment scope never finds them. Auto-open the SAME shared guided flow once results
-        // are on screen (owner 2026-07-28). Eligible scopes only, fully skippable/closable, and NO
-        // refine-chip fallback — the filter user didn't ask to narrow, so an empty plan closes silently.
-        const guidedQ = result.query ?? pending.q;
-        if (anyGuidedEligible(guidedQ)) void startAgeFlow(guidedQ, false);
+        // RESULTS-FIRST (owner 2026-08-03): a تصفية (Filter) search shows its results immediately and does
+        // NOT auto-open the guided interview — the modal jumping over the cards read as an unprompted quiz.
+        // The SAME shared guided flow stays one tap away via the «خلّنا نحدد الطلب أكثر» button under the
+        // cards (see startAgeFlow at that Pressable), so nothing is lost — it's just opt-in now, not forced.
         void promptSignupSoon(run); // guest used their free search (filter) → prompt sign-up
       } catch {
         if (!run.cancelled) {

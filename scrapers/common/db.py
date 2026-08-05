@@ -196,16 +196,16 @@ def _sanitize_ints(r: dict[str, Any]) -> None:
 
 
 def _sanitize_price(r: dict[str, Any]) -> None:
-    """HIDE listings whose price is a clear advertiser typo — total > 1B SAR, per-meter > 300k SAR/m²,
-    or annual rent > 100M SAR (e.g. a land ad with سعر المتر = 800,000 × 57,500 m² = 46,000,000,000).
-    The source site shows that bogus number too, so a "Price on request" card would contradict the page;
-    marking the row inactive keeps the rule that a card's price always equals the price the user sees
-    after clicking through. Runs on every upsert path so it can't slip in on any platform."""
-    pt, ppm, pa = r.get("price_total"), r.get("price_per_meter"), r.get("price_annual")
-    if ((isinstance(pt, (int, float)) and pt > 1_000_000_000)
-            or (isinstance(ppm, (int, float)) and ppm > 300_000)
-            or (isinstance(pa, (int, float)) and pa > 100_000_000)):
-        r["active"] = False
+    """Extreme-price rule (owner, 2026-07-30 — extreme-price verify-then-preserve): a source-published
+    price is NEVER grounds to hide a listing. Unrealistic ≠ invalid; the source displays that number
+    too, so we store it EXACTLY and the row stays active. This function used to set active=False for
+    total > 1B / per-meter > 300k / annual > 100M — that clause force-killed source-verified-live
+    listings on every upsert path (it re-killed 9 InStock dealapp rows on 2026-08-03, 90 minutes after
+    the guarded recovery job had restored them) and survived PR#277, which removed the same hide only
+    from dealapp/run.py. Detection stays: the DB-side monitors (mon_buy_token_price,
+    mon_detect_field_integrity, mon_detect_unverified_inactivation) watch price bands without touching
+    listing state. Kept as an intentional no-op so every upsert path documents the rule."""
+    return
 
 
 def _ensure_capture(r: dict[str, Any]) -> None:
@@ -233,6 +233,31 @@ def _ensure_capture(r: dict[str, Any]) -> None:
         cap.setdefault("image_count", len(photos))
         cap.setdefault("url_path", r.get("listing_url"))
         cap.setdefault("schema", "unspecified")
+    _fold_price_evidence(r)
+
+
+def _fold_price_evidence(r: dict[str, Any]) -> None:
+    """PRICE = SOURCE invariant, layer 1 (owner rule 2026-08-04): preserve, at ingestion, the
+    proof of WHAT THE SOURCE PUBLISHED, so a stored price can be corroborated later without
+    re-fetching the page.
+
+    A scraper declares its evidence by putting `price_evidence` on the row (build it with
+    normalize.price_evidence()). This folds it into `source_capture["price_evidence"]` and drops
+    the top-level key, which is NOT a column. Nothing else about the row changes — the evidence
+    is a witness, never an input to the stored price.
+
+    Why this matters, concretely: on 2026-08-04 wasalt's 7 ppm-as-total rows were provable in
+    seconds because wasalt already captures `propertyInfo.salePrice`, while 48 aqar truncations
+    needed 600+ live page fetches to prove because aqar captured no structured price at all.
+    Evidence turns a forensic project into a SQL query — and it is what
+    mon_detect_price_source_mismatch() reads.
+    """
+    ev = r.pop("price_evidence", None)
+    if not ev:
+        return
+    cap = r.get("source_capture")
+    if isinstance(cap, dict):
+        cap.setdefault("price_evidence", ev)
 
 
 # Location columns checked on EVERY upsert path (2026-07-10 architecture redesign — see

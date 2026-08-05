@@ -245,7 +245,16 @@ def _ld_blocks(body: str) -> tuple[Optional[dict], Optional[dict]]:
 
 
 def _breadcrumb_district(bc: Optional[dict]) -> Optional[str]:
-    """The 4th crumb (under city) is the district/neighborhood; the 5th is the listing itself."""
+    """The 4th crumb (under city) is the district/neighborhood; the 5th is the listing itself.
+
+    When raghdan's CMS doesn't tag a district, the breadcrumb collapses to 4 crumbs instead — but
+    the title crumb itself embeds the district: "ارض للبيع في مغرزات، الرياض" (re-verified live
+    2026-08-04). Extract the text between "في" and the following Arabic comma. This is a raw,
+    unvalidated extraction — landmarks ("مطار الملك خالد الدولي") or placeholders ("غير محدد") can
+    come out of it too, but downstream district resolution (resolve_district_ar) only accepts a
+    value already attested in loc_canonical_district for the listing's city, so anything that
+    isn't a real district for this city safely resolves to NULL rather than leaking onto the card.
+    """
     if not bc:
         return None
     items = bc.get("itemListElement") or []
@@ -255,6 +264,12 @@ def _breadcrumb_district(bc: Optional[dict]) -> Optional[str]:
         # the district crumb's name is the bare neighborhood (e.g. "النرجس")
         if name and "للبيع" not in name and "للإيجار" not in name:
             return name
+    elif len(items) == 4:
+        # crumbs: [home, العقارات, city, title] — title is "<type> لل.. في <district>، <city>"
+        title = items[3].get("name") or ""
+        m = re.search(r"في\s+([^،]+)،", title)
+        if m:
+            return m.group(1).strip()
     return None
 
 

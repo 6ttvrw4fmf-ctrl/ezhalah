@@ -150,10 +150,17 @@ _PHONE_LOOSE = re.compile(r"[\(\[\{«]{1,3}\s*0?5[\d\s\.\-]{7,}\s*[\)\]\}»]{1,3
 LD_RE = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
 DETAIL_WRAP_RE = re.compile(r'class="detail-wrap"(.*?)</ul>', re.S)
 ITEM_RE = re.compile(r"<strong>([^<]+)</strong>\s*<span>(.*?)</span>", re.S)
-# district from the slug/title — capture the whole multi-word district name between the deal
-# phrase ("for-sale"/"for-rent[-in]" or a bare "-in-") and the "-district" marker, e.g.
+# district from the slug/title — capture the district name immediately preceding "-district", e.g.
 # "…-for-rent-in-al-hizam-al-thahabi-district-…" → "al hizam al thahabi".
-DISTRICT_SLUG_RE = re.compile(r"(?:for[- ](?:sale|rent)(?:[- ]in)?|[- ]in)[- ](.+?)[- ]district", re.I)
+# The leading ".*" is greedy, so on backtracking it lands on the LAST "for-sale/for-rent[-in]"/"-in-"
+# before "-district" rather than the first — titles are sometimes phrased "Villa For Rent OR Sale In
+# Al Saif District" (first "for rent" swallows "or sale in al saif") or stack a project/compound name
+# before the real district ("… In Al Majediyah Compound In Al Bahar District" — first "in" swallows
+# the compound name too). A trailing comma-glued city prefix ("Al Khobar, Al Sadafah District") isn't
+# fixable by the anchor alone — that's stripped by the comma check in _district_from below.
+DISTRICT_SLUG_RE = re.compile(
+    r".*(?:for[- ](?:sale|rent)(?:[- ]in)?|[- ]in)[- ](.+?)[- ]district", re.I
+)
 
 _BAD_IMG = ("logo", "icon", "placeholder", "no-image", "no_image", "spinner", "avatar",
             "favicon", "/svg/", "loader", "blank.")
@@ -338,6 +345,11 @@ def _district_from(slug: str, title: str) -> Optional[str]:
         m = DISTRICT_SLUG_RE.search(src)
         if m:
             d = m.group(1).replace("-", " ").strip()
+            # a city/project name glued on before a comma ("Al Khobar, Al Sadafah",
+            # "Durrat Al Nakheel Plan, Al Bahar") — the real district is the segment adjacent
+            # to "District", i.e. the last comma-separated piece.
+            if "," in d:
+                d = d.rsplit(",", 1)[-1].strip()
             # drop a leading deal/type word that the regex sometimes grabs ("rent in al saif")
             d = re.sub(r"^(?:rent|sale|the|a)\s+", "", d, flags=re.I).strip()
             if d and len(d) > 2 and not d.isdigit():
