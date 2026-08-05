@@ -359,35 +359,60 @@ def _purpose(html: str) -> Optional[str]:
 # Multiplier annualizes to SAR/year; rent_period keeps this scraper's existing "annual"/"monthly"
 # vocabulary (no other scraper in this codebase uses a finer-grained value) — a daily/weekly source
 # rate is recorded as "monthly" (not annual) since that's this schema's only non-annual bucket.
-_PERIOD_WINDOW_RE = re.compile(r"إيجار")
-_DAILY_RE = re.compile(r"يومي|باليوم")
-_WEEKLY_RE = re.compile(r"أسبوعي|بالأسبوع")
-_MONTHLY_RE = re.compile(r"شهري|بالشهر")
+# P0 (2026-08-05): the period MUST come from dealapp's own structured price badge, never from prose.
+#
+# The old scan walked EVERY «إيجار» in the whole document — including <head> (og:description) and the
+# broker's free-text description — and returned on the first period token it saw, then DEFAULTED to
+# "annual" if it found none. Both halves were wrong, and I reproduced it on live pages with the real
+# production function:
+#   DA443363 — badge «إيجار سنوي» (ANNUAL), detector said daily -> stored 60,000/yr as 21,900,000
+#   DA537587 — badge «إيجار سنوي», description says «إيجار يومي» -> detector said daily -> 12,775,000
+#   DA552452 — badge «إيجار يومي», genuinely daily
+# Scoping to the body is NOT sufficient: DA443363's description also contains a period token that
+# precedes the badge in document order.
+#
+# dealapp renders exactly one structured badge per hydrated detail page:
+#   ...src="assets/imgs/coin.svg"></ion-icon><span class="typographyTextXsLd0Normal"> إيجار {PERIOD}
+# That badge is the only published statement of the period (the JSON-LD carries price/currency only),
+# so it is the sole anchor. If the badge is absent the page did not hydrate — we return None
+# (UNKNOWN) rather than assuming "annual", because a default is a guess and the owner's rule is that
+# an unconfident source value is stored as unknown, never invented.
+_PERIOD_BADGE_RE = re.compile(
+    r"coin\.svg[^>]*>\s*</ion-icon>\s*<span[^>]*>\s*إيجار\s*(يومي|أسبوعي|شهري|سنوي)"
+)
+_PERIOD_AR_TO_EN = {"يومي": "daily", "أسبوعي": "weekly", "شهري": "monthly", "سنوي": "annual"}
 
 
-def _rent_period_window(html: str) -> str:
-    for m in _PERIOD_WINDOW_RE.finditer(html):
-        win = html[m.end():m.end() + 30]
-        if _DAILY_RE.search(win):
-            return "daily"
-        if _WEEKLY_RE.search(win):
-            return "weekly"
-        if _MONTHLY_RE.search(win):
-            return "monthly"
-    return "annual"
+def _rent_period_window(html: str) -> Optional[str]:
+    """The period dealapp itself prints on the listing, or None when it does not print one."""
+    m = _PERIOD_BADGE_RE.search(html)
+    return _PERIOD_AR_TO_EN.get(m.group(1)) if m else None
 
 
 def _rent_annualize(price: Optional[int], html: str) -> tuple[Optional[int], Optional[str]]:
+    """(price_annual, rent_period) — never a magnitude the source did not publish.
+
+    annual  -> stored verbatim.
+    monthly -> ×12. This is the schema's annualisation contract, identical on every platform:
+               price_annual holds the ANNUAL figure and the app divides by 12 to display a monthly
+               price, so ×12 round-trips back to exactly the number dealapp printed. It converts the
+               unit of the same stated rent; it does not invent a different one.
+    daily / weekly -> UNKNOWN (None, None). The old code stored price×365 / ×52 and labelled it
+               "monthly", which both fabricated a magnitude dealapp never published (DA552452:
+               350/day became 127,750, and the card then rendered "SAR 10,645/mo") and mislabelled
+               the period. This schema has no daily or weekly bucket, so the honest answer is that we
+               cannot represent it — the listing keeps its other fields and simply carries no price.
+               Inventing an annual figure to fill the column is exactly what the fidelity rule bans.
+    no badge -> UNKNOWN, never a default.
+    """
     if price is None:
         return None, None
     period = _rent_period_window(html)
-    if period == "daily":
-        return price * 365, "monthly"
-    if period == "weekly":
-        return price * 52, "monthly"
+    if period == "annual":
+        return price, "annual"
     if period == "monthly":
         return price * 12, "monthly"
-    return price, "annual"
+    return None, None
 
 
 def _images(schema: dict) -> list[str]:

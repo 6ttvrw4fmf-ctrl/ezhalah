@@ -33,9 +33,20 @@ def _page(price: int, ppm_text: str | None = None) -> str:
     }
     state = {"schemaMarkupScripts": {"real-estate-listing-1": json.dumps(schema)}}
     spec = f'<div>سعر المتر<span>{ppm_text}</span></div>' if ppm_text else ""
-    return (f'<html><body>{spec}'
+    # dealapp's structured price badge — the ONLY place it publishes the rental period (fidelity fix
+    # 2026-08-05). Without it the period is UNKNOWN and no price is stored, so a fixture that omits it
+    # is not a realistic rent page. These ads are annual leases.
+    badge = ('<ion-icon src="assets/imgs/coin.svg"></ion-icon>'
+             '<span class="typographyTextXsLd0Normal"> إيجار سنوي </span>')
+    return (f'<html><body>{spec}{badge}'
             f'<script id="ng-state" type="application/json">{json.dumps(state)}</script>'
             f"</body></html>")
+
+
+def _page_without_period_badge(price: int) -> str:
+    """A page that did not hydrate its price badge — the period is genuinely unknown."""
+    full = _page(price)
+    return full.replace('<ion-icon src="assets/imgs/coin.svg"></ion-icon>', "")
 
 
 def test_billion_riyal_source_price_preserved_and_active():
@@ -58,3 +69,18 @@ def test_normal_price_unchanged():
     row, cat, sold = map_listing(_page(850_000), "111111")
     assert row is not None and row["active"] is True
     assert row["price_annual"] == 850_000
+
+
+def test_unhydrated_page_stores_no_price_rather_than_guessing_annual():
+    """Fidelity over completeness (owner directive 2026-08-05).
+
+    price_annual asserts the price is ANNUAL. When dealapp's badge is absent we do not know the
+    period, so filling that column would be a guess about the most consequential field on a rental —
+    and a monthly figure parked in an annual column understates the real cost 12x. Unknown stays
+    unknown; the listing keeps every other field. This is a deliberate trade, pinned so it is not
+    "fixed" back into a default.
+    """
+    row, cat, sold = map_listing(_page_without_period_badge(850_000), "222222")
+    assert row is not None
+    assert row["price_annual"] is None, "no published period -> no annual price asserted"
+    assert row["rent_period"] is None, "period must be unknown, never defaulted to annual"
