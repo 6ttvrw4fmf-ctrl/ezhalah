@@ -77,9 +77,13 @@ def test_eaqartabuk_two_figures_in_one_price_field_are_never_concatenated():
     for raw in ("1800 2500", "1,800 / 2,500", "2500 و 1800", "1800\n2500"):
         assert eaqar_price(raw, is_rent=True) == (None, None, None), raw
     # Single figures keep the existing magnitude heuristic behavior.
-    assert eaqar_price("2500", is_rent=True) == (None, 30000, "monthly")
-    assert eaqar_price("150000", is_rent=True) == (None, 150000, "annual")
-    assert eaqar_price("580", is_rent=False) == (580000, None, None)
+    # 2026-08-05: a stated «شهري» still annualises; a SILENT ad is now unknown, never guessed.
+    assert eaqar_price("2500", is_rent=True, raw_text="ايجار شهري") == (None, 30000, "monthly")
+    assert eaqar_price("2500", is_rent=True) == (None, None, None)
+    assert eaqar_price("150000", is_rent=True, raw_text="ايجار سنوي") == (None, 150000, "annual")
+    # 2026-08-05: the ×1000 magnitude guess is GONE — ET10864's page and wp-json both say 380 and we
+    # stored 380,000. A price the source prints as 580 IS 580.
+    assert eaqar_price("580", is_rent=False) == (580, None, None)
     # A single decimal figure is ONE figure, not two (the dot must not split it).
     assert eaqar_price("150000.0", is_rent=False) == (150000, None, None)
 

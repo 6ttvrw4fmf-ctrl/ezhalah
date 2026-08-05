@@ -58,10 +58,21 @@ def test_eaqartabuk_bug2_still_fixed():
     """BUG 2 regression, eaqartabuk-specific: _price() must annualize a small rent figure, never
     store it raw. Live-verified 2026-07-14: id 8950 (ET8950/row 598426) meta.price="2700" → the
     live DB row shows price_annual=32400, rent_period="monthly" (32400/12=2700 ✓ card shows real rent)."""
+    # SUPERSEDED 2026-08-05 by the owner's source-fidelity rule. The 2026-07-14 concern was REAL and
+    # is still honoured: a monthly figure must not sit raw in price_annual, or the card's ÷12 shows a
+    # twelfth of the rent. What is now FORBIDDEN is how the period and the magnitude were decided —
+    # by guessing from size. Live-verified on the whole active population (33/33): ET10864's page and
+    # the site's own wp-json API both say 380, and `*1000 if v<10000` stored 380,000; ET10886 is a
+    # 1,400 SAR RENTAL that the same branch sold as a 1.4M purchase; ET8766 prints no period at all
+    # and was asserted 'monthly'. So: the figure is stored verbatim, and ×12 applies ONLY when the ad
+    # actually states «شهري».
     from scrapers.eaqartabuk.run import _price
-    assert _price("2700", True) == (None, 32400, "monthly")
-    # Buy-side magnitude heuristic must be untouched by this fix.
-    assert _price("580", False) == (580_000, None, None)
+    # period STATED monthly -> the 2026-07-14 annualisation still applies (and round-trips via ÷12)
+    assert _price("2700", True, "شقة للايجار الشهري") == (None, 32400, "monthly")
+    # period NOT stated -> unknown; we do not claim an annual figure from a magnitude hunch
+    assert _price("2700", True, "شقة للايجار") == (None, None, None)
+    # Buy: verbatim. 580 is 580 — the ×1000 guess is gone.
+    assert _price("580", False) == (580, None, None)
     assert _price("1350000", False) == (1350000, None, None)
 
 
@@ -85,8 +96,9 @@ def test_eaqartabuk_bug3_on_request_price_not_fabricated():
 
     # The raw numeric heuristic alone would still fabricate a price (proves the bug existed / could
     # regress if _price_on_request's call-site in map_listing were ever removed).
-    assert _price("150", True) == (None, 1800, "monthly")
-    assert _price("150000", True) == (None, 150000, "annual")
+    # 2026-08-05: the period must be STATED, not inferred from size (see bug2 note above).
+    assert _price("150", True, "شقة للايجار الشهري") == (None, 1800, "monthly")
+    assert _price("150000", True, "ايجار سنوي") == (None, 150000, "annual")
 
     # The text-based signal must fire for all three live-observed phrasings.
     assert _price_on_request(_strip_tags(content_7917)) is True
