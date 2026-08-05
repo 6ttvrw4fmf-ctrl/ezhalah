@@ -14,9 +14,13 @@
 # Triggered by pg_cron → GitHub workflow_dispatch (GitHub's own schedule: triggers were dropped
 # project-wide because they skipped ~half the runs). The pg_cron job calls this with no inputs.
 #
-# PRUNE: a sharded run can't safely prune (no job sees all cities). For the initial populate this is
-# moot (fresh table). For ongoing stale-removal, the project-wide weekly purge_inactive_listings +
-# the collapse guard cover it short-term; a cross-shard prune (artifact union) is a follow-up.
+# PRUNE: a sharded run can't safely prune (no job sees all cities), so each shard writes its seen
+# ad_numbers to an artifact and the `prune` job below unions all 12 and prunes ONCE. That job is the
+# cross-shard prune this file called a "follow-up" — it was never built, so when the crawl became a
+# 12-way matrix on 2026-07-27 gathern silently stopped ageing out sold/booked units for 9 days
+# (3,005 rows went 7+ days unseen while still shown as available). The prune job FAILS CLOSED: if it
+# does not receive exactly 12 shard files it refuses to prune, because a missing shard's cities would
+# look unseen and start ageing toward deactivation.
 
 name: Gathern sync
 
@@ -50,4 +54,46 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_MIN_INTERVAL: "0.3"
-        run: python -m scrapers.gathern.run --shard ${{ matrix.shard }}/12
+        run: |
+          mkdir -p seen
+          python -m scrapers.gathern.run --shard ${{ matrix.shard }}/12 \
+            --emit-seen "seen/shard-${{ matrix.shard }}.txt"
+
+      # The union input for the prune job. if-no-files-found:error makes a shard that crawled but
+      # wrote nothing a HARD failure here, so it can never silently shrink the union.
+      - name: Upload shard seen-set
+        uses: actions/upload-artifact@v4
+        with:
+          name: gathern-seen-${{ matrix.shard }}
+          path: seen/shard-${{ matrix.shard }}.txt
+          if-no-files-found: error
+          retention-days: 2
+
+  # ── cross-shard prune: the ONLY job allowed to deactivate gathern rows ──────────────────────────
+  # Runs after every shard. `needs: sync` + the default success() condition means a single failed
+  # shard skips this job entirely — no prune that cycle, which is the safe direction (one cycle of
+  # staleness costs nothing; pruning on a partial union would deactivate live listings).
+  prune:
+    needs: sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Download every shard's seen-set
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gathern-seen-*
+          merge-multiple: true
+          path: seen
+      - name: Union all shards and prune once
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m scrapers.gathern.run --prune-from seen --expect-shards 12
