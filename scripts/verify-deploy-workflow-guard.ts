@@ -24,6 +24,32 @@ const ok: string[] = [];
 const check = (cond: boolean, pass: string, fail: string) =>
   cond ? ok.push(pass) : problems.push(fail);
 
+// ── Line-based helpers. Deliberately NOT regex with nested quantifiers.
+// A previous version matched the deploy step with /- name:[^\n]*\n(?:\s+.*\n)*?\s+run:.../ which
+// backtracks catastrophically the moment `run:` becomes a block scalar (`run: |`) instead of a
+// one-liner — it hung for minutes on 2026-08-05 and would have hung CI. These are O(n).
+const stripComments = (s: string) => s.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+/** True if the workflow actually invokes safe-deploy.sh (block scalar or one-liner), ignoring comments. */
+const invokesSafeDeploy = (body: string) => /scripts\/safe-deploy\.sh/.test(stripComments(body));
+
+/** The step block (`- name:` … next `- name:`) whose body contains `needle`, comments ignored. */
+function stepBlockContaining(body: string, needle: string): string | null {
+  const lines = body.split('\n');
+  let stepStart = -1;
+  let found = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s+-\s+(name|uses):/.test(lines[i])) stepStart = i;
+    if (!/^\s*#/.test(lines[i]) && lines[i].includes(needle) && stepStart !== -1) { found = stepStart; break; }
+  }
+  if (found === -1) return null;
+  let end = lines.length;
+  for (let j = found + 1; j < lines.length; j++) {
+    if (/^\s+-\s+(name|uses):/.test(lines[j])) { end = j; break; }
+  }
+  return lines.slice(found, end).join('\n');
+}
+
 if (!existsSync(WF)) {
   console.error(`❌ deploy-workflow-guard: ${WF} is missing.`);
   console.error('   The autonomous deploy path was removed. If that is intentional, remove this');
@@ -47,7 +73,7 @@ for (const forbidden of ['push:', 'pull_request:', 'schedule:', 'repository_disp
 }
 
 // ── 2. Routes through the ONE sanctioned entrypoint. ─────────────────────────────────────────
-check(/run:\s*scripts\/safe-deploy\.sh/.test(wf),
+check(invokesSafeDeploy(wf),
   'deploy step runs scripts/safe-deploy.sh',
   'workflow must deploy by running scripts/safe-deploy.sh (never a raw vercel command)');
 
@@ -89,9 +115,9 @@ check(/inputs\.confirm/.test(wf) && /!=\s*"DEPLOY"/.test(wf),
 // condition that skipped the deploy on a REAL run, would both be silent disasters. Only enforced
 // when the input exists, so removing the dry-run feature entirely stays allowed.
 if (/dry_run:/.test(wf)) {
-  const deployStep = wf.match(/- name:[^\n]*\n(?:\s+.*\n)*?\s+run:\s*scripts\/safe-deploy\.sh/);
+  const deployStep = stepBlockContaining(wf, 'scripts/safe-deploy.sh');
   check(
-    deployStep !== null && /if:\s*\$\{\{\s*!\s*inputs\.dry_run\s*\}\}/.test(deployStep[0]),
+    deployStep !== null && /if:\s*\$\{\{\s*!\s*inputs\.dry_run\s*\}\}/.test(deployStep),
     'dry_run skips the DEPLOY step (never the safety checks)',
     'a dry_run input exists but the safe-deploy.sh step is not gated on `if: ${{ !inputs.dry_run }}` —\n' +
       '     a dry run must be incapable of reaching the deploy, and a real run must never skip it',
@@ -129,7 +155,7 @@ if (existsSync(WF_DIR)) {
     .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
     .map((f) => ({ file: `${WF_DIR}/${f}`, body: readFileSync(`${WF_DIR}/${f}`, 'utf8') }))
     // Only workflows that can actually RUN a deploy — a docs mention is not an entrypoint.
-    .filter(({ body }) => /run:[^\n]*scripts\/safe-deploy\.sh/.test(body));
+    .filter(({ body }) => invokesSafeDeploy(body));
 
   check(deployWorkflows.length > 0,
     `deploy entrypoints discovered: ${deployWorkflows.length}`,
@@ -154,6 +180,44 @@ if (existsSync(WF_DIR)) {
       `${file} hardcodes ${ids.join(', ')} instead of sourcing ${GUARD} — it can drift off-target`);
   }
 }
+
+// ── 9. The run summary must never claim production is untouched when it actually deployed. ────
+// SAFETY DEFECT 2026-08-05: the Report step branched on `job.status` alone and printed "nothing was
+// deployed and production is untouched" on ANY failure. At 09:11 that day the deploy SUCCEEDED (the
+// alias moved to entry-19ac2cd5…) and only the post-deploy schema-drift baseline advance failed —
+// and the summary reported production as untouched. A false all-clear on a live production change
+// is the worst class of report: the reader stops investigating and never rolls back.
+//
+// `job.status` cannot distinguish "refused before deploying" from "deployed, then a later check
+// failed". The report must therefore decide from EVIDENCE in the captured safe-deploy log.
+const LOGFILE = '/tmp/safe-deploy.log';
+check(new RegExp(`tee\\s+${LOGFILE.replace(/\//g, '\\/')}`).test(wf),
+  'deploy step captures safe-deploy output to a log',
+  `the deploy step must tee safe-deploy.sh output to ${LOGFILE} — without it the report has no\n` +
+  '     evidence and can only guess from job.status, which is what caused the false all-clear');
+
+check(/set -o pipefail/.test(wf),
+  'pipefail set so tee cannot mask a deploy failure',
+  'piping safe-deploy.sh into tee without `set -o pipefail` makes the step pass even when the deploy fails');
+
+for (const marker of ['NOTHING WAS DEPLOYED', 'DEPLOY SUCCEEDED', 'POST-DEPLOY VERIFICATION FAILED']) {
+  check(wf.includes(marker),
+    `report distinguishes the "${marker}" outcome`,
+    `the run summary must have a distinct "${marker}" outcome — collapsing deployed and\n` +
+    '     not-deployed into one failure message is the 2026-08-05 reporting defect');
+}
+
+// Ordering check: the report must derive "did it ship?" from the log BEFORE it is allowed to make
+// any "untouched" claim. This is what makes the claim conditional on evidence rather than on state.
+// Comments are stripped first: prose *describing* the defect legitimately says "untouched", and
+// only executable lines can actually mislead a reader of the run summary.
+const wfCode = stripComments(wf);
+const shipsFromLog = wfCode.search(/grep[^\n]*"\$LOG"/);
+const firstUntouched = wfCode.search(/untouched/);
+check(firstUntouched === -1 || (shipsFromLog !== -1 && shipsFromLog < firstUntouched),
+  'any "production is untouched" claim is gated on log evidence, not job.status',
+  'the report claims production is "untouched" without first deriving from the safe-deploy log\n' +
+  '     whether a deployment actually shipped — this is exactly the 2026-08-05 false all-clear');
 
 console.log('deploy-workflow-guard: the autonomous deploy path must keep every safety property');
 for (const line of ok) console.log(`  ✓ ${line}`);

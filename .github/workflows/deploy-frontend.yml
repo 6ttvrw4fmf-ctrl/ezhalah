@@ -189,17 +189,74 @@ jobs:
           # (npm ci + expo export + alias polling), so give it room — the lock still self-expires so
           # a killed runner can never wedge production.
           DEPLOY_LOCK_TTL_SECONDS: "1800"
-        run: scripts/safe-deploy.sh
+        # Captured to a log because `job.status` alone CANNOT distinguish "refused before deploying"
+        # from "deployed, then a post-deploy check failed" — and reporting the second as the first is
+        # a safety defect (see the Report step). pipefail keeps the step's exit code from `tee`.
+        run: |
+          set -o pipefail
+          scripts/safe-deploy.sh 2>&1 | tee /tmp/safe-deploy.log
 
       - name: Report
         if: always()
+        # SAFETY DEFECT FIXED 2026-08-05: this step used to branch on `job.status` alone and print
+        # "nothing was deployed and production is untouched" on ANY failure. On 2026-08-05 09:11 the
+        # deploy SUCCEEDED (alias moved to entry-19ac2cd5…) and only the post-deploy schema-drift
+        # baseline advance failed — and this step reported production as untouched. That is a false
+        # all-clear on a live production change: the worst class of report, because the reader stops
+        # investigating and never rolls back.
+        #
+        # `job.status` cannot distinguish "refused before deploying" from "deployed, then a later
+        # check failed". So decide from EVIDENCE in the captured safe-deploy log, not from job state.
         run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "### ✅ Deployed to https://ezhalah-app.vercel.app" >> "$GITHUB_STEP_SUMMARY"
-            echo "Alias assertion passed inside safe-deploy.sh — the canonical URL is serving this build." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "### ❌ Deploy did not complete" >> "$GITHUB_STEP_SUMMARY"
-            echo "safe-deploy.sh fails closed: if it refused, **nothing was deployed** and production is untouched." >> "$GITHUB_STEP_SUMMARY"
-            echo "If it deployed but the alias did not move, the log above prints the exact promote command to run." >> "$GITHUB_STEP_SUMMARY"
+          LOG=/tmp/safe-deploy.log
+          SHIPPED=no; REFUSED_PRE=no; POST_FAILED=no; DEPLOY_URL=""
+
+          if [ -f "$LOG" ]; then
+            # safe-deploy.sh only reaches these lines AFTER the production deploy returned a deployment.
+            if grep -qE 'Aliased|^https://ezhalah-[a-z0-9]+-' "$LOG"; then SHIPPED=yes; fi
+            # Every pre-deploy gate refuses with one of these and exits before deploying.
+            if grep -qE 'REFUSING TO DEPLOY|safe-deploy: REFUSED' "$LOG"; then REFUSED_PRE=yes; fi
+            # These fire only AFTER a successful deploy (alias/env/smoke-test/drift checks).
+            if grep -q 'REFUSING TO ADVANCE THE BASELINE' "$LOG"; then POST_FAILED=yes; fi
+            DEPLOY_URL="$(grep -oE 'https://ezhalah-[a-z0-9]+-[a-z0-9-]+\.vercel\.app' "$LOG" | tail -1)"
           fi
-          echo "Reason given: ${{ inputs.reason }}" >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "### 🧪 Dry run — NOTHING WAS DEPLOYED"
+              echo "Verification only. The deploy step was skipped by design."
+
+            elif [ "$SHIPPED" = "yes" ] && [ "$POST_FAILED" = "yes" ]; then
+              echo "### ⚠️ DEPLOY SUCCEEDED — POST-DEPLOY VERIFICATION FAILED"
+              echo ""
+              echo "**Production WAS changed. It is NOT untouched.** Do not read this as a no-op."
+              echo ""
+              echo "- The new build shipped and \`https://ezhalah-app.vercel.app\` is serving it."
+              echo "- A post-deploy check then failed (alias/env/smoke-test/schema-drift)."
+              echo "- The approved baseline was NOT advanced, so the next preflight will flag this commit."
+              echo ""
+              echo "**Verify production yourself, and roll back with \`scripts/emergency-rollback.sh\` if it is unhealthy.**"
+
+            elif [ "$SHIPPED" = "yes" ] && [ "${{ job.status }}" != "success" ]; then
+              echo "### ⚠️ DEPLOY SUCCEEDED — a later step FAILED"
+              echo ""
+              echo "**Production WAS changed. It is NOT untouched.**"
+              echo "The deployment completed; a subsequent step did not. Check the log and verify production."
+
+            elif [ "${{ job.status }}" = "success" ]; then
+              echo "### ✅ DEPLOY SUCCEEDED — all post-deploy checks passed"
+              echo "Alias assertion passed inside safe-deploy.sh — the canonical URL is serving this build."
+
+            elif [ "$REFUSED_PRE" = "yes" ]; then
+              echo "### ⛔ REFUSED BY A GATE — NOTHING WAS DEPLOYED"
+              echo "safe-deploy.sh failed closed before deploying. Production is untouched."
+
+            else
+              echo "### ❌ NOTHING WAS DEPLOYED — failed before reaching the deploy"
+              echo "The run failed before the production deploy produced a deployment. Production is untouched."
+            fi
+
+            [ -n "$DEPLOY_URL" ] && { echo ""; echo "Deployment: $DEPLOY_URL"; }
+            echo ""
+            echo "Reason given: ${{ inputs.reason }}"
+          } >> "$GITHUB_STEP_SUMMARY"
