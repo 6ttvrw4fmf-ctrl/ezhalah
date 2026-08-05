@@ -37,6 +37,12 @@ def _src(p: Path) -> str:
     return p.read_text(encoding="utf-8")
 
 
+def _strip_prose(src: str) -> str:
+    """Drop docstrings and #-comments so a comment QUOTING a removed bug cannot trip these guards."""
+    src = re.sub(r'"""[\s\S]*?"""', " ", src)
+    return re.sub(r"(?m)^\s*#.*$", " ", src)
+
+
 # ── 1. No scraper may DEFAULT the rent period ────────────────────────────────────────────────────
 # A hardcoded period is only honest when the platform genuinely sells one kind of contract and that
 # fact is documented. Every entry here is a DECLARED, DATED exception that must state, in the file,
@@ -180,3 +186,45 @@ def test_wasalt_absent_amenity_list_yields_unknown_not_false() -> None:
     assert build([{"name": "Parking"}])("elevator", "lift") is False, (
         "list present but amenity not in it -> a genuine, source-backed false"
     )
+
+
+# ── 6. No scraper may scale a price by its MAGNITUDE ─────────────────────────────────────────────
+def test_no_scraper_scales_a_price_because_it_looks_small() -> None:
+    """"A value under 10,000 must be thousands" is a guess, and it was wrong on 33/33 rows.
+
+    eaqartabuk had `total = v * 1000 if v < 10000 else v`. Live-verified: ad ET10864's page header
+    reads «SAR 380» and the site's own wp-json API returns meta.price='380' — we stored 380,000. Worse,
+    ET10886 is a RENTAL («إيجار», «SAR 1,400») that the same branch sold as a 1,400,000 SAR purchase.
+    The same heuristic on the rent side asserted 'monthly' for ET8766, whose page prints no period at
+    all. A price the source prints as 380 IS 380.
+    """
+    bad = []
+    for p in RUNS:
+        code = _strip_prose(_src(p))
+        for m in re.finditer(r"\*\s*1000\s+if\s+\w+\s*<\s*\d", code):
+            bad.append(f"{p.parent.name}: {m.group(0)}")
+    assert not bad, (
+        f"{bad} scale a price based on how big it looks. Store what the source prints; if a seller "
+        "quotes in thousands that is their ad, not our arithmetic to correct."
+    )
+
+
+def test_eaqartabuk_reads_a_stated_period_and_never_infers_one() -> None:
+    src = _src(SCRAPERS / "eaqartabuk" / "run.py")
+    assert "_stated_rent_period" in src, "eaqartabuk must read the period the page states"
+    assert "* 1000 if" not in _strip_prose(src), "the ×1000 magnitude guess must not return"
+
+    # EXECUTED replica of the shipped reader.
+    mon = re.compile(r"شهري|شهريا|بالشهر|/\s*شهر|في\s*الشهر")
+    ann = re.compile(r"سنوي|سنويا|بالسنة|/\s*سنة|في\s*السنة")
+
+    def period(t):
+        m, a = bool(mon.search(t or "")), bool(ann.search(t or ""))
+        if m and a:
+            return None
+        return "monthly" if m else ("annual" if a else None)
+
+    assert period("شقة للايجار في تبوك") is None, "silence -> unknown, never a magnitude guess"
+    assert period("شقة للايجار الشهري") == "monthly"
+    assert period("ايجار سنوي") == "annual"
+    assert period("يومي شهري سنوي") is None, "an ad offering several periods cannot be pinned"
