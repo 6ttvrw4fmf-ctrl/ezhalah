@@ -6,7 +6,8 @@ the Saudi-only rule. ~64 listings. No auth, no proxy, no JSON API / sitemap — 
 initial server-rendered HTML.
 
 Data path (HTML parse, NO API — "v4" redesign live since ~2026-07-26, scraper updated 2026-07-30):
-  • GET /properties (+?page=N, rel="next" pagination) → `<article class="property-card">` cards:
+  • GET /properties (+?page=N pagination; the pager carries NO rel="next" as of 2026-08-04 — the
+    crawl stops when a page yields no NEW /property/{ID} links) → `<article class="property-card">` cards:
     title (h3), href="/property/{ID}" (5-char alnum id), deal badge (للبيع/للإيجار),
     `property-facts` chips as `<b>VALUE</b><span>LABEL</span>` pairs (م² area, غرف, حمامات), and
     the `property-location` line "CITY · DISTRICT" — now the ONLY structured city/district on the
@@ -51,7 +52,8 @@ BASE = "https://www.sadin.com.sa"
 # 2026-07 site redesign ("v4", found live 2026-07-30 after 4 days of 0-card runs): /properties/all
 # 301s to /properties, /properties/forSale|forRent 301 to /properties?purpose=sale|rent, cards moved
 # from `deals-block-one` divs to `<article class="property-card">`, and list pages are now
-# SERVER-side paginated (?page=N with a rel="next" link) instead of one full catalog page.
+# SERVER-side paginated (?page=N) instead of one full catalog page. NOTE: the rel="next" link that
+# redesign shipped with is GONE as of 2026-08-04 — see _pages() for why nothing may depend on it.
 LIST_ALL = f"{BASE}/properties"
 LIST_SALE = f"{BASE}/properties?purpose=sale"
 LIST_RENT = f"{BASE}/properties?purpose=rent"
@@ -193,11 +195,19 @@ def _page_url(url: str, page: int) -> str:
     return f"{url}{'&' if '?' in url else '?'}page={page}"
 
 
-def _pages(s: cc.Session, url: str, max_pages: int = 12):
+def _pages(s: cc.Session, url: str, max_pages: int = 40):
     """Yield each list page's HTML, following the redesign's server-side ?page=N pagination.
 
-    Stops when a page contributes no NEW /property/{ID} links or carries no rel="next" hint —
-    max_pages is a runaway guard (site has ~3 pages × 24 cards today)."""
+    Stops when a page contributes no NEW /property/{ID} links — max_pages is a runaway guard.
+
+    There used to be a second stop condition here, `if 'rel="next"' not in html: return`. It broke
+    silently when sadin.com.sa changed its pager: as of 2026-08-04 the site serves NO rel="next" on
+    ANY page (verified live: pages 1, 2, 3 and 11 all return 0 occurrences), so the crawl returned
+    after page 1 and collected 9 of the 82 listings sadin publishes — an 89% intake loss that every
+    run still recorded as ok=true. The remaining condition is site-agnostic and terminates correctly
+    on today's markup: pages 1/2 share 0 ids (9 unique each), and page 11 yields 0 links, which ends
+    the loop. Do not re-add a stop that depends on a specific pager marker — the catalogue itself is
+    the only reliable signal that there is nothing left to read."""
     seen: set[str] = set()
     for p in range(1, max_pages + 1):
         _throttle()
@@ -210,8 +220,6 @@ def _pages(s: cc.Session, url: str, max_pages: int = 12):
             return
         seen |= ids
         yield html
-        if 'rel="next"' not in html:
-            return
 
 
 def _ids(s: cc.Session, url: str) -> list[str]:

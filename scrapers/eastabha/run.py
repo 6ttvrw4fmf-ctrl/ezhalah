@@ -511,7 +511,6 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     row = {
         "ad_number": f"EA{p.get('id')}",
         "listing_url": _listing_url(p),
-        "scraped_at": datetime.now(timezone.utc).isoformat(),
         "active": not gone,
         "source": "Eastabha",
         "property_type": stored_property_type,

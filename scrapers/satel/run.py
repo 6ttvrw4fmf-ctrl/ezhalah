@@ -340,7 +340,6 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
         "listing_url": listing_url,
         "source": SOURCE,
         "active": not gone,
-        "scraped_at": datetime.now(timezone.utc).isoformat(),
         "property_type": property_type,
         "transaction_type": transaction_type,
         "area_m2": area_m2,

@@ -85,7 +85,11 @@ for (const f of pyFiles) {
 // «المطلوب للمتر 5555» rate as a total). Listed here so the ban is ENFORCED everywhere else and a
 // NEW prose-price path in any other scraper still fails this check. Remove this entry the moment
 // the owner rules on it — the decision is "blank 63 sadin prices" vs "keep labeled-total parsing".
-const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:433']);
+// NOTE: anchored by LINE NUMBER, so any edit above this call site moves it. It shifted 433 -> 441
+// on 2026-08-04 when _pages()'s docstring grew (pagination fix, PR#313) — the exception itself is
+// unchanged. If this fails, confirm the line still holds the SAME `price = _extract_price(desc_raw)`
+// call before re-pinning; do not re-pin a different call site to make the check pass.
+const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:441']);
 const proseUnapproved = proseOffenders.filter(o => !PROSE_ALLOWLIST.has(o.split(': ')[0]));
 check('no scraper assigns a listing price from prose (outside the declared, dated exception)',
   proseUnapproved.length === 0);
