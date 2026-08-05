@@ -156,6 +156,28 @@ TITLE_PARSE_RE = re.compile(
 # price div carrying the Riyal symbol icon
 PRICE_RE = re.compile(
     r"font-size:25px;[^>]*>\s*([\d,]+)\s*<span[^>]*icon-Saudi_Riyal_Symbol", re.S)
+# The rental PERIOD souq24 prints inside that same price div, immediately after the Riyal icon:
+#   <div style="font-size:25px…">5,000<span class="icon-Saudi_Riyal_Symbol-2"></span> شهري </div>
+# Verified live 2026-08-05 on ad 1106 (/1106/x): the page reads «5,000 شهري» = 5,000 MONTHLY, while we
+# stored rent_period="annual" — a 12x understatement, and the exact class of defect the owner's
+# fidelity rule forbids (defaulting instead of reading what the source published). Scoped to the 420
+# chars after the price match so a period word elsewhere in the page (a broker surname like «الشهري»,
+# the description, the footer) can never be mistaken for the price's own label.
+PERIOD_AFTER_PRICE_RE = re.compile(r"(شهري|سنوي|يومي|أسبوعي)")
+_PERIOD_AR_TO_EN = {"شهري": "monthly", "سنوي": "annual", "يومي": "daily", "أسبوعي": "weekly"}
+
+
+def _rent_period_from_price_div(body: str, price_match) -> Optional[str]:
+    """The period souq24 prints next to the price, or None when it prints none.
+
+    None means UNKNOWN — never a default. The previous code hardcoded "annual" for every rent
+    listing, which silently overwrote a published «شهري».
+    """
+    if price_match is None:
+        return None
+    tail = re.sub(r"<[^>]+>", " ", body[price_match.end():price_match.end() + 420])
+    m = PERIOD_AFTER_PRICE_RE.search(tail)
+    return _PERIOD_AR_TO_EN.get(m.group(1)) if m else None
 # spec table th/td
 TH_TD_RE = re.compile(r"<th>\s*(.*?)\s*</th>\s*<td>\s*(.*?)\s*</td>", re.S)
 # معلومات الإعلان labelled lines
@@ -409,6 +431,8 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
     price = _to_int(pm.group(1)) if pm else None
     if price is not None and price < 1000:
         price = None  # reject display glitches / placeholder zeros
+    # Period comes from the source's own price div — never defaulted. (fidelity fix 2026-08-05)
+    src_rent_period = _rent_period_from_price_div(body, pm)
 
     # ── spec table ──
     specs = _spec_table(body)
@@ -490,7 +514,9 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
         "price_total": price if not is_rent else None,
         "price_annual": price if is_rent else None,
         "price_per_meter": ppm,
-        "rent_period": "annual" if is_rent else None,
+        # EXACTLY what souq24 published. daily/weekly have no bucket in this schema, so they stay
+        # UNKNOWN rather than being folded into a period the source did not state.
+        "rent_period": (src_rent_period if src_rent_period in ("annual", "monthly") else None) if is_rent else None,
         "city": city,
         "region": region,
         "neighborhood": district,
