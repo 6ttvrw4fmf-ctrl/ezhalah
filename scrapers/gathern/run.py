@@ -740,7 +740,56 @@ def main() -> int:
                     help="Tier 2: fetch detail pages to fill description + suitability for active rows "
                          "still missing a description (bounded by --limit, default 500). Separate from "
                          "the crawl; idempotent + resumable.")
+    ap.add_argument("--emit-seen", default="",
+                    help="write this run's seen ad_numbers (one per line) to PATH. Used by the sharded "
+                         "matrix so a later job can union every shard's slice and prune ONCE.")
+    ap.add_argument("--prune-from", default="",
+                    help="cross-shard prune: read every *.txt under DIR, union the ad_numbers, and prune "
+                         "against that union. Requires --expect-shards; does NOT crawl.")
+    ap.add_argument("--expect-shards", type=int, default=0,
+                    help="with --prune-from: the exact number of shard files that MUST be present. "
+                         "A missing shard means its cities look unseen, so we refuse to prune at all.")
     args = ap.parse_args()
+
+    # ── cross-shard prune (no crawling): union every shard's seen-set, then prune once ──
+    # This is the follow-up the sharded workflow always needed. Shards deliberately never prune (each
+    # sees ~1/12 of the cities, so pruning by source would deactivate the other 11/12), and when the
+    # crawl moved to a 12-way matrix on 2026-07-27 the unsharded pass that used to prune stopped
+    # existing — so gathern stopped ageing out sold/booked units entirely for 9 days (3,005 rows went
+    # 7+ days unseen while still shown as available). Reconstituting the full seen-set from the shard
+    # artifacts restores the exact precondition prune_unseen was written for, without giving up the
+    # sharding that exists to avoid Gathern's per-IP rate limiting.
+    if args.prune_from:
+        import glob as _glob
+        if args.expect_shards <= 0:
+            print("✗ --prune-from requires --expect-shards N (refusing to prune on an unknown slice count)")
+            return 1
+        files = sorted(_glob.glob(os.path.join(args.prune_from, "*.txt")))
+        if len(files) != args.expect_shards:
+            # FAIL CLOSED. A missing shard's cities are absent from the union, so they would look
+            # unseen and start ageing toward deactivation — the exact cascade the shard guard exists
+            # to prevent. Skipping a prune costs one cycle of staleness; a wrong prune costs listings.
+            print(f"✗ gathern cross-shard prune ABORTED: found {len(files)} shard files, expected "
+                  f"{args.expect_shards}. Refusing to prune on a partial union.")
+            return 1
+        seen: set[str] = set()
+        for f in files:
+            with open(f, encoding="utf-8") as fh:
+                seen |= {ln.strip() for ln in fh if ln.strip()}
+        if not seen:
+            print("✗ gathern cross-shard prune ABORTED: union is empty")
+            return 1
+        run_id = db.begin_run("gathern_prune")
+        pruned = db.prune_unseen("gathern_residential_listings", seen, source=SOURCE)
+        if pruned < 0:
+            print("⚠ gathern prune guard tripped (collapse/coverage) — kept existing active")
+            pruned = 0
+        print(f"✓ Gathern cross-shard prune: {len(seen)} ad_numbers seen across {len(files)} shards, "
+              f"{pruned} stale pruned")
+        db.end_run(run_id, ok=True, rows_seen=len(seen), rows_upserted=0,
+                   notes=f"cross_shard_prune shards={len(files)} pruned={pruned}",
+                   check_tables=["gathern_residential_listings"])
+        return 0
 
     # ── Tier-2 detail backfill: a SEPARATE, bounded pass (NOT the crawl). Fills description +
     #    suitability for active rows that still lack a description; re-run / schedule to fill the rest.
@@ -827,7 +876,13 @@ def main() -> int:
         # ── prune anything active-but-unseen — ONLY on a full all-cities pass ──
         # A --cities shard sees just its slice; pruning by source='Gathern' would deactivate every
         # OTHER city's listings (the collapse guard would usually catch it, but we don't rely on that).
-        # The cron's full pass runs with no --cities, so that's the one that prunes. (Workflow contract.)
+        # An unsharded run still prunes directly. A SHARDED run writes its slice to --emit-seen and a
+        # later `--prune-from` job unions all 12 slices and prunes once — see the block in main().
+        # (Before that existed, sharding silently disabled gathern pruning altogether for 9 days.)
+        if args.emit_seen:
+            with open(args.emit_seen, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(sorted(r["ad_number"] for r in rows)))
+            print(f"  ↳ wrote {len(rows)} seen ad_numbers to {args.emit_seen} (for the cross-shard prune)")
         if args.cities or args.shard:
             pruned = 0
             slice_label = args.cities and f"cities={args.cities}" or f"shard={args.shard}"
