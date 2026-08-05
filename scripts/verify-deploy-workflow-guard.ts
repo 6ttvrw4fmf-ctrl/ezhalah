@@ -14,7 +14,7 @@
 // This is the same defect class that bit twice in 24h on 2026-08-03/04 — a later change rebuilding
 // something from a stale base and silently dropping a guard (PR#289 reverting PR#286; migration
 // 20260803194308 dropping a detector from mon_run_all_detectors). Machine-check it, don't trust it.
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 
 const WF = '.github/workflows/deploy-frontend.yml';
 const GUARD = 'scripts/deploy-target-guard.sh';
@@ -110,6 +110,49 @@ if (existsSync(GUARD)) {
   check(/DTG_CANONICAL_URL="https:\/\/ezhalah-app\.vercel\.app"/.test(g),
     'target guard still pins https://ezhalah-app.vercel.app',
     'deploy-target-guard.sh no longer pins https://ezhalah-app.vercel.app');
+}
+
+// ── 8. EVERY workflow that can deploy must carry these guards, not just the one named above. ──
+// Sections 1-7 check `deploy-frontend.yml` BY NAME. That is a real hole: a second workflow that
+// also calls safe-deploy.sh would inherit none of these checks. On 2026-08-04 23:29 a concurrent
+// session opened PR#309 adding exactly that — a second `.github/workflows/deploy.yml` wrapping
+// safe-deploy.sh — 28 minutes after deploy-frontend.yml had already merged. Neither session knew
+// about the other (the same coordination failure as the 2026-07-15 triple-deploy incident).
+//
+// AGENTS.md: "If any deploy path is ever added that does NOT route through these scripts, it MUST
+// carry the same guards." This enforces that for paths that DO route through them too — routing
+// through safe-deploy.sh is necessary but not sufficient. Auto-deploy-on-push wrapped around
+// safe-deploy.sh is still auto-deploy.
+const WF_DIR = '.github/workflows';
+if (existsSync(WF_DIR)) {
+  const deployWorkflows = readdirSync(WF_DIR)
+    .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
+    .map((f) => ({ file: `${WF_DIR}/${f}`, body: readFileSync(`${WF_DIR}/${f}`, 'utf8') }))
+    // Only workflows that can actually RUN a deploy — a docs mention is not an entrypoint.
+    .filter(({ body }) => /run:[^\n]*scripts\/safe-deploy\.sh/.test(body));
+
+  check(deployWorkflows.length > 0,
+    `deploy entrypoints discovered: ${deployWorkflows.length}`,
+    'no workflow runs scripts/safe-deploy.sh — the autonomous deploy path is gone');
+
+  for (const { file, body } of deployWorkflows) {
+    const trig = body.match(/^on:\s*$([\s\S]*?)^[a-z]/mi)?.[1] ?? '';
+    const autoTrigger = ['push:', 'pull_request:', 'schedule:', 'repository_dispatch:']
+      .find((t) => new RegExp(`^\\s+${t}`, 'm').test(trig));
+    check(!autoTrigger,
+      `${file}: dispatch-only`,
+      `${file} deploys production but triggers on ${autoTrigger} — auto-deploy is forbidden`);
+    check(/ref:\s*main\b/.test(body),
+      `${file}: checks out main`,
+      `${file} deploys production without pinning the checkout to main`);
+    check(/inputs\.confirm/.test(body) && /!=\s*"DEPLOY"/.test(body),
+      `${file}: requires the literal DEPLOY confirmation`,
+      `${file} deploys production without a DEPLOY confirmation gate — a misclick would ship`);
+    const ids = body.match(/prj_[A-Za-z0-9]+/g) ?? [];
+    check(ids.length === 0,
+      `${file}: no hardcoded project id`,
+      `${file} hardcodes ${ids.join(', ')} instead of sourcing ${GUARD} — it can drift off-target`);
+  }
 }
 
 console.log('deploy-workflow-guard: the autonomous deploy path must keep every safety property');
