@@ -151,3 +151,32 @@ def test_no_platform_wide_field_fabrication_documented() -> None:
         "expected the furnished de-fabrication migration to be recorded in supabase/migrations — "
         "without it the next schema rebuild would reintroduce the platform-wide constant."
     )
+
+
+# ── 5. An ABSENT amenity list is UNKNOWN, never a fleet of confident "no"s ────────────────────────
+def test_wasalt_absent_amenity_list_yields_unknown_not_false() -> None:
+    """Wasalt's `featureAmenities` is often missing entirely; a bare False then invents a negative.
+
+    Measured 2026-08-05: 0 of 9,247 active Wasalt rent apartments carried the key, and `elevator` was
+    false on 9,247/9,247 — a column that can only say "no" is not reading anything. Wasalt is 39% of
+    the annual-rent apartment inventory, so this was the largest single source of invented negatives.
+    List present -> True/False is honest (Wasalt chose not to list it). List absent -> None.
+    """
+    src = _src(SCRAPERS / "wasalt" / "run.py")
+    assert "_has_amenity_list" in src, "wasalt must distinguish an absent list from an empty match"
+    assert "if _has_amenity_list else None" in src, (
+        "an absent featureAmenities list must yield None (unknown), never False"
+    )
+
+    # EXECUTED replica of the shipped lambda.
+    def build(raw):
+        present = isinstance(raw, list) and len(raw) > 0
+        names = [(a or {}).get("name", "").lower() for a in (raw or []) if isinstance(a, dict)]
+        return lambda *kws: (any(k in n for n in names for k in kws) if present else None)
+
+    assert build(None)("elevator", "lift") is None, "missing list -> unknown"
+    assert build([])("elevator", "lift") is None, "empty list -> unknown"
+    assert build([{"name": "Elevator"}])("elevator", "lift") is True, "listed -> true"
+    assert build([{"name": "Parking"}])("elevator", "lift") is False, (
+        "list present but amenity not in it -> a genuine, source-backed false"
+    )
