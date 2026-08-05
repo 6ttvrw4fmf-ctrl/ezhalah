@@ -93,7 +93,15 @@ def session() -> cc.Session:
 
 
 def _clean(s: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", ihtml.unescape(s or ""))).strip()
+    s = ihtml.unescape(s or "")
+    # rem_fields() bounds a field's value at the START of the next field's title marker text
+    # (the lookahead in its outer regex), not at the end of that marker's OPENING TAG — so the
+    # captured segment always ends with the next field's dangling `<strong class="` prefix, which
+    # has no closing `>` and survives the tag-strip below untouched (live 2026-08-05: hajer's
+    # المدينة field stored "الأحساء <strong class=\"" as city_ar, breaking catalog resolution for
+    # every active row). Drop a trailing unclosed tag fragment before stripping complete tags.
+    s = re.sub(r"<[^>]*$", " ", s)
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", s)).strip()
 
 
 def _num(s: Optional[str]) -> Optional[int]:
