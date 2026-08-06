@@ -56,6 +56,16 @@ export function filterBoosted<T extends DiversityCand>(cands: T[], boostedKeys: 
   return cands.filter((c) => !boostedKeys.has(candKey(c)));
 }
 
+// Union a fresh boosted-key set into whatever was already recorded for this query (2026-08-05 Show
+// More fix — the diversity seed now fires on every page, not just page 0). The accumulated set only
+// ever GROWS across a query's pages, so a row pulled forward by an earlier page's seed is never
+// re-suggested by a later page's own seed call, and stays excluded once the main window's own offset
+// eventually reaches that row's true recency rank.
+export function unionBoosted(prior: Set<string> | undefined, fresh: Set<string>): Set<string> {
+  if (!fresh.size) return prior ?? new Set();
+  return prior ? new Set([...prior, ...fresh]) : fresh;
+}
+
 // ── Diversity-order hierarchy (orderByScope / interleaveRanked) ─────────────────────────────────────
 // Extracted from src/data/remote.ts (zero behavioral change beyond the owner 2026-07-13 key reorder
 // below) so the exact reordering algorithm is unit-testable without the react-native import chain that
