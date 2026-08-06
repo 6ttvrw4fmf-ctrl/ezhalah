@@ -15,47 +15,6 @@ export function candKey(c: DiversityCand): string {
   return `${c.source_table}:${c.listing_id}`;
 }
 
-// Merge a small per-platform-capped "seed" fetch into the main recency-window candidate pool,
-// deduping by (source_table, listing_id) and re-deriving order to match the RPC's own
-// `ORDER BY last_updated DESC NULLS LAST, source_table, listing_id` — so the merged pool's
-// position still means "true recency rank" for interleaveRanked's freshness tiebreaks.
-// NULLS LAST (owner 2026-07-16, "newest first" fix): a row with an unknown last_updated has no
-// evidence it is the newest, so it must never sort to the top (that would fabricate recency it
-// doesn't have). Unknown-date rows go LAST here, mirroring the RPC's matching NULLS LAST.
-export function mergeDiversitySeed<T extends DiversityCand>(
-  mainCands: T[],
-  seedCands: T[],
-): { merged: T[]; boostedKeys: Set<string> } {
-  const known = new Set(mainCands.map(candKey));
-  const boostedKeys = new Set<string>();
-  const fresh: T[] = [];
-  for (const c of seedCands) {
-    const key = candKey(c);
-    if (!known.has(key)) {
-      known.add(key);
-      fresh.push(c);
-      boostedKeys.add(key);
-    }
-  }
-  if (!fresh.length) return { merged: mainCands, boostedKeys };
-  const dateVal = (c: T) => (c.last_updated ? Date.parse(c.last_updated) : -Infinity);
-  const merged = [...mainCands, ...fresh].sort((a, b) => {
-    const da = dateVal(a), db = dateVal(b);
-    if (da !== db) return db - da; // last_updated DESC (unknown date → -Infinity, sorts LAST — never claim an unknown-date row is newest)
-    if (a.source_table !== b.source_table) return a.source_table < b.source_table ? -1 : 1;
-    return a.listing_id - b.listing_id;
-  });
-  return { merged, boostedKeys };
-}
-
-// Drop any candidate already shown via a prior page-0 diversity seed, so a Load-More page (which
-// walks the main recency window by its own true rank) never re-shows the same card once the window
-// naturally reaches that platform's real position.
-export function filterBoosted<T extends DiversityCand>(cands: T[], boostedKeys: Set<string>): T[] {
-  if (!boostedKeys.size) return cands;
-  return cands.filter((c) => !boostedKeys.has(candKey(c)));
-}
-
 // ── Diversity-order hierarchy (orderByScope / interleaveRanked) ─────────────────────────────────────
 // Extracted from src/data/remote.ts (zero behavioral change beyond the owner 2026-07-13 key reorder
 // below) so the exact reordering algorithm is unit-testable without the react-native import chain that

@@ -92,6 +92,26 @@ const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
     marker: /limit greatest\(p_limit,\s*0\) offset greatest\(p_offset,\s*0\)/i,
     why: "2026-07-28 audit: p_offset already guards itself but p_limit didn't — a negative p_limit raised a hard 'LIMIT must not be negative' Postgres error instead of degrading like p_limit:=0 already does (0 rows, no error).",
   },
+  {
+    name: 'PLATFORM DIVERSITY: the default branch computes a per-platform round-robin rank (div_rank)',
+    marker: /then row_number\(\) over \(\s*partition by m\.platform\s*order by m\.last_updated desc nulls last, m\.source_table, m\.listing_id\s*\)\s*end as div_rank/i,
+    why: 'Owner PERMANENT rule 2026-08-05 (MATCH FIRST -> DIVERSIFY SECOND). Without this, ordering is pure recency and one platform saturates every window — live-measured 65-row single-platform streak with 11 qualifying platforms and 9,257 eligible rows.',
+  },
+  {
+    name: 'PLATFORM DIVERSITY: div_rank leads the tie-break in the default branch (before last_updated)',
+    marker: /a\.div_rank asc nulls last,\s*a\.last_updated desc nulls last, a\.source_table, a\.listing_id/i,
+    why: 'The rank must be APPLIED, and must sit BEFORE recency — otherwise it is computed and ignored. Ending in the unique (source_table, listing_id) keeps the sort a TOTAL order, which is what makes paging deterministic and duplicate-free.',
+  },
+  {
+    name: 'PLATFORM DIVERSITY: the outer union ORDER BY honours div_rank too',
+    marker: /u\.div_rank asc nulls last,\s*u\.last_updated desc nulls last, u\.source_table, u\.listing_id/i,
+    why: 'The outer ORDER BY re-sorts the page after the union. If it ignores div_rank it silently reverts the page to recency order, undoing the diversification the inner branch just computed.',
+  },
+  {
+    name: 'PLATFORM DIVERSITY: objective sorts are excluded from diversification',
+    marker: /coalesce\(p_sort_by,''\) not in \('price_asc','price_desc','area_asc','area_desc','beds_desc','oldest'\)/i,
+    why: "Owner requirement: price/area/bedrooms/oldest must retain their exact intended semantics. div_rank must be NULL for those 6 sorts (verified: 0 mismatched positions over 300 rows x 6 sorts).",
+  },
 ];
 
 // A clause that must NOT come back: the pre-fix rent-period predicate keyed on lease length + a hardcoded

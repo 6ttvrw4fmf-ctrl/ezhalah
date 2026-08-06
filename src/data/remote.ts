@@ -10,7 +10,7 @@ import { scoreListingProximity } from './proximity';
 import { cityDisplay } from './locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
-import { mergeDiversitySeed, filterBoosted, orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
+import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import saLocations from './sa-locations.json';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
@@ -879,20 +879,11 @@ const QUERY_LIMIT = 1500; // page size — the newest N MATCHING rows per page (
 // closure, so there's nothing to race. (owner 2026-08-03 concurrency fix)
 export type FetchListingsResult = { listings: Listing[] | null; pageCandidates: number; pageTotal: number };
 
-// Per-query set of (source_table:listing_id) keys pulled forward by the page-0 platform-diversity seed
-// (owner PERMANENT rule 2026-07-13, see fetchListingsForQuery). Keyed by JSON.stringify(q) rather than a
-// single flat Set so an unrelated search started in between a page-0 fetch and a later Load-More click
-// (both real in the AI Agent, which keeps every past search's "Load More" live in the same conversation)
-// can never clobber a different search's boosted-id memory. Capped to bound memory over a long session.
-const _diversityBoostedByQuery = new Map<string, Set<string>>();
-const _DIVERSITY_QUERY_CAP = 50;
-function noteDiversityQuery(key: string, keys: Set<string>) {
-  _diversityBoostedByQuery.set(key, keys);
-  if (_diversityBoostedByQuery.size > _DIVERSITY_QUERY_CAP) {
-    const oldest = _diversityBoostedByQuery.keys().next().value;
-    if (oldest !== undefined) _diversityBoostedByQuery.delete(oldest);
-  }
-}
+// (2026-08-06) The page-0 diversity seed and its per-query boosted-key memory are GONE. Platform
+// diversification now lives in the RPC's own ORDER BY (migration
+// platform_diversity_round_robin_ordering), so the ordering the client receives is already one stable
+// diversified total order across every page. There is no page-0 special case left to remember, and
+// therefore no cross-page bookkeeping to keep in sync. See fetchListingsForQuery.
 
 // Apply the kept NON-location filters (deal, type, rent period) to a fresh query on the right table.
 // Location scoping is added by the caller (city / region / country-wide). Keeps every branch identical
@@ -1086,57 +1077,32 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
   pageTotal = Number((cands as any[] | null)?.[0]?.total_count ?? 0) || ((cands as Cand[] | null)?.length ?? 0);
   if (!cands || !(cands as Cand[]).length) return { listings: [], pageCandidates, pageTotal };
 
-  // PLATFORM-DIVERSITY SEED — owner PERMANENT rule 2026-07-13 (Rule 2: the first page must show the
-  // widest platform mix, never let one platform crowd out others that also have matches).
-  // Root cause this fixes (SQL-verified against search_listings_ar, project aannarbkwcymrotzwdbo, on a
-  // live Rent+Apartment+Riyadh search): the main call above is ONE global window ordered by
-  // `last_updated DESC`, capped at pageLimit. When a platform's rows were all (re)scraped in the same run,
-  // they share near-identical timestamps and can occupy the ENTIRE window — e.g. aqar's batch filled every
-  // one of the first 1,500 ranked rows while wasalt (the LARGER platform for that exact filter: 6,458 vs
-  // aqar's 3,238) had its freshest matching row rank 2,076th — outside the window entirely. No client-side
-  // interleave (orderByScope/interleaveRanked) can diversify a platform it never received, so the first
-  // page rendered 100% aqar. Fix: for page 0 only, when the main window is saturated (cands.length >=
-  // pageLimit — a window that ISN'T full already contains every matching row, so no platform can be
-  // missing), issue a second small call using the RPC's existing p_per_platform windowing to pull each
-  // qualifying platform's own freshest rows regardless of global recency rank, and merge them into the
-  // pool the diversify step actually sees. Load-More is untouched (still walks the main window by its own
-  // real recency rank — offset math below is unaffected), and pulled-forward ids are remembered so a later
-  // Load-More page never re-shows the same card (see diversityBoostedKeys below).
-  let allCands: any[] = cands as any[];
-  const diversityKey = JSON.stringify(q);
-  // Skip entirely when an objective RPC sort is active (price/area/beds/oldest, 2026-07-27 fix):
-  // mergeDiversitySeed() hardcodes a last_updated-DESC re-sort of the merged pool, which would
-  // silently clobber the true price/area/beds ordering the RPC just computed. The bug this seed
-  // fixes (one platform's batch-scraped rows saturating a RECENCY window) also doesn't apply to a
-  // price/area/beds sort in the first place — those aren't clustered by scrape run.
-  const objectiveRpcSort = RPC_SORT_KEYS.has(q.sort as string);
-  if (!objectiveRpcSort && pageOffset === 0 && allCands.length >= pageLimit) {
-    const DIVERSITY_SEED_PER_PLATFORM = 20;
-    const { data: seedCands } = await supabase.rpc('location_search_candidates_ar', {
-      ...baseRpcParams,
-      p_per_platform: DIVERSITY_SEED_PER_PLATFORM,
-      p_limit: 2000, // generous cap: far more than DIVERSITY_SEED_PER_PLATFORM × (every known platform)
-      p_offset: 0,
-    });
-    // Commit the boosted-key set to the map in ONE atomic write, built fresh from this call's own result
-    // rather than read-then-mutate-in-place — two page-0 fetches for the identical query (diversityKey)
-    // racing across this await could otherwise have the second call's reset silently orphan the first
-    // call's in-flight Set, losing its boosted ids from the map entirely (real, if narrow, race caught in
-    // adversarial review — the old pattern mutated a Set object fetched from the map BEFORE this await).
-    if (seedCands && (seedCands as any[]).length) {
-      const { merged, boostedKeys } = mergeDiversitySeed(allCands, seedCands as any[]);
-      allCands = merged;
-      noteDiversityQuery(diversityKey, boostedKeys);
-    } else {
-      noteDiversityQuery(diversityKey, new Set<string>());
-    }
-  } else if (pageOffset > 0) {
-    // Load-More continuation: drop any candidate already shown via a page-0 diversity seed for this exact
-    // query, so the same card never appears twice as the main window's offset later reaches that
-    // platform's true rank.
-    const priorBoostedKeys = _diversityBoostedByQuery.get(diversityKey);
-    if (priorBoostedKeys && priorBoostedKeys.size) allCands = filterBoosted(allCands, priorBoostedKeys);
-  }
+  // PLATFORM DIVERSITY — owner PERMANENT rule (2026-07-13, restated and widened 2026-08-05):
+  // "MATCH FIRST -> DIVERSIFY SECOND. Never let one platform unnecessarily take over the results while
+  // other qualifying platforms are available — and keep it working through عرض المزيد / Show More."
+  //
+  // This is now enforced ENTIRELY in the RPC's own ORDER BY (migration
+  // platform_diversity_round_robin_ordering, 2026-08-06). The RPC numbers each platform's own eligible
+  // rows 1..n and sorts by that number first, so the ordering it returns is already a neutral
+  // round-robin over the WHOLE eligible set, applied BEFORE limit/offset and ending in the unique
+  // (source_table, listing_id) — i.e. ONE stable total order that every page and every Show More batch
+  // simply walks. Nothing is left for the client to re-diversify per page.
+  //
+  // What used to be here (2026-07-13 -> 2026-08-05) was a page-0-ONLY seed: a second RPC call with
+  // p_per_platform, merged into the pool via mergeDiversitySeed(). It could not satisfy the rule and had
+  // to go, for three independent reasons:
+  //   1. it ran only when pageOffset === 0, so every Show More batch fell back to raw recency order —
+  //      live-measured on Riyadh/annual-rent/apartment: 11 qualifying platforms, 9,257 eligible rows,
+  //      yet a 65-row single-platform streak and only 3 platforms in the first 100;
+  //   2. mergeDiversitySeed() re-sorts the merged pool by last_updated DESC, which would now CLOBBER the
+  //      diversified order the RPC just computed;
+  //   3. it needed cross-page bookkeeping (_diversityBoostedByQuery) purely to stop a pulled-forward card
+  //      reappearing later — a whole class of duplicate bug that a single total order cannot produce.
+  // Bonus: page 0 now costs ONE RPC call instead of two (live: 326ms -> 173ms).
+  //
+  // Objective sorts (price/area/beds/oldest) are unaffected: the RPC leaves its diversity key NULL for
+  // them, so they keep their exact prior ordering — verified 0 mismatched positions over 300 rows x 6 sorts.
+  const allCands: any[] = cands as any[];
 
   // 2) Keep the RPC's newest-first order (true last_updated recency); remember each candidate's recency
   //    rank, and group ids by source_table to fetch the full cards.
