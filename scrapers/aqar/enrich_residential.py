@@ -24,14 +24,31 @@ def _redact_pii(s: str) -> str:
 
 LISTING_ID_RE = re.compile(r"-(\d{6,})/?$")
 
-# (column_name, list-of-Arabic-patterns) — feature is True if ANY pattern matches anywhere
-# in the HTML. NOTE: this is a coarse signal (a listing that says "لا يوجد مصعد" still
-# matches the elevator pattern). Good enough for v1; we can refine with negation later.
+# (column_name, list-of-Arabic-patterns).
+#
+# SOURCE FIDELITY (owner rule, 2026-08-05) — the semantics changed, read this before editing:
+#   pattern found, NOT negated              -> True   (aqar states it)
+#   pattern found, explicitly NEGATED       -> False  (aqar states the absence — a real value)
+#   both a negated and a plain occurrence   -> None   (contradictory; we cannot say)
+#   pattern NOT found                       -> None   (UNKNOWN — aqar told us nothing)
+#
+# It used to be a bare `any(...)`: absence returned False, so a page we simply could not read
+# recorded a confident "this flat has NO lift". Measured 2026-08-05 across the annual-rent apartment
+# cohort: amenities were 100% populated and NEVER NULL on all 12,244 rows — a set of columns that can
+# never say "unknown" is not reading anything. The old header even conceded the second half of the
+# bug: «لا يوجد مصعد» ("there is no lift") matched the elevator pattern and stored True. That is the
+# same inversion as the furnished defect fixed in aqar_parse the same day, where «مفروش» matched
+# inside «غير مفروش».
 FEATURE_PATTERNS: list[tuple[str, list[str]]] = [
     ("elevator",                   [r"مصعد"]),
     ("kitchen",                    [r"مطبخ"]),
     ("car_entrance",               [r"مدخل\s*سيارة", r"مدخل\s*للسيارة", r"كراج"]),
-    ("parking",                    [r"موقف\s*سيارة", r"مواقف"]),
+    # ("parking", ...) REMOVED 2026-08-05. Aqar publishes NO parking field: its listing object carries
+    # explicit 0/1 keys for lift/ketchen/ac/car_entrance/two_entrances/special_entrance and there is no
+    # parking key anywhere in it. Every value we held was therefore invented by prose-matching, and the
+    # tell was decisive — parking=true on 93.6% of the stub cohort vs 14.5% of the healthy one, a 6.5x
+    # gap no real market produces. `car_entrance` (مدخل سيارة) IS published and is kept; parking is not
+    # the same thing and must stay NULL until aqar publishes one.
     ("maid_room",                  [r"غرفة\s*خادم(?:ة|ه)", r"غرفة\s*شغّ?الة"]),
     ("driver_room",                [r"غرفة\s*سائق"]),
     ("water_supply",               [r"توفر\s*الماء", r"\bالماء\b", r"\bمياه\b"]),
@@ -52,8 +69,26 @@ FEATURE_PATTERNS: list[tuple[str, list[str]]] = [
 ]
 
 
-def _flag(html: str, patterns: list[str]) -> bool:
-    return any(re.search(p, html) for p in patterns)
+# Arabic ways of saying a feature is ABSENT, immediately before the feature word.
+_NEG_PREFIX = r"(?:لا\s*يوجد|لا\s*يتوفر|بدون|غير|ما\s*في(?:ه)?|عدم\s*وجود)\s*"
+
+
+def _flag(html: str, patterns: list[str]) -> Optional[bool]:
+    """True / False / None — see the FEATURE_PATTERNS header. None means aqar did not tell us."""
+    negated = any(re.search(_NEG_PREFIX + p, html) for p in patterns)
+    # strip negated occurrences first, so «لا يوجد مصعد» cannot satisfy the positive test via its own
+    # substring — the same technique the aqar_parse furnished fix uses.
+    stripped = html
+    for p in patterns:
+        stripped = re.sub(_NEG_PREFIX + p, " ", stripped)
+    positive = any(re.search(p, stripped) for p in patterns)
+    if negated and positive:
+        return None
+    if negated:
+        return False
+    if positive:
+        return True
+    return None
 
 
 # Grouped-integer token (comma fix 2026-07-17): the old capture `(\d+)` stopped at the FIRST
