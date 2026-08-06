@@ -37,6 +37,12 @@ def _src(p: Path) -> str:
     return p.read_text(encoding="utf-8")
 
 
+def _strip_prose(src: str) -> str:
+    """Drop docstrings and #-comments so a comment QUOTING a removed bug cannot trip these guards."""
+    src = re.sub(r'"""[\s\S]*?"""', " ", src)
+    return re.sub(r"(?m)^\s*#.*$", " ", src)
+
+
 # ── 1. No scraper may DEFAULT the rent period ────────────────────────────────────────────────────
 # A hardcoded period is only honest when the platform genuinely sells one kind of contract and that
 # fact is documented. Every entry here is a DECLARED, DATED exception that must state, in the file,
@@ -151,3 +157,74 @@ def test_no_platform_wide_field_fabrication_documented() -> None:
         "expected the furnished de-fabrication migration to be recorded in supabase/migrations — "
         "without it the next schema rebuild would reintroduce the platform-wide constant."
     )
+
+
+# ── 5. An ABSENT amenity list is UNKNOWN, never a fleet of confident "no"s ────────────────────────
+def test_wasalt_absent_amenity_list_yields_unknown_not_false() -> None:
+    """Wasalt's `featureAmenities` is often missing entirely; a bare False then invents a negative.
+
+    Measured 2026-08-05: 0 of 9,247 active Wasalt rent apartments carried the key, and `elevator` was
+    false on 9,247/9,247 — a column that can only say "no" is not reading anything. Wasalt is 39% of
+    the annual-rent apartment inventory, so this was the largest single source of invented negatives.
+    List present -> True/False is honest (Wasalt chose not to list it). List absent -> None.
+    """
+    src = _src(SCRAPERS / "wasalt" / "run.py")
+    assert "_has_amenity_list" in src, "wasalt must distinguish an absent list from an empty match"
+    assert "if _has_amenity_list else None" in src, (
+        "an absent featureAmenities list must yield None (unknown), never False"
+    )
+
+    # EXECUTED replica of the shipped lambda.
+    def build(raw):
+        present = isinstance(raw, list) and len(raw) > 0
+        names = [(a or {}).get("name", "").lower() for a in (raw or []) if isinstance(a, dict)]
+        return lambda *kws: (any(k in n for n in names for k in kws) if present else None)
+
+    assert build(None)("elevator", "lift") is None, "missing list -> unknown"
+    assert build([])("elevator", "lift") is None, "empty list -> unknown"
+    assert build([{"name": "Elevator"}])("elevator", "lift") is True, "listed -> true"
+    assert build([{"name": "Parking"}])("elevator", "lift") is False, (
+        "list present but amenity not in it -> a genuine, source-backed false"
+    )
+
+
+# ── 6. No scraper may scale a price by its MAGNITUDE ─────────────────────────────────────────────
+def test_no_scraper_scales_a_price_because_it_looks_small() -> None:
+    """"A value under 10,000 must be thousands" is a guess, and it was wrong on 33/33 rows.
+
+    eaqartabuk had `total = v * 1000 if v < 10000 else v`. Live-verified: ad ET10864's page header
+    reads «SAR 380» and the site's own wp-json API returns meta.price='380' — we stored 380,000. Worse,
+    ET10886 is a RENTAL («إيجار», «SAR 1,400») that the same branch sold as a 1,400,000 SAR purchase.
+    The same heuristic on the rent side asserted 'monthly' for ET8766, whose page prints no period at
+    all. A price the source prints as 380 IS 380.
+    """
+    bad = []
+    for p in RUNS:
+        code = _strip_prose(_src(p))
+        for m in re.finditer(r"\*\s*1000\s+if\s+\w+\s*<\s*\d", code):
+            bad.append(f"{p.parent.name}: {m.group(0)}")
+    assert not bad, (
+        f"{bad} scale a price based on how big it looks. Store what the source prints; if a seller "
+        "quotes in thousands that is their ad, not our arithmetic to correct."
+    )
+
+
+def test_eaqartabuk_reads_a_stated_period_and_never_infers_one() -> None:
+    src = _src(SCRAPERS / "eaqartabuk" / "run.py")
+    assert "_stated_rent_period" in src, "eaqartabuk must read the period the page states"
+    assert "* 1000 if" not in _strip_prose(src), "the ×1000 magnitude guess must not return"
+
+    # EXECUTED replica of the shipped reader.
+    mon = re.compile(r"شهري|شهريا|بالشهر|/\s*شهر|في\s*الشهر")
+    ann = re.compile(r"سنوي|سنويا|بالسنة|/\s*سنة|في\s*السنة")
+
+    def period(t):
+        m, a = bool(mon.search(t or "")), bool(ann.search(t or ""))
+        if m and a:
+            return None
+        return "monthly" if m else ("annual" if a else None)
+
+    assert period("شقة للايجار في تبوك") is None, "silence -> unknown, never a magnitude guess"
+    assert period("شقة للايجار الشهري") == "monthly"
+    assert period("ايجار سنوي") == "annual"
+    assert period("يومي شهري سنوي") is None, "an ad offering several periods cannot be pinned"

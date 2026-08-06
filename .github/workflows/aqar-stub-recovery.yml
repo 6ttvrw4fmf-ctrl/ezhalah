@@ -1,0 +1,67 @@
+# Re-enrich Aqar rows stuck on the June `backfill.v1` STUB capture.
+#
+# Those rows stored a description-only source_text (~381 chars) with NO «تفاصيل الإعلان» spec block,
+# so every label-anchored parser in enrich_residential.py silently extracts nothing from them. That one
+# root cause explains the missing bedrooms/bathrooms/floor/direction/age/licence on ~43% of aqar's rent
+# apartments, and the 184 rows whose rent_period is NULL while aqar publishes «سنوي» (those are
+# invisible in BOTH annual and monthly search). Neither sweep.py (first-N-pages-per-city) nor
+# liveness.py (never re-parses) can reach them.
+#
+# MUST run here, not locally: aqar.fm serves unfamiliar clients a ~241 KB app shell with no listing
+# payload, while the GitHub runners get real pages — which is why the nightly crawls work. The script
+# exits non-zero if it cannot parse a single page, so an unserved environment fails loudly instead of
+# silently reporting "nothing to fix".
+#
+# Nothing is invented: it calls the production enrich_residential() + upsert_aqar_residential(), so a
+# field aqar does not publish simply stays NULL and the rows re-enter through the normal triggers and
+# sync. Start with dry_run=true to inspect the diff.
+name: Aqar stub recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "max stub rows to recover this run"
+        required: false
+        default: "300"
+      deal:
+        description: "rent | buy | (blank = both)"
+        required: false
+        default: "rent"
+      ptype:
+        description: "canonical property_type, e.g. Apartment (blank = all)"
+        required: false
+        default: "Apartment"
+      dry_run:
+        description: "true = print the diff, write nothing"
+        required: false
+        default: "false"
+
+concurrency:
+  group: aqar-stub-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Recover stub rows
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_MIN_INTERVAL: "0.4"
+        run: |
+          python -m scrapers.aqar.recover_stubs \
+            --limit "${{ inputs.limit }}" \
+            ${{ inputs.deal && format('--deal {0}', inputs.deal) || '' }} \
+            ${{ inputs.ptype && format('--type "{0}"', inputs.ptype) || '' }} \
+            ${{ inputs.dry_run == 'true' && '--dry-run' || '' }}

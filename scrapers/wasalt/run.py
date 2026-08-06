@@ -297,8 +297,18 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
 
     # Feature amenities (Wasalt's curated list of nearby amenities — Parking, Mosque, etc.). We map
     # each into the closest Aqar feature-grid boolean so the card UI lights up the same icons.
-    amenities = [(a or {}).get("name", "").lower() for a in (prop.get("featureAmenities") or []) if isinstance(a, dict)]
-    has = lambda *kws: any(kw in a for a in amenities for kw in kws)
+    # SOURCE FIDELITY (owner rule): an ABSENT amenity list is UNKNOWN, not "no amenities".
+    # `featureAmenities` is Wasalt's curated list and it is frequently missing entirely — measured
+    # 2026-08-05: 0 of 9,247 active Wasalt rent apartments have the key in their stored capture. The
+    # old `has()` returned a bare False in that case, so every one of those rows recorded a confident
+    # "this flat has NO lift / NO parking / NO kitchen" that Wasalt never published (elevator was
+    # false on 9,247/9,247 — a column that can only say "no" is not reading anything). When the list
+    # IS present, absence of a keyword genuinely means Wasalt did not list that amenity, so False is
+    # the honest answer there. Hence: no list -> None (unknown); list present -> True/False.
+    _raw_amenities = prop.get("featureAmenities")
+    _has_amenity_list = isinstance(_raw_amenities, list) and len(_raw_amenities) > 0
+    amenities = [(a or {}).get("name", "").lower() for a in (_raw_amenities or []) if isinstance(a, dict)]
+    has = lambda *kws: (any(kw in a for a in amenities for kw in kws) if _has_amenity_list else None)
     return {
         "ad_number": f"WST{pid}",
         "listing_url": f"{BASE}/en/property/{slug}",

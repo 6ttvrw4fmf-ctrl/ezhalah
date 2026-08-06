@@ -269,7 +269,26 @@ def _enrich(pid: int) -> tuple[dict, Optional[str]]:
     return mp, desc
 
 
-def _price(raw: Any, is_rent: bool) -> tuple[Optional[int], Optional[int], Optional[str]]:
+_PERIOD_MONTHLY_RE = re.compile(r"شهري|شهريا|بالشهر|/\s*شهر|في\s*الشهر")
+_PERIOD_ANNUAL_RE = re.compile(r"سنوي|سنويا|بالسنة|/\s*سنة|في\s*السنة")
+
+
+def _stated_rent_period(text: Optional[str]) -> Optional[str]:
+    """The period eaqartabuk actually PRINTS, or None. Never inferred from the price's magnitude."""
+    if not text:
+        return None
+    monthly = bool(_PERIOD_MONTHLY_RE.search(text))
+    annual = bool(_PERIOD_ANNUAL_RE.search(text))
+    if monthly and annual:
+        return None  # the ad offers both -> we cannot say which this price is
+    if monthly:
+        return "monthly"
+    if annual:
+        return "annual"
+    return None
+
+
+def _price(raw: Any, is_rent: bool, raw_text: Optional[str] = None) -> tuple[Optional[int], Optional[int], Optional[str]]:
     """→ (price_total, price_annual, rent_period). Applies the magnitude heuristic."""
     # Two DISTINCT figures squashed into one price field are ambiguous — never pick one and never
     # concatenate. Live id 598669 (2026-08-03): a multi-unit building listing two unit rents
@@ -281,18 +300,34 @@ def _price(raw: Any, is_rent: bool) -> tuple[Optional[int], Optional[int], Optio
     v = _int(raw)
     if not v or v <= 0:
         return None, None, None
+    # SOURCE FIDELITY (owner rule, 2026-08-05): store the number eaqartabuk publishes. Nothing here
+    # may scale, annualise or reinterpret it based on how big it looks.
+    #
+    # What was here before, and why it was wrong:
+    #   Buy : `total = v * 1000 if v < 10000 else v` — a MAGNITUDE GUESS. Live-verified on the whole
+    #         active population (33/33): ad ET10864's page header reads «SAR 380» and the site's own
+    #         wp-json API returns meta.price='380', yet we stored 380,000. Worse, ET10886 is a RENTAL
+    #         («إيجار» badge, «SAR 1,400») that this branch sold as a 1,400,000 SAR purchase.
+    #         A price the source prints as 380 IS 380. If a seller quotes in thousands, that is the
+    #         seller's ad, not our arithmetic to correct.
+    #   Rent: `v < 10000 -> annualize as monthly` — the same guess applied to the period. ET8766
+    #         prints «SAR 1,200» with NO period anywhere on the page; we asserted 'monthly' and
+    #         stored 14,400 purely because 1,200 "looked monthly".
+    #
+    # New behaviour: the figure is stored verbatim. A rent period is recorded ONLY when eaqartabuk
+    # actually states one; otherwise the period is UNKNOWN and we do not claim an annual figure,
+    # because price_annual asserts "this is the yearly rent" and we would be guessing. Same rule the
+    # dealapp fix applies. The raw figure remains in source_capture either way.
     if not is_rent:
-        # Buy: values < 10,000 are quoted in thousands (580 = 580,000); else already full SAR.
-        total = v * 1000 if v < 10000 else v
-        if total < 1000:
-            return None, None, None
-        return total, None, None
-    # Rent: small values are MONTHLY rent in full SAR; large are annual. price_annual must hold the
-    # ANNUALIZED figure — the app displays round(price_annual/12) for monthly rentals, so storing the
-    # raw monthly here made the card show 1/12 of the real rent. (price-fidelity fix 2026-07-13)
-    if v < 10000:
+        return v, None, None
+    period = _stated_rent_period(raw_text)
+    if period == "monthly":
+        # ×12 is the schema's documented annualisation and is fully reversible: the card divides by
+        # 12, recovering exactly the number eaqartabuk printed.
         return None, normalize.annualize_rent(v, "monthly"), "monthly"
-    return None, v, "annual"
+    if period == "annual":
+        return None, v, "annual"
+    return None, None, None
 
 
 # Some listings quote no real figure at all: the description literally says the price depends on
@@ -333,7 +368,11 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str]) -> tuple[Optiona
     status_ar = (mp.get("status") or "").strip()
     is_rent = op == "rent" or "إيجار" in status_ar or "ايجار" in status_ar
 
-    price_total, price_annual, rent_period = _price(meta.get("price"), is_rent)
+    # The period text eaqartabuk actually prints. Built from the raw title/excerpt/status available
+    # here (the redacted `title`/`description` are computed further down); redaction only strips
+    # phone numbers, so it cannot remove a period word.
+    _period_text = " ".join(str(x or "") for x in (item.get("title"), item.get("excerpt"), status_ar))
+    price_total, price_annual, rent_period = _price(meta.get("price"), is_rent, _period_text)
 
     # On-request pricing: the number in meta.price is a placeholder, not a real quote (see
     # _price_on_request docstring above). Null the price rather than store a fabricated figure;
