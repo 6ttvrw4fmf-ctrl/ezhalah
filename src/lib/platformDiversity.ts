@@ -61,6 +61,18 @@ export function filterBoosted<T extends DiversityCand>(cands: T[], boostedKeys: 
 // ever GROWS across a query's pages, so a row pulled forward by an earlier page's seed is never
 // re-suggested by a later page's own seed call, and stays excluded once the main window's own offset
 // eventually reaches that row's true recency rank.
+// How deep the diversity seed asks into each platform's own ranked list on a given round (2026-08-05).
+// Round 0 (a query's first seed) asks for each platform's top 20 freshest; every subsequent round
+// asks deeper (40, 60, 80, ...) so a platform with real depth keeps surfacing NEW rows across many
+// Show-More clicks instead of exhausting its one-time top-20 allowance after a single page — the
+// owner rule is "repeatedly where inventory permits," not "once." Capped at 200/platform so one query
+// can never request an unbounded window. A platform with fewer real matches than the current ask
+// simply stops contributing (mergeDiversitySeed dedupes against priorBoostedKeys) — natural
+// exhaustion, never a hard quota.
+export function diversitySeedDepth(round: number): number {
+  return Math.min(20 * (round + 1), 200);
+}
+
 export function unionBoosted(prior: Set<string> | undefined, fresh: Set<string>): Set<string> {
   if (!fresh.size) return prior ?? new Set();
   return prior ? new Set([...prior, ...fresh]) : fresh;

@@ -16,15 +16,34 @@
 // main window's own offset later reaches its true recency rank (the original Load-More-duplicate guard,
 // now applied unconditionally instead of only when pageOffset>0).
 //
+// SECOND fix, same day: a fixed top-20-per-platform seed only ever pulled one round of diversity
+// forward per platform — a platform with real depth (hundreds of matches) still reverted to the raw
+// window after ~1 Show-More click, once its one-time top-20 allowance was exhausted. `diversitySeedDepth`
+// makes the ask grow every round (20, 40, 60, ... capped at 200) so a deep platform keeps contributing
+// "repeatedly where inventory permits" (owner rule), not just once. Live-verified against production:
+// a 11-qualifying-platform Riyadh/Apartment/Rent search went from [1, 1, 2] platforms shown in the
+// front-25-of-page for Show-More clicks #1-3 (pre-fix) to [9, 6, 2] (post-fix, growing-depth), with
+// zero same-platform streak in that front-25 on any page (pre-fix streak was 25 = the whole batch).
+//
 //   node --experimental-strip-types scripts/verify-show-more-diversity.ts   (wired into `npm test`)
 
-import { unionBoosted, mergeDiversitySeed, filterBoosted } from '../src/lib/platformDiversity.ts';
+import { unionBoosted, mergeDiversitySeed, filterBoosted, diversitySeedDepth } from '../src/lib/platformDiversity.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => {
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`);
 };
+
+// ── diversitySeedDepth: the growing-ask primitive that keeps diversity going past 1 Show-More click ──
+{
+  check('round 0 (a query\'s first seed) asks for the original top-20-per-platform (no regression)', diversitySeedDepth(0) === 20);
+  check('round 1 asks deeper (40), not the same 20 (the actual second bug fixed)', diversitySeedDepth(1) === 40);
+  check('round 2 asks deeper still (60)', diversitySeedDepth(2) === 60);
+  check('the ask keeps growing linearly with the round', diversitySeedDepth(4) === 100);
+  check('the ask is capped at 200/platform (never an unbounded window)', diversitySeedDepth(50) === 200);
+  check('the cap holds even further out', diversitySeedDepth(1000) === 200);
+}
 
 // ── unionBoosted: the accumulation primitive the whole fix rests on ──────────────────────────────
 {
