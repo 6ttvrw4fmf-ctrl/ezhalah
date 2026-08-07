@@ -263,42 +263,62 @@ def _ids_from_page(url: str) -> list[str]:
 
 
 def enumerate_ids(s: cc.Session, cap_pages: int) -> list[str]:
-    """Every /ad-details id to scrape: the sitemap's direct listing ids (the authoritative live set,
-    previously discarded) ∪ the ids we already hold active (re-fetched for an honest liveness check)
-    ∪ a capped filter-page harvest (backstop for ids not yet in the sitemap). Ids are canonicalised
+    """Ordered list of /ad-details ids to scrape this run. Sources, in PRIORITY order:
+      1. sitemap listing ids we do NOT already hold active  → new coverage (the ~54k we were missing)
+      2. sitemap listing ids we already hold active         → re-confirm (liveness)
+      3. active ids absent from the sitemap                 → re-fetch (omitted-live vs truly removed)
+      4. filter-page harvest                                → backstop for ids not yet in the sitemap
+
+    Why the order matters: dealapp throttles to a few workers with no proxy (its anonymous origin
+    trips a login-wall under load), so one job can only fetch a slice of the 58k catalogue. Putting
+    NEW listings first means each run spends its budget closing the coverage gap — and because a
+    scraped id becomes active, it drops out of bucket 1 next run, so coverage advances run-over-run
+    instead of re-fetching the same prefix. DEALAPP_MAX_LISTINGS caps the run so it finishes cleanly
+    (prune + end_run run normally) instead of being killed at the job timeout. Ids are canonicalised
     to str(int(...)) so a zero-padded ad_number and its bare form collapse to one fetch."""
     listing_ids, filter_urls = _sitemap_entries(s)
-    ids: list[str] = []
-    seen: set[str] = set()
+    active = _active_ids_for_reconfirm()
+    max_listings = int(os.environ.get("DEALAPP_MAX_LISTINGS", "0"))  # 0 = no cap (full crawl)
 
-    def _add(raw: str) -> None:
+    def _norm(raw: str) -> Optional[str]:
         m = re.search(r"\d+", raw or "")
-        if not m:
-            return
-        i = str(int(m.group()))
-        if i not in seen:
-            seen.add(i)
-            ids.append(i)
+        return str(int(m.group())) if m else None
 
-    for i in listing_ids:
-        _add(i)
-    n_sitemap = len(ids)
-    for i in _active_ids_for_reconfirm():
-        _add(i)
-    n_active = len(ids) - n_sitemap
-    if cap_pages and len(filter_urls) > cap_pages:
-        filter_urls = filter_urls[:cap_pages]
-    print(f"Deal App: {n_sitemap} ids direct from sitemap + {n_active} active-to-reconfirm; "
-          f"filter-page backstop {len(filter_urls)} pages ({WORKERS} workers)", flush=True)
-    done = 0
-    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        for batch in ex.map(_ids_from_page, filter_urls):
-            done += 1
-            for i in batch:
-                _add(i)
-            if done % 200 == 0:
-                print(f"  …{done}/{len(filter_urls)} pages, {len(ids)} distinct ids", flush=True)
-    print(f"Deal App: {len(ids)} distinct listing ids enumerated", flush=True)
+    seen: set[str] = set()
+    new_ids: list[str] = []
+    known_ids: list[str] = []
+    for raw in listing_ids:
+        i = _norm(raw)
+        if not i or i in seen:
+            continue
+        seen.add(i)
+        (known_ids if i in active else new_ids).append(i)
+    tail = [i for i in active if i not in seen]     # active but not in the current sitemap
+    seen.update(tail)
+    ids = new_ids + known_ids + tail
+
+    # Filter-page backstop: only worth the extra fetches on an UNCAPPED full crawl; a capped
+    # catch-up run should spend every request on the prioritised listing ids above.
+    if not max_listings:
+        if cap_pages and len(filter_urls) > cap_pages:
+            filter_urls = filter_urls[:cap_pages]
+        done = 0
+        with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+            for batch in ex.map(_ids_from_page, filter_urls):
+                done += 1
+                for raw in batch:
+                    i = _norm(raw)
+                    if i and i not in seen:
+                        seen.add(i)
+                        ids.append(i)
+                if done % 200 == 0:
+                    print(f"  …{done}/{len(filter_urls)} filter pages, {len(ids)} ids", flush=True)
+
+    if max_listings and len(ids) > max_listings:
+        ids = ids[:max_listings]
+    print(f"Deal App: {len(ids)} ids to scrape "
+          f"({len(new_ids)} new-from-sitemap first, {len(known_ids)} re-confirm, {len(tail)} off-sitemap"
+          f"{'' if not max_listings else f', capped at {max_listings}'})", flush=True)
     return ids
 
 
