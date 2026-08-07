@@ -90,6 +90,42 @@ deploy unless you're on `main`, the working tree is 100% clean, and local `main`
 `origin/main` exactly. If it refuses, fix the underlying git state (commit → push → PR → merge) —
 do not bypass it.
 
+## How an agent session actually ships a frontend fix (2026-08-06)
+
+**No agent session holds the deploy credentials, and none ever should.** `safe-deploy.sh` needs
+`VERCEL_TOKEN` and `SUPABASE_SERVICE_ROLE_KEY`; a cloud routine has neither, and its egress proxy
+blocks Vercel and Supabase REST anyway. That is the design, not a fault: production secrets live in
+**GitHub Actions repository secrets**, never in an agent's environment.
+
+The deploy therefore runs *in CI*, not in your container. Dispatch the
+**`Deploy frontend (production)`** workflow (`.github/workflows/deploy-frontend.yml`,
+`workflow_dispatch`) — e.g. the GitHub MCP `actions_run_trigger` / `run_workflow`, or the Actions UI:
+
+| input | value |
+|---|---|
+| `reason` | why this deploy is needed (recorded in the deploy-lock note) |
+| `confirm` | `DEPLOY` — exact literal, or a real deploy hard-fails |
+| `dry_run` | `true` to verify secrets + token + target lock and **stop without deploying** |
+
+That workflow runs `scripts/safe-deploy.sh` **and nothing else**, so every gate in this file still
+applies unchanged, in the same order, and still fails closed. It contains no raw `vercel` command,
+which is why `verify-no-vercel-bypass.ts` stays green. This is not a bypass — it is the same
+entrypoint, given credentials you are deliberately not trusted with.
+
+**Therefore: "frontend fix completed but deployment BLOCKED because this environment cannot deploy"
+is NOT an acceptable report.** It was accurate about `safe-deploy.sh` locally and wrong about the
+system. If a verified change genuinely needs a frontend deploy, dispatch the workflow, watch the
+run, then verify `https://ezhalah-app.vercel.app` per `docs/ops/VERIFYING_PRODUCTION.md`. Report
+BLOCKED only if the dispatch itself is refused, and say exactly what refused it.
+
+Two things this does **not** change:
+1. **Still never deploy without a verified change that requires one.** No `src/` diff since the live
+   commit ⇒ no deploy. `Deployments: 0` remains a correct, successful run. Use `dry_run` to prove
+   the pipeline is healthy — never a real deploy.
+2. **Read the workflow's own Report step before you believe an outcome.** A run marked `failure`
+   may still have SHIPPED (2026-08-05: the deploy succeeded and only the post-deploy baseline
+   advance failed). Never report "production untouched" from job status alone.
+
 # Deployment lock (P0, non-negotiable — 2026-07-16)
 
 **Multiple Claude/agent sessions can run against this repo and this Supabase project at the same
