@@ -36,6 +36,10 @@ on:
         description: "true = print the diff, write nothing"
         required: false
         default: "false"
+      include_price:
+        description: "true = ALSO write price/period/area (OFF by default — see recover_stubs.py)"
+        required: false
+        default: "false"
 
 concurrency:
   group: aqar-stub-recovery
@@ -64,4 +68,5 @@ jobs:
             --limit "${{ inputs.limit }}" \
             ${{ inputs.deal && format('--deal {0}', inputs.deal) || '' }} \
             ${{ inputs.ptype && format('--type "{0}"', inputs.ptype) || '' }} \
-            ${{ inputs.dry_run == 'true' && '--dry-run' || '' }}
+            ${{ inputs.dry_run == 'true' && '--dry-run' || '' }} \
+            ${{ inputs.include_price == 'true' && '--include-price' || '' }}

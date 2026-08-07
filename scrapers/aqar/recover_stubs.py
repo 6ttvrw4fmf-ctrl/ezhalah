@@ -57,6 +57,32 @@ REPORT_FIELDS = (
     "kitchen", "license_number", "street_width_m",
 )
 
+# Fields whose value comes from aqar's own STRUCTURED keys (the RSC listing object) or from a
+# label-anchored spec-table read. These are safe to recover: the re-read either finds aqar's stated
+# value or leaves the field unknown.
+_STRUCTURED_SAFE = {
+    "furnished", "property_age", "bathrooms", "bedrooms", "floor_number", "street_width_m",
+    "license_number", "license_expiry", "ad_source", "tenant_category", "direction",
+    "elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
+    "private_entrance", "car_entrance", "water_supply", "electricity", "sanitation",
+    "optical_fibers", "laundry_room", "balcony_terrace", "separate_water_meter",
+    "separate_electricity_meter", "extension", "special_surface", "special_position",
+    "villa_on_roof", "apartment_in_project", "master_bedrooms", "halls",
+    "reception_rooms_majlis", "rega_location_verified", "num_apartments",
+}
+# Fields the recovery must NOT touch, and why (2026-08-05 dry-run evidence):
+#   • price_annual / price_total / price_per_meter — enrich_residential scans `price_text`, the whole
+#     pre-«تفاصيل الإعلان» prefix, which carries the seller's free-text blurb. The dry-run produced
+#     three unexplained moves: 6668912 24,000->2,000 and 6609974 30,000->2,500 (both EXACTLY ÷12, the
+#     signature of a monthly figure landing in an annual column) and 6663318 550->16,000. Until the
+#     price path itself is verified against source, a "recovery" could overwrite a correct price with
+#     a prose number. The owner's rule cuts both ways: never guess, and never overwrite on a guess.
+#   • rent_period — defaults to "annual" for every Rent listing (enrich_residential.py:371, "the Saudi
+#     norm"). Recovering it would write that DEFAULT over an honest NULL, which is fabrication.
+#   • area_m2 — the comma-truncation class is repaired, but area feeds the derived price_per_meter,
+#     so it moves with the price decision rather than ahead of it.
+_PRICE_AND_PERIOD = {"price_annual", "price_total", "price_per_meter", "rent_period", "area_m2"}
+
 # canonical property_type -> the aqar URL slug enrich_residential expects
 TYPE_TO_SLUG = {v: k for k, v in N.SLUG_TO_TYPE.items()}
 
@@ -100,7 +126,8 @@ def stub_cohort(limit: int, deal: Optional[str], ptype: Optional[str]) -> list[d
     return out
 
 
-def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int) -> dict[str, int]:
+def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int,
+            structured_only: bool = True) -> dict[str, int]:
     counter = {"done": 0, "fetched": 0, "written": 0, "unfetchable": 0, "no_gain": 0}
     lock = threading.Lock()
 
@@ -113,6 +140,11 @@ def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int) -> dict[str
                 counter["unfetchable"] += 1
             return
         fresh = enrich_residential(r["listing_url"], type_slug=slug, deal_slug=deal_slug)
+        if fresh and structured_only:
+            # Carry the EXISTING price/period/area through untouched, so the upsert cannot move them.
+            for f in _PRICE_AND_PERIOD:
+                if f in r:
+                    fresh[f] = r.get(f)
         with lock:
             counter["done"] += 1
         if not fresh:
@@ -123,9 +155,11 @@ def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int) -> dict[str
         with lock:
             counter["fetched"] += 1
         # What the re-read actually recovers, purely for the operator's report.
-        gained = {f: fresh.get(f) for f in REPORT_FIELDS
+        reportable = [f for f in REPORT_FIELDS
+                      if not (structured_only and f in _PRICE_AND_PERIOD)]
+        gained = {f: fresh.get(f) for f in reportable
                   if r.get(f) is None and fresh.get(f) is not None}
-        changed = {f: (r.get(f), fresh.get(f)) for f in REPORT_FIELDS
+        changed = {f: (r.get(f), fresh.get(f)) for f in reportable
                    if r.get(f) is not None and fresh.get(f) is not None and r.get(f) != fresh.get(f)}
         if not gained and not changed:
             with lock:
@@ -159,9 +193,14 @@ def main() -> int:
                     help="canonical property_type, e.g. Apartment")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--dry-run", action="store_true", help="print the diff, write nothing")
+    ap.add_argument("--include-price", action="store_true",
+                    help="ALSO recover price/period/area. OFF by default: the 2026-08-05 dry-run "
+                         "produced unexplained price moves (two exactly ÷12), so those fields are "
+                         "held back until the price path is verified against source.")
     args = ap.parse_args()
 
     rows = stub_cohort(args.limit, args.deal, args.ptype)
+    print(f"mode: {'ALL FIELDS (price included)' if args.include_price else 'STRUCTURED-ONLY (price/period/area preserved)'}")
     print(f"stub cohort: {len(rows)} rows "
           f"(deal={args.deal or 'any'} type={args.ptype or 'any'} limit={args.limit})")
     if not rows:
@@ -169,7 +208,7 @@ def main() -> int:
         return 0
 
     run_id = None if args.dry_run else db.begin_run("aqar_stub_recovery")
-    c = recover(rows, args.dry_run, args.workers)
+    c = recover(rows, args.dry_run, args.workers, structured_only=not args.include_price)
     print(f"\nfetched={c['fetched']} written={c['written']} "
           f"unfetchable={c['unfetchable']} no_gain={c['no_gain']} of {len(rows)}")
 
