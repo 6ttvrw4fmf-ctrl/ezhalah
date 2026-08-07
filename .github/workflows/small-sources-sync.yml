@@ -62,7 +62,11 @@ jobs:
           - { source: alkhaas,     cmd: "python -m scrapers.alkhaas.run --type all" }
           - { source: abeea,       cmd: "python -m scrapers.abeea.run --type all" }
           - { source: jurash,      cmd: "python -m scrapers.jurash.run --type all" }
-          - { source: dealapp,     cmd: "DEALAPP_MAX_FILTER_PAGES=2000 DEALAPP_WORKERS=3 python -m scrapers.dealapp.run --type all" }
+          # DEALAPP_MAX_LISTINGS caps each run so it finishes inside the 90m budget (prune+end_run
+          # run cleanly). enumerate_ids orders NEW sitemap listings first, so coverage climbs
+          # run-over-run toward the full ~58k catalogue. Raise the cap once real CI throughput is
+          # known, or add a proxy to lift the 3-worker login-wall throttle. (bug-fix 2026-08-07)
+          - { source: dealapp,     cmd: "DEALAPP_MAX_LISTINGS=12000 DEALAPP_WORKERS=3 python -m scrapers.dealapp.run --type all" }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }

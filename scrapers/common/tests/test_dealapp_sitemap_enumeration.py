@@ -10,6 +10,7 @@ Run: python -m pytest scrapers/common/tests/test_dealapp_sitemap_enumeration.py 
 """
 from unittest.mock import MagicMock
 
+from scrapers.dealapp import run
 from scrapers.dealapp.run import _sitemap_entries
 
 
@@ -43,3 +44,18 @@ def test_listing_ids_are_taken_directly_from_the_sitemap():
     # filter pages are kept as a backstop — and listing URLs never leak into them
     assert any("/ar/riyadh/apartments-for-rent" in u for u in filter_urls)
     assert all("/ad-details/" not in u for u in filter_urls)
+
+
+def test_enumerate_orders_new_listings_first_and_caps(monkeypatch):
+    """New (not-yet-held) sitemap ids come first so a throttled run spends its budget closing the
+    coverage gap; DEALAPP_MAX_LISTINGS bounds the run so it finishes cleanly."""
+    monkeypatch.setattr(run, "_sitemap_entries",
+                        lambda s: (["100", "200", "300", "400", "500"], []))
+    monkeypatch.setattr(run, "_active_ids_for_reconfirm",
+                        lambda: {"200", "300", "999"})  # 200/300 in sitemap, 999 off-sitemap
+    monkeypatch.setenv("DEALAPP_MAX_LISTINGS", "4")
+
+    ids = run.enumerate_ids(s=None, cap_pages=0)
+
+    # order: NEW (100,400,500) → re-confirm (200,300) → off-sitemap (999); then capped to 4
+    assert ids == ["100", "400", "500", "200"]
