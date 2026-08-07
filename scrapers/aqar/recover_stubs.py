@@ -99,30 +99,34 @@ def stub_cohort(limit: int, deal: Optional[str], ptype: Optional[str]) -> list[d
         q = q.eq("transaction_type", "Rent" if deal == "rent" else "Buy")
     if ptype:
         q = q.eq("property_type", ptype)
-    rows: list[dict[str, Any]] = []
+    # Page through the WHOLE matching population, testing each page for stubs as we go, until we have
+    # `limit` STUBS. The earlier version capped the CANDIDATE pool at `limit` and only then filtered,
+    # so a run with limit=1500 examined the first 2,000 rows and found 486 stubs — it could never
+    # reach the rest of the cohort no matter how high the limit was set. (Found live 2026-08-05 when
+    # a limit=1500 run reported a 486-row cohort against a known ~5k population.)
+    out: list[dict[str, Any]] = []
     page = 0
-    while len(rows) < limit:
+    while len(out) < limit:
         batch = q.range(page * 1000, page * 1000 + 999).execute().data or []
         if not batch:
             break
-        rows.extend(batch)
         page += 1
-        if page > 60:
+        # The stub test needs source_text, which is large — fetch it only for this page's ids.
+        for i in range(0, len(batch), 200):
+            chunk = batch[i:i + 200]
+            caps = (c.table(TABLE).select("id, source_capture")
+                    .in_("id", [r["id"] for r in chunk]).execute().data or [])
+            by_id = {x["id"]: (x.get("source_capture") or {}) for x in caps}
+            for r in chunk:
+                txt = (by_id.get(r["id"]) or {}).get("source_text") or ""
+                if "تفاصيل الإعلان" not in txt:
+                    r["_stub_len"] = len(txt)
+                    out.append(r)
+                    if len(out) >= limit:
+                        return out
+        if page > 200:      # runaway guard: 200k rows scanned
             break
-    # The stub test itself needs source_text, which is large — fetch it per row only for candidates.
-    out: list[dict[str, Any]] = []
-    for i in range(0, len(rows), 200):
-        chunk = rows[i:i + 200]
-        ids = [r["id"] for r in chunk]
-        caps = (c.table(TABLE).select("id, source_capture").in_("id", ids).execute().data or [])
-        by_id = {x["id"]: (x.get("source_capture") or {}) for x in caps}
-        for r in chunk:
-            txt = (by_id.get(r["id"]) or {}).get("source_text") or ""
-            if "تفاصيل الإعلان" not in txt:
-                r["_stub_len"] = len(txt)
-                out.append(r)
-                if len(out) >= limit:
-                    return out
+    return out
     return out
 
 
