@@ -10,9 +10,12 @@
 // before LIMIT/OFFSET. This script asserts (a) the client forwards q.sort to p_sort_by for every
 // server-supported key, (b) ppm_asc/ppm_desc are deliberately NOT forwarded (RPC has no derived-ppm
 // sort — this project has a strict "never derive price-per-meter" history), and (c) the platform-
-// diversity-seed call (which hardcodes a last_updated-DESC re-sort — see mergeDiversitySeed in
-// src/lib/platformDiversity.ts) is skipped for an objective RPC sort, since applying it would silently
-// clobber the true price/area/beds ordering the RPC just computed.
+// diversity re-sort can no longer clobber the true price/area/beds ordering the RPC just computed.
+// (2026-08-06) That last guarantee got STRONGER: the page-0 diversity seed — the thing that hardcoded a
+// last_updated-DESC re-sort — was deleted outright when platform diversification moved into the RPC's own
+// ORDER BY (migration platform_diversity_round_robin_ordering). The RPC leaves its diversity key NULL for
+// the 6 objective sorts, so there is no client re-sort left to gate: verified 0 mismatched positions over
+// 300 rows x 6 sorts. This script now asserts the re-sort is ABSENT rather than merely conditional.
 //
 //   node --experimental-strip-types scripts/verify-rpc-price-sort-fix.ts   (wired into `npm test`)
 
@@ -29,7 +32,10 @@ const src = readFileSync(new URL('../src/data/remote.ts', import.meta.url), 'utf
 check('rpcFilterParams forwards q.sort as p_sort_by for RPC-supported keys', /\.\.\.\(RPC_SORT_KEYS\.has\(q\.sort as string\) \? \{ p_sort_by: q\.sort \} : \{\}\)/.test(src));
 check('RPC_SORT_KEYS covers exactly the 6 server-supported sort keys (no ppm, no newest)', /const RPC_SORT_KEYS = new Set\(\['oldest', 'price_asc', 'price_desc', 'area_asc', 'area_desc', 'beds_desc'\]\)/.test(src));
 check('ppm_asc/ppm_desc are NOT in RPC_SORT_KEYS (still client-side-only, unchanged)', !/RPC_SORT_KEYS = new Set\(\[[^\]]*ppm/.test(src));
-check('the diversity-seed call is gated off for an objective RPC sort', /const objectiveRpcSort = RPC_SORT_KEYS\.has\(q\.sort as string\);/.test(src) && /if \(!objectiveRpcSort && pageOffset === 0 && allCands\.length >= pageLimit\)/.test(src));
+// Comments are stripped: remote.ts DOCUMENTS the removal by name, and that prose must not read as a call.
+const code = src.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+check('no client-side last_updated-DESC re-sort can clobber an objective RPC sort (the page-0 seed is GONE)',
+  !/mergeDiversitySeed\s*\(/.test(code) && !/objectiveRpcSort/.test(code));
 
 // Verbatim copy of the RPC_SORT_KEYS gating logic — executed against every real SortKey.
 type SortKey = 'newest' | 'oldest' | 'price_asc' | 'price_desc' | 'area_asc' | 'area_desc' | 'ppm_asc' | 'ppm_desc' | 'beds_desc';
