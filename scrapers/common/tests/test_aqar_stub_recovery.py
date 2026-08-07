@@ -91,3 +91,36 @@ def test_reports_no_gain_separately_from_failure() -> None:
     """
     assert "no_gain" in SRC and "unfetchable" in SRC, "the two outcomes must be counted separately"
     assert "aqar publishes nothing further" in SRC, "no-gain must be stated as a finding, not an error"
+
+
+# ── the recovery must not move a price it cannot justify ─────────────────────────────────────────
+def test_price_period_and_area_are_held_back_by_default() -> None:
+    """2026-08-05 dry-run evidence: three unexplained price moves, two of them EXACTLY ÷12.
+
+    6668912 24,000 -> 2,000 and 6609974 30,000 -> 2,500 are the signature of a monthly figure landing
+    in an annual column; 6663318 550 -> 16,000 is unexplained in the other direction.
+    enrich_residential scans `price_text` — the whole pre-«تفاصيل الإعلان» prefix, which carries the
+    seller's free-text blurb — so a "recovery" could overwrite a correct price with a prose number.
+    rent_period is worse: it DEFAULTS to "annual" for every Rent listing, so recovering it would write
+    a default over an honest NULL. Structured fields (aqar's own 0/1 keys and spec-table labels) are
+    safe and are recovered; these are not, until the price path is verified against source.
+    """
+    assert "_PRICE_AND_PERIOD" in SRC
+    for f in ("price_annual", "price_total", "price_per_meter", "rent_period", "area_m2"):
+        assert f'"{f}"' in SRC.split("_PRICE_AND_PERIOD")[1].split("}")[0], f"{f} must be held back"
+    assert "structured_only: bool = True" in SRC, "holding price back must be the DEFAULT"
+    assert "--include-price" in SRC, "overriding must be explicit and deliberate"
+
+
+def test_held_back_fields_are_carried_through_unchanged() -> None:
+    """Not merely skipped in the report — the existing value must be written back verbatim."""
+    assert "for f in _PRICE_AND_PERIOD:" in SRC and "fresh[f] = r.get(f)" in SRC, (
+        "the upsert receives the whole row, so a held-back field must be re-seeded from the DB value "
+        "or the upsert would null it"
+    )
+
+
+def test_report_hides_fields_that_cannot_be_written() -> None:
+    """A diff line claiming a price change we will not make would be a lie to the operator."""
+    assert "reportable = [f for f in REPORT_FIELDS" in SRC
+    assert "structured_only and f in _PRICE_AND_PERIOD" in SRC
