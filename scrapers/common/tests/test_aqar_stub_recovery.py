@@ -124,3 +124,16 @@ def test_report_hides_fields_that_cannot_be_written() -> None:
     """A diff line claiming a price change we will not make would be a lie to the operator."""
     assert "reportable = [f for f in REPORT_FIELDS" in SRC
     assert "structured_only and f in _PRICE_AND_PERIOD" in SRC
+
+
+def test_cohort_scans_the_whole_population_not_just_the_first_limit_rows() -> None:
+    """The candidate pool must NOT be capped by `limit` before the stub filter runs.
+
+    Found live 2026-08-05: a limit=1500 run reported a 486-row cohort against a known ~5k population,
+    because it read 2,000 rows first and only then filtered for stubs. Raising the limit could never
+    reach the rest of the cohort. The loop must page until it has `limit` STUBS.
+    """
+    body = SRC[SRC.index("def stub_cohort"):SRC.index("def recover(")]
+    assert "while len(out) < limit:" in body, "the loop must terminate on STUB count, not row count"
+    assert "rows.extend(batch)" not in body, "must not accumulate an unfiltered candidate pool"
+    assert "if len(out) >= limit:" in body and "return out" in body, "must stop once enough stubs found"
