@@ -6,6 +6,7 @@ targeted regex; missing values stay None (or False for boolean features).
 """
 from __future__ import annotations
 
+import json as _json
 import re
 from typing import Any, Optional
 from urllib.parse import urlparse, unquote
@@ -24,9 +25,11 @@ def _redact_pii(s: str) -> str:
 
 LISTING_ID_RE = re.compile(r"-(\d{6,})/?$")
 
-# (column_name, list-of-Arabic-patterns) — feature is True if ANY pattern matches anywhere
-# in the HTML. NOTE: this is a coarse signal (a listing that says "لا يوجد مصعد" still
-# matches the elevator pattern). Good enough for v1; we can refine with negation later.
+# (column_name, list-of-Arabic-patterns) — a COARSE prose signal, used ONLY as a positive hint for
+# columns aqar does not publish structurally. See _structured_amenities() below: where aqar states a
+# field explicitly we take its value and NEVER fall back to these patterns, because prose matching
+# cannot distinguish "has a lift" from «لا يوجد مصعد» and, worse, cannot distinguish "not mentioned"
+# from "does not have one".
 FEATURE_PATTERNS: list[tuple[str, list[str]]] = [
     ("elevator",                   [r"مصعد"]),
     ("kitchen",                    [r"مطبخ"]),
@@ -71,6 +74,117 @@ def _flag(html: str, patterns: list[str]) -> bool:
 _GROUPED_INT = r"(\d{1,3}(?:[,٬]\d{3})+(?!\d)|\d+)"
 _SEP_RE = re.compile(r"[,٬]")
 
+
+
+# ── Amenities: aqar's own structured keys, never prose ───────────────────────────────────────────
+# aqar renders an ~88-key listing object into the page's Next.js RSC flight payload. Six amenity
+# facts are explicit 0/1 there, and reading them is the only way to tell "aqar says NO" apart from
+# "aqar did not say" — a distinction prose matching structurally cannot make.
+#
+# Measured 2026-08-05 across 108 live pages + the whole active cohort, which is what forced this fix:
+#   • `_flag()` returned a bare bool, so every amenity was 100% populated and NEVER NULL;
+#   • **aqar publishes NO parking field at all** — yet `parking` was true on 4,880/5,216 (93.6%) of
+#     the June stub rows vs 1,016/7,028 (14.5%) of healthy rows. A 6.5x gap in the same market is not
+#     a real difference; both figures were manufactured by the «مواقف» prose pattern firing on
+#     whatever text happened to be stored.
+#   • stub `parking` values are not even reproducible from the text we stored (921/5,216), whereas
+#     healthy rows reproduce 7,028/7,028.
+#
+# Mapping (aqar key -> our column). Anything not listed is NOT published by aqar structurally.
+_STRUCTURED_AMENITY_KEYS: dict[str, str] = {
+    "lift": "elevator",
+    "ketchen": "kitchen",          # aqar's own spelling
+    "ac": "air_conditioner",
+    "car_entrance": "car_entrance",
+    "furnished": "furnished",
+}
+# Either of aqar's two entrance flags means a private/independent entrance.
+_PRIVATE_ENTRANCE_KEYS = ("special_entrance", "two_entrances")
+# Columns aqar NEVER publishes: they must stay unknown rather than be inferred from the description.
+# `parking` is the important one — see the 6.5x census above.
+_NEVER_PUBLISHED_BY_AQAR = ("parking",)
+
+_LISTING_OBJ_RE = re.compile(r'"listing"\s*:\s*\{')
+
+
+def _listing_json(html: str) -> Optional[dict[str, Any]]:
+    """The listing object aqar embeds in its RSC flight payload, or None if it is not present.
+
+    None means we could not read aqar's structured data on this fetch — NOT that the flat lacks
+    amenities. Callers must treat it as unknown.
+    """
+    if not html or '"listing"' not in html and '\\"listing\\"' not in html:
+        return None
+    # The payload arrives as JS string literals inside self.__next_f.push([1,"..."]) chunks; joining
+    # them and unescaping reconstitutes the JSON. Fall back to the raw html for already-plain markup.
+    chunks = re.findall(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)', html, re.S)
+    blob = "".join(chunks) if chunks else html
+    if chunks:
+        blob = blob.encode("utf-8", "surrogatepass").decode("unicode_escape", "ignore")
+    for m in _LISTING_OBJ_RE.finditer(blob):
+        start = blob.index("{", m.start() + len('"listing"'))
+        depth = 0
+        for i in range(start, min(len(blob), start + 200_000)):
+            ch = blob[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        obj = _json.loads(blob[start:i + 1])
+                    except Exception:  # noqa: BLE001
+                        break
+                    # The first `"listing":{` in the payload is an i18n label bundle with no id.
+                    if isinstance(obj, dict) and obj.get("id") is not None:
+                        return obj
+                    break
+    return None
+
+
+def _tri_state(raw: Any) -> Optional[bool]:
+    """aqar's 0/1/None -> False/True/UNKNOWN. Anything unrecognised is UNKNOWN, never False."""
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    t = str(raw).strip().lower()
+    if t in ("1", "true", "yes"):
+        return True
+    if t in ("0", "false", "no"):
+        return False
+    return None
+
+
+def _amenities(html: str, text: str) -> dict[str, Optional[bool]]:
+    """Every amenity column, with UNKNOWN (None) wherever aqar does not state a value."""
+    obj = _listing_json(html)
+    out: dict[str, Optional[bool]] = {}
+    # Seed EVERY column we may emit — including ones with no prose pattern, e.g. `furnished` — so a
+    # missing structured key yields UNKNOWN rather than an absent dict entry.
+    for col in [c for c, _ in FEATURE_PATTERNS] + list(_STRUCTURED_AMENITY_KEYS.values()) + ["private_entrance"]:
+        out[col] = None                      # default is UNKNOWN, not False
+    if obj:
+        for key, col in _STRUCTURED_AMENITY_KEYS.items():
+            if key in obj:
+                out[col] = _tri_state(obj.get(key))
+        vals = [_tri_state(obj.get(k)) for k in _PRIVATE_ENTRANCE_KEYS if k in obj]
+        if vals:
+            out["private_entrance"] = True if any(v is True for v in vals) else (
+                False if all(v is False for v in vals) else None)
+    # Columns aqar publishes NOWHERE stay unknown regardless of what the description happens to say.
+    for col in _NEVER_PUBLISHED_BY_AQAR:
+        out[col] = None
+    # Remaining columns have no structured counterpart. A prose hit is still evidence the listing
+    # ADVERTISES the feature, so keep True; but silence stays UNKNOWN rather than becoming False.
+    structured = set(_STRUCTURED_AMENITY_KEYS.values()) | {"private_entrance"} | set(_NEVER_PUBLISHED_BY_AQAR)
+    for col, pats in FEATURE_PATTERNS:
+        if col in structured:
+            continue
+        out[col] = True if _flag(text, pats) else None
+    return out
 
 def _int_after_label(html: str, *labels: str) -> Optional[int]:
     """Find the first number that appears right after ANY of the given Arabic labels."""
@@ -402,7 +516,10 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     rega_verified     = _flag(text, [r"موقع\s*موثق", r"REGA", r"الهيئة\s*العامة\s*للعقار"])
 
     # ─── Features ────────────────────────────────────────────────────────────
-    features = {col: _flag(text, pats) for col, pats in FEATURE_PATTERNS}
+    # SOURCE FIDELITY (owner rule, 2026-08-05): aqar publishes most amenities as explicit 0/1 keys in
+    # its own page payload. Read THOSE. A key aqar does not publish stays UNKNOWN (None) — it is never
+    # turned into False, and never guessed from prose.
+    features = _amenities(html, text)
 
     # ─── Media & Metadata ────────────────────────────────────────────────────
     # ALL listing photos (no cap). Scoped to images.aqar.fm — the gallery CDN — so the broker
