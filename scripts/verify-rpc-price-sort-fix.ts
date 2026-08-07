@@ -29,7 +29,9 @@ const src = readFileSync(new URL('../src/data/remote.ts', import.meta.url), 'utf
 check('rpcFilterParams forwards q.sort as p_sort_by for RPC-supported keys', /\.\.\.\(RPC_SORT_KEYS\.has\(q\.sort as string\) \? \{ p_sort_by: q\.sort \} : \{\}\)/.test(src));
 check('RPC_SORT_KEYS covers exactly the 6 server-supported sort keys (no ppm, no newest)', /const RPC_SORT_KEYS = new Set\(\['oldest', 'price_asc', 'price_desc', 'area_asc', 'area_desc', 'beds_desc'\]\)/.test(src));
 check('ppm_asc/ppm_desc are NOT in RPC_SORT_KEYS (still client-side-only, unchanged)', !/RPC_SORT_KEYS = new Set\(\[[^\]]*ppm/.test(src));
-check('the diversity-seed call is gated off for an objective RPC sort', /const objectiveRpcSort = RPC_SORT_KEYS\.has\(q\.sort as string\);/.test(src) && /if \(!objectiveRpcSort && pageOffset === 0 && allCands\.length >= pageLimit\)/.test(src));
+// 2026-08-05: the seed now fires on EVERY page (Show More fix, see remote.ts), not just page 0 — the
+// pageOffset===0 restriction is intentionally gone. The objective-sort gate itself is unchanged.
+check('the diversity-seed call is gated off for an objective RPC sort', /const objectiveRpcSort = RPC_SORT_KEYS\.has\(q\.sort as string\);/.test(src) && /if \(!objectiveRpcSort && allCands\.length >= pageLimit\)/.test(src));
 
 // Verbatim copy of the RPC_SORT_KEYS gating logic — executed against every real SortKey.
 type SortKey = 'newest' | 'oldest' | 'price_asc' | 'price_desc' | 'area_asc' | 'area_desc' | 'ppm_asc' | 'ppm_desc' | 'beds_desc';

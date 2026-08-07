@@ -10,7 +10,7 @@ import { scoreListingProximity } from './proximity';
 import { cityDisplay } from './locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
-import { mergeDiversitySeed, filterBoosted, orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
+import { mergeDiversitySeed, filterBoosted, unionBoosted, diversitySeedDepth, orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import saLocations from './sa-locations.json';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
@@ -879,18 +879,41 @@ const QUERY_LIMIT = 1500; // page size — the newest N MATCHING rows per page (
 // closure, so there's nothing to race. (owner 2026-08-03 concurrency fix)
 export type FetchListingsResult = { listings: Listing[] | null; pageCandidates: number; pageTotal: number };
 
-// Per-query set of (source_table:listing_id) keys pulled forward by the page-0 platform-diversity seed
-// (owner PERMANENT rule 2026-07-13, see fetchListingsForQuery). Keyed by JSON.stringify(q) rather than a
-// single flat Set so an unrelated search started in between a page-0 fetch and a later Load-More click
-// (both real in the AI Agent, which keeps every past search's "Load More" live in the same conversation)
-// can never clobber a different search's boosted-id memory. Capped to bound memory over a long session.
+// Per-query set of (source_table:listing_id) keys pulled forward by a platform-diversity seed, on
+// ANY page (owner PERMANENT rule 2026-07-13, extended 2026-08-05 to the full pagination sequence —
+// see fetchListingsForQuery). Keyed by JSON.stringify(q) rather than a single flat Set so an
+// unrelated search started in between a page-0 fetch and a later Load-More click (both real in the
+// AI Agent, which keeps every past search's "Load More" live in the same conversation) can never
+// clobber a different search's boosted-id memory. Capped to bound memory over a long session.
+//
+// ACCUMULATES across pages (2026-08-05 fix): the first version of this only ran the seed on page 0,
+// so Load-More walked the raw recency window unassisted — if a platform's rows were batch-scraped
+// (near-identical last_updated), a Load-More window could still land 100% on that one platform (the
+// exact failure the page-0 seed was built to fix, just one page later). Now every page may seed, and
+// this map's Set only ever GROWS for a given query — noteDiversityQuery unions instead of replacing —
+// so a row pulled forward on page 0 is never re-suggested by page 1's seed call, and a row pulled
+// forward on page 1 is excluded once the main window's own offset later reaches its true rank.
 const _diversityBoostedByQuery = new Map<string, Set<string>>();
+// How many times the seed has already fired for a query (2026-08-05, sibling to the map above —
+// same cap, evicted together via noteDiversityQuery so the two can never desync). The seed RPC call
+// asks for a FIXED p_per_platform depth; without tracking rounds, every page's seed would ask for
+// the exact same "top 20 per platform" — round 2+ would find every one of those 20 already in
+// `priorBoostedKeys` and contribute NOTHING new, so diversity would only ever last ONE Show-More
+// click deep before a smaller platform's pullable rows ran dry (even if that platform genuinely has
+// hundreds more real matches sitting just past its top-20-freshest). Each successful seed round
+// widens the ask (see DIVERSITY_SEED_PER_PLATFORM below), so a platform with real depth keeps
+// surfacing "repeatedly where inventory permits" (owner rule) across many Show-More clicks, and
+// naturally stops contributing once its true matching count is exhausted — never a hard quota.
+const _diversitySeedRoundByQuery = new Map<string, number>();
 const _DIVERSITY_QUERY_CAP = 50;
 function noteDiversityQuery(key: string, keys: Set<string>) {
-  _diversityBoostedByQuery.set(key, keys);
-  if (_diversityBoostedByQuery.size > _DIVERSITY_QUERY_CAP) {
-    const oldest = _diversityBoostedByQuery.keys().next().value;
-    if (oldest !== undefined) _diversityBoostedByQuery.delete(oldest);
+  _diversitySeedRoundByQuery.set(key, (_diversitySeedRoundByQuery.get(key) ?? 0) + 1);
+  if (keys.size) _diversityBoostedByQuery.set(key, unionBoosted(_diversityBoostedByQuery.get(key), keys));
+  if (_diversityBoostedByQuery.size > _DIVERSITY_QUERY_CAP || _diversitySeedRoundByQuery.size > _DIVERSITY_QUERY_CAP) {
+    const oldestBoost = _diversityBoostedByQuery.keys().next().value;
+    if (oldestBoost !== undefined) _diversityBoostedByQuery.delete(oldestBoost);
+    const oldestRound = _diversitySeedRoundByQuery.keys().next().value;
+    if (oldestRound !== undefined) _diversitySeedRoundByQuery.delete(oldestRound);
   }
 }
 
@@ -1094,48 +1117,74 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
   // they share near-identical timestamps and can occupy the ENTIRE window — e.g. aqar's batch filled every
   // one of the first 1,500 ranked rows while wasalt (the LARGER platform for that exact filter: 6,458 vs
   // aqar's 3,238) had its freshest matching row rank 2,076th — outside the window entirely. No client-side
-  // interleave (orderByScope/interleaveRanked) can diversify a platform it never received, so the first
-  // page rendered 100% aqar. Fix: for page 0 only, when the main window is saturated (cands.length >=
-  // pageLimit — a window that ISN'T full already contains every matching row, so no platform can be
-  // missing), issue a second small call using the RPC's existing p_per_platform windowing to pull each
-  // qualifying platform's own freshest rows regardless of global recency rank, and merge them into the
-  // pool the diversify step actually sees. Load-More is untouched (still walks the main window by its own
-  // real recency rank — offset math below is unaffected), and pulled-forward ids are remembered so a later
-  // Load-More page never re-shows the same card (see diversityBoostedKeys below).
+  // interleave (orderByScope/interleaveRanked) can diversify a platform it never received, so the page
+  // rendered 100% aqar. Fix: whenever the main window is saturated (cands.length >= pageLimit — a window
+  // that ISN'T full already contains every matching row, so no platform can be missing), issue a second
+  // small call using the RPC's existing p_per_platform windowing to pull each qualifying platform's own
+  // freshest not-yet-shown rows regardless of global recency rank, and merge them into the pool the
+  // diversify step actually sees.
+  //
+  // EXTENDED 2026-08-05 (owner report: Show More degrades into long same-platform runs) — this used to
+  // fire on page 0 ONLY ("Load-More is untouched, still walks the main window by its own real recency
+  // rank"), on the theory that a saturated window is a page-0-only phenomenon. It is not: a platform's
+  // batch-scraped rows can saturate ANY offset window, not just the first, so Load-More hit the exact
+  // same starvation the page-0 seed was built to fix — just one page later, silently. Now every page may
+  // seed. `priorBoostedKeys` (accumulated across every earlier page of this exact query, see
+  // noteDiversityQuery) is applied BOTH to the main window (so a row already surfaced by an earlier
+  // page's seed is never repeated once the main window's own offset reaches its true rank — the original
+  // Load-More-continuation guard, now unconditional) AND to a fresh seed call's own results (so page 2's
+  // seed doesn't re-offer the exact same top-20-per-platform rows page 0's seed already used — it only
+  // offers what's left). Once a platform's forward-pullable surplus is exhausted, its seed contribution
+  // shrinks to nothing and pages naturally fall back to plain recency order for it — matching the owner's
+  // explicit "once a platform's matching inventory is exhausted, it's fine to keep showing the dominant
+  // platform" rule, not a hard quota.
   let allCands: any[] = cands as any[];
   const diversityKey = JSON.stringify(q);
+  const priorBoostedKeys = _diversityBoostedByQuery.get(diversityKey);
+  if (priorBoostedKeys && priorBoostedKeys.size) allCands = filterBoosted(allCands, priorBoostedKeys);
   // Skip entirely when an objective RPC sort is active (price/area/beds/oldest, 2026-07-27 fix):
   // mergeDiversitySeed() hardcodes a last_updated-DESC re-sort of the merged pool, which would
   // silently clobber the true price/area/beds ordering the RPC just computed. The bug this seed
   // fixes (one platform's batch-scraped rows saturating a RECENCY window) also doesn't apply to a
   // price/area/beds sort in the first place — those aren't clustered by scrape run.
   const objectiveRpcSort = RPC_SORT_KEYS.has(q.sort as string);
-  if (!objectiveRpcSort && pageOffset === 0 && allCands.length >= pageLimit) {
-    const DIVERSITY_SEED_PER_PLATFORM = 20;
-    const { data: seedCands } = await supabase.rpc('location_search_candidates_ar', {
+  if (!objectiveRpcSort && allCands.length >= pageLimit) {
+    // Ask DEEPER into each platform's own ranked list every round (2026-08-05), not the same fixed
+    // top-20 every time — round 1 asks for each platform's top 20, round 2 asks for their top 40 (of
+    // which the first 20 are already in priorBoostedKeys and get stripped below, leaving rows 21-40
+    // as genuinely new), round 3 top 60, and so on. Without this, a platform with real depth (say 300
+    // matches) would only ever get its first 20 pulled forward — diversity would last exactly one
+    // Show-More click before reverting to the raw window, even though the owner rule is "repeatedly
+    // where inventory permits." Capped so one query can't runaway-request an unbounded window.
+    const round = _diversitySeedRoundByQuery.get(diversityKey) ?? 0;
+    const DIVERSITY_SEED_PER_PLATFORM = diversitySeedDepth(round);
+    const { data: seedCandsRaw } = await supabase.rpc('location_search_candidates_ar', {
       ...baseRpcParams,
       p_per_platform: DIVERSITY_SEED_PER_PLATFORM,
-      p_limit: 2000, // generous cap: far more than DIVERSITY_SEED_PER_PLATFORM × (every known platform)
+      p_limit: Math.max(2000, DIVERSITY_SEED_PER_PLATFORM * 20), // generous: PER_PLATFORM × every known platform
       p_offset: 0,
     });
-    // Commit the boosted-key set to the map in ONE atomic write, built fresh from this call's own result
-    // rather than read-then-mutate-in-place — two page-0 fetches for the identical query (diversityKey)
-    // racing across this await could otherwise have the second call's reset silently orphan the first
-    // call's in-flight Set, losing its boosted ids from the map entirely (real, if narrow, race caught in
-    // adversarial review — the old pattern mutated a Set object fetched from the map BEFORE this await).
-    if (seedCands && (seedCands as any[]).length) {
-      const { merged, boostedKeys } = mergeDiversitySeed(allCands, seedCands as any[]);
+    // Strip anything an EARLIER page's seed already pulled forward, so a later page's (deeper) seed
+    // only ever offers genuinely-not-yet-shown rows.
+    const seedCands = priorBoostedKeys && priorBoostedKeys.size
+      ? filterBoosted((seedCandsRaw as any[] | null) ?? [], priorBoostedKeys)
+      : ((seedCandsRaw as any[] | null) ?? []);
+    // Commit the boosted-key set (and advance the round counter, whether or not this round found any
+    // genuinely new rows — a platform can legitimately be exhausted on round 2 but that must still
+    // count as a round, or round 3's ask would re-derive the same depth and loop forever) in ONE
+    // atomic write, built fresh from this call's own result rather than read-then-mutate-in-place —
+    // two concurrent fetches for the identical query (diversityKey) racing across this await could
+    // otherwise have the second call's write silently orphan the first call's in-flight Set, losing
+    // its boosted ids from the map entirely (real, if narrow, race caught in adversarial review — the
+    // old pattern mutated a Set object fetched from the map BEFORE this await). noteDiversityQuery
+    // unions with whatever the map already holds, so this is safe to call every page.
+    if (seedCands.length) {
+      const { merged, boostedKeys } = mergeDiversitySeed(allCands, seedCands);
       allCands = merged;
       noteDiversityQuery(diversityKey, boostedKeys);
     } else {
-      noteDiversityQuery(diversityKey, new Set<string>());
+      noteDiversityQuery(diversityKey, new Set());
     }
-  } else if (pageOffset > 0) {
-    // Load-More continuation: drop any candidate already shown via a page-0 diversity seed for this exact
-    // query, so the same card never appears twice as the main window's offset later reaches that
-    // platform's true rank.
-    const priorBoostedKeys = _diversityBoostedByQuery.get(diversityKey);
-    if (priorBoostedKeys && priorBoostedKeys.size) allCands = filterBoosted(allCands, priorBoostedKeys);
   }
 
   // 2) Keep the RPC's newest-first order (true last_updated recency); remember each candidate's recency
