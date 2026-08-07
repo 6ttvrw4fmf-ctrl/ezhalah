@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
-import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
+import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR, DISTRICT_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText } from '@/lib/arabicText';
 
@@ -93,6 +93,17 @@ export function ResultCard({
   // arabicOrPlaceholder is a no-op for an empty locale-'en' t(listing.city) (place() still
   // transliterates it below), and a no-op for any already-Arabic value.
   const cityAr = arabicOrPlaceholder(t(listing.city), locale, LOCATION_UNRESOLVED_AR);
+  // Card headline location. Honest+consistent (owner 2026-07-21): remote.ts now sets listing.district to
+  // a MATCHED (filterable) district or '' — never an unmatched raw token. So whenever we have a resolved
+  // city, always render a district slot: the real matched district, or «الحي غير محدد» when none matched.
+  // That way "a district on the card" always means "matched & filterable", and a missing match is stated
+  // honestly instead of showing a silent blank (looks like no data) or a road/landmark that filters to 0.
+  const districtLabel = place(arabicOrPlaceholder(t(listing.district), locale, ''));
+  const cityLabelForTitle = place(cityAr);
+  const cityResolved = !!cityAr && cityAr !== LOCATION_UNRESOLVED_AR;
+  const locationTitle = cityResolved
+    ? `${districtLabel || DISTRICT_UNRESOLVED_AR}, ${cityLabelForTitle}`
+    : (districtLabel || LOCATION_UNRESOLVED_AR);
   // Region (e.g. "north Riyadh") extracted from the Aqar listing URL — shown as a small chip so the
   // user sees which part of the city the property is in. (user request.)
   const region = regionFromUrl(listing.source_url);
@@ -185,7 +196,7 @@ export function ResultCard({
             the raw junk token. A present district with no city (or vice versa) is the normal,
             non-bug case and is untouched. */}
         <Text style={[card.title, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
-          {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
+          {locationTitle}
         </Text>
         <View style={card.locRow}>
           <Ionicons name="location-outline" size={12} color={colors.primary} />
