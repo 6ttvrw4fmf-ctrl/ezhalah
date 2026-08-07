@@ -183,36 +183,71 @@ def _redact(text: Optional[str]) -> Optional[str]:
 
 
 # ── id enumeration ───────────────────────────────────────────────────────────────
-def _sitemap_filter_urls(s: cc.Session) -> list[str]:
-    """All AR filter-page URLs from the sitemap index (the pages that SSR-render listing links).
-    We skip the EN children — they reference the same listing ids."""
-    out: list[str] = []
-    seen: set[str] = set()
+def _sitemap_entries(s: cc.Session) -> tuple[list[str], list[str]]:
+    """Parse the sitemap index once → (listing_ids, filter_urls).
+
+    Dealapp's sitemap now enumerates every /ad-details/{id} listing DIRECTLY (~58k URLs). Those ids
+    ARE the live catalogue and must be scraped directly. This function used to `continue` past every
+    /ad-details URL and re-derive ids by crawling only the filter pages — which reached ~7% of the
+    catalogue (the rest never got captured). We now harvest the listing ids straight from the sitemap
+    and keep the remaining /ar/ city/type/district FILTER pages as a BACKSTOP (they SSR-render links
+    to any brand-new id the sitemap hasn't picked up yet). EN children carry the same listing ids, so
+    dedup-by-id collapses them."""
+    listing_ids: list[str] = []
+    filter_urls: list[str] = []
+    seen_id: set[str] = set()
+    seen_url: set[str] = set()
     try:
         idx = s.get(SITEMAP_INDEX, timeout=40).text
     except Exception:
-        return out
-    children = re.findall(r"<loc>([^<]+)</loc>", idx)
-    for child in children:
+        return listing_ids, filter_urls
+    for child in re.findall(r"<loc>([^<]+)</loc>", idx):
         try:
             body = s.get(child, timeout=60).text
         except Exception:
             continue
         for u in re.findall(r"<loc>([^<]+)</loc>", body):
             u = u.replace("&amp;", "&")
-            # AR marketplace/category pages only (these embed /ad-details links)
-            if "/ad-details/" in u:
+            m = re.search(r"/ad-details/(\d+)", u)
+            if m:
+                i = m.group(1)
+                if i not in seen_id:
+                    seen_id.add(i)
+                    listing_ids.append(i)
                 continue
-            if ("/ar/" not in u):
+            if "/ar/" not in u or u in seen_url:
                 continue
-            if u in seen:
-                continue
-            seen.add(u)
-            out.append(u)
+            seen_url.add(u)
+            filter_urls.append(u)
     # Prioritise the deep district/type filter pages (sitemap-2: they carry the long tail) before
-    # the broad city landing pages, so a capped run still reaches many distinct listings.
-    out.sort(key=lambda u: (u.count("/"), u), reverse=True)
-    return out
+    # the broad city landing pages, so a capped backstop run still reaches many distinct listings.
+    filter_urls.sort(key=lambda u: (u.count("/"), u), reverse=True)
+    return listing_ids, filter_urls
+
+
+def _active_ids_for_reconfirm() -> set[str]:
+    """Every ad_number we currently mark active, as canonical numeric ids, so each crawl RE-FETCHES
+    them against source. Coverage alone can't tell a removed listing from one the sitemap merely
+    omits (both are absent from it) — but a re-fetch can: a still-live page re-confirms the row, a
+    dead page drops it from the seen set and prune_unseen ages it out on its 3-strike guard. This is
+    what turns the coverage crawl into an honest liveness signal without any risky bulk delete."""
+    ids: set[str] = set()
+    for tbl in ("dealapp_residential_listings", "dealapp_commercial_listings"):
+        start = 0
+        while True:  # PostgREST caps a select at 1000 rows — page explicitly
+            rows = db._execute(
+                db.sb().table(tbl).select("ad_number").eq("active", True).eq("source", SOURCE)
+                  .range(start, start + 999),
+                what=tbl + ".active_ids",
+            ).data or []
+            for r in rows:
+                m = re.search(r"\d+", r.get("ad_number") or "")
+                if m:
+                    ids.add(str(int(m.group())))
+            if len(rows) < 1000:
+                break
+            start += 1000
+    return ids
 
 
 def _ids_from_page(url: str) -> list[str]:
@@ -228,23 +263,41 @@ def _ids_from_page(url: str) -> list[str]:
 
 
 def enumerate_ids(s: cc.Session, cap_pages: int) -> list[str]:
-    """Harvest the union of distinct /ad-details ids by crawling the filter pages."""
-    urls = _sitemap_filter_urls(s)
-    if cap_pages and len(urls) > cap_pages:
-        urls = urls[:cap_pages]
-    print(f"Deal App: {len(urls)} filter pages to harvest ids from ({WORKERS} workers)", flush=True)
+    """Every /ad-details id to scrape: the sitemap's direct listing ids (the authoritative live set,
+    previously discarded) ∪ the ids we already hold active (re-fetched for an honest liveness check)
+    ∪ a capped filter-page harvest (backstop for ids not yet in the sitemap). Ids are canonicalised
+    to str(int(...)) so a zero-padded ad_number and its bare form collapse to one fetch."""
+    listing_ids, filter_urls = _sitemap_entries(s)
     ids: list[str] = []
     seen: set[str] = set()
+
+    def _add(raw: str) -> None:
+        m = re.search(r"\d+", raw or "")
+        if not m:
+            return
+        i = str(int(m.group()))
+        if i not in seen:
+            seen.add(i)
+            ids.append(i)
+
+    for i in listing_ids:
+        _add(i)
+    n_sitemap = len(ids)
+    for i in _active_ids_for_reconfirm():
+        _add(i)
+    n_active = len(ids) - n_sitemap
+    if cap_pages and len(filter_urls) > cap_pages:
+        filter_urls = filter_urls[:cap_pages]
+    print(f"Deal App: {n_sitemap} ids direct from sitemap + {n_active} active-to-reconfirm; "
+          f"filter-page backstop {len(filter_urls)} pages ({WORKERS} workers)", flush=True)
     done = 0
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        for batch in ex.map(_ids_from_page, urls):
+        for batch in ex.map(_ids_from_page, filter_urls):
             done += 1
             for i in batch:
-                if i not in seen:
-                    seen.add(i)
-                    ids.append(i)
+                _add(i)
             if done % 200 == 0:
-                print(f"  …{done}/{len(urls)} pages, {len(ids)} distinct ids", flush=True)
+                print(f"  …{done}/{len(filter_urls)} pages, {len(ids)} distinct ids", flush=True)
     print(f"Deal App: {len(ids)} distinct listing ids enumerated", flush=True)
     return ids
 
@@ -672,18 +725,28 @@ def main() -> int:
     s = session()
 
     if args.limit:
-        # Validation: harvest a small set of ids from a handful of filter pages, parse the first N.
-        filter_urls = _sitemap_filter_urls(s)
-        ids: list[str] = []
+        # Validation: take a small set of ids straight from the sitemap (falling back to filter
+        # pages only if the sitemap came back empty), parse the first N.
+        listing_ids, filter_urls = _sitemap_entries(s)
+        want = max(args.limit * 4, 24)
         seen: set[str] = set()
+        ids: list[str] = []
+        for raw in listing_ids:
+            i = str(int(raw))
+            if i not in seen:
+                seen.add(i)
+                ids.append(i)
+            if len(ids) >= want:
+                break
         for u in filter_urls[:60]:
-            for i in _ids_from_page(u):
+            if len(ids) >= want:
+                break
+            for raw in _ids_from_page(u):
+                i = str(int(raw))
                 if i not in seen:
                     seen.add(i)
                     ids.append(i)
-            if len(ids) >= args.limit * 4:
-                break
-        ids = ids[: max(args.limit * 4, 24)]
+        ids = ids[:want]
     else:
         ids = enumerate_ids(s, MAX_FILTER_PAGES)
 
