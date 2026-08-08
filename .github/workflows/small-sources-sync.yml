@@ -64,9 +64,20 @@ jobs:
           - { source: jurash,      cmd: "python -m scrapers.jurash.run --type all" }
           # DEALAPP_MAX_LISTINGS caps each run so it finishes inside the 90m budget (prune+end_run
           # run cleanly). enumerate_ids orders NEW sitemap listings first, so coverage climbs
-          # run-over-run toward the full ~58k catalogue. Raise the cap once real CI throughput is
-          # known, or add a proxy to lift the 3-worker login-wall throttle. (bug-fix 2026-08-07)
-          - { source: dealapp,     cmd: "DEALAPP_MAX_LISTINGS=12000 DEALAPP_WORKERS=3 python -m scrapers.dealapp.run --type all" }
+          # run-over-run toward the full ~58k catalogue.
+          #
+          # The cap is now sized from MEASURED CI throughput, not guessed. The 2026-08-07 cap of
+          # 12000 did NOT fit: run 31239278341 (2026-08-08) was cancelled at exactly 90m
+          # (04:22:49 -> 05:52:46), so prune_unseen() and end_run() never ran, scrape_runs id 25397
+          # is dangling ok=NULL forever, and dealapp's last-OK freshness signal froze at 08-07.
+          # That run fetched 1,800 detail pages in ~83m of fetching = ~21.7/min at WORKERS=3
+          # (dealapp's anonymous origin trips a login-wall above ~3 workers, so this is the ceiling
+          # without a proxy). Budget: 90m - ~1m setup - ~7m sitemap enumeration - ~5m prune/end_run
+          # = ~77m of fetching. 1200 listings = ~55m, leaving >20m of headroom for throttle
+          # variance. scripts/verify-dealapp-crawl-budget.ts enforces this arithmetic.
+          # To go faster, raise throughput (a proxy lifts the 3-worker throttle) or raise `tmo`
+          # AND the cap together — never the cap alone. (bug-fix 2026-08-08)
+          - { source: dealapp,     cmd: "DEALAPP_MAX_LISTINGS=1200 DEALAPP_WORKERS=3 python -m scrapers.dealapp.run --type all" }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
