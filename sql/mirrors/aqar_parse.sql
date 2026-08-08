@@ -1,7 +1,9 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
--- Refreshed 2026-08-03 (senior run #3 continuation): adds the per-meter-rate exclusion
--- (rate-qualified price expressions stripped from the head before the price scan).
--- Verified byte-exact; md5 of everything below this header block: 00f675b3620becc41c4fdabc0ee325d4
+-- Refreshed 2026-08-08 (senior run #7): picks up migration 20260805190111
+-- (aqar_parse_furnished_honour_explicit_negation). The previous refresh was dated 2026-08-03, so
+-- this file described a 'furnished' clause production had not run since 08-05 — a stale mirror is
+-- how an agent session reasons its way to a wrong fix, which is exactly what the byte-exactness
+-- rule exists to prevent. Verified byte-exact against pg_get_functiondef() at refresh time.
 CREATE OR REPLACE FUNCTION public.aqar_parse(txt text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -59,7 +61,7 @@ begin
     'floor_number',     case when v_floor_raw ~ '^[اأ]رضي$' then '0'
                              else (regexp_match(v_floor_raw, '^\d{1,2}$'))[1] end,
     'num_apartments',   (regexp_match(_aqar_between(region, 'عدد الشقق'), '\d+'))[1],
-    'furnished',        case when txt ~ 'مؤثث|مفروش' then true else null end,
+    'furnished',        case when txt ~ 'غير[[:space:]]*(مفروش|مؤثث)' and regexp_replace(txt, 'غير[[:space:]]*(مفروش|مؤثث)[^[:space:]]*', ' ', 'g') ~ '(مفروش|مؤثث)' then null when txt ~ 'غير[[:space:]]*(مفروش|مؤثث)' then false when txt ~ '(مفروش|مؤثث)' then true else null end,
     'area_m2',          v_area, 'price', v_price, 'price_original', v_orig, 'discount_pct', v_disc
   ));
 end
