@@ -50,10 +50,21 @@ function IntroPlayer({ source, onDone }: { source: number | string; onDone: () =
   });
 
   // Fade the overlay out, then hand control back to the app exactly once.
+  //
+  // onDone() is NOT gated on the fade completing (same root cause as the Search-button fix,
+  // 2026-08-07). On web RNAnimated runs on requestAnimationFrame, which the browser suspends for a
+  // backgrounded/minimised tab — the timing never completes, its callback never fires, and the intro
+  // overlay stays up FOREVER, leaving the whole app behind a splash screen the user cannot dismiss.
+  // The fade is decoration; handing control back is the function, so a setTimeout guarantees it
+  // (background tabs clamp setTimeout but still run it, unlike rAF). `handedOff` keeps it to exactly
+  // one onDone() no matter which path gets there first.
   const finish = () => {
     if (finished.current) return;
     finished.current = true;
-    Animated.timing(fade, { toValue: 0, duration: 420, useNativeDriver: true }).start(() => onDone());
+    let handedOff = false;
+    const done = () => { if (handedOff) return; handedOff = true; onDone(); };
+    Animated.timing(fade, { toValue: 0, duration: 420, useNativeDriver: true }).start(done);
+    setTimeout(done, 450); // safety net: fires even when rAF (and so the fade) is frozen
   };
 
   // Web autoplay hardening: some browsers (notably iOS Safari) only autoplay a muted video that also

@@ -386,19 +386,36 @@ export default function Home() {
 
   // Shared "play the here-we-go backdrop lift, then open results" navigation — used by the Search
   // button (above) and by the proactive Trending chips below (which search immediately on tap).
+  //
+  // NAVIGATION IS NEVER GATED ON THE ANIMATION (bug fix 2026-08-07: "I press بحث and nothing
+  // happens"). This used to live entirely inside `.start(callback)`. On web, RNAnimated is driven by
+  // requestAnimationFrame — `useNativeDriver` is a no-op there — and the browser FREEZES rAF whenever
+  // the tab is backgrounded, the window is minimised, or the OS throttles for power. The timing then
+  // never completes, its completion callback never fires, and Search silently does nothing at all: no
+  // navigation, no error, no spinner. Reproduced live with rAF stalled — SEARCH_PRESSED fired and the
+  // app was still sitting on `/` 10s later.
+  // Fix: the animation stays purely decorative, and a setTimeout drives the actual navigation.
+  // Background tabs CLAMP setTimeout (to ~1s) but still run it, whereas rAF is suspended outright —
+  // so the user always lands on their results. `navigated` makes the two paths idempotent, so
+  // whichever fires first wins and the other is a no-op (never a double push).
   const navigateWithQuery = (q: SearchQuery) => {
-    RNAnimated.timing(heroAnim, {
-      toValue: 1,
-      duration: 300,
-      easing: RNEasing.out(RNEasing.cubic),
-      useNativeDriver: true,
-    }).start(() => {
+    let navigated = false;
+    const go = () => {
+      if (navigated) return;
+      navigated = true;
       if (gated) {
         router.push('/auth');
         return;
       }
       router.push({ pathname: '/agent', params: { filter: JSON.stringify(q) } });
-    });
+    };
+    RNAnimated.timing(heroAnim, {
+      toValue: 1,
+      duration: 300,
+      easing: RNEasing.out(RNEasing.cubic),
+      useNativeDriver: true,
+    }).start(go);
+    setTimeout(go, 320); // safety net: fires even when rAF (and so the animation) is frozen
   };
 
   // Note #3 — try the OS share sheet FIRST when it exists (native device share is the most natural
