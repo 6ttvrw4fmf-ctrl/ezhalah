@@ -1,6 +1,9 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
 -- Refreshed 2026-08-03 (senior run #3 continuation): fidelity guard gains the unconfirmed
 -- token band (parsed_price NULL + price_total 1–9999 → NULL).
+-- Re-verified 2026-08-08 (senior run #7) against production and UNCHANGED — migration
+-- 20260805190111 touches aqar_parse only, not this trigger, so no refresh was needed. Re-stamped
+-- so the staleness guard can tell "checked and still correct" apart from "never looked at".
 -- Verified byte-exact; md5 of everything below this header block: 4ac2b9680be6b3ed9d6dcbd30d84f7fa
 CREATE OR REPLACE FUNCTION public.trg_aqar_parse()
  RETURNS trigger
