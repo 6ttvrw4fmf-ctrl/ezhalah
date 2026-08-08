@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import random
+import signal
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -91,13 +92,91 @@ def upsert_listing(row: dict[str, Any]) -> None:
     )
 
 
+# The scrape_runs row this process opened, if any — read by the kill-handler below.
+_OPEN_RUN: dict[str, Any] = {"run_id": None, "platform": None}
+
+
+def _finalize_open_run_on_signal(signum, _frame) -> None:  # pragma: no cover - signal path
+    """Close this process's open scrape_runs row when the CI job is killed.
+
+    THE BUG THIS EXISTS TO FIX (2026-08-08). Every scraper puts `end_run()` in a `finally:`
+    block, which is airtight for Python-level exceptions — and useless when the process is
+    killed by a signal, because `finally` never runs. GitHub Actions kills a job that exceeds
+    `timeout-minutes`, so the row stays ok=NULL / finished_at=NULL FOREVER:
+
+      • dealapp run 25397 — "Small sources sync" job cancelled at timeout-minutes:90
+        (GH run 31239278341, 04:22:49→05:52:46), 1,800 rows written, row never closed.
+      • 7 aqar_residential shards from the weekly deep-fill — `Fill turabah`, `Fill umluj`,
+        `Fill abu_arish`, `Fill ahad_al_masarihah` and 3 more each ran ~90.2m against
+        `timeout-minutes: 90` (GH run 31233959785) and were cancelled.
+
+    A dangling row is worse than a failed one: `ops_freshness_by_layer` never advances the
+    platform's last-OK, `mon_detect_silent_scraper_death` reads `ok IS NULL` as not-healthy but
+    needs THREE consecutive bad runs, and the row still reports rows_seen=0 even though the run
+    really did write rows — so a killed job reads as a dead SOURCE rather than an infra kill.
+
+    Actions sends SIGINT, then SIGTERM, then SIGKILL after a grace period, so one small UPDATE
+    lands comfortably. We deliberately do NOT call end_run(): its check_tables field-range RPCs
+    are far too slow for a grace window, and we must not guess rows_seen/rows_upserted — they
+    stay as begin_run() left them and the note says why.
+
+    The write is conditional on the row still being open (`ok is null`), so it can never
+    overwrite a run that finalized normally, and the handler re-raises with the default
+    disposition so the process still dies exactly as the runner expects.
+    """
+    run_id = _OPEN_RUN.get("run_id")
+    _OPEN_RUN["run_id"] = None  # re-entrancy: a second signal must not double-write
+    if run_id is not None:
+        name = signal.Signals(signum).name
+        try:
+            sb().table("scrape_runs").update(
+                {
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "ok": False,
+                    "notes": (
+                        f"killed by {name} before end_run() — the CI job hit its timeout-minutes "
+                        "budget or was cancelled. Rows upserted before the kill are kept; "
+                        "prune/liveness and the run's own bookkeeping did NOT run, so "
+                        "rows_seen/rows_upserted are NOT meaningful for this row."
+                    ),
+                }
+            ).is_("ok", "null").eq("id", run_id).execute()
+        except Exception:
+            pass  # never let bookkeeping stop the process from dying
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+
+def _install_run_signal_handlers() -> None:
+    """Arm the kill-handler, without stomping on a handler a caller already installed.
+
+    `signal.signal` only works on the main thread; a scraper that calls begin_run() from a
+    worker thread simply keeps the old (unprotected) behaviour rather than crashing.
+    """
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            if signal.getsignal(sig) in (signal.SIG_DFL, signal.default_int_handler):
+                signal.signal(sig, _finalize_open_run_on_signal)
+        except (ValueError, OSError, AttributeError):
+            pass  # not the main thread, or a platform without this signal
+
+
 def begin_run(platform: str) -> int:
-    """Open a row in scrape_runs and return its id, so end_run can finalize it."""
+    """Open a row in scrape_runs and return its id, so end_run can finalize it.
+
+    Also arms a SIGTERM/SIGINT handler so a CI job killed at its `timeout-minutes` budget still
+    closes this row honestly instead of leaving it dangling at ok=NULL — see
+    `_finalize_open_run_on_signal` for the incident this prevents.
+    """
     res = _execute(
         sb().table("scrape_runs").insert({"platform": platform, "started_at": datetime.now(timezone.utc).isoformat()}),
         what="scrape_runs.begin",
     )
-    return int(res.data[0]["id"])
+    run_id = int(res.data[0]["id"])
+    _OPEN_RUN["run_id"] = run_id
+    _OPEN_RUN["platform"] = platform
+    _install_run_signal_handlers()
+    return run_id
 
 
 def upsert_aqar_residential(row: dict[str, Any]) -> None:
@@ -505,6 +584,10 @@ def end_run(
         ).eq("id", run_id),
         what="scrape_runs.end",
     )
+    # This row is finalized: disarm the kill-handler for it so a SIGTERM arriving during the
+    # process's normal shutdown can never re-write a run that already closed honestly.
+    if _OPEN_RUN.get("run_id") == run_id:
+        _OPEN_RUN["run_id"] = None
     return effective_ok
 
 

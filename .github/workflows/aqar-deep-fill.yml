@@ -74,7 +74,16 @@ jobs:
     needs: setup
     name: Fill ${{ matrix.label }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # 150, not 90 (bug-fix 2026-08-08). On the 08-08 weekly run (GH 31233959785) SEVEN shards hit
+    # the old 90m ceiling and were cancelled mid-fill — `Fill turabah` 90.2m, `Fill umluj` 90.3m,
+    # `Fill abu_arish`, `Fill ahad_al_masarihah` and 3 more — so those cities never completed a
+    # deep fill at all, and each left a dangling ok=NULL row in scrape_runs. The next-slowest
+    # shard finished in 68.2m, so 90 was only just too small for a handful of single-shard towns
+    # (a small town runs ALL types on one machine, where a big city is split into 3 type-group
+    # shards). 150 matches the souq24 precedent in small-sources-sync.yml and clears the slowest
+    # observed shard with ~60m of headroom. scripts/verify-scrape-run-finalized-on-kill.ts fails
+    # if this budget ever drops back below the slowest shard actually observed.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       max-parallel: ${{ fromJSON(github.event.inputs.max_parallel || '20') }}
