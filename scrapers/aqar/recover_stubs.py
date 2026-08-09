@@ -93,6 +93,23 @@ _PRICE_AND_PERIOD = {"price_annual", "price_total", "price_per_meter", "rent_per
 TYPE_TO_SLUG = {v: k for k, v in N.SLUG_TO_TYPE.items()}
 
 
+def explicit_cohort(ads: list[str]) -> list[dict[str, Any]]:
+    """The named rows, whatever their capture looks like.
+
+    The stub cohort is one population that needs re-enriching; it is not the only one. Rows whose
+    stored price disagrees with the figure their OWN capture rendered are another, and they are not
+    stubs. Rather than grow a second detector in here, the caller identifies its cohort however it
+    likes and passes the ad numbers in — the re-enrich path is identical either way.
+    """
+    c = db.sb()
+    cols = ("id, ad_number, listing_url, property_type, transaction_type, " + ", ".join(REPORT_FIELDS))
+    out: list[dict[str, Any]] = []
+    for i in range(0, len(ads), 200):                       # PostgREST caps the URL length
+        out += (c.table(TABLE).select(cols).in_("ad_number", ads[i:i + 200])
+                .not_.is_("listing_url", "null").execute().data or [])
+    return out
+
+
 def stub_cohort(limit: int, deal: Optional[str], ptype: Optional[str]) -> list[dict[str, Any]]:
     """Active rows whose stored capture has no «تفاصيل الإعلان» spec block."""
     c = db.sb()
@@ -204,15 +221,21 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--dry-run", action="store_true", help="print the diff, write nothing")
     ap.add_argument("--include-price", action="store_true",
-                    help="ALSO recover price/period/area. OFF by default: the 2026-08-05 dry-run "
-                         "produced unexplained price moves (two exactly ÷12), so those fields are "
-                         "held back until the price path is verified against source.")
+                    help="ALSO recover price/period/area. OFF by default so rewriting money is "
+                         "always a deliberate run whose dry-run diff someone has read.")
+    ap.add_argument("--ads", default="",
+                    help="comma-separated ad numbers to re-enrich instead of selecting the stub "
+                         "cohort. Lets a caller target a cohort identified elsewhere (e.g. rows "
+                         "whose stored price disagrees with the figure their own capture rendered) "
+                         "without teaching this script a second detection heuristic.")
     args = ap.parse_args()
 
-    rows = stub_cohort(args.limit, args.deal, args.ptype)
+    ads = [s.strip() for s in args.ads.split(",") if s.strip()]
+    rows = explicit_cohort(ads) if ads else stub_cohort(args.limit, args.deal, args.ptype)
     print(f"mode: {'ALL FIELDS (price included)' if args.include_price else 'STRUCTURED-ONLY (price/period/area preserved)'}")
-    print(f"stub cohort: {len(rows)} rows "
-          f"(deal={args.deal or 'any'} type={args.ptype or 'any'} limit={args.limit})")
+    print(f"{'explicit' if ads else 'stub'} cohort: {len(rows)} rows "
+          + (f"(of {len(ads)} ad numbers given)" if ads else
+             f"(deal={args.deal or 'any'} type={args.ptype or 'any'} limit={args.limit})"))
     if not rows:
         print("nothing to recover")
         return 0
