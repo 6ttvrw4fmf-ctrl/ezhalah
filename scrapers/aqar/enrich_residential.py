@@ -151,6 +151,42 @@ def _listing_json(html: str) -> Optional[dict[str, Any]]:
     return None
 
 
+def _structured_price(obj: Optional[dict[str, Any]]) -> tuple[Optional[int], bool]:
+    """aqar's OWN published price, plus whether aqar settled the question at all.
+
+    Returns `(price, authoritative)`. `authoritative=True` means aqar's payload answered — either
+    it published a number, or it published that this listing has no price — and the prose scan must
+    not second-guess it. `authoritative=False` means the payload was unreadable on this fetch, so
+    the legacy prose path stays in charge and behaviour is unchanged.
+
+    Evidence (2026-08-09, 150 live listings probed on a runner aqar serves): the structured `price`
+    and the number aqar RENDERS in its price slot agreed **84/84** times. Every apparent
+    disagreement was an «N شهريا» RNPL financing instalment — never the rent.
+
+    `published: false` is the one case where the payload carries a number aqar does NOT show: the
+    price slot renders «طلب تسويق» and the human sees no figure (21/150 sampled listings, all of
+    them `published: false`, `status: 0`, `closed: false`). Importing that number would put a price
+    on our card that the source page does not display, so it stays NULL — aqar's non-publication is
+    itself the published fact.
+    """
+    if not obj:
+        return None, False
+    if "price" not in obj:
+        return None, False                    # payload present but priceless shape — don't claim it
+    if obj.get("published") is False:
+        return None, True
+    raw = obj.get("price")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None, True                     # aqar states there is no price
+    v = int(raw)
+    return (v if v > 0 else None), True
+
+
+# aqar's rent-period enum, as observed live. Only values PROVEN against a rendered page are mapped;
+# an unmapped value falls through to the rendered price slot rather than guessing a period.
+_RENT_PERIOD_ENUM: dict[int, str] = {3: "annual"}
+
+
 def _tri_state(raw: Any) -> Optional[bool]:
     """aqar's 0/1/None -> False/True/UNKNOWN. Anything unrecognised is UNKNOWN, never False."""
     if raw is None or raw == "":
@@ -167,9 +203,13 @@ def _tri_state(raw: Any) -> Optional[bool]:
     return None
 
 
-def _amenities(html: str, text: str) -> dict[str, Optional[bool]]:
-    """Every amenity column, with UNKNOWN (None) wherever aqar does not state a value."""
-    obj = _listing_json(html)
+def _amenities(html: str, text: str, obj: Optional[dict[str, Any]] = None) -> dict[str, Optional[bool]]:
+    """Every amenity column, with UNKNOWN (None) wherever aqar does not state a value.
+
+    `obj` lets the caller pass the already-parsed listing payload so a page is not unescaped twice.
+    """
+    if obj is None:
+        obj = _listing_json(html)
     out: dict[str, Optional[bool]] = {}
     # Seed EVERY column we may emit — including ones with no prose pattern, e.g. `furnished` — so a
     # missing structured key yields UNKNOWN rather than an absent dict entry.
@@ -327,6 +367,9 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # regex was already written against the raw markup). `text` is the de-tagged plain
     # version we run all label+number regexes against from now on.
     text = _html_to_text(html)
+    # aqar's structured listing payload, parsed ONCE and shared by the price and amenity reads.
+    # None means we could not read it on this fetch — never that the listing lacks these fields.
+    obj = _listing_json(html)
 
     # ad_number — always the trailing numeric segment of the URL.
     m = LISTING_ID_RE.search(url)
@@ -375,9 +418,15 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     price_per_meter: Optional[int] = None
     # The listing's billing period. Aqar shows rent as "69,000 §/سنوي" (yearly) OR "5,000 §/شهري"
     # (monthly). We keep the ORIGINAL period so the app can filter "per month" to true monthly rentals
-    # instead of converting everything to yearly and losing the distinction. Default annual for Rent
-    # (the Saudi norm); None for Buy. (user request: "per month = charged monthly, not yearly".)
-    rent_period: Optional[str] = "annual" if transaction_type == "Rent" else None
+    # instead of converting everything to yearly and losing the distinction.
+    #
+    # It used to DEFAULT to "annual" for every Rent listing ("the Saudi norm"). That is a guess
+    # wearing a value's clothes: on a page where aqar states no period, and on a page with no price
+    # at all, we still asserted "annual". It now starts UNKNOWN and is set only from evidence —
+    # aqar's own `rent_period` enum, or the period word aqar renders beside this listing's price.
+    # (This costs aqar nothing in practice: its residential rent product is annual, 0 of 23,907 live
+    # rows are monthly, and its UI renders «سنوي» — so the value is now the same but EVIDENCED.)
+    rent_period: Optional[str] = None
 
     # Cross-listing contamination guard (2026-07-27 audit, live-proven on 6723041): the de-tagged
     # page text INCLUDES the related-listings strip at the bottom, so on a PRICE-LESS listing the
@@ -418,18 +467,50 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     is_rnpl_page = "/rnpl/" in html
 
     mp_yr = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*سنوي", price_text)
-    if mp_yr:
-        price_annual = N.to_int(mp_yr.group(1))
-
     mp_mo = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*شهري", price_text)
-    if not price_annual and mp_mo and not is_rnpl_page:
-        # No yearly price, but a "/شهري" figure → this is a genuinely MONTHLY rental. Tag it and store
-        # the annualized figure too (monthly × 12) so sorting/compare still works. The app divides it
-        # back by 12 for the monthly display.
-        v = N.to_int(mp_mo.group(1))
-        if v:
-            price_annual = v * 12
-            rent_period = "monthly"
+
+    # PRICE = SOURCE, primary path (2026-08-09). aqar publishes the price as a STRUCTURED field in
+    # its RSC payload; everything above is a regex over rendered prose, kept only as the fallback for
+    # a fetch whose payload we could not read. Reading the structured field fixes three proven live
+    # classes at once, all verified against the source page on a runner aqar serves:
+    #   • a stale/mis-parsed stored price (6663318 held 550, aqar publishes 16,000; 6632651 held
+    #     24,000, aqar publishes 25,000);
+    #   • a published price we simply missed (6803307 renders «21,600 سنوي», we held NULL);
+    #   • an INVENTED price — on 6689796 aqar publishes no price at all and the prose scan lifted
+    #     2,000 out of a neighbouring related-listing card, because the cross-listing guard only
+    #     works when the «تفاصيل الإعلان» anchor is present and that page has none.
+    # When aqar's payload speaks, it is the last word in BOTH directions: a number becomes the price,
+    # and "no price" becomes NULL rather than an excuse to go hunting through prose.
+    s_price, s_authoritative = _structured_price(obj)
+
+    if s_authoritative:
+        if transaction_type == "Rent":
+            price_annual = s_price
+            # Never seen live on aqar residential (0/23,907 rows are monthly, its rent product is
+            # annual) — but if aqar ever renders «N شهري» against its own published figure, that
+            # figure is a MONTHLY rent and must be annualized, not filed as a yearly price.
+            if price_annual and mp_mo and not is_rnpl_page and N.to_int(mp_mo.group(1)) == s_price:
+                price_annual = s_price * 12
+                rent_period = "monthly"
+        else:
+            price_total = s_price
+    else:
+        if mp_yr:
+            price_annual = N.to_int(mp_yr.group(1))
+
+        if not price_annual and mp_mo and not is_rnpl_page:
+            # No yearly price, but a "/شهري" figure → this is a genuinely MONTHLY rental. Tag it and
+            # store the annualized figure too (monthly × 12) so sorting/compare still works. The app
+            # divides it back by 12 for the monthly display.
+            v = N.to_int(mp_mo.group(1))
+            if v:
+                price_annual = v * 12
+                rent_period = "monthly"
+
+    # Period, from evidence only — aqar's enum first, then the word it renders beside the price.
+    if transaction_type == "Rent" and rent_period is None:
+        rent_period = _RENT_PERIOD_ENUM.get((obj or {}).get("rent_period")) or (
+            "annual" if mp_yr else None)
 
     # Anchored to the سعر المتر label — the old any-"N م²" pattern grabbed the AREA token and
     # caused the daily hide/recover flap on big-area land (see parse_price_per_meter above).
@@ -528,7 +609,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # SOURCE FIDELITY (owner rule, 2026-08-05): aqar publishes most amenities as explicit 0/1 keys in
     # its own page payload. Read THOSE. A key aqar does not publish stays UNKNOWN (None) — it is never
     # turned into False, and never guessed from prose.
-    features = _amenities(html, text)
+    features = _amenities(html, text, obj)
 
     # ─── Media & Metadata ────────────────────────────────────────────────────
     # ALL listing photos (no cap). Scoped to images.aqar.fm — the gallery CDN — so the broker
