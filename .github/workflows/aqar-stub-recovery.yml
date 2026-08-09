@@ -40,6 +40,10 @@ on:
         description: "true = ALSO write price/period/area (OFF by default — see recover_stubs.py)"
         required: false
         default: "false"
+      ads:
+        description: "comma-separated ad numbers to re-enrich instead of the stub cohort"
+        required: false
+        default: ""
 
 concurrency:
   group: aqar-stub-recovery
@@ -69,4 +73,5 @@ jobs:
             ${{ inputs.deal && format('--deal {0}', inputs.deal) || '' }} \
             ${{ inputs.ptype && format('--type "{0}"', inputs.ptype) || '' }} \
             ${{ inputs.dry_run == 'true' && '--dry-run' || '' }} \
-            ${{ inputs.include_price == 'true' && '--include-price' || '' }}
+            ${{ inputs.include_price == 'true' && '--include-price' || '' }} \
+            ${{ inputs.ads && format('--ads "{0}"', inputs.ads) || '' }}
