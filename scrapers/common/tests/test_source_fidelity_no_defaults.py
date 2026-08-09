@@ -31,6 +31,11 @@ from pathlib import Path
 
 SCRAPERS = Path(__file__).resolve().parent.parent.parent
 RUNS = sorted(p for p in SCRAPERS.glob("*/run.py"))
+# Enrichers write the same columns as run.py and were NOT covered until 2026-08-09 — which is how
+# aqar's `rent_period = "annual" if transaction_type == "Rent"` default lived in enrich_residential.py
+# while every guard below looked only at run.py. A second file per platform is not a second standard.
+ENRICHERS = sorted(p for p in SCRAPERS.glob("*/enrich*.py"))
+WRITERS = sorted(RUNS + ENRICHERS)
 
 
 def _src(p: Path) -> str:
@@ -65,7 +70,7 @@ _HARDCODED_PERIOD_RE = re.compile(r'"rent_period"\s*:\s*"(annual|monthly)"\s*if\
 
 def test_no_new_scraper_defaults_the_rent_period() -> None:
     offenders = {
-        p.parent.name for p in RUNS if _HARDCODED_PERIOD_RE.search(_src(p))
+        p.parent.name for p in WRITERS if _HARDCODED_PERIOD_RE.search(_src(p))
     } - PERIOD_DEFAULT_ALLOWLIST - SINGLE_PERIOD_PLATFORMS
     assert not offenders, (
         f"{sorted(offenders)} hardcode the rent period instead of reading it from the page. "
@@ -105,7 +110,7 @@ def test_no_scraper_multiplies_a_price_by_a_calendar_constant() -> None:
     and the card renders a monthly price that was never published.
     """
     bad = []
-    for p in RUNS:
+    for p in WRITERS:
         for m in re.finditer(r"\bprice\w*\s*\*\s*(365|52)\b", _src(p)):
             bad.append(f"{p.parent.name}: {m.group(0)}")
     assert not bad, (
@@ -199,7 +204,7 @@ def test_no_scraper_scales_a_price_because_it_looks_small() -> None:
     all. A price the source prints as 380 IS 380.
     """
     bad = []
-    for p in RUNS:
+    for p in WRITERS:
         code = _strip_prose(_src(p))
         for m in re.finditer(r"\*\s*1000\s+if\s+\w+\s*<\s*\d", code):
             bad.append(f"{p.parent.name}: {m.group(0)}")
