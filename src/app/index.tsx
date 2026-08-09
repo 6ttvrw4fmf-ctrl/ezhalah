@@ -379,6 +379,9 @@ export default function Home() {
       districts: districtSelected ? districtSelected.matchValues : undefined,
       // Clean display spelling of the picked district → drives the summary sentence ("حي X، جدة").
       districtLabel: districtSelected ? districtSelected.districtAr : undefined,
+      // The picked district's live count (deal/category scope) so the 0-results path can tell an EMPTY
+      // district ("widen area") from one that has listings but not the chosen type ("widen type").
+      districtListingCount: districtSelected ? districtSelected.listingCount : undefined,
       // Persist the effective rent period for Rent so the summary reflects the visible Monthly/Yearly toggle.
       rentPeriod: query.deal === 'Rent' ? (query.rentPeriod ?? 'annual') : query.rentPeriod,
     };
@@ -920,22 +923,27 @@ export default function Home() {
                         />
                       </>
                     ) : (
-                      districtSuggestions.map((opt, i) => (
+                      districtSuggestions.map((opt, i) => {
+                        // listingCount is the district's live count at the CURRENT deal/category scope.
+                        // 0 → picking it would return nothing right now. Zero-listing catalog districts
+                        // stay findable + selectable (owner 2026-07-18) BUT are now clearly marked, so a
+                        // user is never silently led into a dead-end pick (2026-08-09).
+                        const isEmpty = opt.listingCount === 0;
+                        return (
                         <Tappable
                           key={opt.districtAr + '#' + i}
                           dip={0.03}
-                          style={[s.suggRow, i < districtSuggestions.length - 1 && s.suggDivider]}
+                          style={[s.suggRow, i < districtSuggestions.length - 1 && s.suggDivider, isEmpty && s.suggRowEmpty]}
                           onPress={() => districtOnPress(opt)}
                         >
-                          <Image source={LOC_IMG.district} style={s.suggLocIcon} />
+                          <Image source={LOC_IMG.district} style={[s.suggLocIcon, isEmpty && s.suggIconEmpty]} />
                           <View style={{ flex: 1 }}>
-                            {/* Top-6 are still chosen by active-listing count, but the count itself is no
-                                longer shown — just the district name. Every row (incl. zero-listing catalog
-                                districts) is rendered unconditionally and selectable. (owner UI request 2026-07-18.) */}
-                            <Text style={s.suggCity}>{opt.districtAr}</Text>
+                            <Text style={[s.suggCity, isEmpty && s.suggCityEmpty]}>{opt.districtAr}</Text>
+                            {isEmpty ? <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text> : null}
                           </View>
                         </Tappable>
-                      ))
+                        );
+                      })
                     )}
                   </ScrollView>
                 );
@@ -1292,6 +1300,12 @@ const s = StyleSheet.create({
   suggDivider: { borderBottomWidth: 1, borderBottomColor: colors.line },
   suggCity: { fontSize: 13.5, fontWeight: '600', color: colors.ink },
   suggDist: { fontSize: 11.5, color: colors.muted },
+  // Zero-listing (for the current deal/category) district rows: dimmed + a plain "no listings" note so
+  // the user is never silently led into a dead-end pick. Still tappable (findability + never-dead-end).
+  suggRowEmpty: { opacity: 0.6 },
+  suggIconEmpty: { opacity: 0.5 },
+  suggCityEmpty: { color: colors.muted, fontWeight: '500' },
+  suggEmptyNote: { fontSize: 11, color: colors.muted, marginTop: 1 },
 
   pick: { marginTop: 12 },
   ctxBox: { backgroundColor: colors.chipFill, borderWidth: 1, borderColor: colors.chipLine, borderRadius: 12, padding: 14 },
