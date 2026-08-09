@@ -153,6 +153,52 @@ def stub_cohort(limit: int, deal: Optional[str], ptype: Optional[str]) -> list[d
     return out
 
 
+AMENITY_REPAIR_TABLE = "aqar_amenity_fabrication_repair_20260809"
+
+
+def amenity_repair_cohort(limit: int, deal: Optional[str], ptype: Optional[str]) -> list[dict[str, Any]]:
+    """Active rows whose amenity booleans were cleared by the 2026-08-09 fabrication repair.
+
+    Those eight columns were matched out of the description, which cannot express «no» — see
+    docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md. The migration snapshotted every affected id and set the
+    columns to NULL, because `recover()` below only writes a field whose fresh value is NOT NULL and
+    would otherwise leave a fabricated `true` standing. Re-reading each page now writes aqar's OWN
+    value from `listing.extended_details` wherever aqar publishes one, and leaves the rest unknown.
+
+    The snapshot table is the cohort definition on purpose: it is the exact, closed set of rows that
+    ever held an invented value, so this can never widen into "re-fetch everything".
+    """
+    c = db.sb()
+    ids: list[int] = []
+    page = 0
+    while True:
+        batch = (c.table(AMENITY_REPAIR_TABLE).select("id")
+                 .eq("was_active", True).order("id")
+                 .range(page * 1000, page * 1000 + 999).execute().data or [])
+        if not batch:
+            break
+        ids += [r["id"] for r in batch]
+        page += 1
+        if page > 200:
+            break
+    out: list[dict[str, Any]] = []
+    for i in range(0, len(ids), 200):
+        if len(out) >= limit:
+            break
+        q = (c.table(TABLE)
+             .select("id, ad_number, listing_url, property_type, transaction_type, "
+                     + ", ".join(REPORT_FIELDS))
+             .in_("id", ids[i:i + 200])
+             .eq("active", True)
+             .not_.is_("listing_url", "null"))
+        if deal:
+            q = q.eq("transaction_type", "Rent" if deal == "rent" else "Buy")
+        if ptype:
+            q = q.eq("property_type", ptype)
+        out += q.execute().data or []
+    return out[:limit]
+
+
 def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int,
             structured_only: bool = True) -> dict[str, int]:
     counter = {"done": 0, "fetched": 0, "written": 0, "unfetchable": 0, "no_gain": 0}
@@ -228,12 +274,22 @@ def main() -> int:
                          "cohort. Lets a caller target a cohort identified elsewhere (e.g. rows "
                          "whose stored price disagrees with the figure their own capture rendered) "
                          "without teaching this script a second detection heuristic.")
+    ap.add_argument("--cohort", choices=["stub", "amenity-repair"], default="stub",
+                    help="stub = rows with no «تفاصيل الإعلان» block (the June backfill). "
+                         "amenity-repair = the closed set of rows whose amenity booleans were "
+                         "prose-fabricated and cleared on 2026-08-09, re-read so aqar's own "
+                         "extended_details values replace the NULLs.")
     args = ap.parse_args()
 
     ads = [s.strip() for s in args.ads.split(",") if s.strip()]
-    rows = explicit_cohort(ads) if ads else stub_cohort(args.limit, args.deal, args.ptype)
+    if ads:
+        rows, mode = explicit_cohort(ads), "explicit"
+    elif args.cohort == "amenity-repair":
+        rows, mode = amenity_repair_cohort(args.limit, args.deal, args.ptype), "amenity-repair"
+    else:
+        rows, mode = stub_cohort(args.limit, args.deal, args.ptype), "stub"
     print(f"mode: {'ALL FIELDS (price included)' if args.include_price else 'STRUCTURED-ONLY (price/period/area preserved)'}")
-    print(f"{'explicit' if ads else 'stub'} cohort: {len(rows)} rows "
+    print(f"{mode} cohort: {len(rows)} rows "
           + (f"(of {len(ads)} ad numbers given)" if ads else
              f"(deal={args.deal or 'any'} type={args.ptype or 'any'} limit={args.limit})"))
     if not rows:

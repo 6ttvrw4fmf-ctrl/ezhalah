@@ -44,6 +44,10 @@ on:
         description: "comma-separated ad numbers to re-enrich instead of the stub cohort"
         required: false
         default: ""
+      cohort:
+        description: "stub | amenity-repair (rows whose amenity booleans were prose-fabricated and cleared 2026-08-09)"
+        required: false
+        default: "stub"
 
 concurrency:
   group: aqar-stub-recovery
@@ -74,4 +78,5 @@ jobs:
             ${{ inputs.ptype && format('--type "{0}"', inputs.ptype) || '' }} \
             ${{ inputs.dry_run == 'true' && '--dry-run' || '' }} \
             ${{ inputs.include_price == 'true' && '--include-price' || '' }} \
-            ${{ inputs.ads && format('--ads "{0}"', inputs.ads) || '' }}
+            ${{ inputs.ads && format('--ads "{0}"', inputs.ads) || '' }} \
+            ${{ inputs.cohort && format('--cohort {0}', inputs.cohort) || '' }}
