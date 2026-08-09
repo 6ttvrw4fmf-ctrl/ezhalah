@@ -64,6 +64,10 @@ const HOLDS_LICENCE = [
   /نعمل\s+بموجب\s+ترخيص/,
   /تعمل\s+إزهله\s+بموجب\s+ترخيص/,
   /(?:holds?|issued to)\s+(?:a\s+)?(?:REGA\s+)?FAL\s+licen[cs]e/i,
+  // A PENDING claim is still an unprovable claim: "our licence application is in progress" asserts a fact
+  // about a filing we have not evidenced. It shipped as dead dictionary text and was removed 2026-08-09.
+  /licen[cs]e\s+application\s+is\s+in\s+progress/i,
+  /طلب\s+ترخيص[^.\n]{0,30}قيد\s+المعالجة/,
 ];
 let claimHits = 0;
 for (const f of files) {
