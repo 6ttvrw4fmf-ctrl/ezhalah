@@ -119,6 +119,27 @@ def test_extended_details_of_the_wrong_type_is_unknown_not_false():
     assert _amenities(["special_parking"])["parking"] is None
 
 
+# ── Utility availability: published as flat booleans, previously guessed from prose ────────────
+def test_utility_availability_comes_from_aqar_not_prose():
+    """water/electrical/drainage are native booleans on aqar's flat object and carry real negatives
+    (24 live pages: water 21T/1F, electrical 21T/1F, drainage 18T/4F). Prose «توفر الماء» / «كهرباء»
+    / «صرف صحي» can only ever say yes, so it must no longer be consulted for them."""
+    html = _page({}, prose="الشقة بها توفر الماء وكهرباء وصرف صحي")
+    obj = E._listing_json(html)
+    obj.update({"water_availability": False, "electrical_availability": False,
+                "drainage_availability": False})
+    am = E._amenities(html, html, obj)
+    assert am["water_supply"] is False, "aqar's published negative lost to a prose hit"
+    assert am["electricity"] is False
+    assert am["sanitation"] is False
+
+
+def test_utility_availability_is_unknown_when_aqar_is_silent():
+    am = _amenities({}, prose="الشقة بها توفر الماء وكهرباء وصرف صحي")
+    for col in ("water_supply", "electricity", "sanitation"):
+        assert am[col] is None, f"{col} invented a value from prose"
+
+
 # ── The flat keys must keep working — this change must not disturb them ─────────────────────────
 def test_flat_structured_keys_are_untouched_by_the_extended_read():
     am = _amenities({"special_parking": True})
