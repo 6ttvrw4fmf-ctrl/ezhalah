@@ -15,7 +15,7 @@ import random
 import signal
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from dotenv import load_dotenv
@@ -161,13 +161,78 @@ def _install_run_signal_handlers() -> None:
             pass  # not the main thread, or a platform without this signal
 
 
+# Must comfortably exceed the LONGEST job budget in .github/workflows, so a legitimately-running
+# sibling shard can never be finalized out from under itself. The longest is 330 min / 5.5h
+# (muktamel-sync, wasalt-enrich-matrix, wasalt-enum-liveness — all just under GitHub's 6h cap), so
+# 6h would leave only 30 min of margin and could close a job that is still working. 12h is >2x the
+# longest budget, and still bounds the lag well since every platform runs at least daily.
+# scripts/verify-scrape-run-finalized-on-kill.ts fails if this ever drops back near a real budget.
+ORPHAN_RUN_HOURS = 12
+
+
+def reconcile_orphaned_runs(platform: str, *, older_than_hours: int = ORPHAN_RUN_HOURS) -> int:
+    """Finalize THIS platform's abandoned scrape_runs stubs as ok=false. Returns rows closed.
+
+    WHY THIS EXISTS ON TOP OF THE SIGTERM HANDLER (2026-08-09). `_finalize_open_run_on_signal`
+    closes the row when the job is stopped *gracefully* — but a process can also be SIGKILLed
+    (which is uncatchable by definition), OOM-killed by the kernel, or lose its runner VM outright.
+    No in-process handler can survive any of those, so the row still dangles at ok=NULL forever.
+
+    That is not hypothetical: it is what happened the day after the handler shipped. Of 32 aqar
+    liveness shards on 2026-08-09, 31 finished ok and shard 8 of aqar_residential_listings
+    (run 25880) died at ~77 min — well inside its 120-min budget, so NOT a timeout — with GH run
+    31287355118 concluding `failure`. `aqar_stub_recovery` run 26102 went the same way. The handler
+    closed neither, because neither got a signal it could catch.
+
+    So the complete fix needs BOTH halves:
+      • in-process handler  → closes instantly on SIGTERM/SIGINT (graceful cancel, job timeout)
+      • this reconciliation → closes on the next run of the same platform, bounded lag, and covers
+                              SIGKILL / OOM / lost runner, which the handler cannot.
+
+    Scoped to the EXACT platform string so parallel shards never race each other
+    ('aqar_liveness:<table>:<shard>/<shards>' is unique per shard; the deep-fill shards share
+    'aqar_residential', which is why the age cutoff must exceed the longest job budget). rows_seen
+    is deliberately left as-is: the killed process's true progress is unknown, and inventing a
+    number would be worse than the honest stub value.
+
+    Generalised from scrapers/aqar/liveness.py's reconcile_orphaned_stubs() (2026-07-16), which
+    solved exactly this — but only ever for aqar liveness. Every other platform was uncovered.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=older_than_hours)).isoformat()
+    try:
+        res = _execute(
+            sb().table("scrape_runs").update(
+                {
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "ok": False,
+                    "notes": "orphaned — presumed killed (SIGKILL/OOM/lost runner, so no handler "
+                             "could close it); finalized by the next run's startup reconciliation. "
+                             "rows_seen/rows_upserted are NOT meaningful for this row.",
+                }
+            ).eq("platform", platform).is_("finished_at", "null").lt("started_at", cutoff),
+            what="scrape_runs.reconcile",
+        )
+        n = len(res.data or [])
+    except Exception as exc:
+        # Bookkeeping must never stop a scrape from starting.
+        print(f"⚠ scrape_runs.reconcile({platform}) skipped: {str(exc)[:140]}", flush=True)
+        return 0
+    if n:
+        print(f"reconciled {n} orphaned run stub(s) for {platform} → ok=false", flush=True)
+    return n
+
+
 def begin_run(platform: str) -> int:
     """Open a row in scrape_runs and return its id, so end_run can finalize it.
+
+    First reconciles any of THIS platform's stubs abandoned by an earlier killed process — see
+    `reconcile_orphaned_runs`, which covers the SIGKILL/OOM cases the signal handler cannot.
 
     Also arms a SIGTERM/SIGINT handler so a CI job killed at its `timeout-minutes` budget still
     closes this row honestly instead of leaving it dangling at ok=NULL — see
     `_finalize_open_run_on_signal` for the incident this prevents.
     """
+    reconcile_orphaned_runs(platform)
     res = _execute(
         sb().table("scrape_runs").insert({"platform": platform, "started_at": datetime.now(timezone.utc).isoformat()}),
         what="scrape_runs.begin",
