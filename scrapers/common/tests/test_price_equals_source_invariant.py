@@ -50,9 +50,20 @@ def test_price_evidence_refuses_prose_origin():
         raise AssertionError("origin='description' must raise")
 
 
-def test_capture_without_evidence_still_works():
-    # Scrapers not yet migrated must keep ingesting — evidence is additive, never a hard gate.
+def test_unmigrated_priced_row_is_flagged_unverified():
+    # A scraper not yet emitting evidence still ingests (never a hard gate) — but a price with no
+    # proof is recorded UNVERIFIED, never silently trusted (2026-08 provenance guard). This is the
+    # state that would have flagged DA545798/DA507447 from the DB instead of a live-page forensic.
     row = {"listing_url": "https://x/1", "description": "بيت", "price_total": 1}
+    db._ensure_capture(row)
+    ev = row["source_capture"]["price_evidence"]
+    assert ev["unverified"] is True and ev["found"] is None
+    assert row["price_total"] == 1  # the guard labels provenance; it NEVER alters/hides the price
+
+
+def test_priceless_row_needs_no_evidence():
+    # No price → nothing to prove → no marker. The guard fires only when a price is actually present.
+    row = {"listing_url": "https://x/2", "description": "بيت"}
     db._ensure_capture(row)
     assert row["source_capture"] and "price_evidence" not in row["source_capture"]
 
