@@ -45,6 +45,7 @@ Usage:  python -m scrapers.dealapp.run [--type residential|commercial|all] [--li
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import os
 import re
@@ -518,22 +519,93 @@ def has_priced_schema(html: str) -> bool:
     return bool(offers.get("price"))
 
 
+# Diagnostic-only: WHY each fetch_one ultimately failed, tallied across the run so main() can
+# print a one-line breakdown (2026-08-09 — after a run that scraped 0/1200 detail pages with zero
+# exceptions and zero per-item logging, leaving no way to tell "every page 200'd but never carried
+# the listing schema (login-wall/consent shell?)" apart from "every id 404'd (bad sitemap ids?)"
+# without live access to the source. Never affects control flow — read-only visibility.
+_fetch_fail_lock = threading.Lock()
+_fetch_fail_reasons: collections.Counter = collections.Counter()
+
+
+def _record_fetch_failure(reason: str) -> None:
+    with _fetch_fail_lock:
+        _fetch_fail_reasons[reason] += 1
+
+
+# Bounded, per-bucket samples for the status_200_no_listing_schema class (2026-08-09, after a run
+# where 980/1200 fetches fell in that one bucket with no way to tell "expired listing" from "we're
+# failing to render a live one" apart). CONTENT-FREE BY DESIGN — this file's own PDPL rule (see the
+# module docstring) redacts phones/seller info from titles/descriptions during PARSING, so a raw-
+# response diagnostic path must never bypass that by logging page text. Only two structural, public
+# signals are recorded, both cheap to reason about without reading listing content:
+#   redirected_away        — the final URL (after following redirects) left the requested
+#                             /ad-details/{adid} path entirely. The strongest safe signal that
+#                             dealapp itself considers this id gone (301/302 to home/search/a
+#                             generic page), not that OUR renderer failed on a still-live page.
+#   same_url_no_ng_state    — stayed on the requested URL, but the response never hydrated an
+#                             Angular ng-state block at all. Looks like a block/rate-limit/raw-shell
+#                             response rather than the SPA genuinely rendering "no such ad".
+#   same_url_ng_state_no_schema — stayed on the requested URL, DID fully hydrate (ng-state present),
+#                             but the app itself never wrote a real-estate-listing schema block —
+#                             i.e. the SPA rendered and decided there's no listing here (a soft-404
+#                             inside the app state), the cleanest "genuinely gone" signal of the three.
+# Only "same_url_no_ng_state" is a candidate for "we're failing to render a live listing" — the
+# other two both mean dealapp's own app told us, one way or another, that the id isn't live.
+_MAX_SAMPLES_PER_BUCKET = 5
+_fetch_fail_samples: dict[str, list[dict]] = {}
+
+
+def _record_status_200_no_schema(adid: str, requested_url: str, resp: Any) -> None:
+    try:
+        final_url = str(getattr(resp, "url", "") or "")
+    except Exception:
+        final_url = ""
+    requested_path = requested_url.split("//", 1)[-1].split("/", 1)[-1]  # strip scheme + host
+    redirected_away = bool(final_url) and requested_path not in final_url
+    body = resp.text or ""
+    has_ng_state_tag = 'id="ng-state"' in body
+    if redirected_away:
+        bucket = "redirected_away"
+    elif not has_ng_state_tag:
+        bucket = "same_url_no_ng_state"
+    else:
+        bucket = "same_url_ng_state_no_schema"
+    with _fetch_fail_lock:
+        _fetch_fail_reasons[f"status_200_no_listing_schema:{bucket}"] += 1
+        samples = _fetch_fail_samples.setdefault(bucket, [])
+        if len(samples) < _MAX_SAMPLES_PER_BUCKET:
+            # adid is a public ad number; final_path/body_len are structural only — no listing
+            # content, no seller info, nothing PDPL redaction would need to touch.
+            samples.append({
+                "adid": adid,
+                "final_path": (final_url[len(BASE):][:100] if final_url.startswith(BASE) else final_url[:100]) or None,
+                "body_len": len(body),
+            })
+
+
 def fetch_one(adid: str) -> Optional[tuple[str, str]]:
     s = _session()
     url = f"{BASE}/ar/ad-details/{adid}"
     last_skeleton_html: Optional[str] = None
+    last_status: Any = None
+    last_resp: Any = None
     for attempt in range(3):
         try:
             r = s.get(url, timeout=45, allow_redirects=True)
-        except Exception:
+        except Exception as e:
+            last_status = f"exception:{type(e).__name__}"
             time.sleep(1.0 * (attempt + 1))
             continue
+        last_status = r.status_code
+        last_resp = r
         if r.status_code == 200 and "real-estate-listing" in r.text:
             if has_priced_schema(r.text):
                 return r.text, adid
             # Skeleton hit: keep the response as a fallback and retry for a fully-hydrated one.
             last_skeleton_html = r.text
         if r.status_code in (404, 410):
+            _record_fetch_failure("not_found_404_410")
             return None
         time.sleep(0.8 * (attempt + 1))
     # Exhausted retries without ever seeing a priced schema. Fall back to the last skeleton
@@ -541,7 +613,16 @@ def fetch_one(adid: str) -> Optional[tuple[str, str]]:
     # None for an absent price, so the listing still ingests and surfaces as "Price on request"
     # rather than being silently dropped. Never invent a price, never let a genuinely-present
     # listing vanish because of a transient render gap.
-    return (last_skeleton_html, adid) if last_skeleton_html else None
+    if last_skeleton_html:
+        _record_fetch_failure("skeleton_no_price_after_3_retries")
+        return last_skeleton_html, adid
+    if last_status == 200 and last_resp is not None:
+        # 200 but never once carried "real-estate-listing" across 3 attempts. Classify WHY —
+        # expired/removed id vs a genuine render failure — see _record_status_200_no_schema.
+        _record_status_200_no_schema(adid, url, last_resp)
+    else:
+        _record_fetch_failure(f"status_{last_status}")
+    return None
 
 
 def _resolve_city(city_ar: Optional[str]) -> Optional[str]:
@@ -827,6 +908,17 @@ def main() -> int:
                     print(f"  …{seen_n} parsed/upserted", flush=True)
                 if args.limit and seen_n >= args.limit:
                     break
+        if _fetch_fail_reasons:
+            # Always visible in the job log, unlike the `curl`ed page bodies themselves — this is
+            # the difference between "0 rows, guess why" and "0 rows: 1200/1200 status_200_no_
+            # listing_schema" in the next run's log, without needing live access to the source.
+            print(f"Deal App fetch-failure breakdown: {dict(_fetch_fail_reasons)}", flush=True)
+        if _fetch_fail_samples:
+            # Content-free samples (adid + redirect path + body length only, see
+            # _record_status_200_no_schema) — enough to tell an expired/removed id from a genuine
+            # render failure without ever logging listing content (PDPL).
+            print(f"Deal App fetch-failure samples (up to {_MAX_SAMPLES_PER_BUCKET}/bucket): "
+                  f"{_fetch_fail_samples}", flush=True)
         if args.limit:
             # write exactly the validation rows
             if res:
@@ -868,9 +960,21 @@ def main() -> int:
                 pruned += n
         print(f"✓ Deal App: {len(res)} residential + {len(com)} commercial upserted, "
               f"{sold_ct} sold (inactive), {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n,
-                   notes=f"sold={sold_ct} pruned={pruned}",
-                   check_tables=["dealapp_residential_listings", "dealapp_commercial_listings"])
+        # end_run's RC-B guard returns the EFFECTIVE ok it wrote (see scrapers/common/db.py) —
+        # a 0-row "success" or an integrity trip gets demoted to False. Every scraper in the fleet
+        # discards that return value and always `return 0`, so a demoted run still shows green in
+        # CI (found live 2026-08-09: run 31294408328 scraped 0/1200 pages, scrape_runs.ok was
+        # correctly demoted to false, but the job exited 0). Fixed here for dealapp; propagate the
+        # return code so CI actually reddens when the DB already knows the run was unhealthy.
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n,
+                              notes=f"sold={sold_ct} pruned={pruned}",
+                              check_tables=["dealapp_residential_listings", "dealapp_commercial_listings"])
+        if not healthy:
+            print("✗ Deal App: run demoted to unhealthy by end_run()'s RC-B guard "
+                  "(0 rows / integrity check tripped) — failing CI instead of reporting a silent "
+                  "success. See scrape_runs.notes and the fetch-failure breakdown above.",
+                  flush=True)
+            return 1
         return 0
     except Exception as e:
         if run_id:

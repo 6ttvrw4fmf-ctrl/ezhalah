@@ -34,24 +34,13 @@ FEATURE_PATTERNS: list[tuple[str, list[str]]] = [
     ("elevator",                   [r"مصعد"]),
     ("kitchen",                    [r"مطبخ"]),
     ("car_entrance",               [r"مدخل\s*سيارة", r"مدخل\s*للسيارة", r"كراج"]),
-    ("parking",                    [r"موقف\s*سيارة", r"مواقف"]),
     ("maid_room",                  [r"غرفة\s*خادم(?:ة|ه)", r"غرفة\s*شغّ?الة"]),
     ("driver_room",                [r"غرفة\s*سائق"]),
-    ("water_supply",               [r"توفر\s*الماء", r"\bالماء\b", r"\bمياه\b"]),
     ("air_conditioner",            [r"مكيف", r"تكييف"]),
-    ("electricity",                [r"توفر\s*الكهرباء", r"كهرباء"]),
-    ("sanitation",                 [r"صرف\s*صحي"]),
     ("private_entrance",           [r"مدخل\s*خاص", r"مدخل\s*مستقل"]),
-    ("optical_fibers",             [r"ألياف\s*بصرية", r"الياف\s*بصرية", r"فايبر", r"FTTH"]),
-    ("laundry_room",               [r"غرفة\s*غسيل", r"غرفة\s*الغسيل"]),
-    ("balcony_terrace",            [r"بلكونة", r"شرفة", r"تراس"]),
-    ("separate_water_meter",       [r"عداد\s*ماء\s*(?:مستقل|منفصل)"]),
-    ("separate_electricity_meter", [r"عداد\s*كهرباء\s*(?:مستقل|منفصل)"]),
     ("extension",                  [r"إمكانية\s*التوسعة", r"امكانية\s*التوسعة", r"قابلة\s*للتوسعة"]),
     ("special_surface",            [r"واجهة\s*مميزة", r"وجه\s*مميز"]),
     ("special_position",           [r"موقع\s*مميز"]),
-    ("villa_on_roof",              [r"فيلا\s*على\s*السطح", r"شقة\s*على\s*السطح"]),
-    ("apartment_in_project",       [r"ضمن\s*مشروع", r"داخل\s*مشروع"]),
 ]
 
 
@@ -83,12 +72,19 @@ _SEP_RE = re.compile(r"[,٬]")
 #
 # Measured 2026-08-05 across 108 live pages + the whole active cohort, which is what forced this fix:
 #   • `_flag()` returned a bare bool, so every amenity was 100% populated and NEVER NULL;
-#   • **aqar publishes NO parking field at all** — yet `parking` was true on 4,880/5,216 (93.6%) of
-#     the June stub rows vs 1,016/7,028 (14.5%) of healthy rows. A 6.5x gap in the same market is not
-#     a real difference; both figures were manufactured by the «مواقف» prose pattern firing on
-#     whatever text happened to be stored.
+#   • `parking` was true on 4,880/5,216 (93.6%) of the June stub rows vs 1,016/7,028 (14.5%) of
+#     healthy rows. A 6.5x gap in the same market is not a real difference; both figures were
+#     manufactured by the «مواقف» prose pattern firing on whatever text happened to be stored.
 #   • stub `parking` values are not even reproducible from the text we stored (921/5,216), whereas
 #     healthy rows reproduce 7,028/7,028.
+#
+# That fix drew the right conclusion (stop trusting prose) from a WRONG premise: it asserted "aqar
+# publishes NO parking field at all" and pinned the column to NULL forever. aqar does publish it —
+# as `listing.extended_details.special_parking`, one level deeper than this parser was looking.
+# Re-measured 2026-08-09 against 24 live pages: 19 of 20 stored values disagreed with the source,
+# INCLUDING a row stored `false` where aqar published `true`. The lesson is in
+# docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md: "the source doesn't publish it" must be proven by
+# reading the payload, never inferred from the field's absence in the part of it we happen to parse.
 #
 # Mapping (aqar key -> our column). Anything not listed is NOT published by aqar structurally.
 _STRUCTURED_AMENITY_KEYS: dict[str, str] = {
@@ -97,12 +93,30 @@ _STRUCTURED_AMENITY_KEYS: dict[str, str] = {
     "ac": "air_conditioner",
     "car_entrance": "car_entrance",
     "furnished": "furnished",
+    # Utility availability: aqar publishes all three as native booleans and they carry real
+    # negatives (2026-08-09, 24 live pages: water 21T/1F, electrical 21T/1F, drainage 18T/4F).
+    # They were previously matched from «توفر الماء» / «كهرباء» / «صرف صحي», which cannot say "no".
+    "water_availability": "water_supply",
+    "electrical_availability": "electricity",
+    "drainage_availability": "sanitation",
+}
+# aqar nests a second block of facts under `listing.extended_details`, as native JSON booleans with
+# the same true/false/null semantics as the flat keys above. Verified across 24 live pages
+# (2026-08-09): every key below is bool-or-null — `fiber_optic` was observed BOTH true and false, so
+# these carry real negatives that prose could never produce. Only boolean keys are mapped; the block
+# also carries strings (`ac_type`, `project_name`), counts, and broker PII we deliberately never read.
+_EXTENDED_DETAIL_KEYS: dict[str, str] = {
+    "special_parking":            "parking",
+    "fiber_optic":                "optical_fibers",
+    "laundry_room":               "laundry_room",
+    "balcony":                    "balcony_terrace",
+    "roof_villa":                 "villa_on_roof",
+    "apartment_in_project":       "apartment_in_project",
+    "separated_water_meter":      "separate_water_meter",
+    "separated_electrical_meter": "separate_electricity_meter",
 }
 # Either of aqar's two entrance flags means a private/independent entrance.
 _PRIVATE_ENTRANCE_KEYS = ("special_entrance", "two_entrances")
-# Columns aqar NEVER publishes: they must stay unknown rather than be inferred from the description.
-# `parking` is the important one — see the 6.5x census above.
-_NEVER_PUBLISHED_BY_AQAR = ("parking",)
 
 _LISTING_OBJ_RE = re.compile(r'"listing"\s*:\s*\{')
 
@@ -204,9 +218,20 @@ def _period_beside(price: Optional[int], text: str, is_rnpl_page: bool = False) 
     listings, and an unanchored scan reads those as this listing's period. Searching the FULL page
     text is therefore safe here, and necessary — the price headline is not always above the
     «تفاصيل الإعلان» anchor, which left 104 live rows with a published price and no period.
+
+    ARABIC-INDIC DIGITS (2026-08-09, live-proven on ad 6727466). Aqar renders some prices in
+    Arabic-Indic numerals: that ad's own price slot reads **«٨٠٠ شهري»** — 800 per MONTH — while the
+    structured payload says `price: 800`. Matching only the ASCII "800" finds nothing, the period
+    comes back unknown, and 800 gets filed as an ANNUAL rent: a 12× understatement of a listing that
+    really costs 9,600/yr. Normalising the text through `N._TRANS` first is what makes the anchor
+    work on both numeral systems.
     """
     if not price:
         return None
+    # Digits AND separators: «٤٠٬٠٠٠» is 40,000 written with Arabic-Indic numerals and the Arabic
+    # thousands mark U+066C. Translating the digits alone leaves «40٬000», which matches neither
+    # "40000" nor "40,000" — the same silent miss, one character further along. Mirrors N.to_int().
+    text = text.translate(N._TRANS).replace("٬", ",").replace("٫", ".")
     grouped = f"{price:,}"
     for pattern, period in _PERIOD_WORDS:
         if period == "monthly" and is_rnpl_page:
@@ -233,6 +258,21 @@ def _tri_state(raw: Any) -> Optional[bool]:
     return None
 
 
+def _extended_details(obj: dict[str, Any]) -> dict[str, Any]:
+    """aqar's `extended_details` block, or {} when this listing has none.
+
+    aqar sends it as a nested object on most pages but as a JSON *string* on some; {} means the
+    block is absent, which — like a null value inside it — is UNKNOWN, never False.
+    """
+    ext = obj.get("extended_details")
+    if isinstance(ext, str):
+        try:
+            ext = _json.loads(ext)
+        except (ValueError, TypeError):
+            return {}
+    return ext if isinstance(ext, dict) else {}
+
+
 def _amenities(html: str, text: str, obj: Optional[dict[str, Any]] = None) -> dict[str, Optional[bool]]:
     """Every amenity column, with UNKNOWN (None) wherever aqar does not state a value.
 
@@ -243,22 +283,27 @@ def _amenities(html: str, text: str, obj: Optional[dict[str, Any]] = None) -> di
     out: dict[str, Optional[bool]] = {}
     # Seed EVERY column we may emit — including ones with no prose pattern, e.g. `furnished` — so a
     # missing structured key yields UNKNOWN rather than an absent dict entry.
-    for col in [c for c, _ in FEATURE_PATTERNS] + list(_STRUCTURED_AMENITY_KEYS.values()) + ["private_entrance"]:
+    for col in ([c for c, _ in FEATURE_PATTERNS] + list(_STRUCTURED_AMENITY_KEYS.values())
+                + list(_EXTENDED_DETAIL_KEYS.values()) + ["private_entrance"]):
         out[col] = None                      # default is UNKNOWN, not False
     if obj:
         for key, col in _STRUCTURED_AMENITY_KEYS.items():
             if key in obj:
                 out[col] = _tri_state(obj.get(key))
+        ext = _extended_details(obj)
+        for key, col in _EXTENDED_DETAIL_KEYS.items():
+            if key in ext:
+                out[col] = _tri_state(ext.get(key))
         vals = [_tri_state(obj.get(k)) for k in _PRIVATE_ENTRANCE_KEYS if k in obj]
         if vals:
             out["private_entrance"] = True if any(v is True for v in vals) else (
                 False if all(v is False for v in vals) else None)
-    # Columns aqar publishes NOWHERE stay unknown regardless of what the description happens to say.
-    for col in _NEVER_PUBLISHED_BY_AQAR:
-        out[col] = None
     # Remaining columns have no structured counterpart. A prose hit is still evidence the listing
     # ADVERTISES the feature, so keep True; but silence stays UNKNOWN rather than becoming False.
-    structured = set(_STRUCTURED_AMENITY_KEYS.values()) | {"private_entrance"} | set(_NEVER_PUBLISHED_BY_AQAR)
+    # A column aqar publishes structurally NEVER falls back to prose: a structured null means "aqar
+    # did not say", and a prose hit must not overwrite that with a confident True.
+    structured = (set(_STRUCTURED_AMENITY_KEYS.values()) | set(_EXTENDED_DETAIL_KEYS.values())
+                  | {"private_entrance"})
     for col, pats in FEATURE_PATTERNS:
         if col in structured:
             continue
@@ -609,7 +654,12 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
             r"استأجر\s*الآن(?:\s*و?)?\s*(?:ا?دفع|أدفع)?\s*لاحق",  # "استأجر الآن وأدفع لاحقًا" + variants
             r"إيجار\s*الآن[^.<\n]{0,30}لاحق",
             r"ادفع\s*لاحقاً?",
-            r"تمكين",
+            # `تمكين` was here as an RNPL provider name. REMOVED 2026-08-09: it is an ordinary Arabic
+            # noun ("enablement") and a common Saudi company name, matched as a BARE substring
+            # against the whole page text — which includes the advertiser block. It fired on 26
+            # active aqar BUY listings that carry no RNPL offer at all, purely because the broker is
+            # called «التمكين». A brand name is not a per-listing fact. `/rnpl/` and the explicit
+            # «استأجر الآن وأدفع لاحقًا» phrase are the real signals and both survive.
             r"rent\s*now\s*pay\s*later",
         ])
     )
@@ -617,21 +667,36 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # When RNPL is offered Aqar prints the starting monthly installment like
     # "استأجر الآن وأدفع لاحقًا ابتداءً من 8,025 § شهريا". Capture that monthly figure so the app can
     # surface a "from SAR X/month" badge on the listing card. (user request.)
+    # THE INSTALMENT IS A DIFFERENT FIELD FROM THE RENT (owner rule, 2026-08-09) and aqar publishes
+    # it STRUCTURALLY as `rnpl_monthly_price`. Read that; prose is only the fallback.
+    #
+    # The prose path it replaces had three defects, all live-proven on 2026-08-09:
+    #   • its second pattern `(\d[\d,]{2,})…شهري[ا]?` was UNANCHORED, so on a genuinely MONTHLY
+    #     listing it could capture the listing's own RENT and store it as a financing instalment —
+    #     the banned rent↔instalment confusion, running backwards.
+    #   • the `500 <= v <= 100_000` plausibility gate silently DISCARDED real published instalments:
+    #     the live probe found 72, 76 and 90 on ads 6727466 / 6703504 / 6450928, all under the floor.
+    #     A source-published number is never ours to reject for looking small.
+    #   • it read prose while aqar publishes the exact figure in its payload.
     rent_now_pay_later_monthly: Optional[int] = None
-    if rent_now_pay_later:
-        # Look for the "starting from N شهريا" snippet near the RNPL phrase. Two patterns: the
-        # explicit "ابتداءً من" prefix, OR a bare "N § شهريا" / "N شهرياً" near the RNPL trigger.
-        for pat in (
-            r"ابتداء[ًاء]?\s*من\s*(\d[\d,]{2,})\s*[§ر﷼]?\s*شهري",
-            r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*شهري[ا]?\b",
-        ):
-            mp_rnpl = re.search(pat, text)
-            if mp_rnpl:
-                v = N.to_int(mp_rnpl.group(1))
-                # Sanity-check: RNPL installments are reasonable monthly rents, not annual figures.
-                if v and 500 <= v <= 100_000:
-                    rent_now_pay_later_monthly = v
-                    break
+    _rnpl_raw = (obj or {}).get("rnpl_monthly_price")
+    if isinstance(_rnpl_raw, (int, float)) and not isinstance(_rnpl_raw, bool) and int(_rnpl_raw) > 0:
+        rent_now_pay_later_monthly = int(_rnpl_raw)
+    elif rent_now_pay_later:
+        # Fallback for a payload we could not read: ONLY the explicitly-labelled teaser
+        # «… ابتداءً من N § شهريا». Never a bare «N شهري», which is how the rent got in.
+        mp_rnpl = re.search(r"ابتداء[ًاء]?\s*من\s*(\d[\d,]{2,})\s*[§ر﷼]?\s*شهري",
+                            text.translate(N._TRANS).replace("٬", ","))
+        if mp_rnpl:
+            v = N.to_int(mp_rnpl.group(1))
+            # On the PROSE path a value identical to the rent means the regex found the rent, not an
+            # instalment — drop it rather than publish financing that is really the asking price.
+            # Applied here and NOT to the structured read: when aqar states the instalment in its own
+            # field, an equal value is a coincidence on a cheap listing, and discarding a
+            # source-published number would itself breach the fidelity rule.
+            if v is not None and price_annual is not None and v in (price_annual, price_annual * 12):
+                v = None
+            rent_now_pay_later_monthly = v
 
     # ─── Location ────────────────────────────────────────────────────────────
     # The URL slug always tells us the city + neighborhood reliably.

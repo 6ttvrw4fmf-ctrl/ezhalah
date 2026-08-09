@@ -348,8 +348,27 @@ def parse_detail(html_text: str) -> dict[str, Any]:
     if not disp:
         pl = re.search(r'class="price_area">(.*?)</div>', html_text, re.S)
         disp = pl.group(1) if pl else ""
-    if out.get("price") and re.search(r"(?:لل|ال)\s*متر", disp):
-        out["price_per_meter"] = out["price"]
+    # WP Residence renders TWO different per-metre shapes, and the old test — «does the whole blob
+    # mention متر?» → «then the main price IS the rate» — got one of them exactly backwards.
+    #
+    #   A) the qualifier carries its OWN number and the main figure is the TOTAL. Live 2026-08-09,
+    #      EA23034: data-price = «<span class='infocur infocur_first'>سعر المتر 1000 ريال</span>
+    #      920,000 ريال», data-clean_price 920000, 920 m². The rate is 1,000 and the total is
+    #      920,000 — we were storing 920,000 in BOTH columns.
+    #   B) the qualifier has no number of its own, so the displayed figure IS the rate («3,000 للمتر»
+    #      on a 5,505 m² plot). Then the rate is right and there is NO published total — and we must
+    #      not multiply by the area to manufacture one.
+    qual = ""
+    qm = re.search(r"<span[^>]*infocur_first[^>]*>(.*?)</span>", disp, re.S)
+    if qm:
+        qual = re.sub(r"<[^>]+>", " ", qm.group(1))
+    if re.search(r"(?:لل|ال)\s*متر", disp):
+        qual_rate = _price_from_text(qual) if re.search(r"(?:لل|ال)\s*متر", qual) else None
+        if qual_rate:
+            out["price_per_meter"] = qual_rate            # shape A: price stays the TOTAL
+        elif out.get("price"):
+            out["price_per_meter"] = out["price"]         # shape B: the displayed figure is the rate
+            out["price_is_rate"] = True                   # …so there is no total to store
     # geo
     g = re.search(r'data-cur_lat="([\d.\-]+)"\s+data-cur_long="([\d.\-]+)"', html_text)
     if g and g.group(1) not in ("", "0"):
@@ -519,8 +538,10 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
         "bedrooms": detail.get("bedrooms") or None,
         "bathrooms": detail.get("bathrooms") or None,
         "property_age": age,
-        "price_total": price if not is_rent else None,
-        "price_annual": (normalize.annualize_rent(price, "monthly") if (title_rent_monthly and price) else price) if is_rent else None,
+        # A displayed figure that is a per-metre RATE (shape B above) is neither a total nor a rent.
+        "price_total": None if (is_rent or detail.get("price_is_rate")) else price,
+        "price_annual": None if (not is_rent or detail.get("price_is_rate")) else (
+            normalize.annualize_rent(price, "monthly") if (title_rent_monthly and price) else price),
         "price_per_meter": ppm,
         "rent_period": ("monthly" if title_rent_monthly else "annual") if is_rent else None,
         "city": city,
@@ -633,10 +654,13 @@ def main() -> int:
 
         print(f"✓ Eastabha: {len(res)} residential + {len(com)} commercial upserted, "
               f"{gone_ct} sold/rented (inactive), {skipped_auction} auctions skipped, {pruned} stale pruned")
+        healthy = True
         if run_id:
-            db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
+            healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
                        notes=f"auctions_skipped={skipped_auction} gone={gone_ct} pruned={pruned}", check_tables=["eastabha_residential_listings", "eastabha_commercial_listings"])
-        return 0
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])

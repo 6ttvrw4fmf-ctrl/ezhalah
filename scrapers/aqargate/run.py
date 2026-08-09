@@ -243,11 +243,23 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         # on ad 5435594 — DB said 11 bedrooms, the listing's own description said 5).
         "bedrooms": None,
         "bathrooms": _int(ar.get("numberOfBathrooms")),
-        "price_total": _price_int(price) if not is_rent else None,
-        # On Buy LAND ads REGA publishes landTotalPrice = propertyPrice × propertyArea exactly
-        # (31/31 live-verified 2026-08-03) — i.e. propertyPrice is the UNIT rate («سعر الوحدة» in the
-        # page's own REGA table) that the badge displays as the price. Copy-the-display rule keeps
-        # price_total as the displayed figure; the per-meter semantic is recorded honestly here.
+        # On Buy LAND ads `propertyPrice` is the UNIT RATE, not the asking price. The page's own REGA
+        # table labels it «سعر الوحدة» and sellers write «N ريال للمتر» in the description — verified
+        # live 2026-08-09 on AG55663: «سعر الوحدة 2817», «2817 ريال للمتر», area 1,740 m².
+        #
+        # It used to be stored in price_total under a "copy-the-display" rule, because aqargate's own
+        # badge renders it under the bare label «السعر». That is precisely the total↔per-m² confusion
+        # the owner's 2026-08-09 rule forbids: a 1,740 m² plot appeared in search at 2,817 SAR.
+        #
+        # And we do NOT substitute `landTotalPrice`: it equals propertyPrice × propertyArea exactly on
+        # 30 of 31 live rows, so it is aqargate's own arithmetic, not an independently published
+        # price. Adopting it would be the banned rate × area multiplication with an extra step.
+        # The honest state is what the source actually gives us: a RATE, and no total.
+        # (This also defuses 18 further rows whose wrong totals were only hidden by the sub-1000
+        # suppression retired on 2026-08-05 — they would otherwise surface on the next run, e.g.
+        # AG52441 offering a 106,474 m² plot for "40 SAR".)
+        "price_total": None if (is_rent or ar.get("landTotalPrice") is not None)
+                       else _price_int(price),
         "price_per_meter": _price_int(ar.get("propertyPrice"))
             if (not is_rent and ar.get("landTotalPrice") is not None) else None,
         "price_annual": rent_annual,
@@ -315,8 +327,10 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Aqargate: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["aqargate_residential_listings", "aqargate_commercial_listings"])
-        return 0
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["aqargate_residential_listings", "aqargate_commercial_listings"])
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])

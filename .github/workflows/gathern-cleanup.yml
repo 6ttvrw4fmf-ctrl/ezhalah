@@ -5,7 +5,15 @@
 name: Gathern cleanup
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true = probe + classify + report, delete NOTHING (use this before any first real run)"
+        required: false
+        # MUST default to "false": the weekly pg_cron trigger (gh-gathern-cleanup) dispatches with
+        # NO inputs, so the default is what the scheduled job gets. Defaulting to "true" here would
+        # silently turn the real weekly cleanup into a no-op.
+        default: "false"
 
 concurrency:
   group: gathern-cleanup
@@ -28,4 +36,6 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python -m scrapers.common.cleanup --platform gathern
+        run: |
+          python -m scrapers.common.cleanup --platform gathern \
+            ${{ inputs.dry_run == 'true' && '--dry-run' || '' }}

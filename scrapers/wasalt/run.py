@@ -338,6 +338,14 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
         # from the search-list; deep rows only when WASALT_FETCH_DETAIL=1. detail_enriched lets the
         # cloud "new-only" enricher skip rows that already have the deep fields. (cost guard.)
         "additional_info": addl_info,
+        # SOURCE IS TRUTH (owner rule 2026-08-09, docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md).
+        # wasalt states these two explicitly as "Yes"/"No" in its additionalAttributes panel, on
+        # ~100% of listings. They were NEVER written here, so PostgreSQL's `DEFAULT false` invented a
+        # negative on all 52,892 active rows — contradicting wasalt's own "Yes" on 45,723 (water) and
+        # 51,801 (electricity) of them. The defaults are now dropped fleet-wide; these must be
+        # written explicitly, tri-state, or the fact is lost instead of merely wrong.
+        "separate_water_meter":       _yes_no(addl_info, "waterMeter"),
+        "separate_electricity_meter": _yes_no(addl_info, "electricityMeter"),
         "detail_enriched": detail_enriched,
         # Feature-grid booleans the card already renders. Wasalt amenities map roughly:
         "parking":          has("parking", "garage"),
@@ -354,6 +362,23 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
         "laundry_room":     has("laundry"),
         "balcony_terrace":  has("balcony", "terrace"),
     }
+
+
+def _yes_no(addl_info, key: str):
+    """A wasalt additionalAttributes flag as a TRI-STATE: Yes -> True, No -> False, absent -> None.
+
+    `None` means wasalt did not state it and is the only honest answer — never False. See
+    docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md.
+    """
+    for a in addl_info or []:
+        if isinstance(a, dict) and a.get("key") == key:
+            v = str(a.get("value") or "").strip().lower()
+            if v == "yes":
+                return True
+            if v == "no":
+                return False
+            return None
+    return None
 
 
 def upsert(row: dict, main_type: str) -> None:
@@ -442,9 +467,11 @@ def main() -> int:
         notes = str(e)[:400]
         print(f"\n✗ FATAL: {e}")
     finally:
-        db.end_run(run_id, ok=ok, rows_seen=total, rows_upserted=total, notes=notes, allow_empty=legit_empty, check_tables=["wasalt_residential_listings", "wasalt_commercial_listings"])
+        healthy = db.end_run(run_id, ok=ok, rows_seen=total, rows_upserted=total, notes=notes, allow_empty=legit_empty, check_tables=["wasalt_residential_listings", "wasalt_commercial_listings"])
     print(f"\n📊 Wasalt done. {total} upserted. (run_id={run_id})")
-    return 0 if ok else 1
+    if ok and not healthy:
+        print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+    return 0 if (ok and healthy) else 1
 
 
 if __name__ == "__main__":

@@ -38,6 +38,7 @@ def main() -> int:
 
     seen = 0
     upserted = 0
+    healthy = True
     try:
         for url in D.discover(args.type, args.deal, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit):
             seen += 1
@@ -59,10 +60,12 @@ def main() -> int:
         notes = str(e)
         print(f"✗ FATAL: {e}")
     finally:
-        db.end_run(run_id, ok=ok, rows_seen=seen, rows_upserted=upserted, notes=notes, check_tables=["listings"])
+        healthy = db.end_run(run_id, ok=ok, rows_seen=seen, rows_upserted=upserted, notes=notes, check_tables=["listings"])
 
     print(f"\n📊 Done. {upserted}/{seen} upserted. (run_id={run_id})")
-    return 0 if upserted else 1
+    if upserted and not healthy:
+        print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+    return 0 if (upserted and healthy) else 1
 
 
 if __name__ == "__main__":

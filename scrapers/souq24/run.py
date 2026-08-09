@@ -434,6 +434,25 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
     # plausibility judgement the standing PRICE = SOURCE rule forbids. Store what the page printed.
     # Period comes from the source's own price div — never defaulted. (fidelity fix 2026-08-05)
     src_rent_period = _rent_period_from_price_div(body, pm)
+    # ── the ×12 STORAGE conversion (bug fix 2026-08-09, owner-reported) ──────────────────────────
+    # `price_annual` is the canonical stored column and the app DIVIDES IT BY 12 to render the
+    # per-month figure. So a source price labelled «شهري» must be stored as monthly×12, otherwise the
+    # card shows one TWELFTH of what the platform published. This scraper read the period correctly
+    # (above) but then wrote the raw number into price_annual, so «5,000 شهري» rendered as 417/mo.
+    # Live-verified on souq24 ads 1106 + 1117 («5,000 شهري») and 1208 («1,500 شهري») — 3 production
+    # rows, repaired by migration souq24_monthly_price_x12_storage_repair_3_rows.
+    # This is a UNIT CONVERSION for the storage container — NOT price derivation and NOT period
+    # inference. The DISPLAYED number still equals the source's number exactly. Same convention
+    # gathern / aqarmonthly / wasalt already use.
+    # (owner PERMANENT rule 2026-08-09: the period comes only from the source; never calculate it.)
+    price_annual_val = None
+    if is_rent and price is not None:
+        if src_rent_period == "monthly":
+            price_annual_val = price * 12
+        elif src_rent_period == "annual":
+            price_annual_val = price
+        # daily / weekly / unstated → the annual container cannot hold this faithfully, and
+        # inventing one (×365, ×52) would be derivation. Leave it UNKNOWN.
 
     # ── spec table ──
     specs = _spec_table(body)
@@ -513,7 +532,7 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
         "bedrooms": beds,
         "direction": facade,
         "price_total": price if not is_rent else None,
-        "price_annual": price if is_rent else None,
+        "price_annual": price_annual_val,
         "price_per_meter": ppm,
         # EXACTLY what souq24 published. daily/weekly have no bucket in this schema, so they stay
         # UNKNOWN rather than being folded into a period the source did not state.
@@ -610,8 +629,10 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ 24 Souq: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["souq24_residential_listings", "souq24_commercial_listings"])
-        return 0
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["souq24_residential_listings", "souq24_commercial_listings"])
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])

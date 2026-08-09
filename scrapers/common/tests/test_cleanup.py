@@ -10,7 +10,10 @@ import scrapers.common.cleanup as C
 
 
 class _Res:
-    def __init__(self, data): self.data = data
+    def __init__(self, data, count=None):
+        self.data = data
+        # head+count queries (the unclamped anomaly measurement) read .count
+        self.count = len(data) if count is None else count
 
 
 class _Table:
@@ -33,7 +36,8 @@ class _Table:
             self.c.updated.setdefault(self.name, []).append((self._ids, self._op[1])); return _Res([])
         if self._op and self._op[0] == "insert":
             self.c.inserted.setdefault(self.name, []).append(self._op[1]); return _Res([])
-        return _Res(self.c.rows.get(self.name, []))
+        rows = self.c.rows.get(self.name, [])
+        return _Res(rows, count=len(rows))
 
 
 class _Client:
