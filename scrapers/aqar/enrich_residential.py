@@ -182,9 +182,39 @@ def _structured_price(obj: Optional[dict[str, Any]]) -> tuple[Optional[int], boo
     return (v if v > 0 else None), True
 
 
-# aqar's rent-period enum, as observed live. Only values PROVEN against a rendered page are mapped;
-# an unmapped value falls through to the rendered price slot rather than guessing a period.
-_RENT_PERIOD_ENUM: dict[int, str] = {3: "annual"}
+# aqar's rent-period enum. Only values PROVEN against a rendered page are mapped; an unmapped value
+# falls through to the rendered word rather than guessing a period.
+#   3 → annual  (77/150 live listings, every one rendering «N سنوي»)
+#   2 → monthly (ad 6586188: enum 2, price_text "6,500", page renders «6,500 شهري»)
+# aqar DOES publish monthly residential rentals, so the retired `rent_period = "annual"` default was
+# not merely unevidenced — it filed a monthly rent as a yearly one, understating it 12×. The same
+# defect souq24 had. An unknown future value must stay unmapped: mislabelling the period is worse
+# than admitting we do not know it.
+_RENT_PERIOD_ENUM: dict[int, str] = {2: "monthly", 3: "annual"}
+
+# The period word aqar prints next to a specific figure, matched with and without thousands commas.
+_PERIOD_WORDS = (("سنوي", "annual"), ("شهري", "monthly"))
+
+
+def _period_beside(price: Optional[int], text: str, is_rnpl_page: bool = False) -> Optional[str]:
+    """The billing period aqar prints beside THIS listing's published figure, or None.
+
+    Anchored on the figure itself rather than on "the first period word on the page". That anchoring
+    is the whole point: aqar's pages also carry «N شهريا» RNPL financing lines and a strip of related
+    listings, and an unanchored scan reads those as this listing's period. Searching the FULL page
+    text is therefore safe here, and necessary — the price headline is not always above the
+    «تفاصيل الإعلان» anchor, which left 104 live rows with a published price and no period.
+    """
+    if not price:
+        return None
+    grouped = f"{price:,}"
+    for pattern, period in _PERIOD_WORDS:
+        if period == "monthly" and is_rnpl_page:
+            continue          # on a financing page every «شهري» is an instalment, never the rent
+        for num in {str(price), grouped}:
+            if re.search(rf"{re.escape(num)}\s*[§ر﷼]?\s*/?\s*{pattern}", text):
+                return period
+    return None
 
 
 def _tri_state(raw: Any) -> Optional[bool]:
@@ -486,17 +516,21 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     if s_authoritative:
         if transaction_type == "Rent":
             price_annual = s_price
-            # Never seen live on aqar residential (0/23,907 rows are monthly, its rent product is
-            # annual) — but if aqar ever renders «N شهري» against its own published figure, that
-            # figure is a MONTHLY rent and must be annualized, not filed as a yearly price.
-            if price_annual and mp_mo and not is_rnpl_page and N.to_int(mp_mo.group(1)) == s_price:
+            # The period aqar states for THIS listing: its own enum, else the word it prints next to
+            # this listing's published figure. `_period_beside` is anchored on that figure, so a
+            # «N شهريا» financing line or a neighbouring listing card can never supply the answer.
+            rent_period = _RENT_PERIOD_ENUM.get((obj or {}).get("rent_period")) \
+                or _period_beside(s_price, text, is_rnpl_page)
+            if rent_period == "monthly" and price_annual:
+                # price_annual holds the ANNUAL figure by schema contract and the app divides by 12
+                # to display a monthly price, so ×12 round-trips back to exactly what aqar printed.
                 price_annual = s_price * 12
-                rent_period = "monthly"
         else:
             price_total = s_price
     else:
         if mp_yr:
             price_annual = N.to_int(mp_yr.group(1))
+            rent_period = "annual"
 
         if not price_annual and mp_mo and not is_rnpl_page:
             # No yearly price, but a "/شهري" figure → this is a genuinely MONTHLY rental. Tag it and
@@ -506,11 +540,6 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
             if v:
                 price_annual = v * 12
                 rent_period = "monthly"
-
-    # Period, from evidence only — aqar's enum first, then the word it renders beside the price.
-    if transaction_type == "Rent" and rent_period is None:
-        rent_period = _RENT_PERIOD_ENUM.get((obj or {}).get("rent_period")) or (
-            "annual" if mp_yr else None)
 
     # Anchored to the سعر المتر label — the old any-"N م²" pattern grabbed the AREA token and
     # caused the daily hide/recover flap on big-area land (see parse_price_per_meter above).
