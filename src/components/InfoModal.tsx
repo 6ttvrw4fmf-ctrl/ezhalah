@@ -134,8 +134,8 @@ function AboutBody({ t }: { t: (s: string) => string }) {
         </Card>
 
         {/* 3 — الترخيص */}
-        <Card icon="ribbon-outline" title={t('License')}>
-          <Text style={s.tx}>{t('We operate under FAL license No. XXXXXXXX.')}</Text>
+        <Card icon="ribbon-outline" title={t('Listing licensing')}>
+          <Text style={s.tx}>{t('Every listing is published by its source platform and remains subject to that platform\'s licensing. Ezhalah does not issue or own advertisements.')}</Text>
         </Card>
 
         {/* 4 — إخلاء المسؤولية */}
@@ -145,7 +145,7 @@ function AboutBody({ t }: { t: (s: string) => string }) {
 
         {/* 5 — البيانات والخصوصية */}
         <Card icon="lock-closed-outline" title={t('Data & privacy')}>
-          <Text style={s.tx}>{t('We are committed to storing your data on servers inside the Kingdom in accordance with the Personal Data Protection Law.')}</Text>
+          <Text style={s.tx}>{t('We collect only what the service needs, and we do not sell user data.')}</Text>
         </Card>
       </View>
 

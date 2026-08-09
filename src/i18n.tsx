@@ -974,24 +974,23 @@ const AR: Record<string, string> = {
     'ابحث بذكاء، قارن بسرعة، وتواصل مباشرة مع مصدر الإعلان. كل ذلك من شاشة واحدة.',
   'In short: Ezhalah is a search and aggregation tool — we do not own or sell properties, we connect you to them wherever they are.':
     'باختصار: إزهله أداة بحث وتجميع — لا نملك العقارات ولا نبيعها، بل نوصلك إليها أينما كانت.',
-  'We operate under FAL license No. XXXXXXXX.':
-    'نعمل بموجب ترخيص فال رقم XXXXXXXX.',
-  'We are committed to storing your data on servers inside the Kingdom in accordance with the Personal Data Protection Law.':
-    'نلتزم بحفظ بياناتك على خوادم داخل المملكة وفق نظام حماية البيانات الشخصية.',
+  'Listing licensing': 'ترخيص الإعلانات',
+  "Every listing is published by its source platform and remains subject to that platform's licensing. Ezhalah does not issue or own advertisements.":
+    'كل إعلان منشور من قِبل المنصة المصدر ويظل خاضعاً لترخيص تلك المنصة. إزهله لا تُصدر الإعلانات ولا تملكها.',
+  'We collect only what the service needs, and we do not sell user data.':
+    'نجمع فقط ما تحتاجه الخدمة، ولا نبيع بيانات المستخدمين.',
   'Ezhalah is a Saudi, AI-powered property search platform. We help people find properties faster by searching Aqar, Wasalt, Aldarim and more in one place, and help those platforms reach more users by driving traffic directly to their listings.':
     'إزهله منصة سعودية للبحث العقاري مدعومة بالذكاء الاصطناعي. نساعد الناس على إيجاد العقارات بشكل أسرع بالبحث في منصات عقار ووصلت والدريم في مكان واحد، ونساعد تلك المنصات على الوصول إلى مزيد من المستخدمين بتوجيه الزيارات مباشرة إلى إعلاناتها.',
   'Our role': 'دورنا',
   'We are a property search platform only. We do not own, list, sell or rent any property. We do not facilitate transactions or collect commission.':
     'نحن منصة بحث عقاري فقط. لا نملك أو ندرج أو نبيع أو نؤجّر أي عقار. ولا نسهّل أي معاملة ولا نأخذ أي عمولة.',
   'License': 'الترخيص',
-  'Ezhalah operates under REGA FAL license number XXXXXXXX, issued by the General Authority for Real Estate in Saudi Arabia.':
-    'تعمل إزهله بموجب ترخيص فال رقم XXXXXXXX الصادر عن الهيئة العامة للعقار في المملكة العربية السعودية.',
+  "Every listing shown on Ezhalah is published by the source platform it came from, and each advertisement remains subject to that platform's own licensing and regulatory obligations. Ezhalah does not issue, own or publish advertisements.":
+    'كل إعلان يظهر في إزهله منشور من قِبل المنصة المصدر التي جاء منها، ويظل كل إعلان خاضعاً لترخيص تلك المنصة والتزاماتها النظامية. إزهله لا تُصدر الإعلانات ولا تملكها ولا تنشرها.',
   'Disclaimer': 'إخلاء المسؤولية',
   'All listings are sourced directly from third-party platforms. Ezhalah does not own or verify any listing. Always confirm details directly with the original platform before making any decision.':
     'جميع الإعلانات مصدرها منصات خارجية مباشرة. لا تملك إزهله أي إعلان ولا تتحقق منه. تأكّد دائماً من التفاصيل مباشرة مع المنصة الأصلية قبل اتخاذ أي قرار.',
   'Data & privacy': 'البيانات والخصوصية',
-  "Ezhalah complies with Saudi Arabia's PDPL. All user data is stored on Saudi servers. We do not sell user data.":
-    'تلتزم إزهله بنظام حماية البيانات الشخصية في المملكة. تُخزَّن جميع بيانات المستخدمين على خوادم داخل السعودية. ولا نبيع بيانات المستخدمين.',
 
   // Support
   'Questions about your account, searches, or technical issues.':
