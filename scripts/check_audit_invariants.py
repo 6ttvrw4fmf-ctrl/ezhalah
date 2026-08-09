@@ -230,15 +230,16 @@ def check_filter_qa(client) -> bool:
       buy_token_price_servable — servable Buy rows with an impossible sub-1000 price (parse token);
       cityid_not_in_match — production_ready rows whose city_id is not in their own match_city_ids
       (the Taif→Makkah compound-label class)."""
-    rows = client.table("mon_filter_qa").select("buy_token_price_servable,cityid_not_in_match").limit(1).execute().data
+    rows = client.table("mon_filter_qa").select("buy_token_price_servable,cityid_not_in_match,untaxonomized_type").limit(1).execute().data
     if not rows:
         detail = "mon_filter_qa returned no row — the regression view is missing."
         print(f"FAIL filter-qa: {detail}"); _alert(client, "mon_filter_qa_missing", 0, detail); return False
     tok = rows[0].get("buy_token_price_servable") or 0
     mis = rows[0].get("cityid_not_in_match") or 0
-    if tok == 0 and mis == 0:
-        print("OK  filter-qa: 0 servable sub-1000 Buy prices, 0 city_id/match_city_ids contradictions."); return True
-    detail = f"filter-qa regression: buy_token_price_servable={tok}, cityid_not_in_match={mis} (both must be 0)."
+    unk = rows[0].get("untaxonomized_type") or 0
+    if tok == 0 and mis == 0 and unk == 0:
+        print("OK  filter-qa: 0 servable sub-1000 Buy prices, 0 city_id/match contradictions, 0 untaxonomized types."); return True
+    detail = f"filter-qa regression: buy_token_price_servable={tok}, cityid_not_in_match={mis}, untaxonomized_type={unk} (all must be 0)."
     print(f"FAIL filter-qa: {detail}"); _alert(client, "filter_qa_regression", tok + mis, detail); return False
 
 
