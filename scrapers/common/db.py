@@ -184,6 +184,7 @@ def upsert_aqar_residential(row: dict[str, Any]) -> None:
     row = dict(row)
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
+    _keep_price_when_the_fetch_saw_none(row)
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="aqar_residential_listings")
@@ -196,6 +197,7 @@ def upsert_aqar_commercial(row: dict[str, Any]) -> None:
     row = dict(row)
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
+    _keep_price_when_the_fetch_saw_none(row)      # same «طلب تسويق» exposure as residential
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="aqar_commercial_listings")
@@ -285,6 +287,34 @@ def _sanitize_price(r: dict[str, Any]) -> None:
     mon_detect_field_integrity, mon_detect_unverified_inactivation) watch price bands without touching
     listing state. Kept as an intentional no-op so every upsert path documents the rule."""
     return
+
+
+_PRICE_COLS = ("price_annual", "price_total", "price_per_meter")
+
+
+def _keep_price_when_the_fetch_saw_none(r: dict[str, Any]) -> None:
+    """A fetch that saw NO price must not erase a price we already stored.
+
+    An upsert sends the whole row, so a `price_annual: None` overwrites the stored value with NULL.
+    That is the wrong default here, because "this fetch found no price" and "this listing has no
+    price" are not the same statement. aqar renders «طلب تسويق» instead of a figure on a large
+    minority of live ads, and per [[reference_aqar-liveness-source-verification-method]] it also
+    withholds fields from anonymous fetches — so one silent fetch is not enough evidence to delete
+    money that a previous fetch read off the page.
+
+    Dropping the key instead of sending NULL gives the right answer in both directions: a NEW row
+    still lands with the column NULL (absent means default), and an EXISTING row keeps what it had.
+    A price only ever MOVES when the source publishes a number to move it to.
+
+    Deliberately not symmetric with the rest of the row: bedrooms/amenities/age are re-read from a
+    spec block that is either present or absent, whereas a price disappearing from the page is more
+    often aqar changing what it serves us than the advertiser deleting the number. Retiring a price
+    that really was withdrawn is a job for corroborated evidence over several fetches, not for this
+    one. (2026-08-09, price-path verification.)
+    """
+    for col in _PRICE_COLS:
+        if col in r and r[col] is None:
+            del r[col]
 
 
 def _ensure_capture(r: dict[str, Any]) -> None:
