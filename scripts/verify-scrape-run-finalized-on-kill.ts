@@ -24,7 +24,7 @@
 // pins the two properties that make the handler safe (conditional on `ok is null`; disarmed by a
 // normal end_run) and asserts the deep-fill budget covers its slowest observed shard.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -60,6 +60,7 @@ class Q:
     def select(self, *a, **k): self.payload = ("select", a); return self
     def eq(self, col, val): self.filters.append(("eq", col, val)); return self
     def is_(self, col, val): self.filters.append(("is_", col, val)); return self
+    def lt(self, col, val): self.filters.append(("lt", col, val)); return self
     def execute(self):
         CALLS.append({"table": self.table_name, "op": self.payload[0],
                       "row": self.payload[1], "filters": self.filters})
@@ -112,7 +113,9 @@ if (existsSync(callsOut)) calls = JSON.parse(readFileSync(callsOut, 'utf8'));
 const insert = calls.find((c) => c.op === 'insert' && c.table === 'scrape_runs');
 check('begin_run opened a scrape_runs row', !!insert);
 
-const update = calls.find((c) => c.op === 'update' && c.table === 'scrape_runs');
+const update = calls.find(
+  (c) => c.op === 'update' && c.table === 'scrape_runs' && c.filters.some((f: any[]) => f[1] === 'id'),
+);
 check('the SIGTERM handler wrote a finalizing UPDATE to scrape_runs', !!update);
 
 if (update) {
@@ -134,6 +137,55 @@ if (update) {
   check(
     'it is conditional on `ok is null`, so a normally-finalized run can never be overwritten',
     update.filters.some((f: any[]) => f[0] === 'is_' && f[1] === 'ok' && f[2] === 'null'),
+  );
+}
+
+// ── 1b. begin_run reconciles this platform's orphaned stubs (the SIGKILL path) ──────────────────
+// The handler above covers SIGTERM/SIGINT. It CANNOT cover SIGKILL, an OOM kill, or a lost runner
+// — and that is what actually happened on 2026-08-09: aqar liveness shard 8 (run 25880) died at
+// ~77 min inside a 120-min budget with GH run 31287355118 concluding `failure`, and
+// aqar_stub_recovery run 26102 the same way. The handler closed neither. So begin_run() must also
+// finalize the platform's abandoned stubs on startup.
+const reconcileUpdate = calls.find(
+  (c) => c.op === 'update' && c.table === 'scrape_runs' && c.filters.some((f: any[]) => f[1] === 'platform'),
+);
+check('begin_run() reconciles this platform\'s orphaned stubs before opening a new run', !!reconcileUpdate);
+if (reconcileUpdate) {
+  check(
+    '    reconciliation is scoped to the exact platform string (parallel shards never race)',
+    reconcileUpdate.filters.some((f: any[]) => f[0] === 'eq' && f[1] === 'platform' && f[2] === 'verify_platform'),
+  );
+  check(
+    '    it only touches rows with finished_at null',
+    reconcileUpdate.filters.some((f: any[]) => f[0] === 'is_' && f[1] === 'finished_at' && f[2] === 'null'),
+  );
+  check(
+    '    it only touches stubs older than the cutoff (a running sibling is never closed)',
+    reconcileUpdate.filters.some((f: any[]) => f[0] === 'lt' && f[1] === 'started_at'),
+  );
+  check('    it closes them ok=false, never true', reconcileUpdate.row.ok === false);
+  check(
+    '    it does NOT invent rows_seen / rows_upserted',
+    !('rows_seen' in reconcileUpdate.row) && !('rows_upserted' in reconcileUpdate.row),
+  );
+}
+
+// The orphan cutoff must exceed the LONGEST job budget in the repo, or a still-running sibling
+// shard could be finalized out from under itself.
+const dbSrcForCutoff = readFileSync('scrapers/common/db.py', 'utf8');
+const cutoffHours = Number(dbSrcForCutoff.match(/^ORPHAN_RUN_HOURS\s*=\s*(\d+)/m)?.[1] ?? NaN);
+check('db.py declares ORPHAN_RUN_HOURS', Number.isFinite(cutoffHours));
+const allBudgets = readdirSync('.github/workflows')
+  .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
+  .flatMap((f) => [...readFileSync(`.github/workflows/${f}`, 'utf8').matchAll(/timeout-minutes:\s*(\d+)/g)])
+  .map((m) => Number(m[1]));
+const longestBudgetMin = Math.max(...allBudgets);
+if (Number.isFinite(cutoffHours)) {
+  console.log(`    orphan cutoff ${cutoffHours}h vs longest workflow budget ${longestBudgetMin}m`);
+  check(
+    'the orphan cutoff comfortably exceeds the longest workflow timeout-minutes',
+    cutoffHours * 60 > longestBudgetMin * 1.5,
+    `${cutoffHours * 60}m > ${Math.round(longestBudgetMin * 1.5)}m`,
   );
 }
 
