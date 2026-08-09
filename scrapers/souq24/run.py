@@ -429,8 +429,9 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
     # ── price ──
     pm = PRICE_RE.search(body)
     price = _to_int(pm.group(1)) if pm else None
-    if price is not None and price < 1000:
-        price = None  # reject display glitches / placeholder zeros
+    # No magnitude gate (removed 2026-08-09). A genuine placeholder is a MISSING price (no price
+    # node at all, handled by `pm is None`), not a small one — "< 1000 is a display glitch" is a
+    # plausibility judgement the standing PRICE = SOURCE rule forbids. Store what the page printed.
     # Period comes from the source's own price div — never defaulted. (fidelity fix 2026-08-05)
     src_rent_period = _rent_period_from_price_div(body, pm)
 

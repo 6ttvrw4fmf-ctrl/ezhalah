@@ -284,13 +284,12 @@ def map_listing(item: dict) -> tuple[Optional[dict], str]:
     meter = _int(rea.get("meter_price"))
     total = _resolve_total(_int(rea.get("total_price")), meter, area)
 
-    # SANITY: reject implausible micro-prices. This gate must keep judging the listing's
-    # MAGNITUDE, not just whichever field happens to be populated — gating on a bare per-m² rate
-    # would DROP honest cheap land outright (real shape: FG24914 meter 33 / area 620). So the
-    # product is computed here purely as a magnitude probe and never stored anywhere.
-    price_for_check = total or (meter * area if (meter and area and meter < 50000) else meter)
-    if price_for_check is not None and price_for_check < 1000:
-        return None, category
+    # No magnitude gate (removed 2026-08-09). This DISCARDED THE WHOLE LISTING when the computed
+    # magnitude probe fell under 1,000 SAR. The comment above it already recorded the discomfort —
+    # that gating the wrong field "would DROP honest cheap land outright" — and the answer is that
+    # gating on magnitude at all drops honest cheap listings: all 204 live sub-1000 Buy rows were
+    # fetched from their source pages on 2026-08-09 and 204/204 matched the published price
+    # exactly. A published price is stored at any magnitude (PRICE = SOURCE, 2026-08-03).
 
     # region: Arabic label first, else map city → region
     raw_region = (rea.get("region") or "").strip()

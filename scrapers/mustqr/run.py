@@ -219,10 +219,15 @@ def _video_url(videos: Any) -> Optional[str]:
 
 
 def _price_fields(p: dict, is_rent: bool) -> dict[str, Any]:
-    """price > price_som > price_had. Reject < 1000."""
+    """price > price_som > price_had. A published price is kept at ANY magnitude.
+
+    The `n < 1000` rejection was removed 2026-08-09: it was a plausibility gate on a
+    source-published figure, which the standing PRICE = SOURCE rule forbids. An absent/zero price
+    still yields no price fields, because there is nothing published to store.
+    """
     raw = p.get("price") or p.get("price_som") or p.get("price_had")
     n = _int(raw)
-    if not n or n < 1000:
+    if not n:
         return {}
     if is_rent:
         # Monthly rentals must store the ANNUALIZED figure (monthly×12); the app displays

@@ -277,9 +277,9 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
     transaction_type = "Rent" if is_rent else "Buy"
 
     price_group = (p.get("priceGroup") or "").strip().lower()
+    # No magnitude gate (removed 2026-08-09) — a published price is stored at any magnitude
+    # (PRICE = SOURCE, 2026-08-03; 204/204 live sub-1000 Buy rows matched their source page).
     price = _int(p.get("price"))
-    if price is not None and price < 1000:  # SANITY: reject absurdly-low prices
-        price = None
 
     price_total = price_annual = None
     rent_period = None

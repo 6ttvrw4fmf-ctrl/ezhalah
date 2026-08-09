@@ -1,0 +1,542 @@
+[
+{
+"id": "1890134",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/388451",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "2046983",
+"last_seen": "07-09",
+"url": "https://dealapp.sa/ar/ad-details/399093",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "6201969",
+"last_seen": "08-03",
+"url": "https://dealapp.sa/ar/ad-details/514578",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "6264356",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/487156",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "1501553",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/538052",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "1571704",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/395409",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "1136239",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/286508",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "3063426",
+"last_seen": "08-04",
+"url": "https://dealapp.sa/ar/ad-details/471413",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "1291434",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/411299",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "3063334",
+"last_seen": "07-20",
+"url": "https://dealapp.sa/ar/ad-details/062037",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "1274511",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/486726",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "1139332",
+"last_seen": "07-27",
+"url": "https://dealapp.sa/ar/ad-details/536902",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "4576600",
+"last_seen": "07-27",
+"url": "https://dealapp.sa/ar/ad-details/555791",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "1571686",
+"last_seen": "07-30",
+"url": "https://dealapp.sa/ar/ad-details/490096",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "2037066",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/449471",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "1126529",
+"last_seen": "07-14",
+"url": "https://dealapp.sa/ar/ad-details/455063",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "3046432",
+"last_seen": "07-17",
+"url": "https://dealapp.sa/ar/ad-details/549647",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "1134758",
+"last_seen": "07-20",
+"url": "https://dealapp.sa/ar/ad-details/506591",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "1274163",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/536092",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "3045427",
+"last_seen": "07-31",
+"url": "https://dealapp.sa/ar/ad-details/419526",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "5440617",
+"last_seen": "07-30",
+"url": "https://dealapp.sa/ar/ad-details/542345",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "2293096",
+"last_seen": "07-13",
+"url": "https://dealapp.sa/ar/ad-details/547560",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "2046880",
+"last_seen": "07-23",
+"url": "https://dealapp.sa/ar/ad-details/526046",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "1726044",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/504776",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "1291794",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/536970",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "1291713",
+"last_seen": "07-30",
+"url": "https://dealapp.sa/ar/ad-details/458906",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "5133504",
+"last_seen": "07-27",
+"url": "https://dealapp.sa/ar/ad-details/477259",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "4957284",
+"last_seen": "07-27",
+"url": "https://dealapp.sa/ar/ad-details/548173",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "4583002",
+"last_seen": "07-29",
+"url": "https://dealapp.sa/ar/ad-details/548866",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "5440152",
+"last_seen": "07-29",
+"url": "https://dealapp.sa/ar/ad-details/558935",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "1134751",
+"last_seen": "07-21",
+"url": "https://dealapp.sa/ar/ad-details/537540",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "4748674",
+"last_seen": "07-27",
+"url": "https://dealapp.sa/ar/ad-details/453656",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "3966865",
+"last_seen": "07-21",
+"url": "https://dealapp.sa/ar/ad-details/542155",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "1806663",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/451900",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "5642162",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/431415",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "2046817",
+"last_seen": "07-27",
+"url": "https://dealapp.sa/ar/ad-details/537128",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "1291473",
+"last_seen": "07-05",
+"url": "https://dealapp.sa/ar/ad-details/385399",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "2295983",
+"last_seen": "07-30",
+"url": "https://dealapp.sa/ar/ad-details/517578",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "1125659",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/506999",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "5192675",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/551065",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "2037486",
+"last_seen": "07-20",
+"url": "https://dealapp.sa/ar/ad-details/380663",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "2500041",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/535999",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "1967866",
+"last_seen": "07-27",
+"url": "https://dealapp.sa/ar/ad-details/415099",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "3046428",
+"last_seen": "07-29",
+"url": "https://dealapp.sa/ar/ad-details/521864",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "1136154",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/331460",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "3441276",
+"last_seen": "07-20",
+"url": "https://dealapp.sa/ar/ad-details/513832",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "3063125",
+"last_seen": "07-20",
+"url": "https://dealapp.sa/ar/ad-details/384658",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "3443337",
+"last_seen": "07-27",
+"url": "https://dealapp.sa/ar/ad-details/545677",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "2295925",
+"last_seen": "07-12",
+"url": "https://dealapp.sa/ar/ad-details/371156",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "5184950",
+"last_seen": "08-03",
+"url": "https://dealapp.sa/ar/ad-details/468785",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "2500051",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/506687",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "1291833",
+"last_seen": "07-27",
+"url": "https://dealapp.sa/ar/ad-details/403530",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "6264324",
+"last_seen": "08-03",
+"url": "https://dealapp.sa/ar/ad-details/395689",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "1125955",
+"last_seen": "08-03",
+"url": "https://dealapp.sa/ar/ad-details/501925",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "3063318",
+"last_seen": "08-03",
+"url": "https://dealapp.sa/ar/ad-details/526243",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "1291395",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/416940",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "956951",
+"last_seen": "07-30",
+"url": "https://dealapp.sa/ar/ad-details/433036",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "1040011",
+"last_seen": "08-03",
+"url": "https://dealapp.sa/ar/ad-details/406005",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+},
+{
+"id": "2295923",
+"last_seen": "08-05",
+"url": "https://dealapp.sa/ar/ad-details/542867",
+"http": 200,
+"verdict": "live",
+"availability": "https://schema.org/instock",
+"err": null
+},
+{
+"id": "1571248",
+"last_seen": "08-03",
+"url": "https://dealapp.sa/ar/ad-details/496794",
+"http": 200,
+"verdict": "dead",
+"availability": null,
+"err": null
+}
+]

@@ -219,6 +219,11 @@ def test_fursaghyr_micro_price_gate_still_judges_magnitude_not_the_bare_rate():
     assert row is not None, "honest cheap-land row was dropped by the micro-price gate"
     assert row["price_total"] == 33 * 620, "rate×area fallback should have populated price_total"
 
-    # genuinely implausible magnitude → still dropped
+    # REVERSED AGAIN 2026-08-09: a small magnitude is no longer grounds to DROP the listing. The
+    # gate's remaining arm assumed "under 1,000 SAR ⇒ not real", and that premise was tested against
+    # the sources — all 204 live sub-1000 Buy rows matched their source page exactly (204/204), so
+    # the assumption was false and the drop was silently destroying real inventory. The listing is
+    # kept and the published magnitude stored as-is (PRICE = SOURCE, 2026-08-03).
     row, _ = map_listing(item(3, land_area=1, meter_price=500))
-    assert row is None
+    assert row is not None, "a small-magnitude row must be KEPT, not dropped"
+    assert row["price_total"] == 500, "the published figure is stored verbatim"
