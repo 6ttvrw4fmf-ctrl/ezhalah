@@ -208,6 +208,27 @@ def check_aqar_price_not_licence(client) -> bool:
     return False
 
 
+def check_bedroom_or(client) -> bool:
+    """True = OK. Bedroom multi-select must be an OR: selecting an exact count AND "5+" together must
+    return BOTH sets, never silently drop the 5+ rows. The search + 2 guided-count RPCs shared a
+    priority-CASE bedroom predicate (p_beds_exact won; p_beds_min was ignored when exact was set), so
+    a "3 or 5+" selection returned only the 3-bed rows (Filter QA 2026-08-05; fixed in migration
+    20260809110618). This asserts, on a live scope, count("3 or 5+") == count(3) + count(>=5)."""
+    def tc(**extra):
+        scope = {"p_deal": "بيع", "p_cities": ["الرياض"], "p_limit": 1, **extra}
+        rows = client.rpc("location_search_candidates_ar", scope).execute().data or []
+        return rows[0]["total_count"] if rows else 0
+    n3 = tc(p_beds_exact=[3]); n5 = tc(p_beds_min=5); both = tc(p_beds_exact=[3], p_beds_min=5)
+    if both == n3 + n5 and both > n3 and both > n5:
+        print(f"OK  bedroom OR: '3 or 5+' = {both} == {n3} (=3) + {n5} (>=5).")
+        return True
+    detail = (f"bedroom multi-select is not OR: '3 or 5+' returned {both}, expected {n3 + n5} "
+              f"(exact-3={n3}, min-5={n5}) — the priority-CASE regression is back.")
+    print(f"FAIL bedroom OR: {detail}")
+    _alert(client, "bedroom_or_predicate_regression", both, detail)
+    return False
+
+
 def _call_agent(text: str) -> dict:
     body = json.dumps({"text": text, "locale": "ar", "loggedIn": False, "order": False, "history": []}).encode()
     req = urllib.request.Request(
@@ -250,7 +271,7 @@ def check_agent(client=None) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index", "unverified_kill", "aqar_licence_price"],
+    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index", "unverified_kill", "aqar_licence_price", "bedroom_or"],
                     help="run one check")
     args = ap.parse_args()
 
@@ -274,6 +295,7 @@ def main() -> int:
     if args.only in (None, "awal"):        results.append(check_awal(client))
     if args.only in (None, "unverified_kill"): results.append(check_unverified_inactivations(client))
     if args.only in (None, "aqar_licence_price"): results.append(check_aqar_price_not_licence(client))
+    if args.only in (None, "bedroom_or"):  results.append(check_bedroom_or(client))
     if args.only is None:                  results.append(check_agent(client))
     return 0 if all(results) else 1
 
