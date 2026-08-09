@@ -36,10 +36,7 @@ FEATURE_PATTERNS: list[tuple[str, list[str]]] = [
     ("car_entrance",               [r"مدخل\s*سيارة", r"مدخل\s*للسيارة", r"كراج"]),
     ("maid_room",                  [r"غرفة\s*خادم(?:ة|ه)", r"غرفة\s*شغّ?الة"]),
     ("driver_room",                [r"غرفة\s*سائق"]),
-    ("water_supply",               [r"توفر\s*الماء", r"\bالماء\b", r"\bمياه\b"]),
     ("air_conditioner",            [r"مكيف", r"تكييف"]),
-    ("electricity",                [r"توفر\s*الكهرباء", r"كهرباء"]),
-    ("sanitation",                 [r"صرف\s*صحي"]),
     ("private_entrance",           [r"مدخل\s*خاص", r"مدخل\s*مستقل"]),
     ("extension",                  [r"إمكانية\s*التوسعة", r"امكانية\s*التوسعة", r"قابلة\s*للتوسعة"]),
     ("special_surface",            [r"واجهة\s*مميزة", r"وجه\s*مميز"]),
@@ -96,6 +93,12 @@ _STRUCTURED_AMENITY_KEYS: dict[str, str] = {
     "ac": "air_conditioner",
     "car_entrance": "car_entrance",
     "furnished": "furnished",
+    # Utility availability: aqar publishes all three as native booleans and they carry real
+    # negatives (2026-08-09, 24 live pages: water 21T/1F, electrical 21T/1F, drainage 18T/4F).
+    # They were previously matched from «توفر الماء» / «كهرباء» / «صرف صحي», which cannot say "no".
+    "water_availability": "water_supply",
+    "electrical_availability": "electricity",
+    "drainage_availability": "sanitation",
 }
 # aqar nests a second block of facts under `listing.extended_details`, as native JSON booleans with
 # the same true/false/null semantics as the flat keys above. Verified across 24 live pages
