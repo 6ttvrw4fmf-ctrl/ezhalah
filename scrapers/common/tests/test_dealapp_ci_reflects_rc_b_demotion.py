@@ -14,9 +14,14 @@ exited 0, so the daily cron kept reporting success while dealapp's raw last_seen
 2026-08-08 05:51 UTC for 23+ hours across 2 consecutive days. Filed as
 https://github.com/6ttvrw4fmf-ctrl/ezhalah/issues/343.
 
-Also covers: fetch_one now classifies WHY each fetch ultimately failed (login-wall/page-shape-
-change vs 404 vs a persistent unhydrated skeleton) into a counter, so a future silent-zero run is
+Also covers: fetch_one now classifies WHY each fetch ultimately failed (404 vs a persistent
+unhydrated skeleton vs a 200 that never carried the listing schema, itself split into
+redirected-away / same-url-no-ng-state / same-url-ng-state-no-schema — see
+_record_status_200_no_schema's docstring) into a counter, so a future silent-zero run is
 diagnosable straight from the job log instead of needing live access to the source to guess.
+The 2026-08-09 follow-up (issue #343 second pass) added the sub-classification after a real run
+showed 980/1200 fetches in that one bucket, with no way to tell "expired listing" from "we're
+failing to render a live one" apart.
 
 Run: python -m pytest scrapers/common/tests/test_dealapp_ci_reflects_rc_b_demotion.py -v
 """
@@ -59,32 +64,18 @@ def test_main_exits_zero_when_end_run_reports_a_healthy_run(monkeypatch):
     assert run.main() == 0
 
 
-def test_fetch_one_classifies_a_persistent_200_with_no_listing_schema():
-    """The exact shape a login-wall / consent shell / changed page layout would produce: HTTP 200
-    on every attempt, but the response never once carries the 'real-estate-listing' marker at all
-    (not even an unhydrated skeleton). Must be tallied distinctly from a 404 or a skeleton-only
-    response so the next run's job log actually says which one happened."""
-    run._fetch_fail_reasons.clear()
-
-    class _FakeResp:
-        status_code = 200
-        text = "<html><body>يرجى تسجيل الدخول للمتابعة</body></html>"  # no ng-state at all
-
+def _fetch_one_with_fake_response(adid, resp):
+    """Run fetch_one against a canned response, patching the module-level thread-local _session()
+    helper (fetch_one doesn't take a session argument) rather than injecting one directly."""
     fake_session = MagicMock()
-    fake_session.get.return_value = _FakeResp()
-
-    # fetch_one calls the module-level _session() helper (thread-local), not a passed-in session —
-    # patch that instead of trying to inject one directly.
+    fake_session.get.return_value = resp
     import scrapers.dealapp.run as run_mod
     orig_session = run_mod._session
     try:
         run_mod._session = lambda: fake_session
-        out = run_mod.fetch_one("999")
+        return run_mod.fetch_one(adid)
     finally:
         run_mod._session = orig_session
-
-    assert out is None
-    assert run._fetch_fail_reasons["status_200_no_listing_schema(likely_block_or_page_shape_change)"] == 1
 
 
 def test_fetch_one_classifies_a_404_separately_from_a_block_page():
@@ -94,17 +85,99 @@ def test_fetch_one_classifies_a_404_separately_from_a_block_page():
         status_code = 404
         text = "Not Found"
 
-    fake_session = MagicMock()
-    fake_session.get.return_value = _FakeResp()
-
-    import scrapers.dealapp.run as run_mod
-    orig_session = run_mod._session
-    try:
-        run_mod._session = lambda: fake_session
-        out = run_mod.fetch_one("999")
-    finally:
-        run_mod._session = orig_session
+    out = _fetch_one_with_fake_response("999", _FakeResp())
 
     assert out is None
     assert run._fetch_fail_reasons["not_found_404_410"] == 1
     assert "status_200" not in run._fetch_fail_reasons
+
+
+def test_fetch_one_classifies_a_redirect_away_as_redirected_away():
+    """dealapp 301/302s an expired/removed ad to somewhere else entirely (home, search, a generic
+    page) — the strongest safe (content-free) signal that the id is gone, not that OUR renderer
+    failed on a still-live page."""
+    run._fetch_fail_reasons.clear()
+    run._fetch_fail_samples.clear()
+
+    class _FakeResp:
+        status_code = 200
+        text = "<html><body>generic homepage shell</body></html>"
+        url = "https://dealapp.sa/ar/home"  # left the requested /ad-details/999 path entirely
+
+    out = _fetch_one_with_fake_response("999", _FakeResp())
+
+    assert out is None
+    assert run._fetch_fail_reasons["status_200_no_listing_schema:redirected_away"] == 1
+    assert run._fetch_fail_samples["redirected_away"][0]["adid"] == "999"
+
+
+def test_fetch_one_classifies_a_same_url_response_with_no_ng_state_as_a_block_signature():
+    """The login-wall/consent-shell/rate-limit shape: HTTP 200, stayed on the requested URL, but
+    never even hydrated an Angular ng-state block. The one bucket that's a candidate for 'we're
+    failing to render a genuinely live listing' rather than 'dealapp told us it's gone'."""
+    run._fetch_fail_reasons.clear()
+    run._fetch_fail_samples.clear()
+
+    class _FakeResp:
+        status_code = 200
+        text = "<html><body>يرجى تسجيل الدخول للمتابعة</body></html>"  # no ng-state at all
+        url = "https://dealapp.sa/ar/ad-details/999"  # same path as requested
+
+    out = _fetch_one_with_fake_response("999", _FakeResp())
+
+    assert out is None
+    assert run._fetch_fail_reasons["status_200_no_listing_schema:same_url_no_ng_state"] == 1
+
+
+def test_fetch_one_classifies_a_hydrated_soft_404_distinctly_from_a_block_page():
+    """Angular DID fully hydrate (ng-state present) but the app itself never wrote a real-estate-
+    listing schema block — the SPA rendered and decided there's no listing here. Cleanest 'this id
+    is genuinely gone' signal of the three, and must NOT be confused with the block-page bucket."""
+    run._fetch_fail_reasons.clear()
+    run._fetch_fail_samples.clear()
+
+    class _FakeResp:
+        status_code = 200
+        text = '<html><body><script id="ng-state" type="application/json">{"schemaMarkupScripts":{}}</script></body></html>'
+        url = "https://dealapp.sa/ar/ad-details/999"
+
+    out = _fetch_one_with_fake_response("999", _FakeResp())
+
+    assert out is None
+    assert run._fetch_fail_reasons["status_200_no_listing_schema:same_url_ng_state_no_schema"] == 1
+    assert run._fetch_fail_reasons["status_200_no_listing_schema:same_url_no_ng_state"] == 0
+
+
+def test_fetch_fail_samples_are_content_free():
+    """PDPL guard: a sample must carry only the adid, a truncated redirect path, and a body length
+    — never the response text itself."""
+    run._fetch_fail_reasons.clear()
+    run._fetch_fail_samples.clear()
+
+    class _FakeResp:
+        status_code = 200
+        text = "<html><body>0512345678 محمد للتواصل</body></html>"  # a phone number, on purpose
+        url = "https://dealapp.sa/ar/home"
+
+    _fetch_one_with_fake_response("999", _FakeResp())
+
+    sample = run._fetch_fail_samples["redirected_away"][0]
+    assert set(sample.keys()) == {"adid", "final_path", "body_len"}
+    assert "0512345678" not in str(sample.values())
+    assert "محمد" not in str(sample.values())
+
+
+def test_fetch_fail_samples_are_capped_per_bucket():
+    run._fetch_fail_reasons.clear()
+    run._fetch_fail_samples.clear()
+
+    class _FakeResp:
+        status_code = 200
+        text = "<html></html>"
+        url = "https://dealapp.sa/ar/home"
+
+    for i in range(run._MAX_SAMPLES_PER_BUCKET + 5):
+        _fetch_one_with_fake_response(str(i), _FakeResp())
+
+    assert run._fetch_fail_reasons["status_200_no_listing_schema:redirected_away"] == run._MAX_SAMPLES_PER_BUCKET + 5
+    assert len(run._fetch_fail_samples["redirected_away"]) == run._MAX_SAMPLES_PER_BUCKET
