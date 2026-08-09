@@ -7,7 +7,11 @@ import { useI18n } from '@/i18n';
 
 const MAX_W = 560;
 
-// About Us — neutrality, REGA FAL licensing, disclaimer, and PDPL data residency (prototype AboutPage).
+// About Us — neutrality, listing-licensing provenance, disclaimer, and privacy.
+// TRUTHFULNESS RULE (2026-08-06, owner-approved): this screen must never assert a licence Ezhalah does not
+// hold, nor a data-residency location that is not factually where production data lives (currently Supabase
+// ap-northeast-1 / Tokyo — NOT the Kingdom). Both claims previously shipped here and were false. Any future
+// claim must be provable before it ships; scripts/verify-no-unsupported-claims.ts fails the build otherwise.
 export default function About() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -32,14 +36,14 @@ export default function About() {
           <Text style={s.sec}>{t('Our role')}</Text>
           <Text style={s.tx}>{t('We are a property search platform only. We do not own, list, sell or rent any property. We do not facilitate transactions or collect commission.')}</Text>
 
-          <Text style={s.sec}>{t('License')}</Text>
-          <Text style={s.tx}>{t('Ezhalah operates under REGA FAL license number XXXXXXXX, issued by the General Authority for Real Estate in Saudi Arabia.')}</Text>
+          <Text style={s.sec}>{t('Listing licensing')}</Text>
+          <Text style={s.tx}>{t('Every listing shown on Ezhalah is published by the source platform it came from, and each advertisement remains subject to that platform\'s own licensing and regulatory obligations. Ezhalah does not issue, own or publish advertisements.')}</Text>
 
           <Text style={s.sec}>{t('Disclaimer')}</Text>
           <Text style={s.tx}>{t('All listings are sourced directly from third-party platforms. Ezhalah does not own or verify any listing. Always confirm details directly with the original platform before making any decision.')}</Text>
 
           <Text style={s.sec}>{t('Data & privacy')}</Text>
-          <Text style={s.tx}>{t("Ezhalah complies with Saudi Arabia's PDPL. All user data is stored on Saudi servers. We do not sell user data.")}</Text>
+          <Text style={s.tx}>{t('We collect only what the service needs, and we do not sell user data.')}</Text>
         </View>
       </ScrollView>
     </View>
