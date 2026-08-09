@@ -63,7 +63,22 @@ check('English district input shows the Arabic-only hint and clears suggestions'
 //    SELECTED by active-listing count (asserted above, in locations.ts), but the count is no longer
 //    displayed; every row (incl. zero-listing catalog districts) renders its name unconditionally. ──
 check('district dropdown no longer displays the listing count', !/grouped\(opt\.listingCount\)/.test(indexSrc) && !/\{opt\.listingCount\}/.test(indexSrc));
-check('every district row renders its name unconditionally (zero-listing districts still selectable)', /<Text style=\{s\.suggCity\}>\{opt\.districtAr\}<\/Text>/.test(indexSrc));
+check('every district row renders its name unconditionally (zero-listing districts still selectable)', /<Text style=\{\[s\.suggCity, isEmpty && s\.suggCityEmpty\]\}>\{opt\.districtAr\}<\/Text>/.test(indexSrc));
+
+// ── Dead-end guard (2026-08-09): a district with ZERO listings for the current deal/category must be
+//    visibly marked, so a user is never silently led into a 0-result pick. The row stays selectable
+//    (never-dead-end: picking it yields the specific "widen area" suggestion). ──
+check('zero-listing district rows are detected via listingCount === 0', /const isEmpty = opt\.listingCount === 0/.test(indexSrc));
+check('empty district rows are marked with a "no listings here" note', /isEmpty \? <Text style=\{s\.suggEmptyNote\}>\{t\('No listings here right now'\)\}<\/Text> : null/.test(indexSrc));
+check('the "No listings here right now" string is translated to Arabic', /'No listings here right now': '[^']+'/.test(readFileSync(join(root, 'src/i18n.tsx'), 'utf8')));
+// The picked district's live count rides along to the search so the 0-results path can tell an empty
+// district ("widen area") from one that lacks only the chosen TYPE ("widen type").
+check('onSearch carries districtSelected.listingCount to the query', /districtListingCount: districtSelected \? districtSelected\.listingCount : undefined/.test(indexSrc));
+{
+  const searchSrc = readFileSync(join(root, 'src/data/search.ts'), 'utf8');
+  check('SearchQuery carries districtListingCount', /districtListingCount\?: number/.test(searchSrc));
+  check('0-results diagnosis uses the real district count, not the empty pool', /distCount === 0[\s\S]{0,400}?widen the area[\s\S]{0,400}?q\.type[\s\S]{0,120}?broaden the type/.test(searchSrc));
+}
 
 console.log(failed === 0 ? '\n✓ all district-field assertions passed' : `\n✗ ${failed} district-field assertion(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

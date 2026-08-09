@@ -422,6 +422,7 @@ const AR: Record<string, string> = {
     'تعرض إزهله إعلانات من منصات خارجية. نحن لا نوصي بأي إعلان ولا نتحقق منه ولا نملكه — والقرار لك.',
   'Ezhalah! ': 'إزهله! ',
   'No exact matches — try broadening your search.': 'لا توجد نتائج مطابقة تماماً — حاول توسيع نطاق بحثك.',
+  'No listings here right now': 'لا توجد إعلانات هنا حالياً',
   'No listings within that budget — there are matches above it. Want me to remove the budget?':
     'ما فيه إعلانات داخل ميزانيتك — لكن فيه خيارات فوقها. تبيني أشيل الميزانية؟',
   'No matches in that specific area — but I can find some elsewhere in the same city. Want me to widen the area?':
