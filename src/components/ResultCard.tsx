@@ -220,7 +220,12 @@ export function ResultCard({
           && listing.pricePerMeter != null
           && listing.pricePerMeter > 1 ? (
           <Text style={card.pricePerMeter} numberOfLines={1}>
-            {t('Price Per m²')} <Text style={card.pricePerMeterStrong}>{t('SAR')} {Number(listing.pricePerMeter).toLocaleString('en-US')}</Text>
+            {/* UNIT-SUFFIXED, never prefix-only (owner 2026-08-09: "display it clearly as ريال/م²").
+                Renders «سعر المتر 750 ريال/م²». The old form put the currency BEFORE the number
+                («سعر المتر ر.س 750»), which reads like a total price with a label in front of it —
+                the one thing this element must never be mistaken for. The unit now travels with the
+                number, so a rate can never be misread as the price of the property. */}
+            {t('Price Per m²')} <Text style={card.pricePerMeterStrong}>{Number(listing.pricePerMeter).toLocaleString('en-US')} {t('SAR/m²')}</Text>
           </Text>
         ) : null}
         {/* Guest rating — renders ONLY when the listing carries one (Gathern). e.g. ★ 9.9 (59 تقييم) */}
