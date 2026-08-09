@@ -227,23 +227,23 @@ def check_bedroom_or(client) -> bool:
 
 def check_filter_qa(client) -> bool:
     """True = OK. Reads mon_filter_qa (Filter QA 2026-08-05). Both counts must be 0:
-      buy_token_price_servable — servable Buy rows with an impossible sub-1000 price (parse token);
       cityid_not_in_match — production_ready rows whose city_id is not in their own match_city_ids
-      (the Taif→Makkah compound-label class)."""
-    rows = client.table("mon_filter_qa").select("buy_token_price_servable,cityid_not_in_match,untaxonomized_type,period_payment_mismatch").limit(1).execute().data
+        (the Taif→Makkah compound-emirate-label class; fixed by the trg_set_match_city_ids reconcile);
+      untaxonomized_type — production_ready rows whose type_ar is not in known_type_ar (unreachable by
+        any type filter).
+    NOTE: sub-1000 Buy prices are SOURCE-REAL (PR#362, 204/204 live-verified) and are NOT monitored
+    here — price magnitude is PR#362's mon_detect_price_magnitude_gate. rent-now-pay-later rows are
+    deliberately excluded from monthly by the owner, so payment_monthly is not asserted here either."""
+    rows = client.table("mon_filter_qa").select("cityid_not_in_match,untaxonomized_type").limit(1).execute().data
     if not rows:
         detail = "mon_filter_qa returned no row — the regression view is missing."
         print(f"FAIL filter-qa: {detail}"); _alert(client, "mon_filter_qa_missing", 0, detail); return False
-    tok = rows[0].get("buy_token_price_servable") or 0
     mis = rows[0].get("cityid_not_in_match") or 0
     unk = rows[0].get("untaxonomized_type") or 0
-    ppm = rows[0].get("period_payment_mismatch") or 0
-    if tok == 0 and mis == 0 and unk == 0 and ppm == 0:
-        print("OK  filter-qa: 0 servable sub-1000 Buy prices, 0 city_id/match contradictions, "
-              "0 untaxonomized types, 0 period/payment mismatches."); return True
-    detail = (f"filter-qa regression: buy_token_price_servable={tok}, cityid_not_in_match={mis}, "
-              f"untaxonomized_type={unk}, period_payment_mismatch={ppm} (all must be 0).")
-    print(f"FAIL filter-qa: {detail}"); _alert(client, "filter_qa_regression", tok + mis + unk + ppm, detail); return False
+    if mis == 0 and unk == 0:
+        print("OK  filter-qa: 0 city_id/match contradictions, 0 untaxonomized types."); return True
+    detail = f"filter-qa regression: cityid_not_in_match={mis}, untaxonomized_type={unk} (both must be 0)."
+    print(f"FAIL filter-qa: {detail}"); _alert(client, "filter_qa_regression", mis + unk, detail); return False
 
 
 def _call_agent(text: str) -> dict:
