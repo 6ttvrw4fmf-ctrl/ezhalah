@@ -695,6 +695,19 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
         "price_total": price if not is_rent else None,
         "price_annual": price_annual,
         "price_per_meter": price_per_meter,
+        # PRICE = SOURCE evidence (owner invariant 2026-08-04). dealapp publishes a STRUCTURED
+        # offers.price; record it verbatim next to what we store, so "is 720M real?" is answerable
+        # from the DB alone. The 2026-08-09 forensic on DA545798/DA507447 needed a live-page session
+        # for exactly this reason — no evidence had been kept. A witness only: run.py reads
+        # offers.price directly (line ~597); this never feeds the stored price.
+        "price_evidence": normalize.price_evidence(
+            field="offers.price",
+            raw=offers.get("price"),
+            stored=price,
+            kind="total" if not is_rent else (rent_period or "annual"),
+            unit="total",
+            origin="structured",
+        ),
         "rent_period": rent_period,
         "city": city,
         "region": region,

@@ -503,6 +503,10 @@ const AR: Record<string, string> = {
   'Monthly Rent': 'الإيجار الشهري',
   'Annual Equivalent': 'المعادل السنوي',
   'Price Per m²': 'سعر المتر',
+  // Unit suffix for the source-published «سعر المتر» rate. It is printed NEXT TO the number so the
+  // card reads «سعر المتر 750 ريال/م²» — a per-square-metre RATE, never mistakable for a total.
+  // (owner 2026-08-09: "display it clearly as ريال/م²".)
+  'SAR/m²': 'ريال/م²',
   'Calculated Total': 'الإجمالي المحسوب',
   'Size': 'المساحة',
   '{n} beds': '{n} غرف',

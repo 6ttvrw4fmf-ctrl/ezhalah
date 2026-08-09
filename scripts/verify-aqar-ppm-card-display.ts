@@ -42,6 +42,9 @@ const arOf = (key: string): string | null => {
 eq("i18n renders the label «سعر المتر» for 'Price Per m²'", arOf('Price Per m²'), 'سعر المتر');
 check("i18n renders the currency «ر.س» for 'SAR'", /AR\['SAR'\]\s*=\s*'ر\.س'/.test(I18N),
       "AR['SAR'] = 'ر.س' not found in src/i18n.tsx");
+// 2026-08-09 (owner): the rate must carry an explicit per-square-metre UNIT, so it can never be
+// read as a total price. The unit follows the number: «سعر المتر 750 ريال/م²».
+eq("i18n renders the unit «ريال/م²» for 'SAR/m²'", arOf('SAR/m²'), 'ريال/م²');
 check('tPrice maps the price-less sentinel to «السعر عند الطلب»',
       /'Price on request'\)\s*return\s*'السعر عند الطلب'/.test(I18N));
 
@@ -52,9 +55,9 @@ type Row = { ad: string; price: string; pricePerMeter: number | null };
 const showsPpm = (l: Row): boolean =>
   l.price === 'Price on request' && l.pricePerMeter != null && l.pricePerMeter > 1;
 
-// The Arabic line the card composes, ported from the JSX:
-//   {t('Price Per m²')} <Text …>{t('SAR')} {Number(ppm).toLocaleString('en-US')}</Text>
-const ppmLine = (ppm: number) => `سعر المتر ر.س ${ppm.toLocaleString('en-US')}`;
+// The Arabic line the card composes, ported from the JSX (2026-08-09 unit-suffixed form):
+//   {t('Price Per m²')} <Text …>{Number(ppm).toLocaleString('en-US')} {t('SAR/m²')}</Text>
+const ppmLine = (ppm: number) => `سعر المتر ${ppm.toLocaleString('en-US')} ريال/م²`;
 
 // REAL rows, frozen from the live DB after migration 20260726120000 (verified via the anon key).
 const ROWS: Row[] = [
@@ -74,9 +77,13 @@ const ROWS: Row[] = [
 ];
 
 check('published rate renders on a price-less listing (ad 6237931)', showsPpm(ROWS[0]));
-eq('…and its Arabic line reads «سعر المتر ر.س 175»', ppmLine(ROWS[0].pricePerMeter!), 'سعر المتر ر.س 175');
+eq('…and its Arabic line reads «سعر المتر 175 ريال/م²»', ppmLine(ROWS[0].pricePerMeter!), 'سعر المتر 175 ريال/م²');
 check('published rate renders on 238,000 m² land (ad 6246621)', showsPpm(ROWS[1]));
-eq('…thousands separator is applied (ad 6781586)', ppmLine(ROWS[2].pricePerMeter!), 'سعر المتر ر.س 2,000');
+eq('…thousands separator is applied (ad 6781586)', ppmLine(ROWS[2].pricePerMeter!), 'سعر المتر 2,000 ريال/م²');
+// The unit must FOLLOW the number. «ر.س 2,000» (currency first, no unit) is the pre-2026-08-09 form
+// and reads like a total price with a label in front of it — the exact confusion this guards.
+check('the rendered line ends in the per-m² unit, never a bare currency amount',
+      ppmLine(2000).endsWith('ريال/م²') && !/ر\.س\s*\d/.test(ppmLine(2000)));
 check('rate renders for ad 6694227', showsPpm(ROWS[3]));
 
 check('«سعر المتر 1» placeholder is WITHHELD (ad 6668714 keeps «السعر عند الطلب»)', !showsPpm(ROWS[4]),
@@ -93,8 +100,14 @@ check('ResultCard still gates on a non-null pricePerMeter',
       /listing\.pricePerMeter\s*!=\s*null/.test(CARD));
 check('ResultCard still withholds the 1 placeholder AND non-positive rates (0, negatives)',
       /listing\.pricePerMeter\s*>\s*1/.test(CARD));
-check('ResultCard renders the rate with the Arabic label + currency helpers',
-      /t\('Price Per m²'\)/.test(CARD) && /t\('SAR'\)/.test(CARD));
+check('ResultCard renders the rate with the Arabic label + the per-m² unit helper',
+      /t\('Price Per m²'\)/.test(CARD) && /t\('SAR\/m²'\)/.test(CARD));
+// Anti-regression for the 2026-08-09 owner change: the currency must NOT be re-inserted as a bare
+// prefix before the number, which is what made the rate look like a total price.
+check('ResultCard no longer prefixes the rate with a bare t(\'SAR\')',
+      !/t\('SAR'\)\s*\}?\s*\{?\s*Number\(listing\.pricePerMeter\)/.test(CARD));
+check('ResultCard puts the number BEFORE the unit',
+      /Number\(listing\.pricePerMeter\)\.toLocaleString\('en-US'\)\}\s*\{t\('SAR\/m²'\)\}/.test(CARD));
 
 // The value must stay OUT of the `price` display string: search.ts parses that string back into a
 // number (listingPriceValue) for the hard price filter and the cheapest/priciest sort, so folding a
