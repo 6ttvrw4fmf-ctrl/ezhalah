@@ -62,7 +62,18 @@ PLATFORMS: dict[str, dict] = {
 DEFAULT_POLICY = {
     "min_inactive_days": 30, "min_missing_count": 3, "require_source_recheck": True,
     "max_delete_per_run": 500, "anomaly_floor": 300, "anomaly_factor": 4, "enabled": False,
+    # Scale-relative mass-deletion guard (2026-08-09). The absolute anomaly_floor cannot notice
+    # that a SMALL platform has gone catastrophically wrong: with floor=1000, a 3,000-row platform
+    # could have 600 rows (20%) suddenly eligible and still sail through. This guard scales with
+    # the platform, so a source outage / partial crawl / sitemap collapse that falsely inactivates
+    # a large FRACTION is caught regardless of how the floor is tuned. It can never deadlock: it
+    # moves with the platform's own size instead of being pinned to a fixed row count.
+    "max_eligible_frac": 0.10,
 }
+
+# The fraction guard is meaningless on a tiny table (10% of 9 rows is 0.9), and every such platform
+# is enabled=false anyway. Apply it only where the percentage means something.
+FRAC_GUARD_MIN_ROWS = 500
 
 
 def _probe(url: str) -> tuple[int | None, str]:
@@ -102,6 +113,17 @@ def _load_policy(client, platform: str) -> dict:
     return p
 
 
+def _count_of(res) -> int:
+    """Exact row count from a PostgREST head+count response, defensively.
+
+    Older/stubbed clients may not expose `.count`; fall back to len(data) rather than crashing a
+    destructive-path guard on an attribute error.
+    """
+    n = getattr(res, "count", None)
+    if n is None:
+        n = len(getattr(res, "data", None) or [])
+    return int(n)
+
 def _trailing_median_deleted(client, platform: str) -> float:
     rows = (client.table("cleanup_runs").select("deleted")
             .eq("platform", platform).eq("dry_run", False).eq("aborted", False)
@@ -121,7 +143,10 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
     dead_marker = (reg or {}).get("dead_marker")
     run_id = begin_run(f"cleanup:{platform}")
     stats = {"platform": platform, "dry_run": dry_run, "candidates": 0, "rechecked": 0,
-             "deleted": 0, "reactivated": 0, "skipped": 0, "aborted": False, "abort_reason": None}
+             "deleted": 0, "reactivated": 0, "skipped": 0, "aborted": False, "abort_reason": None,
+             # eligible_total = the TRUE unclamped population the anomaly gate judges;
+             # work_set = how many of them this run actually touches (<= max_delete_per_run).
+             "eligible_total": 0, "work_set": 0, "platform_rows": 0}
 
     def _abort(reason: str):
         stats["aborted"] = True
@@ -138,24 +163,54 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
 
         if not stats["aborted"]:
             cutoff = (datetime.now(timezone.utc) - _days(pol["min_inactive_days"])).isoformat()
-            # count eligible candidates across all this platform's tables (for the anomaly gate)
-            cands: list[tuple[str, dict]] = []
+
+            # ── measure the TRUE eligible population, unclamped by the delete cap ────────────────
+            # This count drives the anomaly gate, so the gate sees reality. Previously the same
+            # capped SELECT served both roles, which pinned the measurement at cap+1 and caused
+            # the deadlock above. Measurement and work-set are now separate concerns.
+            eligible_total = 0
+            platform_rows = 0
             for t in tables:
-                rows = (client.table(t).select("id, ad_number, listing_url, missing_count, last_seen_at")
-                        .eq("active", False).gte("missing_count", pol["min_missing_count"])
-                        .lt("last_seen_at", cutoff).order("last_seen_at")
-                        .limit(pol["max_delete_per_run"] + 1).execute().data or [])
-                cands.extend((t, r) for r in rows)
-            stats["candidates"] = len(cands)
+                eligible_total += _count_of(
+                    client.table(t).select("id", count="exact", head=True)
+                    .eq("active", False).gte("missing_count", pol["min_missing_count"])
+                    .lt("last_seen_at", cutoff).execute())
+                platform_rows += _count_of(
+                    client.table(t).select("id", count="exact", head=True).execute())
+            stats["eligible_total"] = eligible_total
+            stats["candidates"] = eligible_total          # what the gate and the audit log see
+            stats["platform_rows"] = platform_rows
 
             median = _trailing_median_deleted(client, platform)
             thresh = max(pol["anomaly_floor"], pol["anomaly_factor"] * median)
-            if stats["candidates"] > thresh:
-                _abort(f"anomaly: {stats['candidates']} candidates > threshold {thresh:.0f} "
+            frac_cap = pol["max_eligible_frac"] * platform_rows
+
+            if eligible_total > thresh:
+                _abort(f"anomaly: {eligible_total} eligible > threshold {thresh:.0f} "
                        f"(floor {pol['anomaly_floor']}, {pol['anomaly_factor']}× median {median:.0f}). "
-                       f"Human review required; re-run with --force after confirming the deletion report.")
+                       f"Human review required. NOTE: a STANDING backlog above the floor aborts "
+                       f"every run and can never drain — if {eligible_total} is legitimate "
+                       f"accumulation rather than a spike, raise anomaly_floor above it; do not "
+                       f"force.")
+            elif platform_rows >= FRAC_GUARD_MIN_ROWS and eligible_total > frac_cap:
+                # Scale guard: a partial crawl, source outage or sitemap collapse shows up as a
+                # large FRACTION of the platform going eligible at once, even when the absolute
+                # count is under the floor.
+                _abort(f"mass-inactivation guard: {eligible_total} eligible is "
+                       f"{100.0 * eligible_total / platform_rows:.1f}% of {platform_rows} rows "
+                       f"(cap {100.0 * pol['max_eligible_frac']:.0f}%). Suspect a partial crawl or "
+                       f"source outage rather than genuine delistings.")
             else:
-                cands = cands[: pol["max_delete_per_run"]]     # hard cap
+                # ── work-set: only now do we pull rows, and only up to the per-run cap ───────────
+                cands: list[tuple[str, dict]] = []
+                for t in tables:
+                    rows = (client.table(t).select("id, ad_number, listing_url, missing_count, last_seen_at")
+                            .eq("active", False).gte("missing_count", pol["min_missing_count"])
+                            .lt("last_seen_at", cutoff).order("last_seen_at")
+                            .limit(pol["max_delete_per_run"]).execute().data or [])
+                    cands.extend((t, r) for r in rows)
+                cands = cands[: pol["max_delete_per_run"]]     # hard cap across ALL tables
+                stats["work_set"] = len(cands)
                 to_delete: dict[str, list] = {}
                 to_reactivate: dict[str, list] = {}
                 log_rows: list[dict] = []
@@ -202,9 +257,17 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
         end_run(run_id, ok=ok, rows_seen=stats["candidates"], rows_upserted=stats["deleted"],
                 allow_empty=True, notes=("ABORT: " + stats["abort_reason"]) if stats["aborted"] else
                 f"deleted={stats['deleted']} reactivated={stats['reactivated']} skipped={stats['skipped']} dry_run={dry_run}")
-        print(f"✓ cleanup {platform}: candidates={stats['candidates']} rechecked={stats['rechecked']} "
-              f"deleted={stats['deleted']} reactivated={stats['reactivated']} skipped={stats['skipped']} "
+        print(f"✓ cleanup {platform}: eligible_total={stats['eligible_total']} "
+              f"work_set={stats['work_set']} cap={pol['max_delete_per_run']} "
+              f"rechecked={stats['rechecked']} deleted={stats['deleted']} "
+              f"reactivated={stats['reactivated']} skipped={stats['skipped']} "
               f"dry_run={dry_run} aborted={stats['aborted']}", flush=True)
+        # The headline the owner asked for: reactivated == rows the source proved are still LIVE,
+        # i.e. exactly the false-deletions this gate prevented.
+        if stats["rechecked"]:
+            fp = 100.0 * stats["reactivated"] / stats["rechecked"]
+            print(f"  false-positive sample: {stats['reactivated']}/{stats['rechecked']} rechecked "
+                  f"came back LIVE ({fp:.1f}%) → reactivated, NOT deleted", flush=True)
         return stats
     except Exception as e:
         end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=f"error: {e}")
