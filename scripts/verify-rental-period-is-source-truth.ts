@@ -71,6 +71,31 @@ if (defining.length) {
     /s\.deal_ar\s*=\s*'إيجار'/.test(body));
 }
 
+// ── 2e. THE TRIGGER — the writer that actually has the last word ─────────────────────────────────
+// enforce_price_size_sanity() is a BEFORE trigger on search_listings_ar. It used to carry an
+// UNCONDITIONAL `if rent_period_ar='شهري' then payment_monthly := true`, which ignored RNPL and
+// silently overrode sync_payment_monthly() on the very UPDATE that tried to correct a row — the
+// sweep even reported "1 row corrected" while nothing changed. Fixing the sweep alone was NOT
+// enough. Both writers must carry the SAME predicate or the guard is inverted by whichever runs
+// last. (Caught behaviourally 2026-08-09 on aqar id 23235.)
+{
+  const trigFiles = readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort()
+    .filter((f) => /create\s+or\s+replace\s+function\s+public\.enforce_price_size_sanity/i
+      .test(readFileSync(join(MIGRATIONS, f), 'utf8')));
+  check('2e. enforce_price_size_sanity() is defined by a migration in the repo', trigFiles.length > 0);
+  if (trigFiles.length) {
+    const t = readFileSync(join(MIGRATIONS, trigFiles[trigFiles.length - 1]), 'utf8')
+      .split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+    check('2f. the trigger NEVER force-sets payment_monthly := true unconditionally',
+      !/rent_period_ar\s*=\s*'شهري'\s*then\s*\n?\s*NEW\.payment_monthly\s*:=\s*true\s*;/i.test(t),
+      'an unconditional force here silently defeats the RNPL exclusion on every write');
+    check('2g. the trigger applies the SAME RNPL predicate as sync_payment_monthly()',
+      /NEW\.payment_monthly\s*:=\s*not\s+coalesce\(\s*NEW\.rent_now_pay_later\s*,\s*false\s*\)/i.test(t));
+    check('2h. the trigger still maps سنوي → not monthly',
+      /rent_period_ar\s*=\s*'سنوي'[\s\S]{0,80}?payment_monthly\s*:=\s*false/i.test(t));
+  }
+}
+
 // ── 3. the ×12 storage convention, per scraper that stores a monthly-labelled price ──────────────
 const scraperSrc = (p: string) => readFileSync(join(import.meta.dirname, '..', 'scrapers', p), 'utf8');
 {
