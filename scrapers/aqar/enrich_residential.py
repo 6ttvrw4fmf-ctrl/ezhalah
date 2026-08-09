@@ -324,11 +324,37 @@ def _property_age_from_text(text: str) -> Optional[int]:
     return N.parse_property_age(m.group(1)) if m else None
 
 
+# The labels aqar prints in its specification block. De-tagged, that block is one long run of
+# «label value label value …», so a capture that does not STOP at the next label swallows the rest of
+# the table and then the seller's blurb.
+_SPEC_LABELS = (
+    "الواجهة", "واجهة العقار", "غرف النوم", "غرف نوم", "الصالات", "دورات المياه", "عرض الشارع",
+    "عمر العقار", "المساحة", "المميزات", "نوع السكن", "اسم المشروع", "الشارع", "اسم الشارع",
+    "رقم المبنى", "الرمز البريدي", "الرقم الإضافي", "تاريخ الإعلان", "تاريخ الإضافة", "آخر تحديث",
+    "رخصة الإعلان", "رقم الرخصة", "السعر", "سعر المتر", "مصدر الإعلان", "الفئة المستهدفة",
+    "عدد الشقق", "الدور", "مكونات", "تفاصيل الإعلان", "المطبخ", "المصعد", "مواقف",
+)
+_SPEC_BOUNDARY_RE = re.compile("|".join(re.escape(s) for s in _SPEC_LABELS))
+
+
 def _text_after_label(html: str, *labels: str, max_len: int = 80) -> Optional[str]:
+    """The value aqar prints after `label`, cut at the next spec label.
+
+    SOURCE IS TRUTH (owner rule, 2026-08-09). Without the cut this returned up to `max_len`
+    characters of whatever followed, which on aqar's de-tagged spec table is the NEXT field and then
+    the seller's free text. Live proof from the 2026-08-09 recovery dry-run: `direction` came back as
+    «شمال غرف النوم 5 الصالات 2 دورات المياه 4 عرض الشارع 20 م عمر العقار 3 سنوات الم» — the real
+    facing is «شمال» and everything after it is three other fields plus prose. Storing that is
+    exactly the "never take a value from the description" failure, in a text column.
+    """
     for lbl in labels:
         m = re.search(rf"{lbl}[\s:]*([^\n<]{{1,{max_len}}})", html)
         if m:
-            v = re.sub(r"\s+", " ", m.group(1)).strip()
+            v = m.group(1)
+            cut = _SPEC_BOUNDARY_RE.search(v)
+            if cut:
+                v = v[:cut.start()]
+            v = re.sub(r"\s+", " ", v).strip(" :-،")
             if v:
                 return v
     return None
