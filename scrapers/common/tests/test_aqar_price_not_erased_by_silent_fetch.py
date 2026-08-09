@@ -9,6 +9,11 @@ from anonymous fetches (see reference_aqar-liveness-source-verification-method).
 Dropping the key rather than sending NULL is correct in both directions: a NEW row still lands with
 the column NULL, an EXISTING row keeps what it had, and a price only moves when the source publishes
 a number to move it to.
+
+GENERALISED 2026-08-09 to the whole fleet and every field, on the owner's permanent SOURCE IS TRUTH
+rule — the guard is now `_unknown_must_not_overwrite_known` and runs on every upsert path. These
+tests stay because they carry the aqar EVIDENCE that motivated it; the fleet-level contract lives in
+test_source_is_truth_fleet_invariants.py.
 """
 from __future__ import annotations
 
@@ -21,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scrapers.common.db import _keep_price_when_the_fetch_saw_none as guard  # noqa: E402
+from scrapers.common.db import _unknown_must_not_overwrite_known as guard  # noqa: E402
 
 
 @pytest.mark.parametrize("col", ["price_annual", "price_total", "price_per_meter"])
@@ -51,13 +56,12 @@ def test_zero_is_a_value_not_an_absence():
     assert row["price_annual"] == 0
 
 
-def test_non_price_nulls_are_left_alone():
-    """Bedrooms/amenities/age come from a spec block that is either present or absent, so their
-    NULLs are honest re-reads and must keep clearing stale values."""
+def test_every_listing_field_is_protected_not_just_price():
+    """Originally price-only. The owner's 2026-08-09 rule extends it to every scraped field: an
+    unreadable bedroom count is no more entitled to erase a verified one than an unreadable price."""
     row = {"bedrooms": None, "furnished": None, "property_age": None, "price_annual": None}
     guard(row)
-    assert row["bedrooms"] is None and row["furnished"] is None and row["property_age"] is None
-    assert "price_annual" not in row
+    assert row == {}, "no unreadable field may overwrite a stored value"
 
 
 def test_guard_is_wired_into_both_aqar_upserts():
@@ -65,4 +69,4 @@ def test_guard_is_wired_into_both_aqar_upserts():
     src = (ROOT / "scrapers" / "common" / "db.py").read_text()
     for fn in ("upsert_aqar_residential", "upsert_aqar_commercial"):
         body = src.split(f"def {fn}(", 1)[1].split("\ndef ", 1)[0]
-        assert "_keep_price_when_the_fetch_saw_none(row)" in body, f"{fn} does not call the guard"
+        assert "_unknown_must_not_overwrite_known(row)" in body, f"{fn} does not call the guard"

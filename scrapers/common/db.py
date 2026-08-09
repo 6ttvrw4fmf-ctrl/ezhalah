@@ -249,7 +249,7 @@ def upsert_aqar_residential(row: dict[str, Any]) -> None:
     row = dict(row)
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
-    _keep_price_when_the_fetch_saw_none(row)
+    _unknown_must_not_overwrite_known(row)
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="aqar_residential_listings")
@@ -262,7 +262,7 @@ def upsert_aqar_commercial(row: dict[str, Any]) -> None:
     row = dict(row)
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
-    _keep_price_when_the_fetch_saw_none(row)      # same «طلب تسويق» exposure as residential
+    _unknown_must_not_overwrite_known(row)
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="aqar_commercial_listings")
@@ -275,6 +275,7 @@ def upsert_wasalt_residential(row: dict[str, Any]) -> None:
     row = dict(row)
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
+    _unknown_must_not_overwrite_known(row)
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="wasalt_residential_listings")
@@ -356,30 +357,42 @@ def _sanitize_price(r: dict[str, Any]) -> None:
 
 _PRICE_COLS = ("price_annual", "price_total", "price_per_meter")
 
+# Columns a writer must always be able to set, including to NULL/False. These are CONTROL state —
+# liveness, bookkeeping, capture provenance — not values read off the source page. Excluding them is
+# what keeps prune/reactivate/kill paths working while listing DATA is protected.
+_CONTROL_COLS = frozenset({
+    "active", "missing_count", "deactivated_at", "last_seen_at", "scraped_at", "raw_captured_at",
+    "source_capture", "raw_html_key", "image_storage_keys", "fullparse_done", "id", "ad_number",
+    "listing_url", "source_platform", "source_id", "degraded", "run_id",
+})
 
-def _keep_price_when_the_fetch_saw_none(r: dict[str, Any]) -> None:
-    """A fetch that saw NO price must not erase a price we already stored.
 
-    An upsert sends the whole row, so a `price_annual: None` overwrites the stored value with NULL.
-    That is the wrong default here, because "this fetch found no price" and "this listing has no
-    price" are not the same statement. aqar renders «طلب تسويق» instead of a figure on a large
-    minority of live ads, and per [[reference_aqar-liveness-source-verification-method]] it also
-    withholds fields from anonymous fetches — so one silent fetch is not enough evidence to delete
-    money that a previous fetch read off the page.
+def _unknown_must_not_overwrite_known(r: dict[str, Any]) -> None:
+    """SOURCE IS TRUTH — a field this fetch could not read must not erase what a previous fetch did.
 
-    Dropping the key instead of sending NULL gives the right answer in both directions: a NEW row
-    still lands with the column NULL (absent means default), and an EXISTING row keeps what it had.
-    A price only ever MOVES when the source publishes a number to move it to.
+    Owner rule, 2026-08-09, fleet-wide and permanent: "If a page doesn't load or a field cannot be
+    read, it must NOT overwrite previously verified data with false, zero, NO, annual, or another
+    default… never overwrite a known source-backed value with a weaker or uncertain value."
 
-    Deliberately not symmetric with the rest of the row: bedrooms/amenities/age are re-read from a
-    spec block that is either present or absent, whereas a price disappearing from the page is more
-    often aqar changing what it serves us than the advertiser deleting the number. Retiring a price
-    that really was withdrawn is a job for corroborated evidence over several fetches, not for this
-    one. (2026-08-09, price-path verification.)
+    An upsert sends the WHOLE row, so any `field: None` in the payload writes NULL over the stored
+    value. That silently converts "this fetch found no X" into "this listing has no X" — two
+    different statements. It is not hypothetical: aqar renders «طلب تسويق» instead of a price on a
+    large minority of live ads, withholds fields from anonymous fetches, and serves an app SHELL to
+    clients it does not recognise; a single unlucky crawl could therefore blank a whole listing.
+
+    Dropping the key instead of sending NULL is right in both directions: a NEW row still lands with
+    the column NULL (absent means default), and an EXISTING row keeps what it had. A value only ever
+    MOVES when the source publishes something to move it to.
+
+    Control columns are exempt (`_CONTROL_COLS`) — liveness and bookkeeping must stay writable, or
+    prune/reactivate/kill paths break.
+
+    The cost is deliberate and was chosen with eyes open: a value the source has genuinely RETRACTED
+    lingers until a later crawl reads a new one. Retracting on the strength of one silent fetch is
+    the more dangerous error, and retirement is a job for corroborated evidence across fetches.
     """
-    for col in _PRICE_COLS:
-        if col in r and r[col] is None:
-            del r[col]
+    for col in [c for c, v in r.items() if v is None and c not in _CONTROL_COLS]:
+        del r[col]
 
 
 def _ensure_capture(r: dict[str, Any]) -> None:
@@ -513,6 +526,7 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         r["missing_count"] = 0
         r.setdefault("active", True)
         _sanitize_price(r)
+        _unknown_must_not_overwrite_known(r)
         _sanitize_ints(r)
         _ensure_capture(r)
         _reject_placeholder_location(r, table=table)

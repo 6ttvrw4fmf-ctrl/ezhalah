@@ -284,7 +284,14 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
     price_total = price_annual = None
     rent_period = None
     if is_rent:
-        rent_period = "monthly" if price_group == "monthly" else "annual"
+        # SOURCE IS TRUTH (owner rule, 2026-08-09): `priceGroup` is satel's own statement of the
+        # period. When it is present we honour it; when the field is MISSING the old `else "annual"`
+        # asserted a yearly lease the source never claimed. Absence is unknown, not annual.
+        # Field PRESENT → satel has stated the period, and its non-monthly token keeps meaning annual
+        # (unchanged; 209 live rows depend on it and satel's exact yearly token is not captured
+        # anywhere we can read). Field ABSENT → unknown, where the old `else "annual"` asserted a
+        # yearly lease the source never claimed.
+        rent_period = ("monthly" if price_group == "monthly" else "annual") if price_group else None
         # Monthly rentals must store the ANNUALIZED figure (monthly×12); the app displays
         # round(price_annual/12), so storing the raw monthly showed 1/12 of the real rent.
         # (price-fidelity fix 2026-07-13)
