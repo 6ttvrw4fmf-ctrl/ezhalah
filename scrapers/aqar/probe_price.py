@@ -78,8 +78,16 @@ def probe_one(row: dict[str, Any], dump_keys: bool) -> Optional[dict[str, Any]]:
     rendered = [f"{m.group(1)} {m.group(2)}" for m in _RENDERED.finditer(
         text.split(ER._AGE_BLOCK_ANCHOR, 1)[0] if ER._AGE_BLOCK_ANCHOR in text else text)][:4]
     parsed = ER.enrich_residential(row["listing_url"], type_slug=slug, deal_slug=deal_slug) or {}
+    # Is the listing still open? A closed/expired ad keeps its JSON price but stops displaying it,
+    # so liveness has to be read alongside the price or the two get confused.
+    state = {k: obj.get(k) for k in ("status", "closed", "published", "rent_period_text")}
+    # The first 400 chars of the page's own prefix — what the human actually sees above the fold.
+    head = re.sub(r"\s+", " ", (text.split(ER._AGE_BLOCK_ANCHOR, 1)[0] if ER._AGE_BLOCK_ANCHOR in text
+                                else text))[:400]
     out = {
         "ad": row["ad_number"],
+        "state": state,
+        "head": head,
         "aqar_structured": structured,
         "aqar_rendered": rendered,
         "parser": {k: parsed.get(k) for k in
