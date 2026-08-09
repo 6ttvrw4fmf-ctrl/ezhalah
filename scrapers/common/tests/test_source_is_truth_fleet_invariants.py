@@ -257,3 +257,96 @@ def test_absence_is_not_a_period_muktamel_and_satel():
     assert re.search(r"if price_group else None", st), (
         "satel must treat an absent priceGroup as unknown, not as annual"
     )
+
+
+# ── 5. A per-metre RATE may never be stored as a total (owner's confusion #1) ─────────────────────
+
+def test_no_writer_assigns_the_same_expression_to_total_and_per_metre():
+    """`price_total` means "the whole asking price". A per-m2 rate in that column made a 1,740 m2
+    plot searchable at 2,817 SAR (aqargate AG55663) and a 458 m2 plot at 1,050 SAR (hajer HJ3107).
+
+    Three platforms shipped it independently under a "copy-the-display" convention, because the
+    platform's own badge renders the rate under a bare «السعر» label. The badge is not the contract:
+    the REGA table says «سعر الوحدة» and the sellers write «N ريال للمتر».
+    """
+    bad = []
+    for p in WRITERS:
+        src = _code(p)
+        # the literal shape that shipped: both keys taking the same bare variable
+        m_total = re.search(r'"price_total"\s*:\s*([A-Za-z_][\w.]*)\s*(?:if[^,\n]*)?,', src)
+        m_ppm = re.search(r'"price_per_meter"\s*:\s*([A-Za-z_][\w.]*)\s*(?:if[^,\n]*)?,', src)
+        if (m_total and m_ppm and m_total.group(1) == m_ppm.group(1)
+                and m_total.group(1) != "None"):      # both UNKNOWN is fine; both the same NUMBER is not
+            bad.append(f"{p.parent.name}/{p.name}: both columns get `{m_total.group(1)}`")
+    assert not bad, (
+        f"{bad} store one number as BOTH the total and the per-m2 rate. One of the two is a lie. "
+        "If the source publishes only a rate, the total is UNKNOWN — never rate x area."
+    )
+
+
+@pytest.mark.parametrize("platform,marker", [
+    ("hajer", "rate_only"),
+    ("eastabha", "price_is_rate"),
+])
+def test_rate_only_platforms_null_the_total(platform, marker):
+    """Each platform must carry an explicit rate-only signal into the row, not just record the rate
+    alongside a total that is really the same number."""
+    src = _code(SCRAPERS / platform / "run.py")
+    assert marker in src, f"{platform} lost its rate-only marker"
+    assert re.search(rf'"price_total"\s*:\s*None if[^,]*{marker}', src) or \
+           re.search(rf'"price_total"\s*:\s*None if\s*\([^)]*{marker}', src), (
+        f"{platform} must set price_total to None when the displayed figure is a per-m2 rate")
+
+
+def test_aqargate_does_not_adopt_the_platforms_own_rate_times_area():
+    """aqargate publishes `landTotalPrice`, but it equals propertyPrice x propertyArea exactly on 30
+    of 31 live rows — it is aqargate's arithmetic, not an independently published price. Adopting it
+    would be the banned rate x area multiplication with an extra step."""
+    src = _code(SCRAPERS / "aqargate" / "run.py")
+    # The guard itself legitimately mentions landTotalPrice as a CONDITION; what is forbidden is
+    # landTotalPrice being the assigned VALUE.
+    assert not re.search(r'"price_total"\s*:\s*_price_int\(\s*ar\.get\("landTotalPrice"', src), (
+        "aqargate must not store landTotalPrice as the asking price — it is a derived product")
+    assert re.search(r'"price_total"\s*:\s*None if\s*\(is_rent or ar\.get\("landTotalPrice"\)', src), (
+        "aqargate must leave price_total UNKNOWN on rate-priced land ads")
+
+
+# ── 6. The RNPL instalment is a different field from the rent (owner's confusion #4) ─────────────
+
+def test_no_writer_derives_an_instalment_from_the_price():
+    """alhoshan computed `round(price / 12)` and published it as a source instalment, and set the
+    RNPL flag from a brand tagline so it read true for every priced rental. A marketing fact about
+    the company is not a per-listing data fact."""
+    bad = [f"{p.parent.name}/{p.name}"
+           for p in WRITERS
+           if re.search(r"rent_now_pay_later_monthly\"?\s*[:=]\s*[^,\n]*/\s*12", _code(p))
+           or re.search(r"monthly_inst\s*=\s*round\([^)]*/\s*12", _code(p))]
+    assert not bad, f"{bad} DERIVE the RNPL instalment from the price instead of reading it"
+
+
+def test_the_instalment_is_never_assigned_to_a_price_column():
+    """The 6704222 class: aqar's 12-instalment financing TOTAL stored as price_annual (30,000 where
+    aqar publishes 2,500/yr)."""
+    bad = []
+    for p in WRITERS:
+        src = _code(p)
+        for m in re.finditer(r'"price_(?:annual|total)"\s*:\s*([^,\n]{0,80})', src):
+            expr = m.group(1)
+            if re.search(r"rnpl|instal|monthly_inst|price_12_payments", expr, re.I):
+                bad.append(f"{p.parent.name}/{p.name}: price column fed by `{expr.strip()}`")
+    assert not bad, f"{bad} let a financing figure become the asking price"
+
+
+def test_aqar_reads_the_instalment_from_its_own_published_field():
+    src = _code(SCRAPERS / "aqar" / "enrich_residential.py")
+    assert "rnpl_monthly_price" in src, "aqar must read the instalment aqar publishes"
+    assert not re.search(r"500\s*<=\s*v\s*<=\s*100_000", src), (
+        "the plausibility band discarded 1,314 real published instalments (72, 76, 90 SAR) — "
+        "a source-published number is never ours to reject for looking small")
+
+
+def test_a_brand_name_can_never_set_the_rnpl_flag():
+    """«تمكين» is an ordinary Arabic noun and a common company name; as a bare substring it flagged
+    26 active aqar BUY listings that carry no RNPL offer at all."""
+    src = _code(SCRAPERS / "aqar" / "enrich_residential.py")
+    assert 'r"تمكين"' not in src, "a broker's company name is not an RNPL offer"

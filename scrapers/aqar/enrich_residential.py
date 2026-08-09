@@ -651,7 +651,12 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
             r"استأجر\s*الآن(?:\s*و?)?\s*(?:ا?دفع|أدفع)?\s*لاحق",  # "استأجر الآن وأدفع لاحقًا" + variants
             r"إيجار\s*الآن[^.<\n]{0,30}لاحق",
             r"ادفع\s*لاحقاً?",
-            r"تمكين",
+            # `تمكين` was here as an RNPL provider name. REMOVED 2026-08-09: it is an ordinary Arabic
+            # noun ("enablement") and a common Saudi company name, matched as a BARE substring
+            # against the whole page text — which includes the advertiser block. It fired on 26
+            # active aqar BUY listings that carry no RNPL offer at all, purely because the broker is
+            # called «التمكين». A brand name is not a per-listing fact. `/rnpl/` and the explicit
+            # «استأجر الآن وأدفع لاحقًا» phrase are the real signals and both survive.
             r"rent\s*now\s*pay\s*later",
         ])
     )
