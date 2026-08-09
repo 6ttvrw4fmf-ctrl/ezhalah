@@ -70,17 +70,23 @@ _STRUCTURED_SAFE = {
     "villa_on_roof", "apartment_in_project", "master_bedrooms", "halls",
     "reception_rooms_majlis", "rega_location_verified", "num_apartments",
 }
-# Fields the recovery must NOT touch, and why (2026-08-05 dry-run evidence):
-#   • price_annual / price_total / price_per_meter — enrich_residential scans `price_text`, the whole
-#     pre-«تفاصيل الإعلان» prefix, which carries the seller's free-text blurb. The dry-run produced
-#     three unexplained moves: 6668912 24,000->2,000 and 6609974 30,000->2,500 (both EXACTLY ÷12, the
-#     signature of a monthly figure landing in an annual column) and 6663318 550->16,000. Until the
-#     price path itself is verified against source, a "recovery" could overwrite a correct price with
-#     a prose number. The owner's rule cuts both ways: never guess, and never overwrite on a guess.
-#   • rent_period — defaults to "annual" for every Rent listing (enrich_residential.py:371, "the Saudi
-#     norm"). Recovering it would write that DEFAULT over an honest NULL, which is fabrication.
-#   • area_m2 — the comma-truncation class is repaired, but area feeds the derived price_per_meter,
-#     so it moves with the price decision rather than ahead of it.
+# Fields the recovery holds back by default.
+#
+# HISTORY — these were withheld on 2026-08-05 because the price path was unverified. A dry-run had
+# produced three unexplained moves (6668912 24,000->2,000, 6609974 30,000->2,500, 6663318 550->16,000)
+# and overwriting a correct price with a prose number is as much a fidelity breach as guessing one.
+#
+# RESOLVED 2026-08-09 by verifying the path against live aqar pages from a runner aqar serves. All
+# three moves are now explained, and two of them were aqar being right:
+#   • 6668912 and 6609974 — aqar publishes exactly 2,000 and 2,500 (`price_text` "2,000"/"2,500",
+#     rendered «سنوي»). The ÷12 shape was a coincidence, not a monthly figure in an annual column.
+#   • 6663318 — aqar publishes 16,000 and our stored 550 was a prose number. The move was a REPAIR.
+# enrich_residential now reads aqar's structured `price`/`rent_period` instead of scanning prose,
+# and refuses to import a `published: false` figure, so a recovery can no longer invent or inflate.
+#
+# They stay OFF BY DEFAULT anyway: turning them on rewrites money on every touched row, so it should
+# be a deliberate `--include-price` run whose dry-run diff a human has read — not a side effect of
+# recovering a bathroom count. `area_m2` rides with them because price_per_meter derives from it.
 _PRICE_AND_PERIOD = {"price_annual", "price_total", "price_per_meter", "rent_period", "area_m2"}
 
 # canonical property_type -> the aqar URL slug enrich_residential expects
