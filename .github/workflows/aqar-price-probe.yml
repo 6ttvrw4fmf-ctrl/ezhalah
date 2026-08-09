@@ -1,0 +1,64 @@
+# READ-ONLY evidence run: what does aqar actually publish for price and rent period?
+#
+# Prints four views of the same listing side by side — aqar's structured RSC keys, the rendered
+# price slot the human sees, what the current parser produces, and what our DB holds — so a
+# disagreement can be attributed to a specific stage instead of guessed at. It writes NOTHING:
+# no upserts, no Supabase mutations, no run rows.
+#
+# MUST run here, not locally: aqar.fm serves unfamiliar clients a ~241 KB app shell with no listing
+# payload, while the GitHub runners get real pages.
+name: Aqar price probe (read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ads:
+        description: "comma-separated ad numbers (blank = sample by deal/type)"
+        required: false
+        default: ""
+      deal:
+        description: "rent | buy"
+        required: false
+        default: "rent"
+      ptype:
+        description: "canonical property_type, e.g. Apartment"
+        required: false
+        default: "Apartment"
+      limit:
+        description: "sample size when no ad numbers given"
+        required: false
+        default: "60"
+      schema_keys:
+        description: "true = also dump every key of the first listing object"
+        required: false
+        default: "true"
+
+concurrency:
+  group: aqar-price-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Probe price path
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_MIN_INTERVAL: "0.4"
+        run: |
+          python -m scrapers.aqar.probe_price \
+            ${{ inputs.ads && format('--ads "{0}"', inputs.ads) || '' }} \
+            ${{ inputs.deal && format('--deal {0}', inputs.deal) || '' }} \
+            ${{ inputs.ptype && format('--type "{0}"', inputs.ptype) || '' }} \
+            --limit "${{ inputs.limit }}" \
+            ${{ inputs.schema_keys == 'true' && '--schema-keys' || '' }}
