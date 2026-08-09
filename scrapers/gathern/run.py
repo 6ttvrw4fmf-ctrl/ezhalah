@@ -786,10 +786,12 @@ def main() -> int:
             pruned = 0
         print(f"✓ Gathern cross-shard prune: {len(seen)} ad_numbers seen across {len(files)} shards, "
               f"{pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=len(seen), rows_upserted=0,
+        healthy = db.end_run(run_id, ok=True, rows_seen=len(seen), rows_upserted=0,
                    notes=f"cross_shard_prune shards={len(files)} pruned={pruned}",
                    check_tables=["gathern_residential_listings"])
-        return 0
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
 
     # ── Tier-2 detail backfill: a SEPARATE, bounded pass (NOT the crawl). Fills description +
     #    suitability for active rows that still lack a description; re-run / schedule to fill the rest.
@@ -822,13 +824,19 @@ def main() -> int:
     # Gathern has no commercial inventory; a commercial-only run is a clean no-op.
     if args.type == "commercial":
         print("Gathern is residential-only — nothing to scrape for --type commercial.")
+        healthy = True
         if not args.limit and not args.dry_run:
             run_id = db.begin_run("gathern")
             # allow_empty: Gathern genuinely has no commercial inventory, so a 0-row commercial
             # run is correct, not a failure. This is the ONE legitimate empty run in the fleet;
-            # every other 0-row run is demoted to ok=False by end_run's RC-B chokepoint.
-            db.end_run(run_id, ok=True, rows_seen=0, rows_upserted=0, notes="commercial=noop", allow_empty=True)
-        return 0
+            # every other 0-row run is demoted to ok=False by end_run's RC-B chokepoint. (This
+            # call can never actually demote today — no check_tables/degraded/floor passed — but
+            # capturing it anyway keeps every end_run call site in the fleet uniformly honest, so
+            # adding check_tables here later doesn't silently reopen the CI-stays-green gap.)
+            healthy = db.end_run(run_id, ok=True, rows_seen=0, rows_upserted=0, notes="commercial=noop", allow_empty=True)
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
 
     print(f"Gathern MONTHLY: {len(cities)} Saudi cities, stay {ci} → {co}"
           f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}"
@@ -898,9 +906,11 @@ def main() -> int:
                   f"(scanned {scanned} cards across {len(cities)} cities), {pruned} stale pruned")
         top = sorted(per_city.items(), key=lambda kv: -kv[1])[:10]
         print("  top cities:", ", ".join(f"{n}={c}" for n, c in top))
-        db.end_run(run_id, ok=True, rows_seen=scanned, rows_upserted=len(rows),
+        healthy = db.end_run(run_id, ok=True, rows_seen=scanned, rows_upserted=len(rows),
                    notes=f"cities={len(cities)} pruned={pruned}", check_tables=["gathern_residential_listings"])
-        return 0
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=scanned, rows_upserted=0, notes=str(e)[:300])

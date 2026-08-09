@@ -435,7 +435,7 @@ def main() -> int:
             f"✓ Mustqr: {len(res)} residential + {len(com)} commercial upserted"
             + (f", {pruned} stale pruned" if full_run else " (validation: no prune)")
         )
-        db.end_run(
+        healthy = db.end_run(
             run_id,
             ok=True,
             rows_seen=len(raw),
@@ -443,7 +443,9 @@ def main() -> int:
             notes=f"pruned={pruned}" if full_run else "validation",
             check_tables=["mustqr_residential_listings", "mustqr_commercial_listings"],
         )
-        return 0
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         db.end_run(run_id, ok=False, rows_seen=len(raw), rows_upserted=0, notes=str(e)[:300])
         print(f"✗ {e}")
