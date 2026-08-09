@@ -17,6 +17,7 @@ import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, type SearchQuery } from '@/data/search';
 import { HOME_DEFAULT_QUERY, hasActiveFilters } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
+import { runAfterAnimation } from '@/lib/afterAnimation';
 import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
@@ -394,28 +395,26 @@ export default function Home() {
   // never completes, its completion callback never fires, and Search silently does nothing at all: no
   // navigation, no error, no spinner. Reproduced live with rAF stalled — SEARCH_PRESSED fired and the
   // app was still sitting on `/` 10s later.
-  // Fix: the animation stays purely decorative, and a setTimeout drives the actual navigation.
-  // Background tabs CLAMP setTimeout (to ~1s) but still run it, whereas rAF is suspended outright —
-  // so the user always lands on their results. `navigated` makes the two paths idempotent, so
-  // whichever fires first wins and the other is a no-op (never a double push).
+  // Fix: runAfterAnimation() plays the backdrop lift but drives the navigation from a timer too, so
+  // the user always lands on their results. See src/lib/afterAnimation.ts — the exactly-once
+  // behaviour is unit-tested there against an animation that never completes.
   const navigateWithQuery = (q: SearchQuery) => {
-    let navigated = false;
-    const go = () => {
-      if (navigated) return;
-      navigated = true;
-      if (gated) {
-        router.push('/auth');
-        return;
-      }
-      router.push({ pathname: '/agent', params: { filter: JSON.stringify(q) } });
-    };
-    RNAnimated.timing(heroAnim, {
-      toValue: 1,
-      duration: 300,
-      easing: RNEasing.out(RNEasing.cubic),
-      useNativeDriver: true,
-    }).start(go);
-    setTimeout(go, 320); // safety net: fires even when rAF (and so the animation) is frozen
+    runAfterAnimation(
+      (onFinished) => RNAnimated.timing(heroAnim, {
+        toValue: 1,
+        duration: 300,
+        easing: RNEasing.out(RNEasing.cubic),
+        useNativeDriver: true,
+      }).start(onFinished),
+      () => {
+        if (gated) {
+          router.push('/auth');
+          return;
+        }
+        router.push({ pathname: '/agent', params: { filter: JSON.stringify(q) } });
+      },
+      320,
+    );
   };
 
   // Note #3 — try the OS share sheet FIRST when it exists (native device share is the most natural

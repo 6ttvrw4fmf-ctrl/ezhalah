@@ -24,6 +24,7 @@
 //   node --experimental-strip-types scripts/verify-platform-diversity.ts   (wired into `npm test`)
 
 import { readFileSync } from 'node:fs';
+import { orderByScope, type RankedRow, type Scope } from '../src/lib/platformDiversity.ts';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -63,6 +64,11 @@ function longestStreak(rows: Row[]): number {
   for (const r of rows) { cur = r.platform === prev ? cur + 1 : 1; prev = r.platform; best = Math.max(best, cur); }
   return best;
 }
+const longestStreakOf = (a: string[]): number => {
+  let best = a.length ? 1 : 0, cur = 0, prev = '';
+  for (const p of a) { cur = p === prev ? cur + 1 : 1; prev = p; best = Math.max(best, cur); }
+  return best;
+};
 function distinctPlatforms(rows: Row[]): number { return new Set(rows.map((r) => r.platform)).size; }
 
 // Inventory builder: `{aqar: 5000, wasalt: 2}` → rows with descending, interleaved timestamps.
@@ -278,6 +284,49 @@ console.log('\nPLATFORM DIVERSITY — owner permanent rule (MATCH FIRST → DIVE
   check('14b. the client no longer branches its ordering on pageOffset === 0',
     !/pageOffset === 0 && allCands\.length >= pageLimit/.test(code),
     'diversity must come from ONE ordering that every page walks, not a first-page special case');
+}
+
+// ── 15. the client's second ordering stage must never WEAKEN the RPC's platform diversity ────────
+// The RPC owns platform diversity globally. remote.ts then runs orderByScope()/interleaveRanked() to
+// apply the OTHER owner diversity rules (geography 2026-06-27, multi-type Tier 3 2026-06-28) within
+// each batch. That second stage is allowed to permute a batch — but platform diversity outranks
+// geography and type, so it must never make the platform picture worse. Pinned here because a future
+// tweak to the geography/type keys could silently re-cluster platforms.
+{
+  const spec = { a: 5795, b: 3216, c: 93, d: 51, e: 42, f: 41, g: 7, h: 5, i: 3, j: 2, k: 2 };
+  const CITIES = ['الرياض', 'جدة', 'الدمام', 'أبها'];
+  const DISTRICTS = ['النرجس', 'الياسمين', 'الملقا', 'القادسية', 'الروضة'];
+  let worseStreak = 0, lostPlatforms = 0, lostRows = 0, checked = 0;
+
+  for (const [limit, offset] of [[10, 0], [15, 10], [25, 25], [50, 50], [100, 100], [100, 300]] as const) {
+    const batch = page(inventory(spec), limit, offset);      // the RPC's diversified order
+    if (!batch.length) continue;
+    checked++;
+    const ranked: RankedRow[] = batch.map((r, i) => ({
+      l: { cleanType: null } as any,
+      platform: r.platform,
+      city: CITIES[r.id % CITIES.length],
+      region: 'الرياض',
+      district: DISTRICTS[r.id % DISTRICTS.length],
+      rank: i,
+      source_table: `${r.platform}_residential_listings`,
+    }));
+    for (const scope of ['country', 'region', 'city', 'district'] as Scope[]) {
+      for (const multiType of [false, true]) {
+        const after = orderByScope(ranked, scope, multiType);
+        const b = ranked.map((r) => r.platform), a = after.map((r) => r.platform);
+        if (longestStreakOf(a) > longestStreakOf(b)) worseStreak++;
+        if (new Set(a).size < new Set(b).size) lostPlatforms++;
+        if (a.length !== b.length || new Set(after.map((r) => r.rank)).size !== ranked.length) lostRows++;
+      }
+    }
+  }
+  check(`15. client re-sort never lengthens a same-platform streak (${checked} real batch shapes × 8 scopes)`,
+    worseStreak === 0, `${worseStreak} batches got a WORSE streak`);
+  check('15b. client re-sort never drops a platform from a batch',
+    lostPlatforms === 0, `${lostPlatforms} batches lost a platform`);
+  check('15c. client re-sort is a pure permutation — no row invented, duplicated or lost',
+    lostRows === 0, `${lostRows} batches changed membership`);
 }
 
 console.log(failures === 0
