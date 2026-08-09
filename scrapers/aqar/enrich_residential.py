@@ -659,21 +659,36 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # When RNPL is offered Aqar prints the starting monthly installment like
     # "استأجر الآن وأدفع لاحقًا ابتداءً من 8,025 § شهريا". Capture that monthly figure so the app can
     # surface a "from SAR X/month" badge on the listing card. (user request.)
+    # THE INSTALMENT IS A DIFFERENT FIELD FROM THE RENT (owner rule, 2026-08-09) and aqar publishes
+    # it STRUCTURALLY as `rnpl_monthly_price`. Read that; prose is only the fallback.
+    #
+    # The prose path it replaces had three defects, all live-proven on 2026-08-09:
+    #   • its second pattern `(\d[\d,]{2,})…شهري[ا]?` was UNANCHORED, so on a genuinely MONTHLY
+    #     listing it could capture the listing's own RENT and store it as a financing instalment —
+    #     the banned rent↔instalment confusion, running backwards.
+    #   • the `500 <= v <= 100_000` plausibility gate silently DISCARDED real published instalments:
+    #     the live probe found 72, 76 and 90 on ads 6727466 / 6703504 / 6450928, all under the floor.
+    #     A source-published number is never ours to reject for looking small.
+    #   • it read prose while aqar publishes the exact figure in its payload.
     rent_now_pay_later_monthly: Optional[int] = None
-    if rent_now_pay_later:
-        # Look for the "starting from N شهريا" snippet near the RNPL phrase. Two patterns: the
-        # explicit "ابتداءً من" prefix, OR a bare "N § شهريا" / "N شهرياً" near the RNPL trigger.
-        for pat in (
-            r"ابتداء[ًاء]?\s*من\s*(\d[\d,]{2,})\s*[§ر﷼]?\s*شهري",
-            r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*شهري[ا]?\b",
-        ):
-            mp_rnpl = re.search(pat, text)
-            if mp_rnpl:
-                v = N.to_int(mp_rnpl.group(1))
-                # Sanity-check: RNPL installments are reasonable monthly rents, not annual figures.
-                if v and 500 <= v <= 100_000:
-                    rent_now_pay_later_monthly = v
-                    break
+    _rnpl_raw = (obj or {}).get("rnpl_monthly_price")
+    if isinstance(_rnpl_raw, (int, float)) and not isinstance(_rnpl_raw, bool) and int(_rnpl_raw) > 0:
+        rent_now_pay_later_monthly = int(_rnpl_raw)
+    elif rent_now_pay_later:
+        # Fallback for a payload we could not read: ONLY the explicitly-labelled teaser
+        # «… ابتداءً من N § شهريا». Never a bare «N شهري», which is how the rent got in.
+        mp_rnpl = re.search(r"ابتداء[ًاء]?\s*من\s*(\d[\d,]{2,})\s*[§ر﷼]?\s*شهري",
+                            text.translate(N._TRANS).replace("٬", ","))
+        if mp_rnpl:
+            v = N.to_int(mp_rnpl.group(1))
+            # On the PROSE path a value identical to the rent means the regex found the rent, not an
+            # instalment — drop it rather than publish financing that is really the asking price.
+            # Applied here and NOT to the structured read: when aqar states the instalment in its own
+            # field, an equal value is a coincidence on a cheap listing, and discarding a
+            # source-published number would itself breach the fidelity rule.
+            if v is not None and price_annual is not None and v in (price_annual, price_annual * 12):
+                v = None
+            rent_now_pay_later_monthly = v
 
     # ─── Location ────────────────────────────────────────────────────────────
     # The URL slug always tells us the city + neighborhood reliably.
