@@ -362,12 +362,15 @@ def main() -> int:
                 print("⚠ aqarmonthly prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 print(f"✓ pruned {pruned} stale (no-longer-available) units")
+        healthy = True
         if run_id is not None:
-            db.end_run(run_id, ok=True, rows_seen=len(ids), rows_upserted=len(rows),
+            healthy = db.end_run(run_id, ok=True, rows_seen=len(ids), rows_upserted=len(rows),
                        degraded=pruned < 0,  # a tripped prune guard is an integrity trip → honest red
                        notes=f"shard={args.shard or 'full'} priced={counter['ok']}/{len(ids)} "
                              f"pruned={max(pruned, 0)}", check_tables=["aqarmonthly_residential_listings"])
-        return 0
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         if run_id is not None:
             db.end_run(run_id, ok=False, rows_seen=counter["done"], rows_upserted=0,

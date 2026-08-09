@@ -467,9 +467,11 @@ def main() -> int:
         notes = str(e)[:400]
         print(f"\n✗ FATAL: {e}")
     finally:
-        db.end_run(run_id, ok=ok, rows_seen=total, rows_upserted=total, notes=notes, allow_empty=legit_empty, check_tables=["wasalt_residential_listings", "wasalt_commercial_listings"])
+        healthy = db.end_run(run_id, ok=ok, rows_seen=total, rows_upserted=total, notes=notes, allow_empty=legit_empty, check_tables=["wasalt_residential_listings", "wasalt_commercial_listings"])
     print(f"\n📊 Wasalt done. {total} upserted. (run_id={run_id})")
-    return 0 if ok else 1
+    if ok and not healthy:
+        print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+    return 0 if (ok and healthy) else 1
 
 
 if __name__ == "__main__":
