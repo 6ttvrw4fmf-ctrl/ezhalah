@@ -35,9 +35,16 @@ as $function$
   group by s.platform having count(*) > 0
 
   union all
-  -- VIOLATION: a Buy total identical to its own per-metre rate is a RATE stored as a total.
-  select 'buy_total_equals_per_metre_rate', s.platform, count(*)::bigint,
-         'price_total == price_per_meter — a RATE stored as the whole asking price'
+  -- INVESTIGATE (not a violation): `price_total = price_per_meter` is the fingerprint of TWO
+  -- OPPOSITE defects, and one repair rule would corrupt half the cohort:
+  --   • rate-in-total (hajer, aqargate, eastabha) — fixed at the scraper; total is honestly UNKNOWN
+  --   • total-in-rate (aqar 18, eastabha EA23034) — the total is CORRECT and the RATE is the
+  --     contaminated column. On the aqar rows the SOURCE prints the total inside its own «سعر المتر»
+  --     slot (6630081: 600,000 over 600 m²), so they are source-odd-but-correct — do NOT repair.
+  -- Decide per row by the implied rate: price_total/area_m2 in 100..20000 SAR/m² means the total is
+  -- real. (Renamed 2026-08-09b, migration …_rate_total_check_is_bidirectional.)
+  select 'investigate_total_equals_per_metre', s.platform, count(*)::bigint,
+         'TWO OPPOSITE defects share this shape — decide per row by the implied rate'
   from public.search_listings_ar s
   where s.deal_ar = 'بيع' and s.price_total is not null and s.price_per_meter is not null
     and s.price_total = s.price_per_meter and s.price_total > 0

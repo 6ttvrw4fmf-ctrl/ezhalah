@@ -192,10 +192,14 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     raw_price = (f.get("السعر") or "").strip()
     price = _num(raw_price)
     # Some REM price fields quote a PER-METRE rate («1000 للمتر. ر.س», live 2026-08-03, 6 rows).
-    # The page displays that number as its price, so price_total/annual keep it verbatim
-    # (copy-paste-the-display rule, owner 2026-08-03) — but the per-metre semantic is recorded in
-    # its own column so the rate is honest and queryable rather than silently read as a total.
-    price_per_meter = price if ("للمتر" in raw_price) else None
+    #
+    # The rate used to be kept in price_total as well, under a "copy-paste-the-display" rule. That is
+    # the total↔per-m² confusion the owner's 2026-08-09 rule forbids: a 458 m² plot advertised at
+    # «1050 للمتر» was searchable as a 1,050 SAR property. Re-verified live 2026-08-09 — these pages
+    # publish ONLY the rate, no total appears anywhere on them — so the honest state is a rate with
+    # NO total. We must not multiply by the area to manufacture one.
+    rate_only = "للمتر" in raw_price
+    price_per_meter = price if rate_only else None
 
     extra = []
     for label, key in (("واجهة العقار", "Facade"), ("عمر العقار", "Age"),
@@ -214,8 +218,9 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         "area_m2": _num(f.get("المساحة")),
         "bedrooms": _num(f.get("عدد غرف النوم")),
         "bathrooms": _num(f.get("عدد دورات المياه")),
-        "price_total": price if not is_rent else None,
-        "price_annual": price if is_rent else None,
+        # A per-metre rate is never a total and never an annual rent — see `rate_only` above.
+        "price_total": None if (is_rent or rate_only) else price,
+        "price_annual": None if (not is_rent or rate_only) else price,
         "price_per_meter": price_per_meter,
         "rent_period": "annual" if is_rent else None,
         "city": city,

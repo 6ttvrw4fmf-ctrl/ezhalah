@@ -233,3 +233,60 @@ def test_a_text_field_is_none_when_only_the_next_label_follows():
     """Label present, value empty → unknown, never the next field's content."""
     text = "الواجهة غرف النوم 5 الصالات 2"
     assert ER._text_after_label(text, r"الواجهة") is None
+
+
+def test_arabic_indic_digits_do_not_hide_a_monthly_rent():
+    """Live proof, ad 6727466: aqar's own price slot reads «٨٠٠ شهري» — 800 per MONTH — while the
+    structured payload says price: 800.
+
+    Matching only the ASCII "800" finds nothing, the period comes back unknown, and 800 is filed as
+    an ANNUAL rent: a 12x understatement of a flat that really costs 9,600/yr. This is the exact
+    monthly-read-as-annual confusion the owner banned, arriving through a numeral system rather than
+    through a bad regex.
+    """
+    row = _parse(_page({"id": 6600001, "price": 800, "published": True}, prose="٨٠٠ شهري"))
+    assert row["rent_period"] == "monthly"
+    assert row["price_annual"] == 9600
+
+
+def test_arabic_indic_digits_are_read_for_annual_too():
+    row = _parse(_page({"id": 6600001, "price": 40000, "published": True}, prose="٤٠٬٠٠٠ سنوي"))
+    assert row["rent_period"] == "annual"
+    assert row["price_annual"] == 40000
+
+
+# ── RNPL: the instalment is a DIFFERENT field from the rent, in both directions ───────────────────
+
+def test_the_instalment_comes_from_aqars_own_field_not_from_prose():
+    row = _parse(_page({"id": 6600001, "price": 30000, "published": True,
+                        "rnpl_monthly_price": 2827}, prose="30,000 § سنوي 2,827 § شهريا"))
+    assert row["rent_now_pay_later_monthly"] == 2827
+    assert row["price_annual"] == 30000, "the instalment must never become the rent"
+
+
+def test_a_small_published_instalment_is_not_rejected_for_looking_small():
+    """The old prose path had a `500 <= v <= 100_000` plausibility gate. The live probe found real
+    published instalments of 72, 76 and 90 — all silently discarded. A source-published number is
+    never ours to reject for looking small."""
+    row = _parse(_page({"id": 6600001, "price": 850, "published": True,
+                        "rnpl_monthly_price": 76}, prose="850 § سنوي"))
+    assert row["rent_now_pay_later_monthly"] == 76
+
+
+def test_a_bare_monthly_figure_can_no_longer_be_captured_as_an_instalment():
+    """The retired second prose pattern was unanchored, so on a genuinely MONTHLY listing it could
+    capture the listing's own RENT and file it as financing — the rent/instalment confusion running
+    backwards. Only the «ابتداءً من …» teaser may supply the fallback value."""
+    row = _parse("<div>/rnpl/ 2,500 § شهري تفاصيل الإعلان</div>")
+    assert row["rent_now_pay_later_monthly"] is None
+
+
+def test_the_labelled_teaser_still_works_when_the_payload_is_unreadable():
+    row = _parse("<div>/rnpl/ استأجر الآن وأدفع لاحقًا ابتداءً من 8,025 § شهريا تفاصيل الإعلان</div>")
+    assert row["rent_now_pay_later_monthly"] == 8025
+
+
+def test_a_prose_instalment_equal_to_the_rent_is_dropped_not_published():
+    row = _parse("<div>/rnpl/ 45,000 § سنوي ابتداءً من 45,000 § شهريا تفاصيل الإعلان</div>")
+    assert row["price_annual"] == 45000
+    assert row["rent_now_pay_later_monthly"] is None

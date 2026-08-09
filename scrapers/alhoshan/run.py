@@ -193,10 +193,19 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
     is_rent = purpose.startswith("rent")
     price = p.get("currentPrice") or p.get("price") or p.get("basePrice")
 
-    # "أقساط" rent-now-pay-later: Al Hoshan markets annual rent payable in 12 monthly installments
-    # (brand tagline "استأجر الحين.. وادفع بعدين"). No per-listing flag in the API, so it's the
-    # standard offer on any annual rental — monthly = annual / 12 (mirrors their on-site banner).
-    monthly_inst = round(_int(price) / 12) if (is_rent and _int(price)) else None
+    # RNPL: NOT CAPTURED, on purpose (2026-08-09, owner's source-is-truth rule).
+    #
+    # This used to read `monthly_inst = round(price / 12)` and then set BOTH
+    # `rent_now_pay_later = bool(monthly_inst)` and `rent_now_pay_later_monthly = monthly_inst`.
+    # Two separate fabrications:
+    #   • the instalment was DERIVED (price ÷ 12). Al Hoshan publishes no such number — only monthly
+    #     × 12 into the annual column is an approved reversible normalization, and this is neither
+    #     reversible nor published;
+    #   • the flag was a BRAND TAGLINE («استأجر الحين.. وادفع بعدين») encoded as a per-listing fact,
+    #     so it read `true` for every priced rental whether or not that listing offers financing.
+    # The API exposes no per-listing RNPL field, so the honest answer is UNKNOWN. If Al Hoshan ever
+    # publishes one per listing, read THAT — do not reinstate the division.
+    monthly_inst = None
 
     # specs.city may be a city OR a region label — resolve both.
     raw_city = (specs.get("city") or "").strip()
@@ -240,7 +249,8 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "price_total": _int(price) if not is_rent else None,
         "price_annual": _int(price) if is_rent else None,
         "rent_period": "annual" if is_rent else None,
-        "rent_now_pay_later": bool(monthly_inst),
+        # Both UNKNOWN: Al Hoshan's API publishes no per-listing RNPL field (see above).
+        "rent_now_pay_later": None,
         "rent_now_pay_later_monthly": monthly_inst,
         "city": city,
         "region": region,

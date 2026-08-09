@@ -1,11 +1,23 @@
 """Token-price fixes, non-aqar platforms (senior audit run #3 continuation, 2026-08-03).
 
-The owner's two price conventions, both dated 2026-08-03:
-  • copy-the-display rule (hajer precedent): when the source PAGE displays a per-meter rate as the
-    listing's price, price_total keeps the displayed figure VERBATIM and price_per_meter records
-    the same figure so the rate semantic is honest and queryable — never silently read as a total.
-  • rates are never silently totals (aqar precedent): a per-meter-qualified figure must never be
-    stored as a bare total with the qualifier dropped.
+!! THE COPY-THE-DISPLAY RULE WAS REVERSED ON 2026-08-09 — read this before "fixing" a failure here.
+
+Original convention (owner, 2026-08-03): when the source PAGE displays a per-meter rate as the
+listing's price, price_total keeps the displayed figure VERBATIM and price_per_meter records the
+same figure, so the rate semantic is honest and queryable rather than silently read as a total.
+
+REVERSED (owner, 2026-08-09): "I never want total price confused with price/m²." Keeping the rate in
+price_total IS that confusion, whatever the platform's own badge says — aqargate AG55663 made a
+1,740 m² plot searchable at 2,817 SAR, hajer HJ3107 a 458 m² plot at 1,050 SAR. Live re-verification
+that day showed the badge is not the contract: the REGA table labels the number «سعر الوحدة» and the
+sellers write «N ريال للمتر». So a rate-priced ad now stores price_per_meter and leaves price_total
+UNKNOWN. We do NOT multiply by the area to manufacture a total, and we do not adopt the platform's
+own product either (aqargate's landTotalPrice = propertyPrice × propertyArea exactly on 30/31 rows —
+that is its arithmetic, not a published price).
+
+The assertions below were rewritten, not deleted, so the reversal stays visible.
+  • still true: a per-meter-qualified figure must never be stored as a bare total with the qualifier
+    dropped (the aqar precedent) — it is now enforced by NULLing the total, not by duplicating it.
 
 Fixes pinned here (each independently adversarially verified against live source pages):
   1. eastabha: WP Residence renders «ريال للمتر» beside the price on land ads (8/8 token rows,
@@ -39,25 +51,28 @@ SCRAPERS = Path(__file__).resolve().parents[2]
 
 
 # ── 1. eastabha ────────────────────────────────────────────────────────────────
-def test_eastabha_per_meter_display_records_ppm():
-    from scrapers.eastabha import run as ea
-    html = ('<div data-clean_price="3000" data-price="Price%3A%20%3Cspan%20class%3D%22price_label%20'
-            'price_label_before%22%3E%D8%B1%D9%8A%D8%A7%D9%84%20%D9%84%D9%84%D9%85%D8%AA%D8%B1'
-            '%3C%2Fspan%3E%203%2C000%20%D8%B1%D9%8A%D8%A7%D9%84" data-size="900">')
-    out = ea.parse_detail(html) if hasattr(ea, "parse_detail") else None
-    if out is None:  # extractor is module-level parsing in some revisions — assert source shape then
-        src = (SCRAPERS / "eastabha" / "run.py").read_text(encoding="utf-8")
-        assert 'out["price_per_meter"] = out["price"]' in src
-        return
-    assert out.get("price") == 3000, "display figure stays verbatim (copy-the-display rule)"
-    assert out.get("price_per_meter") == 3000, "the للمتر qualifier must be recorded as a rate"
-
-
-def test_eastabha_plain_price_has_no_ppm():
+def test_eastabha_per_meter_display_records_ppm_and_no_total():
+    """Shape B: the qualifier carries no number of its own, so the DISPLAYED figure is the rate."""
     src = (SCRAPERS / "eastabha" / "run.py").read_text(encoding="utf-8")
-    assert "ppm = None" not in src.split("Source per-m² rate ONLY")[0].rsplit("def ", 1)[-1] or True
+    assert 'out["price_per_meter"] = out["price"]' in src, "the rate must still be recorded"
+    assert 'out["price_is_rate"] = True' in src, (
+        "and the row must carry the rate-only signal so price_total can be left UNKNOWN")
+
+
+def test_eastabha_qualifier_with_its_own_rate_keeps_the_total():
+    """Shape A, live 2026-08-09 on EA23034: data-price is
+    «<span class='infocur infocur_first'>سعر المتر 1000 ريال</span>920,000 ريال», area 920 m².
+    The rate is 1,000 and 920,000 is the real TOTAL — we used to store 920,000 in both columns."""
+    src = (SCRAPERS / "eastabha" / "run.py").read_text(encoding="utf-8")
+    assert "infocur_first" in src, "the qualifier span must be parsed separately from the main price"
+    assert 'out["price_per_meter"] = qual_rate' in src, (
+        "when the qualifier states its own rate, THAT is the rate — not the total beside it")
+
+
+def test_eastabha_threads_the_rate_through_to_the_row():
+    src = (SCRAPERS / "eastabha" / "run.py").read_text(encoding="utf-8")
     assert 'ppm = detail.get("price_per_meter")' in src, "map_listing must thread the detected rate"
-    assert 'if out.get("price") and re.search(r"(?:لل|ال)\\s*متر", disp)' in src
+    assert 'detail.get("price_is_rate")' in src, "and must honour the rate-only signal"
 
 
 # ── 2. aqargate ────────────────────────────────────────────────────────────────
