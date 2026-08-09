@@ -114,14 +114,19 @@ def _load_policy(client, platform: str) -> dict:
 
 
 def _count_of(res) -> int:
-    """Exact row count from a PostgREST head+count response, defensively.
+    """Exact row count from a count="exact" response — or FAIL, never guess.
 
-    Older/stubbed clients may not expose `.count`; fall back to len(data) rather than crashing a
-    destructive-path guard on an attribute error.
+    An earlier draft fell back to len(data) when `.count` was absent. That silently returned 0 for
+    the whole eligible population on the 2026-08-09 dry run, which disabled BOTH the anomaly gate
+    and the fraction guard at once (0 is under every threshold) while the work-set query still
+    happily returned 300 rows to delete. A destructive path must never run on an unmeasured
+    population, so an absent count is now a hard error: fail closed, loudly.
     """
     n = getattr(res, "count", None)
     if n is None:
-        n = len(getattr(res, "data", None) or [])
+        raise RuntimeError(
+            "PostgREST returned no exact count — refusing to run a destructive cleanup against an "
+            "unmeasured population. Check the count=\"exact\" query.")
     return int(n)
 
 def _trailing_median_deleted(client, platform: str) -> float:
@@ -172,11 +177,11 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
             platform_rows = 0
             for t in tables:
                 eligible_total += _count_of(
-                    client.table(t).select("id", count="exact", head=True)
+                    client.table(t).select("id", count="exact")
                     .eq("active", False).gte("missing_count", pol["min_missing_count"])
-                    .lt("last_seen_at", cutoff).execute())
+                    .lt("last_seen_at", cutoff).limit(1).execute())
                 platform_rows += _count_of(
-                    client.table(t).select("id", count="exact", head=True).execute())
+                    client.table(t).select("id", count="exact").limit(1).execute())
             stats["eligible_total"] = eligible_total
             stats["candidates"] = eligible_total          # what the gate and the audit log see
             stats["platform_rows"] = platform_rows

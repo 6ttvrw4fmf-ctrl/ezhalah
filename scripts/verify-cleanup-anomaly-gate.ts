@@ -97,7 +97,9 @@ class Q:
                 # two count queries per table: eligible, then total rows
                 if not hasattr(self,"_seen"):
                     Q._ncount = getattr(Q,"_ncount",0)+1
-                return R(data=[], count=(SCENARIO["eligible"] if Q._ncount%2==1 else SCENARIO["platform_rows"]))
+                if SCENARIO.get("no_count"):
+                    return R(data=[], count=None)   # broken/absent Content-Range
+                return R(data=[{"id":1}], count=(SCENARIO["eligible"] if Q._ncount%2==1 else SCENARIO["platform_rows"]))
             n = min(SCENARIO["eligible"], self._limit or SCENARIO["eligible"])
             return R(data=_rows(n), count=None)
         return R(data=[], count=None)
@@ -114,8 +116,13 @@ cleanup.begin_run = lambda p: 999
 cleanup.end_run = lambda *a, **k: True
 cleanup._probe = lambda url: tuple(SCENARIO["probe"])
 
-stats = cleanup.run("gathern", dry_run=SCENARIO.get("dry_run", False))
-out = {"stats": stats, "deleted": len(DELETED), "reactivated": len(REACTIVATED), "logged": len(LOGGED)}
+try:
+    stats = cleanup.run("gathern", dry_run=SCENARIO.get("dry_run", False))
+    err = None
+except Exception as e:
+    stats, err = {}, str(e)
+out = {"stats": stats, "err": err, "deleted": len(DELETED),
+       "reactivated": len(REACTIVATED), "logged": len(LOGGED)}
 with open(os.environ["OUT"], "w") as fh: json.dump(out, fh)
 `;
 
@@ -157,6 +164,19 @@ check(
   !!blind && blind.stats.eligible_total === 20000,
   blind ? `eligible_total=${blind.stats.eligible_total}` : '',
 );
+
+// 1b. AN UNMEASURED POPULATION MUST NEVER BE DELETED FROM.
+// The 2026-08-09 dry run proved this the hard way: `head=True` returned no Content-Range, the
+// count came back None, an earlier len(data) fallback read it as 0 — which is under EVERY
+// threshold, so the anomaly gate and the fraction guard were both silently disabled while the
+// work-set query still returned 300 rows to delete. Absent count must now fail closed.
+const nocount = scenario('no-count', {
+  policy: POLICY(), eligible: 488, platform_rows: 31688, probe: [404, ''], no_count: true,
+});
+check('a missing exact count refuses to run rather than reading 0', !!nocount && !!nocount.err);
+check('  …and it deletes NOTHING', !!nocount && nocount.deleted === 0);
+check('  …and the error names the unmeasured population',
+      !!nocount && /unmeasured population/.test(String(nocount.err)));
 
 // 2. THE REAL GATHERN SHAPE — 488 eligible, floor 1000, cap 300: must proceed, capped.
 const live = scenario('proceed', {
@@ -214,6 +234,7 @@ check('  …and still reports what it would delete', !!dry && dry.stats.deleted 
 // 7. Source-lint: the invariant and the cap must not be quietly removed.
 const src = readFileSync('scrapers/common/cleanup.py', 'utf8');
 check('the unclamped count feeds the gate (count="exact")', /count="exact"/.test(src));
+check('an absent count raises instead of defaulting to 0', /unmeasured population/.test(src));
 check('the cap-saturating `max_delete_per_run + 1` measurement never returns',
       !/max_delete_per_run"\] \+ 1/.test(src));
 check('the work-set SELECT is capped by max_delete_per_run', /\.limit\(pol\["max_delete_per_run"\]\)/.test(src));
