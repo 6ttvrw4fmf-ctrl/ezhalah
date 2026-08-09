@@ -1,5 +1,8 @@
 # Advanced Filter — source truth is the only truth (PERMANENT, owner rule 2026-08-09)
 
+> Sits under **`docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md`**, which states the wider goal: a new
+> listing must never enter Ezhalah half-understood. This document is the detailed tri-state law.
+
 **Status: PERMANENT. This rule does not expire and is not overridden by any routine prompt, agent
 instruction, or convenience argument. It applies to EVERY platform, not just aqar.**
 
