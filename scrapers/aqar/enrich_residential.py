@@ -215,9 +215,20 @@ def _period_beside(price: Optional[int], text: str, is_rnpl_page: bool = False) 
     listings, and an unanchored scan reads those as this listing's period. Searching the FULL page
     text is therefore safe here, and necessary — the price headline is not always above the
     «تفاصيل الإعلان» anchor, which left 104 live rows with a published price and no period.
+
+    ARABIC-INDIC DIGITS (2026-08-09, live-proven on ad 6727466). Aqar renders some prices in
+    Arabic-Indic numerals: that ad's own price slot reads **«٨٠٠ شهري»** — 800 per MONTH — while the
+    structured payload says `price: 800`. Matching only the ASCII "800" finds nothing, the period
+    comes back unknown, and 800 gets filed as an ANNUAL rent: a 12× understatement of a listing that
+    really costs 9,600/yr. Normalising the text through `N._TRANS` first is what makes the anchor
+    work on both numeral systems.
     """
     if not price:
         return None
+    # Digits AND separators: «٤٠٬٠٠٠» is 40,000 written with Arabic-Indic numerals and the Arabic
+    # thousands mark U+066C. Translating the digits alone leaves «40٬000», which matches neither
+    # "40000" nor "40,000" — the same silent miss, one character further along. Mirrors N.to_int().
+    text = text.translate(N._TRANS).replace("٬", ",").replace("٫", ".")
     grouped = f"{price:,}"
     for pattern, period in _PERIOD_WORDS:
         if period == "monthly" and is_rnpl_page:

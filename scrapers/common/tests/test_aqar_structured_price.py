@@ -233,3 +233,23 @@ def test_a_text_field_is_none_when_only_the_next_label_follows():
     """Label present, value empty → unknown, never the next field's content."""
     text = "الواجهة غرف النوم 5 الصالات 2"
     assert ER._text_after_label(text, r"الواجهة") is None
+
+
+def test_arabic_indic_digits_do_not_hide_a_monthly_rent():
+    """Live proof, ad 6727466: aqar's own price slot reads «٨٠٠ شهري» — 800 per MONTH — while the
+    structured payload says price: 800.
+
+    Matching only the ASCII "800" finds nothing, the period comes back unknown, and 800 is filed as
+    an ANNUAL rent: a 12x understatement of a flat that really costs 9,600/yr. This is the exact
+    monthly-read-as-annual confusion the owner banned, arriving through a numeral system rather than
+    through a bad regex.
+    """
+    row = _parse(_page({"id": 6600001, "price": 800, "published": True}, prose="٨٠٠ شهري"))
+    assert row["rent_period"] == "monthly"
+    assert row["price_annual"] == 9600
+
+
+def test_arabic_indic_digits_are_read_for_annual_too():
+    row = _parse(_page({"id": 6600001, "price": 40000, "published": True}, prose="٤٠٬٠٠٠ سنوي"))
+    assert row["rent_period"] == "annual"
+    assert row["price_annual"] == 40000
