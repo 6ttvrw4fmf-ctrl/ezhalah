@@ -894,9 +894,6 @@ const AR: Record<string, string> = {
   'Results are never sold. No listing is promoted or boosted for payment — ordering is based only on neutral signals.':
     'لا تُباع النتائج أبداً. لا يُروَّج لأي إعلان أو يُعزَّز مقابل المال — والترتيب يعتمد على إشارات محايدة فقط.',
   'Licensing & compliance': 'التراخيص والامتثال',
-  'REGA FAL license': 'ترخيص فال من الهيئة العامة للعقار',
-  "Real-estate advertising in Saudi Arabia is regulated by REGA. Ezhalah's FAL license application is in progress; the license number will appear here once issued.":
-    'يخضع الإعلان العقاري في المملكة العربية السعودية لتنظيم الهيئة العامة للعقار. طلب ترخيص فال لإزهله قيد المعالجة؛ وسيظهر رقم الترخيص هنا فور إصداره.',
   'Your data (PDPL)': 'بياناتك (نظام حماية البيانات الشخصية)',
   "Ezhalah follows Saudi Arabia's Personal Data Protection Law. We don't sell your data. Your searches and account are kept until you delete your account, then permanently removed.":
     'تلتزم إزهله بنظام حماية البيانات الشخصية في المملكة. نحن لا نبيع بياناتك. تُحفظ عمليات بحثك وحسابك حتى تحذف حسابك، ثم تُزال نهائياً.',
