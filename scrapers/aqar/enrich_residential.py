@@ -121,6 +121,15 @@ def _listing_json(html: str) -> Optional[dict[str, Any]]:
     blob = "".join(chunks) if chunks else html
     if chunks:
         blob = blob.encode("utf-8", "surrogatepass").decode("unicode_escape", "ignore")
+        # `unicode_escape` decodes byte-by-byte as latin-1, so every multi-byte UTF-8 sequence comes
+        # back as one char per BYTE — «سنوي» arrived as "Ø³Ù\x86Ù\x88Ù\x8a". Round-tripping through
+        # latin-1 reassembles the original bytes and decodes them as the UTF-8 they always were.
+        # Booleans and numbers were never affected, which is why the amenity read worked regardless;
+        # it matters the moment we read an Arabic value such as `rent_period_text`. (2026-08-09)
+        try:
+            blob = blob.encode("latin-1", "ignore").decode("utf-8", "ignore")
+        except UnicodeError:      # already clean on some payload shapes — keep what we have
+            pass
     for m in _LISTING_OBJ_RE.finditer(blob):
         start = blob.index("{", m.start() + len('"listing"'))
         depth = 0
