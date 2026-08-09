@@ -1,0 +1,40 @@
+name: Platform diversity — live behavioral check
+
+# Executes the REAL production RPC (location_search_candidates_ar) and asserts the owner's rule
+# MATCH FIRST -> DIVERSIFY SECOND on live rows: round-robin front, no domination (streaks are
+# exhaustion-only), 0 duplicates across Show More, an explicit objective sort still wins, and every
+# returned row satisfies the filter (correctness never traded for diversity).
+#
+# This is the LIVE behavioral half of the barrier — it complements the static guards that run in
+# `npm test` (verify-rpc-clause-invariants.ts pins the ORDER-BY text; verify-platform-diversity.ts
+# models the sort key offline). A regression that keeps the pinned text but changes behavior another
+# way turns THIS job RED, and GitHub notifies the repo owner. Read-only (anon key, RLS-respecting).
+#
+# Activation: needs the app's PUBLIC anon key as a repo secret (never the service role). The script
+# accepts EXPO_PUBLIC_SUPABASE_ANON_KEY or EXPO_PUBLIC_SUPABASE_KEY; the URL defaults to the public
+# project URL if EXPO_PUBLIC_SUPABASE_URL is unset.
+
+on:
+  schedule:
+    - cron: '17 */6 * * *' # every 6 hours
+  workflow_dispatch:
+
+concurrency:
+  group: diversity-live-check
+  cancel-in-progress: false
+
+jobs:
+  diversity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Live platform-diversity behavioral assertions
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-platform-diversity-live.ts
