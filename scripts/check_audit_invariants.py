@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Nightly production-audit invariants (2026-07-24) — the checks a daily audit was skipping.
 
-Runs FIVE live-production checks and exits non-zero + logs a row to location_pipeline_alerts if
+Runs SIX live-production checks and exits non-zero + logs a row to location_pipeline_alerts if
 any fails (same "build fails + ops dashboard" mechanism as scripts/check_placeholder_locations.py):
 
   1. NOT-READY REASON INVARIANT — every production_ready=false row in listing_native_location_v2
@@ -23,6 +23,11 @@ any fails (same "build fails + ops dashboard" mechanism as scripts/check_placeho
   4. LIVE AI AGENT — POST fixed Arabic queries to the production `agent` edge function and assert
      the classification is right (deal / city / type) and the reply is Arabic. This is the live
      end-to-end AI test the audit was missing.
+
+  5. ALERT ESCALATION (2026-08-09) — an open alert must be able to get worse. mon_raise() used to
+     no-op on an existing open dedup key, so a P2 could never become a P1 and its payload froze at
+     the values it was born with. dealapp's staleness warning sat at a three-week-old P2 while the
+     real figure crossed the critical threshold, and nobody was paged for 30 days.
 
 Usage:
   python3 scripts/check_audit_invariants.py            # all checks (DB checks need SERVICE_ROLE key)
@@ -208,6 +213,42 @@ def check_aqar_price_not_licence(client) -> bool:
     return False
 
 
+def check_alert_escalation(client) -> bool:
+    """True = OK. An open alert must be able to get WORSE.
+
+    mon_raise() used to return 0 the moment an open alert_event existed for the dedup key, so an
+    alert that opened at P2 stayed P2 forever, still displaying the numbers it was born with.
+    dealapp_residential_listings opened `stale_active` at P2 on 2026-07-27 with frac 0.234 / 3,873
+    active / 905 stale; by 2026-08-09 the real figure was frac 0.414 / 7,212 / 2,985 — past the 0.30
+    critical threshold — and it was still showing the three-week-old P2 payload. Nobody was paged,
+    which is how dealapp went 30 days with zero deactivations (last kill 2026-07-10, 0 of its 274
+    inactive rows source-verified) while 41.9% of its searchable inventory went stale. The defect
+    was fleet-wide: every detector raises through mon_raise.
+
+    mon_selftest_raise_escalates() exercises the live function on a reserved dedup key and cleans up
+    after itself: fresh key raises; same severity refreshes the payload without re-paging; worse
+    severity escalates AND clears dispatched_at so it pages again; a milder reading never downgrades
+    an open critical. It returns false on the pre-2026-08-09 implementation.
+    """
+    try:
+        ok = client.rpc("mon_selftest_raise_escalates").execute().data
+    except Exception as e:
+        detail = f"mon_selftest_raise_escalates() could not be run: {e}"
+        print(f"FAIL alert-escalation invariant: {detail}")
+        _alert(client, "alert_escalation_selftest_missing", 0, detail)
+        return False
+    if ok is True:
+        print("OK  alert-escalation invariant: mon_raise refreshes stale payloads, escalates "
+              "P2->P1, re-arms dispatch, and never downgrades an open alert.")
+        return True
+    detail = ("mon_raise() no longer escalates an open alert — a warning that becomes critical will "
+              "stay a warning, with stale numbers, and will never page. This is the 2026-08-09 "
+              "regression that let dealapp rot for 30 days unnoticed.")
+    print(f"FAIL alert-escalation invariant: {detail}")
+    _alert(client, "alert_escalation_regression", 1, detail)
+    return False
+
+
 def _call_agent(text: str) -> dict:
     body = json.dumps({"text": text, "locale": "ar", "loggedIn": False, "order": False, "history": []}).encode()
     req = urllib.request.Request(
@@ -250,7 +291,8 @@ def check_agent(client=None) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index", "unverified_kill", "aqar_licence_price"],
+    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index", "unverified_kill",
+                                       "aqar_licence_price", "alert_escalation"],
                     help="run one check")
     args = ap.parse_args()
 
@@ -274,6 +316,7 @@ def main() -> int:
     if args.only in (None, "awal"):        results.append(check_awal(client))
     if args.only in (None, "unverified_kill"): results.append(check_unverified_inactivations(client))
     if args.only in (None, "aqar_licence_price"): results.append(check_aqar_price_not_licence(client))
+    if args.only in (None, "alert_escalation"): results.append(check_alert_escalation(client))
     if args.only is None:                  results.append(check_agent(client))
     return 0 if all(results) else 1
 
