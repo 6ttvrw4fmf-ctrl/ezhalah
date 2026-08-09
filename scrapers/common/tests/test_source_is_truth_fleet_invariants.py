@@ -350,3 +350,25 @@ def test_a_brand_name_can_never_set_the_rnpl_flag():
     26 active aqar BUY listings that carry no RNPL offer at all."""
     src = _code(SCRAPERS / "aqar" / "enrich_residential.py")
     assert 'r"تمكين"' not in src, "a broker's company name is not an RNPL offer"
+
+
+# ── 7. The guard protects verified data — it must not silently protect FABRICATIONS ──────────────
+
+def test_the_guard_is_documented_as_needing_a_one_off_retraction():
+    """A trap found twice on 2026-08-09, worth writing down rather than rediscovering.
+
+    `_unknown_must_not_overwrite_known` is deliberately asymmetric: a re-crawl that now (correctly)
+    emits None cannot clear a stored value. That is exactly what we want when the value was real and
+    the fetch was weak — and exactly WRONG when the stored value was a fabrication we just removed
+    from the scraper. alhoshan's derived instalments and eastabha EA21188's rate-as-total both
+    survived their own fix for this reason and needed an explicit one-off retraction.
+
+    So the guard's docstring must keep saying so: shipping a fabrication fix WITHOUT a retraction
+    leaves production wrong while every test passes.
+    """
+    src = (SCRAPERS / "common" / "db.py").read_text(encoding="utf-8")
+    body = src.split("def _unknown_must_not_overwrite_known(", 1)[1].split("\ndef ", 1)[0]
+    assert "retract" in body.lower(), (
+        "the guard must document that removing a fabrication ALSO needs a one-off data retraction — "
+        "the guard will otherwise keep the fabricated value alive through every future crawl"
+    )
