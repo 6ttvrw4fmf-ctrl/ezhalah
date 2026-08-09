@@ -113,6 +113,17 @@ def _load_policy(client, platform: str) -> dict:
     return p
 
 
+def _count_of(res) -> int:
+    """Exact row count from a PostgREST head+count response, defensively.
+
+    Older/stubbed clients may not expose `.count`; fall back to len(data) rather than crashing a
+    destructive-path guard on an attribute error.
+    """
+    n = getattr(res, "count", None)
+    if n is None:
+        n = len(getattr(res, "data", None) or [])
+    return int(n)
+
 def _trailing_median_deleted(client, platform: str) -> float:
     rows = (client.table("cleanup_runs").select("deleted")
             .eq("platform", platform).eq("dry_run", False).eq("aborted", False)
@@ -150,20 +161,6 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
         elif pol["require_source_recheck"] and dead_marker is None:
             _abort("require_source_recheck but no dead-check registered — cannot verify, refusing to delete")
 
-        # STRUCTURAL INVARIANT (deadlock fix, 2026-08-09). The anomaly gate compares the eligible
-        # population against max(anomaly_floor, ...). If anomaly_floor <= max_delete_per_run the
-        # gate becomes UNSATISFIABLE the moment the backlog exceeds the cap: the job can never
-        # delete more than the cap per run, so the backlog can never fall below the floor, so the
-        # gate aborts forever. That is not theoretical — gathern ran with
-        # anomaly_floor == max_delete_per_run == 300 and, because the candidate query used
-        # .limit(max_delete_per_run + 1), reported exactly 301 > 300 and aborted deterministically
-        # on every run (cleanup_runs id 6, 2026-08-09). Fail CLOSED and say so, rather than
-        # silently never deleting.
-        if not stats["aborted"] and pol["anomaly_floor"] <= pol["max_delete_per_run"]:
-            _abort(f"config deadlock: anomaly_floor ({pol['anomaly_floor']}) must exceed "
-                   f"max_delete_per_run ({pol['max_delete_per_run']}), otherwise the backlog can "
-                   f"never drain below the floor and every run aborts. Raise anomaly_floor.")
-
         if not stats["aborted"]:
             cutoff = (datetime.now(timezone.utc) - _days(pol["min_inactive_days"])).isoformat()
 
@@ -174,11 +171,12 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
             eligible_total = 0
             platform_rows = 0
             for t in tables:
-                eligible_total += (client.table(t).select("id", count="exact", head=True)
-                                   .eq("active", False).gte("missing_count", pol["min_missing_count"])
-                                   .lt("last_seen_at", cutoff).execute().count or 0)
-                platform_rows += (client.table(t).select("id", count="exact", head=True)
-                                  .execute().count or 0)
+                eligible_total += _count_of(
+                    client.table(t).select("id", count="exact", head=True)
+                    .eq("active", False).gte("missing_count", pol["min_missing_count"])
+                    .lt("last_seen_at", cutoff).execute())
+                platform_rows += _count_of(
+                    client.table(t).select("id", count="exact", head=True).execute())
             stats["eligible_total"] = eligible_total
             stats["candidates"] = eligible_total          # what the gate and the audit log see
             stats["platform_rows"] = platform_rows
@@ -190,7 +188,10 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
             if eligible_total > thresh:
                 _abort(f"anomaly: {eligible_total} eligible > threshold {thresh:.0f} "
                        f"(floor {pol['anomaly_floor']}, {pol['anomaly_factor']}× median {median:.0f}). "
-                       f"Human review required.")
+                       f"Human review required. NOTE: a STANDING backlog above the floor aborts "
+                       f"every run and can never drain — if {eligible_total} is legitimate "
+                       f"accumulation rather than a spike, raise anomaly_floor above it; do not "
+                       f"force.")
             elif platform_rows >= FRAC_GUARD_MIN_ROWS and eligible_total > frac_cap:
                 # Scale guard: a partial crawl, source outage or sitemap collapse shows up as a
                 # large FRACTION of the platform going eligible at once, even when the absolute

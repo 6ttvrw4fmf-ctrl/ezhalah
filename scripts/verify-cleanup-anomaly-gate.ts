@@ -10,16 +10,26 @@
 // (cleanup_runs id 6, 2026-08-09) — a permanent deadlock: the backlog could never drain below the
 // floor because deletion is capped at the floor. 488 rows sat eligible and untouched.
 //
+// The SAME clamp had a second, worse consequence: the measurement SATURATED at cap+1, so a genuine
+// catastrophe (source outage, sitemap collapse) reported as ~301 eligible rows under any sane floor
+// and the gate would happily delete a full batch every run. The gate could not see a spike at all.
+//
 // The fix separates measurement from work-set: an exact unclamped count feeds the gate, and a
 // separate capped SELECT feeds the deletion batch. This guard EXECUTES the real `run()` against a
-// stubbed Supabase client (no network, no DB) across five scenarios, asserting both that the
-// deadlock is impossible AND that every safety property the owner required still holds:
-//   1. anomaly_floor <= max_delete_per_run is refused outright (fail closed, deletes nothing)
+// stubbed Supabase client (no network, no DB), asserting that both failure modes are gone AND that
+// every safety property the owner required still holds:
+//   1. a catastrophic spike is SEEN and refused (the saturation blindness is gone)
 //   2. the gate sees the TRUE eligible population, not a cap-clamped number
-//   3. deletion stays capped at max_delete_per_run per run
-//   4. source verification: a LIVE page reactivates and is never deleted
-//   5. source verification: an ambiguous response (403/timeout) is skipped and never deleted
-//   6. a mass-inactivation fraction guard aborts a partial-crawl / source-outage shape
+//   3. anomaly_floor == max_delete_per_run no longer deadlocks a normal backlog
+//   4. deletion stays capped at max_delete_per_run per run, logged before deleting
+//   5. source verification: a LIVE page reactivates and is never deleted
+//   6. source verification: an ambiguous response (403/timeout) is skipped and never deleted
+//   7. a mass-inactivation fraction guard aborts a partial-crawl / source-outage shape
+//
+// NOTE on what is deliberately NOT enforced: an earlier draft made anomaly_floor <= max_delete_per_run
+// a hard abort. That is wrong — it is not the deadlock condition (any floor below the standing
+// backlog deadlocks, whatever the cap) and it fails closed for every platform on DEFAULT_POLICY,
+// where floor=300 < cap=500. CI caught it. The abort message now names the remedy instead.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -130,14 +140,23 @@ function scenario(name: string, s: Record<string, unknown>) {
   return existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : null;
 }
 
-// 1. THE DEADLOCK ITSELF — floor <= cap must fail closed, not delete, not silently pass.
-const dead = scenario('deadlock', {
-  policy: POLICY({ anomaly_floor: 300, max_delete_per_run: 300 }),
-  eligible: 488, platform_rows: 31688, probe: [404, ''],
+// 1. SATURATION BLINDNESS — the defect that mattered most.
+// The old candidate SELECT was `.limit(max_delete_per_run + 1)`, so the measurement SATURATED at
+// cap+1. A catastrophic mass-inactivation (source outage, sitemap collapse) therefore looked like
+// exactly 301 eligible rows — under any sane floor — and the gate happily proceeded to delete a
+// full batch, every run. The gate literally could not see a spike. With the clamp gone it sees
+// 20,000 and refuses.
+const blind = scenario('saturation', {
+  policy: POLICY({ anomaly_floor: 1000, max_delete_per_run: 300 }),
+  eligible: 20000, platform_rows: 31688, probe: [404, ''],
 });
-check('floor <= cap is refused outright', !!dead && dead.stats.aborted === true);
-check('  …and the abort names the config deadlock', !!dead && /config deadlock/.test(String(dead.stats.abort_reason)));
-check('  …and it deletes NOTHING', !!dead && dead.deleted === 0);
+check('a catastrophic 20,000-row eligible spike is SEEN and refused', !!blind && blind.stats.aborted === true);
+check('  …and it deletes NOTHING', !!blind && blind.deleted === 0);
+check(
+  '  …the gate reports the true magnitude, not a cap-saturated number',
+  !!blind && blind.stats.eligible_total === 20000,
+  blind ? `eligible_total=${blind.stats.eligible_total}` : '',
+);
 
 // 2. THE REAL GATHERN SHAPE — 488 eligible, floor 1000, cap 300: must proceed, capped.
 const live = scenario('proceed', {
@@ -155,6 +174,15 @@ check(
   live ? `deleted=${live.deleted} cap=300` : '',
 );
 check('  …every deletion is written to the audit log first', !!live && live.logged === live.deleted);
+
+// 2b. anomaly_floor == max_delete_per_run must no longer be inherently fatal: with the clamp gone,
+// a backlog UNDER the floor proceeds normally instead of being pinned at cap+1 and aborting.
+const eq = scenario('floor-equals-cap', {
+  policy: POLICY({ anomaly_floor: 300, max_delete_per_run: 300 }),
+  eligible: 250, platform_rows: 31688, probe: [404, ''],
+});
+check('floor == cap no longer deadlocks when the real backlog is under the floor',
+      !!eq && eq.stats.aborted === false && eq.stats.eligible_total === 250);
 
 // 3. SOURCE VERIFICATION — a LIVE page must reactivate, never delete.
 const alive = scenario('live-page', {
@@ -186,6 +214,8 @@ check('  …and still reports what it would delete', !!dry && dry.stats.deleted 
 // 7. Source-lint: the invariant and the cap must not be quietly removed.
 const src = readFileSync('scrapers/common/cleanup.py', 'utf8');
 check('the unclamped count feeds the gate (count="exact")', /count="exact"/.test(src));
+check('the cap-saturating `max_delete_per_run + 1` measurement never returns',
+      !/max_delete_per_run"\] \+ 1/.test(src));
 check('the work-set SELECT is capped by max_delete_per_run', /\.limit\(pol\["max_delete_per_run"\]\)/.test(src));
 check('require_source_recheck is still honoured', /require_source_recheck/.test(src));
 
