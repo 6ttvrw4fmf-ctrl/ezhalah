@@ -362,11 +362,22 @@ def _fold_price_evidence(r: dict[str, Any]) -> None:
     mon_detect_price_source_mismatch() reads.
     """
     ev = r.pop("price_evidence", None)
-    if not ev:
-        return
     cap = r.get("source_capture")
-    if isinstance(cap, dict):
+    if not isinstance(cap, dict):
+        return
+    if ev:
         cap.setdefault("price_evidence", ev)
+        return
+    # PROVENANCE GUARD (2026-08): a row that carries a price but NO evidence is a price we cannot
+    # prove from the database — the exact state that turned DA545798/DA507447 into a live-page
+    # forensic instead of a one-line SQL check. Record the coverage gap so the price is never
+    # silently trusted; mon_price_source_corroboration / mon_price_evidence_coverage read this, and
+    # the value is what tells an audit "re-scrape this through the evidence-emitting adapter".
+    # NEVER hide, delete, or alter the price (owner: a source-published price stays, at any
+    # magnitude) — this only labels provenance, and only when a price is actually present.
+    if any(r.get(c) is not None for c in _PRICE_COLS):
+        cap.setdefault("price_evidence",
+                       {"found": None, "unverified": True, "reason": "adapter_emitted_no_evidence"})
 
 
 # Location columns checked on EVERY upsert path (2026-07-10 architecture redesign — see
