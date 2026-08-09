@@ -112,6 +112,45 @@ def test_rent_period_from_the_rendered_word_when_the_enum_is_absent():
     assert row["rent_period"] == "annual"
 
 
+def test_enum_2_is_monthly_and_the_price_is_annualized():
+    """Live proof: ad 6586188 carries enum 2, price_text "6,500", and renders «6,500 شهري».
+
+    aqar DOES publish monthly residential rentals, so the retired `"annual"` default was not merely
+    unevidenced — it filed a monthly rent as a yearly one, understating it 12×.
+    """
+    row = _parse(_page({"id": 6600001, "price": 6500, "published": True, "rent_period": 2},
+                       prose="6,500 § شهري"))
+    assert row["rent_period"] == "monthly"
+    assert row["price_annual"] == 6500 * 12, "price_annual holds the ANNUAL figure by contract"
+
+
+def test_period_is_read_beside_the_price_even_below_the_details_anchor():
+    """The 104-row gap: the price headline is not always above «تفاصيل الإعلان».
+
+    Searching the full page text is safe because the search is anchored on the published figure.
+    """
+    row = _parse(_page({"id": 6600001, "price": 40000, "published": True},
+                       prose="تفاصيل الإعلان المساحة 120 م² 40,000 § سنوي"))
+    assert row["rent_period"] == "annual"
+
+
+def test_an_rnpl_instalment_line_never_supplies_the_period():
+    """«597 شهريا» is financing, not rent. Anchoring on the published figure is what excludes it."""
+    row = _parse(_page({"id": 6600001, "price": 6690, "published": True},
+                       prose="6,690 § سنوي 597 § شهريا"))
+    assert row["rent_period"] == "annual"
+    assert row["price_annual"] == 6690, "the instalment must not become the rent"
+
+
+def test_a_neighbouring_listing_card_never_supplies_the_period():
+    """A related-listing strip prints other listings' «N سنوي». Ours is 8,000, which appears nowhere
+    with a period word, so the honest answer is unknown."""
+    row = _parse(_page({"id": 6600001, "price": 8000, "published": True},
+                       prose="2,000 § سنوي 2,400 § سنوي"))
+    assert row["price_annual"] == 8000
+    assert row["rent_period"] is None
+
+
 def test_unmapped_enum_value_does_not_invent_a_period():
     row = _parse(_page({"id": 6600001, "price": 30000, "published": True, "rent_period": 99},
                        prose=""))
