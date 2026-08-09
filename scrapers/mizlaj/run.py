@@ -313,8 +313,13 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
     price_raw = _num(md.get("total_price") or listing.get("total_price")
                      or md.get("min_price") or listing.get("min_price"))
     price = round(price_raw) if price_raw else None
-    if not price or price < 1000:
-        return None, category  # reject junk prices (<1000 SAR)
+    # No magnitude gate (removed 2026-08-09). This used to DISCARD THE WHOLE LISTING when the
+    # source price was under 1,000 SAR — the harshest form of the plausibility gate the standing
+    # PRICE = SOURCE rule forbids, since a genuinely cheap listing never reached the database at
+    # all and left no trace to audit. A missing/zero price still drops the row (no price = nothing
+    # to publish); an unusual-but-published price is now kept exactly as the source printed it.
+    if not price:
+        return None, category
     area = _num(md.get("space") or listing.get("space"))
     # price_per_meter arrives as a DECIMAL string ("2946.17") — round the float, don't _int()
     # it (which would strip the dot → 294617). Derive from price/area when absent.

@@ -250,9 +250,10 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
     if master is not None and master > 20:
         master = None
 
+    # No magnitude gate (removed 2026-08-09): a source-published price is stored at ANY magnitude
+    # per the standing PRICE = SOURCE rule. Nulling "implausibly low" prices is a judgement call
+    # that silently destroys evidence — wrong prices are corrected against the source page instead.
     price_f = _num(rec.get("price"))
-    if price_f is not None and price_f < 1000:
-        price_f = None
     price = int(round(price_f)) if price_f is not None else None
 
     age_raw = (rec.get("real_estate_age") or "").strip()

@@ -529,9 +529,9 @@ def map_listing(body: str, url: str, sitemap_image: Optional[str] = None) -> tup
     if not pm:
         pm = PRICE_RE_FALLBACK.search(body)
     price = _int(pm.group(1)) if pm else None
-    if price is not None and price < 1000:
-        # Reject implausibly tiny prices (display glitch / unit confusion).
-        price = None
+    # No magnitude gate (removed 2026-08-09). "Display glitch / unit confusion" is a guess about
+    # the source; a genuine glitch is a MISSING price node (handled by `pm is None`), not a small
+    # one. A published price is stored at any magnitude (PRICE = SOURCE, 2026-08-03).
     # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
     price_per_meter = None
 

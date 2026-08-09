@@ -312,9 +312,9 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
     description = _description(f)
 
     # ── price ──
+    # No magnitude gate (removed 2026-08-09) — a published price is stored at any magnitude
+    # (PRICE = SOURCE, 2026-08-03; 204/204 live sub-1000 Buy rows matched their source page).
     price = _to_int(f.get("pt_price"))
-    if price is not None and price < 1000:
-        price = None
 
     # ── area (pt_size, else description مساحة) ──
     area = _to_float(f.get("pt_size"))
