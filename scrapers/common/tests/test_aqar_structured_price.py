@@ -208,3 +208,28 @@ def test_arabic_survives_the_payload_unescape():
 ])
 def test_structured_price_contract(payload, expected):
     assert ER._structured_price(payload) == expected
+
+
+# ── text fields must not swallow the next spec row or the seller's blurb ──────────────────────────
+
+def test_a_text_field_stops_at_the_next_spec_label():
+    """Live from the 2026-08-09 recovery dry-run: `direction` came back as
+    «شمال غرف النوم 5 الصالات 2 دورات المياه 4 عرض الشارع 20 م عمر العقار 3 سنوات الم».
+
+    The facing is «شمال»; the rest is three other fields plus prose. Storing it is the "never take a
+    value from the description" failure, in a text column.
+    """
+    text = "الواجهة شمال غرف النوم 5 الصالات 2 دورات المياه 4 عرض الشارع 20 م عمر العقار 3 سنوات"
+    assert ER._text_after_label(text, r"الواجهة") == "شمال"
+
+
+def test_a_text_field_keeps_a_genuine_multi_word_value():
+    """The cut must not truncate a real value that simply contains spaces."""
+    text = "الواجهة شمال شرقي غرف النوم 5"
+    assert ER._text_after_label(text, r"الواجهة") == "شمال شرقي"
+
+
+def test_a_text_field_is_none_when_only_the_next_label_follows():
+    """Label present, value empty → unknown, never the next field's content."""
+    text = "الواجهة غرف النوم 5 الصالات 2"
+    assert ER._text_after_label(text, r"الواجهة") is None

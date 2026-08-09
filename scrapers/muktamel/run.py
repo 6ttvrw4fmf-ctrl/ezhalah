@@ -528,9 +528,14 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
     rent_period = None
     price_total = price_annual = price_per_meter = None
     if is_rent:
-        # isRentPerYear True → annual; otherwise the per-listing price is the period price. Muktamel
-        # stores rent as a single figure; treat per-year as annual, else flag monthly.
-        rent_period = "annual" if offer.get("isRentPerYear") else "monthly"
+        # isRentPerYear True → annual, False → monthly. Muktamel stores rent as a single figure and
+        # this flag is what says which period it is.
+        # SOURCE IS TRUTH (owner rule, 2026-08-09): an ABSENT flag is not a monthly rental. The old
+        # `"annual" if offer.get("isRentPerYear") else "monthly"` could not tell "the source says
+        # False" from "the source did not say", so a listing whose payload simply omits the key was
+        # labelled MONTHLY — and a monthly label makes the reader divide by 12. Absence is unknown.
+        _per_year = offer.get("isRentPerYear")
+        rent_period = None if _per_year is None else ("annual" if _per_year else "monthly")
         price_annual = price
     elif property_type in LAND_TYPES and price and price <= 100_000:
         # LAND: offer.price is the SAR-per-m² RATE, not a total. Store it as the rate and leave
