@@ -45,6 +45,7 @@ Usage:  python -m scrapers.dealapp.run [--type residential|commercial|all] [--li
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import os
 import re
@@ -518,22 +519,40 @@ def has_priced_schema(html: str) -> bool:
     return bool(offers.get("price"))
 
 
+# Diagnostic-only: WHY each fetch_one ultimately failed, tallied across the run so main() can
+# print a one-line breakdown (2026-08-09 — after a run that scraped 0/1200 detail pages with zero
+# exceptions and zero per-item logging, leaving no way to tell "every page 200'd but never carried
+# the listing schema (login-wall/consent shell?)" apart from "every id 404'd (bad sitemap ids?)"
+# without live access to the source. Never affects control flow — read-only visibility.
+_fetch_fail_lock = threading.Lock()
+_fetch_fail_reasons: collections.Counter = collections.Counter()
+
+
+def _record_fetch_failure(reason: str) -> None:
+    with _fetch_fail_lock:
+        _fetch_fail_reasons[reason] += 1
+
+
 def fetch_one(adid: str) -> Optional[tuple[str, str]]:
     s = _session()
     url = f"{BASE}/ar/ad-details/{adid}"
     last_skeleton_html: Optional[str] = None
+    last_status: Any = None
     for attempt in range(3):
         try:
             r = s.get(url, timeout=45, allow_redirects=True)
-        except Exception:
+        except Exception as e:
+            last_status = f"exception:{type(e).__name__}"
             time.sleep(1.0 * (attempt + 1))
             continue
+        last_status = r.status_code
         if r.status_code == 200 and "real-estate-listing" in r.text:
             if has_priced_schema(r.text):
                 return r.text, adid
             # Skeleton hit: keep the response as a fallback and retry for a fully-hydrated one.
             last_skeleton_html = r.text
         if r.status_code in (404, 410):
+            _record_fetch_failure("not_found_404_410")
             return None
         time.sleep(0.8 * (attempt + 1))
     # Exhausted retries without ever seeing a priced schema. Fall back to the last skeleton
@@ -541,7 +560,16 @@ def fetch_one(adid: str) -> Optional[tuple[str, str]]:
     # None for an absent price, so the listing still ingests and surfaces as "Price on request"
     # rather than being silently dropped. Never invent a price, never let a genuinely-present
     # listing vanish because of a transient render gap.
-    return (last_skeleton_html, adid) if last_skeleton_html else None
+    if last_skeleton_html:
+        _record_fetch_failure("skeleton_no_price_after_3_retries")
+        return last_skeleton_html, adid
+    if last_status == 200:
+        # 200 but never once carried "real-estate-listing" across 3 attempts — the listing page
+        # itself never rendered. Most likely a login-wall/consent shell or a changed page shape.
+        _record_fetch_failure("status_200_no_listing_schema(likely_block_or_page_shape_change)")
+    else:
+        _record_fetch_failure(f"status_{last_status}")
+    return None
 
 
 def _resolve_city(city_ar: Optional[str]) -> Optional[str]:
@@ -827,6 +855,11 @@ def main() -> int:
                     print(f"  …{seen_n} parsed/upserted", flush=True)
                 if args.limit and seen_n >= args.limit:
                     break
+        if _fetch_fail_reasons:
+            # Always visible in the job log, unlike the `curl`ed page bodies themselves — this is
+            # the difference between "0 rows, guess why" and "0 rows: 1200/1200 status_200_no_
+            # listing_schema" in the next run's log, without needing live access to the source.
+            print(f"Deal App fetch-failure breakdown: {dict(_fetch_fail_reasons)}", flush=True)
         if args.limit:
             # write exactly the validation rows
             if res:
@@ -868,9 +901,21 @@ def main() -> int:
                 pruned += n
         print(f"✓ Deal App: {len(res)} residential + {len(com)} commercial upserted, "
               f"{sold_ct} sold (inactive), {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n,
-                   notes=f"sold={sold_ct} pruned={pruned}",
-                   check_tables=["dealapp_residential_listings", "dealapp_commercial_listings"])
+        # end_run's RC-B guard returns the EFFECTIVE ok it wrote (see scrapers/common/db.py) —
+        # a 0-row "success" or an integrity trip gets demoted to False. Every scraper in the fleet
+        # discards that return value and always `return 0`, so a demoted run still shows green in
+        # CI (found live 2026-08-09: run 31294408328 scraped 0/1200 pages, scrape_runs.ok was
+        # correctly demoted to false, but the job exited 0). Fixed here for dealapp; propagate the
+        # return code so CI actually reddens when the DB already knows the run was unhealthy.
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n,
+                              notes=f"sold={sold_ct} pruned={pruned}",
+                              check_tables=["dealapp_residential_listings", "dealapp_commercial_listings"])
+        if not healthy:
+            print("✗ Deal App: run demoted to unhealthy by end_run()'s RC-B guard "
+                  "(0 rows / integrity check tripped) — failing CI instead of reporting a silent "
+                  "success. See scrape_runs.notes and the fetch-failure breakdown above.",
+                  flush=True)
+            return 1
         return 0
     except Exception as e:
         if run_id:
