@@ -1,10 +1,10 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
--- Refreshed 2026-08-03 (senior run #3 continuation): fidelity guard gains the unconfirmed
--- token band (parsed_price NULL + price_total 1–9999 → NULL).
--- Re-verified 2026-08-08 (senior run #7) against production and UNCHANGED — migration
--- 20260805190111 touches aqar_parse only, not this trigger, so no refresh was needed. Re-stamped
--- so the staleness guard can tell "checked and still correct" apart from "never looked at".
--- Verified byte-exact; md5 of everything below this header block: 4ac2b9680be6b3ed9d6dcbd30d84f7fa
+-- Refreshed 2026-08-09 (aqar price-path verification): `furnished` is now
+--   coalesce(safe_bool(p->>'furnished'), NEW.furnished) instead of an unconditional assignment.
+--   aqar_parse returns NULL when the description does not mention furnishing, so the old line
+--   wiped the value the scraper had read from aqar's OWN structured `furnished` key. Migration
+--   20260809112129. Prose still overrides whenever it makes a statement; it just cannot erase one.
+-- Verified byte-exact; md5 of everything below this header block: 86bbb2e9544b7139a32be426e32688ee
 CREATE OR REPLACE FUNCTION public.trg_aqar_parse()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -33,7 +33,7 @@ begin
   NEW.tenant_category := p->>'tenant_category';
   NEW.num_apartments  := public.safe_int(p->>'num_apartments');
   NEW.floor_number    := public.safe_int(p->>'floor_number');
-  NEW.furnished       := public.safe_bool(p->>'furnished');
+  NEW.furnished       := coalesce(public.safe_bool(p->>'furnished'), NEW.furnished);
   NEW.discount_pct    := public.safe_int(p->>'discount_pct');
   NEW.price_original  := public.safe_bigint(p->>'price_original');
 

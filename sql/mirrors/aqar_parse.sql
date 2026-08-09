@@ -4,6 +4,10 @@
 -- this file described a 'furnished' clause production had not run since 08-05 — a stale mirror is
 -- how an agent session reasons its way to a wrong fix, which is exactly what the byte-exactness
 -- rule exists to prevent. Verified byte-exact against pg_get_functiondef() at refresh time.
+-- Re-verified 2026-08-09 (aqar price-path verification) against production and UNCHANGED —
+-- migration 20260809112129 touches trg_aqar_parse only; this parser is byte-identical
+-- (live md5 91cea73cb8d442072a2bb8c744da529b). Re-stamped so the staleness guard can tell
+-- "checked and still correct" apart from "never looked at".
 -- Verified byte-exact; md5 of everything below this header block: 91cea73cb8d442072a2bb8c744da529b
 CREATE OR REPLACE FUNCTION public.aqar_parse(txt text)
  RETURNS jsonb
