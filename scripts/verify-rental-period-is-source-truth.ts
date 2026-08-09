@@ -96,6 +96,53 @@ if (defining.length) {
   }
 }
 
+// ── 2i. READ-LAYER GUARANTEE: the Monthly bucket itself must exclude RNPL ────────────────────────
+// Both writers can be correct and the flag can STILL arrive late: sync_search_listings_ar does not
+// carry rent_now_pay_later, so a brand-new row takes the column default FALSE and is Monthly until
+// refresh_rnpl_flags() runs. "NEVER" leaves no room for a 5-minute window, so the READ side is
+// self-defending — the Monthly bucket reads the row's own flag at query time. Proven behaviourally
+// on 2026-08-09: with payment_monthly=true AND rent_now_pay_later=true forced, the filter returned
+// the row FALSE. Applied to the search RPC and BOTH counts RPCs so counts can never disagree.
+{
+  // NOTE ON REPLAY: the guard was applied by a DO-block PATCHER migration (it needle-edits each
+  // function's live body), so the last migration that literally CREATEs these RPCs predates it. A
+  // fresh replay is still correct — base definition, then patcher — so the check must look at the
+  // last migration that DEFINES **or PATCHES** the function, which is what actually determines the
+  // effective body. (Tradeoff accepted deliberately: a patcher keeps the diff tiny and cannot lose
+  // an unrelated clause, but it does mean no single file shows the whole current definition.)
+  const RPCS = ['location_search_candidates_ar','apartment_guided_counts_ar','property_age_option_counts_ar'];
+  const GUARD = 'payment_monthly = true and not coalesce(s.rent_now_pay_later, false)';
+  const files = readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort();
+  for (const rpc of RPCS) {
+    const touching = files.filter((f) => {
+      const t = readFileSync(join(MIGRATIONS, f), 'utf8');
+      return new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${rpc}\\b`, 'i').test(t)
+          || (t.includes(rpc) && t.includes(GUARD));
+    });
+    if (!touching.length) { check(`2i. ${rpc} is defined in the repo`, false); continue; }
+    const last = readFileSync(join(MIGRATIONS, touching[touching.length - 1]), 'utf8');
+    check(`2i. ${rpc}: the شهري bucket excludes rent_now_pay_later (effective replay body)`,
+      last.includes(GUARD),
+      'without this a stale payment_monthly can surface an instalment listing under Monthly');
+  }
+}
+
+// ── 2j. the RNPL refresh must be FLEET-WIDE, never a hardcoded platform list ─────────────────────
+{
+  const files = readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort()
+    .filter((f) => /create\s+or\s+replace\s+function\s+public\.refresh_rnpl_flags/i
+      .test(readFileSync(join(MIGRATIONS, f), 'utf8')));
+  if (files.length) {
+    const body = readFileSync(join(MIGRATIONS, files[files.length - 1]), 'utf8')
+      .split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+    check('2j. refresh_rnpl_flags() names no platform tables (fleet-wide, discovers them)',
+      !/from public\.(aqar|alhoshan|wasalt|gathern|dealapp)_(residential|commercial)_listings/i.test(body),
+      'a hardcoded list silently misses any NEW platform that starts publishing RNPL');
+    check('2j2. …and discovers source tables from the catalog instead',
+      /information_schema\.columns/i.test(body) && /rent_now_pay_later/i.test(body));
+  }
+}
+
 // ── 3. the ×12 storage convention, per scraper that stores a monthly-labelled price ──────────────
 const scraperSrc = (p: string) => readFileSync(join(import.meta.dirname, '..', 'scrapers', p), 'utf8');
 {
