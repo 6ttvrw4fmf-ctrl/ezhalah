@@ -3,6 +3,7 @@ import { Animated, Image, Platform, StyleSheet, Text } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { colors } from '@/theme/tokens';
 import { useApp } from '@/store';
+import { runAfterAnimation } from '@/lib/afterAnimation';
 
 // ─── The first-run cinematic intro (the eagle clip) ──────────────────────────────────────────────
 //
@@ -55,16 +56,18 @@ function IntroPlayer({ source, onDone }: { source: number | string; onDone: () =
   // 2026-08-07). On web RNAnimated runs on requestAnimationFrame, which the browser suspends for a
   // backgrounded/minimised tab — the timing never completes, its callback never fires, and the intro
   // overlay stays up FOREVER, leaving the whole app behind a splash screen the user cannot dismiss.
-  // The fade is decoration; handing control back is the function, so a setTimeout guarantees it
-  // (background tabs clamp setTimeout but still run it, unlike rAF). `handedOff` keeps it to exactly
-  // one onDone() no matter which path gets there first.
+  // The fade is decoration; handing control back is the function. runAfterAnimation() plays the fade
+  // but also drives onDone() from a timer, so control always comes back. See
+  // src/lib/afterAnimation.ts — the exactly-once behaviour is unit-tested there against an animation
+  // that never completes.
   const finish = () => {
     if (finished.current) return;
     finished.current = true;
-    let handedOff = false;
-    const done = () => { if (handedOff) return; handedOff = true; onDone(); };
-    Animated.timing(fade, { toValue: 0, duration: 420, useNativeDriver: true }).start(done);
-    setTimeout(done, 450); // safety net: fires even when rAF (and so the fade) is frozen
+    runAfterAnimation(
+      (onFinished) => Animated.timing(fade, { toValue: 0, duration: 420, useNativeDriver: true }).start(onFinished),
+      onDone,
+      450,
+    );
   };
 
   // Web autoplay hardening: some browsers (notably iOS Safari) only autoplay a muted video that also
