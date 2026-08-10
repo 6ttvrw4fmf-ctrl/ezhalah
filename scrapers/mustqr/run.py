@@ -271,6 +271,32 @@ def probe_column_bisect(s: cc.Session, jwt: str) -> dict[str, str]:
     return results
 
 
+def probe_column_singles(s: cc.Session, jwt: str) -> dict[str, str]:
+    """Diagnostic (2026-08-10, round 4 — definitive): round 3's bisect proved there is MORE than
+    one restricted column — `lat_lng_only` (2 cols) failed on its own, but so did `minus_lat_lng`
+    (all 27 remaining columns), so lat/lng is not the whole story. Rather than keep bisecting
+    halves, this tests every one of the 29 non-id/status columns in `_PROPERTIES_COLUMNS`
+    INDIVIDUALLY (each paired with id/status only), so a single dispatch produces the complete,
+    exact list of restricted columns instead of another round of guessing. Read-only, never called
+    from main(). ~29 requests at the usual throttle — a few seconds total.
+      python -m scrapers.mustqr.run --probe-column-singles
+    """
+    extra = [c for c in _PROPERTIES_COLUMNS.split(",") if c not in ("id", "status")]
+    results: dict[str, str] = {}
+    for col in extra:
+        url = (
+            f"{PROJECT}/rest/v1/properties?select=id,status,{col}"
+            f"&status=eq.%D9%85%D8%AA%D8%A7%D8%AD&order=id.asc"
+        )
+        _throttle()
+        r = s.get(url, headers=_headers(jwt), timeout=30)
+        results[col] = "OK" if r.status_code in (200, 206) else f"RESTRICTED (HTTP {r.status_code})"
+        print(f"  probe_column_singles[{col}]: {results[col]}", flush=True)
+    restricted = [c for c, v in results.items() if v != "OK"]
+    print(f"Mustqr: restricted columns = {restricted}", flush=True)
+    return results
+
+
 def fetch_page(s: cc.Session, jwt: str, offset: int) -> tuple[list[dict], Optional[int]]:
     """Range-paginated GET of /rest/v1/properties. Returns (rows, total_count_or_None)."""
     _throttle()
@@ -533,6 +559,9 @@ def main() -> int:
     ap.add_argument("--probe-column-bisect", action="store_true",
                      help="read-only: bisect _PROPERTIES_COLUMNS to find the restricted column(s) "
                           "— see probe_column_bisect() docstring")
+    ap.add_argument("--probe-column-singles", action="store_true",
+                     help="read-only: test every _PROPERTIES_COLUMNS column individually for the "
+                          "definitive restricted-column list — see probe_column_singles() docstring")
     args = ap.parse_args()
 
     s = session()
@@ -554,6 +583,10 @@ def main() -> int:
         results = probe_column_bisect(s, jwt)
         print(f"Mustqr: column bisect: {results}")
         return 0 if all(v.startswith("HTTP 200") or v.startswith("HTTP 206") for v in results.values()) else 1
+
+    if args.probe_column_singles:
+        results = probe_column_singles(s, jwt)
+        return 0 if all(v == "OK" for v in results.values()) else 1
 
     n_to_region = fetch_neighborhoods(s, jwt)
     print(f"  neighborhoods: {len(n_to_region)} mapped")
