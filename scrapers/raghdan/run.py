@@ -328,6 +328,73 @@ def _rendered_location(body: str) -> dict[str, str]:
     return out
 
 
+# ── The server-rendered spec / licence / deed / utilities panel ────────────────
+# Same class of capture gap as _rendered_location above: the JSON-LD carries only area, rooms and a
+# prose description, while the page the user sees renders a full REGA-grade panel. Until 2026-08-11
+# the scraper read none of it, so raghdan held 0/71 ad licences, 0 street widths and 0 utilities on
+# its searchable annual-rent apartments — not because the source is silent, but because we never
+# looked. Every value below is read verbatim from the rendered page; nothing is inferred.
+_LABEL_TPL = r">{}<!-- -->:</span>\s*<span[^>]*>(.*?)</span>"
+_SPEC_FIELDS = {
+    "street_width":    "عرض الشارع",
+    "street_name":     "شارع",
+    "ad_license":      "رقم ترخيص الإعلان",
+    "brokerage_license": "رقم رخصة الوساطة",
+    "deed_type":       "نوع الصك",
+    "plan_number":     "رقم المخطط",
+    "parcel_number":   "رقم القطعة",
+    "deed_location":   "وصف الموقع حسب الصك",
+    "building_code":   "مطابقة كود البناء السعودي",
+    "ad_source":       "مصدر الإعلان",
+    "license_expiry":  "تاريخ انتهاء صلاحية الإعلان",
+    "published_at":    "تاريخ النشر",
+    "registry_restrictions": "قيود السجل العقاري",
+    "obligations":     "الالتزامات على العقار",
+    "warranties":      "الضمانات ومدتها",
+}
+_SPEC_RE = {k: re.compile(_LABEL_TPL.format(re.escape(v)), re.S) for k, v in _SPEC_FIELDS.items()}
+
+# «المرافق» is a positive-only list, so a utility that is not listed means the seller did not say —
+# NULL, never false. Scoped to the «مرافق العقار واستخداماته» card because the page footer carries
+# an unrelated «المرافق» string in its newsletter block.
+_UTIL_CARD_RE = re.compile(r"مرافق العقار واستخداماته(.{0,1200}?)إستخدام العقار", re.S)
+_UTILITIES = {
+    "كهرباء": "electricity",
+    "مياه": "water_supply",
+    "صرف صحي": "sanitation",
+    "ألياف ضوئية": "optical_fibers",
+}
+
+
+def _rendered_specs(body: str) -> dict[str, str]:
+    """Label → verbatim value from the rendered spec/licence/deed cards. Placeholders drop out."""
+    out: dict[str, str] = {}
+    for key, rx in _SPEC_RE.items():
+        m = rx.search(body)
+        if not m:
+            continue
+        val = _strip_tags(m.group(1)).strip()
+        # raghdan's own placeholders for "nothing here" — an absent value, not a value.
+        if val and val not in ("غير محدد", "-", "—"):
+            out[key] = val
+    return out
+
+
+def _rendered_utilities(body: str) -> dict[str, bool]:
+    m = _UTIL_CARD_RE.search(body)
+    if not m:
+        return {}
+    card = _strip_tags(m.group(1))
+    return {col: True for ar, col in _UTILITIES.items() if ar in card}
+
+
+def _spec_int(v: Optional[str]) -> Optional[int]:
+    """«عرض الشارع» and «رقم القطعة» print a literal 0 when the seller left them blank. Storing 0
+    would claim a zero-metre street; 0 here means "not stated", so it must stay NULL."""
+    n = _int(v)
+    return n if n and n > 0 else None
+
+
 def _map_type(*candidates: str) -> Optional[str]:
     """Whole string then first token, exact-first then substring — via the SHARED canonical map
     (normalize.map_type) with TYPE_OVERRIDES_AR as the exact-match override layer."""
@@ -499,6 +566,29 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "availability": offers.get("availability"),
         "business_function": offers.get("businessFunction"),
     }
+    # ── the rendered spec / licence / deed panel (see _rendered_specs) ──
+    sp = _rendered_specs(body)
+    info.update({
+        # `rega_ad_license_number` is the key listing_extra_attrs already reads for other platforms.
+        # The AD licence only — NOT «رقم رخصة الوساطة», which is the brokerage's own company licence
+        # and is identical on every raghdan listing. Two different licences; never merged.
+        "rega_ad_license_number": sp.get("ad_license"),
+        "brokerage_license_number": sp.get("brokerage_license"),
+        "deed_location_text": sp.get("deed_location"),
+        "deed_type": sp.get("deed_type"),
+        "plan_number": sp.get("plan_number"),
+        "parcel_number": sp.get("parcel_number") if _spec_int(sp.get("parcel_number")) else None,
+        "saudi_building_code": sp.get("building_code"),
+        "ad_source": sp.get("ad_source"),
+        "license_expiry": sp.get("license_expiry"),
+        "registry_restrictions": sp.get("registry_restrictions"),
+        "obligations": sp.get("obligations"),
+        "warranties": sp.get("warranties"),
+        # kept as source text in JSONB rather than the typed `date_added` column: raghdan prints
+        # DD/MM/YYYY, and dropping that into a column other platforms fill in a different shape
+        # would create a field nobody can parse without knowing the platform first.
+        "published_at": sp.get("published_at"),
+    })
     info = {k: v for k, v in info.items() if v not in (None, "", "—")}
 
     row: dict[str, Any] = {
@@ -524,10 +614,18 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "region": region,
         "neighborhood": district,
         "zip_code": addr.get("postalCode") or None,
+        # «شارع» is NOT stored. This scraper already drops address.streetAddress because on raghdan
+        # that field is frequently a PERSON name rather than a street, and we cannot tell an owner
+        # or advertiser name from an official street name. The «شارع» card carries the same free
+        # text with the same ambiguity (live values seen: "رقم 469", "محمد بن عبدالعزيز الدغيثر"),
+        # so the same absolute PDPL decision applies. Nothing downstream reads street_name.
+        "street_width_m": _spec_int(sp.get("street_width")),
         "title": title,
         "description": description,
         "photo_urls": _images(ld),
         "additional_info": info,
+        # utilities: listed ⇒ True, not listed ⇒ absent ⇒ NULL (never False)
+        **_rendered_utilities(body),
     }
     return row, category
 

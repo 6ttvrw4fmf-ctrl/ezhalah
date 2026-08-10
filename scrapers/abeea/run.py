@@ -76,6 +76,7 @@ BASE = "https://abeea.com.sa"
 # now serve the themed 404 page (zero <loc> tags → the silent 0-row runs of 07-14 + 07-16), and
 # Rank Math's own sitemap module is off (robots.txt still advertises /sitemap_index.xml, also 404).
 LIST_API = f"{BASE}/wp-json/wp/v2/properties"
+FEATURE_API = f"{BASE}/wp-json/wp/v2/property_feature"
 # Sitemap FALLBACK, tried only when the REST list yields nothing: a static xml-sitemaps.com
 # /sitemap.xml exists (frozen at its 2026-06-20 generation date — stale but better than nothing),
 # plus the old Yoast pair in case the site ever brings them back.
@@ -108,6 +109,59 @@ TYPE_RULES = [
 ]
 COMMERCIAL_TYPES = {
     "Shop", "Office", "Showroom", "Warehouse", "Commercial Land", "Commercial Building",
+}
+
+# ── Houzez "Features" block ────────────────────────────────────────────────────
+# Abeea publishes a rich, grouped feature list on every detail page (Air Conditioning / Facing /
+# Rooms / Street Width / Other Features …). We already download that page for price, area and
+# bedrooms — until 2026-08-11 the parser simply threw the whole block away, so all 151 rows carried
+# NULL for air_conditioner, kitchen, parking, maid_room, driver_room, direction and street_width_m
+# even though the columns exist and listing_extra_attrs already reads them. Nothing downstream
+# needed changing; the data was being discarded at the door.
+#
+# Keyed on the /feature/<slug>/ href, not the visible label: the slug is the taxonomy's stable
+# machine key, while labels are editable display text.
+FEATURES_WRAP_RE = re.compile(r'id="property-features-wrap".*?<!--\s*property-features-wrap\s*-->', re.S)
+FEATURE_A_RE = re.compile(r'/feature/([a-z0-9\-]+)/"[^>]*>\s*([^<]+?)\s*</a>', re.I)
+WIDTH_SLUG_RE = re.compile(r"(\d{1,3})m")
+
+# Only mappings that are TRUE EQUIVALENTS. Every slug not listed here still survives verbatim in
+# additional_info['features'] — absent from this map means "we have no column that means the same
+# thing", never "discard it".
+FEATURE_BOOL = {
+    "electricity": "electricity",
+    "water-supply": "water_supply",
+    "sanitation-network": "sanitation",
+    "air-condition": "air_conditioner",
+    "central-air-conditioning": "air_conditioner",   # label "Central Cooling"
+    "open-kitchen": "kitchen",
+    "closed-kitchen": "kitchen",
+    "kitchen": "kitchen",
+    "external-kitchen": "kitchen",
+    "maid-room": "maid_room",
+    "driver-room": "driver_room",
+    "garage": "parking",
+    "laundry": "laundry_room",
+    "balcony": "balcony_terrace",
+    "fibre-optics-network": "optical_fibers",
+}
+# Deliberately NOT mapped, with the reason, so nobody "helpfully" adds them later:
+#   smart-entry      → a smart LOCK, not a private entrance (مدخل خاص). Different concept.
+#   central-heating  → heating is not cooling; air_conditioner would be a lie.
+#   swimming-pool / gym / garden / storage-room / sea-view / appliances / white goods
+#                    → real facts with no column on this table yet; preserved in features[].
+#   facing / street-width / air-conditioning / services
+#                    → group HEADERS that a few listings carry as a tag. They name a category
+#                      without a value, so they can only ever produce a guess. Left NULL.
+
+# canon_direction_ar() already accepts these eight English spellings verbatim (it learned them for
+# wasalt's panel), so the scraper stores the source's own word and the shared predicate canonicalises.
+# Multi-facing tags ("East South West") are intentionally absent: they are not one of the eight
+# canonical directions, and picking one of their three would be inventing a fact.
+FEATURE_DIRECTION = {
+    "north": "North", "south": "South", "east": "East", "west": "West",
+    "north-east": "North East", "north-west": "North West",
+    "south-east": "South East", "south-west": "South West",
 }
 
 # English city label (JSON-LD addressLocality) → canonical English city. The Houzez data writes
@@ -212,15 +266,52 @@ def _is_property_url(u: str) -> bool:
     return u.rstrip("/").rsplit("/", 1)[-1] != "property"
 
 
-def rest_urls(s: cc.Session) -> list[str]:
-    """Primary discovery: the live WP REST property list (paginated, per_page=100)."""
-    out: list[str] = []
-    seen: set[str] = set()
+def feature_terms(s: cc.Session) -> dict[int, str]:
+    """{term_id: slug} for the whole property_feature taxonomy. ONE request per run — the REST
+    property list references features by numeric term id, which is meaningless on its own."""
+    out: dict[int, str] = {}
     page = 1
     while True:
         try:
-            r = s.get(f"{LIST_API}?per_page=100&page={page}&_fields=link", timeout=30,
+            r = s.get(f"{FEATURE_API}?per_page=100&page={page}&_fields=id,slug", timeout=30,
                       headers={"Accept": "application/json"})
+        except Exception:
+            break
+        if r.status_code != 200:
+            break
+        try:
+            arr = r.json() or []
+        except Exception:
+            break
+        if not isinstance(arr, list) or not arr:
+            break
+        for t in arr:
+            if isinstance(t, dict) and isinstance(t.get("id"), int) and t.get("slug"):
+                out[t["id"]] = str(t["slug"]).lower()
+        if len(arr) < 100:
+            break
+        page += 1
+    return out
+
+
+def rest_urls(s: cc.Session) -> tuple[list[str], dict[str, set[str]]]:
+    """Primary discovery: the live WP REST property list (paginated, per_page=100).
+
+    Also returns {url: {feature slug}}. The list response carries `property_feature` for free, and
+    it is STRICTLY more complete than the rendered detail page: verified 2026-08-11 on
+    villa-for-sale-in-al-sadafah-district-al-khobar, whose REST record has the `kitchen` term while
+    the page's own Features block never prints it (the theme only renders terms that belong to a
+    display group). Parsing the HTML alone would have silently lost that fact — and 'kitchen' is one
+    of the Advanced Filter's own chips."""
+    out: list[str] = []
+    feats: dict[str, set[str]] = {}
+    seen: set[str] = set()
+    terms = feature_terms(s)
+    page = 1
+    while True:
+        try:
+            r = s.get(f"{LIST_API}?per_page=100&page={page}&_fields=link,property_feature",
+                      timeout=30, headers={"Accept": "application/json"})
         except Exception:
             break
         if r.status_code != 200:
@@ -236,10 +327,16 @@ def rest_urls(s: cc.Session) -> list[str]:
             if _is_property_url(u) and u not in seen:
                 seen.add(u)
                 out.append(u)
+                # An id missing from `terms` is a term we could not resolve to a slug — skipped,
+                # never guessed. Only resolved slugs reach the mapper.
+                if terms:
+                    ids = p.get("property_feature") or []
+                    if isinstance(ids, list):
+                        feats[u] = {terms[i] for i in ids if i in terms}
         if len(arr) < 100:  # WP paginates hard at per_page; a short page is the last one
             break
         page += 1
-    return out
+    return out, feats
 
 
 def sitemap_urls(s: cc.Session) -> list[str]:
@@ -264,12 +361,14 @@ def sitemap_urls(s: cc.Session) -> list[str]:
     return out
 
 
-def discover_urls(s: cc.Session) -> list[str]:
-    urls = rest_urls(s)
+def discover_urls(s: cc.Session) -> tuple[list[str], dict[str, set[str]]]:
+    urls, feats = rest_urls(s)
     if urls:
-        return urls
+        return urls, feats
     print("⚠ Abeea: REST property list empty/unreachable — falling back to XML sitemaps")
-    return sitemap_urls(s)
+    # No REST list ⇒ no feature ids either; map_listing falls back to scraping the (lossy)
+    # rendered Features block, which is still better than storing nothing.
+    return sitemap_urls(s), {}
 
 
 def fetch_one(url: str) -> Optional[tuple[str, str]]:
@@ -310,6 +409,42 @@ def _detail_items(body: str) -> dict[str, str]:
     out: dict[str, str] = {}
     for it in ITEM_RE.finditer(m.group(1)):
         out[_clean(it.group(1))] = _clean(it.group(2))
+    return out
+
+
+def _features(body: str) -> list[tuple[str, str]]:
+    """[(slug, label)] from the detail page's Features block, source order, de-duplicated."""
+    m = FEATURES_WRAP_RE.search(body)
+    if not m:
+        return []
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for slug, label in FEATURE_A_RE.findall(m.group(0)):
+        slug = slug.lower()
+        if slug in seen:
+            continue
+        seen.add(slug)
+        out.append((slug, _clean(label)))
+    return out
+
+
+def _feature_fields(slugs: set[str]) -> dict[str, Any]:
+    """Feature slugs → typed columns. Present ⇒ True; ABSENT ⇒ NULL, never False — the block is a
+    positive-only tag list, so "not tagged" means the seller didn't say, not that the property
+    lacks it (the manufactured-negative trap the field-level safety barrier exists to stop)."""
+    out: dict[str, Any] = {col: True for slug, col in FEATURE_BOOL.items() if slug in slugs}
+
+    # A listing may legitimately be tagged with two directions or two street widths (a corner plot
+    # on two streets). There is no way to pick one without guessing, so ambiguity stays NULL and
+    # the raw tags survive in features[].
+    dirs = {FEATURE_DIRECTION[s] for s in slugs if s in FEATURE_DIRECTION}
+    if len(dirs) == 1:
+        out["direction"] = dirs.pop()
+
+    widths = {int(m.group(1)) for s in slugs if (m := WIDTH_SLUG_RE.fullmatch(s))}
+    widths = {w for w in widths if 1 <= w <= 200}
+    if len(widths) == 1:
+        out["street_width_m"] = widths.pop()
     return out
 
 
@@ -386,7 +521,8 @@ def _images(body: str, ld: dict) -> list[str]:
     return out[:25]
 
 
-def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
+def map_listing(body: str, url: str,
+                rest_slugs: Optional[set[str]] = None) -> tuple[Optional[dict], str, bool]:
     """Return (row, category, gone). gone=True → sold/rented (skip / mark inactive)."""
     ld = _json_ld(body)
     items = _detail_items(body)
@@ -491,9 +627,19 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
     else:
         ad_number = "AB" + hashlib.md5(slug.encode("utf-8")).hexdigest()[:12]
 
+    # ── features ──
+    # REST is authoritative when we have it (complete); the page block is the fallback (lossy).
+    html_feats = _features(body)
+    slugs = rest_slugs if rest_slugs is not None else {s for s, _ in html_feats}
+    feature_fields = _feature_fields(slugs)
+
     info: dict[str, Any] = {
         "property_id": pid or None,
         "slug": slug,
+        # Every tag the page printed, in source order, whether or not we have a column for it.
+        # A feature we cannot map today (Swimming Pool, Gym, Garden, Smart Entry, Sea View …) is
+        # still a fact the source published, so it is kept verbatim rather than dropped.
+        "features": sorted(slugs) or None,
         "address_region_en": region_en_raw or None,
         "street_address": addr.get("streetAddress") or None,
         "latitude": lat,
@@ -522,11 +668,14 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
         "region": region,
         "neighborhood": district,
         "zip_code": postal,
-        "rega_location_verified": False,
+        # rega_location_verified is deliberately NOT set. Abeea publishes no REGA verification at
+        # all, and the old hardcoded `False` asserted on all 151 rows that REGA had checked the
+        # location and rejected it — a claim the source never made. Silent source ⇒ NULL.
         "title": title,
         "description": description,
         "photo_urls": _images(body, ld),
         "additional_info": info,
+        **feature_fields,
     }
     return row, category, gone
 
@@ -563,7 +712,7 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
-    urls = discover_urls(s)
+    urls, url_feats = discover_urls(s)
     if args.limit:
         urls = urls[: max(args.limit * 3, 30)]
     print(f"Abeea: {len(urls)} candidate listings ({WORKERS} workers)"
@@ -594,7 +743,7 @@ def main() -> int:
                 if not result:
                     continue
                 body, u = result
-                row, cat, gone = map_listing(body, u)
+                row, cat, gone = map_listing(body, u, url_feats.get(u))
                 if not row:
                     continue
                 if gone:
