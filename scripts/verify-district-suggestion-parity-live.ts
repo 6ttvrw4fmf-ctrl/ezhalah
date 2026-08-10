@@ -44,9 +44,9 @@ async function cityId(cityAr: string): Promise<number | null> {
   return rows.length ? rows[0].city_id : null;
 }
 
-async function searchCount(cityAr: string, deal: string, matchValues: string[]): Promise<number> {
+async function searchCount(cityAr: string, deal: string, matchValues: string[], extra: Record<string, unknown> = {}): Promise<number> {
   const rows = await post('location_search_candidates_ar', {
-    p_deal: deal, p_cities: [cityAr], p_districts: matchValues, p_per_platform: 100000000, p_limit: 1,
+    p_deal: deal, p_cities: [cityAr], p_districts: matchValues, p_per_platform: 100000000, p_limit: 1, ...extra,
   });
   return rows.length ? Number(rows[0].total_count) : 0;
 }
@@ -54,22 +54,39 @@ async function searchCount(cityAr: string, deal: string, matchValues: string[]):
 let failed = 0, checked = 0;
 const deadEnds: string[] = [];
 
-// 1) Gather every populated district suggestion across all scopes (district_options_ar is one call
-//    per city×deal — cheap).
-type Task = { cityAr: string; deal: string; district: string; count: number; mv: string[] };
+// 1) Gather every populated district suggestion across EVERY scope the District field can be in.
+//    Each scope maps district_options_ar's args (what the dropdown suggests) to the
+//    location_search_candidates_ar args the app actually searches with — if the two disagree, a
+//    populated suggestion is a dead end. (district_options_ar is one cheap call per city×deal×scope.)
+type Task = { cityAr: string; deal: string; district: string; count: number; mv: string[]; scope: string; searchExtra: Record<string, unknown> };
+type Scope = { label: string; deals: string[]; dopt: Record<string, unknown>; search: Record<string, unknown> };
+const SCOPES: Scope[] = [
+  // Deal-only, before Category / Monthly is chosen — the original coverage.
+  { label: 'default',         deals: [BUY, RENT], dopt: {},                          search: {} },
+  // Monthly toggle. district_options_ar counts payment_monthly rows (incl. RNPL); the search asks
+  // rent_period='شهري' which EXCLUDES RNPL (the FROZEN PERIOD=SOURCE / RNPL→ANNUAL rule). If a
+  // district's only monthly rows are RNPL this flags a dead end — that is the guard working; the
+  // remedy is data/coverage, NEVER the frozen RNPL rule. Live 2026-08-10: 0 monthly dead-ends.
+  { label: 'monthly',         deals: [RENT],      dopt: { p_payment_monthly: true }, search: { p_rent_period: 'شهري' } },
+  // Category picked (non-frozen — a category-scope dead-end IS a real fixable bug).
+  { label: 'cat:Residential', deals: [BUY, RENT], dopt: { p_category: 'Residential' }, search: { p_category: 'Residential' } },
+  { label: 'cat:Commercial',  deals: [BUY, RENT], dopt: { p_category: 'Commercial' },  search: { p_category: 'Commercial' } },
+];
 const tasks: Task[] = [];
 for (const cityAr of CITIES) {
   const cid = await cityId(cityAr);
   if (cid == null) { console.log(`SKIP  ${cityAr} — city_id not found`); continue; }
-  for (const deal of [BUY, RENT]) {
-    // Category null = the default (deal-only) ranking the app shows before Category is picked.
-    let opts: DistrictOpt[];
-    try {
-      opts = (await post('district_options_ar', { p_city_id: cid, p_deal: deal })) as DistrictOpt[];
-    } catch (e) { console.log(`FAIL  district_options_ar(${cityAr}, ${deal}) — ${(e as Error).message}`); failed++; continue; }
-    for (const o of opts.filter((x) => Number(x.listing_count) > 0).slice(0, MAX_DISTRICTS_PER_SCOPE)) {
-      tasks.push({ cityAr, deal, district: o.district_ar, count: Number(o.listing_count),
-        mv: Array.isArray(o.match_values) && o.match_values.length ? o.match_values : [o.district_ar] });
+  for (const scope of SCOPES) {
+    for (const deal of scope.deals) {
+      let opts: DistrictOpt[];
+      try {
+        opts = (await post('district_options_ar', { p_city_id: cid, p_deal: deal, ...scope.dopt })) as DistrictOpt[];
+      } catch (e) { console.log(`FAIL  district_options_ar(${cityAr}, ${deal}, ${scope.label}) — ${(e as Error).message}`); failed++; continue; }
+      for (const o of opts.filter((x) => Number(x.listing_count) > 0).slice(0, MAX_DISTRICTS_PER_SCOPE)) {
+        tasks.push({ cityAr, deal, scope: scope.label, district: o.district_ar, count: Number(o.listing_count),
+          mv: Array.isArray(o.match_values) && o.match_values.length ? o.match_values : [o.district_ar],
+          searchExtra: scope.search });
+      }
     }
   }
 }
@@ -82,15 +99,15 @@ async function worker() {
   while (cursor < tasks.length) {
     const task = tasks[cursor++];
     try {
-      const n = await searchCount(task.cityAr, task.deal, task.mv);
+      const n = await searchCount(task.cityAr, task.deal, task.mv, task.searchExtra);
       checked++;
-      if (n === 0) { failed++; deadEnds.push(`${task.cityAr} › ${task.district} (${task.deal}): suggested with listing_count=${task.count} but search returned 0`); }
-    } catch (e) { failed++; console.log(`FAIL  search(${task.cityAr}/${task.district}/${task.deal}) — ${(e as Error).message}`); }
+      if (n === 0) { failed++; deadEnds.push(`${task.cityAr} › ${task.district} (${task.deal}/${task.scope}): suggested with listing_count=${task.count} but search returned 0`); }
+    } catch (e) { failed++; console.log(`FAIL  search(${task.cityAr}/${task.district}/${task.deal}/${task.scope}) — ${(e as Error).message}`); }
   }
 }
 await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
-console.log(`\nchecked ${checked} populated district suggestions across ${CITIES.length} cities × 2 deals.`);
+console.log(`\nchecked ${checked} populated district suggestions across ${CITIES.length} cities × ${SCOPES.length} scopes (deal-only, monthly, category).`);
 if (deadEnds.length) {
   console.log(`\n✗ ${deadEnds.length} DEAD-END suggestion(s) — a district shown as populated returned 0 from search:`);
   for (const d of deadEnds) console.log(`   • ${d}`);
