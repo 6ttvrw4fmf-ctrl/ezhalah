@@ -1,0 +1,35 @@
+# READ-ONLY evidence run: does mustqr's `status` enum still contain 'متاح' ('available')?
+#
+# 2026-08-10: two consecutive runs (04:22 auto, 12:13 manual re-trigger) of the real sync got a
+# healthy JWT + neighborhoods fetch but 0 rows from /rest/v1/properties?status=eq.متاح. The RC-B
+# prune guard correctly refused to trust it (0 rows pruned, 1141 existing listings kept untouched),
+# but nobody could tell from that alone whether mustqr genuinely emptied its board or the status
+# value changed on their side. This dispatches probe_status_values() (scrapers/mustqr/run.py),
+# which fetches the SAME endpoint with no status filter and prints a {status: count} histogram.
+# Writes NOTHING: no upserts, no Supabase mutations, no run rows.
+name: Mustqr status probe (read-only)
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: mustqr-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Probe status values
+        env:
+          SCRAPE_MIN_INTERVAL: "0.3"
+        run: python -m scrapers.mustqr.run --probe-status

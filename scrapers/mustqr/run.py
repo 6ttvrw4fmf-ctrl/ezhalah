@@ -166,6 +166,29 @@ def fetch_neighborhoods(s: cc.Session, jwt: str) -> dict[str, str]:
     return {row["name"]: row.get("region") for row in r.json() if row.get("name")}
 
 
+def probe_status_values(s: cc.Session, jwt: str) -> dict[str, int]:
+    """Diagnostic (2026-08-10): the real fetch_page() filters on status=eq.متاح ('available') — when
+    that returns 0 rows twice in a row (2026-08-10 04:22 and 12:13, both with a working JWT and a
+    healthy neighborhoods fetch), the RC-B prune guard correctly refuses to trust it, but nobody can
+    tell from that alone whether mustqr genuinely emptied its board or the status ENUM VALUE changed
+    on their side. This fetches the same endpoint with NO status filter and returns a {status: count}
+    histogram, so a human (or the next run) can see immediately whether 'متاح' still exists at all.
+    Read-only: never called from main(), never touches the DB. Run manually via:
+      python -m scrapers.mustqr.run --probe-status
+    """
+    _throttle()
+    url = f"{PROJECT}/rest/v1/properties?select=status&limit=2000"
+    r = s.get(url, headers=_headers(jwt), timeout=45)
+    if r.status_code not in (200, 206):
+        print(f"  probe: HTTP {r.status_code} — {r.text[:200]}")
+        return {}
+    counts: dict[str, int] = {}
+    for row in r.json():
+        k = row.get("status") or "(null)"
+        counts[k] = counts.get(k, 0) + 1
+    return counts
+
+
 def fetch_page(s: cc.Session, jwt: str, offset: int) -> tuple[list[dict], Optional[int]]:
     """Range-paginated GET of /rest/v1/properties. Returns (rows, total_count_or_None)."""
     _throttle()
@@ -409,12 +432,20 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
     ap.add_argument("--limit", type=int, default=None, help="cap to first N rows (validation runs)")
+    ap.add_argument("--probe-status", action="store_true",
+                     help="read-only: print a status-value histogram from mustqr's API and exit "
+                          "(no DB writes) — see probe_status_values() docstring")
     args = ap.parse_args()
 
     s = session()
     print("Mustqr: fetching anon JWT from SPA bundle…")
     jwt = fetch_jwt(s)
     print(f"  jwt ok ({jwt[:18]}…)")
+
+    if args.probe_status:
+        counts = probe_status_values(s, jwt)
+        print(f"Mustqr: status-value histogram (no filter, up to 2000 rows): {counts}")
+        return 0 if counts else 1
 
     n_to_region = fetch_neighborhoods(s, jwt)
     print(f"  neighborhoods: {len(n_to_region)} mapped")
