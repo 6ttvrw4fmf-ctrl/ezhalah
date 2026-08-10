@@ -97,11 +97,39 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
  */
 function looksLikeUninterpretedChange(sql: string, fn: string): boolean {
   if (!sql.includes(fn)) return false;
-  const rewritesViaLiveBody = /pg_get_functiondef/i.test(sql) && /\bexecute\b/i.test(sql);
+
   const dropsOrAlters =
     new RegExp(`drop\\s+function\\s+(if\\s+exists\\s+)?public\\.${fn}\\b`, 'i').test(sql) ||
     new RegExp(`alter\\s+function\\s+public\\.${fn}\\b`, 'i').test(sql);
-  return rewritesViaLiveBody || dropsOrAlters;
+  if (dropsOrAlters) return true;
+
+  const rewritesViaLiveBody = /pg_get_functiondef/i.test(sql) && /\bexecute\b/i.test(sql);
+  if (!rewritesViaLiveBody) return false;
+
+  // A migration that reads pg_get_functiondef is not necessarily rewriting THIS function.
+  // Monitors routinely INSPECT an RPC's body — mon_detect_location_predicate_drift reads
+  // location_search_candidates_ar to check that a predicate is still indexable, for example. Those
+  // migrations define only mon_* functions and change nothing about the RPC, but the old heuristic
+  // saw "pg_get_functiondef + execute + the name appears" and reported the tracked function as
+  // uninterpretable. Two such migrations landed within minutes of each other on 2026-08-10, and
+  // muting each one by hand does not scale — the next monitor repeats it.
+  //
+  // So: if every function this migration DEFINES is some other function, and none of them is the
+  // tracked one, the migration is inspecting, not rewriting. Anything that does define/redefine the
+  // tracked function (statically or by building its body dynamically) still reports as unresolved.
+  const definedHere = [...sql.matchAll(/create\s+or\s+replace\s+function\s+public\.([a-z0-9_]+)/gi)]
+    .map((m) => m[1].toLowerCase());
+  const definesTracked = definedHere.includes(fn.toLowerCase());
+  if (!definesTracked && definedHere.length > 0) {
+    // Guard the loophole: a dynamic rebuild names the target in the EXECUTE string rather than in a
+    // literal CREATE OR REPLACE. If the function name appears next to a create-or-replace fragment
+    // anywhere (including inside a quoted string being assembled), keep flagging it.
+    const dynamicRebuild = new RegExp(
+      `create\\s+or\\s+replace\\s+function[^;]{0,120}${fn}|${fn}[^;]{0,120}create\\s+or\\s+replace\\s+function`, 'i',
+    ).test(sql);
+    return dynamicRebuild;
+  }
+  return true;
 }
 
 export function replayFunction(migrationsDir: string, fn: string): Replayed {
