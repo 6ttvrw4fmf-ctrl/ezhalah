@@ -152,7 +152,78 @@ def test_genuine_bedrooms_still_parses():
     assert _int_after_label_in_spec_table(text, *BEDROOM_LABELS) == 5
 
 
+# ─── AREA (2026-08-10) — the same leak, in the field that survived the 2026-08-03 sweep ──────────
+# «المساحة» is not only a spec label; in free text it is an ordinary Arabic word that routinely
+# introduces a PRICE, so the unanchored read stored the asking price as the area. Live proof:
+#   ad 6603069  area=1,822,550 — desc: "قيمة الأرض مقابل المساحة = 1,822,550 ريال" (the land's VALUE;
+#                                 the real area, "مساحتها 364,51 متر مربع", uses a suffixed form the
+#                                 label never matches) → a 364 m² plot filed as 1.8 million m²
+#   ad 6656704  area=550,000   — an apartment, area came out exactly equal to price_total
+#   ad 6680418  area=4,200,000 — a villa, likewise ("910م²" is the real area, stated in prose)
+AREA_LABELS = (r"المساحة\s*(?:الكلية|الإجمالية)?", r"\bالمساحة\b")
+
+# Trimmed but structurally real shape (ad 6603069): a land description that states the area with a
+# suffixed word and the PRICE with the bare label, and whose stored page carries no spec table.
+_AREA_LEAK_HTML = """
+<html><body>
+<div>● للبيع أرض في حي النعيم رقم المخطط 441 / ب .
+● مساحتها 364,51 متر مربع .
+● السعر 5000 ريال للمتر المربع .
+● قيمة الأرض مقابل المساحة = 1,822,550 ريال .</div>
+</body></html>
+"""
+
+# Free text where the bare label is followed directly by a figure — the shape the anchor removes.
+_AREA_PROSE_NUMBER_HTML = """
+<html><body>
+<div>شقة للبيع بحي البديعة المساحة 550,000 ريال شامل الضريبة</div>
+</body></html>
+"""
+
+_AREA_GENUINE_HTML = """
+<html><body>
+<div>شقة للبيع بحي البديعة السعر: 550,000 ريال</div>
+<div>المزيد تفاصيل الإعلان نوع العقار سكني المساحة 132 م² غرف النوم 3 عمر العقار جديد</div>
+</body></html>
+"""
+
+
+def test_area_leak_is_fixed():
+    """No spec table → no area. A number scavenged from the description is not an area."""
+    text = _html_to_text(_AREA_LEAK_HTML)
+    assert _int_after_label_in_spec_table(text, *AREA_LABELS) is None
+
+
+def test_area_leak_was_real():
+    """Pin the hazard the anchor removes: free text where «المساحة» IS followed straight by a
+    number, so the unanchored read adopts it. NOTE — the exact prose that produced the live
+    defects could not be replayed: those listings' stored captures are truncated to the
+    description (447 chars vs 2,878 average), so the page region the parser actually matched is
+    not in our snapshot. What IS proven about them is the outcome — the stored area equals the
+    asking price exactly, while the page states a different, plausible area (364.51 m², 910 m²,
+    480 m²). This fixture pins the shape; the live rows pin the consequence."""
+    text = _html_to_text(_AREA_PROSE_NUMBER_HTML)
+    assert _int_after_label(text, *AREA_LABELS) == 550000
+    assert _int_after_label_in_spec_table(text, *AREA_LABELS) is None
+
+
+def test_genuine_area_still_parses():
+    """The spec table's own «المساحة» row is unaffected — and is NOT the 550,000 price above it."""
+    text = _html_to_text(_AREA_GENUINE_HTML)
+    assert _int_after_label_in_spec_table(text, *AREA_LABELS) == 132
+
+
+def test_area_is_never_the_price():
+    """The signature of this class: area coming out exactly equal to the asking price."""
+    text = _html_to_text(_AREA_GENUINE_HTML)
+    assert _int_after_label_in_spec_table(text, *AREA_LABELS) != 550000
+
+
 if __name__ == "__main__":
+    test_area_leak_is_fixed()
+    test_area_leak_was_real()
+    test_genuine_area_still_parses()
+    test_area_is_never_the_price()
     test_bathrooms_leak_is_fixed()
     test_bathrooms_leak_was_real()
     test_master_bedrooms_leak_is_fixed()
