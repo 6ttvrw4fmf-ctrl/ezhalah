@@ -6,11 +6,23 @@
 # but nobody could tell from that alone whether mustqr genuinely emptied its board or the status
 # value changed on their side. This dispatches probe_status_values() (scrapers/mustqr/run.py),
 # which fetches the SAME endpoint with no status filter and prints a {status: count} histogram.
+#
+# Round 2 (same day): the histogram STILL comes back healthy ({'متاح': 1000}) even after fetch_page()
+# was narrowed to an explicit column allowlist (#418) and STILL got 401/42501. `mode: query-shape`
+# runs probe_query_shape() instead, which isolates exactly which of fetch_page()'s OTHER query
+# elements (status filter / order / Range pagination / Prefer:count=exact) trips the permission
+# check, by adding them back one at a time onto the otherwise-working request.
+#
 # Writes NOTHING: no upserts, no Supabase mutations, no run rows.
 name: Mustqr status probe (read-only)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "status | query-shape"
+        required: false
+        default: "status"
 
 concurrency:
   group: mustqr-probe
@@ -32,4 +44,9 @@ jobs:
       - name: Probe status values
         env:
           SCRAPE_MIN_INTERVAL: "0.3"
-        run: python -m scrapers.mustqr.run --probe-status
+        run: |
+          if [ "${{ inputs.mode }}" = "query-shape" ]; then
+            python -m scrapers.mustqr.run --probe-query-shape
+          else
+            python -m scrapers.mustqr.run --probe-status
+          fi
