@@ -15,9 +15,11 @@
 //   1. results  — the slug is in location_search_candidates_ar's p_amenities vocabulary
 //   2. count    — apartment_guided_counts_ar returns the cnt_* the chip's count() reads
 //   3. UI       — the control is actually rendered
-// This checks 1 and 2 statically for every control declared in 3.
+// This checks 1 and 2 statically for every control declared in 3, and check 5 enforces the inverse —
+// a field the registry marks backend-only must never acquire a chip.
 //
-// Hermetic: pure source parsing, no DB, no network. Wired into `npm test`.
+// Checks 1-4 are hermetic source parsing. Check 5 reads the LIVE field registry through the anon key
+// (a copy of the contract inside the test would drift from the contract). Wired into `npm test`.
 //   node --experimental-strip-types scripts/verify-ui-controls-have-predicates.ts
 
 import { readFileSync } from 'node:fs';
@@ -110,7 +112,48 @@ for (const dead of ['Pool', 'Gym']) {
     `The data is still stored (search_listings_ar.${dead.toLowerCase()}); re-expose it only when a platform publishes a yes.`);
 }
 
+// ── 5. THE INVERSE RULE: backend-only fields must STAY backend-only ─────────────────────────────
+// Checks 1-4 stop a visible control existing without a backend. This stops the opposite: a field the
+// registry marks ui_exposed=false quietly acquiring a chip. Those flags are not stylistic — they
+// record that a field is free prose (deed_location_text), has zero positive inventory anywhere
+// (pool/gym/garden), or is too thin to help (floor at 17%). Exposing one anyway puts a question in
+// front of users that cannot answer them.
+//
+// Read from the LIVE registry rather than a copy here, so the check can never drift from the
+// contract it is enforcing. Network-dependent, unlike checks 1-4 — if the registry is unreachable
+// this FAILS rather than skipping, because a barrier that silently opts out is not a barrier.
+const REG_URL = process.env.EZHALAH_SUPABASE_URL ?? 'https://aannarbkwcymrotzwdbo.supabase.co';
+const regKey = (await import('./lib/public-supabase.ts')).resolvePublicSupabase(process.env).key;
+try {
+  const registry: Array<{ canonical_key: string; ui_exposed: boolean; not_exposed_reason: string | null }> =
+    await fetch(`${REG_URL}/rest/v1/af_field_registry?select=canonical_key,ui_exposed,not_exposed_reason`,
+      { headers: { apikey: regKey, Authorization: `Bearer ${regKey}` } }).then((r) => r.json());
+
+  check('field registry is readable and populated', Array.isArray(registry) && registry.length > 0,
+    `got ${JSON.stringify(registry).slice(0, 200)}`);
+
+  if (Array.isArray(registry) && registry.length) {
+    const backendOnly = registry.filter((f) => !f.ui_exposed).map((f) => f.canonical_key);
+    const exposedChips = new Set(chipKeys);
+    const leaked = backendOnly.filter((k) => exposedChips.has(k));
+    check(`backend-only fields are not exposed as chips (${backendOnly.length} backend-only)`,
+      leaked.length === 0,
+      `ui_exposed=false in the registry but rendered as a chip: ${leaked.join(', ')}`);
+
+    // deed_location_text specifically: prose must never become a predicate anywhere.
+    const deedInUi = /deed_location_text/.test(advanced) || /deed_location_text/.test(interview);
+    check('deed_location_text never reaches the filter UI (it is prose, not a predicate)', !deedInUi,
+      'a free-text title-deed description cannot be a filter, and must never be parsed into '
+      + 'district/street/coordinates — those are separate facts with their own sources');
+
+    const noReason = registry.filter((f) => !f.ui_exposed && !f.not_exposed_reason).map((f) => f.canonical_key);
+    check('every backend-only field records WHY it is hidden', noReason.length === 0, noReason.join(', '));
+  }
+} catch (e) {
+  check('field registry reachable for the backend-only check', false, String(e));
+}
+
 console.log(failures === 0
-  ? '\n✓ every visible control maps to a real predicate and a real count path\n'
-  : `\n✗ ${failures} check(s) FAILED — a control would be silently ignored\n`);
+  ? '\n✓ every visible control maps to a real predicate, and backend-only fields stay backend-only\n'
+  : `\n✗ ${failures} check(s) FAILED — a control would be silently ignored, or a hidden field leaked into the UI\n`);
 process.exit(failures === 0 ? 0 : 1);
