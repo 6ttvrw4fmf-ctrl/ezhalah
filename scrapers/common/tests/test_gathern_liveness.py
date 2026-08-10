@@ -63,6 +63,21 @@ def test_anomaly_quarantines_oversized_batch_partial_crawl_cannot_wipe():
     assert is_anomaly(0, 150) is False     # nothing to kill
 
 
+def test_scheduled_liveness_stays_source_confirmed_not_a_stale_rule():
+    # BARRIER (owner 2026-08-10): nobody may later replace the automatic gathern liveness with a
+    # "stale = inactive" time-based rule. The scheduled workflow MUST invoke the 404-confirmed module,
+    # keep the 3-strike grace, and be a real (apply) schedule.
+    import os
+    wf = os.path.join(os.path.dirname(__file__), "..", "..", "..",
+                      ".github", "workflows", "gathern-liveness.yml")
+    text = open(wf, encoding="utf-8").read()
+    assert "scrapers.gathern.liveness" in text          # the 404-confirmed module, not a shortcut
+    assert "--grace" in text                             # 3-strike confirmation preserved
+    assert "schedule:" in text and "--apply" in text     # automatic apply is actually wired
+    # and the core signal is still source-confirmed (404/410 only), never staleness:
+    assert looks_dead(404) and not looks_dead(200) and not looks_dead(0)
+
+
 if __name__ == "__main__":
     test_looks_dead_only_on_404_410()
     test_404_bumps_but_grace_protects_until_third_strike()
@@ -70,4 +85,5 @@ if __name__ == "__main__":
     test_none_missing_count_treated_as_zero()
     test_kill_cap_floor_and_two_percent()
     test_anomaly_quarantines_oversized_batch_partial_crawl_cannot_wipe()
+    test_scheduled_liveness_stays_source_confirmed_not_a_stale_rule()
     print("ok")
