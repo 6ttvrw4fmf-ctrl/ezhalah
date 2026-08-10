@@ -583,6 +583,32 @@ search-RPC workstream; re-wire it into `npm run verify` once the overload is dis
 loudly — a scraper that fetched 0 rows when it had URLs exits non-zero and logs per-URL status (fixed for
 toor). Freshness monitoring closes the "cron succeeded but wrote nothing" gap.
 
+### 19.2 Live behavioral Filter barriers (scheduled, anon-key REST path — full audit 2026-08-10)
+
+Unlike §19.1 (build-time, offline), these execute the REAL production RPCs through the same anon key
+real clients use (a privileged connection could mask RLS/permission differences). Each has a dedicated
+`.github/workflows/*-live-check.yml`, runs every 6h + on-demand, and turns a GitHub Actions job RED
+(owner-notified) the moment production regresses — proven live-green on every one as of 2026-08-10.
+
+| Barrier | Workflow | Script | Proves |
+|---|---|---|---|
+| Platform diversity | `diversity-live-check.yml` | `verify-platform-diversity-live.ts` | MATCH-FIRST → DIVERSIFY-SECOND on live rows: round-robin front, no single-platform domination, 0 dupes across Show More, objective sorts still win, every row still satisfies the filter. Live 2026-08-10: 9–13 distinct platforms lead the round-robin across Buy/Rent-annual/Rent-monthly/Commercial in Riyadh — no platform is structurally favored. |
+| Trending Districts / district-suggestion dead-ends | `district-suggestion-parity-live-check.yml` | `verify-district-suggestion-parity-live.ts` | Every district `district_options_ar` reports `listing_count > 0` (i.e. every district that can appear in the "Trending districts in {city}" Top-6, `TrendingList.tsx`) actually returns `> 0` from `location_search_candidates_ar` for the same city+deal — no dead-end suggestion. Live 2026-08-10: 1,757 populated-district suggestions checked across 7 cities × 4 scopes (default/monthly/Residential/Commercial), 0 dead ends. |
+| Advanced Filter count == search | `count-rpc-parity-live-check.yml` | `verify-count-rpc-parity-live.ts` | `apartment_guided_counts_ar` and `property_age_option_counts_ar` (the RPCs behind every Advanced Filter option's live count, `ADVANCED_FILTER_DESIGN_CONTRACT.md` §8) report the EXACT same total as `location_search_candidates_ar` for the same params. Added 2026-08-10 after the audit found the three RPCs' read-side defense-in-depth guard (PR #409) had only been applied to the search RPC — see migration `20260810145200_extend_readside_guard_to_count_rpcs`. |
+| Strict-filter count parity | *(manual / daily audit — not yet scheduled)* | `verify-strict-filter-parity-live.ts` | `location_search_candidates_ar.total_count` equals a strict PostgREST ground-truth count for every NULL-permissive-fixed filter (floor, street width, tenant, direction families, RNPL amenity alias, annual-rent-is-source-published-only), plus the amenity-vocabulary fail-closed invariant. Live 2026-08-10: exact on all 6 (the one apparent mismatch was the ground-truth query missing the documented RNPL-folded-into-annual row — not an RPC bug). |
+| Unlocated-fallback scope | *(manual / daily audit — not yet scheduled)* | `verify-unlocated-fallback-scope-live.ts` | The "unresolved-location countrywide" disjunct in all three read RPCs rescues ONLY genuinely-unlocated rows, never a located-but-price/size-withheld row (the 2026-08-10 dealapp/5696027 bug class). Live 2026-08-10: exact (`rpc == production_ready + unlocated`) for both buy and rent. |
+| Normal-Filter read-side barrier | *(continuous, DB-native)* `mon_detect_filter_barrier_leaks` → P1 alert | `verify-filter-barrier.ts` (PR #409, unmerged) | `mon_filter_barrier_leaks`: 0 rows may ever have negative price/area, no city/region while `production_ready`, or a null deal, among rows the Filter can return. Live 2026-08-10: 0 leaks across 185,110 visible rows. |
+| Real-browser production parity | `ui-parity.yml` | `e2e/ui-parity.spec.ts` (Playwright) | Drives the actual deployed app (`https://ezhalah-app.vercel.app`) with real clicks — Buy/Rent+Monthly/type filters, bedrooms/price/area refine, AI-mode free-text classification, city-vs-region disambiguation. Nightly + on-demand. Live 2026-08-10: 8/8 passed. |
+
+**Full-audit finding (2026-08-10):** a targeted parity sweep (RPC total_count vs. raw `search_listings_ar`
+ground truth) across every filter dimension the RPC exposes — price/area (incl. 0/null/negative/extreme/
+boundary-inclusive/malformed-input cases), bedrooms, bathrooms, amenities, floor, direction, age,
+new-construction, license, category, and 4 realistic multi-filter combos — was byte-EXACT in every case.
+The one genuine gap found (count RPCs missing the read-side guard, above) has been fixed and is now
+covered by a dedicated barrier. See migration `20260810145200_extend_readside_guard_to_count_rpcs` and
+PR #425 for the fix; PRs #409/#410/#406 remain open awaiting owner review (migration-touching, per the
+migration-drift-guard rule in `AGENTS.md`).
+
 ---
 
 ## 20. Permanent rules (the non-negotiables)
