@@ -52,6 +52,7 @@
     "verify": "npm run verify:taxonomy && npm run verify:location-index",
     "verify:taxonomy": "tsx scripts/verify-taxonomy.ts",
     "verify:location-index": "tsx scripts/verify-location-index-source.ts",
+    "verify:filter-barrier": "tsx scripts/verify-filter-barrier.ts",
     "verify:emit-sql": "tsx scripts/verify-taxonomy.ts --emit-sql",
     "build": "npm run verify && expo export --platform web"
   },
