@@ -271,16 +271,27 @@ def to_catalog(city_ar: Optional[str], region_hint: Union[int, str, None] = None
     hit = _pick_candidate(n, hint)
     if hit:
         return hit
-    # Strip a leading admin prefix («محافظة X» governorate / «منطقة X» region) and retry as a city.
+    # Strip a leading «محافظة X» (governorate) and retry as a city: a governorate is named after its
+    # seat city, so «محافظة الخرج» → الخرج is a real city resolution.
+    #
+    # «منطقة X» is NOT stripped and retried (audit 2026-08-10). One of the 13 regions is an
+    # administrative area, never a city, even though 'منطقة الرياض' and the city 'الرياض' share a
+    # name. Retrying it as a city silently upgraded a region-level source value into a specific city:
+    # alhoshan/584386 published city 'منطقة الرياض' and we resolved city_id=3 (الرياض city) — but the
+    # listing's own title says حي الرمال… and alhoshan/584369 published 'منطقة القصيم' for a listing
+    # whose title says البدائع, a different city entirely. That fabricates precision the source never
+    # gave, against the exact-location-only rule (honest unknown, never invent). A region label must
+    # fall through to the region-only branch below: (None, region_id).
     stripped = n
-    for pre in ("محافظه ", "منطقه "):
-        if n.startswith(pre):
-            stripped = n[len(pre):]
-            break
+    if n.startswith("محافظه "):
+        stripped = n[len("محافظه "):]
     if stripped != n:
         hit = _pick_candidate(stripped, hint)
         if hit:
             return hit
+    # A «منطقة X» label still needs its region resolved from the bare name below.
+    if n.startswith("منطقه "):
+        stripped = n[len("منطقه "):]
     # Otherwise treat it as a region label → region_id only; failing that, fall back to an explicit
     # region hint (e.g. a structured «منطقة …» field) so an unknown city still keeps its real region.
     rid = _REGION_NORM.get(n) or _REGION_NORM.get(stripped) or _REGION_NORM.get("منطقه " + n)

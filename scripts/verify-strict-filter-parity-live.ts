@@ -31,9 +31,22 @@ async function rpcCount(args: Record<string, unknown>): Promise<number> {
   return rows.length ? Number(rows[0].total_count) : 0;
 }
 
-// Strict ground truth: PostgREST exact count on the base table (same predicate, no PR filter).
+// The row scope the read RPCs actually serve: production_ready ∪ genuinely-unlocated.
+//
+// Updated 2026-08-10 (audit). This used to be a bare count with NO scope predicate, which matched
+// the RPCs only because their unlocated-fallback disjunct was too wide — it rescued LOCATED rows
+// that had been withheld by the price/size safety gate (production_ready is not a pure location
+// gate; enforce_price_size_sanity() clears it for price_size_impossible rows). Migration
+// 20260810123000 narrowed the fallback to genuinely-unlocated rows, so ground truth must carry the
+// same scope or it counts rows the product deliberately withholds. Concretely, on the day of the
+// fix: p_street_width_min=>20 (buy) → bare count 19,704, scoped count 19,701, RPC 19,701; the 3-row
+// gap is exactly the located-but-withheld rows. See scripts/verify-unlocated-fallback-scope-live.ts.
+const SERVED_SCOPE = 'or=(production_ready.is.true,region_id.is.null,city_id.is.null)';
+
+// Strict ground truth: PostgREST exact count on the base table (same predicate, RPC row scope).
 async function tableCount(filters: string): Promise<number> {
-  const res = await fetch(`${URL_BASE}/rest/v1/search_listings_ar?select=listing_id&limit=1&${filters}`, {
+  const res = await fetch(
+    `${URL_BASE}/rest/v1/search_listings_ar?select=listing_id&limit=1&${SERVED_SCOPE}&${filters}`, {
     headers: { ...HEADERS, Prefer: 'count=exact' },
   });
   if (!res.ok && res.status !== 206) throw new Error(`table ${res.status}: ${await res.text()}`);
