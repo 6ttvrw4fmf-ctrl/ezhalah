@@ -208,6 +208,44 @@ def check_aqar_price_not_licence(client) -> bool:
     return False
 
 
+def check_bedroom_or(client) -> bool:
+    """True = OK. Bedroom multi-select must be an OR: an exact count AND "5+" together returns BOTH
+    sets. The search + 2 guided-count RPCs shared a priority-CASE (p_beds_min ignored when
+    p_beds_exact set), so "3 or 5+" dropped every 5+ row (Filter QA 2026-08-05; migration
+    20260809110618). Asserts, live, count("3 or 5+") == count(3) + count(>=5)."""
+    def tc(**extra):
+        scope = {"p_deal": "بيع", "p_cities": ["الرياض"], "p_limit": 1, **extra}
+        rows = client.rpc("location_search_candidates_ar", scope).execute().data or []
+        return rows[0]["total_count"] if rows else 0
+    n3 = tc(p_beds_exact=[3]); n5 = tc(p_beds_min=5); both = tc(p_beds_exact=[3], p_beds_min=5)
+    if both == n3 + n5 and both > n3 and both > n5:
+        print(f"OK  bedroom OR: '3 or 5+' = {both} == {n3} (=3) + {n5} (>=5)."); return True
+    detail = (f"bedroom multi-select is not OR: '3 or 5+' returned {both}, expected {n3 + n5} "
+              f"(exact-3={n3}, min-5={n5}) — the priority-CASE regression is back.")
+    print(f"FAIL bedroom OR: {detail}"); _alert(client, "bedroom_or_predicate_regression", both, detail); return False
+
+
+def check_filter_qa(client) -> bool:
+    """True = OK. Reads mon_filter_qa (Filter QA 2026-08-05). Both counts must be 0:
+      cityid_not_in_match — production_ready rows whose city_id is not in their own match_city_ids
+        (the Taif→Makkah compound-emirate-label class; fixed by the trg_set_match_city_ids reconcile);
+      untaxonomized_type — production_ready rows whose type_ar is not in known_type_ar (unreachable by
+        any type filter).
+    NOTE: sub-1000 Buy prices are SOURCE-REAL (PR#362, 204/204 live-verified) and are NOT monitored
+    here — price magnitude is PR#362's mon_detect_price_magnitude_gate. rent-now-pay-later rows are
+    deliberately excluded from monthly by the owner, so payment_monthly is not asserted here either."""
+    rows = client.table("mon_filter_qa").select("cityid_not_in_match,untaxonomized_type").limit(1).execute().data
+    if not rows:
+        detail = "mon_filter_qa returned no row — the regression view is missing."
+        print(f"FAIL filter-qa: {detail}"); _alert(client, "mon_filter_qa_missing", 0, detail); return False
+    mis = rows[0].get("cityid_not_in_match") or 0
+    unk = rows[0].get("untaxonomized_type") or 0
+    if mis == 0 and unk == 0:
+        print("OK  filter-qa: 0 city_id/match contradictions, 0 untaxonomized types."); return True
+    detail = f"filter-qa regression: cityid_not_in_match={mis}, untaxonomized_type={unk} (both must be 0)."
+    print(f"FAIL filter-qa: {detail}"); _alert(client, "filter_qa_regression", mis + unk, detail); return False
+
+
 def _call_agent(text: str) -> dict:
     body = json.dumps({"text": text, "locale": "ar", "loggedIn": False, "order": False, "history": []}).encode()
     req = urllib.request.Request(
@@ -250,7 +288,7 @@ def check_agent(client=None) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index", "unverified_kill", "aqar_licence_price"],
+    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index", "unverified_kill", "aqar_licence_price", "bedroom_or", "filter_qa"],
                     help="run one check")
     args = ap.parse_args()
 
@@ -274,6 +312,8 @@ def main() -> int:
     if args.only in (None, "awal"):        results.append(check_awal(client))
     if args.only in (None, "unverified_kill"): results.append(check_unverified_inactivations(client))
     if args.only in (None, "aqar_licence_price"): results.append(check_aqar_price_not_licence(client))
+    if args.only in (None, "bedroom_or"):  results.append(check_bedroom_or(client))
+    if args.only in (None, "filter_qa"):   results.append(check_filter_qa(client))
     if args.only is None:                  results.append(check_agent(client))
     return 0 if all(results) else 1
 
