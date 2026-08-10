@@ -240,6 +240,37 @@ _PROPERTIES_COLUMNS = (
 )
 
 
+def probe_column_bisect(s: cc.Session, jwt: str) -> dict[str, str]:
+    """Diagnostic (2026-08-10, round 3): probe_query_shape() proved the filter/order/Range/count
+    are NOT the problem — its variant E used the exact same query shape as fetch_page() (status
+    filter + order + Range + Prefer:count=exact) with `select=status` and got HTTP 206. Only
+    fetch_page()'s much WIDER select (the 30-column _PROPERTIES_COLUMNS allowlist from the #418
+    fix) fails. So one or more of those 30 non-id/status columns is itself restricted — the #418
+    fix narrowed correctly in principle but not far enough. This bisects _PROPERTIES_COLUMNS to
+    find exactly which column(s), using the same query shape as fetch_page() (filter+order, no
+    Range/count needed to reproduce a permission error). Read-only, never called from main().
+      python -m scrapers.mustqr.run --probe-column-bisect
+    """
+    extra = [c for c in _PROPERTIES_COLUMNS.split(",") if c not in ("id", "status")]
+    mid = len(extra) // 2
+    variants = {
+        "full_allowlist": extra,
+        "first_half": extra[:mid],
+        "second_half": extra[mid:],
+        "minus_lat_lng": [c for c in extra if c not in ("lat", "lng")],
+        "lat_lng_only": ["lat", "lng"],
+    }
+    results: dict[str, str] = {}
+    for label, cols in variants.items():
+        select = "id,status," + ",".join(cols)
+        url = f"{PROJECT}/rest/v1/properties?select={select}&status=eq.%D9%85%D8%AA%D8%A7%D8%AD&order=id.asc"
+        _throttle()
+        r = s.get(url, headers=_headers(jwt), timeout=30)
+        results[label] = f"HTTP {r.status_code}" + ("" if r.status_code in (200, 206) else f" — {r.text[:150]}")
+        print(f"  probe_column_bisect[{label}] ({len(cols)} cols): {results[label]}", flush=True)
+    return results
+
+
 def fetch_page(s: cc.Session, jwt: str, offset: int) -> tuple[list[dict], Optional[int]]:
     """Range-paginated GET of /rest/v1/properties. Returns (rows, total_count_or_None)."""
     _throttle()
@@ -499,6 +530,9 @@ def main() -> int:
     ap.add_argument("--probe-query-shape", action="store_true",
                      help="read-only: isolate which query element (filter/order/range/count) "
                           "triggers the 2026-08-10 401/42501 — see probe_query_shape() docstring")
+    ap.add_argument("--probe-column-bisect", action="store_true",
+                     help="read-only: bisect _PROPERTIES_COLUMNS to find the restricted column(s) "
+                          "— see probe_column_bisect() docstring")
     args = ap.parse_args()
 
     s = session()
@@ -514,6 +548,11 @@ def main() -> int:
     if args.probe_query_shape:
         results = probe_query_shape(s, jwt)
         print(f"Mustqr: query-shape isolation: {results}")
+        return 0 if all(v.startswith("HTTP 200") or v.startswith("HTTP 206") for v in results.values()) else 1
+
+    if args.probe_column_bisect:
+        results = probe_column_bisect(s, jwt)
+        print(f"Mustqr: column bisect: {results}")
         return 0 if all(v.startswith("HTTP 200") or v.startswith("HTTP 206") for v in results.values()) else 1
 
     n_to_region = fetch_neighborhoods(s, jwt)

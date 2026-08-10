@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "status | query-shape"
+        description: "status | query-shape | column-bisect"
         required: false
         default: "status"
 
@@ -47,6 +47,8 @@ jobs:
         run: |
           if [ "${{ inputs.mode }}" = "query-shape" ]; then
             python -m scrapers.mustqr.run --probe-query-shape
+          elif [ "${{ inputs.mode }}" = "column-bisect" ]; then
+            python -m scrapers.mustqr.run --probe-column-bisect
           else
             python -m scrapers.mustqr.run --probe-status
           fi
