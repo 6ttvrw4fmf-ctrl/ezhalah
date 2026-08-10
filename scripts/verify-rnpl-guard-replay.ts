@@ -64,6 +64,20 @@ console.log('\nRNPL/Monthly guard — asserted against the REPLAYED final state 
 // confirmed not to touch the RNPL/Monthly predicates. Remove an entry the moment its migration is
 // superseded by an explicit definition.
 const AUDITED_UNINTERPRETABLE = new Map<string, string>([
+  ['20260810201309_wire_filter_audit_barriers_into_daily_detector_roster.sql',
+   'audited 2026-08-10 (mine): wires five Filter-audit detectors into mon_run_all_detectors(). ' +
+   'ZERO occurrences of payment_monthly and ZERO of rent_now_pay_later/rnpl/RNPL. Every function it ' +
+   'creates is a mon_detect_* / mon_* monitor, and its single DO block re-executes exactly one ' +
+   'function — mon_run_all_detectors — which is a detector roster, not a search RPC. Its two ' +
+   'location_search_candidates_ar hits are CALLS inside the performance detector ' +
+   '(`perform 1 from public.location_search_candidates_ar(...)`) that time the query; the RPC is ' +
+   'read, never redefined, so no Monthly/RNPL predicate can be reached from this file.'],
+  ['20260810201833_daily_gate_expensive_filter_detectors.sql',
+   'audited 2026-08-10 (mine): same shape and same audit as the migration above — it re-emits those ' +
+   'detectors wrapped in a ~20h gate (ops_detector_last_full_run) and adds ' +
+   'mon_detect_stalled_daily_detector. ZERO payment_monthly, ZERO rent_now_pay_later/rnpl. Creates ' +
+   'only mon_* functions plus one ops_* table; its DO block re-executes only mon_run_all_detectors. ' +
+   'The two location_search_candidates_ar hits are again timing CALLS, not a redefinition.'],
   ['20260809113302_aqar_ppm_source_truth_repair_and_searchable_price_per_meter.sql',
    'audited 2026-08-09: price_per_meter only — 0 occurrences of beds/bedroom/غرف, and it needle-edits ' +
    'from the LIVE body so it preserves whatever predicates exist. Does not touch payment_monthly or ' +
