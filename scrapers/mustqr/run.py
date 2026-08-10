@@ -109,24 +109,38 @@ def session() -> cc.Session:
 
 def fetch_jwt(s: cc.Session) -> str:
     """Pull the public anon JWT Mustqr embeds in its SPA bundle. Cached in-process so a full run
-    only does the discovery once."""
+    only does the discovery once.
+
+    RETRY (2026-08-10): mustqr.sa is a Vercel SPA; a redeploy swaps the /assets/index-<hash>.js
+    bundle, so a run that lands mid-deploy can 404 the bundle (or get a transient landing blip) and,
+    with no retry, the WHOLE run failed with 0 rows — exactly the 2026-08-10 04:22 & 12:13 failures
+    (source itself was healthy: 1,144 live listings, verified). We re-read the LANDING page on every
+    attempt so a freshly-deployed bundle hash is picked up. Retries fire ONLY on failure (with
+    backoff) — no added load on a healthy run."""
     global _JWT
     if "_JWT" in globals() and _JWT:
         return _JWT
-    # 1) Read landing page, find the index-*.js bundle.
-    r = s.get(SITE, timeout=30)
-    r.raise_for_status()
-    bundles = re.findall(r"/assets/index-[A-Za-z0-9_\-]+\.js", r.text)
-    if not bundles:
-        raise RuntimeError("Mustqr: could not locate SPA bundle in landing page")
-    # 2) Fetch the first index bundle and grep for a JWT.
-    r = s.get(SITE + bundles[0], timeout=30)
-    r.raise_for_status()
-    jwts = re.findall(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", r.text)
-    if not jwts:
-        raise RuntimeError(f"Mustqr: no JWT found in {bundles[0]}")
-    _JWT = jwts[0]
-    return _JWT
+    last_err: Optional[Exception] = None
+    for attempt in range(3):
+        try:
+            # 1) Read landing page (fresh each attempt), find the index-*.js bundle.
+            r = s.get(SITE, timeout=30)
+            r.raise_for_status()
+            bundles = re.findall(r"/assets/index-[A-Za-z0-9_\-]+\.js", r.text)
+            if not bundles:
+                raise RuntimeError("could not locate SPA bundle in landing page")
+            # 2) Fetch the first index bundle and grep for the anon JWT.
+            rb = s.get(SITE + bundles[0], timeout=30)
+            rb.raise_for_status()
+            jwts = re.findall(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", rb.text)
+            if not jwts:
+                raise RuntimeError(f"no JWT found in {bundles[0]}")
+            _JWT = jwts[0]
+            return _JWT
+        except Exception as e:  # noqa: BLE001 — any transient (network, 404 bundle swap, blip) → retry
+            last_err = e
+            time.sleep(2 * (attempt + 1))
+    raise RuntimeError(f"Mustqr: JWT discovery failed after 3 attempts: {last_err}")
 
 
 def _headers(jwt: str, *, range_hdr: Optional[str] = None, count: bool = False) -> dict[str, str]:
@@ -152,11 +166,150 @@ def fetch_neighborhoods(s: cc.Session, jwt: str) -> dict[str, str]:
     return {row["name"]: row.get("region") for row in r.json() if row.get("name")}
 
 
+def probe_status_values(s: cc.Session, jwt: str) -> dict[str, int]:
+    """Diagnostic (2026-08-10): the real fetch_page() filters on status=eq.متاح ('available') — when
+    that returns 0 rows twice in a row (2026-08-10 04:22 and 12:13, both with a working JWT and a
+    healthy neighborhoods fetch), the RC-B prune guard correctly refuses to trust it, but nobody can
+    tell from that alone whether mustqr genuinely emptied its board or the status ENUM VALUE changed
+    on their side. This fetches the same endpoint with NO status filter and returns a {status: count}
+    histogram, so a human (or the next run) can see immediately whether 'متاح' still exists at all.
+    Read-only: never called from main(), never touches the DB. Run manually via:
+      python -m scrapers.mustqr.run --probe-status
+    """
+    _throttle()
+    url = f"{PROJECT}/rest/v1/properties?select=status&limit=2000"
+    r = s.get(url, headers=_headers(jwt), timeout=45)
+    if r.status_code not in (200, 206):
+        print(f"  probe: HTTP {r.status_code} — {r.text[:200]}")
+        return {}
+    counts: dict[str, int] = {}
+    for row in r.json():
+        k = row.get("status") or "(null)"
+        counts[k] = counts.get(k, 0) + 1
+    return counts
+
+
+def probe_query_shape(s: cc.Session, jwt: str) -> dict[str, str]:
+    """Diagnostic (2026-08-10, round 2): probe_status_values() (`select=status&limit=2000`, no
+    filter/order/Range/Prefer) still succeeds RIGHT NOW even though fetch_page() — with the SAME
+    JWT, seconds apart — still gets 401/42501 EVEN AFTER narrowing select=* to an explicit
+    column allowlist (2026-08-10 fix, PR #418). That falsifies both the "whole table locked down"
+    theory (probe still works) and the "select=* projects a restricted PII column" theory (the
+    narrowed select still fails). Something about fetch_page()'s OTHER query elements — the
+    status=eq.متاح filter, order=id.asc, Range/Range-Unit pagination headers, or
+    Prefer: count=exact — is what actually trips the permission check. This isolates each one by
+    adding them back one at a time onto the otherwise-working `select=status` request, so the
+    next run pinpoints exactly which element to work around. Read-only, never called from main().
+      python -m scrapers.mustqr.run --probe-query-shape
+    """
+    base = f"{PROJECT}/rest/v1/properties?select=status"
+    filt = "&status=eq.%D9%85%D8%AA%D8%A7%D8%AD"
+    order = "&order=id.asc"
+    variants = {
+        "A_no_filter_no_headers": (base, {}),
+        "B_filter_only": (base + filt, {}),
+        "C_filter_and_order": (base + filt + order, {}),
+        "D_filter_order_range": (base + filt + order, {"range": "0-4"}),
+        "E_filter_order_range_count": (base + filt + order, {"range": "0-4", "count": True}),
+    }
+    results: dict[str, str] = {}
+    for label, (url, opts) in variants.items():
+        _throttle()
+        r = s.get(url, headers=_headers(jwt, range_hdr=opts.get("range"), count=bool(opts.get("count"))),
+                   timeout=30)
+        results[label] = f"HTTP {r.status_code}" + ("" if r.status_code in (200, 206) else f" — {r.text[:200]}")
+        print(f"  probe_query_shape[{label}]: {results[label]}", flush=True)
+    return results
+
+
+# Explicit column allowlist for fetch_page() (2026-08-10). `select=*` started failing 401/42501
+# "permission denied for table properties" on 2026-08-10 (04:22, 12:13, 13:20, 13:31 — 4 consecutive
+# real runs). A first narrowing attempt (this list minus `*`, still 29 columns) STILL failed, which
+# `probe_query_shape()` (round 2) proved was not the filter/order/Range/count — `select=status` with
+# the identical filter+order+Range+count succeeded. `probe_column_bisect()` (round 3) then showed
+# MORE than one column was restricted, and `probe_column_singles()` (round 4) tested all 29
+# individually and produced the exact, definitive list: `types`, `lat`, `lng`. (`categories` — the
+# plural sibling of `types` — and `show_location` are NOT restricted; only `types`/`lat`/`lng` are.)
+# The module docstring already records that `properties` carries `owner_phone`/`broker`/`raw_text`
+# PII columns we have always dropped/redacted; `lat`/`lng` (precise geolocation) fits the same
+# privacy-lockdown pattern mustqr appears to be applying. This list is exactly the columns
+# map_listing() actually consumes MINUS the 3 confirmed-restricted ones — dropping `types` only
+# loses the optional `types_ar` extras field, and dropping `lat`/`lng` only loses the optional
+# map-pin extras; neither is a core field (property_type/price/area/etc. come from other columns),
+# so both come back simply absent (never fabricated), exactly like any field mustqr doesn't publish.
+_PROPERTIES_COLUMNS = (
+    "id,status,type,category,usage_type,area_sqm,neighborhood,title,description,images,videos,"
+    "price,price_som,price_had,price_type,offer_number,direction,features,floor,"
+    "have_a_planner_number,planner_number,categories,view_count,is_featured,show_location,"
+    "created_at,updated_at,bathrooms"
+)
+
+
+def probe_column_bisect(s: cc.Session, jwt: str) -> dict[str, str]:
+    """Diagnostic (2026-08-10, round 3): probe_query_shape() proved the filter/order/Range/count
+    are NOT the problem — its variant E used the exact same query shape as fetch_page() (status
+    filter + order + Range + Prefer:count=exact) with `select=status` and got HTTP 206. Only
+    fetch_page()'s much WIDER select (the 30-column _PROPERTIES_COLUMNS allowlist from the #418
+    fix) fails. So one or more of those 30 non-id/status columns is itself restricted — the #418
+    fix narrowed correctly in principle but not far enough. This bisects _PROPERTIES_COLUMNS to
+    find exactly which column(s), using the same query shape as fetch_page() (filter+order, no
+    Range/count needed to reproduce a permission error). Read-only, never called from main().
+      python -m scrapers.mustqr.run --probe-column-bisect
+    """
+    extra = [c for c in _PROPERTIES_COLUMNS.split(",") if c not in ("id", "status")]
+    mid = len(extra) // 2
+    variants = {
+        "full_allowlist": extra,
+        "first_half": extra[:mid],
+        "second_half": extra[mid:],
+        "minus_lat_lng": [c for c in extra if c not in ("lat", "lng")],
+        "lat_lng_only": ["lat", "lng"],
+    }
+    results: dict[str, str] = {}
+    for label, cols in variants.items():
+        select = "id,status," + ",".join(cols)
+        url = f"{PROJECT}/rest/v1/properties?select={select}&status=eq.%D9%85%D8%AA%D8%A7%D8%AD&order=id.asc"
+        _throttle()
+        r = s.get(url, headers=_headers(jwt), timeout=30)
+        results[label] = f"HTTP {r.status_code}" + ("" if r.status_code in (200, 206) else f" — {r.text[:150]}")
+        print(f"  probe_column_bisect[{label}] ({len(cols)} cols): {results[label]}", flush=True)
+    return results
+
+
+def probe_column_singles(s: cc.Session, jwt: str) -> dict[str, str]:
+    """Diagnostic (2026-08-10, round 4 — definitive): round 3's bisect proved there is MORE than
+    one restricted column — `lat_lng_only` (2 cols) failed on its own, but so did `minus_lat_lng`
+    (all 27 remaining columns), so lat/lng is not the whole story. Rather than keep bisecting
+    halves, this tests every one of the 29 non-id/status columns in `_PROPERTIES_COLUMNS`
+    INDIVIDUALLY (each paired with id/status only), so a single dispatch produces the complete,
+    exact list of restricted columns instead of another round of guessing. Read-only, never called
+    from main(). ~29 requests at the usual throttle — a few seconds total.
+      python -m scrapers.mustqr.run --probe-column-singles
+    """
+    extra = [c for c in _PROPERTIES_COLUMNS.split(",") if c not in ("id", "status")]
+    results: dict[str, str] = {}
+    for col in extra:
+        url = (
+            f"{PROJECT}/rest/v1/properties?select=id,status,{col}"
+            f"&status=eq.%D9%85%D8%AA%D8%A7%D8%AD&order=id.asc"
+        )
+        _throttle()
+        r = s.get(url, headers=_headers(jwt), timeout=30)
+        results[col] = "OK" if r.status_code in (200, 206) else f"RESTRICTED (HTTP {r.status_code})"
+        print(f"  probe_column_singles[{col}]: {results[col]}", flush=True)
+    restricted = [c for c, v in results.items() if v != "OK"]
+    print(f"Mustqr: restricted columns = {restricted}", flush=True)
+    return results
+
+
 def fetch_page(s: cc.Session, jwt: str, offset: int) -> tuple[list[dict], Optional[int]]:
     """Range-paginated GET of /rest/v1/properties. Returns (rows, total_count_or_None)."""
     _throttle()
     rng = f"{offset}-{offset + PAGE_SIZE - 1}"
-    url = f"{PROJECT}/rest/v1/properties?select=*&status=eq.%D9%85%D8%AA%D8%A7%D8%AD&order=id.asc"
+    url = (
+        f"{PROJECT}/rest/v1/properties?select={_PROPERTIES_COLUMNS}"
+        f"&status=eq.%D9%85%D8%AA%D8%A7%D8%AD&order=id.asc"
+    )
     for attempt in range(3):
         try:
             r = s.get(url, headers=_headers(jwt, range_hdr=rng, count=(offset == 0)), timeout=45)
@@ -172,6 +325,13 @@ def fetch_page(s: cc.Session, jwt: str, offset: int) -> tuple[list[dict], Option
             return r.json(), total
         if r.status_code in (429, 502, 503, 504):
             time.sleep(3 * (attempt + 1)); continue
+        # DIAGNOSTIC (2026-08-10): any other status code was silently treated as "0 rows, no error" —
+        # exactly the blind spot that made the 2026-08-10 04:22/12:13/13:20 failures indistinguishable
+        # from "mustqr genuinely has 0 available listings" (it did not: an unfiltered probe of the
+        # same endpoint the same day found 1000+ rows with status='متاح'). Surface what actually came
+        # back so a non-retryable error (4xx from a filter/encoding/API-shape change) is diagnosable
+        # instead of silently swallowed as an empty result.
+        print(f"  fetch_page: HTTP {r.status_code} (non-retryable) — {r.text[:300]!r}", flush=True)
         return [], None
     return [], None
 
@@ -395,12 +555,43 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
     ap.add_argument("--limit", type=int, default=None, help="cap to first N rows (validation runs)")
+    ap.add_argument("--probe-status", action="store_true",
+                     help="read-only: print a status-value histogram from mustqr's API and exit "
+                          "(no DB writes) — see probe_status_values() docstring")
+    ap.add_argument("--probe-query-shape", action="store_true",
+                     help="read-only: isolate which query element (filter/order/range/count) "
+                          "triggers the 2026-08-10 401/42501 — see probe_query_shape() docstring")
+    ap.add_argument("--probe-column-bisect", action="store_true",
+                     help="read-only: bisect _PROPERTIES_COLUMNS to find the restricted column(s) "
+                          "— see probe_column_bisect() docstring")
+    ap.add_argument("--probe-column-singles", action="store_true",
+                     help="read-only: test every _PROPERTIES_COLUMNS column individually for the "
+                          "definitive restricted-column list — see probe_column_singles() docstring")
     args = ap.parse_args()
 
     s = session()
     print("Mustqr: fetching anon JWT from SPA bundle…")
     jwt = fetch_jwt(s)
     print(f"  jwt ok ({jwt[:18]}…)")
+
+    if args.probe_status:
+        counts = probe_status_values(s, jwt)
+        print(f"Mustqr: status-value histogram (no filter, up to 2000 rows): {counts}")
+        return 0 if counts else 1
+
+    if args.probe_query_shape:
+        results = probe_query_shape(s, jwt)
+        print(f"Mustqr: query-shape isolation: {results}")
+        return 0 if all(v.startswith("HTTP 200") or v.startswith("HTTP 206") for v in results.values()) else 1
+
+    if args.probe_column_bisect:
+        results = probe_column_bisect(s, jwt)
+        print(f"Mustqr: column bisect: {results}")
+        return 0 if all(v.startswith("HTTP 200") or v.startswith("HTTP 206") for v in results.values()) else 1
+
+    if args.probe_column_singles:
+        results = probe_column_singles(s, jwt)
+        return 0 if all(v == "OK" for v in results.values()) else 1
 
     n_to_region = fetch_neighborhoods(s, jwt)
     print(f"  neighborhoods: {len(n_to_region)} mapped")

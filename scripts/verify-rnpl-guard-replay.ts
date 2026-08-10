@@ -48,6 +48,19 @@ const AUDITED_UNINTERPRETABLE = new Map<string, string>([
    'audited 2026-08-09: price_per_meter only — 0 occurrences of beds/bedroom/غرف, and it needle-edits ' +
    'from the LIVE body so it preserves whatever predicates exist. Does not touch payment_monthly or ' +
    'rent_now_pay_later.'],
+  ['20260809110618_fix_bedroom_mixed_exact_plus_5plus_or_predicate.sql',
+   'audited 2026-08-10 (recovered from prod drift): bedrooms p_beds_exact/p_beds_min OR-predicate ' +
+   'only — 0 occurrences of payment_monthly/rent_now_pay_later/rnpl/RNPL, and it needle-edits from ' +
+   'the LIVE body (pg_get_functiondef at apply time) so it preserves whatever the RNPL/Monthly ' +
+   'predicates were, unchanged.'],
+  ['20260810145200_extend_readside_guard_to_count_rpcs.sql',
+   'audited 2026-08-10 (Filter audit): extends the PR #409 read-side defense-in-depth guard ' +
+   '(negative price/area, null deal, production_ready-without-location) from location_search_' +
+   'candidates_ar to the two count RPCs — 0 occurrences of payment_monthly/rent_now_pay_later/rnpl/' +
+   'RNPL anywhere in the file. It needle-edits from the LIVE body (pg_get_functiondef at apply time, ' +
+   'anchor-count-guarded — aborts rather than rewriting blind if the anchor is not found exactly ' +
+   'once), so it preserves whatever the RNPL/Monthly predicates were, unchanged. Self-proven live: ' +
+   'both count RPCs returned the identical baseline (109581 for p_deal=\'بيع\') before and after.'],
 ]);
 
 // ── every tracked function must be fully interpretable ───────────────────────────────────────────

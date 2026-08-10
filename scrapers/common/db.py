@@ -21,7 +21,7 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
-from scrapers.common.pii import redact_pii
+from scrapers.common.pii import is_free_text, redact_capture, redact_pii
 from scrapers.common.placeholder_tokens import PLACEHOLDER_TOKENS, is_placeholder
 
 
@@ -305,6 +305,7 @@ def upsert_aqar_residential(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _unknown_must_not_overwrite_known(row)
+    _redact_user_visible_text(row)
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="aqar_residential_listings")
@@ -318,6 +319,7 @@ def upsert_aqar_commercial(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _unknown_must_not_overwrite_known(row)
+    _redact_user_visible_text(row)
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="aqar_commercial_listings")
@@ -331,6 +333,7 @@ def upsert_wasalt_residential(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _unknown_must_not_overwrite_known(row)
+    _redact_user_visible_text(row)
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="wasalt_residential_listings")
@@ -395,6 +398,47 @@ def _sanitize_ints(r: dict[str, Any]) -> None:
                 continue
             if isinstance(v, int) and not (0 <= v <= hi):
                 r[c] = None  # overflow OR negative — both impossible for a count/area/price
+
+
+# Free-text columns that can carry a contact detail. PDPL: a broker's phone number, WhatsApp handle
+# or e-mail must never survive into any of them, on any platform.
+#
+# THIS LIST WAS ONCE ("description", "title") AND THAT WAS THE BUG. A compliance audit on 2026-08-10
+# found 78 live broker mobiles sitting in `street_name` — publicly readable through the anon key —
+# plus 4 in `residence_type`, because advertisers type «...لتواصل: 05XXXXXXXX» into whatever box the
+# source gives them. Guarding the two columns we happened to think of is not a barrier. Any free-text
+# column a scraper writes belongs here; when in doubt, add it — redaction leaves non-contact text
+# byte-identical, so the cost of over-listing is zero and the cost of under-listing is a live leak.
+_USER_VISIBLE_TEXT_COLS = (
+    "description", "title", "street_name", "residence_type", "project_name",
+    "neighborhood", "address_text", "payment_terms", "tenant_category",
+)
+
+
+def _redact_user_visible_text(r: dict[str, Any]) -> None:
+    """PDPL redaction on the columns the app actually displays — every platform, every upsert path.
+
+    THE BUG THIS CLOSES (2026-08-09): `redact_pii()` was applied to `source_capture.source_text` and
+    to NOTHING ELSE. The `description` column — the one users read — was written raw. A one-off
+    UPDATE cleaned 9,785 descriptions earlier the same day and was reported as fixed; it was not,
+    because ingestion kept writing new ones. Within hours aqar was back to 1,895 descriptions
+    carrying Saudi mobile numbers, 684 carrying WhatsApp/Telegram links and 194 carrying e-mail
+    addresses — several alongside the agent's name («حسام : 05XXXXXXXX»), which is unambiguously
+    personal data. Repairing rows without closing the write path is not a fix, it is a delay.
+
+    Placed AFTER `_unknown_must_not_overwrite_known` on purpose: if a description consists of
+    nothing BUT contact details, `redact_pii` returns None and we deliberately write NULL over the
+    stored value. PDPL beats preservation — that is the one case where erasing is the correct
+    outcome, and it cannot be reached by a fetch that simply failed to read the field (a missing
+    key never gets here, it was dropped by the no-clobber guard above).
+    """
+    for col in _USER_VISIBLE_TEXT_COLS:
+        # is_free_text() gate, same as the capture barrier: NEVER run the contact patterns over a
+        # value that is a bare number or a URL. `0?5\d{8}` means "nine digits starting with 5",
+        # which a price per m2 (512345678), a postal code or a plot number can satisfy — redacting
+        # those would destroy source facts to fix nothing, since nobody is reachable through them.
+        if is_free_text(r.get(col)):
+            r[col] = redact_pii(r[col])
 
 
 def _sanitize_price(r: dict[str, Any]) -> None:
@@ -476,6 +520,13 @@ def _ensure_capture(r: dict[str, Any]) -> None:
         cap.setdefault("url_path", r.get("listing_url"))
         cap.setdefault("schema", "unspecified")
     _fold_price_evidence(r)
+    # PDPL capture barrier (owner rule 2026-08-09). The capture is PRIVATE (anon has no SELECT on
+    # it), but "private" is not "allowed to accumulate contact details" — hidden PII is still PII,
+    # and 614 sanadak rows proved it accumulates silently. redact_capture() scrubs FREE TEXT only:
+    # coordinates, prices, lot sizes, ids, photo/QR URLs, and REGA/FAL licence numbers survive
+    # byte-identical, because destroying regulatory data to fix a privacy bug is not a fix.
+    if isinstance(r.get("source_capture"), (dict, list)):
+        r["source_capture"] = redact_capture(r["source_capture"])
 
 
 def _fold_price_evidence(r: dict[str, Any]) -> None:
@@ -582,6 +633,7 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         r.setdefault("active", True)
         _sanitize_price(r)
         _unknown_must_not_overwrite_known(r)
+        _redact_user_visible_text(r)
         _sanitize_ints(r)
         _ensure_capture(r)
         _reject_placeholder_location(r, table=table)

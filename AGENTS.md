@@ -2,6 +2,46 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.
 
+# Read this first — canonical rules + token efficiency (owner rule, 2026-08-10, confirmed permanent)
+
+**Reading order before any research task: `AGENTS.md` (this file) → `docs/ARCHITECTURE.md` →
+`docs/VERIFIED_BASELINES.md` → whichever `docs/ops/*.md` is relevant to the task.** Those are the
+canonical rule sources. Do not open a historical audit/report file (`AUDIT_REPORT.md`,
+`BACKEND_AUDIT.md`, `PRODUCTION_AUDIT_2026-07-17.md`, old PR descriptions, etc.) unless the current task
+genuinely requires it — those are point-in-time snapshots kept for provenance, not where current rules
+live, and most of their findings are already fixed. If `ARCHITECTURE.md` §20 (Permanent rules), §21
+(Open questions), `docs/VERIFIED_BASELINES.md`, `docs/ops/AGENT_AUTHORITY.md`, `docs/ops/
+ADVANCED_FILTER_SOURCE_TRUTH.md`, or `docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md` already answer the
+question, cite it — do not re-read a giant old report to re-derive the same fact, and do not restate a
+settled rule at length in a chat reply; a one-line citation is enough.
+
+**Owner-granted engineering/product decisions belong in this repo, not just in an agent's own memory.**
+When the owner gives you a permanent rule, architecture decision, or business/compliance decision:
+land it in `docs/ARCHITECTURE.md` (or the relevant `docs/ops/*.md`) in the same session, not only in
+your own memory system — a future session (or a different agent/tool entirely) must be able to recover
+it by reading the repo, without replaying this conversation. Consolidate overlapping rules into one
+canonical statement instead of letting duplicates accumulate; if you find a stale fact while working
+nearby, fix it in the same edit.
+
+**Token/context discipline (applies to every session, every routine):**
+- Query only the columns/rows/lines needed to answer the current question — don't dump full SQL
+  results, logs, payloads, or whole source files into context when a targeted read/grep answers it.
+- Don't spawn multiple agents for a simple check; use parallel agents only when they cover genuinely
+  independent work or materially save wall-clock time.
+- Reports: **issue → root cause → fix → barrier → production verification → remaining.** Full evidence
+  dumps only when something is disputed or needs an owner decision.
+- Before a large investigation, check whether the answer already exists in `docs/`, git history, or a
+  monitor/dashboard before re-discovering it from scratch.
+- None of this trades away rigor: fix → regression test → verify → deploy still applies in full: it
+  just runs on targeted reads instead of wholesale context dumps.
+
+**PR safety in this shared repo (permanent, 2026-08-10):** this working directory is shared by
+concurrent sessions with no per-session isolation — a background `gh pr create` with no `--head` can
+silently pick up whatever branch another session has checked out and open/merge the wrong PR (this
+happened once). Always pass `--head <exact-branch> --base main` explicitly; verify the PR's file list
+(`gh pr view N --json files`) right after creating it AND again immediately before `gh pr merge`, not
+just once.
+
 # Autonomous engineering authority (owner-granted, 2026-08-04)
 
 **The engineering routines are AUTONOMOUS for safe operational work. Finding a safe production bug
@@ -149,6 +189,16 @@ script.
 acquire the lock yourself via the Supabase MCP `execute_sql` tool, on project `aannarbkwcymrotzwdbo`,
 immediately before the deploy/rollback action, and release it immediately after:
 
+**The production lock has exactly ONE identity: `production`.** Since 2026-08-10 the database
+canonicalises every production-scoped alias (`prod`, `prod-change`, `PROD_DB`, `prd`, `live`,
+`deploy`, any `prod*`) onto that one row, so an alias can no longer create a *second* lock that
+excludes nobody. That bug was real and observed live: on 2026-08-10 `daily-health-check` held
+`'prod'` while another session held `'production'`, and later `audit-fix` held `'prod-change'`
+against `'production'` — in both windows two sessions each believed they held THE deploy lock.
+Still write `'production'`: aliases now work, but `mon_detect_deploy_lock_misuse()` raises a P2
+naming any caller that uses one, and unrelated named locks (e.g. `gathern_liveness_apply`) keep
+their own identity and are unaffected.
+
 ```sql
 -- 1. Acquire (before deploying) — a non-empty result means you hold it:
 select * from acquire_deploy_lock('production', '<your session id or a short description>', 600, '<what you are about to do>');
@@ -165,3 +215,43 @@ The lock self-expires after 10 minutes (`p_ttl_seconds`, default 600) so a crash
 can never permanently block deploys — but always release explicitly rather than relying on the
 TTL. See `docs/DEPLOY_SAFETY.md` "Deployment lock" and `supabase/migrations/20260716_deploy_lock.sql`
 for the full design.
+
+# Migration drift guard (P0, non-negotiable — 2026-08-10)
+
+**Every migration applied to production MUST also be committed to `supabase/migrations/` in this
+repo — this is enforced continuously, not just at deploy time.** Applying a migration directly to
+production via the Supabase MCP `apply_migration` (a normal, expected pattern per "Deployment
+lock" above — concurrent sessions do this routinely) and then forgetting to commit the SQL is
+schema drift, and it is not a paperwork problem: it is the exact precondition of the 2026-07-16
+PGRST203 search outage (a migration applied via MCP left a duplicate function overload that was
+never in git, so nobody could see it coming) and it has recurred at least twice since (daily-
+engineer heartbeats on 2026-08-04 and 2026-08-10 each independently found 20-30+ migrations applied
+to prod with zero git record, discovered up to 24h after the fact).
+
+**If you apply a migration via MCP, commit the identical SQL to `supabase/migrations/` in the same
+session, before you consider the work done.** `apply_migration` mints its own server-side version
+timestamp — copy the SQL verbatim into a file named `<that timestamp>_<a name>.sql` (or recover it
+later from `supabase_migrations.schema_migrations.statements`, which is exact and queryable).
+
+**You do not have to catch your own drift by memory — the barrier catches it for you, continuously:**
+- `scripts/verify-migration-drift-vs-production.ts` asks `ops_deploy_preflight_checks` (the same
+  RPC `scripts/safe-deploy.sh` already gates deploys on) whether every migration live in production
+  is present in git. It is wired into `npm test` (`full-verification-ci.yml`), so drift already
+  goes red on the very next push or PR to `main` — anyone's, not just the one that caused it.
+- `.github/workflows/migration-drift-guard.yml` runs that same check **every 15 minutes**,
+  independent of any push — because the failure mode this exists for is a session that applies a
+  migration and pushes nothing at all, which a push-triggered check alone would never catch. On
+  drift it fails the job loudly (a GitHub Actions red X) **and** raises a P1 `alert_event` row
+  (`kind='migration_drift'`) via `mon_raise`, so it shows on the ops dashboard too — not just
+  something a human has to notice in the Actions tab. It self-heals via `mon_resolve_key` the next
+  time it runs clean.
+- Both `scripts/safe-deploy.sh` and the continuous checker build "what migrations does the repo
+  claim" from the ONE shared `scripts/build-repo-migration-versions.cjs` — `scripts/verify-
+  migration-drift-guard-wired.ts` (also in `npm test`) fails if either script stops using it (two
+  independent copies of that parser is its own drift risk) or if any piece of this barrier goes
+  missing, gets a loosened schedule, or stops being invoked.
+
+**If `migration_drift` is ever red:** recover the missing SQL verbatim from
+`supabase_migrations.schema_migrations.statements` (matched by `version`) into
+`supabase/migrations/`, commit, and open a PR — this itself touches `supabase/migrations/`, so per
+the daily/senior routine rules it stays OPEN for review, never self-merged by an autonomous run.

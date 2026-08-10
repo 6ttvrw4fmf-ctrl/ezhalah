@@ -174,7 +174,19 @@ State clearly: **⚠️ I NEED YOUR APPROVAL**, with the evidence and the exact 
    preserved exactly. Verify against the stored capture or the live page before calling it a bug.
    Honest NULL beats a guess.
 5. **Hold the deploy lock** for anything that changes what production serves; release it after
-   verifying, not before.
+   verifying, not before. **Always request it by its canonical name, `'production'`** —
+   `acquire_deploy_lock('production', …)` / `release_deploy_lock('production', …)`. Never `prod`,
+   `prod-change`, `PROD_DB`, `prd`, `live`, `deploy`, or any other variant. On 2026-08-10 three
+   different names were in live use and TWICE two sessions each held what they believed was THE
+   deploy lock while neither excluded the other (`prod` vs `production` at 11:08, `prod-change` vs
+   `production` at 12:22) — the lock keyed on the *string*, so an alias silently created a second,
+   independent lock. The database now canonicalises every `prod*`/`prd`/`live`/`deploy` variant onto
+   the one `production` row, and that barrier stays as the final fail-safe — but it is layer 2. This
+   rule is layer 1: **ask for the right lock in the first place.** `mon_detect_deploy_lock_misuse()`
+   raises a P2 naming any holder that uses an alias, and
+   `scripts/verify-deploy-lock-canonical.ts` fails CI if a repo caller or instruction introduces one.
+   Unrelated named mutexes (e.g. `gathern_liveness_apply`) are a different resource and keep their
+   own identity — do not route them through `'production'`.
 6. **No migration drift.** Every applied DDL gets a committed file at its exact recorded version.
 7. **Report honestly.** Use the verification vocabulary: FIXED+VERIFIED (E2E) / PROPAGATION PENDING
    / AWAITING FIRST PRODUCTION EXECUTION / BLOCKED / UNPUSHED. Never upgrade a status on belief.
@@ -218,6 +230,31 @@ Then classify every issue found, one line each, using exactly one of:
 Never call something "fixed" while users are still running the broken version. Never call something
 "deployed" because it merged. Never call something "verified" because unit tests passed — only the
 real production path counts.
+
+## Routine cadence (owner decision, 2026-08-10)
+
+| routine | cadence | time (UTC) | durable handoff |
+|---|---|---|---|
+| Junior/Beginner Daily Engineer | **daily** | 05:00 | `ops_daily_engineer_run` |
+| Senior Production Engineer | **daily** (was every 2 days) | 06:00 | `ops_senior_audit_run` |
+
+**The Senior audit moved from every-2-days to DAILY on 2026-08-10, by owner decision.** It is recorded
+here because the schedule itself lives in the claude.ai scheduled-task configuration, outside this
+repo — and a stored routine prompt still saying *"Run this complete Senior Production Engineer audit
+every 2 days"* is now **stale**. Per the top of this file, **this file wins**: run it daily, and treat
+the prompt's cadence line as the drift it is. The same applies to `ops_senior_audit_run.trigger`
+values reading `every-2-day-scheduled` on rows before that date — historical, not a contradiction.
+(The 2-day cadence is also named in migration `20260730211425_ops_senior_audit_run_state.sql`; that
+file is an applied migration and is deliberately NOT edited — an applied migration is a record of
+what ran, and rewriting it would create schema drift for a documentation change.)
+
+**Keep the two routines on different hours.** They are deliberately an hour apart so the Senior run
+consumes the Junior run's fresh heartbeat as input rather than racing it, and so two heavyweight
+sessions never open together. This matters more now that both run daily: on 2026-08-10 a cron
+stampede wedged the database into a 522 outage (see `#430`), and the same day two sessions twice held
+what each believed was the deploy lock. The lock is now genuinely exclusive
+(`20260810131511`) — do not spend that safety margin by collapsing the two routines onto the same
+minute.
 
 ## Junior/Beginner Daily Engineer — scope note
 

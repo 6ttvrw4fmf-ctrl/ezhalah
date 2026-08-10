@@ -1,6 +1,6 @@
 # Ezhalah — Complete Architecture (Frontend + Backend)
 
-> **Status:** canonical reference, last consolidated **2026-07-06**.
+> **Status:** canonical reference, last consolidated **2026-08-10**.
 > **Purpose:** one source of truth for how Ezhalah is built — UI structure, filter hierarchy, property
 > card, search flow, backend, scraper pipeline, DB rules, matching, locations, type mapping,
 > rent-period rules, and every permanent rule. Written so we never re-discover the same facts twice.
@@ -53,6 +53,12 @@ across many partner platforms and shows them in one place. **It is a search engi
 | **Scraper dispatch** | `pg_cron` → `trigger_gh_workflow(wf)` → GitHub `workflow_dispatch`. **Every workflow is dispatch-only; all cadence is owned by Postgres** (so it is monitorable/pausable from the DB). PAT in Vault (exp 2027-06-22). |
 | **AI agent** | Supabase Edge Function named **`agent`** (Gemini 2.5 Flash-Lite primary + Flash fallback, via `GEMINI_MODEL` secret). Runtime behavior tunable via the `agent_notes` DB table (no redeploy). |
 
+**Why Expo/React Native, not native SwiftUI (owner decision 2026-06-09):** the owner first said "decide
+for me" (→ SwiftUI), then pivoted: wanted web + iPhone + Android from one codebase, live-preview while
+building, and GitHub + Supabase + Vercel wired up. Expo/RN was chosen to satisfy cross-platform + live
+preview in one codebase; an earlier SwiftUI build under `Ezhalah/` (design-handoff repo root) is
+superseded/abandoned, kept on disk only. Don't re-ask this or re-litigate it.
+
 **Regression safety (locked #1 priority):** preserve local work (commit/stash) before any risky git op;
 never `git reset --hard` a dirty tree; before+after verification on every deploy; on any regression
 STOP → restore → fix → continue. Checklist: `ezhalah-app/docs/DEPLOY_REGRESSION_CHECKLIST.md`.
@@ -72,7 +78,7 @@ in-memory only).
 |---|---|---|---|
 | `index` | **Home / Filter search** | fade | The structured filter search. §4. |
 | `agent` | **AI chat + inline results** | none | The one conversational surface; also renders results. §6, §9. |
-| `interview` | Guided interview | transparentModal | **DEPRECATED** (see §6.3). |
+| `interview` | Guided interview | transparentModal | Live, on-demand (see §6.3). |
 | `auth` | Sign-in sheet | modal, fade | §7. |
 | `settings` | Settings popup | transparentModal | §7. |
 | `browser` | In-app listing viewer | modal, slide-up | §7. |
@@ -207,12 +213,16 @@ explicit order. Distress input → supportive non-real-estate reply. **Authorita
 in the edge `agent` function + `agent_notes` DB table**, not in the client (the client only backstops
 deterministically).
 
-### 6.3 `src/app/interview.tsx` — guided interview — **DEPRECATED**
+### 6.3 `src/app/interview.tsx` — guided interview — **LIVE, on-demand (label corrected 2026-07-06)**
 
-Owner decision 2026-07-06: **legacy handoff artifact, not canonical.** It uses English-only labels and
-an English city list (`INTERVIEW_CITIES`, old `taxonomy CATEGORY_TYPES`), inconsistent with the
-Arabic-first filter/agent. Do not build on it or treat it as intended architecture. (It still routes to
-`/agent` with a built `SearchQuery` if reached.)
+Not dead code, not onboarding. It's a **live modal reachable on demand**: the AI agent routes to it
+whenever the user says something matching `INTERVIEW_RE` (agent.ts) — "ask me questions" / "guide me" /
+"interview me" / "walk me through" — via `agent.tsx: router.push('/interview')`; the edge function can
+also return `kind:'interview'`. It routes back to `/agent` with a built `SearchQuery` when finished.
+It is built on **legacy English-only foundations** (English labels, `INTERVIEW_CITIES`, old `taxonomy
+CATEGORY_TYPES`) — inconsistent with the Arabic-first filter/agent, but not unreachable or inert.
+**Owner decision 2026-07-06: leave as-is for now** — do not rework, disable, or delete until the owner
+rules on keep-as-is vs. rework-onto-canonical-Arabic-taxonomy vs. disable-the-trigger.
 
 ---
 
@@ -573,6 +583,32 @@ search-RPC workstream; re-wire it into `npm run verify` once the overload is dis
 loudly — a scraper that fetched 0 rows when it had URLs exits non-zero and logs per-URL status (fixed for
 toor). Freshness monitoring closes the "cron succeeded but wrote nothing" gap.
 
+### 19.2 Live behavioral Filter barriers (scheduled, anon-key REST path — full audit 2026-08-10)
+
+Unlike §19.1 (build-time, offline), these execute the REAL production RPCs through the same anon key
+real clients use (a privileged connection could mask RLS/permission differences). Each has a dedicated
+`.github/workflows/*-live-check.yml`, runs every 6h + on-demand, and turns a GitHub Actions job RED
+(owner-notified) the moment production regresses — proven live-green on every one as of 2026-08-10.
+
+| Barrier | Workflow | Script | Proves |
+|---|---|---|---|
+| Platform diversity | `diversity-live-check.yml` | `verify-platform-diversity-live.ts` | MATCH-FIRST → DIVERSIFY-SECOND on live rows: round-robin front, no single-platform domination, 0 dupes across Show More, objective sorts still win, every row still satisfies the filter. Live 2026-08-10: 9–13 distinct platforms lead the round-robin across Buy/Rent-annual/Rent-monthly/Commercial in Riyadh — no platform is structurally favored. |
+| Trending Districts / district-suggestion dead-ends | `district-suggestion-parity-live-check.yml` | `verify-district-suggestion-parity-live.ts` | Every district `district_options_ar` reports `listing_count > 0` (i.e. every district that can appear in the "Trending districts in {city}" Top-6, `TrendingList.tsx`) actually returns `> 0` from `location_search_candidates_ar` for the same city+deal — no dead-end suggestion. Live 2026-08-10: 1,757 populated-district suggestions checked across 7 cities × 4 scopes (default/monthly/Residential/Commercial), 0 dead ends. |
+| Advanced Filter count == search | `count-rpc-parity-live-check.yml` | `verify-count-rpc-parity-live.ts` | `apartment_guided_counts_ar` and `property_age_option_counts_ar` (the RPCs behind every Advanced Filter option's live count, `ADVANCED_FILTER_DESIGN_CONTRACT.md` §8) report the EXACT same total as `location_search_candidates_ar` for the same params. Added 2026-08-10 after the audit found the three RPCs' read-side defense-in-depth guard (PR #409) had only been applied to the search RPC — see migration `20260810145200_extend_readside_guard_to_count_rpcs`. |
+| Strict-filter count parity | *(manual / daily audit — not yet scheduled)* | `verify-strict-filter-parity-live.ts` | `location_search_candidates_ar.total_count` equals a strict PostgREST ground-truth count for every NULL-permissive-fixed filter (floor, street width, tenant, direction families, RNPL amenity alias, annual-rent-is-source-published-only), plus the amenity-vocabulary fail-closed invariant. Live 2026-08-10: exact on all 6 (the one apparent mismatch was the ground-truth query missing the documented RNPL-folded-into-annual row — not an RPC bug). |
+| Unlocated-fallback scope | *(manual / daily audit — not yet scheduled)* | `verify-unlocated-fallback-scope-live.ts` | The "unresolved-location countrywide" disjunct in all three read RPCs rescues ONLY genuinely-unlocated rows, never a located-but-price/size-withheld row (the 2026-08-10 dealapp/5696027 bug class). Live 2026-08-10: exact (`rpc == production_ready + unlocated`) for both buy and rent. |
+| Normal-Filter read-side barrier | *(continuous, DB-native)* `mon_detect_filter_barrier_leaks` → P1 alert | `verify-filter-barrier.ts` (PR #409, unmerged) | `mon_filter_barrier_leaks`: 0 rows may ever have negative price/area, no city/region while `production_ready`, or a null deal, among rows the Filter can return. Live 2026-08-10: 0 leaks across 185,110 visible rows. |
+| Real-browser production parity | `ui-parity.yml` | `e2e/ui-parity.spec.ts` (Playwright) | Drives the actual deployed app (`https://ezhalah-app.vercel.app`) with real clicks — Buy/Rent+Monthly/type filters, bedrooms/price/area refine, AI-mode free-text classification, city-vs-region disambiguation. Nightly + on-demand. Live 2026-08-10: 8/8 passed. |
+
+**Full-audit finding (2026-08-10):** a targeted parity sweep (RPC total_count vs. raw `search_listings_ar`
+ground truth) across every filter dimension the RPC exposes — price/area (incl. 0/null/negative/extreme/
+boundary-inclusive/malformed-input cases), bedrooms, bathrooms, amenities, floor, direction, age,
+new-construction, license, category, and 4 realistic multi-filter combos — was byte-EXACT in every case.
+The one genuine gap found (count RPCs missing the read-side guard, above) has been fixed and is now
+covered by a dedicated barrier. See migration `20260810145200_extend_readside_guard_to_count_rpcs` and
+PR #425 for the fix; PRs #409/#410/#406 remain open awaiting owner review (migration-touching, per the
+migration-drift-guard rule in `AGENTS.md`).
+
 ---
 
 ## 20. Permanent rules (the non-negotiables)
@@ -621,11 +657,30 @@ toor). Freshness monitoring closes the "cron succeeded but wrote nothing" gap.
   **Owner decision: leave as-is** — no split, no code change (project memory
   `project_rawland-classification-decision-2026-07-23`).
 - **Rent scaling:** monthly price ×12 handling vs Gathern's pre-annualized `price_annual`.
-- **PRD §13 business items:** revenue model (CPC-first decided), **REGA license number** (`XXXXXXXX`
-  placeholder in About/Settings — needs the real number), signed partner data agreements, PDPL retention
-  windows, Tokyo vs Saudi hosting region.
 - **In-app browser proxy** proven for all partners (currently Aqar-centric); reconcile the "iframe
   impossible" note.
+
+**PRD §13 business items — DECIDED 2026-06-09 (don't re-ask these):**
+1. Revenue: **CPC (pay-per-click) first**, subscriptions later. Near-term work = click tracking, not
+   subscription billing.
+2. REGA FAL license: **application in progress** → show a "license pending" placeholder in
+   compliance/about copy (`XXXXXXXX` in About/Settings). **Still genuinely OPEN:** the real license
+   number/scope — never invent one.
+3. Partner data agreements (6 platforms): **none signed** — decided to build against mock/scraped data
+   and enable platforms incrementally as agreements land. **Still genuinely OPEN:** actually signing
+   them.
+4. Listing data source: **web scraping** (carries ToS/PDPL risk — flagged in ingestion design, not a
+   blocker).
+5. Phone OTP: **WhatsApp Business API** (the auth screen's WhatsApp badge is correct, not a placeholder).
+6. FX & units: **SAR only, m² only** — no currency conversion needed.
+7. Featured/paid placement: **NONE, ever.** Results rank purely on neutral signals (recency/match/
+   diversity) — reinforces §1 neutrality and §10 diversity rules.
+8. Language: **Arabic-first primary** (RTL), English secondary/latent — matches §1.
+9. PDPL retention: **keep search history/account data until the user deletes their account**, purge on
+   deletion.
+
+Also still genuinely open: Tokyo vs. Saudi hosting region for PDPL residency (see §2 — Supabase has no
+KSA region; recommendation delivered was "don't migrate," awaiting owner call).
 
 ---
 

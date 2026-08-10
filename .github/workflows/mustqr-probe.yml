@@ -1,0 +1,56 @@
+# READ-ONLY evidence run: does mustqr's `status` enum still contain 'متاح' ('available')?
+#
+# 2026-08-10: two consecutive runs (04:22 auto, 12:13 manual re-trigger) of the real sync got a
+# healthy JWT + neighborhoods fetch but 0 rows from /rest/v1/properties?status=eq.متاح. The RC-B
+# prune guard correctly refused to trust it (0 rows pruned, 1141 existing listings kept untouched),
+# but nobody could tell from that alone whether mustqr genuinely emptied its board or the status
+# value changed on their side. This dispatches probe_status_values() (scrapers/mustqr/run.py),
+# which fetches the SAME endpoint with no status filter and prints a {status: count} histogram.
+#
+# Round 2 (same day): the histogram STILL comes back healthy ({'متاح': 1000}) even after fetch_page()
+# was narrowed to an explicit column allowlist (#418) and STILL got 401/42501. `mode: query-shape`
+# runs probe_query_shape() instead, which isolates exactly which of fetch_page()'s OTHER query
+# elements (status filter / order / Range pagination / Prefer:count=exact) trips the permission
+# check, by adding them back one at a time onto the otherwise-working request.
+#
+# Writes NOTHING: no upserts, no Supabase mutations, no run rows.
+name: Mustqr status probe (read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "status | query-shape | column-bisect | column-singles"
+        required: false
+        default: "status"
+
+concurrency:
+  group: mustqr-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Probe status values
+        env:
+          SCRAPE_MIN_INTERVAL: "0.3"
+        run: |
+          if [ "${{ inputs.mode }}" = "query-shape" ]; then
+            python -m scrapers.mustqr.run --probe-query-shape
+          elif [ "${{ inputs.mode }}" = "column-bisect" ]; then
+            python -m scrapers.mustqr.run --probe-column-bisect
+          elif [ "${{ inputs.mode }}" = "column-singles" ]; then
+            python -m scrapers.mustqr.run --probe-column-singles
+          else
+            python -m scrapers.mustqr.run --probe-status
+          fi

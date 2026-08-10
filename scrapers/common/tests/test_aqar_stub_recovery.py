@@ -38,9 +38,16 @@ def test_reuses_the_production_parser_and_writer() -> None:
     assert "from scrapers.aqar.enrich_residential import enrich_residential" in SRC, (
         "the recovery must call the SAME parser the nightly crawl uses; a private parser would drift"
     )
-    assert "db.upsert_aqar_residential(fresh)" in SRC, (
-        "recovered rows must go through the production upsert so triggers/canonical mapping/sync all "
-        "run exactly as they do for a normal crawl"
+    # GENERALIZED 2026-08-10: --table residential|commercial selects between the two production
+    # upserts via the UPSERT_FN indirection; the call site is now UPSERT_FN(fresh), not a hardcoded
+    # db.upsert_aqar_residential(fresh). Pin that BOTH ends of the indirection are still the real
+    # production writers (never a private one) and that the call site still uses the indirection.
+    assert "UPSERT_FN(fresh)" in SRC, (
+        "recovered rows must go through the production upsert (via UPSERT_FN) so triggers/canonical "
+        "mapping/sync all run exactly as they do for a normal crawl"
+    )
+    assert "db.upsert_aqar_residential" in SRC and "db.upsert_aqar_commercial" in SRC, (
+        "UPSERT_FN must only ever be assigned one of the two real production upserts"
     )
 
 

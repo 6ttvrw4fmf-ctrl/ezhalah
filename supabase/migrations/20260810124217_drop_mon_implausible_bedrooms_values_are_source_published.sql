@@ -1,0 +1,12 @@
+-- Remove mon_implausible_bedrooms (added 20260810113345). Its premise — that >50-bedroom rows are OUR
+-- parse noise — is DISPROVEN. Per-listing source evidence shows they are SOURCE-PUBLISHED room counts
+-- for large buildings/projects, faithfully ingested:
+--   • wasalt: bedrooms = its own noOfBedrooms; wasalt's own titles read "Apartment with 32000 Bedrooms".
+--   • sanadak: stored bedrooms == source_capture.numberBedrooms for all 68 rows; title "…23000 غرفة".
+--   • aqar: source_text publishes "عدد الغرف 500" / "عدد الغرف 220 غرفة" for عمارة/projects.
+-- Per SOURCE-IS-TRUTH / listing-fidelity / no-magnitude-clamp, these must be preserved, and a monitor
+-- that flags them as a barrier violation is itself a mini-regression (it would pressure a wrong "fix").
+-- The bedrooms ingestion barrier (overflow/negative/bad-cast → NULL, listing never dropped) is the real
+-- guard and is complete. Whether a "5+" search should CAP the bedroom max is a search-layer PRODUCT
+-- decision (owner-gated), not a data/barrier fix.
+drop view if exists public.mon_implausible_bedrooms;
