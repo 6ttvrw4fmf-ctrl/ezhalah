@@ -8,9 +8,12 @@
 // Network note: reads the PUBLIC anon REST endpoint. If the network is unavailable the check is
 // SKIPPED WITH A LOUD WARNING (exit 0) — offline builds must not false-fail; CI has network.
 import { readFileSync } from 'node:fs';
+import { PUBLIC_SUPABASE_ANON_KEY, PUBLIC_SUPABASE_URL } from './lib/public-supabase.ts';
 
-const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFhbm5hcmJrd2N5bXJvdHp3ZGJvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0MDgxMDAsImV4cCI6MjA5NTk4NDEwMH0.Z-GhSpan6otYWkc8sU43Dw5PT5T_VBUMr0IDZShCQw0';
-const URL_ = 'https://aannarbkwcymrotzwdbo.supabase.co/rest/v1/known_type_ar?select=type_ar,macro&limit=1000';
+// Same committed PUBLIC constants this file used to inline — now shared, so the key lives in ONE
+// place and the copies cannot drift apart (2026-08-10).
+const ANON = PUBLIC_SUPABASE_ANON_KEY;
+const URL_ = `${PUBLIC_SUPABASE_URL}/rest/v1/known_type_ar?select=type_ar,macro&limit=1000`;
 
 const seedSql = readFileSync(new URL('../sql/known_type_ar.generated.sql', import.meta.url), 'utf8');
 const seed = new Map<string, string>();
