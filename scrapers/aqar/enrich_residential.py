@@ -494,9 +494,23 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
             property_type = "Commercial Land"
 
     # ─── Basic info ──────────────────────────────────────────────────────────
-    area_m2           = _int_after_label(text, r"المساحة\s*(?:الكلية|الإجمالية)?", r"\bالمساحة\b")
-    interior_space_m2 = _int_after_label(text, r"المساحة\s*الداخلية", r"مساحة\s*البناء")
-    outdoor_area_m2   = _int_after_label(text, r"المساحة\s*الخارجية", r"مساحة\s*خارجية")
+    # AREA IS SPEC-TABLE-ONLY — the same anchoring the room counts already use, and for the same
+    # reason. «المساحة» is not only a spec label; in the seller's description it is an ordinary word
+    # that routinely introduces a PRICE. Live proof (2026-08-10): ad 6603069 reads
+    # «● مساحتها 364,51 متر مربع … ● قيمة الأرض مقابل المساحة = 1,822,550 ريال» — "the land's value
+    # against the area = 1,822,550 SAR". The unanchored label matched inside that PRICE sentence and
+    # stored 1,822,550 as the area, while the listing's real area («مساحتها», a suffixed form the
+    # label never matches) was missed. Result: a 364 m² plot filed at 1.8 million m², and the same
+    # shape put an apartment at 550,000 m² (6656704) and a villa at 4,200,000 m² (6680418) — each
+    # time the area came out exactly equal to the asking price. Inside the spec table the label can
+    # only match Aqar's own «المساحة» row, or nothing. A page with no spec table now yields NULL:
+    # "this page did not state an area" is the truth, and a number scavenged from prose is not.
+    # Costs ~nothing in coverage — 89% of rows whose stored capture lacks the spec block still have
+    # spec-only fields (bedrooms) populated, i.e. the live page had the table and only the capture
+    # was truncated.
+    area_m2           = _int_after_label_in_spec_table(text, r"المساحة\s*(?:الكلية|الإجمالية)?", r"\bالمساحة\b")
+    interior_space_m2 = _int_after_label_in_spec_table(text, r"المساحة\s*الداخلية", r"مساحة\s*البناء")
+    outdoor_area_m2   = _int_after_label_in_spec_table(text, r"المساحة\s*الخارجية", r"مساحة\s*خارجية")
     # "عدد الغرف" (a generic total-room-count fallback) removed 2026-07-28 — same unconditional-
     # fallback shape as the abeea/muktamel area_m2 bug (PR#259): "غرف النوم" is bedroom-specific and
     # trusted, but silently falling back to a total-room count when it's absent mislabels total
