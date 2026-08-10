@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Nightly production-audit invariants (2026-07-24) — the checks a daily audit was skipping.
 
-Runs FIVE live-production checks and exits non-zero + logs a row to location_pipeline_alerts if
+Runs SIX live-production checks and exits non-zero + logs a row to location_pipeline_alerts if
 any fails (same "build fails + ops dashboard" mechanism as scripts/check_placeholder_locations.py):
 
   1. NOT-READY REASON INVARIANT — every production_ready=false row in listing_native_location_v2
@@ -23,6 +23,10 @@ any fails (same "build fails + ops dashboard" mechanism as scripts/check_placeho
   4. LIVE AI AGENT — POST fixed Arabic queries to the production `agent` edge function and assert
      the classification is right (deal / city / type) and the reply is Arabic. This is the live
      end-to-end AI test the audit was missing.
+
+  5. DELETION-SPIKE NO-REREISE (2026-08-10) — an aborted cleanup run must alert exactly once, not
+     re-raise every ~30 minutes for up to 2 days after its own self-heal resolves it. A single
+     2026-08-09 gathern abort produced 40 duplicate P1 alerts before this was fixed.
 
 Usage:
   python3 scripts/check_audit_invariants.py            # all checks (DB checks need SERVICE_ROLE key)
@@ -208,6 +212,43 @@ def check_aqar_price_not_licence(client) -> bool:
     return False
 
 
+def check_deletion_spike_no_rereise(client) -> bool:
+    """True = OK. An aborted cleanup run must alert exactly once — not re-raise every ~30 minutes
+    for up to 2 days after its own self-heal resolves it.
+
+    mon_detect_deletion_spike() scans the last 2 days of cleanup_runs on every sweep and called
+    mon_raise() for every ABORTED row it found, every time — including ones it already alerted on
+    hours ago. mon_raise() only dedupes against an OPEN row, so as soon as the 20260809153239
+    self-heal closed the alert (a later successful cleanup run existed), the very next sweep found
+    no open row and inserted a fresh one. Net effect: gathern's single 2026-08-09 03:00 abort
+    (cleanup_runs id 6) produced 40 separate P1 alert_event rows over the following ~31 hours, each
+    created and resolved in the same instant — real alert noise that could bury a genuine future
+    spike, self-terminating only when the row aged out of the 2-day window (not a real fix).
+
+    mon_selftest_deletion_spike_no_rereise() exercises the live function against a reserved
+    platform and cleans up after itself: an aborted run raises once; a later successful run
+    self-heals it AND the next sweep must not re-raise; a third sweep with nothing new must still
+    not add a row. Returns false on the pre-2026-08-10 implementation.
+    """
+    try:
+        ok = client.rpc("mon_selftest_deletion_spike_no_rereise").execute().data
+    except Exception as e:
+        detail = f"mon_selftest_deletion_spike_no_rereise() could not be run: {e}"
+        print(f"FAIL deletion-spike no-rereise invariant: {detail}")
+        _alert(client, "deletion_spike_rereise_selftest_missing", 0, detail)
+        return False
+    if ok is True:
+        print("OK  deletion-spike no-rereise invariant: an aborted cleanup run alerts exactly "
+              "once, even across a self-heal resolution and repeated sweeps.")
+        return True
+    detail = ("mon_detect_deletion_spike() re-raises an alert for an aborted run that was already "
+              "resolved by self-heal — the 2026-08-10 regression that produced 40 duplicate "
+              "gathern P1 alerts in ~31 hours from a single abort.")
+    print(f"FAIL deletion-spike no-rereise invariant: {detail}")
+    _alert(client, "deletion_spike_rereise_regression", 1, detail)
+    return False
+
+
 def _call_agent(text: str) -> dict:
     body = json.dumps({"text": text, "locale": "ar", "loggedIn": False, "order": False, "history": []}).encode()
     req = urllib.request.Request(
@@ -250,7 +291,8 @@ def check_agent(client=None) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index", "unverified_kill", "aqar_licence_price"],
+    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index", "unverified_kill",
+                                       "aqar_licence_price", "deletion_spike_no_rereise"],
                     help="run one check")
     args = ap.parse_args()
 
@@ -274,6 +316,7 @@ def main() -> int:
     if args.only in (None, "awal"):        results.append(check_awal(client))
     if args.only in (None, "unverified_kill"): results.append(check_unverified_inactivations(client))
     if args.only in (None, "aqar_licence_price"): results.append(check_aqar_price_not_licence(client))
+    if args.only in (None, "deletion_spike_no_rereise"): results.append(check_deletion_spike_no_rereise(client))
     if args.only is None:                  results.append(check_agent(client))
     return 0 if all(results) else 1
 
