@@ -1,0 +1,37 @@
+# Advanced Filter count == search parity (live check, 2026-08-10 filter audit).
+#
+# Executes the REAL production RPCs (apartment_guided_counts_ar, property_age_option_counts_ar,
+# location_search_candidates_ar) through the app's anon key and asserts the invariant docs/
+# ADVANCED_FILTER_DESIGN_CONTRACT.md §8 requires: the count shown next to any Advanced Filter option
+# must equal exactly what Search will return for the same selection. If the two count RPCs ever
+# drift from the search RPC's eligibility scope again (the exact class of bug fixed in migration
+# 20260810145200 — see scripts/verify-count-rpc-parity-live.ts), THIS job turns RED and GitHub
+# notifies the repo owner.
+#
+# This is the LIVE behavioral half of the barrier; the migration itself carries the static
+# self-tests. Read-only (anon key, RLS-respecting) — never the service role.
+
+on:
+  schedule:
+    - cron: '47 */6 * * *' # every 6 hours (offset from the diversity/district checks)
+  workflow_dispatch:
+
+concurrency:
+  group: count-rpc-parity-live-check
+  cancel-in-progress: false
+
+jobs:
+  count-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Live count-RPC parity assertions
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-count-rpc-parity-live.ts
