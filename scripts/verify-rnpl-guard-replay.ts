@@ -31,7 +31,27 @@ const check = (label: string, ok: boolean, detail = '') => {
 // The three READ paths that bucket شهري. Results and BOTH counts must agree, or the UI shows a
 // count it cannot deliver.
 const READERS = ['location_search_candidates_ar', 'apartment_guided_counts_ar', 'property_age_option_counts_ar'];
-const READ_GUARD = 'payment_monthly = true and not coalesce(s.rent_now_pay_later, false)';
+
+// ── WHERE THE GUARD LIVES CHANGED, 2026-08-10 ────────────────────────────────────────────────────
+// The شهري bucket used to be `payment_monthly = true and not coalesce(s.rent_now_pay_later, false)`
+// — the RNPL exclusion repeated at all three read sites. The period-routing rework
+// (rent_period_filter_symmetric_no_unreachable_listings, rent_period_rnpl_rows_are_annual_not_
+// unreachable, annual_bucket_absorbs_rnpl_only_not_unknown_period) consolidated it: the readers now
+// say simply `p_rent_period = 'شهري' and s.payment_monthly = true`, and RNPL is excluded ONCE, at
+// the WRITE layer, so payment_monthly can never be true for an RNPL row in the first place.
+//
+// That is a STRONGER design — one enforcement point instead of four that can drift apart — so this
+// file follows the guard rather than pinning the old string. Asserting the retired read predicate
+// would now fail on correct code, and a check that cries wolf gets muted, which is how the
+// protection would really be lost.
+//
+// What is asserted instead:
+//   • both WRITERS still carry `not coalesce(..., false)`   (below, via replay)
+//   • the readers bucket شهري on payment_monthly ALONE, so write-side enforcement is sufficient
+//   • the behavioural invariant — ZERO rnpl rows inside the monthly bucket — is asserted against
+//     the LIVE database by scripts/verify-safety-barrier.ts, which is location-independent and
+//     therefore survives any future relocation of the predicate.
+const READER_MONTHLY_BUCKET = /p_rent_period\s*=\s*'شهري'\s*and\s*s\.payment_monthly\s*=\s*true/;
 
 // The two WRITERS of payment_monthly. Both must carry the same predicate, or whichever runs last
 // wins and silently inverts the other (exactly the 2026-08-09 trigger bug).
@@ -61,6 +81,28 @@ const AUDITED_UNINTERPRETABLE = new Map<string, string>([
    'anchor-count-guarded — aborts rather than rewriting blind if the anchor is not found exactly ' +
    'once), so it preserves whatever the RNPL/Monthly predicates were, unchanged. Self-proven live: ' +
    'both count RPCs returned the identical baseline (109581 for p_deal=\'بيع\') before and after.'],
+  ['20260810125657_filter_rpc_readside_defense_in_depth.sql',
+   'audited 2026-08-10 (read line by line): ZERO occurrences of payment_monthly and ZERO of ' +
+   'rent_now_pay_later/rnpl. Adds the negative-price/negative-area/null-deal/production_ready-' +
+   'without-location guard. Needle-edits from the LIVE body (pg_get_functiondef) and RAISEs rather ' +
+   'than rewriting blind if the anchor is missing, so existing predicates survive verbatim.'],
+  ['20260810190845_guided_counts_add_ac_and_private_entrance.sql',
+   'audited 2026-08-10 (mine): adds cnt_ac + cnt_private_entrance to apartment_guided_counts_ar. ' +
+   'ZERO occurrences of payment_monthly. Its two rent_now_pay_later hits are the inner projection ' +
+   'list being WIDENED (`select s.rent_now_pay_later, ... , s.air_conditioner, s.private_entrance`) ' +
+   '- the column is carried through unchanged, never re-predicated. DROP+CREATE (return type widens) ' +
+   'built from the LIVE body, with a needle-count guard that RAISEs unless each anchor matches once. ' +
+   'Verified live: cnt_ac 6,209 and cnt_private_entrance 2,575 both equal the results RPC exactly.'],
+  ['20260810195452_location_predicate_indexable_scalar_array_form.sql',
+   'audited 2026-08-10: ZERO occurrences of payment_monthly and ZERO of rent_now_pay_later/rnpl. ' +
+   'Rewrites the location predicate from IN (SELECT) to = ANY(ARRAY(SELECT)) so it can use an index. ' +
+   'Needle-edits from the LIVE body with three RAISE guards.'],
+  ['20260810185359_buy_rows_must_not_carry_a_zero_annual_rent.sql',
+   'audited 2026-08-10 CAREFULLY - this one DOES contain `payment_monthly := false`, twice. Both ' +
+   'occurrences sit INSIDE the needle string and its replacement, which re-emits that line byte-for-' +
+   'byte; the migration only APPENDS a Buy-side zero-price rule after it. It never writes ' +
+   'payment_monthly := true and never touches the RNPL clause, so it cannot add a row to the monthly ' +
+   'bucket. Behaviourally confirmed after the fact: 0 of 32,419 monthly rows carry rent_now_pay_later.'],
 ]);
 
 // ── every tracked function must be fully interpretable ───────────────────────────────────────────
@@ -82,13 +124,21 @@ for (const fn of TRACKED) {
   }
 }
 
-// ── 1. READ layer: the شهري bucket excludes RNPL in all three RPCs ───────────────────────────────
+// ── 1. READ layer: شهري is bucketed on payment_monthly ALONE ─────────────────────────────────────
+// Since the routing rework the readers no longer repeat the RNPL exclusion; they delegate entirely
+// to payment_monthly, which the write layer guarantees is never true for an RNPL row. So what has
+// to be true here is that the bucket really is defined by payment_monthly — if a reader ever starts
+// bucketing on something else (rent_period_ar, a platform name, a derived expression), write-side
+// enforcement stops covering it and the RNPL exclusion is silently bypassed.
 for (const fn of READERS) {
   const r = replayed.get(fn)!;
   if (!r.body) continue;
-  check(`READ  ${fn}: شهري bucket excludes rent_now_pay_later`,
-    codeOnly(r.body).includes(READ_GUARD),
-    'a stale payment_monthly could otherwise surface an instalment listing under Monthly');
+  const b = codeOnly(r.body);
+  check(`READ  ${fn}: شهري bucket is defined by payment_monthly (write-side guard covers it)`,
+    READER_MONTHLY_BUCKET.test(b),
+    'the monthly bucket is no longer keyed on payment_monthly, so the write-layer RNPL exclusion no ' +
+    'longer protects this reader — either restore the payment_monthly bucket or re-add the explicit ' +
+    'read guard `and not coalesce(s.rent_now_pay_later, false)`');
 }
 
 // ── 2. WRITE layer: both writers carry the same predicate ────────────────────────────────────────
@@ -119,7 +169,9 @@ for (const fn of READERS) {
 {
   const bodies = READERS.map((fn) => replayed.get(fn)!.body).filter(Boolean) as string[];
   check('counts RPCs and the results RPC share one identical شهري predicate',
-    bodies.length === READERS.length && bodies.every((b) => codeOnly(b).includes(READ_GUARD)));
+    bodies.length === READERS.length && bodies.every((b) => READER_MONTHLY_BUCKET.test(codeOnly(b))),
+    'all three must bucket شهري the same way — a count the search cannot deliver is the exact defect ' +
+    'this file exists to prevent');
 }
 
 // ── 4. the RNPL flag refresh must be fleet-wide, never a hardcoded platform list ─────────────────

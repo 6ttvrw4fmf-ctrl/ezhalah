@@ -95,6 +95,30 @@ check('Annual Rent -> Apartment still carries RNPL unknowns (tri-state intact)',
 check('RNPL "yes" side preserved (the honesty fix must not remove real offers)',
   rnplYes > 0, `yes=${rnplYes}`);
 
+// 4. THE INVARIANT THAT OUTLIVES ANY REFACTOR: an annual lease payable in instalments is NOT a
+//    monthly rental, so no RNPL listing may ever sit in the شهري bucket.
+//
+//    On 2026-08-10 the period-routing rework moved this guard from the three read RPCs to the write
+//    layer (payment_monthly can never be true for an RNPL row). A string check pinned to either
+//    location would have failed on correct code. This one asserts the OUTCOME through the anon path,
+//    so it keeps working wherever the enforcement lives — and fails the moment a real leak appears.
+async function countRent(extra: string): Promise<number> {
+  const q = `${URL}/rest/v1/search_listings_ar?select=listing_id`
+    + `&deal_ar=eq.${encodeURIComponent('إيجار')}${extra}`;
+  const r = await fetch(q, { headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, Prefer: 'count=exact', Range: '0-0' } });
+  if (!r.ok) throw new Error(`REST ${r.status} ${await r.text()}`);
+  return Number((r.headers.get('content-range') ?? '/0').split('/')[1] ?? 0);
+}
+
+const rnplInMonthly = await countRent('&payment_monthly=is.true&rent_now_pay_later=is.true');
+const monthlyTotal  = await countRent('&payment_monthly=is.true');
+check('no RNPL listing sits inside the Monthly bucket (annual+instalments ≠ monthly rental)',
+  rnplInMonthly === 0,
+  `${rnplInMonthly} of ${monthlyTotal} monthly rows carry rent_now_pay_later=true — an annual lease ` +
+  'payable in instalments is being sold to users as a monthly rental');
+check('the Monthly bucket is non-empty (the check above must not pass by emptiness)',
+  monthlyTotal > 0, `monthly=${monthlyTotal}`);
+
 console.log(failures === 0
   ? '\n✓ Safety Barrier intact — no invented negatives, no column defaults\n'
   : `\n✗ ${failures} check(s) FAILED — absence is being turned into "no" again\n`);
