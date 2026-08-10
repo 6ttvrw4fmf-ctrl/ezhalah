@@ -106,10 +106,13 @@ CONTACT_CHANNEL_KEYS: tuple[str, ...] = (
     "contactnumber", "contact_number", "responsible_employee_name",
 )
 
+# Unambiguous Saudi contact numbers standing alone as an entire field value.
+_BARE_CONTACT_ONLY = re.compile(r"\s*(?:(?:\+|00)?966\s*5\d[\d\s\-]{6,}|0\s*5\d{8}|920\d{5,8})\s*")
+
 _URLISH = re.compile(r"^\s*(?:https?://|//|/|data:|blob:)", re.IGNORECASE)
 
 
-def _is_free_text(v: str) -> bool:
+def is_free_text(v: Any) -> bool:
     """True only for prose that could hide a contact detail.
 
     Excludes anything numeric (coordinates, prices, areas, ids) and anything URL-shaped (photo and
@@ -121,9 +124,15 @@ def _is_free_text(v: str) -> bool:
         return False
     try:
         float(v.strip().replace(",", ""))
-        return False          # a pure number: latitude, price, lot size, district id
     except ValueError:
-        return True
+        return True           # has letters/punctuation: prose, always checkable
+    # A BARE number. Almost always a structured source fact (latitude 24.7136523, price per m2
+    # 512345678, REGA licence 7100306688, lot size 256.56) — those must survive byte-identical.
+    # The one exception is a value that is a phone number and nothing else, e.g. a description
+    # reduced to «0501234567». Only the UNAMBIGUOUS Saudi contact shapes qualify: a leading 0
+    # before the 5, an explicit +966/00966, or a 920 business line. A bare "512345678" stays a
+    # number, because nothing distinguishes it from a price and a price is the likelier reading.
+    return bool(_BARE_CONTACT_ONLY.fullmatch(v.strip()))
 
 
 def _is_contact_channel_key(key: Any) -> bool:
@@ -142,6 +151,6 @@ def redact_capture(obj: Any) -> Any:
         return {k: redact_capture(v) for k, v in obj.items() if not _is_contact_channel_key(k)}
     if isinstance(obj, list):
         return [redact_capture(v) for v in obj]
-    if isinstance(obj, str) and _is_free_text(obj):
+    if isinstance(obj, str) and is_free_text(obj):
         return redact_pii(obj)
     return obj
