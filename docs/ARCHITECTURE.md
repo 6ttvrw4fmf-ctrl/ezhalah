@@ -78,7 +78,7 @@ in-memory only).
 |---|---|---|---|
 | `index` | **Home / Filter search** | fade | The structured filter search. §4. |
 | `agent` | **AI chat + inline results** | none | The one conversational surface; also renders results. §6, §9. |
-| `interview` | Guided interview | transparentModal | **DEPRECATED** (see §6.3). |
+| `interview` | Guided interview | transparentModal | Live, on-demand (see §6.3). |
 | `auth` | Sign-in sheet | modal, fade | §7. |
 | `settings` | Settings popup | transparentModal | §7. |
 | `browser` | In-app listing viewer | modal, slide-up | §7. |
