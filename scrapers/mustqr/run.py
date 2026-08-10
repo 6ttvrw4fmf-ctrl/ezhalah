@@ -224,19 +224,24 @@ def probe_query_shape(s: cc.Session, jwt: str) -> dict[str, str]:
 
 # Explicit column allowlist for fetch_page() (2026-08-10). `select=*` started failing 401/42501
 # "permission denied for table properties" on 2026-08-10 (04:22, 12:13, 13:20, 13:31 — 4 consecutive
-# real runs), while an UNFILTERED `select=status` probe against the same endpoint, same JWT, same
-# day succeeded and returned 1000+ 'متاح' rows (see probe_status_values()/mustqr-probe.yml). The
-# module docstring already records that `properties` carries `owner_phone`/`broker`/`raw_text` PII
-# columns we have always dropped/redacted — the working theory, consistent with every observation,
-# is mustqr locked down anon SELECT on those specific PII columns (a privacy fix on their side), so
-# `select=*` now tries to project columns anon can no longer read while a narrower select does not.
-# This lists exactly the columns map_listing() actually consumes (plus id/status for the filter and
-# order), so it can never regress into re-requesting a column we don't use — PII or otherwise.
+# real runs). A first narrowing attempt (this list minus `*`, still 29 columns) STILL failed, which
+# `probe_query_shape()` (round 2) proved was not the filter/order/Range/count — `select=status` with
+# the identical filter+order+Range+count succeeded. `probe_column_bisect()` (round 3) then showed
+# MORE than one column was restricted, and `probe_column_singles()` (round 4) tested all 29
+# individually and produced the exact, definitive list: `types`, `lat`, `lng`. (`categories` — the
+# plural sibling of `types` — and `show_location` are NOT restricted; only `types`/`lat`/`lng` are.)
+# The module docstring already records that `properties` carries `owner_phone`/`broker`/`raw_text`
+# PII columns we have always dropped/redacted; `lat`/`lng` (precise geolocation) fits the same
+# privacy-lockdown pattern mustqr appears to be applying. This list is exactly the columns
+# map_listing() actually consumes MINUS the 3 confirmed-restricted ones — dropping `types` only
+# loses the optional `types_ar` extras field, and dropping `lat`/`lng` only loses the optional
+# map-pin extras; neither is a core field (property_type/price/area/etc. come from other columns),
+# so both come back simply absent (never fabricated), exactly like any field mustqr doesn't publish.
 _PROPERTIES_COLUMNS = (
     "id,status,type,category,usage_type,area_sqm,neighborhood,title,description,images,videos,"
     "price,price_som,price_had,price_type,offer_number,direction,features,floor,"
-    "have_a_planner_number,planner_number,categories,types,view_count,is_featured,show_location,"
-    "lat,lng,created_at,updated_at,bathrooms"
+    "have_a_planner_number,planner_number,categories,view_count,is_featured,show_location,"
+    "created_at,updated_at,bathrooms"
 )
 
 
