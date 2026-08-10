@@ -148,6 +148,53 @@ for (const rel of scan) {
 }
 if (callers === 0) bad('repo callers discovered', 'found none — the LOCK_NAME scan has drifted');
 
+// ---------------------------------------------------------------------------
+// 5. LAYER 1, repo-wide: no file may ASK for the lock under an alias — not code, not a workflow,
+//    not an instruction in a doc. The DB barrier (layer 2) normalises aliases, but an instruction
+//    that tells the next agent to say 'prod' is still a bug: it teaches the wrong habit and it is
+//    exactly how 'prod' and 'prod-change' got into production routines in the first place.
+// ---------------------------------------------------------------------------
+console.log('\n5) no alias literal in any acquire/release call, anywhere in the repo');
+const SCAN_EXT = /\.(ts|tsx|js|py|sh|ya?ml|md|sql|json)$/;
+// The canonicalisation migration deliberately CALLS every alias to prove they are refused, and this
+// guard quotes them as test data. Both are allowlisted by exact path.
+const ALIAS_CALL_EXEMPT = new Set<string>([SELF]);
+const allFiles: string[] = [];
+const walkAll = (u: URL, rel: string) => {
+  for (const e of readdirSync(u, { withFileTypes: true })) {
+    if (['node_modules', '.git', '__pycache__', 'dist', 'build', '.expo'].includes(e.name)) continue;
+    if (e.isDirectory()) walkAll(new URL(`${e.name}/`, u), `${rel}${e.name}/`);
+    else if (SCAN_EXT.test(e.name)) allFiles.push(`${rel}${e.name}`);
+  }
+};
+walkAll(root, '');
+
+const CALL_LITERAL = /(?:acquire|release)_deploy_lock\s*\(\s*['"]([^'"]+)['"]/g;
+let aliasCalls = 0, scanned = 0;
+for (const rel of allFiles) {
+  if (ALIAS_CALL_EXEMPT.has(rel)) continue;
+  // The self-test migration proves aliases are REFUSED, so it must be allowed to name them.
+  const isSelftestMigration = rel.startsWith('supabase/migrations/') &&
+    readFileSync(new URL(rel, root), 'utf8').includes('ops_selftest_deploy_lock_exclusive');
+  if (isSelftestMigration) continue;
+  scanned++;
+  const src = readFileSync(new URL(rel, root), 'utf8');
+  for (const m of src.matchAll(CALL_LITERAL)) {
+    const name = m[1];
+    if (name.startsWith('<')) continue; // documentation placeholder like '<holder>'
+    if (canonical(name) === 'production' && name !== 'production') {
+      aliasCalls++;
+      bad(`${rel}: ${m[0].slice(0, 60)}…`,
+          `asks for the production lock as '${name}'. Use the canonical 'production'. The DB now ` +
+          `normalises it, but layer 1 is asking correctly — an alias here teaches the next agent wrong.`);
+    } else if (canonical(name) !== 'production' && !REGISTERED_DISTINCT.has(name)) {
+      aliasCalls++;
+      bad(`${rel}: ${m[0].slice(0, 60)}…`, `unregistered lock identity '${name}'.`);
+    }
+  }
+}
+if (aliasCalls === 0) ok(`no alias literals across ${scanned} scanned files`);
+
 console.log(failed === 0
   ? '\n✓ the production deploy lock has exactly one identity.\n'
   : `\n✗ ${failed} check(s) failed — an alias could fork the production lock.\n`);

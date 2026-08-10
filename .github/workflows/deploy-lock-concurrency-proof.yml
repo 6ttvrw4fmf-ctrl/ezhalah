@@ -1,0 +1,127 @@
+name: Deploy-lock concurrency proof (simultaneous negative controls)
+
+# Proves, with GENUINELY SIMULTANEOUS writers from separate machines, that the production deploy
+# lock can be held by AT MOST ONE session — no matter which alias each caller asks for.
+#
+# WHY THIS EXISTS. Until 2026-08-10 acquire_deploy_lock() keyed on the lock NAME, so 'prod' and
+# 'production' were two independent locks. Twice that day two sessions each held what they believed
+# was THE deploy lock and neither excluded the other. The fix canonicalises every prod*/prd/live/
+# deploy alias onto one row (migration 20260810131511).
+#
+# A sequential test cannot prove that: calling acquire twice from ONE session only shows the second
+# call sees the first one's committed row. The real question is what happens when N writers race for
+# the same row at the same instant from different processes. So this workflow fans out a matrix of
+# SIX parallel jobs, each on its own runner, each asking under a DIFFERENT alias, all released from a
+# shared wall-clock barrier so they collide inside the same second. Exactly one must win; the other
+# five are the NEGATIVE CONTROLS and must each be refused.
+#
+# It is safe to run at any time: it refuses to start if a real deploy is in progress, uses a 60s TTL
+# so nothing can wedge production, tags its holders with the run id, and cleans up after itself.
+#
+# Dispatch-only. Re-run it after ANY change to the locking functions.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-lock-concurrency-proof
+  cancel-in-progress: false
+
+env:
+  SB: https://aannarbkwcymrotzwdbo.supabase.co
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      barrier: ${{ steps.plan.outputs.barrier }}
+    steps:
+      - name: Refuse to run while a real production writer holds the lock
+        env:
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          held=$(curl -sS "$SB/rest/v1/ops_deploy_lock?select=holder,expires_at&lock_name=eq.production" \
+                   -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
+          echo "current production lock: $held"
+          if [ "$(echo "$held" | jq 'length')" != "0" ]; then
+            echo "::error::a production writer holds the lock right now — not racing it. Re-run later."
+            exit 1
+          fi
+      - id: plan
+        name: Pick a shared barrier instant (all racers fire together)
+        run: |
+          # far enough ahead that every matrix runner is booted and waiting before it fires
+          echo "barrier=$(( $(date -u +%s) + 150 ))" >> "$GITHUB_OUTPUT"
+
+  race:
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every alias that has been seen in the wild, plus the canonical name. All SIX must contend
+        # for the SAME row — five of them are negative controls that must be refused.
+        alias: ['production', 'prod', 'prod-change', 'PROD_DB', 'prd', 'live']
+    steps:
+      - name: Wait for the shared barrier, then race
+        env:
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BARRIER: ${{ needs.setup.outputs.barrier }}
+          ALIAS: ${{ matrix.alias }}
+        run: |
+          set -euo pipefail
+          # Busy-wait to the exact second so all six land inside the same instant.
+          while [ "$(date -u +%s)" -lt "$BARRIER" ]; do sleep 0.2; done
+          HOLDER="ci-concurrency-${{ github.run_id }}-${ALIAS}"
+          RESP=$(curl -sS -X POST "$SB/rest/v1/rpc/acquire_deploy_lock" \
+                   -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+                   -H "Content-Type: application/json" \
+                   -d "{\"p_lock_name\":\"${ALIAS}\",\"p_holder\":\"${HOLDER}\",\"p_ttl_seconds\":60,\"p_note\":\"concurrency proof\"}")
+          echo "alias=${ALIAS} fired at $(date -u +%H:%M:%S.%N) -> $RESP"
+          if [ "$(echo "$RESP" | jq 'length')" = "0" ]; then
+            echo "REFUSED (negative control held) for alias ${ALIAS}"
+          else
+            echo "GRANTED for alias ${ALIAS}"
+          fi
+
+  assert:
+    needs: [setup, race]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exactly ONE writer may have won
+        env:
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          AUD=$(curl -sS "$SB/rest/v1/ops_deploy_lock_audit?select=requested_name,canonical_name,holder,granted,blocked_by&holder=like.ci-concurrency-${{ github.run_id }}-*&action=eq.acquire" \
+                  -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
+          echo "$AUD" | jq -r '.[] | "  \(.requested_name) -> \(.canonical_name)  granted=\(.granted)  blocked_by=\(.blocked_by // "-")"'
+
+          ATTEMPTS=$(echo "$AUD" | jq 'length')
+          GRANTED=$(echo "$AUD" | jq '[.[] | select(.granted == true)] | length')
+          NONCANON=$(echo "$AUD" | jq '[.[] | select(.canonical_name != "production")] | length')
+          echo "attempts=$ATTEMPTS granted=$GRANTED non_canonical_rows=$NONCANON"
+
+          FAIL=0
+          [ "$ATTEMPTS" -eq 6 ]  || { echo "::error::expected 6 simultaneous attempts, saw $ATTEMPTS"; FAIL=1; }
+          [ "$GRANTED"  -eq 1 ]  || { echo "::error::EXCLUSIVITY VIOLATED — $GRANTED writers acquired the production lock simultaneously"; FAIL=1; }
+          [ "$NONCANON" -eq 0 ]  || { echo "::error::an alias resolved to a non-canonical identity ($NONCANON rows) — the lock forked"; FAIL=1; }
+
+          # Belt and braces: only one production row can exist at all.
+          ROWS=$(curl -sS "$SB/rest/v1/ops_deploy_lock?select=lock_name&lock_name=eq.production" \
+                   -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | jq 'length')
+          [ "$ROWS" -le 1 ] || { echo "::error::$ROWS production lock rows exist"; FAIL=1; }
+
+          exit $FAIL
+      - name: Clean up (always)
+        if: always()
+        env:
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          curl -sS -X DELETE "$SB/rest/v1/ops_deploy_lock?holder=like.ci-concurrency-${{ github.run_id }}-*" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" >/dev/null || true
+          curl -sS -X DELETE "$SB/rest/v1/ops_deploy_lock_audit?holder=like.ci-concurrency-${{ github.run_id }}-*" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" >/dev/null || true
+          echo "test holders removed"

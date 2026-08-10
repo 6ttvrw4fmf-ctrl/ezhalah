@@ -174,7 +174,19 @@ State clearly: **⚠️ I NEED YOUR APPROVAL**, with the evidence and the exact 
    preserved exactly. Verify against the stored capture or the live page before calling it a bug.
    Honest NULL beats a guess.
 5. **Hold the deploy lock** for anything that changes what production serves; release it after
-   verifying, not before.
+   verifying, not before. **Always request it by its canonical name, `'production'`** —
+   `acquire_deploy_lock('production', …)` / `release_deploy_lock('production', …)`. Never `prod`,
+   `prod-change`, `PROD_DB`, `prd`, `live`, `deploy`, or any other variant. On 2026-08-10 three
+   different names were in live use and TWICE two sessions each held what they believed was THE
+   deploy lock while neither excluded the other (`prod` vs `production` at 11:08, `prod-change` vs
+   `production` at 12:22) — the lock keyed on the *string*, so an alias silently created a second,
+   independent lock. The database now canonicalises every `prod*`/`prd`/`live`/`deploy` variant onto
+   the one `production` row, and that barrier stays as the final fail-safe — but it is layer 2. This
+   rule is layer 1: **ask for the right lock in the first place.** `mon_detect_deploy_lock_misuse()`
+   raises a P2 naming any holder that uses an alias, and
+   `scripts/verify-deploy-lock-canonical.ts` fails CI if a repo caller or instruction introduces one.
+   Unrelated named mutexes (e.g. `gathern_liveness_apply`) are a different resource and keep their
+   own identity — do not route them through `'production'`.
 6. **No migration drift.** Every applied DDL gets a committed file at its exact recorded version.
 7. **Report honestly.** Use the verification vocabulary: FIXED+VERIFIED (E2E) / PROPAGATION PENDING
    / AWAITING FIRST PRODUCTION EXECUTION / BLOCKED / UNPUSHED. Never upgrade a status on belief.
