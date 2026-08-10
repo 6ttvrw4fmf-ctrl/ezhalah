@@ -38,7 +38,11 @@ on:
         default: false
       limit:
         description: "Max oldest-stale rows to probe this run (0 = all stale)"
-        default: "3000"
+        # 1500 sized so a run COMPLETES within timeout-minutes even at gathern's worst observed detail-
+        # page throughput (~0.15 req/s under heavy 429 backoff, measured 2026-08-10): 1500/0.15 ≈ 2.8h
+        # < 300m. A run that times out mid-loop never reaches the kill gate → 0 inactivations, so an
+        # oversized limit would mean the automation strikes forever but never removes anything.
+        default: "1500"
       min_stale_days:
         description: "Only probe rows not seen in the feed for this many days"
         default: "3"
@@ -70,7 +74,7 @@ jobs:
           SCRAPE_MIN_INTERVAL: "1.0"
         run: |
           python -m scrapers.gathern.liveness \
-            --limit ${{ inputs.limit || '3000' }} \
+            --limit ${{ inputs.limit || '1500' }} \
             --min-stale-days ${{ inputs.min_stale_days || '3' }} \
             --grace ${{ inputs.grace || '3' }} \
             ${{ (github.event_name == 'schedule' || inputs.apply == 'true') && '--apply' || '' }}
