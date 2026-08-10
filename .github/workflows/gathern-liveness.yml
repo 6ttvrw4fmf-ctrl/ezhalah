@@ -1,28 +1,39 @@
-# Gathern liveness sweep — detail-page 404 check that ages delisted units out of search.
+# Gathern liveness sweep — detail-page 404 check that ages delisted units out of search (soft
+# inactivation: active=false, row kept + resurrection-safe). Complements gathern-cleanup.yml, which
+# HARD-deletes only after 30 days + 404.
 #
-# WHY a dedicated pass (not prune / mark_stale): Gathern has no working inactivation path. prune_unseen
-# is never called (the crawl only runs sharded, every shard skips prune); mark_stale_listings_inactive
-# can't fire (its coverage gate needs one run to see >=50% of the catalog, which the sharded monthly
-# crawl never does); and last_seen_at staleness is not a valid delisting signal anyway — a fully-booked
-# LIVE unit drops out of the has_available feed and goes stale just like a delisted one. Only the detail
-# page tells them apart (404 = gone, 200 = live). See scrapers/gathern/liveness.py.
+# WHY a dedicated pass (not prune / mark_stale): Gathern has no other working inactivation path.
+# prune_unseen is never called (the crawl only runs sharded, every shard skips prune); mark_stale
+# can't fire (coverage gate needs one run to see >=50% of the catalog, which the sharded monthly crawl
+# never does); and last_seen_at staleness is NOT a valid delisting signal — a fully-booked LIVE unit
+# drops out of the has_available feed and goes stale just like a delisted one. Only the detail page
+# tells them apart (404/410 = gone, 200 = live). See scrapers/gathern/liveness.py.
 #
-# OWNER-GATED — deliberately NOT on a cron / pg_cron schedule. It runs only when the owner dispatches
-# it, and even then DRY-RUN by default (apply=false → reports what it WOULD do, writes nothing). Set
-# apply=true only after reviewing a dry-run. The 3-strike grace means the first apply run kills nothing
-# (every active row starts at missing_count=0); a unit must 404 on three separate apply runs to go
-# inactive. Do NOT bulk-inactivate ad-hoc; respect the deletion-safety resurrection pins.
-#
-# SINGLE RUNNER — never a shard matrix. Gathern rate-limits detail pages GLOBALLY (429 above ~2 req/s
-# across ALL IPs), so parallel shards would just trip 429s (that is what stalled the Tier-2 backfill).
+# AUTOMATIC (owner-authorized 2026-08-10) — daily apply at 06:00 UTC. Every safety rule is PERMANENT and
+# unchanged; automation only removes the "remember to run it manually" gap:
+#   • SOURCE-CONFIRMED ONLY — inactivates only on a real 404/410 from the unit's own gathern page.
+#   • 200 = ALIVE — resets strikes + refreshes last_seen (rescues live-but-booked units).
+#   • TRANSIENT (429/5xx/timeout/no-response) NEVER counts as dead — the row is left untouched.
+#   • 3-STRIKE grace — a unit must 404 on THREE separate DAILY runs before active=false; the first
+#     run after a clean history kills nothing. (Daily cadence => the July-2026 776-kill scare, which
+#     needed 3 apply runs within ONE HOUR, is structurally impossible.)
+#   • ANOMALY CAP — a kill batch above max(150, 2% of active) is QUARANTINED: strikes recorded, 0 rows
+#     flipped, run marked ok=false for review. A partial / blocked / site-wide-404 crawl can NOT
+#     mass-inactivate. (Guarded by scrapers/common/tests/test_gathern_liveness.py.)
+#   • SINGLE RUNNER at ~1 req/s — Gathern 429s above ~2 req/s across ALL IPs; never a shard matrix.
+#   • RESURRECTION stays possible — a killed row is pinned at missing_count=grace so the guarded
+#     auto_recover can't revive it, but a genuine return to the feed reactivates it via the crawl upsert.
+# A manual workflow_dispatch still defaults to DRY-RUN (apply=false) for ad-hoc inspection.
 
 name: Gathern liveness
 
 on:
+  schedule:
+    - cron: "0 6 * * *"   # daily 06:00 UTC — automatic source-confirmed apply (owner 2026-08-10)
   workflow_dispatch:
     inputs:
       apply:
-        description: "Actually write missing_count / active=false (false = dry-run report only)"
+        description: "Actually write missing_count / active=false (false = dry-run report only). Scheduled runs always apply."
         type: boolean
         default: false
       limit:
@@ -52,14 +63,14 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
-      - name: Gathern liveness sweep (${{ inputs.apply && 'APPLY' || 'dry-run' }})
+      - name: Gathern liveness sweep (${{ (github.event_name == 'schedule' || inputs.apply) && 'APPLY' || 'dry-run' }})
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_MIN_INTERVAL: "1.0"
         run: |
           python -m scrapers.gathern.liveness \
-            --limit ${{ inputs.limit }} \
-            --min-stale-days ${{ inputs.min_stale_days }} \
-            --grace ${{ inputs.grace }} \
-            ${{ inputs.apply && '--apply' || '' }}
+            --limit ${{ inputs.limit || '3000' }} \
+            --min-stale-days ${{ inputs.min_stale_days || '3' }} \
+            --grace ${{ inputs.grace || '3' }} \
+            ${{ (github.event_name == 'schedule' || inputs.apply == 'true') && '--apply' || '' }}
