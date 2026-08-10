@@ -189,11 +189,32 @@ def probe_status_values(s: cc.Session, jwt: str) -> dict[str, int]:
     return counts
 
 
+# Explicit column allowlist for fetch_page() (2026-08-10). `select=*` started failing 401/42501
+# "permission denied for table properties" on 2026-08-10 (04:22, 12:13, 13:20, 13:31 — 4 consecutive
+# real runs), while an UNFILTERED `select=status` probe against the same endpoint, same JWT, same
+# day succeeded and returned 1000+ 'متاح' rows (see probe_status_values()/mustqr-probe.yml). The
+# module docstring already records that `properties` carries `owner_phone`/`broker`/`raw_text` PII
+# columns we have always dropped/redacted — the working theory, consistent with every observation,
+# is mustqr locked down anon SELECT on those specific PII columns (a privacy fix on their side), so
+# `select=*` now tries to project columns anon can no longer read while a narrower select does not.
+# This lists exactly the columns map_listing() actually consumes (plus id/status for the filter and
+# order), so it can never regress into re-requesting a column we don't use — PII or otherwise.
+_PROPERTIES_COLUMNS = (
+    "id,status,type,category,usage_type,area_sqm,neighborhood,title,description,images,videos,"
+    "price,price_som,price_had,price_type,offer_number,direction,features,floor,"
+    "have_a_planner_number,planner_number,categories,types,view_count,is_featured,show_location,"
+    "lat,lng,created_at,updated_at,bathrooms"
+)
+
+
 def fetch_page(s: cc.Session, jwt: str, offset: int) -> tuple[list[dict], Optional[int]]:
     """Range-paginated GET of /rest/v1/properties. Returns (rows, total_count_or_None)."""
     _throttle()
     rng = f"{offset}-{offset + PAGE_SIZE - 1}"
-    url = f"{PROJECT}/rest/v1/properties?select=*&status=eq.%D9%85%D8%AA%D8%A7%D8%AD&order=id.asc"
+    url = (
+        f"{PROJECT}/rest/v1/properties?select={_PROPERTIES_COLUMNS}"
+        f"&status=eq.%D9%85%D8%AA%D8%A7%D8%AD&order=id.asc"
+    )
     for attempt in range(3):
         try:
             r = s.get(url, headers=_headers(jwt, range_hdr=rng, count=(offset == 0)), timeout=45)
