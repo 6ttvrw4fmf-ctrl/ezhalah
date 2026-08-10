@@ -13,12 +13,9 @@
 //   EXPO_PUBLIC_SUPABASE_URL=... EXPO_PUBLIC_SUPABASE_ANON_KEY=... \
 //     node --experimental-strip-types scripts/verify-strict-filter-parity-live.ts
 
-const URL_BASE = process.env.EXPO_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
-const KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
-if (!URL_BASE || !KEY) {
-  console.error('SKIP-FAIL: set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY (anon/publishable key — never the service role).');
-  process.exit(1);
-}
+// Env wins when set; otherwise the committed PUBLIC endpoint (see scripts/lib/public-supabase.ts).
+import { resolvePublicSupabase } from './lib/public-supabase.ts';
+const { url: URL_BASE, key: KEY } = resolvePublicSupabase();
 
 const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
 

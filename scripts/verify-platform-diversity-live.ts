@@ -19,18 +19,11 @@
 //   EXPO_PUBLIC_SUPABASE_URL=... EXPO_PUBLIC_SUPABASE_ANON_KEY=... \
 //     node --experimental-strip-types scripts/verify-platform-diversity-live.ts
 
-const URL_BASE =
-  process.env.EXPO_PUBLIC_SUPABASE_URL ??
-  process.env.SUPABASE_URL ??
-  'https://aannarbkwcymrotzwdbo.supabase.co'; // public project URL default; anon KEY still required below
-const KEY =
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
-  process.env.EXPO_PUBLIC_SUPABASE_KEY ?? // the name the app's deploy preflight uses
-  process.env.SUPABASE_ANON_KEY;
-if (!KEY) {
-  console.error('SKIP-FAIL: set EXPO_PUBLIC_SUPABASE_ANON_KEY (the app\'s PUBLIC anon/publishable key — never the service role).');
-  process.exit(1);
-}
+// Env wins when set; otherwise the committed PUBLIC endpoint. The URL already defaulted this way —
+// before 2026-08-10 the KEY did not, and the workflow's repo secret did not exist, so this barrier
+// exited 1 without ever running once since it shipped.
+import { resolvePublicSupabase } from './lib/public-supabase.ts';
+const { url: URL_BASE, key: KEY } = resolvePublicSupabase();
 
 const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
 const enc = encodeURIComponent;
