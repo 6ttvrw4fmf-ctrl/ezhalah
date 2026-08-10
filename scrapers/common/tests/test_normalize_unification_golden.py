@@ -486,13 +486,30 @@ def test_to_int_and_to_int_numeric_must_not_be_swapped():
 def test_golden_mustqr_price_fields_identical_when_price_type_explicit():
     from scrapers.mustqr.run import _price_fields
 
-    for raw in [None, 0, "0", 500, 999, 1000, 1700, 2700, "2700", 150588, 10**7]:
+    # 500 and 999 moved to the DELTA test below: the `< 1000` rejection they encoded was removed
+    # on 2026-08-09 (source-verified — see test_delta_mustqr_keeps_sub_1000_published_prices).
+    # Everything at or above the old cutoff must still be byte-identical to the pre-unification
+    # reference, which is what this golden exists to prove.
+    for raw in [None, 0, "0", 1000, 1700, 2700, "2700", 150588, 10**7]:
         for is_rent in (False, True):
             for is_monthly in (False, True):
                 price_type = "شهري" if is_monthly else "سنوي"
                 p = {"price": raw, "price_type": price_type} if is_rent else {"price": raw}
                 assert _price_fields(p, is_rent) == \
                     old_mustqr_price_fields(old_int(raw), is_rent, is_monthly), (raw, is_rent, is_monthly)
+
+
+def test_delta_mustqr_keeps_sub_1000_published_prices():
+    """DELTA (2026-08-09, intentional): the old reference DROPPED any price under 1,000 SAR as
+    implausible. That premise was tested against reality — all 204 live sub-1000 Buy rows were
+    fetched from their source pages and 204/204 matched the published price exactly — so the gate
+    was destroying real data and violating PRICE = SOURCE (2026-08-03). Divergence from the golden
+    here is the fix, not a regression."""
+    from scrapers.mustqr.run import _price_fields
+
+    for raw in (500, 999):
+        assert old_mustqr_price_fields(old_int(raw), False, False) == {}, "old code dropped it"
+        assert _price_fields({"price": raw}, False) == {"price_total": raw}, "new code keeps it"
 
 
 # ═══ DELTA: documented, intentional coverage GAINS (previously None/skipped) ═══════════════════

@@ -250,9 +250,10 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
     if master is not None and master > 20:
         master = None
 
+    # No magnitude gate (removed 2026-08-09): a source-published price is stored at ANY magnitude
+    # per the standing PRICE = SOURCE rule. Nulling "implausibly low" prices is a judgement call
+    # that silently destroys evidence — wrong prices are corrected against the source page instead.
     price_f = _num(rec.get("price"))
-    if price_f is not None and price_f < 1000:
-        price_f = None
     price = int(round(price_f)) if price_f is not None else None
 
     age_raw = (rec.get("real_estate_age") or "").strip()
@@ -479,10 +480,13 @@ def main() -> int:
 
         print(f"✓ Ramzalqasim: {len(res)} residential + {len(com)} commercial upserted, "
               f"{gone_ct} marked inactive, {pruned} stale pruned")
+        healthy = True
         if run_id:
-            db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
+            healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
                         notes=f"gone={gone_ct} pruned={pruned}", check_tables=["ramzalqasim_residential_listings", "ramzalqasim_commercial_listings"])
-        return 0
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])

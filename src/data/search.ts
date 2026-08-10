@@ -68,6 +68,11 @@ export type SearchQuery = {
   // is purely for the human-readable summary sentence so it can read "حي X، جدة". Filter path only —
   // the agent free-text path leaves it undefined. (owner UI request 2026-07-18.)
   districtLabel?: string;
+  // The PICKED district's own live listing count (deal/category scope, straight from
+  // district_options_ar) — carried so the 0-results diagnosis can tell "this district is empty" from
+  // "this district has listings but not of your TYPE". noResultsSuggestion's countWith() can't tell
+  // them apart because `pools` is the already-server-filtered (empty) fetch. Filter path only. (2026-08-09)
+  districtListingCount?: number;
   // Free-text terms matched against the listing's OWN text (street_name / title / description / facade) —
   // the street / "near a mosque|school|park" / facade search. Extracted from the user's message; if real
   // matches exist we show only them, else we keep the area + a note. Never invented. (Q3.)
@@ -1325,6 +1330,29 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
       // to it in the same call — so an unresolved English location echo (q.location, or an
       // unresolved lm.label) could render inside this Arabic zero-results suggestion.
       return t('We couldn’t find listings in "{place}". Did you mean {alt}?', { place: arabicOrUnresolved(q.locationMatch?.label || q.location), alt: arabicOrUnresolved(cityDisplay(alt.cityEn, getLocale())) });
+    }
+  }
+  // Filter path: `pools` is the already-server-filtered (empty) fetch, so every countWith() below is
+  // blind — it returns 0 whichever field it clears (see the note above the explicitPlace check). The
+  // PICKED district's OWN live count (deal/category scope, straight from district_options_ar) is the
+  // one real signal we still have, and it distinguishes the two dead-ends users actually hit:
+  //   • district has ZERO listings for this deal/category  → widen the AREA
+  //   • district HAS listings but none of the chosen TYPE  → widen the TYPE  (e.g. حي المطار/الرس has
+  //     villas + a house for sale but zero apartments — the exact case that used to fall to the generic
+  //     "widen the search?" because the empty pool couldn't prove the type was the bottleneck).
+  // Only trust this when NO other relaxable filter (price/size/beds/keywords) is also narrowing, so the
+  // bottleneck is unambiguously the district and/or the type.
+  const distPicked = !!(q.districts && q.districts.length);
+  const distCount = q.districtListingCount;
+  if (distPicked && typeof distCount === 'number'
+      && !q.priceInput && !q.priceBand && q.priceMin == null && q.priceMax == null
+      && !q.detail && !q.contextBeds && !(q.contextBedsList && q.contextBedsList.length)
+      && !q.contextSize && q.areaMin == null && q.areaMax == null && !(q.keywords && q.keywords.length)) {
+    if (distCount === 0) {
+      return t("No matches in that specific area — but I can find some elsewhere in the same city. Want me to widen the area?");
+    }
+    if (q.type || (q.types && q.types.length) || q.typeGroup) {
+      return t("No matches for that property type here — other types are available. Want me to broaden the type?");
     }
   }
   if ((q.priceInput || q.priceMin || q.priceMax) && countWith({ priceInput: '', priceMin: null, priceMax: null }) > 0) {

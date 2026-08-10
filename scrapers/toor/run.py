@@ -529,9 +529,9 @@ def map_listing(body: str, url: str, sitemap_image: Optional[str] = None) -> tup
     if not pm:
         pm = PRICE_RE_FALLBACK.search(body)
     price = _int(pm.group(1)) if pm else None
-    if price is not None and price < 1000:
-        # Reject implausibly tiny prices (display glitch / unit confusion).
-        price = None
+    # No magnitude gate (removed 2026-08-09). "Display glitch / unit confusion" is a guess about
+    # the source; a genuine glitch is a MISSING price node (handled by `pm is None`), not a small
+    # one. A published price is stored at any magnitude (PRICE = SOURCE, 2026-08-03).
     # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
     price_per_meter = None
 
@@ -718,8 +718,10 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Toor: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["toor_residential_listings", "toor_commercial_listings"])
-        return 0
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["toor_residential_listings", "toor_commercial_listings"])
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])

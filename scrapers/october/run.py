@@ -318,8 +318,10 @@ def main() -> int:
             else:
                 pruned += nn
         print(f"✓ 1 October: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com), notes=f"pruned={pruned}", check_tables=["october_residential_listings", "october_commercial_listings"])
-        return 0
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com), notes=f"pruned={pruned}", check_tables=["october_residential_listings", "october_commercial_listings"])
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])

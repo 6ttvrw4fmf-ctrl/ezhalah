@@ -109,13 +109,23 @@ def main() -> int:
         notes = str(e)[:500]
         print(f"\n✗ FATAL: {e}")
     finally:
-        db.end_run(run_id, ok=ok, rows_seen=total_seen, rows_upserted=total_upserted, notes=notes, check_tables=["aqar_commercial_listings"])
+        # Capture end_run()'s EFFECTIVE ok (see scrapers/common/db.py's RC-B guard docstring) —
+        # a bare `db.end_run(...)` call here would discard a demotion (0-row shard, a tripped
+        # floor, a check_tables integrity trip) and this process would still exit 0, exactly the
+        # dealapp #343 incident (fixed in PR #363) reproduced fleet-wide minus this file and
+        # run_residential.py, which used `ok=ok` (a variable, not the `ok=True` literal
+        # test_scraper_fleet_end_run_return_captured.py's AST check was matching) and slipped
+        # through that pass undetected.
+        healthy = db.end_run(run_id, ok=ok, rows_seen=total_seen, rows_upserted=total_upserted, notes=notes, check_tables=["aqar_commercial_listings"])
 
     print(f"\n📊 Done. {total_upserted}/{total_seen} upserted across all slices. (run_id={run_id})")
-    # Exit 0 when the run COMPLETED cleanly, even if it upserted nothing — a small town with zero
-    # commercial inventory is a valid result, not a failure. Only a real crash (ok=False) → exit 1.
+    if ok and not healthy:
+        print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+    # Exit 0 only when the run COMPLETED cleanly AND end_run() did not demote it. A small town
+    # with zero commercial inventory is a valid result, not a failure — but a demotion (0-row/
+    # dead-source, tripped floor, degraded integrity check) must redden CI.
     # (was `0 if total_upserted else 1`, which falsely marked empty-town shards as "failure".)
-    return 0 if ok else 1
+    return 0 if (ok and healthy) else 1
 
 
 if __name__ == "__main__":

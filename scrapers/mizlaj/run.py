@@ -313,8 +313,13 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
     price_raw = _num(md.get("total_price") or listing.get("total_price")
                      or md.get("min_price") or listing.get("min_price"))
     price = round(price_raw) if price_raw else None
-    if not price or price < 1000:
-        return None, category  # reject junk prices (<1000 SAR)
+    # No magnitude gate (removed 2026-08-09). This used to DISCARD THE WHOLE LISTING when the
+    # source price was under 1,000 SAR — the harshest form of the plausibility gate the standing
+    # PRICE = SOURCE rule forbids, since a genuinely cheap listing never reached the database at
+    # all and left no trace to audit. A missing/zero price still drops the row (no price = nothing
+    # to publish); an unusual-but-published price is now kept exactly as the source printed it.
+    if not price:
+        return None, category
     area = _num(md.get("space") or listing.get("space"))
     # price_per_meter arrives as a DECIMAL string ("2946.17") — round the float, don't _int()
     # it (which would strip the dot → 294617). Derive from price/area when absent.
@@ -537,8 +542,10 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Mizlaj: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["mizlaj_residential_listings", "mizlaj_commercial_listings"])
-        return 0
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["mizlaj_residential_listings", "mizlaj_commercial_listings"])
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])

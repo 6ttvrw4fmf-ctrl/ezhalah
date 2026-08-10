@@ -165,3 +165,43 @@ The lock self-expires after 10 minutes (`p_ttl_seconds`, default 600) so a crash
 can never permanently block deploys — but always release explicitly rather than relying on the
 TTL. See `docs/DEPLOY_SAFETY.md` "Deployment lock" and `supabase/migrations/20260716_deploy_lock.sql`
 for the full design.
+
+# Migration drift guard (P0, non-negotiable — 2026-08-10)
+
+**Every migration applied to production MUST also be committed to `supabase/migrations/` in this
+repo — this is enforced continuously, not just at deploy time.** Applying a migration directly to
+production via the Supabase MCP `apply_migration` (a normal, expected pattern per "Deployment
+lock" above — concurrent sessions do this routinely) and then forgetting to commit the SQL is
+schema drift, and it is not a paperwork problem: it is the exact precondition of the 2026-07-16
+PGRST203 search outage (a migration applied via MCP left a duplicate function overload that was
+never in git, so nobody could see it coming) and it has recurred at least twice since (daily-
+engineer heartbeats on 2026-08-04 and 2026-08-10 each independently found 20-30+ migrations applied
+to prod with zero git record, discovered up to 24h after the fact).
+
+**If you apply a migration via MCP, commit the identical SQL to `supabase/migrations/` in the same
+session, before you consider the work done.** `apply_migration` mints its own server-side version
+timestamp — copy the SQL verbatim into a file named `<that timestamp>_<a name>.sql` (or recover it
+later from `supabase_migrations.schema_migrations.statements`, which is exact and queryable).
+
+**You do not have to catch your own drift by memory — the barrier catches it for you, continuously:**
+- `scripts/verify-migration-drift-vs-production.ts` asks `ops_deploy_preflight_checks` (the same
+  RPC `scripts/safe-deploy.sh` already gates deploys on) whether every migration live in production
+  is present in git. It is wired into `npm test` (`full-verification-ci.yml`), so drift already
+  goes red on the very next push or PR to `main` — anyone's, not just the one that caused it.
+- `.github/workflows/migration-drift-guard.yml` runs that same check **every 15 minutes**,
+  independent of any push — because the failure mode this exists for is a session that applies a
+  migration and pushes nothing at all, which a push-triggered check alone would never catch. On
+  drift it fails the job loudly (a GitHub Actions red X) **and** raises a P1 `alert_event` row
+  (`kind='migration_drift'`) via `mon_raise`, so it shows on the ops dashboard too — not just
+  something a human has to notice in the Actions tab. It self-heals via `mon_resolve_key` the next
+  time it runs clean.
+- Both `scripts/safe-deploy.sh` and the continuous checker build "what migrations does the repo
+  claim" from the ONE shared `scripts/build-repo-migration-versions.cjs` — `scripts/verify-
+  migration-drift-guard-wired.ts` (also in `npm test`) fails if either script stops using it (two
+  independent copies of that parser is its own drift risk) or if any piece of this barrier goes
+  missing, gets a loosened schedule, or stops being invoked.
+
+**If `migration_drift` is ever red:** recover the missing SQL verbatim from
+`supabase_migrations.schema_migrations.statements` (matched by `version`) into
+`supabase/migrations/`, commit, and open a PR — this itself touches `supabase/migrations/`, so per
+the daily/senior routine rules it stays OPEN for review, never self-merged by an autonomous run.

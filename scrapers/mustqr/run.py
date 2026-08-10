@@ -109,24 +109,38 @@ def session() -> cc.Session:
 
 def fetch_jwt(s: cc.Session) -> str:
     """Pull the public anon JWT Mustqr embeds in its SPA bundle. Cached in-process so a full run
-    only does the discovery once."""
+    only does the discovery once.
+
+    RETRY (2026-08-10): mustqr.sa is a Vercel SPA; a redeploy swaps the /assets/index-<hash>.js
+    bundle, so a run that lands mid-deploy can 404 the bundle (or get a transient landing blip) and,
+    with no retry, the WHOLE run failed with 0 rows — exactly the 2026-08-10 04:22 & 12:13 failures
+    (source itself was healthy: 1,144 live listings, verified). We re-read the LANDING page on every
+    attempt so a freshly-deployed bundle hash is picked up. Retries fire ONLY on failure (with
+    backoff) — no added load on a healthy run."""
     global _JWT
     if "_JWT" in globals() and _JWT:
         return _JWT
-    # 1) Read landing page, find the index-*.js bundle.
-    r = s.get(SITE, timeout=30)
-    r.raise_for_status()
-    bundles = re.findall(r"/assets/index-[A-Za-z0-9_\-]+\.js", r.text)
-    if not bundles:
-        raise RuntimeError("Mustqr: could not locate SPA bundle in landing page")
-    # 2) Fetch the first index bundle and grep for a JWT.
-    r = s.get(SITE + bundles[0], timeout=30)
-    r.raise_for_status()
-    jwts = re.findall(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", r.text)
-    if not jwts:
-        raise RuntimeError(f"Mustqr: no JWT found in {bundles[0]}")
-    _JWT = jwts[0]
-    return _JWT
+    last_err: Optional[Exception] = None
+    for attempt in range(3):
+        try:
+            # 1) Read landing page (fresh each attempt), find the index-*.js bundle.
+            r = s.get(SITE, timeout=30)
+            r.raise_for_status()
+            bundles = re.findall(r"/assets/index-[A-Za-z0-9_\-]+\.js", r.text)
+            if not bundles:
+                raise RuntimeError("could not locate SPA bundle in landing page")
+            # 2) Fetch the first index bundle and grep for the anon JWT.
+            rb = s.get(SITE + bundles[0], timeout=30)
+            rb.raise_for_status()
+            jwts = re.findall(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", rb.text)
+            if not jwts:
+                raise RuntimeError(f"no JWT found in {bundles[0]}")
+            _JWT = jwts[0]
+            return _JWT
+        except Exception as e:  # noqa: BLE001 — any transient (network, 404 bundle swap, blip) → retry
+            last_err = e
+            time.sleep(2 * (attempt + 1))
+    raise RuntimeError(f"Mustqr: JWT discovery failed after 3 attempts: {last_err}")
 
 
 def _headers(jwt: str, *, range_hdr: Optional[str] = None, count: bool = False) -> dict[str, str]:
@@ -219,10 +233,15 @@ def _video_url(videos: Any) -> Optional[str]:
 
 
 def _price_fields(p: dict, is_rent: bool) -> dict[str, Any]:
-    """price > price_som > price_had. Reject < 1000."""
+    """price > price_som > price_had. A published price is kept at ANY magnitude.
+
+    The `n < 1000` rejection was removed 2026-08-09: it was a plausibility gate on a
+    source-published figure, which the standing PRICE = SOURCE rule forbids. An absent/zero price
+    still yields no price fields, because there is nothing published to store.
+    """
     raw = p.get("price") or p.get("price_som") or p.get("price_had")
     n = _int(raw)
-    if not n or n < 1000:
+    if not n:
         return {}
     if is_rent:
         # Monthly rentals must store the ANNUALIZED figure (monthly×12); the app displays
@@ -435,7 +454,7 @@ def main() -> int:
             f"✓ Mustqr: {len(res)} residential + {len(com)} commercial upserted"
             + (f", {pruned} stale pruned" if full_run else " (validation: no prune)")
         )
-        db.end_run(
+        healthy = db.end_run(
             run_id,
             ok=True,
             rows_seen=len(raw),
@@ -443,7 +462,9 @@ def main() -> int:
             notes=f"pruned={pruned}" if full_run else "validation",
             check_tables=["mustqr_residential_listings", "mustqr_commercial_listings"],
         )
-        return 0
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         db.end_run(run_id, ok=False, rows_seen=len(raw), rows_upserted=0, notes=str(e)[:300])
         print(f"✗ {e}")

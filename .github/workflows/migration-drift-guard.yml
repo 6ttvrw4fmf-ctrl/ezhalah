@@ -1,0 +1,53 @@
+name: Migration drift guard (production vs git)
+
+# Owner-requested permanent barrier (2026-08-10): "Production DB change -> tracked migration ->
+# repository matches production -> CI verifies the match. If another session changes production
+# directly and forgets to commit it, I want our system to detect it immediately and fail loudly."
+#
+# scripts/safe-deploy.sh already refuses to DEPLOY on drift, but that only ever checks at the
+# moment someone deploys. Concurrent agent sessions apply migrations directly to production via the
+# Supabase MCP routinely (AGENTS.md "Deployment lock" documents this as expected, not a mistake) —
+# a session that does this without also committing the SQL leaves drift that a push-triggered check
+# alone would NEVER catch, because there may be no push at all. This workflow exists to close that
+# exact gap: it runs independent of any git activity, on a tight schedule, so drift is caught within
+# minutes of being introduced rather than at the next deploy attempt (which is how the 2026-07-16
+# PGRST203 outage happened) or the next daily-engineer run (which is how it was actually caught on
+# 2026-08-04 and 2026-08-10 — up to 24h later).
+#
+# scripts/verify-migration-drift-vs-production.ts also runs on every push/PR via `npm test`
+# (full-verification-ci.yml) — this workflow is the complementary schedule-driven half, and the
+# only one of the two with the service-role key, so ONLY this one also raises/resolves a P1 in
+# alert_event (the same stream the ops dashboard and mon_run_all_detectors already watch) —
+# turning drift into a paged alert, not just a GitHub Actions red X someone has to go looking for.
+#
+# Read-only against production except for that one alert_event write (via mon_raise/mon_resolve_key,
+# both scoped exactly to that purpose — see their own grants/comments). Never touches migrations,
+# never applies anything, never deploys anything.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # every 15 minutes — tight enough that "immediately" is actually true
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
+  workflow_dispatch: {}
+
+concurrency:
+  group: migration-drift-guard
+  cancel-in-progress: true
+
+jobs:
+  drift-check:
+    name: Verify production migrations match git
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify migration drift vs production
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-migration-drift-vs-production.ts

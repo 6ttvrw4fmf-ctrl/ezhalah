@@ -76,19 +76,28 @@ SITEMAP = f"{BASE}/sitemap.xml"
 WORKERS = int(os.environ.get("RAGHDAN_WORKERS", "4"))
 
 # Arabic property-type word (first token of `name`, or breadcrumb) → canonical English type.
-TYPE_MAP_AR = {
-    "شقة": "Apartment", "شقه": "Apartment", "استوديو": "Studio",
-    "فيلا": "Villa", "فلة": "Villa", "دوبلكس": "Duplex", "قصر": "Villa",
-    "دور": "Floor", "روف": "Floor", "بيت": "House", "منزل": "House",
-    "عمارة": "Building", "عماره": "Building", "بناية": "Building", "برج": "Building",
-    "أرض": "Residential Land", "ارض": "Residential Land", "اراضي": "Residential Land",
-    "استراحة": "Rest House", "استراحه": "Rest House", "شاليه": "Chalet",
-    "مزرعة": "Farm", "مزرعه": "Farm", "غرفة": "Room", "غرفه": "Room",
-    "مخيم": "Camp",
-    # commercial
-    "محل": "Shop", "مكتب": "Office", "مستودع": "Warehouse", "معرض": "Showroom",
-    "ورشة": "Workshop", "ورشه": "Workshop", "مصنع": "Factory", "فندق": "Hotel",
+#
+# 2026-08-09: this used to be a FULL private copy of the canonical map, and it had silently drifted
+# from `normalize.TYPE_MAP_AR` — 12 shared keys were missing here, so raghdan alone failed to map
+# "إستراحة" (hamza-alif spelling; the bare-alif "استراحة" was present) and stored the whole page
+# TITLE as the property type instead: 2 live rows carried
+# type_ar = "إستراحة للبيع في الودي، حائل". Same drift also left "أرض تجارية" / "أرض زراعية"
+# unmapped, which would have substring-matched the bare "أرض" and misfiled commercial and
+# agricultural land as Residential Land — the exact reconflation the Farm/Agriculture-Plot split
+# exists to prevent.
+#
+# The fix is to stop maintaining a second copy: raghdan now flows through the shared map and keeps
+# ONLY its genuine deltas below, per the map_type_exact overrides contract (exact-match, conflicts
+# and platform-only vocabulary only, defined in the scraper). Differential-tested against all 169
+# distinct live raghdan titles: 2 changes, both the إستراحة fix, zero other movement.
+TYPE_OVERRIDES_AR = {
+    # raghdan-only vocabulary (absent from the shared map)
+    "روف": "Floor", "بناية": "Building", "برج": "Building", "اراضي": "Residential Land",
     "محطة": "Gas Station", "مجمع": "Commercial Building",
+    # genuine conflicts with the shared map — raghdan's brokerage vocabulary treats these as a
+    # standalone house, not a villa. Kept as-is (owner rule: never silently re-decide a mapping
+    # conflict); flip only on an explicit taxonomy decision.
+    "بيت": "House", "منزل": "House",
 }
 COMMERCIAL_TYPES = {
     "Shop", "Office", "Warehouse", "Showroom", "Workshop", "Factory", "Hotel",
@@ -273,18 +282,67 @@ def _breadcrumb_district(bc: Optional[dict]) -> Optional[str]:
     return None
 
 
+# The rendered "الموقع" card, e.g.
+#   <span ...>المنطقة<!-- -->:</span><span ...>منطقة مكة المكرمة</span>
+#   <span ...>المدينة<!-- -->:</span><span ...>جدة</span>
+#   <span ...>الحى<!-- -->:</span><span ...>النعيم</span>
+_LOC_CARD_RE = re.compile(r">\s*الموقع\s*<")
+_LOC_FIELD_RE = {
+    "region": re.compile(r">المنطقة<!-- -->:</span><span[^>]*>(.*?)</span>", re.S),
+    "city": re.compile(r">المدينة<!-- -->:</span><span[^>]*>(.*?)</span>", re.S),
+    "district": re.compile(r">الحى<!-- -->:</span><span[^>]*>(.*?)</span>", re.S),
+    "postal": re.compile(r">الرمز البريدي<!-- -->:</span><span[^>]*>(.*?)</span>", re.S),
+}
+
+
+def _rendered_location(body: str) -> dict[str, str]:
+    """Arabic region/city/district from the server-rendered «الموقع» card.
+
+    Raghdan serves TWO page shapes. On the REGA-sourced shape (numeric ad ids), the JSON-LD
+    `address` carries `addressCountry: "SA"` and NOTHING else — no locality, no region — while the
+    page body renders the full location. The scraper only ever read JSON-LD, so those listings were
+    stored with city/region/neighborhood all NULL and became unreachable by every city filter:
+    172 of raghdan's 361 live rows on 2026-08-09.
+
+    This is a CAPTURE gap, not missing source data — the values below are read verbatim from the
+    page the user sees, never inferred. Everything downstream is unchanged: the strings still go
+    through normalize.map_city / REGION_AR / the district catalog, so an unrecognised value still
+    resolves to an honest NULL rather than leaking onto the card.
+
+    Scoped to the text AFTER the «الموقع» heading on purpose: an earlier «العنوان» card repeats a
+    (usually blank) «المدينة» label, and reading that one back would overwrite a good city with "".
+    """
+    m = _LOC_CARD_RE.search(body)
+    if not m:
+        return {}
+    tail = body[m.end():]
+    out: dict[str, str] = {}
+    for key, rx in _LOC_FIELD_RE.items():
+        hit = rx.search(tail)
+        if not hit:
+            continue
+        val = _strip_tags(hit.group(1)).strip()
+        # "غير محدد" is raghdan's own placeholder — an explicit "unspecified", not a value.
+        if val and val != "غير محدد":
+            out[key] = val
+    return out
+
+
 def _map_type(*candidates: str) -> Optional[str]:
+    """Whole string then first token, exact-first then substring — via the SHARED canonical map
+    (normalize.map_type) with TYPE_OVERRIDES_AR as the exact-match override layer."""
     for c in candidates:
         if not c:
             continue
         c = c.strip()
         first = c.split(" ")[0] if " " in c else c
         for cand in (c, first):
-            if cand in TYPE_MAP_AR:
-                return TYPE_MAP_AR[cand]
-        for word, eng in TYPE_MAP_AR.items():
-            if word in c:
-                return eng
+            hit = normalize.map_type_exact(cand, TYPE_OVERRIDES_AR)
+            if hit:
+                return hit
+        hit = normalize.map_type(c, TYPE_OVERRIDES_AR)
+        if hit:
+            return hit
     return None
 
 
@@ -380,21 +438,27 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
             # price_per_meter NULL — deriving it would fabricate a rate the source never printed.
             price_total = raw_price
 
-    # SANITY: reject absurdly low TOTAL sale prices (data-entry slips) — keep the row but null price.
-    # Scope is deliberately unchanged: it gates a TOTAL only. It used to also null price_per_meter,
-    # but the two can no longer co-occur (land sets the rate, buildings set the total), so that arm
-    # was dead. A land row's rate is NOT magnitude-gated here — it is stored exactly as published;
-    # withholding an implausible-looking source value would be a judgement call, and the «سعر المتر 1»
-    # placeholder case is handled at DISPLAY (ResultCard), where it alters no stored data.
-    if price_total is not None and price_total < 1000:
-        price_total = None
-    if price_annual is not None and price_annual < 1000:
-        price_annual = None
+    # NO magnitude gate. A sub-1000 total is stored exactly as the source published it, same as the
+    # land per-meter rate directly above.
+    #
+    # Removed 2026-08-09. This block used to null any total under 1,000 SAR as an "absurdly low
+    # data-entry slip". That is a plausibility judgement on a source-published price, which the
+    # standing owner rule (2026-08-03) forbids: if the platform displays it, we display it, and it
+    # stays searchable at any magnitude. It also made raghdan the only scraper silently disagreeing
+    # with the PRICE = SOURCE invariant, and it is unfalsifiable by design — a discarded price
+    # leaves no evidence, so a genuinely cheap listing and a source typo become indistinguishable
+    # downstream. Wrong prices are corrected against the SOURCE PAGE, never inferred from magnitude;
+    # the «سعر المتر 1» placeholder case is handled at DISPLAY (ResultCard), altering no stored data.
 
     # ── location ──
     addr = ld.get("address") or {}
     raw_city = (addr.get("addressLocality") or "").strip()
     raw_region = (addr.get("addressRegion") or "").strip()
+    # JSON-LD is authoritative when it carries the fields; the rendered «الموقع» card is the
+    # fallback for the REGA-sourced page shape, which publishes location ONLY in the body.
+    rendered = _rendered_location(body) if not (raw_city and raw_region) else {}
+    raw_city = raw_city or rendered.get("city", "")
+    raw_region = raw_region or rendered.get("region", "")
     # Forward-fix (2026-07-10 location-data-quality audit): removed the "Other" fallback AND the
     # subsequent "if region and city == 'Other': city = region" block below it — that block used to
     # silently surface a REGION NAME as the city label whenever city resolution failed but region
@@ -408,7 +472,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
             break
     if not region:
         region = CITY_TO_REGION.get(city)
-    district = _breadcrumb_district(bc)
+    district = _breadcrumb_district(bc) or rendered.get("district")
 
     # ── PDPL-safe text (broker.name is DROPPED entirely; phones redacted) ──
     title = _redact(_strip_tags(name))
@@ -540,8 +604,10 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Raghdan: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["raghdan_residential_listings", "raghdan_commercial_listings"])
-        return 0
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["raghdan_residential_listings", "raghdan_commercial_listings"])
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])

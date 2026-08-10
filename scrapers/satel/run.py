@@ -277,9 +277,9 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
     transaction_type = "Rent" if is_rent else "Buy"
 
     price_group = (p.get("priceGroup") or "").strip().lower()
+    # No magnitude gate (removed 2026-08-09) — a published price is stored at any magnitude
+    # (PRICE = SOURCE, 2026-08-03; 204/204 live sub-1000 Buy rows matched their source page).
     price = _int(p.get("price"))
-    if price is not None and price < 1000:  # SANITY: reject absurdly-low prices
-        price = None
 
     price_total = price_annual = None
     rent_period = None
@@ -473,10 +473,13 @@ def main() -> int:
             print(f"✓ Satel VALIDATION: {len(res)} residential + {len(com)} commercial upserted "
                   f"({gone_ct} rented out) (no prune)")
 
+        healthy = True
         if run_id:
-            db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
+            healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
                        notes=f"rented_out={gone_ct} pruned={pruned}", check_tables=["satel_residential_listings", "satel_commercial_listings"])
-        return 0
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])

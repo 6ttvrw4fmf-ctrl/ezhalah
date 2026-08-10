@@ -1,0 +1,37 @@
+name: District suggestions — no dead ends (live check)
+
+# Executes the REAL production RPCs (district_options_ar + location_search_candidates_ar) through the
+# app's anon key and asserts the invariant: every district the app suggests as POPULATED
+# (listing_count > 0) actually returns > 0 from search for the same city + deal. A district shown as
+# available that a search can't fulfil is a dead end — the exact trap that sent users to "0 results"
+# (e.g. حي المطار/الرس, and the 24-of-44 zero-listing catalog districts). If any suggestion becomes a
+# dead end, THIS job turns RED and GitHub notifies the repo owner.
+#
+# This is the LIVE behavioral half of the "never again" barrier; the static half runs in `npm test`
+# (verify-district-field.ts pins the marking + the real-count 0-results diagnosis in the source).
+# Read-only (anon key, RLS-respecting) — never the service role.
+
+on:
+  schedule:
+    - cron: '37 */6 * * *' # every 6 hours (offset from the diversity check)
+  workflow_dispatch:
+
+concurrency:
+  group: district-suggestion-parity-live-check
+  cancel-in-progress: false
+
+jobs:
+  district-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Live district-suggestion dead-end assertions
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-district-suggestion-parity-live.ts

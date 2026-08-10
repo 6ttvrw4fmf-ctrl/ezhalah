@@ -8,6 +8,14 @@
 -- session READS to reason about the location pipeline, so a stale one is how a session concludes
 -- "satel has no native resolution" and ships a fix for a problem that does not exist.
 --
+-- Re-verified 2026-08-10 (daily engineer, recovering 24 uncommitted 2026-08-09 migrations —
+-- verify-sql-mirrors-not-stale flagged this file because 20260809154124_dealapp_live_location_
+-- overlay.sql MENTIONS listing_native_location_v1 (it reads from v1 while rebuilding v2), which
+-- trips the checker's any-mention heuristic even though it does not modify v1 itself. Re-ran
+-- pg_get_viewdef('listing_native_location_v1'::regclass, true) against live production: byte-exact
+-- with the body below (same 13,385 chars, same md5) — content genuinely unchanged, only the
+-- verification date needed to advance past that migration.
+--
 -- Regenerated from pg_get_viewdef('listing_native_location_v1'::regclass, true) — 13,385 chars.
 -- Verified byte-exact; md5 of everything below this header block: d7fff7ec0378d6095728e862aee80106
  WITH native AS (

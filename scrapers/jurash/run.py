@@ -312,9 +312,9 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
     description = _description(f)
 
     # ── price ──
+    # No magnitude gate (removed 2026-08-09) — a published price is stored at any magnitude
+    # (PRICE = SOURCE, 2026-08-03; 204/204 live sub-1000 Buy rows matched their source page).
     price = _to_int(f.get("pt_price"))
-    if price is not None and price < 1000:
-        price = None
 
     # ── area (pt_size, else description مساحة) ──
     area = _to_float(f.get("pt_size"))
@@ -524,9 +524,11 @@ def main() -> int:
                 pruned += n
         print(f"✓ Jurash: {len(res)} residential + {len(com)} commercial upserted, "
               f"{gone_ct} sold/rented pinned inactive, {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
                    notes=f"gone={gone_ct} pruned={pruned}", check_tables=["jurash_residential_listings", "jurash_commercial_listings"])
-        return 0
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])

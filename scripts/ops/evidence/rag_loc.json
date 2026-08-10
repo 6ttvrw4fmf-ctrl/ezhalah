@@ -1,0 +1,2901 @@
+[
+{
+"id": "597796",
+"fid": "993902588378",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597797",
+"fid": "870928570741",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597798",
+"fid": "862878217062",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "597799",
+"fid": "797045303560",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597800",
+"fid": "616924204677",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597907",
+"fid": "923069657776",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597913",
+"fid": "871803386305",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597914",
+"fid": "852513938443",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597915",
+"fid": "836851474745",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597916",
+"fid": "736316917174",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597917",
+"fid": "608724183617",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "597918",
+"fid": "489412986062",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "597919",
+"fid": "465597584314",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "597920",
+"fid": "273726359755",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597921",
+"fid": "166754908789",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "597922",
+"fid": "163451985346",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597945",
+"fid": "952982139287",
+"http": 200,
+"loc": {
+"region": "منطقة حائل",
+"city": "حائل",
+"district": "المحطة",
+"postal": "55424"
+},
+"err": null,
+"mapped": {
+"city": "Hail",
+"region": "Hail",
+"neighborhood": "المحطة"
+}
+},
+{
+"id": "597947",
+"fid": "220301089976",
+"http": 200,
+"loc": {
+"region": "منطقة حائل",
+"city": "حائل",
+"district": "النفل",
+"postal": "55484"
+},
+"err": null,
+"mapped": {
+"city": "Hail",
+"region": "Hail",
+"neighborhood": "النفل"
+}
+},
+{
+"id": "597958",
+"fid": "913081613277",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "597959",
+"fid": "836791821675",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "597960",
+"fid": "749304950958",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "597961",
+"fid": "524041907811",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "597962",
+"fid": "280104560602",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "597963",
+"fid": "248189046119",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "597964",
+"fid": "171315463111",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "597965",
+"fid": "145853356011",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "597968",
+"fid": "868543425286",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "597969",
+"fid": "235907028460",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "597984",
+"fid": "979571009724",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الربوة",
+"postal": "23535"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الربوة"
+}
+},
+{
+"id": "597990",
+"fid": "790262671635",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597991",
+"fid": "719308337123",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "597992",
+"fid": "554472722464",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "597993",
+"fid": "461263303835",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597994",
+"fid": "355875348123",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "597995",
+"fid": "190740097394",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "597996",
+"fid": "112702222624",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "597998",
+"fid": "35th2PhxRA1Z4YF0N7Ui",
+"http": 200,
+"loc": {
+"region": "منطقة الحدود الشماليه",
+"city": "العويقيلة",
+"district": "الخليج",
+"postal": "73656"
+},
+"err": null,
+"mapped": {
+"city": null,
+"region": null,
+"neighborhood": "الخليج"
+}
+},
+{
+"id": "598007",
+"fid": "714145356962",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598008",
+"fid": "663621609029",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598009",
+"fid": "257403307229",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598011",
+"fid": "660971331732",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الزمرد",
+"postal": "23822"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الزمرد"
+}
+},
+{
+"id": "598012",
+"fid": "541594072569",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الزمرد",
+"postal": "23822"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الزمرد"
+}
+},
+{
+"id": "598013",
+"fid": "200774043914",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الزمرد",
+"postal": "23822"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الزمرد"
+}
+},
+{
+"id": "598014",
+"fid": "315565187501",
+"http": 200,
+"loc": {
+"region": "منطقة عسير",
+"city": "بيشة",
+"district": "الخالدية والعزيزية",
+"postal": "67712"
+},
+"err": null,
+"mapped": {
+"city": "Bisha",
+"region": "Asir",
+"neighborhood": "الخالدية والعزيزية"
+}
+},
+{
+"id": "598015",
+"fid": "208262444390",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598025",
+"fid": "961551887937",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598029",
+"fid": "947434678469",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598030",
+"fid": "668407539094",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598031",
+"fid": "525384241839",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598032",
+"fid": "442182317049",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598033",
+"fid": "429303232856",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598034",
+"fid": "415811117039",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598035",
+"fid": "119342628013",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598036",
+"fid": "868038685438",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598037",
+"fid": "717643755511",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598038",
+"fid": "663764561231",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598052",
+"fid": "953357968209",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598053",
+"fid": "800356736035",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598054",
+"fid": "596943729966",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598055",
+"fid": "359631654676",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598056",
+"fid": "132926425344",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598057",
+"fid": "386380481497",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "598062",
+"fid": "933635855683",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598063",
+"fid": "868326361986",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23436"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598064",
+"fid": "730713433204",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598065",
+"fid": "679377882253",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "598066",
+"fid": "670272406829",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598067",
+"fid": "617112658847",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598068",
+"fid": "484399964093",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598069",
+"fid": "263992172866",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598070",
+"fid": "253736043397",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598071",
+"fid": "200373524963",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598072",
+"fid": "665671968319",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598073",
+"fid": "237284826005",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598077",
+"fid": "999632907859",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598078",
+"fid": "991413410428",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598079",
+"fid": "933120899339",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598080",
+"fid": "740233886544",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23436"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598081",
+"fid": "630460583285",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598082",
+"fid": "491111883962",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598083",
+"fid": "384875400833",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598084",
+"fid": "358495575840",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "598085",
+"fid": "237726287552",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598086",
+"fid": "204584217223",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598087",
+"fid": "203226654461",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "598094",
+"fid": "910848521916",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598095",
+"fid": "837228392296",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598096",
+"fid": "830687298603",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598097",
+"fid": "742677872988",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598098",
+"fid": "641616984646",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598099",
+"fid": "617518563410",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598100",
+"fid": "521524343328",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598101",
+"fid": "444606020894",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598103",
+"fid": "541195163273",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "مكة المكرمة",
+"district": "المحمدية",
+"postal": "24353"
+},
+"err": null,
+"mapped": {
+"city": "Mecca",
+"region": "Makkah",
+"neighborhood": "المحمدية"
+}
+},
+{
+"id": "598125",
+"fid": "879559932242",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "598126",
+"fid": "674457562860",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "598127",
+"fid": "531234216267",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23434"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598129",
+"fid": "179005867685",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23436"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598131",
+"fid": "695359012900",
+"http": 200,
+"loc": {
+"region": "منطقة المدينة المنورة",
+"city": "المدينة المنورة",
+"district": "الظاهرة",
+"postal": "42315"
+},
+"err": null,
+"mapped": {
+"city": "Medina",
+"region": "Madinah",
+"neighborhood": "الظاهرة"
+}
+},
+{
+"id": "598141",
+"fid": "516494675948",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "مكة المكرمة",
+"district": "المحمدية",
+"postal": "24353"
+},
+"err": null,
+"mapped": {
+"city": "Mecca",
+"region": "Makkah",
+"neighborhood": "المحمدية"
+}
+},
+{
+"id": "598143",
+"fid": "414006043113",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "المروة",
+"postal": "23543"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "المروة"
+}
+},
+{
+"id": "598161",
+"fid": "869239567616",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23434"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598163",
+"fid": "793964236288",
+"http": 200,
+"loc": {
+"region": "منطقة الرياض",
+"city": "الرياض",
+"district": "السويدي الغربي",
+"postal": "12991"
+},
+"err": null,
+"mapped": {
+"city": "Riyadh",
+"region": "Riyadh",
+"neighborhood": "السويدي الغربي"
+}
+},
+{
+"id": "598164",
+"fid": "369239030074",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23436"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "598181",
+"fid": "756413405127",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الزهراء",
+"postal": "23425"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الزهراء"
+}
+},
+{
+"id": "598182",
+"fid": "188714274337",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "مكة المكرمة",
+"district": "الكوثر",
+"postal": "24268"
+},
+"err": null,
+"mapped": {
+"city": "Mecca",
+"region": "Makkah",
+"neighborhood": "الكوثر"
+}
+},
+{
+"id": "598183",
+"fid": "522621620527",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23434"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598184",
+"fid": "634650022438",
+"http": 200,
+"loc": {
+"region": "المنطقة الشرقية",
+"city": "حفر الباطن",
+"district": "حي هجرة السليمانية",
+"postal": "31991"
+},
+"err": null,
+"mapped": {
+"city": "Hafar Al Batin",
+"region": "Eastern Province",
+"neighborhood": "حي هجرة السليمانية"
+}
+},
+{
+"id": "598186",
+"fid": "535649575989",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "طيبة",
+"postal": "23832"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "طيبة"
+}
+},
+{
+"id": "598187",
+"fid": "764631349549",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "مكة المكرمة",
+"district": "الجامعة",
+"postal": "24243"
+},
+"err": null,
+"mapped": {
+"city": "Mecca",
+"region": "Makkah",
+"neighborhood": "الجامعة"
+}
+},
+{
+"id": "598188",
+"fid": "881593162106",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الصواري",
+"postal": "23828"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الصواري"
+}
+},
+{
+"id": "598189",
+"fid": "711006384584",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "المروج",
+"postal": "23844"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "المروج"
+}
+},
+{
+"id": "598190",
+"fid": "469556053002",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الفردوس",
+"postal": "23818"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الفردوس"
+}
+},
+{
+"id": "598192",
+"fid": "257881204502",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "المروة",
+"postal": "23542"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "المروة"
+}
+},
+{
+"id": "598193",
+"fid": "742495542450",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "المنارات",
+"postal": "23829"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "المنارات"
+}
+},
+{
+"id": "598195",
+"fid": "625733063772",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23434"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "598198",
+"fid": "405654581945",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "اليسر",
+"postal": "23865"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "اليسر"
+}
+},
+{
+"id": "598200",
+"fid": "914650476852",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "مكة المكرمة",
+"district": "شعب عامر",
+"postal": "24573"
+},
+"err": null,
+"mapped": {
+"city": "Mecca",
+"region": "Makkah",
+"neighborhood": "شعب عامر"
+}
+},
+{
+"id": "598205",
+"fid": "302171469279",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النهضة",
+"postal": "23523"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النهضة"
+}
+},
+{
+"id": "598206",
+"fid": "494797500856",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الكوثر",
+"postal": "23743"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الكوثر"
+}
+},
+{
+"id": "598207",
+"fid": "819568071889",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الصواري",
+"postal": "23828"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الصواري"
+}
+},
+{
+"id": "598209",
+"fid": "515404304687",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "المروة",
+"postal": "23545"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "المروة"
+}
+},
+{
+"id": "598211",
+"fid": "597788007877",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "مكه المكرمه",
+"district": "الشوقية",
+"postal": "24351"
+},
+"err": null,
+"mapped": {
+"city": "Mecca",
+"region": "Makkah",
+"neighborhood": "الشوقية"
+}
+},
+{
+"id": "598212",
+"fid": "613448360440",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الياقوت",
+"postal": "23826"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الياقوت"
+}
+},
+{
+"id": "598213",
+"fid": "565704197905",
+"http": 404
+},
+{
+"id": "598214",
+"fid": "537476908232",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "المنار",
+"postal": "23462"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "المنار"
+}
+},
+{
+"id": "598216",
+"fid": "265509886257",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الصواري",
+"postal": "23828"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الصواري"
+}
+},
+{
+"id": "598217",
+"fid": "578962353378",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "مكه المكرمه",
+"district": "النوارية",
+"postal": "24215"
+},
+"err": null,
+"mapped": {
+"city": "Mecca",
+"region": "Makkah",
+"neighborhood": "النوارية"
+}
+},
+{
+"id": "598219",
+"fid": "919987805665",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الرياض",
+"postal": "23874"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الرياض"
+}
+},
+{
+"id": "598220",
+"fid": "141999215203",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "المنارات",
+"postal": "23829"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "المنارات"
+}
+},
+{
+"id": "598221",
+"fid": "864572734599",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الوفاء",
+"postal": "23786"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الوفاء"
+}
+},
+{
+"id": "784996",
+"fid": "354955273931",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "866002",
+"fid": "641536771263",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "951631",
+"fid": "387302349034",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "1034250",
+"fid": "732265642793",
+"http": 200,
+"loc": {
+"region": "منطقة حائل",
+"city": "حقروصين",
+"district": "حقروصين",
+"postal": "55427"
+},
+"err": null,
+"mapped": {
+"city": null,
+"region": "Hail",
+"neighborhood": "حقروصين"
+}
+},
+{
+"id": "1566844",
+"fid": "194723340572",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "1801656",
+"fid": "388195367961",
+"http": 200,
+"loc": {
+"region": "منطقة الرياض",
+"city": "الرياض",
+"district": "المؤتمرات"
+},
+"err": null,
+"mapped": {
+"city": "Riyadh",
+"region": "Riyadh",
+"neighborhood": "المؤتمرات"
+}
+},
+{
+"id": "1840292",
+"fid": "271566477825",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "1961986",
+"fid": "963642102869",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "1961987",
+"fid": "901281711092",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "1961988",
+"fid": "637300690551",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "1962017",
+"fid": "535504297448",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "2032198",
+"fid": "172831518090",
+"http": 404
+},
+{
+"id": "2032203",
+"fid": "950803107695",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "2290389",
+"fid": "420770544151",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "2290439",
+"fid": "208322895760",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "2493555",
+"fid": "879997700554",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "2493556",
+"fid": "619407929958",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "2680462",
+"fid": "797411390213",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "2867427",
+"fid": "244954126566",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "3040827",
+"fid": "213893514401",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "3237609",
+"fid": "727764779320",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "3237610",
+"fid": "420055160085",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "3759486",
+"fid": "365480118485",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "3961794",
+"fid": "147959993642",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "4947713",
+"fid": "455076025213",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "4947715",
+"fid": "302125546730",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "4948467",
+"fid": "581558038904",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "مكة المكرمة",
+"district": "وادي جليل",
+"postal": "24238"
+},
+"err": null,
+"mapped": {
+"city": "Mecca",
+"region": "Makkah",
+"neighborhood": "وادي جليل"
+}
+},
+{
+"id": "5173456",
+"fid": "263298452730",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "6192973",
+"fid": "344479023516",
+"http": 200,
+"loc": {
+"region": "منطقة الرياض",
+"city": "الرياض",
+"district": "العوالي",
+"postal": "14924"
+},
+"err": null,
+"mapped": {
+"city": "Riyadh",
+"region": "Riyadh",
+"neighborhood": "العوالي"
+}
+},
+{
+"id": "6259564",
+"fid": "543002225145",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "6493624",
+"fid": "987224180263",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "6493625",
+"fid": "675113109147",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "6493641",
+"fid": "739126950304",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الزهراء",
+"postal": "23425"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الزهراء"
+}
+},
+{
+"id": "6695022",
+"fid": "977222772675",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "6695023",
+"fid": "851137137269",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "6757889",
+"fid": "619867410879",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "البوادي",
+"postal": "23531"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "البوادي"
+}
+},
+{
+"id": "6757890",
+"fid": "452374738133",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "الروضة",
+"postal": "23435"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "الروضة"
+}
+},
+{
+"id": "7124481",
+"fid": "882076550030",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "7124486",
+"fid": "379744380876",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "السلامة",
+"postal": "23437"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "السلامة"
+}
+},
+{
+"id": "7124487",
+"fid": "467694770092",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+},
+{
+"id": "7124492",
+"fid": "849253458805",
+"http": 200,
+"loc": {
+"region": "منطقة مكة المكرمة",
+"city": "جدة",
+"district": "النعيم",
+"postal": "23526"
+},
+"err": null,
+"mapped": {
+"city": "Jeddah",
+"region": "Makkah",
+"neighborhood": "النعيم"
+}
+}
+]

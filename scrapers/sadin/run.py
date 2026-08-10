@@ -438,9 +438,12 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
 
     # Best-effort TOTAL price from the description free-text (see _extract_price for the full logic
     # + fidelity history).
+    # No magnitude gate (removed 2026-08-09) — a published price is stored at any magnitude
+    # (PRICE = SOURCE, 2026-08-03; 204/204 live sub-1000 Buy rows matched their source page).
+    # NOTE sadin-specific: this price is parsed out of DESCRIPTION PROSE, so a wrong value here is
+    # a PARSER bug, not a magnitude one — it belongs in _extract_price's own evidence rules (the
+    # 2026-08-05 aqar prose-price repair is the worked precedent), never in a blanket size cutoff.
     price = _extract_price(desc_raw)
-    if price is not None and price < 1000:
-        price = None
     # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
     price_per_meter = None
 
@@ -595,8 +598,10 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Sadin: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["sadin_residential_listings", "sadin_commercial_listings"])
-        return 0
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["sadin_residential_listings", "sadin_commercial_listings"])
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
+        return 0 if healthy else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])
