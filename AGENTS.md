@@ -149,6 +149,16 @@ script.
 acquire the lock yourself via the Supabase MCP `execute_sql` tool, on project `aannarbkwcymrotzwdbo`,
 immediately before the deploy/rollback action, and release it immediately after:
 
+**The production lock has exactly ONE identity: `production`.** Since 2026-08-10 the database
+canonicalises every production-scoped alias (`prod`, `prod-change`, `PROD_DB`, `prd`, `live`,
+`deploy`, any `prod*`) onto that one row, so an alias can no longer create a *second* lock that
+excludes nobody. That bug was real and observed live: on 2026-08-10 `daily-health-check` held
+`'prod'` while another session held `'production'`, and later `audit-fix` held `'prod-change'`
+against `'production'` — in both windows two sessions each believed they held THE deploy lock.
+Still write `'production'`: aliases now work, but `mon_detect_deploy_lock_misuse()` raises a P2
+naming any caller that uses one, and unrelated named locks (e.g. `gathern_liveness_apply`) keep
+their own identity and are unaffected.
+
 ```sql
 -- 1. Acquire (before deploying) — a non-empty result means you hold it:
 select * from acquire_deploy_lock('production', '<your session id or a short description>', 600, '<what you are about to do>');
