@@ -73,6 +73,23 @@ def classify(status: int, missing_count: Optional[int], grace: int) -> tuple[str
     return "transient", mc
 
 
+def resolve_kill_cap(active_now: int, override: int = 0) -> int:
+    """Max rows ONE run may inactivate. An explicit override>0 wins; otherwise auto =
+    max(150, 2% of currently-active). This is the partial-crawl / site-wide-404 backstop: a real
+    delisting wave is small and gradual, so a batch above this cap is treated as an anomaly."""
+    if override > 0:
+        return override
+    return max(150, active_now * 2 // 100)
+
+
+def is_anomaly(kill_count: int, kill_cap: int) -> bool:
+    """True iff this run's kill batch exceeds the cap → QUARANTINE (record strikes, inactivate NOTHING).
+    This is what stops a partial/blocked/site-wide-404 event from wiping live inventory: on
+    2026-07-27 a 776-row batch drained all three grace strikes within an hour; with this gate that
+    batch (>> max(150, 2%)) inactivates 0 rows and flags the run for owner review instead."""
+    return kill_count > kill_cap
+
+
 def _throttle(_last: list[float] = [0.0]) -> None:
     """Space request STARTS ≥ MIN_INTERVAL apart (single-threaded, so a plain sleep is enough)."""
     wait = _last[0] + MIN_INTERVAL - time.monotonic()
@@ -221,7 +238,7 @@ def main() -> int:
     if kill_cap <= 0:
         active_now = (client.table(TABLE).select("id", count="exact", head=True)
                       .eq("source", SOURCE).eq("active", True).execute().count or 0)
-        kill_cap = max(150, active_now * 2 // 100)
+        kill_cap = resolve_kill_cap(active_now)
 
     s = detail_session()
     seen = dead = alive = transient = killed = struck = 0
@@ -273,7 +290,7 @@ def main() -> int:
         _flush_alive()
 
     # ── Anomaly cap gate (2026-07-27): the kill batch lands as one reviewed decision, not a drip ──
-    anomaly = args.apply and len(kill_pending) > kill_cap
+    anomaly = args.apply and is_anomaly(len(kill_pending), kill_cap)
     applied_kills = 0
     if args.apply and kill_pending:
         if anomaly:
