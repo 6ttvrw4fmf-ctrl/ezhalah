@@ -19,7 +19,7 @@ _dotenv_mod = types.ModuleType("dotenv")
 _dotenv_mod.load_dotenv = lambda *a, **k: None
 sys.modules.setdefault("dotenv", _dotenv_mod)
 
-from scrapers.gathern.liveness import classify, looks_dead  # noqa: E402
+from scrapers.gathern.liveness import classify, is_anomaly, looks_dead, resolve_kill_cap  # noqa: E402
 
 
 def test_looks_dead_only_on_404_410():
@@ -47,9 +47,27 @@ def test_none_missing_count_treated_as_zero():
     assert classify(200, None, 3) == ("alive", 0)
 
 
+def test_kill_cap_floor_and_two_percent():
+    assert resolve_kill_cap(1000) == 150          # 2% = 20, floored at 150
+    assert resolve_kill_cap(50000) == 1000        # 2% = 1000 > floor
+    assert resolve_kill_cap(29948) == 598         # ~current gathern active (2% = 598)
+    assert resolve_kill_cap(50000, override=5) == 5  # explicit owner override wins
+
+
+def test_anomaly_quarantines_oversized_batch_partial_crawl_cannot_wipe():
+    # THE partial-crawl / site-wide-404 backstop: a kill batch above the cap must inactivate NOTHING.
+    assert is_anomaly(776, 150) is True    # the 2026-07-27 scare shape → quarantined now, 0 killed
+    assert is_anomaly(5000, 598) is True   # a site-wide-404 event over the whole stale set → quarantined
+    assert is_anomaly(20, 150) is False    # a normal small delisting batch proceeds
+    assert is_anomaly(150, 150) is False   # exactly at the cap is allowed (strictly-greater triggers)
+    assert is_anomaly(0, 150) is False     # nothing to kill
+
+
 if __name__ == "__main__":
     test_looks_dead_only_on_404_410()
     test_404_bumps_but_grace_protects_until_third_strike()
     test_alive_resets_and_transient_never_touches()
     test_none_missing_count_treated_as_zero()
+    test_kill_cap_floor_and_two_percent()
+    test_anomaly_quarantines_oversized_batch_partial_crawl_cannot_wipe()
     print("ok")
