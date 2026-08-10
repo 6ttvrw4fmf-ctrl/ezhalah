@@ -1,0 +1,39 @@
+name: Ramz Al-Qassim zero-price source probe (read-only)
+
+# ONE question, answered against the source itself: does ramzalqasim.com PUBLISH a price of 0 for
+# the six listings we store as price_total = 0, or is that 0 an internal sentinel meaning "no price
+# / السوم"? Source fidelity is absolute — a published 0 is preserved exactly; a sentinel must become
+# an honest NULL, never a guess. Neither answer can come from the database.
+#
+# It runs here because the audit/agent container's egress policy hard-403s ramzalqasim.com, while
+# Actions reaches it every day (this is where the production scraper runs). Same fetch path, so it
+# sees exactly what the scraper sees.
+#
+# READ-ONLY BY CONSTRUCTION: no Supabase secrets are passed to this job, so it cannot write to the
+# database even if it wanted to — it only prints evidence to the log. PDPL: the marker JSON carries
+# owner_name/owner_phone; the script allowlists the keys it prints and redacts phone-shaped digits.
+#
+# Dispatch-only — there is nothing to schedule; this answers a one-off owner question.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ramzalqasim-zero-price-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Probe the source (no DB credentials in this job)
+        run: python scripts/diagnose_ramzalqasim_zero_price.py
