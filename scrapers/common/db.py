@@ -21,7 +21,7 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
-from scrapers.common.pii import redact_capture, redact_pii
+from scrapers.common.pii import is_free_text, redact_capture, redact_pii
 from scrapers.common.placeholder_tokens import PLACEHOLDER_TOKENS, is_placeholder
 
 
@@ -433,7 +433,11 @@ def _redact_user_visible_text(r: dict[str, Any]) -> None:
     key never gets here, it was dropped by the no-clobber guard above).
     """
     for col in _USER_VISIBLE_TEXT_COLS:
-        if isinstance(r.get(col), str):
+        # is_free_text() gate, same as the capture barrier: NEVER run the contact patterns over a
+        # value that is a bare number or a URL. `0?5\d{8}` means "nine digits starting with 5",
+        # which a price per m2 (512345678), a postal code or a plot number can satisfy — redacting
+        # those would destroy source facts to fix nothing, since nobody is reachable through them.
+        if is_free_text(r.get(col)):
             r[col] = redact_pii(r[col])
 
 
