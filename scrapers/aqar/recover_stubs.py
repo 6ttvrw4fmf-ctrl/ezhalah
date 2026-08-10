@@ -32,6 +32,7 @@ can be inspected before it touches production.
 Usage:
   python -m scrapers.aqar.recover_stubs --limit 200 --dry-run
   python -m scrapers.aqar.recover_stubs --limit 2000 --deal rent --type apartment
+  python -m scrapers.aqar.recover_stubs --table commercial --limit 200 --dry-run   # aqar_commercial_listings
 """
 from __future__ import annotations
 
@@ -49,7 +50,17 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.aqar.enrich_residential import enrich_residential  # noqa: E402
 
+# TABLE is module-level state, set by main() from --table before any cohort/recover function runs.
+# GENERALIZED 2026-08-10: aqar_commercial_listings has the exact same June `backfill.v1` stub-capture
+# defect as residential (confirmed live: id 5004234 and others carry the same no-«تفاصيل الإعلان»-
+# block captures), but this script only ever recovered aqar_residential_listings — commercial had NO
+# recovery path at all. enrich_residential() is already table-agnostic ("generic page enricher
+# (shared)" — see scrapers/aqar/run_commercial.py:30, which reuses it verbatim for commercial rows);
+# only the SELECT table and the upsert function were hardcoded. upsert_aqar_commercial()'s own
+# docstring: "Same schema/shape as residential (the commercial table was cloned from it), just a
+# different destination table" — so no new fidelity risk, same rules, same structured-only default.
 TABLE = "aqar_residential_listings"
+UPSERT_FN = db.upsert_aqar_residential
 # The fields the stub costs us. Used only for the before/after report — never to decide a write.
 REPORT_FIELDS = (
     "rent_period", "price_annual", "price_total", "area_m2", "bedrooms", "bathrooms",
@@ -245,7 +256,7 @@ def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int,
                 print(f"  [{counter['done']}] DRY ad={r['ad_number']} +{gained} ~{changed}")
             return
         try:
-            db.upsert_aqar_residential(fresh)
+            UPSERT_FN(fresh)
             with lock:
                 counter["written"] += 1
                 print(f"  [{counter['done']}] ✓ ad={r['ad_number']} +{gained} ~{changed}")
@@ -279,7 +290,17 @@ def main() -> int:
                          "amenity-repair = the closed set of rows whose amenity booleans were "
                          "prose-fabricated and cleared on 2026-08-09, re-read so aqar's own "
                          "extended_details values replace the NULLs.")
+    ap.add_argument("--table", choices=["residential", "commercial"], default="residential",
+                    help="which Aqar table to recover — same stub defect, same enrich_residential() "
+                         "reader, same upsert rules; just a different destination table "
+                         "(aqar_commercial_listings was cloned from aqar_residential_listings).")
     args = ap.parse_args()
+
+    global TABLE, UPSERT_FN
+    if args.table == "commercial":
+        TABLE, UPSERT_FN = "aqar_commercial_listings", db.upsert_aqar_commercial
+    else:
+        TABLE, UPSERT_FN = "aqar_residential_listings", db.upsert_aqar_residential
 
     ads = [s.strip() for s in args.ads.split(",") if s.strip()]
     if ads:
@@ -296,7 +317,8 @@ def main() -> int:
         print("nothing to recover")
         return 0
 
-    run_id = None if args.dry_run else db.begin_run("aqar_stub_recovery")
+    run_platform = "aqar_stub_recovery" if args.table == "residential" else "aqar_stub_recovery_commercial"
+    run_id = None if args.dry_run else db.begin_run(run_platform)
     c = recover(rows, args.dry_run, args.workers, structured_only=not args.include_price)
     print(f"\nfetched={c['fetched']} written={c['written']} "
           f"unfetchable={c['unfetchable']} no_gain={c['no_gain']} of {len(rows)}")

@@ -1,5 +1,8 @@
 # Re-enrich Aqar rows stuck on the June `backfill.v1` STUB capture.
 #
+# Covers both aqar_residential_listings (default) and aqar_commercial_listings (--table commercial,
+# added 2026-08-10 — same defect, confirmed live e.g. id 5004234, previously had no recovery path).
+#
 # Those rows stored a description-only source_text (~381 chars) with NO «تفاصيل الإعلان» spec block,
 # so every label-anchored parser in enrich_residential.py silently extracts nothing from them. That one
 # root cause explains the missing bedrooms/bathrooms/floor/direction/age/licence on ~43% of aqar's rent
@@ -48,6 +51,10 @@ on:
         description: "stub | amenity-repair (rows whose amenity booleans were prose-fabricated and cleared 2026-08-09)"
         required: false
         default: "stub"
+      table:
+        description: "residential | commercial — aqar_commercial_listings has the same stub defect (added 2026-08-10)"
+        required: false
+        default: "residential"
 
 concurrency:
   group: aqar-stub-recovery
@@ -79,4 +86,5 @@ jobs:
             ${{ inputs.dry_run == 'true' && '--dry-run' || '' }} \
             ${{ inputs.include_price == 'true' && '--include-price' || '' }} \
             ${{ inputs.ads && format('--ads "{0}"', inputs.ads) || '' }} \
-            ${{ inputs.cohort && format('--cohort {0}', inputs.cohort) || '' }}
+            ${{ inputs.cohort && format('--cohort {0}', inputs.cohort) || '' }} \
+            ${{ inputs.table && format('--table {0}', inputs.table) || '' }}

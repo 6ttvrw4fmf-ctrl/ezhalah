@@ -284,17 +284,11 @@ fi
 echo ""
 echo "Running the schema-drift + duplicate-overload gate (ops_deploy_preflight_checks against production)..."
 DRIFT_URL="https://aannarbkwcymrotzwdbo.supabase.co/rest/v1/rpc/ops_deploy_preflight_checks"
-DRIFT_BODY="$(node -e '
-  const fs = require("fs");
-  const files = fs.readdirSync("supabase/migrations").filter((f) => f.endsWith(".sql"));
-  const ids = new Set();
-  for (const f of files) {
-    const base = f.replace(/\.sql$/, "");
-    const m = base.match(/^([0-9]+)_(.+)$/);
-    if (m) { ids.add(m[1]); ids.add(m[2]); } else { ids.add(base); }
-  }
-  process.stdout.write(JSON.stringify({ p_repo_versions: [...ids].sort() }));
-')"
+# Shared with scripts/verify-migration-drift-vs-production.ts (the continuous, push/schedule-driven
+# half of this same gate) so there is exactly ONE parser for "what migrations does the repo claim" —
+# see build-repo-migration-versions.cjs's header for why a second copy is exactly the kind of drift
+# this repo keeps getting bitten by.
+DRIFT_BODY="$(node -e 'process.stdout.write(JSON.stringify({p_repo_versions: require("./scripts/build-repo-migration-versions.cjs").buildRepoMigrationVersions()}))')"
 DRIFT_HTTP="$(curl -s -o /tmp/safe-deploy-drift-response.json -w '%{http_code}' --max-time 20 \
   -X POST "$DRIFT_URL" \
   -H "apikey: $SMOKE_ANON_KEY" \

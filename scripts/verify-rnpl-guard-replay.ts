@@ -48,6 +48,11 @@ const AUDITED_UNINTERPRETABLE = new Map<string, string>([
    'audited 2026-08-09: price_per_meter only — 0 occurrences of beds/bedroom/غرف, and it needle-edits ' +
    'from the LIVE body so it preserves whatever predicates exist. Does not touch payment_monthly or ' +
    'rent_now_pay_later.'],
+  ['20260809110618_fix_bedroom_mixed_exact_plus_5plus_or_predicate.sql',
+   'audited 2026-08-10 (recovered from prod drift): bedrooms p_beds_exact/p_beds_min OR-predicate ' +
+   'only — 0 occurrences of payment_monthly/rent_now_pay_later/rnpl/RNPL, and it needle-edits from ' +
+   'the LIVE body (pg_get_functiondef at apply time) so it preserves whatever the RNPL/Monthly ' +
+   'predicates were, unchanged.'],
 ]);
 
 // ── every tracked function must be fully interpretable ───────────────────────────────────────────
