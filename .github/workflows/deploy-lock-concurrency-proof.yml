@@ -87,7 +87,13 @@ jobs:
 
   assert:
     needs: [setup, race]
-    if: always()
+    # ONLY judge the race if the race actually happened. The first run of this workflow proved why:
+    # setup correctly refused to start (a real writer, claude-af-backend-architecture, held the lock)
+    # and this job still ran under `if: always()`, saw 0 attempts, and reported
+    # "EXCLUSIVITY VIOLATED — 0 writers acquired the lock". That is a false alarm about the single
+    # most important safety property in the system — precisely the kind of noise that teaches people
+    # to ignore a red build. A refusal to race is a SKIP, never a violation.
+    if: needs.setup.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Exactly ONE writer may have won
@@ -115,8 +121,14 @@ jobs:
           [ "$ROWS" -le 1 ] || { echo "::error::$ROWS production lock rows exist"; FAIL=1; }
 
           exit $FAIL
-      - name: Clean up (always)
-        if: always()
+  # Cleanup is its OWN always() job so it runs even when the race was skipped or the assertion
+  # failed — but it can no longer make the run look red on its own.
+  cleanup:
+    needs: [setup, race, assert]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove this run's test holders
         env:
           KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
@@ -125,3 +137,7 @@ jobs:
           curl -sS -X DELETE "$SB/rest/v1/ops_deploy_lock_audit?holder=like.ci-concurrency-${{ github.run_id }}-*" \
             -H "apikey: $KEY" -H "Authorization: Bearer $KEY" >/dev/null || true
           echo "test holders removed"
+      - name: Report why the race was skipped, if it was
+        if: needs.setup.result != 'success'
+        run: |
+          echo "::notice::Race SKIPPED - a real production writer held the lock. That is the guard working, not a failure. Re-dispatch when the lock is free."
