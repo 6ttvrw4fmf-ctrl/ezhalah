@@ -24,7 +24,11 @@ Ezhalah created the error.**
 
 **The barriers are machine-enforced and do not depend on any agent remembering to run them.**
 `mon_run_all_detectors()` runs twice an hour (pg_cron jobid 38 at :29/:59) and returns a count per
-detector plus `failed`; **`failed` must be empty and every count 0**. Expensive behavioural detectors
+detector plus `failed`; **`failed` must be empty and every count 0** — but a count is NEWLY-raised or
+escalated alerts, not standing state: `mon_raise()` returns 0 when its dedup key is already open, so
+an all-zero sweep can sit on top of open alerts (it did, 2026-08-10 — nine dark detectors read as a
+clean bill of health). **Read `open_alerts` in the same return** before certifying anything healthy.
+Expensive behavioural detectors
 (they drive real RPCs) are gated to ~once per 20h via `ops_detector_last_full_run`, and
 `mon_detect_stalled_daily_detector` watches that gate — because a monitor that cannot fire reads as
 "clean". When you add a barrier, add its `mon_detect_*` wrapper **and** its roster entry in the SAME
