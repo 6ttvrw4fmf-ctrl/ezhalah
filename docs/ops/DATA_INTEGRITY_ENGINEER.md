@@ -1,10 +1,11 @@
 # DATA INTEGRITY ENGINEER — NORMAL FILTER / FULL SCRAPED INVENTORY ONLY
 
 > Canonical spec (owner, 2026-08-10). The live cloud routine
-> (`trig_01RCVx7ie1T1i5oPC6KzZAKd`, daily 06:00 UTC) carries this text; **this file is the source of
+> (`trig_018DMt9RgmRkjRcugEzcFgrj`, daily 07:00 UTC) carries this text; **this file is the source of
 > truth** — if the routine prompt and this file ever differ, update the routine to match this file.
-> This spec REPLACED the former "Senior Production Engineer" scope: **Advanced Filter is out of
-> scope for this routine** (it has its own separate track).
+> This is a SEPARATE routine from the 🎖️ Daily Senior Production Engineer (which keeps its own
+> original scope, daily 06:00 UTC): **Advanced Filter is out of scope for this routine** — it
+> belongs to the senior. See `docs/ops/ENGINEER_ROUTINES.md` for the three-engineer contract.
 
 Ignore Advanced Filter for this routine.
 
