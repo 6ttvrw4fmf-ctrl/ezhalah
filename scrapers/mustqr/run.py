@@ -189,6 +189,39 @@ def probe_status_values(s: cc.Session, jwt: str) -> dict[str, int]:
     return counts
 
 
+def probe_query_shape(s: cc.Session, jwt: str) -> dict[str, str]:
+    """Diagnostic (2026-08-10, round 2): probe_status_values() (`select=status&limit=2000`, no
+    filter/order/Range/Prefer) still succeeds RIGHT NOW even though fetch_page() — with the SAME
+    JWT, seconds apart — still gets 401/42501 EVEN AFTER narrowing select=* to an explicit
+    column allowlist (2026-08-10 fix, PR #418). That falsifies both the "whole table locked down"
+    theory (probe still works) and the "select=* projects a restricted PII column" theory (the
+    narrowed select still fails). Something about fetch_page()'s OTHER query elements — the
+    status=eq.متاح filter, order=id.asc, Range/Range-Unit pagination headers, or
+    Prefer: count=exact — is what actually trips the permission check. This isolates each one by
+    adding them back one at a time onto the otherwise-working `select=status` request, so the
+    next run pinpoints exactly which element to work around. Read-only, never called from main().
+      python -m scrapers.mustqr.run --probe-query-shape
+    """
+    base = f"{PROJECT}/rest/v1/properties?select=status"
+    filt = "&status=eq.%D9%85%D8%AA%D8%A7%D8%AD"
+    order = "&order=id.asc"
+    variants = {
+        "A_no_filter_no_headers": (base, {}),
+        "B_filter_only": (base + filt, {}),
+        "C_filter_and_order": (base + filt + order, {}),
+        "D_filter_order_range": (base + filt + order, {"range": "0-4"}),
+        "E_filter_order_range_count": (base + filt + order, {"range": "0-4", "count": True}),
+    }
+    results: dict[str, str] = {}
+    for label, (url, opts) in variants.items():
+        _throttle()
+        r = s.get(url, headers=_headers(jwt, range_hdr=opts.get("range"), count=bool(opts.get("count"))),
+                   timeout=30)
+        results[label] = f"HTTP {r.status_code}" + ("" if r.status_code in (200, 206) else f" — {r.text[:200]}")
+        print(f"  probe_query_shape[{label}]: {results[label]}", flush=True)
+    return results
+
+
 # Explicit column allowlist for fetch_page() (2026-08-10). `select=*` started failing 401/42501
 # "permission denied for table properties" on 2026-08-10 (04:22, 12:13, 13:20, 13:31 — 4 consecutive
 # real runs), while an UNFILTERED `select=status` probe against the same endpoint, same JWT, same
@@ -463,6 +496,9 @@ def main() -> int:
     ap.add_argument("--probe-status", action="store_true",
                      help="read-only: print a status-value histogram from mustqr's API and exit "
                           "(no DB writes) — see probe_status_values() docstring")
+    ap.add_argument("--probe-query-shape", action="store_true",
+                     help="read-only: isolate which query element (filter/order/range/count) "
+                          "triggers the 2026-08-10 401/42501 — see probe_query_shape() docstring")
     args = ap.parse_args()
 
     s = session()
@@ -474,6 +510,11 @@ def main() -> int:
         counts = probe_status_values(s, jwt)
         print(f"Mustqr: status-value histogram (no filter, up to 2000 rows): {counts}")
         return 0 if counts else 1
+
+    if args.probe_query_shape:
+        results = probe_query_shape(s, jwt)
+        print(f"Mustqr: query-shape isolation: {results}")
+        return 0 if all(v.startswith("HTTP 200") or v.startswith("HTTP 206") for v in results.values()) else 1
 
     n_to_region = fetch_neighborhoods(s, jwt)
     print(f"  neighborhoods: {len(n_to_region)} mapped")
