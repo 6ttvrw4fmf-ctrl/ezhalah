@@ -11,20 +11,28 @@
 // found fresh uncommitted-migration drift on at least two separate days since (2026-08-04, 2026-08-10).
 //
 // THIS script asks production the same question ops_deploy_preflight_checks always answered, but
-// runs it continuously instead of only at deploy time:
-//   - wired into `npm test` (via full-verification-ci.yml, which runs on every push AND every PR to
-//     main) — so drift that already exists is visible on the VERY NEXT push/PR, not just at deploy.
-//   - ALSO run on its own tight schedule by .github/workflows/migration-drift-guard.yml (every 15
-//     minutes) — because the failure mode this exists for is a session that applies a migration and
-//     does NOT push anything at all, so a push-triggered check alone would never fire. The scheduled
-//     run additionally raises/resolves a P1 alert_event row (service-role key, when provided) so the
-//     ops dashboard shows it immediately too, not just a GitHub Actions red X someone has to notice.
+// runs it continuously instead of only at deploy time — via .github/workflows/migration-drift-guard.yml,
+// on its own tight schedule (every 15 minutes) PLUS on every push to main that touches
+// supabase/migrations/. On drift it fails that dedicated job loudly AND raises a P1 alert_event row
+// (service-role key, when provided) so the ops dashboard shows it immediately too, not just a
+// GitHub Actions red X someone has to notice.
+//
+// DELIBERATELY NOT wired into `npm test` / full-verification-ci.yml, unlike most other live-network
+// verifiers here (e.g. verify-live-canon-sync.ts). `npm test` is a REQUIRED status check for every
+// PR regardless of what it touches — and unlike canon-sync drift (rare), migration drift in this
+// repo is common (multiple concurrent sessions apply migrations directly via MCP routinely; this
+// exact check caught 11 drifted migrations, including 2 from minutes earlier, the first time it
+// ever ran for real in CI). Wiring it into the required check would mean an UNRELATED PR — a one-
+// line scraper fix touching nothing near migrations — goes red because some OTHER session forgot to
+// commit something hours ago. That is not "fail loudly", it's "block everyone for someone else's
+// miss". The dedicated schedule + migrations-path-scoped push trigger already deliver "detect
+// immediately and fail loudly" without that collateral blocking — see
+// verify-migration-drift-guard-wired.ts, which pins this exclusion so it cannot silently regress.
 //
 // Uses the PUBLIC anon key for the read (ops_deploy_preflight_checks is anon-executable by design —
-// see its own migration comment — so no secret is needed for the core check to run on every push).
-// SUPABASE_SERVICE_ROLE_KEY, if present in the environment, additionally raises/resolves the P1
-// alert_event row; its absence (e.g. in full-verification-ci.yml, which deliberately carries no
-// secrets) only skips that dashboard side-effect — the exit code (the actual CI gate) is unaffected.
+// see its own migration comment — so no secret is needed for the core check). SUPABASE_SERVICE_ROLE_KEY,
+// if present in the environment, additionally raises/resolves the P1 alert_event row; its absence
+// only skips that dashboard side-effect — the exit code (the actual CI gate) is unaffected.
 //
 //   node --experimental-strip-types scripts/verify-migration-drift-vs-production.ts
 import { resolvePublicSupabase } from './lib/public-supabase.ts';

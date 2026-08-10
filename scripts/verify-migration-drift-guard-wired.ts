@@ -45,13 +45,23 @@ for (const f of [CHECK_SCRIPT, SHARED_PARSER, WORKFLOW]) {
   check(existsSync(f), `${f} exists`, `${f} is missing — the barrier has a dead link`);
 }
 
-// 2. `npm test` must actually run the check — this is what makes drift visible on the very next
-//    push/PR, not just on the schedule.
+// 2. This offline structural test itself MUST run in `npm test` (so a future refactor that breaks
+//    the wiring below is caught on every push) — but the LIVE checker must NOT (see its own header
+//    for why: `npm test` is a required status check for every PR, and migration drift is common
+//    enough here that wiring the live check in would block unrelated PRs for someone else's miss).
+//    This pins BOTH halves of that decision, not just one, so neither can silently drift back.
 const pkg = readFileSync(PACKAGE_JSON, 'utf8');
 const testScript: string = JSON.parse(pkg).scripts?.test ?? '';
-check(testScript.includes(CHECK_SCRIPT),
-  'npm test runs the migration-drift check',
-  `package.json's "test" script no longer runs ${CHECK_SCRIPT} — drift would stop showing up on every push/PR`);
+check(testScript.includes('verify-migration-drift-guard-wired.ts'),
+  'npm test runs THIS structural check',
+  `package.json's "test" script no longer runs verify-migration-drift-guard-wired.ts — a broken ` +
+  `wiring below would go unnoticed until someone happens to run it manually`);
+check(!testScript.includes(CHECK_SCRIPT),
+  'npm test deliberately does NOT run the live production check',
+  `package.json's "test" script now runs ${CHECK_SCRIPT} directly — this makes the REQUIRED ` +
+  `full-verification-ci.yml check fail for ANY unrelated PR whenever drift exists anywhere in ` +
+  `production (common in this repo), not just PRs that touch migrations. Revert to relying on ` +
+  `migration-drift-guard.yml's schedule + migrations-path-scoped push trigger instead`);
 
 // 3. The dedicated workflow must run independently of any push (the actual failure mode: a session
 //    applies a migration via MCP and pushes NOTHING) — so it needs a schedule trigger, and that
