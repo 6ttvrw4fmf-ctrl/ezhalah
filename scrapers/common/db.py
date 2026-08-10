@@ -21,7 +21,7 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
-from scrapers.common.pii import redact_pii
+from scrapers.common.pii import redact_capture, redact_pii
 from scrapers.common.placeholder_tokens import PLACEHOLDER_TOKENS, is_placeholder
 
 
@@ -400,9 +400,19 @@ def _sanitize_ints(r: dict[str, Any]) -> None:
                 r[c] = None  # overflow OR negative — both impossible for a count/area/price
 
 
-# Free-text columns that are RENDERED TO USERS. PDPL: a broker's phone number, WhatsApp handle or
-# email must never survive into them, on any platform.
-_USER_VISIBLE_TEXT_COLS = ("description", "title")
+# Free-text columns that can carry a contact detail. PDPL: a broker's phone number, WhatsApp handle
+# or e-mail must never survive into any of them, on any platform.
+#
+# THIS LIST WAS ONCE ("description", "title") AND THAT WAS THE BUG. A compliance audit on 2026-08-10
+# found 78 live broker mobiles sitting in `street_name` — publicly readable through the anon key —
+# plus 4 in `residence_type`, because advertisers type «...لتواصل: 05XXXXXXXX» into whatever box the
+# source gives them. Guarding the two columns we happened to think of is not a barrier. Any free-text
+# column a scraper writes belongs here; when in doubt, add it — redaction leaves non-contact text
+# byte-identical, so the cost of over-listing is zero and the cost of under-listing is a live leak.
+_USER_VISIBLE_TEXT_COLS = (
+    "description", "title", "street_name", "residence_type", "project_name",
+    "neighborhood", "address_text", "payment_terms", "tenant_category",
+)
 
 
 def _redact_user_visible_text(r: dict[str, Any]) -> None:
@@ -506,6 +516,13 @@ def _ensure_capture(r: dict[str, Any]) -> None:
         cap.setdefault("url_path", r.get("listing_url"))
         cap.setdefault("schema", "unspecified")
     _fold_price_evidence(r)
+    # PDPL capture barrier (owner rule 2026-08-09). The capture is PRIVATE (anon has no SELECT on
+    # it), but "private" is not "allowed to accumulate contact details" — hidden PII is still PII,
+    # and 614 sanadak rows proved it accumulates silently. redact_capture() scrubs FREE TEXT only:
+    # coordinates, prices, lot sizes, ids, photo/QR URLs, and REGA/FAL licence numbers survive
+    # byte-identical, because destroying regulatory data to fix a privacy bug is not a fix.
+    if isinstance(r.get("source_capture"), (dict, list)):
+        r["source_capture"] = redact_capture(r["source_capture"])
 
 
 def _fold_price_evidence(r: dict[str, Any]) -> None:
