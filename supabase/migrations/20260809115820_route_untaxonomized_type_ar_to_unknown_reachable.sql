@@ -1,0 +1,28 @@
+-- Filter QA (2026-08-05). Reachability fix: a scraper occasionally leaks a full ad title
+-- ("إستراحة للبيع في الودي، حائل") or an untaxonomized word ("مستشفى") into property_type, so type_ar
+-- lands OUTSIDE known_type_ar. The RPC's category-purity gate (EXISTS known_type_ar) then excludes the
+-- row from every group AND no-type search — a genuine listing becomes unreachable. Route any type_ar
+-- not in the catalog to 'غير معروف' (the existing, reachable Unknown bucket, macro='both') so the
+-- listing is findable via a no-type search; this is the documented unknown-type behaviour, NOT a
+-- taxonomy change (no canonical value added/removed) and NOT inference of a specific type. The
+-- novel-type alarm (jobid 33) still flags the raw value for owner triage / catalog addition, and the
+-- scraper-side guard against title-shaped property_type is the upstream follow-up. Folded into the
+-- existing row-sanity trigger so it re-applies on every write (self-healing, all platforms).
+create or replace function public.enforce_price_size_sanity()
+ returns trigger
+ language plpgsql
+as $function$
+begin
+  if public.price_size_impossible(NEW.price_total, NEW.price_annual, NEW.area_m2) then
+    NEW.production_ready := false;
+  end if;
+  if NEW.deal_ar = 'بيع'
+     and NEW.price_total is not null and NEW.price_total > 0 and NEW.price_total < 1000 then
+    NEW.price_total := null;   -- impossible sale price → price on request, row stays searchable
+  end if;
+  if NEW.type_ar is not null
+     and not exists (select 1 from public.known_type_ar k where k.type_ar = NEW.type_ar) then
+    NEW.type_ar := 'غير معروف';   -- untaxonomized/leaked type → reachable Unknown bucket
+  end if;
+  return NEW;
+end $function$;
