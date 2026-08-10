@@ -593,6 +593,10 @@ export type GuidedCounts = {
   cnt_parking: number;
   cnt_elevator: number;
   cnt_furnished: number;
+  // Added 2026-08-10 once air_conditioner / private_entrance reached search on more than one
+  // platform. A chip may only exist when its COUNT path exists — that is the whole contract.
+  cnt_ac: number;
+  cnt_private_entrance: number;
   cnt_bath1: number;
   cnt_bath2: number;
   cnt_bath3: number;

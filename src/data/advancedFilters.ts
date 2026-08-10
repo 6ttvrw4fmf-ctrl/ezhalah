@@ -164,6 +164,14 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
       { key: 'kitchen',  labelKey: 'Kitchen',  count: (c) => c.cnt_kitchen },
       { key: 'parking',  labelKey: 'Parking',  count: (c) => c.cnt_parking },
       { key: 'elevator', labelKey: 'Elevator', count: (c) => c.cnt_elevator },
+      // Air conditioning + private entrance (added 2026-08-10). Both were fully built and
+      // completely unreachable: the columns were populated, the `ac` / `private_entrance` slugs
+      // already worked in location_search_candidates_ar's p_amenities block, and only the COUNT
+      // path was missing — so no chip could satisfy the "count == what Search returns" contract.
+      // cnt_ac / cnt_private_entrance were added to apartment_guided_counts_ar the same day and
+      // verified equal to the results RPC (6,208 and 2,575 on Annual Rent → Apartment).
+      { key: 'ac',               labelKey: 'Air conditioning', count: (c) => c.cnt_ac },
+      { key: 'private_entrance', labelKey: 'Private entrance', count: (c) => c.cnt_private_entrance },
     ];
     // Furnished chip: Annual Rent only (Buy furnished ≈2%; owner: no Furnished filter on Buy).
     if (isAnnualRentApartment(q)) defs.push({ key: 'furnished', labelKey: 'Furnished', count: (c) => c.cnt_furnished });

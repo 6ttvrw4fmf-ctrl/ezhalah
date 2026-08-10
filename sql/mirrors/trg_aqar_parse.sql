@@ -1,10 +1,14 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
--- Refreshed 2026-08-09 (aqar price-path verification): `furnished` is now
---   coalesce(safe_bool(p->>'furnished'), NEW.furnished) instead of an unconditional assignment.
---   aqar_parse returns NULL when the description does not mention furnishing, so the old line
---   wiped the value the scraper had read from aqar's OWN structured `furnished` key. Migration
---   20260809112129. Prose still overrides whenever it makes a statement; it just cannot erase one.
--- Verified byte-exact; md5 of everything below this header block: 86bbb2e9544b7139a32be426e32688ee
+-- Refreshed 2026-08-10 (structured-beats-prose P0). TWO lines were inverted:
+--     NEW.furnished    := coalesce(safe_bool(p->>'furnished'), NEW.furnished)   -- prose WON
+--     NEW.floor_number := safe_int(p->>'floor_number')                          -- no coalesce at all
+--   `p` is aqar_parse(source_text), a regex sweep over the WHOLE page including seller free text, so
+--   prose overwrote the structured value the scraper had read from aqar's own keys. Measured before
+--   the fix: 3,504/11,127 annual-rent apartments (31.5%) prose-decided, and 3,445 of the 3,472 visible
+--   "Furnished" results (99.2%) came from the regex. Both now read coalesce(NEW.<col>, prose) so the
+--   structured value wins and prose can only FILL A GAP. Migration 20260810184335.
+--   Guarded by detect_prose_overrides_structured(), which scans every trg_*_parse live body.
+-- Verified byte-exact; md5 of everything below this header block: e94517e6c07ddb44ac946fe64b1b7ee0
 CREATE OR REPLACE FUNCTION public.trg_aqar_parse()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -32,8 +36,8 @@ begin
   NEW.views_count     := public.safe_int(p->>'views_count');
   NEW.tenant_category := p->>'tenant_category';
   NEW.num_apartments  := public.safe_int(p->>'num_apartments');
-  NEW.floor_number    := public.safe_int(p->>'floor_number');
-  NEW.furnished       := coalesce(public.safe_bool(p->>'furnished'), NEW.furnished);
+  NEW.floor_number    := coalesce(NEW.floor_number, public.safe_int(p->>'floor_number'));  -- structured beats prose
+  NEW.furnished       := coalesce(NEW.furnished, public.safe_bool(p->>'furnished'));  -- structured beats prose
   NEW.discount_pct    := public.safe_int(p->>'discount_pct');
   NEW.price_original  := public.safe_bigint(p->>'price_original');
 

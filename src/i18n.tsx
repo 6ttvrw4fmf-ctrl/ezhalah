@@ -360,6 +360,8 @@ const AR: Record<string, string> = {
   'Facilities': 'المرافق',
   'Service Facilities': 'مرافق خدمية',
   'Elevator': 'مصعد',
+  'Air conditioning': 'تكييف',
+  'Private entrance': 'مدخل خاص',
   'Gym': 'صالة رياضية',
   'Maid room': 'غرفة خادمة',
   "Doesn't matter": 'لا يهم',

@@ -34,7 +34,13 @@ const AMENITY_TOKEN: Record<string, string> = {
   Parking: 'parking',
   Elevator: 'elevator',
   'Maid room': 'maid_room',
+  'Air conditioning': 'ac',   // 10,620 non-null / 6,208 true across aqar + sanadak + satel
 };
+
+// EVERY offered amenity must map to a real slug. Pool/Gym were offered for months while mapping to
+// nothing, so picking one silently broadened the search. verify-ui-controls-have-predicates.ts
+// asserts this list against AMENITY_TOKEN at build time so the gap cannot reopen.
+export const INTERVIEW_AMENITY_OPTS = ['Air conditioning', 'Parking', 'Elevator', 'Maid room'] as const;
 
 type Opt = string | { main: string; sub: string };
 type Step = { key: string; group?: 'Location' | 'Details'; title: string; sub?: string; opts: Opt[] };
@@ -62,7 +68,16 @@ const SECONDARY: Record<string, { key: string; title: string; sub?: string; opts
       key: 's_amenities',
       title: 'Must-have amenities?',
       sub: 'Extra features the home includes (e.g. pool, gym, parking). Not sure? Pick “Doesn\'t matter.”',
-      opts: ['Pool', 'Parking', 'Elevator', 'Gym', 'Maid room', "Doesn't matter"],
+      // Pool and Gym REMOVED 2026-08-10. They were offered, echoed back in the user's own bubble,
+      // and then silently broadened the search — AMENITY_TOKEN has no slug for them, so picking one
+      // applied no constraint at all. The 2026-08-10 source audit settled whether that was fixable:
+      // only sanadak publishes them, and it publishes an explicit NO on 184/184 listings, so
+      // `pool is true` matches ZERO rows fleet-wide (re-verified against production the same day).
+      // A chip that can only ever return nothing is worse than no chip. The data is still captured
+      // (search_listings_ar.pool / .gym, af_field_registry marks them ui_exposed=false with this
+      // reason) so the questions come back automatically if a platform ever publishes a yes.
+      // Air conditioning and Private entrance now cover this slot properly via the Advanced Filter.
+      opts: ['Air conditioning', 'Parking', 'Elevator', 'Maid room', "Doesn't matter"],
     },
   ],
   Commercial: [
