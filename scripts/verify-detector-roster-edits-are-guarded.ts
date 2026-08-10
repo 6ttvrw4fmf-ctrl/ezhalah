@@ -1,0 +1,130 @@
+// The detector roster must never again be lost to a hand-copied full body (2026-08-10, DIE run).
+//
+// THE FAILURE CLASS: `mon_run_all_detectors()` holds the list of every barrier that runs twice an
+// hour. Replacing it with `create or replace function ... <a body pasted from a screen>` silently
+// deletes every entry the author's copy predates. Nothing errors, nothing regresses in CI, and the
+// only symptom is that a barrier stops protecting anything — which looks exactly like silence.
+//
+// It has now happened at least four times, and the migration names alone tell the story:
+//   20260804113911_revert_nightly_report_clobber_restore_full_detector_roster
+//   20260810175245_restore_full_detector_roster_union
+//   20260810202219_price_area_artifact_fix_repair_and_barrier   ← dropped 6 detectors 4 min after
+//                                                                 they were wired; comment claimed
+//                                                                 "rebuilt from the current live
+//                                                                 body, verified this session"
+//   20260810222259_restore_roster_detectors_dropped_by_stale_rebuild  ← the repair
+//
+// THE PATTERN THAT CANNOT LOSE ENTRIES: read the live body with pg_get_functiondef(), assert the
+// anchor, splice the new name in, execute the result. 20260810201833 does it; 20260810222259 does
+// it. A needle-edit never has to know what else is in the array, so it cannot drop what it never
+// read. That is the rule this guard enforces for every future migration.
+//
+// Deliberately OFFLINE (tracked repo files only), like the other verifiers in `npm test`. The LIVE
+// half is mon_detect_orphaned_detectors(), which raises P2 within seconds when a detector becomes
+// unreachable — it caught this incident correctly; what was missing was anything that stops the
+// bad edit from landing in the first place.
+//
+// Run: node --experimental-strip-types scripts/verify-detector-roster-edits-are-guarded.ts
+import { readFileSync, readdirSync } from 'node:fs';
+
+const MIGRATIONS_DIR = 'supabase/migrations';
+const REPAIR = '20260810222259_restore_roster_detectors_dropped_by_stale_rebuild.sql';
+
+// Migrations that already replace the roster wholesale. Grandfathered by exact filename — this list
+// is a record of past misses, not a template. It must never grow: a NEW entry here is the very
+// thing the guard exists to prevent, so adding one is a deliberate, reviewed act.
+const GRANDFATHERED = new Set([
+  '20260713_batch0_detection_spine.sql',
+  '20260716_batch2_search_truth.sql',
+  '20260716_batch5_integrity_checks.sql',
+  '20260716_search_index_freshness_detector.sql',
+  '20260717194809_20260717194600_mon_rls_reachability_detector.sql',
+  '20260717_ingestion_watchdogs.sql',
+  '20260721021600_mon_detect_mass_inactivation.sql',
+  '20260721102646_mon_detect_mass_inactivation.sql',
+  '20260727115000_retention_cleanup_framework.sql',
+  '20260803193000_mon_english_district_leak_detector.sql',
+  '20260804063424_mon_rewire_orphaned_detectors_crash_isolate_sweep_search_gate_leak.sql',
+  '20260804113559_fix_mass_inactivation_date_type_and_isolate_detectors.sql',
+  '20260804113911_revert_nightly_report_clobber_restore_full_detector_roster.sql',
+  '20260804120000_price_size_sanity_safety_check.sql',
+  '20260808062049_mon_detect_dangling_scrape_run_killed_jobs_must_not_be_silent.sql',
+  '20260810125209_mon_filter_barrier_leak_alerting.sql',
+  '20260810175029_cron_stampede_fix_and_collision_detector.sql',
+  '20260810175245_restore_full_detector_roster_union.sql',
+  '20260810175327_roster_drop_superseded_search_gate_leak.sql',
+  '20260810202219_price_area_artifact_fix_repair_and_barrier.sql',
+]);
+
+// Every detector the 2026-08-10 repair put back. Pinned so a future revert of that migration, or a
+// rebuild that quietly drops one of them again, fails here instead of going unnoticed in production.
+const RESTORED = [
+  'mon_detect_price_size_contamination',
+  'mon_detect_trending_district_dead_end',
+  'mon_detect_location_predicate_drift',
+  'mon_detect_search_performance_regression',
+  'mon_detect_commercial_coverage_blind_spot',
+  'mon_detect_stalled_daily_detector',
+  'mon_detect_zero_price_served',
+  'mon_detect_filter_barrier_leaks',
+  'mon_detect_deploy_lock_misuse',
+];
+
+const FULL_REWRITE = /create\s+or\s+replace\s+function\s+(?:public\.)?mon_run_all_detectors/i;
+
+const problems: string[] = [];
+const ok: string[] = [];
+const check = (cond: boolean, pass: string, fail: string) =>
+  cond ? ok.push(pass) : problems.push(fail);
+
+const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
+check(files.length > 100, `scanned ${files.length} migrations`,
+  `only ${files.length} migration files found — the scan is not seeing the directory`);
+
+// 1. No NEW migration may rewrite the roster wholesale.
+const offenders = files.filter(
+  (f) => !GRANDFATHERED.has(f) && f !== REPAIR && FULL_REWRITE.test(readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8')),
+);
+check(offenders.length === 0,
+  'no migration replaces mon_run_all_detectors with a hand-written body',
+  `these migrations rewrite the roster wholesale, which silently drops every entry their copy ` +
+  `predates — use the guarded needle-edit in ${REPAIR} instead: ${offenders.join(', ')}`);
+
+// 2. The grandfather list is a record, not a loophole: it may only name files that exist.
+const stale = [...GRANDFATHERED].filter((f) => !files.includes(f));
+check(stale.length === 0,
+  `grandfather list matches the tree (${GRANDFATHERED.size} historical full rewrites)`,
+  `grandfathered files no longer exist — the list has drifted from the tree: ${stale.join(', ')}`);
+
+// 3. The repair itself must stay in the tree, keep using the needle-edit, and keep naming every
+//    detector it restored.
+const repair = files.includes(REPAIR) ? readFileSync(`${MIGRATIONS_DIR}/${REPAIR}`, 'utf8') : '';
+check(repair.length > 0, `${REPAIR} is present`,
+  `${REPAIR} is missing — the roster repair has been reverted out of the tree`);
+check(repair.includes('pg_get_functiondef') && !FULL_REWRITE.test(repair),
+  'the repair edits the LIVE body via pg_get_functiondef instead of pasting a new one',
+  `${REPAIR} no longer reads the live body — it has become the bug it fixed`);
+const dropped = RESTORED.filter((d) => !repair.includes(d));
+check(dropped.length === 0,
+  `all ${RESTORED.length} restored detectors are still pinned by the repair`,
+  `the repair no longer restores: ${dropped.join(', ')}`);
+check(repair.includes('open_alerts'),
+  'the roster still reports standing open alerts, not only newly-raised ones',
+  `${REPAIR} dropped the open_alerts summary — an all-zero sweep would again read as healthy ` +
+  `while alerts sit open (mon_raise returns 0 for an already-open dedup key)`);
+
+// 4. This guard is worthless if nothing runs it.
+const pkg = readFileSync('package.json', 'utf8');
+check(pkg.includes('verify-detector-roster-edits-are-guarded'),
+  'npm test runs this guard',
+  'package.json no longer runs verify-detector-roster-edits-are-guarded.ts — the guard is inert');
+
+console.log('detector-roster-edits-are-guarded: the barrier list must survive the next migration\n');
+for (const o of ok) console.log(`  ✓ ${o}`);
+for (const p of problems) console.error(`  ✗ ${p}`);
+
+if (problems.length) {
+  console.error(`\n❌ ${problems.length} check(s) failed — a roster edit can silently drop detectors.`);
+  process.exit(1);
+}
+console.log('\n✅ detector-roster-edits-are-guarded: passed.');
