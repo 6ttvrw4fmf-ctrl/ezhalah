@@ -171,10 +171,23 @@ FEATURE_COL = {
     "تكييف مركزي": "air_conditioner", "تكييف": "air_conditioner",
     "كهرباء": "electricity", "ماء": "water_supply", "مياه": "water_supply",
     "شُرفة ، بلكونة": "balcony_terrace", "شرفة": "balcony_terrace", "بلكونة": "balcony_terrace",
-    "غرفة غسيل": "laundry_room", "سطح خاص": "villa_on_roof",
-    "حديقة": "balcony_terrace",  # closest canonical column
+    "غرفة غسيل": "laundry_room",
     "مدخل خاص": "private_entrance", "ألياف بصرية": "optical_fibers",
 }
+# Deliberately NOT mapped — every one of these is a real fact eastabha published, kept verbatim in
+# additional_info.features_ar, but none has a column that means the SAME thing. Mapping them to the
+# nearest-looking column makes the search lie:
+#   حديقة (garden)     ✗ balcony_terrace — a garden is not a balcony. This mapping was live until
+#                        2026-08-11 with the comment "closest canonical column"; it had put a
+#                        balcony on 7 active listings that never claimed one.
+#   سطح خاص (private roof) ✗ villa_on_roof — having roof access is not being a rooftop dwelling
+#                        (فيلا على السطح). 4 active listings were mislabelled.
+#   تهوية (ventilation) ✗ air_conditioner — a vent does not cool.
+#   تدفئة (heating)     ✗ air_conditioner — heating is the opposite of cooling.
+#   حمام ساخن (water heater) · واي فاي · الغاز الطبيعي · كاشف الدخان · صالة رياضية · مسبح ·
+#   فناء أمامي/خلفي · غرفة عرض ، سينما · ملعب كرة سلة · مقاعد مهيأة لذوي الاحتياجات
+#                      — no equivalent column exists yet; they stay in features_ar until one does.
+#   مرافق العامة · تفاصيل خارجية — category headers, not values. Only a guess could come of them.
 
 # action-category Arabic → deal handling
 ACTION_BUY = ("بيع", "استثمار")
@@ -547,7 +560,9 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
         "city": city,
         "region": region,
         "neighborhood": district_ar,
-        "rega_location_verified": False,
+        # NOT set. eastabha displays no REGA data at all (see the rega_note we store alongside),
+        # so a hardcoded False asserted that REGA had checked the location and rejected it — a
+        # claim the source never made. Silent source => NULL.
         "photo_urls": photos,
         "title": title or None,
         "description": description,

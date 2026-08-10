@@ -91,10 +91,13 @@ def test_rest_urls_paginates_and_stops_on_short_page():
         return _Resp(body=page2 if "page=2" in url else page1)
 
     s = _Session({"https://abeea.com.sa/wp-json/wp/v2/properties": rest})
-    urls = rest_urls(s)
+    urls, feats = rest_urls(s)
     assert len(urls) == 101  # 100 + PROP; archive root + null link dropped
     assert urls[-1] == PROP
     assert not any("page=3" in c for c in s.calls)  # short page 2 ended pagination
+    # the list response also carries property_feature; with no taxonomy route stubbed here the
+    # id->slug map is empty, and an UNRESOLVED id must yield nothing rather than a guessed slug
+    assert feats == {}
 
 
 def test_discover_prefers_rest_over_sitemap():
@@ -102,7 +105,7 @@ def test_discover_prefers_rest_over_sitemap():
         "https://abeea.com.sa/wp-json/wp/v2/properties": _Resp(body=[{"link": PROP}]),
         "https://abeea.com.sa/sitemap.xml": _Resp(text=_SITEMAP_XML),
     })
-    assert discover_urls(s) == [PROP]
+    assert discover_urls(s)[0] == [PROP]
     assert not any("sitemap" in c for c in s.calls)
 
 
@@ -112,14 +115,18 @@ def test_discover_falls_back_to_sitemap_when_rest_dark():
         "https://abeea.com.sa/wp-json/wp/v2/properties": _Resp(status_code=404, text="nope"),
         "https://abeea.com.sa/sitemap.xml": _Resp(text=_SITEMAP_XML),
     })
-    assert discover_urls(s) == [PROP, PROP2]
+    urls, feats = discover_urls(s)
+    assert urls == [PROP, PROP2]
+    # sitemap fallback carries no feature ids at all; map_listing then falls back to scraping the
+    # (lossy) rendered Features block rather than inventing anything
+    assert feats == {}
 
 
 def test_discover_both_paths_dark_returns_empty_not_crash():
     # Total darkness (the 2026-07-16 state pre-fix, had REST not existed): empty list, no raise —
     # main() then records a 0-row run and RC-B demotes it; prune's 0-seen breaker keeps the data.
     s = _Session({})
-    assert discover_urls(s) == []
+    assert discover_urls(s) == ([], {})
 
 
 if __name__ == "__main__":
