@@ -2,16 +2,18 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.
 
-# Read this first — canonical rules + token efficiency (owner rule, 2026-08-10)
+# Read this first — canonical rules + token efficiency (owner rule, 2026-08-10, confirmed permanent)
 
-**`docs/ARCHITECTURE.md` is the canonical rule source. Read it before re-deriving anything, and before
-opening any historical audit/report file (`AUDIT_REPORT.md`, `BACKEND_AUDIT.md`,
-`PRODUCTION_AUDIT_2026-07-17.md`, old PR descriptions, etc.).** Those historical files are point-in-time
-snapshots, kept for provenance — they are NOT where current rules live and most of their findings are
-already fixed. If `ARCHITECTURE.md` §20 (Permanent rules), §21 (Open questions), `docs/ops/
-AGENT_AUTHORITY.md`, `docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md`, or `docs/ops/
-EZHALAH_DATA_ARCHITECTURE_GOAL.md` already answer the question, cite it — do not re-read a giant old
-report to re-derive the same fact.
+**Reading order before any research task: `AGENTS.md` (this file) → `docs/ARCHITECTURE.md` →
+`docs/VERIFIED_BASELINES.md` → whichever `docs/ops/*.md` is relevant to the task.** Those are the
+canonical rule sources. Do not open a historical audit/report file (`AUDIT_REPORT.md`,
+`BACKEND_AUDIT.md`, `PRODUCTION_AUDIT_2026-07-17.md`, old PR descriptions, etc.) unless the current task
+genuinely requires it — those are point-in-time snapshots kept for provenance, not where current rules
+live, and most of their findings are already fixed. If `ARCHITECTURE.md` §20 (Permanent rules), §21
+(Open questions), `docs/VERIFIED_BASELINES.md`, `docs/ops/AGENT_AUTHORITY.md`, `docs/ops/
+ADVANCED_FILTER_SOURCE_TRUTH.md`, or `docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md` already answer the
+question, cite it — do not re-read a giant old report to re-derive the same fact, and do not restate a
+settled rule at length in a chat reply; a one-line citation is enough.
 
 **Owner-granted engineering/product decisions belong in this repo, not just in an agent's own memory.**
 When the owner gives you a permanent rule, architecture decision, or business/compliance decision:
@@ -26,12 +28,19 @@ nearby, fix it in the same edit.
   results, logs, payloads, or whole source files into context when a targeted read/grep answers it.
 - Don't spawn multiple agents for a simple check; use parallel agents only when they cover genuinely
   independent work or materially save wall-clock time.
-- Reports: **issue → root cause → fix → regression barrier → production verification → before/after.**
-  Full evidence dumps only when something is disputed or needs an owner decision.
+- Reports: **issue → root cause → fix → barrier → production verification → remaining.** Full evidence
+  dumps only when something is disputed or needs an owner decision.
 - Before a large investigation, check whether the answer already exists in `docs/`, git history, or a
   monitor/dashboard before re-discovering it from scratch.
 - None of this trades away rigor: fix → regression test → verify → deploy still applies in full: it
   just runs on targeted reads instead of wholesale context dumps.
+
+**PR safety in this shared repo (permanent, 2026-08-10):** this working directory is shared by
+concurrent sessions with no per-session isolation — a background `gh pr create` with no `--head` can
+silently pick up whatever branch another session has checked out and open/merge the wrong PR (this
+happened once). Always pass `--head <exact-branch> --base main` explicitly; verify the PR's file list
+(`gh pr view N --json files`) right after creating it AND again immediately before `gh pr merge`, not
+just once.
 
 # Autonomous engineering authority (owner-granted, 2026-08-04)
 
