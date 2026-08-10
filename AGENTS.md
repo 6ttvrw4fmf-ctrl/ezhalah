@@ -15,6 +15,22 @@ ADVANCED_FILTER_SOURCE_TRUTH.md`, or `docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md
 question, cite it — do not re-read a giant old report to re-derive the same fact, and do not restate a
 settled rule at length in a chat reply; a one-line citation is enough.
 
+**The daily integrity routine's spec is `docs/ops/DATA_INTEGRITY_ENGINEER.md` — that FILE is the
+source of truth, not the cloud routine's prompt text.** If the two ever differ, update the routine to
+match the file. Read it before any data-fidelity, price, area, location, searchability or Normal
+Filter work; it carries the standing rules and the worked examples that keep them from being
+misapplied — above all: **weird does not mean wrong, and data is only corrected when you can PROVE
+Ezhalah created the error.**
+
+**The barriers are machine-enforced and do not depend on any agent remembering to run them.**
+`mon_run_all_detectors()` runs twice an hour (pg_cron jobid 38 at :29/:59) and returns a count per
+detector plus `failed`; **`failed` must be empty and every count 0**. Expensive behavioural detectors
+(they drive real RPCs) are gated to ~once per 20h via `ops_detector_last_full_run`, and
+`mon_detect_stalled_daily_detector` watches that gate — because a monitor that cannot fire reads as
+"clean". When you add a barrier, add its `mon_detect_*` wrapper **and** its roster entry in the SAME
+migration: `mon_detect_orphaned_detectors()` fires on any detector nothing reaches, and a detector
+outside the roster is decoration. Adjudicate every finding against source before repairing anything.
+
 **Owner-granted engineering/product decisions belong in this repo, not just in an agent's own memory.**
 When the owner gives you a permanent rule, architecture decision, or business/compliance decision:
 land it in `docs/ARCHITECTURE.md` (or the relevant `docs/ops/*.md`) in the same session, not only in
