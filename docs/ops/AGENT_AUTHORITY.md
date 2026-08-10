@@ -231,6 +231,31 @@ Never call something "fixed" while users are still running the broken version. N
 "deployed" because it merged. Never call something "verified" because unit tests passed — only the
 real production path counts.
 
+## Routine cadence (owner decision, 2026-08-10)
+
+| routine | cadence | time (UTC) | durable handoff |
+|---|---|---|---|
+| Junior/Beginner Daily Engineer | **daily** | 05:00 | `ops_daily_engineer_run` |
+| Senior Production Engineer | **daily** (was every 2 days) | 06:00 | `ops_senior_audit_run` |
+
+**The Senior audit moved from every-2-days to DAILY on 2026-08-10, by owner decision.** It is recorded
+here because the schedule itself lives in the claude.ai scheduled-task configuration, outside this
+repo — and a stored routine prompt still saying *"Run this complete Senior Production Engineer audit
+every 2 days"* is now **stale**. Per the top of this file, **this file wins**: run it daily, and treat
+the prompt's cadence line as the drift it is. The same applies to `ops_senior_audit_run.trigger`
+values reading `every-2-day-scheduled` on rows before that date — historical, not a contradiction.
+(The 2-day cadence is also named in migration `20260730211425_ops_senior_audit_run_state.sql`; that
+file is an applied migration and is deliberately NOT edited — an applied migration is a record of
+what ran, and rewriting it would create schema drift for a documentation change.)
+
+**Keep the two routines on different hours.** They are deliberately an hour apart so the Senior run
+consumes the Junior run's fresh heartbeat as input rather than racing it, and so two heavyweight
+sessions never open together. This matters more now that both run daily: on 2026-08-10 a cron
+stampede wedged the database into a 522 outage (see `#430`), and the same day two sessions twice held
+what each believed was the deploy lock. The lock is now genuinely exclusive
+(`20260810131511`) — do not spend that safety margin by collapsing the two routines onto the same
+minute.
+
 ## Junior/Beginner Daily Engineer — scope note
 
 The Junior routine holds the **same GREEN authority** but a **narrower default blast radius**: it is
