@@ -249,6 +249,30 @@ def check_deletion_spike_no_rereise(client) -> bool:
     return False
 
 
+def check_normal_filter_barrier(client) -> bool:
+    """True = OK. The PERMANENT Normal Filter safety barrier (owner request 2026-08-10): every Normal
+    Filter field has a per-field Ezhalah-side-mistake invariant in mon_normal_filter_barrier, and EVERY
+    column must read 0. Covers deal, rent-period, region, city, district, category, property type/group,
+    bedrooms, area (price fabrication is covered by the dedicated price monitors; district dead-ends by
+    verify-district-suggestion-parity-live.ts). SOURCE-IS-TRUTH: source-published unusual values (high
+    bedroom/area counts, unusual prices) are NOT flagged — only OUR fabrication / cross-field
+    contamination / unreachable-or-dropped listings. A live hourly cron (mon_check_normal_filter_barrier)
+    also alerts; this is the CI-enforced layer that fails the build on any regression."""
+    rows = client.table("mon_normal_filter_barrier").select("*").limit(1).execute().data
+    if not rows:
+        detail = "mon_normal_filter_barrier returned no row — the permanent barrier view is missing."
+        print(f"FAIL normal-filter barrier: {detail}"); _alert(client, "normal_filter_barrier_missing", 0, detail); return False
+    bad = {k: v for k, v in rows[0].items() if (v or 0) != 0}
+    if not bad:
+        print("OK  normal-filter barrier: all per-field invariants 0 "
+              "(deal/period/region/city/district/category/type/bedrooms/area — no Ezhalah-side mistakes).")
+        return True
+    detail = "normal-filter barrier regression: " + ", ".join(f"{k}={v}" for k, v in bad.items()) + " (all must be 0)."
+    print(f"FAIL normal-filter barrier: {detail}")
+    _alert(client, "normal_filter_barrier_regression", sum(int(v or 0) for v in bad.values()), detail)
+    return False
+
+
 def _call_agent(text: str) -> dict:
     body = json.dumps({"text": text, "locale": "ar", "loggedIn": False, "order": False, "history": []}).encode()
     req = urllib.request.Request(
@@ -292,7 +316,7 @@ def check_agent(client=None) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index", "unverified_kill",
-                                       "aqar_licence_price", "deletion_spike_no_rereise"],
+                                       "aqar_licence_price", "deletion_spike_no_rereise", "normal_filter_barrier"],
                     help="run one check")
     args = ap.parse_args()
 
@@ -317,6 +341,7 @@ def main() -> int:
     if args.only in (None, "unverified_kill"): results.append(check_unverified_inactivations(client))
     if args.only in (None, "aqar_licence_price"): results.append(check_aqar_price_not_licence(client))
     if args.only in (None, "deletion_spike_no_rereise"): results.append(check_deletion_spike_no_rereise(client))
+    if args.only in (None, "normal_filter_barrier"): results.append(check_normal_filter_barrier(client))
     if args.only is None:                  results.append(check_agent(client))
     return 0 if all(results) else 1
 
