@@ -133,7 +133,12 @@ defaults/false negatives. If a new bug class appears: create a permanent barrier
 
 ### 11a. Run the roster — this is not optional and not from memory
 `select public.mon_run_all_detectors();` — one call, every detector, returns a count per detector
-plus `failed`. **`failed` must be empty and every count must be 0.** A detector that crashes is
+plus `failed`. **`failed` must be empty and every count must be 0 — AND `open_alerts` must be read,
+not skipped.** A count is *newly-raised or escalated*, never standing state: `mon_raise()` returns 0
+for a dedup key that is already open, so an all-zero sweep is not the same claim as "nothing is
+wrong". On 2026-08-10 the roster returned every count 0 while nine detectors were unreachable and 25
+alerts stood open; `open_alerts` (added by `20260810222259`) is what closes that gap. A detector that
+crashes is
 raised as `detector_crash` and must be fixed the same run: a crashed detector is an unmonitored bug
 class, which is worse than a known-failing one because it looks like silence.
 
