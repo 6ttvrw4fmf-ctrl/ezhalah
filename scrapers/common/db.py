@@ -41,7 +41,12 @@ _TRANSIENT_MARKERS = ("522", "520", "524", "503", "502", "504", "429", "408",
 
 def _execute(query, *, what: str = "db", tries: int = 5):
     """Run a PostgREST query with exponential backoff + jitter on TRANSIENT errors (522 etc.), then
-    re-raise after the last attempt. Upserts/selects/updates here are idempotent, so retrying is safe."""
+    re-raise after the last attempt. Upserts/selects/updates here are idempotent, so retrying is safe.
+
+    NOT SAFE for a bare INSERT that has no conflict key — a transient error can be raised AFTER the
+    server already committed the row, so the retry inserts a SECOND one. `scrape_runs` is the only
+    such insert in this module; it goes through `_begin_run_idempotent` below instead of this
+    helper. Do not route a new plain insert through here without giving it an idempotency key."""
     last_exc: Optional[BaseException] = None
     for attempt in range(tries):
         try:
@@ -222,6 +227,60 @@ def reconcile_orphaned_runs(platform: str, *, older_than_hours: int = ORPHAN_RUN
     return n
 
 
+def _begin_run_idempotent(platform: str, *, tries: int = 5) -> int:
+    """Insert THIS run's scrape_runs row exactly once, even if the insert has to be retried.
+
+    THE DEFECT THIS FIXES (2026-08-10 senior audit, run #8). `_execute` retries transient DB errors
+    on the assumption — stated in its own docstring — that every operation it runs is idempotent.
+    A bare INSERT is not. PostgREST can fail the RESPONSE (522/timeout/connection reset) after the
+    server has already COMMITTED the row; the retry then inserts a duplicate. The caller keeps the
+    second id, so the first row is orphaned at ok=NULL/rows_seen=0 forever, raises a false P1
+    `dangling_scrape_run`, and makes a healthy platform look like it had a killed run.
+
+    PROOF IT HAPPENS, not a theory: scrape_runs 26326 and 26327 both carry
+    started_at = 2026-08-10 00:09:56.826524+00 — identical to the MICROSECOND. Two independent
+    shard processes cannot produce that; two attempts at the same payload must, because started_at
+    is computed once here in the client and re-sent verbatim on retry. 26327 finished ok with 468
+    rows; 26326 dangles. That blip also tripped four other aqar_residential shards and made pg_cron
+    report `job startup timeout` on 4 unrelated jobs at 00:10:00 — one infra wobble, several
+    symptoms.
+
+    THE FIX uses the client-side timestamp that caused the collision as the idempotency KEY: it is
+    generated once, so it uniquely identifies this attempt-set. After a transient failure, look for
+    a row already carrying it before inserting again — if the server did commit, adopt that id
+    instead of creating a twin. No schema change, no unique index, no behaviour change on the happy
+    path (one insert, one row).
+    """
+    started_at = datetime.now(timezone.utc).isoformat()
+    last_exc: Optional[BaseException] = None
+    for attempt in range(tries):
+        try:
+            res = sb().table("scrape_runs").insert({"platform": platform, "started_at": started_at}).execute()
+            return int(res.data[0]["id"])
+        except Exception as exc:
+            last_exc = exc
+            msg = str(exc).lower()
+            if not any(m in msg for m in _TRANSIENT_MARKERS) or attempt == tries - 1:
+                raise
+            # The failure may have been purely on the response path. If the row landed, adopt it.
+            try:
+                found = sb().table("scrape_runs").select("id").eq("platform", platform) \
+                    .eq("started_at", started_at).limit(1).execute()
+                if found.data:
+                    run_id = int(found.data[0]["id"])
+                    print(f"scrape_runs.begin: insert response failed but the row COMMITTED "
+                          f"(id={run_id}) — adopting it instead of inserting a duplicate", flush=True)
+                    return run_id
+            except Exception as probe_exc:  # probe is best-effort; fall through to the normal retry
+                print(f"⚠ scrape_runs.begin: commit probe failed ({str(probe_exc)[:100]}) — retrying insert",
+                      flush=True)
+            delay = min(30.0, 2.0 ** attempt) + random.uniform(0.0, 1.0)
+            print(f"⚠ scrape_runs.begin: transient DB error (attempt {attempt + 1}/{tries}), "
+                  f"retrying in {delay:.1f}s — {str(exc)[:140]}", flush=True)
+            time.sleep(delay)
+    raise last_exc  # unreachable; satisfies type checkers
+
+
 def begin_run(platform: str) -> int:
     """Open a row in scrape_runs and return its id, so end_run can finalize it.
 
@@ -233,11 +292,7 @@ def begin_run(platform: str) -> int:
     `_finalize_open_run_on_signal` for the incident this prevents.
     """
     reconcile_orphaned_runs(platform)
-    res = _execute(
-        sb().table("scrape_runs").insert({"platform": platform, "started_at": datetime.now(timezone.utc).isoformat()}),
-        what="scrape_runs.begin",
-    )
-    run_id = int(res.data[0]["id"])
+    run_id = _begin_run_idempotent(platform)
     _OPEN_RUN["run_id"] = run_id
     _OPEN_RUN["platform"] = platform
     _install_run_signal_handlers()
