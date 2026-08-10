@@ -1,6 +1,6 @@
 # Ezhalah — Complete Architecture (Frontend + Backend)
 
-> **Status:** canonical reference, last consolidated **2026-07-06**.
+> **Status:** canonical reference, last consolidated **2026-08-10**.
 > **Purpose:** one source of truth for how Ezhalah is built — UI structure, filter hierarchy, property
 > card, search flow, backend, scraper pipeline, DB rules, matching, locations, type mapping,
 > rent-period rules, and every permanent rule. Written so we never re-discover the same facts twice.
@@ -52,6 +52,12 @@ across many partner platforms and shows them in one place. **It is a search engi
 | **Scraper repo** | GitHub **`6ttvrw4fmf-ctrl/ezhalah`**. All scrapers + GitHub Actions workflows live here. |
 | **Scraper dispatch** | `pg_cron` → `trigger_gh_workflow(wf)` → GitHub `workflow_dispatch`. **Every workflow is dispatch-only; all cadence is owned by Postgres** (so it is monitorable/pausable from the DB). PAT in Vault (exp 2027-06-22). |
 | **AI agent** | Supabase Edge Function named **`agent`** (Gemini 2.5 Flash-Lite primary + Flash fallback, via `GEMINI_MODEL` secret). Runtime behavior tunable via the `agent_notes` DB table (no redeploy). |
+
+**Why Expo/React Native, not native SwiftUI (owner decision 2026-06-09):** the owner first said "decide
+for me" (→ SwiftUI), then pivoted: wanted web + iPhone + Android from one codebase, live-preview while
+building, and GitHub + Supabase + Vercel wired up. Expo/RN was chosen to satisfy cross-platform + live
+preview in one codebase; an earlier SwiftUI build under `Ezhalah/` (design-handoff repo root) is
+superseded/abandoned, kept on disk only. Don't re-ask this or re-litigate it.
 
 **Regression safety (locked #1 priority):** preserve local work (commit/stash) before any risky git op;
 never `git reset --hard` a dirty tree; before+after verification on every deploy; on any regression
@@ -207,12 +213,16 @@ explicit order. Distress input → supportive non-real-estate reply. **Authorita
 in the edge `agent` function + `agent_notes` DB table**, not in the client (the client only backstops
 deterministically).
 
-### 6.3 `src/app/interview.tsx` — guided interview — **DEPRECATED**
+### 6.3 `src/app/interview.tsx` — guided interview — **LIVE, on-demand (label corrected 2026-07-06)**
 
-Owner decision 2026-07-06: **legacy handoff artifact, not canonical.** It uses English-only labels and
-an English city list (`INTERVIEW_CITIES`, old `taxonomy CATEGORY_TYPES`), inconsistent with the
-Arabic-first filter/agent. Do not build on it or treat it as intended architecture. (It still routes to
-`/agent` with a built `SearchQuery` if reached.)
+Not dead code, not onboarding. It's a **live modal reachable on demand**: the AI agent routes to it
+whenever the user says something matching `INTERVIEW_RE` (agent.ts) — "ask me questions" / "guide me" /
+"interview me" / "walk me through" — via `agent.tsx: router.push('/interview')`; the edge function can
+also return `kind:'interview'`. It routes back to `/agent` with a built `SearchQuery` when finished.
+It is built on **legacy English-only foundations** (English labels, `INTERVIEW_CITIES`, old `taxonomy
+CATEGORY_TYPES`) — inconsistent with the Arabic-first filter/agent, but not unreachable or inert.
+**Owner decision 2026-07-06: leave as-is for now** — do not rework, disable, or delete until the owner
+rules on keep-as-is vs. rework-onto-canonical-Arabic-taxonomy vs. disable-the-trigger.
 
 ---
 
@@ -621,11 +631,30 @@ toor). Freshness monitoring closes the "cron succeeded but wrote nothing" gap.
   **Owner decision: leave as-is** — no split, no code change (project memory
   `project_rawland-classification-decision-2026-07-23`).
 - **Rent scaling:** monthly price ×12 handling vs Gathern's pre-annualized `price_annual`.
-- **PRD §13 business items:** revenue model (CPC-first decided), **REGA license number** (`XXXXXXXX`
-  placeholder in About/Settings — needs the real number), signed partner data agreements, PDPL retention
-  windows, Tokyo vs Saudi hosting region.
 - **In-app browser proxy** proven for all partners (currently Aqar-centric); reconcile the "iframe
   impossible" note.
+
+**PRD §13 business items — DECIDED 2026-06-09 (don't re-ask these):**
+1. Revenue: **CPC (pay-per-click) first**, subscriptions later. Near-term work = click tracking, not
+   subscription billing.
+2. REGA FAL license: **application in progress** → show a "license pending" placeholder in
+   compliance/about copy (`XXXXXXXX` in About/Settings). **Still genuinely OPEN:** the real license
+   number/scope — never invent one.
+3. Partner data agreements (6 platforms): **none signed** — decided to build against mock/scraped data
+   and enable platforms incrementally as agreements land. **Still genuinely OPEN:** actually signing
+   them.
+4. Listing data source: **web scraping** (carries ToS/PDPL risk — flagged in ingestion design, not a
+   blocker).
+5. Phone OTP: **WhatsApp Business API** (the auth screen's WhatsApp badge is correct, not a placeholder).
+6. FX & units: **SAR only, m² only** — no currency conversion needed.
+7. Featured/paid placement: **NONE, ever.** Results rank purely on neutral signals (recency/match/
+   diversity) — reinforces §1 neutrality and §10 diversity rules.
+8. Language: **Arabic-first primary** (RTL), English secondary/latent — matches §1.
+9. PDPL retention: **keep search history/account data until the user deletes their account**, purge on
+   deletion.
+
+Also still genuinely open: Tokyo vs. Saudi hosting region for PDPL residency (see §2 — Supabase has no
+KSA region; recommendation delivered was "don't migrate," awaiting owner call).
 
 ---
 
