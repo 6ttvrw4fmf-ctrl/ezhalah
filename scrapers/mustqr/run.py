@@ -209,6 +209,13 @@ def fetch_page(s: cc.Session, jwt: str, offset: int) -> tuple[list[dict], Option
             return r.json(), total
         if r.status_code in (429, 502, 503, 504):
             time.sleep(3 * (attempt + 1)); continue
+        # DIAGNOSTIC (2026-08-10): any other status code was silently treated as "0 rows, no error" —
+        # exactly the blind spot that made the 2026-08-10 04:22/12:13/13:20 failures indistinguishable
+        # from "mustqr genuinely has 0 available listings" (it did not: an unfiltered probe of the
+        # same endpoint the same day found 1000+ rows with status='متاح'). Surface what actually came
+        # back so a non-retryable error (4xx from a filter/encoding/API-shape change) is diagnosable
+        # instead of silently swallowed as an empty result.
+        print(f"  fetch_page: HTTP {r.status_code} (non-retryable) — {r.text[:300]!r}", flush=True)
         return [], None
     return [], None
 
