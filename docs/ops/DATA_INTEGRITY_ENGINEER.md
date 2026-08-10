@@ -16,6 +16,17 @@ crazy bedroom count, huge area, 0 SAR, or anything unusual, preserve it exactly 
 Your job is not to make source data look reasonable. Your job is to find where Ezhalah changed,
 lost, invented, misclassified, failed to propagate, or incorrectly deactivated source data.
 
+**Weird does not mean wrong. Only correct data when you can PROVE Ezhalah created the error.**
+This is absolute and it outranks every other instruction in this file, including the 10/10 target.
+"This value looks impossible" is a reason to investigate, never a licence to change anything. Worked
+examples, all decided against the instinct (2026-08-10): a «غرفة» (room) published at 1,080,200 m² —
+**kept**, aqar's own spec table publishes that figure · aqar 6594767 where area equals the price
+exactly — **kept**, it publishes «سعر المتر 1» so total = area × 1 legitimately · 3 ramzalqasim rows
+with `price_total = 0` — **kept and searchable**, the source publishes 0 · 18 aqar rows where the
+total sits inside the «سعر المتر» slot — **kept**. Of 31 rows that all shared the "impossible"
+shape `area = price`, exactly **1** was ours. A repair that cannot name the mechanism Ezhalah used
+to create the wrong value is not a repair; it is data loss with good intentions.
+
 ## 1. Everything we scrape must be accounted for
 Every day, across all active platforms, verify:
 source → scraper/raw capture → canonical table → location mapping → production eligibility →
@@ -90,6 +101,16 @@ artifacts · no stale source value in search.
 **But:** an extreme source-backed value must be preserved exactly. Never hide or rewrite it solely
 because it looks unrealistic.
 
+**Adjudicating a price/area suspicion — three signals must agree before anything is repaired:**
+(1) the value equals another field exactly, AND (2) the source's structured spec block publishes no
+such value, AND (3) no matching currency-marked figure exists anywhere in the capture. Any one signal
+alone is noise: `price_per_meter = 1` makes total = area legitimately, a published area can coincide
+with the rent, and a truncated capture (description only, ~450 chars vs ~2,800) simply cannot contain
+the figure. **Never conclude "the page has no spec block" from `source_capture` alone** — 89% of rows
+whose stored capture lacks the block still have spec-only fields populated, which proves the live page
+had the table and only the snapshot was truncated. See §19 (oracle discipline), §20 (both tables),
+§21 (retraction trap). Detector: `price_size_contamination`.
+
 ## 9. Search index parity
 Compare canonical rows against search rows. Detect: missing search row · duplicate search row ·
 stale search value · wrong active state · wrong deal/period/location · canonical/search field
@@ -108,6 +129,29 @@ production-ready/searchability · new-listing propagation · search-index parity
 stale/liveness/deletion safety · migration drift · deploy lock/concurrency · manufactured
 defaults/false negatives. If a new bug class appears: create a permanent barrier for that class.
 **The goal is not to fix the same bug twice.**
+
+### 11a. Run the roster — this is not optional and not from memory
+`select public.mon_run_all_detectors();` — one call, every detector, returns a count per detector
+plus `failed`. **`failed` must be empty and every count must be 0.** A detector that crashes is
+raised as `detector_crash` and must be fixed the same run: a crashed detector is an unmonitored bug
+class, which is worse than a known-failing one because it looks like silence.
+
+A barrier that nothing calls is decoration. Any `mon_detect_*` function not reachable from
+`mon_run_all_detectors()` or a cron job is caught by `mon_detect_orphaned_detectors()` — so a new
+barrier and its roster entry must land in the **same migration**. Barriers behind the roster
+(callable directly when adjudicating a finding):
+`mon_price_size_fidelity_barrier()` · `mon_trending_district_barrier()` ·
+`mon_location_predicate_branch_barrier()` · `mon_filter_parity_barrier()` ·
+`mon_source_is_truth_violations()` · `mon_filter_barrier_leaks`.
+
+Detectors added 2026-08-10 from the Filter audit, and what each one is really protecting:
+- **`price_size_contamination`** — price ⇄ area contamination across residential AND commercial.
+- **`trending_district_dead_end`** — a Trending chip must deliver the count it advertises, and no
+  district with inventory may be missing from the canonical catalog.
+- **`location_predicate_drift`** — the 3-branch city OR must never collapse to `city_id` alone.
+- **`search_performance_regression`** — structural regression in the search path (see §18).
+- **`commercial_coverage_blind_spot`** — a whole commercial table holding inventory but reaching
+  search with nothing.
 
 ## 12. Autonomous repair + deploy
 For confirmed ordinary engineering bugs: detect → prove → fix root cause → repair proven affected
@@ -138,6 +182,17 @@ Verify: **eligible canonical count = searchable index count = RPC eligible count
 result population.** A listing in `search_listings_ar` does NOT count as searchable until the real
 production search path can retrieve it. If unreachable: prove root cause → fix → barrier →
 regression test → deploy → production verify → continue.
+
+**Verify through the anon key, not MCP/service-role** — MCP SQL bypasses RLS, so it cannot prove
+what a real user sees (`docs/ops/VERIFYING_PRODUCTION.md`). The daily Normal Filter proof must cover,
+end to end: page-1 platform diversity (each platform at most once on page 1) · Show More paging is
+ONE total order (pages 0..N unioned must equal a single N-row call — no duplicates, no gaps) · all
+6 sorts monotonic with `total_count` unchanged across every sort · Trending chip promised = delivered
+when called with `match_values` · categories partitioning the searchable set exactly (Residential +
+Commercial = production_ready + unlocated-fallback rows) · annual ∩ monthly = 0.
+Baseline verified 2026-08-10: 40/40 trending chips exact, 0 dead ends, 0 unreachable of 182,556;
+page 1 = 10 rows / 10 distinct platforms; paged set identical to single call; 6/6 sorts 0 violations;
+161,679 + 24,054 = 185,208 + exactly 525 fallback rows.
 
 ## 15. Inactive resurrection audit
 Every day, actively challenge recent inactivations. Don't only ask "why was this marked inactive?"
@@ -181,6 +236,72 @@ and engineering quality**, not whether source data looks clean. A source listing
 50,000 bedrooms, an extreme area, or unusual text can still be a perfect 10/10 if Ezhalah
 faithfully preserved what the source published. **10/10 ≠ "normal-looking data." 10/10 = "Ezhalah
 handled the source data correctly."**
+
+## 18. Search performance — only after correctness, never instead of it
+Measured baselines (2026-08-10, Large/`m6g.large`): broad city search (Riyadh/Buy, 35,908 matches)
+**255 ms**; typical filtered search (city+type+price+beds) **65 ms**. `search_performance_regression`
+alerts loosely (2000 ms / 500 ms) because it exists to catch a STRUCTURAL regression, not contention.
+
+First thing to check on an alert: `EXPLAIN` the broad query. It **must** show a `BitmapOr` over
+`idx_slar_city_norm` + `idx_slar_deal_city` + `idx_slar_match_city_ids`. If it shows a hashed
+SubPlan, someone reverted the location predicate from `= ANY (ARRAY(SELECT …))` back to
+`IN (SELECT …)`. That single difference is what made three already-existing indexes usable: a hashed
+SubPlan can never be an index condition. Rewriting the phrasing cut the broad search 590 → 255 ms and
+buffers 89,853 → 10,331 **without changing one returned row**.
+
+**Never buy speed with correctness.** The tempting "optimization" — collapsing the city OR to
+`city_id = any(...)` — is trivially indexable and silently drops every unresolved-city row and every
+multi-id row. Any performance change to the search path must be proven by digest parity: capture
+`total_count` and an md5 of the ORDERED `source_table:listing_id` sequence across ≥12 query shapes
+(city / district / hamza-twin district / region / no-location / types+price+beds / each sort / offset
+page / category / rent period / multi-city) before AND after. **Identical digests or revert.**
+Statistics are not the lever here: the planner's row estimate on this predicate is off ~12× because
+of OR-of-subplans selectivity, not staleness — check `n_mod_since_analyze` before "fixing" it with
+`ANALYZE`.
+
+## 19. Oracle discipline — your measurement is the likelier defect
+On 2026-08-10 the audit produced **eight** apparent defects. **One** was real code; the other seven
+were errors in the measurement. Before reporting or repairing anything, sample the rows and read the
+raw source text. Real examples, each of which looked like a confirmed bug:
+- `[\d,]+\s*عقار` matched the card index «#2 | عقار» — عقار is both "property" and the platform name.
+- Area fidelity read 94.88% — the regex was matching seller prose and «المساحة للقطعة رقم 29», a
+  PLOT NUMBER. Anchored to the spec block: **100.00%**.
+- Buy price fidelity read 82.86% — the "differences" were DISCOUNTS (`price_original` printed first,
+  `price_total` second, `discount_pct` agreeing).
+- 950 more "wrong" prices — aqar publishes half-riyal prices; we round; the oracle's integer regex
+  truncated the decimal (stored 170,006 vs page "170,005").
+- The remaining price residue tracked CAPTURE AGE (0.53% same-day → 1.63% at 31+ days): `price_total`
+  is read at the latest enrich, `source_capture.source_text` is an older snapshot. A live probe
+  proved 5/5 DB == aqar's structured price.
+- "112/144 trending counts wrong" — I compared exact strings; the RPC counts by `norm_district_tok`.
+- "26 sort violations" — `row_number() over (order by 1)` is a CONSTANT ordering that destroys the
+  RPC's sequence. With `WITH ORDINALITY`: **0 violations on all 6 sorts**.
+- "Trending counts inflated" — I passed the chip's display name; the app passes `match_values`.
+
+Rules that follow: anchor every field oracle to the structured block, never to free text · use
+`WITH ORDINALITY` to preserve an RPC's returned order · call RPCs with exactly the parameters the app
+sends · check capture freshness (`last_seen_at` vs `scraped_at`) before calling a value stale · and
+when the source is genuinely ambiguous, fetch it live rather than reasoning about it.
+
+## 20. Residential AND commercial — every check, every platform
+A fidelity check JOINed only to `<platform>_residential_listings` silently scopes away half that
+platform. This is not hypothetical: on 2026-08-10 the price/area barrier missed a real defect in
+`aqar_commercial_listings` (ad 6650784 — the page reads «المساحة… الإيجار 40000», the area label
+followed by an ellipsis and no number, so the parser took the RENT) purely because the barrier's JOIN
+named the residential table. Both tables share one enricher — `run_commercial.py` imports
+`enrich_residential` — so a parser bug is a bug in BOTH, and a parser fix fixes BOTH, but a
+**retraction of already-stored bad data must be applied to both tables explicitly.**
+Every daily count, sample, barrier and repair must enumerate residential and commercial tables.
+
+## 21. Fixing the code is half the job — the retraction trap
+`db._unknown_must_not_overwrite_known()` deliberately refuses to let a weaker read erase a stored
+value. So when a scraper stops fabricating a value, **the old fabricated value survives every future
+crawl, with all tests green**. This trap has now been hit four times (alhoshan instalments, eastabha
+EA21188, aqar residential areas, aqar commercial area). Removing a fabrication from code REQUIRES a
+paired, source-verified one-off retraction of the rows already carrying it. Retract to **NULL**, not
+to a value scraped from prose: a description figure is not a source field even when it looks right.
+Pin at least one source-real row as a CONTROL in the same migration, and assert it survived — that is
+what stops a repair from turning into a sweep.
 
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
