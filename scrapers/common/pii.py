@@ -33,8 +33,10 @@ _PHONE_LOOSE = re.compile(r"[\(\[\{«]{1,3}\s*0?5[\d\s\.\-]{7,}\s*[\)\]\}»]{1,3
 _PHONE_RE = re.compile(
     r"(?:\+?966|00966)\s*5\d[\d\s\-]{6,}"   # +966 5X…, 00966 5X…
     r"|0?5\d{8}"                              # 05XXXXXXXX / 5XXXXXXXX
-    r"|\b9200\d{4,8}\b"                       # 9200… unified business lines
-    r"|\b920\d{6}\b"                          # 920XXXXXX business lines
+    r"|\b920\d{5,8}\b"                        # 920… unified business lines. 5-8 trailing digits:
+                                              # live aqar ad 109347 carried «للتواصل : 92015189»
+                                              # (920 + FIVE digits), which the old 9200\d{4,8} /
+                                              # 920\d{6} pair matched neither of. (2026-08-09)
     r"|واتس\S*\s*\d[\d\s\-]{6,}"              # واتساب/واتس اب followed by digits
 )
 

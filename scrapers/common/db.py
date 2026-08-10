@@ -305,6 +305,7 @@ def upsert_aqar_residential(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _unknown_must_not_overwrite_known(row)
+    _redact_user_visible_text(row)
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="aqar_residential_listings")
@@ -318,6 +319,7 @@ def upsert_aqar_commercial(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _unknown_must_not_overwrite_known(row)
+    _redact_user_visible_text(row)
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="aqar_commercial_listings")
@@ -331,6 +333,7 @@ def upsert_wasalt_residential(row: dict[str, Any]) -> None:
     row["last_seen_at"] = datetime.now(timezone.utc).isoformat()
     _sanitize_price(row)
     _unknown_must_not_overwrite_known(row)
+    _redact_user_visible_text(row)
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="wasalt_residential_listings")
@@ -395,6 +398,33 @@ def _sanitize_ints(r: dict[str, Any]) -> None:
                 continue
             if isinstance(v, int) and not (0 <= v <= hi):
                 r[c] = None  # overflow OR negative — both impossible for a count/area/price
+
+
+# Free-text columns that are RENDERED TO USERS. PDPL: a broker's phone number, WhatsApp handle or
+# email must never survive into them, on any platform.
+_USER_VISIBLE_TEXT_COLS = ("description", "title")
+
+
+def _redact_user_visible_text(r: dict[str, Any]) -> None:
+    """PDPL redaction on the columns the app actually displays — every platform, every upsert path.
+
+    THE BUG THIS CLOSES (2026-08-09): `redact_pii()` was applied to `source_capture.source_text` and
+    to NOTHING ELSE. The `description` column — the one users read — was written raw. A one-off
+    UPDATE cleaned 9,785 descriptions earlier the same day and was reported as fixed; it was not,
+    because ingestion kept writing new ones. Within hours aqar was back to 1,895 descriptions
+    carrying Saudi mobile numbers, 684 carrying WhatsApp/Telegram links and 194 carrying e-mail
+    addresses — several alongside the agent's name («حسام : 05XXXXXXXX»), which is unambiguously
+    personal data. Repairing rows without closing the write path is not a fix, it is a delay.
+
+    Placed AFTER `_unknown_must_not_overwrite_known` on purpose: if a description consists of
+    nothing BUT contact details, `redact_pii` returns None and we deliberately write NULL over the
+    stored value. PDPL beats preservation — that is the one case where erasing is the correct
+    outcome, and it cannot be reached by a fetch that simply failed to read the field (a missing
+    key never gets here, it was dropped by the no-clobber guard above).
+    """
+    for col in _USER_VISIBLE_TEXT_COLS:
+        if isinstance(r.get(col), str):
+            r[col] = redact_pii(r[col])
 
 
 def _sanitize_price(r: dict[str, Any]) -> None:
@@ -582,6 +612,7 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         r.setdefault("active", True)
         _sanitize_price(r)
         _unknown_must_not_overwrite_known(r)
+        _redact_user_visible_text(r)
         _sanitize_ints(r)
         _ensure_capture(r)
         _reject_placeholder_location(r, table=table)
