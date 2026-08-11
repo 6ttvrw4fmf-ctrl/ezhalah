@@ -309,6 +309,40 @@ to a value scraped from prose: a description figure is not a source field even w
 Pin at least one source-real row as a CONTROL in the same migration, and assert it survived — that is
 what stops a repair from turning into a sweep.
 
+## 22. A rent listing whose source never stated a period (settled 2026-08-11 — do not re-derive)
+
+`rent_period_ar` that is neither «سنوي» nor «شهري» makes a priced Rent listing unreachable by **both**
+period branches of the Filter. It still sits in `search_listings_ar`, still counts as searchable in
+every count-parity check, and a user only ever reaches it with no period chip set. Baseline when this
+was first measured: **77 rows** (aqar 75, souq24 1, october 1).
+
+Two things were found and both are now permanent:
+
+1. **The check existed and nothing ran it.** `mon_source_is_truth_violations()` has carried
+   `rent_period_missing_on_priced_rent` since it was written, but no `pg_proc` body other than its own
+   referenced that function — it is a *manual* barrier, so the cohort had never raised one alert.
+   `mon_detect_rent_period_unreachable()` (P2) now wraps it and is in `mon_run_all_detectors()`.
+   Same lesson as §11a: **a barrier nothing calls is decoration**, and "the check exists" is not the
+   same claim as "the check runs".
+
+2. **The obvious repair was the wrong one.** The natural assumption — the June `backfill.v1` stub
+   capture swallowed a published «سنوي», so re-enrich and recover it — was *tested*, not believed:
+   all 64 aqar residential ads were re-fetched through the production enricher from a runner aqar
+   serves (`aqar-stub-recovery` run 31469756776, `--include-price --dry-run`). Result
+   `fetched=64 written=0 no_gain=60 of 64` — 60 came back *"aqar publishes nothing further for this
+   listing"*, and the single row that would have gained a period came bundled with a price rewrite.
+   **aqar does not state a period for these listings.** Honest NULL is correct; «سنوي» must never be
+   defaulted in. Nothing was written.
+
+So the residue is a **product** gap, not a data bug, and it is an owner decision (§16 stop condition 2):
+leave as-is · surface period-less rentals under both chips · add an "unspecified" chip. An autonomous
+run must not pick one. The verdict is also attached to the detector via `COMMENT ON FUNCTION`, so it is
+recoverable from the database alone.
+
+**The general rule this pins:** when a field is missing and a re-enrich path exists, run it `--dry-run`
+FIRST and read the diff. "The parser dropped it" and "the source never published it" look identical in
+the database and lead to opposite actions — one is a repair, the other is fabrication.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve
