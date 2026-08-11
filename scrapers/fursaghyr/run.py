@@ -338,7 +338,10 @@ def map_listing(item: dict) -> tuple[Optional[dict], str]:
         "bathrooms": bathrooms,
         "price_total": total if not is_rent else None,
         "price_annual": total if is_rent else None,
-        "rent_period": "annual" if is_rent else None,
+        # The rea payload has no rental-period field (purpose=إيجار carries no period), so a period
+        # label would be manufactured (2026-08-11 audit — FG26842's سنوي happens to be page-
+        # confirmed, but the NEXT rent listing might say شهري or nothing). UNKNOWN.
+        "rent_period": None,
         # Trust meter_price as a per-m² figure only when it's in a plausible range.
         "price_per_meter": meter if (meter and meter < 50000) else None,
         "city": city,

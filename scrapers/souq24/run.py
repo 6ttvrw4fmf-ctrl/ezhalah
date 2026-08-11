@@ -163,8 +163,13 @@ PRICE_RE = re.compile(
 # fidelity rule forbids (defaulting instead of reading what the source published). Scoped to the 420
 # chars after the price match so a period word elsewhere in the page (a broker surname like «الشهري»,
 # the description, the footer) can never be mistaken for the price's own label.
-PERIOD_AFTER_PRICE_RE = re.compile(r"(شهري|سنوي|يومي|أسبوعي)")
-_PERIOD_AR_TO_EN = {"شهري": "monthly", "سنوي": "annual", "يومي": "daily", "أسبوعي": "weekly"}
+# Longest alternatives FIRST: «نصف سنوي» / «ربع سنوي» must not substring-match as «سنوي» — live
+# ad 1006 prints «33,000 نصف سنوي» (SEMI-annual) and the old alternation stored it as annual with
+# the half-year figure in price_annual, a 2x understatement (2026-08-11 audit, listing 648161).
+PERIOD_AFTER_PRICE_RE = re.compile(r"(نصف\s*سنوي|ربع\s*سنوي|شهري|سنوي|يومي|أسبوعي)")
+_PERIOD_AR_TO_EN = {"شهري": "monthly", "سنوي": "annual", "يومي": "daily", "أسبوعي": "weekly",
+                    # like daily/weekly, no annual bucket exists (×2/×4 would be derivation):
+                    "نصف سنوي": "semiannual", "ربع سنوي": "quarterly"}
 
 
 def _rent_period_from_price_div(body: str, price_match) -> Optional[str]:
@@ -177,7 +182,7 @@ def _rent_period_from_price_div(body: str, price_match) -> Optional[str]:
         return None
     tail = re.sub(r"<[^>]+>", " ", body[price_match.end():price_match.end() + 420])
     m = PERIOD_AFTER_PRICE_RE.search(tail)
-    return _PERIOD_AR_TO_EN.get(m.group(1)) if m else None
+    return _PERIOD_AR_TO_EN.get(re.sub(r"\s+", " ", m.group(1))) if m else None
 # spec table th/td
 TH_TD_RE = re.compile(r"<th>\s*(.*?)\s*</th>\s*<td>\s*(.*?)\s*</td>", re.S)
 # معلومات الإعلان labelled lines

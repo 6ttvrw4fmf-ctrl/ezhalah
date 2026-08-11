@@ -265,8 +265,12 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
     rent_monthly = _int(L.get("rent_price_monthly")) if rent_annual is None else None
     if rent_monthly is not None:
         price_annual, rent_period = normalize.annualize_rent(rent_monthly, "monthly"), "monthly"
+    elif rent_annual is not None:
+        price_annual, rent_period = rent_annual, "annual"
     else:
-        price_annual, rent_period = rent_annual, "annual"  # annual figure, or no rent price at all
+        # No rent-price field published at all → the source states no period; UNKNOWN, never a
+        # default (2026-08-11 audit: 3 field-less rows stored a manufactured سنوي with no price).
+        price_annual, rent_period = None, None
 
     # Native Arabic R/C/D (ADDITIVE — live city/neighborhood above untouched). The API already carries
     # city.name_ar / district.name_ar; we just stopped discarding them. No region signal from Aldarim,

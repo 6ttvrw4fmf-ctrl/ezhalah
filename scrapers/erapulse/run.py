@@ -322,6 +322,21 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
     if not price or price < 500:
         return None, category
 
+    # ── rent period: the API's own structured rentPeriod field (see docstring line 18) — read,
+    # never hardcoded (2026-08-11 audit: the field was ignored and every rent row defaulted to
+    # 'annual'; coincident with source today, but a future MONTHLY/DAILY listing would be
+    # silently mislabeled سنوي). Monthly → ×12 storage conversion like the sibling scrapers;
+    # a daily/weekly-class value has no annual bucket; silent → period UNKNOWN, price kept.
+    rent_period = price_annual = None
+    if is_rent:
+        rp = (p.get("rentPeriod") or "").strip().upper()
+        if rp == "ANNUAL":
+            rent_period, price_annual = "annual", price
+        elif rp == "MONTHLY":
+            rent_period, price_annual = "monthly", N.annualize_rent(price, "monthly")
+        elif not rp:
+            price_annual = price
+
     area = _int(p.get("area"))
     # No source per-m² rate → NULL, never sale/area (aqar PR#216, scrapers PR#217).
     ppm = None
@@ -384,9 +399,9 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
         "balcony_terrace": bool(p.get("balcony")) or None,
         "elevator": bool(p.get("elevator")) or None,
         "price_total": price if not is_rent else None,
-        "price_annual": price if is_rent else None,
+        "price_annual": price_annual,
         "price_per_meter": ppm,
-        "rent_period": "annual" if is_rent else None,
+        "rent_period": rent_period,
         "city": city,
         "region": region,
         "neighborhood": neighborhood,

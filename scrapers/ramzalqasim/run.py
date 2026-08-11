@@ -377,7 +377,9 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
         "price_total": price_total,
         "price_annual": price_annual,
         "price_per_meter": price_per_meter,
-        "rent_period": "annual" if is_rent else None,
+        # ramzalqasim publishes NO rental period anywhere (bare Livewire `price`, none in the page
+        # prose either) — a period label would be manufactured (2026-08-11 audit, 3 rows). UNKNOWN.
+        "rent_period": None,
         "city": city,
         "region": REGION_EN,
         "neighborhood": district,

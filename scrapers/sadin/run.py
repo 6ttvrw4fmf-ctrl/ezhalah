@@ -447,6 +447,14 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
     # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
     price_per_meter = None
 
+    # ── rent period: ONLY a token in the source's own prose (title/description) ──
+    # sadin publishes الغرض=للإيجار but no period field, so this is normally UNKNOWN — never the
+    # manufactured سنوي default it used to be (2026-08-11 audit, 8 rows, all also priceless).
+    rent_period = price_annual = None
+    if is_rent:
+        rent_period, price_annual = normalize.rent_period_and_annual(
+            price, f"{title_raw}\n{desc_raw or ''}")
+
     # Street frontage / width from description (e.g. "على شارع … بعرض 16م").
     sw = None
     if desc_raw:
@@ -509,9 +517,9 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
         "halls": halls,
         "street_width_m": sw,
         "price_total": price if not is_rent else None,
-        "price_annual": price if is_rent else None,
+        "price_annual": price_annual,
         "price_per_meter": price_per_meter,
-        "rent_period": "annual" if is_rent else None,
+        "rent_period": rent_period,
         "city": city,
         "region": region,
         "neighborhood": raw_district,
