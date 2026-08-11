@@ -347,18 +347,43 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
         "separate_water_meter":       _yes_no(addl_info, "waterMeter"),
         "separate_electricity_meter": _yes_no(addl_info, "electricityMeter"),
         "detail_enriched": detail_enriched,
-        # Feature-grid booleans the card already renders. Wasalt amenities map roughly:
+        # Feature-grid booleans the card already renders. Wasalt amenities map roughly.
+        #
+        # ONLY THE KEYWORDS WASALT'S VOCABULARY ACTUALLY USES (2026-08-11). The rule above — "list
+        # present -> absence of a keyword means Wasalt did not list that amenity, so False is
+        # honest" — holds ONLY for a keyword the curated list is capable of containing. For a
+        # keyword it never uses, `False` does not mean "the property lacks it", it means "this
+        # vocabulary cannot express it", and writing that is manufacturing a negative.
+        #
+        # Measured over the ENTIRE wasalt corpus (62,745 rows, active + inactive, all time):
+        #
+        #     parking  2,258 true / 11,023 false      elevator          0 true /   203 false
+        #     maid       1,285 / 11,996               air_conditioner   0 / 203
+        #     laundry      828 / 12,453               private_entrance  0 / 203
+        #     driver       739 / 12,542               optical_fibers    0 / 203
+        #     balcony      658 / 12,623               water_supply      0 / 203
+        #     kitchen       80 / 13,201               electricity       0 / 203
+        #                                             sanitation        0 / 203
+        #
+        # Two different populations. The six on the left are read: even `kitchen`, the rarest,
+        # says "yes" 80 times. The seven on the right have NEVER been true once in 62,745 rows —
+        # and only 203 rows carry any value at all, because the 2026-08-05 repair NULLed them
+        # fleet-wide and every crawl since has re-manufactured the same negative on whatever it
+        # touched. That is the signature the safety barrier exists to catch, and on 2026-08-11 it
+        # caught it (mon_safety_barrier_state, 7 wasalt pairs × 199 active rows) and turned
+        # `npm test` red on every open PR.
+        #
+        # So the seven are NOT mapped: the column stays NULL (honest unknown) rather than a
+        # confident "no" Wasalt never published. Water and electricity are not lost — Wasalt states
+        # those explicitly in its additionalAttributes panel and they are captured above as
+        # separate_water_meter / separate_electricity_meter via the tri-state `_yes_no()`.
+        #
+        # Re-adding any of the seven requires evidence that the keyword can appear at all, i.e. at
+        # least one true. scripts/verify-wasalt-amenity-vocabulary.ts fails the build otherwise.
         "parking":          has("parking", "garage"),
-        "elevator":         has("elevator", "lift"),
         "kitchen":          has("kitchen"),
         "maid_room":        has("maid"),
         "driver_room":      has("driver"),
-        "air_conditioner":  has("air condition", "ac "),
-        "water_supply":     has("water"),
-        "electricity":      has("electric"),
-        "sanitation":       has("sewage", "sanitation", "drainage"),
-        "private_entrance": has("private entrance"),
-        "optical_fibers":   has("fiber", "fibre", "ftth"),
         "laundry_room":     has("laundry"),
         "balcony_terrace":  has("balcony", "terrace"),
     }
