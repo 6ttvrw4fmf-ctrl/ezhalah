@@ -1,0 +1,116 @@
+# Alert delivery — the missing last mile of the barrier system (2026-08-11).
+#
+# mon_run_all_detectors() raises alert_event rows twice an hour, and mon_dispatch_alerts() has
+# carried delivery plumbing since launch — but with 0 webhook channels configured it has been a
+# complete no-op: 56 unresolved alerts existed with dispatched_at NULL and nobody had ever been
+# told. A barrier that detects a serious problem nobody receives is incomplete protection.
+#
+# This workflow is the delivery channel, built ONLY from credentials the repo already holds
+# (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY as Actions secrets, plus the built-in GITHUB_TOKEN):
+# every undispatched unresolved P1/P2 alert becomes ONE GitHub issue per dedup_key, and the issue
+# auto-closes when the alert resolves in the database. No new secrets, no paid service.
+#
+# Semantics (mirrors mon_dispatch_alerts' fail-closed design):
+#   - dispatched_at is stamped per-row ONLY after the gh call succeeds, so a mid-loop failure
+#     leaves the remainder undispatched for the next run.
+#   - The issue title "[alert] <dedup_key>" IS the identity — do not rename issues.
+#   - Closing an issue by hand does NOT resolve the alert; a persisting condition re-raises and
+#     files a fresh issue. Resolution lives in the database (mon_resolve_key / detector self-heal).
+#   - mon_dispatch_alerts() stays untouched and remains a no-op while 0 webhook channels exist;
+#     if a webhook channel is ever configured, dispatched_at becomes ambiguous between the two
+#     consumers and needs a dedicated column FIRST (documented owner decision, not needed today).
+#
+# Schedule: :09/:39 — 10 minutes after the :29/:59 detector sweep, off the :00/:15/:20 hot slots
+# (cron-discipline rule from the 2026-08-10 outage; GitHub-side, kept consistent deliberately).
+name: Alert dispatch (P1/P2 -> GitHub issues)
+
+on:
+  schedule:
+    - cron: "9,39 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: alert-dispatch
+  cancel-in-progress: true
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Ensure labels exist (idempotent)
+        run: |
+          gh label create ezhalah-alert --repo "$REPO" --force --color D93F0B --description "Auto-filed from alert_event by alert-dispatch.yml" >/dev/null
+          gh label create P1 --repo "$REPO" --force --color B60205 --description "Critical production alert" >/dev/null
+          gh label create P2 --repo "$REPO" --force --color FBCA04 --description "Important production alert" >/dev/null
+
+      - name: File issues for undispatched alerts
+        run: |
+          set -euo pipefail
+          rows=$(curl -sf "$SUPABASE_URL/rest/v1/alert_event?select=id,severity,kind,platform,dedup_key,detail,created_at&resolved_at=is.null&dispatched_at=is.null&severity=in.%28P1,P2%29&order=created_at.asc&limit=100" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
+          n=$(jq length <<<"$rows")
+          echo "undispatched P1/P2 alerts: $n"
+          [ "$n" -eq 0 ] && exit 0
+
+          gh issue list --repo "$REPO" --label ezhalah-alert --state open --limit 200 --json number,title > open_issues.json
+
+          echo "$rows" | jq -c '.[]' | while read -r row; do
+            id=$(jq -r .id <<<"$row")
+            sev=$(jq -r .severity <<<"$row")
+            kind=$(jq -r .kind <<<"$row")
+            platform=$(jq -r '.platform // "-"' <<<"$row")
+            dedup=$(jq -r .dedup_key <<<"$row")
+            created=$(jq -r .created_at <<<"$row")
+            title="[alert] ${dedup}"
+
+            {
+              echo "**${sev}** | kind: \`${kind}\` | platform: \`${platform}\` | raised: ${created} | alert_event id: ${id}"
+              echo
+              echo '```json'
+              jq .detail <<<"$row"
+              echo '```'
+              echo
+              echo "_Auto-filed by alert-dispatch.yml. This issue auto-closes when the alert resolves in alert_event (detector self-heal or mon_resolve_key). Do not rename the title — it is the dedup identity. Closing by hand does not resolve the alert; a persisting condition will re-raise._"
+            } > body.md
+
+            existing=$(jq -r --arg t "$title" '.[] | select(.title == $t) | .number' open_issues.json | head -1)
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --repo "$REPO" --body-file body.md
+              echo "commented #${existing} for ${dedup}"
+            else
+              gh issue create --repo "$REPO" --title "$title" --label ezhalah-alert --label "$sev" --body-file body.md
+              echo "created issue for ${dedup}"
+            fi
+
+            # Stamp ONLY after gh succeeded (set -e aborts before reaching here on failure).
+            curl -sf -X PATCH "$SUPABASE_URL/rest/v1/alert_event?id=eq.${id}&dispatched_at=is.null" \
+              -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+              -H "Content-Type: application/json" -H "Prefer: return=minimal" \
+              -d "{\"dispatched_at\":\"$(date -u +%FT%TZ)\"}"
+          done
+
+      - name: Close issues whose alerts resolved
+        run: |
+          set -euo pipefail
+          gh issue list --repo "$REPO" --label ezhalah-alert --state open --limit 200 --json number,title \
+            | jq -c '.[]' | while read -r issue; do
+            num=$(jq -r .number <<<"$issue")
+            dedup=$(jq -r '.title | sub("^\\[alert\\] "; "")' <<<"$issue")
+            enc=$(jq -rn --arg s "$dedup" '$s|@uri')
+            unresolved=$(curl -sf "$SUPABASE_URL/rest/v1/alert_event?select=id&dedup_key=eq.${enc}&resolved_at=is.null&limit=1" \
+              -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | jq length)
+            if [ "$unresolved" -eq 0 ]; then
+              gh issue close "$num" --repo "$REPO" --comment "Resolved in alert_event: no unresolved rows remain for this dedup_key."
+              echo "closed #${num} (${dedup})"
+            fi
+          done
