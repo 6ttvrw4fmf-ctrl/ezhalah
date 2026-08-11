@@ -1,15 +1,17 @@
-# ENGINEER ROUTINES — THE THREE DAILY ENGINEERS (canonical, owner-locked 2026-08-11)
+# ENGINEER ROUTINES — THE FOUR DAILY ENGINEERS (canonical, owner-locked 2026-08-11)
 
-> Owner rule: there are **exactly THREE separate cloud routines, all DAILY**. They are never
-> merged, renamed into each other, or scope-swapped. Converting one into another (which happened
-> once on 2026-08-10 and was reverted) is a violation, not a refactor. If a routine's live prompt
-> ever diverges from what this file describes, restore the routine to match this file.
+> Owner rule: there are **exactly FOUR separate cloud routines, all DAILY** (the fourth added by
+> the owner 2026-08-11). They are never merged, renamed into each other, or scope-swapped.
+> Converting one into another (which happened once on 2026-08-10 and was reverted) is a violation,
+> not a refactor. If a routine's live prompt ever diverges from what this file describes, restore
+> the routine to match this file.
 
 | # | Engineer | Trigger ID | Daily time (UTC) | Model | Scope |
 |---|---|---|---|---|---|
 | 1 | ⚡ Daily JUNIOR SCRAPING Engineer | `trig_01NpFaJ1ALUZbZKdKpCdWF16` | 05:00 | claude-sonnet-5 | Daily scraping layer ONLY |
 | 2 | 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit | `trig_01RCVx7ie1T1i5oPC6KzZAKd` | 06:00 | claude-opus-5 | Broad production engineering, **including Advanced Filter + AI Agent** |
 | 3 | 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) | `trig_01Tr6Rb6XPggFXqCf3EKG62y` | 07:00 | claude-opus-5 | Full scraped inventory / Normal Filter ONLY, **Advanced Filter explicitly out of scope** |
+| 4 | 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA | `trig_016eagxsMuB2cCbMe9DK7JJD` | 08:00 | claude-opus-5 | Live production Normal Filter USED AS A REAL USER: matching → diversity → «عرض المزيد» → card click-through, end to end |
 
 Schedules are deliberately **staggered one hour apart** so the heavy DB phases never launch
 simultaneously (2026-08-10 outage lesson: concurrent heavy jobs + cron stampede took the DB down).
@@ -47,6 +49,23 @@ divergence). 17-section owner spec: source-is-truth, everything-scraped accounte
 search proof via the production RPC, daily inactive-resurrection audit (target 0 false
 inactivations), price/area barriers, one-report-only autonomous loop, the 10/10 honesty rule.
 **Ignore Advanced Filter** — that belongs to the senior (routine #2).
+
+## 4. 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA Engineer (new, 2026-08-11)
+
+Canonical spec: **`docs/ops/SEARCH_MATCH_QA_ENGINEER.md`** (file wins over the live prompt on any
+divergence). 39-section owner spec: drive the LIVE production filter like a real user (Arabic
+controls, no stale hardcoded lists — enumerate live options each run), verify MATCHING first
+(every returned card satisfies every selection against the structured backend), diversity second
+(never manufactured), «عرض المزيد» batches stay correct, card click-through reaches THE SAME
+listing, honest-zero vs search-bug classification against the DB, golden searches + randomized
+exploration with a persistent coverage ledger (`ops_qa_coverage_ledger`), state persistence /
+duplicates / boundaries / performance / mobile RTL, autonomous fix→barrier→deploy→production-retest
+loop with the hard safety rails (§36 never modify data to pass a test, §37 root cause not the
+example, §38 deploy safety overrides autonomy). One report at the end, 10/10 only after remediation.
+
+Distinct from #3: the Data Integrity engineer verifies the INVENTORY (scrape → canonical → index),
+this engineer verifies the USER EXPERIENCE (filter → results → cards → source click-through).
+They meet at the Normal Filter from opposite sides; neither replaces the other.
 
 ## Boundary rules (permanent)
 
