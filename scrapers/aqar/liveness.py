@@ -204,6 +204,15 @@ def price_from_body(body: str) -> Optional[int]:
     Returns None when the page publishes no price (closed ad, «طلب تسويق», or a render we don't
     recognise) — and the caller then leaves the stored value ALONE rather than nulling it, so a
     single odd render can never wipe a good price.
+
+    CAVEAT (2026-08-11, still open): `_LD_PRICE_RE` is a bare `"price":N` search over the whole
+    body, not scoped to the JSON-LD `<script type="application/ld+json">` block or a specific
+    Offer — so it returns whichever `"price"` key appears FIRST in the page, same failure shape
+    as the SQL-side `aqar_parse()` "first currency-marked number wins" bug this refresh was meant
+    to help fix. `is_price_refresh_artifact()` below is a stopgap that catches the two classes
+    already proven live (see its docstring); it does not prove the regex itself is correctly
+    scoped, which needs a live page fetch this environment could not make (aqar returned 403 to a
+    direct fetch attempt) to confirm.
     """
     m = _LD_PRICE_RE.search(body)
     if not m:
@@ -213,6 +222,34 @@ def price_from_body(body: str) -> Optional[int]:
     except (TypeError, ValueError):
         return None
     return v if v > 0 else None
+
+
+def is_price_refresh_artifact(new_price: int, area_m2, price_per_meter) -> bool:
+    """True when `new_price` matches the two proven-live price-refresh artifact classes and
+    should be REJECTED rather than written.
+
+    Evidence (P1 alerts `aqar_ppm_as_total` + `price_eq_area_or_ppm`, 2026-08-11): the liveness
+    price refresh (owner-approved 2026-08-04, above) re-corrupted 5 already-repaired rows
+    (7026223, 7032586, 1015536, 1017694, 1019212) during the 01:00 UTC sweep on 2026-08-11 —
+    `scrape_runs` shows `price_updated` writes from exactly that sweep window landing on ids the
+    SQL-side `aqar_parse()` guard (migrations 20260810122200 / 20260810202219) had already fixed.
+    Root cause: `price_from_body()` takes the first `"price":N` in the page regardless of what it
+    labels (a per-meter rate chip or a financing-teaser figure can precede the real total), the
+    exact same "first number wins" shape as the already-documented SQL bug.
+
+    This mirrors `mon_detect_price_eq_area_or_ppm()`'s exact predicate (price == area or price ==
+    price_per_meter) applied to the value THIS refresh is about to write, so a corrupt refresh is
+    rejected before it reaches the table instead of being caught by the detector after the fact.
+    Not a full fix (see the CAVEAT on `price_from_body`) — a source-real coincidence (e.g. id
+    132677, allowlisted in `ops_price_eq_area_verified`) would also be skipped here, which only
+    means that one row's refresh is deferred to the next sweep after a human/detector clears it,
+    never that a wrong price gets written.
+    """
+    if area_m2 is not None and new_price == area_m2:
+        return True
+    if price_per_meter is not None and new_price == price_per_meter:
+        return True
+    return False
 
 
 def looks_dead(status: int, body: str) -> bool:
@@ -287,6 +324,7 @@ def main() -> None:
     alive_ids: list[int] = []  # batched "still alive" ids → one UPDATE per 200 (see flush below)
     price_updated = 0   # prices re-read from the page we already fetched (owner-approved 2026-08-04)
     price_capped = 0    # changes seen past PRICE_REFRESH_CAP — next sweep picks them up
+    price_artifact_rejected = 0  # refresh matched a proven artifact class (P1 2026-08-11) — skipped
     # aqar only: aqar's JSON-LD offers.price is the published sale price. wasalt rows are swept by
     # this same script but their price comes from the wasalt API payload, so JSON-LD is not their
     # source of truth and must not overwrite it.
@@ -305,7 +343,8 @@ def main() -> None:
         while window is not None:
             q = (
                 client.table(table)
-                .select("id, ad_number, listing_url, missing_count, transaction_type, price_total")
+                .select("id, ad_number, listing_url, missing_count, transaction_type, price_total,"
+                        " area_m2, price_per_meter")
                 .eq("active", True)
                 .gt("id", last_id)
                 .order("id", desc=False)
@@ -359,6 +398,14 @@ def main() -> None:
                     if price_refresh_on and (row.get("transaction_type") == "Buy"):
                         new_price = price_from_body(body)
                         old_price = row.get("price_total")
+                        if (new_price is not None
+                                and is_price_refresh_artifact(new_price, row.get("area_m2"),
+                                                               row.get("price_per_meter"))):
+                            # Proven-live artifact class (P1 2026-08-11, see is_price_refresh_
+                            # artifact docstring) — reject the write, keep the old value, count it
+                            # so a spike is visible in scrape_runs.notes.
+                            price_artifact_rejected += 1
+                            new_price = None
                         if new_price and old_price is not None and int(old_price) != new_price:
                             if price_updated < PRICE_REFRESH_CAP:
                                 _run_with_retry(lambda i=row["id"], p=new_price:
@@ -404,7 +451,8 @@ def main() -> None:
     notes = (
         f"refreshed={refreshed} killed={killed} "
         f"pending_kill={pending_kill} transient={transient} "
-        f"price_updated={price_updated} price_capped={price_capped}"
+        f"price_updated={price_updated} price_capped={price_capped} "
+        f"price_artifact_rejected={price_artifact_rejected}"
     )
     print(f"\n✓ Liveness sweep done. scanned={seen} {notes}")
     end_run(run_id, ok=True, rows_seen=seen, rows_upserted=killed, notes=notes)
