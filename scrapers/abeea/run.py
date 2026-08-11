@@ -554,8 +554,13 @@ def map_listing(body: str, url: str,
         low = price_text.lower()
         if "monthly" in low:
             rent_period = "monthly"
-        else:
-            rent_period = "annual"  # site shows yearly rents
+        elif "/yearly" in low:
+            rent_period = "annual"
+        # No suffix → UNKNOWN, never a default (2026-08-11 audit: 2 dual «For Rent, For Sale»
+        # pages print a bare figure with no period wording anywhere, yet stored سنوي).
+    # A dual «For Rent, For Sale» page prints ONE unsuffixed figure — the source never says which
+    # deal it prices (likely the sale), so it must not be stored as the rent (ABRE210211/ABRE195).
+    dual_unsuffixed_rent = is_rent and rent_period is None and "for sale" in status
     # sanity: drop absurd/zero prices
     if price is not None and price < 100:
         price = None
@@ -661,7 +666,7 @@ def map_listing(body: str, url: str,
         "bathrooms": baths,
         "halls": halls,
         "price_total": price if not is_rent else None,
-        "price_annual": price if is_rent else None,
+        "price_annual": None if dual_unsuffixed_rent else (price if is_rent else None),
         "price_per_meter": ppm,
         "rent_period": rent_period,
         "city": city,

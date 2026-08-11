@@ -374,6 +374,14 @@ def map_listing(adid: int, body: str) -> tuple[Optional[dict], str]:
 
     title = _redact(title_raw) or title_raw
 
+    # ── rent period: ONLY a token the source itself prints (title/description/السعر cell) ──
+    # alkhaas's spec table publishes a bare price with no period anywhere, so this is normally
+    # UNKNOWN — never the manufactured سنوي default it used to be (2026-08-11 audit, 24 rows).
+    rent_period = price_annual = None
+    if is_rent:
+        rent_period, price_annual = normalize.rent_period_and_annual(
+            headline, f"{own_text}\n{f.get('السعر') or ''}")
+
     # District from the ad TITLE (2026-07-27 audit, extended 2026-08-04): alkhaas.net's spec table
     # has NO الحي row — the district exists ONLY as free text in the title («للبيع فيلا بحي
     # المحمدية», live-verified on /ads/1000 and /ads/1004; 174/209 titles carry a «بحي X» phrase,
@@ -403,9 +411,9 @@ def map_listing(adid: int, body: str) -> tuple[Optional[dict], str]:
         "bedrooms": bedrooms,
         "bathrooms": baths,
         "price_total": headline if not is_rent else None,
-        "price_annual": headline if is_rent else None,
+        "price_annual": price_annual,
         "price_per_meter": ppm,
-        "rent_period": "annual" if is_rent else None,
+        "rent_period": rent_period,
         "city": city,
         "region": region,
         "neighborhood": neighborhood,

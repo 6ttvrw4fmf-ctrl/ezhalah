@@ -169,10 +169,11 @@ def _price_round(v: Any) -> Optional[int]:
         return _int(v)
 
 
-def is_monthly_rental(body: str, unit: str, price: Optional[int]) -> bool:
+def is_monthly_rental(body: str, unit: str, price: Optional[int], title: str = "") -> bool:
     """True iff this rent ad's rent_period is genuinely MONTHLY (short-term / month-to-month), false
     for an ANNUAL lease (incl. one paid in monthly installments). `price` = offers.get("price") from
-    the JSON-LD, `unit` = priceSpecification.unitText.upper(), `body` = the page's plain-text body.
+    the JSON-LD, `unit` = priceSpecification.unitText.upper(), `body` = the page's plain-text body,
+    `title` = the JSON-LD name (gates the keyword fallback on sale/handover ads — see below).
 
     aqarcity's structured unitText is unreliably "YEAR" even for true monthly rentals, so we also
     check for شهري/شهرياً/بالشهر in the PAGE BODY (where the lister's "1,700 شهرياً" text lives — the
@@ -202,6 +203,14 @@ def is_monthly_rental(body: str, unit: str, price: Optional[int]) -> bool:
         for g in pair if g
     ) if n))
     keyword_monthly = bool(re.search(r"شهري|بالشهر|في\s*الشهر|/\s*شهر", body))
+    # 2026-08-11 audit (aqarcity 29362 / listing 593563): a sale/business-handover ad — title
+    # leading with «للبيع» or «تقبيل» — whose multi-number body mentions شهري in prose (the shop's
+    # remaining lease terms) must never be keyword-classified as monthly RENT: its one structured
+    # price is the one-time sale figure, and the ×12 path manufactured 24,000,000/yr from a
+    # 2,000,000 handover price. Kills the KEYWORD FALLBACK only — unitText=MONTH above and the
+    # numeric disambiguation below still decide first.
+    if keyword_monthly and re.match(r"[\W\d_]*(?:للبيع|تقبيل)", title or ""):
+        keyword_monthly = False
     if len(body_nums) != 1 or not price:
         return keyword_monthly  # ambiguous (0 or >1 candidates) — unchanged fallback
     n = body_nums[0]
@@ -484,7 +493,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     price = _price_round(offers.get("price"))
     rent_period = None
     if is_rent:
-        rent_period = "monthly" if is_monthly_rental(body, unit, price) else "annual"
+        rent_period = "monthly" if is_monthly_rental(body, unit, price, title_raw) else "annual"
     area = _float(pi.get("مساحة العقار"))
     # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
     price_per_meter = None

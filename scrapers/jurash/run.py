@@ -392,7 +392,9 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
         "price_total": price if not is_rent else None,
         "price_annual": price if is_rent else None,
         "price_per_meter": price_per_meter,
-        "rent_period": "annual" if is_rent else None,
+        # jurash publishes NO rental period (bare pt_price in the print_r dump; zero period words
+        # on the live page) — a period label would be manufactured (2026-08-11 audit, JR80). UNKNOWN.
+        "rent_period": None,
         "city": city,
         "region": region,
         "neighborhood": district,

@@ -318,13 +318,17 @@ def _photos(estate: dict) -> list[str]:
     return out[:25]
 
 
-def _rent_period(subtype: Optional[str]) -> str:
+def _rent_period(subtype: Optional[str]) -> Optional[str]:
     s = (subtype or "").strip()
     if "يوم" in s:
         return "daily"
     if "شهر" in s:
         return "monthly"
-    return "annual"
+    if ("سنو" in s or "سنة" in s) and "نصف" not in s and "ربع" not in s:
+        return "annual"
+    # Empty (e.g. a failed detail fetch) or unrecognized subtype → UNKNOWN, never an 'annual'
+    # default (2026-08-11 audit: the else-branch would manufacture سنوي the source never stated).
+    return None
 
 
 def _video(estate: dict) -> Optional[str]:

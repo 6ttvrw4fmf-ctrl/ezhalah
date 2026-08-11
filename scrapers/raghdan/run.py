@@ -497,11 +497,15 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     # ── price ──
     raw_price = _int(offers.get("price"))
     price_total = price_annual = price_per_meter = None
+    # rent_period stays None: raghdan publishes NO rental period anywhere — the JSON-LD offers
+    # block carries price only and the page prints a bare figure («٩٥ ألف»), so any period label
+    # would be manufactured (2026-08-11 audit: 127 rent rows carried a hardcoded سنوي the source
+    # never stated). The file-header note that offers.price is annual is a one-time engineering
+    # assertion about Firestore docs this scraper does not read — not a per-listing source signal.
     rent_period = None
     if raw_price:
         if is_rent:
             price_annual = raw_price
-            rent_period = "annual"
         elif property_type in LAND_TYPES:
             # Buy + land: offers.price is the PER-METER rate. Store it as the rate and leave
             # price_total NULL — the source did not print a total here (see PRICE SEMANTICS above).

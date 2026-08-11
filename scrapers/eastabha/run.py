@@ -382,6 +382,14 @@ def parse_detail(html_text: str) -> dict[str, Any]:
         elif out.get("price"):
             out["price_per_meter"] = out["price"]         # shape B: the displayed figure is the rate
             out["price_is_rate"] = True                   # …so there is no total to store
+    # The SAME price label carries the rental-period qualifier when the source states one
+    # («سنويا 35,000 ريال» / «2500 شهري قابل للتفاوض») — 2026-08-11 audit: this text was already
+    # parsed for «للمتر» but the period token was discarded and every taxonomy-detected rent row
+    # then defaulted to 'annual' (12 live rows said شهري). Absent → no key (UNKNOWN).
+    ptm = re.search(r"(نصف\s*سنوي|ربع\s*سنوي|شهري|سنوي|يومي)", re.sub(r"<[^>]+>", " ", disp))
+    if ptm:
+        out["price_period"] = {"شهري": "monthly", "سنوي": "annual", "يومي": "daily"}.get(
+            re.sub(r"\s+", " ", ptm.group(1)))  # نصف/ربع سنوي → None: no annual bucket
     # geo
     g = re.search(r'data-cur_lat="([\d.\-]+)"\s+data-cur_long="([\d.\-]+)"', html_text)
     if g and g.group(1) not in ("", "0"):
@@ -516,6 +524,29 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     # against GONE_STATUS_AR only; any other/unknown status (incl. "مزاد …") stays active.
     gone = (status_ar or "").strip() in GONE_STATUS_AR
 
+    # ── rent period: the SOURCE's own signal only — never a default (2026-08-11 audit: every
+    # taxonomy-detected rent row was hardcoded 'annual' while the page's own price label said
+    # «شهري» on 12 live rows, e.g. EA33902 «2500 شهري» stored as annual 2,500). Signals, in
+    # order: the price-label qualifier parse_detail reads, an explicit «الإيجار الشهري/السنوي»
+    # statement in the page's own text, then the existing no-taxonomy title fallback.
+    rent_period = None
+    if is_rent:
+        rent_period = detail.get("price_period")
+        if rent_period is None:
+            sm = re.search(r"(?:الإيجار|الايجار)\s+ال?(شهري|سنوي)", f"{title or ''} {description or ''}")
+            if sm:
+                rent_period = "monthly" if sm.group(1) == "شهري" else "annual"
+        if rent_period is None and title_rent_monthly:
+            rent_period = "monthly"
+    price_annual = None
+    if is_rent and price and not detail.get("price_is_rate"):
+        if rent_period == "monthly":
+            price_annual = normalize.annualize_rent(price, "monthly")  # standard ×12 storage
+        elif rent_period == "daily":
+            price_annual = None  # a daily rate: the annual container cannot hold it faithfully
+        else:
+            price_annual = price  # annual — or period-unknown, price stays the source's figure
+
     amenity_cols: dict[str, bool] = {}
     for fa in features_ar:
         col = FEATURE_COL.get(fa)
@@ -553,10 +584,9 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
         "property_age": age,
         # A displayed figure that is a per-metre RATE (shape B above) is neither a total nor a rent.
         "price_total": None if (is_rent or detail.get("price_is_rate")) else price,
-        "price_annual": None if (not is_rent or detail.get("price_is_rate")) else (
-            normalize.annualize_rent(price, "monthly") if (title_rent_monthly and price) else price),
+        "price_annual": price_annual,
         "price_per_meter": ppm,
-        "rent_period": ("monthly" if title_rent_monthly else "annual") if is_rent else None,
+        "rent_period": rent_period if rent_period in ("annual", "monthly") else None,
         "city": city,
         "region": region,
         "neighborhood": district_ar,

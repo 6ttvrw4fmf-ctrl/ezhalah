@@ -464,7 +464,10 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
         "price_total": price if not is_rent else None,
         "price_annual": price if is_rent else None,
         "price_per_meter": ppm,
-        "rent_period": ("annual" if is_rent else None),
+        # mizlaj publishes NO rental period anywhere — not in the Inertia listing JSON, the embedded
+        # REGA payload (landTotalAnnualRent null), or the rendered UI — so a period label would be
+        # manufactured (2026-08-11 audit, 7 rows). UNKNOWN until mizlaj adds a source field.
+        "rent_period": None,
         "city": city,
         "region": region,
         "neighborhood": district_ar or None,

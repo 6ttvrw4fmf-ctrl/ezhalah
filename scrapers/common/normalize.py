@@ -482,6 +482,34 @@ def annualize_rent(price: Optional[int], period: Optional[str]) -> Optional[int]
     return price
 
 
+# Longest tokens FIRST — «نصف سنوي» / «ربع سنوي» must never substring-match as سنوي (the souq24
+# semi-annual defect, 2026-08-11 rent-period audit).
+_RENT_PERIOD_TOKEN_RE = re.compile(r"(نصف\s*سنوي|ربع\s*سنوي|شهري|سنوي|يومي|أسبوعي)")
+
+
+def rent_period_and_annual(price: Optional[int], text: Optional[str]) -> tuple[Optional[str], Optional[int]]:
+    """(rent_period, price_annual) for a RENT row, from the source text's OWN period token.
+
+    2026-08-11 audit: 11 scrapers hardcoded rent_period='annual' for every rent row, manufacturing
+    سنوي on ~187 rows whose source states no period. The period must come only from the source:
+      سنوي/سنوياً  → 'annual', price verbatim
+      شهري/شهرياً  → 'monthly', price ×12 (the standard storage conversion — price_annual is divided
+                     by 12 for display, so the shown figure still equals the source's exactly)
+      يومي/أسبوعي/نصف سنوي/ربع سنوي → (None, None): this schema has no bucket for them, and
+                     inventing an annual figure (×365/×52/×2/×4) would be derivation
+      no token     → (None, price): period UNKNOWN — never a default; the price stays as published.
+    """
+    m = _RENT_PERIOD_TOKEN_RE.search(text or "")
+    if not m:
+        return None, price
+    tok = re.sub(r"\s+", " ", m.group(1))
+    if tok == "سنوي":
+        return "annual", price
+    if tok == "شهري":
+        return "monthly", annualize_rent(price, "monthly")
+    return None, None
+
+
 # ── Property age: the SHARED Saudi Arabic age vocabulary ──────────────────────────────────────────
 # WHY THIS EXISTS (2026-07-17): every scraper parsed «عمر العقار» with an int-only regex of the shape
 # `عمر\s*العقار[\s:]*?(\d+)`. That regex can only ever match a LATIN DIGIT, so the three non-numeric

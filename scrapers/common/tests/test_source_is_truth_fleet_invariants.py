@@ -161,10 +161,13 @@ def test_no_writer_derives_a_total_from_area_and_per_metre_rate():
 # STATUS 2026-08-09: still unverified against their sources. souq24 was on this list and was PROVEN
 # wrong; aqar came OFF it after its structured `rent_period` enum was verified live (2 = monthly,
 # 3 = annual). Treat the remainder as suspect, not settled.
+#
+# STATUS 2026-08-11: the rent-period audit verified the suspicion — alkhaas/sadin/hajer/mizlaj/
+# ramzalqasim/jurash/fursaghyr publish NO period at all (their defaults manufactured سنوي on ~48
+# rows and are now token-gated or None), erapulse now reads its structured rentPeriod, and
+# alhoshan moved to PERIOD_FROM_SOURCE_SIGNAL. None of them may be re-added.
 PERIOD_DEFAULT_ALLOWLIST = {
-    "alhoshan", "alkhaas", "alnokhba", "awal", "deal", "erapulse", "hajer",
-    "fursaghyr", "jazwtn", "jurash", "mizlaj", "nowaisiry", "sadin",
-    "ramzalqasim", "toor",
+    "alnokhba", "awal", "deal", "jazwtn", "nowaisiry", "toor",
 }
 SINGLE_PERIOD_PLATFORMS = {"gathern", "aqarmonthly"}   # short-stay marketplaces, one period by design
 
@@ -180,6 +183,8 @@ _HARDCODED_PERIOD_RE = re.compile(
 # swap its source read for a default and stay on this list.
 PERIOD_FROM_SOURCE_SIGNAL = {
     "aqarcity": "is_monthly_rental(",   # reads the page body and disambiguates numerically
+    "eastabha": "price_period",         # the price label's own سنوي/شهري qualifier (2026-08-11)
+    "alhoshan": "rentlong",             # priced rentLong = the site's 12-month-instalment contract
 }
 
 

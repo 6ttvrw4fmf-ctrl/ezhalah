@@ -201,6 +201,15 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     rate_only = "للمتر" in raw_price
     price_per_meter = price if rate_only else None
 
+    # ── rent period: ONLY a token in the REM field table itself (السعر value / any field) ──
+    # hajer's REM table has no rental-period field and the price cell carries no period word, so
+    # this is normally UNKNOWN — never the manufactured سنوي default it used to be (2026-08-11
+    # audit, 5 rows whose full source_capture holds zero period tokens).
+    rent_period = price_annual = None
+    if is_rent:
+        rent_period, price_annual = normalize.rent_period_and_annual(
+            None if rate_only else price, " ".join(str(v) for v in f.values()))
+
     extra = []
     for label, key in (("واجهة العقار", "Facade"), ("عمر العقار", "Age"),
                        ("عرض الشارع", "Street width"), ("خدمات الحي", "Property services")):
@@ -220,9 +229,9 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         "bathrooms": _num(f.get("عدد دورات المياه")),
         # A per-metre rate is never a total and never an annual rent — see `rate_only` above.
         "price_total": None if (is_rent or rate_only) else price,
-        "price_annual": None if (not is_rent or rate_only) else price,
+        "price_annual": price_annual,
         "price_per_meter": price_per_meter,
-        "rent_period": "annual" if is_rent else None,
+        "rent_period": rent_period,
         "city": city,
         "region": region,
         "neighborhood": f.get("أسم الحي") or None,

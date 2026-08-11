@@ -292,9 +292,11 @@ def test_contract_aldarim_rent_annualization_both_shapes(monkeypatch):
     row, _ = A.map_listing({**base, "rent_price_annually": 45000, "rent_price_monthly": 3000})
     assert row["price_annual"] == 45000 and row["rent_period"] == "annual"
 
-    # neither → honest None, historical 'annual' tag for rent rows preserved.
+    # neither → honest None for BOTH (2026-08-11 rent-period audit: the historical 'annual' tag on
+    # a field-less row was a manufactured period — 3 live rows stored سنوي with no price and no
+    # period anywhere at the source, e.g. ALD25714).
     row, _ = A.map_listing(dict(base))
-    assert row["price_annual"] is None and row["rent_period"] == "annual"
+    assert row["price_annual"] is None and row["rent_period"] is None
 
     # Buy listing: rent fields stay None exactly as before.
     row, _ = A.map_listing({**base, "purpose": "sell", "selling_price": 900000,

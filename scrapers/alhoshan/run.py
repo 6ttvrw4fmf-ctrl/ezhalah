@@ -193,6 +193,13 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
     is_rent = purpose.startswith("rent")
     price = p.get("currentPrice") or p.get("price") or p.get("basePrice")
 
+    # ── rent period (2026-08-11 audit): Al Hoshan publishes no period field, but the SITE ITSELF
+    # defines a priced rentLong amount as covering 12 months — its pages caption the figure with
+    # «يمكن تقسيط مبلغ الإيجار على 12 شهر» and render exactly price÷12 as «… / شهرياً» — so that
+    # amount is source-backed ANNUAL. rentShort is daily-class (no annual bucket), and a zero/
+    # absent price states no period at all (AH1024 stored سنوي with NULL price): both UNKNOWN.
+    rent_period = "annual" if (purpose == "rentlong" and _int(price)) else None
+
     # RNPL: NOT CAPTURED, on purpose (2026-08-09, owner's source-is-truth rule).
     #
     # This used to read `monthly_inst = round(price / 12)` and then set BOTH
@@ -248,7 +255,7 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "bathrooms": _int(specs.get("bathrooms")),
         "price_total": _int(price) if not is_rent else None,
         "price_annual": _int(price) if is_rent else None,
-        "rent_period": "annual" if is_rent else None,
+        "rent_period": rent_period,
         # Both UNKNOWN: Al Hoshan's API publishes no per-listing RNPL field (see above).
         "rent_now_pay_later": None,
         "rent_now_pay_later_monthly": monthly_inst,
