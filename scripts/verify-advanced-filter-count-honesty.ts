@@ -86,8 +86,11 @@ check('eligibleQuestions still applies each question\'s own eligibility() gate',
   /return ADVANCED_QUESTIONS\.filter\(\(question\) => question\.eligibility\(q\)\);/.test(adv));
 check('the offer gate (anyGuidedEligible) routes through eligibleQuestions',
   /function anyGuidedEligible\(q: SearchQuery\): boolean \{\s*return eligibleQuestions\(q\)\.length > 0;/.test(agent));
-check('the flow planner (startAgeFlow) routes through eligibleQuestions',
-  agent.includes('const eligible = eligibleQuestions(q);'));
+// 2026-08-11 contextual rework: startAgeFlow routes through rankQuestions(), whose first line is
+// eligibleQuestions() — the client-only-narrowing gate is preserved one layer down. Pin both halves.
+check('the flow planner (startAgeFlow) routes through rankQuestions -> eligibleQuestions',
+  agent.includes('const ranked = await rankQuestions(q, ageFlowAskedRef.current);')
+  && adv.includes('const pool = eligibleQuestions(q).filter'));
 check('NO call site re-derives eligibility by filtering ADVANCED_QUESTIONS itself (contract: gates live in the engine)',
   !/ADVANCED_QUESTIONS\s*\.?\s*(filter|some)\(\((question|c)\) => \1\.eligibility/.test(agent));
 check('hasClientOnlyNarrowing still guards the exact count headline too (its original job)',

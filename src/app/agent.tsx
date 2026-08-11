@@ -42,7 +42,7 @@ import { useApp } from '@/store';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 import AdvancedQuestionCard, { AdvancedQuestionLoading } from '@/components/AdvancedQuestionCard';
-import { ADVANCED_QUESTIONS, eligibleQuestions, minOptionsFor, liveResultCount, type AdvancedOption, type AdvancedQuestion } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type RankedQuestion } from '@/data/advancedFilters';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
 // below a results block — NEVER before first results — and ONLY for a strict single-type Residential
@@ -461,6 +461,9 @@ export default function Agent() {
   const ageFlowChangedRef = useRef(false);
   const ageFlowLabelsRef = useRef<string[]>([]);
   const ageFlowPlanRef = useRef<Array<{ question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number }>>([]);
+  // Questions already answered OR skipped this session — never re-asked (owner 2026-08-11). The
+  // plan is RE-RANKED against the narrowed set after every answer, so ask-order is contextual.
+  const ageFlowAskedRef = useRef<Set<string>>(new Set());
   const revealTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   // The results turn whose cards are still popping in one-by-one (id + total count), so a new user
   // message can instantly finish it and stop the drip. null once the reveal completes. (user request.)
@@ -868,20 +871,23 @@ export default function Agent() {
   // a planned question that drops below its option floor after narrowing is skipped. `progressCur/Total`
   // are 1-based over the PLAN (the questions that actually show). `token` supersedes a stale flow.
   const presentGuided = async (planIndex: number, token: number) => {
+    // CONTEXTUAL re-ranking (owner 2026-08-11): after any answer the remaining pool is re-probed and
+    // re-scored against the NARROWED set, so plan[0] is always the most useful next question for the
+    // listings the user actually has left — and the flow stops by itself the moment the set drops to
+    // ≤ INTERVIEW_STOP_AT (rankQuestions returns nothing below the floor). planIndex survives only as
+    // the answered-so-far count for the subtle progress bar.
+    if (ageFlowChangedRef.current || ageFlowAskedRef.current.size) {
+      const q = ageFlowQueryRef.current;
+      if (!q || ageFlowTokenRef.current !== token) return;
+      const ranked = await rankQuestions(q, ageFlowAskedRef.current);
+      if (ageFlowTokenRef.current !== token) return;
+      ageFlowPlanRef.current = ranked.map((r: RankedQuestion) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount }));
+    }
     const plan = ageFlowPlanRef.current;
-    for (let i = planIndex; i < plan.length; i++) {
-      const question = plan[i].question;
-      let options = plan[i].options;
-      let unknownCount = plan[i].unknownCount;
-      if (ageFlowChangedRef.current) {
-        const q = ageFlowQueryRef.current;
-        if (!q || ageFlowTokenRef.current !== token) return;
-        const r = await question.resolveOptions(q);
-        if (ageFlowTokenRef.current !== token) return;
-        options = r.options; unknownCount = r.unknownCount;
-        if (options.length < minOptionsFor(question.selection)) continue; // narrowed out → skip
-      }
-      setAgeFlow({ phase: 'asking', planIndex: i, question, options, unknownCount, progressCur: i + 1, progressTotal: plan.length });
+    if (plan.length) {
+      const answered = ageFlowAskedRef.current.size;
+      const { question, options, unknownCount } = plan[0];
+      setAgeFlow({ phase: 'asking', planIndex, question, options, unknownCount, progressCur: answered + 1, progressTotal: answered + plan.length });
       return;
     }
     finishGuided(token);
@@ -908,11 +914,14 @@ export default function Agent() {
     ageFlowLabelsRef.current = [];
     ageFlowPlanRef.current = [];
     setAgeFlow({ phase: 'loading' });
-    const eligible = eligibleQuestions(q);
-    const probes = await Promise.all(eligible.map((question) => question.resolveOptions(q)));
+    ageFlowAskedRef.current = new Set();
+    // Rank the pool against the user's ACTUAL current result set (score = split × salience over the
+    // live counts). Below the >25 floor rankQuestions returns [], so the interview simply never
+    // opens on a small result set — the ≤25 rule and the entry gate are the same constant.
+    const ranked = await rankQuestions(q, ageFlowAskedRef.current);
     if (ageFlowTokenRef.current !== token) return; // superseded by a newer tap/turn
-    ageFlowPlanRef.current = eligible
-      .map((question, i) => ({ question, options: probes[i].options, unknownCount: probes[i].unknownCount }))
+    ageFlowPlanRef.current = ranked
+      .map((r) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount }))
       .filter((p) => p.options.length >= minOptionsFor(p.question.selection));
     if (!ageFlowPlanRef.current.length) { setAgeFlow(null); if (fallbackToRefine) startRefine(q); return; }
     void presentGuided(0, token);
@@ -930,11 +939,14 @@ export default function Agent() {
       ageFlowChangedRef.current = true;
       for (const k of keys) { const o = options.find((x) => x.key === k); if (o?.label) ageFlowLabelsRef.current.push(o.label); }
     }
+    ageFlowAskedRef.current.add(question.id);
     void presentGuided(planIndex + 1, ageFlowTokenRef.current);
   };
 
   // Skip THIS question → next; skip-all → finish now; X (close) → abandon the flow.
-  const onAgeSkip = () => { if (ageFlow?.phase === 'asking') void presentGuided(ageFlow.planIndex + 1, ageFlowTokenRef.current); };
+  // Skip = NO PREFERENCE (owner): nothing is filtered, no false is written, the question is just
+  // marked asked for this session so the re-ranker moves on to the next useful one.
+  const onAgeSkip = () => { if (ageFlow?.phase === 'asking') { ageFlowAskedRef.current.add(ageFlow.question.id); void presentGuided(ageFlow.planIndex + 1, ageFlowTokenRef.current); } };
   const onAgeSkipAll = () => finishGuided(ageFlowTokenRef.current);
   const onAgeClose = () => { ageFlowTokenRef.current++; setAgeFlow(null); };
 

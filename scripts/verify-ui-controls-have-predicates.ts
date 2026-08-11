@@ -125,8 +125,8 @@ for (const dead of ['Pool', 'Gym']) {
 const REG_URL = process.env.EZHALAH_SUPABASE_URL ?? 'https://aannarbkwcymrotzwdbo.supabase.co';
 const regKey = (await import('./lib/public-supabase.ts')).resolvePublicSupabase(process.env).key;
 try {
-  const registry: Array<{ canonical_key: string; ui_exposed: boolean; not_exposed_reason: string | null }> =
-    await fetch(`${REG_URL}/rest/v1/af_field_registry?select=canonical_key,ui_exposed,not_exposed_reason`,
+  const registry: Array<{ canonical_key: string; ui_exposed: boolean; not_exposed_reason: string | null; filter_tier?: string }> =
+    await fetch(`${REG_URL}/rest/v1/af_field_registry?select=canonical_key,ui_exposed,not_exposed_reason,filter_tier`,
       { headers: { apikey: regKey, Authorization: `Bearer ${regKey}` } }).then((r) => r.json());
 
   check('field registry is readable and populated', Array.isArray(registry) && registry.length > 0,
@@ -148,6 +148,30 @@ try {
 
     const noReason = registry.filter((f) => !f.ui_exposed && !f.not_exposed_reason).map((f) => f.canonical_key);
     check('every backend-only field records WHY it is hidden', noReason.length === 0, noReason.join(', '));
+
+    // ── 6. THE BOUNDARY RULE (owner 2026-08-11): the interview must NEVER auto-ask Normal-Filter
+    // territory. filter_tier is the boundary as DATA; every interview question id must map to an
+    // 'advanced'-tier registry field. Bedrooms is 'normal' — even when unset, the interview may not
+    // ask it; that belongs to the Filter form.
+    const tier = new Map(registry.map((f) => [f.canonical_key, f.filter_tier ?? 'backend']));
+    const INTERVIEW_FIELDS: Record<string, string[]> = {
+      property_age: ['property_age'],
+      rnpl: ['installment_available'],
+      bathrooms: ['bathrooms'],
+      furnished: ['furnished'],
+      amenities: ['kitchen', 'parking', 'elevator', 'air_conditioner', 'private_entrance', 'maid_room', 'driver_room', 'furnished'],
+    };
+    const advSrcTier = read('src/data/advancedFilters.ts');
+    for (const [qid, fields] of Object.entries(INTERVIEW_FIELDS)) {
+      check(`interview question '${qid}' exists in the pool`, new RegExp(`id: '${qid}'`).test(advSrcTier));
+      for (const fkey of fields) {
+        check(`interview field '${fkey}' (question '${qid}') is 'advanced' tier in the registry`,
+          tier.get(fkey) === 'advanced',
+          `filter_tier='${tier.get(fkey)}' — Normal-Filter territory must never be auto-asked (owner boundary rule 2026-08-11)`);
+      }
+    }
+    check("bedrooms stays 'normal' tier and appears in NO interview question",
+      tier.get('bedrooms') === 'normal' && !/bedrooms/.test(JSON.stringify(INTERVIEW_FIELDS)));
   }
 } catch (e) {
   check('field registry reachable for the backend-only check', false, String(e));

@@ -128,6 +128,10 @@ export type SearchQuery = {
   // (confirmed >= N; unknown-bathroom listings excluded — owner 2026-07-20). Both optional, OR-safe.
   amenities?: string[] | null;
   bathMin?: number | null;
+  // Furnished PREFERENCE from the interview's single-select (تفضلها مفروشة؟): true = confirmed
+  // furnished only, false = confirmed unfurnished only, null/undefined = no preference (Skip).
+  // Distinct from the 'furnished' amenity token (true-only). Maps to p_furnished on BOTH RPCs.
+  furnishedPref?: boolean | null;
 };
 
 // Parse a raw digit string ("1,200" / "300" / "") → a positive number, or null when empty/invalid.
