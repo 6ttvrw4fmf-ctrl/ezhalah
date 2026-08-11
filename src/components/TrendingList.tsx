@@ -21,27 +21,35 @@ export function TrendingHeader({ title }: { title: string }) {
 }
 
 export function TrendingRows({
-  items, onPress,
+  items, onPress, selectedLabels,
 }: {
   items: TrendingItem[];
   onPress: (item: TrendingItem, index: number) => void;
+  // District multi-select (owner 2026-08-10): rows whose label is in this set render selected —
+  // chip-green fill + a primary checkmark — and tapping again deselects (the parent toggles).
+  // Optional and label-keyed so the City field's single-select use is completely untouched.
+  selectedLabels?: ReadonlySet<string>;
 }) {
   return (
     <>
-      {items.map((item, i) => (
-        <Tappable
-          key={item.key}
-          dip={0.03}
-          style={[s.row, i < items.length - 1 && s.rowDivider]}
-          onPress={() => onPress(item, i)}
-        >
-          <Text style={s.rank}>{i + 1}.</Text>
-          <View style={{ flex: 1 }}>
-            <Text style={s.rowLabel}>{item.label}</Text>
-            {item.sublabel ? <Text style={s.rowSub}>{item.sublabel}</Text> : null}
-          </View>
-        </Tappable>
-      ))}
+      {items.map((item, i) => {
+        const sel = selectedLabels?.has(item.label) ?? false;
+        return (
+          <Tappable
+            key={item.key}
+            dip={0.03}
+            style={[s.row, i < items.length - 1 && s.rowDivider, sel && s.rowSelected]}
+            onPress={() => onPress(item, i)}
+          >
+            <Text style={s.rank}>{i + 1}.</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.rowLabel, sel && s.rowLabelSelected]}>{item.label}</Text>
+              {item.sublabel ? <Text style={s.rowSub}>{item.sublabel}</Text> : null}
+            </View>
+            {sel ? <Text style={s.selMark}>✓</Text> : null}
+          </Tappable>
+        );
+      })}
     </>
   );
 }
@@ -55,4 +63,8 @@ const s = StyleSheet.create({
   rank: { fontSize: 13, fontWeight: '700', color: colors.muted, width: 18 },
   rowLabel: { fontSize: 13.5, fontWeight: '600', color: colors.ink },
   rowSub: { fontSize: 11.5, color: colors.muted },
+  // Selected = the app's existing chip treatment (chipFill/chipLine), not a new visual language.
+  rowSelected: { backgroundColor: colors.chipFill },
+  rowLabelSelected: { color: colors.dark, fontWeight: '700' },
+  selMark: { fontSize: 14, fontWeight: '800', color: colors.primary },
 });

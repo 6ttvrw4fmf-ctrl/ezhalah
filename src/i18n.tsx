@@ -281,6 +281,9 @@ const AR: Record<string, string> = {
   // Guided interview (modal)
   'Any': 'أي',
   'Which neighborhood?': 'أي حي؟',
+  // District multi-select (owner copy, 2026-08-10)
+  'You can pick more than one neighborhood': 'تقدر تختار أكثر من حي',
+  '{n} neighborhoods': '{n} أحياء',
   'Rent or Buy?': 'إيجار أم شراء؟',
   'Price per m², total shown for a typical size. Or type any amount.':
     'سعر المتر المربع، مع الإجمالي لمساحة نموذجية. أو اكتب أي مبلغ.',
