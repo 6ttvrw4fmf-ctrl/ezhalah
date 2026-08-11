@@ -26,17 +26,24 @@
 //       hid the 2026-08-04 revert (senior audit run #5) and that migration 20260803194308 caused.
 import { readFileSync, readdirSync } from 'node:fs';
 
-const WORKFLOW = '.github/workflows/small-sources-sync.yml';
+const WORKFLOW = '.github/workflows/dealapp-sharded.yml';
+const SMALL_SOURCES = '.github/workflows/small-sources-sync.yml';
 const MIGRATIONS_DIR = 'supabase/migrations';
 
-// Measured on GitHub Actions run 31239278341 (2026-08-08), DEALAPP_WORKERS=3, no proxy.
-const MEASURED_LISTINGS_PER_MIN = 21.7;
+// WORST sustained throughput observed across the last 8 real dealapp runs (2026-08-07..08-11):
+// 8.3 / 9.5 / 15.5 / 16.2 / 31.5 rows-per-minute, plus two 0-row login-wall runs. The 2026-08-08
+// figure of 21.7/min was a single sample; sizing on the worst observed rate is what makes the
+// budget hold on a bad night rather than on an average one.
+const MEASURED_LISTINGS_PER_MIN = 8.3;
 // Fixed per-run cost that is NOT fetching detail pages: runner setup + dependency install +
 // sitemap enumeration + the final prune_unseen()/end_run() bookkeeping.
 const FIXED_OVERHEAD_MIN = 13;
 // The fetching phase must leave this much of the budget unused, so a slower-than-measured day
 // (throttle variance, a retry storm) still completes rather than being killed.
 const REQUIRED_HEADROOM_MIN = 15;
+// Active dealapp inventory the fleet must re-confirm every night (8,012 residential + 374
+// commercial, measured 2026-08-11). Sized with headroom for growth; re-measure if it moves a lot.
+const ACTIVE_INVENTORY = 8386;
 
 let failures = 0;
 const check = (name: string, cond: boolean) => {
@@ -47,60 +54,79 @@ const check = (name: string, cond: boolean) => {
 console.log('verify-dealapp-crawl-budget: the dealapp cap must fit its CI timeout, and a killed');
 console.log('  run must not be able to go unnoticed.');
 
-// ── (A) the cap fits the budget ────────────────────────────────────────────────────────────────
+// ── (A) the sharded fleet fits its budget, and dealapp runs in exactly ONE place ───────────────
 const wf = readFileSync(WORKFLOW, 'utf8');
 
-// Default job timeout: `timeout-minutes: ${{ matrix.tmo || 90 }}`
-const defaultTmoMatch = wf.match(/timeout-minutes:\s*\$\{\{\s*matrix\.tmo\s*\|\|\s*(\d+)\s*\}\}/);
-check('workflow declares a matrix-overridable timeout-minutes default', !!defaultTmoMatch);
-const defaultTmo = defaultTmoMatch ? Number(defaultTmoMatch[1]) : NaN;
+// dealapp must NOT also run in the small-sources matrix. Two crawls of the same catalogue would
+// double the load on an origin that already blocks under burst, and the unsharded run would
+// re-create the ~25%-coverage state that kept prune_unseen's coverage guard permanently tripped.
+const small = readFileSync(SMALL_SOURCES, 'utf8');
+check(
+  'dealapp does NOT also run in small-sources-sync.yml (no duplicate crawl of the same catalogue)',
+  !small.split('\n').some((l) => /^\s*-\s*\{\s*source:\s*dealapp\b/.test(l)),
+);
 
-// The dealapp matrix entry (a single `- { source: dealapp, ... }` line).
-const dealappLine = wf.split('\n').find((l) => /^\s*-\s*\{\s*source:\s*dealapp\b/.test(l));
-check('workflow has a dealapp matrix entry', !!dealappLine);
+const tmoMatch = wf.match(/timeout-minutes:\s*(\d+)/);
+check('sharded workflow declares an explicit timeout-minutes', !!tmoMatch);
+const tmo = tmoMatch ? Number(tmoMatch[1]) : NaN;
 
-if (dealappLine && Number.isFinite(defaultTmo)) {
-  const capMatch = dealappLine.match(/DEALAPP_MAX_LISTINGS=(\d+)/);
-  check('dealapp entry sets an explicit DEALAPP_MAX_LISTINGS cap (0/unset = uncapped full crawl)', !!capMatch);
+const shardsMatch = wf.match(/--shards\s+(\d+)/);
+check('the crawl command passes an explicit --shards count', !!shardsMatch);
 
-  const workersMatch = dealappLine.match(/DEALAPP_WORKERS=(\d+)/);
-  check('dealapp entry pins DEALAPP_WORKERS (throughput is only meaningful at a known worker count)', !!workersMatch);
+// The matrix must enumerate exactly shards 0..N-1 — a missing shard is a permanent coverage hole
+// that nothing else would report, and a duplicated one is wasted work against a throttled origin.
+const matrixMatch = wf.match(/shard:\s*\[([^\]]*)\]/);
+check('the matrix enumerates the shard list', !!matrixMatch);
 
-  // Per-source timeout override, e.g. `tmo: 150` (souq24 uses this).
-  const tmoMatch = dealappLine.match(/\btmo:\s*(\d+)/);
-  const tmo = tmoMatch ? Number(tmoMatch[1]) : defaultTmo;
+const capMatch = wf.match(/DEALAPP_MAX_LISTINGS:\s*"?(\d+)"?/);
+check('the workflow sets an explicit per-shard DEALAPP_MAX_LISTINGS cap', !!capMatch);
 
-  if (capMatch && workersMatch) {
-    const cap = Number(capMatch[1]);
-    const workers = Number(workersMatch[1]);
+const workersMatch = wf.match(/DEALAPP_WORKERS:\s*"?(\d+)"?/);
+check('the workflow pins DEALAPP_WORKERS (throughput is only meaningful at a known worker count)', !!workersMatch);
 
-    // Throughput was measured at 3 workers. More workers would be faster, but dealapp's
-    // login-wall throttle is exactly why the run is pinned to 3 — so treat >3 as unproven
-    // rather than silently assuming a linear speed-up.
-    check(
-      `dealapp runs at the measured worker count (WORKERS=${workers}; throughput was measured at 3 — re-measure before raising it)`,
-      workers <= 3,
-    );
+if (shardsMatch && matrixMatch && capMatch && workersMatch && Number.isFinite(tmo)) {
+  const shards = Number(shardsMatch[1]);
+  const listed = matrixMatch[1].split(',').map((x) => Number(x.trim())).filter((n) => Number.isFinite(n));
+  const expected = Array.from({ length: shards }, (_, i) => i);
+  check(
+    `the matrix runs every shard exactly once (0..${shards - 1}) — a missing shard is a silent coverage hole`,
+    listed.length === shards && expected.every((i) => listed.filter((x) => x === i).length === 1),
+  );
 
-    const fetchMin = cap / MEASURED_LISTINGS_PER_MIN;
-    const projectedMin = fetchMin + FIXED_OVERHEAD_MIN;
-    const headroom = tmo - projectedMin;
+  const workers = Number(workersMatch[1]);
+  check(
+    `dealapp runs at the measured worker count (WORKERS=${workers}; throughput was measured at 3 — re-measure before raising it)`,
+    workers <= 3,
+  );
 
-    console.log(
-      `    cap=${cap} @ ${MEASURED_LISTINGS_PER_MIN}/min = ${fetchMin.toFixed(1)}m fetch` +
-        ` + ${FIXED_OVERHEAD_MIN}m overhead = ${projectedMin.toFixed(1)}m against a ${tmo}m budget` +
-        ` (headroom ${headroom.toFixed(1)}m, need ≥${REQUIRED_HEADROOM_MIN}m)`,
-    );
+  // A shard must be able to re-confirm its whole slice of the ACTIVE inventory inside the budget —
+  // that is the entire point of sharding. Coverage below prune_unseen's 0.80 floor means the guard
+  // trips and nothing is ever aged out, which is the state this replaced.
+  const perShard = Math.ceil(ACTIVE_INVENTORY / shards);
+  const fetchMin = perShard / MEASURED_LISTINGS_PER_MIN;
+  const projectedMin = fetchMin + FIXED_OVERHEAD_MIN;
+  const headroom = tmo - projectedMin;
 
-    check(
-      `projected run time fits the ${tmo}m budget with ≥${REQUIRED_HEADROOM_MIN}m headroom` +
-        ' — raise `tmo` (or throughput) together with the cap, never the cap alone',
-      headroom >= REQUIRED_HEADROOM_MIN,
-    );
+  console.log(
+    `    ${ACTIVE_INVENTORY} active / ${shards} shards = ${perShard} rows/shard @ ${MEASURED_LISTINGS_PER_MIN}/min` +
+      ` = ${fetchMin.toFixed(1)}m + ${FIXED_OVERHEAD_MIN}m overhead = ${projectedMin.toFixed(1)}m` +
+      ` against a ${tmo}m budget (headroom ${headroom.toFixed(1)}m, need ≥${REQUIRED_HEADROOM_MIN}m)`,
+  );
 
-    // GitHub Actions hard-caps a job at 6h; a cap that needs more than that can never complete.
-    check('projected run time is under the GitHub Actions 360m job ceiling', projectedMin < 360);
-  }
+  check(
+    `a shard re-confirms its full active slice inside the ${tmo}m budget with ≥${REQUIRED_HEADROOM_MIN}m headroom` +
+      ' — raise the shard COUNT (or throughput), never the timeout alone',
+    headroom >= REQUIRED_HEADROOM_MIN,
+  );
+
+  // The per-shard cap must not be able to truncate that slice, or coverage drops back under the
+  // floor and pruning silently stops again.
+  check(
+    `the per-shard cap (${Number(capMatch[1])}) exceeds the shard's active slice (${perShard})`,
+    Number(capMatch[1]) > perShard,
+  );
+
+  check('projected run time is under the GitHub Actions 360m job ceiling', projectedMin < 360);
 }
 
 // ── (B) the killed-run detector is wired, and nothing was dropped from the roster ───────────────

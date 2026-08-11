@@ -226,7 +226,7 @@ def _sitemap_entries(s: cc.Session) -> tuple[list[str], list[str]]:
     return listing_ids, filter_urls
 
 
-def _active_ids_for_reconfirm() -> set[str]:
+def _active_ids_for_reconfirm(shards: int = 1, shard: int = 0) -> set[str]:
     """Every ad_number we currently mark active, as canonical numeric ids, so each crawl RE-FETCHES
     them against source. Coverage alone can't tell a removed listing from one the sitemap merely
     omits (both are absent from it) — but a re-fetch can: a still-live page re-confirms the row, a
@@ -243,7 +243,7 @@ def _active_ids_for_reconfirm() -> set[str]:
             ).data or []
             for r in rows:
                 m = re.search(r"\d+", r.get("ad_number") or "")
-                if m:
+                if m and (shards <= 1 or db._ad_shard(r.get("ad_number"), shards) == shard):
                     ids.add(str(int(m.group())))
             if len(rows) < 1000:
                 break
@@ -263,7 +263,7 @@ def _ids_from_page(url: str) -> list[str]:
     return []
 
 
-def enumerate_ids(s: cc.Session, cap_pages: int) -> list[str]:
+def enumerate_ids(s: cc.Session, cap_pages: int, shards: int = 1, shard: int = 0) -> list[str]:
     """Ordered list of /ad-details ids to scrape this run. Sources, in PRIORITY order:
       1. sitemap listing ids we do NOT already hold active  → new coverage (the ~54k we were missing)
       2. sitemap listing ids we already hold active         → re-confirm (liveness)
@@ -278,7 +278,9 @@ def enumerate_ids(s: cc.Session, cap_pages: int) -> list[str]:
     (prune + end_run run normally) instead of being killed at the job timeout. Ids are canonicalised
     to str(int(...)) so a zero-padded ad_number and its bare form collapse to one fetch."""
     listing_ids, filter_urls = _sitemap_entries(s)
-    active = _active_ids_for_reconfirm()
+    # Unsharded keeps the original zero-arg call exactly as it was — the shard slice is only
+    # requested when sharding is actually on, so no existing caller or test sees a new signature.
+    active = _active_ids_for_reconfirm(shards, shard) if shards > 1 else _active_ids_for_reconfirm()
     max_listings = int(os.environ.get("DEALAPP_MAX_LISTINGS", "0"))  # 0 = no cap (full crawl)
 
     def _norm(raw: str) -> Optional[str]:
@@ -292,11 +294,30 @@ def enumerate_ids(s: cc.Session, cap_pages: int) -> list[str]:
         i = _norm(raw)
         if not i or i in seen:
             continue
+        if shards > 1 and db._ad_shard(i, shards) != shard:
+            continue                     # not this shard's id — exactly one shard owns it
         seen.add(i)
         (known_ids if i in active else new_ids).append(i)
     tail = [i for i in active if i not in seen]     # active but not in the current sitemap
     seen.update(tail)
-    ids = new_ids + known_ids + tail
+
+    if shards > 1:
+        # SHARDED ORDER: RE-CONFIRM FIRST, then new ids with whatever budget is left.
+        #
+        # The unsharded crawl puts NEW ids first on purpose — one capped run could only afford a
+        # slice of the ~58k catalogue, so every request went to closing the coverage gap. The cost
+        # of that choice was that the 8,386 ACTIVE rows were almost never re-visited: measured
+        # 2026-08-11, 2,024 rows seen in 7 days against 8,012 active residential, i.e. ~25% weekly
+        # coverage, which is why 3,976 of them (49.6%) were 7-day stale and why prune_unseen's 0.80
+        # coverage floor tripped every single night.
+        #
+        # A shard only owns ~699 active rows, so it can re-confirm ALL of them and still have cap
+        # budget left for new ids. Re-confirmation is what actually produces the liveness signal
+        # (a re-fetched page either re-confirms the row or drops it from the seen set), so it has
+        # to come first or the coverage floor stays unreachable and nothing is ever aged out.
+        ids = known_ids + tail + new_ids
+    else:
+        ids = new_ids + known_ids + tail
 
     # Filter-page backstop: only worth the extra fetches on an UNCAPPED full crawl; a capped
     # catch-up run should spend every request on the prioritised listing ids above.
@@ -316,9 +337,22 @@ def enumerate_ids(s: cc.Session, cap_pages: int) -> list[str]:
                     print(f"  …{done}/{len(filter_urls)} filter pages, {len(ids)} ids", flush=True)
 
     if max_listings and len(ids) > max_listings:
-        ids = ids[:max_listings]
+        # A sharded run must never drop part of its own active slice: that slice is exactly what
+        # prune_unseen will measure coverage against, so truncating it would re-create the
+        # under-coverage that stopped pruning in the first place. The cap only ever trims NEW ids.
+        if shards > 1:
+            must_keep = len(known_ids) + len(tail)
+            if max_listings < must_keep:
+                print(f"  ⚠ cap {max_listings} < {must_keep} active ids owned by shard "
+                      f"{shard}/{shards}; keeping the full active slice and dropping new ids only",
+                      flush=True)
+            ids = ids[:max(max_listings, must_keep)]
+        else:
+            ids = ids[:max_listings]
     print(f"Deal App: {len(ids)} ids to scrape "
-          f"({len(new_ids)} new-from-sitemap first, {len(known_ids)} re-confirm, {len(tail)} off-sitemap"
+          f"({'shard %d/%d, ' % (shard, shards) if shards > 1 else ''}"
+          f"{len(new_ids)} new-from-sitemap, {len(known_ids)} re-confirm, {len(tail)} off-sitemap"
+          f"{', RE-CONFIRM FIRST' if shards > 1 else ' (new first)'}"
           f"{'' if not max_listings else f', capped at {max_listings}'})", flush=True)
     return ids
 
@@ -834,7 +868,13 @@ def main() -> int:
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
     ap.add_argument("--limit", type=int, default=0,
                     help="VALIDATION run: upsert only the first N parsed listings, NO prune, print samples")
+    ap.add_argument("--shards", type=int, default=1,
+                    help="Total shard count. 1 (default) = the original single unsharded crawl.")
+    ap.add_argument("--shard", type=int, default=0,
+                    help="This shard's index, 0..shards-1. Owns ids where int(ad_number) %% shards == shard.")
     args = ap.parse_args()
+    if args.shards < 1 or not (0 <= args.shard < args.shards):
+        ap.error(f"--shard must be in 0..{max(0, args.shards - 1)} for --shards {args.shards}")
 
     s = session()
 
@@ -862,12 +902,17 @@ def main() -> int:
                     ids.append(i)
         ids = ids[:want]
     else:
-        ids = enumerate_ids(s, MAX_FILTER_PAGES)
+        ids = (enumerate_ids(s, MAX_FILTER_PAGES, args.shards, args.shard)
+               if args.shards > 1 else enumerate_ids(s, MAX_FILTER_PAGES))
 
     print(f"Deal App: parsing up to {len(ids)} listings"
           f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}", flush=True)
 
-    run_id = None if args.limit else db.begin_run("dealapp")
+    # Sharded runs record as `dealapp:K/N` — one scrape_runs row per shard, mirroring
+    # `aqar_liveness:<table>:K/16`. That is what lets the coverage barrier see whether every shard
+    # actually executed, and keeps `platform='dealapp'` meaning "the old unsharded crawl".
+    run_platform = "dealapp" if args.shards <= 1 else f"dealapp:{args.shard}/{args.shards}"
+    run_id = None if args.limit else db.begin_run(run_platform)
     res: list[dict] = []
     com: list[dict] = []
     sold_res: list[str] = []
@@ -953,7 +998,10 @@ def main() -> int:
         pruned = 0
         for tbl, rows_seen in (("dealapp_residential_listings", res),
                                ("dealapp_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)
+            seen_set = {r["ad_number"] for r in rows_seen}
+            n = (db.prune_unseen(tbl, seen_set, source=SOURCE,
+                                 shards=args.shards, shard=args.shard)
+                 if args.shards > 1 else db.prune_unseen(tbl, seen_set, source=SOURCE))
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

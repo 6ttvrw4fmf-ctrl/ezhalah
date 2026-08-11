@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import random
+import re
 import signal
 import time
 from collections import defaultdict
@@ -652,6 +653,29 @@ def upsert_wasalt_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("wasalt_commercial_listings", rows)
 
 
+def _ad_shard(ad_number: Optional[str], shards: int) -> Optional[int]:
+    """THE shard key for a sharded crawl: `int(digits(ad_number)) % shards`.
+
+    Defined once, here, because the crawl's enumeration and `prune_unseen`'s guard MUST agree — if
+    they disagreed by even one id, a shard would visit a row it does not own (double work) or age
+    out a row it never visited (false inactivation). `scripts/verify-dealapp-shard-partition.ts`
+    pins that both sides call this function rather than re-deriving the arithmetic.
+
+    Modulo is the whole safety argument: it is a total function on the id space, so every id maps
+    to EXACTLY ONE shard, no id maps to two, and the union of shards 0..shards-1 is the complete
+    id space. That is a property of the key, not of a schedule or a lock — it cannot drift.
+    Range-splitting would not give this for free: aqar's original geometric split handed shard 0
+    81% of the rows (bug B1, 2026-07-16), which is why ids are hashed here, not bucketed.
+
+    Returns None for an ad_number with no digits, which is never a member of any shard — such a row
+    is left alone by every shard rather than being silently swept into shard 0.
+    """
+    m = re.search(r"\d+", ad_number or "")
+    if not m:
+        return None
+    return int(m.group()) % max(1, shards)
+
+
 def prune_unseen(
     table: str,
     seen_ads,
@@ -661,6 +685,8 @@ def prune_unseen(
     max_prune_frac: float = 0.30,
     min_active_guard: int = 8,
     min_coverage: Optional[float] = None,
+    shards: int = 1,
+    shard: int = 0,
 ) -> int:
     """Age out active rows whose ad_number wasn't seen this crawl — CONSERVATIVELY.
 
@@ -682,6 +708,23 @@ def prune_unseen(
         churn. Tune via PRUNE_MIN_COVERAGE. (Combined with the 3-strike counter, a listing now needs
         both good coverage AND three misses in a row before it can go inactive.)
 
+    SHARDED CRAWLS (`shards` > 1, added 2026-08-11 for the dealapp shard fleet). A sharded run only
+    ever visits its OWN slice of the catalog, so measuring coverage against the WHOLE active set
+    would put every shard at ~1/shards coverage — permanently under the 0.80 floor, so the guard
+    would trip on every shard and pruning could never happen at all. That is exactly the state
+    dealapp was in before sharding (one capped run re-saw ~15% of 8,386 active rows, so
+    `prune_unseen` returned -1 every night and nothing was ever aged out).
+
+    When `shards` > 1 the active set is filtered to this shard's slice — `int(ad_number) % shards
+    == shard`, the same deterministic key the crawl enumerates by — and every guard below then
+    measures against that slice. The consequences are the safety properties that matter:
+      • a shard can only ever affect ids that belong to it, so a failed or blocked shard cannot
+        touch another shard's rows — no cross-shard false inactivation;
+      • a 0-row shard still returns -1 and prunes nothing (the empty-seen guard is unchanged);
+      • the collapse and coverage guards apply per slice, so a shard that is throttled part-way
+        through still declines to prune rather than ageing out the rows it never reached.
+    `shards == 1` (the default) is byte-for-byte the previous behaviour for every other caller.
+
     Returns the number of rows actually DEACTIVATED this run (0 when misses were only counted),
     or -1 when a circuit breaker tripped and nothing was changed, so the caller can flag the
     run degraded.
@@ -693,6 +736,8 @@ def prune_unseen(
     if source:
         q = q.eq("source", source)
     existing = _execute(q, what=table + ".prune_select").data or []
+    if shards > 1:
+        existing = [r for r in existing if _ad_shard(r.get("ad_number"), shards) == shard]
     if not existing:
         return 0
     seen = set(seen_ads)

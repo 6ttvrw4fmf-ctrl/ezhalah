@@ -70,7 +70,12 @@ def test_parser_sees_the_small_sources_matrix():
     assert wf.is_file(), f"missing {wf}"
     found = {slug for _, slug in active_matrix_sources(wf.read_text(encoding="utf-8"))}
     assert len(found) >= 10, f"parser only matched {sorted(found)} — matrix format changed?"
-    assert "sanadak" in found and "dealapp" in found  # two known long-lived active sources
+    # Two known long-lived active sources, used purely as a canary that the matrix parser still
+    # matches real entries. `dealapp` was one of them until 2026-08-11, when it moved OUT of this
+    # matrix into the 12-shard fleet (.github/workflows/dealapp-sharded.yml, owner-approved option
+    # b) — so it is deliberately no longer expected here, and verify-dealapp-crawl-budget.ts now
+    # fails CI if it ever reappears in this file. `october` replaces it as the second canary.
+    assert "sanadak" in found and "october" in found
 
 
 def test_parser_distinguishes_active_entries_from_comments():

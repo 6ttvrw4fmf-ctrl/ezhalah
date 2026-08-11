@@ -112,88 +112,54 @@ comment on function public.mon_detect_dealapp_shard_coverage() is
   'run: 8,386 active, 4,197 stale-7d (50.0%), ~25% weekly coverage.';
 
 -- ── roster entry, SAME migration (AGENTS.md §11a: a detector outside the roster is decoration) ──
--- Array copied from the LIVE pg_get_functiondef read at 2026-08-11 13:16Z (36 detectors), with one
--- element inserted before mon_detect_orphaned_detectors, which stays last. The DO block below
--- asserts every one of the 36 survived — the silent-drop class that has cost this roster entries
--- at least four times (20260804113911, 20260810175245, 20260810202219).
-create or replace function public.mon_run_all_detectors()
-returns jsonb
-language plpgsql
-security definer
-set search_path to 'public'
-as $function$
-declare
-  fns text[] := array[
-    'mon_detect_silent_scraper_death','mon_detect_zero_new_stall','mon_detect_stale_active_fraction',
-    'mon_detect_volume_drop','mon_detect_cron_health','mon_detect_stale_refresh',
-    'mon_detect_legacy_alert_tables','mon_detect_field_integrity','mon_detect_search_index_freshness',
-    'mon_detect_quarantine_growth','mon_detect_registry_orphans','mon_detect_rls_reachability',
-    'mon_detect_mass_inactivation','mon_detect_english_district_leak','mon_detect_impossible_price_size',
-    'mon_detect_unverified_inactivation','mon_detect_deletion_spike',
-    'mon_detect_buy_token_price_suppression','mon_detect_price_source_mismatch',
-    'mon_detect_dangling_scrape_run','mon_detect_cron_minute_collision','mon_detect_price_eq_area_or_ppm',
-    'mon_detect_price_size_contamination','mon_detect_trending_district_dead_end',
-    'mon_detect_location_predicate_drift','mon_detect_search_performance_regression',
-    'mon_detect_commercial_coverage_blind_spot','mon_detect_stalled_daily_detector',
-    'mon_detect_zero_price_served','mon_detect_filter_barrier_leaks','mon_detect_deploy_lock_misuse',
-    'mon_detect_rent_period_unreachable','mon_detect_manufactured_rent_period',
-    'mon_detect_alert_delivery','mon_detect_sql_mirror_drift',
-    'mon_detect_dealapp_shard_coverage',   -- new 2026-08-11: 12-shard fleet coverage/partition
-    'mon_detect_orphaned_detectors'
-  ];
-  fn text; raised int; result jsonb := '{}'::jsonb; failed text[] := '{}';
-begin
-  foreach fn in array fns loop
-    begin
-      execute format('select public.%I()', fn) into raised;
-      result := result || jsonb_build_object(replace(fn, 'mon_detect_', ''), raised);
-    exception when others then
-      failed := failed || fn;
-      result := result || jsonb_build_object(replace(fn, 'mon_detect_', ''), 'ERROR: ' || sqlerrm);
-      begin
-        perform public.mon_raise('P1', 'detector_crash', 'all',
-          'detector_crash:' || fn || ':' || current_date,
-          jsonb_build_object('detector', fn, 'sqlstate', sqlstate, 'error', sqlerrm));
-      exception when others then
-        null;
-      end;
-    end;
-  end loop;
-  return result || jsonb_build_object('ran_at', now(), 'failed', to_jsonb(failed),
-    'open_alerts', (select coalesce(jsonb_object_agg(severity, c), '{}'::jsonb)
-                       from (select severity, count(*) c from public.alert_event
-                              where resolved_at is null group by severity) s));
-end $function$;
-
+--
+-- PATTERN NOTE, recorded honestly: the version first applied to production at 13:17:36Z wired the
+-- roster with a WHOLESALE rewrite of mon_run_all_detectors (array copied from the live body, with a
+-- DO block asserting all 36 pre-existing detectors survived — they did).
+-- `scripts/verify-detector-roster-edits-are-guarded.ts` rejects that shape on principle, and it is
+-- right to: a copied array is only as good as the moment it was copied, and this roster has lost
+-- entries to exactly that pattern at least four times (20260804113911, 20260810175245,
+-- 20260810202219). The committed form below is therefore the sanctioned NEEDLE-EDIT — it reads the
+-- LIVE definition and inserts one element before the trailing anchor, so it cannot drop an entry it
+-- never read. It is idempotent: re-applied against the already-correct production roster it is a
+-- no-op. Both forms produce an identical roster; the needle-edit is the one that stays in the repo.
 do $$
 declare
-  body text := pg_get_functiondef('public.mon_run_all_detectors()'::regprocedure);
-  survivors constant text[] := array[
-    'mon_detect_silent_scraper_death','mon_detect_zero_new_stall','mon_detect_stale_active_fraction',
-    'mon_detect_volume_drop','mon_detect_cron_health','mon_detect_stale_refresh',
-    'mon_detect_legacy_alert_tables','mon_detect_field_integrity','mon_detect_search_index_freshness',
-    'mon_detect_quarantine_growth','mon_detect_registry_orphans','mon_detect_rls_reachability',
-    'mon_detect_mass_inactivation','mon_detect_english_district_leak','mon_detect_impossible_price_size',
-    'mon_detect_unverified_inactivation','mon_detect_deletion_spike',
-    'mon_detect_buy_token_price_suppression','mon_detect_price_source_mismatch',
-    'mon_detect_dangling_scrape_run','mon_detect_cron_minute_collision','mon_detect_price_eq_area_or_ppm',
-    'mon_detect_price_size_contamination','mon_detect_trending_district_dead_end',
-    'mon_detect_location_predicate_drift','mon_detect_search_performance_regression',
-    'mon_detect_commercial_coverage_blind_spot','mon_detect_stalled_daily_detector',
-    'mon_detect_zero_price_served','mon_detect_filter_barrier_leaks','mon_detect_deploy_lock_misuse',
-    'mon_detect_rent_period_unreachable','mon_detect_manufactured_rent_period',
-    'mon_detect_alert_delivery','mon_detect_sql_mirror_drift','mon_detect_orphaned_detectors'
-  ];
-  f text;
+  v_def text;
+  v_before text;
+  fn constant text := 'mon_detect_dealapp_shard_coverage';
+  anchor constant text := '    ''mon_detect_orphaned_detectors''';
 begin
-  foreach f in array survivors loop
-    if position(f in body) = 0 then
-      raise exception 'roster regression: % was dropped from mon_run_all_detectors', f;
-    end if;
-  end loop;
+  select pg_get_functiondef(p.oid) into v_def
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = 'mon_run_all_detectors';
+  if v_def is null then raise exception 'mon_run_all_detectors is missing'; end if;
+  v_before := v_def;
+
+  -- Anchor on the LAST roster entry so the insert lands inside the array literal.
+  if position(anchor in v_def) = 0 then
+    raise exception 'roster anchor missing — refusing to guess at the array shape';
+  end if;
+
+  if position('''' || fn || '''' in v_def) = 0 then
+    v_def := replace(v_def, anchor, '    ''' || fn || ''',' || E'\n' || anchor);
+  end if;
+
+  if v_def = v_before then
+    raise notice 'roster already lists % — nothing to do', fn;
+    return;
+  end if;
+  execute v_def;
+end $$;
+
+-- Prove it in the same migration that changed it: the detector is reachable from the roster and
+-- actually runs. A detector nothing calls is decoration.
+do $$
+declare body text := pg_get_functiondef('public.mon_run_all_detectors()'::regprocedure);
+begin
   if position('mon_detect_dealapp_shard_coverage' in body) = 0 then
     raise exception 'mon_detect_dealapp_shard_coverage was not wired into the roster';
   end if;
   perform public.mon_detect_dealapp_shard_coverage();
-  raise notice 'dealapp shard coverage barrier wired; % detectors in roster', array_length(survivors,1) + 1;
+  raise notice 'dealapp shard coverage barrier wired and executing';
 end $$;
