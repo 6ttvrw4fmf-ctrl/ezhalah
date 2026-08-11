@@ -1,13 +1,45 @@
--- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
--- Refreshed 2026-08-11 for the labeled-total-beats-sub-floor-pick fix (migration 20260811064231).
---   THIS MIRROR WAS FOUND STALE by senior audit run #10 and is regenerated verbatim here. It had
---   been missing the ENTIRE «AREA-ARTIFACT GUARD (2026-08-10)» block shipped by migration
---   20260810202219 — 4,363 bytes on disk against 5,270 live. The offline verifier could not see it:
---   check (A) is self-consistency (the file's md5 against its own body) and check (B) compares the
---   mirror's date to the newest migration touching the object, and BOTH were 2026-08-10, so a
---   same-day drift passes every assertion. Re-derived from pg_get_functiondef, not hand-patched.
--- Verified byte-exact; md5 of everything below this header block: 3347a572f90a29a1ab2de739f987975b
---   equals md5(pg_get_functiondef) in production, 7,234 bytes both sides, checked 2026-08-11.
+-- P1 (senior audit run #10, 2026-08-11): a source-published PER-METER rate is stored as price_total
+-- while the SAME page prints «السعر: N ريال». Applied to production via MCP apply_migration at
+-- 2026-08-11T06:42:31Z; committed here verbatim per the AGENTS.md migration-drift rule.
+--
+-- WHAT WAS SERVED TO USERS
+--   id 7026223 — عمارة, المدينة المنورة, 2,091 m², page says «سعر المتر 2690 السعر: 11,000,000 ريال»
+--                → stored price_total = 2690. An 11,000,000 SAR building offered at 2,690 SAR,
+--                  production_ready, live in search_listings_ar, matching every cheap Buy filter.
+--   id 7032586 — the same advertiser's neighbouring ad, identical failure.
+-- Detector mon_detect_aqar_ppm_as_total raised P1 alert 420 at 02:25Z on these two.
+--
+-- ROOT CAUSE (proved, not assumed)
+-- aqar_parse() scans the page head for currency-marked numbers and takes prices[1] — DOCUMENT ORDER.
+-- For these ads the head yields TWO: «2,690 §» (the unlabeled chip aqar renders in the page header)
+-- and «11,000,000 ريال» (the labeled total). The 2026-08-03 per-meter strips do not fire here: they
+-- require the currency marker to sit adjacent to «المتر», and this page writes the rate as bare
+-- «سعر المتر 2690» in the description while the CHIP carries the currency mark. So the rate won on
+-- position alone.
+--
+-- The wider defect this exposed: 162 active aqar Buy listings are served at a total under 10,000 SAR.
+-- Sampling them against their own captured page text shows the header chip is not always the total —
+-- it is sometimes the per-meter rate, and sometimes an abbreviated thousands figure («950 §» for a
+-- page that says «السعر: 950,000 ريال»). 10 of the 162 carry an explicit labeled total and are
+-- recoverable with zero guessing; the rest are reported, not touched (see the audit note below).
+--
+-- THE RULE ADDED
+-- When the document-order pick lands UNDER 10,000 SAR — the band trg_aqar_parse already documents as
+-- "never a real SAR total ... an honest NULL beats a fabricated price" — and the same page states an
+-- explicit «السعر: N ريال» at or above that band, the labeled figure is the SOURCE'S OWN statement of
+-- the price and wins. Nothing is derived, estimated or rounded; the value is copied from the page.
+--
+-- WHY IT CANNOT REGRESS THE COMMON CASE
+-- One-directional and floor-gated on purpose. Measured over all 56,384 active aqar Buy rows on
+-- 2026-08-11: 348 carry a labeled value BELOW the header price (tax/net/rounding — e.g. header
+-- 1,250,025 against «السعر: 1,250,000 ريال صافي», where the header IS the authoritative structured
+-- price and the prose is the seller's round number). Every one of those is left untouched — the rule
+-- can never let prose displace a plausible structured price. Whole-corpus blast radius: 10 Buy rows.
+-- This does not gate, hide or withhold anything: the owner's SOURCE-OF-TRUTH KEEP rule (2026-08-09,
+-- guarded by scripts/verify-sub1000-buy-not-gated.ts) is untouched — a genuinely source-published
+-- sub-1000 Buy price stays searchable at any magnitude.
+--
+-- Guarded by scripts/verify-aqar-labeled-total-beats-subfloor.ts (wired into `npm test`).
 CREATE OR REPLACE FUNCTION public.aqar_parse(txt text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -108,4 +140,15 @@ begin
     'area_m2',          v_area, 'price', v_price, 'price_original', v_orig, 'discount_pct', v_disc
   ));
 end
-$function$
+$function$;
+
+-- Source-verified repair of the rows already stored wrong. NOT a hand-written price: clearing
+-- fullparse_done makes the shipped BEFORE trigger re-derive every field from the row's own stored
+-- source_capture, so each new value is the parser's reading of the page. 14 rows — the 10 this rule
+-- reaches, plus 4 that were already stuck on a stale parse from earlier fixes (fullparse_done
+-- short-circuits re-parse, so improvements never reached rows whose source_capture had not changed;
+-- e.g. id 127081 was served at 510 SAR while its page says «السعر : 510 الف» = 510,000).
+-- Executed 2026-08-11T06:43Z under deploy lock 'production'.
+update public.aqar_residential_listings set fullparse_done = false
+where id in (11051, 34724, 74567, 74616, 74619, 127081, 186874, 3185385,
+             3378693, 3897470, 6962441, 6971084, 7026223, 7032586);
