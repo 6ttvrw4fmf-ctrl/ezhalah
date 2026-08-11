@@ -50,6 +50,51 @@ decision. It must NOT loosen the gate to proceed.
 
 ---
 
+## An open alert is work, not wallpaper (owner directive, 2026-08-11)
+
+**Every open alert must be driven to a terminal classification on every run.** "It was already
+open when I started" is not a status. Age confers no immunity: a P1 raised three weeks ago is
+exactly as much this run's job as one raised this morning.
+
+The four terminal classifications, and only these:
+
+1. **Ezhalah-side fixable bug** — fix it now, without asking. Repair only what evidence proves is
+   wrong, add a barrier for the bug class, regression-test it, ship it, verify production.
+2. **Already fixed / stale alert** — prove the underlying condition is gone, then resolve the
+   alert. Historical alerts must not be left making production look unhealthy.
+3. **Source limitation / truth cannot be established** — do not guess. Preserve what the source
+   backs, and record precisely what could not be established and why.
+4. **Genuine product / business / cost decision** — the only category that should normally reach
+   the owner. State the options, the consequences, and a recommendation.
+
+**This rule exists because of a specific failure (senior audit run #10, 2026-08-11).** The routine's
+stored prompt binds `ops_senior_audit_run` as a "known-standing-issues list (do NOT re-diagnose
+items documented there as standing/benign/owner-pending)". That wording is a token-efficiency rule
+about *re-deriving a diagnosis*, and it was misread as permission to skip the alerts entirely — so
+31 open P1s were carried to the owner untouched, several of which were plainly fixable and one of
+which (an aqar area truncated at its thousands comma) had been silently mispricing listings per
+square metre for weeks. **"Standing" means do not re-derive the diagnosis. It never means do not
+fix.** If a prior run classified something as owner-pending, re-read its reason — if the reason was
+"needs an owner decision" it stays category 4; if the reason was only "not looked at yet", it is
+this run's work.
+
+Corollaries:
+
+- **Do not report a count of unresolved alerts as an outcome.** "31 P1 alerts remain" is not a
+  finding; it is an unstarted task list. Report the *classification* of each.
+- **Another session working nearby is not a reason to abandon a confirmed bug.** Respect the deploy
+  lock, do not overwrite another session's files or force-push its branch — but wait for the lock,
+  pick a non-colliding path, or coordinate on the PR, and then continue. "Someone else might be on
+  it" is only an answer when they demonstrably already fixed it.
+- **A monitor that fires on correct data is itself a defect.** If a barrier flags source-published
+  truth (a real 100,000,000 SAR building, a genuine 23 km² land parcel), the fix is to teach the
+  barrier — with per-row evidence — not to change the data and not to leave a permanent false P1.
+
+This section does not widen GREEN or narrow RED. It states that GREEN work already in scope must
+actually be *done*, not deferred, and that the owner is interrupted only for category 4.
+
+---
+
 ## GREEN — do it, do not ask
 
 Applies to both routines unless a line says Senior-only.
