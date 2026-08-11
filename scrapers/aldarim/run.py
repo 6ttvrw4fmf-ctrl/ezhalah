@@ -114,6 +114,40 @@ def _name(v: Any) -> Optional[str]:
 _int = normalize.to_int_numeric
 
 
+def _kitchen_state(is_installed: Any, kitchens: Any) -> Optional[bool]:
+    """aldarim's kitchen signals → true / false / UNKNOWN, never a manufactured negative.
+
+    `bool(is_kitchen_installed) or _int(kitchens) is not None` mapped BOTH "aldarim said 0" and
+    "aldarim sent null" to False, so 12 listings aldarim published nothing about recorded a
+    confident "this property has NO kitchen".
+
+    WHY THE SAFETY BARRIER MISSED IT. detect_manufactured_negatives() flags a column that is false
+    somewhere and true nowhere — "it can only ever say no, so it is not reading anything". `kitchen`
+    has 14 real trues on aldarim, so it looked healthy while 12 of its values were fabricated. A
+    column can be PARTLY manufactured and still pass that barrier, which is why this needs a
+    flag-level test rather than another platform-wide count.
+
+    Measured over the stored source_capture, which retains aldarim's full payload:
+        is_kitchen_installed = 0, kitchens = 0     -> 112 res + 34 com   aldarim SAYS no kitchen
+        is_kitchen_installed = 0, kitchens = 1..4  ->  14 res            counted kitchens
+        is_kitchen_installed = null, kitchens null ->   7 res +  5 com   aldarim says nothing
+        is_kitchen_installed = 1                   ->   0 rows anywhere
+
+    The flag is never affirmative on this platform — the COUNT is the only positive signal aldarim
+    publishes — but a published 0 is still a REAL negative and must be preserved. Retracting the
+    column wholesale (the obvious reading of "false with no trues") would have destroyed 146 source
+    values; only the 12 nulls were ours, retracted by migration 20260811095857.
+
+    Order matters: a non-zero count proves a kitchen even when the flag reads 0 (the pre-existing
+    widening, unchanged), then the flag decides, and only a null/blank flag yields honest unknown.
+    """
+    if _int(kitchens) is not None:          # a counted kitchen is proof, whatever the flag says
+        return True
+    if is_installed is None or is_installed == "":
+        return None                          # aldarim said nothing — not a denial
+    return str(is_installed).strip() not in ("0", "false", "False")
+
+
 # Ageless types never carry a property_age even when the seller typed one (mizlaj PR#265 precedent).
 AGELESS_TYPES = {"Residential Land", "Commercial Land", "Gas Station"}
 
@@ -252,7 +286,7 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "water_supply":     bool(L.get("has_water")),
         "sanitation":       bool(L.get("has_sewage")),
         "air_conditioner":  bool(L.get("is_ac_installed")),
-        "kitchen":          bool(L.get("is_kitchen_installed")) or _int(L.get("kitchens")) is not None,
+        "kitchen":          _kitchen_state(L.get("is_kitchen_installed"), L.get("kitchens")),
         "parking":          (_int(L.get("parking_spots")) or 0) > 0,
         "elevator":         (_int(L.get("elevators")) or 0) > 0,
         "maid_room":        (_int(L.get("maid_rooms")) or 0) > 0,
