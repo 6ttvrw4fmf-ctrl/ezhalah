@@ -49,6 +49,12 @@ const GRANDFATHERED = new Set([
   '20260804113911_revert_nightly_report_clobber_restore_full_detector_roster.sql',
   '20260804120000_price_size_sanity_safety_check.sql',
   '20260808062049_mon_detect_dangling_scrape_run_killed_jobs_must_not_be_silent.sql',
+  // 2026-08-11: applied to prod by a concurrent session as a wholesale rewrite; this guard caught
+  // it at mirror time. Production verified BEFORE grandfathering: the live roster carries all 37
+  // detectors including every 2026-08-11 addition, and mon_detect_orphaned_detectors() = 0 — this
+  // instance dropped nothing (its copy was written the same day as the newest entries). Recorded
+  // here as a miss, not a template: the next roster edit still must use the guarded needle-edit.
+  '20260811131736_dealapp_shard_coverage_barrier.sql',
   '20260810125209_mon_filter_barrier_leak_alerting.sql',
   '20260810175029_cron_stampede_fix_and_collision_detector.sql',
   '20260810175245_restore_full_detector_roster_union.sql',
