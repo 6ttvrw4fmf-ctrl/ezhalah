@@ -396,12 +396,12 @@ export default function Home() {
       location: lm.label,
       locationMatch: lm,
       districts: districtMatchUnion,
-      // Display label → drives the summary sentence: one name as before; 2 joined with «و»; 3+ as a
-      // count («4 أحياء») so the summary stays one readable line however many were picked.
+      // Display label → drives the summary sentence. Owner 2026-08-11: ALWAYS name every picked
+      // district («النرجس والياسمين والملقا»), never collapse to a count («3 أحياء») — the user
+      // chose specific places and the summary must say them back. Joined with «، » and a final «و».
       districtLabel: districtsSelected.length === 0 ? undefined
         : districtsSelected.length === 1 ? districtsSelected[0].districtAr
-        : districtsSelected.length === 2 ? `${districtsSelected[0].districtAr} و${districtsSelected[1].districtAr}`
-        : t('{n} neighborhoods', { n: String(districtsSelected.length) }),
+        : `${districtsSelected.slice(0, -1).map((d) => d.districtAr).join('، ')} و${districtsSelected[districtsSelected.length - 1].districtAr}`,
       // Live count at the current deal/category scope — for multi-select the SUM of the picked
       // districts' counts (folds are disjoint, so the sum IS the union size at that scope) — so the
       // 0-results path can still tell an EMPTY area ("widen area") from a type mismatch ("widen type").
