@@ -8,6 +8,16 @@
 -- session READS to reason about the location pipeline, so a stale one is how a session concludes
 -- "satel has no native resolution" and ships a fix for a problem that does not exist.
 --
+-- Re-verified 2026-08-11 (Data Integrity self-audit): UNCHANGED. md5(pg_get_viewdef(...,true)) in
+--   production read d7fff7ec0378d6095728e862aee80106 at 13:04Z — byte-identical to the digest this
+--   header already carried, so the body below is untouched. The stamp moves because migration
+--   20260811130514 NAMES this view (it seeds ops_sql_mirror_expected with the view's expected
+--   digest) and the staleness guard matches on any MENTION, deliberately: needle-edit migrations
+--   change a function without ever spelling out CREATE OR REPLACE, so a CREATE-only heuristic would
+--   miss real drift. Re-stamping after a genuine live re-verification is the intended workflow —
+--   loosening the guard to recognise "merely records the digest" would reopen that hole.
+--   That migration also adds mon_detect_sql_mirror_drift, which from now on compares this digest to
+--   the live definition twice an hour, so a future divergence is caught by a barrier, not by a date.
 -- Re-verified 2026-08-10 (daily engineer, recovering 24 uncommitted 2026-08-09 migrations —
 -- verify-sql-mirrors-not-stale flagged this file because 20260809154124_dealapp_live_location_
 -- overlay.sql MENTIONS listing_native_location_v1 (it reads from v1 while rebuilding v2), which
