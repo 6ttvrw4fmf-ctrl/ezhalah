@@ -36,11 +36,31 @@ check('clearDistrict called on ≥4 city-mutation sites', (indexSrc.match(/clear
 // (PR#167/#175, LIVE) to also thread paymentMonthly (Rent's Monthly/Yearly toggle), so the same
 // effect/warm-up also live-refreshes District's Top-6 on a Monthly<->Yearly flip.
 check('city-select (via citySelected) warms THIS city’s districts by city_id, Category+Deal+period-scoped', /useEffect\(\(\) => \{\s*if \(!citySelected\) return;\s*const cid = citySelected\.cityId;\s*void ensureDistrictOptions\(cid, query\.deal, query\.category, paymentMonthly\)/.test(indexSrc));
-check('editing the district text invalidates a prior pick', /setDistrictText\(v\);[\s\S]{0,240}?setDistrictSelected\(null\)/.test(indexSrc));
 
-// ── Search payload: send match_values (full recall), never the raw normalized token ─────────────
-check('onSearch sends districtSelected.matchValues (all spellings)', /districts: districtSelected \? districtSelected\.matchValues : undefined/.test(indexSrc));
-check('District is OPTIONAL — undefined when unset (city-only search stays valid)', /: undefined/.test(indexSrc) && /districtSelected \?/.test(indexSrc));
+// ── MULTI-SELECT (owner 2026-08-10): several districts, OR semantics, one shared selection state ──
+// The state is an ARRAY and city-mutation clears wipe the WHOLE array (no cross-city carry-over,
+// exactly the old invariant but over a list).
+check('district selection is an array (districtsSelected)', /const \[districtsSelected, setDistrictsSelected\] = useState<DistrictOption\[\]>\(\[\]\)/.test(indexSrc));
+check('clearDistrict wipes the whole selection array', /const clearDistrict = \(\) => \{[\s\S]{0,300}?setDistrictsSelected\(\[\]\)/.test(indexSrc));
+// DEDUP: membership is keyed by districtAr, and toggle add/remove goes through ONE helper — so the
+// same district picked from Trending and from typed search is one key, one entry, and a second tap
+// REMOVES it. Trending and typed rows share the same selectedLabels set (one shared state).
+check('one toggleDistrict helper keyed by districtAr (add/remove, no duplicates)', /prev\.some\(\(d\) => d\.districtAr === opt\.districtAr\)\s*\? prev\.filter\(\(d\) => d\.districtAr !== opt\.districtAr\)\s*: \[\.\.\.prev, opt\]/.test(indexSrc));
+check('Trending rows and typed rows share ONE selection state (selectedLabels from districtsSelected)', /const selectedLabels = new Set\(districtsSelected\.map\(\(d\) => d\.districtAr\)\)/.test(indexSrc) && /selectedLabels=\{selectedLabels\}/.test(indexSrc));
+check('typed suggestion rows highlight when picked', /isPicked && s\.suggRowPicked/.test(indexSrc));
+// Selected picks stay VISIBLE as removable chips (owner: "the user knows exactly what they picked").
+check('selected districts render as removable chips (✕ per district)', /districtsSelected\.map\(\(d\) => \([\s\S]{0,400}?toggleDistrict\(d\)/.test(indexSrc));
+// The capability is TOLD to the user in Arabic (owner copy).
+check('multi-select helper text is shown and translated («تقدر تختار أكثر من حي»)', /You can pick more than one neighborhood/.test(indexSrc) && /'You can pick more than one neighborhood': 'تقدر تختار أكثر من حي'/.test(readFileSync(join(root, 'src/i18n.tsx'), 'utf8')));
+// The confirm animation survives multi-select: green border/checkmark persist while ≥1 pick, and the
+// one-shot pop replays on each ADDITION (owner: "don't forget the animation").
+check('confirm pop replays on each added district', /if \(n > prevDistrictCount\.current\) confirmPop\(districtPop\)/.test(indexSrc));
+
+// ── Search payload: UNION of every selected district's match_values, deduped (OR semantics). ─────
+// ONE pick serializes to exactly the array an old single-district link carries — old links and new
+// ones are the same shape, so nothing downstream needed changing (p_districts was always string[]).
+check('onSearch sends the deduped UNION of matchValues (district A OR B OR C)', /new Set\(districtsSelected\.flatMap\(\(d\) => d\.matchValues\)\)/.test(indexSrc));
+check('District is OPTIONAL — undefined when nothing picked (city-only search stays valid)', /districtsSelected\.length\s*\? \[\.\.\.new Set/.test(indexSrc));
 
 // ── Data source: city_id-scoped RPC, Top-6 from live counts, autocomplete = complete catalog ────
 // 2026-07-20: district_options_ar now takes optional p_deal AND p_category (proved live that
@@ -71,9 +91,9 @@ check('every district row renders its name unconditionally (zero-listing distric
 check('zero-listing district rows are detected via listingCount === 0', /const isEmpty = opt\.listingCount === 0/.test(indexSrc));
 check('empty district rows are marked with a "no listings here" note', /isEmpty \? <Text style=\{s\.suggEmptyNote\}>\{t\('No listings here right now'\)\}<\/Text> : null/.test(indexSrc));
 check('the "No listings here right now" string is translated to Arabic', /'No listings here right now': '[^']+'/.test(readFileSync(join(root, 'src/i18n.tsx'), 'utf8')));
-// The picked district's live count rides along to the search so the 0-results path can tell an empty
-// district ("widen area") from one that lacks only the chosen TYPE ("widen type").
-check('onSearch carries districtSelected.listingCount to the query', /districtListingCount: districtSelected \? districtSelected\.listingCount : undefined/.test(indexSrc));
+// The picked districts' live counts ride along to the search (multi: the SUM — folds are disjoint,
+// so the sum IS the union size) so the 0-results path can tell an empty area from a type mismatch.
+check('onSearch carries the summed listingCount of all picked districts', /districtsSelected\.reduce\(\(sum, d\) => sum \+ d\.listingCount, 0\)/.test(indexSrc));
 {
   const searchSrc = readFileSync(join(root, 'src/data/search.ts'), 'utf8');
   check('SearchQuery carries districtListingCount', /districtListingCount\?: number/.test(searchSrc));

@@ -128,11 +128,17 @@ export default function Home() {
   const [cityFocus, setCityFocus] = useState(false);
   const [locMsg, setLocMsg] = useState(''); // Arabic-only: shown when the user types the city in English
   // District: strictly under City, disabled until a city is chosen, scoped to citySelected.cityId.
-  // districtSelected is the source of truth passed to search (its matchValues → p_districts); it is
-  // cleared on every city change/keystroke so a stale cross-city district can never leak.
+  // MULTI-SELECT (owner 2026-08-10): districtsSelected is an ARRAY — the user can pick several
+  // districts and search them as OR (the whole pipeline below already takes districts: string[] →
+  // p_districts; the field was the only single-select hop). Keyed by districtAr, which is already
+  // dedup-safe: district_options_ar folds hamza twins into ONE option row, and Trending and typed
+  // suggestions render the SAME rows — so picking «حي النرجس» from Trending and again from search is
+  // one key, one entry. Tap toggles: tapping a selected district removes it. The array is cleared on
+  // every city change (clearDistrict below) so a stale cross-city district can never leak — same
+  // invariant as before, now over a list.
   const [districtText, setDistrictText] = useState('');
   const [districtSuggestions, setDistrictSuggestions] = useState<DistrictOption[]>([]);
-  const [districtSelected, setDistrictSelected] = useState<DistrictOption | null>(null);
+  const [districtsSelected, setDistrictsSelected] = useState<DistrictOption[]>([]);
   const [districtFocus, setDistrictFocus] = useState(false);
   const [districtMsg, setDistrictMsg] = useState(''); // Arabic-only: shown when the user types the district in English
   const districtRef = useRef<TextInput>(null);
@@ -141,10 +147,17 @@ export default function Home() {
   const clearDistrict = () => {
     districtTextRef.current = '';
     setDistrictText('');
-    setDistrictSelected(null);
+    setDistrictsSelected([]);
     setDistrictSuggestions([]);
     setDistrictFocus(false);
     setDistrictMsg('');
+  };
+  // Toggle a district in/out of the multi-select. Membership by districtAr (see comment above).
+  const toggleDistrict = (opt: DistrictOption) => {
+    setDistrictsSelected((prev) =>
+      prev.some((d) => d.districtAr === opt.districtAr)
+        ? prev.filter((d) => d.districtAr !== opt.districtAr)
+        : [...prev, opt]);
   };
   const cityRef = useRef<TextInput>(null);
   // Mirrors query.location synchronously (state updates are async/batched) so the Top-6-on-focus
@@ -370,18 +383,31 @@ export default function Home() {
       return;
     }
     const lm = resolveCitySelection(citySelected);
-    // District is optional. When chosen, send ALL spellings of the (hamza-folded) district so search
-    // recall is complete; when not, districts:undefined → city-only search (spec: City-only is valid).
+    // District is optional, now MULTI (owner 2026-08-10): send the UNION of every selected district's
+    // matchValues (all spellings of each hamza-folded district, deduped) — the RPC's p_districts is
+    // already OR over the array, ANDed with every other filter. Zero picks → districts:undefined →
+    // city-only search (spec: City-only is valid). One pick serializes to exactly the same query an
+    // old single-district link carries, so old links and new ones are the same shape.
+    const districtMatchUnion = districtsSelected.length
+      ? [...new Set(districtsSelected.flatMap((d) => d.matchValues))]
+      : undefined;
     const q = {
       ...query,
       location: lm.label,
       locationMatch: lm,
-      districts: districtSelected ? districtSelected.matchValues : undefined,
-      // Clean display spelling of the picked district → drives the summary sentence ("حي X، جدة").
-      districtLabel: districtSelected ? districtSelected.districtAr : undefined,
-      // The picked district's live count (deal/category scope) so the 0-results path can tell an EMPTY
-      // district ("widen area") from one that has listings but not the chosen type ("widen type").
-      districtListingCount: districtSelected ? districtSelected.listingCount : undefined,
+      districts: districtMatchUnion,
+      // Display label → drives the summary sentence: one name as before; 2 joined with «و»; 3+ as a
+      // count («4 أحياء») so the summary stays one readable line however many were picked.
+      districtLabel: districtsSelected.length === 0 ? undefined
+        : districtsSelected.length === 1 ? districtsSelected[0].districtAr
+        : districtsSelected.length === 2 ? `${districtsSelected[0].districtAr} و${districtsSelected[1].districtAr}`
+        : t('{n} neighborhoods', { n: String(districtsSelected.length) }),
+      // Live count at the current deal/category scope — for multi-select the SUM of the picked
+      // districts' counts (folds are disjoint, so the sum IS the union size at that scope) — so the
+      // 0-results path can still tell an EMPTY area ("widen area") from a type mismatch ("widen type").
+      districtListingCount: districtsSelected.length
+        ? districtsSelected.reduce((sum, d) => sum + d.listingCount, 0)
+        : undefined,
       // Persist the effective rent period for Rent so the summary reflects the visible Monthly/Yearly toggle.
       rentPeriod: query.deal === 'Rent' ? (query.rentPeriod ?? 'annual') : query.rentPeriod,
     };
@@ -485,10 +511,18 @@ export default function Home() {
     RNAnimated.timing(citySel, { toValue: citySelected ? 1 : 0, duration: citySelected ? 220 : 140, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: false }).start();
     if (citySelected) confirmPop(cityPop);
   }, [citySelected, citySel, cityPop, confirmPop]);
+  // Multi-select keeps the exact same confirmation vocabulary (owner: "don't forget the animation"):
+  // the green border + checkmark persist while ≥1 district is picked, and the one-shot scale pop
+  // replays on every ADDITION — each new district feels like completing a step, exactly like the
+  // single-select did. Removals (and clears) don't pop; the border just settles back when the last
+  // pick goes. prevDistrictCount is a ref, not state — it only gates the pop.
+  const prevDistrictCount = useRef(0);
   useEffect(() => {
-    RNAnimated.timing(districtSel, { toValue: districtSelected ? 1 : 0, duration: districtSelected ? 220 : 140, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: false }).start();
-    if (districtSelected) confirmPop(districtPop);
-  }, [districtSelected, districtSel, districtPop, confirmPop]);
+    const n = districtsSelected.length;
+    RNAnimated.timing(districtSel, { toValue: n > 0 ? 1 : 0, duration: n > 0 ? 220 : 140, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: false }).start();
+    if (n > prevDistrictCount.current) confirmPop(districtPop);
+    prevDistrictCount.current = n;
+  }, [districtsSelected, districtSel, districtPop, confirmPop]);
   // Field style while/after a pick is confirmed: a scale overshoot (one-shot) + the border easing to
   // green (persistent while selected). `sel` is the 0/1 persistent value, `pop` the one-shot pulse.
   const confirmFieldStyle = (pop: RNAnimated.Value, sel: RNAnimated.Value) => ({
@@ -830,6 +864,10 @@ export default function Home() {
               {'  '}
               <Text style={s.fieldLabelOptional}>{t('Optional')}</Text>
             </Text>
+            {/* Multi-select capability line (owner copy, 2026-08-10) — shown once the field is usable. */}
+            {citySelected ? (
+              <Text style={s.districtMultiHint}>{t('You can pick more than one neighborhood')}</Text>
+            ) : null}
             <AnimatedPressable
               style={[s.field, confirmFieldStyle(districtPop, districtSel), !citySelected && { opacity: 0.5 }]}
               onPress={() => { if (citySelected) districtRef.current?.focus(); }}
@@ -861,8 +899,11 @@ export default function Home() {
                   onChangeText={(v) => {
                     districtTextRef.current = v;
                     setDistrictText(v);
-                    // Editing invalidates a prior pick — a typed-but-unconfirmed district is never searched.
-                    setDistrictSelected(null);
+                    // Multi-select: typing NEVER touches the confirmed picks — the text is only a
+                    // search box over the catalog now; picks live as chips below and only chips are
+                    // searched. (The old "editing invalidates the pick" rule protected against a
+                    // typed-but-unconfirmed string being searched; that stays true by construction,
+                    // since districtText itself is never sent anywhere.)
                     if (!citySelected) return;
                     if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, paymentMonthly, 6)); setDistrictMsg(''); return; }
                     // Arabic-only product: English typing gets NO autocomplete and the same Arabic hint the
@@ -873,17 +914,18 @@ export default function Home() {
                   }}
                 />
               </View>
-              {/* Confirmed pick → a green checkmark scales/fades in (owner UI request). */}
-              {districtSelected ? (
+              {/* ≥1 confirmed pick → the green checkmark scales/fades in (owner UI request). */}
+              {districtsSelected.length > 0 ? (
                 <RNAnimated.View style={checkStyle(districtSel)} pointerEvents="none">
                   <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
                 </RNAnimated.View>
               ) : null}
               {districtText.length > 0 && (
                 <Pressable onPress={() => {
+                  // Clears the TYPED text only — confirmed picks are removed via their own chip ✕
+                  // below, so wiping a half-typed search can never throw away the user's selections.
                   districtTextRef.current = '';
                   setDistrictText('');
-                  setDistrictSelected(null);
                   setDistrictMsg('');
                   if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, paymentMonthly, 6));
                   districtRef.current?.focus();
@@ -892,6 +934,22 @@ export default function Home() {
                 </Pressable>
               )}
             </AnimatedPressable>
+
+            {/* Selected districts — always-visible removable chips, so the user can see exactly what
+                they picked whether it came from Trending or typed search. Same chip vocabulary as the
+                rest of the app (chipFill/chipLine); ✕ removes just that district. */}
+            {districtsSelected.length > 0 ? (
+              <View style={s.districtChipsRow}>
+                {districtsSelected.map((d) => (
+                  <View key={d.districtAr} style={s.districtChip}>
+                    <Text style={s.districtChipText}>{d.districtAr}</Text>
+                    <Pressable onPress={() => toggleDistrict(d)} hitSlop={8}>
+                      <Ionicons name="close-circle" size={16} color={colors.chipIcon} />
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            ) : null}
 
             {districtMsg ? (
               <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{districtMsg}</Text>
@@ -903,15 +961,20 @@ export default function Home() {
               {(() => {
                 // Same derived Top-6-vs-typed split as the City field above.
                 const isTop6 = !districtText;
+                // MULTI-SELECT tap = toggle, and the dropdown STAYS OPEN so the user can keep
+                // picking (the whole point of multi-select — closing after each tap would make
+                // picking 3 districts take 3 open-the-dropdown round-trips). Typed text clears on
+                // pick so the list falls back to Trending and the next search starts clean. The
+                // dropdown closes the way every dropdown here closes: tapping away (onBlur). No
+                // auto-scroll to Category — we can't know the user is done picking.
                 const districtOnPress = (opt: DistrictOption) => {
-                  districtTextRef.current = opt.districtAr;
-                  setDistrictText(opt.districtAr);
-                  setDistrictSelected(opt);
-                  setDistrictSuggestions([]);
-                  setDistrictFocus(false);
+                  toggleDistrict(opt);
+                  districtTextRef.current = '';
+                  setDistrictText('');
                   setDistrictMsg('');
-                  scrollDown(catAnchorRef); // carry them down to the next step (category)
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, paymentMonthly, 6));
                 };
+                const selectedLabels = new Set(districtsSelected.map((d) => d.districtAr));
                 return (
                   <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                     {isTop6 && citySelected ? (
@@ -920,6 +983,7 @@ export default function Home() {
                         <TrendingRows
                           items={districtSuggestions.map((opt, i) => ({ key: `${opt.districtAr}#${i}`, label: opt.districtAr }))}
                           onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
+                          selectedLabels={selectedLabels}
                         />
                       </>
                     ) : (
@@ -929,11 +993,12 @@ export default function Home() {
                         // stay findable + selectable (owner 2026-07-18) BUT are now clearly marked, so a
                         // user is never silently led into a dead-end pick (2026-08-09).
                         const isEmpty = opt.listingCount === 0;
+                        const isPicked = selectedLabels.has(opt.districtAr);
                         return (
                         <Tappable
                           key={opt.districtAr + '#' + i}
                           dip={0.03}
-                          style={[s.suggRow, i < districtSuggestions.length - 1 && s.suggDivider, isEmpty && s.suggRowEmpty]}
+                          style={[s.suggRow, i < districtSuggestions.length - 1 && s.suggDivider, isEmpty && s.suggRowEmpty, isPicked && s.suggRowPicked]}
                           onPress={() => districtOnPress(opt)}
                         >
                           <Image source={LOC_IMG.district} style={[s.suggLocIcon, isEmpty && s.suggIconEmpty]} />
@@ -941,6 +1006,7 @@ export default function Home() {
                             <Text style={[s.suggCity, isEmpty && s.suggCityEmpty]}>{opt.districtAr}</Text>
                             {isEmpty ? <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text> : null}
                           </View>
+                          {isPicked ? <Ionicons name="checkmark-circle" size={18} color={colors.primary} /> : null}
                         </Tappable>
                         );
                       })
@@ -1303,6 +1369,16 @@ const s = StyleSheet.create({
   // Zero-listing (for the current deal/category) district rows: dimmed + a plain "no listings" note so
   // the user is never silently led into a dead-end pick. Still tappable (findability + never-dead-end).
   suggRowEmpty: { opacity: 0.6 },
+  // District multi-select (2026-08-10) — selected rows/chips reuse the app's chip vocabulary.
+  suggRowPicked: { backgroundColor: colors.chipFill },
+  districtMultiHint: { fontSize: 11.5, color: colors.muted, textAlign: 'right', marginTop: 3 },
+  districtChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  districtChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: colors.chipFill, borderWidth: 1, borderColor: colors.chipLine,
+    borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10,
+  },
+  districtChipText: { fontSize: 12.5, fontWeight: '700', color: colors.dark },
   suggIconEmpty: { opacity: 0.5 },
   suggCityEmpty: { color: colors.muted, fontWeight: '500' },
   suggEmptyNote: { fontSize: 11, color: colors.muted, marginTop: 1 },
