@@ -63,111 +63,24 @@ begin
   return n;
 end $function$;
 
--- ── roster entry, SAME migration (AGENTS.md §11a: a detector outside the roster is decoration) ──
--- Body copied verbatim from the LIVE pg_get_functiondef read at 2026-08-11 07:37Z, with exactly one
--- array element added. The recorded failure mode here is a hand-retyped body silently dropping
--- entries (at least four losses: 20260804113911, 20260810175245, 20260810202219) — the DO block
--- below asserts every one of the 32 pre-existing detectors survived, so that cannot happen silently.
-create or replace function public.mon_run_all_detectors()
-returns jsonb
-language plpgsql
-security definer
-set search_path to 'public'
-as $function$
-declare
-  fns text[] := array[
-    'mon_detect_silent_scraper_death',
-    'mon_detect_zero_new_stall',
-    'mon_detect_stale_active_fraction',
-    'mon_detect_volume_drop',
-    'mon_detect_cron_health',
-    'mon_detect_stale_refresh',
-    'mon_detect_legacy_alert_tables',
-    'mon_detect_field_integrity',
-    'mon_detect_search_index_freshness',
-    'mon_detect_quarantine_growth',
-    'mon_detect_registry_orphans',
-    'mon_detect_rls_reachability',
-    'mon_detect_mass_inactivation',
-    'mon_detect_english_district_leak',
-    'mon_detect_impossible_price_size',
-    'mon_detect_unverified_inactivation',
-    'mon_detect_deletion_spike',
-    'mon_detect_buy_token_price_suppression',
-    'mon_detect_price_source_mismatch',
-    'mon_detect_dangling_scrape_run',
-    'mon_detect_cron_minute_collision',
-    'mon_detect_price_eq_area_or_ppm',      -- new 2026-08-10: area/ppm-as-price artifact tripwire
-    'mon_detect_price_size_contamination',
-    'mon_detect_trending_district_dead_end',
-    'mon_detect_location_predicate_drift',
-    'mon_detect_search_performance_regression',
-    'mon_detect_commercial_coverage_blind_spot',
-    'mon_detect_stalled_daily_detector',
-    'mon_detect_zero_price_served',
-    'mon_detect_filter_barrier_leaks',
-    'mon_detect_deploy_lock_misuse',
-    'mon_detect_rent_period_unreachable',   -- new 2026-08-11: priced rent unreachable by both periods
-    'mon_detect_orphaned_detectors'
-  ];
-  fn text; raised int; result jsonb := '{}'::jsonb; failed text[] := '{}';
-begin
-  foreach fn in array fns loop
-    begin
-      execute format('select public.%I()', fn) into raised;
-      result := result || jsonb_build_object(replace(fn, 'mon_detect_', ''), raised);
-    exception when others then
-      failed := failed || fn;
-      result := result || jsonb_build_object(replace(fn, 'mon_detect_', ''), 'ERROR: ' || sqlerrm);
-      begin
-        perform public.mon_raise('P1', 'detector_crash', 'all',
-          'detector_crash:' || fn || ':' || current_date,
-          jsonb_build_object('detector', fn, 'sqlstate', sqlstate, 'error', sqlerrm));
-      exception when others then
-        null;
-      end;
-    end;
-  end loop;
-  return result || jsonb_build_object('ran_at', now(), 'failed', to_jsonb(failed),
-    'open_alerts', (select coalesce(jsonb_object_agg(severity, c), '{}'::jsonb)
-                       from (select severity, count(*) c from public.alert_event
-                              where resolved_at is null group by severity) s));
-end $function$;
-
-do $$
-declare
-  body text := pg_get_functiondef('public.mon_run_all_detectors()'::regprocedure);
-  survivors constant text[] := array[
-    'mon_detect_silent_scraper_death','mon_detect_zero_new_stall','mon_detect_stale_active_fraction',
-    'mon_detect_volume_drop','mon_detect_cron_health','mon_detect_stale_refresh',
-    'mon_detect_legacy_alert_tables','mon_detect_field_integrity','mon_detect_search_index_freshness',
-    'mon_detect_quarantine_growth','mon_detect_registry_orphans','mon_detect_rls_reachability',
-    'mon_detect_mass_inactivation','mon_detect_english_district_leak','mon_detect_impossible_price_size',
-    'mon_detect_unverified_inactivation','mon_detect_deletion_spike',
-    'mon_detect_buy_token_price_suppression','mon_detect_price_source_mismatch',
-    'mon_detect_dangling_scrape_run','mon_detect_cron_minute_collision','mon_detect_price_eq_area_or_ppm',
-    'mon_detect_price_size_contamination','mon_detect_trending_district_dead_end',
-    'mon_detect_location_predicate_drift','mon_detect_search_performance_regression',
-    'mon_detect_commercial_coverage_blind_spot','mon_detect_stalled_daily_detector',
-    'mon_detect_zero_price_served','mon_detect_filter_barrier_leaks','mon_detect_deploy_lock_misuse',
-    'mon_detect_orphaned_detectors'
-  ];
-  f text;
-begin
-  -- 1. no pre-existing detector was dropped by this rewrite
-  foreach f in array survivors loop
-    if position(f in body) = 0 then
-      raise exception 'roster regression: % was dropped from mon_run_all_detectors', f;
-    end if;
-  end loop;
-
-  -- 2. the new detector is actually wired
-  if position('mon_detect_rent_period_unreachable' in body) = 0 then
-    raise exception 'mon_detect_rent_period_unreachable was not wired into the roster';
-  end if;
-
-  -- 3. it runs without crashing
-  perform public.mon_detect_rent_period_unreachable();
-
-  raise notice 'rent_period_unreachable barrier wired; % detectors in roster', array_length(survivors,1) + 1;
-end $$;
+-- ── ROSTER WIRING: NOT REPRODUCED HERE (amended 2026-08-11) ──────────────────────────────────
+-- As APPLIED, this migration also wired the detector into mon_run_all_detectors() by pasting a full
+-- hand-written body. That is the pattern scripts/verify-detector-roster-edits-are-guarded.ts
+-- forbids, and it failed CI on this branch — correctly. The roster has been lost at least four times
+-- to exactly that move (20260804113911, 20260810175245, 20260810202219, repaired by 20260810222259);
+-- this migration's own header quoted that history and then repeated it, on the reasoning that an
+-- explicit 32-detector survival assertion made it safe. It made that one edit safe. It does not make
+-- the pattern safe: an assertion only protects the entries the author thought to list, while a
+-- needle-edit cannot drop what it never read.
+--
+-- The guard's grandfather list states that it "must never grow", so exempting this file was not an
+-- option. The wiring was therefore REDONE the sanctioned way — read the live body with
+-- pg_get_functiondef(), anchor, splice only if absent — by:
+--
+--     20260811124301_rewire_rent_period_detector_via_needle_edit.sql
+--
+-- and the offending block is omitted from this file so the tree contains no wholesale roster rewrite.
+-- PROVENANCE: the SQL as actually applied is recorded verbatim in
+-- supabase_migrations.schema_migrations where version = '20260811073933'
+-- (md5 of statements[1] = 6b6b8d13f18baf5f601547477d38ee7b). Nothing about the live roster changed;
+-- only the pattern the repository sanctions for editing it.
