@@ -1,0 +1,84 @@
+# Deal App sharded crawl — the full-inventory coverage fleet.
+#
+# WHY THIS EXISTS (owner-approved 2026-08-11, option b)
+# The single capped dealapp crawl could only re-see a slice of the catalogue per night: measured
+# 2026-08-11, 2,024 rows seen in 7 days against 8,386 active listings — ~25% weekly coverage. Two
+# consequences, both bad:
+#   * 3,976 residential rows (49.6%) and 221 commercial (59%) were 7-day stale, which is what the
+#     standing `stale_active` P1 alerts were reporting;
+#   * because `prune_unseen` only counts misses when a run re-saw >= 80% of the active catalog
+#     (PRUNE_MIN_COVERAGE), a 25%-coverage run tripped that guard EVERY night and returned -1 —
+#     dealapp has never aged a single dead listing out. The alert was real; the crawl simply could
+#     not reach its own inventory.
+# Sharding fixes the cause: 12 shards on 12 separate runners cover the whole active set in one
+# night, so coverage clears the floor and the 3-strike liveness rule can finally do its job.
+#
+# SHARD COUNT IS SIZED FROM MEASUREMENT, NOT GUESSED (the 2026-08-08 lesson: the 12000 cap was set
+# without measuring and was SIGKILLed at the 90m timeout every day). Observed dealapp throughput
+# across the last 8 real runs: 8.3 / 9.5 / 15.5 / 16.2 / 31.5 rows per minute (plus two 0-row
+# blocked runs). Sizing on the WORST sustained rate, 8.3/min:
+#     6 shards → 1,398 rows/shard → 168 min  ✗ over the 120m timeout
+#     8 shards → 1,048 rows/shard → 126 min  ✗ over the 120m timeout
+#    12 shards →   699 rows/shard →  84 min  ✓ 30% headroom          <- chosen
+#    16 shards →   524 rows/shard →  63 min  ✓ 47% headroom, 2x the parallel load
+# 12 is the smallest count that fits the worst observed rate inside the timeout with real headroom.
+# It is deliberately not 16: dealapp's anonymous origin trips a login-wall under load (2 of the last
+# 8 runs returned 0 rows, blocked), so every extra concurrent shard is extra risk. Each shard is its
+# own GitHub runner with its own IP and its own throttle, which is precisely what makes parallelism
+# help here rather than hurt.
+#
+# SAFETY. Shard membership is `int(ad_number) % 12` (scrapers/common/db.py::_ad_shard) — a total
+# function, so every listing is owned by exactly one shard, no listing by two, and the union is the
+# whole id space. `prune_unseen` filters the active set by that same key, so a shard can only ever
+# age out ids it owns, and a blocked 0-row shard still prunes nothing at all. Proven by
+# scrapers/common/tests/test_dealapp_shard_partition.py and by mon_detect_dealapp_shard_coverage().
+
+name: Deal App sharded crawl
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: dealapp-sharded
+  cancel-in-progress: false  # never interrupt a crawl mid-run — a half-run prunes nothing anyway
+
+jobs:
+  crawl:
+    name: Deal App shard ${{ matrix.shard }}/12
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false   # one blocked shard must never cancel the other eleven
+      max-parallel: 12
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+
+      # Stagger the start so twelve runners do not hit dealapp's origin in the same second — the
+      # login-wall is triggered by concurrent burst, not by total volume. 12 shards x 20s = at most
+      # ~4 minutes of skew, negligible against an ~84 minute worst-case shard.
+      - name: Stagger shard start
+        run: sleep $(( ${{ matrix.shard }} * 20 ))
+
+      - name: Crawl shard ${{ matrix.shard }} of 12
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Per-shard cap. The shard owns ~699 active rows; 1200 leaves ~500 requests for NEW
+          # sitemap ids so coverage of the wider ~58k catalogue still advances run-over-run. The
+          # cap can never truncate the shard's own active slice — enumerate_ids() keeps the full
+          # slice and trims new ids only, because that slice is exactly what prune measures
+          # coverage against.
+          DEALAPP_MAX_LISTINGS: "1200"
+          DEALAPP_WORKERS: "3"   # dealapp's origin trips a login-wall above ~3 workers (no proxy)
+        run: python -m scrapers.dealapp.run --type all --shards 12 --shard ${{ matrix.shard }}

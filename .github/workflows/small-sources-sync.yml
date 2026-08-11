@@ -77,7 +77,13 @@ jobs:
           # variance. scripts/verify-dealapp-crawl-budget.ts enforces this arithmetic.
           # To go faster, raise throughput (a proxy lifts the 3-worker throttle) or raise `tmo`
           # AND the cap together — never the cap alone. (bug-fix 2026-08-08)
-          - { source: dealapp,     cmd: "DEALAPP_MAX_LISTINGS=1200 DEALAPP_WORKERS=3 python -m scrapers.dealapp.run --type all" }
+          # dealapp MOVED OUT of this matrix 2026-08-11 (owner-approved option b) to
+          # .github/workflows/dealapp-sharded.yml — a 12-shard fleet that covers the FULL active
+          # inventory in one night. It must not run here as well: two crawls of the same catalogue
+          # would double the load on an origin that already blocks under burst, and the unsharded
+          # run would re-introduce the ~25%-coverage state that kept prune_unseen's coverage guard
+          # permanently tripped. scripts/verify-dealapp-crawl-budget.ts fails CI if dealapp
+          # reappears in this matrix.
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
