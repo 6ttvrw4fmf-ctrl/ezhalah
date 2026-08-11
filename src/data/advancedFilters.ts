@@ -23,6 +23,7 @@ export type AdvancedOption = {
 export type AdvancedQuestionResult = {
   options: AdvancedOption[]; // pre-filtered to the meaningful-option floor; callers render exactly this
   unknownCount: number;      // disclosed as a caption when > 0; never a selectable option
+  total: number;             // the scope total these options were computed over (0 when below floor)
 };
 
 // THE CONTRACT BOUNDARY — a question supplies exactly these eight fields, nothing else.
@@ -47,9 +48,12 @@ export function minOptionsFor(selection: 'single' | 'multi'): number {
   return selection === 'multi' ? MIN_OPTIONS_MULTI : MIN_OPTIONS_SINGLE;
 }
 
-// Scope-size floor: don't ask a question unless the current scope has enough matching listings to be
-// worth narrowing (owner 2026-07-16, grounded in real Buy/Rent × city distributions).
-export const MIN_TOTAL_TO_SHOW = 150;
+// Scope-size floor: don't ask a question unless the current scope has MORE results than the
+// interview's stop line. Owner 2026-08-11 (contextual-interview rework): the Advanced interview is
+// available when the user's own search has > 25 results and stops asking the moment ≤ 25 remain —
+// so 26 is the floor, and the ≤25 auto-stop falls out of the same constant everywhere.
+export const INTERVIEW_STOP_AT = 25;
+export const MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT + 1;
 
 // Per-OPTION floor — one value for EVERY question (contract §9; the old >0-chips vs >=5-buckets split
 // is banned). An option backed by fewer than this many listings is not a meaningful choice and is hidden.
@@ -87,9 +91,9 @@ const AGE_QUESTION: AdvancedQuestion = {
   eligibility: (q) => isAgeFilterScopeFor(q, effectiveTypes(q)),
   async resolveOptions(q) {
     const counts = await fetchPropertyAgeOptionCounts(q);
-    if (!counts || counts.cnt_total < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: 0 };
+    if (!counts || counts.cnt_total < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: 0, total: counts?.cnt_total ?? 0 };
     const options = meaningful(AGE_BUCKETS.map((b) => ({ key: b.key, label: t(b.labelKey), count: b.count(counts) })));
-    return { options, unknownCount: counts.cnt_unknown };
+    return { options, unknownCount: counts.cnt_unknown, total: counts.cnt_total };
   },
   apply(q, keys) {
     switch (keys[0]) {
@@ -131,8 +135,8 @@ function guidedOptions(
   counts: GuidedCounts | null,
   defs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }>,
 ): AdvancedQuestionResult {
-  if (!counts || counts.cnt_total_base < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: 0 };
-  return { options: meaningful(defs.map((d) => ({ key: d.key, label: t(d.labelKey), count: d.count(counts) }))), unknownCount: 0 };
+  if (!counts || counts.cnt_total_base < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: 0, total: counts?.cnt_total_base ?? 0 };
+  return { options: meaningful(defs.map((d) => ({ key: d.key, label: t(d.labelKey), count: d.count(counts) }))), unknownCount: 0, total: counts.cnt_total_base };
 }
 
 // Installments (RNPL) — one strict chip. NEUTRAL metadata filter only (no payment calc/estimate/
@@ -172,6 +176,10 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
       // verified equal to the results RPC (6,208 and 2,575 on Annual Rent → Apartment).
       { key: 'ac',               labelKey: 'Air conditioning', count: (c) => c.cnt_ac },
       { key: 'private_entrance', labelKey: 'Private entrance', count: (c) => c.cnt_private_entrance },
+      // Maid + driver room (2026-08-11): the p_amenities slugs always worked; only the COUNT path
+      // was missing until cnt_maid_room/cnt_driver_room were added to apartment_guided_counts_ar.
+      { key: 'maid_room',   labelKey: 'Maid room',   count: (c) => c.cnt_maid_room },
+      { key: 'driver_room', labelKey: 'Driver room', count: (c) => c.cnt_driver_room },
     ];
     // Furnished chip: Annual Rent only (Buy furnished ≈2%; owner: no Furnished filter on Buy).
     if (isAnnualRentApartment(q)) defs.push({ key: 'furnished', labelKey: 'Furnished', count: (c) => c.cnt_furnished });
@@ -215,12 +223,76 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
   },
 };
 
-// The queue — asked in this order; each self-gates via its own eligibility() + resolveOptions(). The
-// card and orchestrator are driven entirely by the config (title/description/options/selection) and
-// never branch on a question id.
+// Furnished preference — single-select (تفضلها مفروشة؟), Rent-only like the furnished chip. TRUE
+// tri-state: «مفروشة» = confirmed furnished, «غير مفروشة» = confirmed unfurnished (explicit source
+// no — cnt_unfurnished counts furnished IS FALSE), Skip = no preference (unknowns stay eligible).
+const FURNISHED_QUESTION: AdvancedQuestion = {
+  id: 'furnished',
+  titleKey: 'Do you prefer it furnished?',
+  selection: 'single',
+  eligibility: isAnnualRentApartment,
+  async resolveOptions(q) {
+    return guidedOptions(await fetchApartmentGuidedCounts(q), [
+      { key: 'yes', labelKey: 'Furnished',   count: (c) => c.cnt_furnished },
+      { key: 'no',  labelKey: 'Unfurnished', count: (c) => c.cnt_unfurnished },
+    ]);
+  },
+  apply: (q, keys) =>
+    keys[0] === 'yes' ? { ...q, furnishedPref: true }
+    : keys[0] === 'no' ? { ...q, furnishedPref: false }
+    : q,
+};
+
+// The question POOL — each self-gates via its own eligibility() + resolveOptions(). The ASK ORDER is
+// NOT this array: rankQuestions() below re-ranks the pool against the user's CURRENT candidate set
+// after every answer (owner 2026-08-11 — a Jeddah search may open with furnished where a Riyadh
+// search opens with bathrooms). The card and orchestrator are driven entirely by the config
+// (title/description/options/selection) and never branch on a question id.
 export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
-  RNPL_QUESTION, AGE_QUESTION, AMENITIES_QUESTION, BATHROOMS_QUESTION,
+  RNPL_QUESTION, AGE_QUESTION, AMENITIES_QUESTION, BATHROOMS_QUESTION, FURNISHED_QUESTION,
 ];
+
+// ── Contextual ranking (owner 2026-08-11) ────────────────────────────────────────────────────────
+// score = split × salience, computed from the CURRENT candidate set's counts. `split` peaks when an
+// option covers half the set (1 − |2k/N − 1|); an option that matches nearly everyone (> 90% of N)
+// or too few (< max(15, 8% of N)) is not worth asking about and is dropped for ranking purposes —
+// the same "don't ask a question that barely changes the result set" rule the owner set, applied
+// with numbers. Unknown ≠ no throughout: options only ever count KNOWN matches.
+const SALIENCE: Record<string, number> = {
+  property_age: 1.0, furnished: 1.0, bathrooms: 0.9, amenities: 0.8, rnpl: 0.6,
+};
+
+export function scoreQuestion(
+  question: AdvancedQuestion, result: AdvancedQuestionResult,
+): { score: number; options: AdvancedOption[] } | null {
+  const N = result.total;
+  if (N < MIN_TOTAL_TO_SHOW) return null;
+  const floor = Math.max(15, Math.ceil(0.08 * N));
+  const useful = result.options.filter((o) => o.count >= floor && o.count <= 0.9 * N);
+  if (useful.length < minOptionsFor(question.selection)) return null;
+  // at least one answer must genuinely narrow (≤ 75% of the current set)
+  if (!useful.some((o) => o.count <= 0.75 * N)) return null;
+  const bestSplit = Math.max(...useful.map((o) => 1 - Math.abs((2 * o.count) / N - 1)));
+  return { score: bestSplit * (SALIENCE[question.id] ?? 0.5), options: useful };
+}
+
+export type RankedQuestion = {
+  question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number; total: number; score: number;
+};
+
+// Probe every still-unasked eligible question against the CURRENT query, score, and rank. The
+// orchestrator calls this at entry AND after every answer — that re-anchoring on the shrinking set
+// is the whole architecture (350 → answer → analyze 140 → answer → analyze 48 → …).
+export async function rankQuestions(q: SearchQuery, askedIds: ReadonlySet<string>): Promise<RankedQuestion[]> {
+  const pool = eligibleQuestions(q).filter((question) => !askedIds.has(question.id));
+  const probes = await Promise.all(pool.map((question) => question.resolveOptions(q)));
+  const ranked: RankedQuestion[] = [];
+  pool.forEach((question, i) => {
+    const scored = scoreQuestion(question, probes[i]);
+    if (scored) ranked.push({ question, options: scored.options, unknownCount: probes[i].unknownCount, total: probes[i].total, score: scored.score });
+  });
+  return ranked.sort((a, b) => b.score - a.score);
+}
 
 // THE engine gate — every caller asks HERE which questions may run, so no call site re-derives it.
 //

@@ -29,8 +29,21 @@ check('all four questions use selection + eligibility + resolveOptions',
   && (advSrc.match(/resolveOptions\s*\(/g) || []).length >= 4);
 
 // ── Sequence + selection modes ───────────────────────────────────────────────────────────────────
-check('queue order is RNPL → age → amenities → bathrooms',
-  /ADVANCED_QUESTIONS[^=]*=\s*\[\s*RNPL_QUESTION,\s*AGE_QUESTION,\s*AMENITIES_QUESTION,\s*BATHROOMS_QUESTION/.test(advSrc));
+// CONTRACT CHANGE (owner 2026-08-11, contextual interview): ask-order is no longer the static
+// queue — rankQuestions() re-ranks the pool against the user's CURRENT candidate set after every
+// answer. The pool array still exists (probe universe); what we now pin is the ranking engine.
+check('the pool contains all five questions and rankQuestions re-ranks it contextually',
+  /ADVANCED_QUESTIONS[^=]*=\s*\[\s*RNPL_QUESTION,\s*AGE_QUESTION,\s*AMENITIES_QUESTION,\s*BATHROOMS_QUESTION,\s*FURNISHED_QUESTION/.test(advSrc)
+  && /export async function rankQuestions/.test(advSrc)
+  && /export function scoreQuestion/.test(advSrc)
+  && /INTERVIEW_STOP_AT = 25/.test(advSrc)
+  && /MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT \+ 1/.test(advSrc));
+check('the orchestrator re-ranks after every answer and tracks asked questions (never re-asks)',
+  /rankQuestions\(q, ageFlowAskedRef\.current\)/.test(agentSrc) && /ageFlowAskedRef\.current\.add\(/.test(agentSrc));
+check('furnished question is single-select, Rent-only, true tri-state via furnishedPref',
+  /FURNISHED_QUESTION[\s\S]{0,400}selection:\s*'single'/.test(advSrc)
+  && /FURNISHED_QUESTION[\s\S]{0,400}eligibility:\s*isAnnualRentApartment/.test(advSrc)
+  && /furnishedPref:\s*true/.test(advSrc) && /furnishedPref:\s*false/.test(advSrc));
 check('RNPL + amenities are multi; age + bathrooms are single',
   /RNPL_QUESTION[\s\S]{0,400}selection:\s*'multi'/.test(advSrc)
   && /AMENITIES_QUESTION[\s\S]{0,500}selection:\s*'multi'/.test(advSrc)
@@ -70,8 +83,13 @@ check('a live count pill renders on EVERY option row (both modes)',
   /countPill/.test(cardSrc) && /grouped\(option\.count\)/.test(cardSrc));
 check('progress is animated and shared',
   /Animated\.timing/.test(cardSrc) && /progFill/.test(cardSrc));
-check('numeric progress caption (Question {cur} of {total}) renders beside the bar for every question',
-  /Question \{cur\} of \{total\}/.test(cardSrc) && /progNum/.test(cardSrc));
+// CONTRACT CHANGE (owner 2026-08-11): NO numeric N-of-M caption — with contextual re-ranking the
+// denominator legitimately moves between steps, and the owner wants no questionnaire pressure. The
+// thin animated bar stays as the only progress signal.
+check('no numeric Question-N-of-M caption renders (subtle bar only)',
+  !/Question \{cur\} of \{total\}/.test(cardSrc));
+check('single-select auto-advances after a short hold via plain setTimeout (never an animation callback)',
+  /setTimeout\(\(\) => onConfirm\(next\), 260\)/.test(cardSrc));
 check('skip-all link discloses how many questions remain',
   /Skip remaining \(\{count\}\) and search now/.test(cardSrc));
 

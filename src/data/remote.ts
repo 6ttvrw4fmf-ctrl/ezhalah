@@ -569,6 +569,7 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
       // (no-op) so an unanswered question never affects a call that omits them.
       ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
       ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
+      ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
     }),
     AGE_COUNT_TIMEOUT_MS,
   );
@@ -597,6 +598,9 @@ export type GuidedCounts = {
   // platform. A chip may only exist when its COUNT path exists — that is the whole contract.
   cnt_ac: number;
   cnt_private_entrance: number;
+  cnt_unfurnished: number;
+  cnt_maid_room: number;
+  cnt_driver_room: number;
   cnt_bath1: number;
   cnt_bath2: number;
   cnt_bath3: number;
@@ -619,6 +623,7 @@ export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<Guided
       ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
       ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
       ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
+      ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
     }),
     AGE_COUNT_TIMEOUT_MS,
   );
@@ -1062,6 +1067,7 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     // unknown-bathroom rows (the strict-bathrooms migration removes the `s.bathrooms is null` pass).
     ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
     ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
+    ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
   };
 
   // RC-A rebase note (2026-07-16): main's baseRpcParams block above is the P0-fixed parameter source

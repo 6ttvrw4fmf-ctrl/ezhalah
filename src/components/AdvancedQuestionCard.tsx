@@ -119,8 +119,18 @@ export default function AdvancedQuestionCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel.join(',')]);
 
+  // Single-select auto-advance (owner 2026-08-11): the tap IS the answer — show the selected state,
+  // hold ~260ms so the user sees what they picked, then confirm without a second button press.
+  // Multi keeps select-then-confirm (several chips may be wanted). Tap-again during the hold cancels.
+  const autoRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (autoRef.current) clearTimeout(autoRef.current); }, []);
   const pick = (key: string) => setSel((cur) => {
-    if (selection === 'single') return cur[0] === key ? [] : [key]; // radio: replace / tap-again clears
+    if (selection === 'single') {
+      if (autoRef.current) clearTimeout(autoRef.current);
+      const next = cur[0] === key ? [] : [key]; // radio: replace / tap-again clears
+      if (next.length) autoRef.current = setTimeout(() => onConfirm(next), 260);
+      return next;
+    }
     return cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]; // checkbox: toggle
   });
 
@@ -131,9 +141,6 @@ export default function AdvancedQuestionCard({
           <View style={s.progTrack}>
             <Animated.View style={[s.progFill, { width: fillWidth }]} />
           </View>
-          <Text style={s.progNum}>
-            {t('Question {cur} of {total}', { cur: progressCur, total: progressTotal })}
-          </Text>
         </View>
       ) : null}
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">

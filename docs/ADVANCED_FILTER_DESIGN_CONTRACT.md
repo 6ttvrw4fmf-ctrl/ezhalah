@@ -157,7 +157,7 @@ distinct and consistently styled across both modes (Skip = secondary button; Ski
 - **Every question is optional/skippable** (§7).
 - **One unified eligibility gate.** `eligibility(scope)` is the *only* visibility rule a question
   declares, and all questions share the same gate contract (same thresholds: a question shows only when
-  it clears the scope-size floor `MIN_TOTAL_TO_SHOW` **and** has ≥ the required real options —
+  it clears the scope-size floor `MIN_TOTAL_TO_SHOW (= INTERVIEW_STOP_AT + 1 = 26 since 2026-08-11)` **and** has ≥ the required real options —
   **one** `MIN_REAL_OPTION_COUNT` applied to single **and** multi alike; the current `>0` (chips) vs
   `>=5` (buckets) split is banned). Age's gate must live in its own config like every other question —
   no gate may live only at the call site.
@@ -194,3 +194,23 @@ hidden per-chip counts (§8), the `Skip`/`No preference` weight mismatch (§7), 
 copy (§4 generic `Show {N}`), and the raw-literal token bypass (§5). Adding **Floor Number**, **Street
 Width**, or any future filter is then a one-config-object change that inherits the entire system for
 free.
+
+
+## Amendment 2026-08-11 — the contextual interview (owner-approved)
+
+- The interview is available only when the user's OWN search has **more than 25** results, and it
+  stops asking the moment **25 or fewer** remain — both from the same constant
+  (`INTERVIEW_STOP_AT = 25`, `MIN_TOTAL_TO_SHOW = 26`).
+- Ask-order is **not** the queue: `rankQuestions()` re-probes and re-scores the still-unasked pool
+  against the CURRENT candidate set after every answer (`score = split × salience` with the
+  usefulness gates in `scoreQuestion()`). `ADVANCED_QUESTIONS` is the probe universe only.
+- A question answered OR skipped is never re-asked in the same session (`ageFlowAskedRef`).
+  **Skip = no preference**: nothing is filtered, no false is written, unknowns stay eligible.
+- `FURNISHED_QUESTION` (single, Rent-only) is true tri-state via `q.furnishedPref` → `p_furnished`;
+  «غير مفروشة» counts EXPLICIT unfurnished only (`cnt_unfurnished` = furnished IS FALSE).
+- Single-select auto-advances ~260 ms after the tap (plain `setTimeout`, never an animation
+  callback). Multi stays select-then-confirm.
+- No numeric «Question N of M» caption — the denominator legitimately changes as the set narrows;
+  the thin bar and the shrinking live count are the only progress signals.
+- Normal-Filter territory (location, deal, period, category/type, price, size, **bedrooms**) is
+  never asked by the interview — enforced as data via `af_field_registry.filter_tier`.

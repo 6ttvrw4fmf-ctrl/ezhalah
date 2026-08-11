@@ -321,7 +321,7 @@ const AR: Record<string, string> = {
 
   // Advanced-filter question engine («خلّنا نحدد الطلب أكثر») — عمر العقار is the first field built on
   // this reusable card; new fields add their own strings here, never touch this block's wording.
-  'How old is the property?': 'كم عمر العقار اللي تفضله؟',
+  'How old is the property?': 'كم عمر العقار تقريباً؟',
   'New construction': 'جديد',
   'Less than a year': 'أقل من سنة',
   '1–2 years': '١-٢ سنوات',
@@ -336,9 +336,12 @@ const AR: Record<string, string> = {
   // question titles, the Furnished chip, the bathroom ladder, and the live-count CTA are added here.
   'Do you prefer listings with installment options?': 'تفضّل عقارات تتيح التقسيط / الدفع لاحقًا؟',
   'Offers installments': 'يقبل التقسيط',
-  'What amenities matter to you?': 'ما المرافق المهمة لك؟',
+  'What amenities matter to you?': 'وش المميزات المهمة لك؟',
+  'Do you prefer it furnished?': 'تفضلها مفروشة؟',
+  'Unfurnished': 'غير مفروشة',
+  'Driver room': 'غرفة سائق',
   // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
-  'How many bathrooms?': 'كم عدد دورات المياه؟',
+  'How many bathrooms?': 'كم دورة مياه تفضل؟',
   'Any number': 'أي عدد',
   '1+': '+١',
   '2+': '+٢',
