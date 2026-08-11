@@ -8,6 +8,12 @@
 --   "Furnished" results (99.2%) came from the regex. Both now read coalesce(NEW.<col>, prose) so the
 --   structured value wins and prose can only FILL A GAP. Migration 20260810184335.
 --   Guarded by detect_prose_overrides_structured(), which scans every trg_*_parse live body.
+-- Re-verified 2026-08-11 (senior audit run #10): UNCHANGED. Migration 20260811064231 changes
+--   aqar_parse, not this caller, but it names trg_aqar_parse in its rationale, so the mirror
+--   staleness guard requires a fresh stamp. Re-derived md5 from production is identical to the one
+--   already recorded below — nothing about this trigger moved. It still fully owns the Buy total
+--   (`NEW.price_total := parsed_price`), which is why fixing aqar_parse was the correct write-path
+--   fix rather than a data-only repair.
 -- Verified byte-exact; md5 of everything below this header block: e94517e6c07ddb44ac946fe64b1b7ee0
 CREATE OR REPLACE FUNCTION public.trg_aqar_parse()
  RETURNS trigger
