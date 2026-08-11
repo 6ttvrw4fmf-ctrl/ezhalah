@@ -53,6 +53,7 @@ Usage:  python -m scrapers.raghdan.run [--limit N] [--type residential|commercia
 from __future__ import annotations
 
 import argparse
+import html as ihtml
 import json
 import os
 import re
@@ -185,7 +186,12 @@ def _float(v: Any) -> Optional[float]:
 
 
 def _strip_tags(s: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", s or "")).strip()
+    # ihtml.unescape FIRST, matching abeea/alkhaas/awal/eastabha — raghdan was the only scraper in
+    # the fleet missing it, so entities reached the database raw. Found 2026-08-11 in a deed-location
+    # value that stored «قطعة الأرض &quot;2558&quot;» instead of the quotation marks the deed shows.
+    # Unescaping before tag-stripping is deliberate and safe here: the order cannot resurrect a tag,
+    # because the regex that follows removes anything an entity could decode into.
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", ihtml.unescape(s or ""))).strip()
 
 
 def _redact(text: Optional[str]) -> Optional[str]:

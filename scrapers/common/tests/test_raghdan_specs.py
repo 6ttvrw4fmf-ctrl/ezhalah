@@ -102,3 +102,15 @@ def test_street_name_is_never_written_to_the_row():
         "street_name was added back to the raghdan row; this source cannot distinguish an "
         "official street name from an owner/advertiser name"
     )
+
+
+def test_html_entities_are_decoded_before_storage():
+    """raghdan was the only scraper in the fleet whose _strip_tags skipped ihtml.unescape, so
+    entities reached the database raw — a live deed-location value stored
+    «قطعة الأرض &quot;2558&quot;» instead of the quotation marks the deed actually shows."""
+    from scrapers.raghdan.run import _strip_tags
+
+    out = _strip_tags('قطعة الأرض &quot;2558&quot; &amp; <b>x</b>')
+    assert '&quot;' not in out and '&amp;' not in out
+    assert '"2558"' in out
+    assert '<b>' not in out and 'x' in out
