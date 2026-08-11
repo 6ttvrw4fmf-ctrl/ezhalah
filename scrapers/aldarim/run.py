@@ -148,6 +148,25 @@ def _kitchen_state(is_installed: Any, kitchens: Any) -> Optional[bool]:
     return str(is_installed).strip() not in ("0", "false", "False")
 
 
+def _flag(v: Any) -> Optional[bool]:
+    """Aldarim's 0/1 feature flags → true / false / UNKNOWN, never a manufactured negative.
+
+    `bool(L.get(k))` maps BOTH "the API said 0" and "the API sent null" to False, so a listing
+    aldarim said nothing about recorded a confident "this property does NOT have air conditioning".
+    Same absence→False class as aqar `_flag` (PR#327) and the abeea/eastabha tri-state work (PR#449).
+
+    Aldarim genuinely publishes the negative, so `false` here is a REAL value and must be kept:
+    measured 2026-08-11 over the active inventory, `is_ac_installed` is "0" on 157 rows and null on
+    only 12. That is exactly why this returns None instead of the whole column being retracted —
+    123 residential + 34 commercial rows carry a source-published "no".
+    """
+    if v is None or v == "":
+        return None
+    if isinstance(v, str):
+        return v.strip() not in ("0", "false", "False")
+    return bool(v)
+
+
 # Ageless types never carry a property_age even when the seller typed one (mizlaj PR#265 precedent).
 AGELESS_TYPES = {"Residential Land", "Commercial Land", "Gas Station"}
 
@@ -282,10 +301,16 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "additional_info": _additional_info(L),
         # Feature-grid booleans the card renders with icons — mapped from Aldarim's flags/counts so the
         # card shows real features (Electricity/Water/Sewage/AC/parking…) instead of "No features".
-        "electricity":      bool(L.get("has_electricity")),
-        "water_supply":     bool(L.get("has_water")),
-        "sanitation":       bool(L.get("has_sewage")),
-        "air_conditioner":  bool(L.get("is_ac_installed")),
+        # Tri-state (2026-08-11): silence is NOT a denial. All four keys are 0/1 flags aldarim really
+        # publishes, so a `false` here is source truth and is preserved; only a null/absent key now
+        # stores NULL instead of a fabricated "no". `is_ac_installed` is the one that had actually
+        # gone wrong in production — null on 12 active rows, every one of them stored as false.
+        "electricity":      _flag(L.get("has_electricity")),
+        "water_supply":     _flag(L.get("has_water")),
+        "sanitation":       _flag(L.get("has_sewage")),
+        "air_conditioner":  _flag(L.get("is_ac_installed")),
+        # kitchen keeps its OWN resolver (PR#455): a non-zero `kitchens` COUNT proves a kitchen even
+        # when the flag reads 0, which _flag alone cannot express.
         "kitchen":          _kitchen_state(L.get("is_kitchen_installed"), L.get("kitchens")),
         "parking":          (_int(L.get("parking_spots")) or 0) > 0,
         "elevator":         (_int(L.get("elevators")) or 0) > 0,
