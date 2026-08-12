@@ -590,6 +590,34 @@ _MAX_SAMPLES_PER_BUCKET = 5
 _fetch_fail_samples: dict[str, list[dict]] = {}
 
 
+def _fetch_fail_summary(limit: int = 6, max_len: int = 240) -> str:
+    """The fetch-failure tally rendered for `scrape_runs.notes`, so it survives the job log.
+
+    The breakdown below has only ever been PRINTED (see main()), which put the one diagnostic
+    that separates "these ids are genuinely gone" from "dealapp is refusing to render live
+    pages" exclusively in a GitHub Actions log: expired after retention, invisible to SQL, and
+    unreadable by any `mon_detect_*`. Every audit that met the standing dealapp coverage and
+    `stale_active` alerts had to re-derive the classification from scratch, and the run that
+    produced the alert was usually long gone by then.
+
+    Persisting it puts the classification in the same row the coverage guard's own outcome is
+    recorded in. Measured 2026-08-12: the 12-shard fleet re-confirmed 2,461 of 9,827 active rows
+    (25%) AND failed on roughly two thirds of the brand-new sitemap ids it was handed — an id
+    the sitemap published hours earlier cannot be "delisted", so the shortfall is a fetch/render
+    failure rather than dead inventory. No log survived to say which bucket it fell in.
+
+    Structural counts only — bucket names and integers, never listing content, the same PDPL
+    rule `_record_status_200_no_schema` follows for its samples.
+    """
+    with _fetch_fail_lock:
+        if not _fetch_fail_reasons:
+            return ""
+        total = sum(_fetch_fail_reasons.values())
+        items = _fetch_fail_reasons.most_common(limit)
+    parts = ",".join(f"{k}={v}" for k, v in items)
+    return f" fetch_fail_total={total} fetch_fail={parts}"[:max_len]
+
+
 def _record_status_200_no_schema(adid: str, requested_url: str, resp: Any) -> None:
     try:
         final_url = str(getattr(resp, "url", "") or "")
@@ -1014,8 +1042,13 @@ def main() -> int:
         # CI (found live 2026-08-09: run 31294408328 scraped 0/1200 pages, scrape_runs.ok was
         # correctly demoted to false, but the job exited 0). Fixed here for dealapp; propagate the
         # return code so CI actually reddens when the DB already knows the run was unhealthy.
+        # `attempted` + the fetch-failure breakdown ride along with the existing sold/pruned
+        # note so a run's coverage shortfall is adjudicable straight from SQL: attempted vs
+        # rows_upserted gives the hit rate, and the buckets say whether the misses were
+        # dealapp's app reporting the ids gone or our fetches never rendering a live page.
         healthy = db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n,
-                              notes=f"sold={sold_ct} pruned={pruned}",
+                              notes=f"sold={sold_ct} pruned={pruned} attempted={len(ids)}"
+                                    f"{_fetch_fail_summary()}",
                               check_tables=["dealapp_residential_listings", "dealapp_commercial_listings"])
         if not healthy:
             print("✗ Deal App: run demoted to unhealthy by end_run()'s RC-B guard "
