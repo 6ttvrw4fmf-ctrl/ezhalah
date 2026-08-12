@@ -1,0 +1,26 @@
+-- INCIDENT RECORD + explicit safety net (2026-08-12, same session as the two migrations above):
+-- while landing dealapp_loc_rel_capacity_fix_batching_cron_timeout_and_barrier, jobid 22's live
+-- cron.job.command was briefly (and incorrectly) set to
+-- 'SET statement_timeout = ''600s''; CALL public.loc_rel_refresh_tick();' — a two-statement
+-- command. That mistake was caught before being committed to git (the companion migration file in
+-- this repo has always read correctly — it never touches jobid 22), but it WAS live in production
+-- for a few minutes, so this migration exists both as an incident record and as an explicit,
+-- idempotent safety net restoring the single-statement command. loc_rel_refresh_tick() is a
+-- PROCEDURE that does its own internal
+-- COMMIT, and Postgres only allows that when the CALL is the SOLE top-level statement of its
+-- transaction — combining it with a preceding SET reproduces the exact 2026-08-06 outage this
+-- repo already has a permanent regression test for (scripts/verify-loc-rel-tick-single-statement-cron.ts,
+-- migration 20260807130000_fix_loc_rel_refresh_tick_transaction_control.sql). Confirmed live in
+-- production: the 11:49:00 UTC tick failed with "ERROR: invalid transaction termination, CONTEXT:
+-- PL/pgSQL function loc_rel_refresh_tick() line 22 at COMMIT" — reverted within the same
+-- ~6-minute window, one failed tick, no data impact (loc_rel ticks are idempotent re-derivations).
+--
+-- jobid 50 (refresh_mon_audit_counts) and jobid 61 (propagate_dealapp_resolved_locations) do NOT
+-- have this problem — both are plain FUNCTIONs (not PROCEDUREs) with no internal transaction
+-- control, so their SET-prefixed commands are safe and were left in place (confirmed: jobid 61's
+-- new two-statement command completed successfully at 11:48:00 UTC, 1.37s).
+--
+-- jobid 22 relies solely on the index + batching fix from the companion migrations (already proven
+-- sufficient — loc_rel_refresh_one on dealapp's full backlog now completes in low single-digit
+-- seconds, well inside the ambient 120s default) rather than an extended timeout.
+select cron.alter_job(22::bigint, command := 'CALL public.loc_rel_refresh_tick();');
