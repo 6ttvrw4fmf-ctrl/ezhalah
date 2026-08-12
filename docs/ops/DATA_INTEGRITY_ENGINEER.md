@@ -359,6 +359,34 @@ recoverable from the database alone.
 FIRST and read the diff. "The parser dropped it" and "the source never published it" look identical in
 the database and lead to opposite actions — one is a repair, the other is fabrication.
 
+### 22a. aqaratikom is NOT waivable — do not add it to `ops_rent_period_sourceless` (2026-08-12)
+
+The 2026-08-11 audit waived 15 platforms into `ops_rent_period_sourceless` and, in the same session,
+removed aqaratikom's fabricating `else → سنوي` default (`scrapers/aqaratikom/run.py:_rent_period`)
+**without** waiving the platform. That asymmetry is correct and must be preserved. Run #14 tested it:
+
+`_rent_period()` reads `subtype` from the **detail** payload only, so an empty detail fetch and a
+source that publishes no period are indistinguishable in the row. Splitting aqaratikom's active Rent
+rows by whether they carry a period settles which one it is:
+
+| cohort | rows | avg `source_capture.source_text` | refetched today |
+|---|---|---|---|
+| period present (`annual`) | 56 | **370 chars** | 54 |
+| period NULL | 6 | **21 chars** | 6 |
+
+The period-less rows carry a systematically **truncated capture** — 17× shorter, all re-fetched by
+the 04:22 production crawl, all with `price_evidence.unverified = true`
+(`adapter_emitted_no_evidence`). That is the §8 truncation signature, not source silence: *a capture
+that thin cannot contain the field, so its absence proves nothing about the page.* Waiving on this
+evidence would permanently record "nawait.sa publishes no period" for 7 listings on the strength of
+our own thin fetch — the fabrication §22 exists to prevent, just pointing the other way.
+
+**Correct state:** honest NULL, still counted by `mon_detect_rent_period_unreachable` (open P2 #423),
+still flagged by `mon_searchability_alerts` as the one non-waived platform with suspect rows. The real
+fix is upstream — make the aqaratikom detail fetch return a full payload — and only then does the
+period question have an answer worth recording. nawait.sa is blocked from the cloud sandbox's egress
+proxy (403 CONNECT), so that probe needs a CI runner.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve
