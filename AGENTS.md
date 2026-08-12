@@ -20,7 +20,12 @@ source of truth, not the cloud routine's prompt text.** If the two ever differ, 
 match the file. Read it before any data-fidelity, price, area, location, searchability or Normal
 Filter work; it carries the standing rules and the worked examples that keep them from being
 misapplied — above all: **weird does not mean wrong, and data is only corrected when you can PROVE
-Ezhalah created the error.**
+Ezhalah created the error.** Its **§0 standing operating contract** (owner, 2026-08-12) is what makes
+that routine finish rather than hand work back: it owns every safely fixable data-integrity problem
+it finds end to end — find → prove → root cause → fix → repair data → barrier → deploy → production
+verify → continue — and does not send its report while safely fixable Ezhalah-side issues from the
+run remain unfinished. §0.1 lists what that authority does NOT waive (source truth, destructive
+safety gates, the RED list).
 
 **The barriers are machine-enforced and do not depend on any agent remembering to run them.**
 `mon_run_all_detectors()` runs twice an hour (pg_cron jobid 38 at :29/:59) and returns a count per
