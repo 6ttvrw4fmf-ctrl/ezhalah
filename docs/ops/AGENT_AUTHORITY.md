@@ -337,8 +337,116 @@ prompt's stricter wording as authoritative. If a stored prompt cannot itself be 
 a session (routine prompts are configured at claude.ai, outside any repo tool's reach), this file is
 the durable fix — that is precisely why it lives here instead of only in the prompt.
 
+## Completion discipline — no report while your own fix is still unverified (owner-granted, 2026-08-12)
+
+The owner's words: *"Do not give me the final report while something from your own fix is still
+waiting for verification."* This followed a real near-miss: a Senior/Daily run root-caused, fixed,
+tested, deployed, and reported a dealapp capacity incident as complete while (a) a natural cron
+cycle needed to prove the live fix hadn't fired yet and (b) CI on the landing PR was still pending.
+The fix was in fact correct — but the report went out before that was actually known, not after.
+
+**The full lifecycle, in order, every time:**
+
+> DETECT → PROVE → ROOT CAUSE → FIX → REPAIR (data, if evidence-backed and safe) → BARRIER → TEST →
+> DEPLOY → **WAIT FOR ANY REQUIRED PRODUCTION CYCLE** → PRODUCTION VERIFY → DRIVE CI TO GREEN → MERGE
+> → **FINAL DETECTOR SWEEP** → REPORT.
+
+The report is the LAST step, unconditionally. Concretely:
+
+- **If a fix's proof depends on a natural event that hasn't happened yet** — a cron tick, a
+  scheduled scraper run, a cache/materialized-view refresh — **wait for that event and verify its
+  actual result** before reporting. "The mechanism should now work" is not verification; "it ran and
+  here is what happened" is. Checking an unrelated code path or an indirect proxy does not substitute
+  for the specific cycle the fix touches. If genuinely waiting is impractical this run (the next
+  cycle is hours away), report honestly as **AWAITING FIRST PRODUCTION EXECUTION** — never silently
+  upgrade that to "fixed" or bury it as a footnote in an otherwise-closing report.
+- **If a PR is open, drive it to green and merge before reporting** — same rule as the CI-failure
+  drive-to-green loop elsewhere in this file, just applied to the finishing line, not only to
+  failures encountered mid-flight. A pending/in-progress CI check is not a stopping point.
+- **Run a final detector sweep** (`mon_run_all_detectors()`, or the equivalent full health check for
+  whatever was touched) after everything above lands, and let its result inform the report — a fix
+  landed five minutes ago has not yet been given the chance to either confirm itself clean or surface
+  a regression the same barriers would have caught on the next daily pass.
+- **Genuine source/external limitations are not failures to push through.** When investigation
+  proves a row, platform, or condition is correctly blocked by something Ezhalah does not control
+  (ambiguous source data with no safe disambiguation, a source that simply does not publish a field,
+  a third party's own outage) — leave it untouched, classify it plainly as source-limited/external,
+  and never invent, guess, or force a resolution just to raise a completion score. This is not in
+  tension with the completion-discipline rule above: "genuinely blocked by the source" is itself a
+  terminal, verified state, not an unfinished one.
+
+**Final report format:** one BEFORE → AFTER report, not a stream of interim updates re-sent as if
+each were the finish line. Structure:
+
+```
+Rating before: …
+Bugs found: …
+Root causes: …
+Rows affected: …
+What was fixed: …
+Data repaired (evidence-backed only, never guessed): …
+Barriers added: …
+Deployments / merges: …
+Production verification (including any awaited cycle's actual result): …
+Rating after: …
+Genuine source/external limitations (separated from Ezhalah bugs, left untouched): …
+```
+
+Target **10/10 for everything Ezhalah controls and can safely fix** — a lower final rating is
+correct and expected when the shortfall is a genuine external/source limitation, not something to
+close the gap on by guessing.
+
+This section governs both the Senior Production Engineer and the Junior/Daily Engineer routines,
+exactly like the rest of this file, and — per the file's own opening rule — overrides any routine
+prompt that is more timid or that asks for a report before this lifecycle completes.
+
 ## Changing this file
 
 Widening GREEN or narrowing RED is an **owner decision** and requires owner approval in the PR.
 Agents may not grant themselves authority. `scripts/verify-agent-authority-contract.ts` fails CI if
 the RED list loses any of its nine categories.
+
+### Difficulty is not an escalation reason (owner-granted, 2026-08-12)
+
+The section above says *when* to report. This says **what you may hand back**. It was added after a
+Senior run investigated a defect correctly, proved a safe source-faithful fix existed, specified it
+precisely — and then returned it to the owner as a decision, because the change touched three core
+search objects and the run was long. The owner's answer:
+
+> *"Your job is not to investigate everything and then return fixable engineering work to me. If you
+> prove something is an Ezhalah-side engineering defect and there is a safe, source-faithful
+> solution, fix it, add a permanent barrier, deploy it, production-verify it, and continue the
+> audit. Do not stop merely because implementing the solution touches several core objects."*
+
+**The loop, run to exhaustion:**
+
+> detect → prove → classify → fix every safely fixable Ezhalah-side issue → repair affected data
+> when authorized → add/strengthen barrier → test → deploy → production verify → **continue until no
+> safely fixable issue remains** → then report once.
+
+**None of these is a reason to escalate instead of fixing:** the fix is difficult; it touches core
+architecture, a view, a matview, an RPC, or several objects at once; it needs a schema change; it
+will take a long time; it is late in the run; it is "arguably product". If it is an Ezhalah-side
+defect and a safe, source-faithful, reversible, testable, barrier-protected fix exists, **it is
+yours to land.** Measure before assuming risk — the 2026-08-12 ordering fix looked like it needed a
+generated column, a table rewrite and three new indexes until `EXPLAIN ANALYZE` showed the query
+already did a full seq-scan-and-sort and used none of the existing ordering indexes, at which point
+the whole change collapsed to one nullable column plus an ORDER BY expression.
+
+**Escalate only these, and say plainly which one applies:**
+
+1. **Genuine product/business decision** — the engineering options are exhausted and what remains is
+   a preference, not a defect.
+2. **Authorization boundary** — a RED-list operation (bulk inactivation, hard delete, retention
+   change, taxonomy/hierarchy change). Classify it as an authorization boundary and **leave the gate
+   exactly as it is.** A guard refusing your batch is the guard working.
+3. **External blocker** — name the exact missing access (e.g. "outbound HTTPS to `dealapp.sa` is
+   blocked by the sandbox proxy"), do everything that can still be done internally, and preserve the
+   evidence for an environment that has that access.
+4. **Source limitation** — the source does not publish the value. Preserve the honest NULL, record
+   the evidence, and register it where the relevant detector reads (e.g.
+   `ops_rent_period_sourceless`) so the barrier stops re-reporting a non-defect.
+
+**The 10/10 must be real.** Never reach it by weakening a destructive-operation gate, bypassing a
+deploy/concurrency lock, inventing source truth, or lowering a coverage/safety threshold to make an
+alert go quiet. A rating held down by a genuine external or source limitation is the correct rating.
