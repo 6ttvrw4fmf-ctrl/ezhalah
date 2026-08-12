@@ -85,6 +85,63 @@ _BATHS = re.compile(r'"bathrooms"\s*:\s*(\d+)')
 _PRICE = re.compile(r'"price"\s*:\s*(\d{3,})')   # numeric only → skips the "price":"السعر" label
 
 
+# ── labelled rent price in the ad body ────────────────────────────────────────────────────────
+# 1october publishes SOME rent ads with no price in JSON-LD offers.price and no numeric "price" in
+# the RSC payload — the figure appears only in the ad body, always as an explicit labelled line:
+#   «💰 الإيجار السنوي: 85,000 ريال»   «💰 الإيجار: 65,000 ريال سنوياً»   «💰 الإيجار الشهري: 2,500 ريال»
+# Measured 2026-08-12: 7 of october's 8 active Rent listings were being SERVED PRICELESS AND
+# PERIODLESS (production_ready, in search) while their own page stated both. Fleet-wide the same
+# check finds 24 such rows in 2,632 priceless active rents — october is 7/7 of its own, aqar 1/2032
+# — so this is a 1october capture gap, not a general "price on request" population.
+#
+# WHY THIS IS A SOURCE READ AND NOT A GUESS. The 2026-08-11 rent-period lesson (a detector keyed on
+# `source_capture ~ شهري` matched RNPL lines, the similar-listings strip and seller prose, and was
+# killed for producing confident wrong numbers) applies to TOKEN PRESENCE anywhere in a blob. This
+# is the opposite shape, and matches the accepted 2026-08-10 aqar precedent (labelled «السعر: N ريال»
+# beats an unlabelled document-order pick): the label, the amount and the currency must be adjacent
+# in that order, so «🔒 تأمين مسترد: 2,000 ريال» (a deposit, id 665337, sits right after the rent
+# line) and «💳 طريقة الدفع: دفعتين» cannot match — a different label, and no amount+ريال pair.
+#
+# The period is taken ONLY from the same labelled phrase, before or after the amount. If the source
+# states an amount but no period, we return nothing at all rather than assume annual: storing the
+# figure would force a period choice the source never made, and honest NULL beats a guess.
+_RENT_PROSE = re.compile(
+    r'ال[إا]يجار'                                  # the rent label itself
+    r'(?:\s*(?P<pre>السنوي|الشهري))?'              # «الإيجار السنوي: …»
+    r'\s*[:：]\s*'
+    r'(?P<amt>\d[\d,٫٬\.]*\d|\d)'        # 85,000 / 2500 (Arabic thousands seps too)
+    r'\s*ريال'
+    r'(?:\s*(?P<post>سنوي(?:ا|اً|ًا)?|شهري(?:ا|اً|ًا)?))?'   # «… 65,000 ريال سنوياً»
+)
+
+
+def _rent_from_prose(text: Optional[str]) -> tuple[Optional[int], Optional[str]]:
+    """(annualised_price, rent_period) from an explicit «الإيجار …: N ريال» line, else (None, None).
+
+    Returns the ANNUALISED figure in the first slot to match how every platform stores rent
+    (verified 2026-08-12: dealapp 8,000/month is stored price_annual=96,000 with
+    rent_period='monthly'), and the source's own stated period in the second — the period is
+    recorded as read, never inferred from the amount.
+    """
+    if not text:
+        return None, None
+    m = _RENT_PROSE.search(text)
+    if not m:
+        return None, None
+    raw = re.sub(r'[,٫٬\.]', '', m.group('amt'))
+    if not raw.isdigit():
+        return None, None
+    amount = int(raw)
+    if amount < 100:                      # same floor the structured path already applies
+        return None, None
+    word = m.group('pre') or m.group('post') or ''
+    if word.startswith('الشهري') or word.startswith('شهري'):
+        return amount * 12, 'monthly'
+    if word.startswith('السنوي') or word.startswith('سنوي'):
+        return amount, 'annual'
+    return None, None                     # amount without a stated period → store nothing
+
+
 def _detail_specs(s: cc.Session, url: str, pid: str) -> dict:
     """Fetch a detail page; return {area_m2, bedrooms, bathrooms, price, photo_urls, description}.
 
@@ -200,11 +257,18 @@ def map_item(item: dict, s: cc.Session) -> Optional[tuple[dict, str]]:
     if price is not None and price < 100:
         price = None
     price_annual = price
+    rent_period = None
     if transaction_type == "Rent" and specs.get("price") is not None:
         # unit_code only applies when `price` actually came from the detail page (specs) — the
         # index-level offers.price is a sale price by convention (see comment above) and never
         # carries this scraper's rent-period signal.
         price_annual = _rent_annualize(price, specs.get("price_unit_code", ""))
+        unit = (specs.get("price_unit_code") or "").strip().upper()
+        rent_period = {"MON": "monthly", "ANN": "annual"}.get(unit)
+    if transaction_type == "Rent" and price_annual is None:
+        # Structured price absent — fall back to the ad body's own labelled rent line. Never
+        # overrides a structured read; only fills a row that would otherwise be served priceless.
+        price_annual, rent_period = _rent_from_prose(specs.get("description"))
     if specs.get("photo_urls"):
         photos = specs["photo_urls"]
 
@@ -233,6 +297,7 @@ def map_item(item: dict, s: cc.Session) -> Optional[tuple[dict, str]]:
         "bathrooms": baths,
         "price_total": price if transaction_type == "Buy" else None,
         "price_annual": price_annual if transaction_type == "Rent" else None,
+        "rent_period": rent_period if transaction_type == "Rent" else None,
         "photo_urls": photos,
         "title": _redact(name),
         "description": specs.get("description"),
