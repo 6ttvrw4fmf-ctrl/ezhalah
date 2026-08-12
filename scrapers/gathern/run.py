@@ -195,12 +195,27 @@ def _monthly_window() -> tuple[str, str]:
     return ci.isoformat(), co.isoformat()
 
 
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
 def _num(v: Any) -> Optional[int]:
-    """Parse '9,935.40' / '14915' / 9935.4 → rounded int. None if not numeric/zero."""
+    r"""Parse '9,935.40' / '14915' / 9935.4 / '990٫00' (Arabic decimal separator) → rounded int.
+    None if not numeric/zero.
+
+    2026-08-12 field_integrity_extreme_magnitude fix (GH #503): msapi.gathern.co sometimes renders
+    a price string using the ARABIC decimal separator ٫ (U+066B) instead of '.' — e.g. "990٫00"
+    meaning 990.00 SAR — and/or the Arabic thousands separator ٬ (U+066C). The old regex `[^\d.]`
+    stripped ٫/٬ out entirely instead of treating them as separators, concatenating the integer and
+    fraction digits into a number ~100x too large: "990٫00" → digits-only "99000" instead of 990.
+    Confirmed in production: 204 active rows had monthly_price up to 2,821,500 SAR (a furnished
+    studio, ~28,215 SAR once corrected) — every one reconciled against its own nightly_price ×
+    stay_nights only after dividing by 100 (repaired directly in the DB; this is the parser fix so
+    new scrapes stop reproducing it)."""
     if v in (None, "", 0, "0"):
         return None
     try:
-        s = re.sub(r"[^\d.]", "", str(v))
+        s = str(v).translate(_AR_DIGITS).replace("٫", ".").replace("٬", "")
+        s = re.sub(r"[^\d.]", "", s)
         n = round(float(s)) if s else None
         return n if n else None
     except (TypeError, ValueError):
