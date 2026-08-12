@@ -50,6 +50,14 @@ search proof via the production RPC, daily inactive-resurrection audit (target 0
 inactivations), price/area barriers, one-report-only autonomous loop, the 10/10 honesty rule.
 **Ignore Advanced Filter** — that belongs to the senior (routine #2).
 
+Carries a **§0 standing operating contract** (owner, 2026-08-12): this engineer owns every safely
+fixable data-integrity problem it discovers from beginning to end, does not pause for permission on
+normal safely provable fixes, and does not report while safely fixable Ezhalah-side issues from the
+run remain unfinished — target 10/10 with **0 known safely fixable Ezhalah-side issues remaining**,
+never reached by bypassing source truth or a destructive safety gate. The owner attached this to
+THIS routine deliberately: *"Do not create a different engineer or duplicate routine."* §0.1 lists
+what it does not waive; §0.3 fixes the one BEFORE → AFTER report shape.
+
 ## 4. 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA Engineer (new, 2026-08-11)
 
 Canonical spec: **`docs/ops/SEARCH_MATCH_QA_ENGINEER.md`** (file wins over the live prompt on any

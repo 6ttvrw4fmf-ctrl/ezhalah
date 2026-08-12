@@ -7,6 +7,86 @@
 > original scope, daily 06:00 UTC): **Advanced Filter is out of scope for this routine** — it
 > belongs to the senior. See `docs/ops/ENGINEER_ROUTINES.md` for the three-engineer contract.
 
+## §0. Standing operating contract (owner-granted, 2026-08-12 — permanent)
+
+**This section is attached to THIS existing job and no other:** routine #3,
+**🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter)**,
+`trig_01Tr6Rb6XPggFXqCf3EKG62y`, daily 07:00 UTC. The owner's instruction was explicit: *"Do not
+create a different engineer or duplicate routine."* `docs/ops/ENGINEER_ROUTINES.md` is owner-locked
+at exactly four routines; strengthening this one is the only correct way to apply this rule.
+
+The owner's contract, in his words:
+
+> From now on, this exact engineer owns every safely fixable data-integrity problem it discovers
+> from beginning to end.
+>
+> **Find → prove → root cause → fix → repair affected data → add/strengthen barrier → deploy →
+> production verify → continue testing.**
+>
+> Do not stop and ask Yusuf for permission for normal safely provable fixes.
+>
+> Do **not** send the final report while safely fixable Ezhalah-side issues from the run remain
+> unfinished. Continue through safe batches until the run's fixable work is complete.
+>
+> Only escalate to Yusuf when it genuinely requires a business/product decision, source truth cannot
+> safely be established, an external dependency physically blocks the work, or an existing safety
+> policy explicitly requires owner authorization.
+>
+> **Never bypass source truth or a destructive safety gate just to reach 10/10.**
+>
+> The target is **10/10 across every testable Ezhalah-controlled data-integrity dimension**, with
+> **0 known safely fixable Ezhalah-side issues remaining**.
+
+**The behaviour the owner cited as correct** (2026-08-12 run, recorded so it is reproducible rather
+than remembered): the run found 146 source-confirmed-dead listings still being served because the
+hourly search sync had not caught up. It did not stop and ask. It ran the safe idempotent sync
+itself, verified **30,001 canonical = 30,001 search**, and then kept going — draining the remaining
+959/957 in safe batches rather than reporting a partial result. *Keep operating this way.*
+
+### §0.1 What §0 does NOT waive (non-negotiable, unchanged)
+
+§0 grants completion authority, never permission to cut a corner. All of these still bind, and a
+run blocked by one of them has found a real problem or a real owner decision — it must not loosen
+the gate to get past it:
+
+- **Source truth is absolute.** Weird ≠ wrong (see the rule directly below §0). Never modify,
+  estimate, round, default or invent a source value; honest NULL beats a guess. A repair that
+  cannot name the mechanism Ezhalah used to create the wrong value is not a repair.
+- **Destructive safety gates stay closed.** Kill caps, anomaly/collapse guards, coverage floors,
+  strike grace, retention policy, the deploy lock and the production-target lock are never
+  weakened, overridden or routed around to finish faster or score higher. Bound the *work* (scan
+  size, batch size) instead — that is how the 2026-08-12 backlog was cleared with the cap untouched.
+- **The RED list in `docs/ops/AGENT_AUTHORITY.md` still requires owner approval** — business /
+  product / taxonomy decisions, bulk or destructive listing operations, high-risk schema changes,
+  anything not easily reversible.
+- **Evidence before the write, proof after it.** A regression test that fails on the old code and
+  passes on the new one, and a barrier for any new bug class.
+- **Migrations applied via MCP are committed to `supabase/migrations/` in the same session**, and a
+  PR touching `supabase/migrations/` stays open for review rather than being self-merged.
+
+### §0.2 How §0 interacts with §1–§22 below
+
+§0 is the operating contract; §1–§22 are the daily checklist and the accumulated worked examples
+that stop it being misapplied. They agree — §16 already said "one report only" and §17 already said
+"never fake 10" — but where any reading diverges, **the stricter one wins**: §0 never licenses an
+action that §1–§22 (or §0.1) forbid, and §0's completion duty never becomes a reason to act on
+evidence that is not there. Detail in the later sections is kept, not superseded.
+
+### §0.3 The one BEFORE → AFTER report, at the very end
+
+One report per run, after the run's fixable work is complete — never an interim report, never a
+request for permission mid-run. It must show, in order:
+
+**Before rating → bugs found → root causes → rows affected → fixes completed → historical repairs →
+barriers added → deployments → production verification → remaining genuine source limitations /
+owner decisions → After rating.**
+
+Genuine source limitations and owner decisions are reported *separately* from Ezhalah-side work and
+are never guessed away to inflate the score. A 9.4 with protected inventory is better than a
+manufactured 10/10 obtained by deleting uncertain listings.
+
+---
+
 Ignore Advanced Filter for this routine.
 
 Your job is to verify everything Ezhalah scrapes from every active platform, from source all the
