@@ -77,4 +77,4 @@ jobs:
             --limit ${{ inputs.limit || '1500' }} \
             --min-stale-days ${{ inputs.min_stale_days || '3' }} \
             --grace ${{ inputs.grace || '3' }} \
-            ${{ (github.event_name == 'schedule' || inputs.apply == 'true') && '--apply' || '' }}
+            ${{ (github.event_name == 'schedule' || inputs.apply) && '--apply' || '' }}
