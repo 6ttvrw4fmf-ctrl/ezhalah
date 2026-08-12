@@ -3,7 +3,10 @@
 # Each city runs as its OWN parallel GitHub job on its own machine with its own IP address.
 # This means 12 cities scrape simultaneously instead of one at a time — roughly 12× faster.
 # Each runner does a light 3-page sweep of every (type × deal) combo for its city and upserts
-# new listings. Running every 4 hours keeps the DB fresh without missing anything for long.
+# new listings. Dispatched every 8 hours by cron.job 'gh-aqar-sweep' ('5 */8 * * *') — corrected
+# 2026-08-10, this comment previously said "every 4 hours" which hasn't matched the actual
+# schedule for a while (see dangling_scrape_run root-cause investigation, migration
+# 20260810130112: an 8h cadence is also why reconciliation needed to become platform-agnostic).
 #
 # Manual trigger: Actions tab → "Aqar sweep" → Run workflow.
 
