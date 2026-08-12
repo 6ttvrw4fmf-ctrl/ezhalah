@@ -159,6 +159,22 @@ Detectors added 2026-08-10 from the Filter audit, and what each one is really pr
 - **`commercial_coverage_blind_spot`** — a whole commercial table holding inventory but reaching
   search with nothing.
 
+Added 2026-08-12 (run #14):
+- **`searchability_collapse`** — per-platform rent-apartment searchability against that platform's
+  own 14-day baseline. The view it reads (`mon_searchability_alerts`) already existed and **nothing
+  called it** — no `pg_proc` body, no cron job — so 7 standing COLLAPSE verdicts had raised zero
+  alerts; cron job 62 was faithfully snapshotting the history for a verdict nobody ever evaluated.
+  Third recorded instance of the §11a/§22 pattern. Two measurement defects were fixed with it:
+  (1) the metric counted only «سنوي», so monthly-heavy platforms read as collapsed while being ~99%
+  reachable (gathern 0.0→99.7, aqarmonthly 0.0→99.3, mustqr 21.6→98.0, dealapp 86.5→97.7) — use
+  `pct_period_searchable`, never `pct_annual_searchable`; and (2) it ignored
+  `ops_rent_period_sourceless`, so evidence-backed source silence read as a defect and wiring it
+  as-is would have raised 7 false P2s on day one. It deliberately does **not** raise on
+  `suspect_price_without_period` — that cohort belongs to `mon_detect_rent_period_unreachable`, and
+  two detectors on one cohort is how a roster becomes noise. Scope is rent APARTMENTS only
+  (`type_ar='شقة'`), stated in a `COMMENT ON VIEW` so it is never mistaken for full coverage.
+  Guarded offline by `scripts/verify-searchability-barrier-wired.ts`.
+
 ## 12. Autonomous repair + deploy
 For confirmed ordinary engineering bugs: detect → prove → fix root cause → repair proven affected
 rows → add barrier → regression test → deploy/apply → verify production. No approval needed.
