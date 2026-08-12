@@ -244,6 +244,7 @@ def main() -> int:
     seen = dead = alive = transient = killed = struck = 0
     alive_ids: list[int] = []
     kill_pending: list[tuple[int, int]] = []  # (row id, new_missing) — flipped ONLY after the cap gate
+    detail_rows: list[dict] = []              # per-row evidence, flushed after the cap gate
     started = time.time()
 
     def _flush_alive() -> None:
@@ -253,13 +254,37 @@ def main() -> int:
                     .in_("id", alive_ids[i:i + 200]).execute()
         alive_ids.clear()
 
+    def _flush_detail(rows: list[dict]) -> None:
+        """Per-row evidence for every decision this sweep made, into `gathern_liveness_detail`.
+
+        Why: this module used to persist only the AGGREGATE line (scanned/dead/alive/transient) in
+        scrape_runs.notes, so "was that kill correct?" could not be answered from our own data — the
+        per-row 404s lived only in an expiring Actions log. On 2026-08-12 that left 1,107 rows
+        pending an owner decision with no queryable evidence behind them. wasalt already solved this
+        (`wasalt_liveness_pilot_detail`); this is the gathern half.
+
+        Written on EVERY run including dry-runs — a dry-run's evidence is the entire point of a
+        dry-run. Best-effort: an audit-log write must never fail or roll back a liveness run."""
+        for i in range(0, len(rows), 500):
+            try:
+                client.table("gathern_liveness_detail").insert(rows[i:i + 500]).execute()
+            except Exception as exc:  # noqa: BLE001 — logging must not break the lifecycle
+                print(f"⚠ detail-log insert failed (non-fatal, {len(rows[i:i + 500])} rows): "
+                      f"{str(exc)[:160]}", flush=True)
+
     try:
         for row in work:
             url = (row.get("listing_url") or "").strip()
             if not url:
                 continue
             seen += 1
-            action, new_missing = classify(probe(s, url), row.get("missing_count"), args.grace)
+            status = probe(s, url)
+            action, new_missing = classify(status, row.get("missing_count"), args.grace)
+            detail_rows.append({
+                "listing_id": row["id"], "http_status": status, "verdict": action,
+                "missing_count_before": int(row.get("missing_count") or 0),
+                "missing_count_after": new_missing,
+            })
 
             if action in ("kill", "strike"):
                 dead += 1
@@ -304,6 +329,20 @@ def main() -> int:
             for rid, nm in kill_pending:
                 client.table(TABLE).update({"missing_count": nm, "active": False}).eq("id", rid).execute()
             applied_kills = len(kill_pending)
+
+    # Evidence is flushed AFTER the cap gate so `applied` reflects what actually happened to the row:
+    # a dry-run and a quarantined (anomaly-capped) batch both record REAL 404s with applied=false.
+    # That distinction is the whole reason this log exists — on 2026-08-12 the 1,107-row backlog was
+    # genuinely 404-confirmed and genuinely un-flipped, and nothing in our data could say so.
+    for d in detail_rows:
+        if d["verdict"] == "kill":
+            d["applied"] = bool(args.apply and not anomaly)
+        elif d["verdict"] == "transient":
+            d["applied"] = False          # nothing is ever written for a transient verdict
+        else:
+            d["applied"] = bool(args.apply)
+    if detail_rows:
+        _flush_detail(detail_rows)
 
     verb = "inactivated" if args.apply else "WOULD inactivate"
     kill_shown = applied_kills if args.apply else len(kill_pending)
