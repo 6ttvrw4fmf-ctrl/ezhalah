@@ -8,6 +8,13 @@
 -- session READS to reason about the location pipeline, so a stale one is how a session concludes
 -- "satel has no native resolution" and ships a fix for a problem that does not exist.
 --
+-- Re-verified 2026-08-12 (issue #460 gathern fix, PR #546): UNCHANGED. This migration's needle-edit
+--   only rewrites listing_native_location_v2's catchall arm (restoring a dropped gathern LATERAL);
+--   it reads FROM v1 but never redefines it. Re-ran pg_get_viewdef('listing_native_location_v1'::
+--   regclass, true) against live production immediately before this commit: byte-exact with the body
+--   below (same 13,385 chars, same md5 d7fff7ec0378d6095728e862aee80106) — content genuinely
+--   unchanged, only the verification date needed to advance past this migration (same any-mention
+--   trip as the 2026-08-10 entry below, not real drift).
 -- Re-verified 2026-08-11 (Data Integrity self-audit): UNCHANGED. md5(pg_get_viewdef(...,true)) in
 --   production read d7fff7ec0378d6095728e862aee80106 at 13:04Z — byte-identical to the digest this
 --   header already carried, so the body below is untouched. The stamp moves because migration
