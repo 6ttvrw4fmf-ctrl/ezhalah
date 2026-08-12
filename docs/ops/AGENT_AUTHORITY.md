@@ -337,6 +337,69 @@ prompt's stricter wording as authoritative. If a stored prompt cannot itself be 
 a session (routine prompts are configured at claude.ai, outside any repo tool's reach), this file is
 the durable fix — that is precisely why it lives here instead of only in the prompt.
 
+## Completion discipline — no report while your own fix is still unverified (owner-granted, 2026-08-12)
+
+The owner's words: *"Do not give me the final report while something from your own fix is still
+waiting for verification."* This followed a real near-miss: a Senior/Daily run root-caused, fixed,
+tested, deployed, and reported a dealapp capacity incident as complete while (a) a natural cron
+cycle needed to prove the live fix hadn't fired yet and (b) CI on the landing PR was still pending.
+The fix was in fact correct — but the report went out before that was actually known, not after.
+
+**The full lifecycle, in order, every time:**
+
+> DETECT → PROVE → ROOT CAUSE → FIX → REPAIR (data, if evidence-backed and safe) → BARRIER → TEST →
+> DEPLOY → **WAIT FOR ANY REQUIRED PRODUCTION CYCLE** → PRODUCTION VERIFY → DRIVE CI TO GREEN → MERGE
+> → **FINAL DETECTOR SWEEP** → REPORT.
+
+The report is the LAST step, unconditionally. Concretely:
+
+- **If a fix's proof depends on a natural event that hasn't happened yet** — a cron tick, a
+  scheduled scraper run, a cache/materialized-view refresh — **wait for that event and verify its
+  actual result** before reporting. "The mechanism should now work" is not verification; "it ran and
+  here is what happened" is. Checking an unrelated code path or an indirect proxy does not substitute
+  for the specific cycle the fix touches. If genuinely waiting is impractical this run (the next
+  cycle is hours away), report honestly as **AWAITING FIRST PRODUCTION EXECUTION** — never silently
+  upgrade that to "fixed" or bury it as a footnote in an otherwise-closing report.
+- **If a PR is open, drive it to green and merge before reporting** — same rule as the CI-failure
+  drive-to-green loop elsewhere in this file, just applied to the finishing line, not only to
+  failures encountered mid-flight. A pending/in-progress CI check is not a stopping point.
+- **Run a final detector sweep** (`mon_run_all_detectors()`, or the equivalent full health check for
+  whatever was touched) after everything above lands, and let its result inform the report — a fix
+  landed five minutes ago has not yet been given the chance to either confirm itself clean or surface
+  a regression the same barriers would have caught on the next daily pass.
+- **Genuine source/external limitations are not failures to push through.** When investigation
+  proves a row, platform, or condition is correctly blocked by something Ezhalah does not control
+  (ambiguous source data with no safe disambiguation, a source that simply does not publish a field,
+  a third party's own outage) — leave it untouched, classify it plainly as source-limited/external,
+  and never invent, guess, or force a resolution just to raise a completion score. This is not in
+  tension with the completion-discipline rule above: "genuinely blocked by the source" is itself a
+  terminal, verified state, not an unfinished one.
+
+**Final report format:** one BEFORE → AFTER report, not a stream of interim updates re-sent as if
+each were the finish line. Structure:
+
+```
+Rating before: …
+Bugs found: …
+Root causes: …
+Rows affected: …
+What was fixed: …
+Data repaired (evidence-backed only, never guessed): …
+Barriers added: …
+Deployments / merges: …
+Production verification (including any awaited cycle's actual result): …
+Rating after: …
+Genuine source/external limitations (separated from Ezhalah bugs, left untouched): …
+```
+
+Target **10/10 for everything Ezhalah controls and can safely fix** — a lower final rating is
+correct and expected when the shortfall is a genuine external/source limitation, not something to
+close the gap on by guessing.
+
+This section governs both the Senior Production Engineer and the Junior/Daily Engineer routines,
+exactly like the rest of this file, and — per the file's own opening rule — overrides any routine
+prompt that is more timid or that asks for a report before this lifecycle completes.
+
 ## Changing this file
 
 Widening GREEN or narrowing RED is an **owner decision** and requires owner approval in the PR.
