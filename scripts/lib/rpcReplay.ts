@@ -71,6 +71,35 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
   while ((d = declRe.exec(sql))) decls.set(d[1], d[2].replace(/''/g, "'"));
 
   const out: { anchor: string; replacement: string }[] = [];
+
+  // (c) TABLE-DRIVEN — `edits text[][] := array[ ['needle','replacement','count'], ... ]` applied in
+  // a loop (20260812122557). A migration that makes a dozen related edits to one RPC is far safer
+  // written as one auditable table than as a dozen near-identical variable pairs, and it lets the
+  // migration assert an expected occurrence count per edit. The loop variables are not literals, so
+  // idioms (a)/(b) above cannot see through them and the whole migration read as "unrecognised
+  // change" — which correctly blocked the RNPL/Monthly replay guard until this was taught.
+  // Only the first two columns matter here: needle, replacement. Any third column (an expected
+  // count) is ignored — it is an assertion, not an edit.
+  const arrDeclRe = /\b([A-Za-z_][A-Za-z0-9_]*)\s+text\s*\[\s*\]\s*\[\s*\]\s*:=\s*array\s*\[/g;
+  let a: RegExpExecArray | null;
+  while ((a = arrDeclRe.exec(sql))) {
+    // Walk from the opening bracket to its match so we only ever read inside THIS declaration.
+    let depth = 0;
+    let end = -1;
+    for (let i = a.index + a[0].length - 1; i < sql.length; i++) {
+      const ch = sql[i];
+      if (ch === '[') depth++;
+      else if (ch === ']') { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (end < 0) continue;                       // unterminated — leave it to the unresolved path
+    const span = sql.slice(a.index, end + 1);
+    const rowRe = /\[\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'/g;
+    let r: RegExpExecArray | null;
+    while ((r = rowRe.exec(span))) {
+      out.push({ anchor: r[1].replace(/''/g, "'"), replacement: r[2].replace(/''/g, "'") });
+    }
+  }
+
   const callRe = /\breplace\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g;
   let c: RegExpExecArray | null;
   const seen = new Set<string>();

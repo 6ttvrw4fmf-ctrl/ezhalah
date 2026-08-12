@@ -1,0 +1,47 @@
+name: Recency fallback — live behavioral check
+
+# Executes the REAL production RPC (location_search_candidates_ar) and asserts that a listing whose
+# SOURCE published no date is still reachable by browsing — and that its absence is still reported
+# honestly rather than backfilled.
+#
+# WHY (senior audit 2026-08-12): the RPC ordered by `last_updated desc NULLS LAST`, and 4,509
+# production_ready listings carry last_updated = NULL because their platform publishes no update
+# date (dealapp 3,059 = 28% of its whole searchable inventory, aqar 1,128, wasalt 301). All of them
+# sorted behind ~186,000 rows, so page 1 of the plain Buy browse held zero of them and its newest
+# row was the previous day. The fix orders by coalesce(last_updated, first_seen_at), where
+# first_seen_at is an Ezhalah-owned observation kept in its own column; `last_updated` stays
+# untouched source truth and is still what the RPC returns.
+#
+# This is the LIVE behavioral half of the barrier. The static half is the migration's own guarded
+# needle-edit, which refuses to install if any `last_updated desc nulls last` site survives — that
+# pins the TEXT. A later change could keep the text and still bury undated listings another way (a
+# new UNION arm, a different fallback column, the sync-search-first-seen-at cron silently stopping,
+# a new platform landing without scraped_at). Any of those turns THIS job red.
+#
+# Read-only, anon key (RLS-respecting, resolved via scripts/lib/public-supabase.ts so the barrier
+# cannot be silently disarmed by a missing repo secret — the 2026-08-10 SKIP-FAIL lesson).
+
+on:
+  schedule:
+    - cron: '27 */6 * * *' # every 6 hours, off the other live checks' minutes
+  workflow_dispatch:
+
+concurrency:
+  group: recency-fallback-live-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Live recency-fallback behavioral assertions
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-recency-fallback-live.ts

@@ -405,3 +405,48 @@ prompt that is more timid or that asks for a report before this lifecycle comple
 Widening GREEN or narrowing RED is an **owner decision** and requires owner approval in the PR.
 Agents may not grant themselves authority. `scripts/verify-agent-authority-contract.ts` fails CI if
 the RED list loses any of its nine categories.
+
+### Difficulty is not an escalation reason (owner-granted, 2026-08-12)
+
+The section above says *when* to report. This says **what you may hand back**. It was added after a
+Senior run investigated a defect correctly, proved a safe source-faithful fix existed, specified it
+precisely — and then returned it to the owner as a decision, because the change touched three core
+search objects and the run was long. The owner's answer:
+
+> *"Your job is not to investigate everything and then return fixable engineering work to me. If you
+> prove something is an Ezhalah-side engineering defect and there is a safe, source-faithful
+> solution, fix it, add a permanent barrier, deploy it, production-verify it, and continue the
+> audit. Do not stop merely because implementing the solution touches several core objects."*
+
+**The loop, run to exhaustion:**
+
+> detect → prove → classify → fix every safely fixable Ezhalah-side issue → repair affected data
+> when authorized → add/strengthen barrier → test → deploy → production verify → **continue until no
+> safely fixable issue remains** → then report once.
+
+**None of these is a reason to escalate instead of fixing:** the fix is difficult; it touches core
+architecture, a view, a matview, an RPC, or several objects at once; it needs a schema change; it
+will take a long time; it is late in the run; it is "arguably product". If it is an Ezhalah-side
+defect and a safe, source-faithful, reversible, testable, barrier-protected fix exists, **it is
+yours to land.** Measure before assuming risk — the 2026-08-12 ordering fix looked like it needed a
+generated column, a table rewrite and three new indexes until `EXPLAIN ANALYZE` showed the query
+already did a full seq-scan-and-sort and used none of the existing ordering indexes, at which point
+the whole change collapsed to one nullable column plus an ORDER BY expression.
+
+**Escalate only these, and say plainly which one applies:**
+
+1. **Genuine product/business decision** — the engineering options are exhausted and what remains is
+   a preference, not a defect.
+2. **Authorization boundary** — a RED-list operation (bulk inactivation, hard delete, retention
+   change, taxonomy/hierarchy change). Classify it as an authorization boundary and **leave the gate
+   exactly as it is.** A guard refusing your batch is the guard working.
+3. **External blocker** — name the exact missing access (e.g. "outbound HTTPS to `dealapp.sa` is
+   blocked by the sandbox proxy"), do everything that can still be done internally, and preserve the
+   evidence for an environment that has that access.
+4. **Source limitation** — the source does not publish the value. Preserve the honest NULL, record
+   the evidence, and register it where the relevant detector reads (e.g.
+   `ops_rent_period_sourceless`) so the barrier stops re-reporting a non-defect.
+
+**The 10/10 must be real.** Never reach it by weakening a destructive-operation gate, bypassing a
+deploy/concurrency lock, inventing source truth, or lowering a coverage/safety threshold to make an
+alert go quiet. A rating held down by a genuine external or source limitation is the correct rating.
