@@ -159,6 +159,22 @@ Detectors added 2026-08-10 from the Filter audit, and what each one is really pr
 - **`commercial_coverage_blind_spot`** — a whole commercial table holding inventory but reaching
   search with nothing.
 
+Added 2026-08-12 (run #14):
+- **`searchability_collapse`** — per-platform rent-apartment searchability against that platform's
+  own 14-day baseline. The view it reads (`mon_searchability_alerts`) already existed and **nothing
+  called it** — no `pg_proc` body, no cron job — so 7 standing COLLAPSE verdicts had raised zero
+  alerts; cron job 62 was faithfully snapshotting the history for a verdict nobody ever evaluated.
+  Third recorded instance of the §11a/§22 pattern. Two measurement defects were fixed with it:
+  (1) the metric counted only «سنوي», so monthly-heavy platforms read as collapsed while being ~99%
+  reachable (gathern 0.0→99.7, aqarmonthly 0.0→99.3, mustqr 21.6→98.0, dealapp 86.5→97.7) — use
+  `pct_period_searchable`, never `pct_annual_searchable`; and (2) it ignored
+  `ops_rent_period_sourceless`, so evidence-backed source silence read as a defect and wiring it
+  as-is would have raised 7 false P2s on day one. It deliberately does **not** raise on
+  `suspect_price_without_period` — that cohort belongs to `mon_detect_rent_period_unreachable`, and
+  two detectors on one cohort is how a roster becomes noise. Scope is rent APARTMENTS only
+  (`type_ar='شقة'`), stated in a `COMMENT ON VIEW` so it is never mistaken for full coverage.
+  Guarded offline by `scripts/verify-searchability-barrier-wired.ts`.
+
 ## 12. Autonomous repair + deploy
 For confirmed ordinary engineering bugs: detect → prove → fix root cause → repair proven affected
 rows → add barrier → regression test → deploy/apply → verify production. No approval needed.
@@ -342,6 +358,34 @@ recoverable from the database alone.
 **The general rule this pins:** when a field is missing and a re-enrich path exists, run it `--dry-run`
 FIRST and read the diff. "The parser dropped it" and "the source never published it" look identical in
 the database and lead to opposite actions — one is a repair, the other is fabrication.
+
+### 22a. aqaratikom is NOT waivable — do not add it to `ops_rent_period_sourceless` (2026-08-12)
+
+The 2026-08-11 audit waived 15 platforms into `ops_rent_period_sourceless` and, in the same session,
+removed aqaratikom's fabricating `else → سنوي` default (`scrapers/aqaratikom/run.py:_rent_period`)
+**without** waiving the platform. That asymmetry is correct and must be preserved. Run #14 tested it:
+
+`_rent_period()` reads `subtype` from the **detail** payload only, so an empty detail fetch and a
+source that publishes no period are indistinguishable in the row. Splitting aqaratikom's active Rent
+rows by whether they carry a period settles which one it is:
+
+| cohort | rows | avg `source_capture.source_text` | refetched today |
+|---|---|---|---|
+| period present (`annual`) | 56 | **370 chars** | 54 |
+| period NULL | 6 | **21 chars** | 6 |
+
+The period-less rows carry a systematically **truncated capture** — 17× shorter, all re-fetched by
+the 04:22 production crawl, all with `price_evidence.unverified = true`
+(`adapter_emitted_no_evidence`). That is the §8 truncation signature, not source silence: *a capture
+that thin cannot contain the field, so its absence proves nothing about the page.* Waiving on this
+evidence would permanently record "nawait.sa publishes no period" for 7 listings on the strength of
+our own thin fetch — the fabrication §22 exists to prevent, just pointing the other way.
+
+**Correct state:** honest NULL, still counted by `mon_detect_rent_period_unreachable` (open P2 #423),
+still flagged by `mon_searchability_alerts` as the one non-waived platform with suspect rows. The real
+fix is upstream — make the aqaratikom detail fetch return a full payload — and only then does the
+period question have an answer worth recording. nawait.sa is blocked from the cloud sandbox's egress
+proxy (403 CONNECT), so that probe needs a CI runner.
 
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
