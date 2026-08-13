@@ -15,6 +15,7 @@ import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, type SearchQuery } from '@/data/search';
+import { fetchDistrictEligibleCounts } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, hasActiveFilters } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -365,6 +366,58 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query.deal, query.category, citySelected, paymentMonthly]);
 
+  // ONE query builder shared by onSearch and the district live-count effect below — the count call
+  // and the search call must be built from the SAME state or their numbers can drift apart, which
+  // is the exact bug class this exists to prevent (owner rule 2026-08-13: the number beside a
+  // district = what selecting it returns, under the CURRENT filter selections). District fields are
+  // deliberately absent here: onSearch adds the picked districts, the count effect overrides
+  // p_districts per visible option.
+  const buildFilterBaseQuery = (): SearchQuery | null => {
+    if (!citySelected) return null;
+    const lm = resolveCitySelection(citySelected);
+    return {
+      ...query,
+      location: lm.label,
+      locationMatch: lm,
+      rentPeriod: query.deal === 'Rent' ? (query.rentPeriod ?? 'annual') : query.rentPeriod,
+    } as SearchQuery;
+  };
+
+  // District marking must use the user's CURRENT filter state (owner, 2026-08-13). The pools behind
+  // the district list (district_options_ar) know deal/category/period only — the moment any
+  // narrower filter is active (نوع/مجموعة/سعر/مساحة/غرف), a district's scope count can no longer
+  // stand in for "what you'd get if you picked it": measured live, with نوع=مستودع set, 10/10 of
+  // Riyadh's top rent districts presented as having inventory while holding ZERO warehouses. When
+  // narrowing is active, fetch the VISIBLE rows' real eligible counts from the results RPC itself
+  // (fetchDistrictEligibleCounts, one p_limit:1 call per row) and mark honesty from those. When no
+  // narrowing is active there are no extra calls — scope count = results count there, a parity the
+  // DB barrier (mon_trending_district_barrier) pins at 40/40 exact.
+  const districtNarrowingSig = JSON.stringify([query.type, query.typeGroup, query.types, query.detail,
+    query.contextBeds, query.contextBedsList, query.contextSize, query.priceInput, query.priceBand,
+    query.priceMin, query.priceMax, query.areaMin, query.areaMax]);
+  const hasDistrictNarrowing = useMemo(
+    () => (JSON.parse(districtNarrowingSig) as unknown[]).some((v) =>
+      Array.isArray(v) ? v.length > 0 : v != null && v !== ''),
+    [districtNarrowingSig]);
+  const [districtLiveCounts, setDistrictLiveCounts] = useState<Record<string, number> | null>(null);
+  const districtLiveReq = useRef(0);
+  useEffect(() => {
+    // Any relevant filter change invalidates the previous counts IMMEDIATELY (stale numbers are the
+    // bug, not a fallback) — then refetch for what's on screen.
+    setDistrictLiveCounts(null);
+    if (!citySelected || !hasDistrictNarrowing || districtSuggestions.length === 0) return;
+    const id = ++districtLiveReq.current;
+    const q = buildFilterBaseQuery();
+    if (!q) return;
+    const visible = districtSuggestions.slice(0, 12)
+      .map((o) => ({ districtAr: o.districtAr, matchValues: o.matchValues }));
+    void fetchDistrictEligibleCounts(q, visible).then((counts) => {
+      if (id === districtLiveReq.current && counts) setDistrictLiveCounts(counts);
+    });
+    // buildFilterBaseQuery reads query/citySelected — both captured via the deps that matter here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [citySelected, hasDistrictNarrowing, districtSuggestions, districtNarrowingSig]);
+
   const onSearch = async () => {
     // CITY-ONLY FIELD (owner spec 2026-07-17): "The user must select a valid city result. Do not
     // accept arbitrary free text and never guess a location." citySelected is cleared on every
@@ -382,7 +435,10 @@ export default function Home() {
       cityRef.current?.focus();
       return;
     }
-    const lm = resolveCitySelection(citySelected);
+    // Base = the SAME builder the district live-count effect uses (see buildFilterBaseQuery above) —
+    // one construction site, so the counts shown and the search run can never be built from
+    // different state.
+    const base = buildFilterBaseQuery()!;
     // District is optional, now MULTI (owner 2026-08-10): send the UNION of every selected district's
     // matchValues (all spellings of each hamza-folded district, deduped) — the RPC's p_districts is
     // already OR over the array, ANDed with every other filter. Zero picks → districts:undefined →
@@ -392,9 +448,7 @@ export default function Home() {
       ? [...new Set(districtsSelected.flatMap((d) => d.matchValues))]
       : undefined;
     const q = {
-      ...query,
-      location: lm.label,
-      locationMatch: lm,
+      ...base,
       districts: districtMatchUnion,
       // Display label → drives the summary sentence. Owner 2026-08-11: ALWAYS name every picked
       // district («النرجس والياسمين والملقا»), never collapse to a count («3 أحياء») — the user
@@ -408,8 +462,6 @@ export default function Home() {
       districtListingCount: districtsSelected.length
         ? districtsSelected.reduce((sum, d) => sum + d.listingCount, 0)
         : undefined,
-      // Persist the effective rent period for Rent so the summary reflects the visible Monthly/Yearly toggle.
-      rentPeriod: query.deal === 'Rent' ? (query.rentPeriod ?? 'annual') : query.rentPeriod,
     };
     navigateWithQuery(q);
   };
@@ -981,7 +1033,15 @@ export default function Home() {
                       <>
                         <TrendingHeader title={`${t('Trending districts in')} ${citySelected.cityAr}`} />
                         <TrendingRows
-                          items={districtSuggestions.map((opt, i) => ({ key: `${opt.districtAr}#${i}`, label: opt.districtAr }))}
+                          items={districtSuggestions.map((opt, i) => ({
+                            key: `${opt.districtAr}#${i}`,
+                            label: opt.districtAr,
+                            // Honest zero under the CURRENT filter state (owner 2026-08-13): when a
+                            // narrower filter is active and this district's LIVE eligible count is 0,
+                            // say so in Arabic — same message the typed list already uses — instead of
+                            // presenting a popular-at-category-scope district that would dead-end.
+                            sublabel: districtLiveCounts?.[opt.districtAr] === 0 ? t('No listings here right now') : undefined,
+                          }))}
                           onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
                           selectedLabels={selectedLabels}
                         />
@@ -992,7 +1052,13 @@ export default function Home() {
                         // 0 → picking it would return nothing right now. Zero-listing catalog districts
                         // stay findable + selectable (owner 2026-07-18) BUT are now clearly marked, so a
                         // user is never silently led into a dead-end pick (2026-08-09).
-                        const isEmpty = opt.listingCount === 0;
+                        // listingCount is the deal/category/period-scope count; districtLiveCounts is
+                        // the results-RPC count under the user's FULL current filter state (fetched
+                        // only when a narrower filter is active — see the effect above). When a live
+                        // count exists it is the truth for this row's empty-marking: the number/signal
+                        // beside a district must equal what selecting it returns (owner, 2026-08-13).
+                        const live = districtLiveCounts?.[opt.districtAr];
+                        const isEmpty = live != null ? live === 0 : opt.listingCount === 0;
                         const isPicked = selectedLabels.has(opt.districtAr);
                         return (
                         <Tappable

@@ -88,7 +88,32 @@ check('every district row renders its name unconditionally (zero-listing distric
 // ── Dead-end guard (2026-08-09): a district with ZERO listings for the current deal/category must be
 //    visibly marked, so a user is never silently led into a 0-result pick. The row stays selectable
 //    (never-dead-end: picking it yields the specific "widen area" suggestion). ──
-check('zero-listing district rows are detected via listingCount === 0', /const isEmpty = opt\.listingCount === 0/.test(indexSrc));
+// ── DISTRICT COUNT HONESTY (owner rule 2026-08-13): the signal beside a district must equal what
+//    selecting it returns UNDER THE CURRENT FILTER STATE. district_options_ar knows deal/category/
+//    period only; measured live, with نوع=مستودع set, 10/10 of Riyadh's top rent districts presented
+//    as having inventory while holding ZERO warehouses. The fix: when any narrower filter is active,
+//    the visible rows' empty-marking comes from the RESULTS RPC itself (fetchDistrictEligibleCounts,
+//    p_limit:1 → total_count), so signal and outcome cannot disagree — by construction. ──
+check('live counts come from the RESULTS RPC (fetchDistrictEligibleCounts exists, p_limit:1)', (() => {
+  const remoteSrc = readFileSync(join(root, 'src/data/remote.ts'), 'utf8');
+  return /export async function fetchDistrictEligibleCounts/.test(remoteSrc)
+    && /location_search_candidates_ar'?,\s*\{ \.\.\.base, p_districts: opt\.matchValues \}/.test(remoteSrc)
+    && /p_limit: 1/.test(remoteSrc);
+})());
+check('per-option match_values OVERRIDE the base q districts (spread order)', /\{ \.\.\.base, p_districts: opt\.matchValues \}/.test(readFileSync(join(root, 'src/data/remote.ts'), 'utf8')));
+check('marking prefers the live full-filter-state count over the scope count', /const live = districtLiveCounts\?\.\[opt\.districtAr\];\s*\n\s*const isEmpty = live != null \? live === 0 : opt\.listingCount === 0/.test(indexSrc));
+check('counts use the CURRENT filter state (narrowing signature covers type/group/types/beds/size/price/area)', /districtNarrowingSig = JSON\.stringify\(\[query\.type, query\.typeGroup, query\.types, query\.detail,[\s\S]{0,200}?query\.priceMin, query\.priceMax, query\.areaMin, query\.areaMax\]\)/.test(indexSrc));
+check('changing any relevant filter INVALIDATES the previous counts before refetch (no stale numbers)', /setDistrictLiveCounts\(null\);\s*\n\s*if \(!citySelected \|\| !hasDistrictNarrowing/.test(indexSrc));
+check('a live-count response is dropped if a newer request superseded it (race guard)', /if \(id === districtLiveReq\.current && counts\) setDistrictLiveCounts\(counts\)/.test(indexSrc));
+check('onSearch and the count effect share ONE query builder (no state drift between count and search)', /const base = buildFilterBaseQuery\(\)!/.test(indexSrc) && /const q = buildFilterBaseQuery\(\);/.test(indexSrc));
+check('trending rows show the Arabic zero message under narrowing (never a silent dead-end)', /sublabel: districtLiveCounts\?\.\[opt\.districtAr\] === 0 \? t\('No listings here right now'\) : undefined/.test(indexSrc));
+// The owner explicitly praised and locked the Arabic zero-listing message: it must exist, stay
+// TRANSLATED (no English leak in the user-visible string), and stay wired to the empty rows.
+{
+  const i18nSrc = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
+  const m = i18nSrc.match(/'No listings here right now': '([^']+)'/);
+  check('the zero-listing message is translated and its Arabic contains no Latin letters', !!m && !/[A-Za-z]/.test(m[1]));
+}
 check('empty district rows are marked with a "no listings here" note', /isEmpty \? <Text style=\{s\.suggEmptyNote\}>\{t\('No listings here right now'\)\}<\/Text> : null/.test(indexSrc));
 check('the "No listings here right now" string is translated to Arabic', /'No listings here right now': '[^']+'/.test(readFileSync(join(root, 'src/i18n.tsx'), 'utf8')));
 // The picked districts' live counts ride along to the search (multi: the SUM — folds are disjoint,

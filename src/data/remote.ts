@@ -641,6 +641,52 @@ export async function fetchGuidedLiveCount(q: SearchQuery, amenities: string[], 
   return counts ? counts.cnt_selected : null;
 }
 
+// DISTRICT MARKING MUST USE THE USER'S CURRENT FILTER STATE (owner rule, 2026-08-13):
+// «The number shown beside a district must equal the exact number of listings the user will get if
+// they select that district with their current filter selections.»
+//
+// district_options_ar knows deal/category/period ONLY, so the district list's empty-marking lied the
+// moment a نوع (or سعر/مساحة/غرف) was set: measured live, with نوع=مستودع picked, 10/10 of Riyadh's
+// top rent districts presented as having inventory while holding ZERO warehouses — a guaranteed
+// dead-end pick; استوديو 9/10; فيلا 0/10, which is exactly why it looked "sometimes fine, sometimes
+// wrong". This helper closes the class BY CONSTRUCTION: the per-district signal is the RESULTS RPC
+// itself (p_limit:1 → total_count) under the caller's full filter state — the same call selecting
+// the district would run — so count and outcome cannot disagree. One lightweight call per VISIBLE
+// option (Top-6 trending / the first dropdown rows, ~65 ms each server-side), fired only when a
+// narrowing filter beyond district_options_ar's scope is active; the base scope needs no calls
+// because scope-count = results there (pinned by mon_trending_district_barrier, 40/40 exact).
+// Each option's own match_values OVERRIDE any districts already in q (spread order is load-bearing).
+export async function fetchDistrictEligibleCounts(
+  q: SearchQuery,
+  options: { districtAr: string; matchValues: string[] }[],
+): Promise<Record<string, number> | null> {
+  if (!supabase || !options.length) return null;
+  const scope = await resolveSearchScope(q);
+  if (!scope) return null;
+  const { isBroadCommercial, ...scopeParams } = scope;
+  const base = {
+    ...scopeParams,
+    ...rpcCountFilterParams(q),
+    ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
+    p_limit: 1,
+    p_offset: 0,
+  };
+  const out: Record<string, number> = {};
+  await Promise.all(options.map(async (opt) => {
+    const result = await withTimeout(
+      supabase!.rpc('location_search_candidates_ar', { ...base, p_districts: opt.matchValues }),
+      AGE_COUNT_TIMEOUT_MS,
+    );
+    if ('timedOut' in result) return;           // absent key → caller falls back to the scope count
+    const { data, error } = result;
+    if (error) return;
+    out[opt.districtAr] = data && (data as { total_count: number }[]).length
+      ? Number((data as { total_count: number }[])[0].total_count) || 0
+      : 0;                                       // empty result set = an honest zero, not an error
+  }));
+  return out;
+}
+
 // Convert a listing's `additional_info` into the {key,label,value} rows the card's
 // AdditionalInformationPanel renders. Two shapes exist in the DB:
 //   • LEGACY (Wasalt/Aqar Gate): already an array of {label,value} → pass through.
