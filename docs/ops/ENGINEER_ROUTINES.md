@@ -113,6 +113,33 @@ and it would have permanently hidden a real capture failure behind a "documented
 - Never silence a barrier to make it green. Make it distinguish cases, then prove BOTH directions —
   the real regression still fires, the proven limitation does not. Record the negative control.
 
+## Repair ordering: raw → matview → sync → verify (permanent, 2026-08-13)
+
+**A data repair that writes `search_listings_ar` directly is not durable and will silently revert.**
+`active_listing_ids_v2` is a MATERIALIZED VIEW refreshed hourly (cron jobid 17, minute 0), and
+`sync_search_listings_ar()` (jobid 28, minute 14) rebuilds the served index *through* it. A raw
+repair applied between refreshes is invisible to the sync, which then writes the stale matview value
+back over your index leg. Observed live in run #15: 13 rows verified at 100.0% at 11:29 were back to
+69.8% at 11:34, with `last_updated` moved *backwards*.
+
+The required order for every raw-layer repair:
+
+```
+repair the RAW row
+  → REFRESH MATERIALIZED VIEW CONCURRENTLY public.active_listing_ids_v2
+  → SELECT public.sync_search_listings_ar()
+  → verify (and verify the matview agrees with raw, not just that the index looks right)
+```
+
+Writing the index directly is fine as a fast path so the fix is live within seconds, but it is never
+the durable step, and **verifying immediately after it proves nothing** — the revert arrives on the
+next sync. Repairs before this rule that appeared to hold (`20260811133417`, `20260813064209`,
+`20260813064929`) survived only because a refresh happened to land after the raw write.
+
+`mon_detect_search_index_diverges_from_sync_source` now asserts this invariant continuously: the
+served index must agree with the relation the sync builds it from, so a repair that is about to
+revert is reported as a revert rather than rediscovered by hand.
+
 ## Boundary rules (permanent)
 
 - Junior detects & escalates; it never deep-audits. Senior owns Advanced Filter + AI Agent + broad
