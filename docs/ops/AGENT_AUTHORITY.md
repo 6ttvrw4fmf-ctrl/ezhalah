@@ -238,6 +238,46 @@ State clearly: **⚠️ I NEED YOUR APPROVAL**, with the evidence and the exact 
 8. **Concurrency.** Other sessions write to this repo and DB. Check the deploy lock, the migration
    tail, and open PRs before writing; never race another writer.
 
+## Rating before / after — mandatory on every report (owner directive, 2026-08-13)
+
+**Every single run's final report — 20 bugs found, 1 bug found, or 0 — must open with an explicit
+numeric rating, before any other content:**
+
+```
+Rating before: X/10
+Rating after:  X/10
+```
+
+Immediately followed by one or two sentences on *why* each number is what it is and what changed
+between them. This applies to **all four routines** (Junior/Daily Engineer, Senior Production
+Engineer, Senior Data Integrity Engineer, Search & Matching QA Engineer) — the latter two already
+carry this exact convention (`docs/ops/DATA_INTEGRITY_ENGINEER.md` §13/§17 "Before score /10 → After
+score /10" / "the final 10/10 rule"; `docs/ops/SEARCH_MATCH_QA_ENGINEER.md` §25/§27 "the final 10/10
+rule"); this section is what closes the same gap for the other two, whose reporting template below
+had counts and classifications but no numeric before/after rating — the omission a 2026-08-13
+Daily/Junior run was caught on and corrected the same day.
+
+Rules for the rating itself, identical in spirit to the Data Integrity / Search QA routines':
+
+- **10/10 → 10/10 is a completely legitimate, expected outcome** when the evidence supports it —
+  nothing was wrong, nothing needed fixing. Never invent a bug, make an unnecessary change, or
+  manufacture "progress" just to show a delta between before and after.
+- **Never fake or inflate either number.** The rating measures what the evidence in this run's
+  investigation actually shows, not how much work was done or how the run "feels."
+- **If the after-rating is below 10/10, state exactly what is preventing 10/10** — named as one of:
+  an Ezhalah-side bug (not yet fixed — say why: out of this routine's scope, needs more evidence,
+  blocked), a source/platform limitation, an external blocker (e.g. sandbox egress, third-party
+  outage), a safety/authorization boundary (a RED-list item per this file), or a genuine owner
+  decision pending. "Standing/already tracked" is a reason a number stays where it is, not an excuse
+  to omit the number.
+- **The after-rating must reflect only what this run itself verified**, not aspiration. If a routine
+  fixed nothing (0 issues found, or found issues but fixed none within its scope), rating before and
+  rating after are the same number — do not raise the after-score for investigation alone.
+- Base the number on evidence gathered *this run*: production availability/correctness, deploy and
+  migration integrity, scraper/platform health, and the state of the open P1/P2 alert backlog are
+  all fair inputs; cite the specific evidence for the number given, the same way every other claim in
+  the report must be evidence-backed (see "Non-negotiable execution rules" above).
+
 ## End-of-run reporting template (2026-08-06 addendum)
 
 The report is the LAST step, never the first or a substitute for finishing the loop. Every routine
