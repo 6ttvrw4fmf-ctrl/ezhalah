@@ -85,3 +85,9 @@ They meet at the Normal Filter from opposite sides; neither replaces the other.
   discipline (see AGENTS.md).
 - Changing any routine's schedule, scope, or prompt is an owner decision; record the change here in
   the same session.
+- **Every routine's final report opens with `Rating before: X/10` / `Rating after: X/10`** (owner
+  directive, 2026-08-13) — no exceptions, including a 0-issues-found run. Data Integrity and Search
+  & Matching QA already carried this convention in their own canonical specs; `docs/ops/AGENT_AUTHORITY.md`
+  ("Rating before / after — mandatory on every report") is where it is now spelled out for the
+  Junior/Daily and Senior Production routines too. See that section for the exact rules (10→10 is a
+  legitimate outcome, never inflate/invent, always name what blocks a sub-10 score).
