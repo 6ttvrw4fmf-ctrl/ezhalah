@@ -75,6 +75,44 @@ Distinct from #3: the Data Integrity engineer verifies the INVENTORY (scrape →
 this engineer verifies the USER EXPERIENCE (filter → results → cards → source click-through).
 They meet at the Normal Filter from opposite sides; neither replaces the other.
 
+## Reporting rules (permanent, owner-locked 2026-08-13)
+
+**Every engineer report MUST state the rating as `Rating Before → Rating After`, never a single
+overall number.** Both halves carry a `X.X/10` and a `XX%`. This is not formatting preference: a
+lone "after" number cannot distinguish a run that repaired three defects from a run that found
+nothing, which is precisely the comparison the owner reads the report for.
+
+- **Rating Before** = production's state as the run FOUND it, scored on the run's own evidence
+  (open alerts, defects present at entry). It is not last run's "after": conditions move between
+  runs, and a defect raised overnight belongs in this run's "before".
+- **Rating After** = the state as the run LEAVES it, counting only changes actually verified in
+  production. A fix that is `PROPAGATION PENDING` or `AWAITING FIRST PRODUCTION EXECUTION` does not
+  move the "after" number — the §28 vocabulary governs here exactly as it does elsewhere.
+- If nothing changed, say so explicitly (`9.4/10 → 9.4/10`). Identical numbers are a valid, useful
+  result; omitting the pair is not.
+- The same pair appears in `ops_senior_audit_run` (`score_pct` holds the AFTER value; the BEFORE
+  value and both breakdowns go in `checks`), so the history stays comparable run over run.
+
+## Evidence rules for "the source doesn't publish it" (permanent, 2026-08-13)
+
+Learned the hard way in senior run #15, in the space of a single run:
+
+**A missing captured field is NOT evidence that the source omits it.** Absence is equally consistent
+with "the source publishes nothing" and with "our fetch failed", and those two have opposite
+consequences — the first is an honest NULL to be preserved, the second is an Ezhalah defect to be
+repaired. Run #15 classified 13 aqaratikom rows as a source limitation on absence alone, then probed
+the source and found it publishing «سنوي» on **all 13**. The benign reading was assumed, not proven,
+and it would have permanently hidden a real capture failure behind a "documented limitation".
+
+- Before calling any field a source limitation, **re-fetch the source and record the result** in
+  `ops_rent_period_source_probe` (or the equivalent per-field probe table). "We checked" must be a
+  queryable row, not a sentence in a migration comment.
+- A waiver/registry that suppresses an alert must be **evidence-gated by foreign key** to that probe
+  (`ops_rent_period_source_limited` is the reference implementation), and must have a detector that
+  re-checks it (`mon_detect_source_limited_contradicted`) so a waiver cannot outlive its proof.
+- Never silence a barrier to make it green. Make it distinguish cases, then prove BOTH directions —
+  the real regression still fires, the proven limitation does not. Record the negative control.
+
 ## Boundary rules (permanent)
 
 - Junior detects & escalates; it never deep-audits. Senior owns Advanced Filter + AI Agent + broad
