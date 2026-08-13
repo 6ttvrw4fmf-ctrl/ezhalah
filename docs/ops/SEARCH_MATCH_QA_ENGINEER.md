@@ -138,6 +138,28 @@ searches → «عرض المزيد» → verify matching, diversity, counts, car
 source truth cannot be determined · two valid product behaviors · legal/compliance · meaningful
 paid infrastructure · a repair could destroy source-backed data and the safe answer is unprovable.
 
+## 18a. Route sibling-engineer issues to that engineer — never to the owner (owner rule, permanent, 2026-08-13)
+
+**Do not ask the owner to resolve an issue that belongs to another autonomous engineer.** The four
+routines exist so that work lands with whoever owns it; escalating a sibling's item to the owner
+converts autonomous work into a human decision that was never needed.
+
+- **Inventory / scrape → canonical → index fidelity** (field integrity, stale-active, quarantine
+  growth, price/area source truth, URL collisions, orphaned index rows, uncommitted migrations from
+  that routine) → **the Data Integrity Engineer** (`docs/ops/DATA_INTEGRITY_ENGINEER.md`).
+- **Advanced Filter, AI Agent, broad infra** → **the Senior Production Engineer**.
+- **Scraper discovery/parse failures** → **the Junior Scraping Engineer**.
+
+The routing mechanism is the one the sibling routine already reads: leave the finding in its
+detector/alert surface (`alert_event` via `mon_raise`, with a dedup key that names the class), or
+in the `docs/ops/*.md` the owning routine reads at start-up. Note it in one line of the report as
+ROUTED — then **continue your own work**. A routed item never blocks this routine's completion and
+never counts against its score.
+
+**Bring the owner only:** a genuine product/business decision · a RED-list authorization boundary
+(`docs/ops/AGENT_AUTHORITY.md`) · an external blocker engineering cannot safely resolve. Nothing
+else.
+
 ## 19. Permanent barriers
 Every new bug class becomes protected. Verify existing barriers execute (matching ·
 count/results parity · deal · period · location · multi-district · فئة/نوع · السعر · المساحة ·
@@ -199,6 +221,42 @@ user's search. Below 10 is allowed only for: unprovable source truth · source p
 with no evidence · real legal/compliance decision · meaningful paid infrastructure · two legitimate
 product behaviors needing owner choice — and the report must state exactly what blocks 10/10, why
 it cannot be fixed safely, and what evidence/decision is missing. Otherwise: fix before reporting.
+
+### 27a. A 10/10 OVERALL rating requires BOTH halves (owner rule, permanent, 2026-08-13)
+
+**An overall 10/10 on the Filter requires backend/RPC verification AND real production browser
+verification. One half alone is never 10/10 overall.** This rule exists because a run reported
+"10/10" on the strength of RPC/DB evidence alone while the production UI had never been opened —
+the session's network policy had blocked it. The backend result was sound; the overall rating
+was not.
+
+**When browser access is blocked, the report says exactly this — three separate lines, never merged
+into one number:**
+
+```
+Backend Search & Matching: 10/10
+Production UI E2E: BLOCKED / NOT VERIFIED
+Overall: NOT FULLY VERIFIED
+```
+
+State the blocked host and the evidence (e.g. proxy 403 on CONNECT) so the blocker is auditable.
+
+**Never convert an untested dimension into a 10/10.** A dimension that could not be exercised is
+reported as NOT VERIFIED — not as a pass, not as "no issues found" phrased to read like a pass, and
+not quietly averaged away into an overall score.
+
+**A blocked browser does NOT reduce the engineer's other duties.** It still: fixes every issue it
+can safely fix, adds a barrier against recurrence, verifies the fix, and deploys when a verified
+change genuinely requires deployment. "Blocked on the UI" is never a reason to hand back unfinished
+backend work.
+
+**On the next run WITH browser access, the missing real-user tests are the first priority** — they
+carry over as owed work, not as an optional fresh pass. Complete, in the real production UI: open
+the actual Arabic filter · click every major control · المدن · multiple الأحياء · every فئة and
+every نوع · «شراء»/«إيجار» · «سنوي»/«شهري» · السعر · المساحة · غرف النوم · الترتيب · «عرض المزيد» ·
+mobile viewport · رجوع/تحديث · Arabic-only UI · and click property cards to confirm each opens THE
+SAME correct listing on the original platform. **Only after those pass may the engineer report
+10/10 overall.**
 
 ## 28. Final report — only after fix + deploy + retest
 Order: full testing → fixes → barriers → regression suite → safe deployment → live production

@@ -75,11 +75,25 @@ Distinct from #3: the Data Integrity engineer verifies the INVENTORY (scrape →
 this engineer verifies the USER EXPERIENCE (filter → results → cards → source click-through).
 They meet at the Normal Filter from opposite sides; neither replaces the other.
 
+**Scoring (owner rule, 2026-08-13 — `SEARCH_MATCH_QA_ENGINEER.md` §27a):** an overall 10/10 needs
+BOTH backend/RPC verification AND real production browser verification. Browser blocked ⇒ report
+`Backend Search & Matching: 10/10` / `Production UI E2E: BLOCKED / NOT VERIFIED` /
+`Overall: NOT FULLY VERIFIED`, and carry the real-user tests into the next run with browser access
+as owed work. An untested dimension is never scored 10/10. The blocked half never excuses the other
+half: safe fixes, barriers, verification and required deploys still happen.
+
 ## Boundary rules (permanent)
 
 - Junior detects & escalates; it never deep-audits. Senior owns Advanced Filter + AI Agent + broad
   infra. Data Integrity owns Normal-Filter/full-inventory fidelity and never touches Advanced
   Filter. No routine absorbs another's responsibilities.
+- **A finding that belongs to a sibling routine is ROUTED to that routine, never escalated to the
+  owner** (owner rule, 2026-08-13). Leave it where the owning routine already looks — its
+  detector/alert surface (`mon_raise` with a class-naming dedup key) or its `docs/ops/*.md` — note
+  it as ROUTED in one report line, and continue. A routed item never blocks the routing routine's
+  completion and never counts against its score. The owner is brought in only for a genuine
+  product/business decision, a RED-list authorization boundary, or an external blocker engineering
+  cannot safely resolve.
 - All three write durable state (`docs/ops/daily-metrics.jsonl` / `ops_senior_audit_run`) and obey
   the shared gates: deploy lock, migration-commit duty, PR `--head` discipline, cron minute-slot
   discipline (see AGENTS.md).
