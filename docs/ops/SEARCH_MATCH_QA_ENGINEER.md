@@ -160,6 +160,69 @@ never counts against its score.
 (`docs/ops/AGENT_AUTHORITY.md`) · an external blocker engineering cannot safely resolve. Nothing
 else.
 
+## 18b. The browser-access requirement — what the environment must allow (2026-08-13)
+
+This routine is an END-TO-END production tester. Backend/RPC evidence is *additional*, never a
+substitute: it cannot prove a user can click the real interface. Real browser access to production
+is therefore part of the routine's required capability, not a nice-to-have.
+
+**Where the restriction lives.** Cloud sessions run in a *cloud environment* whose **Network
+access** level controls outbound egress. The sandbox cannot change it: the local proxy at
+`$HTTPS_PROXY` is only a relay (`/__agentproxy/status` is read-only; there is no config endpoint),
+and the refusal comes from the upstream gateway as `gateway answered 403 to CONNECT (policy denial)`.
+No repo file, `settings.json` permission, or server-managed setting can add a domain — the docs are
+explicit that "none of them adds domains to the environment's network allowlist". **Never try to
+bypass it.** The fix is an owner change in the environment config.
+
+**How the owner enables it** (`docs/en/cloud-environments` → *Allow specific domains*):
+`claude.ai/code` → the **cloud icon** showing the environment name, in the row above the message box
+(there is no settings page or direct URL) → hover the environment → **settings gear** → set
+**Network access** = **Custom** → put one domain per line in **Allowed domains** → keep
+**"Also include default list of common package managers"** CHECKED (the session needs npm/pypi for
+`npm ci` and the Playwright install). A leading `*.` matches every subdomain.
+
+**Tier 1 — required for the production UI journey (§1–§20, §24, §29, §34):**
+
+```
+ezhalah-app.vercel.app
+```
+
+**Tier 2 — required for USER-TRUTH verification via anon REST.** The routine mandates the
+client-public anon key over REST precisely because MCP SQL bypasses RLS, so this is not redundant
+with the Supabase connector:
+
+```
+aannarbkwcymrotzwdbo.supabase.co
+```
+
+**Tier 3 — required for card click-through (§22, §23): one host per active platform, derived from
+live `listing_url` values.** Without these, the click-through half of the journey cannot be tested,
+because the destination is on the source platform's own domain:
+
+```
+sa.aqar.fm            wasalt.sa             gathern.co            dealapp.sa
+www.aqarcity.net      sanadak.sa            mustqr.sa             eaqartabuk.com
+raghdan.sa            aqargate.com          eastabha.sa           nawait.sa
+listings.satel.sa     alkhaas.net           ramzalqasim.com       www.aldarim.sa
+abeea.com.sa          jazwtn.sa             hajerhouses.com       www.sadin.com.sa
+24.com.sa             erapulse.sa           mizlaj.com.sa         www.alhoshan.sa
+alnowaisiry.com       fursaghyr.com         www.1october.com.sa   jurash.sa
+```
+
+29 active platforms, 28 distinct hosts — `aqar` and `aqarmonthly` share `sa.aqar.fm`, and
+`aqaratikom` serves from `nawait.sa`. If a source platform 30x-redirects to a CDN or `www` variant,
+widen that one entry to its `*.` form rather than adding **Full** access. **Re-derive this list
+whenever a platform is added or retired** — it is generated, not hand-maintained:
+
+```sql
+-- per-platform destination hosts, from live production_ready listing_url values
+```
+
+**What does NOT need allowlisting.** MCP connector traffic (Supabase, Vercel, GitHub) bypasses the
+allowlist entirely, and GitHub goes through its own proxy. That is why this routine can still reach
+the database and read the served production HTML while the browser is blocked — and why that
+partial access must never be reported as a UI pass (§27a).
+
 ## 19. Permanent barriers
 Every new bug class becomes protected. Verify existing barriers execute (matching ·
 count/results parity · deal · period · location · multi-district · فئة/نوع · السعر · المساحة ·
