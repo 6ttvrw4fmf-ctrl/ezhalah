@@ -40,6 +40,18 @@ Expensive behavioural detectors
 migration: `mon_detect_orphaned_detectors()` fires on any detector nothing reaches, and a detector
 outside the roster is decoration. Adjudicate every finding against source before repairing anything.
 
+**Two permanent rules for every engineer report and every "the source doesn't publish it" claim
+(owner, 2026-08-13) — full text in `docs/ops/ENGINEER_ROUTINES.md`:**
+1. **Report the rating as `Rating Before → Rating After`, never a single overall number.** Both
+   halves carry `X.X/10` and `XX%`; only production-verified changes move the "after". Unchanged is
+   a valid result (`9.4/10 → 9.4/10`) — omitting the pair is not.
+2. **A missing captured field is NOT evidence that the source omits it** — a failed fetch looks
+   identical. Re-fetch the source and record the probe (`ops_rent_period_source_probe`) before
+   calling anything a source limitation; any alert-suppressing waiver must be FK-gated to that probe
+   and re-checked by a detector. Never silence a barrier to make it green: make it distinguish
+   cases, and prove both directions. (Run #15 assumed absence meant silence on 13 aqaratikom rows;
+   the source published «سنوي» on all 13.)
+
 **Owner-granted engineering/product decisions belong in this repo, not just in an agent's own memory.**
 When the owner gives you a permanent rule, architecture decision, or business/compliance decision:
 land it in `docs/ARCHITECTURE.md` (or the relevant `docs/ops/*.md`) in the same session, not only in
