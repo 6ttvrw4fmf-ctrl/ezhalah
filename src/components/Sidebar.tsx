@@ -388,7 +388,7 @@ const s = StyleSheet.create({
   dockPanel: { width: DOCK_WIDTH, height: '100%', backgroundColor: colors.paper, paddingHorizontal: 14, borderRightWidth: 1, borderRightColor: colors.line },
 
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 4 },
-  logo: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  logo: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   word: { fontSize: 15, fontWeight: '800', letterSpacing: 2, color: colors.ink },
 
   newChat: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 13, marginTop: 12 },
