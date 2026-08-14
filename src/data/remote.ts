@@ -405,6 +405,23 @@ export type SearchScope = {
 // needs to await resolve_district_cities) — every caller must now await this.
 // Returns null for an honest-zero case (unresolvable/ambiguous location, or a named district with no
 // real listings) — callers should treat that as "0 results", not query further.
+//
+// In-flight de-dup (2026-08-14, perf): the advanced-filter question pool fires up to 5 questions in
+// one Promise.all every re-rank cycle, and 4 of them independently call resolveSearchScope(q) before
+// their own RPC — for a district-scoped search that means up to 4 redundant resolve_district_cities
+// round trips where 1 suffices. Keyed on the district list itself (the only input this specific RPC
+// call depends on) so concurrent identical lookups share one promise; unrelated concurrent lookups
+// (different districts) are unaffected, and nothing is cached past settlement. Same helper reused
+// below by fetchPropertyAgeOptionCounts()/fetchApartmentGuidedCounts() for the same reason.
+function dedupeInFlight<T>(cache: Map<string, Promise<T>>, key: string, run: () => Promise<T>): Promise<T> {
+  const existing = cache.get(key);
+  if (existing) return existing;
+  const p = run().finally(() => { if (cache.get(key) === p) cache.delete(key); });
+  cache.set(key, p);
+  return p;
+}
+const inFlightDistrictCities = new Map<string, Promise<{ data: { city_ar: string; match_count: number }[] | null; error: unknown }>>();
+
 export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | null> {
   const tables = tablesFor(q);
   if (!tables.length) return null;
@@ -440,7 +457,14 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   // AI-agent chat path (agent.tsx's 2-strike fallback) silently searched every city nationwide instead
   // of restricting to the real candidates or honest-zeroing.
   if (cities === null && q.districts && q.districts.length && supabase) {
-    const { data: districtCities, error: districtCitiesError } = await supabase.rpc('resolve_district_cities', { p_districts: q.districts });
+    const { data: districtCities, error: districtCitiesError } = await dedupeInFlight(
+      inFlightDistrictCities,
+      JSON.stringify(q.districts),
+      async () => {
+        const r = await supabase!.rpc('resolve_district_cities', { p_districts: q.districts });
+        return { data: r.data as { city_ar: string; match_count: number }[] | null, error: r.error };
+      },
+    );
     if (districtCitiesError) return null;        // RPC failure ≠ genuine zero matches — give up, don't fall through unrestricted
     const dcRows = (districtCities as { city_ar: string; match_count: number }[] | null) ?? [];
     if (dcRows.length === 1) {
@@ -549,6 +573,15 @@ function withTimeout<T>(p: PromiseLike<T>, ms: number): Promise<T | { timedOut: 
 // needing a separate null-handling branch. An RPC error OR timeout returns null — the caller (see
 // advancedFilters.ts) treats that exactly like "no viable options" and falls back, so a backend
 // problem here degrades gracefully instead of leaving the tap with no effect.
+//
+// In-flight de-dup (2026-08-14, perf, dedupeInFlight defined above resolveSearchScope): rankQuestions()
+// Promise.all-fires the whole advanced-question pool every re-rank cycle; this function and
+// fetchApartmentGuidedCounts() below are the two RPCs that batch drives. Collapsing CONCURRENT calls
+// with identical `q` onto one shared promise cuts redundant round trips with zero behavior change —
+// a later call (different q, or once this one settles) always gets a fresh fetch; nothing is cached
+// past settlement.
+const inFlightAgeCounts = new Map<string, Promise<AgeOptionCounts | null>>();
+
 export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeOptionCounts | null> {
   if (!supabase) return null;
   const scope = await resolveSearchScope(q);
@@ -556,27 +589,30 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
     return { cnt_new: 0, cnt_1_2: 0, cnt_3_5: 0, cnt_6_9: 0, cnt_10p: 0, cnt_unknown: 0, cnt_total: 0, platform_breakdown: null };
   }
   const { isBroadCommercial, ...scopeParams } = scope;
-  const result = await withTimeout(
-    supabase.rpc('property_age_option_counts_ar', {
-      ...scopeParams,
-      ...rpcCountFilterParams(q),
-      ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
-      // Carry forward any earlier-answered guided-flow question (e.g. RNPL) — found live 2026-07-24:
-      // without this, the age-bucket badges shown here silently ignored an already-selected amenities
-      // filter, showing counts far larger than what Search (and apartment_guided_counts_ar, which
-      // already receives these) actually returns for the same combination. Same pattern as
-      // fetchApartmentGuidedCounts() below; the RPC's own p_amenities/p_bath_min default to NULL
-      // (no-op) so an unanswered question never affects a call that omits them.
-      ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
-      ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
-      ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
-    }),
-    AGE_COUNT_TIMEOUT_MS,
-  );
-  if ('timedOut' in result) return null;
-  const { data, error } = result;
-  if (error || !data || !(data as AgeOptionCounts[]).length) return null;
-  return (data as AgeOptionCounts[])[0];
+  return dedupeInFlight(inFlightAgeCounts, JSON.stringify(q), async () => {
+    if (!supabase) return null;
+    const result = await withTimeout(
+      supabase.rpc('property_age_option_counts_ar', {
+        ...scopeParams,
+        ...rpcCountFilterParams(q),
+        ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
+        // Carry forward any earlier-answered guided-flow question (e.g. RNPL) — found live 2026-07-24:
+        // without this, the age-bucket badges shown here silently ignored an already-selected amenities
+        // filter, showing counts far larger than what Search (and apartment_guided_counts_ar, which
+        // already receives these) actually returns for the same combination. Same pattern as
+        // fetchApartmentGuidedCounts() below; the RPC's own p_amenities/p_bath_min default to NULL
+        // (no-op) so an unanswered question never affects a call that omits them.
+        ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
+        ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
+        ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
+      }),
+      AGE_COUNT_TIMEOUT_MS,
+    );
+    if ('timedOut' in result) return null;
+    const { data, error } = result;
+    if (error || !data || !(data as AgeOptionCounts[]).length) return null;
+    return (data as AgeOptionCounts[])[0];
+  });
 }
 
 // Annual-Rent apartment guided flow (2026-07-20): one scope-respecting count row that powers the RNPL,
@@ -608,29 +644,36 @@ export type GuidedCounts = {
   cnt_selected: number;
 };
 
+// De-duped per the comment above fetchPropertyAgeOptionCounts — this is the function RNPL/amenities/
+// bathrooms/furnished all call with identical params in the same Promise.all batch.
+const inFlightGuidedCounts = new Map<string, Promise<GuidedCounts | null>>();
+
 export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<GuidedCounts | null> {
   if (!supabase) return null;
   const scope = await resolveSearchScope(q);
   if (!scope) return null;
   const { isBroadCommercial, ...scopeParams } = scope;
-  const result = await withTimeout(
-    supabase.rpc('apartment_guided_counts_ar', {
-      ...scopeParams,
-      ...rpcCountFilterParams(q),
-      ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
-      ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
-      ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
-      ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
-      ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
-      ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
-      ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
-    }),
-    AGE_COUNT_TIMEOUT_MS,
-  );
-  if ('timedOut' in result) return null;
-  const { data, error } = result;
-  if (error || !data || !(data as GuidedCounts[]).length) return null;
-  return (data as GuidedCounts[])[0];
+  return dedupeInFlight(inFlightGuidedCounts, JSON.stringify(q), async () => {
+    if (!supabase) return null;
+    const result = await withTimeout(
+      supabase.rpc('apartment_guided_counts_ar', {
+        ...scopeParams,
+        ...rpcCountFilterParams(q),
+        ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
+        ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
+        ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
+        ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
+        ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
+        ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
+        ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
+      }),
+      AGE_COUNT_TIMEOUT_MS,
+    );
+    if ('timedOut' in result) return null;
+    const { data, error } = result;
+    if (error || !data || !(data as GuidedCounts[]).length) return null;
+    return (data as GuidedCounts[])[0];
+  });
 }
 
 // Live count for the amenities continue button: re-runs the guided count with the tentative amenity
