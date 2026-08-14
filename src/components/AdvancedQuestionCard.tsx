@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, withSpring, Easing } from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Reveal } from '@/components/ui';
 import { LoadingDots } from '@/components/CardReveal';
 import { useI18n } from '@/i18n';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 import { grouped } from '@/data/search';
 import { colors, radius, space, font, cardShadow } from '@/theme/tokens';
 import type { AdvancedOption } from '@/data/advancedFilters';
@@ -13,11 +15,21 @@ import type { AdvancedOption } from '@/data/advancedFilters';
 // the chrome/layout/progress/footer/spacing/typography/motion/skip/counts/interaction. A question
 // supplies only title/description/options/selection; this component NEVER branches on a question id —
 // only on `selection` (single = radio, one pick; multi = checkbox, many). Every question therefore
-// looks and behaves identically: select rows, then confirm via the footer «Show {N}».
+// looks and behaves identically: select rows, then confirm via the footer.
+//
+// UX refresh (owner 2026-08-16): the card should feel like a short smart conversation, not a form —
+// one question, generous whitespace, soft rounded option rows with a gentle press-compression and a
+// check that fades in, a live «N نتيجة» count that follows the narrowing, and a calm secondary
+// «تخطي». All motion is decoration only (timings are short, reduced-motion collapses them) and no
+// hand-off ever rides an animation callback — auto-advance stays a plain setTimeout.
 
-// Shared overlay shell (top bar + backdrop), reused by the loading state and the question state so the
-// container never jumps between them.
-function Shell({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+const PRESS_IN = { duration: 90, easing: Easing.bezier(0.22, 1, 0.36, 1) };
+const RELEASE = { damping: 18, stiffness: 260 };
+
+// Shared overlay shell (top bar + backdrop), reused by the loading, intro and question states so the
+// container never jumps between them. `countChip` is the live remaining-results pill — the narrowing
+// number the user should always see (owner: the user must always understand how far it narrowed).
+function Shell({ children, onClose, countChip }: { children: React.ReactNode; onClose: () => void; countChip?: number | null }) {
   const { t } = useI18n();
   return (
     <View style={s.overlay}>
@@ -28,13 +40,40 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
             <Ionicons name="sparkles" size={16} color={colors.primary} />
             <Text style={s.barTitle} numberOfLines={1}>{t('Ezhalah AI Agent')}</Text>
           </View>
-          <Pressable onPress={onClose} style={s.xBtn} hitSlop={6}>
-            <Ionicons name="close" size={18} color={colors.muted} />
-          </Pressable>
+          <View style={s.barSide}>
+            {countChip != null ? <AnimatedCount value={countChip} /> : null}
+            <Pressable onPress={onClose} style={s.xBtn} hitSlop={6}>
+              <Ionicons name="close" size={18} color={colors.muted} />
+            </Pressable>
+          </View>
         </View>
         {children}
       </Reveal>
     </View>
+  );
+}
+
+// The live result-count pill: soft fade+settle whenever the number changes so the narrowing reads as
+// motion, not a jarring swap. Reduced motion → static text.
+function AnimatedCount({ value }: { value: number }) {
+  const { t } = useI18n();
+  const reduced = useReducedMotion();
+  const v = useSharedValue(1);
+  const prev = useRef(value);
+  useEffect(() => {
+    if (prev.current !== value && !reduced) {
+      prev.current = value;
+      v.value = 0;
+      v.value = withTiming(1, { duration: 260, easing: Easing.bezier(0.22, 1, 0.36, 1) });
+    } else {
+      prev.current = value;
+    }
+  }, [value, reduced, v]);
+  const a = useAnimatedStyle(() => ({ opacity: 0.4 + v.value * 0.6, transform: [{ translateY: (1 - v.value) * -4 }] }));
+  return (
+    <Reanimated.View style={[s.liveChip, a]}>
+      <Text style={s.liveChipTx}>{t('{count} results', { count: grouped(value) })}</Text>
+    </Reanimated.View>
   );
 }
 
@@ -43,6 +82,36 @@ export function AdvancedQuestionLoading({ onClose }: { onClose: () => void }) {
     <Shell onClose={onClose}>
       <View style={s.loadingBody}>
         <LoadingDots color={colors.primary} />
+      </View>
+    </Shell>
+  );
+}
+
+// ── Opening state (owner 2026-08-16) ─────────────────────────────────────────────────────────────
+// Shown automatically after an eligible Filter search lands with > 25 results: never a question, a
+// calm invitation — «لقينا N عقار» → «خلّنا نحدد طلبك أكثر» → one soft line explaining we use the
+// information available about these listings. Begin is opt-in; «عرض النتائج» leaves immediately
+// (the results are already rendered behind the overlay). No technical language, ever.
+export function AdvancedIntroCard({ total, onBegin, onShowResults, onClose }: {
+  total: number | null; onBegin: () => void; onShowResults: () => void; onClose: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <Shell onClose={onClose}>
+      <View style={s.introBody}>
+        {total != null ? (
+          <Text style={s.introCount}>{t('We found {count} properties', { count: grouped(total) })}</Text>
+        ) : null}
+        <Text style={s.introTitle}>{t('Let’s pin down what you’re looking for')}</Text>
+        <Text style={s.introSupport}>{t('We’ll use what we know about these listings to get you closer to the right one')}</Text>
+        <View style={s.introFoot}>
+          <Tap onPress={onBegin} style={s.primaryBtn}>
+            <Text style={s.primaryTxt}>{t('Let’s begin')}</Text>
+          </Tap>
+          <Pressable style={s.introLink} onPress={onShowResults} hitSlop={8}>
+            <Text style={s.skipTxt}>{t('Show results')}</Text>
+          </Pressable>
+        </View>
       </View>
     </Shell>
   );
@@ -64,43 +133,92 @@ export type AdvancedQuestionCardProps = {
   unknownCount: number;
   progressCur: number;           // 1-based ordinal among the questions that will actually show
   progressTotal: number;         // count of ELIGIBLE questions for this scope (not the static array)
-  liveCount: (keys: string[]) => Promise<number | null>; // footer «Show {N}» for a tentative selection
+  liveCount: (keys: string[]) => Promise<number | null>; // live count for a tentative selection
   onConfirm: (keys: string[]) => void; // commit the selection (empty = no preference) and advance/search
   onSkip: () => void;                   // skip THIS question
   onSkipAll: () => void;                // commit accumulated + search now
   onClose: () => void;                  // abandon
 };
 
-// One row template — identical for single and multi. Leading indicator (radio vs checkbox) + label +
-// trailing live count pill. Selected rows share one highlight.
+// Soft press-compression wrapper (same feel as ui.tsx's Tappable, local so the card owns its motion).
+function Tap({ children, onPress, style }: { children: React.ReactNode; onPress: () => void; style?: object | object[] }) {
+  const press = useSharedValue(0);
+  const a = useAnimatedStyle(() => ({ transform: [{ scale: 1 - press.value * 0.03 }] }));
+  return (
+    <Reanimated.View style={[style as object, a]}>
+      <Pressable
+        onPress={onPress}
+        onPressIn={() => { press.value = withTiming(1, PRESS_IN); }}
+        onPressOut={() => { press.value = withSpring(0, RELEASE); }}
+        style={s.tapInner}
+      >
+        {children}
+      </Pressable>
+    </Reanimated.View>
+  );
+}
+
+// One row template — identical for single and multi. Soft rounded option row: label + trailing live
+// count pill; a check indicator fades/scales in on selection and the row fills with the brand tint.
+// Tap again deselects. The press itself compresses gently (micro-animation, decoration only).
 function OptionRow({ option, selected, selection, first, onPress }: {
   option: AdvancedOption; selected: boolean; selection: 'single' | 'multi'; first: boolean; onPress: () => void;
 }) {
-  const icon = selection === 'multi'
-    ? (selected ? 'checkbox' : 'square-outline')
-    : (selected ? 'radio-button-on' : 'radio-button-off');
+  const reduced = useReducedMotion();
+  const press = useSharedValue(0);
+  const sel = useSharedValue(selected ? 1 : 0);
+  useEffect(() => {
+    sel.value = reduced ? (selected ? 1 : 0) : withTiming(selected ? 1 : 0, { duration: 180, easing: Easing.bezier(0.22, 1, 0.36, 1) });
+  }, [selected, reduced, sel]);
+  const rowA = useAnimatedStyle(() => ({ transform: [{ scale: 1 - press.value * 0.02 }] }));
+  const checkA = useAnimatedStyle(() => ({ opacity: sel.value, transform: [{ scale: 0.6 + sel.value * 0.4 }] }));
   return (
-    <Pressable style={[s.row, first && s.rowFirst, selected && s.rowOn]} onPress={onPress}>
-      <View style={s.rowLead}>
-        <Ionicons name={icon} size={20} color={selected ? colors.primary : colors.pickLine} />
-        <Text style={[s.label, selected && s.labelOn]} numberOfLines={1}>{option.label}</Text>
-      </View>
-      <View style={s.countPill}>
-        <Text style={s.countText}>{grouped(option.count)}</Text>
-      </View>
-    </Pressable>
+    <Reanimated.View style={[s.row, first && s.rowFirst, selected && s.rowOn, rowA]}>
+      <Pressable
+        style={s.rowPress}
+        onPress={onPress}
+        onPressIn={() => { press.value = withTiming(1, PRESS_IN); }}
+        onPressOut={() => { press.value = withSpring(0, RELEASE); }}
+      >
+        <View style={s.rowLead}>
+          <View style={s.checkSlot}>
+            <Reanimated.View style={checkA}>
+              <Ionicons name="checkmark-circle" size={21} color={colors.primary} />
+            </Reanimated.View>
+            {/* Empty affordance keeps the checkbox/radio distinction: multi = rounded square, single = circle. */}
+            {!selected ? <View style={[s.checkRing, selection === 'multi' && s.checkRingSquare]} /> : null}
+          </View>
+          <Text style={[s.label, selected && s.labelOn]} numberOfLines={1}>{option.label}</Text>
+        </View>
+        <View style={s.countPill}>
+          <Text style={s.countText}>{grouped(option.count)}</Text>
+        </View>
+      </Pressable>
+    </Reanimated.View>
   );
 }
 
 export default function AdvancedQuestionCard({
-  titleKey, descriptionKey, brandImage, selection, options, unknownCount, progressCur, progressTotal,
+  titleKey, descriptionKey, brandImage, selection, options, unknownCount: _unknownCount, progressCur, progressTotal,
   liveCount, onConfirm, onSkip, onSkipAll, onClose,
 }: AdvancedQuestionCardProps) {
   const { t } = useI18n();
   const [sel, setSel] = useState<string[]>([]);
   const [count, setCount] = useState<number | null>(null);
+  const reduced = useReducedMotion();
 
-  // Animated progress fill — the ONLY motion, shared by every question so single/multi never differ.
+  // Question-transition: the body fades/rises in whenever the QUESTION changes (keyed on titleKey) —
+  // no hard cuts between steps. Decoration only; reduced motion renders instantly.
+  const enter = useSharedValue(reduced ? 1 : 0);
+  useEffect(() => {
+    setSel([]);
+    enter.value = reduced ? 1 : 0;
+    enter.value = withTiming(1, { duration: 240, easing: Easing.bezier(0.22, 1, 0.36, 1) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [titleKey]);
+  const enterA = useAnimatedStyle(() => ({ opacity: enter.value, transform: [{ translateY: (1 - enter.value) * 8 }] }));
+
+  // Animated progress fill — subtle, shared by every question so single/multi never differ.
   const progress = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(progress, {
@@ -117,7 +235,7 @@ export default function AdvancedQuestionCard({
     liveCount(sel).then((n) => { if (alive && n != null) setCount(n); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel.join(',')]);
+  }, [sel.join(','), titleKey]);
 
   // Single-select auto-advance (owner 2026-08-11): the tap IS the answer — show the selected state,
   // hold ~260ms so the user sees what they picked, then confirm without a second button press.
@@ -135,7 +253,7 @@ export default function AdvancedQuestionCard({
   });
 
   return (
-    <Shell onClose={onClose}>
+    <Shell onClose={onClose} countChip={count}>
       {progressTotal > 1 ? (
         <View style={s.progRow}>
           <View style={s.progTrack}>
@@ -144,43 +262,41 @@ export default function AdvancedQuestionCard({
         </View>
       ) : null}
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
-        <Text style={s.qt}>{t(titleKey)}</Text>
-        {descriptionKey ? <Text style={s.desc}>{t(descriptionKey)}</Text> : null}
-        {brandImage && BRAND_IMAGES[brandImage] ? (
-          <View style={s.brandStrip}>
-            <Image source={BRAND_IMAGES[brandImage]} style={s.brandImg} contentFit="contain" />
+        <Reanimated.View style={enterA}>
+          <Text style={s.qt}>{t(titleKey)}</Text>
+          {descriptionKey ? <Text style={s.desc}>{t(descriptionKey)}</Text> : null}
+          {brandImage && BRAND_IMAGES[brandImage] ? (
+            <View style={s.brandStrip}>
+              <Image source={BRAND_IMAGES[brandImage]} style={s.brandImg} contentFit="contain" />
+            </View>
+          ) : null}
+          <View style={s.list}>
+            {options.map((o, i) => (
+              <OptionRow key={o.key} option={o} selected={sel.includes(o.key)} selection={selection}
+                first={i === 0} onPress={() => pick(o.key)} />
+            ))}
           </View>
-        ) : null}
-        <View style={s.list}>
-          {options.map((o, i) => (
-            <OptionRow key={o.key} option={o} selected={sel.includes(o.key)} selection={selection}
-              first={i === 0} onPress={() => pick(o.key)} />
-          ))}
-        </View>
-        {unknownCount > 0 ? (
-          <Text style={s.note}>{t('Age unknown for {count} matching listings', { count: grouped(unknownCount) })}</Text>
-        ) : null}
-        <View style={s.foot}>
-          <Pressable style={s.primaryBtn} onPress={() => onConfirm(sel)}>
-            <Text style={s.primaryTxt}>
-              {count != null ? t('Show {count} results', { count: grouped(count) }) : t('Show results')}
-            </Text>
-          </Pressable>
-          <View style={s.footRow}>
-            <Pressable style={s.skipLink} onPress={onSkip} hitSlop={8}>
-              <Text style={s.skipTxt}>{t('Skip')}</Text>
-            </Pressable>
-            {progressTotal > 1 ? (
-              <Pressable style={s.skipLink} onPress={onSkipAll} hitSlop={8}>
-                <Text style={s.skipAllTxt}>
-                  {progressTotal - progressCur > 0
-                    ? t('Skip remaining ({count}) and search now', { count: progressTotal - progressCur })
-                    : t('Skip remaining questions and search now')}
-                </Text>
+          {/* One tiny availability line instead of database language (owner 2026-08-16): the numbers
+              come from what we actually know about the current listings — say that plainly, once. */}
+          <Text style={s.note}>{t('Options reflect the information available for the current listings')}</Text>
+          <View style={s.foot}>
+            <Tap style={s.primaryBtn} onPress={() => onConfirm(sel)}>
+              <Text style={s.primaryTxt}>
+                {selection === 'multi'
+                  ? (count != null ? t('Continue · {count} results', { count: grouped(count) }) : t('Continue'))
+                  : (count != null ? t('Show {count} results', { count: grouped(count) }) : t('Show results'))}
+              </Text>
+            </Tap>
+            <View style={s.footRow}>
+              <Pressable style={s.skipLink} onPress={onSkip} hitSlop={8}>
+                <Text style={s.skipTxt}>{t('Skip')}</Text>
               </Pressable>
-            ) : null}
+              <Pressable style={s.skipLink} onPress={onSkipAll} hitSlop={8}>
+                <Text style={s.skipAllTxt}>{t('Show results')}</Text>
+              </Pressable>
+            </View>
           </View>
-        </View>
+        </Reanimated.View>
       </ScrollView>
     </Shell>
   );
@@ -190,24 +306,34 @@ const s = StyleSheet.create({
   overlay: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.screenSide },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.scrim },
   card: {
-    width: '100%', maxWidth: 360, maxHeight: '100%', backgroundColor: colors.paper,
+    width: '100%', maxWidth: 380, maxHeight: '100%', backgroundColor: colors.paper,
     borderRadius: radius.sheet, overflow: 'hidden', borderLeftWidth: 6, borderLeftColor: colors.dark, ...cardShadow,
   },
   bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: space.card, paddingTop: space.card, paddingBottom: 10 },
   titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1 },
   barTitle: { fontFamily: font.family.bold, fontSize: 14, color: colors.dark },
+  barSide: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  liveChip: { backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 3 },
+  liveChipTx: { fontFamily: font.family.bold, fontSize: 12, color: colors.primary, fontVariant: ['tabular-nums'] },
   xBtn: { width: 30, height: 30, borderRadius: radius.pill, backgroundColor: colors.segTrack, alignItems: 'center', justifyContent: 'center' },
 
   progRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: space.card, marginBottom: 4 },
   progTrack: { flex: 1, height: 3, backgroundColor: colors.line, borderRadius: 3, overflow: 'hidden' },
   progFill: { height: '100%', backgroundColor: colors.dark, borderRadius: 3 },
-  progNum: { fontFamily: font.family.semibold, fontSize: 11.5, color: colors.muted, fontVariant: ['tabular-nums'] },
 
   loadingBody: { paddingHorizontal: space.card, paddingVertical: 36, alignItems: 'center', justifyContent: 'center' },
 
-  body: { paddingHorizontal: space.card, paddingTop: space.base, paddingBottom: 18 },
-  qt: { fontFamily: font.family.bold, fontSize: 18, color: colors.ink, lineHeight: 24, paddingHorizontal: 2, paddingTop: 6 },
-  desc: { fontFamily: font.family.regular, fontSize: 12.5, color: colors.muted, paddingHorizontal: 2, paddingTop: 4 },
+  // Opening state — count first (the reward), then the invitation, then one soft supporting line.
+  introBody: { paddingHorizontal: space.card, paddingTop: 22, paddingBottom: 20, alignItems: 'center' },
+  introCount: { fontFamily: font.family.bold, fontSize: 26, color: colors.dark, fontVariant: ['tabular-nums'] },
+  introTitle: { fontFamily: font.family.bold, fontSize: 17, color: colors.ink, marginTop: 10, textAlign: 'center' },
+  introSupport: { fontFamily: font.family.regular, fontSize: 13, color: colors.muted, lineHeight: 20, marginTop: 8, textAlign: 'center', maxWidth: 300 },
+  introFoot: { marginTop: 20, alignSelf: 'stretch', gap: 12, alignItems: 'center' },
+  introLink: { paddingVertical: 4 },
+
+  body: { paddingHorizontal: space.card, paddingTop: space.base, paddingBottom: 20 },
+  qt: { fontFamily: font.family.bold, fontSize: 19, color: colors.ink, lineHeight: 27, paddingHorizontal: 2, paddingTop: 8 },
+  desc: { fontFamily: font.family.regular, fontSize: 12.5, color: colors.muted, paddingHorizontal: 2, paddingTop: 5 },
 
   // Shared brand-image slot — one fixed position (under the subtitle, above the options) and one
   // style for ANY question that names a brandImage token. The PNG carries its own branding; the
@@ -218,20 +344,30 @@ const s = StyleSheet.create({
   },
   brandImg: { width: 150, height: 46 },
 
-  list: { marginTop: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, overflow: 'hidden' },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 13, paddingHorizontal: 13, borderTopWidth: 1, borderTopColor: colors.line },
-  rowFirst: { borderTopWidth: 0 },
-  rowOn: { backgroundColor: colors.tint },
-  rowLead: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 },
-  label: { fontFamily: font.family.medium, fontSize: 14.5, color: colors.ink, flexShrink: 1 },
+  // Options: soft rounded stand-alone rows with breathing room (no dense bordered table) — the
+  // Claude-question feel. Selection fills the row with the brand tint + primary border.
+  list: { marginTop: 14, gap: 8 },
+  row: {
+    backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.fieldLine,
+    borderRadius: radius.field,
+  },
+  rowFirst: {},
+  rowOn: { backgroundColor: colors.tint, borderColor: colors.primary },
+  rowPress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 14, paddingHorizontal: 14 },
+  rowLead: { flexDirection: 'row', alignItems: 'center', gap: 11, flexShrink: 1 },
+  checkSlot: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
+  checkRing: { position: 'absolute', width: 19, height: 19, borderRadius: radius.pill, borderWidth: 1.5, borderColor: colors.pickLine },
+  checkRingSquare: { borderRadius: 6 },
+  label: { fontFamily: font.family.medium, fontSize: 15, color: colors.ink, flexShrink: 1 },
   labelOn: { fontFamily: font.family.bold, color: colors.dark },
   countPill: { backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 2, minWidth: 34, alignItems: 'center' },
   countText: { fontFamily: font.family.bold, fontSize: 12.5, color: colors.primary, fontVariant: ['tabular-nums'] },
 
-  note: { marginTop: 10, marginHorizontal: 2, fontFamily: font.family.regular, fontSize: 12, color: colors.muted, lineHeight: 17 },
+  note: { marginTop: 12, marginHorizontal: 2, fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, lineHeight: 16 },
 
-  foot: { marginTop: 16, gap: 10 },
-  primaryBtn: { backgroundColor: colors.primary, borderRadius: radius.chip, paddingVertical: 13, alignItems: 'center' },
+  foot: { marginTop: 18, gap: 10 },
+  tapInner: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: 13 },
+  primaryBtn: { backgroundColor: colors.primary, borderRadius: radius.chip, alignSelf: 'stretch' },
   primaryTxt: { fontFamily: font.family.bold, fontSize: 14.5, color: colors.surface },
   footRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 2 },
   skipLink: { paddingVertical: 4, flexShrink: 1 },

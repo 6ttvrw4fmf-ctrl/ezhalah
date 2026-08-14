@@ -358,6 +358,21 @@ const AR: Record<string, string> = {
   'Question {cur} of {total}': 'السؤال {cur} من {total}',
   'Skip remaining ({count}) and search now': 'تخطي الباقي ({count}) وابحث الآن',
   'Rent now and pay monthly instead of one annual payment': 'استأجر الآن وادفع شهريًا بدلًا من دفعة سنوية واحدة',
+  // Conversational interview refresh (owner 2026-08-16): opening state, live count chip, multi
+  // continue CTA, availability line, mining transition, and the results summary + removable pills.
+  '{count} results': '{count} نتيجة',
+  'We found {count} properties': 'لقينا {count} عقار',
+  'Let’s pin down what you’re looking for': 'خلّنا نحدد طلبك أكثر',
+  'We’ll use what we know about these listings to get you closer to the right one': 'بنستخدم المعلومات المتوفرة عندنا عن هالعقارات عشان نقرّب لك الأنسب',
+  'Let’s begin': 'يلا نبدأ',
+  // 'Continue' reuses the existing auth-flow key ('متابعة') — not redeclared here.
+  'Continue · {count} results': 'متابعة · {count} نتيجة',
+  'Options reflect the information available for the current listings': 'الخيارات تعتمد على المعلومات المتوفرة للإعلانات الحالية',
+  'Finding the closest match for you': 'ندور لك على الأقرب لطلبك',
+  'Going through {count} properties to pull out the best fit': 'نراجع {count} عقار ونطلع لك الأنسب',
+  'We found {count} properties closest to your request': 'لقينا {count} عقار أقرب لطلبك',
+  'Based on: {labels}': 'بناءً على: {labels}',
+  'Without: {label}': 'بدون: {label}',
 
   // Interview option labels
   'Pool': 'مسبح',
