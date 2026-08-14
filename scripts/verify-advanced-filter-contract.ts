@@ -140,8 +140,12 @@ check('startAgeFlow takes a fallbackToRefine flag and only pops refine chips whe
   /const startAgeFlow = async \(q: SearchQuery, fallbackToRefine = true/.test(agentSrc)
   && /if \(fallbackToRefine\) startRefine\(q\)/.test(agentSrc));
 check('the auto entry gates on eligibility AND the shared >25 constant, and opens as auto',
-  /anyGuidedEligible\(q2\) && \(introTotal \?\? 0\) > INTERVIEW_STOP_AT/.test(agentSrc)
+  /anyGuidedEligible\(q2\) && gateTotal > INTERVIEW_STOP_AT/.test(agentSrc)
   && /startAgeFlow\(q2, false, \{ auto: true/.test(agentSrc));
+// The intro count is the EXACT matchTotal (same number as the «لقينا N» headline) — never the
+// page-fetch size, which saturates at the 1,500 candidate cap (bug found live 2026-08-16).
+check('the intro count comes from matchTotal, never the page-capped result.total',
+  /const introTotal = \(!q2\?\.priceIsAnnual \? result\.matchTotal : null\) \?\? null/.test(agentSrc));
 check('the auto path opens on the INTRO phase, never a question',
   /opts\?\.auto \? \{ phase: 'intro'/.test(agentSrc));
 check('the guided flow stays reachable on demand via the narrow-it-down button',

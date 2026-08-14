@@ -1311,8 +1311,14 @@ export default function Agent() {
         // pure results-first behavior — the interview never opens on a set that's already manageable.
         {
           const q2 = result.query ?? pending.q;
-          const introTotal = result.total ?? result.matchTotal ?? null;
-          if (q2 && anyGuidedEligible(q2) && (introTotal ?? 0) > INTERVIEW_STOP_AT) {
+          // matchTotal FIRST (the RPC's exact count(*) over(), same number as the «لقينا N» headline)
+          // — result.total is the page-fetch size and saturates at the 1,500 candidate cap, which is
+          // NOT the user's real total (verified live 2026-08-16: intro said 1,500 while the headline
+          // and the interview correctly said 8,458). Skip the exact number in the priceIsAnnual edge
+          // (same overstate risk the headline guards) — the intro just omits the count line there.
+          const introTotal = (!q2?.priceIsAnnual ? result.matchTotal : null) ?? null;
+          const gateTotal = introTotal ?? result.total ?? 0;
+          if (q2 && anyGuidedEligible(q2) && gateTotal > INTERVIEW_STOP_AT) {
             void startAgeFlow(q2, false, { auto: true, total: introTotal });
           }
         }
