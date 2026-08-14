@@ -1,3 +1,20 @@
+-- RECOVERED VERBATIM from production (AGENTS.md "Migration drift guard", P0).
+--
+-- Applied to production 2026-08-14 19:11 UTC as `stale_breaker_min_population_floor` by another
+-- session and never committed. A function live in production with no git record is the exact
+-- precondition of the 2026-07-16 PGRST203 search outage — nobody can review, diff or roll back what
+-- they cannot see. Recovered byte-for-byte from
+-- supabase_migrations.schema_migrations.statements (version 20260814191140).
+--
+-- Diffed all 436 committed migration versions against production: this was the ONLY gap.
+--
+-- What it changes: adds `min_population := 30` so the stale circuit-breaker and the coverage gate
+-- only engage on tables with a meaningful active population — a 4-row table crossing a 30% stale
+-- fraction is noise, not a signal. Both paths remain REPORT-ONLY: neither ever deactivates a
+-- listing, because a time-based sweep cannot verify a listing is dead.
+--
+-- NOT self-merged: touches supabase/migrations/, so per the daily/senior routine rules this PR
+-- stays OPEN for review.
 create or replace function public.mark_stale_listings_inactive(stale_days integer DEFAULT 7, max_frac numeric DEFAULT 0.30)
  RETURNS integer
  LANGUAGE plpgsql
