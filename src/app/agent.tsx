@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
+import { runAfterAnimation } from '@/lib/afterAnimation';
 import { Tappable, Heartbeat } from '@/components/ui';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
@@ -1434,19 +1435,38 @@ export default function Agent() {
 
   // New Chat routes back here with a changing ?fresh=… — wipe the conversation and greet again, even
   // if we were already on the agent screen (where the component doesn't remount). (user request.)
+  // The wipe is a "fresh page turn", not a hard cut (owner 2026-08-14: the New Chat moment should
+  // FEEL like a new chat): the old conversation breathes out (~110ms fade), the clean chat rises
+  // softly back in, and the greeting starts typing as it settles. The wipe itself rides
+  // runAfterAnimation — the animation is decoration, the fresh chat is the function, so a frozen
+  // rAF (hidden tab) can never leave the user stuck on the old conversation.
+  const freshFade = useRef(new Animated.Value(1)).current;
+  const freshRise = useRef(new Animated.Value(0)).current;
   const freshMountRef = useRef(true);
   useEffect(() => {
     if (freshMountRef.current) { freshMountRef.current = false; return; }
     if (fresh === undefined) return;
     if (runRef.current) runRef.current.cancelled = true;
     if (greetTimerRef.current) clearTimeout(greetTimerRef.current);
-    setBusy(false);
-    setMsgs([]);
-    // Forget the last-handled filter/seed so a re-search AFTER New Chat re-runs even if it's identical
-    // to a previous one (otherwise the change-detection would skip it and leave just the greeting).
-    lastFilterRef.current = undefined;
-    lastSeedRef.current = undefined;
-    sendGreeting();
+    runAfterAnimation(
+      (onFinished) => Animated.timing(freshFade, { toValue: 0, duration: 110, useNativeDriver: true }).start(onFinished),
+      () => {
+        setBusy(false);
+        setMsgs([]);
+        // Forget the last-handled filter/seed so a re-search AFTER New Chat re-runs even if it's
+        // identical to a previous one (otherwise the change-detection would skip it and leave just
+        // the greeting).
+        lastFilterRef.current = undefined;
+        lastSeedRef.current = undefined;
+        freshRise.setValue(10);
+        Animated.parallel([
+          Animated.timing(freshFade, { toValue: 1, duration: 240, useNativeDriver: true }),
+          Animated.timing(freshRise, { toValue: 0, duration: 240, useNativeDriver: true }),
+        ]).start();
+        sendGreeting();
+      },
+      180,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fresh]);
 
@@ -1514,6 +1534,10 @@ export default function Agent() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={insets.top + 52}
       >
+        {/* The fresh-page turn (New Chat): this wrapper fades the whole conversation out and rises
+            the clean chat back in — see the ?fresh effect. Decoration only; the wipe never depends
+            on it completing. */}
+        <Animated.View style={{ flex: 1, opacity: freshFade, transform: [{ translateY: freshRise }] }}>
         <ScrollView
           ref={scrollRef}
           style={{ flex: 1 }}
@@ -1829,6 +1853,7 @@ export default function Agent() {
             })()}
           </View>
         </ScrollView>
+        </Animated.View>
 
         {/* Composer */}
         <View style={[s.composerWrap, { paddingBottom: insets.bottom + 8 }]}>
