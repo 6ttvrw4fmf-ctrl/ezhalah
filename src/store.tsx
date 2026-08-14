@@ -37,8 +37,10 @@ type AppState = {
   runQuery: (q: SearchQuery, record?: boolean) => Promise<SearchResult>;
   loadMoreListings: (q: SearchQuery, offset: number) => Promise<{ listings: Listing[]; nextOffset: number; hasMore: boolean }>;
   dataSource: DataSource;
-  // Auth + the post-first-search gate (PRD §9): the first search is free; anything beyond it
-  // requires sign-in. `gated` is true once a guest has used their one free search.
+  // Auth. SEARCH IS FREE, ALWAYS (owner rule 2026-08-15, retiring the PRD §9 gate): a guest can run
+  // unlimited searches; sign-in only adds persistence (saved history/language). The old `gated`
+  // flag and every auth wall in the search paths were REMOVED — verify-search-is-free.ts fails the
+  // build if any comes back.
   user: AuthUser | null;
   signIn: (u: AuthUser) => void;
   updateUser: (patch: Partial<AuthUser>) => void;
@@ -49,7 +51,6 @@ type AppState = {
   // from the old account must come back.)
   deleteAccount: () => void;
   searchCount: number;
-  gated: boolean;
   // A message the user typed but couldn't send because the gate fired. Persisted so it survives the
   // whole auth round-trip — including a full page reload during a real OAuth redirect — so after
   // sign-in the chat can replay it. The user never loses what they wrote or has to start over.
@@ -319,11 +320,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dataSource,
       user,
       searchCount,
-      // Guests are NOT gated: they can run as many searches as they like within their session/chat.
-      // The only difference from a signed-in user is that nothing is saved — a guest's chats live in
-      // memory only and are gone when they leave (no persistence; see the history effects). The
-      // incentive to sign in is keeping your searches, not unlocking them. (user request.)
-      gated: false,
       pendingMessage,
       setPendingMessage: (m) => {
         setPendingMessageState(m);

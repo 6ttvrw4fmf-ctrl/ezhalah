@@ -7,7 +7,6 @@ import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, isCleanType, type Macro } from '@/data/propertyTypes';
 import { emptyQuery, type SearchQuery } from '@/data/search';
 import { INTERVIEW_CITIES, neighborhoodsFor } from '@/data/locations';
-import { useApp } from '@/store';
 import { useI18n, t, tWord, tBudgetMain, tBudgetSub, tDetailOption, isLatinOnlyInput, ARABIC_ONLY_MSG } from '@/i18n';
 
 // Guided interview — a faithful port of the prototype's modal (.m-iv). One continuous session walks
@@ -274,7 +273,6 @@ export default function Interview() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, isRTL } = useI18n();
-  const { gated } = useApp();
 
   const [ans, setAns] = useState<Answers>({});
   const [order, setOrder] = useState<string[]>([]);
@@ -285,28 +283,21 @@ export default function Interview() {
   // onSearch() guard) — this screen had no such guard, so an English custom answer would flow raw
   // into t()/tWord() calls with no dictionary entry and leak into the Arabic UI (2026-07-13 audit).
   const [customErr, setCustomErr] = useState('');
-  const authPushed = useRef(false);
 
   const curQ = useMemo(() => nextStep(ans), [ans]);
   const prog = useMemo(() => (curQ ? progress(ans) : null), [ans, curQ]);
   const done = curQ === null && order.length > 0;
 
-  // Everything answered → run the search in chat, unless the free search is used up (then sign in).
+  // Everything answered → run the search in chat. Search is FREE, always (owner rule 2026-08-15):
+  // the finished interview goes straight to results — no auth gate, ever.
   useEffect(() => {
     if (!done) return;
-    if (gated) {
-      if (!authPushed.current) {
-        authPushed.current = true;
-        router.push('/auth');
-      }
-      return;
-    }
     const { bubble, sub } = interviewToChat(ans, isRTL);
     router.replace({
       pathname: '/agent',
       params: { filter: JSON.stringify(buildQuery(ans)), chatBubble: bubble, chatSub: sub },
     });
-  }, [done, gated]);
+  }, [done]);
 
   const localizeVal = (key: string, val?: string): string => {
     if (val === undefined || val === SKIP) return t('Any');

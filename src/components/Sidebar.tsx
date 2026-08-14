@@ -67,7 +67,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, isRTL, locale } = useI18n();
-  const { user, history, setQuery, gated, toggleStar, deleteHistory, openModal, activeChatId, setActiveChat } = useApp();
+  const { user, history, setQuery, toggleStar, deleteHistory, openModal, activeChatId, setActiveChat } = useApp();
   // Row action menu (Star / Delete). Rendered as a panel-level overlay OUTSIDE the scrolling list so
   // it can never be clipped, and opened UP or DOWN from the click position so the full menu is always
   // on-screen near the top, middle, or bottom of the sidebar. (user request.)
@@ -182,10 +182,8 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // render in their final state straight away. (user request — "view all the chat history, it
   // doesn't re-write".)
   const openHistory = (c: HistoryItem) => {
-    if (gated) {
-      animateOut(() => { onClose(); router.replace('/auth'); });
-      return;
-    }
+    // Search is FREE, always (owner rule 2026-08-15) — reopening a saved search never routes to
+    // sign-in. (History rows only exist for signed-in users anyway; the retired gate was dead code.)
     // STRICT allowlist into the shared store the Filter home binds to — agent-only fields
     // (bothDeals/sources/keywords/sort/count/type/priceInput/…) must never ride into a later
     // filter search. The chat replay below still gets the FULL query via router params.

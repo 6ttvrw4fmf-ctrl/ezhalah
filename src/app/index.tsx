@@ -116,7 +116,7 @@ export default function Home() {
     })),
     [promptLabels],
   );
-  const { query, setQuery, gated, user } = useApp();
+  const { query, setQuery, user } = useApp();
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
   // CITY-ONLY FIELD (owner spec 2026-07-17): citySuggestions holds either the Top-6-by-listings
   // (focus, empty text) or the Arabic-matched typed results — never a mix, and never a
@@ -618,10 +618,8 @@ export default function Home() {
         useNativeDriver: true,
       }).start(onFinished),
       () => {
-        if (gated) {
-          router.push('/auth');
-          return;
-        }
+        // Search is FREE, always (owner rule 2026-08-15): no auth gate may ever sit between the
+        // Search button and results. verify-search-is-free.ts fails the build if one comes back.
         router.push({ pathname: '/agent', params: { filter: JSON.stringify(q) } });
       },
       320,
@@ -638,10 +636,7 @@ export default function Home() {
   };
 
   const onChip = (seed: string) => {
-    if (gated) {
-      router.push('/auth');
-      return;
-    }
+    // Search is FREE, always — chips route straight to results, never to sign-in.
     router.push({ pathname: '/agent', params: { seed } });
   };
 
