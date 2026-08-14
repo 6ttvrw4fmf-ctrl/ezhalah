@@ -431,6 +431,12 @@ const AR: Record<string, string> = {
   'Ezhalah! ': 'إزهله! ',
   'No exact matches — try broadening your search.': 'لا توجد نتائج مطابقة تماماً — حاول توسيع نطاق بحثك.',
   'No listings here right now': 'لا توجد إعلانات هنا حالياً',
+  // City/District dropdown zero-states (2026-08-14): the box used to render NOTHING while its pool
+  // was loading, after a failed fetch, or on a no-match — indistinguishable silences (findings P1).
+  'Loading…': 'جاري التحميل…',
+  'Could not load the list — tap to retry': 'تعذر تحميل القائمة، اضغط للمحاولة مرة أخرى',
+  'No matching city — pick from the list': 'لا توجد مدينة مطابقة — اختر من القائمة',
+  'No districts available in this city right now': 'لا توجد أحياء متاحة حالياً في هذه المدينة',
   'No listings within that budget — there are matches above it. Want me to remove the budget?':
     'ما فيه إعلانات داخل ميزانيتك — لكن فيه خيارات فوقها. تبيني أشيل الميزانية؟',
   'No matches in that specific area — but I can find some elsewhere in the same city. Want me to widen the area?':

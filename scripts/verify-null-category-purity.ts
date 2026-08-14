@@ -93,7 +93,10 @@ const remoteSrc = readFileSync(new URL('../src/data/remote.ts', import.meta.url)
 const searchSrc = readFileSync(new URL('../src/data/search.ts', import.meta.url), 'utf8');
 
 check('remote.ts defines impliedCategory()', /function impliedCategory\(q: SearchQuery\): Macro \| null/.test(remoteSrc));
-check("impliedCategory's nothing-selected branch resolves to 'Residential', not null", /return effectiveCleanQuery\(q\) \? null : 'Residential';/.test(remoteSrc));
+// 2026-08-14: the literal moved into the exported IMPLIED_CATEGORY_DEFAULT so the City/District
+// count pools can share the SAME default (count-scope parity — see verify-count-scope-parity.ts);
+// both halves are pinned so neither the value nor the single-source indirection can drift.
+check("impliedCategory's nothing-selected branch resolves to 'Residential', not null", /export const IMPLIED_CATEGORY_DEFAULT = 'Residential' as const;/.test(remoteSrc) && /return effectiveCleanQuery\(q\) \? null : IMPLIED_CATEGORY_DEFAULT;/.test(remoteSrc));
 check(
   'the RPC scope actually calls impliedCategory(q) for p_category (not the old bare `q.category ?? null`)',
   /p_category:\s*impliedCategory\(q\),/.test(remoteSrc),
