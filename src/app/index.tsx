@@ -387,6 +387,51 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query.deal, effCategory, citySelected, paymentMonthly]);
 
+  // DISTRICT REHYDRATION — the districtsSelected twin of the citySelected fix above (2026-08-04).
+  //
+  // The bug (live-proven on production, browser E2E 2026-08-14): search «الرياض + حي النرجس + شقة +
+  // 3 غرف + 20,000–90,000 + 100–300 م²» → 266 نتيجة → reopen «تصفية» → press «بحث» with NOTHING
+  // touched → 1,255 نتيجة. Root cause: districtsSelected is LOCAL component state and comes back
+  // EMPTY on remount, while every other selection persists in the app context — and onSearch reads
+  // only the local array, so `districtMatchUnion` was undefined and the rebuilt query dropped
+  // districts entirely. The user's search was SILENTLY WIDENED from their chosen حي to the whole
+  // city (+989 listings they never asked for), with the removable حي chip gone from the form too, so
+  // nothing on screen said the filter had been dropped. Search & Matching QA §13 (never silently
+  // widen the user's request) and §29 (selections survive the results → filter round-trip).
+  //
+  // Restoring is a determination, not a guess — the same discipline as the city rehydration:
+  //  • Candidates come from the SAME canonical catalog the field itself picks from
+  //    (ensureDistrictOptions for this city/deal/category/period), matched on matchValues — the
+  //    exact array persisted in query.districts, so there is no fuzzy or partial matching.
+  //  • The restored union must equal query.districts EXACTLY (set equality both ways). A catalog
+  //    that has drifted since the search restores NOTHING rather than quietly running a different
+  //    search than the one whose results the user is looking at.
+  //  • It runs at most once per mount, so a later city change (clearDistrict) is permanent, and the
+  //    in-flight catalog promise is cancelled when the city changes so a stale pick cannot land in
+  //    the new city.
+  //  • setDistrictsSelected uses a functional (prev.length ? prev : …) update, so a district the
+  //    user picks while the catalog is loading is never clobbered.
+  const districtsRehydrated = useRef(false);
+  useEffect(() => {
+    if (districtsRehydrated.current || !citySelected) return;
+    const want = query.districts ?? [];
+    if (!want.length) return;
+    districtsRehydrated.current = true;
+    if (districtsSelected.length) return;   // a live pick already stands — nothing to restore
+    let cancelled = false;
+    void ensureDistrictOptions(citySelected.cityId, query.deal, effCategory, paymentMonthly).then((pool) => {
+      if (cancelled) return;
+      const wanted = new Set(want);
+      const restored = pool.filter((d) => d.matchValues.some((v) => wanted.has(v)));
+      const union = new Set(restored.flatMap((d) => d.matchValues));
+      if (union.size !== wanted.size) return;              // drifted catalog → restore nothing
+      for (const v of wanted) if (!union.has(v)) return;   // exact round-trip only
+      setDistrictsSelected((prev) => (prev.length ? prev : restored));
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [citySelected, query.deal, effCategory, paymentMonthly]);
+
   // ONE query builder shared by onSearch and the district live-count effect below — the count call
   // and the search call must be built from the SAME state or their numbers can drift apart, which
   // is the exact bug class this exists to prevent (owner rule 2026-08-13: the number beside a
@@ -533,6 +578,21 @@ export default function Home() {
         ? districtsSelected.reduce((sum, d) => sum + d.listingCount, 0)
         : undefined,
     };
+    // PERSIST the picked districts into the app context before navigating (2026-08-14).
+    // Every OTHER control (المدينة, السعر, المساحة, غرف النوم, فئة/نوع) writes itself into `query` as
+    // the user edits, which is why the form comes back filled when «تصفية» is reopened. The districts
+    // did NOT: they lived only in the local districtsSelected array and were merged into `q` right
+    // here, at search time, and handed to navigateWithQuery — which only serialises them into the
+    // /agent?filter=… URL. So `query.districts` was ALWAYS empty on the filter screen, the reopened
+    // form had nothing to restore from, and pressing «بحث» untouched silently widened the search from
+    // the chosen حي to the whole city. Writing them to the same place every sibling field already
+    // lives is what makes the rehydration effect above able to see them at all.
+    setQuery((prev) => ({
+      ...prev,
+      districts: q.districts,
+      districtLabel: q.districtLabel,
+      districtListingCount: q.districtListingCount,
+    }));
     navigateWithQuery(q);
   };
 

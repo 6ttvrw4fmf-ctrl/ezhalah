@@ -423,6 +423,39 @@ def coverage_ok(current_rows: int, history_rows: list[int], frac: float) -> bool
     return current_rows >= frac * median
 
 
+def plan_confirm_budget(available: list[int], cap: int) -> list[int]:
+    """Split `cap` confirm slots across TABLES so a saturated table can never starve another.
+
+    The old cohort loop filled tables in order and broke once the cap was reached, so the FIRST
+    table took every slot it could use and later tables got whatever was left — nothing, once the
+    first table saturated. Observed 2026-08-14: wasalt_residential filled all 1500 slots, so the
+    22 struck wasalt_commercial rows could not be confirmed at all, and would stay served for as
+    long as residential keeps saturating (the cohort has grown 356 → 952 → 1206 → 1489 per run).
+
+    Each table is offered an equal share; any share a table cannot use spills over to the tables
+    that still want slots. This is a FAIRNESS change, not a loosening: the post-conditions are
+    sum(result) == min(cap, sum(available)) and result[i] <= available[i], so no run ever confirms
+    more rows than --confirm-limit and no table is starved while it has struck rows waiting.
+    """
+    n = len(available)
+    if n == 0 or cap <= 0:
+        return [0] * n
+    take = [0] * n
+    remaining = cap
+    while remaining > 0:
+        wants = [i for i in range(n) if take[i] < available[i]]
+        if not wants:
+            break
+        share = max(1, remaining // len(wants))
+        for i in wants:
+            if remaining <= 0:
+                break
+            grant = min(share, available[i] - take[i], remaining)
+            take[i] += grant
+            remaining -= grant
+    return take
+
+
 def control_ok(live: int, dead: int, failed: int, n: int, min_live: float) -> bool:
     """Pure guard: the checker must see ≥min_live of known-live controls as live, on a mostly-decided
     sample. Too many transient failures = can't trust the checker either."""
@@ -479,21 +512,29 @@ def run_enum_strike(args) -> int:
           ", ".join(f"mc{mc}→{mc+1}: {n}" for mc, n in sorted(struck.items())), flush=True)
 
     # 3) CONFIRM cohort: rows at ≥grace consecutive missed enumerations (oldest last_seen first).
-    cohort: list[tuple[str, int, str, int]] = []
+    # Each table's candidates are read independently and the budget is then split by
+    # plan_confirm_budget(), so one saturated table can never starve another (see that docstring).
+    # Reading is still bounded by the same --confirm-limit per table, and the cap is unchanged.
+    per_table: list[list[tuple[str, int, str, int]]] = []
     for tbl in TABLES:
-        need = args.confirm_limit - len(cohort)
-        if need <= 0:
-            break
         rows = db._execute(
             db.sb().table(tbl).select("id, listing_url, missing_count")
             .eq("active", True).gte("missing_count", args.grace)
-            .order("last_seen_at", desc=False).limit(need),
+            .order("last_seen_at", desc=False).limit(args.confirm_limit),
             what=f"{tbl}.enum_confirm_cohort",
         ).data or []
+        cand: list[tuple[str, int, str, int]] = []
         for x in rows:
             url = (x.get("listing_url") or "").strip()
             if url:
-                cohort.append((tbl, x["id"], url, int(x.get("missing_count") or 0)))
+                cand.append((tbl, x["id"], url, int(x.get("missing_count") or 0)))
+        per_table.append(cand)
+    take = plan_confirm_budget([len(p) for p in per_table], args.confirm_limit)
+    cohort: list[tuple[str, int, str, int]] = [r for p, k in zip(per_table, take) for r in p[:k]]
+    if any(len(p) > k for p, k in zip(per_table, take)):
+        print("  confirm budget split " +
+              ", ".join(f"{t}: {k}/{len(p)}" for t, p, k in zip(TABLES, per_table, take)) +
+              " (cap bound — remainder waits for the next run)", flush=True)
     # Control group: rows the enumeration JUST saw (known-live) — proves the checker itself works.
     control: list[tuple[str, int, str, int]] = []
     for tbl in TABLES:

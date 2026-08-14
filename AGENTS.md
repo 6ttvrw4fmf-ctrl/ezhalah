@@ -273,8 +273,12 @@ later from `supabase_migrations.schema_migrations.statements`, which is exact an
 **You do not have to catch your own drift by memory — the barrier catches it for you, continuously:**
 - `scripts/verify-migration-drift-vs-production.ts` asks `ops_deploy_preflight_checks` (the same
   RPC `scripts/safe-deploy.sh` already gates deploys on) whether every migration live in production
-  is present in git. It is wired into `npm test` (`full-verification-ci.yml`), so drift already
-  goes red on the very next push or PR to `main` — anyone's, not just the one that caused it.
+  is present in git. It is deliberately **NOT** wired into `npm test`, and must not be: `npm test`
+  (`full-verification-ci.yml`) is a REQUIRED status check on every PR, so wiring the live check in
+  would fail every unrelated PR whenever drift exists anywhere in production. That decision is
+  pinned in BOTH directions by `scripts/verify-migration-drift-guard-wired.ts` (which asserts the
+  live check is absent from `npm test` and that the structural guard itself is present). Drift is
+  caught by the dedicated workflow below, not by your next push.
 - `.github/workflows/migration-drift-guard.yml` runs that same check **every 15 minutes**,
   independent of any push — because the failure mode this exists for is a session that applies a
   migration and pushes nothing at all, which a push-triggered check alone would never catch. On
