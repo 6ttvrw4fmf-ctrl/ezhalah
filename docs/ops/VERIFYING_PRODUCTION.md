@@ -72,7 +72,53 @@ secrets, authenticates the Vercel token, asserts the target lock and checks the 
 env vars — then stops. The `safe-deploy.sh` step is gated `if: ${{ !inputs.dry_run }}` and
 `verify-deploy-workflow-guard.ts` fails CI if that gating is ever removed or inverted.
 
+## Driving the live UI from a cloud routine (browser E2E)
+
+**Real browser E2E against `https://ezhalah-app.vercel.app` IS possible from a cloud container** —
+three Search & Matching QA runs (2026-08-11 → 2026-08-13) recorded it as `BLOCKED` and fell back to
+API-only verification, which is why this is written down.
+
+Two things have to be right, and the failure they produce is misleading:
+
+1. **Chromium must be pointed at the egress proxy** — `--proxy-server=$HTTPS_PROXY`. Without it,
+   navigation fails with `ERR_CONNECTION_RESET` (not a proxy error), which reads like a policy
+   denial but is not one.
+2. **Chromium must cap TLS at 1.2** — `--ssl-version-max=tls1.2`. The gateway RESETS Chromium's
+   TLS 1.3 ClientHello, again surfacing as `ERR_CONNECTION_RESET` *after* a successful `CONNECT`,
+   with **nothing** in `curl -sS "$HTTPS_PROXY/__agentproxy/status"` — the proxy's own recent-failure
+   list stays empty because from its side the tunnel opened fine. A genuine policy denial looks
+   different (`ERR_TUNNEL_CONNECTION_FAILED`, and the host appears in the status endpoint), so the
+   two are distinguishable: **reset = transport, tunnel-failed = policy.**
+
+   This caps the TLS version only. Certificate verification stays ON — never pass
+   `--ignore-certificate-errors`.
+
+```python
+b = await p.chromium.launch(
+    headless=True,
+    executable_path="/opt/pw-browsers/chromium-1194/chrome-linux/chrome",  # pinned; pip's
+    args=["--no-sandbox", "--disable-dev-shm-usage",                       # playwright wants a
+          "--ssl-version-max=tls1.2",                                      # newer build than the
+          f"--proxy-server={os.environ['HTTPS_PROXY']}",                   # image ships
+          "--disable-background-networking"])
+```
+
+Do **not** run `playwright install` — the image pre-installs browsers under
+`/opt/pw-browsers`, and a `pip install playwright` will pull a version whose expected build number
+does not match, so pass `executable_path` explicitly.
+
+Two behaviours to expect once it runs, both normal:
+
+- **The results list is virtualised.** Cards unmount as they leave the viewport, so counting what is
+  in the DOM at one scroll position undercounts. Scroll the whole list and accumulate by the card's
+  «#N» rank badge — that badge is the reliable per-card anchor.
+- **Card display order is NOT the RPC row order.** `orderByScope()` in `src/data/remote.ts`
+  re-orders for geography/type diversification after the RPC's platform round-robin. Comparing card
+  #N to RPC row N therefore produces false mismatches; compare the displayed SET against the
+  eligible SET instead, and assert rank contiguity (no gaps, no duplicates) for pagination.
+
 ## Related
 
 - `docs/DEPLOY_SAFETY.md` — deploy rules, the deployment lock, emergency rollback
 - `docs/ops/AGENT_AUTHORITY.md` — what a routine may do without asking
+- `docs/ops/SEARCH_MATCH_QA_ENGINEER.md` — the Search & Matching QA spec this harness serves
