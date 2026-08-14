@@ -10,6 +10,7 @@ import { colors } from '@/theme/tokens';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
+import GoogleOneTap from '@/components/GoogleOneTap';
 import IntroVideo from '@/components/IntroVideo';
 
 // RC-A (hardening 2026-07-13): last-resort net. Nothing in the app caught unhandled promise
@@ -59,6 +60,8 @@ function Shell() {
   return (
     <View style={{ flex: 1, flexDirection: isRTL ? 'row-reverse' : 'row' }}>
       {docked && <Sidebar docked onClose={() => {}} />}
+      {/* One-click Google sign-in prompt (web, signed-out only) — renders its own corner UI. */}
+      <GoogleOneTap />
       <View style={{ flex: 1 }}>
         <Stack
           screenOptions={{
