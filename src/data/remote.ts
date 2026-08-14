@@ -869,9 +869,14 @@ function kindsFor(q: SearchQuery): SourceKind[] {
 // already-documented "Default Residential" behavior actually enforced end-to-end, not just at the table
 // level. A specific type/group selection (cq != null) is left untouched: it's already exactly scoped by
 // dbTypesFor's raw type_ar constraint, so this only tightens the one path proven to leak.
+// The category a category-less search DEFAULTS to — exported so the City/District count pools
+// (src/data/locations.ts via index.tsx) scope their counts to the SAME category the results RPC
+// will actually search, from ONE literal (count-scope parity, findings 2026-08-13 R1). Never
+// duplicate this string at a call site.
+export const IMPLIED_CATEGORY_DEFAULT = 'Residential' as const;
 function impliedCategory(q: SearchQuery): Macro | null {
   if (q.category) return q.category;
-  return effectiveCleanQuery(q) ? null : 'Residential';
+  return effectiveCleanQuery(q) ? null : IMPLIED_CATEGORY_DEFAULT;
 }
 
 function tableFor(q: SearchQuery): string {
