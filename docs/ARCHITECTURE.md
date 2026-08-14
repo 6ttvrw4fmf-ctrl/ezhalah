@@ -295,15 +295,15 @@ keep Western digits. `isLatinOnlyInput` + `ARABIC_ONLY_MSG` reject English searc
 - radius chip 12 / card 16 / field 13 / sheet 22 / pill 999. space base 8 / screenTop 56 / screenSide 18.
 - Font **Poppins** (400/500/600/700). Soft green-tinted `cardShadow`. Per-platform brand colors.
 
-**Desktop UI scale (web shell, 2026-08-14 — PR #611):** the app is a mobile-first px design (body
-13–15, titles 18–26, 560px content column) that used to render 1:1 at every viewport — correct on a
-phone, undersized on a monitor. `src/app/+html.tsx` now carries a tiered, media-gated `zoom` on
-`<body>`: **1.1 at ≥1100px, 1.2 at ≥1400px, 1.3 at ≥1700px**. `zoom` reflows layout (unlike
-`transform:scale`) so wrapping/scrolling/hit-targets stay correct; below 1100px nothing applies —
-phones/tablets untouched by construction. Do NOT "fix" desktop sizing by editing per-component font
-sizes (mobile shares those styles) — tune the tier values in `+html.tsx` instead. Barrier:
-`scripts/verify-desktop-ui-scale.ts` (npm test) pins media-gating ≥1024px, sane values (≤1.4),
-monotonic tiers, and zoom-not-transform.
+**Desktop UI scale — 1:1, by owner decision (2026-08-14, PR #617):** the app is a mobile-first px
+design (body 13–15, titles 18–26, 560px content column) rendered 1:1 at every viewport. A tiered
+desktop `zoom` layer (1.1/1.2/1.3 by width) shipped earlier the same day (PR #611) for a "too small
+on desktop" report, and the owner reversed it hours later from a MacBook: "too zoomed in — keep it
+normal." **Current owner call: no desktop zoom, normal browser scale everywhere.** The full history
+is documented in place in `src/app/+html.tsx`, and `scripts/verify-desktop-ui-scale.ts` (npm test)
+now pins the zoom's ABSENCE (no `zoom`, no `transform:scale` substitute, no font-size % inflation,
+standard viewport meta). Do not re-add any desktop scaling — or "fix" desktop sizing via
+per-component font px (mobile shares those styles) — without a fresh, explicit owner ask.
 
 ---
 
