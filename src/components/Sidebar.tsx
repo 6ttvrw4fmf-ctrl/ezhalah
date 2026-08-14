@@ -232,8 +232,19 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               <Text ref={noTranslateRef} style={s.word}>{t('EZHALAH')}</Text>
             </View>
             <Animated.View style={newChatAnim}>
-              <Pressable style={s.newChat} onPress={onNewChat}>
-                <Ionicons name="add" size={18} color={colors.ink} />
+              {/* Owner 2026-08-14: the old white-on-white outline button disappeared into the
+                  sidebar. Solid brand green + white text so it reads as THE primary action, with a
+                  darker hover/press fill (ChatGPT-style affordance). RN-web Pressable exposes
+                  `hovered` in the style function; native ignores it and keeps the press state. */}
+              <Pressable
+                style={(state) => [
+                  s.newChat,
+                  // `hovered` is react-native-web only; RN's PressableStateCallbackType omits it.
+                  (((state as { hovered?: boolean }).hovered ?? false) || state.pressed) && s.newChatHover,
+                ]}
+                onPress={onNewChat}
+              >
+                <Ionicons name="add" size={18} color={colors.surface} />
                 <Text style={s.newChatText}>{t('New Chat')}</Text>
               </Pressable>
             </Animated.View>
@@ -387,8 +398,9 @@ const s = StyleSheet.create({
   logo: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   word: { fontSize: 15, fontWeight: '800', letterSpacing: 2, color: colors.ink },
 
-  newChat: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 13, marginTop: 12 },
-  newChatText: { fontSize: 14, fontWeight: '600', color: colors.ink },
+  newChat: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 13, marginTop: 12 },
+  newChatHover: { backgroundColor: colors.dark },
+  newChatText: { fontSize: 14, fontWeight: '600', color: colors.surface },
 
   hist: { flex: 1, marginTop: 14, marginBottom: 8 },
   empty: { fontSize: 13, color: colors.muted, paddingVertical: 12, paddingHorizontal: 6 },

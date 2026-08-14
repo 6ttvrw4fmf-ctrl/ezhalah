@@ -24,26 +24,12 @@ export default function Root({ children }: PropsWithChildren) {
         <meta name="google" content="notranslate" />
         {/* Disable body scrolling on web so the root ScrollView matches native behavior. */}
         <ScrollViewStyleReset />
-        {/* Desktop UI scale (2026-08-14). The whole app is a mobile-first px design (body 13–15,
-            titles 18–26, 560px content column) rendered 1:1 — perfect on a phone, visibly
-            undersized on a desktop monitor (the owner-reported "small and zoomed out" issue).
-            Rather than rewriting hundreds of hardcoded px values across ~20 components (a huge,
-            mobile-endangering diff), the design gains a deliberate scale LAYER: `zoom` on <body>,
-            tiered by viewport width. `zoom` (standardized; all evergreen browsers) reflows layout —
-            unlike transform:scale — so text wraps, scrolling, and hit-targets stay correct, and the
-            content column genuinely occupies more of the canvas (560px column ≈ 47% of a 1440px
-            screen's effective width vs 39% before). Phones/tablets (<1100px) are untouched by
-            construction. Tiers are calibrated, monotonic, and capped at 1.3 so nothing turns
-            comically large. Regression barrier: scripts/verify-desktop-ui-scale.ts. */}
-        <style
-          dangerouslySetInnerHTML={{
-            __html: `
-@media (min-width: 1100px) { body { zoom: 1.1; } }
-@media (min-width: 1400px) { body { zoom: 1.2; } }
-@media (min-width: 1700px) { body { zoom: 1.3; } }
-`,
-          }}
-        />
+        {/* Desktop UI scale — REVERTED to 1:1 (owner, 2026-08-14 23:47). A zoom layer (1.1/1.2/1.3
+            tiered by viewport) shipped earlier today for the "small and zoomed out" report, but on
+            a MacBook it rendered the app "too zoomed in" (owner, with screenshot). Current owner
+            call wins: normal browser scale everywhere. If desktop sizing comes back, revisit with
+            real typography tokens rather than a body zoom. Barrier flipped to pin the ABSENCE:
+            scripts/verify-desktop-ui-scale.ts. */}
       </head>
       <body>{children}</body>
     </html>
