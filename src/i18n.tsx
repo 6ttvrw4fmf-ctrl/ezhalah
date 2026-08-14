@@ -854,6 +854,8 @@ const AR: Record<string, string> = {
   // Auth hero — new title + subtitle (user-supplied Arabic; English mirrors it without naming
   // platforms, per the platform-confidentiality rule). The title carries the brand "Ezhalah".
   'Looking for a property? Ezhalah.': 'تدور على عقار؟ إزهله.',
+  'Sign in or create your account': 'سجّل الدخول أو أنشئ حسابك',
+  'More than 25 Saudi property platforms — in one place.': 'أكثر من ٢٥ منصة عقارية سعودية — في مكان واحد.',
   'Ezhalah brings property listings from the various Saudi real-estate platforms together in one place.':
     'إزهله تجمع العقارات المعروضة من مختلف منصات العقار السعودية في مكان واحد.',
   'Continue with Google': 'المتابعة باستخدام Google',

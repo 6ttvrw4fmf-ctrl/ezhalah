@@ -59,7 +59,8 @@ function Shell() {
   }, []);
   return (
     <View style={{ flex: 1, flexDirection: isRTL ? 'row-reverse' : 'row' }}>
-      {docked && <Sidebar docked onClose={() => {}} />}
+      {/* /auth is a focused full-screen moment — no docked sidebar there. */}
+      {docked && pathname !== '/auth' && <Sidebar docked onClose={() => {}} />}
       {/* One-click Google sign-in prompt (web, signed-out only) — renders its own corner UI. */}
       <GoogleOneTap />
       <View style={{ flex: 1 }}>
