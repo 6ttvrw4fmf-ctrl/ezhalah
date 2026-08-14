@@ -76,5 +76,22 @@ check('onSearch still builds p_districts from districtsSelected matchValues',
   /const districtMatchUnion = districtsSelected\.length/.test(home)
   && home.includes('districts: districtMatchUnion'));
 
+// ── 6. the REHYDRATION SOURCE must actually be populated ──────────────────────────────────────
+// First deploy of this fix was a no-op in production and the live retest still showed
+// p_districts:null / 266 → 1,255. The effect was in the served bundle and correct; its SOURCE was
+// empty. Every other control writes itself into `query` as the user edits it, which is why the
+// reopened form comes back with المدينة/السعر/المساحة filled — but the districts lived ONLY in the
+// local districtsSelected array and were merged into the query object at search time, then handed
+// to navigateWithQuery(), which serialises to the /agent?filter=… URL and never touches the app
+// context. So query.districts was always [] on the filter screen and the effect returned at its
+// `if (!want.length) return` guard, every time. Persisting them on search is what makes the
+// rehydration above observable at all — without this, §1-§4 can all pass while production is
+// unchanged, which is exactly what happened.
+check('onSearch persists the picked districts into the app context (the rehydration source)',
+  /setQuery\(\(prev\) => \(\{[\s\S]{0,200}districts: q\.districts,[\s\S]{0,160}districtLabel: q\.districtLabel,[\s\S]{0,200}\}\)\);\s*\n\s*navigateWithQuery\(q\);/.test(home));
+check('the districts are persisted BEFORE navigating (same object that reaches the URL)',
+  home.indexOf('districts: q.districts') !== -1
+  && home.indexOf('districts: q.districts') < home.lastIndexOf('navigateWithQuery(q);'));
+
 console.log(failed ? `\n${failed} check(s) FAILED` : '\n✓ district rehydration is pinned — reopening «تصفية» can no longer silently widen a حي search');
 process.exit(failed ? 1 : 0);

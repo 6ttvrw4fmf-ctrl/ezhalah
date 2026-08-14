@@ -578,6 +578,21 @@ export default function Home() {
         ? districtsSelected.reduce((sum, d) => sum + d.listingCount, 0)
         : undefined,
     };
+    // PERSIST the picked districts into the app context before navigating (2026-08-14).
+    // Every OTHER control (المدينة, السعر, المساحة, غرف النوم, فئة/نوع) writes itself into `query` as
+    // the user edits, which is why the form comes back filled when «تصفية» is reopened. The districts
+    // did NOT: they lived only in the local districtsSelected array and were merged into `q` right
+    // here, at search time, and handed to navigateWithQuery — which only serialises them into the
+    // /agent?filter=… URL. So `query.districts` was ALWAYS empty on the filter screen, the reopened
+    // form had nothing to restore from, and pressing «بحث» untouched silently widened the search from
+    // the chosen حي to the whole city. Writing them to the same place every sibling field already
+    // lives is what makes the rehydration effect above able to see them at all.
+    setQuery((prev) => ({
+      ...prev,
+      districts: q.districts,
+      districtLabel: q.districtLabel,
+      districtListingCount: q.districtListingCount,
+    }));
     navigateWithQuery(q);
   };
 
