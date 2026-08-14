@@ -391,7 +391,7 @@ export default function Agent() {
     fresh?: string;
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, gated, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history } = useApp();
+  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history } = useApp();
   // Per-message "Load More" in flight, so a double-tap can't double-fetch the same page.
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -1079,13 +1079,8 @@ export default function Agent() {
     // canonical ARABIC location, searches in Arabic, and shows every location/result in Arabic (never an
     // English place name). The agent_notes location rules enforce the Arabic-canonical output. The FILTER
     // stays Arabic-catalog only (its own Latin guard remains). (user: accept English in chat, normalize.)
-    if (gated) {
-      // Park what they wrote and send them to sign in — after auth the chat replays it (see the
-      // pending-message effect below), so logging in never makes them lose it or start over.
-      setPendingMessage(v);
-      router.push('/auth');
-      return;
-    }
+    // Search is FREE, always (owner rule 2026-08-15): a typed chat message goes straight to the
+    // agent — no auth gate. verify-search-is-free.ts fails the build if a gate comes back.
     setTyped('');
     finalizeReveal(); // stop the previous search's cards from drip-revealing now that the user moved on
     setStopped(false); // new turn — re-enable the refine CTA and clear the stopped state
@@ -1251,10 +1246,7 @@ export default function Agent() {
   // The interview path supplies its own bubble + subheading (prototype interviewToChat copy, which
   // lists the budget label verbatim); the filter path derives them via filterToChat.
   const sendFilter = (q: SearchQuery, override?: { bubble: string; sub: string }) => {
-    if (gated) {
-      router.push('/auth');
-      return;
-    }
+    // Search is FREE, always — the filter's results render for every visitor, signed in or not.
     finalizeReveal(); // stop any previous search's cards from drip-revealing
     setStopped(false); // new search — clear any prior stopped state
     setBusy(true);
@@ -1470,19 +1462,19 @@ export default function Agent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fresh]);
 
-  // After the user signs in at the gate, replay the message they were trying to send. Runs once —
-  // the moment they're no longer gated and a parked message exists. This is what makes "log in →
-  // back to your search" seamless instead of dropping them on an empty screen. (gate UX, PRD §9)
+  // Replay a parked message once (a message typed mid-OAuth-round-trip, or left over from the
+  // retired auth gate) so a sign-in never loses what the user wrote. Search itself is FREE and
+  // never gated (owner rule 2026-08-15) — this effect is pure recovery, not a gate.
   useEffect(() => {
     if (consumedPendingRef.current) return;
-    if (gated || busy || !pendingMessage) return;
+    if (busy || !pendingMessage) return;
     consumedPendingRef.current = true;
     const msg = pendingMessage;
     setPendingMessage(null);
     setTyped('');
     send(msg);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gated, busy, pendingMessage]);
+  }, [busy, pendingMessage]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
