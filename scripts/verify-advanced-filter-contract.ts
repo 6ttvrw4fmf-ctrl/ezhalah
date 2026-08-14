@@ -90,8 +90,30 @@ check('no numeric Question-N-of-M caption renders (subtle bar only)',
   !/Question \{cur\} of \{total\}/.test(cardSrc));
 check('single-select auto-advances after a short hold via plain setTimeout (never an animation callback)',
   /setTimeout\(\(\) => onConfirm\(next\), 260\)/.test(cardSrc));
-check('skip-all link discloses how many questions remain',
-  /Skip remaining \(\{count\}\) and search now/.test(cardSrc));
+// CONTRACT CHANGE (owner 2026-08-16, conversational refresh): the always-available escape is a calm
+// «عرض النتائج» link — «The user must always be able to go straight to the properties … never feel
+// trapped in the interview.» No question-count arithmetic in the link anymore.
+check('the always-available escape link reads «عرض النتائج» and rides onSkipAll',
+  /onPress=\{onSkipAll\}/.test(cardSrc) && /skipAllTxt/.test(cardSrc));
+// Multi-select commits via «متابعة · N نتيجة» with the LIVE count (owner 2026-08-16 §4); single
+// keeps «عرض N نتيجة». Both numbers come from the same liveCount pipe — never a placeholder.
+check('multi-select primary reads Continue · {count} results with the live count',
+  /Continue · \{count\} results/.test(cardSrc));
+// §11: one tiny plain-language availability line; the technical unknown-count phrasing is gone.
+check('availability is explained naturally (no database language, no unknown-count phrasing)',
+  /Options reflect the information available for the current listings/.test(cardSrc)
+  && !/Age unknown for \{count\}/.test(cardSrc));
+// §2: the opening state is its own calm card — count, invitation, soft supporting line, opt-in
+// begin + «عرض النتائج» — and it lives in the SAME shell as the questions (one visual language).
+check('the intro card exists with the count + invitation + supporting line',
+  /AdvancedIntroCard/.test(cardSrc)
+  && /We found \{count\} properties/.test(cardSrc)
+  && /Let’s pin down what you’re looking for/.test(cardSrc)
+  && /We’ll use what we know about these listings/.test(cardSrc));
+// §5: the live narrowing count is always visible (the bar chip), and §8: motion respects the
+// user's reduced-motion setting everywhere the card animates.
+check('a live narrowing count chip renders in the card bar and motion respects reduced-motion',
+  /AnimatedCount/.test(cardSrc) && /useReducedMotion/.test(cardSrc));
 
 // ── Brand image: card-owned registry + one shared slot; questions supply only a string TOKEN ─────
 check('brand images are card-owned: registry in the card, single shared slot, token-only config',
@@ -108,17 +130,46 @@ check('progress denominator = ageFlow.progressTotal (the eligible set), NOT the 
 check('agent builds a plan, presents via one confirm handler, and enters via anyGuidedEligible',
   /ageFlowPlanRef/.test(agentSrc) && /presentGuided/.test(agentSrc) && /onAgeConfirm/.test(agentSrc) && /anyGuidedEligible/.test(agentSrc));
 
-// ── Results-first Filter search (owner 2026-08-03) ───────────────────────────────────────────────
-// A تصفية search shows its results immediately and must NOT auto-open the guided interview — the modal
-// jumping over the cards read as an unprompted quiz. The SAME shared flow stays one tap away via the
-// «narrow it down» button, so the opt-in entry (anyGuidedEligible → startAgeFlow) must still exist.
+// ── Intro-first Filter search (owner 2026-08-16, supersedes the 2026-08-03 results-first rule) ──
+// An eligible تصفية search with MORE than 25 results auto-opens the overlay on the calm INTRO —
+// count + invitation — NEVER a question (the 2026-08-03 objection was the quiz jumping over the
+// cards; the intro is an invitation with «عرض النتائج» one tap away and the results already
+// rendered behind it). ≤ 25 results, or an ineligible scope, stays pure results-first: the
+// interview must never open on a set that's already manageable.
 check('startAgeFlow takes a fallbackToRefine flag and only pops refine chips when it is set',
-  /const startAgeFlow = async \(q: SearchQuery, fallbackToRefine = true\)/.test(agentSrc)
+  /const startAgeFlow = async \(q: SearchQuery, fallbackToRefine = true/.test(agentSrc)
   && /if \(fallbackToRefine\) startRefine\(q\)/.test(agentSrc));
-check('filter search is results-first: NO auto-open of the guided flow after a search',
-  !/if \(anyGuidedEligible\(guidedQ\)\) void startAgeFlow\(guidedQ, false\)/.test(agentSrc));
+check('the auto entry gates on eligibility AND the shared >25 constant, and opens as auto',
+  /anyGuidedEligible\(q2\) && \(introTotal \?\? 0\) > INTERVIEW_STOP_AT/.test(agentSrc)
+  && /startAgeFlow\(q2, false, \{ auto: true/.test(agentSrc));
+check('the auto path opens on the INTRO phase, never a question',
+  /opts\?\.auto \? \{ phase: 'intro'/.test(agentSrc));
 check('the guided flow stays reachable on demand via the narrow-it-down button',
   /if \(q && anyGuidedEligible\(q\)\) void startAgeFlow\(q\)/.test(agentSrc));
+
+// ── Mining transition (owner 2026-08-16 §9) ─────────────────────────────────────────────────────
+// The «digging through the market» beat is DECORATION: its dismissal is driven by plain setTimeout
+// latches in finishGuided (never an animation callback — src/lib/afterAnimation.ts's rule), it uses
+// the REAL from/to counts, and a hard failsafe dismisses it even if the search turn dies.
+const miningSrc = readFileSync(join(root, 'src/components/MiningTransition.tsx'), 'utf8');
+check('mining dismissal is setTimeout-driven with a hard failsafe (never an animation callback)',
+  /phase: 'mining'/.test(agentSrc)
+  && /timers\.push\(setTimeout\(/.test(agentSrc)
+  && /15000/.test(agentSrc)
+  && !/\.start\(\s*\(/.test(miningSrc));
+check('mining shows real numbers and respects reduced motion',
+  /Going through \{count\} properties/.test(miningSrc)
+  && /We found \{count\} properties closest to your request/.test(miningSrc)
+  && /useReducedMotion/.test(miningSrc));
+
+// ── Results summary + removable pills (owner 2026-08-16 §10) ────────────────────────────────────
+// Removal is PURE recomputation — rebuild from the interview's baseQ by re-applying the remaining
+// facets through each question's own apply(), never a hand-written inverse per question id.
+check('removable pills rebuild the query from baseQ via the questions’ own apply()',
+  /removeGuidedFacet/.test(agentSrc)
+  && /for \(const f of remaining\)/.test(agentSrc)
+  && /question\.apply\(q, f\.keys\)/.test(agentSrc)
+  && /Based on: \{labels\}/.test(agentSrc));
 
 // ── Count RPCs must never receive p_sort_by (bug-hunt 2026-07-30) ────────────────────────────────
 // PostgREST resolves RPCs by exact param-name match; leaking p_sort_by 404s BOTH counts calls the

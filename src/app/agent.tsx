@@ -41,8 +41,9 @@ import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
-import AdvancedQuestionCard, { AdvancedQuestionLoading } from '@/components/AdvancedQuestionCard';
-import { ADVANCED_QUESTIONS, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type RankedQuestion } from '@/data/advancedFilters';
+import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard } from '@/components/AdvancedQuestionCard';
+import MiningTransition from '@/components/MiningTransition';
+import { ADVANCED_QUESTIONS, INTERVIEW_STOP_AT, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type RankedQuestion } from '@/data/advancedFilters';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
 // below a results block — NEVER before first results — and ONLY for a strict single-type Residential
@@ -450,7 +451,15 @@ export default function Agent() {
   // re-runs search, renders a new results turn) — never a separate navigation/route.
   const [ageFlow, setAgeFlow] = useState<
     | { phase: 'loading' }
+    // Opening state (owner 2026-08-16): after an eligible Filter search lands with > 25 results the
+    // overlay opens on this calm invitation — the count, «خلّنا نحدد طلبك أكثر», one soft line —
+    // never a question. Begin is opt-in; «عرض النتائج» closes it (the results are already behind).
+    | { phase: 'intro'; total: number | null }
     | { phase: 'asking'; planIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number; progressCur: number; progressTotal: number }
+    // The «digging through the market» beat (owner 2026-08-16): shown once after the interview
+    // finishes while the final search runs behind it. Dismissal is driven by plain setTimeout
+    // latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts rule).
+    | { phase: 'mining'; from: number | null; to: number | null }
     | null
   >(null);
   // The query accumulates answers as the flow advances; `token` supersedes a stale async fetch when a
@@ -461,10 +470,23 @@ export default function Agent() {
   const ageFlowTokenRef = useRef(0);
   const ageFlowChangedRef = useRef(false);
   const ageFlowLabelsRef = useRef<string[]>([]);
-  const ageFlowPlanRef = useRef<Array<{ question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number }>>([]);
+  const ageFlowPlanRef = useRef<Array<{ question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number; total: number }>>([]);
   // Questions already answered OR skipped this session — never re-asked (owner 2026-08-11). The
   // plan is RE-RANKED against the narrowed set after every answer, so ask-order is contextual.
   const ageFlowAskedRef = useRef<Set<string>>(new Set());
+  // Latest KNOWN size of the narrowed set (from the ranked probes) — feeds the intro count and the
+  // mining transition's «نراجع N عقار» line with real numbers, never placeholders.
+  const ageFlowTotalRef = useRef<number | null>(null);
+  // The interview's answers as removable FACETS (owner 2026-08-16): each committed answer records
+  // {question id, picked keys, labels}. The results pills rebuild the query from baseQ by re-applying
+  // the REMAINING facets — removal is pure recomputation, never an ad-hoc inverse per question.
+  const ageFlowBaseQRef = useRef<SearchQuery | null>(null);
+  const ageFlowFacetsRef = useRef<Array<{ id: string; keys: string[]; labels: string[] }>>([]);
+  // Intro «يلا نبدأ» tapped before the ranked plan resolved — present the first question the moment
+  // it lands instead of leaving the user waiting on a silent card.
+  const introBeginRef = useRef(false);
+  const miningTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => () => { miningTimersRef.current.forEach(clearTimeout); }, []);
   const revealTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   // The results turn whose cards are still popping in one-by-one (id + total count), so a new user
   // message can instantly finish it and stop the drip. null once the reveal completes. (user request.)
@@ -846,9 +868,21 @@ export default function Agent() {
     return refined;
   };
 
+  // What the guided interview committed, attached to its results turn so the summary line +
+  // removable pills can render there (owner 2026-08-16). One at a time — a newer guided search
+  // (including a pill removal, which re-runs through the same path) replaces it.
+  const [guidedPills, setGuidedPills] = useState<{
+    msgId: string; baseQ: SearchQuery; facets: Array<{ id: string; keys: string[]; labels: string[] }>; total: number | null;
+  } | null>(null);
+
   // Run a refine answer (tapped chip OR typed reply): echo `label` as the user's bubble, merge the one
   // asked dimension into the SAME filter, and re-search. (user 2026-06-27.)
-  const runRefine = async (baseQ: SearchQuery, dim: string, value: string, label: string) => {
+  // `opts.onFetched` reports the honest RPC total as soon as it's known (drives the mining beat);
+  // `opts.guided` attaches the interview's facets to the results turn for the removable pills.
+  const runRefine = async (
+    baseQ: SearchQuery, dim: string, value: string, label: string,
+    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: Array<{ id: string; keys: string[]; labels: string[] }> } },
+  ) => {
     pendingRefineRef.current = null;
     finalizeReveal();
     setStopped(false);
@@ -862,10 +896,32 @@ export default function Agent() {
     toBottom();
     const result = await runQuery(refined);
     if (run.cancelled) return;
+    opts?.onFetched?.(result.total ?? null);
+    if (opts?.guided) setGuidedPills({ msgId: statusId, baseQ: opts.guided.baseQ, facets: opts.guided.facets, total: result.total ?? null });
     await playListings(run, statusId, buildScrapeIntro(result.query ?? refined), result, label);
     if (run.cancelled) return;
     void promptSignupSoon(run);
     setBusy(false); runRef.current = null; toBottom();
+  };
+
+  // Remove one interview facet from the results pills (owner 2026-08-16: «The user can remove any
+  // advanced choice and results should immediately update»). Pure recomputation: rebuild the query
+  // from the interview's baseQ by re-applying every REMAINING facet in order via its own question's
+  // apply() — never a hand-written inverse — then re-search through the same guided path so the
+  // pills row carries over minus the removed one. No mining beat here; removal is instant.
+  const removeGuidedFacet = (facetIndex: number) => {
+    if (!guidedPills || busy) return;
+    const removed = guidedPills.facets[facetIndex];
+    const remaining = guidedPills.facets.filter((_, i) => i !== facetIndex);
+    let q = guidedPills.baseQ;
+    for (const f of remaining) {
+      const question = ADVANCED_QUESTIONS.find((x) => x.id === f.id);
+      if (question) q = question.apply(q, f.keys);
+    }
+    const label = t('Without: {label}', { label: removed.labels.join('، ') });
+    void runRefine(q, '__guided__', '', label,
+      remaining.length ? { guided: { baseQ: guidedPills.baseQ, facets: remaining } } : undefined);
+    if (!remaining.length) setGuidedPills(null);
   };
 
   // Present plan[planIndex]. Once the query has been narrowed by an answer, re-resolve for LIVE counts;
@@ -882,25 +938,50 @@ export default function Agent() {
       if (!q || ageFlowTokenRef.current !== token) return;
       const ranked = await rankQuestions(q, ageFlowAskedRef.current);
       if (ageFlowTokenRef.current !== token) return;
-      ageFlowPlanRef.current = ranked.map((r: RankedQuestion) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount }));
+      ageFlowPlanRef.current = ranked.map((r: RankedQuestion) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount, total: r.total }));
     }
     const plan = ageFlowPlanRef.current;
     if (plan.length) {
       const answered = ageFlowAskedRef.current.size;
-      const { question, options, unknownCount } = plan[0];
+      const { question, options, unknownCount, total } = plan[0];
+      ageFlowTotalRef.current = total; // the narrowed set the user is answering against, always real
       setAgeFlow({ phase: 'asking', planIndex, question, options, unknownCount, progressCur: answered + 1, progressTotal: answered + plan.length });
       return;
     }
     finishGuided(token);
   };
 
-  // End of the flow: if the user answered ≥1 step, re-search the accumulated query in ONE combined turn
-  // (runRefine's __guided__ passes it through unchanged); if they skipped everything, just close.
+  // End of the flow: if the user answered ≥1 step, re-search the accumulated query in ONE combined
+  // turn (runRefine's __guided__ passes it through unchanged) BEHIND the mining transition — the
+  // Ezhalah «digging through the market» beat (owner 2026-08-16). If they skipped everything, close.
+  //
+  // TIMING (all plain setTimeout — never an animation callback, per src/lib/afterAnimation.ts):
+  //   finish → mining overlay (from = last known narrowed total) + the search starts immediately
+  //   search resolves → hold until ≥ 1.4s total has played (never artificially longer)
+  //   → swap copy to «لقينا N عقار أقرب لطلبك» → ~1.1s beat → dismiss, revealing the result cards.
+  // A 15s failsafe (and a catch on the search itself) dismisses the overlay even if the turn dies,
+  // so the user can never be trapped behind a stuck animation.
   const finishGuided = (token: number) => {
     if (ageFlowTokenRef.current !== token) return;
     const q = ageFlowQueryRef.current;
-    setAgeFlow(null);
-    if (q && ageFlowChangedRef.current) void runRefine(q, '__guided__', '', ageFlowLabelsRef.current.join('، '));
+    if (!(q && ageFlowChangedRef.current)) { setAgeFlow(null); return; }
+    const startedAt = Date.now();
+    setAgeFlow({ phase: 'mining', from: ageFlowTotalRef.current, to: null });
+    const timers = miningTimersRef.current;
+    const stillMining = () => ageFlowTokenRef.current === token;
+    timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, 15000));
+    const guided = ageFlowBaseQRef.current
+      ? { baseQ: ageFlowBaseQRef.current, facets: [...ageFlowFacetsRef.current] }
+      : undefined;
+    void runRefine(q, '__guided__', '', ageFlowLabelsRef.current.join('، '), {
+      guided,
+      onFetched: (total) => {
+        if (!stillMining()) return;
+        const wait = Math.max(0, 1400 - (Date.now() - startedAt));
+        timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
+        timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, wait + 1100));
+      },
+    }).catch(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); });
   };
 
   // Entry point for «خلّنا نحدد الطلب أكثر» (and the auto-open after an eligible Filter search). Build
@@ -908,13 +989,23 @@ export default function Agent() {
   // reflects reality, then present them select-then-confirm. Nothing qualifies → fall through to the
   // pre-existing refine chips so a manual TAP is never a no-op. The AUTO path passes fallbackToRefine=
   // false: a filter user didn't ask to narrow, so an empty plan must close silently, never pop a chip.
-  const startAgeFlow = async (q: SearchQuery, fallbackToRefine = true) => {
+  const startAgeFlow = async (q: SearchQuery, fallbackToRefine = true, opts?: { auto?: boolean; total?: number | null }) => {
     const token = ++ageFlowTokenRef.current;
+    miningTimersRef.current.forEach(clearTimeout);
+    miningTimersRef.current = [];
     ageFlowQueryRef.current = q;
     ageFlowChangedRef.current = false;
     ageFlowLabelsRef.current = [];
     ageFlowPlanRef.current = [];
-    setAgeFlow({ phase: 'loading' });
+    ageFlowBaseQRef.current = q;
+    ageFlowFacetsRef.current = [];
+    ageFlowTotalRef.current = opts?.total ?? null;
+    introBeginRef.current = false;
+    // AUTO entry (owner 2026-08-16, supersedes the 2026-08-03 results-first rule): an eligible
+    // Filter search with > 25 results opens on the calm INTRO — the count + invitation — never a
+    // question. The plan resolves in the background while the intro is on screen, so «يلا نبدأ»
+    // feels instant. A manual «خلّنا نحدد الطلب أكثر» tap skips the intro (the user already opted in).
+    setAgeFlow(opts?.auto ? { phase: 'intro', total: opts?.total ?? null } : { phase: 'loading' });
     ageFlowAskedRef.current = new Set();
     // Rank the pool against the user's ACTUAL current result set (score = split × salience over the
     // live counts). Below the >25 floor rankQuestions returns [], so the interview simply never
@@ -922,11 +1013,28 @@ export default function Agent() {
     const ranked = await rankQuestions(q, ageFlowAskedRef.current);
     if (ageFlowTokenRef.current !== token) return; // superseded by a newer tap/turn
     ageFlowPlanRef.current = ranked
-      .map((r) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount }))
+      .map((r) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount, total: r.total }))
       .filter((p) => p.options.length >= minOptionsFor(p.question.selection));
-    if (!ageFlowPlanRef.current.length) { setAgeFlow(null); if (fallbackToRefine) startRefine(q); return; }
+    if (ageFlowTotalRef.current == null && ranked.length) ageFlowTotalRef.current = ranked[0].total;
+    if (!ageFlowPlanRef.current.length) {
+      // AUTO path: a filter user didn't ask to narrow, so an empty plan closes silently — never a chip.
+      setAgeFlow(null);
+      if (fallbackToRefine) startRefine(q);
+      return;
+    }
+    if (opts?.auto && !introBeginRef.current) return; // stay on the intro until the user opts in
     void presentGuided(0, token);
   };
+
+  // Intro handlers: «يلا نبدأ» opts in (or arms the flag if the plan is still resolving);
+  // «عرض النتائج» simply closes — the results are already rendered behind the overlay.
+  const onIntroBegin = () => {
+    if (ageFlow?.phase !== 'intro') return;
+    introBeginRef.current = true;
+    if (ageFlowPlanRef.current.length) void presentGuided(0, ageFlowTokenRef.current);
+    else setAgeFlow({ phase: 'loading' });
+  };
+  const onIntroShowResults = () => { ageFlowTokenRef.current++; setAgeFlow(null); };
 
   // Confirm the current question's selection (empty = no preference) and advance/search. ONE handler
   // for single and multi — `keys` has ≤1 entry for single, ≥0 for multi.
@@ -938,7 +1046,12 @@ export default function Agent() {
     if (keys.length) {
       ageFlowQueryRef.current = question.apply(q, keys);
       ageFlowChangedRef.current = true;
-      for (const k of keys) { const o = options.find((x) => x.key === k); if (o?.label) ageFlowLabelsRef.current.push(o.label); }
+      const labels: string[] = [];
+      for (const k of keys) { const o = options.find((x) => x.key === k); if (o?.label) labels.push(o.label); }
+      ageFlowLabelsRef.current.push(...labels);
+      // Record the answer as a removable FACET for the results pills (owner 2026-08-16) — removal
+      // later rebuilds the query from baseQ by re-applying the remaining facets in order.
+      ageFlowFacetsRef.current.push({ id: question.id, keys, labels });
     }
     ageFlowAskedRef.current.add(question.id);
     void presentGuided(planIndex + 1, ageFlowTokenRef.current);
@@ -1190,10 +1303,19 @@ export default function Agent() {
         if (run.cancelled) return;
         await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
         if (run.cancelled) return;
-        // RESULTS-FIRST (owner 2026-08-03): a تصفية (Filter) search shows its results immediately and does
-        // NOT auto-open the guided interview — the modal jumping over the cards read as an unprompted quiz.
-        // The SAME shared guided flow stays one tap away via the «خلّنا نحدد الطلب أكثر» button under the
-        // cards (see startAgeFlow at that Pressable), so nothing is lost — it's just opt-in now, not forced.
+        // INTRO-FIRST (owner 2026-08-16, supersedes the 2026-08-03 results-first rule): an eligible
+        // Filter search with MORE than 25 results opens the overlay on the calm INTRO — «لقينا N
+        // عقار» + the invitation — never a question (the 2026-08-03 objection was the quiz jumping
+        // over the cards; the intro is an invitation with «عرض النتائج» one tap away, and the
+        // results are already rendered behind it). ≤ 25 results, or an ineligible scope, keeps the
+        // pure results-first behavior — the interview never opens on a set that's already manageable.
+        {
+          const q2 = result.query ?? pending.q;
+          const introTotal = result.total ?? result.matchTotal ?? null;
+          if (q2 && anyGuidedEligible(q2) && (introTotal ?? 0) > INTERVIEW_STOP_AT) {
+            void startAgeFlow(q2, false, { auto: true, total: introTotal });
+          }
+        }
         void promptSignupSoon(run); // guest used their free search (filter) → prompt sign-up
       } catch {
         if (!run.cancelled) {
@@ -1512,6 +1634,25 @@ export default function Agent() {
                       </Text>
                     );
                   })()}
+                  {/* GUIDED SUMMARY + REMOVABLE PILLS (owner 2026-08-16): after the interview, briefly
+                      show what Ezhalah understood — «بناءً على: …» — and each committed answer as a
+                      removable pill. Removing one rebuilds the query from the interview's baseQ with
+                      the remaining facets and re-searches immediately. */}
+                  {guidedPills && guidedPills.msgId === m.id && guidedPills.facets.length ? (
+                    <View style={{ alignSelf: 'stretch', gap: 7, marginTop: 2 }}>
+                      <Text style={[s.guidedBasedOn, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
+                        {t('Based on: {labels}', { labels: guidedPills.facets.flatMap((f) => f.labels).join(' · ') })}
+                      </Text>
+                      <View style={[s.guidedPillRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
+                        {guidedPills.facets.map((f, i) => (
+                          <Pressable key={`${f.id}-${i}`} style={s.guidedPill} onPress={() => removeGuidedFacet(i)} disabled={busy}>
+                            <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
+                            <Ionicons name="close" size={13} color={colors.primary} />
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
                   {/* Cards no longer wait for the intro text — they cascade in as soon as results are
                       ready (beginCardDrip fires at the morph), while the reply types above (owner
                       2026-07-09: show the first card the moment valid listings exist). The
@@ -1745,6 +1886,15 @@ export default function Agent() {
         <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
           {ageFlow.phase === 'loading' ? (
             <AdvancedQuestionLoading onClose={onAgeClose} />
+          ) : ageFlow.phase === 'intro' ? (
+            <AdvancedIntroCard
+              total={ageFlow.total}
+              onBegin={onIntroBegin}
+              onShowResults={onIntroShowResults}
+              onClose={onIntroShowResults}
+            />
+          ) : ageFlow.phase === 'mining' ? (
+            <MiningTransition from={ageFlow.from} to={ageFlow.to} />
           ) : (
             <AdvancedQuestionCard
               titleKey={ageFlow.question.titleKey}
@@ -1772,6 +1922,15 @@ export default function Agent() {
 
 const s = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.screenSide, paddingBottom: 8 },
+  // Guided-interview summary + removable pills on the results turn (owner 2026-08-16). fontWeight
+  // (not fontFamily) matches the idiom of every other text style in this sheet.
+  guidedBasedOn: { fontSize: 12.5, fontWeight: '500', color: colors.muted },
+  guidedPillRow: { flexWrap: 'wrap', gap: 8, alignItems: 'center' },
+  guidedPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint,
+    borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
+  },
+  guidedPillTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
   // ChatGPT-style feedback toast: centered pill just below the header, floating over the chat.
   fbToastWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 200 },
   fbToast: {

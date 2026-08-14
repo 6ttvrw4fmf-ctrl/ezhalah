@@ -214,3 +214,34 @@ free.
   the thin bar and the shrinking live count are the only progress signals.
 - Normal-Filter territory (location, deal, period, category/type, price, size, **bedrooms**) is
   never asked by the interview — enforced as data via `af_field_registry.filter_tier`.
+
+
+## Amendment 2026-08-16 — the conversational refresh (owner-approved)
+
+The owner's brief: «The user should feel like Ezhalah is quietly understanding what they want and
+narrowing the market for them, not forcing them to fill another form.» Everything below is pinned by
+`scripts/verify-advanced-filter-contract.ts`.
+
+- **Intro-first entry (supersedes 2026-08-03 results-first).** An eligible Filter search with MORE
+  than 25 results auto-opens the overlay on a calm intro — «لقينا N عقار» + «خلّنا نحدد طلبك أكثر»
+  + one soft availability line — never a question. «عرض النتائج» closes it (results are already
+  rendered behind). ≤ 25, or an ineligible scope, keeps pure results-first. A manual «خلّنا نحدد
+  الطلب أكثر» tap skips the intro (the user already opted in).
+- **The narrowing is always visible.** A live «N نتيجة» chip sits in the card bar and follows every
+  tentative selection; multi-select commits via «متابعة · N نتيجة» with the same live number. All
+  numbers come from the production count RPCs — never placeholders, never unknown-as-no.
+- **The escape is always one tap.** «عرض النتائج» replaces the question-count skip-all arithmetic.
+- **Availability is explained naturally.** One tiny line — «الخيارات تعتمد على المعلومات المتوفرة
+  للإعلانات الحالية» — replaces the technical unknown-count phrasing. No coverage/NULL/backend
+  language anywhere user-facing.
+- **Micro-motion, reduced-motion-safe.** Press compression, check fade/scale, count settle, question
+  fade-rise. Decoration only: every hand-off (auto-advance, mining dismissal) is a plain
+  `setTimeout`, never an animation callback (`src/lib/afterAnimation.ts`).
+- **The mining transition.** After the interview commits ≥1 answer, the «digging through the market»
+  beat plays over the final search: fragments drift inward, copy uses REAL numbers («نراجع N عقار
+  ونطلع لك الأنسب» → «لقينا N عقار أقرب لطلبك»), minimum ~1.4 s, dismissed by setTimeout latches
+  with a 15 s failsafe + a catch on the search itself. Skip-everything closes with no beat.
+- **Results summary + removable pills.** The guided results turn shows «بناءً على: …» and each
+  committed answer as a removable pill. Removal is PURE recomputation: rebuild from the interview's
+  baseQ by re-applying the remaining facets through each question's own `apply()` — never a
+  hand-written inverse — then re-search immediately (no mining beat on removal).
