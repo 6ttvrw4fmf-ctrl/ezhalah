@@ -295,6 +295,16 @@ keep Western digits. `isLatinOnlyInput` + `ARABIC_ONLY_MSG` reject English searc
 - radius chip 12 / card 16 / field 13 / sheet 22 / pill 999. space base 8 / screenTop 56 / screenSide 18.
 - Font **Poppins** (400/500/600/700). Soft green-tinted `cardShadow`. Per-platform brand colors.
 
+**Desktop UI scale (web shell, 2026-08-14 — PR #611):** the app is a mobile-first px design (body
+13–15, titles 18–26, 560px content column) that used to render 1:1 at every viewport — correct on a
+phone, undersized on a monitor. `src/app/+html.tsx` now carries a tiered, media-gated `zoom` on
+`<body>`: **1.1 at ≥1100px, 1.2 at ≥1400px, 1.3 at ≥1700px**. `zoom` reflows layout (unlike
+`transform:scale`) so wrapping/scrolling/hit-targets stay correct; below 1100px nothing applies —
+phones/tablets untouched by construction. Do NOT "fix" desktop sizing by editing per-component font
+sizes (mobile shares those styles) — tune the tier values in `+html.tsx` instead. Barrier:
+`scripts/verify-desktop-ui-scale.ts` (npm test) pins media-gating ≥1024px, sane values (≤1.4),
+monotonic tiers, and zoom-not-transform.
+
 ---
 
 ## 9. Search flow (end-to-end)
