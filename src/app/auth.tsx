@@ -504,25 +504,34 @@ const s = StyleSheet.create({
   // locking vertically-centered — the user can scroll the sign-in screen naturally. flexGrow keeps it
   // filling the viewport when the content is short. (user request: "let the user scroll, don't make
   // it stick.") Extra top/bottom padding gives breathing room.
-  center: { flexGrow: 1, alignItems: 'center', justifyContent: 'flex-start', paddingHorizontal: 24, paddingTop: 40, paddingBottom: 48 },
-  col: { width: '100%', maxWidth: MAX_W },
+  center: { flexGrow: 1, alignItems: 'center', justifyContent: 'flex-start', paddingHorizontal: 24, paddingTop: 76, paddingBottom: 48 },
+  // The card is the redesign (owner 2026-08-14: the bare controls over the sketch read as "a
+  // mess"): one ivory panel gives every step — sign-in, OTP, the mock sheets — a home, so the
+  // sketch becomes scenery BEHIND something instead of noise around floating buttons.
+  col: {
+    width: '100%', maxWidth: MAX_W,
+    backgroundColor: 'rgba(255,255,255,0.94)', borderRadius: 22,
+    borderWidth: 1, borderColor: '#e7ece8',
+    paddingHorizontal: 22, paddingBottom: 24,
+    ...cardShadow,
+  },
 
   // Centered hero: logo, then title, then subtitle — generous, balanced spacing on both desktop &
   // mobile. The whole block is centered via the parent `center` style + alignItems center here.
-  brandWrap: { alignItems: 'center', alignSelf: 'center', marginBottom: 30, marginTop: 8, width: '100%' },
+  brandWrap: { alignItems: 'center', alignSelf: 'center', marginBottom: 24, marginTop: -39, width: '100%' },
   // The eagle mark sits in a soft green ring with a tinted halo + shadow so it reads as a deliberate
   // logo, not a floating square. Slightly larger (78) for presence; perfectly centered.
   logoRing: {
     width: 78, height: 78, borderRadius: 39, backgroundColor: colors.primary,
     alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-    borderWidth: 3, borderColor: '#ffffff', ...cardShadow,
+    borderWidth: 4, borderColor: '#fbfaf7', ...cardShadow,
   },
   logoImg: { width: '100%', height: '100%' },
-  heroTitle: { fontSize: 23, fontWeight: '800', color: colors.ink, marginTop: 20, textAlign: 'center', letterSpacing: -0.2, paddingHorizontal: 12 },
-  heroSub: { fontSize: 13.5, color: '#5d6f64', textAlign: 'center', marginTop: 10, paddingHorizontal: 18, lineHeight: 21, maxWidth: 340 },
+  heroTitle: { fontSize: 26, fontWeight: '800', color: colors.ink, marginTop: 16, textAlign: 'center', letterSpacing: -0.3, paddingHorizontal: 12 },
+  heroSub: { fontSize: 14, color: '#5d6f64', textAlign: 'center', marginTop: 9, paddingHorizontal: 18, lineHeight: 22, maxWidth: 350, alignSelf: 'center' },
 
-  oauth: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: 50, borderRadius: 13, marginTop: 11 },
-  google: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#dfe3e0' },
+  oauth: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: 52, borderRadius: 14, marginTop: 11 },
+  google: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d9e0da' },
   apple: { backgroundColor: '#111' },
   oauthText: { fontSize: 15, fontWeight: '600', color: colors.ink },
   oauthErr: { fontSize: 12, color: '#c0392b', textAlign: 'center', marginTop: 6 },
@@ -532,10 +541,10 @@ const s = StyleSheet.create({
   orText: { fontSize: 12, color: '#9aa6a0' },
 
   phoneRow: { flexDirection: 'row', gap: 8 },
-  cc: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 50, paddingHorizontal: 12, borderRadius: 13, borderWidth: 1, borderColor: '#dfe3e0', backgroundColor: '#fff' },
+  cc: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 52, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1, borderColor: '#d9e0da', backgroundColor: '#fff' },
   ccFlag: { fontSize: 18 },
   ccText: { fontSize: 14.5, fontWeight: '600', color: colors.ink },
-  phoneInput: { flex: 1, height: 50, paddingHorizontal: 14, borderRadius: 13, borderWidth: 1, borderColor: '#dfe3e0', fontSize: 15, color: colors.ink, backgroundColor: '#fff', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  phoneInput: { flex: 1, height: 52, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, borderColor: '#dfe3e0', fontSize: 15, color: colors.ink, backgroundColor: '#fff', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
 
   scrim: { position: 'absolute', top: -1000, left: -1000, right: -1000, bottom: -1000 },
   ccList: { marginTop: 6, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.line, borderRadius: 13, padding: 6, ...cardShadow },
@@ -545,10 +554,10 @@ const s = StyleSheet.create({
   ccItemCode: { fontSize: 13.5, color: colors.muted, fontWeight: '600' },
 
   err: { fontSize: 11.5, color: '#c0392b', fontWeight: '500', marginTop: 8, marginHorizontal: 2, lineHeight: 16 },
-  continue: { backgroundColor: colors.dark, height: 50, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginTop: 6 },
-  continueOff: { opacity: 0.4 },
+  continue: { backgroundColor: colors.dark, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  continueOff: { opacity: 0.45 },
   continueText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
-  fine: { fontSize: 10.5, color: '#9aa6a0', textAlign: 'center', marginTop: 14, paddingHorizontal: 12, lineHeight: 15 },
+  fine: { fontSize: 11, color: '#93a09a', textAlign: 'center', marginTop: 16, paddingHorizontal: 12, lineHeight: 16 },
 
   // Google
   gauth: { marginTop: 20 },
