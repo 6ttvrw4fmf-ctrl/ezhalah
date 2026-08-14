@@ -464,28 +464,22 @@ wrongly remove a real listing.**
 |---|---|---|
 | **Ingestion sanitize** | on every upsert | Bad int field → NULL (not a dropped row). §12. |
 | **Aqar liveness** | `aqar-liveness.yml`, jobid 6 daily `01:00` | 3-strike full-page GET; confirmed-dead only. |
-| **Wasalt hybrid liveness** | `wasalt-liveness-hybrid.yml`, jobid 32 daily `03:30` — **DISABLED since 2026-07-09, intentional** (owner-approved pause): superseded by the enumeration-based `gh-wasalt-enum-liveness` (jobid 36, daily `21:00`, running clean since 2026-07-13; verified live 2026-07-16). Safe to leave off; formally retire the hybrid workflow file once enum-liveness has a longer track record. | HEAD first; escalate to GET-confirm only when HEAD ≠ 200; **live iff GET 200 AND `propertyDetailsV3` present**; dead on 404/410 or 200-without-pdv; timeout/5xx/403 → **failed, untouched**. `missing_count += 1` on confirmed-dead; **inactive only at the 3rd consecutive confirmed-dead sweep**. **Collapse guard:** if >30% of a shard is dead, strike nothing. Cards untouched (only the `active` flag). 8-shard keyset sweep; heartbeat in `wasalt_liveness_runs`. |
-| **`prune_unseen()`** | small sources | 3-strike + collapse guard (a collapsed scrape can't wipe a platform). |
-| **`mark_stale_listings_inactive(7)`** | jobid 13 daily `04:00` | Time-based; **EXCLUDES aqar_residential + wasalt**. |
-| **`auto_recover_false_inactive()`** | jobid 30 daily `05:20` | Recovers rows that are `active=false` AND `missing_count=0` AND recently seen AND price sane. |
-| **Reactivate-on-seen** | on scrape | A row seen again resets `missing_count` and reactivates. |
-| **`purge_inactive_listings()`** | jobid 11 Friday `22:00` — **DISABLED** (`cron.job.active=false`) | Would hard-delete rows that are `active=false` + `missing_count≥3` + `deactivated_at` >7 days + price-sane (skips `wasalt_*`), **archive-first by construction** — see below. Has never purged a row. |
+| **Wasalt hybrid liveness** | `wasalt-liveness-hybrid.yml`, jobid 32 | **RETIRED 2026-08-14** — cron job unscheduled, workflow file removed. Was disabled since 2026-07-09, superseded by enumeration-based `gh-wasalt-enum-liveness` (jobid 36, every 2 days). Verified live 2026-08-14: jobid 36 succeeded 10/10 of its last runs back to 2026-07-27 — the "longer track record" this retirement was waiting on. `scrapers/wasalt/liveness.py` is NOT removed — jobid 36 still calls it (`--mode enum-strike`); only the dead `--mode enforce` workflow entrypoint is gone. |
+| **`prune_unseen()`** | shared lib (`scrapers/common/db.py`), called by every platform's own scraper on every run | Soft-inactivation only. 3 consecutive misses before `active=false` (resets to 0 the moment a listing is re-seen). THREE circuit breakers: 0-seen → skip entirely; >30% of active missing at once (collapse) → skip entirely; <80% of active re-seen (partial scrape) → skip entirely. Sharded crawls scope every guard to that shard's own slice. |
+| **`mark_stale_listings_inactive(7)`** | jobid 13 daily `04:00` | **Report-only — never sets `active=false` itself** (removed deliberately; a time-based sweep cannot verify a listing is dead). Raises P2 alerts and tracks a per-table circuit breaker (`mon_stale_breaker_state`). **Fixed 2026-08-14:** its fraction checks (30% stale, 50% coverage) only exempted tables below `act >= 8` — too low to be statistically meaningful; `sadin_commercial_listings` (15 active) had its breaker falsely tripped 12 consecutive days on 5/15=33% noise despite the scraper running perfectly (94% daily coverage). Floor raised to `act >= 30`; verified live to clear the false positive while leaving `dealapp_commercial_listings`'s genuine 32.8%-stale trip (external anti-bot throttling) correctly tripped. Barrier: `scripts/verify-stale-breaker-min-population.ts`. |
+| **`auto_recover_false_inactive()`** | jobid 30 daily `05:20` | Recovers rows that are `active=false` AND `missing_count=0` AND recently seen. 100% success, 7/7 days (verified 2026-08-14). |
+| **Reactivate-on-seen** | on scrape | A row seen again resets `missing_count` and reactivates (see `prune_unseen()`). |
+| **`scrapers/common/cleanup.py`** — owner-approved 2026-07-26, the real live hard-delete mechanism | `gh-*-cleanup` weekly, per platform | **Default-deny**: only 4 platforms registered (aqar, wasalt, gathern, aqarcity); as of 2026-08-14 only **aqarcity and gathern have `enabled=true`**. Deletes only when `active=false` + `missing_count≥3` + 30+ days inactive + a **fresh re-fetch right before deletion** confirms genuinely dead (404/410 or a proven dead-marker); ambiguous responses (403/5xx/network error/still-live) are skipped, and a still-live page **self-heals** instead of being deleted. Two mass-deletion guards (anomaly gate + 10%-of-platform scale guard) — both proven live: a gathern run aborted 2026-08-09 on "301 candidates > threshold 300". Every deletion archived to `cleanup_deletion_log` first (431 real deletions = 431 matching log rows, verified 2026-08-14). One real run reactivated 73/300 (24%) rechecked candidates instead of deleting them. |
+| **`purge_inactive_listings()`** | jobid 11 | **RETIRED 2026-08-14** — cron unscheduled. Never purged a single row in its lifetime (`purged_listings_archive`: 0 rows, all-time). Disabled since ~2026-07-03 pending an owner call on retention policy; that call has since been made — `cleanup.py` (above) IS that policy. Function/archive table left in place (harmless, nothing to lose) but no longer scheduled. |
 
-**Hard-delete tier is OFF — soft-inactivation (`active=false`) is the only live cleanup tier**
-(verified live 2026-07-16). `cron.job` shows jobid 11 `active=false`; `cron.job_run_details` shows
-it ran exactly twice (2026-06-26 and 2026-07-03, both Fridays 22:00 UTC, both "succeeded") and
-`purged_listings_archive` has **0 rows ever** — so both runs matched nothing and no listing row has
-ever been hard-deleted by this job. It was disabled sometime between its last run (2026-07-03
-22:00 UTC) and the first missed Friday slot (2026-07-10 22:00 UTC); `cron.job` records neither
-when nor by whom. The function body itself is archive-safe: it copies each doomed row into
-`purged_listings_archive` (full `to_jsonb(row)` + source table + reason) **in the same statement**
-and deletes **only the ids the archive insert returned**, so it cannot delete a row it did not
-archive. **Re-enabling requires explicit owner approval plus a verified archive-first dry run**
-(owner rule: never permanently delete listing data without a recoverable archive). Note also
-(2026-07-15 fleet health check): re-enabling would hard-delete — archive-first, but still delete
-from the live tables — the rows the retirement passes deliberately preserved as inactive history
-(Toor's archived rows, Alnokhba's 6) once they age past the 7-day window, so the retention window
-question is part of the same owner decision.
+**Hard-delete tier is ON for 2 of ~34 platforms (aqarcity, gathern) via `scrapers/common/cleanup.py`**
+(verified live 2026-08-14 — see the table above for the full evidence bar and real deletion counts).
+Soft-inactivation (`active=false`, via `prune_unseen()` / platform liveness scripts) remains the only
+live cleanup tier for every other platform. The OLDER, SQL-only `purge_inactive_listings()` (jobid 11)
+this section previously described as the hard-delete path is now formally retired — it never purged a
+single row in its lifetime; `cleanup.py` is the mechanism that actually replaced it, per an owner
+approval (2026-07-26) that supersedes the "re-enabling requires owner approval" note this paragraph
+used to end on.
 
 ---
 

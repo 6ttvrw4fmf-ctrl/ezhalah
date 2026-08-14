@@ -1,0 +1,27 @@
+-- Retires two cron jobs that had been PAUSED (active=false) but left registered, confirmed during
+-- the 2026-08-14 listing-lifecycle audit as genuinely superseded, not merely undocumented:
+--
+-- jobid 32 (gh-wasalt-liveness-hybrid, 'wasalt-liveness-hybrid.yml'): disabled since 2026-07-09,
+-- already documented (docs/ARCHITECTURE.md, commit dc29fc0, 2026-07-15) as intentionally superseded
+-- by the enumeration-based gh-wasalt-enum-liveness (jobid 36), pending only "a longer track record"
+-- before formal retirement. Verified live 2026-08-14: jobid 36 has succeeded 10/10 of its last runs
+-- (every 2 days back to 2026-07-27, 100% success) — condition met. scrapers/wasalt/liveness.py
+-- itself is NOT removed — it is still actively used by jobid 36 via `--mode enum-strike`; only the
+-- now-dead hybrid workflow file (`.github/workflows/wasalt-liveness-hybrid.yml`) is removed in the
+-- same commit as this migration.
+--
+-- jobid 11 (purge-inactive-listings, public.purge_inactive_listings()): disabled since ~2026-07-03,
+-- already documented (same 2026-07-15 commit) as "recommend keeping it disabled... re-enable only
+-- after deciding [a] retention window policy — an owner call." That owner call has since been made:
+-- scrapers/common/cleanup.py ("Unified, config-driven retention cleanup for EVERY platform,
+-- owner-approved 2026-07-26") IS that policy — per-platform `min_inactive_days` via
+-- `platform_retention_policy`, source-re-verified before every delete, already live in production
+-- (431 real deletions, 431 matching audit-log rows, 100% archived). purge_inactive_listings() has
+-- never purged a single row (purged_listings_archive: 0 rows, all-time) and has no other caller.
+--
+-- The functions/tables themselves (purge_inactive_listings, purge_doomed_sql,
+-- purged_listings_archive) are DELIBERATELY NOT dropped here — harmless, dormant, zero rows to lose,
+-- and dropping them has no benefit over simply not scheduling them. Only the registrations that
+-- could mislead a future engineer into thinking either is still the live mechanism are removed.
+select cron.unschedule(32);
+select cron.unschedule(11);
