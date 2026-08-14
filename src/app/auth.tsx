@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Animated, Easing, Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, Easing, Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { Spinner } from '@/components/ui';
-import HeroBackground from '@/components/HeroBackground';
 import { useApp, type AuthUser } from '@/store';
 import { useI18n, t } from '@/i18n';
 import {
@@ -227,14 +226,38 @@ export default function Auth() {
 
   const appleEmail = hideEmail ? 'hide-my-email@privaterelay.appleid.com' : 'apple-user@icloud.com';
 
+  // ≥900px: the brand panel and the form sit side by side (panel on the reading-start side — right
+  // in Arabic via the automatic RTL row flip). Below that: the panel becomes a compact header block
+  // above the form. (Complete redesign, owner 2026-08-15: "change it completely… something
+  // attractive" — the washed-out sketch page is gone; the brand carries the screen now.)
+  const wide = useWindowDimensions().width >= 900;
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      {/* The Saudi falcon + map sketch sits behind the whole sign-in screen so Google/Apple/phone
-          float over the brand scenery instead of flat paper. (user request — attached image.) Kept
-          prominent (high opacity, fade only at the very bottom) so the falcon + map clearly read. */}
-      <HeroBackground imageOpacity={0.95} fadeStart={0.94} fadeEnd={1} />
-      <Animated.View style={[{ flex: 1 }, entranceStyle]}>
-      <View style={[s.topBar, { paddingTop: insets.top + 8 }]}>
+      <Animated.View style={[{ flex: 1, flexDirection: wide ? 'row' : 'column' }, entranceStyle]}>
+
+      {/* ── Brand panel: deep Ezhalah green, white eagle mark, the promise. One confident block. ── */}
+      <View style={[s.brand, wide ? s.brandSide : s.brandTop, !wide && { paddingTop: insets.top + 28 }]}>
+        {/* react-native-web can't tint a PNG, so the dark-green eagle sits on a light disc — a
+            seal on the green field. */}
+        <Animated.View style={[s.brandSeal, !wide && s.brandSealSm, { opacity: blink }]}>
+          <RNImage source={LOGO} style={s.brandMark} resizeMode="contain" />
+        </Animated.View>
+        <Text style={[s.brandTitle, !wide && s.brandTitleSm]}>{t('Looking for a property? Ezhalah.')}</Text>
+        <Text style={s.brandSub}>
+          {t('Ezhalah brings property listings from the various Saudi real-estate platforms together in one place.')}
+        </Text>
+        {wide && (
+          <View style={s.brandTrust}>
+            <View style={s.brandTrustLine} />
+            <Text style={s.brandTrustText}>{t('More than 25 Saudi property platforms — in one place.')}</Text>
+          </View>
+        )}
+      </View>
+
+      {/* ── Form side: warm paper, three ways in, nothing else. ── */}
+      <View style={{ flex: 1 }}>
+      <View style={[s.topBar, { paddingTop: wide ? insets.top + 8 : 8 }]}>
         <Pressable onPress={back} style={s.iconBtn} hitSlop={8}>
           <Ionicons
             name={step === 'main' && !ccOpen ? 'close' : isRTL ? 'chevron-forward' : 'chevron-back'}
@@ -249,15 +272,7 @@ export default function Auth() {
           {/* ── main ───────────────────────────────────────────────── */}
           {step === 'main' && (
             <>
-              <View style={s.brandWrap}>
-                <Animated.View style={[s.logoRing, { opacity: blink }]}>
-                  <RNImage source={LOGO} style={s.logoImg} resizeMode="cover" />
-                </Animated.View>
-                <Text style={s.heroTitle}>{t('Looking for a property? Ezhalah.')}</Text>
-                <Text style={s.heroSub}>
-                  {t('Ezhalah brings property listings from the various Saudi real-estate platforms together in one place.')}
-                </Text>
-              </View>
+              <Text style={s.formHead}>{t('Sign in or create your account')}</Text>
 
               <Pressable
                 style={[s.oauth, s.google]}
@@ -478,6 +493,7 @@ export default function Auth() {
           )}
         </View>
       </ScrollView>
+      </View>
       </Animated.View>
     </View>
   );
@@ -504,33 +520,27 @@ const s = StyleSheet.create({
   // locking vertically-centered — the user can scroll the sign-in screen naturally. flexGrow keeps it
   // filling the viewport when the content is short. (user request: "let the user scroll, don't make
   // it stick.") Extra top/bottom padding gives breathing room.
-  center: { flexGrow: 1, alignItems: 'center', justifyContent: 'flex-start', paddingHorizontal: 24, paddingTop: 76, paddingBottom: 48 },
-  // The card is the redesign (owner 2026-08-14: the bare controls over the sketch read as "a
-  // mess"): one ivory panel gives every step — sign-in, OTP, the mock sheets — a home, so the
-  // sketch becomes scenery BEHIND something instead of noise around floating buttons.
-  col: {
-    width: '100%', maxWidth: MAX_W,
-    backgroundColor: 'rgba(255,255,255,0.94)', borderRadius: 22,
-    borderWidth: 1, borderColor: '#e7ece8',
-    paddingHorizontal: 22, paddingBottom: 24,
-    ...cardShadow,
+  center: { flexGrow: 1, alignItems: 'stretch', justifyContent: 'center', paddingHorizontal: 28, paddingTop: 12, paddingBottom: 40 },
+  col: { width: '100%', maxWidth: 420, alignSelf: 'center' },
+  // ── The brand panel ──────────────────────────────────────────────────────────────────────────
+  brand: { backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36 },
+  brandSide: { flex: 1, maxWidth: 520 },
+  brandTop: { paddingBottom: 26, borderBottomLeftRadius: 26, borderBottomRightRadius: 26 },
+  brandSeal: {
+    width: 116, height: 116, borderRadius: 58, backgroundColor: '#f4f6f2',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.45)',
   },
+  brandSealSm: { width: 72, height: 72, borderRadius: 36 },
+  brandMark: { width: '68%', height: '68%' },
+  brandTitle: { fontSize: 34, fontWeight: '800', color: '#ffffff', textAlign: 'center', marginTop: 18, letterSpacing: -0.4, lineHeight: 46 },
+  brandTitleSm: { fontSize: 24, marginTop: 10, lineHeight: 33 },
+  brandSub: { fontSize: 14.5, color: 'rgba(255,255,255,0.82)', textAlign: 'center', marginTop: 12, lineHeight: 23, maxWidth: 360 },
+  brandTrust: { alignItems: 'center', marginTop: 34 },
+  brandTrustLine: { width: 44, height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.35)', marginBottom: 12 },
+  brandTrustText: { fontSize: 12.5, color: 'rgba(255,255,255,0.72)', textAlign: 'center', letterSpacing: 0.2 },
 
-  // Centered hero: logo, then title, then subtitle — generous, balanced spacing on both desktop &
-  // mobile. The whole block is centered via the parent `center` style + alignItems center here.
-  brandWrap: { alignItems: 'center', alignSelf: 'center', marginBottom: 24, marginTop: -39, width: '100%' },
-  // The eagle mark sits in a soft green ring with a tinted halo + shadow so it reads as a deliberate
-  // logo, not a floating square. Slightly larger (78) for presence; perfectly centered.
-  // Light medallion: the eagle asset is dark-green-on-transparent since PR#610, so the disc must be
-  // light for the mark to read (dark green on colors.primary was invisible — live regression).
-  logoRing: {
-    width: 78, height: 78, borderRadius: 39, backgroundColor: '#f3f7f3',
-    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-    borderWidth: 4, borderColor: colors.primary, ...cardShadow,
-  },
-  logoImg: { width: '100%', height: '100%' },
-  heroTitle: { fontSize: 26, fontWeight: '800', color: colors.ink, marginTop: 16, textAlign: 'center', letterSpacing: -0.3, paddingHorizontal: 12 },
-  heroSub: { fontSize: 14, color: '#5d6f64', textAlign: 'center', marginTop: 9, paddingHorizontal: 18, lineHeight: 22, maxWidth: 350, alignSelf: 'center' },
+  formHead: { fontSize: 17, fontWeight: '700', color: colors.ink, textAlign: 'center', marginBottom: 18 },
 
   oauth: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: 52, borderRadius: 14, marginTop: 11 },
   google: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d9e0da' },
