@@ -274,11 +274,17 @@ export default function Auth() {
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={s.center} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <View style={s.col}>
+        {/* Wide screens get the floating-card (modal) presentation; mobile stays edge-to-edge clean. */}
+        <View style={[s.col, wide && s.card]}>
           {/* ── main ───────────────────────────────────────────────── */}
           {step === 'main' && (
             <>
+              {/* Modal-style order (owner request 2026-08-15): big centered title, the agreement line
+                  directly UNDER it (was at the bottom), dark-filled Google as the primary entry, light
+                  Apple as the secondary, divider, then the phone row (kept — phone is Ezhalah's primary
+                  sign-in), Continue, and a Close link. Layout pattern only — Ezhalah copy/brand. */}
               <Text style={s.formHead}>{t('Sign in or create your account')}</Text>
+              <Text style={s.agree}>{t("By continuing you agree to Ezhalah's Terms & Privacy Policy.")}</Text>
 
               <Pressable
                 style={[s.oauth, s.google]}
@@ -290,8 +296,8 @@ export default function Auth() {
                     : setStep('google')
                 }
               >
-                <Ionicons name="logo-google" size={18} color="#ea4335" />
-                <Text style={s.oauthText}>{t('Continue with Google')}</Text>
+                <Ionicons name="logo-google" size={18} color="#fff" />
+                <Text style={[s.oauthText, { color: '#fff' }]}>{t('Continue with Google')}</Text>
               </Pressable>
               <Pressable
                 style={[s.oauth, s.apple]}
@@ -302,8 +308,8 @@ export default function Auth() {
                   isBackendLive ? onAppleContinue() : setStep('apple');
                 }}
               >
-                <Ionicons name="logo-apple" size={20} color="#fff" />
-                <Text style={[s.oauthText, { color: '#fff' }]}>{t('Continue with Apple')}</Text>
+                <Ionicons name="logo-apple" size={20} color={colors.ink} />
+                <Text style={s.oauthText}>{t('Continue with Apple')}</Text>
               </Pressable>
               {!!oauthErr && <Text style={s.oauthErr}>{oauthErr}</Text>}
 
@@ -366,7 +372,11 @@ export default function Auth() {
               <Pressable style={[s.continue, (!valid || busy) && s.continueOff]} disabled={!valid || busy} onPress={onContinuePhone}>
                 {busy ? <Spinner tint="#fff" /> : <Text style={s.continueText}>{t('Continue')}</Text>}
               </Pressable>
-              <Text style={s.fine}>{t("By continuing you agree to Ezhalah's Terms & Privacy Policy.")}</Text>
+              {/* The agreement line moved up under the title; a quiet Close link closes the sheet
+                  (same handler as the top X) so the modal always has a visible way out at the end. */}
+              <Pressable onPress={back} hitSlop={8} style={s.closeLink}>
+                <Text style={s.closeLinkText}>{t('Close')}</Text>
+              </Pressable>
             </>
           )}
 
@@ -546,11 +556,16 @@ const s = StyleSheet.create({
   brandTrustLine: { width: 44, height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.35)', marginBottom: 12 },
   brandTrustText: { fontSize: 12.5, color: 'rgba(255,255,255,0.72)', textAlign: 'center', letterSpacing: 0.2 },
 
-  formHead: { fontSize: 17, fontWeight: '700', color: colors.ink, textAlign: 'center', marginBottom: 18 },
+  // Modal-style header (2026-08-15): a display-size centered title with the agreement line right
+  // under it, so the user consents up front instead of finding the terms in the footer.
+  formHead: { fontSize: 26, fontWeight: '800', color: colors.ink, textAlign: 'center', marginBottom: 10, lineHeight: 38, letterSpacing: -0.3 },
+  agree: { fontSize: 12.5, color: '#7c8a83', textAlign: 'center', marginBottom: 22, lineHeight: 18, paddingHorizontal: 8 },
 
   oauth: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: 52, borderRadius: 14, marginTop: 11 },
-  google: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d9e0da' },
-  apple: { backgroundColor: '#111' },
+  // Google = the dark-filled PRIMARY entry (brand dark green, not black — Ezhalah identity);
+  // Apple = the light bordered secondary. (Swapped 2026-08-15, modal-style prominence.)
+  google: { backgroundColor: colors.dark },
+  apple: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d9e0da' },
   oauthText: { fontSize: 15, fontWeight: '600', color: colors.ink },
   oauthErr: { fontSize: 12, color: '#c0392b', textAlign: 'center', marginTop: 6 },
 
@@ -575,7 +590,12 @@ const s = StyleSheet.create({
   continue: { backgroundColor: colors.dark, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
   continueOff: { opacity: 0.45 },
   continueText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
-  fine: { fontSize: 11, color: '#93a09a', textAlign: 'center', marginTop: 16, paddingHorizontal: 12, lineHeight: 16 },
+  // (fine — the old footer agreement line — moved up under the title as `agree`.)
+  // Quiet centered Close link at the end of the sheet (same handler as the top X).
+  closeLink: { alignSelf: 'center', marginTop: 20, paddingVertical: 6, paddingHorizontal: 14 },
+  closeLinkText: { fontSize: 14, fontWeight: '600', color: '#5d6f64' },
+  // Wide screens: present the form as a floating card (modal feel) on the warm paper ground.
+  card: { backgroundColor: '#fff', borderRadius: 24, paddingVertical: 34, paddingHorizontal: 30, borderWidth: 1, borderColor: colors.line, ...cardShadow },
 
   // Google
   gauth: { marginTop: 20 },
