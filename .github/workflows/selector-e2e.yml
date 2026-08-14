@@ -1,0 +1,83 @@
+# Selector E2E barrier (2026-08-14) — the LIVE half of the selector-reliability guards. The static
+# checks (scripts/verify-selector-reliability.ts and friends, in `npm test`) pin the CODE; this
+# drives the real production app with real clicks (e2e/selector.spec.ts) and pins the BEHAVIOR:
+# one tap always opens the City/District dropdown at full opacity, the blur→quick-refocus race
+# can't strand a dead selector (P3), the district multi-select stays open across picks (P4), the
+# disabled district field hands focus to City (P7), and every trending row carries the LOC_IMG art
+# with zero Latin leaks.
+#
+# Runs on a schedule AND after every production frontend deploy — a deploy that regresses the
+# selector pages within the hour, not at the next nightly. Same alerting pattern as
+# migration-drift-guard.yml: failure raises a P2 in alert_event via mon_raise (kind selector_e2e,
+# dedup selector_e2e_production — the stream the ops dashboard already watches), and a green run
+# self-heals it via mon_resolve_key. The alert write is best-effort; the job's own red/green is
+# decided by the tests alone. Read-only against production: the spec never submits a search.
+#
+# Deliberately NOT part of `npm test` / PR CI — it targets the LIVE deployment, so it would fail on
+# every PR that changes selector behavior before that PR deploys. Schedule + post-deploy is the
+# correct trigger set for a live barrier (same reasoning as ui-parity.yml).
+
+name: Selector E2E (production)
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'   # every 6h, offset to avoid the :00/:15 cron rush
+  workflow_dispatch: {}
+  workflow_run:
+    workflows: ["Deploy frontend (production)"]
+    types: [completed]
+
+concurrency:
+  group: selector-e2e
+  cancel-in-progress: true
+
+jobs:
+  selector-e2e:
+    name: Drive the live selector end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # A workflow_run trigger also fires for FAILED deploys — nothing new is live then, so skip.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright + browser
+        run: |
+          npm i -D @playwright/test@^1.49
+          npx playwright install --with-deps chromium
+      - name: Run selector E2E against production
+        run: npx playwright test e2e/selector.spec.ts
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: selector-e2e-trace
+          path: test-results/
+          retention-days: 7
+      # ── Alert plumbing (mirrors migration-drift-guard.yml / mon_raise + mon_resolve_key). ──
+      - name: Raise P2 selector_e2e alert
+        if: failure()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -sS -X POST "$SUPABASE_URL/rest/v1/rpc/mon_raise" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"p_sev\":\"P2\",\"p_kind\":\"selector_e2e\",\"p_platform\":null,\"p_dedup\":\"selector_e2e_production\",\"p_detail\":{\"run_url\":\"$RUN_URL\",\"trigger\":\"${{ github.event_name }}\"}}" \
+            || echo "::warning::mon_raise write failed (job result is unaffected)"
+      - name: Self-heal selector_e2e alert
+        if: success()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          curl -sS -X POST "$SUPABASE_URL/rest/v1/rpc/mon_resolve_key" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"p_kind":"selector_e2e","p_dedup":"selector_e2e_production"}' \
+            || echo "::warning::mon_resolve_key write failed (job result is unaffected)"

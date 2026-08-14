@@ -12,10 +12,10 @@ import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
-import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption } from '@/data/locations';
+import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, type SearchQuery } from '@/data/search';
-import { fetchDistrictEligibleCounts } from '@/data/remote';
+import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, hasActiveFilters } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -164,12 +164,30 @@ export default function Home() {
   // Mirrors query.location synchronously (state updates are async/batched) so the Top-6-on-focus
   // promise callback above can check the TRUE current text at resolution time, not a stale closure.
   const cityTextRef = useRef('');
+  // P3 fix (findings 2026-08-13): the 150ms close-on-blur timers are STORED and cancelled on the
+  // matching onFocus, on a suggestion-row press, and on unmount. An uncancelled timer from a
+  // blur-then-quick-refocus used to fire AFTER the refocus, closing the dropdown while the input
+  // stayed focused — and with focus already held, no further tap could ever raise a focus event, so
+  // the selector was dead until the user blurred somewhere else. No timing changed: same 150ms.
+  const cityBlurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const districtBlurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearBlurTimer = (timer: React.MutableRefObject<ReturnType<typeof setTimeout> | null>) => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+  };
+  useEffect(() => () => { clearBlurTimer(cityBlurTimer); clearBlurTimer(districtBlurTimer); }, []);
   // Rent period the user has toggled (Monthly/Yearly) — drives the period-scoped Trending lists AND
   // the search summary. Buy has no period. Declared HIGH (above the warm effects below) because those
   // effects depend on it. (Was previously derived lower down; moved up 2026-07-21.)
   const rentPeriod: 'monthly' | 'annual' = query.rentPeriod ?? 'annual';
   // payment_monthly truth for the Trending-scope RPCs: monthly→true, annual→false, Buy→null (no filter).
   const paymentMonthly: boolean | null = query.deal === 'Rent' ? rentPeriod === 'monthly' : null;
+  // COUNT-SCOPE PARITY (findings 2026-08-13, R1): every City/District pool call is scoped to the
+  // category the results RPC will ACTUALLY search — the picked category, else the same implied
+  // default remote.ts applies to a category-less search (imported, never a duplicated literal).
+  // Before this, pools counted ALL categories while a bare search implied Residential: district
+  // counts overstated up to 86%, and commercial-only districts presented as alive yet searched to 0
+  // — silently defeating the PR#384 zero-mark.
+  const effCategory: Category = query.category ?? IMPLIED_CATEGORY_DEFAULT;
   // Refs so the ENTIRE Price/Area/Size box is one tap target (owner 2026-07-10): tapping anywhere in
   // the box — icon, label, padding, unit text — focuses the input immediately, same pattern already
   // used for the city field above (`cityRef` + its wrapping Pressable).
@@ -294,7 +312,7 @@ export default function Home() {
   // Category-aware ranking can't reach this field without moving Category earlier in the flow — a
   // bigger UX change the owner declined (2026-07-20). Deal-only is what this data can support today.
   useEffect(() => {
-    void ensureCityFieldIndex(query.deal, paymentMonthly).then((pool) => {
+    void ensureCityFieldIndex(query.deal, paymentMonthly, effCategory).then((pool) => {
       // EDGE CASE (found in testing, generalizes to every deal change too): a fetch can still be
       // pending when the user has already focused AND typed a query — matchCitiesByText() would have
       // run against a still-empty/stale-deal pool and (correctly, not a crash) returned []/old
@@ -304,9 +322,9 @@ export default function Home() {
       // replay only "when the section first appears or when the rankings change").
       if (cityTextRef.current) {
         const latin = isLatinOnlyInput(cityTextRef.current);
-        setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, cityTextRef.current));
+        setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, effCategory, cityTextRef.current));
       } else if (cityFocus) {
-        setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, 6));
+        setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6));
       }
       // REHYDRATION (bug fix 2026-08-04): returning to this screen after a search REMOUNTS it —
       // query.location persists in the app context (the field still shows the city), but
@@ -340,31 +358,34 @@ export default function Home() {
       }
     });
     // Deliberately NOT depending on cityFocus/citySelected — this effect should fire only on a real
-    // Deal/period change (or mount), not on every focus/blur toggle; cityFocus is read for its value AT
-    // that moment via closure, which is exactly what's wanted (see comment above).
+    // Deal/period/category change (or mount), not on every focus/blur toggle; cityFocus is read for
+    // its value AT that moment via closure, which is exactly what's wanted (see comment above).
+    // effCategory joined the deps with count-scope parity: the pool is now keyed by the effective
+    // category, so a Residential↔Commercial pick re-warms the pool at its true scope.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.deal, paymentMonthly]);
+  }, [query.deal, paymentMonthly, effCategory]);
 
   // Same reactive refresh for District, scoped to the currently-selected city — and ALSO to Category
   // (owner decision 2026-07-20, after proving live that Category matters more for districts than for
   // cities): even though Category is picked after District in this form, the moment the user sets it
-  // — or changes Deal — District's Top-6 re-fetches for the now-more-complete scope. query.category is
-  // null until then, which the RPC treats as "broader/default ranking" (Deal-only), exactly as before.
+  // — or changes Deal — District's Top-6 re-fetches for the now-more-complete scope. Until then the
+  // pool is scoped to effCategory (the implied-Residential default a bare search actually runs at —
+  // count-scope parity, findings R1), never to the old all-categories null scope.
   // Only meaningful once a city is picked; a no-op otherwise (ensureDistrictOptions is never called
   // without one).
   useEffect(() => {
     if (!citySelected) return;
     const cid = citySelected.cityId;
-    void ensureDistrictOptions(cid, query.deal, query.category, paymentMonthly).then(() => {
+    void ensureDistrictOptions(cid, query.deal, effCategory, paymentMonthly).then(() => {
       if (districtTextRef.current) {
         const latin = isLatinOnlyInput(districtTextRef.current);
-        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, query.category, paymentMonthly, districtTextRef.current));
+        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, effCategory, paymentMonthly, districtTextRef.current));
       } else if (districtFocus) {
-        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, query.category, paymentMonthly, 6));
+        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, effCategory, paymentMonthly, 6));
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.deal, query.category, citySelected, paymentMonthly]);
+  }, [query.deal, effCategory, citySelected, paymentMonthly]);
 
   // ONE query builder shared by onSearch and the district live-count effect below — the count call
   // and the search call must be built from the SAME state or their numbers can drift apart, which
@@ -417,6 +438,55 @@ export default function Home() {
     // buildFilterBaseQuery reads query/citySelected — both captured via the deps that matter here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [citySelected, hasDistrictNarrowing, districtSuggestions, districtNarrowingSig]);
+
+  // Dropdown zero-states (findings 2026-08-13, P1 + cases A/C/D/E/F/H): an empty suggestion list
+  // used to render NOTHING — loading, a failed fetch, a typed no-match and a city with no
+  // listing-bearing districts were all the same invisible box. Each now shows ONE small muted
+  // Arabic row. English typing is excluded on purpose: that case already has its own message
+  // (ARABIC_ONLY_MSG under the field) and must keep it, unchanged.
+  const cityLatin = !!query.location && isLatinOnlyInput(query.location);
+  const cityStatus = cityPoolStatus(query.deal, paymentMonthly, effCategory);
+  const cityZeroRow: 'loading' | 'error' | 'empty' | null =
+    citySuggestions.length > 0 || cityLatin ? null
+      : cityStatus !== 'ready' ? cityStatus
+      : query.location ? 'empty' : null;
+  const districtLatin = !!districtText && isLatinOnlyInput(districtText);
+  const districtStatus = citySelected ? districtPoolStatus(citySelected.cityId, query.deal, effCategory, paymentMonthly) : 'loading';
+  const districtZeroRow: 'loading' | 'error' | 'empty' | null =
+    !citySelected || districtSuggestions.length > 0 || districtLatin ? null
+      : districtStatus !== 'ready' ? districtStatus
+      : 'empty'; // covers both "no districts with listings" (empty focus) and a typed no-match
+  // Tap-to-retry for the error row: re-run the ensure (the failed promise was evicted, so this is a
+  // real refetch), and keep the box open across the tap — the row press blurs the input, so cancel
+  // the pending close and put focus straight back, same pattern as districtOnPress below.
+  const retryCityPool = () => {
+    clearBlurTimer(cityBlurTimer);
+    cityRef.current?.focus();
+    setCitySuggestions([]); // fresh [] reference → re-render → the row flips to «جاري التحميل…»
+    void ensureCityFieldIndex(query.deal, paymentMonthly, effCategory).then(() => {
+      if (cityTextRef.current) {
+        const latin = isLatinOnlyInput(cityTextRef.current);
+        setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, effCategory, cityTextRef.current));
+      } else {
+        setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6));
+      }
+    });
+  };
+  const retryDistrictPool = () => {
+    if (!citySelected) return;
+    const cid = citySelected.cityId;
+    clearBlurTimer(districtBlurTimer);
+    districtRef.current?.focus();
+    setDistrictSuggestions([]);
+    void ensureDistrictOptions(cid, query.deal, effCategory, paymentMonthly).then(() => {
+      if (districtTextRef.current) {
+        const latin = isLatinOnlyInput(districtTextRef.current);
+        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, effCategory, paymentMonthly, districtTextRef.current));
+      } else {
+        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, effCategory, paymentMonthly, 6));
+      }
+    });
+  };
 
   const onSearch = async () => {
     // CITY-ONLY FIELD (owner spec 2026-07-17): "The user must select a valid city result. Do not
@@ -778,14 +848,23 @@ export default function Home() {
                 The whole box is a tap target — tapping anywhere inside focuses the input. */}
             <Text style={[s.fieldLabelAbove, { marginTop: 12 }]}>{t('Which city?')}</Text>
             <AnimatedPressable style={[s.field, confirmFieldStyle(cityPop, citySel)]} onPress={() => cityRef.current?.focus()}>
-              <Ionicons name="location-outline" size={18} color={colors.muted} />
+              {/* Selected-value identity (2026-08-14): once a city is confirmed the leading glyph is
+                  the SAME designed city art the suggestion rows carry (LOC_IMG.city) — the pick
+                  visibly "becomes" the thing that was tapped. Unselected keeps the neutral pin. */}
+              {citySelected ? (
+                <Image testID="selected-city-visual" source={LOC_IMG.city} style={s.fieldLocIcon} />
+              ) : (
+                <Ionicons name="location-outline" size={18} color={colors.muted} />
+              )}
               <View style={s.flWrap}>
                 <TextInput
                   ref={cityRef}
+                  testID="city-input"
                   style={s.flInput}
                   value={query.location}
                   autoCorrect={false}
                   onFocus={() => {
+                    clearBlurTimer(cityBlurTimer); // P3: a pending close from a just-blurred state must not outlive the refocus
                     setCityFocus(true);
                     // Focus with no text yet → immediately show the Top 6 (spec: "When the user
                     // clicks the City field without typing, immediately show only the Top 6 cities").
@@ -798,12 +877,21 @@ export default function Home() {
                     // in sync on every keystroke below) at resolution time, not the value captured in
                     // this closure at focus time.
                     if (!query.location) {
-                      void ensureCityFieldIndex(query.deal, paymentMonthly).then(() => {
-                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, 6));
+                      void ensureCityFieldIndex(query.deal, paymentMonthly, effCategory).then(() => {
+                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6));
                       });
+                    } else {
+                      // P2 fix: the field already holds text (a confirmed pick, or mid-typing
+                      // refocus) — populate its matches from the cache instead of opening nothing.
+                      // Suggestions only otherwise arrive via onChangeText, so a tap on a prefilled
+                      // field used to show an empty box until a keystroke. English text keeps the
+                      // existing behavior exactly (no autocomplete; the Arabic-only hint stands).
+                      if (!isLatinOnlyInput(query.location)) {
+                        setCitySuggestions(matchCitiesByText(query.deal, paymentMonthly, effCategory, query.location));
+                      }
                     }
                   }}
-                  onBlur={() => setTimeout(() => setCityFocus(false), 150)}
+                  onBlur={() => { cityBlurTimer.current = setTimeout(() => setCityFocus(false), 150); }}
                   onChangeText={(v) => {
                     cityTextRef.current = v;
                     setQuery((q) => ({ ...q, location: v }));
@@ -813,14 +901,14 @@ export default function Home() {
                     clearDistrict(); // editing the city disables + clears District (no cross-city carry-over)
                     if (!v) {
                       // Cleared back to empty → the Top 6 list, same as a fresh focus.
-                      setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, 6));
+                      setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6));
                       setLocMsg('');
                       return;
                     }
                     // Arabic-only product: English typing gets NO autocomplete and an Arabic hint —
                     // there is nothing to match against, since every city name here is Arabic. (user rule)
                     const latin = isLatinOnlyInput(v);
-                    setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, v));
+                    setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, effCategory, v));
                     setLocMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -832,7 +920,7 @@ export default function Home() {
                 </RNAnimated.View>
               ) : null}
               {query.location.length > 0 && (
-                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, 6)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
+                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
                 </Pressable>
               )}
@@ -845,27 +933,41 @@ export default function Home() {
             {/* Merge note (2026-07-20): outer open/close wrapper is PR #156's DropdownReveal; inner
                 Trending-vs-plain-list split is this branch's content. Content is byte-identical to
                 each side's own version — only the boundary between them moved. */}
-            <DropdownReveal visible={cityFocus && citySuggestions.length > 0}>
+            <DropdownReveal visible={cityFocus && (citySuggestions.length > 0 || cityZeroRow != null)}>
               {(() => {
                 // Trending treatment ONLY for the empty-focus Top-6 — a typed/filtered result set keeps
                 // today's plain list (a fast-scan moment, not a "discovery" one). Derived, not separate
                 // state: the Top-6 is precisely what's showing whenever there's no typed text.
                 const isTop6 = !query.location;
                 const cityOnPress = (opt: CityOption) => {
+                  clearBlurTimer(cityBlurTimer); // P3: the row press blurred the input — its close timer must not fire later
                   cityTextRef.current = opt.cityAr;
                   setQuery((q) => ({ ...q, location: opt.cityAr }));
                   setCitySelected(opt);
                   setCitySuggestions([]);
                   setCityFocus(false);
                   setLocMsg('');
-                  // New city → drop any prior district; the [query.deal, query.category, citySelected]
+                  // New city → drop any prior district; the [query.deal, effCategory, citySelected]
                   // effect above warms THIS city's district catalog so District shows its Top-6 instantly.
                   clearDistrict();
                   scrollDown(districtAnchorRef); // carry them down to the next step (district)
                 };
                 return (
                   <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                    {isTop6 ? (
+                    {cityZeroRow ? (
+                      // ONE muted Arabic row — never an invisible box (findings P1). Error taps retry.
+                      cityZeroRow === 'error' ? (
+                        <Tappable style={s.suggRow} onPress={retryCityPool}>
+                          <Text style={s.suggStatusText}>{t('Could not load the list — tap to retry')}</Text>
+                        </Tappable>
+                      ) : (
+                        <View style={s.suggRow}>
+                          <Text style={s.suggStatusText}>
+                            {cityZeroRow === 'loading' ? t('Loading…') : t('No matching city — pick from the list')}
+                          </Text>
+                        </View>
+                      )
+                    ) : isTop6 ? (
                       <>
                         <TrendingHeader title={t('Trending cities now')} />
                         <TrendingRows
@@ -873,6 +975,7 @@ export default function Home() {
                             key: String(opt.cityId),
                             label: opt.cityAr,
                             sublabel: hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
+                            icon: LOC_IMG.city, // restored designed art (see TrendingList.tsx note)
                           }))}
                           onPress={(_item, i) => cityOnPress(citySuggestions[i])}
                         />
@@ -922,12 +1025,16 @@ export default function Home() {
             ) : null}
             <AnimatedPressable
               style={[s.field, confirmFieldStyle(districtPop, districtSel), !citySelected && { opacity: 0.5 }]}
-              onPress={() => { if (citySelected) districtRef.current?.focus(); }}
+              // P7 (findings): tapping the disabled district field used to be a silent no-op — the
+              // 0.5 opacity + placeholder stay as the signals, but the tap itself now lands the user
+              // in the CITY field, the one step that unlocks this one.
+              onPress={() => { if (citySelected) districtRef.current?.focus(); else cityRef.current?.focus(); }}
             >
               <Image source={LOC_IMG.district} style={{ width: 18, height: 18, resizeMode: 'contain' }} />
               <View style={s.flWrap}>
                 <TextInput
                   ref={districtRef}
+                  testID="district-input"
                   editable={!!citySelected}
                   style={s.flInput}
                   placeholder={citySelected ? '' : t('Select a city first')}
@@ -936,18 +1043,22 @@ export default function Home() {
                   autoCorrect={false}
                   onFocus={() => {
                     if (!citySelected) return;
+                    clearBlurTimer(districtBlurTimer); // P3 — same stale-close guard as the city field
                     setDistrictFocus(true);
                     // Empty focus → Top-6 popular districts in the chosen city. Same race-guard as the
                     // city field: the options load async (though usually pre-warmed on city select), so
                     // re-check the live text via districtTextRef before showing the Top-6.
                     if (!districtTextRef.current) {
                       const cid = citySelected.cityId;
-                      void ensureDistrictOptions(cid, query.deal, query.category, paymentMonthly).then(() => {
-                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, query.category, paymentMonthly, 6));
+                      void ensureDistrictOptions(cid, query.deal, effCategory, paymentMonthly).then(() => {
+                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, effCategory, paymentMonthly, 6));
                       });
+                    } else if (!isLatinOnlyInput(districtTextRef.current)) {
+                      // P2 — refocusing mid-typing shows the current matches, not an empty box.
+                      setDistrictSuggestions(matchDistrictsByCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, districtTextRef.current));
                     }
                   }}
-                  onBlur={() => setTimeout(() => setDistrictFocus(false), 150)}
+                  onBlur={() => { districtBlurTimer.current = setTimeout(() => setDistrictFocus(false), 150); }}
                   onChangeText={(v) => {
                     districtTextRef.current = v;
                     setDistrictText(v);
@@ -957,11 +1068,11 @@ export default function Home() {
                     // typed-but-unconfirmed string being searched; that stays true by construction,
                     // since districtText itself is never sent anywhere.)
                     if (!citySelected) return;
-                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, paymentMonthly, 6)); setDistrictMsg(''); return; }
+                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6)); setDistrictMsg(''); return; }
                     // Arabic-only product: English typing gets NO autocomplete and the same Arabic hint the
                     // City field shows — every district name here is Arabic, so there is nothing to match. (owner UI request.)
                     const latin = isLatinOnlyInput(v);
-                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, query.deal, query.category, paymentMonthly, v));
+                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, v));
                     setDistrictMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -979,7 +1090,7 @@ export default function Home() {
                   districtTextRef.current = '';
                   setDistrictText('');
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, paymentMonthly, 6));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6));
                   districtRef.current?.focus();
                 }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
@@ -993,8 +1104,12 @@ export default function Home() {
             {districtsSelected.length > 0 ? (
               <View style={s.districtChipsRow}>
                 {districtsSelected.map((d) => (
-                  <View key={d.districtAr} style={s.districtChip}>
-                    <Text style={s.districtChipText}>{d.districtAr}</Text>
+                  <View key={d.districtAr} testID="district-chip" style={s.districtChip}>
+                    {/* Same designed district art as the rows the pick came from (2026-08-14). Fixed
+                        14px; the TEXT is what shrinks at narrow widths (flexShrink on the style), so
+                        the image can never be the thing that overflows the chip row. */}
+                    <Image source={LOC_IMG.district} style={s.districtChipIcon} />
+                    <Text style={s.districtChipText} numberOfLines={1}>{d.districtAr}</Text>
                     <Pressable onPress={() => toggleDistrict(d)} hitSlop={8}>
                       <Ionicons name="close-circle" size={16} color={colors.chipIcon} />
                     </Pressable>
@@ -1009,7 +1124,7 @@ export default function Home() {
 
             {/* Merge note (2026-07-20): outer open/close wrapper is PR #156's DropdownReveal; inner
                 Trending-vs-plain-list split is this branch's content — same pattern as City above. */}
-            <DropdownReveal visible={citySelected != null && districtFocus && districtSuggestions.length > 0}>
+            <DropdownReveal visible={citySelected != null && districtFocus && (districtSuggestions.length > 0 || districtZeroRow != null)}>
               {(() => {
                 // Same derived Top-6-vs-typed split as the City field above.
                 const isTop6 = !districtText;
@@ -1019,17 +1134,36 @@ export default function Home() {
                 // pick so the list falls back to Trending and the next search starts clean. The
                 // dropdown closes the way every dropdown here closes: tapping away (onBlur). No
                 // auto-scroll to Category — we can't know the user is done picking.
+                // P4 fix (findings): "stays open" was only a comment before — on web the row press
+                // BLURS the input, arming the 150ms close timer, so the list vanished after the
+                // first pick. Cancel that timer and put focus straight back on the input; now the
+                // contract above is actually true.
                 const districtOnPress = (opt: DistrictOption) => {
+                  clearBlurTimer(districtBlurTimer);
+                  districtRef.current?.focus();
                   toggleDistrict(opt);
                   districtTextRef.current = '';
                   setDistrictText('');
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, query.category, paymentMonthly, 6));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6));
                 };
                 const selectedLabels = new Set(districtsSelected.map((d) => d.districtAr));
                 return (
                   <ScrollView style={s.suggBox} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                    {isTop6 && citySelected ? (
+                    {districtZeroRow ? (
+                      // ONE muted Arabic row — the district mirror of the city zero-states above.
+                      districtZeroRow === 'error' ? (
+                        <Tappable style={s.suggRow} onPress={retryDistrictPool}>
+                          <Text style={s.suggStatusText}>{t('Could not load the list — tap to retry')}</Text>
+                        </Tappable>
+                      ) : (
+                        <View style={s.suggRow}>
+                          <Text style={s.suggStatusText}>
+                            {districtZeroRow === 'loading' ? t('Loading…') : t('No districts available in this city right now')}
+                          </Text>
+                        </View>
+                      )
+                    ) : isTop6 && citySelected ? (
                       <>
                         <TrendingHeader title={`${t('Trending districts in')} ${citySelected.cityAr}`} />
                         <TrendingRows
@@ -1041,6 +1175,7 @@ export default function Home() {
                             // say so in Arabic — same message the typed list already uses — instead of
                             // presenting a popular-at-category-scope district that would dead-end.
                             sublabel: districtLiveCounts?.[opt.districtAr] === 0 ? t('No listings here right now') : undefined,
+                            icon: LOC_IMG.district, // restored designed art (see TrendingList.tsx note)
                           }))}
                           onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
                           selectedLabels={selectedLabels}
@@ -1429,6 +1564,10 @@ const s = StyleSheet.create({
   suggBox: { marginTop: 8, maxHeight: 268, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, backgroundColor: colors.surface, overflow: 'hidden' },
   suggRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 12 },
   suggLocIcon: { width: 20, height: 20, resizeMode: 'contain' }, // Saudi/Region/City/District designed art (assets/images/loc)
+  // Zero-state row text (loading / error / no-match) — muted, RTL, never a Latin leak.
+  suggStatusText: { flex: 1, fontSize: 12.5, color: colors.muted, textAlign: 'right', writingDirection: 'rtl' },
+  // City field's selected-state glyph — the same LOC_IMG.city art as the suggestion rows, field-sized.
+  fieldLocIcon: { width: 18, height: 18, resizeMode: 'contain' },
   suggDivider: { borderBottomWidth: 1, borderBottomColor: colors.line },
   suggCity: { fontSize: 13.5, fontWeight: '600', color: colors.ink },
   suggDist: { fontSize: 11.5, color: colors.muted },
@@ -1444,7 +1583,9 @@ const s = StyleSheet.create({
     backgroundColor: colors.chipFill, borderWidth: 1, borderColor: colors.chipLine,
     borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10,
   },
-  districtChipText: { fontSize: 12.5, fontWeight: '700', color: colors.dark },
+  // flexShrink so the NAME truncates at narrow widths — the fixed 14px art and the ✕ never overflow.
+  districtChipText: { fontSize: 12.5, fontWeight: '700', color: colors.dark, flexShrink: 1 },
+  districtChipIcon: { width: 14, height: 14, resizeMode: 'contain' },
   suggIconEmpty: { opacity: 0.5 },
   suggCityEmpty: { color: colors.muted, fontWeight: '500' },
   suggEmptyNote: { fontSize: 11, color: colors.muted, marginTop: 1 },

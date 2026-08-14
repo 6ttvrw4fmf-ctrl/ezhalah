@@ -153,18 +153,21 @@ check('index.tsx placeholder text is "Which city?" (renders أي مدينة؟), 
 // alongside k — Deal is chosen before City in the form, so it's always known here. Extended
 // 2026-07-21 (PR#167/#175, LIVE) to also thread paymentMonthly (Rent's Monthly/Yearly toggle;
 // always null for Buy) so the Top-6/autocomplete pool is period-scoped, not just deal-scoped.
-check('onFocus with empty text shows the deal+period-scoped Top 6 (topCitiesByListings(query.deal, paymentMonthly, 6))', /onFocus=\{\(\) => \{[\s\S]{0,1300}?topCitiesByListings\(query\.deal, paymentMonthly, 6\)/.test(indexSrc));
+// Extended 2026-08-14 (count-scope parity): every pool call also threads effCategory — the
+// EFFECTIVE category the results RPC searches — so counts and search agree (see
+// verify-count-scope-parity.ts for the full contract).
+check('onFocus with empty text shows the deal+period+category-scoped Top 6 (topCitiesByListings(query.deal, paymentMonthly, effCategory, 6))', /onFocus=\{\(\) => \{[\s\S]{0,1800}?topCitiesByListings\(query\.deal, paymentMonthly, effCategory, 6\)/.test(indexSrc));
 check(
   'REGRESSION (found live in testing): the Top-6-on-focus promise callback re-checks cityTextRef at resolution time before overwriting citySuggestions — without this guard, a keystroke typed right after focus can have its correctly-filtered results silently clobbered back to the stale Top 6 by the async callback resolving a moment later',
-  /if \(!cityTextRef\.current\) setCitySuggestions\(topCitiesByListings\(query\.deal, paymentMonthly, 6\)\);/.test(indexSrc) && /cityTextRef\.current = v;/.test(indexSrc),
+  /if \(!cityTextRef\.current\) setCitySuggestions\(topCitiesByListings\(query\.deal, paymentMonthly, effCategory, 6\)\);/.test(indexSrc) && /cityTextRef\.current = v;/.test(indexSrc),
 );
 check(
   'REGRESSION (found live in testing, now also gates on deal AND period change): the deal+period-scoped ensureCityFieldIndex() fetch re-runs the match against cityTextRef once it resolves — without this, a user who types before a slow-connection fetch finishes would see an empty dropdown forever, since nothing else re-triggers matchCitiesByText() once the data actually arrives',
-  /void ensureCityFieldIndex\(query\.deal, paymentMonthly\)\.then\(\(pool\) => \{[\s\S]{0,700}?if \(cityTextRef\.current\) \{[\s\S]{0,200}?setCitySuggestions\(latin \? \[\] : matchCitiesByText\(query\.deal, paymentMonthly, cityTextRef\.current\)\);/.test(indexSrc),
+  /void ensureCityFieldIndex\(query\.deal, paymentMonthly, effCategory\)\.then\(\(pool\) => \{[\s\S]{0,700}?if \(cityTextRef\.current\) \{[\s\S]{0,200}?setCitySuggestions\(latin \? \[\] : matchCitiesByText\(query\.deal, paymentMonthly, effCategory, cityTextRef\.current\)\);/.test(indexSrc),
 );
 check(
-  'NEW (owner request 2026-07-20, extended 2026-07-21 to also gate on rent-period change): flipping Buy<->Rent or Monthly<->Yearly live-refreshes an already-open Top-6 list instead of leaving a stale ranking on screen',
-  /\}, \[query\.deal, paymentMonthly\]\);/.test(indexSrc) && /else if \(cityFocus\) \{\s*setCitySuggestions\(topCitiesByListings\(query\.deal, paymentMonthly, 6\)\);/.test(indexSrc),
+  'NEW (owner request 2026-07-20, extended 2026-07-21 to also gate on rent-period change, 2026-08-14 on category): flipping Buy<->Rent, Monthly<->Yearly or Residential<->Commercial live-refreshes an already-open Top-6 list instead of leaving a stale ranking on screen',
+  /\}, \[query\.deal, paymentMonthly, effCategory\]\);/.test(indexSrc) && /else if \(cityFocus\) \{\s*setCitySuggestions\(topCitiesByListings\(query\.deal, paymentMonthly, effCategory, 6\)\);/.test(indexSrc),
 );
 check('onChangeText clears citySelected on every keystroke (never silently reuses a stale pick)', /onChangeText=\{\(v\) => \{[\s\S]{0,300}?setCitySelected\(null\)/.test(indexSrc));
 check('onSearch blocks when citySelected is falsy, using CITY_REQUIRED_MSG (never calls the old free-text resolveLocation guessing path)', /if \(!citySelected\) \{[\s\S]{0,600}?setLocMsg\(CITY_REQUIRED_MSG\);[\s\S]{0,600}?return;/.test(indexSrc));

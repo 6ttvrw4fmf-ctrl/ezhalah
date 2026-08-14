@@ -17,6 +17,7 @@ import { colors, radius } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 import { useReducedMotion } from '@/lib/useReducedMotion';
+import { runAfterAnimation } from '@/lib/afterAnimation';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const AnimatedImage = Animated.createAnimatedComponent(Image);
@@ -37,10 +38,10 @@ const FOCUS_T = { duration: 130, easing: Easing.out(Easing.quad) };
 // Reusable spring-press wrapper — wraps any content so a plain tappable gets the
 // same modern dip-and-bounce feedback as the styled controls below.
 export function Tappable({
-  children, onPress, style, dip = 0.035, disabled,
+  children, onPress, style, dip = 0.035, disabled, testID,
 }: {
   children: React.ReactNode; onPress?: () => void; style?: StyleProp<ViewStyle>;
-  dip?: number; disabled?: boolean;
+  dip?: number; disabled?: boolean; testID?: string;
 }) {
   const press = useSharedValue(0);
   const a = useAnimatedStyle(() => ({
@@ -49,6 +50,7 @@ export function Tappable({
   }));
   return (
     <AnimatedPressable
+      testID={testID}
       onPress={onPress}
       disabled={disabled}
       onPressIn={() => { press.value = withTiming(1, PRESS_IN); }}
@@ -85,6 +87,9 @@ export function DropdownReveal({ visible, children, style }: { visible: boolean;
   const v = useSharedValue(visible ? 1 : 0);
   const [mounted, setMounted] = useState(visible);
   const [frozen, setFrozen] = useState(children);
+  // Generation counter for the close hand-off: a reopen while the close is still fading bumps it,
+  // so the pending unmount (animation callback OR timer, whichever fires) becomes a no-op.
+  const closeGen = useRef(0);
 
   useEffect(() => {
     if (visible) setFrozen(children);
@@ -92,12 +97,26 @@ export function DropdownReveal({ visible, children, style }: { visible: boolean;
 
   useEffect(() => {
     if (visible) {
+      closeGen.current++; // cancel any in-flight close hand-off
       setMounted(true);
       v.value = withTiming(1, reduced ? { duration: 0, easing: DROPDOWN_OPEN.easing } : DROPDOWN_OPEN);
     } else {
-      v.value = withTiming(0, reduced ? { duration: 0, easing: DROPDOWN_CLOSE.easing } : DROPDOWN_CLOSE, (finished) => {
-        if (finished) runOnJS(setMounted)(false);
-      });
+      // THE UNMOUNT IS NEVER GATED ON THE ANIMATION (repo rule, PR#341/#346 — see
+      // src/lib/afterAnimation.ts): on web the reanimated completion callback is rAF-driven and
+      // freezes in hidden/backgrounded tabs, which used to leave a ghost box mounted at partial
+      // opacity, still holding its layout height. Same fade, same duration — but the hand-off to
+      // setMounted(false) also rides a timer (200ms, a hair past DROPDOWN_CLOSE's 150ms), so it
+      // always lands. exactly-once is runAfterAnimation's own latch; staleness is closeGen's.
+      const gen = ++closeGen.current;
+      runAfterAnimation(
+        (onFinished) => {
+          v.value = withTiming(0, reduced ? { duration: 0, easing: DROPDOWN_CLOSE.easing } : DROPDOWN_CLOSE, (finished) => {
+            if (finished) runOnJS(onFinished)();
+          });
+        },
+        () => { if (gen === closeGen.current) setMounted(false); },
+        200,
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);

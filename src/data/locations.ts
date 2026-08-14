@@ -669,22 +669,51 @@ export type CityOption = {
 // Rent period is known). Period-scoping the pool means the Trending Top-6 AND the typed autocomplete
 // both reflect the chosen Monthly/Yearly period for Rent; Buy is always null → identical to before.
 const pmKey = (paymentMonthly: boolean | null) => (paymentMonthly === null ? '' : paymentMonthly ? 'm' : 'a');
-const cityPoolKey = (deal: Deal, paymentMonthly: boolean | null) => `${deal}:${pmKey(paymentMonthly)}`;
+// COUNT-SCOPE PARITY (2026-08-14): the pool is now also keyed by the EFFECTIVE category the results
+// RPC will search (query.category once picked, else the implied 'Residential' default — see
+// IMPLIED_CATEGORY_DEFAULT in remote.ts), so the Top-6 ranking and every listing_count agree with
+// what pressing Search actually returns. Before this, the city pool counted ALL categories while a
+// bare search implied Residential — up to 86% overstated district counts, commercial-only places
+// presented as alive (findings 2026-08-13, R1).
+const cityPoolKey = (deal: Deal, paymentMonthly: boolean | null, category: Category | null) => `${deal}:${pmKey(paymentMonthly)}:${category ?? ''}`;
 const CITY_FIELD_POOLS = new Map<string, CityOption[]>();
 const _cityFieldPromises = new Map<string, Promise<CityOption[]>>();
+
+// Pool status — the dropdown's zero-state affordance (2026-08-14). The silent-[] catch below stays
+// (the field must never crash the form), but the UI can no longer distinguish "loading" from
+// "failed" from "genuinely empty" without it: all three rendered NOTHING (findings P1, cases
+// A/C/D/E/F/H). 'ready' means the pool map holds data for this key; 'error' a fetch settled without
+// data (tap-to-retry re-runs the ensure); anything else is 'loading' (incl. not-yet-requested —
+// focusing always triggers the ensure, so that state is momentary).
+export type PoolStatus = 'loading' | 'error' | 'ready';
+const _cityPoolStatus = new Map<string, PoolStatus>();
+const _districtPoolStatus = new Map<string, PoolStatus>();
+export function cityPoolStatus(deal: Deal, paymentMonthly: boolean | null, category: Category | null): PoolStatus {
+  const key = cityPoolKey(deal, paymentMonthly, category);
+  return CITY_FIELD_POOLS.has(key) ? 'ready' : _cityPoolStatus.get(key) ?? 'loading';
+}
+export function districtPoolStatus(cityId: number, deal: Deal, category: Category | null, paymentMonthly: boolean | null): PoolStatus {
+  const key = districtCacheKey(cityId, deal, category, paymentMonthly);
+  return _districtCache.has(key) ? 'ready' : _districtPoolStatus.get(key) ?? 'loading';
+}
 
 // Loads the deal-scoped cities-with-listings pool once per deal per session (a few hundred rows at
 // most — small enough to fetch in one shot and search entirely client-side, same shape as
 // ensureLocationIndex above). Already sorted by listing_count desc so topCitiesByListings() below
 // is just a slice.
-export async function ensureCityFieldIndex(deal: Deal, paymentMonthly: boolean | null = null): Promise<CityOption[]> {
-  const key = cityPoolKey(deal, paymentMonthly);
+export async function ensureCityFieldIndex(deal: Deal, paymentMonthly: boolean | null = null, category: Category | null = null): Promise<CityOption[]> {
+  const key = cityPoolKey(deal, paymentMonthly, category);
   const cached = CITY_FIELD_POOLS.get(key);
   if (cached) return cached;
   const inflight = _cityFieldPromises.get(key);
   if (inflight) return inflight;
+  _cityPoolStatus.set(key, 'loading');
   const p = (async () => {
-    if (!supabase) return [];
+    if (!supabase) {
+      _cityPoolStatus.set(key, 'error');
+      _cityFieldPromises.delete(key);
+      return [];
+    }
     try {
       const _ac = new AbortController();
       const _t = setTimeout(() => _ac.abort(), 15000);
@@ -697,7 +726,15 @@ export async function ensureCityFieldIndex(deal: Deal, paymentMonthly: boolean |
         // populates rather than going blank.
         const args: Record<string, unknown> = { p_deal: dealAr(deal) };
         if (paymentMonthly !== null) args.p_payment_monthly = paymentMonthly;
+        if (category !== null) args.p_category = category;
         let res = await supabase.rpc('top_cities_by_deal_ar', args).abortSignal(_ac.signal);
+        if (res.error && category !== null) {
+          // TODO(pending migration 2026-08-14): top_cities_by_deal_ar is gaining `p_category text
+          // default null` — until that migration is applied everywhere, an older signature rejects
+          // the arg; drop it (counts fall back to the pre-category scope) rather than going blank.
+          const { p_category: _dropped, ...noCat } = args;
+          res = await supabase.rpc('top_cities_by_deal_ar', noCat).abortSignal(_ac.signal);
+        }
         if (res.error && paymentMonthly !== null) {
           res = await supabase.rpc('top_cities_by_deal_ar', { p_deal: dealAr(deal) }).abortSignal(_ac.signal);
         }
@@ -714,12 +751,18 @@ export async function ensureCityFieldIndex(deal: Deal, paymentMonthly: boolean |
           listingCount: Number(r.listing_count) || 0,
         }));
         CITY_FIELD_POOLS.set(key, opts);
+        _cityPoolStatus.set(key, 'ready');
         return opts;
       }
+      // RPC settled with an error (data null): record it and evict the promise so the error row's
+      // tap-to-retry actually refetches instead of replaying a dead resolved-[] promise.
+      _cityPoolStatus.set(key, 'error');
+      _cityFieldPromises.delete(key);
       return [];
     } catch {
       // Same RC-A pattern as ensureLocationIndex: reset so a stalled/failed load retries on the
       // next call instead of returning a dead promise forever.
+      _cityPoolStatus.set(key, 'error');
       _cityFieldPromises.delete(key);
       return [];
     }
@@ -729,8 +772,8 @@ export async function ensureCityFieldIndex(deal: Deal, paymentMonthly: boolean |
 }
 
 // Shown immediately when the City field is focused with no text typed yet.
-export function topCitiesByListings(deal: Deal, paymentMonthly: boolean | null = null, k = 6): CityOption[] {
-  return (CITY_FIELD_POOLS.get(cityPoolKey(deal, paymentMonthly)) ?? []).slice(0, k);
+export function topCitiesByListings(deal: Deal, paymentMonthly: boolean | null = null, category: Category | null = null, k = 6): CityOption[] {
+  return (CITY_FIELD_POOLS.get(cityPoolKey(deal, paymentMonthly, category)) ?? []).slice(0, k);
 }
 
 // ── District field (city_id-scoped) — mirrors the City field. ────────────────────────────────────
@@ -767,8 +810,13 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal, category
   if (cached) return cached;
   const inflight = _districtPromises.get(key);
   if (inflight) return inflight;
+  _districtPoolStatus.set(key, 'loading');
   const p = (async () => {
-    if (!supabase) return [];
+    if (!supabase) {
+      _districtPoolStatus.set(key, 'error');
+      _districtPromises.delete(key);
+      return [];
+    }
     try {
       const _ac = new AbortController();
       const _t = setTimeout(() => _ac.abort(), 15000);
@@ -796,10 +844,15 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal, category
           matchValues: Array.isArray(r.match_values) && r.match_values.length ? r.match_values : [r.district_ar],
         }));
         _districtCache.set(key, opts);
+        _districtPoolStatus.set(key, 'ready');
         return opts;
       }
+      // RPC settled with an error (data null) — same record-and-evict as ensureCityFieldIndex.
+      _districtPoolStatus.set(key, 'error');
+      _districtPromises.delete(key);
       return [];
     } catch {
+      _districtPoolStatus.set(key, 'error');
       _districtPromises.delete(key); // same retry-on-failure pattern as ensureCityFieldIndex
       return [];
     }
@@ -835,11 +888,11 @@ export function matchDistrictsByCityId(cityId: number, deal: Deal, category: Cat
 // tatweel stripped, then non-letter/digit chars dropped) — the same folding the DB's own
 // normalize_ar() applies — so "الري" matches "الرياض" exactly like a DB-side search would. Ranks
 // exact-prefix matches before substring matches, then by listing count (bigger cities first).
-export function matchCitiesByText(deal: Deal, paymentMonthly: boolean | null, query: string): CityOption[] {
+export function matchCitiesByText(deal: Deal, paymentMonthly: boolean | null, category: Category | null, query: string): CityOption[] {
   const q = norm(query);
   if (!q) return [];
   const scored: { opt: CityOption; rank: number }[] = [];
-  for (const opt of CITY_FIELD_POOLS.get(cityPoolKey(deal, paymentMonthly)) ?? []) {
+  for (const opt of CITY_FIELD_POOLS.get(cityPoolKey(deal, paymentMonthly, category)) ?? []) {
     const n = norm(opt.cityAr);
     if (n.startsWith(q)) scored.push({ opt, rank: 0 });
     else if (n.includes(q)) scored.push({ opt, rank: 1 });
