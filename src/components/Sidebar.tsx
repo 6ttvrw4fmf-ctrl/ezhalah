@@ -131,22 +131,18 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
 
   // Quick tactile feedback on the New Chat button — a short shake + scale "pop" so the user
   // unambiguously feels the click landed before the navigation kicks in. (user request.)
-  const ncShake = useSharedValue(0);
   const ncScale = useSharedValue(1);
   const newChatAnim = useAnimatedStyle(() => ({
-    transform: [{ translateX: ncShake.value }, { scale: ncScale.value }],
+    transform: [{ scale: ncScale.value }],
   }));
 
   // New Chat: docked column may be on any screen, so go home explicitly; the overlay only ever
   // opens over Home, where closing is enough.
   const onNewChat = () => {
-    // Tactile feedback: tiny shake + pulse so the user feels the tap. Cheap, runs on the UI thread.
-    ncShake.value = withSequence(
-      withTiming(-6, { duration: 50 }),
-      withTiming(6,  { duration: 60 }),
-      withTiming(-4, { duration: 60 }),
-      withTiming(0,  { duration: 70 }),
-    );
+    // Tactile feedback: a single soft dip + spring back — a calm "done" acknowledgment. The old
+    // side-to-side shake is gone (owner 2026-08-14: "it shakes… I want an animation that makes me
+    // feel I've done a new chat"). The fresh-page feeling itself lives in the chat area: the old
+    // conversation fades out and the clean chat rises in (agent.tsx fresh effect).
     ncScale.value = withSequence(
       withTiming(0.96, { duration: 80 }),
       withSpring(1, { damping: 8, stiffness: 220 }),
