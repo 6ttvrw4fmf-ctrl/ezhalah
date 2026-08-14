@@ -230,7 +230,13 @@ export default function Auth() {
   // in Arabic via the automatic RTL row flip). Below that: the panel becomes a compact header block
   // above the form. (Complete redesign, owner 2026-08-15: "change it completely… something
   // attractive" — the washed-out sketch page is gone; the brand carries the screen now.)
-  const wide = useWindowDimensions().width >= 900;
+  // Hydration-safe: the static export pre-renders with no real window width, so the first client
+  // paint MUST match that (stacked). `wide` only turns on after mount — otherwise React throws
+  // hydration error #418 and the page breaks (live incident, 2026-08-15).
+  const winW = useWindowDimensions().width;
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  const wide = hydrated && winW >= 900;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
