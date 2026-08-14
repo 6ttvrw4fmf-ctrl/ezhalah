@@ -380,15 +380,16 @@ export default function Agent() {
   // language (Arabic UI → Arabic pool, English UI → English pool, never mixed). Re-samples if the
   // language or column count changes. Phone shows 6, wider screens 12. (user request: rotation.)
   const exampleSet = useExamplePrompts(locale === 'ar' ? 'ar' : 'en', narrowGrid ? 6 : 12);
-  const { seed, filter, chatBubble, chatSub, replay, fresh } = useLocalSearchParams<{
+  const { seed, filter, chatBubble, chatSub, replay, fresh, hid } = useLocalSearchParams<{
     seed?: string;
     filter?: string;
     chatBubble?: string;
     chatSub?: string;
     replay?: string;
     fresh?: string;
+    hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, gated, pendingMessage, setPendingMessage, recordChatTurn, trackOpen } = useApp();
+  const { user, runQuery, loadMoreListings, gated, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history } = useApp();
   // Per-message "Load More" in flight, so a double-tap can't double-fetch the same page.
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -1207,10 +1208,24 @@ export default function Agent() {
   // Reopening a past search from the sidebar (replay='0') just SHOWS the saved conversation — the
   // request bubble and the results render in their final state with no typewriter replay, no
   // "thinking/searching" beats. It's a history view, not a fresh run. (user request.)
-  const openStatic = async (q: SearchQuery, override?: { bubble: string; sub: string }) => {
+  const openStatic = async (q: SearchQuery, override?: { bubble: string; sub: string }, snapshot?: SearchResult) => {
     const { bubble, sub } = override ?? filterToChat(q);
     const userId = uid();
     const resultsId = uid();
+    // A saved chat carries the results it already found — render them INSTANTLY, zero network,
+    // no "searching…" beat of any kind (owner 2026-08-14: "it should already show him the property
+    // because he already listed it. This is just saved."). «عرض المزيد» still pages live from here.
+    if (snapshot) {
+      setMsgs([
+        { id: userId, role: 'user', text: bubble },
+        { id: resultsId, role: 'results', text: sub, result: snapshot },
+      ]);
+      setDoneTyping((d) => ({ ...d, [resultsId]: true }));
+      setRevealCount((c) => ({ ...c, [resultsId]: Math.min(FIRST_PAGE, snapshot.listings.length) }));
+      pinModeRef.current = 'top';
+      toTop();
+      return;
+    }
     // Render the user bubble + a brief "searching…" status immediately so the screen is never blank
     // while the per-search fetch (now async) resolves. (runQuery used to be synchronous.)
     setMsgs([
@@ -1275,7 +1290,7 @@ export default function Agent() {
         const q = JSON.parse(filter) as SearchQuery;
         const override = chatBubble && chatSub ? { bubble: chatBubble, sub: chatSub } : undefined;
         startFresh();
-        if (replay === '0') openStatic(q, override);
+        if (replay === '0') openStatic(q, override, hid ? history.find((h) => h.id === hid)?.snapshot : undefined);
         else sendFilter(q, override);
       } catch {}
     } else if (seed && seed !== lastSeedRef.current) {
@@ -1287,7 +1302,7 @@ export default function Agent() {
       greetedRef.current = true;
       sendGreeting();
     }
-  }, [seed, filter, chatBubble, chatSub, replay]);
+  }, [seed, filter, chatBubble, chatSub, replay, hid]);
 
   // New Chat routes back here with a changing ?fresh=… — wipe the conversation and greet again, even
   // if we were already on the agent screen (where the component doesn't remount). (user request.)

@@ -201,7 +201,9 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     const isSearchChat = !!(c.query?.deal || c.query?.location || c.query?.category || c.query?.type || c.query?.detail || c.query?.priceBand || c.query?.priceInput);
     animateOut(() => {
       onClose();
-      if (isSearchChat) router.replace({ pathname: '/agent', params: { filter: JSON.stringify(c.query), replay: '0' } });
+      // hid rides along so the agent can pick up this entry's saved result snapshot and render the
+      // chat instantly (no re-search); entries without a snapshot fall back to the live replay.
+      if (isSearchChat) router.replace({ pathname: '/agent', params: { filter: JSON.stringify(c.query), replay: '0', hid: c.id } });
       else router.replace({ pathname: '/agent', params: { fresh: String(Date.now()) } });
     });
   };

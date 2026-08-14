@@ -24,7 +24,11 @@ export type AuthUser = {
   sub: string; // phone or email
 };
 
-export type HistoryItem = { id: string; label: string; query: SearchQuery; ts: number; starred?: boolean };
+// snapshot = the results the search actually returned, saved WITH the entry so reopening a saved
+// chat renders instantly with zero network (owner 2026-08-14: "it should already show him the
+// property... this is just saved"). Capped at SNAPSHOT_CAP cards; «عرض المزيد» continues live
+// (loadMore de-dups against the held cards, so a truncated snapshot pages gap-free).
+export type HistoryItem = { id: string; label: string; query: SearchQuery; ts: number; starred?: boolean; snapshot?: SearchResult };
 
 type AppState = {
   query: SearchQuery;
@@ -247,16 +251,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // If the user already has a chat for this query, KEEP it (its id and its starred flag) — just
   // refresh the label/timestamp and bump it to the top. Without this, re-running the same search was
   // creating a brand-new entry and silently nuking the star. (user-reported bug.)
-  const recordHistory = (q: SearchQuery) => {
+  // Snapshot bounds: SNAPSHOT_CAP cards per entry, snapshots kept on the SNAPSHOT_ENTRIES most
+  // recent entries only — keeps the persisted history well under localStorage limits while the
+  // chats a user actually reopens (recent ones) stay instant. Older entries fall back to the live
+  // replay path, unchanged.
+  const SNAPSHOT_CAP = 20;
+  const SNAPSHOT_ENTRIES = 15;
+  const recordHistory = (q: SearchQuery, result?: SearchResult) => {
     const label = queryLabel(q);
+    // Truncated snapshot restarts paging at 0 with hasMore — loadMore de-dups against the held
+    // cards, so the continuation is gap-free; an untruncated one keeps its exact paging state.
+    const snapshot: SearchResult | undefined = result
+      ? result.listings.length > SNAPSHOT_CAP
+        ? { ...result, listings: result.listings.slice(0, SNAPSHOT_CAP), pageOffset: 0, hasMore: true }
+        : result
+      : undefined;
     setHistory((h) => {
       const prior = h.find((it) => sameQuery(it.query, q));
       const id = prior?.id ?? 'h' + Date.now();
       const starred = prior?.starred ?? false;
-      const next: HistoryItem = { id, label, query: q, ts: Date.now(), starred };
+      const next: HistoryItem = { id, label, query: q, ts: Date.now(), starred, ...(snapshot ? { snapshot } : {}) };
       setActiveChatId(id);
       const rest = h.filter((it) => it.id !== id);
-      return [next, ...rest].slice(0, 50);
+      return [next, ...rest]
+        .slice(0, 50)
+        .map((it, i) => (i < SNAPSHOT_ENTRIES || !it.snapshot ? it : { ...it, snapshot: undefined }));
     });
   };
 
@@ -394,15 +413,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ls?.setItem(sig, String(visitOffset + 1));
         } catch { /* no localStorage (SSR/native) → no rotation, fine */ }
         const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null, visitOffset });
+        // Attach the RESOLVED query so the caller renders the Search Summary from what actually ran
+        // (the corrected city/region), not the raw pre-resolution text. (one-engine summary parity.)
+        const result: SearchResult = { ...r, query: q, pageOffset: pageCand, hasMore: pageCand >= 1500, matchTotal: pageTotal };
         if (record) {
           setSearchCount((c) => c + 1);
           // Record the chat in memory (it shows in the current session). Persistence only happens for
           // signed-in users — a guest's chats are never written to storage, so they vanish on leave.
-          recordHistory(q);
+          // The result rides along so reopening this chat renders instantly (no re-search).
+          recordHistory(q, result);
         }
-        // Attach the RESOLVED query so the caller renders the Search Summary from what actually ran
-        // (the corrected city/region), not the raw pre-resolution text. (one-engine summary parity.)
-        return { ...r, query: q, pageOffset: pageCand, hasMore: pageCand >= 1500, matchTotal: pageTotal };
+        return result;
       },
       // Load More (owner 2026-07-08): fetch the NEXT real page of matching listings beyond `offset`
       // (filter-first, recency order) so broad searches page through the FULL set. Returns the ranked
