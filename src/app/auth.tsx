@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Animated, Easing, Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Animated, Easing, Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { colors, radius, cardShadow } from '@/theme/tokens';
+import { colors, cardShadow } from '@/theme/tokens';
 import { Spinner } from '@/components/ui';
 import { useApp, type AuthUser } from '@/store';
 import { useI18n, t } from '@/i18n';
@@ -24,12 +23,10 @@ const setLtr = (node: any) => {
   if (Platform.OS === 'web' && node?.setAttribute) node.setAttribute('dir', 'ltr');
 };
 
-const MAX_W = 460;
 const LOGO = require('../../assets/images/ezhalah-logo.png');
 type Step = 'main' | 'google' | 'apple' | 'appleface' | 'otp';
 
 export default function Auth() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { isRTL } = useI18n();
   const { signIn, user } = useApp();
@@ -226,56 +223,30 @@ export default function Auth() {
 
   const appleEmail = hideEmail ? 'hide-my-email@privaterelay.appleid.com' : 'apple-user@icloud.com';
 
-  // ≥900px: the brand panel and the form sit side by side (panel on the reading-start side — right
-  // in Arabic via the automatic RTL row flip). Below that: the panel becomes a compact header block
-  // above the form. (Complete redesign, owner 2026-08-15: "change it completely… something
-  // attractive" — the washed-out sketch page is gone; the brand carries the screen now.)
-  // Hydration-safe: the static export pre-renders with no real window width, so the first client
-  // paint MUST match that (stacked). `wide` only turns on after mount — otherwise React throws
-  // hydration error #418 and the page breaks (live incident, 2026-08-15).
-  const winW = useWindowDimensions().width;
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
-  const wide = hydrated && winW >= 900;
 
   return (
+    // ── Centered sign-in POPUP (owner 2026-08-15): the brand panel is gone. One white card pops up
+    // in the middle of a softly dimmed ground with a gentle rise+fade; clicking ANYWHERE outside the
+    // card (or the X / hardware back) closes it. Logo + the sign-in ways, nothing else. ──
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      <Animated.View style={[{ flex: 1, flexDirection: wide ? 'row' : 'column' }, entranceStyle]}>
-
-      {/* ── Brand panel: deep Ezhalah green, white eagle mark, the promise. One confident block. ── */}
-      <View style={[s.brand, wide ? s.brandSide : s.brandTop, !wide && { paddingTop: insets.top + 28 }]}>
-        {/* react-native-web can't tint a PNG, so the dark-green eagle sits on a light disc — a
-            seal on the green field. */}
-        <Animated.View style={[s.brandSeal, !wide && s.brandSealSm, { opacity: blink }]}>
-          <RNImage source={LOGO} style={s.brandMark} resizeMode="contain" />
-        </Animated.View>
-        <Text style={[s.brandTitle, !wide && s.brandTitleSm]}>{t('Looking for a property? Ezhalah.')}</Text>
-        <Text style={s.brandSub}>
-          {t('Ezhalah brings property listings from the various Saudi real-estate platforms together in one place.')}
-        </Text>
-        {wide && (
-          <View style={s.brandTrust}>
-            <View style={s.brandTrustLine} />
-            <Text style={s.brandTrustText}>{t('More than 25 Saudi property platforms — in one place.')}</Text>
-          </View>
-        )}
-      </View>
-
-      {/* ── Form side: warm paper, three ways in, nothing else. ── */}
-      <View style={{ flex: 1 }}>
-      <View style={[s.topBar, { paddingTop: wide ? insets.top + 8 : 8 }]}>
-        <Pressable onPress={back} style={s.iconBtn} hitSlop={8}>
-          <Ionicons
-            name={step === 'main' && !ccOpen ? 'close' : isRTL ? 'chevron-forward' : 'chevron-back'}
-            size={22}
-            color={colors.ink}
-          />
-        </Pressable>
-      </View>
-
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={s.center} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        {/* Wide screens get the floating-card (modal) presentation; mobile stays edge-to-edge clean. */}
-        <View style={[s.col, wide && s.card]}>
+      <View style={s.dim} pointerEvents="none" />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        {/* The outer Pressable fills the screen — a press on the empty ground closes the popup. The
+            inner Pressable swallows presses so touching the card itself never dismisses it. */}
+        <Pressable style={s.center} onPress={back}>
+          <Pressable style={s.popWrap} onPress={() => {}}>
+            <Animated.View style={[s.pop, entranceStyle]}>
+              <Pressable onPress={back} style={s.popClose} hitSlop={10}>
+                <Ionicons
+                  name={step === 'main' && !ccOpen ? 'close' : isRTL ? 'chevron-forward' : 'chevron-back'}
+                  size={20}
+                  color={colors.ink}
+                />
+              </Pressable>
+              {/* The eagle seal — the only branding the popup needs (keeps its gentle blink). */}
+              <Animated.View style={[s.popSeal, { opacity: blink }]}>
+                <RNImage source={LOGO} style={s.popMark} resizeMode="contain" />
+              </Animated.View>
           {/* ── main ───────────────────────────────────────────────── */}
           {step === 'main' && (
             <>
@@ -371,11 +342,6 @@ export default function Auth() {
 
               <Pressable style={[s.continue, (!valid || busy) && s.continueOff]} disabled={!valid || busy} onPress={onContinuePhone}>
                 {busy ? <Spinner tint="#fff" /> : <Text style={s.continueText}>{t('Continue')}</Text>}
-              </Pressable>
-              {/* The agreement line moved up under the title; a quiet Close link closes the sheet
-                  (same handler as the top X) so the modal always has a visible way out at the end. */}
-              <Pressable onPress={back} hitSlop={8} style={s.closeLink}>
-                <Text style={s.closeLinkText}>{t('Close')}</Text>
               </Pressable>
             </>
           )}
@@ -507,54 +473,48 @@ export default function Auth() {
               </Pressable>
             </View>
           )}
-        </View>
+            </Animated.View>
+          </Pressable>
+        </Pressable>
       </ScrollView>
-      </View>
-      </Animated.View>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
-  // A clear, tappable circular close button (was a bare floating glyph that read as broken). (user request.)
-  iconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
+  // ── The popup ────────────────────────────────────────────────────────────────────────────────
+  // A soft green-tinted dim over the warm paper ground, so the card reads as a floating dialog.
+  dim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(23, 37, 30, 0.30)' },
+  // Fills the screen and centers the card; pressing it (the empty ground) closes the popup.
+  center: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
+  popWrap: { width: '100%', maxWidth: 400 },
+  pop: {
+    backgroundColor: '#fff',
+    borderRadius: 26,
+    paddingTop: 34,
+    paddingBottom: 30,
+    paddingHorizontal: 26,
     borderWidth: 1,
     borderColor: colors.line,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
+    shadowColor: '#12251b',
+    shadowOpacity: 0.22,
+    shadowRadius: 34,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 12,
   },
-  // Content flows from the TOP (justifyContent flex-start) so the page scrolls freely instead of
-  // locking vertically-centered — the user can scroll the sign-in screen naturally. flexGrow keeps it
-  // filling the viewport when the content is short. (user request: "let the user scroll, don't make
-  // it stick.") Extra top/bottom padding gives breathing room.
-  center: { flexGrow: 1, alignItems: 'stretch', justifyContent: 'center', paddingHorizontal: 28, paddingTop: 12, paddingBottom: 40 },
-  col: { width: '100%', maxWidth: 420, alignSelf: 'center' },
-  // ── The brand panel ──────────────────────────────────────────────────────────────────────────
-  brand: { backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36 },
-  brandSide: { flex: 1, maxWidth: 520 },
-  brandTop: { paddingBottom: 26, borderBottomLeftRadius: 26, borderBottomRightRadius: 26 },
-  brandSeal: {
-    width: 116, height: 116, borderRadius: 58, backgroundColor: '#f4f6f2',
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.45)',
+  // X (or back-chevron on inner steps) pinned in the card corner — RTL-aware via `end`.
+  popClose: {
+    position: 'absolute', top: 14, end: 14, zIndex: 5,
+    width: 34, height: 34, borderRadius: 17,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f4f1',
   },
-  brandSealSm: { width: 72, height: 72, borderRadius: 36 },
-  brandMark: { width: '68%', height: '68%' },
-  brandTitle: { fontSize: 34, fontWeight: '800', color: '#ffffff', textAlign: 'center', marginTop: 18, letterSpacing: -0.4, lineHeight: 46 },
-  brandTitleSm: { fontSize: 24, marginTop: 10, lineHeight: 33 },
-  brandSub: { fontSize: 14.5, color: 'rgba(255,255,255,0.82)', textAlign: 'center', marginTop: 12, lineHeight: 23, maxWidth: 360 },
-  brandTrust: { alignItems: 'center', marginTop: 34 },
-  brandTrustLine: { width: 44, height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.35)', marginBottom: 12 },
-  brandTrustText: { fontSize: 12.5, color: 'rgba(255,255,255,0.72)', textAlign: 'center', letterSpacing: 0.2 },
+  // The eagle seal — dark-green mark on a light disc (react-native-web can't tint a PNG).
+  popSeal: {
+    alignSelf: 'center', width: 76, height: 76, borderRadius: 38,
+    backgroundColor: '#eef4ef', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: '#dbe6dd', marginBottom: 14,
+  },
+  popMark: { width: '66%', height: '66%' },
 
   // Modal-style header (2026-08-15): a display-size centered title with the agreement line right
   // under it, so the user consents up front instead of finding the terms in the footer.
@@ -590,12 +550,6 @@ const s = StyleSheet.create({
   continue: { backgroundColor: colors.dark, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
   continueOff: { opacity: 0.45 },
   continueText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
-  // (fine — the old footer agreement line — moved up under the title as `agree`.)
-  // Quiet centered Close link at the end of the sheet (same handler as the top X).
-  closeLink: { alignSelf: 'center', marginTop: 20, paddingVertical: 6, paddingHorizontal: 14 },
-  closeLinkText: { fontSize: 14, fontWeight: '600', color: '#5d6f64' },
-  // Wide screens: present the form as a floating card (modal feel) on the warm paper ground.
-  card: { backgroundColor: '#fff', borderRadius: 24, paddingVertical: 34, paddingHorizontal: 30, borderWidth: 1, borderColor: colors.line, ...cardShadow },
 
   // Google
   gauth: { marginTop: 20 },
