@@ -521,10 +521,12 @@ const s = StyleSheet.create({
   brandWrap: { alignItems: 'center', alignSelf: 'center', marginBottom: 24, marginTop: -39, width: '100%' },
   // The eagle mark sits in a soft green ring with a tinted halo + shadow so it reads as a deliberate
   // logo, not a floating square. Slightly larger (78) for presence; perfectly centered.
+  // Light medallion: the eagle asset is dark-green-on-transparent since PR#610, so the disc must be
+  // light for the mark to read (dark green on colors.primary was invisible — live regression).
   logoRing: {
-    width: 78, height: 78, borderRadius: 39, backgroundColor: colors.primary,
+    width: 78, height: 78, borderRadius: 39, backgroundColor: '#f3f7f3',
     alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-    borderWidth: 4, borderColor: '#fbfaf7', ...cardShadow,
+    borderWidth: 4, borderColor: colors.primary, ...cardShadow,
   },
   logoImg: { width: '100%', height: '100%' },
   heroTitle: { fontSize: 26, fontWeight: '800', color: colors.ink, marginTop: 16, textAlign: 'center', letterSpacing: -0.3, paddingHorizontal: 12 },
