@@ -1,59 +1,41 @@
-// Desktop UI scale — the mobile-first px design must stay 1:1 on phones/tablets and gain a
-// calibrated, tiered scale on desktop (owner report 2026-08-14: "on a computer the entire interface
-// feels too small and too zoomed out; mobile is perfect — do not change mobile").
+// Desktop UI scale — REVERTED to strict 1:1 (owner decision, 2026-08-14 23:47, supersedes the
+// same-day "too small and zoomed out" report this barrier originally enforced).
 //
-// The scale layer lives in src/app/+html.tsx as media-gated `zoom` rules on <body>. This barrier
-// pins the properties that make it CORRECT rather than the exact numbers:
-//   • every zoom rule is inside a min-width media query of >= 1024px — so phones and tablets can
-//     never be scaled, by construction;
-//   • zoom values are sane (1.0 < z <= 1.4) — enough to fix "too small", incapable of "comically
-//     oversized";
-//   • tiers are monotonic (a wider viewport never gets a SMALLER scale);
-//   • the layer keeps using `zoom` (which reflows layout) and not `transform: scale` (which does
-//     not, and would break scrolling/hit-targets).
+// HISTORY, so the next session doesn't relitigate it: a media-gated `zoom` layer on <body>
+// (1.1/1.2/1.3 tiered by viewport width) shipped on 2026-08-14 to enlarge the mobile-first px
+// design on desktops, and THIS script then pinned its presence. The same evening the owner,
+// looking at production on a MacBook, ruled it "too zoomed in — keep it normal", with screenshot.
+// The current owner call wins, so the barrier now pins the ABSENCE of any viewport scaling:
+// no `zoom`, no `transform: scale`, no font-size percentage inflation in the web shell.
 //
-//   node --experimental-strip-types scripts/verify-desktop-ui-scale.ts    (wired into `npm test`)
+// If desktop sizing ever comes back, do it with real typography/spacing tokens per component —
+// not a blanket body scale — and update this barrier deliberately in that PR.
+//
+//   node --experimental-strip-types scripts/verify-desktop-ui-scale.ts   (wired into `npm test`)
 
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
-let failures = 0;
-const check = (label: string, ok: boolean, detail = '') => {
-  if (ok) { console.log(`PASS  ${label}`); return; }
-  failures++;
-  console.error(`FAIL  ${label}${detail ? `\n      ${detail}` : ''}`);
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const html = readFileSync(join(root, 'src/app/+html.tsx'), 'utf8');
+
+let failed = 0;
+const check = (label: string, ok: boolean) => {
+  if (!ok) failed++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`);
 };
 
-console.log('\nDesktop UI scale — phones untouched, desktop tiers calibrated\n');
+check('no body zoom rule survives in the web shell (owner 2026-08-14: "keep it normal")',
+  !/zoom:\s*[\d.]+/.test(html));
+check('no transform:scale substitute snuck in',
+  !/transform:\s*scale/.test(html));
+check('no font-size percentage inflation substitute',
+  !/font-size:\s*1[1-9]\d%/.test(html));
+check('the viewport meta stays standard initial-scale=1',
+  /initial-scale=1/.test(html));
+check('the revert is documented in place, so the next "too small" report finds the history',
+  /REVERTED to 1:1/.test(html));
 
-const html = readFileSync(join(import.meta.dirname, '..', 'src', 'app', '+html.tsx'), 'utf8');
-
-// Collect every zoom declaration and the media query that encloses it.
-const tierRe = /@media\s*\(\s*min-width:\s*(\d+)px\s*\)\s*\{\s*body\s*\{\s*zoom:\s*([\d.]+)\s*;?\s*\}\s*\}/g;
-const tiers: Array<{ minWidth: number; zoom: number }> = [];
-for (let m; (m = tierRe.exec(html)); ) tiers.push({ minWidth: +m[1], zoom: +m[2] });
-
-check('at least 2 desktop scale tiers exist', tiers.length >= 2, `found ${tiers.length}`);
-
-// Any `zoom:` in the file outside the tier pattern would be an un-gated (possibly mobile-reaching)
-// scale — count raw occurrences and require them all to be tier-pattern matches.
-const rawZoomCount = (html.match(/zoom:/g) ?? []).length;
-check('every zoom rule is media-gated (no bare/global zoom that could reach mobile)',
-  rawZoomCount === tiers.length, `raw zoom: count ${rawZoomCount} vs gated tiers ${tiers.length}`);
-
-for (const t of tiers) {
-  check(`tier @${t.minWidth}px: breakpoint is desktop-only (>= 1024px)`, t.minWidth >= 1024);
-  check(`tier @${t.minWidth}px: zoom ${t.zoom} is sane (1.0 < z <= 1.4)`, t.zoom > 1.0 && t.zoom <= 1.4);
-}
-
-const sorted = [...tiers].sort((a, b) => a.minWidth - b.minWidth);
-check('tiers are monotonic (wider viewport never scales SMALLER)',
-  sorted.every((t, i) => i === 0 || t.zoom >= sorted[i - 1].zoom));
-
-check('scale uses zoom (reflows layout), not transform:scale (would break scroll/hit-targets)',
-  !/transform:\s*scale\s*\(/.test(html));
-
-console.log(failures === 0
-  ? '\n✓ desktop UI scale intact: mobile untouched, desktop tiers calibrated\n'
-  : `\n✗ ${failures} check(s) FAILED — the desktop sizing fix is not intact\n`);
-process.exit(failures === 0 ? 0 : 1);
+console.log(failed === 0 ? '\n✓ desktop-ui-scale barrier: 1:1 confirmed' : `\n✗ ${failed} assertion(s) FAILED`);
+process.exit(failed === 0 ? 0 : 1);
