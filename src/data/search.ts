@@ -740,11 +740,12 @@ function withinValue(price: string, min: number, max: number): boolean {
 
 // TRUE when this query carries a filter that only THIS engine applies (the RPC never sees it), so the
 // RPC's count(*) over() OVERSTATES the real result set and the exact «لقينا N إعلان» headline would
-// lie (bug-hunt 2026-07-30: 9,647 claimed vs 134 actual on a per-m² Buy budget). The three client-only
+// lie (bug-hunt 2026-07-30: 9,647 claimed vs 134 actual on a per-m² Buy budget). The client-only
 // narrowers, mirroring their own gates above/below verbatim:
 //   • per-m² Buy budget — single priceInput ≤50k on Buy is read as SAR/m² (priceFilter);
 //   • legacy exact-size band ±15% — contextSize / non-bedroom detail without explicit areaMin/Max;
-//   • agent keywords — substring-matched over title/description here only.
+//   • agent keywords — substring-matched over title/description here only;
+//   • AMBIGUOUS-DEAL budget (added 2026-08-15, pre-expansion verification) — see below.
 export function hasClientOnlyNarrowing(q: SearchQuery): boolean {
   if (q.keywords && q.keywords.length) return true;
   if (numOrNull(q.areaMin) == null && numOrNull(q.areaMax) == null
@@ -753,6 +754,17 @@ export function hasClientOnlyNarrowing(q: SearchQuery): boolean {
     const digits = (q.priceInput.match(/\d/g) ?? []).join('');
     const amount = digits ? parseInt(digits, 10) : 0;
     if (amount >= 100 && amount <= 50_000) return true;
+  }
+  // AMBIGUOUS DEAL (bothDeals) + a budget: agentPriceCapAnnual() deliberately returns null here
+  // ("one cap over buy+rent — leave to the client"), so the RPC applies NO price bound while
+  // priceFilter still caps every card. That is the same shape as the per-m² case above — the
+  // headline counted a set the user never sees — and it was NOT covered: measured live on the
+  // ambiguous-deal agent path, the count overstated the reachable set by ~3.8×. Flagging it here
+  // suppresses the exact «لقينا N إعلان» headline (agent.tsx countSafe) AND retires the guided
+  // interview for this query, because every chip count would be computed over the same wider set.
+  if (q.bothDeals && numOrNull(q.priceMin) == null && numOrNull(q.priceMax) == null && !q.priceBand) {
+    const digits = (q.priceInput.match(/\d/g) ?? []).join('');
+    if (digits && parseInt(digits, 10) >= 100) return true;
   }
   return false;
 }
