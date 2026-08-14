@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppProvider } from '@/store';
 import { LocaleProvider, useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
+import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
 import IntroVideo from '@/components/IntroVideo';
@@ -38,16 +39,21 @@ function Shell() {
   const pathname = usePathname();
   const router = useRouter();
   // On the web, a hard refresh reloads whatever deep route the user was on (e.g. /agent, /settings) —
-  // but the chat/flow state lives in memory and is gone, so that screen would come back empty. Send
-  // every refresh back to Home instead. Runs once on mount; client-side navigation afterwards is
+  // and for screens whose flow state lives in memory only, that screen would come back empty, so the
+  // refresh is sent back to Home instead. Runs once on mount; client-side navigation afterwards is
   // untouched. '/auth' is exempt so an OAuth redirect can still land there and finish signing in.
+  // EXCEPTION (QA 2026-08-14): `/agent?filter=<JSON SearchQuery>` (and `?seed=…`) carries the whole
+  // search in the URL and re-runs itself on open, so it does NOT come back empty — sending it Home
+  // was silently dropping every selection on refresh (المدينة, الأحياء, «سنوي»/«شهري», السعر,
+  // المساحة, غرف النوم, فئة/نوع) and breaking bookmarked/shared result links. The decision lives in
+  // shouldSendRefreshHome() so scripts/verify-refresh-restores-filter-search.ts can execute it.
   const homedRef = useRef(false);
   useEffect(() => {
     if (homedRef.current) return;
     homedRef.current = true;
-    if (Platform.OS === 'web' && pathname && pathname !== '/' && pathname !== '/auth') {
-      router.replace('/');
-    }
+    if (Platform.OS !== 'web') return;
+    const search = typeof window !== 'undefined' ? window.location.search : '';
+    if (shouldSendRefreshHome(pathname, search)) router.replace('/');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
