@@ -1,0 +1,81 @@
+# Does the built app actually RUN? Builds the web bundle and drives the real primary journey
+# (تصفية → «بحث» → results, then hard-refresh → reopen «تصفية») in headless Chromium.
+#
+# Exists because on 2026-08-15 a TypeScript type error in src/app/agent.tsx shipped to production
+# and blanked the page on «بحث» — search dead app-wide — with every gate green: `npm test` is a
+# source-grep/logic suite that never renders the app, the repo has no typecheck, and safe-deploy's
+# post-deploy smoke test calls the search RPC directly (which stayed HTTP 200 while the UI was dead).
+# See scripts/verify-web-runtime-smoke.mjs for the full story and its three-way proof.
+#
+# Kept OUT of the required `npm test` on purpose (that suite is hermetic and runs in seconds; a
+# 2-minute build + browser would slow every unrelated PR and add flake to a required check) — same
+# precedent as the live migration-drift check in AGENTS.md.
+name: Web runtime smoke
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'app.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/verify-web-runtime-smoke.mjs'
+      - '.github/workflows/web-runtime-smoke.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'app.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/verify-web-runtime-smoke.mjs'
+  workflow_dispatch:
+
+concurrency:
+  group: web-runtime-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: built app runs («بحث» → results → refresh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Build the web bundle
+        # EXPO_PUBLIC_* are CLIENT-PUBLIC by definition — they are inlined into the browser bundle
+        # and served to every visitor, so the anon key below is not a secret (it is the same value
+        # already visible in any production page source, and RLS is what actually protects the data).
+        # NEVER put the service-role key here. Repo secrets take precedence when configured.
+        #
+        # This step deliberately does NOT read scripts/safe-deploy.sh: any workflow mentioning it is
+        # classified as a production deploy entrypoint by scripts/verify-deploy-workflow-guard.ts and
+        # must then carry the full manual-dispatch + DEPLOY-confirmation gating. This workflow does
+        # not deploy anything, and must not look like it does.
+        #
+        # Without these the Supabase client builds as null and every search dies — itself the
+        # 2026-07-10 P0 signature, which this smoke test would then (correctly) catch.
+        env:
+          SECRET_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          SECRET_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: |
+          set -euo pipefail
+          PUBLIC_URL="https://aannarbkwcymrotzwdbo.supabase.co"
+          PUBLIC_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFhbm5hcmJrd2N5bXJvdHp3ZGJvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0MDgxMDAsImV4cCI6MjA5NTk4NDEwMH0.Z-GhSpan6otYWkc8sU43Dw5PT5T_VBUMr0IDZShCQw0"
+          export EXPO_PUBLIC_SUPABASE_URL="${SECRET_URL:-$PUBLIC_URL}"
+          export EXPO_PUBLIC_SUPABASE_KEY="${SECRET_KEY:-$PUBLIC_KEY}"
+          npx expo export --platform web
+
+      - name: Drive the built app in a real browser
+        run: node scripts/verify-web-runtime-smoke.mjs

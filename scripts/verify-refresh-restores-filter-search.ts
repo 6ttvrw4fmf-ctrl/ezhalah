@@ -12,7 +12,7 @@
 //
 // webRefreshRoute.ts is zero-dep, so this EXECUTES the real decision rather than grepping for it.
 //   node --experimental-strip-types scripts/verify-refresh-restores-filter-search.ts   (wired into `npm test`)
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { shouldSendRefreshHome, hasRestorableQuery } from '../src/lib/webRefreshRoute.ts';
 
 let failed = 0;
@@ -68,6 +68,36 @@ const agent = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'ut
 check('agent.tsx still reads the filter param', /useLocalSearchParams<[\s\S]{0,400}?>/.test(agent) && /\bfilter\b/.test(agent));
 check('agent.tsx still runs a ?filter= search on open',
   /if\s*\(\s*filter\s*&&\s*filter\s*!==\s*lastFilterRef\.current\s*\)/.test(agent));
+
+// 5b) …and it must SEED the shared filter state from that payload, or the second half of the class
+//     comes back: results restore fine, but reopening «تصفية» shows a blank form and «بحث» dies with
+//     «الرجاء اختيار مدينة من القائمة». The app context is the only thing the home form rehydrates
+//     from (index.tsx city/district rehydration effects read `query`), and a hard refresh resets it
+//     to HOME_DEFAULT_QUERY(), so the parsed payload has to be written back. (QA §29, 2026-08-15.)
+const filterBranch = agent.slice(agent.indexOf('const q = JSON.parse(filter)'));
+check('agent.tsx pulls setQuery out of useApp (can seed the filter form)',
+  /const\s*\{[^}]*\bsetQuery\b[^}]*\}\s*=\s*useApp\(\)/.test(agent));
+check('agent.tsx seeds the app query from the parsed ?filter= payload, before the search runs',
+  /setQuery\(\s*\(\s*\)\s*=>\s*q\s*\)/.test(filterBranch)
+  && filterBranch.search(/setQuery\(/) < filterBranch.indexOf('sendFilter(q'));
+
+// 5c) setQuery takes an UPDATER FUNCTION, never a value. `setQuery(q)` type-checks nowhere and
+//     throws «TypeError: e is not a function» at runtime the moment a filter search opens — it
+//     SHIPPED that way on 2026-08-15 (PR#661) and killed search app-wide until PR#662 reverted it.
+//     The store does setQueryState((prev) => updater(prev)), so a plain object gets *called*.
+check('agent.tsx never calls setQuery with a bare value (the 2026-08-15 outage signature)',
+  !/setQuery\(\s*(?!\(|function\b)[A-Za-z_$][\w$]*\s*\)/.test(agent));
+
+// 5d) The runtime half of this barrier must stay present and reachable. Static checks like the ones
+//     above were ALL GREEN on the broken commit — only a real browser catches a runtime TypeError.
+const smoke = new URL('./verify-web-runtime-smoke.mjs', import.meta.url);
+const wf = new URL('../.github/workflows/web-runtime-smoke.yml', import.meta.url);
+check('the browser runtime smoke test still exists', existsSync(smoke));
+check('the runtime smoke test drives «بحث» and asserts the page does not blank',
+  existsSync(smoke) && /does not blank the page/.test(readFileSync(smoke, 'utf8')));
+check('a workflow still runs the runtime smoke test on src/ changes', existsSync(wf)
+  && /verify-web-runtime-smoke\.mjs/.test(readFileSync(wf, 'utf8'))
+  && /src\/\*\*/.test(readFileSync(wf, 'utf8')));
 
 // 6) The layout must route its decision through the shared helper (no re-inlined divergent copy).
 const layout = readFileSync(new URL('../src/app/_layout.tsx', import.meta.url), 'utf8');
