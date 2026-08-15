@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, cardShadow, radius } from '@/theme/tokens';
 import { Spinner } from '@/components/ui';
+import HeroBackground from '@/components/HeroBackground';
 import { DEAL_IMG, CATEGORY_IMG } from '@/theme/propertyIcons';
 import { useApp, type AuthUser } from '@/store';
 import { useI18n, t } from '@/i18n';
@@ -303,6 +304,14 @@ export default function Auth() {
     // in the middle of a softly dimmed ground with a gentle rise+fade; clicking ANYWHERE outside the
     // card (or the X / hardware back) closes it. Logo + the sign-in ways, nothing else. ──
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
+      {/* Full-bleed brand scenery UNDER the Filter preview (owner 2026-08-15, found live on a real wide
+          desktop window: a fixed-width card centered in a much wider screen left most of the screen a
+          flat empty void — "why is the background different"). HeroBackground fills edge-to-edge at
+          ANY viewport width, so there's never dead space regardless of window size; FilterPreview sits
+          on top of it giving the specific "the filter is really there" proof the owner asked for. */}
+      <View style={s.heroLayer} pointerEvents="none">
+        <HeroBackground imageOpacity={0.55} fadeStart={0.85} fadeEnd={1} />
+      </View>
       {/* The real Filter card stays visible behind the popup — softly dimmed, inert (owner 2026-08-15:
           "I still want the filter and the entire platform to still show", not decorative scenery).
           See FilterPreview's own comment for why this is a static lookalike, not the live Home screen. */}
@@ -564,6 +573,9 @@ export default function Auth() {
 const s = StyleSheet.create({
   // ── The popup ────────────────────────────────────────────────────────────────────────────────
   // A soft green-tinted dim over the warm paper ground, so the card reads as a floating dialog.
+  // Full-bleed brand backdrop, same zIndex tier as `bg` below (order between the two doesn't matter —
+  // HeroBackground is edge-to-edge scenery, FilterPreview is a smaller card on top of it either way).
+  heroLayer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1 },
   bg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', padding: 24, zIndex: 1 },
   // Lighter than before so the artwork behind stays clearly visible — a veil, not a wall.
   dim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(23, 37, 30, 0.18)', zIndex: 1 },
