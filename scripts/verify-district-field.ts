@@ -35,7 +35,7 @@ check('clearDistrict called on ≥4 city-mutation sites', (indexSrc.match(/clear
 // of duplicating a fetch the effect would immediately re-trigger anyway. Extended 2026-07-21
 // (PR#167/#175, LIVE) to also thread paymentMonthly (Rent's Monthly/Yearly toggle), so the same
 // effect/warm-up also live-refreshes District's Top-6 on a Monthly<->Yearly flip.
-check('city-select (via citySelected) warms THIS city’s districts by city_id, Category+Deal+period-scoped (effCategory since count-scope parity 2026-08-14)', /useEffect\(\(\) => \{\s*if \(!citySelected\) return;\s*const cid = citySelected\.cityId;\s*void ensureDistrictOptions\(cid, query\.deal, effCategory, paymentMonthly\)/.test(indexSrc));
+check('city-select (via citySelected) warms THIS city’s districts by city_id, Category+Deal+period-scoped (effCategory since count-scope parity 2026-08-14)', /useEffect\(\(\) => \{\s*if \(!citySelected\) return;\s*const cid = citySelected\.cityId;\s*void ensureDistrictOptions\(cid, query\.deal, effCategory, paymentMonthly, cohortTypes\)/.test(indexSrc));
 
 // ── MULTI-SELECT (owner 2026-08-10): several districts, OR semantics, one shared selection state ──
 // The state is an ARRAY and city-mutation clears wipe the WHOLE array (no cross-city carry-over,
@@ -73,7 +73,7 @@ check('district options come from the district_options_ar RPC, Category+Deal-sco
 check('RPC result carries match_values (twin-safe recall)', /match_values/.test(locSrc));
 check('Top-6 = districts with active listings only (listingCount > 0)', /listingCount > 0\)\.slice\(0, k\)/.test(locSrc));
 check('autocomplete searches the COMPLETE cached catalog for the city', /export function matchDistrictsByCityId/.test(locSrc));
-check('empty focus shows the Category+Deal+period-scoped Top-6 via topDistrictsForCityId', /topDistrictsForCityId\(cid, query\.deal, effCategory, paymentMonthly, 6\)/.test(indexSrc));
+check('empty focus shows the Category+Deal+period-scoped Top-6 via topDistrictsForCityId', /topDistrictsForCityId\(cid, query\.deal, effCategory, paymentMonthly, 6, cohortTypes\)/.test(indexSrc));
 check('typing filters within the chosen city+scope via matchDistrictsByCityId', /matchDistrictsByCityId\(citySelected\.cityId, query\.deal, effCategory, paymentMonthly, v\)/.test(indexSrc));
 // Arabic-only: typing the district in English yields NO autocomplete and the same Arabic hint the City
 // field shows (owner UI request 2026-07-18) — every district name is Arabic, so there's nothing to match.
@@ -106,7 +106,7 @@ check('counts use the CURRENT filter state (narrowing signature covers type/grou
 check('changing any relevant filter INVALIDATES the previous counts before refetch (no stale numbers)', /setDistrictLiveCounts\(null\);\s*\n\s*if \(!citySelected \|\| !hasDistrictNarrowing/.test(indexSrc));
 check('a live-count response is dropped if a newer request superseded it (race guard)', /if \(id === districtLiveReq\.current && counts\) setDistrictLiveCounts\(counts\)/.test(indexSrc));
 check('onSearch and the count effect share ONE query builder (no state drift between count and search)', /const base = buildFilterBaseQuery\(\)!/.test(indexSrc) && /const q = buildFilterBaseQuery\(\);/.test(indexSrc));
-check('trending rows show the Arabic zero message under narrowing (never a silent dead-end)', /sublabel: districtLiveCounts\?\.\[opt\.districtAr\] === 0 \? t\('No listings here right now'\) : undefined/.test(indexSrc));
+check('trending rows show the Arabic zero message under narrowing (never a silent dead-end)', /sublabel: districtLiveCounts\?\.\[opt\.districtAr\] === 0[\s\S]{0,40}\? t\('No listings here right now'\)[\s\S]{0,80}cohortShareLabel\(opt\.listingCount, opt\.totalInCity\)/.test(indexSrc));
 // The owner explicitly praised and locked the Arabic zero-listing message: it must exist, stay
 // TRANSLATED (no English leak in the user-visible string), and stay wired to the empty rows.
 {
@@ -114,7 +114,7 @@ check('trending rows show the Arabic zero message under narrowing (never a silen
   const m = i18nSrc.match(/'No listings here right now': '([^']+)'/);
   check('the zero-listing message is translated and its Arabic contains no Latin letters', !!m && !/[A-Za-z]/.test(m[1]));
 }
-check('empty district rows are marked with a "no listings here" note', /isEmpty \? <Text style=\{s\.suggEmptyNote\}>\{t\('No listings here right now'\)\}<\/Text> : null/.test(indexSrc));
+check('empty district rows are marked with a "no listings here" note', /isEmpty[\s\S]{0,40}\? <Text style=\{s\.suggEmptyNote\}>\{t\('No listings here right now'\)\}<\/Text>/.test(indexSrc));
 check('the "No listings here right now" string is translated to Arabic', /'No listings here right now': '[^']+'/.test(readFileSync(join(root, 'src/i18n.tsx'), 'utf8')));
 // The picked districts' live counts ride along to the search (multi: the SUM — folds are disjoint,
 // so the sum IS the union size) so the 0-results path can tell an empty area from a type mismatch.
