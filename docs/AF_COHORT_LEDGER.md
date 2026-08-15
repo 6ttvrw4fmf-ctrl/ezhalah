@@ -28,38 +28,70 @@ cohort change.
   paging, diversity, unknown≠no, new-listing inheritance, barrier mutations. PRs #606/#608/#621/
   #623/#625/#628/#630/#633/#636.
 
-### شقة / Apartment — BUY — questions data-justified 2026-08-15
-- N=34,049. Coverage: age 90% · direction 50% · kitchen 34% · elevator 29% · private entrance 29% ·
-  bathrooms 26%. RNPL/furnished: correctly absent (rent concepts; Buy furnished ≈2%).
+### شقة / Apartment — BUY — ✅ CERTIFIED 2026-08-15 (PASS, n=34,069)
+- Types بيع: شقة · مبنى شقق مخدومة · ملحق علوي. Coverage: age 90% · direction 50% · kitchen 34% ·
+  elevator 29% · private entrance 29% · bathrooms 26%. RNPL/furnished: correctly absent (rent
+  concepts; Buy furnished ≈2%).
 - Questions: property_age · amenities · bathrooms · **direction** (new).
+- Battery: all chips == af_eligible == candidates total == rows == direct SQL at nationwide + Riyadh;
+  price/beds/stacking exact; garbage tokens fail closed.
 
-### دور / Floor — RENT ANNUAL
-- N=3,638. age 93% · RNPL 83% known with **64% yes** · AC 76% · private entrance 76% · bath 66%.
+### دور / Floor — RENT ANNUAL — ✅ CERTIFIED 2026-08-15 (PASS, n=3,638)
+- age 93% · RNPL 83% known with **64% yes** · AC 76% · private entrance 76% · bath 66%.
 - Questions: rnpl (ask-first) · property_age · amenities · bathrooms · furnished.
+- rnpl chip 2,335 == applied results == referee == direct SQL, 0 row violations; full 4-way
+  equality nationwide + Riyadh; stacking subsets proven by anti-join.
 
-### دور / Floor — BUY
-- N=11,857. age 85% · private entrance 39% · bath 30%.
-- Questions: property_age · amenities · bathrooms.
+### دور / Floor — BUY — ✅ CERTIFIED 2026-08-15 (PASS, n=11,867)
+- age 85% · private entrance 39% · bath 30%. Questions: property_age · amenities · bathrooms.
 
-### عمارة سكنية / Residential Building — RENT ANNUAL & BUY
-- N=3,211 / 6,373. **street width 96-97% · direction 83-84% · age 89-91%** — completely different
-  signature from Apartment (bathrooms 1%: a building has no meaningful bathroom count — deliberately
-  no bathrooms question). RNPL yes ≈0 → no installment question.
+### عمارة سكنية / Residential Building — RENT ANNUAL & BUY — ✅ CERTIFIED 2026-08-15
+- RENT-ANNUAL PASS n=3,202 · BUY PASS n=6,334 (types: عمارة · مجمع سكني · مجمع · برج).
+  **street width 96-97% · direction 83-84% · age 89-91%** — completely different signature from
+  Apartment (bathrooms 1%: a building has no meaningful bathroom count — deliberately no bathrooms
+  question). RNPL yes ≈0 → no installment question.
 - Questions: property_age · **street_width** (new ladder ١٥/٢٠/٢٥/٣٠ م فأكثر) · **direction** ·
   furnished (rent only).
+- Set equality proven by md5(sorted ids) vs direct SQL on every combo; stw ladder monotonic;
+  0 commercial-table rows in any result set.
 
-### غرفة / Room — RENT ANNUAL
-- N=1,774. **kitchen 85% (its signature)** · age 94% · furnished 49%. bathrooms 0%.
+### غرفة / Room — RENT ANNUAL — ✅ CERTIFIED 2026-08-15 (PASS, n=1,774)
+- **kitchen 85% (its signature)** · age 94% · furnished 49%. bathrooms 0%.
   RNPL known 95% but only 5% yes → the floor gate would hide it everywhere; deliberately not offered.
-- Questions: property_age · amenities · furnished.
+- Questions: property_age · amenities · furnished. md5 set-equality at both scopes.
 
-### استوديو / Studio — RENT ANNUAL (minimal)
-- N=30 nationwide — barely above the >25 floor; most gates will suppress most questions. Enabled
-  minimally (property_age · amenities · furnished) so the engine can serve it if inventory grows.
+### استوديو / Studio — RENT ANNUAL (minimal) — ✅ CERTIFIED 2026-08-15 (PASS, n=30)
+- Types: استوديو · ستوديو · شقَّة صغيرة (استوديو). Barely above the >25 floor; most gates will
+  suppress most questions. Enabled minimally (property_age · amenities · furnished) so the engine
+  can serve it if inventory grows. Engine counts verified exact at n=14 Riyadh (gate suppression is
+  client-side by design).
 
-### Not applicable (documented, no cohort)
+## Verifier's corrected NATIONWIDE oracle (use this, not the strict predicate)
+The strict oracle (`production_ready AND city_id/region_id NOT NULL` + category purity + period
+clause) is exact at ANY city/district/region scope, but NATIONWIDE the shared eligibility layer
+deliberately also admits non-production_ready rows with unresolved location (locked
+«unresolved-location-countrywide» product decision). Add this OR-branch for countrywide oracles:
+`(not s.production_ready and (s.region_id is null or s.city_id is null)
+  and not search_row_price_gated(s.deal_ar, s.price_total))`
+Two 2026-08-15 verifiers independently rediscovered this (deltas of 2 and 8 rows, each reconciled
+row-by-row). Chip==RPC always; only a strict-oracle comparison shows the phantom gap.
+
+## Deliberately NOT claimed
+- Annual «مبنى شقق مخدومة» / «ملحق علوي» — the annual battery certified شقة only; certify before
+  adding registry rows.
 - غرفة/Buy (n=1), استوديو/Buy (n=2) — no real market; genuinely N/A.
-- All Monthly-Rent cohorts — FROZEN by owner.
+- All Monthly-Rent cohorts — FROZEN by owner. NOTE 2026-08-15: the شهري bucket's read-side RNPL
+  guard (payment_monthly AND NOT coalesce(rent_now_pay_later,false)) was silently lost on 08-11 when
+  the canonical clause was written without it; restored via clause→rebuild
+  (20260815021419 + replay checkpoint 20260815021440). The replay-checkpoint pattern is what exposed
+  it — after any dynamic rebuild migration, record a literal checkpoint so repo truth == live truth.
+
+### Registry state (2026-08-15)
+18 enabled rows in `af_cohort_registry` (migration 20260815022835): the original إيجار/سنوي/شقة
+plus 17 rows covering every certified cohort above, one row per attested DB type_ar value.
+Mutation-proven: with Floor/Rent-Annual isolated and its interview fields blinded,
+mon_rich_attrs_barrier fired on the second run (drift contract: run1 records, run2 alarms) and
+rolled back. Dry-run before insert: readiness=0, rich=0, parity=0 with all rows present.
 
 ## New-question source map
 - `street_width` ← `search_listings_ar.street_width_m` (raw source field; ladder = cumulative ≥,
