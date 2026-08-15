@@ -44,7 +44,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
         run: |
-          python -m scrapers.common.cleanup \
+          exec python -m scrapers.common.cleanup \
             --platform "${{ github.event.inputs.platform }}" \
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }} \
             ${{ github.event.inputs.force == 'true' && '--force' || '' }}

@@ -50,7 +50,7 @@ jobs:
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
           SCRAPE_MIN_INTERVAL: "0.2"
         run: |
-          python -m scrapers.wasalt.enrich \
+          exec python -m scrapers.wasalt.enrich \
             --table wasalt_residential_listings \
             --shard ${{ matrix.shard }} --shards 10 \
             --limit ${{ github.event.inputs.limit || '8000' }} \

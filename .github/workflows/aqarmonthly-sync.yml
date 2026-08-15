@@ -43,4 +43,4 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_MIN_INTERVAL: "0.3"
-        run: python -m scrapers.aqarmonthly.run --shard ${{ matrix.shard }}/16
+        run: exec python -m scrapers.aqarmonthly.run --shard ${{ matrix.shard }}/16

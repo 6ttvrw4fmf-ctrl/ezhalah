@@ -56,7 +56,7 @@ jobs:
           SCRAPE_MIN_INTERVAL: "0.3"
         run: |
           mkdir -p seen
-          python -m scrapers.gathern.run --shard ${{ matrix.shard }}/12 \
+          exec python -m scrapers.gathern.run --shard ${{ matrix.shard }}/12 \
             --emit-seen "seen/shard-${{ matrix.shard }}.txt"
 
       # The union input for the prune job. if-no-files-found:error makes a shard that crawled but
@@ -96,4 +96,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python -m scrapers.gathern.run --prune-from seen --expect-shards 12
+        run: exec python -m scrapers.gathern.run --prune-from seen --expect-shards 12

@@ -160,4 +160,4 @@ jobs:
             echo "::notice::Skipping ${{ matrix.source }} today — every-${N}-days cadence (off day). Manual single-source dispatch overrides."
             exit 0
           fi
-          ${{ matrix.cmd }}
+          exec ${{ matrix.cmd }}

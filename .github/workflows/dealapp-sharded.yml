@@ -81,4 +81,4 @@ jobs:
           # coverage against.
           DEALAPP_MAX_LISTINGS: "1200"
           DEALAPP_WORKERS: "3"   # dealapp's origin trips a login-wall above ~3 workers (no proxy)
-        run: python -m scrapers.dealapp.run --type all --shards 12 --shard ${{ matrix.shard }}
+        run: exec python -m scrapers.dealapp.run --type all --shards 12 --shard ${{ matrix.shard }}

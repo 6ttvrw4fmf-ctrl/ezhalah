@@ -68,7 +68,7 @@ jobs:
           SCRAPE_WORKERS: "16"
           SCRAPE_MIN_INTERVAL: "0.10"
         run: |
-          python -m scrapers.aqar.run_commercial \
+          exec python -m scrapers.aqar.run_commercial \
             --all-commercial \
             --city ${{ matrix.city }} \
             --pages ${{ github.event.inputs.pages || 150 }} \

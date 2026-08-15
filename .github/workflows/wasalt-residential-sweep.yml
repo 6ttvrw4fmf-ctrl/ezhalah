@@ -38,7 +38,7 @@ jobs:
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
           SCRAPE_MIN_INTERVAL: "0.4"
         run: |
-          python -m scrapers.wasalt.run \
+          exec python -m scrapers.wasalt.run \
             --type residential \
             --slug ${{ matrix.slug }} \
             --deal ${{ matrix.deal }} \
