@@ -49,6 +49,9 @@ const RESULTS_SLUGS = new Set([
   // Villa cohort 2026-08-16: villa-form chips (migration 20260815223500 added both tokens to all
   // 4 shared surfaces; chips == direct SQL == referee asserted in-transaction).
   'car_entrance', 'sanitation',
+  // Commercial expansion 2026-08-16: utility chips (migration 20260815234444, same in-transaction
+  // chips == direct SQL == referee proof).
+  'electricity', 'water_supply',
 ]);
 
 // Only the AMENITY-bearing questions carry p_amenities slugs. The age question's keys

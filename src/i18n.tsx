@@ -372,6 +372,7 @@ const AR: Record<string, string> = {
   'Driver room': 'غرفة سائق',
   'Car entrance': 'مدخل سيارة',
   'Sewage connection': 'صرف صحي',
+  'Water supply': 'توفر الماء',
   // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
   'How many bathrooms?': 'كم دورة مياه تفضل؟',
   'Any number': 'أي عدد',
