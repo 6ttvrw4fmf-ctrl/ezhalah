@@ -227,8 +227,11 @@ A barrier that nothing calls is decoration. Any `mon_detect_*` function not reac
 barrier and its roster entry must land in the **same migration**. Barriers behind the roster
 (callable directly when adjudicating a finding):
 `mon_price_size_fidelity_barrier()` · `mon_trending_district_barrier()` ·
-`mon_location_predicate_branch_barrier()` · `mon_filter_parity_barrier()` ·
-`mon_source_is_truth_violations()` · `mon_filter_barrier_leaks`.
+`mon_location_predicate_branch_barrier()` · `mon_filter_parity_barrier()` (scheduled hourly via its
+own cron job `mon-filter-parity-barrier` at :49, through the `mon_check_filter_parity_legacy()`
+alerting wrapper — not via the roster) · `mon_source_is_truth_violations()` ·
+`mon_filter_barrier_leaks` (a VIEW — read it directly; the live detector that runs and raises on it,
+via jobid 38 `mon_run_all_detectors()`, is named `mon_detect_filter_barrier_leaks`).
 
 Detectors added 2026-08-10 from the Filter audit, and what each one is really protecting:
 - **`price_size_contamination`** — price ⇄ area contamination across residential AND commercial.
