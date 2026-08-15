@@ -80,6 +80,12 @@ type AppState = {
   modal: 'support' | 'about' | null;
   openModal: (m: 'support' | 'about') => void;
   closeModal: () => void;
+  // Sign-in popup (owner 2026-08-15): a true in-place overlay, same pattern as modal/openModal/
+  // closeModal above — never a route, so the screen underneath (the Filter page, wherever the user
+  // actually is) is never navigated away from or unmounted. See src/components/AuthModal.tsx.
+  authOpen: boolean;
+  openAuth: () => void;
+  closeAuth: () => void;
   // First-run cinematic intro (the eagle clip). Shows ONCE, only for a brand-new logged-out
   // visitor; persisted via a `hasSeenIntro` flag so it never replays. `showIntro` waits until both
   // the saved flag is read AND the auth session is resolved, so it never flashes for a returning
@@ -121,6 +127,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [modal, setModal] = useState<'support' | 'about' | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
   const [pendingMessage, setPendingMessageState] = useState<string | null>(null);
   // `null` while the saved flag is still being read from storage; the intro stays hidden until then.
   const [introSeen, setIntroSeen] = useState<boolean | null>(null);
@@ -497,13 +504,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       modal,
       openModal: (m) => setModal(m),
       closeModal: () => setModal(null),
+      authOpen,
+      openAuth: () => setAuthOpen(true),
+      closeAuth: () => setAuthOpen(false),
       showIntro: introSeen === false && authChecked && !user,
       dismissIntro: () => {
         setIntroSeen(true); // session-only hide so it doesn't re-loop after the dissolve
         if (!INTRO_DEMO_MODE) AsyncStorage.setItem('hasSeenIntro', '1').catch(() => {});
       },
     }),
-    [query, dataSource, user, searchCount, history, modal, introSeen, authChecked, pendingMessage, activeChatId, setActiveChatId],
+    [query, dataSource, user, searchCount, history, modal, authOpen, introSeen, authChecked, pendingMessage, activeChatId, setActiveChatId],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -19,7 +19,7 @@ export default function Settings() {
   const router = useRouter();
   const { height } = useWindowDimensions();
   const { isRTL, locale } = useI18n();
-  const { user, updateUser, signOut, deleteAccount } = useApp();
+  const { user, updateUser, signOut, deleteAccount, openAuth } = useApp();
   // Centered popup (not a full-screen page): cap the card height so it scrolls inside the dialog.
   const maxH = Math.min(height - 32, 720);
 
@@ -125,7 +125,7 @@ export default function Settings() {
           </View>
           <View style={s.signedOut}>
             <Text style={s.signedOutText}>{t('Sign in')}</Text>
-            <Pressable style={s.primaryBtn} onPress={() => router.replace('/auth')}>
+            <Pressable style={s.primaryBtn} onPress={() => { router.back(); openAuth(); }}>
               <Text style={s.primaryBtnText}>{t('Sign up / Log in')}</Text>
             </Pressable>
           </View>
