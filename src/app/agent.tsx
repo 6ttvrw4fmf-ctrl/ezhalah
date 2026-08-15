@@ -391,7 +391,7 @@ export default function Agent() {
     fresh?: string;
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history } = useApp();
+  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery } = useApp();
   // Per-message "Load More" in flight, so a double-tap can't double-fetch the same page.
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -1409,6 +1409,28 @@ export default function Agent() {
       lastSeedRef.current = undefined;
       try {
         const q = JSON.parse(filter) as SearchQuery;
+        // Seed the shared filter state from the URL payload (Search & Matching QA §29, 2026-08-15).
+        // The results already survive a hard refresh (PR#589) and `?filter=` carries the whole
+        // SearchQuery — but that payload was never read back into the app context, which is the ONLY
+        // thing «تصفية» rehydrates from. So after a refresh the form came back blank (المدينة, السعر,
+        // المساحة, غرف النوم, فئة/نوع and the «سنوي»/«شهري» control all gone) and «بحث» failed with
+        // «الرجاء اختيار مدينة من القائمة» — a refreshed, bookmarked or shared results link could not
+        // be adjusted, only rebuilt from scratch.
+        //
+        // setQuery takes an UPDATER FUNCTION, never a value — passing the object directly is what
+        // shipped `TypeError: e is not a function` to production on 2026-08-15 (PR#661, reverted by
+        // PR#662): the store does `setQueryState((prev) => updater(prev))`, so a plain object gets
+        // *called*. `() => q` is the whole difference. scripts/verify-web-runtime-smoke.mjs now
+        // drives this exact journey in a real browser and fails on that crash.
+        //
+        // Replacing rather than merging is deliberate: the payload IS the search whose results are on
+        // screen, so the form must show exactly that and nothing left over from a previous query. On
+        // the normal path this is an identity write (the filter form put this same query here before
+        // navigating); it only changes anything when the context is a fresh HOME_DEFAULT_QUERY() and
+        // the payload is not — the reload/bookmark/share case. The existing city/district rehydration
+        // effects in index.tsx then restore the picked المدينة/الأحياء from the catalog exactly as
+        // they already do on the no-reload round-trip.
+        setQuery(() => q);
         const override = chatBubble && chatSub ? { bubble: chatBubble, sub: chatSub } : undefined;
         startFresh();
         if (replay === '0') openStatic(q, override, hid ? history.find((h) => h.id === hid)?.snapshot : undefined);
