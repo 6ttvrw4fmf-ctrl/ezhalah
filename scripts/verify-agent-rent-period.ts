@@ -59,11 +59,8 @@ check('daily/weekly/quarterly budget bases do NOT remap the pool (conservative)'
 
 // ── 3. client mapping ──
 check('BackendQuery declares rentPeriod', /rentPeriod\?:\s*string;/.test(client));
-// 'both' joined the closed set on 2026-08-14 (owner feature: monthly AND annual in one search). The set
-// stays CLOSED on purpose — the point of this check is that an arbitrary edge-supplied string can never
-// reach q.rentPeriod, so any addition must be an explicit literal, exactly like these three.
 check('queryFromBackend maps b.rentPeriod to q.rentPeriod (closed values only)',
-  client.includes("if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual' || b.rentPeriod === 'both') q.rentPeriod = b.rentPeriod;"));
+  client.includes("if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual') q.rentPeriod = b.rentPeriod;"));
 const mapIdx = client.indexOf("if (b.rentPeriod === 'monthly'");
 const gathernIdx = client.indexOf('applySourceFilter(q, userText, b.platforms)');
 check('mapping happens BEFORE applySourceFilter so the Gathern monthly-only override wins',

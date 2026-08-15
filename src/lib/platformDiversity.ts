@@ -24,7 +24,7 @@ export function candKey(c: DiversityCand): string {
 
 export type Scope = 'district' | 'city' | 'region' | 'country';
 
-export type RankedRow<L extends { cleanType?: string | null; rentPeriod?: string | null } = { cleanType?: string | null }> = {
+export type RankedRow<L extends { cleanType?: string | null } = { cleanType?: string | null }> = {
   l: L;
   platform: string;
   city: string;
@@ -50,19 +50,18 @@ function normLocKey(s: string): string {
     .trim();
 }
 
-function rankedKey<L extends { cleanType?: string | null; rentPeriod?: string | null }>(r: RankedRow<L>, k: string): string {
+function rankedKey<L extends { cleanType?: string | null }>(r: RankedRow<L>, k: string): string {
   return k === 'platform' ? r.platform
     : k === 'city' ? normLocKey(r.city)
     : k === 'region' ? normLocKey(r.region)
     : k === 'district' ? normLocKey(r.district)
-    : k === 'cleanType' ? (r.l.cleanType ?? '')
-    : k === 'period' ? (r.l.rentPeriod ?? '') : '';
+    : k === 'cleanType' ? (r.l.cleanType ?? '') : '';
 }
 
 // Hierarchical round-robin: group by the first key, order groups by size (densest first) then freshness,
 // take one card per group per pass, and recurse with the remaining keys. At the leaf (no keys), it is
 // pure newest-first by the RPC recency rank.
-export function interleaveRanked<L extends { cleanType?: string | null; rentPeriod?: string | null }>(rows: RankedRow<L>[], keys: string[]): RankedRow<L>[] {
+export function interleaveRanked<L extends { cleanType?: string | null }>(rows: RankedRow<L>[], keys: string[]): RankedRow<L>[] {
   if (!keys.length) return [...rows].sort((a, b) => a.rank - b.rank);
   const [k, ...rest] = keys;
   const groups = new Map<string, RankedRow<L>[]>();
@@ -84,7 +83,7 @@ export function interleaveRanked<L extends { cleanType?: string | null; rentPeri
   return out;
 }
 
-export function orderByScope<L extends { cleanType?: string | null; rentPeriod?: string | null }>(rows: RankedRow<L>[], scope: Scope, multiType = false, mixPeriods = false): RankedRow<L>[] {
+export function orderByScope<L extends { cleanType?: string | null }>(rows: RankedRow<L>[], scope: Scope, multiType = false): RankedRow<L>[] {
   // Diversity hierarchy per scope — SUPERSEDES the 2026-06-27 geography-first order (Region → cities →
   // districts → platforms) per owner PERMANENT rule 2026-07-13: "Rule 1 filters always win; Rule 2,
   // platform diversity, is the highest-priority tie-break after that — a platform with many matches must
@@ -100,17 +99,9 @@ export function orderByScope<L extends { cleanType?: string | null; rentPeriod?:
     : scope === 'city' ? ['platform', 'district']
     : scope === 'district' ? ['platform']
     : [];
-  // Rent period (owner feature 2026-08-14): when the user asked for BOTH monthly and annual, spread across
-  // the two periods so the answer visibly contains both instead of whichever period happens to dominate the
-  // recency window (annual outnumbers monthly ~43k:32k fleet-wide, so an un-mixed list can open all-annual).
-  // MATCH FIRST, DIVERSIFY SECOND: this only re-orders rows the period filter already matched — it can never
-  // introduce a period the user didn't ask for. Placed AFTER platform, never before: platform is the
-  // outermost diversity key by the owner's PERMANENT rule (2026-07-13), and nesting period inside it still
-  // alternates both periods within every platform's own share.
-  const withPeriod = mixPeriods && base.length ? [base[0], 'period', ...base.slice(1)] : base;
   // Tier 3 (user rule 2026-06-28): when the user picked MULTIPLE exact types, spread across THOSE types
   // LAST — after platform. This only re-orders the already-matched set; it never introduces an unpicked
   // type (the rows were already constrained to the selected types by the raw fetch + matchesType).
-  const keys = multiType ? [...withPeriod, 'cleanType'] : withPeriod;
+  const keys = multiType ? [...base, 'cleanType'] : base;
   return interleaveRanked(rows, keys);
 }

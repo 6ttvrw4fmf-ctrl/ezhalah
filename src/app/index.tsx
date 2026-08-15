@@ -178,11 +178,9 @@ export default function Home() {
   // Rent period the user has toggled (Monthly/Yearly) — drives the period-scoped Trending lists AND
   // the search summary. Buy has no period. Declared HIGH (above the warm effects below) because those
   // effects depend on it. (Was previously derived lower down; moved up 2026-07-21.)
-  const rentPeriod: 'monthly' | 'annual' | 'both' = query.rentPeriod ?? 'annual';
+  const rentPeriod: 'monthly' | 'annual' = query.rentPeriod ?? 'annual';
   // payment_monthly truth for the Trending-scope RPCs: monthly→true, annual→false, Buy→null (no filter).
-  // BOTH→null as well: the city/district pools must span both periods, exactly like the results will.
-  const paymentMonthly: boolean | null =
-    query.deal !== 'Rent' || rentPeriod === 'both' ? null : rentPeriod === 'monthly';
+  const paymentMonthly: boolean | null = query.deal === 'Rent' ? rentPeriod === 'monthly' : null;
   // COUNT-SCOPE PARITY (findings 2026-08-13, R1): every City/District pool call is scoped to the
   // category the results RPC will ACTUALLY search — the picked category, else the same implied
   // default remote.ts applies to a category-less search (imported, never a duplicated literal).
@@ -872,12 +870,11 @@ export default function Home() {
             {query.deal === 'Rent' && (
               <Reveal style={{ marginTop: 12 }}>
                 <Segmented
-                  options={['Monthly', 'Yearly', 'Both']}
+                  options={['Monthly', 'Yearly']}
                   icons={PERIOD_IMG}
-                  value={rentPeriod === 'monthly' ? 'Monthly' : rentPeriod === 'both' ? 'Both' : 'Yearly'}
+                  value={rentPeriod === 'monthly' ? 'Monthly' : 'Yearly'}
                   onChange={(v) => {
-                    const next: 'monthly' | 'annual' | 'both' =
-                      v === 'Monthly' ? 'monthly' : v === 'Both' ? 'both' : 'annual';
+                    const next = v === 'Monthly' ? 'monthly' : 'annual';
                     // Monthly↔Yearly inverts what a typed price MEANS (3,000/شهري ≠ 3,000/سنوي).
                     // Same rule as the Buy↔Rent toggle above: never silently keep bounds whose unit
                     // just changed — clear them and say why. (audit item 3, owner rule 2026-07-27.)
@@ -892,9 +889,7 @@ export default function Home() {
                   }}
                 />
                 <Text style={s.rentHint}>
-                  {t(rentPeriod === 'monthly' ? 'Monthly: the displayed price is the monthly price.'
-                    : rentPeriod === 'both' ? 'Both: monthly and yearly listings together — each card shows its own price basis.'
-                    : 'Yearly: the displayed price is the yearly price.')}
+                  {t(rentPeriod === 'monthly' ? 'Monthly: 1–11 month lease, price/month.' : 'Annual: 12-month lease, price/year.')}
                 </Text>
                 {periodPriceCleared && !query.priceMin && !query.priceMax && !query.priceInput ? (
                   <Text style={[s.rangeNote, s.rangeNoteWarn]}>{t('Price limits were cleared because the price unit changed (monthly ↔ yearly) — please re-enter them.')}</Text>

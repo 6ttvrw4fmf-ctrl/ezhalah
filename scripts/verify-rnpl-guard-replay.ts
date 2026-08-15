@@ -111,19 +111,6 @@ const AUDITED_UNINTERPRETABLE = new Map<string, string>([
    'audited 2026-08-10: ZERO occurrences of payment_monthly and ZERO of rent_now_pay_later/rnpl. ' +
    'Rewrites the location predicate from IN (SELECT) to = ANY(ARRAY(SELECT)) so it can use an index. ' +
    'Needle-edits from the LIVE body with three RAISE guards.'],
-  ['20260815012506_rent_period_both_monthly_and_annual.sql',
-   'audited 2026-08-14 (mine, read line by line): adds the p_rent_period = \'كلاهما\' branch (monthly AND ' +
-   'annual in one search) to the three readers. It is a NEEDLE-EDIT built from pg_get_functiondef of each ' +
-   'LIVE body, so every existing predicate — including the RNPL/Monthly ones — survives byte-for-byte; it ' +
-   'RAISEs unless its needle matches exactly once, and re-running is a no-op (it skips a body that already ' +
-   'carries the branch). Exactly ONE code occurrence each of payment_monthly and rent_now_pay_later, both ' +
-   'on the same added line, both READS inside the new branch and both COPIED VERBATIM from the predicates ' +
-   'they came from (`s.payment_monthly = true` from the شهري branch, `coalesce(s.rent_now_pay_later, false)` ' +
-   'from the سنوي branch). Zero assignments: no `:=` and no `update ... set` touches either column, so it ' +
-   'cannot put an RNPL row into the monthly bucket. The ×12 price scaling stays keyed on \'شهري\' alone, ' +
-   'so كلاهما compares price_annual unscaled. Live-proven at apply time: monthly 31,859 + annual 43,287 = ' +
-   '75,146 = the كلاهما union exactly, vs 75,656 for NULL (the 510-row delta is the unpublished-period ' +
-   'rows, correctly excluded). Guarded going forward by scripts/verify-rent-period-both.ts.'],
   ['20260810185359_buy_rows_must_not_carry_a_zero_annual_rent.sql',
    'audited 2026-08-10 CAREFULLY - this one DOES contain `payment_monthly := false`, twice. Both ' +
    'occurrences sit INSIDE the needle string and its replacement, which re-emits that line byte-for-' +
