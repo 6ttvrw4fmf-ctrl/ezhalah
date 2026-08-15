@@ -78,9 +78,9 @@ const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
     why: 'An unrecognized amenity token must never silently widen a search to "no filter" — it must match nothing, so the mistake is visible the first time it ships.',
   },
   {
-    name: 'bedrooms filter is exclusive (CASE), p_beds_exact and p_beds_min never union',
-    marker: /case\s+when coalesce\(cardinality\(p_beds_exact\), 0\) > 0 then s\.bedrooms = any\(p_beds_exact\)\s+when p_beds_min is not null then s\.bedrooms >= p_beds_min/i,
-    why: '2026-07-28 audit: the old flat OR let a caller who sets BOTH p_beds_exact and p_beds_min get the union of both, not either/or — live-verified to return bedrooms=3 unioned with every value ≥10 (including a 29,800-bedroom outlier row) for p_beds_exact:=[3], p_beds_min:=10.',
+    name: 'bedrooms filter is the guarded tri-arm union (no-filter / exact-any / min), exact ∪ min DELIBERATE',
+    marker: /\(\(coalesce\(cardinality\(p_beds_exact\),0\) = 0 and p_beds_min is null\) or \(coalesce\(cardinality\(p_beds_exact\),0\) > 0 and s\.bedrooms = any\(p_beds_exact\)\) or \(p_beds_min is not null and s\.bedrooms >= p_beds_min\)\)/i,
+    why: 'SEMANTICS CHANGED DELIBERATELY (20260809161258 + 20260811125918 shared-eligibility layer), certified live 2026-08-15: the app’s bedrooms multi-select sends p_beds_exact=[1,2,3,4] AND p_beds_min=5 together for a 1–4 ∪ 5+ selection — the union IS the correct result (verified [1,2,3,4]∪≥5 = 8,254, chip == results == referee == direct SQL). The 2026-07-28 CASE-exclusive form would silently drop every 5+ listing from that selection.',
   },
   {
     name: 'per-platform total_count is computed pre-cap (same window pass as row_number, before rn <= p_per_platform)',
@@ -94,17 +94,17 @@ const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
   },
   {
     name: 'PLATFORM DIVERSITY: the default branch computes a per-platform round-robin rank (div_rank)',
-    marker: /then row_number\(\) over \(\s*partition by m\.platform\s*order by m\.last_updated desc nulls last, m\.source_table, m\.listing_id\s*\)\s*end as div_rank/i,
+    marker: /then row_number\(\) over \(\s*partition by m\.platform\s*order by m\.recency_at desc nulls last, m\.source_table, m\.listing_id\s*\)\s*end as div_rank/i,
     why: 'Owner PERMANENT rule 2026-08-05 (MATCH FIRST -> DIVERSIFY SECOND). Without this, ordering is pure recency and one platform saturates every window — live-measured 65-row single-platform streak with 11 qualifying platforms and 9,257 eligible rows.',
   },
   {
-    name: 'PLATFORM DIVERSITY: div_rank leads the tie-break in the default branch (before last_updated)',
-    marker: /a\.div_rank asc nulls last,\s*a\.last_updated desc nulls last, a\.source_table, a\.listing_id/i,
+    name: 'PLATFORM DIVERSITY: div_rank leads the tie-break in the default branch (before recency)',
+    marker: /a\.div_rank asc nulls last,\s*a\.recency_at desc nulls last, a\.source_table, a\.listing_id/i,
     why: 'The rank must be APPLIED, and must sit BEFORE recency — otherwise it is computed and ignored. Ending in the unique (source_table, listing_id) keeps the sort a TOTAL order, which is what makes paging deterministic and duplicate-free.',
   },
   {
     name: 'PLATFORM DIVERSITY: the outer union ORDER BY honours div_rank too',
-    marker: /u\.div_rank asc nulls last,\s*u\.last_updated desc nulls last, u\.source_table, u\.listing_id/i,
+    marker: /u\.div_rank asc nulls last,\s*u\.recency_at desc nulls last, u\.source_table, u\.listing_id/i,
     why: 'The outer ORDER BY re-sorts the page after the union. If it ignores div_rank it silently reverts the page to recency order, undoing the diversification the inner branch just computed.',
   },
   {
@@ -148,9 +148,9 @@ const FORBIDDEN: { name: string; marker: RegExp; why: string }[] = [
     why: 'Reintroduces the 2026-07-27 defect: floor-unknown rows pass an explicit floor filter (108,880 instead of 3,661).',
   },
   {
-    name: 'bedrooms flat-OR union leak (p_beds_exact and p_beds_min not mutually exclusive)',
-    marker: /any\(p_beds_exact\)\)\s*\n?\s*or \(p_beds_min\s+is not null and s\.bedrooms >= p_beds_min\)/i,
-    why: '2026-07-28 audit: reintroduces the union leak — a caller setting both p_beds_exact and p_beds_min gets bedrooms=3 unioned with everything ≥10 instead of an exclusive either/or.',
+    name: 'bedrooms CASE-exclusive form (reverts the deliberate exact ∪ min union)',
+    marker: /case\s+when coalesce\(cardinality\(p_beds_exact\), ?0\) > 0 then s\.bedrooms = any\(p_beds_exact\)\s+when p_beds_min is not null then s\.bedrooms >= p_beds_min/i,
+    why: 'The app sends p_beds_exact=[1,2,3,4] + p_beds_min=5 together for a 1–4 ∪ 5+ multi-select; the exclusive CASE form silently drops every 5+ listing from that selection (certified union semantics 2026-08-15).',
   },
   {
     name: 'per-platform total_count computed post-cap (over the diversification-capped rowset)',
