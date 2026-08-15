@@ -23,17 +23,17 @@ const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`
 // ── ONE source for the implied default — remote.ts owns it, everyone imports it. ──
 check("remote.ts exports IMPLIED_CATEGORY_DEFAULT ('Residential', as const)", /export const IMPLIED_CATEGORY_DEFAULT = 'Residential' as const;/.test(remoteSrc));
 check('impliedCategory() itself uses the shared constant (no second literal)', /return effectiveCleanQuery\(q\) \? null : IMPLIED_CATEGORY_DEFAULT;/.test(remoteSrc));
-check('index.tsx imports it from remote.ts', /import \{ fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT \} from '@\/data\/remote'/.test(indexSrc));
+check('index.tsx imports it from remote.ts', /import \{ fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr \} from '@\/data\/remote'/.test(indexSrc));
 check('effCategory = query.category ?? IMPLIED_CATEGORY_DEFAULT (the one derivation)', /const effCategory: Category = query\.category \?\? IMPLIED_CATEGORY_DEFAULT;/.test(indexSrc));
 check("index.tsx never re-duplicates the literal ('Residential' appears in no pool wiring)", !/\?\? 'Residential'/.test(indexSrc));
 
 // ── EVERY pool call in index.tsx passes effCategory — none is left at the old raw/null scope. ──
 const poolCalls: Array<[string, RegExp, RegExp]> = [
-  ['ensureCityFieldIndex', /ensureCityFieldIndex\(query\.deal, paymentMonthly, effCategory\)/g, /ensureCityFieldIndex\(query\.deal, paymentMonthly\)[^,]/g],
-  ['topCitiesByListings', /topCitiesByListings\(query\.deal, paymentMonthly, effCategory, 6\)/g, /topCitiesByListings\(query\.deal, paymentMonthly, 6\)/g],
+  ['ensureCityFieldIndex', /ensureCityFieldIndex\(query\.deal, paymentMonthly, effCategory, cohortTypes\)/g, /ensureCityFieldIndex\(query\.deal, paymentMonthly\)[^,]/g],
+  ['topCitiesByListings', /topCitiesByListings\(query\.deal, paymentMonthly, effCategory, 6, cohortTypes\)/g, /topCitiesByListings\(query\.deal, paymentMonthly, 6\)/g],
   ['matchCitiesByText', /matchCitiesByText\(query\.deal, paymentMonthly, effCategory, /g, /matchCitiesByText\(query\.deal, paymentMonthly, [^e]/g],
-  ['ensureDistrictOptions', /ensureDistrictOptions\(cid, query\.deal, effCategory, paymentMonthly\)/g, /ensureDistrictOptions\([^)]*query\.category/g],
-  ['topDistrictsForCityId', /topDistrictsForCityId\((?:cid|citySelected\.cityId), query\.deal, effCategory, paymentMonthly, 6\)/g, /topDistrictsForCityId\([^)]*query\.category/g],
+  ['ensureDistrictOptions', /ensureDistrictOptions\(cid, query\.deal, effCategory, paymentMonthly, cohortTypes\)/g, /ensureDistrictOptions\([^)]*query\.category/g],
+  ['topDistrictsForCityId', /topDistrictsForCityId\((?:cid|citySelected\.cityId), query\.deal, effCategory, paymentMonthly, 6, cohortTypes\)/g, /topDistrictsForCityId\([^)]*query\.category/g],
   ['matchDistrictsByCityId', /matchDistrictsByCityId\((?:cid|citySelected\.cityId), query\.deal, effCategory, paymentMonthly, /g, /matchDistrictsByCityId\([^)]*query\.category/g],
 ];
 for (const [name, good, bad] of poolCalls) {
@@ -44,8 +44,8 @@ for (const [name, good, bad] of poolCalls) {
 
 // ── Cache keys include the effective category — a category flip can never serve the other scope's
 //    counts from cache. ──
-check('city pool cache key includes category', /const cityPoolKey = \(deal: Deal, paymentMonthly: boolean \| null, category: Category \| null\) => `\$\{deal\}:\$\{pmKey\(paymentMonthly\)\}:\$\{category \?\? ''\}`/.test(locSrc));
-check('district cache key includes category (pre-existing, pinned)', /const districtCacheKey = \(cityId: number, deal: Deal, category: Category \| null, paymentMonthly: boolean \| null\) => `\$\{cityId\}:\$\{deal\}:\$\{category \?\? ''\}:\$\{pmKey\(paymentMonthly\)\}`/.test(locSrc));
+check('city pool cache key includes category', /const cityPoolKey = \(deal: Deal, paymentMonthly: boolean \| null, category: Category \| null, types: string\[\] \| null = null\) => `\$\{deal\}:\$\{pmKey\(paymentMonthly\)\}:\$\{category \?\? ''\}:\$\{typesKey\(types\)\}`/.test(locSrc));
+check('district cache key includes category (pre-existing, pinned)', /const districtCacheKey = \(cityId: number, deal: Deal, category: Category \| null, paymentMonthly: boolean \| null, types: string\[\] \| null = null\) => `\$\{cityId\}:\$\{deal\}:\$\{category \?\? ''\}:\$\{pmKey\(paymentMonthly\)\}:\$\{typesKey\(types\)\}`/.test(locSrc));
 
 // ── The city RPC is called WITH the named p_category arg, plus a compat fallback that drops it on
 //    an older signature (the p_category migration is landing separately — see the TODO). ──
