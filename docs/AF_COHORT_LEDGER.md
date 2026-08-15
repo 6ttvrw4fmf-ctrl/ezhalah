@@ -100,6 +100,21 @@ rolled back. Dry-run before insert: readiness=0, rich=0, parity=0 with all rows 
   → `p_directions` + `cnt_dir_{n,s,e,w,ne,nw,se,sw}`.
 - Both added by migration `guided_counts_add_direction_and_street_width` via template+rebuild.
 
+## aqar per-segment amenity source change (RESOLVED 2026-08-15 — do not re-investigate)
+Aqar changed its ad-form composition ~2026-06-21 (weekly first-seen series breaks at Jun 22;
+scraper code unchanged Jun–Jul): kitchen + elevator checkboxes removed from دور forms (both
+deals), air-conditioner removed from بيع forms (both types). Proof: the SAME fresh rows parse
+age ~100% / private_entrance ~83% / rent-side AC 84% on the same code path, and raw == index
+byte-for-byte — the payload is read; only those keys stopped arriving. These columns are
+structured-only by design (prose is NOT a source field), so the honest value is UNKNOWN and the
+correct backfill from published fields is ZERO rows. Old TRUE values (June bulk era, e.g. دور/بيع
+kitchen 43% all-time) predate the form change and stand as captured; they will decay out
+naturally and the affected chips gate out honestly. Acknowledged per (platform, field, segment)
+in `ops_amenity_capture_verified` (evidence in each row's note). Readiness check B is now
+per-cohort-segment (migration 20260815130215) — the pooled version let شقة's healthy 90% mask
+دور's 0%; mutation-proven: waivers stripped → exactly the 4 real segments fire; unrelated
+segment blinded with waivers present → still fires.
+
 ## Barrier fleet (all registry-driven — a cohort row = protection)
 `af_cohort_registry` drives: `mon_rich_attrs_barrier`, `mon_af_new_listing_readiness` (A/B/C),
 `mon_filter_parity_barrier` check 2 (annual rows). Plus the cohort-agnostic fleet: predicate parity
