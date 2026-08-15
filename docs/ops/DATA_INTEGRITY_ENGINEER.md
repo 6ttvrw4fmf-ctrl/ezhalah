@@ -423,6 +423,65 @@ recoverable from the database alone.
 FIRST and read the diff. "The parser dropped it" and "the source never published it" look identical in
 the database and lead to opposite actions — one is a repair, the other is fabrication.
 
+### §22.1 aqar's `rent_period_text` is a DEFAULT, not this listing's period (run #22, 2026-08-15)
+
+The 2026-08-11 verdict above was re-tested from scratch and **confirmed by an independent method** —
+and the re-test found the trap that would have broken it.
+
+All 63 searchable periodless priced aqar rentals were re-fetched live (63/63 HTTP 200) and read
+through the **production enricher's own oracle** (`_RENT_PERIOD_ENUM[obj['rent_period']]` else
+`_period_beside(price, text)`), not a bespoke regex. Result: **61 publish no usable per-listing
+period**, 1 (id 69651) has an authoritative annual enum but a price that has since moved — left alone,
+because a period repair there smuggles in a price rewrite — and exactly **1** (id 72068, source price
+40,000 == stored 40,000, page prints «40,000 سنوي») was a clean period-only repair. That ~3% gain rate
+matches §22's `no_gain=60 of 64` almost exactly.
+
+**The trap.** aqar's listing payload carries a field named `rent_period_text`, and it reads «سنوي» on
+**59 of the 63** period-NULL rows. It is sitting in plain sight next to 61 rentals the Filter cannot
+reach by either period chip, and it is the first thing anyone will reach for. **It is not this
+listing's period.** It reads «سنوي» on ads Ezhalah correctly stores as MONTHLY —
+
+| ad | Ezhalah stores | actual | `rent_period_text` |
+|---|---|---|---|
+| 6815491 | monthly | 600/month room | «سنوي» |
+| 6817740 | monthly | 2,700/month | «سنوي» |
+| 6798704 | monthly | — | «سنوي» |
+| 6658434 | monthly | — | «سنوي» |
+| 6495955 | monthly | enum=2 | «شهري» |
+| 6586188 | monthly | enum=2 | «شهري» |
+
+— it only says «شهري» when the authoritative enum is *also* 2. It is a platform default wearing the
+costume of source truth. Importing it would file 61 unknown-period rentals as annual **and understate
+every genuinely monthly ad 12×** — the same defect already fought on souq24 and on aqar's own retired
+`rent_period = "annual"` default.
+
+Both halves are now in the database, not just here: per-row evidence in `ops_rent_period_source_probe`
+(probed_at `2026-08-15 07:20:00+00`), the platform verdict in `ops_rent_period_sourceless`, and
+`mon_detect_rent_period_contradicts_probe()` (P1, in the roster) fires if any row whose newest HTTP-200
+probe observed `none` ever acquires a period anyway. That closes owner permanent rule #2's requirement
+that a source-limitation waiver be **FK-gated to a recorded probe and re-checked by a detector** — the
+§22 evidence had lived only in a GitHub Actions run and this file.
+
+**And the wider rule: a field whose NAME matches what you need is not thereby a source field.** Prove
+it varies with the listing — find rows where the answer is known and different — before importing it.
+Here the disproof took six fetches.
+
+### §22.2 Wiring a detector: needle-edit the roster, never rebuild its body
+
+Run #22 also re-committed the roster-clobber mistake and caught it in the same session. Wiring the new
+detector above was done with a wholesale `CREATE OR REPLACE` of `mon_run_all_detectors()` from an
+*assumed* body — replacing the explicit roster array with dynamic `proname LIKE 'mon\_detect\_%'`
+discovery. That is wrong three ways: detectors are deliberately **excluded** from the roster because
+they run on their own cron jobs (price_fidelity 42, district_resolution 43, wasalt_enrich_backlog 40,
+aqar_ppm_as_total 63, refresh_coverage 58, price_magnitude_gate 59) and dynamic discovery double-runs
+every one of them twice an hour; `mon_detect_orphaned_detectors()` becomes vacuous because nothing can
+be orphaned from a roster that enumerates itself; and it is precisely what `20260810222259` exists to
+prevent. This is the **fourth** occurrence of the class (2026-08-04, 2026-08-10 ×2, 2026-08-15).
+
+Restored by `20260815072452` with an in-migration assertion that every detector observed in the
+pre-clobber sweep is present. **Use a guarded needle-edit** (the `want text[]` + anchor pattern in
+`20260810222259`): it cannot lose an entry it never read. Never paste a roster body.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve
