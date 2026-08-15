@@ -69,6 +69,18 @@ check('agent.tsx still reads the filter param', /useLocalSearchParams<[\s\S]{0,4
 check('agent.tsx still runs a ?filter= search on open',
   /if\s*\(\s*filter\s*&&\s*filter\s*!==\s*lastFilterRef\.current\s*\)/.test(agent));
 
+// 5b) …and it must SEED the shared filter state from that payload, or the second half of the class
+//     comes back: results restore fine, but reopening «تصفية» shows a blank form and «بحث» dies with
+//     «الرجاء اختيار مدينة من القائمة». The app context is the only thing the home form rehydrates
+//     from (index.tsx city/district rehydration effects read `query`), and a hard refresh resets it
+//     to HOME_DEFAULT_QUERY() — so the parsed payload has to be written back. (QA §29, 2026-08-15.)
+check('agent.tsx pulls setQuery out of useApp (can seed the filter form)',
+  /const\s*\{[^}]*\bsetQuery\b[^}]*\}\s*=\s*useApp\(\)/.test(agent));
+const filterBranch = agent.slice(agent.indexOf('const q = JSON.parse(filter)'));
+check('agent.tsx seeds the app query from the parsed ?filter= payload',
+  filterBranch.indexOf('setQuery(q)') > -1
+  && filterBranch.indexOf('setQuery(q)') < filterBranch.indexOf('sendFilter(q'));
+
 // 6) The layout must route its decision through the shared helper (no re-inlined divergent copy).
 const layout = readFileSync(new URL('../src/app/_layout.tsx', import.meta.url), 'utf8');
 check('_layout.tsx imports shouldSendRefreshHome', /from\s+'@\/lib\/webRefreshRoute'/.test(layout));
