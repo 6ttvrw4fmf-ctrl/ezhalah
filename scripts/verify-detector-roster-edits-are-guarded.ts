@@ -60,6 +60,23 @@ const GRANDFATHERED = new Set([
   '20260810175245_restore_full_detector_roster_union.sql',
   '20260810175327_roster_drop_superseded_search_gate_leak.sql',
   '20260810202219_price_area_artifact_fix_repair_and_barrier.sql',
+  // 2026-08-15, data-integrity run #22 — BOTH halves of one mistake and its repair, applied to prod
+  // via MCP before this guard could run at mirror time. Recorded as a miss, not a template.
+  //   ...072328 wired a new detector by rebuilding the roster from an ASSUMED body, replacing the
+  //   explicit array with dynamic `proname LIKE 'mon\_detect\_%'` discovery. That double-runs the
+  //   detectors deliberately EXCLUDED because they have their own cron jobs (price_fidelity 42,
+  //   district_resolution 43, wasalt_enrich_backlog 40, aqar_ppm_as_total 63, refresh_coverage 58,
+  //   price_magnitude_gate 59) and makes mon_detect_orphaned_detectors() vacuous.
+  //   ...072452 restored the explicit array — but by pasting a full body too, so it trips this guard
+  //   on its own terms. It is grandfathered rather than rewritten because it is already in
+  //   production and this tree must mirror prod byte-exact.
+  // PRODUCTION VERIFIED BEFORE GRANDFATHERING: live roster = 51 detectors (the 50 observed in the
+  // 07:05:38Z pre-clobber sweep, all present, plus mon_detect_rent_period_contradicts_probe),
+  // failed=[], every count 0, orphaned_detectors=0. 072452 additionally asserts in-migration that
+  // every pre-clobber detector is present, so a silent drop would have failed at apply time.
+  // The lesson stands unchanged: the NEXT roster edit must use the guarded needle-edit.
+  '20260815072328_mon_detect_rent_period_contradicts_source_probe.sql',
+  '20260815072452_restore_explicit_detector_roster_after_run22_wholesale_rebuild.sql',
 ]);
 
 // Every detector the 2026-08-10 repair put back. Pinned so a future revert of that migration, or a
