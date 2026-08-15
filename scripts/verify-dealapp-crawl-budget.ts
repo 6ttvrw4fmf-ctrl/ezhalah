@@ -140,10 +140,14 @@ const definesDetector = files.some((f) =>
 check('a migration defines mon_detect_dangling_scrape_run()', definesDetector);
 
 // Latest migration that (re)defines the roster wins — filenames are date-prefixed, so lexical
-// sort is chronological.
+// sort is chronological. Anchored to line start so it only matches a genuine DDL definition:
+// a needle-edit migration (do-block that replace()s the LIVE prosrc and re-executes it via
+// `execute format('create or replace function public.mon_run_all_detectors...')`) carries that
+// text inside a string literal, preserves the roster byte-for-byte by construction, and must NOT
+// be mistaken for a roster rebuild — 20260815233850 is the precedent (false-failed this guard).
 const latestRoster = files
   .filter((f) =>
-    /create\s+or\s+replace\s+function\s+public\.mon_run_all_detectors/i.test(
+    /^\s*create\s+or\s+replace\s+function\s+public\.mon_run_all_detectors/im.test(
       readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8'),
     ),
   )
