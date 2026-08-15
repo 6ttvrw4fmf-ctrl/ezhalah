@@ -245,13 +245,33 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
     #     shows the source's monthly headline EXACTLY (price fidelity at the card).
     #   - otherwise → rent_period='annual', price_annual = the source's yearly amount as published
     #     (falls back to legacy expectedRent when rentFreq is absent — byte-identical behaviour).
+    # EVIDENCE (2026-08-15 senior audit, run #21). Until now this payload was read and thrown away:
+    # run.py stored the DERIVED price_annual but never the rentFreq it came from, so "does the LIST
+    # endpoint publish its own yearly amount when monthly is the default?" was unanswerable from the
+    # database, and the standing `rent_period_source_mismatch` P1 was formally blocked on it. The
+    # only other copy of rentFreq is `ar_data`, written ONCE by enrich_ar and never refreshed —
+    # measured 42.1 days stale on average (max 50.7), so it cannot adjudicate a current price.
+    # We now preserve the raw block verbatim. No parsing, no derivation, no behaviour change.
+    rent_freq_evidence = None
     rent_is_monthly = False
     if is_rent:
         rent_freq = info.get("rentFreq") or {}
         rf_monthly = rent_freq.get("monthly") or {}
         rf_yearly = rent_freq.get("yearly") or {}
+        rent_freq_evidence = rent_freq or None
         if rf_monthly.get("default_freq") and rf_monthly.get("amount"):
             rent_is_monthly = True
+            # DELIBERATELY still x12, and deliberately NOT switched to rf_yearly["amount"].
+            # Measured on contemporaneous rows (ar snapshot <=48h old, so both endpoints describe the
+            # same moment): of 14 rows publishing BOTH amounts, 13 have yearly != monthly*12, and 9
+            # are stored here as monthly*12 while wasalt publishes a different yearly. So the x12
+            # result IS a fabricated annual figure. But storing rf_yearly instead only moves the
+            # error: the card renders price_annual/12 as the monthly headline, so a published yearly
+            # that is not exactly 12x would then misstate the monthly price the source advertises.
+            # ONE column cannot carry both published figures, and choosing which one the card shows
+            # is a product decision (AGENTS.md RED: product meaning), not a scraper fix. Escalated
+            # 2026-08-15 with this evidence; until it is decided, the long-standing behaviour stands
+            # and `mon_detect_wasalt_annualisation_fabricated` measures the exposure every hour.
             rent_price = int(rf_monthly["amount"]) * 12
         elif rf_yearly.get("amount"):
             rent_price = rf_yearly["amount"]
@@ -326,6 +346,10 @@ def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optio
         "street_name": street_name,
         "residence_type": residence_type,
         "project_name": project_name,
+        # Raw per-frequency pricing exactly as the search-list published it, so the annualisation
+        # question is answerable from the DB forever. Written only when the source sent one.
+        **({"source_capture": {"schema": "wasalt.list.v1", "rent_freq": rent_freq_evidence}}
+           if rent_freq_evidence else {}),
         "price_annual": int(rent_price) if (is_rent and rent_price) else None,
         "price_total": int(sale_price) if (not is_rent and sale_price) else None,
         "rent_period": ("monthly" if rent_is_monthly else "annual") if is_rent else None,

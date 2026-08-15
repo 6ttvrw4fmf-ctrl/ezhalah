@@ -69,6 +69,22 @@ const GRANDFATHERED = new Set([
   // guarded needle-edit.
   '20260815072328_mon_detect_rent_period_contradicts_source_probe.sql',
   '20260815072452_restore_explicit_detector_roster_after_run22_wholesale_rebuild.sql',
+  // 2026-08-15: miss #6 — senior audit run #21 adding mon_detect_wasalt_annualisation_fabricated.
+  // The first file IS the guarded needle-edit form this guard asks for; it trips FULL_REWRITE only
+  // because the regex also matches the `create or replace ...` text inside its execute format(),
+  // exactly as it does for REPAIR (which is exempted by name). The second file is a deliberate full
+  // rewrite, required by the OPPOSING guard in verify-dealapp-crawl-budget.ts, which demands the
+  // NEWEST roster migration list every detector literally. Those two rules cannot both be satisfied
+  // by one file, so the pair is recorded here.
+  // LIVE ROSTER VERIFIED INTACT before grandfathering (2026-08-15 23:4x): 59 mon_detect_* functions
+  // exist, 52 are on the roster, and all 7 absentees have their own dedicated cron —
+  // aqar_ppm_as_total:63, district_resolution:43, price_fidelity:42, price_magnitude_gate:59,
+  // refresh_coverage:58, trending_cohort_drift:77, wasalt_enrich_backlog:40. Sweep returned
+  // failed=[] with orphaned_detectors=0. The explicit roster also PRESERVES the concurrent run #22
+  // addition (mon_detect_rent_period_contradicts_probe), which is why the needle-edit was applied
+  // first. The NEXT roster edit still must use the guarded needle-edit.
+  '20260815233850_roster_wire_wasalt_annualisation_fabricated_detector.sql',
+  '20260815234309_roster_full_explicit_after_wasalt_annualisation_detector.sql',
 ]);
 
 // Every detector the 2026-08-10 repair put back. Pinned so a future revert of that migration, or a
