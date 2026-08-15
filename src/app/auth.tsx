@@ -310,7 +310,11 @@ export default function Auth() {
           ANY viewport width, so there's never dead space regardless of window size; FilterPreview sits
           on top of it giving the specific "the filter is really there" proof the owner asked for. */}
       <View style={s.heroLayer} pointerEvents="none">
-        <HeroBackground imageOpacity={0.55} fadeStart={0.85} fadeEnd={1} />
+        {/* Much fainter than the home screen's own hero (0.55) — this is filler for the screen EDGES a
+            fixed-width card can't reach, not the star. At 0.55 it visually competed with and drowned
+            out FilterPreview, recreating the exact "just decorative scenery, where's the actual
+            filter" complaint that FilterPreview was built to fix in the first place. */}
+        <HeroBackground imageOpacity={0.16} fadeStart={0.85} fadeEnd={1} />
       </View>
       {/* The real Filter card stays visible behind the popup — softly dimmed, inert (owner 2026-08-15:
           "I still want the filter and the entire platform to still show", not decorative scenery).
