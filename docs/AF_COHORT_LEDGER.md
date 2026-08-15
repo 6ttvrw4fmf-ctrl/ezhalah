@@ -157,7 +157,21 @@ Live types: **فيلا** 33.6k (99.84% of the family) · بيت 51 · تاون �
 - بيت/تاون هاوس/دوبلكس: searchable as normal, NO interview (n and coverage below every gate).
 - All فيلا annual-rent rows are native سنوي (the شهري+RNPL branch contributes 0). Monthly stays frozen.
 
-## فيلا / Villa — RENT ANNUAL & BUY — built 2026-08-16 (certification in progress)
+## فيلا / Villa — RENT ANNUAL & BUY — ✅ CERTIFIED 2026-08-16
+- RENT-ANNUAL **PASS** (nationwide 5,938 / Riyadh 3,997, 4-way exact + md5 set-equality on all 6
+  combo/scope pairs, 0 row violations). BUY **PASS** (27,304 / 11,346, full base-set md5 identity
+  at both scopes, 3 combos md5-equal, 0 violations, Rent/Buy isolation + Gathern-not-in-Buy = 0).
+- Fresh-listing trace 10/10 rows × 8 fields zero divergences (aqar typed columns; wasalt/dealapp
+  resolver fidelity proven: facade/streetWidth/completionYear → index verbatim); counted-proof
+  3-way exact at الخبر (242/126/89). Browser E2E on production: Buy 11,356→6,193→637 with every
+  hop == referee, pills + removal recompute → 1,683 exact; Rent rnpl leads (2,923 of 4,023).
+- Villa mutation spot-check: rich-attrs drift fired 0→2 in isolation, rolled back, zero residue.
+- KNOWN NUANCE (honest, monitored): Villa/Buy AC chip counts are exact (644 NAT / 241 RYD) but AC
+  is dead on FRESH Buy rows (waived source-side) — the chip is floor-suppressed at big scopes and
+  can render in small scopes on pre-June listings until they age out.
+- OWNER DECISION CANDIDATE: wasalt completionYear sometimes arrives as bare numerals ('2','11');
+  the age resolver maps only string forms → NULL (fail-closed). Mapping bare numerals to years
+  needs an owner call (ambiguous-mapping-ask-first).
 - Types: فيلا (99.84% of family) + riders بيت/تاون هاوس (searchable, no questions). قصر = 0 live rows.
 - Fresh-band profiling designed the questions (7d/48h first-seen, per platform):
   - RENT (n≈5,935; fresh 851): rnpl ask-first (74.7% of fresh known = yes — strongest RNPL market in
