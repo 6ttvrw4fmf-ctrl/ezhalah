@@ -648,6 +648,8 @@ export type GuidedCounts = {
   cnt_dir_n: number; cnt_dir_s: number; cnt_dir_e: number; cnt_dir_w: number;
   cnt_dir_ne: number; cnt_dir_nw: number; cnt_dir_se: number; cnt_dir_sw: number;
   cnt_stw15: number; cnt_stw20: number; cnt_stw25: number; cnt_stw30: number;
+  // Villa cohort 2026-08-16: aqar villa-form chips (مدخل سيارة / صرف صحي).
+  cnt_car_entrance: number; cnt_sanitation: number;
   cnt_selected: number;
 };
 

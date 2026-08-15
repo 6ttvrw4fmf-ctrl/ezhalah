@@ -370,6 +370,8 @@ const AR: Record<string, string> = {
   'Do you prefer it furnished?': 'تفضلها مفروشة؟',
   'Unfurnished': 'غير مفروشة',
   'Driver room': 'غرفة سائق',
+  'Car entrance': 'مدخل سيارة',
+  'Sewage connection': 'صرف صحي',
   // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
   'How many bathrooms?': 'كم دورة مياه تفضل؟',
   'Any number': 'أي عدد',
