@@ -1,9 +1,10 @@
 -- First-class cron schedule for mon_filter_parity_barrier() (certification audit, 2026-08-15).
 --
--- STATUS AT AUTHORING: NOT YET APPLIED to production — authored in a session without the Supabase
--- MCP. Apply via `apply_migration` on project aannarbkwcymrotzwdbo, then rename this file to the
--- server-minted version if it differs (AGENTS.md "Migration drift guard"). Idempotent: safe to
--- re-apply.
+-- APPLIED 2026-08-15 via apply_migration (project aannarbkwcymrotzwdbo), under the 'production'
+-- deploy lock. Idempotent: safe to re-apply. Minute history: first attempt used :54's predecessor
+-- :49 and was ABORTED by the live-uniqueness guard below — live-only job 'refresh-loc-rel-signals'
+-- covers :49 and exists in NO repo migration (cron-state drift; flagged to the owner separately).
+-- :54 was then chosen from the live free-minute set {22,24,30,40,42,54}.
 --
 -- WHY: since 20260811225017 the parity barrier ran ONLY as a chained call
 -- ('; select public.mon_check_filter_parity_legacy();') on the tail of cron job
@@ -12,7 +13,7 @@
 -- jobname, so any re-apply of the af-predicate job's own migration (20260811130434) would silently
 -- drop the chained call and the parity barrier would stop running with no alert.
 --
--- FIX: give the alerting wrapper its own job 'mon-filter-parity-barrier' at :49 — a unique minute,
+-- FIX: give the alerting wrapper its own job 'mon-filter-parity-barrier' at :54 — a unique minute,
 -- re-verified against LIVE cron.job below at apply time; :00/:15/:20 and the barrier minutes
 -- :29/:37/:41/:43/:52/:59 avoided per the 2026-08-10 worker-starvation staggering — and restore
 -- jobid 71's command to its original single-purpose form. This is a MOVE, not a second run:
@@ -25,7 +26,7 @@
 -- (alerts at >=3 hourly jobs sharing a minute), and mon_detect_cron_health() covers the new job from
 -- its first successful run (a never-run job is deliberately not alerted — see 20260713 spine).
 
--- 1. Preconditions: both functions exist, and minute :49 is genuinely free among hourly-class jobs.
+-- 1. Preconditions: both functions exist, and minute :54 is genuinely free among hourly-class jobs.
 --    Minute expansion mirrors mon_detect_cron_minute_collision() (20260810175029).
 do $$
 declare
@@ -41,22 +42,22 @@ begin
      and split_part(schedule, ' ', 2) = '*'
      and (    split_part(schedule, ' ', 1) = '*'
           or (split_part(schedule, ' ', 1) ~ '^\d+$'
-              and split_part(schedule, ' ', 1)::int = 49)
+              and split_part(schedule, ' ', 1)::int = 54)
           or (split_part(schedule, ' ', 1) ~ '^\d+(,\d+)+$'
-              and '49' = any(string_to_array(split_part(schedule, ' ', 1), ',')))
+              and '54' = any(string_to_array(split_part(schedule, ' ', 1), ',')))
           or (split_part(schedule, ' ', 1) ~ '^\*/\d+$'
-              and 49 % split_part(split_part(schedule, ' ', 1), '/', 2)::int = 0)
+              and 54 % split_part(split_part(schedule, ' ', 1), '/', 2)::int = 0)
           or (split_part(schedule, ' ', 1) ~ '^\d+-59/\d+$'
-              and 49 >= split_part(split_part(schedule, ' ', 1), '-', 1)::int
-              and (49 - split_part(split_part(schedule, ' ', 1), '-', 1)::int)
+              and 54 >= split_part(split_part(schedule, ' ', 1), '-', 1)::int
+              and (54 - split_part(split_part(schedule, ' ', 1), '-', 1)::int)
                   % split_part(split_part(schedule, ' ', 1), '/', 2)::int = 0));
   if taken is not null then
-    raise exception 'minute :49 already covered by active cron job(s): % — pick another minute', taken;
+    raise exception 'minute :54 already covered by active cron job(s): % — pick another minute', taken;
   end if;
 end $$;
 
 -- 2. The first-class schedule (cron.schedule upserts by jobname — idempotent).
-select cron.schedule('mon-filter-parity-barrier', '49 * * * *',
+select cron.schedule('mon-filter-parity-barrier', '54 * * * *',
   $$set statement_timeout to '120s'; select public.mon_check_filter_parity_legacy();$$);
 
 -- 3. Restore 'mon-af-predicate-parity' (jobid 71) to single-purpose: remove the exact chained call
@@ -81,7 +82,7 @@ end $$;
 comment on function public.mon_check_filter_parity_legacy() is
   'Hourly alerting wrapper for mon_filter_parity_barrier(): inserts one location_pipeline_alerts '
   'row per leaking check per run, with NO dedup key (does not use mon_raise) — so it must be '
-  'scheduled exactly once. First-class cron job ''mon-filter-parity-barrier'' (49 * * * *) since '
+  'scheduled exactly once. First-class cron job ''mon-filter-parity-barrier'' (54 * * * *) since '
   '2026-08-15; previously chained onto ''mon-af-predicate-parity'' (20260811225017), which made it '
   'invisible in cron.job and silently droppable by any cron.schedule() re-apply of the host job. '
   'Do not chain it onto other jobs, and do not schedule it twice.';
@@ -98,7 +99,7 @@ begin
     from cron.job
    where jobname = 'mon-filter-parity-barrier'
      and active
-     and schedule = '49 * * * *'
+     and schedule = '54 * * * *'
      and command like '%mon_check_filter_parity_legacy%';
   if n <> 1 then
     raise exception 'first-class parity-barrier cron job missing/misconfigured after install';
