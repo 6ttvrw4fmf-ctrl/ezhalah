@@ -606,6 +606,8 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
         ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
         ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
         ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
+        ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
+        ...(q.directions?.length ? { p_directions: q.directions } : {}),
       }),
       AGE_COUNT_TIMEOUT_MS,
     );
@@ -642,6 +644,10 @@ export type GuidedCounts = {
   cnt_bath2: number;
   cnt_bath3: number;
   cnt_bath4: number;
+  // Cohort expansion 2026-08-15: direction + street-width counts (ResBldg/Apartment-Buy questions).
+  cnt_dir_n: number; cnt_dir_s: number; cnt_dir_e: number; cnt_dir_w: number;
+  cnt_dir_ne: number; cnt_dir_nw: number; cnt_dir_se: number; cnt_dir_sw: number;
+  cnt_stw15: number; cnt_stw20: number; cnt_stw25: number; cnt_stw30: number;
   cnt_selected: number;
 };
 
@@ -667,6 +673,8 @@ export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<Guided
         ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
         ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
         ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
+        ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
+        ...(q.directions?.length ? { p_directions: q.directions } : {}),
       }),
       AGE_COUNT_TIMEOUT_MS,
     );
@@ -1176,6 +1184,9 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
     ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
     ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
+    // Cohort-expansion answers (2026-08-15): both params exist on the live RPC signature.
+    ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
+    ...(q.directions?.length ? { p_directions: q.directions } : {}),
   };
 
   // RC-A rebase note (2026-07-16): main's baseRpcParams block above is the P0-fixed parameter source

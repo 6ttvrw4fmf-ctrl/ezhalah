@@ -58,10 +58,22 @@ check('scoreQuestion still gates on scope size, option band, and genuine narrowi
 check('the installment question stays a single binary source-confirmed chip (no invented frequencies)',
   /RNPL_QUESTION[\s\S]{0,600}labelKey: 'Offers installments'/.test(advSrc)
   && !/دفعتين|٤ دفعات|١٢ دفعة/.test(advSrc));
-check('furnished question is single-select, Rent-only, true tri-state via furnishedPref',
+// COHORT CONFIG (owner 2026-08-15): eligibility is data — COHORT_QUESTIONS maps each single type ×
+// deal to its source-justified question list; cohortAllows() is the ONLY eligibility gate for the
+// config-driven questions. The old per-question hardcoded gates are superseded, but their
+// INVARIANTS survive as data shape and are pinned below.
+check('furnished question is single-select, cohort-gated, true tri-state via furnishedPref',
   /FURNISHED_QUESTION[\s\S]{0,400}selection:\s*'single'/.test(advSrc)
-  && /FURNISHED_QUESTION[\s\S]{0,400}eligibility:\s*isAnnualRentApartment/.test(advSrc)
+  && /FURNISHED_QUESTION[\s\S]{0,420}cohortAllows\(q, 'furnished'\)/.test(advSrc)
   && /furnishedPref:\s*true/.test(advSrc) && /furnishedPref:\s*false/.test(advSrc));
+check('COHORT_QUESTIONS exists, Monthly Rent has no key anywhere (frozen per owner), and no Buy list contains a rent-only question',
+  /const COHORT_QUESTIONS/.test(advSrc)
+  && !/Monthly\s*:/.test(advSrc.slice(advSrc.indexOf('const COHORT_QUESTIONS'), advSrc.indexOf('function singleCleanType')))
+  && !/Buy:\s*\[[^\]]*'furnished'/.test(advSrc)
+  && !/Buy:\s*\[[^\]]*'rnpl'/.test(advSrc));
+check('the pool carries the two new data-justified questions (street_width + direction)',
+  /STREET_WIDTH_QUESTION, DIRECTION_QUESTION,/.test(advSrc)
+  && /cnt_stw15/.test(advSrc) && /cnt_dir_n/.test(advSrc));
 check('RNPL + amenities are multi; age + bathrooms are single',
   /RNPL_QUESTION[\s\S]{0,400}selection:\s*'multi'/.test(advSrc)
   && /AMENITIES_QUESTION[\s\S]{0,500}selection:\s*'multi'/.test(advSrc)
@@ -75,14 +87,16 @@ check("age's eligibility lives in its own config, and agent.tsx no longer holds 
 check('one shared per-option floor (MIN_REAL_OPTION_COUNT via meaningful()); the >0-chips vs >=5-buckets split is banned',
   /MIN_REAL_OPTION_COUNT/.test(advSrc) && /function meaningful/.test(advSrc)
   && !/MIN_REAL_BUCKET_COUNT/.test(advSrc) && !/\.count\(counts\)\s*>\s*0/.test(advSrc));
-// RNPL is a rent concept → rent-only. Amenities + bathrooms are physical attributes → they extend to
-// BUY apartments too (owner follow-up 2026-07-27), via isApartmentAttributeScope (deal Buy OR annual Rent).
-check('RNPL gates rent-only (isAnnualRentApartment); amenities + bathrooms extend to Buy (isApartmentAttributeScope)',
-  /RNPL_QUESTION[\s\S]{0,400}eligibility:\s*isAnnualRentApartment/.test(advSrc)
-  && (advSrc.match(/eligibility:\s*isApartmentAttributeScope/g) || []).length >= 2
-  && /function isApartmentAttributeScope[\s\S]{0,400}q\.deal\s*===\s*'Buy'[\s\S]{0,120}q\.deal\s*===\s*'Rent'/.test(advSrc));
-check('Furnished chip stays Rent-only — never offered on Buy (owner: Buy furnished ≈2%)',
-  /isAnnualRentApartment\(q\)\)\s*defs\.push\(\{\s*key:\s*'furnished'/.test(advSrc));
+// RNPL is a rent concept → rent-only; amenities + bathrooms extend to Buy where the cohort's data
+// justifies them. Both now enforced as DATA (COHORT_QUESTIONS) rather than per-question functions —
+// the checks above assert no Buy list carries 'rnpl' or 'furnished'.
+check('RNPL + amenities + bathrooms are cohort-gated through cohortAllows',
+  /RNPL_QUESTION[\s\S]{0,420}cohortAllows\(q, 'rnpl'\)/.test(advSrc)
+  && /cohortAllows\(q, 'amenities'\)/.test(advSrc)
+  && /cohortAllows\(q, 'bathrooms'\)/.test(advSrc)
+  && /function cohortAllows[\s\S]{0,600}q\.rentPeriod !== 'monthly'/.test(advSrc));
+check('Furnished chip is cohort-gated — never offered where the cohort config withholds it',
+  /cohortAllows\(q, 'furnished'\)\)\s*defs\.push\(\{\s*key:\s*'furnished'/.test(advSrc));
 
 // ── ONE card, no per-question branching, tokens only ─────────────────────────────────────────────
 check('the card branches on selection ONLY — never on a question id',
