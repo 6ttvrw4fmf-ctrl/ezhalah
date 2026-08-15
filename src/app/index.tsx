@@ -175,12 +175,18 @@ export default function Home() {
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
   };
   useEffect(() => () => { clearBlurTimer(cityBlurTimer); clearBlurTimer(districtBlurTimer); }, []);
-  // Rent period the user has toggled (Monthly/Yearly) — drives the period-scoped Trending lists AND
-  // the search summary. Buy has no period. Declared HIGH (above the warm effects below) because those
-  // effects depend on it. (Was previously derived lower down; moved up 2026-07-21.)
-  const rentPeriod: 'monthly' | 'annual' = query.rentPeriod ?? 'annual';
-  // payment_monthly truth for the Trending-scope RPCs: monthly→true, annual→false, Buy→null (no filter).
-  const paymentMonthly: boolean | null = query.deal === 'Rent' ? rentPeriod === 'monthly' : null;
+  // Rent period the user has toggled (Monthly/Yearly/Both) — drives the period-scoped Trending lists
+  // AND the search summary. Buy has no period. Declared HIGH (above the warm effects below) because
+  // those effects depend on it. (Was previously derived lower down; moved up 2026-07-21; 'both' added
+  // 2026-08-15 — user doesn't have to pick just one.)
+  const rentPeriod: 'monthly' | 'annual' | 'both' = query.rentPeriod ?? 'annual';
+  // payment_monthly truth for the Trending-scope RPCs: monthly→true, annual→false, Buy OR both→null
+  // (no filter — same "don't restrict" signal Buy already uses, see cityPoolStatus/ensureCityFieldIndex
+  // in locations.ts, which already treat null as "omit p_payment_monthly entirely"). Getting this wrong
+  // would silently hide monthly cities/districts/trending items whenever Both is selected.
+  const paymentMonthly: boolean | null = query.deal === 'Rent'
+    ? (rentPeriod === 'both' ? null : rentPeriod === 'monthly')
+    : null;
   // COUNT-SCOPE PARITY (findings 2026-08-13, R1): every City/District pool call is scoped to the
   // category the results RPC will ACTUALLY search — the picked category, else the same implied
   // default remote.ts applies to a category-less search (imported, never a duplicated literal).
@@ -863,21 +869,29 @@ export default function Home() {
 
             <View ref={withAnchor(cityAnchorRef)} />
 
-            {/* Rent period (Monthly / Yearly) — MOVED here, directly above the City field (owner request
-                2026-07-21, superseding the 07-10 placement above the Refine card): the user picks the
-                period FIRST, then the Trending chips + City/District suggestions all reflect it. Rent-only
-                (Buy has no period). Still tells the engine which period a later typed price/size means. */}
+            {/* Rent period (Monthly / Yearly / Both) — MOVED here, directly above the City field (owner
+                request 2026-07-21, superseding the 07-10 placement above the Refine card): the user picks
+                the period FIRST, then the Trending chips + City/District suggestions all reflect it.
+                Rent-only (Buy has no period). Still tells the engine which period a later typed price/size
+                means. 'Both' added 2026-08-15 (owner: "user can choose both monthly and yearly, he
+                doesn't need to select one only") — reuses this same Segmented control (no new component,
+                no new icon asset; a 3rd text-only option is exactly what Segmented already supports) and
+                sends rentPeriod:'both', which resolves to the RPC's existing p_rent_period=NULL "no
+                period filter" path (the same one Buy already exercises) — MATCH runs first over the full
+                monthly+annual pool, then the existing platform round-robin (div_rank) diversifies across
+                that whole matched sequence exactly as it always does. */}
             {query.deal === 'Rent' && (
               <Reveal style={{ marginTop: 12 }}>
                 <Segmented
-                  options={['Monthly', 'Yearly']}
+                  options={['Monthly', 'Yearly', 'Both']}
                   icons={PERIOD_IMG}
-                  value={rentPeriod === 'monthly' ? 'Monthly' : 'Yearly'}
+                  value={rentPeriod === 'monthly' ? 'Monthly' : rentPeriod === 'annual' ? 'Yearly' : 'Both'}
                   onChange={(v) => {
-                    const next = v === 'Monthly' ? 'monthly' : 'annual';
-                    // Monthly↔Yearly inverts what a typed price MEANS (3,000/شهري ≠ 3,000/سنوي).
-                    // Same rule as the Buy↔Rent toggle above: never silently keep bounds whose unit
-                    // just changed — clear them and say why. (audit item 3, owner rule 2026-07-27.)
+                    const next = v === 'Monthly' ? 'monthly' : v === 'Yearly' ? 'annual' : 'both';
+                    // Monthly↔Yearly inverts what a typed price MEANS (3,000/شهري ≠ 3,000/سنوي); Both is
+                    // just as ambiguous a unit as either single switch. Same rule as the Buy↔Rent toggle
+                    // above: never silently keep bounds whose unit just changed — clear them and say why.
+                    // (audit item 3, owner rule 2026-07-27; extended to Both 2026-08-15.)
                     setQuery((q) => {
                       if ((q.rentPeriod ?? 'annual') === next) return q;
                       const hadPrice = !!(q.priceMin || q.priceMax || q.priceInput || q.priceBand);
@@ -889,7 +903,9 @@ export default function Home() {
                   }}
                 />
                 <Text style={s.rentHint}>
-                  {t(rentPeriod === 'monthly' ? 'Monthly: 1–11 month lease, price/month.' : 'Annual: 12-month lease, price/year.')}
+                  {t(rentPeriod === 'monthly' ? 'Monthly: 1–11 month lease, price/month.'
+                    : rentPeriod === 'annual' ? 'Annual: 12-month lease, price/year.'
+                    : 'Both: monthly and yearly listings together.')}
                 </Text>
                 {periodPriceCleared && !query.priceMin && !query.priceMax && !query.priceInput ? (
                   <Text style={[s.rangeNote, s.rangeNoteWarn]}>{t('Price limits were cleared because the price unit changed (monthly ↔ yearly) — please re-enter them.')}</Text>

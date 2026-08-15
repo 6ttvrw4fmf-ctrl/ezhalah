@@ -111,8 +111,11 @@ const AGE_QUESTION: AdvancedQuestion = {
 // ANNUAL scope (owner 2026-07-20). This is each question's own eligibility() gate.
 function isAnnualRentApartment(q: SearchQuery): boolean {
   const types = effectiveTypes(q);
+  // Exact 'annual' match, not merely "!== 'monthly'" — a 'both' pool mixes in monthly rows (which
+  // carry none of these structured attributes), so it must be excluded here exactly like 'monthly'
+  // is, not swept into "annual" by the negation. (owner rent-period-both request 2026-08-15.)
   return types.length === 1 && types[0] === 'Apartment'
-    && q.category === 'Residential' && q.deal === 'Rent' && q.rentPeriod !== 'monthly';
+    && q.category === 'Residential' && q.deal === 'Rent' && q.rentPeriod === 'annual';
 }
 
 // Amenities + bathrooms also apply to BUY apartments (owner follow-up 2026-07-27) — same single-Apartment
@@ -122,7 +125,9 @@ function isAnnualRentApartment(q: SearchQuery): boolean {
 function isApartmentAttributeScope(q: SearchQuery): boolean {
   const types = effectiveTypes(q);
   if (!(types.length === 1 && types[0] === 'Apartment' && q.category === 'Residential')) return false;
-  return q.deal === 'Buy' || (q.deal === 'Rent' && q.rentPeriod !== 'monthly');
+  // 'both' excluded the same way 'monthly' is (see isAnnualRentApartment) — its pool still mixes in
+  // monthly rows with no structured attributes to ask about.
+  return q.deal === 'Buy' || (q.deal === 'Rent' && q.rentPeriod === 'annual');
 }
 
 // Merge picked strict amenity tokens (kitchen/parking/elevator/furnished/rnpl) into q.amenities.
