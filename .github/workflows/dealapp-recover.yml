@@ -45,7 +45,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          python -m scrapers.dealapp.recover \
+          exec python -m scrapers.dealapp.recover \
             --table ${{ github.event.inputs.table || 'all' }} \
             --limit ${{ github.event.inputs.limit || '0' }} \
             --workers 4

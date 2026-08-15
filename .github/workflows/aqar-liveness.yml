@@ -51,4 +51,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python -m scrapers.aqar.liveness --table ${{ matrix.table }} --shards 16 --shard ${{ matrix.shard }}
+        run: exec python -m scrapers.aqar.liveness --table ${{ matrix.table }} --shards 16 --shard ${{ matrix.shard }}

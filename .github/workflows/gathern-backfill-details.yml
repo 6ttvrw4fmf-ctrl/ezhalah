@@ -40,4 +40,4 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_MIN_INTERVAL: "1.0"   # ~1 req/s single runner = the block-free rate the probe proved
-        run: python -m scrapers.gathern.run --backfill-details
+        run: exec python -m scrapers.gathern.run --backfill-details

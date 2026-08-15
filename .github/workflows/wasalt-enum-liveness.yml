@@ -64,7 +64,7 @@ jobs:
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
           SCRAPE_MIN_INTERVAL: "0.3"
         run: |
-          python -m scrapers.wasalt.run --all --pages 2000
+          exec python -m scrapers.wasalt.run --all --pages 2000
 
   strike:
     name: Strike unseen + confirm-flip (3-strike, guarded)
@@ -91,7 +91,7 @@ jobs:
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
           SCRAPE_MIN_INTERVAL: "0.3"
         run: |
-          python -m scrapers.wasalt.liveness \
+          exec python -m scrapers.wasalt.liveness \
             --mode enum-strike \
             --grace 3 \
             --confirm-limit ${{ inputs.confirm_limit || '1500' }} \

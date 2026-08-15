@@ -122,7 +122,18 @@ def _finalize_open_run_on_signal(signum, _frame) -> None:  # pragma: no cover - 
     really did write rows — so a killed job reads as a dead SOURCE rather than an infra kill.
 
     Actions sends SIGINT, then SIGTERM, then SIGKILL after a grace period, so one small UPDATE
-    lands comfortably. We deliberately do NOT call end_run(): its check_tables field-range RPCs
+    lands comfortably — BUT ONLY IF THIS PROCESS IS THE ONE SIGNALLED. That precondition was
+    missing for the first week this handler existed (2026-08-08 → 2026-08-15) and it closed 0 rows
+    in that window while the 12h reconciler closed 29. GitHub runs a `run:` block as
+    `bash -e <script>`; without `exec`, python is a CHILD of that bash, the runner signals bash,
+    and python is merely orphaned — then destroyed by the post-job "Cleaning up orphan processes"
+    sweep, which no handler can catch. `Fill turabah` (GH job 94946244863) proves it: cancel at
+    04:42:51.788, then `Terminate orphan process: pid (2245) (python)` 261ms later, no UPDATE.
+    Every scraper-launching workflow step must therefore `exec` python so it replaces the shell
+    and receives the signal itself; scripts/verify-scrape-run-finalized-on-kill.ts §4 pins this
+    for the whole fleet, because a correct handler nothing ever signals is not a safety net.
+
+    We deliberately do NOT call end_run(): its check_tables field-range RPCs
     are far too slow for a grace window, and we must not guess rows_seen/rows_upserted — they
     stay as begin_run() left them and the note says why.
 

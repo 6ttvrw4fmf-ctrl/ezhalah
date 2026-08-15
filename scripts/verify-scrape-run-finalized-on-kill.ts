@@ -218,6 +218,77 @@ if (tmo) {
   );
 }
 
+// ── 4. SIGNAL DELIVERY: the workflow must `exec` the scraper ────────────────────────────────────
+// THE BUG THIS EXISTS TO PREVENT (2026-08-15 senior audit, run #21). Sections 1-3 prove the handler
+// is CORRECT — it just never ran. From the day it shipped (2026-08-08) to 2026-08-15 it closed
+// exactly 0 rows, while the 12h reconciler closed 29. The handler was never reached because it was
+// never SIGNALLED:
+//
+//   GitHub writes a `run:` block to a script and executes `bash -e <script>`. Without `exec`, the
+//   scraper is a CHILD of that bash. On cancellation the runner signals the STEP process — bash —
+//   which dies; python is orphaned and then destroyed by the runner's post-job "Cleaning up orphan
+//   processes" sweep, which is not a catchable signal. The row stays dangling.
+//
+// PROOF, from `Fill turabah` (GH job 94946244863, deep-fill run 31858007330):
+//   04:42:51.788  ##[error]The operation was canceled.
+//   04:42:52.049  Terminate orphan process: pid (2245) (python)      <- python OUTLIVED the step
+// No handler output, no UPDATE, 261ms between cancel and the orphan kill. All 31 scraper workflows
+// invoked python this way, so the handler was undeliverable fleet-wide, not just here.
+//
+// `exec` makes python REPLACE bash, so the step process IS python and the runner's signal reaches
+// the handler directly. This check pins that property for every scraper-launching step.
+const EXEC_EXEMPT = new Set([
+  // 4 sequential read-only probes in one block — `exec` would replace the shell at probe #1 and
+  // silently skip the rest. Short-lived and never timeout-killed, so it needs no kill handler.
+  'mustqr-probe.yml',
+]);
+const SCRAPER_CMD = /(?:python -m scrapers\.|\$\{\{ matrix\.cmd \}\})/;
+
+const wfDir = '.github/workflows';
+let execChecked = 0;
+const execMissing: string[] = [];
+for (const wf of readdirSync(wfDir).filter((f) => f.endsWith('.yml')).sort()) {
+  if (EXEC_EXEMPT.has(wf)) continue;
+  const lines = readFileSync(join(wfDir, wf), 'utf8').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\s*)run:\s*(\|-?|>-?)?\s*(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    const indent = m[1].length;
+    let cmds: string[] = [];
+    if (!m[2]) {
+      cmds = [m[3]]; // single-line `run: <cmd>`
+    } else {
+      // Block scalar: collect the body, then fold backslash/`>-` continuations into one command
+      // each so "the last command" means the last COMMAND, not the last line.
+      const body: string[] = [];
+      let j = i + 1;
+      for (; j < lines.length; j++) {
+        const l = lines[j];
+        if (l.trim() !== '' && l.length - l.trimStart().length <= indent) break;
+        body.push(l);
+      }
+      i = j - 1;
+      const folded = m[2].startsWith('>')
+        ? [body.map((l) => l.trim()).filter(Boolean).join(' ')]
+        : body.join('\n').replace(/\\\n\s*/g, ' ').split('\n');
+      cmds = folded.map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    }
+    const last = cmds[cmds.length - 1];
+    if (!last || !SCRAPER_CMD.test(last)) continue;
+    execChecked++;
+    if (!/^exec\s/.test(last)) execMissing.push(`${wf}: ${last.slice(0, 60)}`);
+  }
+}
+console.log(`    scraper-launching steps checked: ${execChecked}`);
+check(
+  'every scraper-launching workflow step uses `exec` so the kill signal reaches python, not bash',
+  execChecked > 0 && execMissing.length === 0,
+  execMissing.length ? `missing exec → ${execMissing.join(' | ')}` : `${execChecked} steps`,
+);
+// A fleet this size must not silently shrink to zero checked steps (e.g. a refactor that renames
+// the invocation form) — that would turn this guard into decoration.
+check('the exec guard still sees the whole scraper fleet', execChecked >= 25, `${execChecked} steps`);
+
 console.log('');
 if (!harnessOk) console.error('  (the signal harness did not run to completion — treat the above as unproven)');
 if (failures > 0) {

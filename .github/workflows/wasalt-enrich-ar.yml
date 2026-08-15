@@ -63,7 +63,7 @@ jobs:
           SCRAPE_MIN_INTERVAL: "0.3"
           ALLOW_BACKFILL_FLAG: ${{ (github.event.inputs.allow_backfill == 'true') && '--allow-backfill' || '' }}
         run: |
-          python -m scrapers.wasalt.enrich_ar \
+          exec python -m scrapers.wasalt.enrich_ar \
             --table ${{ matrix.table }} \
             --limit ${{ github.event.inputs.limit || 2000 }} \
             --workers 6 \

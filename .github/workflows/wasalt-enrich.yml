@@ -44,7 +44,7 @@ jobs:
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
           SCRAPE_MIN_INTERVAL: "0.3"
         run: |
-          python -m scrapers.wasalt.enrich \
+          exec python -m scrapers.wasalt.enrich \
             --table ${{ matrix.table }} \
             --limit ${{ github.event.inputs.limit || 2000 }} \
             --workers 6
