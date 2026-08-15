@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, cardShadow } from '@/theme/tokens';
 import { Spinner } from '@/components/ui';
+import HeroBackground from '@/components/HeroBackground';
 import { useApp, type AuthUser } from '@/store';
 import { useI18n, t } from '@/i18n';
 import {
@@ -52,9 +53,10 @@ export default function Auth() {
     ],
   };
 
-  // Eagle logo "blink": a subtle two-blink on open — opacity briefly dips then restores, twice,
-  // shortly after the page settles. Runs ONCE (not a loop) so it's a gentle wink, never distracting.
-  // (user request: subtle blink animation on the eagle logo when the login page opens.)
+  // Eagle FLY-IN (owner 2026-08-15: no disc, just the dark-green eagle — "let it fly"): the mark
+  // glides down into place from above with a gentle bank (slight rotation) and a soft landing
+  // overshoot, then a quick two-blink "wink" once it has settled. Runs ONCE — graceful, not looping.
+  const fly = useRef(new Animated.Value(0)).current;
   const blink = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     const dip = () =>
@@ -62,10 +64,25 @@ export default function Auth() {
         Animated.timing(blink, { toValue: 0.25, duration: 95, easing: Easing.in(Easing.quad), useNativeDriver: Platform.OS !== 'web' }),
         Animated.timing(blink, { toValue: 1, duration: 130, easing: Easing.out(Easing.quad), useNativeDriver: Platform.OS !== 'web' }),
       ]);
-    const anim = Animated.sequence([Animated.delay(650), dip(), Animated.delay(140), dip()]);
+    const anim = Animated.parallel([
+      // The glide: back-eased so the eagle sweeps in and settles with a tiny bounce — a landing.
+      Animated.timing(fly, { toValue: 1, duration: 750, delay: 140, easing: Easing.out(Easing.back(1.15)), useNativeDriver: Platform.OS !== 'web' }),
+      // The wink, after touchdown.
+      Animated.sequence([Animated.delay(1050), dip(), Animated.delay(140), dip()]),
+    ]);
     anim.start();
     return () => anim.stop();
-  }, [blink]);
+  }, [fly, blink]);
+  const flyStyle = {
+    // Fade is clamped (the back-easing overshoots 1 for the landing bounce; opacity must not).
+    opacity: Animated.multiply(fly.interpolate({ inputRange: [0, 0.55, 1], outputRange: [0, 1, 1], extrapolate: 'clamp' }), blink),
+    transform: [
+      { translateY: fly.interpolate({ inputRange: [0, 1], outputRange: [-44, 0] }) },
+      { translateX: fly.interpolate({ inputRange: [0, 1], outputRange: [isRTL ? -34 : 34, 0] }) },
+      { rotate: fly.interpolate({ inputRange: [0, 1], outputRange: [isRTL ? '9deg' : '-9deg', '0deg'] }) },
+      { scale: fly.interpolate({ inputRange: [0, 1], outputRange: [0.62, 1] }) },
+    ],
+  };
 
   const [cc, setCc] = useState<Country>(COUNTRIES[0]);
   const [ccOpen, setCcOpen] = useState(false);
@@ -229,6 +246,11 @@ export default function Auth() {
     // in the middle of a softly dimmed ground with a gentle rise+fade; clicking ANYWHERE outside the
     // card (or the X / hardware back) closes it. Logo + the sign-in ways, nothing else. ──
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
+      {/* The app's artwork stays visible behind the popup — softly dimmed, never a flat gray field
+          (owner 2026-08-15: "the background should still show"). Same HeroBackground the home uses. */}
+      <View style={s.bg} pointerEvents="none">
+        <HeroBackground imageOpacity={0.55} fadeStart={0.85} fadeEnd={1} />
+      </View>
       <View style={s.dim} pointerEvents="none" />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         {/* The outer Pressable fills the screen — a press on the empty ground closes the popup. The
@@ -243,9 +265,9 @@ export default function Auth() {
                   color={colors.ink}
                 />
               </Pressable>
-              {/* The eagle seal — the only branding the popup needs (keeps its gentle blink). */}
-              <Animated.View style={[s.popSeal, { opacity: blink }]}>
-                <RNImage source={LOGO} style={s.popMark} resizeMode="contain" />
+              {/* The eagle — no disc, just the dark-green mark, flying into place (flyStyle). */}
+              <Animated.View style={[s.popEagle, flyStyle]}>
+                <RNImage source={LOGO} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
               </Animated.View>
           {/* ── main ───────────────────────────────────────────────── */}
           {step === 'main' && (
@@ -484,7 +506,9 @@ export default function Auth() {
 const s = StyleSheet.create({
   // ── The popup ────────────────────────────────────────────────────────────────────────────────
   // A soft green-tinted dim over the warm paper ground, so the card reads as a floating dialog.
-  dim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(23, 37, 30, 0.30)' },
+  bg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  // Lighter than before so the artwork behind stays clearly visible — a veil, not a wall.
+  dim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(23, 37, 30, 0.18)' },
   // Fills the screen and centers the card; pressing it (the empty ground) closes the popup.
   center: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
   popWrap: { width: '100%', maxWidth: 400 },
@@ -508,13 +532,8 @@ const s = StyleSheet.create({
     width: 34, height: 34, borderRadius: 17,
     alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f4f1',
   },
-  // The eagle seal — dark-green mark on a light disc (react-native-web can't tint a PNG).
-  popSeal: {
-    alignSelf: 'center', width: 76, height: 76, borderRadius: 38,
-    backgroundColor: '#eef4ef', alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: '#dbe6dd', marginBottom: 14,
-  },
-  popMark: { width: '66%', height: '66%' },
+  // The bare dark-green eagle — no disc, no border (owner 2026-08-15). Sized for presence.
+  popEagle: { alignSelf: 'center', width: 92, height: 74, marginBottom: 12 },
 
   // Modal-style header (2026-08-15): a display-size centered title with the agreement line right
   // under it, so the user consents up front instead of finding the terms in the footer.
