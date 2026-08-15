@@ -121,13 +121,9 @@ const AR: Record<string, string> = {
   'Purchase Budget': 'ميزانية الشراء',
   'Monthly': 'شهري',
   'Yearly': 'سنوي',
-  // Third rent-period option (owner 2026-08-15): no restriction — matches monthly AND yearly listings.
-  'Both': 'كلاهما',
-  'Monthly & Yearly': 'شهري وسنوي',
-  // Tiny info note shown under the Monthly/Yearly/Both toggle so the user knows what each period means.
+  // Tiny info note shown under the Monthly/Yearly toggle so the user knows what each period means.
   'Annual: 12-month lease, price/year.': 'سنوي: عقد لمدة 12 شهراً، السعر سنوي.',
   'Monthly: 1–11 month lease, price/month.': 'شهري: عقد من 1 إلى 11 شهراً، السعر شهري.',
-  'Both: monthly and yearly listings together.': 'كلاهما: نتائج الإيجار الشهري والسنوي معاً.',
   'Family villa in North Riyadh': 'فيلا عائلية في شمال الرياض',
   'Apartment for rent in Khobar': 'شقة للإيجار في الخبر',
   'Commercial land in Jeddah': 'أرض تجارية في جدة',
@@ -164,7 +160,6 @@ const AR: Record<string, string> = {
   // reflects the toggle exactly — "أبحث عن شقة للإيجار الشهري في جدة". (owner UI request 2026-07-18.)
   'to rent monthly': 'للإيجار الشهري',
   'to rent yearly': 'للإيجار السنوي',
-  'to rent monthly or yearly': 'للإيجار الشهري أو السنوي',
   'to rent or buy': 'للإيجار أو الشراء',
   'Rent or Buy': 'إيجار أو شراء',
   // District, and the "district، city" place phrase used when the user picked a district in the filter.
