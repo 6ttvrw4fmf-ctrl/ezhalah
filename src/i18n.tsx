@@ -339,6 +339,22 @@ const AR: Record<string, string> = {
   // listing supports the رايز/إيجاري instalment service. Unknown is never "no", and we never
   // invent a payment frequency (دفعتين/٤ دفعات/…) — no source publishes instalment counts.
   'Would you rather pay the rent in instalments?': 'تفضل تدفع الإيجار على دفعات؟',
+  // Cohort expansion (owner 2026-08-15): street-width + direction questions, data-justified for
+  // Residential Building (96-97% / 83-84% source coverage) and Apartment/Buy (direction 50%).
+  'How wide should the street be?': 'كم عرض الشارع تفضل؟',
+  '15 m or wider': '١٥ م فأكثر',
+  '20 m or wider': '٢٠ م فأكثر',
+  '25 m or wider': '٢٥ م فأكثر',
+  '30 m or wider': '٣٠ م فأكثر',
+  'Which direction do you prefer?': 'وش الاتجاه اللي تفضله؟',
+  'North': 'شمال',
+  'South': 'جنوب',
+  'East': 'شرق',
+  'West': 'غرب',
+  'North-east': 'شمال شرق',
+  'North-west': 'شمال غرب',
+  'South-east': 'جنوب شرق',
+  'South-west': 'جنوب غرب',
   'Do you prefer listings with installment options?': 'تفضّل عقارات تتيح التقسيط / الدفع لاحقًا؟',
   'Offers installments': 'يقبل التقسيط',
   'What amenities matter to you?': 'وش المميزات المهمة لك؟',

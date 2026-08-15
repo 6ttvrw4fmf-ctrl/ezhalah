@@ -107,22 +107,78 @@ const AGE_QUESTION: AdvancedQuestion = {
   },
 };
 
-// The RNPL / amenities / bathrooms questions apply ONLY to a single-Apartment / Residential / Rent /
-// ANNUAL scope (owner 2026-07-20). This is each question's own eligibility() gate.
-function isAnnualRentApartment(q: SearchQuery): boolean {
+// ── COHORT QUESTION CONFIG (owner 2026-08-15) ────────────────────────────────────────────────────
+// «The architecture should be shared, but the questions should come from the actual property and
+// deal context.» Each (single clean type × deal) cohort lists the questions its SOURCE DATA
+// justifies — profiled live against production before every entry below (coverage %s in the
+// migration/ledger docs). Monthly Rent is deliberately ABSENT everywhere: it is frozen until the
+// owner personally authorizes it, so no cohort key exists for it and no question can fire there.
+//
+// This config is AVAILABILITY only. Whether a question is actually ASKED in a given scope is still
+// decided live by scoreQuestion()'s usefulness gates against the user's current result set — the
+// config says "this question can make sense for this cohort", the gates say "it is worth asking
+// RIGHT NOW". Unknown stays unknown throughout; a cohort with thin coverage simply never fires.
+//
+// Data justification summary (nationwide known-rates, profiled 2026-08-15):
+//   Apartment/RentAnnual — certified 2026-08-15 (the template cohort).
+//   Apartment/Buy        — age 90%, direction 50%, kitchen 34%, elevator 29%, bath 26%.
+//   Floor/RentAnnual     — age 93%, RNPL 83% known (64% yes!), AC 76%, private entrance 76%, bath 66%.
+//   Floor/Buy            — age 85%, private entrance 39%, bath 30%.
+//   ResBldg/(both deals) — street width 96-97%, direction 83-84%, age 89-91%; bathrooms 1% (a whole
+//                          building has no meaningful bathroom count — deliberately NOT offered).
+//   Room/RentAnnual      — kitchen 85% (its signature), age 94%, furnished 49%; bathrooms 0%.
+//                          RNPL known 95% but only 5% yes → floor gate would hide it everywhere;
+//                          deliberately not offered rather than pretending it is a real choice.
+//   Studio/RentAnnual    — n=30 nationwide, thin everything; enabled minimally, gates will suppress.
+//   Room/Buy (n=1) and Studio/Buy (n=2) — no cohort: genuinely not applicable.
+const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: string[] }> = {
+  Apartment: {
+    RentAnnual: ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished'],
+    Buy: ['property_age', 'amenities', 'bathrooms', 'direction'],
+  },
+  Floor: {
+    RentAnnual: ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished'],
+    Buy: ['property_age', 'amenities', 'bathrooms'],
+  },
+  'Residential Building': {
+    RentAnnual: ['property_age', 'street_width', 'direction', 'furnished'],
+    Buy: ['property_age', 'street_width', 'direction'],
+  },
+  Room: {
+    RentAnnual: ['property_age', 'amenities', 'furnished'],
+  },
+  Studio: {
+    RentAnnual: ['property_age', 'amenities', 'furnished'],
+  },
+};
+
+// The single clean type of the query, or null when the user picked several/none — the interview
+// only ever runs on a single-type scope (counts for a mixed scope could not be cohort-honest).
+function singleCleanType(q: SearchQuery): string | null {
   const types = effectiveTypes(q);
-  return types.length === 1 && types[0] === 'Apartment'
-    && q.category === 'Residential' && q.deal === 'Rent' && q.rentPeriod !== 'monthly';
+  return types.length === 1 ? types[0] : null;
 }
 
-// Amenities + bathrooms also apply to BUY apartments (owner follow-up 2026-07-27) — same single-Apartment
-// Residential scope, on Annual Rent OR Buy (NOT monthly short-stay, which carries no structured attributes).
-// RNPL stays Rent-only, and Furnished stays Rent-only (Buy furnished ≈2%; owner: no Furnished on Buy) —
-// enforced in AMENITIES_QUESTION.resolveOptions, not here.
-function isApartmentAttributeScope(q: SearchQuery): boolean {
-  const types = effectiveTypes(q);
-  if (!(types.length === 1 && types[0] === 'Apartment' && q.category === 'Residential')) return false;
-  return q.deal === 'Buy' || (q.deal === 'Rent' && q.rentPeriod !== 'monthly');
+// Is question `id` available for this query's cohort? Residential-only, single-type, deal-aware.
+// Monthly Rent (q.rentPeriod === 'monthly') matches NO key by construction — frozen per owner.
+function cohortAllows(q: SearchQuery, id: string): boolean {
+  if (q.category !== 'Residential') return false;
+  const type = singleCleanType(q);
+  if (!type) return false;
+  const cfg = COHORT_QUESTIONS[type];
+  if (!cfg) return false;
+  const deal: 'RentAnnual' | 'Buy' | null =
+    q.deal === 'Buy' ? 'Buy'
+    : q.deal === 'Rent' && q.rentPeriod !== 'monthly' ? 'RentAnnual'
+    : null;
+  if (!deal) return false;
+  return (cfg[deal] ?? []).includes(id);
+}
+
+// Kept as named helpers (call sites + contract scripts reference them); now cohort-config-driven.
+function isAnnualRentApartment(q: SearchQuery): boolean {
+  return singleCleanType(q) === 'Apartment' && q.category === 'Residential'
+    && q.deal === 'Rent' && q.rentPeriod !== 'monthly';
 }
 
 // Merge picked strict amenity tokens (kitchen/parking/elevator/furnished/rnpl) into q.amenities.
@@ -148,7 +204,7 @@ const RNPL_QUESTION: AdvancedQuestion = {
   descriptionKey: 'Rent now and pay monthly instead of one annual payment',
   brandImage: 'ejari-rnpl',
   selection: 'multi',
-  eligibility: isAnnualRentApartment,
+  eligibility: (q) => cohortAllows(q, 'rnpl'),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q),
       [{ key: 'rnpl', labelKey: 'Offers installments', count: (c) => c.cnt_rnpl }]);
@@ -162,7 +218,7 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
   titleKey: 'What amenities matter to you?',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
-  eligibility: isApartmentAttributeScope,
+  eligibility: (q) => cohortAllows(q, 'amenities'),
   async resolveOptions(q) {
     const defs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
       { key: 'kitchen',  labelKey: 'Kitchen',  count: (c) => c.cnt_kitchen },
@@ -182,7 +238,7 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
       { key: 'driver_room', labelKey: 'Driver room', count: (c) => c.cnt_driver_room },
     ];
     // Furnished chip: Annual Rent only (Buy furnished ≈2%; owner: no Furnished filter on Buy).
-    if (isAnnualRentApartment(q)) defs.push({ key: 'furnished', labelKey: 'Furnished', count: (c) => c.cnt_furnished });
+    if (cohortAllows(q, 'furnished')) defs.push({ key: 'furnished', labelKey: 'Furnished', count: (c) => c.cnt_furnished });
     return guidedOptions(await fetchApartmentGuidedCounts(q), defs);
   },
   apply: addAmenities,
@@ -193,7 +249,7 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
   id: 'bathrooms',
   titleKey: 'How many bathrooms?',
   selection: 'single',
-  eligibility: isApartmentAttributeScope,
+  eligibility: (q) => cohortAllows(q, 'bathrooms'),
   async resolveOptions(q) {
     // Only rungs ABOVE the current answer can narrow. apartment_guided_counts_ar computes cnt_bath1..4
     // over the `scoped` CTE, which ALREADY has the user's previous p_bath_min applied — so with
@@ -230,7 +286,7 @@ const FURNISHED_QUESTION: AdvancedQuestion = {
   id: 'furnished',
   titleKey: 'Do you prefer it furnished?',
   selection: 'single',
-  eligibility: isAnnualRentApartment,
+  eligibility: (q) => cohortAllows(q, 'furnished'),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
       { key: 'yes', labelKey: 'Furnished',   count: (c) => c.cnt_furnished },
@@ -248,8 +304,57 @@ const FURNISHED_QUESTION: AdvancedQuestion = {
 // after every answer (owner 2026-08-11 — a Jeddah search may open with furnished where a Riyadh
 // search opens with bathrooms). The card and orchestrator are driven entirely by the config
 // (title/description/options/selection) and never branch on a question id.
+// Street width (عرض الشارع) — the Residential-Building buyer's signature attribute (96-97% known).
+// Cumulative single-select ladder like bathrooms; STRICT >= N, unknown excluded; monotone via
+// Math.max so a later answer can only narrow (same count-honesty argument as the bathroom rungs).
+const STREET_WIDTH_QUESTION: AdvancedQuestion = {
+  id: 'street_width',
+  titleKey: 'How wide should the street be?',
+  selection: 'single',
+  eligibility: (q) => cohortAllows(q, 'street_width'),
+  async resolveOptions(q) {
+    const floor = q.streetWidthMin ?? 0;
+    const rungs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
+      { key: '15', labelKey: '15 m or wider', count: (c) => c.cnt_stw15 },
+      { key: '20', labelKey: '20 m or wider', count: (c) => c.cnt_stw20 },
+      { key: '25', labelKey: '25 m or wider', count: (c) => c.cnt_stw25 },
+      { key: '30', labelKey: '30 m or wider', count: (c) => c.cnt_stw30 },
+    ];
+    return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((r) => parseInt(r.key, 10) > floor));
+  },
+  apply: (q, keys) => {
+    const n = parseInt(keys[0] ?? '', 10);
+    return Number.isFinite(n) && n > 0 ? { ...q, streetWidthMin: Math.max(n, q.streetWidthMin ?? 0) } : q;
+  },
+};
+
+// Preferred direction (اتجاه العقار) — ResBldg 83-84% known, Apartment/Buy 50%. Multi-select over
+// the 8 normalized source values; picking several = OR (p_directions is a membership filter).
+const DIRECTION_DEFS: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
+  { key: 'شمال', labelKey: 'North', count: (c) => c.cnt_dir_n },
+  { key: 'جنوب', labelKey: 'South', count: (c) => c.cnt_dir_s },
+  { key: 'شرق', labelKey: 'East', count: (c) => c.cnt_dir_e },
+  { key: 'غرب', labelKey: 'West', count: (c) => c.cnt_dir_w },
+  { key: 'شمال شرق', labelKey: 'North-east', count: (c) => c.cnt_dir_ne },
+  { key: 'شمال غرب', labelKey: 'North-west', count: (c) => c.cnt_dir_nw },
+  { key: 'جنوب شرق', labelKey: 'South-east', count: (c) => c.cnt_dir_se },
+  { key: 'جنوب غرب', labelKey: 'South-west', count: (c) => c.cnt_dir_sw },
+];
+const DIRECTION_QUESTION: AdvancedQuestion = {
+  id: 'direction',
+  titleKey: 'Which direction do you prefer?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'direction'),
+  async resolveOptions(q) {
+    return guidedOptions(await fetchApartmentGuidedCounts(q), DIRECTION_DEFS);
+  },
+  apply: (q, keys) => (keys.length ? { ...q, directions: [...new Set([...(q.directions ?? []), ...keys])] } : q),
+};
+
 export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
   RNPL_QUESTION, AGE_QUESTION, AMENITIES_QUESTION, BATHROOMS_QUESTION, FURNISHED_QUESTION,
+  STREET_WIDTH_QUESTION, DIRECTION_QUESTION,
 ];
 
 // ── Contextual ranking (owner 2026-08-11) ────────────────────────────────────────────────────────
@@ -259,7 +364,8 @@ export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
 // the same "don't ask a question that barely changes the result set" rule the owner set, applied
 // with numbers. Unknown ≠ no throughout: options only ever count KNOWN matches.
 const SALIENCE: Record<string, number> = {
-  property_age: 1.0, furnished: 1.0, bathrooms: 0.9, amenities: 0.8, rnpl: 0.6,
+  property_age: 1.0, furnished: 1.0, bathrooms: 0.9, street_width: 0.9, amenities: 0.8,
+  direction: 0.7, rnpl: 0.6,
 };
 
 // ASK-FIRST TIER (owner 2026-08-15). Installments (رايز/إيجاري) is the PREFERRED opening question
