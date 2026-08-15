@@ -60,6 +60,15 @@ const GRANDFATHERED = new Set([
   '20260810175245_restore_full_detector_roster_union.sql',
   '20260810175327_roster_drop_superseded_search_gate_leak.sql',
   '20260810202219_price_area_artifact_fix_repair_and_barrier.sql',
+  // 2026-08-15: miss #5 — applied straight to prod at 07:23 by a concurrent session, discovered at
+  // mirror time when this guard (correctly) refused the verbatim files. LIVE ROSTER VERIFIED INTACT
+  // before grandfathering: every mon_detect_* absent from the live mon_run_all_detectors body has
+  // its own dedicated cron entry (jobids 40/42/43/58/59/63), mon_detect_orphaned_detectors is in
+  // the roster and quiet, zero orphan/roster alerts in the surrounding 10h. Recorded verbatim as a
+  // historical fact (drift mirror must be byte-identical); the NEXT roster edit still must use the
+  // guarded needle-edit.
+  '20260815072328_mon_detect_rent_period_contradicts_source_probe.sql',
+  '20260815072452_restore_explicit_detector_roster_after_run22_wholesale_rebuild.sql',
 ]);
 
 // Every detector the 2026-08-10 repair put back. Pinned so a future revert of that migration, or a
