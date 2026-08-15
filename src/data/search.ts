@@ -31,11 +31,15 @@ export type SearchQuery = {
   // figure (rent is always compared annually). When set, priceInput is the ANNUAL cap — the client
   // must NOT re-apply its monthly-magnitude ×12 guess. (user request.)
   priceIsAnnual?: boolean;
-  // Filter-side rent period the user picked: 'monthly' or 'annual'. Drives the budget-field label
+  // Filter-side rent period the user picked: 'monthly', 'annual', or 'both' (no restriction — the
+  // user doesn't have to pick one; owner request 2026-08-15). Drives the budget-field label
   // ("Monthly Rent Budget" vs "Yearly Rent Budget") and tells the search engine whether the typed
   // number is a monthly figure (×12 for the annual compare) or already a yearly one. Buy ignores
-  // this. Default 'annual'. (user request: Filter rent toggle, no calculator on the user's side.)
-  rentPeriod?: 'monthly' | 'annual';
+  // this. Default 'annual'. 'both' sends the RPC's existing p_rent_period=NULL path (already used
+  // for Buy/bothDeals) — matching happens first over the WHOLE rent pool, then the existing
+  // platform round-robin (div_rank) diversifies across that full matched sequence exactly as it
+  // already does for any other search; no diversity-layer change needed. (user request.)
+  rentPeriod?: 'monthly' | 'annual' | 'both';
   // What the filter's AI-assisted location resolver understood from a free-typed location (district /
   // city / area nickname / landmark / geography). Drives the Search Summary's location lines so the
   // user sees exactly what Ezhalah matched. Absent on the agent path (Gemini resolves there). (user request.)
@@ -166,10 +170,12 @@ const placeText = (q: SearchQuery) => {
 const verbText = (q: SearchQuery) => {
   if (q.bothDeals) return t('to rent or buy');
   if (q.deal === 'Rent') {
-    // Reflect the Monthly / Yearly the user selected in the filter's rent-period toggle. Absent
-    // (agent free-text path never sets it) → plain "to rent". (owner UI request 2026-07-18.)
+    // Reflect the Monthly / Yearly / Both the user selected in the filter's rent-period toggle.
+    // Absent (agent free-text path never sets it) → plain "to rent". (owner UI request 2026-07-18;
+    // 'both' added 2026-08-15.)
     if (q.rentPeriod === 'monthly') return t('to rent monthly');
     if (q.rentPeriod === 'annual') return t('to rent yearly');
+    if (q.rentPeriod === 'both') return t('to rent monthly or yearly');
     return t('to rent');
   }
   return t('to buy');
@@ -519,8 +525,10 @@ export function searchSummary(q: SearchQuery): string {
   if (summaryTypes.length) lines.push(`• ${t('Property Type')}: ${summaryTypes.map((x) => getLocale() === 'ar' ? arabicOrTypeUnresolved(tWord(x)) : x).join('، ')}`);
   else if (q.typeGroup) lines.push(`• ${t('Property Type')}: ${arabicOrTypeUnresolved(t(q.typeGroup))}`);
   else if (q.category) lines.push(`• ${t('Property Type')}: ${arabicOrTypeUnresolved(t(q.category))}`);
-  // For Rent, append the Monthly / Yearly period the user picked so the summary reflects the toggle. (owner UI request 2026-07-18.)
-  const period = q.deal === 'Rent' && q.rentPeriod ? ` (${t(q.rentPeriod === 'monthly' ? 'Monthly' : 'Yearly')})` : '';
+  // For Rent, append the Monthly / Yearly / Both period the user picked so the summary reflects the
+  // toggle. (owner UI request 2026-07-18; 'both' added 2026-08-15.)
+  const periodLabel = q.rentPeriod === 'monthly' ? 'Monthly' : q.rentPeriod === 'annual' ? 'Yearly' : 'Monthly & Yearly';
+  const period = q.deal === 'Rent' && q.rentPeriod ? ` (${t(periodLabel)})` : '';
   lines.push(`• ${t('Transaction Type')}: ${q.bothDeals ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}${period}`);
   // Platform filter line — when the user restricted to specific platforms ("Aqar only"), show which,
   // so the filter is visibly confirmed. (user: "when I type alkhaas it must be al khaas, not aqar".)

@@ -846,18 +846,23 @@ const COM_TABLES = ['aqar_commercial_listings', 'wasalt_commercial_listings', 'a
 const MONTHLY_ONLY_TABLE = /^(gathern|aqarmonthly)_/;
 
 function resTables(q: SearchQuery): string[] {
-  // Gathern + Aqar Monthly only on explicit monthly-rent searches (see [[gathern-source]]).
-  return (q.deal === 'Rent' && q.rentPeriod === 'monthly')
+  // Gathern + Aqar Monthly on any search that INCLUDES monthly rentals — an explicit monthly-only
+  // search (see [[gathern-source]]) or 'both' (owner request 2026-08-15: user picks Both, doesn't
+  // have to choose one). Omitted on 'annual'/unset — those exclude monthly entirely.
+  return (q.deal === 'Rent' && (q.rentPeriod === 'monthly' || q.rentPeriod === 'both'))
     ? [...RES_TABLES, 'gathern_residential_listings', 'aqarmonthly_residential_listings']
     : RES_TABLES;
 }
 
 // Arabic rent-period token for the search RPC. Only a single-deal Rent search with a period chosen sends
-// one ('شهري'/'سنوي'); Buy, "rent or buy" (bothDeals), or no-period send null so the RPC applies NO period
-// filter (and Buy stays untouched). Keeps the candidate budget filled with the correct period so monthly
-// results aren't crowded out by annual. (owner rent-period rule 2026-07-06.)
+// one ('شهري'/'سنوي'); Buy, "rent or buy" (bothDeals), 'both' periods, or no-period send null so the RPC
+// applies NO period filter (and Buy stays untouched) — location_search_candidates_ar's own
+// `p_rent_period is null` arm already matches every row regardless of period (the same path Buy/
+// bothDeals exercise today), so 'both' needs no new backend logic, just this explicit null. Keeps the
+// candidate budget filled with the correct period so monthly results aren't crowded out by annual.
+// (owner rent-period rule 2026-07-06; 'both' 2026-08-15.)
 function rentPeriodParam(q: SearchQuery): string | null {
-  if (q.bothDeals || q.deal !== 'Rent') return null;
+  if (q.bothDeals || q.deal !== 'Rent' || q.rentPeriod === 'both') return null;
   if (q.rentPeriod === 'monthly') return 'شهري';
   if (q.rentPeriod === 'annual') return 'سنوي';
   return null;
@@ -1004,6 +1009,8 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   //    Monthly) → include ALL their rows (every listing is monthly, even rows with a null raw rent_period).
   //  • ANNUAL: strict rent_period='annual' only — a null rent_period on a mixed platform is NOT annual and
   //    must appear in NEITHER monthly nor annual (never guess).
+  //  • BOTH: neither branch below matches 'both', so no rent_period predicate is added at all — every
+  //    Rent row reaches the client regardless of period, same as the RPC's own p_rent_period=null arm.
   if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
     if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.eq('rent_period', 'monthly');
   } else if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'annual') {
