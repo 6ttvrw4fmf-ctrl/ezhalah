@@ -40,6 +40,24 @@ check('the pool contains all five questions and rankQuestions re-ranks it contex
   && /MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT \+ 1/.test(advSrc));
 check('the orchestrator re-ranks after every answer and tracks asked questions (never re-asks)',
   /rankQuestions\(q, ageFlowAskedRef\.current\)/.test(agentSrc) && /ageFlowAskedRef\.current\.add\(/.test(agentSrc));
+// ASK-FIRST TIER (owner 2026-08-15): installments is the PREFERRED opening question, and only that.
+// The tier must reorder ONLY questions that already passed scoreQuestion()'s usefulness gates — it
+// must never bypass them, or a scope with too little installment coverage would be asked a useless
+// question. Pinned structurally: the tier is applied in the SORT (post-gate), never inside
+// scoreQuestion, and scoreQuestion still returns null on every gate.
+check('installments is ask-first via a TIER applied in the sort, never by bypassing the gates',
+  /ASK_FIRST_TIER/.test(advSrc)
+  && /askTier\(b\.question\.id\) - askTier\(a\.question\.id\) \|\| b\.score - a\.score/.test(advSrc)
+  && !/ASK_FIRST_TIER|askTier/.test(advSrc.slice(advSrc.indexOf('export function scoreQuestion'), advSrc.indexOf('export type RankedQuestion'))));
+check('scoreQuestion still gates on scope size, option band, and genuine narrowing',
+  /if \(N < MIN_TOTAL_TO_SHOW\) return null;/.test(advSrc)
+  && /Math\.max\(15, Math\.ceil\(0\.08 \* N\)\)/.test(advSrc)
+  && /o\.count <= 0\.9 \* N/.test(advSrc)
+  && /if \(!useful\.some\(\(o\) => o\.count <= 0\.75 \* N\)\) return null;/.test(advSrc));
+// The installment answer means ONLY "source-confirmed supported". No invented payment frequency.
+check('the installment question stays a single binary source-confirmed chip (no invented frequencies)',
+  /RNPL_QUESTION[\s\S]{0,600}labelKey: 'Offers installments'/.test(advSrc)
+  && !/دفعتين|٤ دفعات|١٢ دفعة/.test(advSrc));
 check('furnished question is single-select, Rent-only, true tri-state via furnishedPref',
   /FURNISHED_QUESTION[\s\S]{0,400}selection:\s*'single'/.test(advSrc)
   && /FURNISHED_QUESTION[\s\S]{0,400}eligibility:\s*isAnnualRentApartment/.test(advSrc)

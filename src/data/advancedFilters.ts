@@ -144,7 +144,7 @@ function guidedOptions(
 // via the brandImage TOKEN — the card owns the asset + slot; this config only names it.
 const RNPL_QUESTION: AdvancedQuestion = {
   id: 'rnpl',
-  titleKey: 'Do you prefer listings with installment options?',
+  titleKey: 'Would you rather pay the rent in instalments?',
   descriptionKey: 'Rent now and pay monthly instead of one annual payment',
   brandImage: 'ejari-rnpl',
   selection: 'multi',
@@ -262,6 +262,23 @@ const SALIENCE: Record<string, number> = {
   property_age: 1.0, furnished: 1.0, bathrooms: 0.9, amenities: 0.8, rnpl: 0.6,
 };
 
+// ASK-FIRST TIER (owner 2026-08-15). Installments (رايز/إيجاري) is the PREFERRED opening question
+// for Annual Rent → Apartment: paying the year in instalments instead of one upfront sum is the
+// single most consequential thing about a rental, so when it is a genuinely useful question it
+// should be asked first.
+//
+// "Preferred" — NOT mandatory. A tier only reorders questions that ALREADY PASSED scoreQuestion()'s
+// usefulness gates (scope > 25, option within [max(15, 8%N), 90%N], at least one answer cutting to
+// ≤ 75%N). A scope with too little confirmed installment coverage fails those gates, scoreQuestion
+// returns null, the question never enters the ranking at all, and the contextual engine picks the
+// next genuinely useful question. That is the owner's rule exactly: first when it earns it, skipped
+// when it does not — never a question that wastes the user's time.
+//
+// Implemented as an explicit tier rather than an inflated salience so the intent is legible and the
+// SALIENCE numbers keep meaning "how much does this attribute matter", uncorrupted by ask-order.
+const ASK_FIRST_TIER: Record<string, number> = { rnpl: 1 };
+function askTier(id: string): number { return ASK_FIRST_TIER[id] ?? 0; }
+
 export function scoreQuestion(
   question: AdvancedQuestion, result: AdvancedQuestionResult,
 ): { score: number; options: AdvancedOption[] } | null {
@@ -291,7 +308,11 @@ export async function rankQuestions(q: SearchQuery, askedIds: ReadonlySet<string
     const scored = scoreQuestion(question, probes[i]);
     if (scored) ranked.push({ question, options: scored.options, unknownCount: probes[i].unknownCount, total: probes[i].total, score: scored.score });
   });
-  return ranked.sort((a, b) => b.score - a.score);
+  // Ask-first tier wins ONLY among questions that already cleared the usefulness gates above
+  // (scoreQuestion returned non-null); within a tier, the contextual score decides. So installments
+  // opens the interview whenever it is genuinely useful, and silently steps aside when it is not.
+  return ranked.sort((a, b) =>
+    askTier(b.question.id) - askTier(a.question.id) || b.score - a.score);
 }
 
 // THE engine gate — every caller asks HERE which questions may run, so no call site re-derives it.

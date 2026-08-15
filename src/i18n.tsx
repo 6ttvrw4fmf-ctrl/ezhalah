@@ -334,6 +334,11 @@ const AR: Record<string, string> = {
   // Annual-Rent apartment guided flow (2026-07-20): RNPL (installments) · amenities · min bathrooms.
   // Kitchen/Parking/Elevator + «استأجر الآن وادفع لاحقًا» reuse existing keys below; only the new
   // question titles, the Furnished chip, the bathroom ladder, and the live-count CTA are added here.
+  // Ask-first installment question (owner 2026-08-15) — the opening question for Annual Rent →
+  // Apartment when it clears the usefulness gates. «نعم» means ONLY: the source confirms this
+  // listing supports the رايز/إيجاري instalment service. Unknown is never "no", and we never
+  // invent a payment frequency (دفعتين/٤ دفعات/…) — no source publishes instalment counts.
+  'Would you rather pay the rent in instalments?': 'تفضل تدفع الإيجار على دفعات؟',
   'Do you prefer listings with installment options?': 'تفضّل عقارات تتيح التقسيط / الدفع لاحقًا؟',
   'Offers installments': 'يقبل التقسيط',
   'What amenities matter to you?': 'وش المميزات المهمة لك؟',
