@@ -421,7 +421,7 @@ function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts
   // 6,909 monthly Riyadh apartments were reachable by asking for them). An unstated period keeps the
   // default — the same annual default the Filter form opens with (agent ≡ filter parity). Set BEFORE
   // applySourceFilter so the Gathern monthly-only override still wins.
-  if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual') q.rentPeriod = b.rentPeriod;
+  if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual' || b.rentPeriod === 'both') q.rentPeriod = b.rentPeriod;
   q.location = typeof b.location === 'string' ? b.location.trim() : '';
 
   const ty = typeof b.type === 'string' && b.type.trim() ? b.type.trim() : null;
