@@ -657,6 +657,8 @@ export type GuidedCounts = {
   cnt_stw15: number; cnt_stw20: number; cnt_stw25: number; cnt_stw30: number;
   // Villa cohort 2026-08-16: aqar villa-form chips (مدخل سيارة / صرف صحي).
   cnt_car_entrance: number; cnt_sanitation: number;
+  // Commercial expansion 2026-08-16: the utility chips the commercial market actually splits on.
+  cnt_electricity: number; cnt_water_supply: number;
   cnt_selected: number;
 };
 

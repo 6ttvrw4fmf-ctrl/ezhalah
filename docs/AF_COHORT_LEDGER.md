@@ -190,6 +190,31 @@ Live types: **فيلا** 33.6k (99.84% of the family) · بيت 51 · تاون �
 - Registry: 6 rows (فيلا/بيت/تاون هاوس × rent-annual/buy), enabled floor raised 18→24
   (20260815223803); replay checkpoint 3 (20260815223522). Monthly untouched — no شهري row.
 
+## Commercial + rural + land families — built 2026-08-16 (overnight mandate; certification in flight)
+20 type×deal cohorts profiled from live fresh-band data. **18 VIABLE registered** (registry 52
+enabled rows, floor 52): Office ×2 (rent n=2,140: age+furnished+utility chips; buy n=60 thin),
+Shop ×2 (rent n=1,982 — strongest commercial; street+direction+age+utilities; aqar 97.9%
+monoculture flag), Showroom buy (88, thin), Warehouse ×2 (1,175/147; fresh supply dealapp-first),
+Workshop ×2 (141/74), CommBldg ×2 (347/179), Hotel buy (69), GasStation ×2 (49/78),
+CommLand buy (**17,509 — largest cohort in the system**; street+direction),
+IndLand buy (1,794; aqar monoculture), ResLand ×2 (10,338/412; dealapp+wasalt+aqar diverse),
+RestHouse ×2 (1,712/1,268; age+street+water/sanitation), Farm buy (233; 15-platform diversity),
+AgriPlot buy (1,009; the land quintet incl. genuinely two-sided utilities).
+**13 NOT-VIABLE, Normal-Filter-only with evidence:** Chalet ×2 (buy n=25 at gate, rent fresh 2/wk
+stale pool), Camp ×2 (0/3), Factory ×2 (32 monoculture / 64 with ZERO fresh), Staff Housing ×2
+(0/3), Service Facilities ×2 (6/28 heterogeneous 6-type mix, 0 fresh), Hotel rent (25),
+Farm rent (104 but fresh 3/wk — hold), CommLand rent (23), IndLand rent (0), AgriPlot rent (5).
+**New amenity tokens** `electricity` كهرباء + `water_supply` توفر الماء (20260815234444, chips ==
+direct == referee in-transaction; checkpoint 4 = 20260815234504). **AC enabled NOWHERE new** —
+fresh-dead on commercial (aqar form change) despite passing all-time gates. **12 evidenced land
+waivers**: land has no building amenities; all-time 22-33% rates are June-bulk artifacts.
+`cohortAllows` now matches the clean type's macro (was Residential-only); `COHORT_CHIPS` scopes
+commercial chips to the utility trio (+kitchen RestHouse) — certified residential cards unchanged.
+**Documented capture gaps (deliberate deferrals, due diligence not done tonight):** wasalt
+electricityMeter/waterMeter (770/770 explicit نعم/لا, columns exist, view branch missing) ·
+aqar special_position (1,798y CommLand, no index column) · aqar deed_area_m2 (~85% raw, no column)
+· aqar land direction non-flow (72 rows). None blocks a shipped question.
+
 ## Barrier fleet (all registry-driven — a cohort row = protection)
 `af_cohort_registry` drives: `mon_rich_attrs_barrier`, `mon_af_new_listing_readiness` (A/B/C),
 `mon_filter_parity_barrier` check 2 (annual rows). Plus the cohort-agnostic fleet: predicate parity

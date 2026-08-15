@@ -2,6 +2,7 @@ import type { SearchQuery } from './search';
 import { effectiveTypes, hasClientOnlyNarrowing } from './search';
 import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, type AgeOptionCounts, type GuidedCounts } from './remote';
 import { isAgeFilterScope as isAgeFilterScopeFor } from '@/lib/ageFilterTypes';
+import { CLEAN_MACRO } from './propertyTypes';
 import { t } from '@/i18n';
 
 // ── Advanced Filter engine — governed by docs/ADVANCED_FILTER_DESIGN_CONTRACT.md ─────────────────
@@ -159,6 +160,76 @@ const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: string[] }
     RentAnnual: ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction'],
     Buy: ['property_age', 'amenities', 'bathrooms', 'street_width', 'direction'],
   },
+  // Commercial + rural + land cohorts (2026-08-16 overnight profiling, fresh-band designed).
+  // AC is fresh-DEAD on commercial (aqar form change) and is deliberately enabled NOWHERE here
+  // despite passing all-time gates. Bedrooms stay Normal-tier everywhere (owner permanent rule).
+  // NOT-VIABLE (Normal-Filter-only, evidence in the ledger): Chalet, Camp, Factory, Staff Housing,
+  // Service Facilities, Hotel/rent, Farm/rent, CommLand/rent, IndLand/rent, AgriPlot/rent, Duplex.
+  Office: {
+    RentAnnual: ['property_age', 'furnished', 'amenities', 'street_width'],
+    Buy: ['property_age', 'street_width'],
+  },
+  Shop: {
+    RentAnnual: ['street_width', 'direction', 'property_age', 'amenities'],
+    Buy: ['street_width', 'direction', 'property_age', 'amenities'],
+  },
+  Showroom: {
+    Buy: ['property_age', 'street_width'],
+  },
+  Warehouse: {
+    RentAnnual: ['property_age', 'street_width', 'amenities'],
+    Buy: ['property_age', 'street_width', 'amenities'],
+  },
+  Workshop: {
+    RentAnnual: ['street_width', 'property_age', 'direction'],
+    Buy: ['street_width', 'property_age'],
+  },
+  'Commercial Building': {
+    RentAnnual: ['property_age', 'street_width', 'direction', 'amenities'],
+    Buy: ['property_age', 'street_width', 'direction', 'amenities'],
+  },
+  Hotel: {
+    Buy: ['property_age', 'street_width', 'amenities'],
+  },
+  'Gas Station': {
+    RentAnnual: ['property_age', 'amenities'],
+    Buy: ['property_age', 'street_width', 'amenities'],
+  },
+  'Commercial Land': {
+    Buy: ['street_width', 'direction'],
+  },
+  'Industrial Land': {
+    Buy: ['street_width', 'direction'],
+  },
+  'Residential Land': {
+    RentAnnual: ['street_width', 'direction'],
+    Buy: ['street_width', 'direction'],
+  },
+  'Rest House': {
+    RentAnnual: ['property_age', 'street_width', 'amenities'],
+    Buy: ['property_age', 'street_width', 'direction', 'amenities'],
+  },
+  Farm: {
+    Buy: ['street_width', 'direction', 'property_age'],
+  },
+  'Agriculture Plot': {
+    Buy: ['street_width', 'direction', 'amenities'],
+  },
+};
+
+// Which amenity CHIPS a cohort may render (2026-08-16). Clean types absent from this map keep the
+// residential base set exactly as certified. Commercial/rural chips are the utility trio the data
+// actually splits on (electricity/water/sanitation) — never AC (fresh-dead on commercial), never
+// building amenities on land. Rest House additionally earns kitchen (fresh-alive, two-sided scale).
+const COHORT_CHIPS: Record<string, string[]> = {
+  Office: ['electricity', 'water_supply', 'sanitation'],
+  Shop: ['electricity', 'water_supply', 'sanitation'],
+  Warehouse: ['electricity', 'water_supply', 'sanitation'],
+  'Commercial Building': ['electricity', 'water_supply', 'sanitation'],
+  Hotel: ['electricity', 'water_supply', 'sanitation'],
+  'Gas Station': ['electricity', 'water_supply', 'sanitation'],
+  'Rest House': ['kitchen', 'electricity', 'water_supply', 'sanitation'],
+  'Agriculture Plot': ['electricity', 'water_supply', 'sanitation'],
 };
 
 // The single clean type of the query, or null when the user picked several/none — the interview
@@ -171,9 +242,12 @@ function singleCleanType(q: SearchQuery): string | null {
 // Is question `id` available for this query's cohort? Residential-only, single-type, deal-aware.
 // Monthly Rent (q.rentPeriod === 'monthly') matches NO key by construction — frozen per owner.
 function cohortAllows(q: SearchQuery, id: string): boolean {
-  if (q.category !== 'Residential') return false;
   const type = singleCleanType(q);
   if (!type) return false;
+  // The query's category must match the cohort's own macro (2026-08-16: was Residential-only
+  // while only residential cohorts existed; commercial cohorts unlock their side, and a
+  // cross-category scope still matches nothing).
+  if (q.category !== (CLEAN_MACRO[type] ?? 'Residential')) return false;
   const cfg = COHORT_QUESTIONS[type];
   if (!cfg) return false;
   const deal: 'RentAnnual' | 'Buy' | null =
@@ -253,6 +327,17 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
     if (singleCleanType(q) === 'Villa') {
       defs.push({ key: 'car_entrance', labelKey: 'Car entrance', count: (c) => c.cnt_car_entrance });
       defs.push({ key: 'sanitation',   labelKey: 'Sewage connection', count: (c) => c.cnt_sanitation });
+    }
+    // Commercial/rural chip scoping (2026-08-16): mapped clean types render EXACTLY their
+    // COHORT_CHIPS list — the utility trio (+kitchen for Rest House) — and none of the
+    // residential chips. Unmapped types keep the behavior above, byte-for-byte.
+    const chipAllow = COHORT_CHIPS[singleCleanType(q) ?? ''];
+    if (chipAllow) {
+      defs.push({ key: 'sanitation',   labelKey: 'Sewage connection', count: (c) => c.cnt_sanitation });
+      defs.push({ key: 'electricity',  labelKey: 'Electricity',       count: (c) => c.cnt_electricity });
+      defs.push({ key: 'water_supply', labelKey: 'Water supply',      count: (c) => c.cnt_water_supply });
+      const chosen = defs.filter((d) => chipAllow.includes(d.key));
+      return guidedOptions(await fetchApartmentGuidedCounts(q), chosen);
     }
     // Furnished chip: Annual Rent only (Buy furnished ≈2%; owner: no Furnished filter on Buy).
     if (cohortAllows(q, 'furnished')) defs.push({ key: 'furnished', labelKey: 'Furnished', count: (c) => c.cnt_furnished });
