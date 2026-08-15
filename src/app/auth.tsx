@@ -3,9 +3,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Animated, Easing, Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { colors, cardShadow } from '@/theme/tokens';
+import { colors, cardShadow, radius } from '@/theme/tokens';
 import { Spinner } from '@/components/ui';
-import HeroBackground from '@/components/HeroBackground';
+import { DEAL_IMG, CATEGORY_IMG } from '@/theme/propertyIcons';
 import { useApp, type AuthUser } from '@/store';
 import { useI18n, t } from '@/i18n';
 import {
@@ -26,6 +26,63 @@ const setLtr = (node: any) => {
 
 const LOGO = require('../../assets/images/ezhalah-logo.png');
 type Step = 'main' | 'google' | 'apple' | 'appleface' | 'otp';
+
+// Static, inert preview of the real Filter card behind the sign-in popup (owner 2026-08-15: "I still
+// want the filter and the entire platform to still show" — a decorative city sketch didn't read as
+// "the platform"). Deliberately NOT the live Home screen: Expo Router unmounts the previous screen
+// behind a modal on web (see settings.tsx's own note on this), so there is no real screen to reveal —
+// and mounting the actual Home component a second time here would drag in its full effect/data-fetch
+// surface for a purely decorative background, which is exactly the kind of risk this app cannot afford
+// right after today's hydration incident. This reuses the SAME icons/labels/colors as the real filter
+// (DEAL_IMG, CATEGORY_IMG, the real Rent/Buy/Residential/Commercial strings) with zero state, zero
+// hooks beyond i18n, and zero touch handling — every row carries pointerEvents="none" up at the call
+// site, so it can never be tapped through the popup.
+function FilterPreview() {
+  return (
+    <View style={ps.card}>
+      <View style={ps.seg}>
+        <View style={[ps.segBtn, ps.segBtnOn]}>
+          <RNImage source={DEAL_IMG.Rent} style={[ps.segIcon, { tintColor: '#fff' }]} resizeMode="contain" />
+          <Text style={[ps.segText, ps.segTextOn]}>{t('Rent')}</Text>
+        </View>
+        <View style={ps.segBtn}>
+          <RNImage source={DEAL_IMG.Buy} style={ps.segIcon} resizeMode="contain" />
+          <Text style={ps.segText}>{t('Buy')}</Text>
+        </View>
+      </View>
+      <Text style={ps.label}>{t('Which city?')}</Text>
+      <View style={ps.field}>
+        <Ionicons name="location-outline" size={15} color={colors.muted} />
+        <View style={ps.fieldLine2} />
+      </View>
+      <View style={[ps.seg, { marginTop: 12 }]}>
+        <View style={[ps.segBtn, ps.segBtnOn]}>
+          <RNImage source={CATEGORY_IMG.Residential} style={[ps.segIcon, { tintColor: '#fff' }]} resizeMode="contain" />
+          <Text style={[ps.segText, ps.segTextOn]}>{t('Residential')}</Text>
+        </View>
+        <View style={ps.segBtn}>
+          <RNImage source={CATEGORY_IMG.Commercial} style={ps.segIcon} resizeMode="contain" />
+          <Text style={ps.segText}>{t('Commercial')}</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const ps = StyleSheet.create({
+  // WIDER than the sign-in popup (popWrap maxWidth 400) so its edges genuinely peek out from behind
+  // the popup instead of being fully covered by it — both are centered at the same point on screen.
+  card: { width: '100%', maxWidth: 640, backgroundColor: colors.surface, borderRadius: radius.sheet, borderWidth: 1, borderColor: colors.fieldLine, padding: 24, ...cardShadow },
+  seg: { flexDirection: 'row', backgroundColor: colors.segTrack, borderRadius: radius.pill, padding: 4, gap: 4 },
+  segBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 40, borderRadius: radius.pill },
+  segBtnOn: { backgroundColor: colors.primary },
+  segIcon: { width: 15, height: 15, tintColor: colors.ink },
+  segText: { fontSize: 13, fontWeight: '600', color: colors.ink },
+  segTextOn: { color: '#fff' },
+  label: { fontSize: 12, fontWeight: '600', color: colors.muted, marginTop: 16, marginBottom: 6 },
+  field: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 44, paddingHorizontal: 14, borderRadius: radius.field, borderWidth: 1, borderColor: colors.pickLine, backgroundColor: colors.surface },
+  fieldLine2: { flex: 1, height: 1, backgroundColor: colors.line },
+});
 
 export default function Auth() {
   const router = useRouter();
@@ -246,13 +303,14 @@ export default function Auth() {
     // in the middle of a softly dimmed ground with a gentle rise+fade; clicking ANYWHERE outside the
     // card (or the X / hardware back) closes it. Logo + the sign-in ways, nothing else. ──
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      {/* The app's artwork stays visible behind the popup — softly dimmed, never a flat gray field
-          (owner 2026-08-15: "the background should still show"). Same HeroBackground the home uses. */}
+      {/* The real Filter card stays visible behind the popup — softly dimmed, inert (owner 2026-08-15:
+          "I still want the filter and the entire platform to still show", not decorative scenery).
+          See FilterPreview's own comment for why this is a static lookalike, not the live Home screen. */}
       <View style={s.bg} pointerEvents="none">
-        <HeroBackground imageOpacity={0.55} fadeStart={0.85} fadeEnd={1} />
+        <FilterPreview />
       </View>
       <View style={s.dim} pointerEvents="none" />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1, zIndex: 2 }} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         {/* The outer Pressable fills the screen — a press on the empty ground closes the popup. The
             inner Pressable swallows presses so touching the card itself never dismisses it. */}
         <Pressable style={s.center} onPress={back}>
@@ -506,9 +564,9 @@ export default function Auth() {
 const s = StyleSheet.create({
   // ── The popup ────────────────────────────────────────────────────────────────────────────────
   // A soft green-tinted dim over the warm paper ground, so the card reads as a floating dialog.
-  bg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  bg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', padding: 24, zIndex: 1 },
   // Lighter than before so the artwork behind stays clearly visible — a veil, not a wall.
-  dim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(23, 37, 30, 0.18)' },
+  dim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(23, 37, 30, 0.18)', zIndex: 1 },
   // Fills the screen and centers the card; pressing it (the empty ground) closes the popup.
   center: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
   popWrap: { width: '100%', maxWidth: 400 },
