@@ -196,6 +196,36 @@ jobs:
           set -o pipefail
           scripts/safe-deploy.sh 2>&1 | tee /tmp/safe-deploy.log
 
+      # ── Post-deploy hydration gate ───────────────────────────────────────────────────────────────
+      # Added 2026-08-15 after the SAME feature was shipped and reverted twice in one night (PR #634 →
+      # #635, PR #637 → #639), both times for React #418 on the home page, both times discovered only by
+      # a human opening the live site. Every repo-side check had passed: a hydration mismatch is a
+      # property of the SERVED page and cannot be seen from source or from a static fetch.
+      #
+      # ADVISORY, NOT BLOCKING — deliberately, and only for now. Measured on 2026-08-15 against the
+      # then-live build: React #418 is ALREADY present on production on a build that does NOT contain
+      # the "Both" feature (bundle entry-1b703a1e…, hasBothFeature=false, 2×#418). So the error is
+      # PRE-EXISTING and was never caused by the reverted feature. Making this blocking today would fail
+      # every deploy for a defect that predates it — so it reports loudly instead. Flip
+      # `continue-on-error` to false the moment that pre-existing #418 is fixed; a gate that cries wolf
+      # gets muted, which is how the real protection is lost.
+      - name: Post-deploy hydration gate (advisory — see comment)
+        if: always()
+        continue-on-error: true
+        run: |
+          npx playwright install chromium >/dev/null 2>&1 || true
+          node scripts/verify-live-hydration.mjs 2>&1 | tee /tmp/hydration.log || true
+          {
+            echo "### Hydration gate"
+            if grep -q "REACT HYDRATION MISMATCH" /tmp/hydration.log; then
+              echo "⚠️ **React hydration mismatch on the live page.**"
+              echo "Known PRE-EXISTING as of 2026-08-15 (present without the \"Both\" feature)."
+              echo "If this is NEW for your change, treat it as a P0 and roll back."
+            else
+              echo "✅ live page hydrates cleanly"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Report
         if: always()
         # SAFETY DEFECT FIXED 2026-08-05: this step used to branch on `job.status` alone and print

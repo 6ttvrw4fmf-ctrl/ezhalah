@@ -526,7 +526,27 @@ used to end on.
 
 ## 17. Rent-period rules
 
-- `query.rentPeriod` ∈ `{'monthly','annual'}`, default `annual`; the toggle shows only for Rent.
+- `query.rentPeriod` ∈ `{'monthly','annual','both'}`, default `annual`; the control shows only for Rent.
+- **`'both'` (owner feature 2026-08-14) = the UNION OF TWO KNOWN PERIODS, never "no period filter".**
+  `p_rent_period IS NULL` already meant "don't filter", and that also admits the rent rows whose source
+  published NO period (510 live at build time) — those are neither monthly nor annual, so claiming them
+  would be a derived answer. `'both'` therefore sends its own RPC token **`'كلاهما'`** whose predicate is
+  exactly monthly-OR-annual (migration `20260815012506_rent_period_both_monthly_and_annual`, applied to
+  all THREE readers so counts match results). Live proof at apply time: 31,859 + 43,287 = 75,146 = the
+  union exactly, vs 75,656 for NULL.
+  - **Monthly-only sources must be in scope for it.** `resTables` adds gathern + aqarmonthly when the
+    period scope includes monthly — `'monthly'` *or* `'both'`. Omitting them on a both-search silently
+    returns an annual-only pool while claiming to cover both.
+  - **Price basis = ANNUAL.** The ×12 monthly scaling stays keyed on `'شهري'` alone, so a both-search
+    compares the budget against `price_annual` — the only unit that spans the two periods.
+  - **Results are period-interleaved** (`orderByScope(..., mixPeriods)`), nested INSIDE platform so the
+    platform-outermost permanent rule (2026-07-13) is untouched. MATCH FIRST, DIVERSIFY SECOND: it only
+    re-orders rows the filter already matched. Measured on a mixed-period platform distribution: first 10
+    went 3→6 monthly, first 25 went 8→16, with zero rows lost or duplicated.
+  - Barrier: `scripts/verify-rent-period-both.ts` (npm test), mutation-tested.
+- **Period copy states the PRICE BASIS, never a lease length** (owner 2026-08-14). The old hints asserted
+  "عقد من 1 إلى 11 شهراً" / "عقد لمدة 12 شهراً" — a contract term no source publishes and Ezhalah never
+  captures. They now read «السعر المعروض شهري/سنوي». Pinned by the same barrier.
 - **"per month" = true monthly rentals only** (the `rent_period` column). Enforced two-layer: RPC
   predicate (`p_rent_period`) + `remote.ts` (`rentPeriodParam` / `keptFiltersReq`). Monthly-only sources
   = **gathern + aqarmonthly**; rows with mixed/null periods are excluded from a monthly search.
