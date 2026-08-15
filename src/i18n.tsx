@@ -121,17 +121,9 @@ const AR: Record<string, string> = {
   'Purchase Budget': 'ميزانية الشراء',
   'Monthly': 'شهري',
   'Yearly': 'سنوي',
-  'Both': 'كلاهما',
   // Tiny info note shown under the Monthly/Yearly toggle so the user knows what each period means.
-  // Period hints (reworded 2026-08-14, owner). The old copy asserted a CONTRACT LENGTH ("عقد من 1 إلى 11
-  // شهراً" / "عقد لمدة 12 شهراً") that no source publishes and Ezhalah never captures — an invented claim
-  // about the lease. What we actually know is the BASIS OF THE PRICE WE DISPLAY, so that is all we say.
-  'Annual: 12-month lease, price/year.': 'سنوي: السعر المعروض سنوي.',
-  'Monthly: 1–11 month lease, price/month.': 'شهري: السعر المعروض شهري.',
-  'Monthly: the displayed price is the monthly price.': 'شهري: السعر المعروض شهري.',
-  'Yearly: the displayed price is the yearly price.': 'سنوي: السعر المعروض سنوي.',
-  'Both: monthly and yearly listings together — each card shows its own price basis.':
-    'كلاهما: نعرض الشهري والسنوي معاً — كل إعلان يوضّح أساس سعره.',
+  'Annual: 12-month lease, price/year.': 'سنوي: عقد لمدة 12 شهراً، السعر سنوي.',
+  'Monthly: 1–11 month lease, price/month.': 'شهري: عقد من 1 إلى 11 شهراً، السعر شهري.',
   'Family villa in North Riyadh': 'فيلا عائلية في شمال الرياض',
   'Apartment for rent in Khobar': 'شقة للإيجار في الخبر',
   'Commercial land in Jeddah': 'أرض تجارية في جدة',
@@ -168,7 +160,6 @@ const AR: Record<string, string> = {
   // reflects the toggle exactly — "أبحث عن شقة للإيجار الشهري في جدة". (owner UI request 2026-07-18.)
   'to rent monthly': 'للإيجار الشهري',
   'to rent yearly': 'للإيجار السنوي',
-  'to rent monthly or yearly': 'للإيجار الشهري أو السنوي',
   'to rent or buy': 'للإيجار أو الشراء',
   'Rent or Buy': 'إيجار أو شراء',
   // District, and the "district، city" place phrase used when the user picked a district in the filter.
