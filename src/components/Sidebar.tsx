@@ -67,7 +67,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, isRTL, locale } = useI18n();
-  const { user, history, setQuery, toggleStar, deleteHistory, openModal, activeChatId, setActiveChat } = useApp();
+  const { user, history, setQuery, toggleStar, deleteHistory, openModal, openAuth, activeChatId, setActiveChat } = useApp();
   // Row action menu (Star / Delete). Rendered as a panel-level overlay OUTSIDE the scrolling list so
   // it can never be clipped, and opened UP or DOWN from the click position so the full menu is always
   // on-screen near the top, middle, or bottom of the sidebar. (user request.)
@@ -160,7 +160,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     setTimeout(() => animateOut(() => { onClose(); setTimeout(() => router.replace({ pathname: '/', params }), 10); }), 240);
   };
 
-  const go = (path: '/auth' | '/settings' | '/agent' | '/') => {
+  const go = (path: '/settings' | '/agent' | '/') => {
     animateOut(() => {
       onClose();
       // Home is the current screen — for New Chat just close; otherwise push the target.
@@ -168,12 +168,19 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     });
   };
 
-  // Support / About Us open as in-app popups (centered dialog) rather than full-screen routes:
-  // close the drawer, then raise the modal so it overlays the current page.
+  // Support / About Us / Sign-in open as in-app popups (centered dialog) rather than full-screen
+  // routes: close the drawer, then raise the overlay so it sits on top of the current page (owner
+  // 2026-08-15: sign-in must never navigate away from the Filter — see AuthModal.tsx).
   const openInfo = (m: 'support' | 'about') => {
     animateOut(() => {
       if (!docked) onClose();
       setTimeout(() => openModal(m), 10);
+    });
+  };
+  const openSignIn = () => {
+    animateOut(() => {
+      if (!docked) onClose();
+      setTimeout(() => openAuth(), 10);
     });
   };
 
@@ -205,7 +212,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const groups = groupHistory(history);
   const NavLinks = (
     <View style={s.nav}>
-      <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && s.navLinkHover]} onPress={() => go(user ? '/settings' : '/auth')}>
+      <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && s.navLinkHover]} onPress={() => (user ? go('/settings') : openSignIn())}>
         <Ionicons name="settings-outline" size={19} color={colors.ink} />
         <Text style={s.navText}>{t('Settings')}</Text>
       </Pressable>
@@ -301,7 +308,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               <Text ref={noTranslateRef} style={s.word}>{t('EZHALAH')}</Text>
             </View>
 
-            <Pressable style={[s.cta, { marginTop: 22 }]} onPress={() => go('/auth')}>
+            <Pressable style={[s.cta, { marginTop: 22 }]} onPress={openSignIn}>
               <Ionicons name="person-outline" size={18} color="#fff" />
               <View>
                 <Text style={s.ctaTitle}>{t('Sign up / Log in')}</Text>
@@ -312,7 +319,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
             <View style={{ flex: 1, minHeight: 30 }} />
             <View style={s.divider} />
             {NavLinks}
-            <Pressable style={s.cta} onPress={() => go('/auth')}>
+            <Pressable style={s.cta} onPress={openSignIn}>
               <Ionicons name="person-outline" size={18} color="#fff" />
               <View>
                 <Text style={s.ctaTitle}>{t('Sign up / Log in')}</Text>

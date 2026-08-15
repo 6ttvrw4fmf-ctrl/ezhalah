@@ -10,6 +10,7 @@ import { colors } from '@/theme/tokens';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
+import AuthModal from '@/components/AuthModal';
 import GoogleOneTap from '@/components/GoogleOneTap';
 import IntroVideo from '@/components/IntroVideo';
 
@@ -85,6 +86,9 @@ function Shell() {
       </View>
       {/* Support / About Us popups — rendered at the root so they overlay every screen. */}
       <InfoModal />
+      {/* Sign-in popup — rendered at the root, same reason: a true overlay on top of whatever screen
+          is active (owner 2026-08-15), never a route the user navigates to. */}
+      <AuthModal />
       {/* First-run cinematic intro — overlays everything; shows once for new logged-out visitors. */}
       <IntroVideo />
     </View>
