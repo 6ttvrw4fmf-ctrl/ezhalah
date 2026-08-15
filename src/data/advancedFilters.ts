@@ -150,6 +150,15 @@ const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: string[] }
   Studio: {
     RentAnnual: ['property_age', 'amenities', 'furnished'],
   },
+  // Villa (2026-08-16): fresh-band profiling designed these. Rent: RNPL ask-first (74.7% of fresh
+  // known say yes — the strongest installment market in the DB), AC textbook split, furnished,
+  // plus the villa staples. Buy: NO rnpl (yes=0), NO furnished (yes below floor), and AC is
+  // deliberately absent from the amenity data on Buy (aqar dropped it from بيع forms — chip
+  // gates itself out). بيت/تاون هاوس ride the same search with no interview (n=3–51).
+  Villa: {
+    RentAnnual: ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction'],
+    Buy: ['property_age', 'amenities', 'bathrooms', 'street_width', 'direction'],
+  },
 };
 
 // The single clean type of the query, or null when the user picked several/none — the interview
@@ -237,6 +246,14 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
       { key: 'maid_room',   labelKey: 'Maid room',   count: (c) => c.cnt_maid_room },
       { key: 'driver_room', labelKey: 'Driver room', count: (c) => c.cnt_driver_room },
     ];
+    // Villa-form chips (2026-08-16): aqar villa ads carry مدخل سيارة and صرف صحي checkboxes the
+    // apartment forms don't — both near-perfect two-sided splits (buy car entrance 5,594/5,943,
+    // sanitation 7,377/2,829; both ≥52% known on FRESH rows). Villa-scoped so the certified
+    // cohorts' cards are unchanged.
+    if (singleCleanType(q) === 'Villa') {
+      defs.push({ key: 'car_entrance', labelKey: 'Car entrance', count: (c) => c.cnt_car_entrance });
+      defs.push({ key: 'sanitation',   labelKey: 'Sewage connection', count: (c) => c.cnt_sanitation });
+    }
     // Furnished chip: Annual Rent only (Buy furnished ≈2%; owner: no Furnished filter on Buy).
     if (cohortAllows(q, 'furnished')) defs.push({ key: 'furnished', labelKey: 'Furnished', count: (c) => c.cnt_furnished });
     return guidedOptions(await fetchApartmentGuidedCounts(q), defs);

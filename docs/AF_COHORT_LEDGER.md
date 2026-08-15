@@ -157,6 +157,25 @@ Live types: **فيلا** 33.6k (99.84% of the family) · بيت 51 · تاون �
 - بيت/تاون هاوس/دوبلكس: searchable as normal, NO interview (n and coverage below every gate).
 - All فيلا annual-rent rows are native سنوي (the شهري+RNPL branch contributes 0). Monthly stays frozen.
 
+## فيلا / Villa — RENT ANNUAL & BUY — built 2026-08-16 (certification in progress)
+- Types: فيلا (99.84% of family) + riders بيت/تاون هاوس (searchable, no questions). قصر = 0 live rows.
+- Fresh-band profiling designed the questions (7d/48h first-seen, per platform):
+  - RENT (n≈5,935; fresh 851): rnpl ask-first (74.7% of fresh known = yes — strongest RNPL market in
+    the DB) · property_age · amenities (AC 74% fresh; kitchen 76%; مدخل سيارة 75%; صرف صحي 85%) ·
+    bathrooms · furnished · street_width · direction.
+  - BUY (n≈27,400; fresh 2,492): property_age · amenities (kitchen 51% fresh and RISING; NO AC —
+    aqar dropped it from بيع forms, fresh 0.0%; NO rnpl — yes=0; NO furnished — yes below floor) ·
+    bathrooms · street_width · direction.
+- NEW amenity tokens (migration 20260815223500, template+rebuild, chips==direct==referee asserted):
+  **car_entrance مدخل سيارة** (buy 5,594y/5,943n — near-perfect split) and **sanitation صرف صحي**
+  (buy 7,377y/2,829n). Villa-scoped chips in AMENITIES_QUESTION (singleCleanType==='Villa') so
+  certified cohorts' cards are unchanged. af_field_registry rows exposed (20260815224225).
+- 3 new evidenced waivers (same aqar form-composition class): AC بيع/فيلا (fresh 0/1,378 vs 29%);
+  private_entrance BOTH deals فيلا (0/2,012 fresh while the same rows parse age 100%/car_entrance
+  84% — villa forms carry مدخل سيارة, not مدخل خاص).
+- Registry: 6 rows (فيلا/بيت/تاون هاوس × rent-annual/buy), enabled floor raised 18→24
+  (20260815223803); replay checkpoint 3 (20260815223522). Monthly untouched — no شهري row.
+
 ## Barrier fleet (all registry-driven — a cohort row = protection)
 `af_cohort_registry` drives: `mon_rich_attrs_barrier`, `mon_af_new_listing_readiness` (A/B/C),
 `mon_filter_parity_barrier` check 2 (annual rows). Plus the cohort-agnostic fleet: predicate parity
