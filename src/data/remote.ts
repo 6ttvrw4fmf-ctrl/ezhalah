@@ -330,6 +330,7 @@ function agentPriceCapAnnual(q: SearchQuery): number | null {
   if (q.deal === 'Rent') {
     if (q.priceIsAnnual) return amount;             // agent already annualized a daily/weekly/monthly rent
     if (q.rentPeriod === 'annual') return amount;
+    if (q.rentPeriod === 'both') return amount;     // both → annual basis (the unit that spans periods)
     if (q.rentPeriod === 'monthly') return amount * 12;
     return amount <= 25_000 ? amount * 12 : amount; // agent magnitude heuristic (matches priceFilter)
   }
@@ -846,8 +847,11 @@ const COM_TABLES = ['aqar_commercial_listings', 'wasalt_commercial_listings', 'a
 const MONTHLY_ONLY_TABLE = /^(gathern|aqarmonthly)_/;
 
 function resTables(q: SearchQuery): string[] {
-  // Gathern + Aqar Monthly only on explicit monthly-rent searches (see [[gathern-source]]).
-  return (q.deal === 'Rent' && q.rentPeriod === 'monthly')
+  // Gathern + Aqar Monthly on any search whose period scope INCLUDES monthly (see [[gathern-source]]).
+  // 'both' must list them too — they are the two monthly-only sources, so omitting them would let a
+  // "monthly AND annual" search silently return an annual-only pool. (owner feature 2026-08-14.)
+  const wantsMonthly = q.rentPeriod === 'monthly' || q.rentPeriod === 'both';
+  return (q.deal === 'Rent' && wantsMonthly)
     ? [...RES_TABLES, 'gathern_residential_listings', 'aqarmonthly_residential_listings']
     : RES_TABLES;
 }
@@ -860,6 +864,11 @@ function rentPeriodParam(q: SearchQuery): string | null {
   if (q.bothDeals || q.deal !== 'Rent') return null;
   if (q.rentPeriod === 'monthly') return 'شهري';
   if (q.rentPeriod === 'annual') return 'سنوي';
+  // 'كلاهما' is NOT the same as null. null = "apply no period filter", which also sweeps in the rent rows
+  // whose source published no period at all. The user asking for BOTH is asking for the union of two KNOWN
+  // periods, so the RPC branch is exactly monthly-predicate OR annual-predicate and an unpublished period
+  // stays out. (migration rent_period_both_monthly_and_annual, 2026-08-14.)
+  if (q.rentPeriod === 'both') return 'كلاهما';
   return null;
 }
 
@@ -1004,10 +1013,15 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   //    Monthly) → include ALL their rows (every listing is monthly, even rows with a null raw rent_period).
   //  • ANNUAL: strict rent_period='annual' only — a null rent_period on a mixed platform is NOT annual and
   //    must appear in NEITHER monthly nor annual (never guess).
+  //  • BOTH: the union of the two KNOWN periods — mixed platforms must carry an explicit monthly OR
+  //    annual rent_period (a null one is still neither, and never guessed); monthly-only platforms pass
+  //    wholesale exactly as they do on a monthly search. (owner feature 2026-08-14.)
   if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
     if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.eq('rent_period', 'monthly');
   } else if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'annual') {
     req = req.eq('rent_period', 'annual');
+  } else if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'both') {
+    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.in('rent_period', ['monthly', 'annual']);
   }
   return req;
 }
@@ -1289,7 +1303,10 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
   // multi-select AND for a subgroup box like «مرافق خدمية» that expands to 5 member types, so its results
   // come out as a balanced MIX of the five rather than clumped by one type. (owner 2026-07-07)
   const multiType = (q.types?.length ?? 0) > 1 || (q.types ?? []).some((t) => (SUBGROUPS[t]?.length ?? 0) > 1);
-  const scoped = orderByScope(ranked, scopeOf(q, scope.p_cities, isCountryWideQuery(q)), multiType);
+  // mixPeriods → the user asked for BOTH rent periods, so interleave monthly/annual (nested inside the
+  // platform key) instead of letting the denser period own the top of the list. (owner 2026-08-14.)
+  const mixPeriods = !q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'both';
+  const scoped = orderByScope(ranked, scopeOf(q, scope.p_cities, isCountryWideQuery(q)), multiType, mixPeriods);
   // Diversification (orderByScope) reorders `scoped` away from pure recency, so the true RPC recency
   // rank (r.rank, 0 = newest) must travel WITH each listing — sortListings()'s newest/oldest sort has
   // nothing else to key off once `rows` is just bare Listings. (sort=newest/oldest fix, 2026-07-25.)

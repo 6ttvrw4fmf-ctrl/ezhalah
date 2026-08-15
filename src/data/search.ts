@@ -35,7 +35,11 @@ export type SearchQuery = {
   // ("Monthly Rent Budget" vs "Yearly Rent Budget") and tells the search engine whether the typed
   // number is a monthly figure (×12 for the annual compare) or already a yearly one. Buy ignores
   // this. Default 'annual'. (user request: Filter rent toggle, no calculator on the user's side.)
-  rentPeriod?: 'monthly' | 'annual';
+  // 'both' (owner feature 2026-08-14) = the user explicitly wants BOTH monthly and annual rentals in one
+  // result set. It is the UNION OF TWO KNOWN PERIODS, NOT "no period filter": a listing whose source never
+  // published a period is neither, and is excluded rather than guessed at (SOURCE IS TRUTH). A typed price
+  // under 'both' is read on the ANNUAL basis — the only unit that can span both periods (see priceFilter).
+  rentPeriod?: 'monthly' | 'annual' | 'both';
   // What the filter's AI-assisted location resolver understood from a free-typed location (district /
   // city / area nickname / landmark / geography). Drives the Search Summary's location lines so the
   // user sees exactly what Ezhalah matched. Absent on the agent path (Gemini resolves there). (user request.)
@@ -170,6 +174,7 @@ const verbText = (q: SearchQuery) => {
     // (agent free-text path never sets it) → plain "to rent". (owner UI request 2026-07-18.)
     if (q.rentPeriod === 'monthly') return t('to rent monthly');
     if (q.rentPeriod === 'annual') return t('to rent yearly');
+    if (q.rentPeriod === 'both') return t('to rent monthly or yearly');
     return t('to rent');
   }
   return t('to buy');
@@ -520,7 +525,8 @@ export function searchSummary(q: SearchQuery): string {
   else if (q.typeGroup) lines.push(`• ${t('Property Type')}: ${arabicOrTypeUnresolved(t(q.typeGroup))}`);
   else if (q.category) lines.push(`• ${t('Property Type')}: ${arabicOrTypeUnresolved(t(q.category))}`);
   // For Rent, append the Monthly / Yearly period the user picked so the summary reflects the toggle. (owner UI request 2026-07-18.)
-  const period = q.deal === 'Rent' && q.rentPeriod ? ` (${t(q.rentPeriod === 'monthly' ? 'Monthly' : 'Yearly')})` : '';
+  const period = q.deal === 'Rent' && q.rentPeriod
+    ? ` (${t(q.rentPeriod === 'monthly' ? 'Monthly' : q.rentPeriod === 'both' ? 'Both' : 'Yearly')})` : '';
   lines.push(`• ${t('Transaction Type')}: ${q.bothDeals ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}${period}`);
   // Platform filter line — when the user restricted to specific platforms ("Aqar only"), show which,
   // so the filter is visibly confirmed. (user: "when I type alkhaas it must be al khaas, not aqar".)
@@ -712,11 +718,15 @@ function priceFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
     // as-is. Otherwise (AI agent path) fall back to the magnitude heuristic. (user request.)
     const explicitMonthly = q.rentPeriod === 'monthly';
     const explicitAnnual = q.rentPeriod === 'annual';
+    // 'both' reads the budget on the ANNUAL basis (the RPC compares price_annual, the canonical stored
+    // unit — the only one that can span both periods). Monthly rows have already been bounded server-side
+    // on price_annual, so comparing their per-MONTH display price here can only pass rows the server
+    // already accepted — never admit one it rejected.
+    const explicitBoth = q.rentPeriod === 'both';
     // "Per month": the pool is true monthly rentals priced per MONTH, so compare the monthly budget
     // directly — do NOT ×12. "Per year": compare the yearly price. Agent path (neither set): keep the
     // old magnitude heuristic. (user: per month = charged monthly, never converted to a year.)
-    const cap = explicitMonthly ? amount
-      : explicitAnnual ? amount
+    const cap = explicitMonthly || explicitAnnual || explicitBoth ? amount
       : (!q.priceIsAnnual && !q.bothDeals && amount <= 25_000 ? amount * 12 : amount);
     return (l) => withinValue(l.price, 0, cap);
   }
@@ -1019,9 +1029,9 @@ function budgetCap(q: SearchQuery): number | null {
   if (q.deal === 'Rent') {
     const explicitMonthly = q.rentPeriod === 'monthly';
     const explicitAnnual = q.rentPeriod === 'annual';
+    const explicitBoth = q.rentPeriod === 'both';   // annual basis — see priceFilter
     // Monthly pool is priced per month → the cap is the monthly budget as-is (mirrors priceFilter).
-    return explicitMonthly ? amount
-      : explicitAnnual ? amount
+    return explicitMonthly || explicitAnnual || explicitBoth ? amount
       : (!q.priceIsAnnual && !q.bothDeals && amount <= 25_000 ? amount * 12 : amount);
   }
   if (amount <= 50_000) { const size = fixedSize(q); return size > 0 ? amount * size : null; }
