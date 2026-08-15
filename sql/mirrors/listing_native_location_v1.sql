@@ -8,6 +8,13 @@
 -- session READS to reason about the location pipeline, so a stale one is how a session concludes
 -- "satel has no native resolution" and ships a fix for a problem that does not exist.
 --
+-- Re-verified 2026-08-15 (cron-state mirror sweep, PR #673): UNCHANGED. Migration 20260815211103
+--   records the verbatim command of cron jobid 17, which NAMES this view (`refresh materialized
+--   view concurrently public.listing_native_location_v1 ...`) but never redefines it — the same
+--   any-mention trip as the 2026-08-12 and 2026-08-10 entries below, not real drift. Re-ran
+--   md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against live
+--   production at 21:14Z: d7fff7ec0378d6095728e862aee80106, 13,385 chars — byte-identical to the
+--   digest this header already carries; only the verification date advances.
 -- Re-verified 2026-08-12 (issue #460 gathern fix, PR #546): UNCHANGED. This migration's needle-edit
 --   only rewrites listing_native_location_v2's catchall arm (restoring a dropped gathern LATERAL);
 --   it reads FROM v1 but never redefines it. Re-ran pg_get_viewdef('listing_native_location_v1'::
