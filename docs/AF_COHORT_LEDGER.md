@@ -115,6 +115,48 @@ per-cohort-segment (migration 20260815130215) — the pooled version let شقة'
 دور's 0%; mutation-proven: waivers stripped → exactly the 4 real segments fire; unrelated
 segment blinded with waivers present → still fires.
 
+## Backend certification audit — 2026-08-15 (9-agent sweep + inline mutations)
+All 8 cohorts re-verified 4-way exact (af_eligible_count == candidates total == returned rows ==
+independent SQL oracle) at nationwide + Riyadh, every chip == SQL, 20 stacked combos with full
+row-level verification (0 violations), md5 set-equality on 8 combos. 12 adversarial probes: never
+widened, never errored (garbage tokens/empty arrays/conflicts/overflow/RLM unicode/oversized
+arrays all fail CLOSED; شهري+rnpl = 0 at the RPC surface). UNKNOWN sweep: 0 fabricated defaults
+across 354 column instances on 35 tables; the only row-field `coalesce(...,false)` anywhere is the
+3 documented rnpl exceptions per surface. New-listing trace: 10/10 fresh rows (aqar/wasalt/dealapp)
+in-index with 9/9 AF fields exactly equal to raw (null==null); worst sync lag ~34 min (wasalt AR
+enrichment queue, provably drains).
+
+**Fixed during the audit (PR#674, migration 20260815215511):** the three hourly filter barriers
+(predicate parity :43, normal-filter :41, parity-legacy :54) detected but never PAGED — they wrote
+only location_pipeline_alerts, which alert-dispatch does not read. All three now mon_raise P1 on
+detection. Added registry freeze-guards (a شهري row or enabled<18 pages P1 — raise the floor in
+the same migration that adds cohorts) and gave mon_detect_orphaned_detectors an explicit
+must-be-scheduled list for the 5 first-class AF barriers. Mutation-proven incl. the
+dispatched-channel write; zero residue.
+
+**API contract notes (documented behavior, not bugs):** `p_types: []` fails CLOSED (0 rows) — the
+app sends null for "no type"; never send [] to mean "all". `p_directions: []` also fails closed
+(asymmetric with other array params' cardinality-0 escapes); app skip omits the param. Array caps
+(cities>200/districts>500/types>200/platforms>100) return 0 by design.
+
+## الفلل والبيوت plan (profiled 2026-08-15 — NOT implemented)
+Live types: **فيلا** 33.6k (99.84% of the family) · بيت 51 · تاون هاوس 3 · دوبلكس 65 · قصر 0
+(taxonomy rawType maps to nothing live — do not build). Build exactly TWO cohorts:
+- **فيلا × بيع (n≈27,249; aqar 50% + wasalt 40%):** age (≤2y 17.9k / 3–10y 7.0k, merge >10y 154 up),
+  street_width (≤15m/16–20m/>20m all pass), direction (4 cardinals only; diagonals 484–771 fail the
+  2,180 floor), **car_entrance مدخل سيارة (5,594/5,943 — villa gem)**, elevator-as-luxury
+  (2,454/8,492), sanitation.
+- **فيلا × إيجار سنوي (n≈5,935; 82% aqar):** age, AC (2,052/2,339 textbook), **RNPL ask-first
+  (yes 3,908 = 66% of cohort — strongest RNPL market found anywhere)**, furnished, car_entrance,
+  street_width (all 4 rungs), direction (cardinals), sanitation, living_rooms.
+- **Must NOT copy from Apartment:** floor_number (0%), kitchen (no-side below floor — a no-option
+  would make UNKNOWN behave as NO), maid/driver/private_entrance (publish-only-when-yes),
+  furnished on Buy, elevator on Rent (yes 361 < floor 475).
+- **Data-dead villa dreams (need scraper work first, not filter work):** pool/garden/majlis/
+  total_floors/balcony all <5%; annex/apartments-in-villa/two-entrances have NO column anywhere.
+- بيت/تاون هاوس/دوبلكس: searchable as normal, NO interview (n and coverage below every gate).
+- All فيلا annual-rent rows are native سنوي (the شهري+RNPL branch contributes 0). Monthly stays frozen.
+
 ## Barrier fleet (all registry-driven — a cohort row = protection)
 `af_cohort_registry` drives: `mon_rich_attrs_barrier`, `mon_af_new_listing_readiness` (A/B/C),
 `mon_filter_parity_barrier` check 2 (annual rows). Plus the cohort-agnostic fleet: predicate parity
