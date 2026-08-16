@@ -22,6 +22,15 @@
 // reload. This file only decides WHERE the refresh lands, never whether a search runs — so the
 // redirect cannot reintroduce duplicate execution even if a load reaches the agent screen first.
 //
+// ⚡ WHY THE SAME REDIRECT ALSO EXISTS IN vercel.json (`/agent` → `/`, 307), and why that is not a
+// duplicate to "clean up": this module can only run AFTER the whole JS bundle has downloaded and
+// booted. On a hard refresh that is seconds of dead screen before the redirect fires — the owner's
+// report was literally "still get stuck then it shows filter". The edge rule answers the document
+// request immediately, so a refresh never loads the AI page at all. Only REAL document requests hit
+// it; in-app navigation to الوكيل الذكي is client-side routing and never asks the server.
+// This module remains the native path (no Vercel there), the rule for every other deep route, and
+// the fallback if the edge rule is ever removed. Keep both; they are one decision at two layers.
+//
 // A signed-in user does not lose that conversation: it is written to their history at SEARCH time
 // (store.tsx recordHistory → `history:<sub>`, de-duped by query so a repeat can never fork a second
 // copy), and it stays in the left sidebar to reopen on purpose. Guests keep no visible history.

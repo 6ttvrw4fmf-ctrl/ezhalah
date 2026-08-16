@@ -1603,6 +1603,16 @@ export default function Agent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busy, pendingMessage]);
 
+  // A DOCUMENT LOAD of this screen (refresh, pasted link, restored tab) is on its way Home — the
+  // root layout calls router.replace('/') in its mount effect (see lib/webRefreshRoute.ts). Until
+  // that lands, render the bare paper background instead of the whole AI screen: otherwise the user
+  // watches the header, backdrop and composer paint and then get yanked away, which reads as the app
+  // being stuck on the wrong page. (owner 2026-08-16: "still get stuck then it shows filter".)
+  // In-app navigation is unaffected — the session is already started by then, so this is false.
+  if (IS_WEB && !isAppSessionStarted()) {
+    return <View style={{ flex: 1, backgroundColor: colors.paper }} />;
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
