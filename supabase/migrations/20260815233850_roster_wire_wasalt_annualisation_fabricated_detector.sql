@@ -2,6 +2,11 @@
 -- detector itself (AGENTS.md: a detector nothing reaches is decoration, and
 -- mon_detect_orphaned_detectors() fires on it). Needle-edit so the rest of the roster body — which
 -- several concurrent sessions also touch — is preserved byte-for-byte rather than rebuilt.
+--
+-- SUPERSEDED, minutes later, by 20260815234309_roster_full_explicit_after_wasalt_annualisation_
+-- detector.sql. Kept because it WAS applied to production and prod/git must not diverge — but a
+-- needle-edit is invisible to scripts/verify-dealapp-crawl-budget.ts, which requires the newest
+-- roster migration to list every live detector literally. See that migration for the explicit form.
 do $$
 declare src text; newsrc text;
 begin
