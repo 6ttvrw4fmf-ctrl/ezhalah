@@ -45,11 +45,11 @@ function Shell() {
   // and for screens whose flow state lives in memory only, that screen would come back empty, so the
   // refresh is sent back to Home instead. Runs once on mount; client-side navigation afterwards is
   // untouched. '/auth' is exempt so an OAuth redirect can still land there and finish signing in.
-  // EXCEPTION (QA 2026-08-14): `/agent?filter=<JSON SearchQuery>` (and `?seed=…`) carries the whole
-  // search in the URL and re-runs itself on open, so it does NOT come back empty — sending it Home
-  // was silently dropping every selection on refresh (المدينة, الأحياء, «سنوي»/«شهري», السعر,
-  // المساحة, غرف النوم, فئة/نوع) and breaking bookmarked/shared result links. The decision lives in
-  // shouldSendRefreshHome() so scripts/verify-refresh-restores-filter-search.ts can execute it.
+  // `/agent` used to be exempted here (it re-ran `?filter=` on open, so it did not come back empty).
+  // Both halves of that changed on 2026-08-16 by owner decision: a reload may no longer re-run any
+  // search (appSession gate), and — since that left an empty AI chat — a reload now lands on the
+  // Filter home like every other deep route. The decision lives in shouldSendRefreshHome() so
+  // scripts/verify-refresh-restores-filter-search.ts can execute it rather than grep for it.
   const homedRef = useRef(false);
   useEffect(() => {
     if (homedRef.current) return;

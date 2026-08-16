@@ -1,5 +1,5 @@
 // Permanent guard: the built web bundle must actually RUN. Drives the real primary journey
-// (تصفية → «بحث» → results, then hard-refresh → NEW CHAT with zero search requests) in a headless
+// (تصفية → «بحث» → results, then hard-refresh → FILTER HOME with zero search requests) in a headless
 // browser against a
 // locally-served production build.
 //
@@ -190,10 +190,12 @@ try {
   check('a refresh issues ZERO search/AI requests', searchCalls === 0,
     `${searchCalls} search/AI request(s) fired on reload — a refresh must never count as a user search`);
   check('a refresh does not re-render the previous results', !/لقينا|ما لقينا/.test(afterRefresh));
-  check('a refresh lands on the AI new-chat screen (empty composer present)',
-    (await page.locator('textarea').count()) > 0);
-  check('a refresh stays on the AI surface (not bounced to the filter home)',
-    page.url().includes('/agent'), `url = ${page.url()}`);
+  // Owner rule 2 (2026-08-16, same day as rule 1): "when i refresh takes me to the filter page …
+  // not this here" — an emptied AI chat is a dead end, so the refresh lands on the Filter home.
+  check('a refresh lands on the FILTER HOME (owner 2026-08-16 rule 2)',
+    !page.url().includes('/agent'), `url = ${page.url()}`);
+  check('the filter home actually rendered (city field present, not a blank bounce)',
+    /أي مدينة؟/.test(afterRefresh));
   check('the consumed URL no longer carries an executable search param',
     !/[?&](filter|seed)=/.test(page.url()), `url = ${page.url().slice(0, 140)}`);
   check('the pre-refresh URL did carry the one-shot intent (so the clear is what emptied it)',
@@ -231,7 +233,7 @@ try {
   await page.waitForTimeout(12000);
   check('[mobile] a refresh issues ZERO search/AI requests', searchCalls === 0, `${searchCalls} fired`);
   check('[mobile] a refresh does not re-render the previous results', !RESULT_COUNT.test(await body()));
-  check('[mobile] a refresh lands on the AI new-chat screen', (await page.locator('textarea').count()) > 0);
+  check('[mobile] a refresh lands on the FILTER HOME', !page.url().includes('/agent'), `url = ${page.url()}`);
   check('[mobile] the consumed URL carries no executable search param', !/[?&](filter|seed)=/.test(page.url()),
     `url = ${page.url().slice(0, 140)}`);
 
