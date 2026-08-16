@@ -69,21 +69,22 @@ const GRANDFATHERED = new Set([
   // guarded needle-edit.
   '20260815072328_mon_detect_rent_period_contradicts_source_probe.sql',
   '20260815072452_restore_explicit_detector_roster_after_run22_wholesale_rebuild.sql',
-  // 2026-08-15: miss #6 — senior audit run #21 adding mon_detect_wasalt_annualisation_fabricated.
-  // The first file IS the guarded needle-edit form this guard asks for; it trips FULL_REWRITE only
-  // because the regex also matches the `create or replace ...` text inside its execute format(),
-  // exactly as it does for REPAIR (which is exempted by name). The second file is a deliberate full
-  // rewrite, required by the OPPOSING guard in verify-dealapp-crawl-budget.ts, which demands the
-  // NEWEST roster migration list every detector literally. Those two rules cannot both be satisfied
-  // by one file, so the pair is recorded here.
-  // LIVE ROSTER VERIFIED INTACT before grandfathering (2026-08-15 23:4x): 59 mon_detect_* functions
-  // exist, 52 are on the roster, and all 7 absentees have their own dedicated cron —
-  // aqar_ppm_as_total:63, district_resolution:43, price_fidelity:42, price_magnitude_gate:59,
-  // refresh_coverage:58, trending_cohort_drift:77, wasalt_enrich_backlog:40. Sweep returned
-  // failed=[] with orphaned_detectors=0. The explicit roster also PRESERVES the concurrent run #22
-  // addition (mon_detect_rent_period_contradicts_probe), which is why the needle-edit was applied
-  // first. The NEXT roster edit still must use the guarded needle-edit.
+  // 2026-08-15: miss #6 — applied straight to prod at 23:38 by the senior-audit session, recovered
+  // verbatim at mirror time (md5 36deb3503dfb2b648e7066f748586538). It IS a needle-edit (reads live
+  // prosrc, asserts the rent-period anchor, splices one name in, re-executes) so it cannot drop
+  // entries — it trips this guard only because its execute format() string spells out the
+  // create-or-replace header, unlike the repair's pg_get_functiondef splice. LIVE ROSTER VERIFIED
+  // INTACT before grandfathering: 23/23 required detectors present in the live body, including
+  // both names this migration and its sibling (233826) touch. Drift mirror must stay byte-identical,
+  // so the file is grandfathered rather than rewritten; the NEXT roster edit still must use the
+  // pg_get_functiondef needle-edit.
   '20260815233850_roster_wire_wasalt_annualisation_fabricated_detector.sql',
+  // 2026-08-15: miss #7 — the 23:43 sibling of miss #6, applied straight to prod by the same
+  // concurrent session and recovered verbatim at mirror time (md5 3d0a1a30454e6e13e71035e335c7b2d0).
+  // Named 'roster_full_explicit' by its own author. LIVE ROSTER VERIFIED INTACT before
+  // grandfathering: mon_detect_orphaned_detectors() = 0 and zero orphan/roster alerts in the
+  // surrounding 3h. Drift mirror must stay byte-identical; the NEXT roster edit still must use the
+  // pg_get_functiondef needle-edit.
   '20260815234309_roster_full_explicit_after_wasalt_annualisation_detector.sql',
 ]);
 
