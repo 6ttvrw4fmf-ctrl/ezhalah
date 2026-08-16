@@ -8,6 +8,7 @@ import { AppProvider } from '@/store';
 import { LocaleProvider, useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
+import { markAppSessionStarted } from '@/lib/appSession';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
@@ -53,9 +54,15 @@ function Shell() {
   useEffect(() => {
     if (homedRef.current) return;
     homedRef.current = true;
-    if (Platform.OS !== 'web') return;
+    // Open the app session AFTER this load's screen effects have run (see lib/appSession.ts): from
+    // here on, params reaching a screen are in-app navigation and may run a search. During the load
+    // itself they are page-load params and must not. This is what stops a refresh from re-issuing
+    // the AI call and the property RPC. (owner 2026-08-16.)
+    const t = setTimeout(markAppSessionStarted, 0);
+    if (Platform.OS !== 'web') return () => clearTimeout(t);
     const search = typeof window !== 'undefined' ? window.location.search : '';
     if (shouldSendRefreshHome(pathname, search)) router.replace('/');
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
