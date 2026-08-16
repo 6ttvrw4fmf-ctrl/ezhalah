@@ -37,8 +37,12 @@ const defaults = readFileSync(new URL('../src/lib/searchDefaults.ts', import.met
 // NOTE (clean slate, 2026-08-16): checks that asserted on the SYSTEM-PROMPT PROSE were deleted
 // here, not weakened. The prose they pinned was deliberately removed with the whole instruction
 // layer; pinning sentences is what made that layer only ever grow. The CODE checks below stand.
+// [^{}]* (not a bare .*) so this can't accidentally reach past rent_period's own closing brace into
+// an unrelated field — it still fails if the enum values or STRING type are wrong or missing, and
+// tolerates extra schema keys (e.g. a `description`) in either order, before or after the enum.
 check('SCHEMA declares rent_period with the closed enum (Gemini rejects an empty enum member — "none", never "")',
-  /rent_period:\s*\{\s*type:\s*"STRING",\s*enum:\s*\["none"\s*,\s*"monthly"\s*,\s*"annual"\]\s*\}/.test(edge));
+  /rent_period:\s*\{[^{}]*type:\s*"STRING"[^{}]*enum:\s*\["none"\s*,\s*"monthly"\s*,\s*"annual"\][^{}]*\}/.test(edge) ||
+  /rent_period:\s*\{[^{}]*enum:\s*\["none"\s*,\s*"monthly"\s*,\s*"annual"\][^{}]*type:\s*"STRING"[^{}]*\}/.test(edge));
 check('SCHEMA required includes rent_period',
   /required:\s*\[[^\]]*"rent_period"[^\]]*\]/.test(edge));
 

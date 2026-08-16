@@ -57,6 +57,26 @@ async function locClassify(token: string): Promise<Record<string, unknown> | nul
   } catch { return null; }
 }
 
+// ── OBSERVABILITY (foundation brief 2026-08-16, item 6) ───────────────────────────────────────
+// One row per Gemini call in `mon_agent_request_log` — counts, timings, model id, and the
+// structured `kind` field only. NEVER the raw user message or the raw model reply (see the
+// caller: only String(out?.kind) and numeric/boolean fields are ever passed in). Dashboard-first
+// convention (ARCHITECTURE.md §19.0) — this table IS the read interface, no notification side
+// channel. Best-effort and non-blocking-in-spirit: any failure here must never affect, delay past
+// a couple seconds, or fail the real user response.
+async function logUsage(row: Record<string, unknown>): Promise<void> {
+  try {
+    await Promise.race([
+      fetch(`${SUPABASE_URL}/rest/v1/mon_agent_request_log`, {
+        method: "POST",
+        headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify(row),
+      }),
+      new Promise((resolve) => setTimeout(resolve, 2000)),
+    ]);
+  } catch { /* best-effort only — telemetry may never affect the response */ }
+}
+
 // Arabic fold mirroring SQL normalize_ar: unify alef/ta-marbuta/alef-maqsura, drop
 // tatweel + bidi marks, collapse spaces. Used to check whether the user already named
 // one of the catalog candidates (so we don't re-ask a question they've answered).
@@ -288,28 +308,96 @@ function stripFiller(s: string): string {
   return out || String(s ?? "").trim();
 }
 
+// ── DETERMINISTIC OUTPUT HYGIENE (foundation brief 2026-08-16, item 4) ───────────────────────
+// Gemini's ENUM fields below (kind, deal, pricing_basis, rent_period, sort) are constrained
+// decoding — the model literally cannot emit an out-of-enum value, so they need no runtime
+// guard. Free-form STRING/ARRAY fields have no such guarantee: observed live, the model
+// sometimes fills an unused field with a placeholder WORD ("None", "none", "N/A", "null")
+// instead of leaving it empty, and Latin-script property types come back inconsistently cased.
+// Same principle as extractPrice() above — never trust the model to be exhaustive or literal
+// about "empty"; guarantee it in code, regardless of what the schema description asks for.
+const PLACEHOLDER_RE = /^(?:none|null|n\/?a|unknown|undefined|-)$/i;
+function cleanStr(v: unknown): string {
+  const s = typeof v === "string" ? v.trim() : "";
+  return PLACEHOLDER_RE.test(s) ? "" : s;
+}
+// Title-case a Latin-script value ("apartment" → "Apartment"). Arabic script has no case and an
+// already-empty string both pass through untouched.
+function titleCaseLatin(s: string): string {
+  if (!s || /[؀-ۿ]/.test(s)) return s;
+  return s.toLowerCase().replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+}
+
 // Gemini structured-output schema (OpenAPI subset; uppercase types).
+//
+// ── SCHEMA DESIGN CONTRACT (foundation brief 2026-08-16, item 3) ─────────────────────────────
+// Every `description` below explains ONLY the field's technical contract — its type, format, and
+// the convention for "unstated" (empty string / empty array, never a placeholder word). None of
+// them name a real property type, city, landmark, or platform, and none of them teach the model
+// how to interpret a Saudi real-estate request (e.g. how to tell an RNPL instalment from real
+// rent). That is deliberate: the taxonomy and search intelligence are the owner's prompt-
+// engineering pass, not this schema's job. Litmus test used for every line here: if removing it
+// would let the model violate the JSON *contract* (wrong format, invented placeholder, stray
+// formatting), keep it; if removing it would only make the model worse at real estate, leave it
+// out. See scripts/verify-agent-token-budget-barriers.ts for the structural tests that hold this.
 const SCHEMA = {
   type: "OBJECT",
   properties: {
     kind: { type: "STRING", enum: ["listings", "message", "interview"] },
-    reply: { type: "STRING" },
+    reply: {
+      type: "STRING",
+      description: "Plain text only — no markdown, no code fences, no JSON.",
+    },
     deal: { type: "STRING", enum: ["Rent", "Buy", "Both"] },
-    location: { type: "STRING" },
-    type: { type: "STRING" },
-    detail: { type: "STRING" },
-    price: { type: "STRING" },
+    location: {
+      type: "STRING",
+      description:
+        "The location exactly as the user wrote it (a city, a district, or \"district, city\"). Empty string if no location was stated — never a placeholder word like 'none' or 'unknown'.",
+    },
+    type: {
+      type: "STRING",
+      description:
+        "The property type, in the user's own script. Latin-script values in Proper Case (e.g. 'Apartment'). Empty string if not stated — never a placeholder word like 'none'.",
+    },
+    detail: {
+      type: "STRING",
+      description:
+        "Digits only, one of two meanings: a bedroom count ('1'-'4', or '5+' for five or more), or — if the user gave a size instead — the number of square meters. Empty string if neither was stated.",
+    },
+    price: {
+      type: "STRING",
+      description:
+        "The budget figure as digits only — no currency symbols, no commas, no words like 'thousand' or 'million'. Empty string if no figure was stated.",
+    },
     pricing_basis: {
       type: "STRING",
       enum: ["daily_rent", "weekly_rent", "monthly_rent", "quarterly_rent", "annual_rent", "full_price", "price_per_sqm", "none"],
+      description: "The recurrence basis of `price`. 'none' if no price was stated.",
     },
-    rent_period: { type: "STRING", enum: ["none", "monthly", "annual"] },
+    rent_period: {
+      type: "STRING",
+      enum: ["none", "monthly", "annual"],
+      description: "'monthly' or 'annual' only if the user was explicit about it. 'none' otherwise.",
+    },
     sort: {
       type: "STRING",
       enum: ["none", "newest", "oldest", "price_asc", "price_desc", "area_asc", "area_desc", "ppm_asc", "ppm_desc", "beds_desc"],
+      description: "'none' unless the user explicitly asked for a specific ordering.",
     },
-    count: { type: "STRING" },
-    platforms: { type: "ARRAY", items: { type: "STRING" } },
+    count: {
+      type: "STRING",
+      description:
+        "Digits only — the exact number of results the user explicitly requested (e.g. 'show me 5'). Empty string if they did not request a specific count — never invent a default.",
+    },
+    platforms: {
+      type: "ARRAY",
+      items: {
+        type: "STRING",
+        description: "A platform name exactly as the user wrote it — never the literal word 'None'.",
+      },
+      description:
+        "Platform names the user explicitly restricted the search to. Empty array if unrestricted — never `[\"None\"]` or any placeholder string.",
+    },
   },
   required: ["kind", "reply", "deal", "location", "type", "detail", "price", "pricing_basis", "rent_period", "sort", "count", "platforms"],
 };
@@ -406,6 +494,11 @@ Deno.serve(async (req: Request) => {
       responseSchema: SCHEMA,
     };
     const models = [MODEL, FALLBACK_MODEL].filter((m, i, a) => a.indexOf(m) === i);
+    // Observability side-channel (foundation brief 2026-08-16, item 6): which model actually served
+    // this request and Gemini's own usageMetadata, so every request can be logged without threading
+    // extra fields through runModel()'s return shape (which downstream code pattern-matches on).
+    let servedModel = models[0];
+    let usage: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number; totalTokenCount?: number } | null = null;
     // Call Gemini with the given contents and return the parsed JSON object, or { __err } with a ready
     // Response on failure. Flash can return 503 during spikes — retry once, then fall back to lite.
     // NOTE: no `sysExtra` seam. The system instruction is exactly SYSTEM — nothing may be appended
@@ -415,6 +508,7 @@ Deno.serve(async (req: Request) => {
       let res: Response | null = null;
       outer: for (const m of models) {
         for (let attempt = 0; attempt < 2; attempt++) {
+          servedModel = m;
           const r = await fetch(urlFor(m), { method: "POST", headers, body: payload });
           if (r.ok) { res = r; break outer; }
           res = r;
@@ -425,12 +519,31 @@ Deno.serve(async (req: Request) => {
       }
       if (!res || !res.ok) { const detail = res ? await res.text() : "no response"; return { __err: json({ error: `gemini ${res?.status ?? 0}`, detail }, 502) }; }
       const data = await res.json();
+      usage = data?.usageMetadata ?? null;
       const raw = (data?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p?.text ?? "").join("").trim();
       if (!raw) return { __err: json({ error: "empty model output" }, 502) };
       try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw }, 502) }; }
     };
 
+    const requestStartedAt = Date.now();
     let out: any = await runModel(contents);
+    const latencyMs = Date.now() - requestStartedAt;
+    // Fire-and-log BEFORE branching on success/failure so every outcome (listings, message,
+    // interview, or an error) gets exactly one row. Never blocks or fails the real response —
+    // logUsage() swallows every error itself. Never passes text/reply/raw — counts and labels only.
+    void logUsage({
+      model: servedModel,
+      fallback_used: servedModel !== MODEL,
+      request_kind: out?.__err ? "error" : String(out?.kind ?? "unknown"),
+      history_turns: history.length,
+      system_chars: SYSTEM.length,
+      prompt_tokens: usage?.promptTokenCount ?? null,
+      output_tokens: usage?.candidatesTokenCount ?? null,
+      thinking_tokens: usage?.thoughtsTokenCount ?? 0,
+      total_tokens: usage?.totalTokenCount ?? null,
+      latency_ms: latencyMs,
+      http_status: out?.__err ? (out.__err as Response).status : 200,
+    });
     if (out?.__err) return out.__err;
     if (!out?.kind) return json({ error: "no classification" }, 502);
 
@@ -521,7 +634,7 @@ Deno.serve(async (req: Request) => {
       // catalog (4,581 cities). NEVER force into a fixed city list; if Gemini outputs Arabic
       // (e.g. "ذبحة" for the unknown Eastern-Province city), let it through unchanged so the client
       // can match it exactly. Just normalize whitespace and reject objects/arrays sneaking through.
-      const rawLoc = typeof out.location === "string" ? out.location : "";
+      const rawLoc = cleanStr(out.location);
       // EDGE ANTI-GUESS (parity with prod v81): strip any city/region the user never typed BEFORE the
       // catalog backstop runs, so a model-appended anchor («حي العزيزية» → «حي العزيزية، الخبر») can't slip
       // a guessed city past loc_classify. A user-typed anchor is kept; loc_classify then asks for a bare
@@ -595,7 +708,7 @@ Deno.serve(async (req: Request) => {
       // "Size: 500 m²" in the summary while the reply sentence never said 500 at all). Same fix pattern as
       // extractPrice() above: don't trust the model to be exhaustive, backstop it deterministically. The
       // bedroom-shape regex mirrors the client's own detail-is-bedrooms-vs-size check (src/data/search.ts).
-      const detailStr = typeof out.detail === "string" ? out.detail.trim() : "";
+      const detailStr = cleanStr(out.detail);
       const isSizeDetail = detailStr !== "" && !/^([1-4]|5\+?)$/.test(detailStr);
       let replyOut = lead(out.reply);
       if (isSizeDetail && !replyOut.includes(detailStr)) {
@@ -613,8 +726,8 @@ Deno.serve(async (req: Request) => {
           location,
           regionPin,
           districtPin,
-          type: typeof out.type === "string" && out.type ? out.type : null,
-          detail: typeof out.detail === "string" && out.detail ? out.detail : null,
+          type: titleCaseLatin(cleanStr(out.type)) || null,
+          detail: detailStr || null,
           price,
           priceOriginal: priceOriginal || undefined,
           sort: typeof out.sort === "string" && out.sort && out.sort !== "none" ? out.sort : undefined,
@@ -622,7 +735,7 @@ Deno.serve(async (req: Request) => {
             const n = parseInt(String(out.count ?? "").replace(/[^\d]/g, ""), 10);
             return isFinite(n) && n >= 1 ? Math.min(n, 15) : undefined;
           })(),
-          platforms: Array.isArray(out.platforms) ? out.platforms.filter((p: unknown) => typeof p === "string" && p) : [],
+          platforms: Array.isArray(out.platforms) ? out.platforms.map((p: unknown) => cleanStr(p)).filter(Boolean) : [],
         },
       });
     }
