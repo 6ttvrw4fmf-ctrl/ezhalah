@@ -6,7 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
-import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal, DropdownReveal } from '@/components/ui';
+import { Segmented, OptionBox, FieldLabel, Tappable, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
@@ -23,15 +23,8 @@ import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG } from '@/i18n';
-import { iconForPrompt, useExamplePrompts } from '@/data/examplePrompts';
 
 const MAX_W = 560; // desktop-web: keep the mobile-first column centered
-
-// The 6 "Start here" chips ROTATE per mount — drawn from the shared examplePrompts library so the
-// home grid and the AI Agent's empty-state grid stay in lockstep. A returning user sees a fresh
-// random subset every visit / refresh / sidebar dismissal. Sampled inside the component via useMemo
-// keyed on locale (Arabic UI → Arabic pool, English UI → English pool — never mixed). (user request:
-// "always refresh whenever a user leaves or joins — same for Ezhalah AI Agent — create a rotation.")
 
 const AnimatedPressable = RNAnimated.createAnimatedComponent(Pressable);
 
@@ -105,17 +98,6 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, locale, isRTL } = useI18n();
-  // Fresh random 6 examples per mount, biased toward real DB inventory (~70%) + curated variety.
-  // Renamed to `promptChips` to avoid colliding with the location-suggestions state below.
-  const promptLabels = useExamplePrompts(locale === 'ar' ? 'ar' : 'en', 6);
-  const promptChips = useMemo(
-    () => promptLabels.map((label) => ({
-      label,
-      seed: label,
-      icon: iconForPrompt(label) as keyof typeof Ionicons.glyphMap,
-    })),
-    [promptLabels],
-  );
   const { query, setQuery, user } = useApp();
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
   // CITY-ONLY FIELD (owner spec 2026-07-17): citySuggestions holds either the Top-6-by-listings
@@ -635,11 +617,6 @@ export default function Home() {
   const onShare = async () => {
     const shared = await shareNative();
     if (!shared) setShareOpen(true);
-  };
-
-  const onChip = (seed: string) => {
-    // Search is FREE, always — chips route straight to results, never to sign-in.
-    router.push({ pathname: '/agent', params: { seed } });
   };
 
   const detail = query.type ? detailFor(query.type) : null;
@@ -1500,28 +1477,12 @@ export default function Home() {
             <View ref={withAnchor(endAnchorRef)} style={{ height: 1 }} />
           </View>
 
-          {/* Onboarding header — centered icon + bold heading + lighter description, explaining the
-              example cards. Same structure as the AI Agent page. (user request.) */}
-          <View style={s.onbWrap}>
-            <Ionicons name="search" size={26} color={colors.primary} />
-            <Text style={s.onbHeading}>{t("Not sure what you're looking for?")}</Text>
-            <Text style={s.onbDesc}>{t('Tap one of the examples below and let Ezhalah start the search for you.')}</Text>
-          </View>
-
-          <View style={s.suggGrid}>
-            {promptChips.map((sg, i) => (
-              // Heartbeat wrapper holds the grid sizing and the gentle pulse; the Tappable inside keeps
-              // the press-scale and fills the cell. (user request: heartbeat on the cards.)
-              <Heartbeat key={sg.label} index={i} style={s.chipCell}>
-                <Tappable style={s.chip} onPress={() => onChip(sg.seed)} dip={0.05}>
-                  <View style={s.chipIc}>
-                    <Ionicons name={sg.icon} size={21} color={colors.chipIcon} />
-                  </View>
-                  <Text style={s.chipTx}>{sg.label}</Text>
-                </Tappable>
-              </Heartbeat>
-            ))}
-          </View>
+          {/* REMOVED 2026-08-16 (owner: "remove this for now"): the «مو متأكد وش تبحث عنه؟» onboarding
+              header + the 6 "Start here" example cards that sat below the Search button. The supporting
+              code (promptChips/onChip + the examplePrompts import) went with it so nothing dead is left
+              behind — `git revert` of that commit restores the whole block. The styles (onbWrap/
+              onbHeading/onbDesc/suggGrid/chip*) are deliberately KEPT so a restore needs no re-authoring.
+              The AI Agent page still shows its own version of this block to guests. */}
         </RNAnimated.View>
       </ScrollView>
 
