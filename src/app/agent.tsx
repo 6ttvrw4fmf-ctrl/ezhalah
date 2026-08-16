@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { runAfterAnimation } from '@/lib/afterAnimation';
+import { isAppSessionStarted } from '@/lib/appSession';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import { CardIn, LoadingDots } from '@/components/CardReveal';
@@ -767,6 +768,11 @@ export default function Agent() {
       ),
     );
     toBottom();
+    // NOTE (owner 2026-08-16, supersedes the morning's PR#705): results are deliberately NOT mirrored
+    // back into `?filter=` here. Publishing them made a refresh restore the search — which is exactly
+    // the behaviour the owner then ruled against ("refresh must never count as a new user search").
+    // A search now lives only in this screen's state and, once run, in the sidebar history; the URL
+    // carries it for the navigation hop and is consumed on arrival. Do not re-add a URL write here.
     // Cards start appearing NOW — one by one, while the intro text is still typing above (owner
     // 2026-07-09: show the first card as soon as valid listings are ready; don't hold them hostage
     // to the typewriter). The more-message + feedback row still wait for the text (doneTyping).
@@ -1446,6 +1452,29 @@ export default function Agent() {
     }, 150);
   };
 
+  // REFRESH MUST NEVER RE-EXECUTE A SEARCH (owner 2026-08-16). The search params are a ONE-SHOT
+  // INTENT that belongs to the navigation hop, not a standing instruction re-run on every mount.
+  //
+  // ROOT CAUSE they name: this screen read `?filter=`/`?seed=` as "run this search NOW", evaluated
+  // on mount. On a cold mount `lastFilterRef.current` is undefined, so ANY param looked new and
+  // fired a full turn — a second AI call, a second property RPC, a second history write — with
+  // nothing distinguishing "the user pressed بحث" from "the browser re-mounted this route".
+  //
+  // Consuming the param the moment it is picked up removes the input a reload would replay, so
+  // zero-duplication is structural rather than defended by a flag or a timer: after the hop the URL
+  // is a bare `/agent`, and a refresh has literally nothing to execute. It then renders its
+  // new-chat state, which IS the owner's target screen (greeting + empty composer).
+  //
+  // setParams (not replace/history.replaceState): a same-route param update, so the screen is not
+  // remounted and the search now rendering into it is untouched.
+  const consumeSearchParams = () => {
+    if (Platform.OS !== 'web') return;
+    // The greeting branch below keys off "no params"; mark it done so clearing them cannot inject a
+    // greeting bubble into the conversation this navigation just started.
+    greetedRef.current = true;
+    router.setParams({ filter: undefined, seed: undefined, chatBubble: undefined, chatSub: undefined, replay: undefined, hid: undefined });
+  };
+
   // A "Start here" chip routes here with ?seed=…; Filter search with ?filter=… — run once on open.
   // With neither, this is a brand-new chat → Ezhalah sends its greeting.
   useEffect(() => {
@@ -1459,6 +1488,15 @@ export default function Agent() {
       setBusy(false);
       setMsgs([]);                                         // new search = a clean chat view
     };
+    // THE GATE (owner 2026-08-16). Params that were in the URL when the DOCUMENT loaded — a refresh,
+    // a restored tab, a pasted link — are not a user action, so they must not execute anything. Drop
+    // them and let this render as the new-chat screen the owner asked for. Params that arrive later
+    // came from «بحث», a chip, or the sidebar, and run normally. See src/lib/appSession.ts.
+    if ((filter || seed) && !isAppSessionStarted()) {
+      consumeSearchParams();   // clear them so the URL matches the blank chat actually on screen
+      sendGreeting();          // AI home: greeting + empty composer
+      return;
+    }
     if (filter && filter !== lastFilterRef.current) {
       lastFilterRef.current = filter;
       lastSeedRef.current = undefined;
@@ -1490,15 +1528,27 @@ export default function Agent() {
         startFresh();
         if (replay === '0') openStatic(q, override, hid ? history.find((h) => h.id === hid)?.snapshot : undefined);
         else sendFilter(q, override);
+        // Intent consumed — including for a sidebar replay, so refreshing a REOPENED chat also lands
+        // on a new blank chat rather than reopening it again (owner requirement 6).
+        consumeSearchParams();
       } catch {}
     } else if (seed && seed !== lastSeedRef.current) {
       lastSeedRef.current = seed;
       lastFilterRef.current = undefined;
       startFresh();
       send(seed);
-    } else if (!filter && !seed && !greetedRef.current) {
-      greetedRef.current = true;
-      sendGreeting();
+      consumeSearchParams();
+    } else if (!filter && !seed) {
+      // No params: either a genuinely new chat, or the tick right after consumeSearchParams cleared
+      // them. Release the "already handled" refs so the SAME search can be run again later from
+      // «تصفية» — without this, re-running an identical query would match the stale ref and do
+      // nothing (the "keep searching → nothing pops up" class this guard was written for).
+      lastFilterRef.current = undefined;
+      lastSeedRef.current = undefined;
+      if (!greetedRef.current) {
+        greetedRef.current = true;
+        sendGreeting();
+      }
     }
   }, [seed, filter, chatBubble, chatSub, replay, hid]);
 

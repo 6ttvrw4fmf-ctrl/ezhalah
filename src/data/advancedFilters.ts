@@ -174,6 +174,10 @@ const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: string[] }
     Buy: ['street_width', 'direction', 'property_age', 'amenities'],
   },
   Showroom: {
+    // Rent has MORE viable inventory than Buy (469 vs 88; 23 fresh/7d, direction 84%, street 85%,
+    // age 100%) — gap found in the 2026-08-16 full-taxonomy audit. No utility chips (commercial
+    // showroom electricity 0% — wasalt doesn't publish it).
+    RentAnnual: ['property_age', 'street_width', 'direction'],
     Buy: ['property_age', 'street_width'],
   },
   Warehouse: {

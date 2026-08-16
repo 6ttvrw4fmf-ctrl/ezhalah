@@ -1,24 +1,42 @@
-// Permanent guard: a hard web REFRESH on a results URL must not throw the user's search away.
-// (Search & Matching QA, 2026-08-14 — SEARCH_MATCH_QA_ENGINEER.md §29 "Refresh, back, and state
-// persistence".)
+// Permanent guard: A BROWSER REFRESH MUST NEVER COUNT AS A NEW USER SEARCH.
 //
-// The bug this locks out, observed live on https://ezhalah-app.vercel.app: a Filter search routes to
-// `/agent?filter=<JSON SearchQuery>` — the whole query («إيجار»/«شراء», «سنوي»/«شهري», المدينة,
-// الأحياء, فئة/نوع, غرف النوم, السعر, المساحة) travels in the URL, and agent.tsx re-runs it on open.
-// A blanket "every web refresh goes Home" rule in _layout.tsx fired first, so refreshing (or opening a
-// bookmarked/shared results link) landed on Home with every selection silently dropped and no search
-// run at all. The rule is right for screens that really do come back empty; it must skip the ones that
-// can rebuild themselves.
+// ⚠️ THIS FILE'S CONTRACT WAS DELIBERATELY REVERSED ON 2026-08-16 BY OWNER DECISION. Read this
+// before "fixing" anything here — the previous behaviour is not a bug to restore.
 //
-// webRefreshRoute.ts is zero-dep, so this EXECUTES the real decision rather than grepping for it.
-//   node --experimental-strip-types scripts/verify-refresh-restores-filter-search.ts   (wired into `npm test`)
+// Until 2026-08-16 the rule was the opposite: a refresh on `/agent?filter=…` RESTORED the search by
+// re-running it (QA §29, 2026-08-14/15), and this file asserted that. The owner then ruled that out
+// in full:
+//
+//     "Right now, when I refresh the page while I am inside a chat/search, it appears to run or
+//      reconstruct the search again. I do not want that behavior. … A browser refresh must never
+//      accidentally count as a new user search. There should be no duplicate AI request, duplicate
+//      property-search RPC, duplicate conversation message, duplicate analytics event, or duplicate
+//      saved conversation caused simply by refreshing."
+//
+// THE RULE NOW, for guests and signed-in users alike:
+//   refresh inside a chat/search  →  AI home / new-chat screen (greeting + empty composer)
+//                                 →  ZERO AI calls, ZERO property RPCs, ZERO history writes
+//   signed-in                     →  the conversation is already in the sidebar (saved at SEARCH
+//                                    time, de-duped by query) and reopens only when clicked
+//   guest                         →  nothing to restore; guests have no visible history
+//
+// ROOT CAUSE that was fixed (not patched): the agent screen treated `?filter=`/`?seed=` as a
+// standing instruction re-evaluated on every mount, with nothing distinguishing "the user pressed
+// «بحث»" from "the browser re-mounted this route". Two structural changes, no timers and no browser
+// flags:
+//   1. src/lib/appSession.ts — a search may only run in response to a user action inside a LIVE app
+//      session. Params present when the DOCUMENT loaded are page-load params and never execute.
+//   2. agent.tsx consumeSearchParams() — the params are a one-shot intent, cleared the moment they
+//      are acted on, so a reload has no input left to replay and the URL matches what is on screen.
+//
+//   node --experimental-strip-types scripts/verify-refresh-restores-filter-search.ts  (in `npm test`)
 import { readFileSync, existsSync } from 'node:fs';
-import { shouldSendRefreshHome, hasRestorableQuery } from '../src/lib/webRefreshRoute.ts';
+import { shouldSendRefreshHome, hasRestorableQuery, AGENT_REFRESH_STARTS_NEW_CHAT } from '../src/lib/webRefreshRoute.ts';
+import { isAppSessionStarted, markAppSessionStarted, __resetAppSessionForTest } from '../src/lib/appSession.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); };
 
-// A real filter payload, exactly as the app serialises it into the URL (captured from production).
 const REAL_FILTER = JSON.stringify({
   deal: 'Rent', location: 'الرياض', category: 'Residential', rentPeriod: 'annual',
   typeGroup: 'Apartments & Co-living', types: ['Apartment'], contextBedsList: ['3'],
@@ -26,87 +44,108 @@ const REAL_FILTER = JSON.stringify({
   districts: ['حي النرجس', 'حي الملقا'], districtLabel: 'حي النرجس وحي الملقا',
 });
 
-// 1) A results URL that can restore itself is NEVER sent Home.
-check('/agent + real ?filter= stays put (the whole search survives refresh)',
-  shouldSendRefreshHome('/agent', `?filter=${encodeURIComponent(REAL_FILTER)}`) === false);
-check('/agent + ?seed= stays put ("Start here" chip link survives refresh)',
-  shouldSendRefreshHome('/agent', '?seed=%D8%B4%D9%82%D8%A9') === false);
-check('/agent + both filter and seed stays put',
-  shouldSendRefreshHome('/agent', `?seed=x&filter=${encodeURIComponent(REAL_FILTER)}`) === false);
-
-// 2) Screens that genuinely come back empty still go Home — the original behaviour is preserved.
-check('/agent with NO query still goes Home (nothing to restore)',
-  shouldSendRefreshHome('/agent', '') === true);
-check('/agent with a malformed filter goes Home (would render empty)',
-  shouldSendRefreshHome('/agent', '?filter=not-json') === true);
-check('/agent with a non-object filter goes Home',
-  shouldSendRefreshHome('/agent', '?filter=%5B1%2C2%5D') === true);
-check('/agent with an empty seed goes Home',
-  shouldSendRefreshHome('/agent', '?seed=%20') === true);
-check('/settings goes Home', shouldSendRefreshHome('/settings', '') === true);
-check('/interview goes Home even with a filter (only /agent self-restores)',
-  shouldSendRefreshHome('/interview', `?filter=${encodeURIComponent(REAL_FILTER)}`) === true);
-check('/about goes Home', shouldSendRefreshHome('/about', '?filter=%7B%7D') === true);
-
-// 3) Home and the OAuth callback are never redirected.
-check('/ is left alone', shouldSendRefreshHome('/', '') === false);
-check('/auth is left alone (OAuth redirect must finish signing in)',
-  shouldSendRefreshHome('/auth', '?code=abc') === false);
-check('empty pathname is left alone', shouldSendRefreshHome('', '') === false);
-check('null pathname is left alone', shouldSendRefreshHome(null, '') === false);
-
-// 4) hasRestorableQuery only accepts a payload the screen can actually rebuild from.
-check('hasRestorableQuery: real filter → true', hasRestorableQuery(`?filter=${encodeURIComponent(REAL_FILTER)}`) === true);
-check('hasRestorableQuery: empty object filter → true', hasRestorableQuery('?filter=%7B%7D') === true);
-check('hasRestorableQuery: garbage → false', hasRestorableQuery('?filter=%7Bnope') === false);
-check('hasRestorableQuery: no query at all → false', hasRestorableQuery('') === false);
-check('hasRestorableQuery: unrelated params → false', hasRestorableQuery('?utm_source=x') === false);
-
-// 5) The screen the fix exists for must still consume ?filter= on open — otherwise "don't go Home"
-//    would just leave the user on a blank /agent.
 const agent = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
-check('agent.tsx still reads the filter param', /useLocalSearchParams<[\s\S]{0,400}?>/.test(agent) && /\bfilter\b/.test(agent));
-check('agent.tsx still runs a ?filter= search on open',
-  /if\s*\(\s*filter\s*&&\s*filter\s*!==\s*lastFilterRef\.current\s*\)/.test(agent));
+const layout = readFileSync(new URL('../src/app/_layout.tsx', import.meta.url), 'utf8');
 
-// 5b) …and it must SEED the shared filter state from that payload, or the second half of the class
-//     comes back: results restore fine, but reopening «تصفية» shows a blank form and «بحث» dies with
-//     «الرجاء اختيار مدينة من القائمة». The app context is the only thing the home form rehydrates
-//     from (index.tsx city/district rehydration effects read `query`), and a hard refresh resets it
-//     to HOME_DEFAULT_QUERY(), so the parsed payload has to be written back. (QA §29, 2026-08-15.)
-const filterBranch = agent.slice(agent.indexOf('const q = JSON.parse(filter)'));
-check('agent.tsx pulls setQuery out of useApp (can seed the filter form)',
-  /const\s*\{[^}]*\bsetQuery\b[^}]*\}\s*=\s*useApp\(\)/.test(agent));
-check('agent.tsx seeds the app query from the parsed ?filter= payload, before the search runs',
-  /setQuery\(\s*\(\s*\)\s*=>\s*q\s*\)/.test(filterBranch)
-  && filterBranch.search(/setQuery\(/) < filterBranch.indexOf('sendFilter(q'));
+// 1) THE GATE — a page load never executes a search. Executed, not grepped.
+__resetAppSessionForTest();
+check('before boot completes, the session is NOT started (page-load params must not execute)',
+  isAppSessionStarted() === false);
+markAppSessionStarted();
+check('after boot, the session IS started (in-app navigation may execute)',
+  isAppSessionStarted() === true);
+__resetAppSessionForTest();
+check('the reset restores the pre-boot state (the rule is testable in both directions)',
+  isAppSessionStarted() === false);
 
-// 5c) setQuery takes an UPDATER FUNCTION, never a value. `setQuery(q)` type-checks nowhere and
-//     throws «TypeError: e is not a function» at runtime the moment a filter search opens — it
-//     SHIPPED that way on 2026-08-15 (PR#661) and killed search app-wide until PR#662 reverted it.
-//     The store does setQueryState((prev) => updater(prev)), so a plain object gets *called*.
+// 2) The agent screen must consult the gate BEFORE acting on any param, and must bail out of the
+//    search branches entirely — not merely skip a line inside them.
+const effect = agent.slice(agent.indexOf('const startFresh = ()'), agent.indexOf('}, [seed, filter, chatBubble, chatSub, replay, hid]);'));
+check('agent.tsx imports the session gate', /from\s+'@\/lib\/appSession'/.test(agent));
+check('agent.tsx drops page-load params instead of running them',
+  /if\s*\(\s*\(\s*filter\s*\|\|\s*seed\s*\)\s*&&\s*!isAppSessionStarted\(\)\s*\)/.test(effect));
+check('the page-load branch returns before any search branch is reached',
+  effect.indexOf('!isAppSessionStarted()') < effect.indexOf('if (filter && filter !== lastFilterRef.current)')
+  && /!isAppSessionStarted\(\)[\s\S]{0,400}?return;/.test(effect));
+check('the page-load branch lands on the AI new-chat screen (greeting + empty composer)',
+  /!isAppSessionStarted\(\)[\s\S]{0,400}?sendGreeting\(\)/.test(effect));
+check('the page-load branch runs NO search (no sendFilter/send/openStatic before its return)',
+  !/!isAppSessionStarted\(\)[\s\S]{0,300}?(sendFilter\(|openStatic\(|\bsend\(seed\))/.test(effect));
+
+// 3) THE ONE-SHOT INTENT — params are consumed when acted on, so a reload has nothing to replay.
+check('consumeSearchParams exists and clears every executable param', /const\s+consumeSearchParams\s*=/.test(agent)
+  && /filter:\s*undefined/.test(agent) && /seed:\s*undefined/.test(agent)
+  && /replay:\s*undefined/.test(agent) && /hid:\s*undefined/.test(agent));
+check('the filter branch consumes its params after acting', /sendFilter\(q,\s*override\);[\s\S]{0,400}?consumeSearchParams\(\)/.test(effect));
+check('the seed branch consumes its params after acting', /send\(seed\);\s*\n\s*consumeSearchParams\(\)/.test(effect));
+check('a sidebar replay also consumes its params (refreshing a reopened chat starts new — req. 6)',
+  /replay === '0'[\s\S]{0,600}?consumeSearchParams\(\)/.test(effect));
+check('consuming marks the greeting handled so clearing params cannot inject a greeting mid-search',
+  /greetedRef\.current = true;[\s\S]{0,200}?router\.setParams/.test(agent));
+
+// 4) NOTHING may write a search back into the URL. PR#705 published results to `?filter=` so a
+//    refresh would restore them — the exact behaviour the owner then rejected. If it comes back,
+//    refresh silently starts re-running searches again.
+check('playListings no longer publishes results to the URL (PR#705 reverted by owner decision)',
+  !/publishSearchToUrl/.test(agent));
+check('no setParams call writes a filter value back into the URL',
+  !/setParams\(\s*\{[^}]*filter:\s*(?!undefined)[A-Za-z_$]/.test(agent));
+
+// 5) The refresh guard must leave the AI surface alone — it is now the DESTINATION, not a route to
+//    bounce off. Everything else still goes Home.
+check('/agent is never redirected Home (it renders the new-chat screen itself)',
+  shouldSendRefreshHome('/agent', '') === false
+  && shouldSendRefreshHome('/agent', `?filter=${encodeURIComponent(REAL_FILTER)}`) === false
+  && shouldSendRefreshHome('/agent', '?seed=%D8%B4%D9%82%D8%A9') === false);
+check('/settings still goes Home', shouldSendRefreshHome('/settings', '') === true);
+check('/interview still goes Home', shouldSendRefreshHome('/interview', `?filter=${encodeURIComponent(REAL_FILTER)}`) === true);
+check('/about still goes Home', shouldSendRefreshHome('/about', '') === true);
+check('/ is left alone', shouldSendRefreshHome('/', '') === false);
+check('/auth is left alone (OAuth redirect must finish signing in)', shouldSendRefreshHome('/auth', '?code=abc') === false);
+check('null/empty pathname is left alone',
+  shouldSendRefreshHome(null, '') === false && shouldSendRefreshHome('', '') === false);
+check('the contract constant states the rule for both halves', AGENT_REFRESH_STARTS_NEW_CHAT === true);
+check('_layout.tsx opens the session only AFTER this load\'s screen effects have run',
+  /markAppSessionStarted/.test(layout) && /setTimeout\(markAppSessionStarted,\s*0\)/.test(layout));
+
+// 6) hasRestorableQuery is retained to state what a reloaded URL must NOT contain.
+check('hasRestorableQuery still detects an executable payload', hasRestorableQuery(`?filter=${encodeURIComponent(REAL_FILTER)}`) === true);
+check('a consumed (bare) agent URL carries nothing executable', hasRestorableQuery('') === false);
+check('unrelated params are not executable', hasRestorableQuery('?utm_source=x') === false);
+
+// 7) INTENTIONAL behaviour that must keep working — the fix must not turn into "searches stop".
+check('an in-session ?filter= still runs a search', /if\s*\(\s*filter\s*&&\s*filter\s*!==\s*lastFilterRef\.current\s*\)/.test(agent));
+check('an in-session ?seed= still runs a search', /else if\s*\(\s*seed\s*&&\s*seed\s*!==\s*lastSeedRef\.current\s*\)/.test(agent));
+check('the sidebar still reopens a saved chat via replay=0 + hid',
+  /replay:\s*'0',\s*hid:\s*c\.id/.test(readFileSync(new URL('../src/components/Sidebar.tsx', import.meta.url), 'utf8')));
+check('re-running the SAME query later still works (the handled-refs are released when params clear)',
+  /if\s*\(\s*!filter\s*&&\s*!seed\s*\)[\s\S]{0,400}?lastFilterRef\.current = undefined;[\s\S]{0,120}?lastSeedRef\.current = undefined;/.test(effect));
+check('agent.tsx still seeds the app query from a filter payload (تصفية stays usable)',
+  /setQuery\(\s*\(\s*\)\s*=>\s*q\s*\)/.test(agent));
 check('agent.tsx never calls setQuery with a bare value (the 2026-08-15 outage signature)',
   !/setQuery\(\s*(?!\(|function\b)[A-Za-z_$][\w$]*\s*\)/.test(agent));
 
-// 5d) The runtime half of this barrier must stay present and reachable. Static checks like the ones
-//     above were ALL GREEN on the broken commit — only a real browser catches a runtime TypeError.
+// 8) Signed-in persistence: the conversation must already be saved BEFORE any refresh, and a repeat
+//    must never fork a second copy. Both live in store.tsx and are asserted there.
+const store = readFileSync(new URL('../src/store.tsx', import.meta.url), 'utf8');
+check('history is written at SEARCH time, not at refresh time', /recordHistory\(/.test(store));
+check('history de-dupes by QUERY, so a repeated search cannot create a second saved conversation',
+  /const prior = h\.find\(\(it\) => sameQuery\(it\.query, q\)\)/.test(store));
+check('history is bucketed per account, so a signed-in user sees their own chats after a refresh',
+  /const historyKey = \(sub: string\) =>/.test(store));
+check('history hydration waits for the auth check, so a refresh cannot load the wrong bucket',
+  /if \(!authChecked\) return;[\s\S]{0,400}?historyKey\(user \? user\.sub : 'guest'\)/.test(store));
+
+// 9) The runtime half. Static checks were ALL GREEN on the 2026-08-15 outage commit; only a real
+//    browser proves the built app behaves.
 const smoke = new URL('./verify-web-runtime-smoke.mjs', import.meta.url);
 const wf = new URL('../.github/workflows/web-runtime-smoke.yml', import.meta.url);
 check('the browser runtime smoke test still exists', existsSync(smoke));
-check('the runtime smoke test drives «بحث» and asserts the page does not blank',
-  existsSync(smoke) && /does not blank the page/.test(readFileSync(smoke, 'utf8')));
+check('the smoke test asserts a refresh lands on a new chat and issues no search request',
+  existsSync(smoke) && /refresh issues ZERO/.test(readFileSync(smoke, 'utf8')));
 check('a workflow still runs the runtime smoke test on src/ changes', existsSync(wf)
   && /verify-web-runtime-smoke\.mjs/.test(readFileSync(wf, 'utf8'))
   && /src\/\*\*/.test(readFileSync(wf, 'utf8')));
 
-// 6) The layout must route its decision through the shared helper (no re-inlined divergent copy).
-const layout = readFileSync(new URL('../src/app/_layout.tsx', import.meta.url), 'utf8');
-check('_layout.tsx imports shouldSendRefreshHome', /from\s+'@\/lib\/webRefreshRoute'/.test(layout));
-check('_layout.tsx calls shouldSendRefreshHome', /shouldSendRefreshHome\s*\(/.test(layout));
-check('_layout.tsx has no unconditional pathname !== "/" redirect left',
-  !/pathname\s*!==\s*'\/'\s*&&\s*pathname\s*!==\s*'\/auth'\s*\)\s*\{?\s*router\.replace\('\/'\)/.test(layout));
-check('_layout.tsx passes the real query string, not a hardcoded one',
-  /window\.location\.search/.test(layout));
-
-console.log(failed ? `\n${failed} FAILED` : '\nAll refresh-restore checks passed');
+console.log(failed ? `\n${failed} FAILED` : '\nAll refresh-behaviour checks passed');
 process.exit(failed ? 1 : 0);
