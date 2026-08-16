@@ -190,7 +190,21 @@ Live types: **فيلا** 33.6k (99.84% of the family) · بيت 51 · تاون �
 - Registry: 6 rows (فيلا/بيت/تاون هاوس × rent-annual/buy), enabled floor raised 18→24
   (20260815223803); replay checkpoint 3 (20260815223522). Monthly untouched — no شهري row.
 
-## Commercial + rural + land families — built 2026-08-16 (overnight mandate; certification in flight)
+## Commercial + rural + land families — ✅ CERTIFIED 2026-08-16 (all 6 battery agents PASS)
+~136 same-moment equality checks, 0 mismatches. Highlights: CommLand/Buy 17,511 five-way equal with
+FULL base-set md5 identity (nationwide + Riyadh + Jeddah); ResLand/Buy 10,575 md5-identical; Office
+rent 2,140 / Shop rent 1,982 full 32-chip row-diffs == SQL at both scopes; 20+ stacked combos
+row-level verified 0 violations; skip-null == baseline everywhere; garbage → 0 everywhere;
+unknown≠no partitions sum exactly (e.g. CommLand electricity 9,712y+2,445n+5,354null=17,511, and
+p_furnished=false NEVER counts unknowns). عمارة CATEGORY ISOLATION proven: commercial-kind 11/49
+vs residential 3,277/6,526, zero cross-table leaks. Gathern absent from every set. Fresh trace:
+441/441 fresh rows present, 8-field parity 0 divergences (aqar/dealapp/wasalt), counted-proof exact,
+pipeline lag <8h. Mutation spot-check (Shop rent isolated, utility fields blinded): rich-attrs
+fired 0→2, rolled back, zero residue; previously certified stable (Apartment 9,907, Villa 11,346).
+FOLLOW-UP (small, monitored): 10 fresh dealapp ResLand rows are location-unresolved
+(production_ready=false) and their direction/street_width sit in listing_extra_attrs but not the
+index — outside every cohort until location resolves; verify attr backfill on resolution
+(ids 8005469, 8009303, 8011667, 8014426, 7853423, 7853433, 7853625, 7853686, 7853384, 7853038).
 20 type×deal cohorts profiled from live fresh-band data. **18 VIABLE registered** (registry 52
 enabled rows, floor 52): Office ×2 (rent n=2,140: age+furnished+utility chips; buy n=60 thin),
 Shop ×2 (rent n=1,982 — strongest commercial; street+direction+age+utilities; aqar 97.9%
