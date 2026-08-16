@@ -233,11 +233,34 @@ def main() -> int:
     print(f"Gathern liveness [{mode}]: {len(work)} active rows stale >{args.min_stale_days}d "
           f"(grace={args.grace}, ~{MIN_INTERVAL:.1f}s/req)", flush=True)
 
-    # Resolve the anomaly cap up front (count query is cheap; head-only).
+    # Resolve the anomaly cap up front (the count query is cheap).
+    #
+    # DO NOT reintroduce head=True here. On the pinned client (supabase 2.10.0 / postgrest 0.18.0)
+    # a HEAD request returns .count = 0 rather than the real total, so `or 0` fed
+    # resolve_kill_cap(0) and the cap silently collapsed to its 150 floor on EVERY run — measured
+    # 2026-08-16 against production: head=True -> .count = 0, without head -> .count = 29335,
+    # i.e. cap 150 instead of the designed 586 (2% of active). A threshold that quietly degrades to
+    # its floor is worse than a wrong threshold: it looks computed. Consequence in production: the
+    # 2026-08-16 06:41 sweep refused a 173-row batch as an "anomaly" that the designed cap would
+    # have accepted, leaving source-dead units served to users for days (alert
+    # served_after_source_gone:gathern_residential_listings).
     kill_cap = args.kill_cap
+    # Always read the denominator, even under an explicit override, so the run log can state what
+    # the cap WOULD have been. Under a hold that is the whole point: the owner needs to see both.
+    active_now_logged = (client.table(TABLE).select("id", count="exact")
+                         .eq("source", SOURCE).eq("active", True).limit(1).execute().count)
     if kill_cap <= 0:
-        active_now = (client.table(TABLE).select("id", count="exact", head=True)
-                      .eq("source", SOURCE).eq("active", True).execute().count or 0)
+        active_now = active_now_logged
+        # Fail CLOSED on an unknown denominator. A zero/None count while there is stale work to do
+        # means the count query failed, not that the platform is empty -- and a destructive cap must
+        # never be resolved from a denominator we could not read.
+        if not active_now:
+            if work:
+                raise SystemExit(
+                    f"REFUSING TO SWEEP: active-row count for {SOURCE} came back {active_now!r} "
+                    f"while {len(work)} stale rows are pending. The kill cap would silently fall "
+                    f"back to its floor. Fix the count query before running liveness.")
+            active_now = 0
         kill_cap = resolve_kill_cap(active_now)
 
     s = detail_session()
@@ -307,8 +330,14 @@ def main() -> int:
 
     verb = "inactivated" if args.apply else "WOULD inactivate"
     kill_shown = applied_kills if args.apply else len(kill_pending)
+    # cap_src makes the cap's PROVENANCE auditable: an explicit --kill-cap override and a computed
+    # cap are operationally different decisions and must never read the same in the run log. This is
+    # what would have exposed the head=True count bug immediately instead of after ~3 days
+    # (2026-08-16): every run logged a bare "kill_cap=150" that looked computed and was not.
+    cap_src = (f"override active={active_now_logged}" if args.kill_cap > 0
+               else f"auto=max(150,2% of {active_now_logged})")
     notes = (f"{mode} scanned={seen} dead={dead} {verb}={kill_shown} strike={struck} "
-             f"alive={alive} transient={transient} kill_cap={kill_cap}")
+             f"alive={alive} transient={transient} kill_cap={kill_cap} [{cap_src}]")
     if anomaly:
         notes = (f"ANOMALY-CAPPED would_inactivate={len(kill_pending)} cap={kill_cap} — 0 rows "
                  f"inactivated; owner review required. " + notes)
