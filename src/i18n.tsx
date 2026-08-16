@@ -592,6 +592,8 @@ const AR: Record<string, string> = {
   'Let’s narrow it down': 'خلّنا نحدد الطلب أكثر',
   'Help me find more precise results': 'ساعدني ألقى نتائج أدق',
   'I can get you something more precise.': 'أقدر أجيب لك نتائج أدق.',
+  // Composer placeholder (owner wording 2026-08-16) — names the domain and the country, in the
+  // conversational register the rest of the agent speaks.
   "Type the property you're looking for in Saudi Arabia...": 'اكتب العقار اللي تبحث عنه في السعودية...',
   'Want more accurate results?': 'تريد نتائج أدق؟',
   'I can ask you a few questions to find your perfect match.': 'يمكنني طرح بعض الأسئلة لإيجاد ما يناسبك تماماً.',
