@@ -370,6 +370,9 @@ const AR: Record<string, string> = {
   'Do you prefer it furnished?': 'تفضلها مفروشة؟',
   'Unfurnished': 'غير مفروشة',
   'Driver room': 'غرفة سائق',
+  'Car entrance': 'مدخل سيارة',
+  'Sewage connection': 'صرف صحي',
+  'Water supply': 'توفر الماء',
   // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
   'How many bathrooms?': 'كم دورة مياه تفضل؟',
   'Any number': 'أي عدد',
@@ -476,6 +479,7 @@ const AR: Record<string, string> = {
   'Ezhalah! ': 'إزهله! ',
   'No exact matches — try broadening your search.': 'لا توجد نتائج مطابقة تماماً — حاول توسيع نطاق بحثك.',
   'No listings here right now': 'لا توجد إعلانات هنا حالياً',
+  'ads': 'إعلان',
   // City/District dropdown zero-states (2026-08-14): the box used to render NOTHING while its pool
   // was loading, after a failed fetch, or on a no-match — indistinguishable silences (findings P1).
   'Loading…': 'جاري التحميل…',

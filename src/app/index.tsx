@@ -15,7 +15,7 @@ import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, type SearchQuery } from '@/data/search';
-import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT } from '@/data/remote';
+import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, hasActiveFilters } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -172,6 +172,18 @@ export default function Home() {
   // counts overstated up to 86%, and commercial-only districts presented as alive yet searched to 0
   // — silently defeating the PR#384 zero-mark.
   const effCategory: Category = query.category ?? IMPLIED_CATEGORY_DEFAULT;
+  // The cohort's Arabic types — the EXACT array the search RPC receives (one shared definition in
+  // remote.ts), so Trending cities/districts, their counts, and their percentages always describe
+  // the same inventory pressing Search returns. Price is deliberately absent (owner, 2026-08-15).
+  const cohortTypes = cohortTypesAr(query);
+  const cohortTypesSig = cohortTypes ? cohortTypes.join('|') : '';
+  // «N إعلان · P٪» — the honest share of the current cohort. Denominator comes from the SAME RPC
+  // row as the count (one query, cannot disagree); clamped so a display bug can never show >100%.
+  const cohortShareLabel = (n: number, total: number): string | undefined => {
+    if (!(n > 0) || !(total > 0)) return undefined;
+    const pct = Math.max(0, Math.min(100, Math.round((100 * n) / total)));
+    return `${grouped(n)} ${t('ads')} · ${pct}٪`;
+  };
   // Refs so the ENTIRE Price/Area/Size box is one tap target (owner 2026-07-10): tapping anywhere in
   // the box — icon, label, padding, unit text — focuses the input immediately, same pattern already
   // used for the city field above (`cityRef` + its wrapping Pressable).
@@ -296,7 +308,7 @@ export default function Home() {
   // Category-aware ranking can't reach this field without moving Category earlier in the flow — a
   // bigger UX change the owner declined (2026-07-20). Deal-only is what this data can support today.
   useEffect(() => {
-    void ensureCityFieldIndex(query.deal, paymentMonthly, effCategory).then((pool) => {
+    void ensureCityFieldIndex(query.deal, paymentMonthly, effCategory, cohortTypes).then((pool) => {
       // EDGE CASE (found in testing, generalizes to every deal change too): a fetch can still be
       // pending when the user has already focused AND typed a query — matchCitiesByText() would have
       // run against a still-empty/stale-deal pool and (correctly, not a crash) returned []/old
@@ -306,9 +318,9 @@ export default function Home() {
       // replay only "when the section first appears or when the rankings change").
       if (cityTextRef.current) {
         const latin = isLatinOnlyInput(cityTextRef.current);
-        setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, effCategory, cityTextRef.current));
+        setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, effCategory, cityTextRef.current, cohortTypes));
       } else if (cityFocus) {
-        setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6));
+        setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6, cohortTypes));
       }
       // REHYDRATION (bug fix 2026-08-04): returning to this screen after a search REMOUNTS it —
       // query.location persists in the app context (the field still shows the city), but
@@ -347,7 +359,7 @@ export default function Home() {
     // effCategory joined the deps with count-scope parity: the pool is now keyed by the effective
     // category, so a Residential↔Commercial pick re-warms the pool at its true scope.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.deal, paymentMonthly, effCategory]);
+  }, [query.deal, paymentMonthly, effCategory, cohortTypesSig]);
 
   // Same reactive refresh for District, scoped to the currently-selected city — and ALSO to Category
   // (owner decision 2026-07-20, after proving live that Category matters more for districts than for
@@ -360,16 +372,16 @@ export default function Home() {
   useEffect(() => {
     if (!citySelected) return;
     const cid = citySelected.cityId;
-    void ensureDistrictOptions(cid, query.deal, effCategory, paymentMonthly).then(() => {
+    void ensureDistrictOptions(cid, query.deal, effCategory, paymentMonthly, cohortTypes).then(() => {
       if (districtTextRef.current) {
         const latin = isLatinOnlyInput(districtTextRef.current);
-        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, effCategory, paymentMonthly, districtTextRef.current));
+        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, effCategory, paymentMonthly, districtTextRef.current, cohortTypes));
       } else if (districtFocus) {
-        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, effCategory, paymentMonthly, 6));
+        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, effCategory, paymentMonthly, 6, cohortTypes));
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.deal, effCategory, citySelected, paymentMonthly]);
+  }, [query.deal, effCategory, citySelected, paymentMonthly, cohortTypesSig]);
 
   // DISTRICT REHYDRATION — the districtsSelected twin of the citySelected fix above (2026-08-04).
   //
@@ -403,7 +415,7 @@ export default function Home() {
     districtsRehydrated.current = true;
     if (districtsSelected.length) return;   // a live pick already stands — nothing to restore
     let cancelled = false;
-    void ensureDistrictOptions(citySelected.cityId, query.deal, effCategory, paymentMonthly).then((pool) => {
+    void ensureDistrictOptions(citySelected.cityId, query.deal, effCategory, paymentMonthly, cohortTypes).then((pool) => {
       if (cancelled) return;
       const wanted = new Set(want);
       const restored = pool.filter((d) => d.matchValues.some((v) => wanted.has(v)));
@@ -414,7 +426,7 @@ export default function Home() {
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [citySelected, query.deal, effCategory, paymentMonthly]);
+  }, [citySelected, query.deal, effCategory, paymentMonthly, cohortTypesSig]);
 
   // ONE query builder shared by onSearch and the district live-count effect below — the count call
   // and the search call must be built from the SAME state or their numbers can drift apart, which
@@ -474,13 +486,13 @@ export default function Home() {
   // Arabic row. English typing is excluded on purpose: that case already has its own message
   // (ARABIC_ONLY_MSG under the field) and must keep it, unchanged.
   const cityLatin = !!query.location && isLatinOnlyInput(query.location);
-  const cityStatus = cityPoolStatus(query.deal, paymentMonthly, effCategory);
+  const cityStatus = cityPoolStatus(query.deal, paymentMonthly, effCategory, cohortTypes);
   const cityZeroRow: 'loading' | 'error' | 'empty' | null =
     citySuggestions.length > 0 || cityLatin ? null
       : cityStatus !== 'ready' ? cityStatus
       : query.location ? 'empty' : null;
   const districtLatin = !!districtText && isLatinOnlyInput(districtText);
-  const districtStatus = citySelected ? districtPoolStatus(citySelected.cityId, query.deal, effCategory, paymentMonthly) : 'loading';
+  const districtStatus = citySelected ? districtPoolStatus(citySelected.cityId, query.deal, effCategory, paymentMonthly, cohortTypes) : 'loading';
   const districtZeroRow: 'loading' | 'error' | 'empty' | null =
     !citySelected || districtSuggestions.length > 0 || districtLatin ? null
       : districtStatus !== 'ready' ? districtStatus
@@ -492,12 +504,12 @@ export default function Home() {
     clearBlurTimer(cityBlurTimer);
     cityRef.current?.focus();
     setCitySuggestions([]); // fresh [] reference → re-render → the row flips to «جاري التحميل…»
-    void ensureCityFieldIndex(query.deal, paymentMonthly, effCategory).then(() => {
+    void ensureCityFieldIndex(query.deal, paymentMonthly, effCategory, cohortTypes).then(() => {
       if (cityTextRef.current) {
         const latin = isLatinOnlyInput(cityTextRef.current);
-        setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, effCategory, cityTextRef.current));
+        setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, effCategory, cityTextRef.current, cohortTypes));
       } else {
-        setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6));
+        setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6, cohortTypes));
       }
     });
   };
@@ -507,12 +519,12 @@ export default function Home() {
     clearBlurTimer(districtBlurTimer);
     districtRef.current?.focus();
     setDistrictSuggestions([]);
-    void ensureDistrictOptions(cid, query.deal, effCategory, paymentMonthly).then(() => {
+    void ensureDistrictOptions(cid, query.deal, effCategory, paymentMonthly, cohortTypes).then(() => {
       if (districtTextRef.current) {
         const latin = isLatinOnlyInput(districtTextRef.current);
-        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, effCategory, paymentMonthly, districtTextRef.current));
+        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, effCategory, paymentMonthly, districtTextRef.current, cohortTypes));
       } else {
-        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, effCategory, paymentMonthly, 6));
+        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, effCategory, paymentMonthly, 6, cohortTypes));
       }
     });
   };
@@ -914,8 +926,8 @@ export default function Home() {
                     // in sync on every keystroke below) at resolution time, not the value captured in
                     // this closure at focus time.
                     if (!query.location) {
-                      void ensureCityFieldIndex(query.deal, paymentMonthly, effCategory).then(() => {
-                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6));
+                      void ensureCityFieldIndex(query.deal, paymentMonthly, effCategory, cohortTypes).then(() => {
+                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6, cohortTypes));
                       });
                     } else {
                       // P2 fix: the field already holds text (a confirmed pick, or mid-typing
@@ -938,7 +950,7 @@ export default function Home() {
                     clearDistrict(); // editing the city disables + clears District (no cross-city carry-over)
                     if (!v) {
                       // Cleared back to empty → the Top 6 list, same as a fresh focus.
-                      setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6));
+                      setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6, cohortTypes));
                       setLocMsg('');
                       return;
                     }
@@ -957,7 +969,7 @@ export default function Home() {
                 </RNAnimated.View>
               ) : null}
               {query.location.length > 0 && (
-                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
+                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(query.deal, paymentMonthly, effCategory, 6, cohortTypes)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
                 </Pressable>
               )}
@@ -1011,7 +1023,12 @@ export default function Home() {
                           items={citySuggestions.map((opt) => ({
                             key: String(opt.cityId),
                             label: opt.cityAr,
-                            sublabel: hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
+                            // count + honest cohort share (owner, 2026-08-15); region only on a real
+                            // display-name collision (e.g. الهفوف ×2), prepended so it stays visible.
+                            sublabel: [
+                              hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
+                              cohortShareLabel(opt.listingCount, opt.totalInCohort),
+                            ].filter(Boolean).join(' · ') || undefined,
                             icon: LOC_IMG.city, // restored designed art (see TrendingList.tsx note)
                           }))}
                           onPress={(_item, i) => cityOnPress(citySuggestions[i])}
@@ -1032,9 +1049,13 @@ export default function Home() {
                                 UNLESS two results in this exact list share a display name — a real,
                                 verified case (e.g. الهفوف exists as two distinct real cities) — in which
                                 case showing it is the only way the user can tell them apart. */}
-                            {hasNameCollision(citySuggestions, opt.cityAr) && opt.regionAr ? (
-                              <Text style={s.suggDist}>{opt.regionAr}</Text>
-                            ) : null}
+                            {(() => {
+                              const parts = [
+                                hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
+                                cohortShareLabel(opt.listingCount, opt.totalInCohort),
+                              ].filter(Boolean);
+                              return parts.length ? <Text style={s.suggDist}>{parts.join(' · ')}</Text> : null;
+                            })()}
                           </View>
                         </Tappable>
                       ))
@@ -1087,8 +1108,8 @@ export default function Home() {
                     // re-check the live text via districtTextRef before showing the Top-6.
                     if (!districtTextRef.current) {
                       const cid = citySelected.cityId;
-                      void ensureDistrictOptions(cid, query.deal, effCategory, paymentMonthly).then(() => {
-                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, effCategory, paymentMonthly, 6));
+                      void ensureDistrictOptions(cid, query.deal, effCategory, paymentMonthly, cohortTypes).then(() => {
+                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, effCategory, paymentMonthly, 6, cohortTypes));
                       });
                     } else if (!isLatinOnlyInput(districtTextRef.current)) {
                       // P2 — refocusing mid-typing shows the current matches, not an empty box.
@@ -1211,7 +1232,9 @@ export default function Home() {
                             // narrower filter is active and this district's LIVE eligible count is 0,
                             // say so in Arabic — same message the typed list already uses — instead of
                             // presenting a popular-at-category-scope district that would dead-end.
-                            sublabel: districtLiveCounts?.[opt.districtAr] === 0 ? t('No listings here right now') : undefined,
+                            sublabel: districtLiveCounts?.[opt.districtAr] === 0
+                              ? t('No listings here right now')
+                              : cohortShareLabel(opt.listingCount, opt.totalInCity),
                             icon: LOC_IMG.district, // restored designed art (see TrendingList.tsx note)
                           }))}
                           onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
@@ -1242,7 +1265,11 @@ export default function Home() {
                           <Image source={LOC_IMG.district} style={[s.suggLocIcon, isEmpty && s.suggIconEmpty]} />
                           <View style={{ flex: 1 }}>
                             <Text style={[s.suggCity, isEmpty && s.suggCityEmpty]}>{opt.districtAr}</Text>
-                            {isEmpty ? <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text> : null}
+                            {isEmpty
+                              ? <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text>
+                              : (cohortShareLabel(opt.listingCount, opt.totalInCity)
+                                  ? <Text style={s.suggDist}>{cohortShareLabel(opt.listingCount, opt.totalInCity)}</Text>
+                                  : null)}
                           </View>
                           {isPicked ? <Ionicons name="checkmark-circle" size={18} color={colors.primary} /> : null}
                         </Tappable>

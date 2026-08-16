@@ -115,6 +115,120 @@ per-cohort-segment (migration 20260815130215) — the pooled version let شقة'
 دور's 0%; mutation-proven: waivers stripped → exactly the 4 real segments fire; unrelated
 segment blinded with waivers present → still fires.
 
+## Backend certification audit — 2026-08-15 (9-agent sweep + inline mutations)
+All 8 cohorts re-verified 4-way exact (af_eligible_count == candidates total == returned rows ==
+independent SQL oracle) at nationwide + Riyadh, every chip == SQL, 20 stacked combos with full
+row-level verification (0 violations), md5 set-equality on 8 combos. 12 adversarial probes: never
+widened, never errored (garbage tokens/empty arrays/conflicts/overflow/RLM unicode/oversized
+arrays all fail CLOSED; شهري+rnpl = 0 at the RPC surface). UNKNOWN sweep: 0 fabricated defaults
+across 354 column instances on 35 tables; the only row-field `coalesce(...,false)` anywhere is the
+3 documented rnpl exceptions per surface. New-listing trace: 10/10 fresh rows (aqar/wasalt/dealapp)
+in-index with 9/9 AF fields exactly equal to raw (null==null); worst sync lag ~34 min (wasalt AR
+enrichment queue, provably drains).
+
+**Fixed during the audit (PR#674, migration 20260815215511):** the three hourly filter barriers
+(predicate parity :43, normal-filter :41, parity-legacy :54) detected but never PAGED — they wrote
+only location_pipeline_alerts, which alert-dispatch does not read. All three now mon_raise P1 on
+detection. Added registry freeze-guards (a شهري row or enabled<18 pages P1 — raise the floor in
+the same migration that adds cohorts) and gave mon_detect_orphaned_detectors an explicit
+must-be-scheduled list for the 5 first-class AF barriers. Mutation-proven incl. the
+dispatched-channel write; zero residue.
+
+**API contract notes (documented behavior, not bugs):** `p_types: []` fails CLOSED (0 rows) — the
+app sends null for "no type"; never send [] to mean "all". `p_directions: []` also fails closed
+(asymmetric with other array params' cardinality-0 escapes); app skip omits the param. Array caps
+(cities>200/districts>500/types>200/platforms>100) return 0 by design.
+
+## الفلل والبيوت plan (profiled 2026-08-15 — NOT implemented)
+Live types: **فيلا** 33.6k (99.84% of the family) · بيت 51 · تاون هاوس 3 · دوبلكس 65 · قصر 0
+(taxonomy rawType maps to nothing live — do not build). Build exactly TWO cohorts:
+- **فيلا × بيع (n≈27,249; aqar 50% + wasalt 40%):** age (≤2y 17.9k / 3–10y 7.0k, merge >10y 154 up),
+  street_width (≤15m/16–20m/>20m all pass), direction (4 cardinals only; diagonals 484–771 fail the
+  2,180 floor), **car_entrance مدخل سيارة (5,594/5,943 — villa gem)**, elevator-as-luxury
+  (2,454/8,492), sanitation.
+- **فيلا × إيجار سنوي (n≈5,935; 82% aqar):** age, AC (2,052/2,339 textbook), **RNPL ask-first
+  (yes 3,908 = 66% of cohort — strongest RNPL market found anywhere)**, furnished, car_entrance,
+  street_width (all 4 rungs), direction (cardinals), sanitation, living_rooms.
+- **Must NOT copy from Apartment:** floor_number (0%), kitchen (no-side below floor — a no-option
+  would make UNKNOWN behave as NO), maid/driver/private_entrance (publish-only-when-yes),
+  furnished on Buy, elevator on Rent (yes 361 < floor 475).
+- **Data-dead villa dreams (need scraper work first, not filter work):** pool/garden/majlis/
+  total_floors/balcony all <5%; annex/apartments-in-villa/two-entrances have NO column anywhere.
+- بيت/تاون هاوس/دوبلكس: searchable as normal, NO interview (n and coverage below every gate).
+- All فيلا annual-rent rows are native سنوي (the شهري+RNPL branch contributes 0). Monthly stays frozen.
+
+## فيلا / Villa — RENT ANNUAL & BUY — ✅ CERTIFIED 2026-08-16
+- RENT-ANNUAL **PASS** (nationwide 5,938 / Riyadh 3,997, 4-way exact + md5 set-equality on all 6
+  combo/scope pairs, 0 row violations). BUY **PASS** (27,304 / 11,346, full base-set md5 identity
+  at both scopes, 3 combos md5-equal, 0 violations, Rent/Buy isolation + Gathern-not-in-Buy = 0).
+- Fresh-listing trace 10/10 rows × 8 fields zero divergences (aqar typed columns; wasalt/dealapp
+  resolver fidelity proven: facade/streetWidth/completionYear → index verbatim); counted-proof
+  3-way exact at الخبر (242/126/89). Browser E2E on production: Buy 11,356→6,193→637 with every
+  hop == referee, pills + removal recompute → 1,683 exact; Rent rnpl leads (2,923 of 4,023).
+- Villa mutation spot-check: rich-attrs drift fired 0→2 in isolation, rolled back, zero residue.
+- KNOWN NUANCE (honest, monitored): Villa/Buy AC chip counts are exact (644 NAT / 241 RYD) but AC
+  is dead on FRESH Buy rows (waived source-side) — the chip is floor-suppressed at big scopes and
+  can render in small scopes on pre-June listings until they age out.
+- OWNER DECISION CANDIDATE: wasalt completionYear sometimes arrives as bare numerals ('2','11');
+  the age resolver maps only string forms → NULL (fail-closed). Mapping bare numerals to years
+  needs an owner call (ambiguous-mapping-ask-first).
+- Types: فيلا (99.84% of family) + riders بيت/تاون هاوس (searchable, no questions). قصر = 0 live rows.
+- Fresh-band profiling designed the questions (7d/48h first-seen, per platform):
+  - RENT (n≈5,935; fresh 851): rnpl ask-first (74.7% of fresh known = yes — strongest RNPL market in
+    the DB) · property_age · amenities (AC 74% fresh; kitchen 76%; مدخل سيارة 75%; صرف صحي 85%) ·
+    bathrooms · furnished · street_width · direction.
+  - BUY (n≈27,400; fresh 2,492): property_age · amenities (kitchen 51% fresh and RISING; NO AC —
+    aqar dropped it from بيع forms, fresh 0.0%; NO rnpl — yes=0; NO furnished — yes below floor) ·
+    bathrooms · street_width · direction.
+- NEW amenity tokens (migration 20260815223500, template+rebuild, chips==direct==referee asserted):
+  **car_entrance مدخل سيارة** (buy 5,594y/5,943n — near-perfect split) and **sanitation صرف صحي**
+  (buy 7,377y/2,829n). Villa-scoped chips in AMENITIES_QUESTION (singleCleanType==='Villa') so
+  certified cohorts' cards are unchanged. af_field_registry rows exposed (20260815224225).
+- 3 new evidenced waivers (same aqar form-composition class): AC بيع/فيلا (fresh 0/1,378 vs 29%);
+  private_entrance BOTH deals فيلا (0/2,012 fresh while the same rows parse age 100%/car_entrance
+  84% — villa forms carry مدخل سيارة, not مدخل خاص).
+- Registry: 6 rows (فيلا/بيت/تاون هاوس × rent-annual/buy), enabled floor raised 18→24
+  (20260815223803); replay checkpoint 3 (20260815223522). Monthly untouched — no شهري row.
+
+## Commercial + rural + land families — ✅ CERTIFIED 2026-08-16 (all 6 battery agents PASS)
+~136 same-moment equality checks, 0 mismatches. Highlights: CommLand/Buy 17,511 five-way equal with
+FULL base-set md5 identity (nationwide + Riyadh + Jeddah); ResLand/Buy 10,575 md5-identical; Office
+rent 2,140 / Shop rent 1,982 full 32-chip row-diffs == SQL at both scopes; 20+ stacked combos
+row-level verified 0 violations; skip-null == baseline everywhere; garbage → 0 everywhere;
+unknown≠no partitions sum exactly (e.g. CommLand electricity 9,712y+2,445n+5,354null=17,511, and
+p_furnished=false NEVER counts unknowns). عمارة CATEGORY ISOLATION proven: commercial-kind 11/49
+vs residential 3,277/6,526, zero cross-table leaks. Gathern absent from every set. Fresh trace:
+441/441 fresh rows present, 8-field parity 0 divergences (aqar/dealapp/wasalt), counted-proof exact,
+pipeline lag <8h. Mutation spot-check (Shop rent isolated, utility fields blinded): rich-attrs
+fired 0→2, rolled back, zero residue; previously certified stable (Apartment 9,907, Villa 11,346).
+FOLLOW-UP (small, monitored): 10 fresh dealapp ResLand rows are location-unresolved
+(production_ready=false) and their direction/street_width sit in listing_extra_attrs but not the
+index — outside every cohort until location resolves; verify attr backfill on resolution
+(ids 8005469, 8009303, 8011667, 8014426, 7853423, 7853433, 7853625, 7853686, 7853384, 7853038).
+20 type×deal cohorts profiled from live fresh-band data. **18 VIABLE registered** (registry 52
+enabled rows, floor 52): Office ×2 (rent n=2,140: age+furnished+utility chips; buy n=60 thin),
+Shop ×2 (rent n=1,982 — strongest commercial; street+direction+age+utilities; aqar 97.9%
+monoculture flag), Showroom buy (88, thin), Warehouse ×2 (1,175/147; fresh supply dealapp-first),
+Workshop ×2 (141/74), CommBldg ×2 (347/179), Hotel buy (69), GasStation ×2 (49/78),
+CommLand buy (**17,509 — largest cohort in the system**; street+direction),
+IndLand buy (1,794; aqar monoculture), ResLand ×2 (10,338/412; dealapp+wasalt+aqar diverse),
+RestHouse ×2 (1,712/1,268; age+street+water/sanitation), Farm buy (233; 15-platform diversity),
+AgriPlot buy (1,009; the land quintet incl. genuinely two-sided utilities).
+**13 NOT-VIABLE, Normal-Filter-only with evidence:** Chalet ×2 (buy n=25 at gate, rent fresh 2/wk
+stale pool), Camp ×2 (0/3), Factory ×2 (32 monoculture / 64 with ZERO fresh), Staff Housing ×2
+(0/3), Service Facilities ×2 (6/28 heterogeneous 6-type mix, 0 fresh), Hotel rent (25),
+Farm rent (104 but fresh 3/wk — hold), CommLand rent (23), IndLand rent (0), AgriPlot rent (5).
+**New amenity tokens** `electricity` كهرباء + `water_supply` توفر الماء (20260815234444, chips ==
+direct == referee in-transaction; checkpoint 4 = 20260815234504). **AC enabled NOWHERE new** —
+fresh-dead on commercial (aqar form change) despite passing all-time gates. **12 evidenced land
+waivers**: land has no building amenities; all-time 22-33% rates are June-bulk artifacts.
+`cohortAllows` now matches the clean type's macro (was Residential-only); `COHORT_CHIPS` scopes
+commercial chips to the utility trio (+kitchen RestHouse) — certified residential cards unchanged.
+**Documented capture gaps (deliberate deferrals, due diligence not done tonight):** wasalt
+electricityMeter/waterMeter (770/770 explicit نعم/لا, columns exist, view branch missing) ·
+aqar special_position (1,798y CommLand, no index column) · aqar deed_area_m2 (~85% raw, no column)
+· aqar land direction non-flow (72 rows). None blocks a shipped question.
+
 ## Barrier fleet (all registry-driven — a cohort row = protection)
 `af_cohort_registry` drives: `mon_rich_attrs_barrier`, `mon_af_new_listing_readiness` (A/B/C),
 `mon_filter_parity_barrier` check 2 (annual rows). Plus the cohort-agnostic fleet: predicate parity

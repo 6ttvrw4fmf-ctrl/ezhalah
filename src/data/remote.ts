@@ -337,9 +337,16 @@ function agentPriceCapAnnual(q: SearchQuery): number | null {
   return amount > 50_000 ? amount : null;           // Buy: only a fixed total ceiling maps (per-m² stays client-side)
 }
 
-function rpcFilterParams(q: SearchQuery) {
+// The cohort's Arabic type array — THE single definition shared by the search RPC params below and
+// the Trending city/district pools (locations.ts). One definition means trending and search cannot
+// disagree about what a selected type/group expands to (owner barriers #7/#17/#18, 2026-08-15).
+export function cohortTypesAr(q: SearchQuery): string[] | null {
   const sel = effectiveTypes(q);
-  const p_types = sel.length ? typeArForTypes(sel) : (q.typeGroup ? typeArForSelection(q.typeGroup) : null);
+  return sel.length ? typeArForTypes(sel) : (q.typeGroup ? typeArForSelection(q.typeGroup) : null);
+}
+
+function rpcFilterParams(q: SearchQuery) {
+  const p_types = cohortTypesAr(q);
   const toks = bedroomTokens(q);
   const exact = toks.filter((d) => /^[1-4]$/.test(d)).map((d) => parseInt(d, 10));
   const p_beds_exact = exact.length ? exact : null;
@@ -648,6 +655,10 @@ export type GuidedCounts = {
   cnt_dir_n: number; cnt_dir_s: number; cnt_dir_e: number; cnt_dir_w: number;
   cnt_dir_ne: number; cnt_dir_nw: number; cnt_dir_se: number; cnt_dir_sw: number;
   cnt_stw15: number; cnt_stw20: number; cnt_stw25: number; cnt_stw30: number;
+  // Villa cohort 2026-08-16: aqar villa-form chips (مدخل سيارة / صرف صحي).
+  cnt_car_entrance: number; cnt_sanitation: number;
+  // Commercial expansion 2026-08-16: the utility chips the commercial market actually splits on.
+  cnt_electricity: number; cnt_water_supply: number;
   cnt_selected: number;
 };
 

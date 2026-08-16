@@ -90,6 +90,22 @@ check('one shared per-option floor (MIN_REAL_OPTION_COUNT via meaningful()); the
 // RNPL is a rent concept → rent-only; amenities + bathrooms extend to Buy where the cohort's data
 // justifies them. Both now enforced as DATA (COHORT_QUESTIONS) rather than per-question functions —
 // the checks above assert no Buy list carries 'rnpl' or 'furnished'.
+// Commercial expansion (2026-08-16): the category gate matches the cohort's own macro (not
+// Residential-only), no commercial list carries rnpl/furnished-question on Buy, no NEW cohort
+// carries the fresh-dead 'ac' chip, and mapped types render EXACTLY their COHORT_CHIPS list.
+check('cohortAllows matches the clean type macro and COHORT_CHIPS scopes commercial chips',
+  /q\.category !== \(CLEAN_MACRO\[type\] \?\? 'Residential'\)/.test(advSrc)
+  && /const COHORT_CHIPS/.test(advSrc)
+  && !/COHORT_CHIPS[\s\S]{0,900}'ac'/.test(advSrc.slice(advSrc.indexOf('const COHORT_CHIPS'), advSrc.indexOf('const COHORT_CHIPS') + 1200))
+  && /chipAllow\.includes\(d\.key\)/.test(advSrc));
+
+// Villa cohort (2026-08-16): rnpl leads Rent only; Buy carries neither rnpl nor furnished; the two
+// villa-form chips (car_entrance/sanitation) are Villa-scoped so certified cohorts' cards never change.
+check('Villa cohort lists exist and the villa chips are Villa-scoped',
+  /Villa:\s*\{\s*RentAnnual:\s*\['rnpl'/.test(advSrc)
+  && /Villa:\s*\{[\s\S]{0,400}Buy:\s*\[(?![^\]]*'rnpl')(?![^\]]*'furnished')[^\]]*\]/.test(advSrc)
+  && /singleCleanType\(q\) === 'Villa'[\s\S]{0,320}car_entrance[\s\S]{0,200}sanitation/.test(advSrc));
+
 check('RNPL + amenities + bathrooms are cohort-gated through cohortAllows',
   /RNPL_QUESTION[\s\S]{0,420}cohortAllows\(q, 'rnpl'\)/.test(advSrc)
   && /cohortAllows\(q, 'amenities'\)/.test(advSrc)

@@ -426,6 +426,53 @@ recoverable from the database alone.
 FIRST and read the diff. "The parser dropped it" and "the source never published it" look identical in
 the database and lead to opposite actions — one is a repair, the other is fabrication.
 
+## 23. A safety mechanism that cannot fail loudly (settled 2026-08-16, run #24 — two shapes)
+
+Both defects this section records looked *fine* in every log and every dashboard. Neither was found
+by a barrier; both were found by asking what a mechanism would look like if it had quietly stopped
+working, and then measuring that.
+
+**23a. A barrier must be able to go GREEN, not only red.** Seven `mon_detect_*` functions called
+`mon_raise()` with no resolve path of any kind. The visible symptom was a false standing P1
+(`price_size_contamination:index_price_differs_from_raw:aqar`, open 3 days on a condition that had
+cleared). The *dangerous* symptom is the invisible one: `mon_raise()` returns 0 for an already-open
+dedup key, so while a stuck key sits open a **genuine re-occurrence at the same severity raises
+nothing, counts 0 in the roster, and never re-dispatches**. §11a added `open_alerts` because an
+all-zero sweep could hide open alerts; this is the same wound from the other side. Fix:
+`mon_resolve_stale_keys(kind, live_keys)`, called on the **evaluated path only** — never after a
+`mon_claim_daily_slot()` early return, or a detector that never ran would resolve what it never
+checked. Barrier: `mon_detect_unresolvable_detector()`.
+
+**23b. A destructive threshold must know its own denominator.** gathern's liveness anomaly cap is
+`max(150, 2% of currently-active)`. It read the denominator with
+`.select("id", count="exact", head=True).execute().count or 0`, and on the pinned client
+(`supabase==2.10.0` / `postgrest 0.18.0`) **a HEAD request returns `.count = 0`**. So
+`resolve_kill_cap(0)` returned the 150 floor on every run for days, ~4× tighter than designed
+(29,335 active ⇒ 586), while every run logged a bare `kill_cap=150` that *looked computed*. The cost
+was not safety — it was the opposite of safety: the guard quarantined a legitimate 173-row batch as
+an "anomaly", and source-dead listings stayed served to real users behind an alert nobody could act
+on. **A threshold that degrades toward "stricter" is still a broken threshold**, and a too-tight
+kill cap is a searchability defect, not a conservative choice.
+
+Three rules this pins, all cheap:
+- **Never resolve a destructive threshold from a number you could not read.** Fail closed. `or 0` on
+  a count is how "the query failed" becomes "the platform is empty".
+- **Log a threshold's PROVENANCE, not just its value.** `kill_cap=150` is ambiguous;
+  `kill_cap=150 [auto=max(150,2% of 29335)]` vs `[override active=29335]` is not, and the ambiguity
+  is exactly what hid this for days. The live barrier
+  (`mon_detect_liveness_cap_degraded()`) uses that marker to distinguish a reviewed hold from a
+  silent degradation — it was made to **discriminate**, never silenced.
+- **A client-library call is not self-evidently correct.** `head=True` is an optimisation whose
+  return value changed meaning. When a measured constant never varies while its input does
+  (`kill_cap=150` across four days at 29k active), that constancy IS the evidence.
+
+**And the run's own miss, kept because it generalises:** the first fix derived each detector's live
+key set by *re-running its barrier* — correct, and it doubled a 25,698 ms barrier to ~51 s inside a
+60 s budget in a 30-minute cron. A detector that times out raises `detector_crash` and stops
+protecting its class, i.e. the fix would have been worse than the bug. It was caught by **running
+the patched path and timing it**, not by reasoning about it. *A correctness fix is not finished
+until its COST has been measured.*
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve

@@ -104,6 +104,98 @@ def test_anomaly_spike_aborts_and_deletes_nothing():
     assert s["aborted"] is True and s["deleted"] == 0 and c.deleted == {}
 
 
+def test_anomaly_abort_names_the_fraction_gate_when_it_would_also_trip():
+    """Regression (aqarcity, 2026-08-16): the anomaly abort told the operator to 'raise
+    anomaly_floor', but on a platform where the eligible population ALSO exceeds
+    max_eligible_frac, doing only that re-aborts on the mass-inactivation guard — whose
+    message blames 'a partial crawl or source outage', a misleading read when the backlog is
+    already proven to be genuine delistings. The abort must name BOTH gates so it is one
+    owner decision. 600 rows: over FRAC_GUARD_MIN_ROWS, and 600 > 10% of 600."""
+    c = _install({"testp_listings": [_cand(i) for i in range(600)]},
+                 POL(anomaly_floor=2, anomaly_factor=4), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is True and s["deleted"] == 0 and c.deleted == {}
+    assert "ALSO NOTE" in s["abort_reason"], s["abort_reason"]
+    assert "mass-inactivation guard" in s["abort_reason"]
+    assert "raising anomaly_floor alone would NOT unblock" in s["abort_reason"]
+
+
+def test_anomaly_abort_stays_quiet_when_the_fraction_gate_would_pass():
+    """The converse: below FRAC_GUARD_MIN_ROWS the fraction guard does not apply, so the
+    abort must NOT claim a second gate is in the way."""
+    c = _install({"testp_listings": [_cand(i) for i in range(5)]},
+                 POL(anomaly_floor=2, anomaly_factor=4), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is True and c.deleted == {}
+    assert "ALSO NOTE" not in s["abort_reason"], s["abort_reason"]
+
+
+def _cand_ts(i, ts):
+    return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": ts}
+
+
+def test_bounded_cap_never_exceeds_what_unbounded_gates_would_allow():
+    """The core safety property the owner asked for (2026-08-16, aqarcity 419-row backlog):
+    bounded_cap is NOT a bypass. Even when the operator requests far more than the standing
+    gates would ever allow, the actual work-set is hard-capped at what an UNBOUNDED run would
+    already permit. 600 rows, max_eligible_frac default 0.10 -> frac_cap=60; anomaly_floor set
+    high so the fraction guard is the binding constraint. Requesting bounded_cap=600 (the full
+    backlog) must still delete only 60 — proving the request cannot widen the guard."""
+    c = _install({"testp_listings": [_cand(i) for i in range(600)]},
+                 POL(anomaly_floor=1000, max_delete_per_run=500), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True, bounded_cap=600)
+    assert s["aborted"] is False
+    assert s["deleted"] == 60, s
+    assert len(c.deleted["testp_listings"]) == 60
+    assert "requested_cap=600 -> safe_cap=60" in s["note"], s["note"]
+
+
+def test_bounded_cap_below_gates_is_honored_exactly():
+    """When the requested cap is already the tightest bound (well under every gate), it is used
+    as-is — this is the normal case (aqarcity: requested 261, no gate is tighter)."""
+    c = _install({"testp_listings": [_cand(i) for i in range(50)]},
+                 POL(anomaly_floor=1000, max_delete_per_run=500), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True, bounded_cap=10)
+    assert s["deleted"] == 10
+    assert "requested_cap=10 -> safe_cap=10" in s["note"]
+
+
+def test_bounded_cap_deletes_oldest_first_across_all_tables():
+    """'oldest-first' (owner instruction, 2026-08-16) means globally oldest across every table
+    the platform spans — NOT oldest-per-table-then-concatenated, which is what the UNBOUNDED
+    path intentionally still does, unchanged (test_hard_cap_limits_deletes above)."""
+    old = [_cand_ts(100 + i, f"2026-01-0{i + 1}T00:00:00+00:00") for i in range(3)]   # oldest 3
+    newer_a = [_cand_ts(200 + i, "2026-06-01T00:00:00+00:00") for i in range(3)]      # newest, table A
+    newer_b = [_cand_ts(300 + i, "2026-05-01T00:00:00+00:00") for i in range(3)]      # mid, table B
+    c = _install({"testp_listings": old + newer_a, "testp2_listings": newer_b},
+                 POL(anomaly_floor=1000, max_delete_per_run=500), probe=lambda url: (404, ""),
+                 tables=("testp_listings", "testp2_listings"))
+    s = C.run("testp", force=True, bounded_cap=4)
+    assert s["deleted"] == 4
+    deleted_ids = set(c.deleted.get("testp_listings", [])) | set(c.deleted.get("testp2_listings", []))
+    # the 3 globally-oldest (100,101,102) plus the next-oldest overall, which lives in table B (300)
+    assert deleted_ids == {100, 101, 102, 300}, deleted_ids
+
+
+def test_bounded_cap_never_touches_retention_policy():
+    c = _install({"testp_listings": [_cand(i) for i in range(20)]},
+                 POL(anomaly_floor=1000), probe=lambda url: (404, ""))
+    C.run("testp", force=True, bounded_cap=5)
+    assert c.updated.get("platform_retention_policy") is None
+
+
+def test_bounded_cap_still_preserves_unknown_and_reactivates_live():
+    """Bounded mode must keep every existing individual-row protection: unknown/blocked stays
+    preserved, a still-live row self-heals, only the confirmed-dead row is deleted."""
+    verdicts = {"http://x/0": (200, "still for sale"), "http://x/1": (403, ""), "http://x/2": (200, "DEAD")}
+    c = _install({"testp_listings": [_cand(i) for i in range(3)]}, POL(anomaly_floor=1000),
+                 probe=lambda url: verdicts[url])
+    s = C.run("testp", force=True, bounded_cap=10)
+    assert s["deleted"] == 1 and s["reactivated"] == 1 and s["skipped"] == 1
+    assert c.deleted["testp_listings"] == [2]
+    assert c.updated.get("testp_listings")   # the still-live row (id 0) was self-healed, not deleted
+
+
 def test_failsafe_no_dead_check_aborts():
     C.PLATFORMS.pop("nodeadp", None)
     C.PLATFORMS["nodeadp"] = {"tables": ["nodeadp_listings"], "dead_marker": None}

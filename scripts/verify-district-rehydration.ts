@@ -45,7 +45,7 @@ const effect = start === -1 ? '' : home.slice(start, start + 1800);
 
 // ── 1. candidates come from the canonical catalog, keyed on the persisted matchValues ──
 check('rehydration reads the same canonical catalog the field picks from (ensureDistrictOptions)',
-  /ensureDistrictOptions\(\s*citySelected\.cityId,\s*query\.deal,\s*effCategory,\s*paymentMonthly\s*\)/.test(effect));
+  /ensureDistrictOptions\(\s*citySelected\.cityId,\s*query\.deal,\s*effCategory,\s*paymentMonthly,\s*cohortTypes\s*\)/.test(effect));
 check('candidates matched on matchValues against the persisted query.districts (no fuzzy matching)',
   effect.includes('query.districts') && /matchValues\.some\(\(v\) => wanted\.has\(v\)\)/.test(effect));
 
@@ -63,7 +63,7 @@ check('in-flight catalog promise is cancelled on city change (stale pick cannot 
   /let cancelled = false;/.test(effect) && /if \(cancelled\) return;/.test(effect)
   && /return \(\) => \{ cancelled = true; \};/.test(effect));
 check('effect re-runs on city/deal/category/period change',
-  /\}, \[citySelected, query\.deal, effCategory, paymentMonthly\]\);/.test(effect));
+  /\}, \[citySelected, query\.deal, effCategory, paymentMonthly, cohortTypesSig\]\);/.test(effect));
 
 // ── 4. a live user pick is never clobbered ──
 check('setDistrictsSelected uses a functional prev-wins update',

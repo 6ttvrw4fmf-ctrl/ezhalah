@@ -8,6 +8,7 @@ import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
 import { supports } from './platforms';
 import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
+import { rediversifyByPlatform } from '@/lib/platformDiversity';
 import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { groupMembers, CLEAN_MACRO, SUBGROUPS } from './propertyTypes';
@@ -1290,10 +1291,23 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
   // full set by the user's objective key (cheapest/newest/…), so a rotated window would show rank #26
   // first under a «مرتبة حسب الأقل سعراً» note — a visible lie. Rotation is for the default relevance
   // order only.
+  // ROTATION MUST NOT COST PLATFORM DIVERSITY (Search QA 2026-08-16). The incoming order is the
+  // platform round-robin from remote.ts's orderByScope, which necessarily ends in a single-platform TAIL
+  // once the smaller platforms run out (live: مستودع/بيع/الرياض — aqar 55, wasalt 10, aldarim 2, dealapp 2
+  // → positions ~20+ are all aqar). Rotating a 25-window by 25/50/… landed a RETURNING visitor squarely
+  // inside that tail and rendered a 100%-single-platform first page while 4 platforms had real matches —
+  // owner PERMANENT rule 2026-07-13 Rule 2 broken by a rule-2026-06-27 feature. Live-reproduced 2026-08-16:
+  // same filters, same session — visit 1 (off=0) 4 platforms, visits 2-3 (off=25/50) 1 platform, visit 4
+  // (off=6) 4 platforms. Fix: rotate as before (the returning visitor still gets DIFFERENT listings), then
+  // re-interleave ONLY the rotated window by platform so the mix survives. No listing is added, removed or
+  // re-filtered — every row here already passed every filter (MATCH FIRST, DIVERSIFY SECOND).
   if (!q.sort && opts?.visitOffset && total > 25) {
     const POOL = Math.min(total, 100);
     const off = (opts.visitOffset * 25) % POOL;
-    if (off > 0) listings = [...listings.slice(off, POOL), ...listings.slice(0, off), ...listings.slice(POOL)];
+    if (off > 0) {
+      const rotated = [...listings.slice(off, POOL), ...listings.slice(0, off)];
+      listings = [...rediversifyByPlatform(rotated, (l) => l.source), ...listings.slice(POOL)];
+    }
   }
   // Return up to the system max (200) so "show all" reveals beyond the first 25 with NO refetch; the UI
   // shows the first 25 and only reveals the rest when the user taps «عرض جميع النتائج». (user: first 25 + show-all.)

@@ -46,6 +46,9 @@ on:
       min_stale_days:
         description: "Only probe rows not seen in the feed for this many days"
         default: "3"
+      kill_cap:
+        description: "Max rows one run may inactivate. 0 = auto max(150, 2% of active). HELD at 150 pending the owner decision on the 172-row backlog (DIE #24); pass 0 to release."
+        default: "150"
       grace:
         description: "Consecutive 404 sweeps before a unit is marked inactive"
         default: "3"
@@ -73,8 +76,21 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_MIN_INTERVAL: "1.0"
         run: |
+          # ── OWNER-PENDING HOLD (2026-08-16, DIE run #24) — REMOVE THE --kill-cap LINE TO RELEASE ──
+          # Until 2026-08-16 the auto cap silently resolved to its 150 floor because the denominator
+          # was read with head=True (.count = 0 on supabase==2.10.0). That is now fixed, so the auto
+          # cap would jump 150 -> 586 and the very next scheduled sweep would inactivate the standing
+          # 172-row backlog in one batch. Those 172 ARE source-confirmed gone (172/172 probed 404 on
+          # 2026-08-16, against a live control group that returned 200), but actioning a batch that
+          # size is a bulk listing operation and an owner decision under the AGENTS.md RED list.
+          # Pinning the cap at its historical 150 keeps behaviour EXACTLY as it has been while the
+          # decision is pending -- the run still records strikes and still aborts the oversized batch.
+          # The difference is that the cap is now an explicit, logged choice instead of an accident:
+          # run notes print `kill_cap=150 [override active=NNNNN]` so the computed alternative is
+          # visible. Delete this one line to let the fixed cap take effect.
           exec python -m scrapers.gathern.liveness \
             --limit ${{ inputs.limit || '1500' }} \
             --min-stale-days ${{ inputs.min_stale_days || '3' }} \
             --grace ${{ inputs.grace || '3' }} \
+            --kill-cap ${{ inputs.kill_cap || '150' }} \
             ${{ (github.event_name == 'schedule' || inputs.apply == 'true') && '--apply' || '' }}
