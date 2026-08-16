@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 from datetime import datetime, timezone
@@ -140,7 +141,38 @@ def _trailing_median_deleted(client, platform: str) -> float:
     return float(vals[n // 2]) if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
 
 
-def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
+def _bounded_candidates(client, tables, pol, cutoff, safe_cap):
+    """GLOBAL oldest-first candidate selection across ALL of a platform's tables, capped at
+    safe_cap. Used ONLY by bounded one-time runs (`run(..., bounded_cap=...)`) — the standing
+    scheduled path below keeps its existing per-table-then-concat selection completely
+    unchanged, so this never alters production behaviour for a normal automated run."""
+    cands: list[tuple[str, dict]] = []
+    for t in tables:
+        rows = (client.table(t).select("id, ad_number, listing_url, missing_count, last_seen_at")
+                .eq("active", False).gte("missing_count", pol["min_missing_count"])
+                .lt("last_seen_at", cutoff).order("last_seen_at")
+                .limit(safe_cap).execute().data or [])
+        cands.extend((t, r) for r in rows)
+    cands.sort(key=lambda tr: tr[1].get("last_seen_at") or "")
+    return cands[:safe_cap]
+
+
+def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_cap: int | None = None) -> dict:
+    """bounded_cap: manual one-time escape from the anomaly/fraction ABORT-EVERYTHING behaviour,
+    for a backlog already proven (by a fresh source-truth audit) to be genuine attrition rather
+    than a scraper regression — e.g. a platform whose deletion-eligible population has grown past
+    BOTH the anomaly_floor and max_eligible_frac gates at once, so raising anomaly_floor alone
+    would not unblock it (aqarcity, 2026-08-16). It is NOT a bypass: the actual work-set is
+    hard-capped at min(bounded_cap, max_delete_per_run, the fraction guard's own cap, the anomaly
+    threshold) — see the `safe_cap` computation below — so this can never touch more rows than an
+    UNBOUNDED run would already be permitted to touch; it only avoids the coarse all-or-nothing
+    abort when a smaller in-bounds batch exists. platform_retention_policy is never written by
+    this path. Every other guard is unchanged: individual live re-verification per row, the
+    30-day/missing-count eligibility rule, dead-marker confirmation, self-heal-on-live for
+    anything the recheck finds still live, unknown/403/429/5xx/network-error rows are preserved
+    (never deleted), and the full audit trail (cleanup_deletion_log + cleanup_runs) is written
+    exactly as for a normal run, with a `note` explaining the cap. Never wired to cron — only
+    reachable via an explicit `--bounded-cap` CLI/workflow-dispatch invocation."""
     client = sb()
     reg = PLATFORMS.get(platform)
     pol = _load_policy(client, platform)
@@ -151,7 +183,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
              "deleted": 0, "reactivated": 0, "skipped": 0, "aborted": False, "abort_reason": None,
              # eligible_total = the TRUE unclamped population the anomaly gate judges;
              # work_set = how many of them this run actually touches (<= max_delete_per_run).
-             "eligible_total": 0, "work_set": 0, "platform_rows": 0}
+             "eligible_total": 0, "work_set": 0, "platform_rows": 0, "note": None}
 
     def _abort(reason: str):
         stats["aborted"] = True
@@ -190,7 +222,29 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
             thresh = max(pol["anomaly_floor"], pol["anomaly_factor"] * median)
             frac_cap = pol["max_eligible_frac"] * platform_rows
 
-            if eligible_total > thresh:
+            frac_applies = platform_rows >= FRAC_GUARD_MIN_ROWS
+            cands = None
+
+            if bounded_cap is not None:
+                # Bounded one-time mode — see the `run()` docstring. NEVER aborts on the aggregate
+                # gates; instead the work-set is hard-capped at the SAFE number those same gates
+                # already permit, so it can never exceed what an unbounded run would allow anyway.
+                caps = [bounded_cap, pol["max_delete_per_run"], math.floor(thresh)]
+                if frac_applies:
+                    caps.append(math.floor(frac_cap))
+                safe_cap = max(0, min(caps))
+                stats["note"] = (
+                    f"bounded one-time run: requested_cap={bounded_cap} -> safe_cap={safe_cap} "
+                    f"(bounded by max_delete_per_run={pol['max_delete_per_run']}"
+                    + (f", frac_cap={math.floor(frac_cap)}" if frac_applies else "")
+                    + f", anomaly_thresh={math.floor(thresh)}); true eligible_total={eligible_total} "
+                    + (f"({100.0 * eligible_total / platform_rows:.1f}% of {platform_rows} rows); "
+                       if platform_rows else "; ")
+                    + f"remaining_after_this_run={max(0, eligible_total - safe_cap)} returns to the "
+                      f"normal scheduled cycle. platform_retention_policy untouched.")
+                print(f"ℹ cleanup {platform}: BOUNDED — {stats['note']}", flush=True)
+                cands = _bounded_candidates(client, tables, pol, cutoff, safe_cap) if safe_cap > 0 else []
+            elif eligible_total > thresh:
                 # Report the OTHER gate's verdict in the same breath. The two gates are independent
                 # and are evaluated in sequence, so an operator who reads only "raise anomaly_floor"
                 # can raise it, re-run, and abort a second time on the fraction guard with a message
@@ -198,7 +252,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
                 # the backlog has already been proven to be genuine delistings. aqarcity 2026-08-16
                 # is exactly that case: 419 eligible clears neither the floor (408) nor the 10% cap
                 # (261 of 2,611 rows). Naming both here makes it ONE owner decision, not two.
-                if platform_rows >= FRAC_GUARD_MIN_ROWS and eligible_total > frac_cap:
+                if frac_applies and eligible_total > frac_cap:
                     also = (f" ALSO NOTE: raising anomaly_floor alone would NOT unblock this run — "
                             f"{eligible_total} is {100.0 * eligible_total / platform_rows:.1f}% of "
                             f"{platform_rows} rows and the mass-inactivation guard caps it at "
@@ -212,7 +266,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
                        f"every run and can never drain — if {eligible_total} is legitimate "
                        f"accumulation rather than a spike, raise anomaly_floor above it; do not "
                        f"force.{also}")
-            elif platform_rows >= FRAC_GUARD_MIN_ROWS and eligible_total > frac_cap:
+            elif frac_applies and eligible_total > frac_cap:
                 # Scale guard: a partial crawl, source outage or sitemap collapse shows up as a
                 # large FRACTION of the platform going eligible at once, even when the absolute
                 # count is under the floor.
@@ -222,7 +276,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
                        f"source outage rather than genuine delistings.")
             else:
                 # ── work-set: only now do we pull rows, and only up to the per-run cap ───────────
-                cands: list[tuple[str, dict]] = []
+                cands = []
                 for t in tables:
                     rows = (client.table(t).select("id, ad_number, listing_url, missing_count, last_seen_at")
                             .eq("active", False).gte("missing_count", pol["min_missing_count"])
@@ -230,6 +284,8 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
                             .limit(pol["max_delete_per_run"]).execute().data or [])
                     cands.extend((t, r) for r in rows)
                 cands = cands[: pol["max_delete_per_run"]]     # hard cap across ALL tables
+
+            if cands is not None:
                 stats["work_set"] = len(cands)
                 to_delete: dict[str, list] = {}
                 to_reactivate: dict[str, list] = {}
@@ -249,10 +305,14 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
                     if v == "dead":
                         to_delete.setdefault(t, []).append(r["id"])
                         age_days = _age_days(r.get("last_seen_at"), now)
+                        reason = {"inactive_days": age_days, "missing_count": r.get("missing_count"),
+                                  "http_status": status, "verdict": "dead"}
+                        if bounded_cap is not None:
+                            reason["bounded_run"] = True
+                            reason["bounded_cap"] = bounded_cap
                         log_rows.append({"run_id": run_id, "platform": platform, "source_table": t,
                                          "listing_id": r["id"], "ad_number": r.get("ad_number"), "listing_url": url,
-                                         "reason": {"inactive_days": age_days, "missing_count": r.get("missing_count"),
-                                                    "http_status": status, "verdict": "dead"}})
+                                         "reason": reason})
                     elif v == "live":
                         to_reactivate.setdefault(t, []).append(r["id"])
                         stats["reactivated"] += 1
@@ -272,7 +332,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
                 stats["deleted"] = sum(len(v) for v in to_delete.values())
 
         client.table("cleanup_runs").insert({k: stats[k] for k in
-            ("platform", "dry_run", "candidates", "rechecked", "deleted", "reactivated", "skipped", "aborted", "abort_reason")}).execute()
+            ("platform", "dry_run", "candidates", "rechecked", "deleted", "reactivated", "skipped", "aborted", "abort_reason", "note")}).execute()
         ok = not stats["aborted"]
         end_run(run_id, ok=ok, rows_seen=stats["candidates"], rows_upserted=stats["deleted"],
                 allow_empty=True, notes=("ABORT: " + stats["abort_reason"]) if stats["aborted"] else
@@ -314,8 +374,13 @@ def main() -> int:
     ap.add_argument("--platform", required=True)
     ap.add_argument("--dry-run", action="store_true", help="Probe + classify + report; delete nothing.")
     ap.add_argument("--force", action="store_true", help="Run even if policy.enabled=false (all safety guards still apply).")
+    ap.add_argument("--bounded-cap", type=int, default=None, metavar="N",
+                     help="Manual one-time escape from the anomaly/fraction ABORT-EVERYTHING behaviour for a "
+                          "backlog already proven genuine by a fresh source-truth audit. Never lets the work-set "
+                          "exceed what an unbounded run would already permit — see run()'s docstring. Never used "
+                          "by the scheduled cron path; explicit invocation only.")
     args = ap.parse_args()
-    stats = run(args.platform, dry_run=args.dry_run, force=args.force)
+    stats = run(args.platform, dry_run=args.dry_run, force=args.force, bounded_cap=args.bounded_cap)
     return 1 if stats["aborted"] and not args.dry_run else 0
 
 
