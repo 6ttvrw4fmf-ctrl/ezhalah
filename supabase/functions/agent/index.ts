@@ -42,6 +42,23 @@ const urlFor = (m: string) =>
 // the cached prefix on every request and silently disable caching entirely.
 // AGENT_PROVIDER flips back to "gemini" with no redeploy of anything else, so this is reversible.
 const AGENT_PROVIDER = (Deno.env.get("AGENT_PROVIDER") ?? "gemini").toLowerCase();
+
+// ── OpenAI (owner's chosen provider, 2026-08-15) ─────────────────────────────
+// MODEL CHOICE IS AN ENV VAR ON PURPOSE. The owner asked for "gpt-5-mini", but OpenAI's own
+// deprecations page lists `gpt-5-mini-2025-08-07` for SHUTDOWN on 2026-12-11, with `gpt-5.6-terra`
+// as the named replacement. Hard-coding a model with a ~4-month shutdown clock would guarantee
+// rework, so the ID lives in OPENAI_MODEL and can change without touching this file.
+//   gpt-5.6-luna   $0.20/$1.20  — budget tier, cheaper than gpt-5-mini was; the default here
+//   gpt-5.6-terra  $2.00/$12.00 — OpenAI's own recommended replacement for gpt-5-mini
+//   gpt-5.6-sol    $5.00/$30.00 — flagship
+const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? "";
+const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-5.6-luna";
+// Reasoning effort: the field name for this model generation was NOT confirmable from the docs at
+// authoring time, so it is OFF unless OPENAI_REASONING_EFFORT is set. An unknown parameter is a 400,
+// and silently breaking every search to add an unverified knob is not a trade worth making. Set it,
+// run scripts/smoke-agent-openai.sh, and keep it only if the smoke test passes.
+const OPENAI_REASONING_EFFORT = Deno.env.get("OPENAI_REASONING_EFFORT") ?? "";
+
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const CLAUDE_MODEL = Deno.env.get("CLAUDE_MODEL") ?? "claude-sonnet-5";
 // Thinking + JSON share this ceiling, so it is much larger than Gemini's 800: adaptive thinking
@@ -676,6 +693,69 @@ Deno.serve(async (req: Request) => {
     };
     const models = [MODEL, FALLBACK_MODEL].filter((m, i, a) => a.indexOf(m) === i);
 
+    // ── OpenAI path ───────────────────────────────────────────────────────────
+    // Same contract as the other providers: turns + volatile system suffix -> parsed object | {__err}.
+    // Uses the RESPONSES API (/v1/responses), not chat/completions: `input` instead of `messages`,
+    // and the schema goes in `text.format`, not `response_format`.
+    // Prompt caching is AUTOMATIC on OpenAI (no cache_control to set) — but it only works on a stable
+    // PREFIX, so the frozen SYSTEM prompt must come FIRST and the per-turn volatile text after it.
+    // Same ordering rule as the Claude path, different mechanism.
+    const runModelOpenAI = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
+      if (!OPENAI_API_KEY) return { __err: json({ error: "OPENAI_API_KEY not set" }, 500) };
+      const input: Array<{ role: string; content: string }> = [
+        { role: "system", content: SYSTEM },          // stable prefix -> auto-cached
+      ];
+      if (sysExtra) input.push({ role: "system", content: sysExtra }); // volatile, AFTER the prefix
+      for (const c of cts) {
+        input.push({
+          role: c.role === "model" ? "assistant" : "user",
+          content: c.parts.map((p) => p.text).join("\n"),
+        });
+      }
+      const payload: Record<string, unknown> = {
+        model: OPENAI_MODEL,
+        input,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "ezhalah_agent_output",
+            strict: true,
+            schema: SCHEMA_JSON,
+          },
+        },
+      };
+      if (OPENAI_REASONING_EFFORT) payload.reasoning = { effort: OPENAI_REASONING_EFFORT };
+      const body = JSON.stringify(payload);
+      let res: Response | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const r = await fetch("https://api.openai.com/v1/responses", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${OPENAI_API_KEY}` },
+          body,
+        });
+        if (r.ok) { res = r; break; }
+        res = r;
+        if (![429, 500, 502, 503].includes(r.status)) break;
+        await r.body?.cancel().catch(() => {});
+        if (attempt < 2) await new Promise((rs) => setTimeout(rs, 400 * (attempt + 1)));
+      }
+      if (!res || !res.ok) {
+        const detail = res ? await res.text() : "no response";
+        return { __err: json({ error: `openai ${res?.status ?? 0}`, detail }, 502) };
+      }
+      const data = await res.json();
+      // The Responses API returns an `output` ARRAY that can contain reasoning items as well as the
+      // message — so pick the message item explicitly rather than indexing output[0], which is the
+      // reasoning block whenever reasoning is enabled.
+      const msg = (data?.output ?? []).find((o: any) => o?.type === "message") ?? (data?.output ?? [])[0];
+      const raw = (msg?.content ?? [])
+        .map((c: any) => c?.text ?? "")
+        .join("")
+        .trim();
+      if (!raw) return { __err: json({ error: "empty model output" }, 502) };
+      try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw }, 502) }; }
+    };
+
     // ── Claude path ───────────────────────────────────────────────────────────
     // Same contract as runModelGemini: takes the turns + the volatile system suffix, returns the
     // parsed object or { __err }. Everything downstream is provider-agnostic.
@@ -763,8 +843,12 @@ Deno.serve(async (req: Request) => {
     };
 
     // ONE dispatcher, so every existing call site is provider-agnostic and AGENT_PROVIDER is the
-    // only switch. Flipping it back to "gemini" is an env change, not a code change.
-    const runModel = AGENT_PROVIDER === "claude" ? runModelClaude : runModelGemini;
+    // only switch. Flipping back to "gemini" is an env change, not a code change — which is what
+    // makes trying a new provider a reversible experiment instead of a migration.
+    const runModel =
+      AGENT_PROVIDER === "openai" ? runModelOpenAI :
+      AGENT_PROVIDER === "claude" ? runModelClaude :
+      runModelGemini;
 
     // Force the reply language via system_instruction (Gemini weights it far more than a turn line) —
     // the model otherwise slips to Arabic when an English message contains one Arabic word (a city).
