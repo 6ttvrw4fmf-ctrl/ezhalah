@@ -3,7 +3,21 @@
 # 200 page; every other 200 is live → self-heal. Triggered weekly by pg_cron (gh-aqarcity-cleanup).
 name: Aqarcity cleanup
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      bounded_cap:
+        description: >
+          Manual one-time bounded cap (rows). Leave empty for the normal scheduled run — every
+          existing gate applies unchanged. When set, this run skips ONLY the coarse
+          abort-everything behaviour of the anomaly/fraction gates, and instead hard-caps the
+          work-set at min(this value, max_delete_per_run, the fraction guard's own cap, the
+          anomaly threshold) — so it can never exceed what an unbounded run would already permit.
+          Individual live re-verification, the 30-day/missing-count eligibility rule, dead-marker
+          confirmation, self-heal-on-live, and the full audit trail are unchanged.
+          platform_retention_policy is never written. Owner-approved 2026-08-16 for the aqarcity
+          backlog; see scrapers/common/cleanup.py `run(..., bounded_cap=...)`.
+        required: false
+        type: string
 concurrency:
   group: aqarcity-cleanup
   cancel-in-progress: false
@@ -24,4 +38,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: exec python -m scrapers.common.cleanup --platform aqarcity
+          BOUNDED_CAP: ${{ inputs.bounded_cap }}
+        run: |
+          if [ -n "$BOUNDED_CAP" ]; then
+            exec python -m scrapers.common.cleanup --platform aqarcity --bounded-cap "$BOUNDED_CAP"
+          else
+            exec python -m scrapers.common.cleanup --platform aqarcity
+          fi
