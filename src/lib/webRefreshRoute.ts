@@ -4,19 +4,23 @@
 // Background: on the web a refresh reloads whatever deep route the user was on. Most screens keep
 // their state in memory only, so they would come back empty — those are sent Home on purpose.
 //
-// `/agent` is the exception, and the REASON changed on 2026-08-16 (owner decision). It used to be
-// exempt because `?filter=` carried the whole search and the screen re-ran it on open, so a refresh
-// "restored" the results. The owner ruled that behaviour out:
+// `/agent` was the one exception, and it is no longer. The rule there changed TWICE on 2026-08-16,
+// both times by owner decision — read both, because the second only makes sense on top of the first:
 //
+//  1. Refresh must never re-run the search:
 //     "A browser refresh must never accidentally count as a new user search. There should be no
 //      duplicate AI request, duplicate property-search RPC, duplicate conversation message,
 //      duplicate analytics event, or duplicate saved conversation caused simply by refreshing."
+//     That made the post-refresh state an EMPTY AI chat (greeting + empty composer).
 //
-// The intended state after a refresh is now the AI HOME / NEW-CHAT screen — a fresh empty composer —
-// for guests and signed-in users alike. So `/agent` is still never redirected, but for the opposite
-// reason: it is now the DESTINATION. agent.tsx consumes `?filter=`/`?seed=` the moment it acts on
-// them (see consumeSearchParams), so by the time any refresh happens the URL is already a bare
-// `/agent` and the screen simply renders its new-chat state. There is no search left to replay.
+//  2. Then, seeing that empty screen: "when i refresh takes me to the filter page … not this here."
+//     An emptied AI chat is a dead end — the Filter home is where a fresh visit belongs. So `/agent`
+//     now follows the SAME rule as every other deep route: a hard refresh lands on Home.
+//
+// Rule 1 is untouched and still enforced independently: the session gate in src/lib/appSession.ts
+// (consulted by agent.tsx before it acts on any param) is what guarantees ZERO AI/RPC calls on a
+// reload. This file only decides WHERE the refresh lands, never whether a search runs — so the
+// redirect cannot reintroduce duplicate execution even if a load reaches the agent screen first.
 //
 // A signed-in user does not lose that conversation: it is written to their history at SEARCH time
 // (store.tsx recordHistory → `history:<sub>`, de-duped by query so a repeat can never fork a second
@@ -25,8 +29,6 @@
 // DO NOT "fix" this by restoring a search on load. That reintroduces the duplicate-execution class
 // the owner rejected; the barrier in scripts/verify-refresh-restores-filter-search.ts enforces it.
 
-/** The AI chat surface. It owns its own new-chat state, so a refresh is never bounced off it. */
-const AGENT_PATH = '/agent';
 /** Already-Home / auth-callback paths the guard never touches. */
 const EXEMPT_PATHS = new Set(['/', '/auth']);
 
@@ -56,15 +58,19 @@ export function hasRestorableQuery(search: string): boolean {
 export function shouldSendRefreshHome(pathname: string | null | undefined, search: string): boolean {
   if (!pathname) return false;
   if (EXEMPT_PATHS.has(pathname)) return false;
-  // The AI chat surface is the refresh destination itself — never bounce it Home, with or without
-  // params. (A param-carrying reload is only reachable if a user hand-edits or bookmarks a URL mid
-  // hop; agent.tsx still starts a new chat in that case — see AGENT_REFRESH_STARTS_NEW_CHAT.)
-  if (pathname === AGENT_PATH) return false;
+  // Every other deep route — including `/agent` since 2026-08-16 (owner: "when i refresh takes me to
+  // the filter page … not this here") — comes back on Home. With or without params: `?filter=`/
+  // `?seed=` on a page load are never executable anyway (appSession gate), so carrying them to an
+  // emptied chat only produced a dead-end screen.
   return true;
 }
 
 /**
  * The contract, stated once so both the app and its barrier read the same sentence:
- * a reload of the AI surface starts a NEW CHAT and executes nothing.
+ * a reload of the AI surface lands on the Filter home and executes nothing.
+ *
+ * Both halves matter. "Executes nothing" is rule 1 (appSession gate, still enforced in agent.tsx);
+ * "lands on the Filter home" is rule 2 (this module). A change that satisfies only one of them is
+ * a regression of the other.
  */
-export const AGENT_REFRESH_STARTS_NEW_CHAT = true;
+export const AGENT_REFRESH_LANDS_HOME = true;

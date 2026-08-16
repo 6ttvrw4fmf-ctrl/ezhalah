@@ -14,7 +14,8 @@
 //      saved conversation caused simply by refreshing."
 //
 // THE RULE NOW, for guests and signed-in users alike:
-//   refresh inside a chat/search  →  AI home / new-chat screen (greeting + empty composer)
+//   refresh inside a chat/search  →  the FILTER HOME screen (owner, 2026-08-16 rule 2: "when i
+//                                    refresh takes me to the filter page … not this here")
 //                                 →  ZERO AI calls, ZERO property RPCs, ZERO history writes
 //   signed-in                     →  the conversation is already in the sidebar (saved at SEARCH
 //                                    time, de-duped by query) and reopens only when clicked
@@ -31,7 +32,7 @@
 //
 //   node --experimental-strip-types scripts/verify-refresh-restores-filter-search.ts  (in `npm test`)
 import { readFileSync, existsSync } from 'node:fs';
-import { shouldSendRefreshHome, hasRestorableQuery, AGENT_REFRESH_STARTS_NEW_CHAT } from '../src/lib/webRefreshRoute.ts';
+import { shouldSendRefreshHome, hasRestorableQuery, AGENT_REFRESH_LANDS_HOME } from '../src/lib/webRefreshRoute.ts';
 import { isAppSessionStarted, markAppSessionStarted, __resetAppSessionForTest } from '../src/lib/appSession.ts';
 
 let failed = 0;
@@ -91,12 +92,14 @@ check('playListings no longer publishes results to the URL (PR#705 reverted by o
 check('no setParams call writes a filter value back into the URL',
   !/setParams\(\s*\{[^}]*filter:\s*(?!undefined)[A-Za-z_$]/.test(agent));
 
-// 5) The refresh guard must leave the AI surface alone — it is now the DESTINATION, not a route to
-//    bounce off. Everything else still goes Home.
-check('/agent is never redirected Home (it renders the new-chat screen itself)',
-  shouldSendRefreshHome('/agent', '') === false
-  && shouldSendRefreshHome('/agent', `?filter=${encodeURIComponent(REAL_FILTER)}`) === false
-  && shouldSendRefreshHome('/agent', '?seed=%D8%B4%D9%82%D8%A9') === false);
+// 5) Where the refresh LANDS (owner rule 2, 2026-08-16 — see this file's header). `/agent` no longer
+//    gets an exemption: a hard refresh lands on the Filter home like every other deep route. This is
+//    independent of rule 1 above — checks 2/3 already proved the reload executes nothing, and they
+//    must keep passing alongside this.
+check('/agent goes Home on a hard refresh, with or without params',
+  shouldSendRefreshHome('/agent', '') === true
+  && shouldSendRefreshHome('/agent', `?filter=${encodeURIComponent(REAL_FILTER)}`) === true
+  && shouldSendRefreshHome('/agent', '?seed=%D8%B4%D9%82%D8%A9') === true);
 check('/settings still goes Home', shouldSendRefreshHome('/settings', '') === true);
 check('/interview still goes Home', shouldSendRefreshHome('/interview', `?filter=${encodeURIComponent(REAL_FILTER)}`) === true);
 check('/about still goes Home', shouldSendRefreshHome('/about', '') === true);
@@ -104,7 +107,7 @@ check('/ is left alone', shouldSendRefreshHome('/', '') === false);
 check('/auth is left alone (OAuth redirect must finish signing in)', shouldSendRefreshHome('/auth', '?code=abc') === false);
 check('null/empty pathname is left alone',
   shouldSendRefreshHome(null, '') === false && shouldSendRefreshHome('', '') === false);
-check('the contract constant states the rule for both halves', AGENT_REFRESH_STARTS_NEW_CHAT === true);
+check('the contract constant states the rule for both halves', AGENT_REFRESH_LANDS_HOME === true);
 check('_layout.tsx opens the session only AFTER this load\'s screen effects have run',
   /markAppSessionStarted/.test(layout) && /setTimeout\(markAppSessionStarted,\s*0\)/.test(layout));
 
@@ -141,8 +144,10 @@ check('history hydration waits for the auth check, so a refresh cannot load the 
 const smoke = new URL('./verify-web-runtime-smoke.mjs', import.meta.url);
 const wf = new URL('../.github/workflows/web-runtime-smoke.yml', import.meta.url);
 check('the browser runtime smoke test still exists', existsSync(smoke));
-check('the smoke test asserts a refresh lands on a new chat and issues no search request',
-  existsSync(smoke) && /refresh issues ZERO/.test(readFileSync(smoke, 'utf8')));
+check('the smoke test asserts BOTH halves at runtime: zero search requests AND landing on the Filter home',
+  existsSync(smoke)
+  && /refresh issues ZERO/.test(readFileSync(smoke, 'utf8'))
+  && /refresh lands on the FILTER HOME/.test(readFileSync(smoke, 'utf8')));
 check('a workflow still runs the runtime smoke test on src/ changes', existsSync(wf)
   && /verify-web-runtime-smoke\.mjs/.test(readFileSync(wf, 'utf8'))
   && /src\/\*\*/.test(readFileSync(wf, 'utf8')));
