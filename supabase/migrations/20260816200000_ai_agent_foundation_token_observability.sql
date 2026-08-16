@@ -54,4 +54,4 @@ from public.mon_agent_request_log
 group by 1, 2;
 
 comment on view public.mon_agent_request_log_daily is
-  'Daily rollup of mon_agent_request_log for the dashboard-first monitoring contract (ARCHITECTURE.md §19.0). Answers "did the average AI request suddenly grow" in one query.';
+  'Daily rollup of mon_agent_request_log for the dashboard-first monitoring contract (ARCHITECTURE.md §19.0). Answers "did the average AI request suddenly grow" in one query. THINKING-BUDGET BASELINE (round 3, 2026-08-17, thinkingBudget=512): avg_thinking_tokens measured ~228 across 1,080 real calls, worst single case ~511 (near the 512 ceiling but never over it). A sustained avg_thinking_tokens materially above ~250-300, or thinkingConfig.thinkingBudget in the outbound payload reading anything other than 512, is the anomaly signal to look for manually until a live alert exists — see prompt-arch-2026-08-16/thinking-budget/REPORT.md.';

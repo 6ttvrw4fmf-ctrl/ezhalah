@@ -33,6 +33,19 @@ const FALLBACK_MODEL = Deno.env.get("GEMINI_FALLBACK_MODEL") ?? "gemini-2.5-flas
 const urlFor = (m: string) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
 
+// THINKING BUDGET (round-3 owner brief, 2026-08-17) — a measured FIXED budget, not dynamic (-1) and
+// not unlimited. See scripts/verify-agent-token-budget-barriers.ts and the genConfig comment below
+// for the full rationale and evidence. Override with GEMINI_THINKING_BUDGET for ops experiments
+// only — the committed/approved value is 512.
+const THINKING_BUDGET = parseInt(Deno.env.get("GEMINI_THINKING_BUDGET") ?? "512", 10);
+// Real JSON headroom ABOVE the thinking budget (Gemini bills thinking tokens against
+// maxOutputTokens) — always derived from THINKING_BUDGET so an env override can never silently
+// recreate the PR #702 empty-response landmine (thinking on, output cap left at its thinking-OFF
+// value). 800 is the same margin the round-2 foundation measured as the floor for legitimate JSON
+// output alone; re-verified empirically this round (worst observed usage at budget 512: 615/1312).
+const THINKING_HEADROOM = 800;
+const MAX_OUTPUT_TOKENS = THINKING_BUDGET + THINKING_HEADROOM;
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
@@ -486,10 +499,23 @@ Deno.serve(async (req: Request) => {
 
     const genConfig = {
       temperature: 0.3,
-      // Gemini 2.5 Flash is a "thinking" model — reasoning tokens count against maxOutputTokens. We
-      // don't need chain-of-thought for classification, so we disable thinking and give JSON headroom.
-      thinkingConfig: { thinkingBudget: 0 },
-      maxOutputTokens: 800,
+      // Gemini 2.5 Flash is a "thinking" model — reasoning tokens are BILLED AGAINST and CONSUME
+      // maxOutputTokens (unlike OpenAI). 512 is a measured, evidence-based fixed budget — NOT
+      // dynamic/unlimited (-1) and NOT the round-2 default of 0 — chosen by the round-3 thinking-
+      // budget benchmark (prompt-arch-2026-08-16/thinking-budget/REPORT.md): across 3 runs of the
+      // 72-case permanent eval set, the 15 reasoning-sensitive cases (cases whose pass/fail flips
+      // with budget, isolated from cases that fail identically at every budget for missing-
+      // taxonomy-knowledge reasons no budget can fix) scored 42-47% at budgets 0/128/256 — flat,
+      // no benefit — then jumped to 62% at 512 and stayed flat at 1024 (60%, no further gain).
+      // 512 is the smallest budget that captures the improvement. THINKING_HEADROOM keeps
+      // maxOutputTokens automatically scaled above whatever budget is configured — the landmine
+      // this guards against (PR #702, unmerged): turning thinking on while leaving maxOutputTokens
+      // at its thinking-OFF value returns HTTP 200 with a truncated/empty candidate because the
+      // model spends its whole budget thinking and never emits the JSON. Empirically re-verified
+      // this round across 1,080 real calls: worst-case usage at budget 512 was 615/1312 tokens
+      // (47% of cap) — comfortable margin, not a coincidence of small inputs.
+      thinkingConfig: { thinkingBudget: THINKING_BUDGET },
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
       responseMimeType: "application/json",
       responseSchema: SCHEMA,
     };

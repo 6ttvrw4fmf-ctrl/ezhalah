@@ -19,6 +19,7 @@
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -30,14 +31,28 @@ const EDGE_URL = new URL('../supabase/functions/agent/index.ts', import.meta.url
 const edge = readFileSync(EDGE_URL, 'utf8');
 const client = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
 
-// ── Committed values (foundation measurement, 2026-08-16 — see prompt-arch-2026-08-16/foundation) ──
+// ── Committed values ─────────────────────────────────────────────────────────────────────────
 // Raise any of these only as a deliberate, reviewed act, in the same commit as this file.
 const COMMITTED_MODEL = 'gemini-2.5-flash';
 const COMMITTED_FALLBACK_MODEL = 'gemini-2.5-flash-lite';
-const COMMITTED_THINKING_BUDGET = 0;
-const COMMITTED_MAX_OUTPUT_TOKENS = 800; // measured: normal 52-220, an explicit "explain everything
-// at length" stress case hit 754/800 uncapped — capping at 300 truncated it into UNPARSEABLE JSON.
-// 800 is not spare headroom being wasted; it is the measured floor for legitimate output today.
+// THINKING BUDGET — round 3 (2026-08-17, see prompt-arch-2026-08-16/thinking-budget/REPORT.md).
+// Was 0 (round 2). Real generateContent calls across 3 runs of the 72-case permanent eval set at
+// budgets 0/128/256/512/1024 showed the 15 reasoning-sensitive cases (cases whose pass/fail
+// actually flips with budget, isolated from cases that fail identically at every budget for
+// missing-taxonomy-knowledge reasons no budget fixes) scoring 42-47% at 0/128/256 — flat, no
+// benefit — then jumping to 62% at 512 and staying flat at 1024 (60%, no further gain). 512 is the
+// smallest budget that captures the improvement — NOT dynamic/unlimited (-1), NOT PR #702's
+// unmerged 1024 proposal (that number wasn't re-derived from this evidence, it just happened to be
+// in the same ballpark; 512 measured strictly as good and cheaper).
+const COMMITTED_THINKING_BUDGET = 512;
+// Gemini bills thinking tokens against maxOutputTokens (unlike OpenAI) — this MUST stay
+// THINKING_BUDGET + a real JSON headroom, never a bare number that can drift out of sync with the
+// budget above (that desync is the exact PR #702 landmine: thinking on, cap left at the old
+// thinking-OFF value → HTTP 200 with a truncated/empty candidate). 800 headroom re-verified
+// empirically this round across 1,080 real calls: worst-case usage at budget 512 was 615/1312
+// tokens (47% of cap).
+const COMMITTED_THINKING_HEADROOM = 800;
+const COMMITTED_MAX_OUTPUT_TOKENS = COMMITTED_THINKING_BUDGET + COMMITTED_THINKING_HEADROOM;
 const MAX_HISTORY_TURNS_CEILING = 20; // generous ceiling — the point is "bounded", not one exact number
 const SCHEMA_FIELD_COUNT = 12;
 
@@ -46,21 +61,32 @@ check(`MODEL default is committed value "${COMMITTED_MODEL}"`,
   new RegExp(`const MODEL = Deno\\.env\\.get\\("GEMINI_MODEL"\\) \\?\\? "${COMMITTED_MODEL}"`).test(edge));
 check(`FALLBACK_MODEL default is committed value "${COMMITTED_FALLBACK_MODEL}"`,
   new RegExp(`const FALLBACK_MODEL = Deno\\.env\\.get\\("GEMINI_FALLBACK_MODEL"\\) \\?\\? "${COMMITTED_FALLBACK_MODEL}"`).test(edge));
+check(`THINKING_BUDGET default is committed value ${COMMITTED_THINKING_BUDGET}`,
+  new RegExp(`const THINKING_BUDGET = parseInt\\(Deno\\.env\\.get\\("GEMINI_THINKING_BUDGET"\\) \\?\\? "${COMMITTED_THINKING_BUDGET}", 10\\)`).test(edge));
+check(`THINKING_HEADROOM is committed value ${COMMITTED_THINKING_HEADROOM}`,
+  new RegExp(`const THINKING_HEADROOM = ${COMMITTED_THINKING_HEADROOM};`).test(edge));
+check('MAX_OUTPUT_TOKENS is DERIVED from THINKING_BUDGET + THINKING_HEADROOM (never an independent literal that can drift out of sync with the budget)',
+  /const MAX_OUTPUT_TOKENS = THINKING_BUDGET \+ THINKING_HEADROOM;/.test(edge));
 
 // ── Boot the real function under a shim and capture EVERYTHING it sends ────────────────────────
 type Sent = { url: string; body: any };
 const sent: Sent[] = [];
 let handler: ((req: Request) => Promise<Response>) | null = null;
 
+// NOTE: real Deno.env.get() returns `undefined` for an unset key (not ''). The shim must match
+// that exactly — `Deno.env.get(k) ?? "default"` only falls back on null/undefined, so a shim that
+// returns '' for missing keys would silently defeat every `?? "default"` in the source and this
+// barrier would test nothing real (found live while wiring the THINKING_BUDGET checks: MODEL's
+// runtime value was never actually exercised before, only its source text — same latent gap).
 (globalThis as any).Deno = {
   env: {
-    get: (k: string) =>
+    get: (k: string): string | undefined =>
       ({
         GEMINI_API_KEY: 'test-key',
         SUPABASE_URL: 'https://example.invalid',
         SUPABASE_SERVICE_ROLE_KEY: 'test-service-key',
         SUPABASE_ANON_KEY: 'test-anon-key',
-      })[k] ?? '',
+      } as Record<string, string>)[k],
   },
   serve: (h: (req: Request) => Promise<Response>) => { handler = h; },
 };
@@ -102,17 +128,76 @@ const gemini = sent.filter((s) => s.url.includes('generativelanguage.googleapis.
 if (gemini.length < 1) { console.log('\n✗ no Gemini call captured — cannot verify config'); process.exit(1); }
 const genConfig = gemini[0].body?.generationConfig ?? {};
 
-// ── 2. Thinking budget must not creep up from the committed value ──────────────────────────────
-check(`generationConfig.thinkingConfig.thinkingBudget === ${COMMITTED_THINKING_BUDGET} (thinking OFF)`,
+// ── 2. Thinking budget must be ON at exactly the approved fixed value — not 0 (round-2 default),
+//    not -1/unset (dynamic/unlimited), not silently creeping to some other number ─────────────────
+check(`generationConfig.thinkingConfig.thinkingBudget === ${COMMITTED_THINKING_BUDGET} (approved fixed budget)`,
   genConfig?.thinkingConfig?.thinkingBudget === COMMITTED_THINKING_BUDGET,
   `saw ${JSON.stringify(genConfig?.thinkingConfig)}`);
-check('the source declares no other thinkingBudget value anywhere (no dead alternate config)',
-  (edge.match(/thinkingBudget:\s*(-?\d+)/g) ?? []).every((m) => m === `thinkingBudget: ${COMMITTED_THINKING_BUDGET}`));
+check('thinkingBudget is never -1 (dynamic/unlimited) anywhere in source',
+  !/thinkingBudget:\s*-1\b/.test(edge));
+check('no OTHER object literal hardcodes a raw thinkingBudget number — the only number is THINKING_BUDGET\'s own env-default string, wired through the THINKING_BUDGET identifier everywhere it is used',
+  !/thinkingBudget:\s*-?\d+/.test(edge) && /thinkingConfig:\s*\{\s*thinkingBudget:\s*THINKING_BUDGET\s*\}/.test(edge));
 
-// ── 3. Output-token ceiling must not creep up silently ──────────────────────────────────────────
-check(`generationConfig.maxOutputTokens === ${COMMITTED_MAX_OUTPUT_TOKENS} (measured floor, see item 2 report)`,
+// ── 3. Output-token ceiling must not creep up silently, AND must auto-scale with the budget ───────
+check(`generationConfig.maxOutputTokens === ${COMMITTED_MAX_OUTPUT_TOKENS} (${COMMITTED_THINKING_BUDGET} budget + ${COMMITTED_THINKING_HEADROOM} JSON headroom)`,
   genConfig?.maxOutputTokens === COMMITTED_MAX_OUTPUT_TOKENS,
   `saw ${genConfig?.maxOutputTokens}`);
+
+// ── 3b. THE LANDMINE, as a LIVE regression test (PR #702's exact failure mode) — a genuinely fresh
+//    CHILD PROCESS (not an in-process re-import: Node's --experimental-strip-types loader resolves
+//    .ts specifiers by path, ignoring cache-busting query strings, so an in-process "second import"
+//    silently keeps evaluating the FIRST module instance — confirmed by direct experiment while
+//    building this check) with GEMINI_THINKING_BUDGET overridden, proving maxOutputTokens follows
+//    it automatically, with no separate env var for the cap and no code changed.
+{
+  const childScript = `
+    globalThis.Deno = { env: { get: (k) => process.env[k] }, serve: (h) => { globalThis.__h = h; } };
+    globalThis.fetch = async (url, init = {}) => {
+      const u = String(url);
+      if (u.includes('generativelanguage.googleapis.com')) {
+        globalThis.__sentGenConfig = JSON.parse(init.body).generationConfig;
+        return new Response(JSON.stringify({
+          candidates: [{ content: { parts: [{ text: JSON.stringify({
+            kind: 'message', reply: 'ok', deal: 'Rent', location: '', type: '',
+            detail: '', price: '', pricing_basis: 'none', rent_period: 'none',
+            sort: 'none', count: '', platforms: [],
+          }) }] } }],
+          usageMetadata: { promptTokenCount: 21, candidatesTokenCount: 79, thoughtsTokenCount: 1200, totalTokenCount: 1300 },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('null', { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    await import(${JSON.stringify(EDGE_URL.href)});
+    const res = await globalThis.__h(new Request('https://x.invalid/agent', {
+      method: 'POST', headers: { 'content-type': 'application/json', apikey: 'test-anon-key' },
+      body: JSON.stringify({ text: 'apartment in Riyadh', locale: 'en' }),
+    }));
+    console.log(JSON.stringify({ status: res.status, genConfig: globalThis.__sentGenConfig }));
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ['--experimental-strip-types', '--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', '--input-type=module', '-e', childScript],
+    {
+      env: {
+        ...process.env,
+        GEMINI_API_KEY: 'test-key',
+        SUPABASE_URL: 'https://example.invalid',
+        SUPABASE_SERVICE_ROLE_KEY: 'test-service-key',
+        SUPABASE_ANON_KEY: 'test-anon-key',
+        GEMINI_THINKING_BUDGET: '2000',
+      },
+      encoding: 'utf8',
+    },
+  );
+  let childOut: { status?: number; genConfig?: any } = {};
+  try { childOut = JSON.parse((child.stdout || '').trim().split('\n').pop() || '{}'); } catch { /* leave empty, checks below fail loudly */ }
+  check('override env (fresh process, GEMINI_THINKING_BUDGET=2000): served 200',
+    childOut.status === 200, `stdout=${child.stdout}\nstderr=${child.stderr}`);
+  check('override env: thinkingBudget follows GEMINI_THINKING_BUDGET=2000',
+    childOut.genConfig?.thinkingConfig?.thinkingBudget === 2000, `saw ${JSON.stringify(childOut.genConfig?.thinkingConfig)}`);
+  check('override env: maxOutputTokens auto-scaled to 2000 + 800 = 2800 WITHOUT a matching env var for it — this is the landmine fix, proven live, not just by formula',
+    childOut.genConfig?.maxOutputTokens === 2800, `saw ${childOut.genConfig?.maxOutputTokens}`);
+}
 
 // ── 4. Conversation history stays BOUNDED — both server and client, never unbounded ────────────
 // EDGE: 30 turns were sent in this test; the served payload must reflect a hard slice, not all 30.
