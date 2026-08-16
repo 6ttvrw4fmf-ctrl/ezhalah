@@ -27,6 +27,28 @@ const FALLBACK_MODEL = Deno.env.get("GEMINI_FALLBACK_MODEL") ?? "gemini-2.5-flas
 const urlFor = (m: string) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
 
+// ── PROVIDER (owner decision 2026-08-15: move off Gemini) ────────────────────
+// The agent's job is intent → filters (see the Ezhalah AI Agent Philosophy): understand messy
+// Arabic/English/dialect input and map it onto the EXISTING filter fields. Two things carry that,
+// and neither is prompt text:
+//   1. STRUCTURED OUTPUT — the JSON schema is enforced, so the model cannot emit a field value
+//      outside the enums. "Never invent a city/type" stops being a prompt rule.
+//   2. THINKING — the old Gemini config ran `thinkingBudget: 0` (reasoning OFF) to save tokens,
+//      which is most of why intent understanding felt weak. Claude runs adaptive thinking at low
+//      effort: enough judgment to decide "search now" vs "ask one question", without a big spend.
+// PROMPT CACHING is what makes it affordable: the ~12.4k-token SYSTEM prompt is marked
+// cache_control and bills at ~10% on every request after the first. The VOLATILE part (per-turn
+// language line + live DB notes) is a SEPARATE later block — appending it to SYSTEM would change
+// the cached prefix on every request and silently disable caching entirely.
+// AGENT_PROVIDER flips back to "gemini" with no redeploy of anything else, so this is reversible.
+const AGENT_PROVIDER = (Deno.env.get("AGENT_PROVIDER") ?? "gemini").toLowerCase();
+const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+const CLAUDE_MODEL = Deno.env.get("CLAUDE_MODEL") ?? "claude-sonnet-5";
+// Thinking + JSON share this ceiling, so it is much larger than Gemini's 800: adaptive thinking
+// spends against it before the JSON is written, and a tight cap truncates mid-object.
+const CLAUDE_MAX_TOKENS = Number(Deno.env.get("CLAUDE_MAX_TOKENS") ?? "4000");
+const CLAUDE_EFFORT = Deno.env.get("CLAUDE_EFFORT") ?? "low";
+
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
 // function. We read the active rows at runtime and append them to the system prompt. Cached ~60s so
@@ -514,6 +536,36 @@ const SCHEMA = {
   required: ["kind", "reply", "deal", "location", "type", "detail", "price", "pricing_basis", "rent_period", "sort", "count", "platforms"],
 };
 
+// The SAME contract as SCHEMA above, in standard JSON Schema (Gemini uses uppercase type names and
+// no additionalProperties; the Messages API expects lowercase + additionalProperties:false). Kept
+// beside SCHEMA deliberately: the two MUST stay in lockstep, because both providers feed the exact
+// same downstream consumer — one shape of parsed object, whichever model produced it.
+const SCHEMA_JSON = {
+  type: "object",
+  properties: {
+    kind: { type: "string", enum: ["listings", "message", "interview"] },
+    reply: { type: "string" },
+    deal: { type: "string", enum: ["Rent", "Buy", "Both"] },
+    location: { type: "string" },
+    type: { type: "string" },
+    detail: { type: "string" },
+    price: { type: "string" },
+    pricing_basis: {
+      type: "string",
+      enum: ["daily_rent", "weekly_rent", "monthly_rent", "quarterly_rent", "annual_rent", "full_price", "price_per_sqm", "none"],
+    },
+    rent_period: { type: "string", enum: ["none", "monthly", "annual"] },
+    sort: {
+      type: "string",
+      enum: ["none", "newest", "oldest", "price_asc", "price_desc", "area_asc", "area_desc", "ppm_asc", "ppm_desc", "beds_desc"],
+    },
+    count: { type: "string" },
+    platforms: { type: "array", items: { type: "string" } },
+  },
+  required: ["kind", "reply", "deal", "location", "type", "detail", "price", "pricing_basis", "rent_period", "sort", "count", "platforms"],
+  additionalProperties: false,
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
@@ -623,9 +675,74 @@ Deno.serve(async (req: Request) => {
       responseSchema: SCHEMA,
     };
     const models = [MODEL, FALLBACK_MODEL].filter((m, i, a) => a.indexOf(m) === i);
+
+    // ── Claude path ───────────────────────────────────────────────────────────
+    // Same contract as runModelGemini: takes the turns + the volatile system suffix, returns the
+    // parsed object or { __err }. Everything downstream is provider-agnostic.
+    const runModelClaude = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
+      if (!ANTHROPIC_API_KEY) return { __err: json({ error: "ANTHROPIC_API_KEY not set" }, 500) };
+      // Gemini calls the assistant role "model"; the Messages API calls it "assistant".
+      const messages = cts.map((c) => ({
+        role: c.role === "model" ? "assistant" : "user",
+        content: c.parts.map((p) => p.text).join("\n"),
+      }));
+      // Two system blocks, in this order, on purpose:
+      //   [0] the big frozen prompt, cache_control'd → billed at ~10% after the first request
+      //   [1] the per-turn language line + live DB notes → NEVER inside the cached block, or the
+      //       prefix bytes change every request and nothing ever caches.
+      const system: Array<Record<string, unknown>> = [
+        { type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } },
+      ];
+      if (sysExtra) system.push({ type: "text", text: sysExtra });
+      const body = JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: CLAUDE_MAX_TOKENS,
+        system,
+        messages,
+        // Adaptive thinking replaces the disabled-reasoning Gemini config. `effort: low` keeps it
+        // fast and cheap for what is fundamentally a classification call; the schema does the rest.
+        // NOTE: temperature/top_p/top_k are REJECTED (400) on Sonnet 5 — steer via prompt, not sampling.
+        thinking: { type: "adaptive" },
+        output_config: { effort: CLAUDE_EFFORT, format: { type: "json_schema", schema: SCHEMA_JSON } },
+      });
+      let res: Response | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const r = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+          },
+          body,
+        });
+        if (r.ok) { res = r; break; }
+        res = r;
+        // 429/5xx are transient; anything else (400 schema error, 401 bad key) is ours to fix.
+        if (![429, 500, 502, 503, 529].includes(r.status)) break;
+        await r.body?.cancel().catch(() => {});
+        if (attempt < 2) await new Promise((rs) => setTimeout(rs, 400 * (attempt + 1)));
+      }
+      if (!res || !res.ok) {
+        const detail = res ? await res.text() : "no response";
+        return { __err: json({ error: `anthropic ${res?.status ?? 0}`, detail }, 502) };
+      }
+      const data = await res.json();
+      // A safety decline returns HTTP 200 with stop_reason "refusal" and empty/partial content —
+      // reading content[0] blindly would throw. Surface it instead of crashing the request.
+      if (data?.stop_reason === "refusal") return { __err: json({ error: "model declined the request" }, 502) };
+      const raw = (data?.content ?? [])
+        .filter((b: any) => b?.type === "text")
+        .map((b: any) => b?.text ?? "")
+        .join("")
+        .trim();
+      if (!raw) return { __err: json({ error: "empty model output" }, 502) };
+      try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw }, 502) }; }
+    };
+
     // Call Gemini with the given contents and return the parsed JSON object, or { __err } with a ready
     // Response on failure. Flash can return 503 during spikes — retry once, then fall back to lite.
-    const runModel = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
+    const runModelGemini = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
       const payload = JSON.stringify({ system_instruction: { parts: [{ text: SYSTEM + sysExtra }] }, contents: cts, generationConfig: genConfig });
       let res: Response | null = null;
       outer: for (const m of models) {
@@ -644,6 +761,10 @@ Deno.serve(async (req: Request) => {
       if (!raw) return { __err: json({ error: "empty model output" }, 502) };
       try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw }, 502) }; }
     };
+
+    // ONE dispatcher, so every existing call site is provider-agnostic and AGENT_PROVIDER is the
+    // only switch. Flipping it back to "gemini" is an env change, not a code change.
+    const runModel = AGENT_PROVIDER === "claude" ? runModelClaude : runModelGemini;
 
     // Force the reply language via system_instruction (Gemini weights it far more than a turn line) —
     // the model otherwise slips to Arabic when an English message contains one Arabic word (a city).
