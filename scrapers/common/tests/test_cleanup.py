@@ -19,12 +19,13 @@ class _Res:
 class _Table:
     def __init__(self, client, name):
         self.c, self.name, self._op, self._ids = client, name, None, None
+        self._order_col, self._limit, self._filtered = None, None, False
     def select(self, *a, **k): return self
-    def eq(self, *a, **k): return self
-    def gte(self, *a, **k): return self
-    def lt(self, *a, **k): return self
-    def order(self, *a, **k): return self
-    def limit(self, *a, **k): return self
+    def eq(self, *a, **k): self._filtered = True; return self
+    def gte(self, *a, **k): self._filtered = True; return self
+    def lt(self, *a, **k): self._filtered = True; return self
+    def order(self, col, *a, **k): self._order_col = col; return self
+    def limit(self, n, *a, **k): self._limit = n; return self
     def update(self, payload): self._op = ("update", payload); return self
     def insert(self, payload): self._op = ("insert", payload); return self
     def delete(self): self._op = ("delete", None); return self
@@ -37,19 +38,35 @@ class _Table:
         if self._op and self._op[0] == "insert":
             self.c.inserted.setdefault(self.name, []).append(self._op[1]); return _Res([])
         rows = self.c.rows.get(self.name, [])
-        return _Res(rows, count=len(rows))
+        # An UNFILTERED count="exact" query (no .eq/.gte/.lt chained) is exactly how cleanup.py measures
+        # platform_rows (the fraction-guard denominator) -- real PostgREST would return every row in the
+        # table there, which can legitimately be larger than the filtered "eligible" population. Model
+        # that distinction via an optional per-table override instead of conflating the two counts.
+        if not self._filtered and self.c.platform_totals and self.name in self.c.platform_totals:
+            return _Res([], count=self.c.platform_totals[self.name])
+        # count="exact" queries (the unclamped anomaly measurement) must see the TRUE full count,
+        # never truncated by .order()/.limit() -- matches real PostgREST semantics where count is
+        # computed over the whole filtered set regardless of the page/limit applied to .data.
+        true_count = len(rows)
+        if self._order_col:
+            rows = sorted(rows, key=lambda r: r.get(self._order_col))
+        if self._limit is not None:
+            rows = rows[: self._limit]
+        return _Res(rows, count=true_count)
 
 
 class _Client:
-    def __init__(self, rows): self.rows, self.deleted, self.updated, self.inserted = rows, {}, {}, {}
+    def __init__(self, rows, platform_totals=None):
+        self.rows, self.deleted, self.updated, self.inserted = rows, {}, {}, {}
+        self.platform_totals = platform_totals or {}
     def table(self, name): return _Table(self, name)
 
 
-def _install(monkey_rows, policy, probe, platform="testp", tables=("testp_listings",), dead_marker=(lambda b: b == "DEAD")):
+def _install(monkey_rows, policy, probe, platform="testp", tables=("testp_listings",), dead_marker=(lambda b: b == "DEAD"), platform_totals=None):
     rows = dict(monkey_rows)
     rows["platform_retention_policy"] = [policy]
     rows.setdefault("cleanup_runs", [])
-    client = _Client(rows)
+    client = _Client(rows, platform_totals=platform_totals)
     C.sb = lambda: client
     C.begin_run = lambda name: 1
     C.end_run = lambda *a, **k: True
@@ -95,6 +112,79 @@ def test_hard_cap_limits_deletes():
                  probe=lambda url: (404, ""))
     s = C.run("testp", force=True)
     assert s["deleted"] == 2 and len(c.deleted["testp_listings"]) == 2
+
+
+def _cand_at(i, day):
+    return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3,
+            "last_seen_at": f"2026-01-{day:02d}T00:00:00+00:00"}
+
+
+def _cand_seq(i):
+    # Monotonically increasing timestamp keyed purely on i, safe for any N (spreads across day+hour
+    # instead of a day-of-month field that overflows past 31).
+    return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3,
+            "last_seen_at": f"2026-01-{(i // 24) + 1:02d}T{i % 24:02d}:00:00+00:00"}
+
+
+def test_max_candidates_lets_a_scoped_backlog_through_the_anomaly_gate():
+    # 10 rows old enough to be eligible, ids 0..9, oldest (day 1) to newest (day 10). True backlog
+    # (10) trips a floor of 5 -- the whole point of max_candidates is to scope the JUDGED population
+    # down without touching that floor.
+    rows = [_cand_at(i, day=i + 1) for i in range(10)]
+
+    # Unscoped: the real 10-row backlog exceeds anomaly_floor=5 -> aborts, deletes nothing.
+    c0 = _install({"testp_listings": rows}, POL(anomaly_floor=5, anomaly_factor=1, max_delete_per_run=500),
+                  probe=lambda url: (404, ""))
+    s0 = C.run("testp", force=True)
+    assert s0["aborted"] is True and s0["deleted"] == 0 and c0.deleted == {}
+    assert s0["eligible_total"] == 10 and s0["eligible_considered"] == 10
+
+    # Scoped to 4: the guard now judges only 4 (<= floor 5) -> passes on its OWN unmodified logic,
+    # no threshold changed. Exactly the 4 OLDEST rows (days 1-4, ids 0-3) get processed; the other 6
+    # (days 5-10) are left completely untouched for a future cycle.
+    c = _install({"testp_listings": [dict(r) for r in rows]}, POL(anomaly_floor=5, anomaly_factor=1, max_delete_per_run=500),
+                 probe=lambda url: (404, ""))
+    s = C.run("testp", force=True, max_candidates=4)
+    assert s["aborted"] is False
+    assert s["eligible_total"] == 10           # true backlog reported honestly
+    assert s["eligible_considered"] == 4        # what the guard actually judged
+    assert s["work_set"] == 4 and s["deleted"] == 4
+    assert sorted(c.deleted["testp_listings"]) == [0, 1, 2, 3]     # oldest-first, nothing newer touched
+
+
+def test_max_candidates_still_aborts_if_the_scoped_amount_itself_is_too_big():
+    # Scoping down does not force anything through: if even the requested scope still exceeds the
+    # (unmodified) floor, the run must still abort and delete nothing.
+    rows = [_cand_at(i, day=i + 1) for i in range(10)]
+    c = _install({"testp_listings": rows}, POL(anomaly_floor=3, anomaly_factor=1, max_delete_per_run=500),
+                 probe=lambda url: (404, ""))
+    s = C.run("testp", force=True, max_candidates=4)     # 4 > floor 3
+    assert s["aborted"] is True and s["deleted"] == 0 and c.deleted == {}
+    assert s["eligible_total"] == 10 and s["eligible_considered"] == 4
+
+
+def test_max_candidates_also_scopes_the_mass_inactivation_fraction_guard():
+    # platform_rows (600, via an UNFILTERED count, independent of the eligible/backlog count) must be
+    # >= FRAC_GUARD_MIN_ROWS(500) for this guard to even engage -- mirrors the real aqarcity shape
+    # (2,611 total rows, a fraction of them eligible). 100 eligible rows here.
+    rows = [_cand_seq(i) for i in range(100)]
+
+    # Unscoped: true backlog (100) is 100/600 = 16.7% of the platform -> exceeds the 10% fraction cap
+    # (anomaly_floor set high so ONLY the fraction guard is what fires here).
+    c0 = _install({"testp_listings": rows}, POL(anomaly_floor=1000, max_delete_per_run=500),
+                  probe=lambda url: (404, ""), platform_totals={"testp_listings": 600})
+    s0 = C.run("testp", force=True)
+    assert s0["aborted"] is True and "mass-inactivation" in s0["abort_reason"] and c0.deleted == {}
+
+    # Scoped to 50: 50/600 = 8.3%, under the 10% cap -> the SAME unmodified fraction guard now passes,
+    # and only the 50 oldest rows are processed; the other 50 are left untouched.
+    c = _install({"testp_listings": [dict(r) for r in rows]}, POL(anomaly_floor=1000, max_delete_per_run=500),
+                 probe=lambda url: (404, ""), platform_totals={"testp_listings": 600})
+    s = C.run("testp", force=True, max_candidates=50)
+    assert s["aborted"] is False
+    assert s["eligible_total"] == 100 and s["eligible_considered"] == 50
+    assert s["platform_rows"] == 600
+    assert s["deleted"] == 50 and sorted(c.deleted["testp_listings"]) == list(range(50))
 
 
 def test_anomaly_spike_aborts_and_deletes_nothing():
