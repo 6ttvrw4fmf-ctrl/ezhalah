@@ -191,12 +191,27 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
             frac_cap = pol["max_eligible_frac"] * platform_rows
 
             if eligible_total > thresh:
+                # Report the OTHER gate's verdict in the same breath. The two gates are independent
+                # and are evaluated in sequence, so an operator who reads only "raise anomaly_floor"
+                # can raise it, re-run, and abort a second time on the fraction guard with a message
+                # that then blames "a partial crawl or source outage" — a misleading conclusion when
+                # the backlog has already been proven to be genuine delistings. aqarcity 2026-08-16
+                # is exactly that case: 419 eligible clears neither the floor (408) nor the 10% cap
+                # (261 of 2,611 rows). Naming both here makes it ONE owner decision, not two.
+                if platform_rows >= FRAC_GUARD_MIN_ROWS and eligible_total > frac_cap:
+                    also = (f" ALSO NOTE: raising anomaly_floor alone would NOT unblock this run — "
+                            f"{eligible_total} is {100.0 * eligible_total / platform_rows:.1f}% of "
+                            f"{platform_rows} rows and the mass-inactivation guard caps it at "
+                            f"{100.0 * pol['max_eligible_frac']:.0f}%, so the next run would abort "
+                            f"on that guard instead. Both gates need an owner decision together.")
+                else:
+                    also = ""
                 _abort(f"anomaly: {eligible_total} eligible > threshold {thresh:.0f} "
                        f"(floor {pol['anomaly_floor']}, {pol['anomaly_factor']}× median {median:.0f}). "
                        f"Human review required. NOTE: a STANDING backlog above the floor aborts "
                        f"every run and can never drain — if {eligible_total} is legitimate "
                        f"accumulation rather than a spike, raise anomaly_floor above it; do not "
-                       f"force.")
+                       f"force.{also}")
             elif platform_rows >= FRAC_GUARD_MIN_ROWS and eligible_total > frac_cap:
                 # Scale guard: a partial crawl, source outage or sitemap collapse shows up as a
                 # large FRACTION of the platform going eligible at once, even when the absolute

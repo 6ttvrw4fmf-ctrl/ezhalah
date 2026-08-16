@@ -104,6 +104,32 @@ def test_anomaly_spike_aborts_and_deletes_nothing():
     assert s["aborted"] is True and s["deleted"] == 0 and c.deleted == {}
 
 
+def test_anomaly_abort_names_the_fraction_gate_when_it_would_also_trip():
+    """Regression (aqarcity, 2026-08-16): the anomaly abort told the operator to 'raise
+    anomaly_floor', but on a platform where the eligible population ALSO exceeds
+    max_eligible_frac, doing only that re-aborts on the mass-inactivation guard — whose
+    message blames 'a partial crawl or source outage', a misleading read when the backlog is
+    already proven to be genuine delistings. The abort must name BOTH gates so it is one
+    owner decision. 600 rows: over FRAC_GUARD_MIN_ROWS, and 600 > 10% of 600."""
+    c = _install({"testp_listings": [_cand(i) for i in range(600)]},
+                 POL(anomaly_floor=2, anomaly_factor=4), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is True and s["deleted"] == 0 and c.deleted == {}
+    assert "ALSO NOTE" in s["abort_reason"], s["abort_reason"]
+    assert "mass-inactivation guard" in s["abort_reason"]
+    assert "raising anomaly_floor alone would NOT unblock" in s["abort_reason"]
+
+
+def test_anomaly_abort_stays_quiet_when_the_fraction_gate_would_pass():
+    """The converse: below FRAC_GUARD_MIN_ROWS the fraction guard does not apply, so the
+    abort must NOT claim a second gate is in the way."""
+    c = _install({"testp_listings": [_cand(i) for i in range(5)]},
+                 POL(anomaly_floor=2, anomaly_factor=4), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is True and c.deleted == {}
+    assert "ALSO NOTE" not in s["abort_reason"], s["abort_reason"]
+
+
 def test_failsafe_no_dead_check_aborts():
     C.PLATFORMS.pop("nodeadp", None)
     C.PLATFORMS["nodeadp"] = {"tables": ["nodeadp_listings"], "dead_marker": None}
