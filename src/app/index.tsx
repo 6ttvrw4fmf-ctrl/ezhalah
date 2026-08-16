@@ -177,12 +177,19 @@ export default function Home() {
   // the same inventory pressing Search returns. Price is deliberately absent (owner, 2026-08-15).
   const cohortTypes = cohortTypesAr(query);
   const cohortTypesSig = cohortTypes ? cohortTypes.join('|') : '';
-  // «N إعلان · P٪» — the honest share of the current cohort. Denominator comes from the SAME RPC
-  // row as the count (one query, cannot disagree); clamped so a display bug can never show >100%.
-  const cohortShareLabel = (n: number, total: number): string | undefined => {
-    if (!(n > 0) || !(total > 0)) return undefined;
-    const pct = Math.max(0, Math.min(100, Math.round((100 * n) / total)));
-    return `${grouped(n)} ${t('ads')} · ${pct}٪`;
+  // «N إعلان» — how many ACTIVE listings this option really has, in the current cohort.
+  //
+  // The share percentage that used to trail this label («… · 38٪») was REMOVED on owner instruction
+  // (2026-08-16): "remove this percentage and show these active numbers". A share answers a question
+  // nobody asked at this moment — the user is choosing where to search, so the only useful fact is
+  // how much is actually there. The count itself is unchanged and still comes straight from the
+  // counting RPC, so nothing about its accuracy moved.
+  //
+  // Returns undefined for a zero/absent count so a caller can render its own explicit "nothing here"
+  // message instead of a bare «0 إعلان» (see the districts list, which does exactly that).
+  const cohortCountLabel = (n: number): string | undefined => {
+    if (!(n > 0)) return undefined;
+    return `${grouped(n)} ${t('ads')}`;
   };
   // Refs so the ENTIRE Price/Area/Size box is one tap target (owner 2026-07-10): tapping anywhere in
   // the box — icon, label, padding, unit text — focuses the input immediately, same pattern already
@@ -1027,7 +1034,7 @@ export default function Home() {
                             // display-name collision (e.g. الهفوف ×2), prepended so it stays visible.
                             sublabel: [
                               hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
-                              cohortShareLabel(opt.listingCount, opt.totalInCohort),
+                              cohortCountLabel(opt.listingCount),
                             ].filter(Boolean).join(' · ') || undefined,
                             icon: LOC_IMG.city, // restored designed art (see TrendingList.tsx note)
                           }))}
@@ -1052,7 +1059,7 @@ export default function Home() {
                             {(() => {
                               const parts = [
                                 hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
-                                cohortShareLabel(opt.listingCount, opt.totalInCohort),
+                                cohortCountLabel(opt.listingCount),
                               ].filter(Boolean);
                               return parts.length ? <Text style={s.suggDist}>{parts.join(' · ')}</Text> : null;
                             })()}
@@ -1234,7 +1241,7 @@ export default function Home() {
                             // presenting a popular-at-category-scope district that would dead-end.
                             sublabel: districtLiveCounts?.[opt.districtAr] === 0
                               ? t('No listings here right now')
-                              : cohortShareLabel(opt.listingCount, opt.totalInCity),
+                              : cohortCountLabel(opt.listingCount),
                             icon: LOC_IMG.district, // restored designed art (see TrendingList.tsx note)
                           }))}
                           onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
@@ -1267,8 +1274,8 @@ export default function Home() {
                             <Text style={[s.suggCity, isEmpty && s.suggCityEmpty]}>{opt.districtAr}</Text>
                             {isEmpty
                               ? <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text>
-                              : (cohortShareLabel(opt.listingCount, opt.totalInCity)
-                                  ? <Text style={s.suggDist}>{cohortShareLabel(opt.listingCount, opt.totalInCity)}</Text>
+                              : (cohortCountLabel(opt.listingCount)
+                                  ? <Text style={s.suggDist}>{cohortCountLabel(opt.listingCount)}</Text>
                                   : null)}
                           </View>
                           {isPicked ? <Ionicons name="checkmark-circle" size={18} color={colors.primary} /> : null}
