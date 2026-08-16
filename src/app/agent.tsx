@@ -675,6 +675,33 @@ export default function Agent() {
 
   // Shared "found" choreography: the typed reply ("answer respond") → a held "Ezhalah is searching…"
   // beat → the results header + cards. `statusId` is the thinking bubble we morph into the reply.
+  // Mirror the query behind the results now on screen into `?filter=`, so a hard refresh restores THIS
+  // search instead of being sent Home (see the call site in playListings for the full defect).
+  //
+  // Writes `lastFilterRef` FIRST, deliberately: the param effect below re-runs on every `filter`
+  // change, and re-running the search we are in the middle of rendering would wipe the conversation
+  // and loop. Pre-seeding the ref makes the effect's `filter !== lastFilterRef.current` guard false,
+  // so this write is inert in-session and only matters to the next cold mount.
+  //
+  // Web-only: `?filter=` exists for the browser's refresh/bookmark/share, and native has no refresh.
+  const publishSearchToUrl = (q: SearchQuery | undefined) => {
+    if (Platform.OS !== 'web' || !q) return;
+    try {
+      const json = JSON.stringify(q);
+      if (json === lastFilterRef.current) return;
+      lastFilterRef.current = json;
+      lastSeedRef.current = undefined;
+      // `seed` is cleared with it: a chip-seeded chat that has since moved on must not restore the
+      // original chip on refresh — `filter` is now the truth for this screen. The remaining params
+      // (chatBubble/chatSub/replay/hid) belong to the history-replay path and are cleared for the
+      // same reason: this is a live search, not a saved one.
+      router.setParams({ filter: json, seed: undefined, chatBubble: undefined, chatSub: undefined, replay: undefined, hid: undefined });
+    } catch {
+      // A query that cannot be serialised simply stays unpublished — the results on screen are
+      // untouched. Never let a URL-sync failure break the search the user is looking at.
+    }
+  };
+
   const playListings = async (run: Run, statusId: string, summary: string, result: SearchResult, messageText?: string) => {
     // 1) SEARCHING phase: status bubble shows the slogan + summary. Slogan language follows the
     // user's MESSAGE text (English message → English slogan) instead of the UI locale, so users
@@ -715,6 +742,15 @@ export default function Agent() {
       ),
     );
     toBottom();
+    // A REFRESH MUST NOT THROW THE USER BACK HOME (owner report 2026-08-16).
+    // The refresh guard in _layout.tsx sends every param-less deep route Home, because a screen whose
+    // state lives only in memory would otherwise come back empty. `/agent?filter=…` is exempt — but
+    // ONLY the Filter path ever wrote that param. A chat search (الوكيل الذكي), a refine answer and the
+    // guided-interview finish all produce results at this exact point while the URL stays a bare
+    // `/agent`, so refreshing on them matched the guard and landed on Home with the search gone.
+    // Publishing the query that PRODUCED these results makes every search path restorable through the
+    // one mechanism that is already proven for Filter — no second restore path to keep in sync.
+    publishSearchToUrl(result.query);
     // Cards start appearing NOW — one by one, while the intro text is still typing above (owner
     // 2026-07-09: show the first card as soon as valid listings are ready; don't hold them hostage
     // to the typewriter). The more-message + feedback row still wait for the text (doneTyping).

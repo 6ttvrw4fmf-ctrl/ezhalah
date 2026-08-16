@@ -182,6 +182,26 @@ try {
   const t3 = await body();
   check('after refresh, untouched «بحث» searches again',
     /لقينا|ما لقينا/.test(t3) && !t3.includes('الرجاء اختيار مدينة من القائمة.'));
+
+  // ---- Journey C: publishing the query to the URL must not re-run the search (owner 2026-08-16).
+  // playListings now writes `?filter=` for EVERY search path, so a chat/refine search survives a
+  // refresh instead of being sent Home. The dangerous half is in-session: the param effect re-runs
+  // on any `filter` change, so a publish that did not pre-seed lastFilterRef would re-run the search
+  // it just rendered — forever. A loop shows up here as the request bubble/summary rendered more than
+  // once. (The chat leg itself is not driven here: it needs the live agent function and 2-3 AI
+  // round-trips, which would make this required check slow and flaky. It was verified by hand in
+  // this same harness — chat search → URL gained ?filter= → refresh restored the results instead of
+  // Home — and the wiring is pinned offline by verify-refresh-restores-filter-search.ts §7.)
+  check('the results URL still carries the query after an in-session search', page.url().includes('filter='),
+    `url = ${page.url().slice(0, 120)}`);
+  const summaries = (t3.match(/ملخص البحث/g) ?? []).length;
+  check('publishing the URL did not re-run the search in a loop', summaries <= 2,
+    `«ملخص البحث» rendered ${summaries}× — more than one live turn means the param effect is looping`);
+  await page.waitForTimeout(4000);
+  const t4 = await body();
+  check('the conversation is stable after the URL write settles',
+    (t4.match(/ملخص البحث/g) ?? []).length <= 2 && /لقينا|ما لقينا/.test(t4));
+
   check('no uncaught runtime error across the whole run', crashes.length === 0, crashes.join(' | '));
 } catch (e) {
   failed++;

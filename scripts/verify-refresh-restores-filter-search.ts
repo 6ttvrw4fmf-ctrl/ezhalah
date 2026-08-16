@@ -108,5 +108,50 @@ check('_layout.tsx has no unconditional pathname !== "/" redirect left',
 check('_layout.tsx passes the real query string, not a hardcoded one',
   /window\.location\.search/.test(layout));
 
+// 7) THE OTHER HALF (owner report 2026-08-16: "user does a search then refresh, it takes him back to
+//    the home page"). Everything above proves `/agent?filter=…` survives — but the exemption only
+//    helps a URL that HAS the param, and only the Filter path ever wrote one. A chat search in
+//    الوكيل الذكي, a refine answer, and the guided-interview finish all render results while the URL
+//    stays a bare `/agent`, which §2 correctly sends Home — so those searches died on refresh.
+//    Reproduced live on production before the fix: typed a chat search, reloaded, landed on `/`.
+//    The fix publishes the query behind the on-screen results from playListings — the ONE funnel all
+//    four live-search call sites go through — so there is no second restore path to keep in sync.
+const play = agent.slice(agent.indexOf('const playListings ='), agent.indexOf('const playListings =') + 4000);
+check('playListings publishes the on-screen query to the URL (every search path, not just Filter)',
+  /publishSearchToUrl\(\s*result\.query\s*\)/.test(play));
+check('publishSearchToUrl exists and writes the filter param',
+  /const\s+publishSearchToUrl\s*=/.test(agent) && /router\.setParams\(\s*\{[^}]*\bfilter:\s*json\b/.test(agent));
+
+// 7a) ANTI-LOOP INVARIANT. The param effect re-runs on every `filter` change and would re-run the
+//     very search being rendered — wiping the conversation, then publishing again. Pre-seeding
+//     lastFilterRef makes its `filter !== lastFilterRef.current` guard false, so the write is inert
+//     in-session. The ORDER is the whole safety property, so it is asserted as an order.
+const pub = agent.slice(agent.indexOf('const publishSearchToUrl ='));
+const pubBody = pub.slice(0, pub.indexOf('const playListings ='));
+check('publishSearchToUrl seeds lastFilterRef BEFORE setParams (or the effect re-runs the search)',
+  pubBody.indexOf('lastFilterRef.current = json') > -1
+  && pubBody.indexOf('lastFilterRef.current = json') < pubBody.indexOf('router.setParams'));
+check('publishSearchToUrl no-ops when the URL already carries this exact query',
+  /json\s*===\s*lastFilterRef\.current/.test(pubBody));
+check('publishSearchToUrl clears the history-replay params (a live search must not restore as a replay)',
+  /replay:\s*undefined/.test(pubBody) && /hid:\s*undefined/.test(pubBody) && /seed:\s*undefined/.test(pubBody));
+check('publishSearchToUrl cannot break the visible results if serialisation fails',
+  /try\s*\{/.test(pubBody) && /catch/.test(pubBody));
+
+// 7b) THE TWO HALVES MUST AGREE. What the app writes has to be what the refresh guard accepts —
+//     asserted by round-tripping a real query through both, not by trusting that they match.
+const CHAT_QUERY = { deal: 'Rent', location: 'جدة', category: 'Residential', rentPeriod: 'annual', type: 'Apartment' };
+const published = `?filter=${encodeURIComponent(JSON.stringify(CHAT_QUERY))}`;
+check('a published chat-search URL is restorable (the two halves agree)',
+  hasRestorableQuery(published) === true);
+check('a published chat-search URL is NOT sent Home (the reported bug, end to end)',
+  shouldSendRefreshHome('/agent', published) === false);
+
+// 7c) Every live-search path must keep funnelling through playListings. If a future path renders
+//     results without it, that path silently loses refresh again — the exact way this bug appeared.
+const playCalls = (agent.match(/await playListings\(/g) ?? []).length;
+check(`every live-search path still funnels through playListings (found ${playCalls} call sites, expected ≥4)`,
+  playCalls >= 4);
+
 console.log(failed ? `\n${failed} FAILED` : '\nAll refresh-restore checks passed');
 process.exit(failed ? 1 : 0);
