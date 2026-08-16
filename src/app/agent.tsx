@@ -8,7 +8,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,7 +15,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { runAfterAnimation } from '@/lib/afterAnimation';
-import { Tappable, Heartbeat } from '@/components/ui';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import { CardIn, LoadingDots } from '@/components/CardReveal';
@@ -31,7 +29,7 @@ import HeroBackground from '@/components/HeroBackground';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import Sidebar, { useDocked } from '@/components/Sidebar';
-import { ResultCard, PopIn } from '@/components/ResultCard';
+import { ResultCard } from '@/components/ResultCard';
 import { parseQuery, respond } from '@/data/agent';
 import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
@@ -70,10 +68,19 @@ const IS_WEB = Platform.OS === 'web';
 // room (the user barely scrolls). On phone it stays a comfortable single-column reading width.
 const MAX_W = IS_WEB ? 940 : 560;
 
+// Composer + mode-pill motion (redesign 2026-08-16) — the TOAST_EASE idiom: state drives the target
+// style, a web-only CSS transition supplies the glide. Chosen over Animated after live-testing that
+// Animated styles do not flush through createAnimatedComponent(TextInput) on this RNW version; CSS
+// transitions are the codebase's proven web-motion path (feedback toast, chip hovers).
+// ponytail: native (no CSS) falls back to the pre-redesign instant height step — revisit with
+// Animated wrappers when the native app actually ships; web (the only live surface) is smooth.
+const COMPOSER_EASE = IS_WEB ? ({ transitionProperty: 'border-color, box-shadow', transitionDuration: '180ms' } as any) : null;
+const INPUT_EASE = IS_WEB ? ({ transitionProperty: 'height', transitionDuration: '140ms', transitionTimingFunction: 'ease-out' } as any) : null;
+const MODE_EASE = IS_WEB ? ({ transitionProperty: 'opacity, height, transform', transitionDuration: '200ms' } as any) : null;
+
 // Example-prompt pools, sampler, and the DB-driven hook all live in src/data/examplePrompts.ts so
 // the home onboarding grid and this agent screen share ONE library — adding a prompt or a new DB
 // source there now appears in both places.
-import { useExamplePrompts } from '@/data/examplePrompts';
 
 // A «more precise» refine prompt attached to an agent message: ONE clarifying dimension with clickable
 // answer chips (never typed). Tapping a chip merges that one field into the SAME filter and re-searches.
@@ -294,8 +301,6 @@ const waitRun = (run: Run, ms: number) =>
 // Greeting, reply, and the request-bubble echo all share the ONE constant speed defined above —
 // there are no per-type durations any more, so nothing ever types faster or slower than anything else.
 
-// Soft background fade on hover/press for the suggestion chips (web only).
-const WEB_TAP = Platform.OS === 'web' ? ({ transitionProperty: 'opacity, background-color', transitionDuration: '150ms' } as any) : null;
 // Feedback toast fade + slide (web CSS transition; native just toggles — acceptable, web ships).
 const TOAST_EASE = Platform.OS === 'web' ? ({ transitionProperty: 'opacity, transform', transitionDuration: '250ms' } as any) : null;
 
@@ -372,16 +377,8 @@ function BrandReveal({ brand, text, onDone }: { brand: string; text: string; onD
 
 export default function Agent() {
   const insets = useSafeAreaInsets();
-  // Responsive to the ACTUAL viewport (not just native vs web): a narrow screen — a phone, OR the web
-  // app opened on a phone browser — gets the reduced 2-column / few-cards layout. (user request.)
-  const { width: winW } = useWindowDimensions();
-  const narrowGrid = winW < 680;
   const router = useRouter();
   const { t, locale, setLocale } = useI18n();
-  // A FRESH random subset of example prompts each mount/refresh — from the pool matching the UI
-  // language (Arabic UI → Arabic pool, English UI → English pool, never mixed). Re-samples if the
-  // language or column count changes. Phone shows 6, wider screens 12. (user request: rotation.)
-  const exampleSet = useExamplePrompts(locale === 'ar' ? 'ar' : 'en', narrowGrid ? 6 : 12);
   const { seed, filter, chatBubble, chatSub, replay, fresh, hid } = useLocalSearchParams<{
     seed?: string;
     filter?: string;
@@ -397,8 +394,46 @@ export default function Agent() {
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [typed, setTyped] = useState('');
   // Composer height: single line by default, grows only as text wraps (ChatGPT-style). (owner 2026-07-08)
-  const [inputH, setInputH] = useState(20);
+  // Composer sizing (redesign 2026-08-16, owner brief: "closer to ChatGPT/Claude, but Ezhalah").
+  // MIN = one 22px Arabic line; MAX = ~5 lines, then the input scrolls internally. `inputH` holds
+  // the TARGET height from RN's own content metrics; `inputHAnim` glides to it (140ms ease-out) so
+  // growth and shrink are smooth — the box never jumps between sizes. JS driver: height cannot use
+  // the native driver, and 140ms of JS-driven height is imperceptible as work.
+  const COMPOSER_MIN_H = 22;
+  const COMPOSER_MAX_H = 112;
+  const [inputH, setInputH] = useState(COMPOSER_MIN_H);
+  // Focus glow — border eases fieldLine→primary and the lift deepens slightly (s.composerFocused +
+  // COMPOSER_EASE). Same calm register as ModeSwitch's raised indicator: a state change you feel
+  // more than notice.
+  const [composerFocused, setComposerFocused] = useState(false);
+  // Send button feel — the ModeSwitch/share spring constants, so the whole surface shares one
+  // motion language. Hover (web) swells to 1.06; press dips to 0.9.
+  const sendScale = useRef(new Animated.Value(1)).current;
+  const sendSpring = (toValue: number) =>
+    Animated.spring(sendScale, { toValue, stiffness: 260, damping: 26, mass: 0.7, useNativeDriver: Platform.OS !== 'web' }).start();
+  const [sendHover, setSendHover] = useState(false);
   const inputRef = useRef<any>(null);
+  // Desktop-web keyboard contract (ChatGPT/Claude convention): Enter sends and KEEPS focus for the
+  // next message; Shift+Enter makes a new line. Bound as a raw DOM keydown on the textarea because
+  // RNW's onKeyPress normalization reported key: "" for Enter (observed live) — the DOM event is
+  // authoritative. preventDefault stops the newline; blurOnSubmit is web-false so RNW never blurs.
+  // sendRef keeps the listener on the LATEST send() without re-binding per render.
+  const sendRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    if (!IS_WEB) return;
+    const node: any = inputRef.current;
+    if (!node?.addEventListener) return;
+    const onKeyDown = (ev: KeyboardEvent) => {
+      // key === 'Enter' is the standard; 'Return' and keyCode 13 cover synthetic/legacy dispatchers.
+      const isEnter = ev.key === 'Enter' || ev.key === 'Return' || ev.keyCode === 13;
+      if (isEnter && !ev.shiftKey && !ev.isComposing) {
+        ev.preventDefault();
+        sendRef.current();
+      }
+    };
+    node.addEventListener('keydown', onKeyDown);
+    return () => node.removeEventListener('keydown', onKeyDown);
+  }, []);
   const [busy, setBusy] = useState(false);
   // True once the user hit Stop mid-display: freezes the cards already shown and hides the "more
   // precise" CTA on the stopped results. Reset on every new turn. (user request.)
@@ -411,6 +446,23 @@ export default function Agent() {
   const shareScale = useRef(new Animated.Value(1)).current;
   const shareSpring = (toValue: number) =>
     Animated.spring(shareScale, { toValue, stiffness: 260, damping: 26, mass: 0.7, useNativeDriver: Platform.OS !== 'web' }).start();
+  // Filter / AI ModeSwitch (owner 2026-08-16): the pill no longer lives in the top-right corner —
+  // it sits CENTERED under the header, mirroring the home hero's centered pill, so switching modes
+  // reads as one control staying in the middle rather than teleporting into the corner. And the
+  // moment a search happens (any user message or results — same condition that hides the guest
+  // chips), it fades + collapses away: mid-conversation the pill is noise. JS driver (height).
+  const modeSearched = msgs.some((m) => m.role === 'user' || m.role === 'results');
+  const [modeGone, setModeGone] = useState(false);
+  useEffect(() => {
+    if (modeSearched && !modeGone) {
+      // Let the CSS collapse (MODE_EASE, 200ms) finish, then unmount. setTimeout, not an animation
+      // callback — hidden tabs freeze rAF, and unmount must never hang on one (see afterAnimation).
+      const id = setTimeout(() => setModeGone(true), 220);
+      return () => clearTimeout(id);
+    }
+    if (!modeSearched && modeGone) setModeGone(false); // new chat — pill returns settled
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeSearched]);
   // ChatGPT-style feedback confirmation: a small «شكراً على ملاحظتك» toast at the TOP of the chat
   // (above the conversation, below the header) that appears briefly after a 👍/👎 and auto-dismisses
   // ~2.4s later. (owner 2026-07-09: like ChatGPT — not next to the buttons.) Fade/slide via the CSS
@@ -1241,6 +1293,9 @@ export default function Agent() {
   // Gemini + the landmark layer (with the bundled-heuristic fallback) exactly like a typed message —
   // so a tapped chip demonstrates the full intelligence, not the offline heuristic. (user request.)
 
+  // Keep the DOM Enter listener on the latest send() (it guards empty/busy itself).
+  sendRef.current = () => { void send(); };
+
   // Filter search / history open routes here with ?filter=<JSON SearchQuery> — show the
   // natural-language bubble + listings inline (prototype parity: no separate results page).
   // The interview path supplies its own bubble + subheading (prototype interviewToChat copy, which
@@ -1522,7 +1577,6 @@ export default function Agent() {
             so switching reads as one continuous control). (owner top-nav redesign, 2026-07-24.) */}
         <Text ref={noTranslateRef} style={s.title}>{t('Ezhalah')}</Text>
         <View style={{ flex: 1 }} />
-        <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
         {/* Note #5 — Share is ALWAYS visible the moment the user is in AI Agent mode. Not gated on
             results, not gated on a completed search. Throughout the entire experience. (user request.) */}
         {/* Redesigned to match the home screen's share button (design review 2026-07-24) — same
@@ -1540,6 +1594,15 @@ export default function Agent() {
           </Animated.View>
         </Pressable>
       </View>
+      {/* Filter / AI pill — centered under the header (same middle-of-screen band as home's hero
+          pill, owner 2026-08-16: "it stays in the middle, not far right"). Fades + collapses away
+          the moment a search happens, in either mode; the wrapper's animated height keeps the chat
+          area from snapping up when it leaves. */}
+      {!modeGone && (
+        <View style={[s.modeWrap, MODE_EASE, modeSearched && s.modeWrapHidden]}>
+          <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
+        </View>
+      )}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
 
@@ -1826,83 +1889,81 @@ export default function Agent() {
               );
             }); })()}
 
-            {/* Quick-suggestion chips sit directly under Ezhalah's greeting on a fresh chat, and
-                disappear once the user has searched (any user message or results present). They're a
-                first-timer onboarding nudge, so they only show for GUESTS — a logged-in user who lives
-                in the app finds them noise, so we hide them entirely. (user request.) */}
-            {(() => {
-              // Chips appear only AFTER the greeting has finished typing (not during the blank/typing
-              // beat), then POP IN one-by-one. Guests only; gone once a search has happened. (user request.)
-              const greet = msgs.find((m) => m.role === 'agent' && m.greeting);
-              const ready = !!greet && !!doneTyping[greet.id];
-              if (user || !ready || msgs.some((m) => m.role === 'user' || m.role === 'results')) return null;
-              return (
-                <View style={s.suggest}>
-                  <View style={s.onbWrap}>
-                    <Ionicons name="search" size={IS_WEB ? 26 : 22} color={colors.primary} />
-                    <Text style={s.onbHeading}>{t("Not sure what you're looking for?")}</Text>
-                    <Text style={s.onbDesc}>{t('Tap one of the examples below and let Ezhalah start the search for you.')}</Text>
-                  </View>
-                  <View style={s.exGrid}>
-                    {/* A randomized subset (exampleSet) already matched to the UI language — sent to the
-                        real agent as-is on tap (no translation). Narrow viewport shows 6 in 2 columns,
-                        wider shows 12 in 3 columns; each pops in then keeps a gentle heartbeat. (user request.) */}
-                    {exampleSet.map((ex, i) => (
-                      <PopIn key={ex} index={i} style={[s.exGridItem, { width: narrowGrid ? '48.5%' : '31.5%' }]}>
-                        <Heartbeat index={i} style={s.exBeat}>
-                          {/* Tappable gives the same press-scale the home "Start here" cards have. */}
-                          <Tappable style={[s.exChip, Platform.OS === 'web' && WEB_TAP] as any} dip={0.06} onPress={() => send(ex)}>
-                            {/* Rounded icon tile, mirroring the filter's "Start here" chips. */}
-                            <View style={s.exIcBox}>
-                              <Ionicons name="search-outline" size={IS_WEB ? 18 : 15} color={colors.primary} />
-                            </View>
-                            <Text style={s.exChipTx} numberOfLines={2}>{ex}</Text>
-                          </Tappable>
-                        </Heartbeat>
-                      </PopIn>
-                    ))}
-                  </View>
-                </View>
-              );
-            })()}
+            {/* REMOVED 2026-08-16 (owner composer brief: "One Arabic RTL AI input, the send arrow,
+                and the disclaimer underneath. No suggestion boxes and no unnecessary elements."):
+                the guest-only «مو متأكد وش تبحث عنه؟» heading + example-chips grid that popped in
+                under the greeting. src/data/examplePrompts.ts and the ex* / onb* styles are KEPT
+                (restore = git revert of this commit, no re-authoring); the chips' prompts library is
+                still pinned healthy by scripts/verify-example-prompts-arabic.ts. */}
           </View>
         </ScrollView>
         </Animated.View>
 
-        {/* Composer */}
+        {/* Composer — redesigned 2026-08-16 (owner brief: "closer to ChatGPT/Claude in interaction,
+            still Ezhalah in identity"). One RTL input + the send arrow + the disclaimer; nothing else.
+            The surface is the ModeSwitch family's raised-white card: hairline border that eases to
+            brand green on focus, soft green-tinted lift that deepens with it, pill radius. Height
+            GLIDES between line counts (inputHAnim) instead of snapping; the send arrow pins to the
+            bottom edge as the box grows, and the input keeps paddingEnd so text never reaches it. */}
         <View style={[s.composerWrap, { paddingBottom: insets.bottom + 8 }]}>
-          <View style={s.col}>
-            <View style={s.composer}>
+          <View style={[s.col, s.composerCol]}>
+            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
+              {/* The GLIDE lives on this wrapper, never on the textarea itself: a CSS height
+                  transition on the measured element corrupts RNW's content measurement (it reads
+                  mid-transition heights and ratchets an empty box to max — observed live). The
+                  textarea keeps the pre-redesign numeric-height contract; the wrapper eases to the
+                  same target and clips the single frame of difference. */}
+              <View style={[s.inputGrow, INPUT_EASE, { height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) }]}>
               <TextInput
                 ref={inputRef}
                 // writingDirection RTL for Arabic (the parent col is LTR-pinned, so without this the
-                // placeholder's trailing «...» lands on the wrong side — it must read «…عنه»). (owner 2026-07-09)
-                style={[s.input, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr', height: Math.min(110, Math.max(20, inputH)) } as any]}
-                placeholder={t("Type what you're looking for...")}
+                // placeholder's trailing «...» lands on the wrong side — it must read «…السعودية»). (owner 2026-07-09)
+                style={[s.input, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr', height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) } as any]}
+                placeholder={t("Type the property you're looking for in Saudi Arabia...")}
                 placeholderTextColor={colors.muted}
+                selectionColor={colors.primary}
                 value={typed}
-                onChangeText={(v) => { setTyped(v); if (!v) setInputH(20); }}
-                // Single line by default; grows only as text wraps, capped at maxHeight (then scrolls).
-                // onContentSizeChange uses RN's own line metrics (native + web). (owner 2026-07-08)
-                onContentSizeChange={(e) => setInputH(Math.min(110, Math.max(20, e.nativeEvent.contentSize.height)))}
+                onChangeText={(v: string) => { setTyped(v); if (!v) setInputH(COMPOSER_MIN_H); }}
+                // Grows only as text wraps, capped at COMPOSER_MAX_H (then scrolls internally); the
+                // TARGET comes from RN's own line metrics (native + web), the MOTION from INPUT_EASE.
+                // (owner 2026-07-08 metrics; owner 2026-08-16 smooth growth.)
+                onContentSizeChange={(e: any) => setInputH(Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, e.nativeEvent.contentSize.height)))}
+                onFocus={() => setComposerFocused(true)}
+                onBlur={() => setComposerFocused(false)}
                 // The language does NOT flip while typing a chat message — it switches only when the
                 // message is SENT (see send(): an English message → English UI, Arabic → Arabic).
                 // Live per-character switching is reserved for the Home filter's location field.
                 // (user request.)
                 multiline
-                onSubmitEditing={() => send()}
+                // Desktop-web Enter handling lives in a raw DOM keydown listener (see the effect by
+                // inputRef): RNW's onKeyPress normalization delivered key: "" for Enter here, so the
+                // send shortcut binds below the framework. Native keeps the platform submit path.
+                onSubmitEditing={IS_WEB ? undefined : () => send()}
                 returnKeyType="search"
-                blurOnSubmit
+                blurOnSubmit={!IS_WEB}
               />
+              </View>
               {busy || revealing ? (
                 // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
                 // is a Stop box — tap it to cancel the search and freeze the cards shown. (user request.)
                 <Pressable onPress={stop} style={s.stopBtn} hitSlop={8} accessibilityLabel={t('Stop')}>
-                  <Ionicons name="stop" size={14} color="#fff" />
+                  <Ionicons name="stop" size={15} color="#fff" />
                 </Pressable>
               ) : (
-                <Pressable onPress={() => send()} disabled={!typed.trim()} style={[s.sendBtn, !typed.trim() && { opacity: 0.4 }]}>
-                  <Ionicons name="arrow-up" size={16} color="#fff" />
+                <Pressable
+                  onPress={() => send()}
+                  disabled={!typed.trim()}
+                  onPressIn={() => sendSpring(0.9)}
+                  onPressOut={() => sendSpring(1)}
+                  onHoverIn={() => { setSendHover(true); sendSpring(1.06); }}
+                  onHoverOut={() => { setSendHover(false); sendSpring(1); }}
+                  hitSlop={6}
+                  accessibilityLabel={t('Search')}
+                  style={!typed.trim() ? s.sendDisabled : undefined}
+                >
+                  <Animated.View style={[s.sendBtn, sendHover && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
+                    <Ionicons name="arrow-up" size={17} color="#fff" />
+                  </Animated.View>
                 </Pressable>
               )}
             </View>
@@ -2138,9 +2199,31 @@ const s = StyleSheet.create({
   // The composer sits inside the LTR-pinned `col`, so `row` (not row-reverse) is what puts the send
   // button on the FAR RIGHT here; the input (flex:1) fills to its left and right-aligns its Arabic
   // text next to the button. (owner 2026-07-09: send button must be far right.)
-  composer: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 18, paddingVertical: 4, paddingLeft: 16, paddingRight: 16, ...cardShadow },
-  input: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.ink, paddingVertical: 0, paddingHorizontal: 4, minHeight: 20, maxHeight: 110, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
-  sendBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  stopBtn: { width: 28, height: 28, borderRadius: 9, backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center' },
-  disc: { fontSize: 10.8, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 8, paddingHorizontal: 8 },
+  // Composer redesign (2026-08-16). The chat column is 940 wide on desktop — a full-width composer
+  // there reads as a search bar, not a place to talk. 720 keeps it a deliberate, centered object.
+  composerCol: { maxWidth: 720, alignSelf: 'center' },
+  // alignItems flex-end pins the send arrow to the BOTTOM edge as the box grows (the ChatGPT/Claude
+  // composer contract); the input's own marginVertical re-centers a single line against the 34px
+  // button, so idle still reads as one compact pill. borderColor/shadowOpacity/shadowRadius are
+  // ANIMATED inline (focus glow) — only the static halves live here.
+  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 24, paddingVertical: 8, paddingLeft: 18, paddingRight: 8, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.1, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 3 },
+  // Focus glow target — COMPOSER_EASE (web) glides border-color and box-shadow between these two.
+  // Carries the FULL shadow set: RNW compiles box-shadow per-style, so a partial override here
+  // would win wholesale and drop the green tint + offset (observed live).
+  composerFocused: { borderColor: colors.primary, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } },
+  // The wrapper owns the glide (INPUT_EASE) and the row position; marginVertical 6 =
+  // (34 send-button − 22 line) / 2, the single-line centering trick above.
+  inputGrow: { flex: 1, overflow: 'hidden', marginVertical: 6 },
+  // 15/22 breathes better for Arabic script than the old 14/20. Height is the same numeric target
+  // as the wrapper's — set state-wise, never transitioned (see the JSX note on measurement).
+  input: { width: '100%', fontSize: 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  sendBtnHover: { backgroundColor: colors.dark },
+  sendDisabled: { opacity: 0.35 },
+  stopBtn: { width: 34, height: 34, borderRadius: 12, backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center' },
+  disc: { fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 10, paddingHorizontal: 12 },
+  // Centered Filter/AI pill band under the header (see the JSX note). Explicit height on BOTH ends
+  // so MODE_EASE can glide it to 0; overflow hidden so the collapse clips instead of squashing.
+  modeWrap: { alignSelf: 'center', alignItems: 'center', justifyContent: 'center', height: 58, overflow: 'hidden' },
+  modeWrapHidden: { opacity: 0, height: 0, transform: [{ scale: 0.96 }] },
 });
