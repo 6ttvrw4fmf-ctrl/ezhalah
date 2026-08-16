@@ -140,7 +140,17 @@ def _trailing_median_deleted(client, platform: str) -> float:
     return float(vals[n // 2]) if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
 
 
-def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
+def run(platform: str, *, dry_run: bool = False, force: bool = False, max_candidates: int | None = None) -> dict:
+    """max_candidates (owner-authorized partial-drain mode, added 2026-08-16): when a platform's TRUE
+    eligible population is larger than what the anomaly-floor and/or mass-inactivation fraction guards
+    would allow through in one run, and a human has reviewed the backlog and judged it a genuine
+    (if oversized) legitimate accumulation, this narrows what THIS RUN asks the guards to judge to the
+    oldest `max_candidates` rows — instead of weakening or bypassing either guard's own math. Both
+    guards still evaluate their normal unmodified logic; they just see a smaller, honestly-scoped
+    number. If that scoped number still doesn't clear both guards, the run still aborts — nothing here
+    forces anything through. The remainder of the true backlog is left completely untouched for future
+    cycles. Does not change platform_retention_policy (no threshold is edited), does not skip the
+    per-row live source re-check, and does not touch max_delete_per_run's own meaning."""
     client = sb()
     reg = PLATFORMS.get(platform)
     pol = _load_policy(client, platform)
@@ -149,9 +159,12 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
     run_id = begin_run(f"cleanup:{platform}")
     stats = {"platform": platform, "dry_run": dry_run, "candidates": 0, "rechecked": 0,
              "deleted": 0, "reactivated": 0, "skipped": 0, "aborted": False, "abort_reason": None,
-             # eligible_total = the TRUE unclamped population the anomaly gate judges;
-             # work_set = how many of them this run actually touches (<= max_delete_per_run).
-             "eligible_total": 0, "work_set": 0, "platform_rows": 0}
+             # eligible_total = the TRUE unclamped population size (for honest audit/reporting);
+             # eligible_considered = what THIS run's guards actually judge (== eligible_total unless
+             # max_candidates scoped it down); work_set = how many of those this run actually touches
+             # (<= max_delete_per_run, further capped by max_candidates when set).
+             "eligible_total": 0, "eligible_considered": 0, "work_set": 0, "platform_rows": 0,
+             "max_candidates": max_candidates}
 
     def _abort(reason: str):
         stats["aborted"] = True
@@ -183,53 +196,67 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
                 platform_rows += _count_of(
                     client.table(t).select("id", count="exact").limit(1).execute())
             stats["eligible_total"] = eligible_total
-            stats["candidates"] = eligible_total          # what the gate and the audit log see
             stats["platform_rows"] = platform_rows
+
+            # eligible_considered: the number the guards below actually judge. Equal to eligible_total
+            # unless a human has explicitly scoped this run down via max_candidates — in which case the
+            # guards see only that smaller, honest number (never inflated, never fabricated: it is a
+            # real cap on how much of the real backlog this run is even allowed to look at).
+            eligible_considered = eligible_total if max_candidates is None else min(eligible_total, max_candidates)
+            stats["eligible_considered"] = eligible_considered
+            stats["candidates"] = eligible_considered      # what the gate and the audit log see
 
             median = _trailing_median_deleted(client, platform)
             thresh = max(pol["anomaly_floor"], pol["anomaly_factor"] * median)
             frac_cap = pol["max_eligible_frac"] * platform_rows
+            scope_note = ("" if max_candidates is None else
+                f" [scoped to oldest {max_candidates} of {eligible_total} true backlog rows — "
+                f"human-authorized partial drain, remainder deferred to future cycles]")
 
-            if eligible_total > thresh:
+            if eligible_considered > thresh:
                 # Report the OTHER gate's verdict in the same breath. The two gates are independent
                 # and are evaluated in sequence, so an operator who reads only "raise anomaly_floor"
                 # can raise it, re-run, and abort a second time on the fraction guard with a message
                 # that then blames "a partial crawl or source outage" — a misleading conclusion when
                 # the backlog has already been proven to be genuine delistings. aqarcity 2026-08-16
                 # is exactly that case: 419 eligible clears neither the floor (408) nor the 10% cap
-                # (261 of 2,611 rows). Naming both here makes it ONE owner decision, not two.
-                if platform_rows >= FRAC_GUARD_MIN_ROWS and eligible_total > frac_cap:
+                # (261 of 2,611 rows). Naming both here makes it ONE owner decision, not two. Judged
+                # against eligible_considered so a max_candidates scope is reflected honestly here too.
+                if platform_rows >= FRAC_GUARD_MIN_ROWS and eligible_considered > frac_cap:
                     also = (f" ALSO NOTE: raising anomaly_floor alone would NOT unblock this run — "
-                            f"{eligible_total} is {100.0 * eligible_total / platform_rows:.1f}% of "
+                            f"{eligible_considered} is {100.0 * eligible_considered / platform_rows:.1f}% of "
                             f"{platform_rows} rows and the mass-inactivation guard caps it at "
                             f"{100.0 * pol['max_eligible_frac']:.0f}%, so the next run would abort "
                             f"on that guard instead. Both gates need an owner decision together.")
                 else:
                     also = ""
-                _abort(f"anomaly: {eligible_total} eligible > threshold {thresh:.0f} "
-                       f"(floor {pol['anomaly_floor']}, {pol['anomaly_factor']}× median {median:.0f}). "
-                       f"Human review required. NOTE: a STANDING backlog above the floor aborts "
-                       f"every run and can never drain — if {eligible_total} is legitimate "
+                _abort(f"anomaly: {eligible_considered} eligible > threshold {thresh:.0f} "
+                       f"(floor {pol['anomaly_floor']}, {pol['anomaly_factor']}× median {median:.0f})."
+                       f"{scope_note} Human review required. NOTE: a STANDING backlog above the floor "
+                       f"aborts every run and can never drain — if {eligible_considered} is legitimate "
                        f"accumulation rather than a spike, raise anomaly_floor above it; do not "
                        f"force.{also}")
-            elif platform_rows >= FRAC_GUARD_MIN_ROWS and eligible_total > frac_cap:
+            elif platform_rows >= FRAC_GUARD_MIN_ROWS and eligible_considered > frac_cap:
                 # Scale guard: a partial crawl, source outage or sitemap collapse shows up as a
                 # large FRACTION of the platform going eligible at once, even when the absolute
                 # count is under the floor.
-                _abort(f"mass-inactivation guard: {eligible_total} eligible is "
-                       f"{100.0 * eligible_total / platform_rows:.1f}% of {platform_rows} rows "
-                       f"(cap {100.0 * pol['max_eligible_frac']:.0f}%). Suspect a partial crawl or "
-                       f"source outage rather than genuine delistings.")
+                _abort(f"mass-inactivation guard: {eligible_considered} eligible is "
+                       f"{100.0 * eligible_considered / platform_rows:.1f}% of {platform_rows} rows "
+                       f"(cap {100.0 * pol['max_eligible_frac']:.0f}%).{scope_note} Suspect a partial "
+                       f"crawl or source outage rather than genuine delistings.")
             else:
-                # ── work-set: only now do we pull rows, and only up to the per-run cap ───────────
+                # ── work-set: only now do we pull rows, capped by BOTH the per-run cap and any
+                # explicit max_candidates scope (oldest-first, so a partial drain always eats the
+                # longest-standing backlog first). ─────────────────────────────────────────────
+                effective_cap = pol["max_delete_per_run"] if max_candidates is None else min(pol["max_delete_per_run"], max_candidates)
                 cands: list[tuple[str, dict]] = []
                 for t in tables:
                     rows = (client.table(t).select("id, ad_number, listing_url, missing_count, last_seen_at")
                             .eq("active", False).gte("missing_count", pol["min_missing_count"])
                             .lt("last_seen_at", cutoff).order("last_seen_at")
-                            .limit(pol["max_delete_per_run"]).execute().data or [])
+                            .limit(effective_cap).execute().data or [])
                     cands.extend((t, r) for r in rows)
-                cands = cands[: pol["max_delete_per_run"]]     # hard cap across ALL tables
+                cands = cands[: effective_cap]     # hard cap across ALL tables
                 stats["work_set"] = len(cands)
                 to_delete: dict[str, list] = {}
                 to_reactivate: dict[str, list] = {}
@@ -274,11 +301,16 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False) -> dict:
         client.table("cleanup_runs").insert({k: stats[k] for k in
             ("platform", "dry_run", "candidates", "rechecked", "deleted", "reactivated", "skipped", "aborted", "abort_reason")}).execute()
         ok = not stats["aborted"]
+        scope_suffix = "" if max_candidates is None else (
+            f" scoped_run={max_candidates} true_backlog={stats['eligible_total']} "
+            f"remaining_after_scope={max(0, stats['eligible_total'] - stats['work_set'])}")
         end_run(run_id, ok=ok, rows_seen=stats["candidates"], rows_upserted=stats["deleted"],
-                allow_empty=True, notes=("ABORT: " + stats["abort_reason"]) if stats["aborted"] else
-                f"deleted={stats['deleted']} reactivated={stats['reactivated']} skipped={stats['skipped']} dry_run={dry_run}")
+                allow_empty=True, notes=(("ABORT: " + stats["abort_reason"]) if stats["aborted"] else
+                f"deleted={stats['deleted']} reactivated={stats['reactivated']} skipped={stats['skipped']} dry_run={dry_run}") + scope_suffix)
         print(f"✓ cleanup {platform}: eligible_total={stats['eligible_total']} "
+              f"eligible_considered={stats['eligible_considered']} "
               f"work_set={stats['work_set']} cap={pol['max_delete_per_run']} "
+              f"max_candidates={max_candidates} "
               f"rechecked={stats['rechecked']} deleted={stats['deleted']} "
               f"reactivated={stats['reactivated']} skipped={stats['skipped']} "
               f"dry_run={dry_run} aborted={stats['aborted']}", flush=True)
@@ -314,8 +346,14 @@ def main() -> int:
     ap.add_argument("--platform", required=True)
     ap.add_argument("--dry-run", action="store_true", help="Probe + classify + report; delete nothing.")
     ap.add_argument("--force", action="store_true", help="Run even if policy.enabled=false (all safety guards still apply).")
+    ap.add_argument("--max-candidates", type=int, default=None,
+                     help="Owner-authorized partial-drain: judge the anomaly-floor and mass-inactivation "
+                          "guards against only the oldest N of the true eligible backlog, instead of the "
+                          "full count. Neither guard's own logic or stored threshold is changed — they "
+                          "just see a smaller, honest number. Any remainder is left untouched for future "
+                          "cycles. Does not bypass the per-row live source re-check.")
     args = ap.parse_args()
-    stats = run(args.platform, dry_run=args.dry_run, force=args.force)
+    stats = run(args.platform, dry_run=args.dry_run, force=args.force, max_candidates=args.max_candidates)
     return 1 if stats["aborted"] and not args.dry_run else 0
 
 

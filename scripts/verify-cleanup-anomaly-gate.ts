@@ -117,7 +117,8 @@ cleanup.end_run = lambda *a, **k: True
 cleanup._probe = lambda url: tuple(SCENARIO["probe"])
 
 try:
-    stats = cleanup.run("gathern", dry_run=SCENARIO.get("dry_run", False))
+    stats = cleanup.run("gathern", dry_run=SCENARIO.get("dry_run", False),
+                         max_candidates=SCENARIO.get("max_candidates"))
     err = None
 except Exception as e:
     stats, err = {}, str(e)
@@ -224,6 +225,46 @@ check('a large FRACTION of the platform going eligible aborts even under the flo
 check('  …and the abort names the mass-inactivation guard', !!mass && /mass-inactivation/.test(String(mass.stats.abort_reason)));
 check('  …and it deletes NOTHING', !!mass && mass.deleted === 0);
 
+// 5b. MAX_CANDIDATES — owner-authorized partial drain (2026-08-16, aqarcity's 419-row backlog: the
+// anomaly floor (408) AND the mass-inactivation fraction guard (10% of 2,611 = 261.1) both trip on
+// the true backlog). max_candidates scopes what BOTH gates judge down to an explicit, honest number
+// without touching either gate's own comparison or the platform's stored policy row.
+const unscopedBoth = scenario('unscoped-both-gates', {
+  policy: POLICY({ anomaly_floor: 408, max_delete_per_run: 500 }),
+  eligible: 419, platform_rows: 2611, probe: [404, ''],
+});
+check('an unscoped 419-row backlog trips the anomaly floor (408)',
+      !!unscopedBoth && unscopedBoth.stats.aborted === true && /^anomaly:/.test(String(unscopedBoth.stats.abort_reason)));
+check('  …and it deletes NOTHING', !!unscopedBoth && unscopedBoth.deleted === 0);
+
+const scoped = scenario('scoped-261', {
+  policy: POLICY({ anomaly_floor: 408, max_delete_per_run: 500 }),
+  eligible: 419, platform_rows: 2611, probe: [404, ''], max_candidates: 261,
+});
+check('scoped to 261 (the amount BOTH unmodified gates already allow), the SAME run proceeds',
+      !!scoped && scoped.stats.aborted === false);
+check(
+  '  …the true backlog is still reported honestly, not silently shrunk',
+  !!scoped && scoped.stats.eligible_total === 419,
+  scoped ? `eligible_total=${scoped.stats.eligible_total}` : '',
+);
+check(
+  '  …only the scoped amount is judged and touched — the other 158 are left alone',
+  !!scoped && scoped.stats.eligible_considered === 261 && scoped.deleted === 261 && scoped.stats.work_set === 261,
+  scoped ? `eligible_considered=${scoped.stats.eligible_considered} deleted=${scoped.deleted}` : '',
+);
+check('  …every deletion is still written to the audit log first', !!scoped && scoped.logged === scoped.deleted);
+
+const scopedNotEnough = scenario('scoped-still-trips-fraction-guard', {
+  policy: POLICY({ anomaly_floor: 408, max_delete_per_run: 500 }),
+  eligible: 419, platform_rows: 2611, probe: [404, ''], max_candidates: 300,
+});
+check(
+  'scoping to an amount that clears the anomaly floor but still exceeds the fraction guard still aborts',
+  !!scopedNotEnough && scopedNotEnough.stats.aborted === true &&
+    /mass-inactivation/.test(String(scopedNotEnough.stats.abort_reason)) && scopedNotEnough.deleted === 0,
+);
+
 // 6. DRY RUN — classifies but never writes.
 const dry = scenario('dry', {
   policy: POLICY(), eligible: 488, platform_rows: 31688, probe: [404, ''], dry_run: true,
@@ -237,7 +278,15 @@ check('the unclamped count feeds the gate (count="exact")', /count="exact"/.test
 check('an absent count raises instead of defaulting to 0', /unmeasured population/.test(src));
 check('the cap-saturating `max_delete_per_run + 1` measurement never returns',
       !/max_delete_per_run"\] \+ 1/.test(src));
-check('the work-set SELECT is capped by max_delete_per_run', /\.limit\(pol\["max_delete_per_run"\]\)/.test(src));
+// The work-set SELECT must be traceably bounded by max_delete_per_run — either directly, or via an
+// `effective_cap` that a max_candidates partial-drain scope can only ever SHRINK (never grow past
+// max_delete_per_run: min(pol["max_delete_per_run"], max_candidates)), and that .limit() must then
+// actually be called with that variable.
+check('the work-set SELECT is capped by max_delete_per_run (directly, or via an effective_cap that '
+      + 'min()s it with an explicit max_candidates partial-drain scope)',
+      /\.limit\(pol\["max_delete_per_run"\]\)/.test(src) ||
+      (/effective_cap\s*=\s*pol\["max_delete_per_run"\]\s+if\s+max_candidates\s+is\s+None\s+else\s+min\(pol\["max_delete_per_run"\],\s*max_candidates\)/.test(src) &&
+       /\.limit\(effective_cap\)/.test(src)));
 check('require_source_recheck is still honoured', /require_source_recheck/.test(src));
 
 console.log('');

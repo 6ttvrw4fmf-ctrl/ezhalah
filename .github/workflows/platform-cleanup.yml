@@ -20,6 +20,10 @@ on:
         description: "Run even if policy.enabled=false (all safety guards still apply)"
         type: boolean
         default: false
+      max_candidates:
+        description: "Owner-authorized partial drain: judge the anomaly-floor + mass-inactivation guards against only the oldest N of the true backlog (leave blank for no scoping, i.e. current unmodified behavior). Neither guard's threshold is changed; the remainder is left for future cycles."
+        type: string
+        default: ""
 
 concurrency:
   group: platform-cleanup-${{ github.event.inputs.platform }}
@@ -47,4 +51,5 @@ jobs:
           exec python -m scrapers.common.cleanup \
             --platform "${{ github.event.inputs.platform }}" \
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }} \
-            ${{ github.event.inputs.force == 'true' && '--force' || '' }}
+            ${{ github.event.inputs.force == 'true' && '--force' || '' }} \
+            ${{ github.event.inputs.max_candidates != '' && format('--max-candidates {0}', github.event.inputs.max_candidates) || '' }}
