@@ -43,9 +43,19 @@ check('city + district effects re-run when the cohort types change',
 check('CityOption carries totalInCohort; DistrictOption carries totalInCity',
   /totalInCohort: Number\(r\.total_in_cohort\) \|\| 0/.test(loc) && /totalInCity: Number\(r\.total_in_city\) \|\| 0/.test(loc));
 
-// percentage honesty: clamped, and zero counts show nothing rather than a fake share
-check('cohortShareLabel clamps to [0,100] and hides zero counts',
-  /Math\.max\(0, Math\.min\(100,/.test(idx) && /if \(!\(n > 0\) \|\| !\(total > 0\)\) return undefined;/.test(idx));
+// COUNT honesty. The share percentage («… · 38٪») was REMOVED by owner instruction 2026-08-16
+// ("remove this percentage and show these active numbers") — so the label must show the active count
+// and NOTHING derived from a denominator. Both directions are pinned: the count is present, and no
+// percentage may creep back into this label.
+check('the option label shows the active count and hides a zero count',
+  /const cohortCountLabel = \(n: number\)/.test(idx)
+  && /if \(!\(n > 0\)\) return undefined;/.test(idx)
+  && /return `\$\{grouped\(n\)\} \$\{t\('ads'\)\}`;/.test(idx));
+// Tested against CODE ONLY — line comments are stripped first, so the history of this decision can
+// still be written down (and must be) without the guard reading its own explanation as a violation.
+const idxCode = idx.replace(/^\s*\/\/.*$/gm, '');
+check('no share percentage is rendered next to a count (owner removed it)',
+  !/٪/.test(idxCode) && !/cohortShareLabel/.test(idxCode) && !/Math\.round\(\(100 \*/.test(idxCode));
 
 // zero-inventory can never trend
 check('trending slices exclude zero-count locations (cities AND districts)',
