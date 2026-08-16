@@ -144,6 +144,17 @@ check('history hydration waits for the auth check, so a refresh cannot load the 
 const smoke = new URL('./verify-web-runtime-smoke.mjs', import.meta.url);
 const wf = new URL('../.github/workflows/web-runtime-smoke.yml', import.meta.url);
 check('the browser runtime smoke test still exists', existsSync(smoke));
+// The edge half of the same decision: a hard load of /agent is answered by Vercel before any JS
+// runs, so the user never waits for the bundle to boot just to be redirected. Pinned here because
+// deleting it looks harmless (the client redirect still "works") while silently restoring the
+// multi-second stuck screen the owner reported.
+const vercelCfg = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8')) as
+  { redirects?: Array<{ source?: string; destination?: string; permanent?: boolean }> };
+const agentEdge = (vercelCfg.redirects ?? []).find((r) => r.source === '/agent');
+check('vercel.json redirects a hard /agent load to Home at the edge', !!agentEdge && agentEdge.destination === '/');
+check('that edge redirect is NOT permanent (a 308 would be cached in browsers past any future change)',
+  !!agentEdge && agentEdge.permanent === false);
+
 check('the smoke test asserts BOTH halves at runtime: zero search requests AND landing on the Filter home',
   existsSync(smoke)
   && /refresh issues ZERO/.test(readFileSync(smoke, 'utf8'))
