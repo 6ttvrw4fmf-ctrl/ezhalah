@@ -58,18 +58,10 @@ check(
   /['"]مزرعة['"]\s*:\s*['"]Farm['"]/.test(agentSrc),
 );
 
-// The real production LLM prompt (supabase/functions/agent/index.ts) must still list Agriculture
-// Plot as a distinct COMMERCIAL_TYPES entry AND carry an explicit synonym line distinguishing it
-// from Farm — otherwise the model silently defaults agricultural-land requests back to Farm.
-const edgeFnSrc = readFileSync(new URL('../supabase/functions/agent/index.ts', import.meta.url), 'utf8');
-check(
-  "supabase/functions/agent/index.ts COMMERCIAL_TYPES still lists 'Agriculture Plot'",
-  /COMMERCIAL_TYPES\s*=\s*\[[\s\S]{0,400}?"Agriculture Plot"/.test(edgeFnSrc),
-);
-check(
-  'supabase/functions/agent/index.ts SYNONYMS still distinguish Agriculture Plot from Farm',
-  /أرض زراعية[\s\S]{0,20}→\s*Agriculture Plot/.test(edgeFnSrc),
-);
+// (REMOVED, clean slate 2026-08-16) Two checks here asserted that the edge SYSTEM prompt listed
+// 'Agriculture Plot' in COMMERCIAL_TYPES and carried an «أرض زراعية → Agriculture Plot» synonym line.
+// Both the list and the prompt were deleted with the instruction layer. The client-side taxonomy
+// checks above (CLEAN_MACRO / EN_TO_AR / normalizeType) are real code and still run.
 
 console.log(
   failed === 0

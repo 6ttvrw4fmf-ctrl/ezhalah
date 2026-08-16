@@ -93,21 +93,10 @@ check(
 );
 if (shadowed.length) shadowed.forEach((s) => console.log(`    ${s}`));
 
-// ── 3. Production LLM prompt: the same 11 terms need an explicit synonym line ──────────────────────
-const edgeFnSrc = readFileSync(new URL('../supabase/functions/agent/index.ts', import.meta.url), 'utf8');
-const synonymsChecks: [string, RegExp][] = [
-  ['كشك / درايف ثرو -> Shop', /كشك[\s\S]{0,80}درايف ثرو[\s\S]{0,20}→\s*Shop/],
-  ['صالة / سينما -> Commercial Building', /صالة[\s\S]{0,80}سينما[\s\S]{0,20}→\s*Commercial Building/],
-  ['محطة (bare) -> Gas Station', /محطة[\s\S]{0,80}→\s*Gas Station/],
-  ['مكاتب مشتركة -> Office', /مكاتب مشتركة[\s\S]{0,20}→\s*Office/],
-  ['مخازن سحابية -> Warehouse', /مخازن سحابية[\s\S]{0,20}→\s*Warehouse/],
-  ['ملحق علوي / مبنى شقق مخدومة -> Apartment', /ملحق علوي[\s\S]{0,120}→\s*Apartment/],
-  ['مجمع سكني -> Residential Building', /مجمع سكني[\s\S]{0,20}→\s*Residential Building/],
-  ['حوش -> Residential Land', /حوش[\s\S]{0,20}→\s*Residential Land/],
-];
-for (const [label, re] of synonymsChecks) {
-  check(`supabase/functions/agent/index.ts SYNONYMS covers: ${label}`, re.test(edgeFnSrc));
-}
+// ── 3. (REMOVED, clean slate 2026-08-16) ─────────────────────────────────────────────────────────
+// This section asserted that the edge SYSTEM prompt contained 8 literal Arabic synonym lines.
+// The prompt is gone, and synonym teaching is not being recreated without owner authorization.
+// The client-side AR_TYPE dict above is real code and is still fully checked.
 
 console.log(
   failed === 0

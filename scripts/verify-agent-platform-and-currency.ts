@@ -30,9 +30,10 @@ const src = readFileSync(new URL('../supabase/functions/agent/index.ts', import.
 check('the legacy PLATFORM_EN/PLATFORM_AR constants are gone', !/const PLATFORM_EN\s*=/.test(src) && !/const PLATFORM_AR\s*=/.test(src));
 check('isPlatformRestriction()/stripPlatform()/platformNote() are gone', !/function isPlatformRestriction/.test(src) && !/function stripPlatform/.test(src) && !/function platformNote/.test(src));
 check('platformPinned is gone (no more forced "we search every platform" note)', !/platformPinned/.test(src));
-check('the model is sent the RAW user text, not a platform-stripped modelText', /Message: """\$\{text\}"""/.test(src) && !/modelText/.test(src));
-check('the newer PLATFORM FILTERING system-prompt feature is still intact (untouched by this fix)', /PLATFORM FILTERING \(ALLOWED and EXPECTED/.test(src));
-check('new prompt guidance distinguishes incidental platform mentions from a real restriction request', /NOT A FILTER REQUEST/.test(src) && /is a nice site/.test(src));
+// NOTE (clean slate, 2026-08-16): checks that asserted on the SYSTEM-PROMPT PROSE were deleted
+// here, not weakened. The prose they pinned was deliberately removed with the whole instruction
+// layer; pinning sentences is what made that layer only ever grow. The CODE checks below stand.
+check('the model is sent the RAW user text, not a platform-stripped modelText', /const currentTurn = text;/.test(src) && !/modelText/.test(src));
 
 // ── source-text: originalCurrency now has an Arabic fallback ──
 check('originalCurrency() has an Arabic currency-word table (AR_CUR_LABEL)', /const AR_CUR_LABEL: Array<\[RegExp, string\]>/.test(src));

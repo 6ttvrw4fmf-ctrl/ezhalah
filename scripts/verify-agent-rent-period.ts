@@ -34,12 +34,9 @@ const client = readFileSync(new URL('../src/data/agent.ts', import.meta.url), 'u
 const defaults = readFileSync(new URL('../src/lib/searchDefaults.ts', import.meta.url), 'utf8');
 
 // ── 1. edge contract ──
-check('prompt OUTPUT object lists rent_period',
-  edge.includes('{ kind, reply, deal, location, type, detail, price, pricing_basis, rent_period, sort, count, platforms }'));
-check('prompt documents rent_period as the rental-POOL filter, separate from pricing_basis',
-  edge.includes('rent_period: "monthly" | "annual" | "none"') && edge.includes('SEPARATE from pricing_basis'));
-check('prompt covers the period-only no-budget case («شقق للإيجار الشهري في الرياض»)',
-  edge.includes('period-only request with no budget'));
+// NOTE (clean slate, 2026-08-16): checks that asserted on the SYSTEM-PROMPT PROSE were deleted
+// here, not weakened. The prose they pinned was deliberately removed with the whole instruction
+// layer; pinning sentences is what made that layer only ever grow. The CODE checks below stand.
 check('SCHEMA declares rent_period with the closed enum (Gemini rejects an empty enum member — "none", never "")',
   /rent_period:\s*\{\s*type:\s*"STRING",\s*enum:\s*\["none"\s*,\s*"monthly"\s*,\s*"annual"\]\s*\}/.test(edge));
 check('SCHEMA required includes rent_period',
