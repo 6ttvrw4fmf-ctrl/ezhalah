@@ -8,6 +8,16 @@
 -- session READS to reason about the location pipeline, so a stale one is how a session concludes
 -- "satel has no native resolution" and ships a fix for a problem that does not exist.
 --
+-- Re-verified 2026-08-17 (data-integrity run #26, PR #723): UNCHANGED. Migration 20260817075301
+--   registers mon_detect_discarded_location_resolution, whose alert text NAMES this view — it
+--   explains that the defect's root cause is the precedence in `listing_native_location_v1.best`
+--   (a native row that resolves to NULL outranking a legacy row that resolves to a real city).
+--   The repair was made one level up, in listing_native_location_v2's COALESCE fallback chain;
+--   v1 itself was deliberately NOT redefined, so this is the same any-mention trip as the
+--   2026-08-15, 2026-08-12 and 2026-08-10 entries. Re-ran
+--   md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against live
+--   production at 07:59Z: d7fff7ec0378d6095728e862aee80106, 13,385 chars — byte-identical to the
+--   digest this header already carries; only the verification date advances.
 -- Re-verified 2026-08-15 (cron-state mirror sweep, PR #673): UNCHANGED. Migration 20260815211103
 --   records the verbatim command of cron jobid 17, which NAMES this view (`refresh materialized
 --   view concurrently public.listing_native_location_v1 ...`) but never redefines it — the same
