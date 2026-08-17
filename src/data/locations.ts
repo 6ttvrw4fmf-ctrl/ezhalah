@@ -785,7 +785,14 @@ export async function ensureCityFieldIndex(deal: Deal, paymentMonthly: boolean |
 }
 
 // Shown immediately when the City field is focused with no text typed yet.
-export function topCitiesByListings(deal: Deal, paymentMonthly: boolean | null = null, category: Category | null = null, k = 6, types: string[] | null = null): CityOption[] {
+// `types` (and every param before it) is REQUIRED, not defaulted — a compile-time barrier
+// (owner P1, 2026-08-18) against the exact bug class found live: 7 call sites in index.tsx silently
+// omitted the cohort types arg, so they read back the WRONG (untyped, broader) cache bucket populated
+// under a different key by ensureCityFieldIndex/ensureDistrictOptions — showing a stale "all types in
+// this category" count (e.g. 9,358) instead of the exact selected type's count (e.g. 28, or 0). Every
+// call site must now pass its cohortTypesAr(query) explicitly; TypeScript refuses to compile a caller
+// that forgets it, so this class of drift can never silently reappear. [[cohortTypesAr]]
+export function topCitiesByListings(deal: Deal, paymentMonthly: boolean | null, category: Category | null, k: number, types: string[] | null): CityOption[] {
   return (CITY_FIELD_POOLS.get(cityPoolKey(deal, paymentMonthly, category, types)) ?? []).filter((c) => c.listingCount > 0).slice(0, k);
 }
 
@@ -885,13 +892,16 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal, category
 
 // Top-6 suggestions on empty focus: ONLY districts with active listings, ranked by count (the RPC
 // already returns rows ordered by listing_count desc, so this is a filter + slice).
-export function topDistrictsForCityId(cityId: number, deal: Deal, category: Category | null, paymentMonthly: boolean | null = null, k = 6, types: string[] | null = null): DistrictOption[] {
+// `types` (and every param before it) is REQUIRED — same compile-time barrier as topCitiesByListings
+// above, guarding the district pool's read-back cache key. [[cohortTypesAr]]
+export function topDistrictsForCityId(cityId: number, deal: Deal, category: Category | null, paymentMonthly: boolean | null, k: number, types: string[] | null): DistrictOption[] {
   return (_districtCache.get(districtCacheKey(cityId, deal, category, paymentMonthly, types)) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
 }
 
 // Typing: search the COMPLETE canonical catalog for THIS city (incl. zero-listing districts) by Arabic
 // substring, using the SAME norm() folding as the city field. Empty query → the Top-6 suggestions.
-export function matchDistrictsByCityId(cityId: number, deal: Deal, category: Category | null, paymentMonthly: boolean | null, query: string, types: string[] | null = null): DistrictOption[] {
+// `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
+export function matchDistrictsByCityId(cityId: number, deal: Deal, category: Category | null, paymentMonthly: boolean | null, query: string, types: string[] | null): DistrictOption[] {
   const all = _districtCache.get(districtCacheKey(cityId, deal, category, paymentMonthly, types)) ?? [];
   const q = norm(query);
   if (!q) return all.filter((d) => d.listingCount > 0).slice(0, 6);
@@ -910,7 +920,8 @@ export function matchDistrictsByCityId(cityId: number, deal: Deal, category: Cat
 // tatweel stripped, then non-letter/digit chars dropped) — the same folding the DB's own
 // normalize_ar() applies — so "الري" matches "الرياض" exactly like a DB-side search would. Ranks
 // exact-prefix matches before substring matches, then by listing count (bigger cities first).
-export function matchCitiesByText(deal: Deal, paymentMonthly: boolean | null, category: Category | null, query: string, types: string[] | null = null): CityOption[] {
+// `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
+export function matchCitiesByText(deal: Deal, paymentMonthly: boolean | null, category: Category | null, query: string, types: string[] | null): CityOption[] {
   const q = norm(query);
   if (!q) return [];
   const scored: { opt: CityOption; rank: number }[] = [];

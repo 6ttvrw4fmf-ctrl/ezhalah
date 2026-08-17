@@ -943,7 +943,7 @@ export default function Home() {
                       // field used to show an empty box until a keystroke. English text keeps the
                       // existing behavior exactly (no autocomplete; the Arabic-only hint stands).
                       if (!isLatinOnlyInput(query.location)) {
-                        setCitySuggestions(matchCitiesByText(query.deal, paymentMonthly, effCategory, query.location));
+                        setCitySuggestions(matchCitiesByText(query.deal, paymentMonthly, effCategory, query.location, cohortTypes));
                       }
                     }
                   }}
@@ -964,7 +964,7 @@ export default function Home() {
                     // Arabic-only product: English typing gets NO autocomplete and an Arabic hint —
                     // there is nothing to match against, since every city name here is Arabic. (user rule)
                     const latin = isLatinOnlyInput(v);
-                    setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, effCategory, v));
+                    setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, effCategory, v, cohortTypes));
                     setLocMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -1120,7 +1120,7 @@ export default function Home() {
                       });
                     } else if (!isLatinOnlyInput(districtTextRef.current)) {
                       // P2 — refocusing mid-typing shows the current matches, not an empty box.
-                      setDistrictSuggestions(matchDistrictsByCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, districtTextRef.current));
+                      setDistrictSuggestions(matchDistrictsByCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, districtTextRef.current, cohortTypes));
                     }
                   }}
                   onBlur={() => { districtBlurTimer.current = setTimeout(() => setDistrictFocus(false), 150); }}
@@ -1133,11 +1133,11 @@ export default function Home() {
                     // typed-but-unconfirmed string being searched; that stays true by construction,
                     // since districtText itself is never sent anywhere.)
                     if (!citySelected) return;
-                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6)); setDistrictMsg(''); return; }
+                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6, cohortTypes)); setDistrictMsg(''); return; }
                     // Arabic-only product: English typing gets NO autocomplete and the same Arabic hint the
                     // City field shows — every district name here is Arabic, so there is nothing to match. (owner UI request.)
                     const latin = isLatinOnlyInput(v);
-                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, v));
+                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, v, cohortTypes));
                     setDistrictMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -1155,7 +1155,7 @@ export default function Home() {
                   districtTextRef.current = '';
                   setDistrictText('');
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6, cohortTypes));
                   districtRef.current?.focus();
                 }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
@@ -1210,7 +1210,7 @@ export default function Home() {
                   districtTextRef.current = '';
                   setDistrictText('');
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6, cohortTypes));
                 };
                 const selectedLabels = new Set(districtsSelected.map((d) => d.districtAr));
                 return (

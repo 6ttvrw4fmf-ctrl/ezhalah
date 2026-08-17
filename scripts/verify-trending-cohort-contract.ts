@@ -62,5 +62,27 @@ check('trending slices exclude zero-count locations (cities AND districts)',
   /filter\(\(c\) => c\.listingCount > 0\)\.slice\(0, k\)/.test(loc)
   && /filter\(\(d\) => d\.listingCount > 0\)\.slice\(0, k\)/.test(loc));
 
+// EVERY read-back call site passes cohortTypes (P1, 2026-08-18): the 4 read functions all take
+// `types` as their trailing arg — locations.ts now makes it a REQUIRED parameter (no default), which
+// is the primary, compiler-enforced barrier. This is the belt-and-suspenders half that actually runs
+// in `npm test` (these scripts execute via --experimental-strip-types, which ERASES types without
+// checking them, so a missing-arg regression would NOT fail at runtime on its own). Found live:
+// 7 of 20 call sites silently omitted `cohortTypes`, so they read back the WRONG cache bucket (the
+// untyped/broader one another call site had populated) instead of a fresh, correctly-scoped fetch —
+// showing a stale "all types in this category" count (e.g. 9,358) instead of the exact selected
+// type's count (e.g. 28, or 0 — proven live: مزرعة/أرض سكنية/استراحة/دوبلكس all have ZERO Riyadh
+// Monthly listings while the untyped bucket reads 9,358). Every call site must end in `cohortTypes)`.
+const readFns: [string, RegExp][] = [
+  ['matchCitiesByText', /matchCitiesByText\(/g],
+  ['topCitiesByListings', /topCitiesByListings\(/g],
+  ['topDistrictsForCityId', /topDistrictsForCityId\(/g],
+  ['matchDistrictsByCityId', /matchDistrictsByCityId\(/g],
+];
+for (const [name, callRe] of readFns) {
+  const total = (idxCode.match(callRe) || []).length;
+  const scoped = (idxCode.match(new RegExp(`${name}\\([\\s\\S]{0,200}?cohortTypes\\)`, 'g')) || []).length;
+  check(`${name}: every call site (${total}) threads cohortTypes (${scoped} scoped, 0 stale-cache-bucket reads)`, total > 0 && scoped === total);
+}
+
 console.log(failed === 0 ? '\n✓ trending cohort contract holds' : `\n✗ ${failed} assertion(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);
