@@ -76,21 +76,31 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_MIN_INTERVAL: "1.0"
         run: |
-          # ── OWNER-PENDING HOLD (2026-08-16, DIE run #24) — REMOVE THE --kill-cap LINE TO RELEASE ──
+          # ── HOLD RELEASED 2026-08-17 by the owner (DIE run #26). History kept deliberately. ──
           # Until 2026-08-16 the auto cap silently resolved to its 150 floor because the denominator
-          # was read with head=True (.count = 0 on supabase==2.10.0). That is now fixed, so the auto
-          # cap would jump 150 -> 586 and the very next scheduled sweep would inactivate the standing
-          # 172-row backlog in one batch. Those 172 ARE source-confirmed gone (172/172 probed 404 on
-          # 2026-08-16, against a live control group that returned 200), but actioning a batch that
-          # size is a bulk listing operation and an owner decision under the AGENTS.md RED list.
-          # Pinning the cap at its historical 150 keeps behaviour EXACTLY as it has been while the
-          # decision is pending -- the run still records strikes and still aborts the oversized batch.
-          # The difference is that the cap is now an explicit, logged choice instead of an accident:
-          # run notes print `kill_cap=150 [override active=NNNNN]` so the computed alternative is
-          # visible. Delete this one line to let the fixed cap take effect.
+          # was read with head=True (.count = 0 on supabase==2.10.0). Run #24 fixed that and then
+          # PINNED the cap at 150 via --kill-cap, because letting the corrected cap take effect
+          # would action a 172-row backlog in one batch -- a bulk listing operation, and an owner
+          # decision under the AGENTS.md RED list. The hold was correct: it kept behaviour identical
+          # while the decision was pending, and made the cap an explicit logged choice rather than
+          # an accident.
+          #
+          # The owner released it on 2026-08-17. By then the backlog had grown 172 -> 229 and those
+          # rows were still production_ready, i.e. real users could click a listing gathern no longer
+          # serves. Evidence re-taken at release, NOT inherited from run #24: 6/6 kill candidates
+          # returned 404 against a control group of 6 currently-active rows that returned 200/307,
+          # so the marker still discriminates and the deaths are real.
+          #
+          # NOTHING ELSE IS LOOSENED. Removing --kill-cap does not disable the anomaly gate; it
+          # restores the gate to its DESIGNED value, max(150, 2% of currently-active) = ~590 at
+          # 29.5k active. A batch above that still quarantines and still inactivates nothing. Per-row
+          # source re-verification, the 3-strike grace, min-stale-days and the deletion path are all
+          # untouched. Do NOT add a --kill-cap override back without a fresh owner decision; the run
+          # notes print `kill_cap=N [auto=max(150,2% of NNNNN)]` so a silent regression stays visible
+          # and mon_detect_liveness_cap_degraded() reads that marker.
           exec python -m scrapers.gathern.liveness \
             --limit ${{ inputs.limit || '1500' }} \
             --min-stale-days ${{ inputs.min_stale_days || '3' }} \
             --grace ${{ inputs.grace || '3' }} \
-            --kill-cap ${{ inputs.kill_cap || '150' }} \
+            ${{ inputs.kill_cap && format('--kill-cap {0}', inputs.kill_cap) || '' }} \
             ${{ (github.event_name == 'schedule' || inputs.apply == 'true') && '--apply' || '' }}
