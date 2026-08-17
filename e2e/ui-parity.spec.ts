@@ -40,11 +40,21 @@ const rangeInput = (page: Page, i: number) => page.getByPlaceholder('—').nth(i
 
 // Run the search and wait for the agent summary (deterministic — appears regardless of whether the
 // result-count line has finished its transient fetch). Used by the refine-permutation tests, which
-// assert the FILTER WAS APPLIED (via URL), not a specific result count.
-async function runSearchToSummary(page: Page) {
+// assert the FILTER WAS APPLIED (via the URL the navigation lands on), not a specific result count.
+//
+// Returns that URL rather than leaving the caller to read page.url() later. Since PR#706 (owner
+// 2026-08-16, "refresh must never re-execute search") the agent screen deliberately SCRUBS
+// `?filter=`/`?seed=` from the URL the instant it consumes them (src/app/agent.tsx
+// consumeSearchParams) — a bare `/agent` is exactly what stops a reload from replaying the search.
+// So the filter payload is only observable in the URL for the brief window right after navigation,
+// before that effect runs; capture it immediately after waitForURL settles, not after the summary
+// (which waits for a real search round-trip and is always called well after the scrub).
+async function runSearchToSummary(page: Page): Promise<string> {
   await page.getByText('بحث', { exact: true }).click();
   await page.waitForURL('**/agent**');
+  const navigatedUrl = page.url();
   await expect(page.getByText('ملخص البحث').first()).toBeVisible({ timeout: 60_000 });
+  return navigatedUrl;
 }
 
 test('Filter mode — Buy in Riyadh returns Arabic results', async ({ page }) => {
@@ -109,15 +119,16 @@ test('AI mode — a city that is also a region asks to disambiguate (no wrong gu
 });
 
 // ── Refine-filter permutations: bedrooms, area, price. Each proves the control is applied end-to-end
-// (asserted from the /agent filter URL — deterministic regardless of result count) AND returns results.
+// (asserted from the /agent navigation URL, captured before the app's post-search scrub — see
+// runSearchToSummary — deterministic regardless of result count) AND returns results.
 
 test('Filter mode — bedrooms filter (3) is applied and returns results', async ({ page }) => {
   await home(page);
   await pickCity(page, 'الرياض');
   await pickGroupType(page, 'الفلل والبيوت', 'فيلا');
   await page.getByText('3', { exact: true }).click(); // bedroom chip
-  await runSearchToSummary(page);
-  expect(decodeURIComponent(page.url())).toContain('"contextBedsList":["3"]');
+  const url = await runSearchToSummary(page);
+  expect(decodeURIComponent(url)).toContain('"contextBedsList":["3"]');
 });
 
 test('Filter mode — price max is applied and returns results', async ({ page }) => {
@@ -126,8 +137,8 @@ test('Filter mode — price max is applied and returns results', async ({ page }
   await pickCity(page, 'الرياض');
   await pickGroupType(page, 'الشقق والسكن المشترك', 'شقة');
   await rangeInput(page, 3).fill('5000000');  // priceMax = 5,000,000 ر.س
-  await runSearchToSummary(page);
-  expect(decodeURIComponent(page.url())).toContain('"priceMax":"5000000"');
+  const url = await runSearchToSummary(page);
+  expect(decodeURIComponent(url)).toContain('"priceMax":"5000000"');
 });
 
 test('Filter mode — area min is applied and returns results', async ({ page }) => {
@@ -135,6 +146,6 @@ test('Filter mode — area min is applied and returns results', async ({ page })
   await pickCity(page, 'الرياض');
   await pickGroupType(page, 'الشقق والسكن المشترك', 'شقة');
   await rangeInput(page, 0).fill('100');       // areaMin = 100 م²
-  await runSearchToSummary(page);
-  expect(decodeURIComponent(page.url())).toContain('"areaMin":"100"');
+  const url = await runSearchToSummary(page);
+  expect(decodeURIComponent(url)).toContain('"areaMin":"100"');
 });
