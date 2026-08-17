@@ -1000,6 +1000,10 @@ const AR: Record<string, string> = {
   'Apple Account': 'حساب Apple',
   'Google Account': 'حساب Google',
   "Can't be changed": 'لا يمكن تغييره',
+  // Shown in the delete dialog when the SERVER delete failed — the account still exists, so the
+  // copy must not imply anything was removed. (owner report 2026-08-17.)
+  "Couldn't delete your account. Check your connection and try again.":
+    'ما قدرنا نحذف حسابك. تأكد من اتصالك وحاول مرة ثانية.',
   "To change it, you'll have to delete this account and make a new one.":
     'لتغييره، عليك حذف هذا الحساب وإنشاء حساب جديد.',
   'Logged in device': 'الجهاز المسجَّل دخوله',
