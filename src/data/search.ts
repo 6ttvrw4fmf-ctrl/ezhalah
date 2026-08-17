@@ -9,6 +9,7 @@ import { supports } from './platforms';
 import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { rediversifyByPlatform } from '@/lib/platformDiversity';
+import { bedroomTokensPure } from '@/lib/roomBedrooms';
 import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { groupMembers, CLEAN_MACRO, SUBGROUPS } from './propertyTypes';
@@ -875,15 +876,27 @@ export function effectiveBeds(q: SearchQuery): string[] {
 // `detail` field — the agent path + type-level chip. A non-bedroom type (e.g. Office, where "3" is a
 // size) is excluded. (audit: bedroom type-null hole; multi-select.)
 export function bedroomTokens(q: SearchQuery): string[] {
-  if (!q.type) {
-    const fb = effectiveBeds(q).map((d) => (d || '').trim()).filter((d) => /^([1-4]|5\+?)$/.test(d));
-    if (fb.length) return fb;
-  }
-  if (q.detail) {
-    const d = q.detail.trim();
-    if (/^([1-4]|5\+?)$/.test(d) && (!q.type || detailFor(q.type).isBedrooms)) return [d];
-  }
-  return [];
+  // نوع=غرفة auto-selects «1 غرفة نوم» and collapses the chip row to just "1" (owner rule 2026-07-06:
+  // a room IS a single room), so that "1" is a label, not a choice the user made. Turning it into the
+  // strict bedrooms predicate deleted every غرفة row whose SOURCE never published a bedroom count —
+  // 1,888 of 2,406 nationwide — while the app's own trending panel still promised the full number on
+  // the same screen (الرياض/إيجار/سنوي: promised 1,172, delivered 1). Dropping it here fixes both the
+  // MATCH failure and the count contradiction at the ONE point that feeds the server param
+  // (p_beds_exact) and the client filter alike. An explicit `detail` still wins below, so the
+  // AI-agent surface and the type-level chip are untouched, and bedrooms stays strict everywhere the
+  // user actually picks a count. See src/lib/roomBedrooms.ts.
+  // (Search & Matching QA 2026-08-17; barrier: scripts/verify-room-bedrooms-not-a-predicate.ts.)
+  //
+  // The rule itself lives in the dependency-free src/lib/roomBedrooms.ts so the barrier can EXECUTE
+  // it (this module's graph reaches i18n.tsx, which `node --experimental-strip-types` cannot load).
+  // This stays a thin adapter — one definition, no second copy to drift.
+  return bedroomTokensPure({
+    type: q.type,
+    detail: q.detail,
+    types: effectiveTypes(q),
+    beds: effectiveBeds(q),
+    typeDetailIsBedrooms: q.type ? detailFor(q.type).isBedrooms : false,
+  });
 }
 
 // The PRIMARY bedroom constraint (first selected) — or null when there's no bedroom filter. "5+" →
