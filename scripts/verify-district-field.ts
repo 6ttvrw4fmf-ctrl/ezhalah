@@ -74,7 +74,7 @@ check('RPC result carries match_values (twin-safe recall)', /match_values/.test(
 check('Top-6 = districts with active listings only (listingCount > 0)', /listingCount > 0\)\.slice\(0, k\)/.test(locSrc));
 check('autocomplete searches the COMPLETE cached catalog for the city', /export function matchDistrictsByCityId/.test(locSrc));
 check('empty focus shows the Category+Deal+period-scoped Top-6 via topDistrictsForCityId', /topDistrictsForCityId\(cid, query\.deal, effCategory, paymentMonthly, 6, cohortTypes\)/.test(indexSrc));
-check('typing filters within the chosen city+scope via matchDistrictsByCityId', /matchDistrictsByCityId\(citySelected\.cityId, query\.deal, effCategory, paymentMonthly, v\)/.test(indexSrc));
+check('typing filters within the chosen city+scope via matchDistrictsByCityId (cohort-typed)', /matchDistrictsByCityId\(citySelected\.cityId, query\.deal, effCategory, paymentMonthly, v, cohortTypes\)/.test(indexSrc));
 // Arabic-only: typing the district in English yields NO autocomplete and the same Arabic hint the City
 // field shows (owner UI request 2026-07-18) — every district name is Arabic, so there's nothing to match.
 check('English district input shows the Arabic-only hint and clears suggestions', /const latin = isLatinOnlyInput\(v\);[\s\S]{0,220}?setDistrictSuggestions\(latin \? \[\][\s\S]{0,220}?setDistrictMsg\(latin \? ARABIC_ONLY_MSG/.test(indexSrc));
