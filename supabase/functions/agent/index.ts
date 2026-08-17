@@ -27,6 +27,45 @@ const FALLBACK_MODEL = Deno.env.get("GEMINI_FALLBACK_MODEL") ?? "gemini-2.5-flas
 const urlFor = (m: string) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
 
+// ── PROVIDER (owner decision 2026-08-15: move off Gemini) ────────────────────
+// The agent's job is intent → filters (see the Ezhalah AI Agent Philosophy): understand messy
+// Arabic/English/dialect input and map it onto the EXISTING filter fields. Two things carry that,
+// and neither is prompt text:
+//   1. STRUCTURED OUTPUT — the JSON schema is enforced, so the model cannot emit a field value
+//      outside the enums. "Never invent a city/type" stops being a prompt rule.
+//   2. THINKING — the old Gemini config ran `thinkingBudget: 0` (reasoning OFF) to save tokens,
+//      which is most of why intent understanding felt weak. Claude runs adaptive thinking at low
+//      effort: enough judgment to decide "search now" vs "ask one question", without a big spend.
+// PROMPT CACHING is what makes it affordable: the ~12.4k-token SYSTEM prompt is marked
+// cache_control and bills at ~10% on every request after the first. The VOLATILE part (per-turn
+// language line + live DB notes) is a SEPARATE later block — appending it to SYSTEM would change
+// the cached prefix on every request and silently disable caching entirely.
+// AGENT_PROVIDER flips back to "gemini" with no redeploy of anything else, so this is reversible.
+const AGENT_PROVIDER = (Deno.env.get("AGENT_PROVIDER") ?? "gemini").toLowerCase();
+
+// ── OpenAI (owner's chosen provider, 2026-08-15) ─────────────────────────────
+// MODEL CHOICE IS AN ENV VAR ON PURPOSE. The owner asked for "gpt-5-mini", but OpenAI's own
+// deprecations page lists `gpt-5-mini-2025-08-07` for SHUTDOWN on 2026-12-11, with `gpt-5.6-terra`
+// as the named replacement. Hard-coding a model with a ~4-month shutdown clock would guarantee
+// rework, so the ID lives in OPENAI_MODEL and can change without touching this file.
+//   gpt-5.6-luna   $0.20/$1.20  — budget tier, cheaper than gpt-5-mini was; the default here
+//   gpt-5.6-terra  $2.00/$12.00 — OpenAI's own recommended replacement for gpt-5-mini
+//   gpt-5.6-sol    $5.00/$30.00 — flagship
+const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? "";
+const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-5.6-luna";
+// Reasoning effort: the field name for this model generation was NOT confirmable from the docs at
+// authoring time, so it is OFF unless OPENAI_REASONING_EFFORT is set. An unknown parameter is a 400,
+// and silently breaking every search to add an unverified knob is not a trade worth making. Set it,
+// run scripts/smoke-agent-openai.sh, and keep it only if the smoke test passes.
+const OPENAI_REASONING_EFFORT = Deno.env.get("OPENAI_REASONING_EFFORT") ?? "";
+
+const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+const CLAUDE_MODEL = Deno.env.get("CLAUDE_MODEL") ?? "claude-sonnet-5";
+// Thinking + JSON share this ceiling, so it is much larger than Gemini's 800: adaptive thinking
+// spends against it before the JSON is written, and a tight cap truncates mid-object.
+const CLAUDE_MAX_TOKENS = Number(Deno.env.get("CLAUDE_MAX_TOKENS") ?? "4000");
+const CLAUDE_EFFORT = Deno.env.get("CLAUDE_EFFORT") ?? "low";
+
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
 // function. We read the active rows at runtime and append them to the system prompt. Cached ~60s so
@@ -514,6 +553,36 @@ const SCHEMA = {
   required: ["kind", "reply", "deal", "location", "type", "detail", "price", "pricing_basis", "rent_period", "sort", "count", "platforms"],
 };
 
+// The SAME contract as SCHEMA above, in standard JSON Schema (Gemini uses uppercase type names and
+// no additionalProperties; the Messages API expects lowercase + additionalProperties:false). Kept
+// beside SCHEMA deliberately: the two MUST stay in lockstep, because both providers feed the exact
+// same downstream consumer — one shape of parsed object, whichever model produced it.
+const SCHEMA_JSON = {
+  type: "object",
+  properties: {
+    kind: { type: "string", enum: ["listings", "message", "interview"] },
+    reply: { type: "string" },
+    deal: { type: "string", enum: ["Rent", "Buy", "Both"] },
+    location: { type: "string" },
+    type: { type: "string" },
+    detail: { type: "string" },
+    price: { type: "string" },
+    pricing_basis: {
+      type: "string",
+      enum: ["daily_rent", "weekly_rent", "monthly_rent", "quarterly_rent", "annual_rent", "full_price", "price_per_sqm", "none"],
+    },
+    rent_period: { type: "string", enum: ["none", "monthly", "annual"] },
+    sort: {
+      type: "string",
+      enum: ["none", "newest", "oldest", "price_asc", "price_desc", "area_asc", "area_desc", "ppm_asc", "ppm_desc", "beds_desc"],
+    },
+    count: { type: "string" },
+    platforms: { type: "array", items: { type: "string" } },
+  },
+  required: ["kind", "reply", "deal", "location", "type", "detail", "price", "pricing_basis", "rent_period", "sort", "count", "platforms"],
+  additionalProperties: false,
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
@@ -623,9 +692,137 @@ Deno.serve(async (req: Request) => {
       responseSchema: SCHEMA,
     };
     const models = [MODEL, FALLBACK_MODEL].filter((m, i, a) => a.indexOf(m) === i);
+
+    // ── OpenAI path ───────────────────────────────────────────────────────────
+    // Same contract as the other providers: turns + volatile system suffix -> parsed object | {__err}.
+    // Uses the RESPONSES API (/v1/responses), not chat/completions: `input` instead of `messages`,
+    // and the schema goes in `text.format`, not `response_format`.
+    // Prompt caching is AUTOMATIC on OpenAI (no cache_control to set) — but it only works on a stable
+    // PREFIX, so the frozen SYSTEM prompt must come FIRST and the per-turn volatile text after it.
+    // Same ordering rule as the Claude path, different mechanism.
+    const runModelOpenAI = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
+      if (!OPENAI_API_KEY) return { __err: json({ error: "OPENAI_API_KEY not set" }, 500) };
+      const input: Array<{ role: string; content: string }> = [
+        { role: "system", content: SYSTEM },          // stable prefix -> auto-cached
+      ];
+      if (sysExtra) input.push({ role: "system", content: sysExtra }); // volatile, AFTER the prefix
+      for (const c of cts) {
+        input.push({
+          role: c.role === "model" ? "assistant" : "user",
+          content: c.parts.map((p) => p.text).join("\n"),
+        });
+      }
+      const payload: Record<string, unknown> = {
+        model: OPENAI_MODEL,
+        input,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "ezhalah_agent_output",
+            strict: true,
+            schema: SCHEMA_JSON,
+          },
+        },
+      };
+      if (OPENAI_REASONING_EFFORT) payload.reasoning = { effort: OPENAI_REASONING_EFFORT };
+      const body = JSON.stringify(payload);
+      let res: Response | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const r = await fetch("https://api.openai.com/v1/responses", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${OPENAI_API_KEY}` },
+          body,
+        });
+        if (r.ok) { res = r; break; }
+        res = r;
+        if (![429, 500, 502, 503].includes(r.status)) break;
+        await r.body?.cancel().catch(() => {});
+        if (attempt < 2) await new Promise((rs) => setTimeout(rs, 400 * (attempt + 1)));
+      }
+      if (!res || !res.ok) {
+        const detail = res ? await res.text() : "no response";
+        return { __err: json({ error: `openai ${res?.status ?? 0}`, detail }, 502) };
+      }
+      const data = await res.json();
+      // The Responses API returns an `output` ARRAY that can contain reasoning items as well as the
+      // message — so pick the message item explicitly rather than indexing output[0], which is the
+      // reasoning block whenever reasoning is enabled.
+      const msg = (data?.output ?? []).find((o: any) => o?.type === "message") ?? (data?.output ?? [])[0];
+      const raw = (msg?.content ?? [])
+        .map((c: any) => c?.text ?? "")
+        .join("")
+        .trim();
+      if (!raw) return { __err: json({ error: "empty model output" }, 502) };
+      try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw }, 502) }; }
+    };
+
+    // ── Claude path ───────────────────────────────────────────────────────────
+    // Same contract as runModelGemini: takes the turns + the volatile system suffix, returns the
+    // parsed object or { __err }. Everything downstream is provider-agnostic.
+    const runModelClaude = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
+      if (!ANTHROPIC_API_KEY) return { __err: json({ error: "ANTHROPIC_API_KEY not set" }, 500) };
+      // Gemini calls the assistant role "model"; the Messages API calls it "assistant".
+      const messages = cts.map((c) => ({
+        role: c.role === "model" ? "assistant" : "user",
+        content: c.parts.map((p) => p.text).join("\n"),
+      }));
+      // Two system blocks, in this order, on purpose:
+      //   [0] the big frozen prompt, cache_control'd → billed at ~10% after the first request
+      //   [1] the per-turn language line + live DB notes → NEVER inside the cached block, or the
+      //       prefix bytes change every request and nothing ever caches.
+      const system: Array<Record<string, unknown>> = [
+        { type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } },
+      ];
+      if (sysExtra) system.push({ type: "text", text: sysExtra });
+      const body = JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: CLAUDE_MAX_TOKENS,
+        system,
+        messages,
+        // Adaptive thinking replaces the disabled-reasoning Gemini config. `effort: low` keeps it
+        // fast and cheap for what is fundamentally a classification call; the schema does the rest.
+        // NOTE: temperature/top_p/top_k are REJECTED (400) on Sonnet 5 — steer via prompt, not sampling.
+        thinking: { type: "adaptive" },
+        output_config: { effort: CLAUDE_EFFORT, format: { type: "json_schema", schema: SCHEMA_JSON } },
+      });
+      let res: Response | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const r = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+          },
+          body,
+        });
+        if (r.ok) { res = r; break; }
+        res = r;
+        // 429/5xx are transient; anything else (400 schema error, 401 bad key) is ours to fix.
+        if (![429, 500, 502, 503, 529].includes(r.status)) break;
+        await r.body?.cancel().catch(() => {});
+        if (attempt < 2) await new Promise((rs) => setTimeout(rs, 400 * (attempt + 1)));
+      }
+      if (!res || !res.ok) {
+        const detail = res ? await res.text() : "no response";
+        return { __err: json({ error: `anthropic ${res?.status ?? 0}`, detail }, 502) };
+      }
+      const data = await res.json();
+      // A safety decline returns HTTP 200 with stop_reason "refusal" and empty/partial content —
+      // reading content[0] blindly would throw. Surface it instead of crashing the request.
+      if (data?.stop_reason === "refusal") return { __err: json({ error: "model declined the request" }, 502) };
+      const raw = (data?.content ?? [])
+        .filter((b: any) => b?.type === "text")
+        .map((b: any) => b?.text ?? "")
+        .join("")
+        .trim();
+      if (!raw) return { __err: json({ error: "empty model output" }, 502) };
+      try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw }, 502) }; }
+    };
+
     // Call Gemini with the given contents and return the parsed JSON object, or { __err } with a ready
     // Response on failure. Flash can return 503 during spikes — retry once, then fall back to lite.
-    const runModel = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
+    const runModelGemini = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
       const payload = JSON.stringify({ system_instruction: { parts: [{ text: SYSTEM + sysExtra }] }, contents: cts, generationConfig: genConfig });
       let res: Response | null = null;
       outer: for (const m of models) {
@@ -644,6 +841,14 @@ Deno.serve(async (req: Request) => {
       if (!raw) return { __err: json({ error: "empty model output" }, 502) };
       try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw }, 502) }; }
     };
+
+    // ONE dispatcher, so every existing call site is provider-agnostic and AGENT_PROVIDER is the
+    // only switch. Flipping back to "gemini" is an env change, not a code change — which is what
+    // makes trying a new provider a reversible experiment instead of a migration.
+    const runModel =
+      AGENT_PROVIDER === "openai" ? runModelOpenAI :
+      AGENT_PROVIDER === "claude" ? runModelClaude :
+      runModelGemini;
 
     // Force the reply language via system_instruction (Gemini weights it far more than a turn line) —
     // the model otherwise slips to Arabic when an English message contains one Arabic word (a city).
