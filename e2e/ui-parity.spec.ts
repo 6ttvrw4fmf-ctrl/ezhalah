@@ -40,21 +40,32 @@ const rangeInput = (page: Page, i: number) => page.getByPlaceholder('—').nth(i
 
 // Run the search and wait for the agent summary (deterministic — appears regardless of whether the
 // result-count line has finished its transient fetch). Used by the refine-permutation tests, which
-// assert the FILTER WAS APPLIED (via the URL the navigation lands on), not a specific result count.
+// assert the FILTER WAS APPLIED by reading the ACTUAL search RPC request body, not a URL side-effect.
 //
-// Returns that URL rather than leaving the caller to read page.url() later. Since PR#706 (owner
-// 2026-08-16, "refresh must never re-execute search") the agent screen deliberately SCRUBS
-// `?filter=`/`?seed=` from the URL the instant it consumes them (src/app/agent.tsx
-// consumeSearchParams) — a bare `/agent` is exactly what stops a reload from replaying the search.
-// So the filter payload is only observable in the URL for the brief window right after navigation,
-// before that effect runs; capture it immediately after waitForURL settles, not after the summary
-// (which waits for a real search round-trip and is always called well after the scrub).
-async function runSearchToSummary(page: Page): Promise<string> {
+// Why not read page.url() (what this used to do): since PR#706 (owner 2026-08-16, "refresh must
+// never re-execute search") the agent screen SCRUBS `?filter=`/`?seed=` from the URL the moment it
+// consumes them (src/app/agent.tsx consumeSearchParams) — deliberately, so a reload can never replay
+// a search. That scrub turned out to be synchronous enough that even capturing page.url() immediately
+// after page.waitForURL() resolved still observed the already-bare `/agent` (verified live,
+// 2026-08-17: run 31999056797 failed identically after that fix). The URL is simply never a reliable
+// window onto the payload for this screen anymore — intercepting the real network call is.
+//
+// `matchBody` lets each caller identify ITS OWN request (rather than the first, in case some other
+// location_search_candidates_ar call — e.g. a live district count — races it), by checking for the
+// param value only that filter's search would send. Returns the parsed JSON body so the caller can
+// assert on it directly — a strictly stronger guarantee than the URL ever was, since it proves the
+// value reached the actual backend query, not just a client-side query-string echo.
+async function runSearchToSummary(page: Page, matchBody: (body: any) => boolean): Promise<any> {
+  const rpcRequest = page.waitForRequest(
+    (req) => req.method() === 'POST'
+      && req.url().includes('/rpc/location_search_candidates_ar')
+      && matchBody(req.postDataJSON() ?? {}),
+    { timeout: 60_000 },
+  );
   await page.getByText('بحث', { exact: true }).click();
-  await page.waitForURL('**/agent**');
-  const navigatedUrl = page.url();
+  const req = await rpcRequest;
   await expect(page.getByText('ملخص البحث').first()).toBeVisible({ timeout: 60_000 });
-  return navigatedUrl;
+  return req.postDataJSON();
 }
 
 test('Filter mode — Buy in Riyadh returns Arabic results', async ({ page }) => {
@@ -119,16 +130,16 @@ test('AI mode — a city that is also a region asks to disambiguate (no wrong gu
 });
 
 // ── Refine-filter permutations: bedrooms, area, price. Each proves the control is applied end-to-end
-// (asserted from the /agent navigation URL, captured before the app's post-search scrub — see
-// runSearchToSummary — deterministic regardless of result count) AND returns results.
+// (asserted from the actual location_search_candidates_ar RPC request body — see runSearchToSummary
+// — deterministic regardless of result count) AND returns results.
 
 test('Filter mode — bedrooms filter (3) is applied and returns results', async ({ page }) => {
   await home(page);
   await pickCity(page, 'الرياض');
   await pickGroupType(page, 'الفلل والبيوت', 'فيلا');
   await page.getByText('3', { exact: true }).click(); // bedroom chip
-  const url = await runSearchToSummary(page);
-  expect(decodeURIComponent(url)).toContain('"contextBedsList":["3"]');
+  const body = await runSearchToSummary(page, (b) => Array.isArray(b.p_beds_exact) && b.p_beds_exact.includes(3));
+  expect(body.p_beds_exact).toEqual([3]);
 });
 
 test('Filter mode — price max is applied and returns results', async ({ page }) => {
@@ -137,8 +148,8 @@ test('Filter mode — price max is applied and returns results', async ({ page }
   await pickCity(page, 'الرياض');
   await pickGroupType(page, 'الشقق والسكن المشترك', 'شقة');
   await rangeInput(page, 3).fill('5000000');  // priceMax = 5,000,000 ر.س
-  const url = await runSearchToSummary(page);
-  expect(decodeURIComponent(url)).toContain('"priceMax":"5000000"');
+  const body = await runSearchToSummary(page, (b) => b.p_price_max === 5000000);
+  expect(body.p_price_max).toBe(5000000);
 });
 
 test('Filter mode — area min is applied and returns results', async ({ page }) => {
@@ -146,6 +157,6 @@ test('Filter mode — area min is applied and returns results', async ({ page })
   await pickCity(page, 'الرياض');
   await pickGroupType(page, 'الشقق والسكن المشترك', 'شقة');
   await rangeInput(page, 0).fill('100');       // areaMin = 100 م²
-  const url = await runSearchToSummary(page);
-  expect(decodeURIComponent(url)).toContain('"areaMin":"100"');
+  const body = await runSearchToSummary(page, (b) => b.p_area_min === 100);
+  expect(body.p_area_min).toBe(100);
 });
