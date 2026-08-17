@@ -8,7 +8,7 @@ import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/dat
 import { resolveLocation, ensureLocationIndex } from '@/data/locations';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
-import { mapSupabaseUser, signOutBackend } from '@/lib/auth';
+import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
 import { buildSyncedName } from '@/lib/nameSync';
 
 type DataSource = 'local' | 'supabase';
@@ -45,11 +45,14 @@ type AppState = {
   signIn: (u: AuthUser) => void;
   updateUser: (patch: Partial<AuthUser>) => void;
   signOut: () => void;
-  // Permanently delete the account: wipe ALL on-device state (history, parked message, saved
-  // language) from both memory AND storage, then sign out. Distinct from signOut, which keeps the
-  // saved history in storage so a later re-login restores it. (user request: after deletion nothing
-  // from the old account must come back.)
-  deleteAccount: () => void;
+  // Permanently delete the account: delete the auth user on the SERVER, then wipe ALL on-device
+  // state (history, parked message, saved language) from both memory AND storage. Distinct from
+  // signOut, which keeps the saved history in storage so a later re-login restores it. (user
+  // request: after deletion nothing from the old account must come back.)
+  //
+  // Resolves TRUE only when the server confirmed the deletion. On false NOTHING was destroyed and
+  // the user is still signed in — the caller must surface the failure rather than claim success.
+  deleteAccount: () => Promise<boolean>;
   searchCount: number;
   // A message the user typed but couldn't send because the gate fired. Persisted so it survives the
   // whole auth round-trip — including a full page reload during a real OAuth redirect — so after
@@ -105,6 +108,18 @@ const INTRO_DEMO_MODE = false;
 // back in after a delete — would resurrect the previous searches. Scoping by `sub` keeps each
 // account's chats isolated, so a fresh login starts clean and a deleted account stays deleted.
 const historyKey = (sub: string) => 'history:' + sub;
+
+// Erase storage keys SYNCHRONOUSLY on web. AsyncStorage's own removal resolves a tick later, and
+// both sign-out and delete-account are followed by a navigation ~1.2s later (settings.tsx) — a
+// reload landing in that gap used to re-hydrate history the user had just deleted. This mirrors the
+// synchronous WRITES in toggleStar/deleteHistory, which exist for the identical reason. Native has
+// no localStorage; there the AsyncStorage call beside each caller is the erase. (owner 2026-08-17.)
+const removeKeysSync = (keys: string[]) => {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    for (const k of keys) localStorage.removeItem(k);
+  } catch {}
+};
 // The old shared key. We proactively purge it so its stale, cross-account contents never reappear.
 const LEGACY_HISTORY_KEY = 'history';
 
@@ -347,17 +362,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setPendingMessageState(null);
         // Also wipe the GUEST bucket, so the freshly-logged-out guest doesn't inherit the prior
         // signed-in user's in-memory chats getting re-written under 'history:guest'. (user request.)
+        // Sync-first for the same reason as deleteAccount: settings.tsx navigates 1.2s after this,
+        // and an async-only removal can lose that race.
+        removeKeysSync(['pendingMessage', LEGACY_HISTORY_KEY, historyKey('guest')]);
         AsyncStorage.multiRemove(['pendingMessage', LEGACY_HISTORY_KEY, historyKey('guest')]).catch(() => {});
         historyLoadedRef.current = false;
         void signOutBackend();
       },
-      deleteAccount: () => {
+      deleteAccount: async () => {
+        // SERVER FIRST, and nothing is destroyed until it confirms. If the delete fails the account
+        // still exists, so wiping the device would throw away the user's history for nothing and
+        // still leave the account signed-in-able. On failure this returns false having changed
+        // NOTHING, and settings.tsx shows the error instead of claiming success.
+        const serverDeleted = await deleteAccountBackend();
+        if (!serverDeleted) return false;
         // Permanent: wipe everything tied to THIS account from storage AND memory, then sign out.
         // After this, signing in again — even with the same provider — starts truly fresh: none of
         // the old history, parked message, or saved language comes back. (user request: deleted
         // account must not resurrect its data.)
-        const keys = ['pendingMessage', 'locale', LEGACY_HISTORY_KEY];
+        //
+        // The guest bucket goes too: this is a "delete everything of mine on this device" action, and
+        // signOut already clears it — leaving it only here would strand the chats made before signup.
+        const keys = ['pendingMessage', 'locale', LEGACY_HISTORY_KEY, historyKey('guest')];
         if (user) keys.push(historyKey(user.sub));
+        // SYNCHRONOUS on web, for exactly the reason toggleStar/deleteHistory below write
+        // synchronously: AsyncStorage resolves on a later tick, and settings.tsx navigates ~1.2s
+        // after calling this. A reload landing in that window re-hydrated the very history this is
+        // supposed to erase — the user-reported "I deleted my account and the chats are still
+        // there". localStorage.removeItem is sync, so the erase has already happened by the time
+        // this function returns. (owner report 2026-08-17.)
+        removeKeysSync(keys);
         AsyncStorage.multiRemove(keys).catch(() => {});
         setUser(null);
         setHistory([]);
@@ -365,7 +399,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setActiveChatId(null);
         setPendingMessageState(null);
         historyLoadedRef.current = false;
-        void signOutBackend();
+        // No signOutBackend() here — deleteAccountBackend() above already signed out, and only after
+        // the auth user was actually deleted.
+        return true;
       },
       // `record` defaults to true: a genuine new search adds a history chat. Reopening a saved chat
       // passes record=false so just VIEWING it never spawns a fresh entry — a new chat is only made

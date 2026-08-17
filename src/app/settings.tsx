@@ -42,6 +42,9 @@ export default function Settings() {
   const [phStep, setPhStep] = useState<null | 'enter' | 'otp'>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Set only when the server refused/failed the delete — shown in the confirm dialog so the user is
+  // never told their account is gone when it isn't. (owner report 2026-08-17.)
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   // True when the typed name differs from the stored one — drives the explicit green Save button.
   const nameChanged = name.trim().length > 0 && name.trim() !== shownName;
 
@@ -105,10 +108,20 @@ export default function Settings() {
 
   // Deleting wipes saved searches + chat history, signs out, and drops the user on the home Filter
   // screen. Show a progress beat first, and block repeat clicks while it runs. (user request.)
-  const onDeleteAccount = () => {
+  // The account is deleted on the SERVER first; only a confirmed delete wipes the device and leaves
+  // this screen. If it fails, nothing was destroyed and the user is still signed in — say so plainly
+  // instead of navigating away as if it had worked. (owner report 2026-08-17.)
+  const onDeleteAccount = async () => {
     if (deleting) return;
     setDeleting(true);
-    setTimeout(() => { deleteAccount(); router.replace('/'); }, 1200);
+    setDeleteError(null);
+    const ok = await deleteAccount();
+    if (!ok) {
+      setDeleting(false);
+      setDeleteError(tp("Couldn't delete your account. Check your connection and try again."));
+      return;
+    }
+    router.replace('/');
   };
 
   if (!user) {
@@ -314,7 +327,8 @@ export default function Settings() {
                 <Text style={s.delConfirmText}>{t('Delete my account')}</Text>
               )}
             </Pressable>
-            <Pressable style={s.delCancel} onPress={() => setConfirmDelete(false)} disabled={deleting}>
+            {deleteError ? <Text style={s.delError}>{deleteError}</Text> : null}
+            <Pressable style={s.delCancel} onPress={() => { setDeleteError(null); setConfirmDelete(false); }} disabled={deleting}>
               <Text style={s.delCancelText}>{t('Cancel')}</Text>
             </Pressable>
           </View>
@@ -525,6 +539,9 @@ const s = StyleSheet.create({
   delT: { fontSize: 18, fontWeight: '700', color: colors.ink, textAlign: 'center' },
   delS: { fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 8, lineHeight: 19 },
   delNote: { fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 10, lineHeight: 17, backgroundColor: '#f6f8f6', borderRadius: 10, padding: 10 },
+  // Failed-delete message. Red like the danger action it belongs to, so it reads as a real failure
+  // rather than a note. (owner report 2026-08-17.)
+  delError: { fontSize: 12.5, color: '#c0392b', textAlign: 'center', marginTop: 10, lineHeight: 18 },
   delConfirm: { width: '100%', backgroundColor: '#c0392b', borderRadius: 13, paddingVertical: 13, alignItems: 'center', marginTop: 18 },
   delConfirmOk: { width: '100%', backgroundColor: colors.dark, borderRadius: 13, paddingVertical: 13, alignItems: 'center', marginTop: 16 },
   delConfirmText: { color: '#fff', fontSize: 15, fontWeight: '600' },
