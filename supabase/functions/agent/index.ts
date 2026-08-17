@@ -27,6 +27,18 @@ const FALLBACK_MODEL = Deno.env.get("GEMINI_FALLBACK_MODEL") ?? "gemini-2.5-flas
 const urlFor = (m: string) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
 
+// ── Thinking budget (owner request 2026-08-15: turn reasoning back on) ───────
+// On Gemini, thinking tokens are billed against maxOutputTokens, so these two MUST move together —
+// see the long note at genConfig. Kept as env vars so the cost/latency/quality trade can be tuned in
+// the Supabase dashboard rather than through a code change and redeploy.
+//   GEMINI_THINKING_BUDGET=0   → exactly the old behaviour (thinking off), an instant rollback
+//   GEMINI_THINKING_BUDGET=-1  → dynamic; NOT the default, because Flash spends 90-98% of the cap
+//                                thinking, which starves the JSON unless the cap is much larger
+const GEMINI_THINKING_BUDGET = Number(Deno.env.get("GEMINI_THINKING_BUDGET") ?? "1024");
+// Must comfortably exceed thinking budget + the JSON payload (~400-800 tokens observed). The old
+// value was 800 with thinking OFF; it is NOT safe to keep that once thinking is on.
+const GEMINI_MAX_OUTPUT_TOKENS = Number(Deno.env.get("GEMINI_MAX_OUTPUT_TOKENS") ?? "3000");
+
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
 // function. We read the active rows at runtime and append them to the system prompt. Cached ~60s so
@@ -615,10 +627,24 @@ Deno.serve(async (req: Request) => {
 
     const genConfig = {
       temperature: 0.3,
-      // Gemini 2.5 Flash is a "thinking" model — reasoning tokens count against maxOutputTokens. We
-      // don't need chain-of-thought for classification, so we disable thinking and give JSON headroom.
-      thinkingConfig: { thinkingBudget: 0 },
-      maxOutputTokens: 800,
+      // THINKING IS ON (owner request 2026-08-15). It used to be `thinkingBudget: 0` on the theory
+      // that "classification doesn't need chain-of-thought". That was wrong for THIS job: the agent
+      // has to infer a city from a bare district («النرجس» → الرياض), read an implicit period out of
+      // «بالشهر», and decide whether it has enough to search or must ask one question. That is
+      // judgment, and with reasoning disabled the model had to be TOLD every rule instead of working
+      // it out — which is how the system prompt grew to ~12.4k tokens.
+      //
+      // ⚠️ THE TRAP, and why maxOutputTokens moved with it: on Gemini (unlike OpenAI) thinking
+      // tokens are billed against maxOutputTokens. Flipping thinking on while leaving the old cap of
+      // 800 would let reasoning eat the whole budget — Flash on a dynamic budget spends 90-98% of it
+      // thinking — and every search would return truncated or empty JSON. So the budget is EXPLICIT
+      // (not dynamic/-1) and the cap is raised to fit thinking + the JSON with room to spare.
+      // thinkingBudget is a SOFT limit, so the headroom is deliberate, not padding.
+      //
+      // Both are env-tunable: if this proves too slow or too costly, change GEMINI_THINKING_BUDGET
+      // (0 restores the old behaviour exactly) without editing or redeploying this file's logic.
+      thinkingConfig: { thinkingBudget: GEMINI_THINKING_BUDGET },
+      maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
       responseMimeType: "application/json",
       responseSchema: SCHEMA,
     };
