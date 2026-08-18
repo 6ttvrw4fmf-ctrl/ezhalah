@@ -353,10 +353,17 @@ const FREE_TEXT_PROSE_LABELS = new Set([
   'address', 'amenities', 'property services', 'furnishing', 'furniture', 'property usage',
   'status', 'parking type', 'ac type', 'kitchen', 'license status', 'warranties', 'deed location',
 ]);
+// DEFENCE IN DEPTH (2026-08-18): `value`/`label` are TYPED as string, but they originate in a
+// source-scraped JSON column, and Wasalt's legacy additional_info array publishes NUMBERS
+// (`{"key":"noOfFloors","label":"Total Floors","value":2}`). Before buildAdditionalInfo() started
+// coercing that branch, `(2).trim()` threw here and the uncaught TypeError unmounted the entire
+// app — production rendered a blank white page for any search containing such a listing. The
+// boundary fix in remote.ts is the root-cause fix; String() here means no future caller (or a
+// newly-added shape on another platform) can turn one odd source value into a blank screen again.
 function arAttrValue(label: string, value: string, locale: string): string {
-  const v = (value ?? '').trim();
+  const v = String(value ?? '').trim();
   if (!v) return value;
-  const ll = (label ?? '').trim().toLowerCase();
+  const ll = String(label ?? '').trim().toLowerCase();
   const lv = v.toLowerCase();
   if (AR_YESNO[lv]) return AR_YESNO[lv];                                   // Electricity/Water/booleans
   if (ll === 'age') {
