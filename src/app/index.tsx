@@ -98,7 +98,7 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, locale, isRTL } = useI18n();
-  const { query, setQuery, user } = useApp();
+  const { query, setQuery, user, openAuth } = useApp();
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
   // CITY-ONLY FIELD (owner spec 2026-07-17): citySuggestions holds either the Top-6-by-listings
   // (focus, empty text) or the Arabic-matched typed results — never a mix, and never a
@@ -799,10 +799,15 @@ export default function Home() {
               </View>
             ) : null}
             <View style={s.topRight}>
-              {/* Header keeps just Share now — the Filter / AI Agent ModeSwitch moved DOWN into the
-                  hero composition (below) so the eye flows headline → choose mode → search card,
-                  instead of the control floating in the corner. Share balances the brand on the left.
-                  (owner redesign 2026-07-24 r3.) */}
+              {/* Logged-out users always see a sign-in action in the top bar (owner 2026-08-19).
+                  On desktop the docked sidebar already shows it; on mobile the sidebar is a drawer,
+                  so without this the sign-in CTA is invisible until the hamburger is tapped. */}
+              {!user && !docked && (
+                <Pressable style={s.topSignIn} onPress={openAuth} hitSlop={6}>
+                  <Ionicons name="person-outline" size={15} color="#fff" />
+                  <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
+                </Pressable>
+              )}
               <Pressable
                 style={({ pressed }) => [s.shareBtn, pressed && s.shareBtnPressed]}
                 hitSlop={8}
@@ -1564,6 +1569,10 @@ const s = StyleSheet.create({
     elevation: 2,
   },
   shareBtnPressed: { opacity: 0.85 },
+  // Top-bar sign-in (mobile, logged-out only — owner 2026-08-19). Compact pill matching the sidebar's
+  // CTA green so the action is unmistakable. On desktop the docked sidebar already shows it.
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.primary, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   hero: { alignItems: 'center', marginTop: 12, marginHorizontal: 4 },
   // The Filter / AI Agent control, centered in the hero flow between the tagline and the card.
