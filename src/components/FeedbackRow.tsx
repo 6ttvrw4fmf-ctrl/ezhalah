@@ -13,7 +13,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { getListingFeedback, setListingFeedback, type FeedbackRating } from '@/lib/listingFeedback';
-import { readAloudLang, speakReadAloud, stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
+import { speakReadAloud, stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
 
 export default function FeedbackRow({
   feedbackKey, shareUrl, onFeedback, readAloudText,
@@ -45,7 +45,7 @@ export default function FeedbackRow({
   useEffect(() => () => { if (speakingRef.current) stopReadAloud(); }, []);
   const onReadAloud = () => {
     if (speaking) { stopReadAloud(); return; }
-    if (readAloudText) speakReadAloud(feedbackKey, readAloudText, readAloudLang(readAloudText));
+    if (readAloudText) speakReadAloud(feedbackKey, readAloudText);
   };
 
   // Only one of up/down active; clicking the active one clears it (ChatGPT feel). The thanks toast
