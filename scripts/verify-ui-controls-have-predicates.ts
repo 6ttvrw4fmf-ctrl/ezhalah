@@ -75,7 +75,11 @@ for (const key of chipKeys) {
 // must exist somewhere — otherwise the chip renders a live count of `undefined`.
 const typeSlice = (name: string) => {
   const i = remote.indexOf(`export type ${name}`);
-  return i < 0 ? '' : remote.slice(i, i + 1200);
+  if (i < 0) return '';
+  // slice to the type's own closing `};` — a fixed window silently truncates as the type grows
+  // (bit 2026-08-18: the six Monthly count fields fell outside the old 1,200-char cap).
+  const end = remote.indexOf('\n};', i);
+  return remote.slice(i, end < 0 ? i + 1200 : end + 3);
 };
 const declaredCountFields = typeSlice('GuidedCounts') + typeSlice('AgeOptionCounts');
 const countFields = [...advanced.matchAll(/count:\s*\(c\)\s*=>\s*c\.(cnt_[a-z0-9_]+)/g)].map((m) => m[1]);

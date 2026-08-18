@@ -615,6 +615,9 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
         ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
         ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
         ...(q.directions?.length ? { p_directions: q.directions } : {}),
+        ...(q.ratingMin != null ? { p_rating_min: q.ratingMin } : {}),
+        ...(q.reviewsMin != null ? { p_reviews_min: q.reviewsMin } : {}),
+        ...(q.unitSubtypes?.length ? { p_unit_subtypes: q.unitSubtypes } : {}),
       }),
       AGE_COUNT_TIMEOUT_MS,
     );
@@ -660,6 +663,10 @@ export type GuidedCounts = {
   // Commercial expansion 2026-08-16: the utility chips the commercial market actually splits on.
   cnt_electricity: number; cnt_water_supply: number;
   cnt_selected: number;
+  // Monthly (2026-08-18): Gathern rating thresholds + unit-subtype chips. Data-derived cuts on the
+  // source-declared 1-10 scale — the only ones that split the distribution (<=8.0 keeps ~94%).
+  cnt_rating95: number; cnt_rating90: number; cnt_rating90_rc10: number;
+  cnt_sub_studio: number; cnt_sub_serviced: number; cnt_sub_regular: number;
 };
 
 // De-duped per the comment above fetchPropertyAgeOptionCounts — this is the function RNPL/amenities/
@@ -1198,6 +1205,11 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     // Cohort-expansion answers (2026-08-15): both params exist on the live RPC signature.
     ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
     ...(q.directions?.length ? { p_directions: q.directions } : {}),
+    // Monthly guided answers (2026-08-18): params exist on the live signature (template rebuild).
+    // STRICT + UNKNOWN-safe by SQL: NULL rating/subtype rows can never satisfy them.
+    ...(q.ratingMin != null ? { p_rating_min: q.ratingMin } : {}),
+    ...(q.reviewsMin != null ? { p_reviews_min: q.reviewsMin } : {}),
+    ...(q.unitSubtypes?.length ? { p_unit_subtypes: q.unitSubtypes } : {}),
   };
 
   // RC-A rebase note (2026-07-16): main's baseRpcParams block above is the P0-fixed parameter source
