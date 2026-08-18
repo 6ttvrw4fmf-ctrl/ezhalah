@@ -142,6 +142,12 @@ const waitForBody = async (re, timeoutMs) => {
 };
 const RESULT_COUNT = /لقينا|ما لقينا/;
 const inputs = () => page.evaluate(() => Array.from(document.querySelectorAll('input')).map((e) => e.value));
+// Expo Router's Stack keeps a replaced screen's prior instance mounted-but-hidden rather than fully
+// unmounting it (confirmed pre-existing: the plain «تصفية» tab click — no Stop involved — produces
+// the identical doubled, half-hidden input set). Harmless and invisible to a real user; scoping to
+// `offsetParent !== null` reads exactly what the user actually sees, same as a human tester would.
+const visibleInputs = () => page.evaluate(() =>
+  Array.from(document.querySelectorAll('input')).filter((e) => e.offsetParent !== null).map((e) => e.value));
 
 try {
   // ---- Journey A: the primary CTA must produce results, not a blank page. ----
@@ -236,6 +242,128 @@ try {
   check('[mobile] a refresh lands on the FILTER HOME', !page.url().includes('/agent'), `url = ${page.url()}`);
   check('[mobile] the consumed URL carries no executable search param', !/[?&](filter|seed)=/.test(page.url()),
     `url = ${page.url().slice(0, 140)}`);
+
+  // ---- Journeys E-G: FILTER → SEARCH → STOP → SAME FILTER (owner 2026-08-18). ----
+  // Owner's own worked example: إيجار + سنوي + الرياض + حي النرجس + شقة + 3 غرف + 80-150 م².
+  // The strongest proof that "restore the exact Filter state" actually held is not reading input
+  // values back (fragile against markup changes) — it's RESUBMITTING «بحث» untouched after Stop and
+  // getting the EXACT SAME landed count as an uninterrupted run of the identical filter. If Stop had
+  // silently dropped the district, widened the type, or reset the bedroom count, the resubmitted
+  // count would differ. That is what E/F assert.
+  const stopSel = '[aria-label="إيقاف"]';
+  const tapStop = async () => { await page.click(stopSel, { timeout: 5000 }); await page.waitForTimeout(600); };
+  const landedCount = async () => {
+    const m = [...(await body()).matchAll(/لقينا ([\d,٬،]+) إعلان/g)];
+    return m.length ? parseInt(m[m.length - 1][1].replace(/[^\d]/g, ''), 10) : null;
+  };
+  const fillOwnerExample = async () => {
+    await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForTimeout(5000);
+    await tap('إيجار'); await tap('سنوي');
+    await pickCity('الرياض');
+    await page.click('input >> nth=1');
+    await page.type('input >> nth=1', 'النرجس', { delay: 60 });
+    await page.waitForTimeout(2200);
+    await tap('حي النرجس');
+    await tap('الشقق والسكن المشترك'); await tap('شقة');
+    await tap('3');
+    await page.fill('input >> nth=2', '80');
+    await page.fill('input >> nth=3', '150');
+    await page.waitForTimeout(400);
+  };
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await fillOwnerExample();
+  const preStopInputs = await visibleInputs();
+  await tap('بحث');
+  const baselineOk = await waitForBody(RESULT_COUNT, 45000);
+  const baselineCount = await landedCount();
+  check('[E] baseline (uninterrupted) owner-example search lands with a real count', baselineOk && Number.isFinite(baselineCount), `count=${baselineCount}`);
+
+  // ---- E: rapid Stop — pressed the instant the search starts. ----
+  await fillOwnerExample();
+  await tap('بحث');
+  const stopVisible = await page.waitForSelector(stopSel, { timeout: 5000 }).catch(() => null);
+  check('[E] Stop control appears while the Filter search is running', !!stopVisible);
+  await tapStop();
+  check('[E] rapid-Stop lands back on the Filter home', page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
+  check('[E] rapid-Stop shows no results/partial text', !RESULT_COUNT.test(await body()));
+  const postRapidInputs = await visibleInputs();
+  check('[E] rapid-Stop restores city/district/area EXACTLY', JSON.stringify(postRapidInputs) === JSON.stringify(preStopInputs),
+    `pre=${JSON.stringify(preStopInputs)} post=${JSON.stringify(postRapidInputs)}`);
+  await tap('بحث');
+  const rapidResubmitOk = await waitForBody(RESULT_COUNT, 45000);
+  const rapidResubmitCount = await landedCount();
+  check('[E] resubmitting untouched after rapid-Stop returns the EXACT SAME count as the uninterrupted baseline',
+    rapidResubmitOk && rapidResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${rapidResubmitCount}`);
+
+  // ---- F: Stop pressed mid-flight (network artificially slowed), and the late response — which
+  // resolves AFTER the user is already back on Filter — must never repopulate results or write history.
+  let inFlightSeen = false;
+  const delayRoute = async (route) => {
+    inFlightSeen = true;
+    await new Promise((r) => setTimeout(r, 6000));
+    await route.continue();
+  };
+  await page.route('**/rest/v1/rpc/location_search_candidates_ar', delayRoute);
+  await fillOwnerExample();
+  await tap('بحث');
+  await page.waitForTimeout(1500); // land inside the artificial delay window — genuinely mid-flight
+  check('[F] the slowed request is confirmed in flight before Stop is pressed', inFlightSeen);
+  await tapStop();
+  check('[F] mid-flight Stop lands back on the Filter home immediately (does not wait out the slow request)',
+    page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
+  const postMidInputs = await visibleInputs();
+  check('[F] mid-flight Stop restores city/district/area EXACTLY', JSON.stringify(postMidInputs) === JSON.stringify(preStopInputs));
+  // Let the slow response actually land now, well after Stop + navigation.
+  await page.waitForTimeout(6000);
+  check('[F] the late response (resolved after Stop) never populated results on the Filter screen',
+    !RESULT_COUNT.test(await body()));
+  check('[F] still on the Filter home after the late response lands (no surprise navigation into results)',
+    page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
+  await page.unroute('**/rest/v1/rpc/location_search_candidates_ar', delayRoute);
+  await tap('بحث');
+  const midResubmitOk = await waitForBody(RESULT_COUNT, 45000);
+  const midResubmitCount = await landedCount();
+  check('[F] resubmitting untouched after a mid-flight Stop still returns the EXACT SAME count',
+    midResubmitOk && midResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${midResubmitCount}`);
+
+  // ---- G: a CHAT-originated Stop must NOT navigate home — origin-tracking must not over-apply. ----
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(5000);
+  await tap('الوكيل الذكي');
+  await page.waitForTimeout(2000);
+  await page.click('textarea');
+  await page.type('textarea', 'ابغى شقة للايجار في جدة', { delay: 30 });
+  await page.keyboard.press('Enter');
+  const chatStopVisible = await page.waitForSelector(stopSel, { timeout: 8000 }).catch(() => null);
+  check('[G] Stop control appears for a chat-originated turn too', !!chatStopVisible);
+  if (chatStopVisible) {
+    await tapStop();
+    check('[G] chat-originated Stop stays on /agent (origin tracking does not over-apply to chat turns)',
+      page.url().includes('/agent'), `url=${page.url()}`);
+    check('[G] chat-originated Stop still shows the existing stop-in-place acknowledgement',
+      /وقفت البحث/.test(await body()));
+  }
+
+  // ---- H: same rapid-Stop + exact-restore proof on MOBILE. ----
+  await page.setViewportSize({ width: 390, height: 844 });
+  await fillOwnerExample();
+  const preStopInputsMobile = await visibleInputs();
+  await tap('بحث');
+  const mobStopVisible = await page.waitForSelector(stopSel, { timeout: 5000 }).catch(() => null);
+  check('[H mobile] Stop control appears while the Filter search is running', !!mobStopVisible);
+  await tapStop();
+  check('[H mobile] rapid-Stop lands back on the Filter home', page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
+  check('[H mobile] rapid-Stop shows no results/partial text', !RESULT_COUNT.test(await body()));
+  const postMobileInputs = await visibleInputs();
+  check('[H mobile] rapid-Stop restores city/district/area EXACTLY',
+    JSON.stringify(postMobileInputs) === JSON.stringify(preStopInputsMobile));
+  await tap('بحث');
+  const mobResubmitOk = await waitForBody(RESULT_COUNT, 45000);
+  const mobResubmitCount = await landedCount();
+  check('[H mobile] resubmitting untouched after rapid-Stop returns the EXACT SAME count as baseline',
+    mobResubmitOk && mobResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${mobResubmitCount}`);
 
   check('no uncaught runtime error across the whole run', crashes.length === 0, crashes.join(' | '));
 } catch (e) {

@@ -34,7 +34,9 @@ type AppState = {
   query: SearchQuery;
   setQuery: (updater: (q: SearchQuery) => SearchQuery) => void;
   resetQuery: () => void;
-  runQuery: (q: SearchQuery, record?: boolean) => Promise<SearchResult>;
+  // `signal` (owner 2026-08-18, Stop button): when the caller's turn is cancelled, the underlying
+  // network calls abort AND the history/searchCount writes are skipped — see the guard at the call site.
+  runQuery: (q: SearchQuery, record?: boolean, signal?: AbortSignal) => Promise<SearchResult>;
   loadMoreListings: (q: SearchQuery, offset: number) => Promise<{ listings: Listing[]; nextOffset: number; hasMore: boolean }>;
   dataSource: DataSource;
   // Auth. SEARCH IS FREE, ALWAYS (owner rule 2026-08-15, retiring the PRD §9 gate): a guest can run
@@ -406,7 +408,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // `record` defaults to true: a genuine new search adds a history chat. Reopening a saved chat
       // passes record=false so just VIEWING it never spawns a fresh entry — a new chat is only made
       // by a new filter search / chat message (or New Chat), keeping the list clean. (user request.)
-      runQuery: async (q, record = true) => {
+      runQuery: async (q, record = true, signal) => {
         // A Room is always exactly 1 bedroom — normalize here so every path (filter or AI agent)
         // shows "1 bedroom" and uses the room price ladder, no matter what detail came in. (user request.)
         if (q.type === 'Room') q = { ...q, detail: '1' };
@@ -438,7 +440,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // timed out at 21k+ rows. null = backend error (flag it so the UI shows retry, not "no matches").
         // pageCandidates/pageTotal come back straight off this call's own result (no shared module state
         // that a concurrent fetchListingsForQuery() call could clobber before we read it — 2026-08-03 fix).
-        const { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q);
+        const { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal });
         // Repeat-visit rotation offset: a per-filter counter persisted in localStorage so returning to the
         // SAME filter (deal + location/districts) later surfaces a DIFFERENT high-quality first 25, never the
         // exact same set — while staying strictly inside the filters. Device-local (guests included);
@@ -455,7 +457,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Attach the RESOLVED query so the caller renders the Search Summary from what actually ran
         // (the corrected city/region), not the raw pre-resolution text. (one-engine summary parity.)
         const result: SearchResult = { ...r, query: q, pageOffset: pageCand, hasMore: pageCand >= 1500, matchTotal: pageTotal };
-        if (record) {
+        // STOP-BUTTON GUARD (owner 2026-08-18): "A cancelled request must never later write results
+        // into the UI or history." fetchListingsForQuery already aborts the underlying network calls
+        // on `signal`, but a response can still be mid-flight (or already back) at the exact instant
+        // Stop is pressed — this check is what makes the no-write guarantee absolute regardless of
+        // that race, not just "usually true because the network call also got cancelled". Checked
+        // AFTER the await (signal.aborted only ever flips true, never back to false), so a Stop that
+        // lands one tick after this line simply loses the race and the write already happened —
+        // exactly the same instant a real completed search would have been too late to cancel.
+        if (record && !signal?.aborted) {
           setSearchCount((c) => c + 1);
           // Record the chat in memory (it shows in the current session). Persistence only happens for
           // signed-in users — a guest's chats are never written to storage, so they vanish on leave.
