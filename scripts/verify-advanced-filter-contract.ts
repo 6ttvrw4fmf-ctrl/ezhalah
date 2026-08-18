@@ -220,8 +220,25 @@ check('startAgeFlow takes a fallbackToRefine flag and only pops refine chips whe
   && /if \(fallbackToRefine\) startRefine\(q\)/.test(agentSrc));
 check('the auto-open trigger call site (>25 results -> startAgeFlow(..., { auto: true })) stays REMOVED',
   !/startAgeFlow\(q2, false, \{ auto: true/.test(agentSrc));
+// The check above pins the EXACT call shape #768 deleted. Widened 2026-08-19 so a re-introduction
+// under any other spelling — different variable, different spacing, an extra arg — is caught too;
+// the literal check stays as the precise historical anchor.
+check('no auto-entry into the interview can return under ANY spelling',
+  !/startAgeFlow\([^;]*\bauto\s*:\s*true/.test(agentSrc)
+  && !/anyGuidedEligible\([^)]*\)\s*&&\s*\w+\s*>\s*INTERVIEW_STOP_AT/.test(agentSrc));
 check('the guided flow stays reachable on demand via the narrow-it-down button',
   /if \(q && anyGuidedEligible\(q\)\) void startAgeFlow\(q\)/.test(agentSrc));
+// ── Result-intro count = matchTotal, never a page-capped length (owner bug, found live 2026-08-16)
+// RESTORED 2026-08-19. The original guard read the `introTotal` const inside the auto-open block;
+// #768 deleted that block and #770 dropped the guard with it as collateral, leaving this rule
+// unprotected in the whole repo. But the RULE did not die with the popup — the computation simply
+// MOVED into the results-message render, where it still feeds the on-screen «لقينا N» sentence (and
+// now Read Aloud too). Without a guard, a future edit could reinstate the page-capped count that
+// once displayed 1,500 (the candidate cap) when the true total was 8,458. Re-anchored to its new
+// home rather than re-deleted.
+check('the result-intro count comes from matchTotal, never a page-capped listings length',
+  /const introTotal = m\.result\.matchTotal \?\? m\.result\.listings\.length/.test(agentSrc)
+  && /const introCountSafe = !m\.result\.query\?\.priceIsAnnual && introTotal > 0/.test(agentSrc));
 
 // ── Mining transition (owner 2026-08-16 §9) ─────────────────────────────────────────────────────
 // The «digging through the market» beat is DECORATION: its dismissal is driven by plain setTimeout
