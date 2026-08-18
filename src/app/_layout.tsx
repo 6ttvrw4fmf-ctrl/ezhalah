@@ -8,6 +8,7 @@ import { AppProvider } from '@/store';
 import { LocaleProvider, useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
+import { markAppSessionStarted } from '@/lib/appSession';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
@@ -44,18 +45,24 @@ function Shell() {
   // and for screens whose flow state lives in memory only, that screen would come back empty, so the
   // refresh is sent back to Home instead. Runs once on mount; client-side navigation afterwards is
   // untouched. '/auth' is exempt so an OAuth redirect can still land there and finish signing in.
-  // EXCEPTION (QA 2026-08-14): `/agent?filter=<JSON SearchQuery>` (and `?seed=…`) carries the whole
-  // search in the URL and re-runs itself on open, so it does NOT come back empty — sending it Home
-  // was silently dropping every selection on refresh (المدينة, الأحياء, «سنوي»/«شهري», السعر,
-  // المساحة, غرف النوم, فئة/نوع) and breaking bookmarked/shared result links. The decision lives in
-  // shouldSendRefreshHome() so scripts/verify-refresh-restores-filter-search.ts can execute it.
+  // `/agent` used to be exempted here (it re-ran `?filter=` on open, so it did not come back empty).
+  // Both halves of that changed on 2026-08-16 by owner decision: a reload may no longer re-run any
+  // search (appSession gate), and — since that left an empty AI chat — a reload now lands on the
+  // Filter home like every other deep route. The decision lives in shouldSendRefreshHome() so
+  // scripts/verify-refresh-restores-filter-search.ts can execute it rather than grep for it.
   const homedRef = useRef(false);
   useEffect(() => {
     if (homedRef.current) return;
     homedRef.current = true;
-    if (Platform.OS !== 'web') return;
+    // Open the app session AFTER this load's screen effects have run (see lib/appSession.ts): from
+    // here on, params reaching a screen are in-app navigation and may run a search. During the load
+    // itself they are page-load params and must not. This is what stops a refresh from re-issuing
+    // the AI call and the property RPC. (owner 2026-08-16.)
+    const t = setTimeout(markAppSessionStarted, 0);
+    if (Platform.OS !== 'web') return () => clearTimeout(t);
     const search = typeof window !== 'undefined' ? window.location.search : '';
     if (shouldSendRefreshHome(pathname, search)) router.replace('/');
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (

@@ -6,7 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
-import { Segmented, OptionBox, FieldLabel, Tappable, Heartbeat, Reveal, DropdownReveal } from '@/components/ui';
+import { Segmented, OptionBox, FieldLabel, Tappable, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
@@ -23,15 +23,8 @@ import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG } from '@/i18n';
-import { iconForPrompt, useExamplePrompts } from '@/data/examplePrompts';
 
 const MAX_W = 560; // desktop-web: keep the mobile-first column centered
-
-// The 6 "Start here" chips ROTATE per mount — drawn from the shared examplePrompts library so the
-// home grid and the AI Agent's empty-state grid stay in lockstep. A returning user sees a fresh
-// random subset every visit / refresh / sidebar dismissal. Sampled inside the component via useMemo
-// keyed on locale (Arabic UI → Arabic pool, English UI → English pool — never mixed). (user request:
-// "always refresh whenever a user leaves or joins — same for Ezhalah AI Agent — create a rotation.")
 
 const AnimatedPressable = RNAnimated.createAnimatedComponent(Pressable);
 
@@ -105,17 +98,6 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, locale, isRTL } = useI18n();
-  // Fresh random 6 examples per mount, biased toward real DB inventory (~70%) + curated variety.
-  // Renamed to `promptChips` to avoid colliding with the location-suggestions state below.
-  const promptLabels = useExamplePrompts(locale === 'ar' ? 'ar' : 'en', 6);
-  const promptChips = useMemo(
-    () => promptLabels.map((label) => ({
-      label,
-      seed: label,
-      icon: iconForPrompt(label) as keyof typeof Ionicons.glyphMap,
-    })),
-    [promptLabels],
-  );
   const { query, setQuery, user } = useApp();
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
   // CITY-ONLY FIELD (owner spec 2026-07-17): citySuggestions holds either the Top-6-by-listings
@@ -195,12 +177,19 @@ export default function Home() {
   // the same inventory pressing Search returns. Price is deliberately absent (owner, 2026-08-15).
   const cohortTypes = cohortTypesAr(query);
   const cohortTypesSig = cohortTypes ? cohortTypes.join('|') : '';
-  // «N إعلان · P٪» — the honest share of the current cohort. Denominator comes from the SAME RPC
-  // row as the count (one query, cannot disagree); clamped so a display bug can never show >100%.
-  const cohortShareLabel = (n: number, total: number): string | undefined => {
-    if (!(n > 0) || !(total > 0)) return undefined;
-    const pct = Math.max(0, Math.min(100, Math.round((100 * n) / total)));
-    return `${grouped(n)} ${t('ads')} · ${pct}٪`;
+  // «N إعلان» — how many ACTIVE listings this option really has, in the current cohort.
+  //
+  // The share percentage that used to trail this label («… · 38٪») was REMOVED on owner instruction
+  // (2026-08-16): "remove this percentage and show these active numbers". A share answers a question
+  // nobody asked at this moment — the user is choosing where to search, so the only useful fact is
+  // how much is actually there. The count itself is unchanged and still comes straight from the
+  // counting RPC, so nothing about its accuracy moved.
+  //
+  // Returns undefined for a zero/absent count so a caller can render its own explicit "nothing here"
+  // message instead of a bare «0 إعلان» (see the districts list, which does exactly that).
+  const cohortCountLabel = (n: number): string | undefined => {
+    if (!(n > 0)) return undefined;
+    return `${grouped(n)} ${t('ads')}`;
   };
   // Refs so the ENTIRE Price/Area/Size box is one tap target (owner 2026-07-10): tapping anywhere in
   // the box — icon, label, padding, unit text — focuses the input immediately, same pattern already
@@ -649,11 +638,6 @@ export default function Home() {
     if (!shared) setShareOpen(true);
   };
 
-  const onChip = (seed: string) => {
-    // Search is FREE, always — chips route straight to results, never to sign-in.
-    router.push({ pathname: '/agent', params: { seed } });
-  };
-
   const detail = query.type ? detailFor(query.type) : null;
   // Context-level detail: shown at category/group level when no specific type is selected.
   const ctx = !query.type ? detailForContext(query.category, query.typeGroup ?? null) : null;
@@ -959,7 +943,7 @@ export default function Home() {
                       // field used to show an empty box until a keystroke. English text keeps the
                       // existing behavior exactly (no autocomplete; the Arabic-only hint stands).
                       if (!isLatinOnlyInput(query.location)) {
-                        setCitySuggestions(matchCitiesByText(query.deal, paymentMonthly, effCategory, query.location));
+                        setCitySuggestions(matchCitiesByText(query.deal, paymentMonthly, effCategory, query.location, cohortTypes));
                       }
                     }
                   }}
@@ -980,7 +964,7 @@ export default function Home() {
                     // Arabic-only product: English typing gets NO autocomplete and an Arabic hint —
                     // there is nothing to match against, since every city name here is Arabic. (user rule)
                     const latin = isLatinOnlyInput(v);
-                    setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, effCategory, v));
+                    setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, paymentMonthly, effCategory, v, cohortTypes));
                     setLocMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -1050,7 +1034,7 @@ export default function Home() {
                             // display-name collision (e.g. الهفوف ×2), prepended so it stays visible.
                             sublabel: [
                               hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
-                              cohortShareLabel(opt.listingCount, opt.totalInCohort),
+                              cohortCountLabel(opt.listingCount),
                             ].filter(Boolean).join(' · ') || undefined,
                             icon: LOC_IMG.city, // restored designed art (see TrendingList.tsx note)
                           }))}
@@ -1075,7 +1059,7 @@ export default function Home() {
                             {(() => {
                               const parts = [
                                 hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
-                                cohortShareLabel(opt.listingCount, opt.totalInCohort),
+                                cohortCountLabel(opt.listingCount),
                               ].filter(Boolean);
                               return parts.length ? <Text style={s.suggDist}>{parts.join(' · ')}</Text> : null;
                             })()}
@@ -1136,7 +1120,7 @@ export default function Home() {
                       });
                     } else if (!isLatinOnlyInput(districtTextRef.current)) {
                       // P2 — refocusing mid-typing shows the current matches, not an empty box.
-                      setDistrictSuggestions(matchDistrictsByCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, districtTextRef.current));
+                      setDistrictSuggestions(matchDistrictsByCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, districtTextRef.current, cohortTypes));
                     }
                   }}
                   onBlur={() => { districtBlurTimer.current = setTimeout(() => setDistrictFocus(false), 150); }}
@@ -1149,11 +1133,11 @@ export default function Home() {
                     // typed-but-unconfirmed string being searched; that stays true by construction,
                     // since districtText itself is never sent anywhere.)
                     if (!citySelected) return;
-                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6)); setDistrictMsg(''); return; }
+                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6, cohortTypes)); setDistrictMsg(''); return; }
                     // Arabic-only product: English typing gets NO autocomplete and the same Arabic hint the
                     // City field shows — every district name here is Arabic, so there is nothing to match. (owner UI request.)
                     const latin = isLatinOnlyInput(v);
-                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, v));
+                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, v, cohortTypes));
                     setDistrictMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -1171,7 +1155,7 @@ export default function Home() {
                   districtTextRef.current = '';
                   setDistrictText('');
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6, cohortTypes));
                   districtRef.current?.focus();
                 }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
@@ -1226,7 +1210,7 @@ export default function Home() {
                   districtTextRef.current = '';
                   setDistrictText('');
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, paymentMonthly, 6, cohortTypes));
                 };
                 const selectedLabels = new Set(districtsSelected.map((d) => d.districtAr));
                 return (
@@ -1257,7 +1241,7 @@ export default function Home() {
                             // presenting a popular-at-category-scope district that would dead-end.
                             sublabel: districtLiveCounts?.[opt.districtAr] === 0
                               ? t('No listings here right now')
-                              : cohortShareLabel(opt.listingCount, opt.totalInCity),
+                              : cohortCountLabel(opt.listingCount),
                             icon: LOC_IMG.district, // restored designed art (see TrendingList.tsx note)
                           }))}
                           onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
@@ -1290,8 +1274,8 @@ export default function Home() {
                             <Text style={[s.suggCity, isEmpty && s.suggCityEmpty]}>{opt.districtAr}</Text>
                             {isEmpty
                               ? <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text>
-                              : (cohortShareLabel(opt.listingCount, opt.totalInCity)
-                                  ? <Text style={s.suggDist}>{cohortShareLabel(opt.listingCount, opt.totalInCity)}</Text>
+                              : (cohortCountLabel(opt.listingCount)
+                                  ? <Text style={s.suggDist}>{cohortCountLabel(opt.listingCount)}</Text>
                                   : null)}
                           </View>
                           {isPicked ? <Ionicons name="checkmark-circle" size={18} color={colors.primary} /> : null}
@@ -1527,28 +1511,12 @@ export default function Home() {
             <View ref={withAnchor(endAnchorRef)} style={{ height: 1 }} />
           </View>
 
-          {/* Onboarding header — centered icon + bold heading + lighter description, explaining the
-              example cards. Same structure as the AI Agent page. (user request.) */}
-          <View style={s.onbWrap}>
-            <Ionicons name="search" size={26} color={colors.primary} />
-            <Text style={s.onbHeading}>{t("Not sure what you're looking for?")}</Text>
-            <Text style={s.onbDesc}>{t('Tap one of the examples below and let Ezhalah start the search for you.')}</Text>
-          </View>
-
-          <View style={s.suggGrid}>
-            {promptChips.map((sg, i) => (
-              // Heartbeat wrapper holds the grid sizing and the gentle pulse; the Tappable inside keeps
-              // the press-scale and fills the cell. (user request: heartbeat on the cards.)
-              <Heartbeat key={sg.label} index={i} style={s.chipCell}>
-                <Tappable style={s.chip} onPress={() => onChip(sg.seed)} dip={0.05}>
-                  <View style={s.chipIc}>
-                    <Ionicons name={sg.icon} size={21} color={colors.chipIcon} />
-                  </View>
-                  <Text style={s.chipTx}>{sg.label}</Text>
-                </Tappable>
-              </Heartbeat>
-            ))}
-          </View>
+          {/* REMOVED 2026-08-16 (owner: "remove this for now"): the «مو متأكد وش تبحث عنه؟» onboarding
+              header + the 6 "Start here" example cards that sat below the Search button. The supporting
+              code (promptChips/onChip + the examplePrompts import) went with it so nothing dead is left
+              behind — `git revert` of that commit restores the whole block. The styles (onbWrap/
+              onbHeading/onbDesc/suggGrid/chip*) are deliberately KEPT so a restore needs no re-authoring.
+              The AI Agent page still shows its own version of this block to guests. */}
         </RNAnimated.View>
       </ScrollView>
 

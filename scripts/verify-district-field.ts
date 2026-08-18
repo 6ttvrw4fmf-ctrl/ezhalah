@@ -74,7 +74,7 @@ check('RPC result carries match_values (twin-safe recall)', /match_values/.test(
 check('Top-6 = districts with active listings only (listingCount > 0)', /listingCount > 0\)\.slice\(0, k\)/.test(locSrc));
 check('autocomplete searches the COMPLETE cached catalog for the city', /export function matchDistrictsByCityId/.test(locSrc));
 check('empty focus shows the Category+Deal+period-scoped Top-6 via topDistrictsForCityId', /topDistrictsForCityId\(cid, query\.deal, effCategory, paymentMonthly, 6, cohortTypes\)/.test(indexSrc));
-check('typing filters within the chosen city+scope via matchDistrictsByCityId', /matchDistrictsByCityId\(citySelected\.cityId, query\.deal, effCategory, paymentMonthly, v\)/.test(indexSrc));
+check('typing filters within the chosen city+scope via matchDistrictsByCityId (cohort-typed)', /matchDistrictsByCityId\(citySelected\.cityId, query\.deal, effCategory, paymentMonthly, v, cohortTypes\)/.test(indexSrc));
 // Arabic-only: typing the district in English yields NO autocomplete and the same Arabic hint the City
 // field shows (owner UI request 2026-07-18) — every district name is Arabic, so there's nothing to match.
 check('English district input shows the Arabic-only hint and clears suggestions', /const latin = isLatinOnlyInput\(v\);[\s\S]{0,220}?setDistrictSuggestions\(latin \? \[\][\s\S]{0,220}?setDistrictMsg\(latin \? ARABIC_ONLY_MSG/.test(indexSrc));
@@ -106,7 +106,7 @@ check('counts use the CURRENT filter state (narrowing signature covers type/grou
 check('changing any relevant filter INVALIDATES the previous counts before refetch (no stale numbers)', /setDistrictLiveCounts\(null\);\s*\n\s*if \(!citySelected \|\| !hasDistrictNarrowing/.test(indexSrc));
 check('a live-count response is dropped if a newer request superseded it (race guard)', /if \(id === districtLiveReq\.current && counts\) setDistrictLiveCounts\(counts\)/.test(indexSrc));
 check('onSearch and the count effect share ONE query builder (no state drift between count and search)', /const base = buildFilterBaseQuery\(\)!/.test(indexSrc) && /const q = buildFilterBaseQuery\(\);/.test(indexSrc));
-check('trending rows show the Arabic zero message under narrowing (never a silent dead-end)', /sublabel: districtLiveCounts\?\.\[opt\.districtAr\] === 0[\s\S]{0,40}\? t\('No listings here right now'\)[\s\S]{0,80}cohortShareLabel\(opt\.listingCount, opt\.totalInCity\)/.test(indexSrc));
+check('trending rows show the Arabic zero message under narrowing (never a silent dead-end)', /sublabel: districtLiveCounts\?\.\[opt\.districtAr\] === 0[\s\S]{0,40}\? t\('No listings here right now'\)[\s\S]{0,80}cohortCountLabel\(opt\.listingCount\)/.test(indexSrc));
 // The owner explicitly praised and locked the Arabic zero-listing message: it must exist, stay
 // TRANSLATED (no English leak in the user-visible string), and stay wired to the empty rows.
 {

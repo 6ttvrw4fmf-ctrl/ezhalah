@@ -127,11 +127,21 @@ const AR: Record<string, string> = {
   // شهراً" / "عقد لمدة 12 شهراً") that no source publishes and Ezhalah never captures — an invented claim
   // about the lease. What we actually know is the BASIS OF THE PRICE WE DISPLAY, so that is all we say.
   'Annual: 12-month lease, price/year.': 'سنوي: السعر المعروض سنوي.',
-  'Monthly: 1–11 month lease, price/month.': 'شهري: السعر المعروض شهري.',
-  'Monthly: the displayed price is the monthly price.': 'شهري: السعر المعروض شهري.',
+  // Owner 2026-08-18: the Monthly note says ONLY that prices are displayed per month — never any
+  // claim about contract length (the old «من شهر إلى 11 شهر» wording is banned; a guard pins it out).
+  'Monthly: the displayed price is the monthly price.': 'الأسعار معروضة بالشهر',
   'Yearly: the displayed price is the yearly price.': 'سنوي: السعر المعروض سنوي.',
   'Both: monthly and yearly listings together — each card shows its own price basis.':
     'كلاهما: نعرض الشهري والسنوي معاً — كل إعلان يوضّح أساس سعره.',
+  // Monthly Advanced Filter (2026-08-18)
+  'What rating would you prefer?': 'كم التقييم اللي تفضله؟',
+  '9.5+': '9.5+',
+  '9.0+': '9.0+',
+  '9.0+ with 10+ reviews': '9.0+ مع 10 تقييمات أو أكثر',
+  'What kind of unit?': 'وش نوع الوحدة اللي تبغاها؟',
+  'Studio unit': 'استديو',
+  'Serviced apartment': 'شقة مخدومة',
+  'Regular apartment': 'شقة عادية',
   'Family villa in North Riyadh': 'فيلا عائلية في شمال الرياض',
   'Apartment for rent in Khobar': 'شقة للإيجار في الخبر',
   'Commercial land in Jeddah': 'أرض تجارية في جدة',
@@ -592,7 +602,9 @@ const AR: Record<string, string> = {
   'Let’s narrow it down': 'خلّنا نحدد الطلب أكثر',
   'Help me find more precise results': 'ساعدني ألقى نتائج أدق',
   'I can get you something more precise.': 'أقدر أجيب لك نتائج أدق.',
-  "Type what you're looking for...": 'اكتب ما تبحث عنه...',
+  // Composer placeholder (owner wording 2026-08-16) — names the domain and the country, in the
+  // conversational register the rest of the agent speaks.
+  "Type the property you're looking for in Saudi Arabia...": 'اكتب العقار اللي تبحث عنه في السعودية...',
   'Want more accurate results?': 'تريد نتائج أدق؟',
   'I can ask you a few questions to find your perfect match.': 'يمكنني طرح بعض الأسئلة لإيجاد ما يناسبك تماماً.',
   'Ezhalah displays listings sourced from third party platforms. We do not recommend, verify or own any listing. The choice is yours.':
@@ -998,6 +1010,10 @@ const AR: Record<string, string> = {
   'Apple Account': 'حساب Apple',
   'Google Account': 'حساب Google',
   "Can't be changed": 'لا يمكن تغييره',
+  // Shown in the delete dialog when the SERVER delete failed — the account still exists, so the
+  // copy must not imply anything was removed. (owner report 2026-08-17.)
+  "Couldn't delete your account. Check your connection and try again.":
+    'ما قدرنا نحذف حسابك. تأكد من اتصالك وحاول مرة ثانية.',
   "To change it, you'll have to delete this account and make a new one.":
     'لتغييره، عليك حذف هذا الحساب وإنشاء حساب جديد.',
   'Logged in device': 'الجهاز المسجَّل دخوله',

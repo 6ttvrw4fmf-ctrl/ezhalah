@@ -145,3 +145,33 @@ export async function signOutBackend(): Promise<void> {
     /* ignore */
   }
 }
+
+/**
+ * Permanently delete the signed-in user's own account on the SERVER, then sign out.
+ *
+ * Before 2026-08-17 "Delete my account" only cleared on-device state, so the account survived and
+ * signing in again restored it — and the About screen promised PDPL removal that never happened.
+ * The `delete-account` edge function deletes the auth user identified by the caller's own access
+ * token (never an id sent from here — see that function's header).
+ *
+ * Returns whether the server actually deleted the account, so the UI can tell the truth instead of
+ * reporting success on a failed delete. Signs out ONLY after a confirmed delete: if the call failed
+ * the account still exists, and silently signing the user out would look like it had worked.
+ */
+export async function deleteAccountBackend(): Promise<boolean> {
+  if (!supabase) return false;
+  let deleted = false;
+  try {
+    const { data, error } = await supabase.functions.invoke('delete-account', { body: {} });
+    deleted = !error && !!(data as { deleted?: boolean } | null)?.deleted;
+  } catch {
+    deleted = false;
+  }
+  if (!deleted) return false;
+  try {
+    await supabase.auth.signOut();
+  } catch {
+    /* the account is already gone; the store clears local state regardless */
+  }
+  return true;
+}

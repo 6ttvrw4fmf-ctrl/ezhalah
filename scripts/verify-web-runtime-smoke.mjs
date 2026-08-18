@@ -1,5 +1,6 @@
 // Permanent guard: the built web bundle must actually RUN. Drives the real primary journey
-// (تصفية → «بحث» → results, then hard-refresh → reopen «تصفية») in a headless browser against a
+// (تصفية → «بحث» → results, then hard-refresh → FILTER HOME with zero search requests) in a headless
+// browser against a
 // locally-served production build.
 //
 // WHY THIS EXISTS (2026-08-15, Search & Matching QA):
@@ -128,6 +129,18 @@ const pickCity = async (name) => {
   await tap(name);
 };
 const body = () => page.innerText('body');
+// Poll instead of sleeping a fixed budget: this journey ends on a TYPEWRITER, whose duration varies
+// with machine load, so any single number is either flaky or needlessly slow. (12s was marginal —
+// the same build passed and failed on consecutive runs.)
+const waitForBody = async (re, timeoutMs) => {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    if (re.test(await body())) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
+};
+const RESULT_COUNT = /لقينا|ما لقينا/;
 const inputs = () => page.evaluate(() => Array.from(document.querySelectorAll('input')).map((e) => e.value));
 
 try {
@@ -146,7 +159,7 @@ try {
   const beforeLen = (await body()).length;
 
   await tap('بحث');
-  await page.waitForTimeout(12000);
+  const gotResults = await waitForBody(RESULT_COUNT, 40000);
   const afterLen = (await body()).length;
   const afterText = await body();
 
@@ -154,34 +167,76 @@ try {
   // and must render a result count.
   check('«بحث» does not blank the page', afterLen > 0, `body length went ${beforeLen} → ${afterLen}`);
   check('«بحث» navigates to the results screen', page.url().includes('/agent'), `url stayed ${page.url()}`);
-  check('results render a count', /لقينا|ما لقينا/.test(afterText));
+  check('results render a count', gotResults);
   check('no uncaught runtime error during the search journey', crashes.length === 0, crashes.join(' | '));
 
-  // ---- Journey B: hard refresh must keep BOTH the results and the «تصفية» form (QA §29). ----
+  // ---- Journey B: A REFRESH MUST START A NEW CHAT AND EXECUTE NOTHING (owner 2026-08-16). ----
+  // Reversal of the previous QA §29 contract (refresh used to re-run and restore the search); see
+  // the header of scripts/verify-refresh-restores-filter-search.ts for the owner's wording.
+  // This is the leg that measures the requirement at the NETWORK level, which is the only place
+  // "zero duplicate search" can actually be proven.
   const resultsUrl = page.url();
-  check('results URL carries the filter payload', resultsUrl.includes('filter='));
 
-  await page.goto(resultsUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForTimeout(11000);
-  check('results survive a hard refresh', /لقينا|ما لقينا/.test(await body()));
+  // Count real search traffic, not renders: the property-search RPC and the agent function.
+  let searchCalls = 0;
+  const countSearch = (u) => /\/rest\/v1\/rpc\/(location_search_candidates_ar|search_listings)/.test(u)
+    || /\/functions\/v1\/agent/.test(u);
+  page.on('request', (r) => { if (countSearch(r.url())) searchCalls++; });
 
-  // «عرض النتائج» dismisses the guided panel that sits over the results.
-  try { await tap('عرض النتائج'); } catch { /* panel not shown — fine */ }
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(12000);
+  const afterRefresh = await body();
+
+  check('a refresh issues ZERO search/AI requests', searchCalls === 0,
+    `${searchCalls} search/AI request(s) fired on reload — a refresh must never count as a user search`);
+  check('a refresh does not re-render the previous results', !/لقينا|ما لقينا/.test(afterRefresh));
+  // Owner rule 2 (2026-08-16, same day as rule 1): "when i refresh takes me to the filter page …
+  // not this here" — an emptied AI chat is a dead end, so the refresh lands on the Filter home.
+  check('a refresh lands on the FILTER HOME (owner 2026-08-16 rule 2)',
+    !page.url().includes('/agent'), `url = ${page.url()}`);
+  check('the filter home actually rendered (city field present, not a blank bounce)',
+    /أي مدينة؟/.test(afterRefresh));
+  check('the consumed URL no longer carries an executable search param',
+    !/[?&](filter|seed)=/.test(page.url()), `url = ${page.url().slice(0, 140)}`);
+  check('the pre-refresh URL did carry the one-shot intent (so the clear is what emptied it)',
+    resultsUrl.includes('filter=') || resultsUrl.endsWith('/agent'));
+
+  // ---- Journey C: intentional behaviour still works — the fix must not mean "searches stop". ----
   await tap('تصفية');
   await page.waitForTimeout(2500);
-  const vals = await inputs();
-  check('after refresh, «تصفية» restores المدينة', vals[0] === 'الرياض', `city input = ${JSON.stringify(vals[0])}`);
-  check('after refresh, «تصفية» restores السعر', /30/.test(vals[4] ?? '') && /60/.test(vals[5] ?? ''),
-    `price inputs = ${JSON.stringify([vals[4], vals[5]])}`);
-  const formText = await body();
-  check('after refresh, «تصفية» restores نوع العقار', formText.includes('نوع العقار'));
-
-  // …and «بحث», untouched, must re-run the search rather than dying on validation.
+  await pickCity('الرياض');
   await tap('بحث');
-  await page.waitForTimeout(12000);
+  const reSearched = await waitForBody(RESULT_COUNT, 40000);
   const t3 = await body();
-  check('after refresh, untouched «بحث» searches again',
-    /لقينا|ما لقينا/.test(t3) && !t3.includes('الرجاء اختيار مدينة من القائمة.'));
+  check('after a refresh, a NEW search still runs normally',
+    reSearched && !t3.includes('الرجاء اختيار مدينة من القائمة.'));
+  check('that new search did issue its request (the gate blocks reloads, not users)', searchCalls > 0,
+    'no search request fired for a real user search — the gate is over-blocking');
+  const summaries = (t3.match(/ملخص البحث/g) ?? []).length;
+  check('the new search ran exactly once (no duplicate turn)', summaries <= 2,
+    `«ملخص البحث» rendered ${summaries}×`);
+
+  // ---- Journey D: the same refresh contract on MOBILE (owner asked for both viewports). ----
+  // The agent screen is a different layout here (drawer sidebar, no docked column), so the refresh
+  // path is re-driven rather than assumed to follow from desktop.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(5000);
+  check('[mobile] home renders', (await body()).includes('تصفية'));
+  await pickCity('الرياض');
+  await tap('بحث');
+  const mobResults = await waitForBody(RESULT_COUNT, 40000);
+  check('[mobile] a search produces results', mobResults);
+
+  searchCalls = 0;
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(12000);
+  check('[mobile] a refresh issues ZERO search/AI requests', searchCalls === 0, `${searchCalls} fired`);
+  check('[mobile] a refresh does not re-render the previous results', !RESULT_COUNT.test(await body()));
+  check('[mobile] a refresh lands on the FILTER HOME', !page.url().includes('/agent'), `url = ${page.url()}`);
+  check('[mobile] the consumed URL carries no executable search param', !/[?&](filter|seed)=/.test(page.url()),
+    `url = ${page.url().slice(0, 140)}`);
+
   check('no uncaught runtime error across the whole run', crashes.length === 0, crashes.join(' | '));
 } catch (e) {
   failed++;

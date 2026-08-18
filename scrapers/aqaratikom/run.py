@@ -240,22 +240,42 @@ def fetch_all_ads(deal_type: str, max_items: int = 0) -> list[dict]:
 
 
 def fetch_detail(ad_id: str) -> Optional[dict]:
+    """GET {BASE}/ad/<uuid> → the fuller record, or None if it is genuinely unavailable.
+
+    Only a 404 is terminal (the ad is gone). EVERY other failure is retried — including a 200 whose
+    body is unparseable or lacks the `data` object, which the previous version treated as
+    authoritative and returned None for on the FIRST attempt, with no retry at all.
+
+    That mattered: the detail call is the sole source of estate.details[] (bathrooms, halls, street
+    width, façade, lift, kitchen) AND of `subtype`, the rent period. `map_listing` still emits a row
+    when this returns None, so a single soft failure silently downgrades a listing to summary-only
+    and the crawl reports ok=true. Senior run #25 (2026-08-17) found 24 of 132 active aqaratikom rows
+    in exactly that state, 8 of them searchable Rent apartments whose NULL period made them
+    unreachable under BOTH period chips — while the source returned HTTP 200 with subtype=«سنوي» for
+    all 8 when re-probed.
+    """
     s = _session()
     url = f"{BASE}/ad/{ad_id}"
-    _throttle()
     for attempt in range(3):
+        _throttle()  # inside the loop: retries must respect the rate limit too, or a soft block
+                     # turns into a retry storm against the source.
         try:
             r = s.get(url, timeout=30)
         except Exception:
             time.sleep(1.2 * (attempt + 1)); continue
+        if r.status_code == 404:
+            return None  # terminal — the ad no longer exists; not a capture failure.
         if r.status_code != 200:
             time.sleep(1.2 * (attempt + 1)); continue
         try:
             j = r.json()
         except Exception:
-            return None
+            time.sleep(1.2 * (attempt + 1)); continue  # was: return None (no retry)
         d = j.get("data") if isinstance(j, dict) else None
-        return d if isinstance(d, dict) else None
+        if isinstance(d, dict):
+            return d
+        time.sleep(1.2 * (attempt + 1))  # 200 with an unexpected shape — a block/interstitial
+                                         # signature, not proof the ad has no detail record.
     return None
 
 
@@ -600,8 +620,17 @@ def main() -> int:
                 db.upsert_aqaratikom_commercial_batch(com_buf)
                 com_buf = []
 
+        # Detail-fetch outcome tally. A row built from the summary alone is missing EVERY
+        # detail-only field (bathrooms, halls, street width, façade, lift, kitchen) and, for a
+        # rental, the rent period — so a crawl that loses most of its detail calls has captured
+        # bad data while looking perfectly healthy. Counting it is what turns that into a signal.
+        detail_stats = {"ok": 0, "missing": 0}
+        detail_lock = threading.Lock()
+
         def work(ad: dict) -> tuple[Optional[dict], str, bool]:
             det = fetch_detail(ad.get("id"))
+            with detail_lock:
+                detail_stats["ok" if det else "missing"] += 1
             return map_listing(ad, det)
 
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
@@ -655,12 +684,33 @@ def main() -> int:
                 pruned += n
         print(f"✓ Aqaratikom: {len(res)} residential + {len(com)} commercial upserted, "
               f"{sold_ct} sold (inactive), {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
-                   notes=f"sold={sold_ct} pruned={pruned}",
+
+        # ── Silent-partial-crawl guard (senior run #25) ──────────────────────────────────────────
+        # A 200 from the list endpoint proves the platform answered; it does NOT prove we captured
+        # the listings. When the detail call fails, the row is still upserted from the summary alone
+        # and the run used to report ok=true — so 24 of 132 active rows silently lost every
+        # detail-only field, and 8 searchable rentals lost their period, for weeks. Detail loss is
+        # now measured, recorded in the run notes, and fails CI past a floor rather than passing
+        # quietly. A 404 is NOT counted as a failure (that ad is simply gone).
+        d_ok, d_missing = detail_stats["ok"], detail_stats["missing"]
+        d_total = d_ok + d_missing
+        d_frac = (d_missing / d_total) if d_total else 0.0
+        max_frac = float(os.environ.get("AQARATIKOM_MAX_DETAIL_MISS_FRAC", "0.20"))
+        detail_note = f"detail_ok={d_ok} detail_missing={d_missing} miss_frac={d_frac:.3f}"
+        print(f"  detail records: {d_ok}/{d_total} captured ({d_frac:.1%} missing)")
+        # Only meaningful with enough samples — a 2-ad validation slice must not fail the fleet.
+        detail_collapsed = d_total >= 20 and d_frac > max_frac
+        if detail_collapsed:
+            print(f"✗ Aqaratikom: detail-fetch loss {d_frac:.1%} exceeds {max_frac:.0%} — rows were "
+                  f"upserted from the summary alone (no bathrooms/halls/street width/façade/lift, and "
+                  f"no rent period on rentals). Failing CI instead of reporting a healthy crawl.",
+                  flush=True)
+        healthy = db.end_run(run_id, ok=not detail_collapsed, rows_seen=seen, rows_upserted=seen,
+                   notes=f"sold={sold_ct} pruned={pruned} {detail_note}",
                    check_tables=["aqaratikom_residential_listings", "aqaratikom_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
-        return 0 if healthy else 1
+        return 0 if (healthy and not detail_collapsed) else 1
     except Exception as e:
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])
