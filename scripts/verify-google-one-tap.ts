@@ -43,6 +43,15 @@ check('logged-out state is resolved via server-validated getUser(), never getSes
 check('any getUser error counts as signed out (deleted user, revoked token, network)',
   /!!error\s*\|\|\s*!data\?\.user/.test(code));
 
+// Measured live 2026-08-18: with an invalid refresh token supabase-js retries the refresh with
+// backoff, so getUser() may never settle — and while it is unresolved we never prompt, which is worse
+// than the bug it fixed (a stale token produced 0 prompt attempts). The call must be time-bounded and
+// must default to SIGNED OUT, the safe direction: a real signed-in user is still covered by the store
+// `user` gate and the cancel-on-sign-in effect.
+check('getUser is time-bounded and defaults to signed-out on timeout',
+  /GETUSER_TIMEOUT_MS/.test(code) && /setTimeout\([\s\S]{0,120}?decide\(true\)/.test(code),
+  'an unresolved getUser() silently blocks One Tap forever');
+
 // auto_select:true silently signs a RETURNING visitor in and never renders the prompt — that is how
 // "it used to appear and then stopped" happens. The owner requires the prompt to be SHOWN.
 check('auto_select is false so Google actually RENDERS the prompt',
