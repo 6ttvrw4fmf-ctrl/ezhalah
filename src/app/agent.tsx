@@ -1934,6 +1934,20 @@ export default function Agent() {
                         // everything matching is already on screen, say so and DROP «عرض المزيد» (a load-more
                         // button with nothing to load would be a lie) — only «خلّنا نحدد الطلب أكثر» stays.
                         const hasMore = serverMore || bufferMore;
+                        // TRUE eligible total — matchTotal FIRST, same invariant already pinned for the
+                        // AF intro gate (PR #608 "never the page-capped total"), NEVER `fetched`/
+                        // `listings.length` alone: that's a page-buffer size, not the true match count,
+                        // and can under-report a real total in the thousands as the 1,500-row page cap.
+                        const trueTotal = m.result.matchTotal ?? fetched;
+                        // ≤25 RULE (owner brief 2026-08-19, item 4): the auto-opening AF intro already
+                        // correctly gated on this same threshold (agent.tsx ~1375) — this SEPARATE manual
+                        // button did not, and its click path (startAgeFlow → rankQuestions, which itself
+                        // floors on the SAME MIN_TOTAL_TO_SHOW=26 constant) fell through to the plain
+                        // refine-chip flow for any ≤25 scope rather than doing nothing. A ≤25 result set
+                        // gets ONLY the normal lightweight actions (Load more if genuinely more exists,
+                        // FeedbackRow below) — never a "narrow further" prompt when there is nothing
+                        // useful left to narrow.
+                        const canNarrowFurther = trueTotal > INTERVIEW_STOP_AT;
                         // fetching = THIS message's page fetch; cascading = THIS message's card drip.
                         // Only the owning message's button shows the dots (review fix: a global flag
                         // was falsely lighting every visible «عرض المزيد»).
@@ -1943,8 +1957,12 @@ export default function Agent() {
                           <View style={{ gap: 8, marginTop: 14, alignSelf: 'stretch' }}>
                             <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                               {hasMore
-                                ? t('I showed you the first {n} listings. Want me to show more, or help you find more precise ones?', { n: shown.toLocaleString('en-US') })
-                                : t('I showed you all {n} matching listings. Want help finding more precise ones?', { n: shown.toLocaleString('en-US') })}
+                                ? (canNarrowFurther
+                                    ? t('I showed you the first {n} listings. Want me to show more, or help you find more precise ones?', { n: shown.toLocaleString('en-US') })
+                                    : t('I showed you the first {n} listings. Want me to show more?', { n: shown.toLocaleString('en-US') }))
+                                : (canNarrowFurther
+                                    ? t('I showed you all {n} matching listings. Want help finding more precise ones?', { n: shown.toLocaleString('en-US') })
+                                    : t('I showed you all {n} matching listings.', { n: shown.toLocaleString('en-US') }))}
                             </Text>
                             {/* Tell the user exactly how Load More behaves (owner 2026-07-08): 100 at a time. */}
                             {hasMore ? (
@@ -1953,34 +1971,39 @@ export default function Agent() {
                               </Text>
                             ) : null}
                             {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
-                                «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches. */}
-                            <View style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
-                              {hasMore ? (
-                                // Active state = calm pulsing dots (owner 2026-07-09: the button must
-                                // visibly work, not sit static) — while THIS message's page fetches or
-                                // its new cards cascade in. Fixed min-size → zero layout shift on swap.
-                                // Disabled during any reveal or a live turn (never two drips at once).
-                                <Pressable
-                                  style={({ hovered, pressed }: any) => [s.mBtnPrimary, (hovered || pressed) && !fetching && !revealing && s.mBtnPrimaryHover]}
-                                  disabled={fetching || revealing || busy}
-                                  onPress={() => loadMore(m)}
-                                >
-                                  {fetching || cascading
-                                    ? <LoadingDots />
-                                    : <Text style={s.mBtnPrimaryTx}>{t('Load more')}</Text>}
-                                </Pressable>
-                              ) : null}
-                              <Pressable
-                                style={s.mBtnAlt}
-                                onPress={() => {
-                                  const q = m.result.query;
-                                  if (q && anyGuidedEligible(q)) void startAgeFlow(q);
-                                  else startRefine(q);
-                                }}
-                              >
-                                <Text style={s.mBtnAltTx}>{t('Let’s narrow it down')}</Text>
-                              </Pressable>
-                            </View>
+                                «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches — but only
+                                when there is genuinely more than INTERVIEW_STOP_AT=25 left to narrow. */}
+                            {(hasMore || canNarrowFurther) ? (
+                              <View style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
+                                {hasMore ? (
+                                  // Active state = calm pulsing dots (owner 2026-07-09: the button must
+                                  // visibly work, not sit static) — while THIS message's page fetches or
+                                  // its new cards cascade in. Fixed min-size → zero layout shift on swap.
+                                  // Disabled during any reveal or a live turn (never two drips at once).
+                                  <Pressable
+                                    style={({ hovered, pressed }: any) => [s.mBtnPrimary, (hovered || pressed) && !fetching && !revealing && s.mBtnPrimaryHover]}
+                                    disabled={fetching || revealing || busy}
+                                    onPress={() => loadMore(m)}
+                                  >
+                                    {fetching || cascading
+                                      ? <LoadingDots />
+                                      : <Text style={s.mBtnPrimaryTx}>{t('Load more')}</Text>}
+                                  </Pressable>
+                                ) : null}
+                                {canNarrowFurther ? (
+                                  <Pressable
+                                    style={s.mBtnAlt}
+                                    onPress={() => {
+                                      const q = m.result.query;
+                                      if (q && anyGuidedEligible(q)) void startAgeFlow(q);
+                                      else startRefine(q);
+                                    }}
+                                  >
+                                    <Text style={s.mBtnAltTx}>{t('Let’s narrow it down')}</Text>
+                                  </Pressable>
+                                ) : null}
+                              </View>
+                            ) : null}
                           </View>
                         );
                       })()}

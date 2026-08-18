@@ -28,13 +28,16 @@ check('effCategory = query.category ?? IMPLIED_CATEGORY_DEFAULT (the one derivat
 check("index.tsx never re-duplicates the literal ('Residential' appears in no pool wiring)", !/\?\? 'Residential'/.test(indexSrc));
 
 // ── EVERY pool call in index.tsx passes effCategory — none is left at the old raw/null scope. ──
+// (paymentMonthly boolean was renamed rentPeriodTok string 2026-08-19 — owner mixed-period feature,
+// Trending now sends the same 'شهري'/'سنوي'/'كلاهما' token the results RPC uses. The invariant this
+// test protects — every pool call passes effCategory — is unaffected by that rename.)
 const poolCalls: Array<[string, RegExp, RegExp]> = [
-  ['ensureCityFieldIndex', /ensureCityFieldIndex\(query\.deal, paymentMonthly, effCategory, cohortTypes\)/g, /ensureCityFieldIndex\(query\.deal, paymentMonthly\)[^,]/g],
-  ['topCitiesByListings', /topCitiesByListings\(query\.deal, paymentMonthly, effCategory, 6, cohortTypes\)/g, /topCitiesByListings\(query\.deal, paymentMonthly, 6\)/g],
-  ['matchCitiesByText', /matchCitiesByText\(query\.deal, paymentMonthly, effCategory, /g, /matchCitiesByText\(query\.deal, paymentMonthly, [^e]/g],
-  ['ensureDistrictOptions', /ensureDistrictOptions\(cid, query\.deal, effCategory, paymentMonthly, cohortTypes\)/g, /ensureDistrictOptions\([^)]*query\.category/g],
-  ['topDistrictsForCityId', /topDistrictsForCityId\((?:cid|citySelected\.cityId), query\.deal, effCategory, paymentMonthly, 6, cohortTypes\)/g, /topDistrictsForCityId\([^)]*query\.category/g],
-  ['matchDistrictsByCityId', /matchDistrictsByCityId\((?:cid|citySelected\.cityId), query\.deal, effCategory, paymentMonthly, /g, /matchDistrictsByCityId\([^)]*query\.category/g],
+  ['ensureCityFieldIndex', /ensureCityFieldIndex\(query\.deal, rentPeriodTok, effCategory, cohortTypes\)/g, /ensureCityFieldIndex\(query\.deal, rentPeriodTok\)[^,]/g],
+  ['topCitiesByListings', /topCitiesByListings\(query\.deal, rentPeriodTok, effCategory, 6, cohortTypes\)/g, /topCitiesByListings\(query\.deal, rentPeriodTok, 6\)/g],
+  ['matchCitiesByText', /matchCitiesByText\(query\.deal, rentPeriodTok, effCategory, /g, /matchCitiesByText\(query\.deal, rentPeriodTok, [^e]/g],
+  ['ensureDistrictOptions', /ensureDistrictOptions\(cid, query\.deal, effCategory, rentPeriodTok, cohortTypes\)/g, /ensureDistrictOptions\([^)]*query\.category/g],
+  ['topDistrictsForCityId', /topDistrictsForCityId\((?:cid|citySelected\.cityId), query\.deal, effCategory, rentPeriodTok, 6, cohortTypes\)/g, /topDistrictsForCityId\([^)]*query\.category/g],
+  ['matchDistrictsByCityId', /matchDistrictsByCityId\((?:cid|citySelected\.cityId), query\.deal, effCategory, rentPeriodTok, /g, /matchDistrictsByCityId\([^)]*query\.category/g],
 ];
 for (const [name, good, bad] of poolCalls) {
   const goodCount = (indexSrc.match(good) || []).length;
@@ -44,8 +47,8 @@ for (const [name, good, bad] of poolCalls) {
 
 // ── Cache keys include the effective category — a category flip can never serve the other scope's
 //    counts from cache. ──
-check('city pool cache key includes category', /const cityPoolKey = \(deal: Deal, paymentMonthly: boolean \| null, category: Category \| null, types: string\[\] \| null = null\) => `\$\{deal\}:\$\{pmKey\(paymentMonthly\)\}:\$\{category \?\? ''\}:\$\{typesKey\(types\)\}`/.test(locSrc));
-check('district cache key includes category (pre-existing, pinned)', /const districtCacheKey = \(cityId: number, deal: Deal, category: Category \| null, paymentMonthly: boolean \| null, types: string\[\] \| null = null\) => `\$\{cityId\}:\$\{deal\}:\$\{category \?\? ''\}:\$\{pmKey\(paymentMonthly\)\}:\$\{typesKey\(types\)\}`/.test(locSrc));
+check('city pool cache key includes category', /const cityPoolKey = \(deal: Deal, periodTok: string \| null, category: Category \| null, types: string\[\] \| null = null\) => `\$\{deal\}:\$\{pmKey\(periodTok\)\}:\$\{category \?\? ''\}:\$\{typesKey\(types\)\}`/.test(locSrc));
+check('district cache key includes category (pre-existing, pinned)', /const districtCacheKey = \(cityId: number, deal: Deal, category: Category \| null, periodTok: string \| null, types: string\[\] \| null = null\) => `\$\{cityId\}:\$\{deal\}:\$\{category \?\? ''\}:\$\{pmKey\(periodTok\)\}:\$\{typesKey\(types\)\}`/.test(locSrc));
 
 // ── The city RPC is called WITH the named p_category arg, plus a compat fallback that drops it on
 //    an older signature (the p_category migration is landing separately — see the TODO). ──

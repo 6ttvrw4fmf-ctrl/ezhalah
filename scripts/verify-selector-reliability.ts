@@ -38,8 +38,8 @@ check('districtOnPress cancels the close timer and REFOCUSES the input', /const 
 
 // ── P2: focusing a field that already holds text populates its matches from the cache — a tap on a
 //    prefilled field (returning from /agent, or mid-typing refocus) must never open an empty box. ──
-check('city onFocus with existing text runs the match immediately (cohort-typed)', /onFocus=\{\(\) => \{[\s\S]{0,2400}?\} else \{[\s\S]{0,700}?if \(!isLatinOnlyInput\(query\.location\)\) \{\s*setCitySuggestions\(matchCitiesByText\(query\.deal, paymentMonthly, effCategory, query\.location, cohortTypes\)\);/.test(indexSrc));
-check('district onFocus with existing text runs the match immediately (cohort-typed)', /\} else if \(!isLatinOnlyInput\(districtTextRef\.current\)\) \{[\s\S]{0,300}?setDistrictSuggestions\(matchDistrictsByCityId\(citySelected\.cityId, query\.deal, effCategory, paymentMonthly, districtTextRef\.current, cohortTypes\)\);/.test(indexSrc));
+check('city onFocus with existing text runs the match immediately (cohort-typed)', /onFocus=\{\(\) => \{[\s\S]{0,2400}?\} else \{[\s\S]{0,700}?if \(!isLatinOnlyInput\(query\.location\)\) \{\s*setCitySuggestions\(matchCitiesByText\(query\.deal, rentPeriodTok, effCategory, query\.location, cohortTypes\)\);/.test(indexSrc));
+check('district onFocus with existing text runs the match immediately (cohort-typed)', /\} else if \(!isLatinOnlyInput\(districtTextRef\.current\)\) \{[\s\S]{0,300}?setDistrictSuggestions\(matchDistrictsByCityId\(citySelected\.cityId, query\.deal, effCategory, rentPeriodTok, districtTextRef\.current, cohortTypes\)\);/.test(indexSrc));
 
 // ── P1 + zero-states A/C/D/E/F/H: the dropdown gates open on loading/error/empty too — an empty
 //    suggestion list is never an invisible box again. ──

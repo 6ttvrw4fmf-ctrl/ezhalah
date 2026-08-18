@@ -544,6 +544,52 @@ used to end on.
     re-orders rows the filter already matched. Measured on a mixed-period platform distribution: first 10
     went 3→6 monthly, first 25 went 8→16, with zero rows lost or duplicated.
   - Barrier: `scripts/verify-rent-period-both.ts` (npm test), mutation-tested.
+- **PERMANENT PRODUCT RULE (owner, 2026-08-19) — "both periods" is a PREFERENCE BOUNDARY, never a
+  ranking/balancing target. Read this before touching anything about combined-period search.**
+  When سنوي + شهري are selected together the user is saying **"I accept either rental period; match
+  everything else exactly first."** It is NOT a request to prioritize one period over the other, to
+  force any Monthly:Annual ratio (50/50 or otherwise), or to relax any other selected criterion
+  (city/district/type/group/category/price/area/bedrooms/Advanced Filter answers) to make room for
+  more of one period. The only thing period selection ever does is OR two period predicates inside
+  the SAME fully-ANDed WHERE clause as every other filter — it can never compensate for a mismatch
+  on anything else. Concretely: a Monthly apartment must never appear in a فيلا search; an Annual
+  villa outside Riyadh must never appear in a Riyadh search; a Monthly villa outside the chosen price
+  range must never appear — MATCH FIRST, full stop.
+  - **Diversification is ordering only, strictly after eligibility is fixed.** The existing
+    `orderByScope`/`interleaveRanked` period-interleave (`mixPeriods`, above) is a stable permutation
+    of the already-matched, fixed-cardinality row set — verified by reading the implementation: it
+    round-robins one row per group (platform, then period) per pass until every already-matched row
+    has been placed, with no quota, no padding, and no code path that can add, drop, or duplicate a
+    row. If both periods naturally occur in the eligible set, interleaving surfaces both early; if
+    the eligible set happens to be 90% one period, the interleave does NOT manufacture more of the
+    other — that would violate this rule. Any future change to diversity ordering must preserve
+    this: reorder only, never rebalance.
+  - **Trending must be computed from the FULL pre-location filter set**, not period alone — category,
+    property group, exact type(s), AND both selected periods together — so that "Riyadh · 3,420" and
+    a subsequent click into Riyadh with the identical filter state return exactly 3,420, every time.
+    (Implemented via `top_cities_by_deal_ar`/`district_options_ar` taking the same `p_rent_period`
+    token, `p_types`, and `p_category` the results RPC uses — see below.)
+  - **No cross-platform deduplication exists anywhere in this codebase, for any search** (documented
+    "search-engine-not-marketplace" permanent rule) — the same physical property listed by two
+    platforms is two independent rows, both counted, both shown. This is pre-existing and unrelated
+    to period selection; combined-period search does not introduce or worsen it. What combined-period
+    search MUST guarantee (and is barrier-tested) is that its own OR-predicate cannot itself cause one
+    row to be counted twice (`p_rent_period='كلاهما'` is a single WHERE-clause OR evaluated once per
+    row, not a UNION of two separate fetches) and that `count(كلاهما) == count(شهري) + count(سنوي)`
+    exactly for the same cohort (proven live, see above; standing barrier extends
+    `mon_detect_trending_cohort_drift`).
+  - A future engineer reading "both periods selected" must never reinterpret it as "show a balanced
+    mix" or "prefer one period" — if a change ever needs that behavior, it is a NEW, explicit product
+    decision requiring an owner call, not an extension of this rule.
+- **Trending (city/district) RPCs mirror the same `p_rent_period` token as the results RPC (owner
+  feature 2026-08-19, closing the multi-select gap).** `top_cities_by_deal_ar` and
+  `district_options_ar` used to take `p_payment_monthly boolean` (true/false/null) — with no
+  representation for "both known periods, excluding unpublished," selecting Both sent `null`, which
+  is a BROADER set than `كلاهما` (it also swept in rent rows with no published period at all). Both
+  RPCs now take `p_rent_period text` and reuse the exact `af_eligibility_clause()` period fragment
+  verbatim, so Trending and Search share one canonical period interpretation for every scope,
+  including combined. `mon_detect_trending_cohort_drift()` (pg_cron) now also probes `'كلاهما'`
+  explicitly, proving Trending's combined count equals the results RPC's combined count live.
 - **Period copy states the PRICE BASIS, never a lease length** (owner 2026-08-14). The old hints asserted
   "عقد من 1 إلى 11 شهراً" / "عقد لمدة 12 شهراً" — a contract term no source publishes and Ezhalah never
   captures. They now read «السعر المعروض شهري/سنوي». Pinned by the same barrier.

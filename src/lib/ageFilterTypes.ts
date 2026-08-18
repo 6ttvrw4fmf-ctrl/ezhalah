@@ -58,7 +58,22 @@ export const AGE_FILTER_TYPES = new Map<string, AgeFilterMacro>([
 
 // A type is eligible only inside its OWN macro, and only when it is the sole selected type (a
 // multi-type search has no single age distribution to ask about).
-export function isAgeFilterScope(q: { category?: string | null }, effectiveTypes: string[]): boolean {
+//
+// PERIOD GATE (owner mixed-period feature 2026-08-19): property_age has never been profiled against
+// Monthly inventory — the COHORT_QUESTIONS ledger in advancedFilters.ts deliberately excludes it from
+// EVERY certified RentMonthly list (age is documented "fresh-dead" there, e.g. 564/30,356 known for
+// Monthly Apartment). This gate used to be period-blind (type+category only), so nothing stopped the
+// age question from firing on a Monthly-only OR a combined ('both') scope even though the ledger's
+// own judgment says it shouldn't. On 'both' specifically this is a live instance of the exact leak
+// the owner's brief warns about: Annual rows dominate age coverage, so answering an age bucket would
+// silently exclude nearly all Monthly rows while the search still claims to cover both periods.
+// Eligible only for Buy or plain-Annual Rent — never 'monthly' or 'both' — matching what the cohort
+// ledger already asserts is true for this question.
+export function isAgeFilterScope(
+  q: { category?: string | null; deal?: string | null; rentPeriod?: string | null },
+  effectiveTypes: string[],
+): boolean {
   if (effectiveTypes.length !== 1) return false;
+  if (q.deal === 'Rent' && (q.rentPeriod === 'monthly' || q.rentPeriod === 'both')) return false;
   return !!q.category && AGE_FILTER_TYPES.get(effectiveTypes[0]) === q.category;
 }

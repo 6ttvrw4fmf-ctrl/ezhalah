@@ -601,6 +601,10 @@ const AR: Record<string, string> = {
   'We found {n} listings matching your search.': 'لقينا {n} إعلان يطابق طلبك.',
   'I showed you the first {n} listings. Want me to show more, or help you find more precise ones?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد، أو أساعدك نلقى نتائج أدق؟',
   'I showed you all {n} matching listings. Want help finding more precise ones?': 'عرضت لك كل النتائج المطابقة ({n} إعلان). تبي أساعدك نلقى نتائج أدق؟',
+  // ≤25-result variants (owner 2026-08-19, item 4): no "help me find more precise ones?" invitation
+  // when the result set is already small enough that Advanced Filter has nothing useful left to offer.
+  'I showed you the first {n} listings. Want me to show more?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد؟',
+  'I showed you all {n} matching listings.': 'عرضت لك كل النتائج المطابقة ({n} إعلان).',
   'I can show you 100 listings at a time.': 'أقدر أعرض لك 100 إعلان في كل مرة.',
   'Let’s narrow it down': 'خلّنا نحدد الطلب أكثر',
   'Help me find more precise results': 'ساعدني ألقى نتائج أدق',

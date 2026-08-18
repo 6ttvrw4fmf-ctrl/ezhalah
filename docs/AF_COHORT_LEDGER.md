@@ -265,3 +265,43 @@ Ratings flow automatically: jobid 28 (:14 hourly) runs `sync_gathern_native_attr
 sync. Fields investigated and REJECTED: guest_capacity (constant 1), stay_nights (constant 30),
 booking_count (engagement, not a property fact — neutrality), check_in/out + house_rules (prose),
 nightly_price (monthly basis is the deal), rate_text as a filter (label, numeric is canonical).
+
+## Mixed period (سنوي + شهري together, `q.rentPeriod === 'both'`) — INTERSECTION only (owner 2026-08-19)
+
+`cohortAllows()` (`src/data/advancedFilters.ts`) requires a question id present in BOTH the type's
+`RentAnnual` AND `RentMonthly` lists to fire on a combined search — never the union, and never a
+silent alias to `RentAnnual` (that was the bug: the old code had no `'both'` branch and fell through
+to the same arm as plain Annual Rent). Reasoning: each list is independently profiled against real
+coverage for THAT period alone; a question absent from one list has zero evidence it is valid there,
+and the shared SQL predicates are strict-NULL-excluding (an unrated/unaged row FAILS the filter, it
+does not pass through as "unknown"). Offering a period-specific question against a mixed result set
+would silently amputate the other period's rows the instant it is answered:
+- `rating` (Monthly-only, never profiled against Annual data) would exclude every Annual listing —
+  the exact "Gathern rating must never classify an Annual listing as low/unrated" risk the owner
+  named directly.
+- `rnpl`/`property_age`/`furnished` (Annual-tuned) would exclude nearly every Monthly listing — the
+  mirror-image leak, found during this same investigation, not explicitly named by the owner but the
+  same failure class.
+
+For the 3 certified Monthly cohorts this yields a SMALLER but fully-safe combined-mode surface:
+
+| Type | RentAnnual ∩ RentMonthly (what fires on 'both') |
+|---|---|
+| Apartment (شقة) | amenities, bathrooms |
+| Room (غرفة) | amenities |
+| Villa (فيلا) | amenities, bathrooms |
+
+Any type with no certified Monthly cohort (Floor, Residential Building, Studio, every commercial/
+rural type) correctly offers ZERO Advanced Filter questions on a 'both' search — an empty
+intersection, because there is no evidence a mixed scope is meaningfully populated for that type
+either. `property_age` (AGE_QUESTION) has its OWN separate eligibility gate
+(`src/lib/ageFilterTypes.ts`, does not route through `cohortAllows` at all) — it needed the identical
+period exclusion added directly, since the ledger already treats age as Monthly-fresh-dead but
+nothing previously enforced that for `isAgeFilterScope`.
+
+This is a CLIENT-SIDE-ONLY gate, same as every other cohort decision in this file — the shared SQL
+`af_eligibility_clause()` / `rebuild_af_filter_rpcs()` 4-surface generator is completely untouched;
+only which questions the client is willing to SURFACE changes. Full architecture + the "why
+intersection, not union" reasoning: `docs/ARCHITECTURE.md` §17. Mutation-tested barrier:
+`scripts/verify-mixed-period-af-gating.ts` (npm test) — proves the old union-shaped bug fails this
+test, and `scripts/verify-age-filter-gate.ts` covers the property_age half.

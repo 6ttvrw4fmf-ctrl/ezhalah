@@ -139,7 +139,14 @@ check('RNPL + amenities + bathrooms are cohort-gated through cohortAllows',
   /RNPL_QUESTION[\s\S]{0,420}cohortAllows\(q, 'rnpl'\)/.test(advSrc)
   && /cohortAllows\(q, 'amenities'\)/.test(advSrc)
   && /cohortAllows\(q, 'bathrooms'\)/.test(advSrc)
-  && /function cohortAllows[\s\S]{0,700}q\.rentPeriod === 'monthly' \? 'RentMonthly'/.test(advSrc));
+  && /function cohortAllows[\s\S]{0,700}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(advSrc));
+
+// Mixed period ('both', owner 2026-08-19): cohortAllows must require BOTH RentAnnual and RentMonthly
+// membership — union would let a period-specific question fire against the other period's rows.
+// Full behavioral coverage lives in scripts/verify-mixed-period-af-gating.ts (mutation-tested); this
+// is a lighter structural check that the contract-level pool still routes 'both' through that gate.
+check("cohortAllows has an explicit 'both' branch (intersection of RentAnnual and RentMonthly), never aliasing to Annual",
+  /q\.rentPeriod === 'both'\) return \(cfg\.RentAnnual \?\? \[\]\)\.includes\(id\) && \(cfg\.RentMonthly \?\? \[\]\)\.includes\(id\)/.test(advSrc));
 check('Furnished chip is cohort-gated — never offered where the cohort config withholds it',
   /cohortAllows\(q, 'furnished'\)\)\s*defs\.push\(\{\s*key:\s*'furnished'/.test(advSrc));
 
