@@ -104,6 +104,16 @@ const RESTORED = [
 
 const FULL_REWRITE = /create\s+or\s+replace\s+function\s+(?:public\.)?mon_run_all_detectors/i;
 
+// A GUARDED NEEDLE-EDIT is not a rewrite, even though it contains that same header inside its
+// `execute format(...)` string. The distinction is the one this file's own header calls "THE PATTERN
+// THAT CANNOT LOSE ENTRIES": it reads the LIVE body (pg_get_functiondef / prosrc) and splices the new
+// name into it, so it never has to know what else is in the array and cannot drop what it never read.
+// A hand-pasted body enumerates the roster literally and silently loses every entry it predates.
+// Keying on the mechanism instead of the string means a genuine needle-edit no longer needs a
+// grandfather entry to pass — and a pasted body still cannot sneak through by adding a comment.
+const NEEDLE_EDIT = (sql: string) =>
+  /(pg_get_functiondef|prosrc)/i.test(sql) && /\breplace\s*\(/i.test(sql);
+
 const problems: string[] = [];
 const ok: string[] = [];
 const check = (cond: boolean, pass: string, fail: string) =>
@@ -114,9 +124,11 @@ check(files.length > 100, `scanned ${files.length} migrations`,
   `only ${files.length} migration files found — the scan is not seeing the directory`);
 
 // 1. No NEW migration may rewrite the roster wholesale.
-const offenders = files.filter(
-  (f) => !GRANDFATHERED.has(f) && f !== REPAIR && FULL_REWRITE.test(readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8')),
-);
+const offenders = files.filter((f) => {
+  if (GRANDFATHERED.has(f) || f === REPAIR) return false;
+  const sql = readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8');
+  return FULL_REWRITE.test(sql) && !NEEDLE_EDIT(sql);
+});
 check(offenders.length === 0,
   'no migration replaces mon_run_all_detectors with a hand-written body',
   `these migrations rewrite the roster wholesale, which silently drops every entry their copy ` +
