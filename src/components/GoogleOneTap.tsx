@@ -84,7 +84,13 @@ export default function GoogleOneTap() {
   useEffect(() => {
     if (Platform.OS !== 'web' || !supabase) return;
     if (typeof document === 'undefined' || typeof window === 'undefined') return;
-    if (signedOut !== true || user) return;   // unresolved, or genuinely signed in → never prompt
+    // Gate on the SERVER-VALIDATED answer only. The store's `user` is derived from its own
+    // getSession(), which is local-only — so a stale/deleted-account token makes `user` truthy and
+    // would block the prompt here, which is exactly the bug this component keeps hitting (measured
+    // live 2026-08-18: the deleted-token case still produced 0 prompt attempts with `|| user` here).
+    // It adds nothing that getUser() does not already answer authoritatively, and someone who signs
+    // in AFTER we prompt is handled by the cancel-on-sign-in effect below.
+    if (signedOut !== true) return;
     if (startedRef.current) return;
     startedRef.current = true;
 
