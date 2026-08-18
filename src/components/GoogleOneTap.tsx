@@ -187,9 +187,22 @@ export default function GoogleOneTap() {
     return () => { cancelled = true; if (fallbackTimer) clearTimeout(fallbackTimer); };
   }, [signedOut, user]);
 
-  // The one legitimate cancel: the visitor signed in, so the prompt is moot.
+  // The one legitimate cancel: the visitor signed in WHILE the prompt was up, so it is moot.
+  //
+  // It must be a TRANSITION (no user → user), never "user is truthy at mount". Measured live
+  // 2026-08-18: with a stale/deleted-account token the store's `user` is truthy from the very first
+  // render (it comes from a LOCAL getSession), so an unconditional cancel fired on every page load —
+  // the probe caught it as `dismissed: cancel_called` immediately after a correct prompt. Google
+  // counts every cancel() as a USER DISMISSAL, so that silently escalated the 2h→1d→7d→30d cooldown
+  // on each load until One Tap stopped appearing at all. That is the reported symptom exactly.
+  const hadUserRef = useRef<boolean | null>(null);
   useEffect(() => {
-    if (Platform.OS !== 'web' || !user) return;
+    if (Platform.OS !== 'web') return;
+    const has = !!user;
+    const prev = hadUserRef.current;
+    hadUserRef.current = has;
+    if (prev === null) return;          // first observation = initial state, never a sign-in event
+    if (!(has && prev === false)) return;
     try { (globalThis as any).google?.accounts?.id?.cancel(); } catch {}
   }, [user]);
 

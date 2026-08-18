@@ -85,8 +85,16 @@ check('the timer retry is skipped when a moment already arrived or GIS UI is pre
 const cancels = (code.match(/accounts\??\.id\??\.cancel\(\)/g) ?? []).length;
 check('cancel() appears exactly once (the sign-in effect only)', cancels === 1,
   `found ${cancels} — a cancel() in cleanup silently triggers the 2h→1d→7d→30d cooldown`);
+// cancel() must fire only on a genuine no-user → user TRANSITION. A stale/deleted-account token makes
+// the store user truthy at mount, and an unconditional cancel then dismisses the prompt we correctly
+// showed AND escalates Google's 2h→1d→7d→30d cooldown on every single page load (measured live
+// 2026-08-18 as `dismissed: cancel_called`). That is how One Tap "stops appearing" for good.
+check('cancel() fires only on a sign-in TRANSITION, never on a user truthy at mount',
+  /hadUserRef/.test(code) && /prev === null/.test(code) && /prev === false/.test(code),
+  'an unconditional cancel burns Google\'s dismissal cooldown on every load');
+
 check('the surviving cancel() is guarded on a signed-in user',
-  /if\s*\(Platform\.OS\s*!==\s*'web'\s*\|\|\s*!user\)\s*return;[\s\S]{0,120}cancel\(\)/.test(code));
+  /has\s*&&\s*prev === false[\s\S]{0,160}cancel\(\)/.test(code));
 check('cancel_on_tap_outside is disabled (stray clicks must not start a cooldown)',
   /cancel_on_tap_outside:\s*false/.test(code));
 
