@@ -8,6 +8,17 @@
 -- session READS to reason about the location pipeline, so a stale one is how a session concludes
 -- "satel has no native resolution" and ships a fix for a problem that does not exist.
 --
+-- Re-verified 2026-08-18 (senior run #28, PR #746): UNCHANGED. Migration 20260818064958 repairs the
+--   `lal_live_overlay` in listing_native_location_v2 — its catch-all branch read our own
+--   listings_arabic_locations resolution but gated it behind a hardcoded dealapp-only allowlist, so
+--   19 already-resolved listings were invisible to every Filter combination. That migration NAMES
+--   this view only to say which rows fall through to the catch-all ("not (yet) in the
+--   listing_native_location_v1 materialized view"); v1 itself was deliberately NOT redefined, and
+--   the repair was again made one level up in v2. Same any-mention trip as the 2026-08-17,
+--   2026-08-15, 2026-08-12 and 2026-08-10 entries. Re-ran
+--   md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against live
+--   production at 06:53Z: d7fff7ec0378d6095728e862aee80106, 13,385 chars — byte-identical to the
+--   digest this header already carries; only the verification date advances.
 -- Re-verified 2026-08-17 (data-integrity run #26, PR #723): UNCHANGED. Migration 20260817075301
 --   registers mon_detect_discarded_location_resolution, whose alert text NAMES this view — it
 --   explains that the defect's root cause is the precedence in `listing_native_location_v1.best`
