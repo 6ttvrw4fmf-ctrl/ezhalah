@@ -823,7 +823,26 @@ const GATHERN_ONLY_ADDL_KEYS = new Set<string>([
 function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; label: string; value: string }> | null {
   if (!raw) return null;
   if (Array.isArray(raw)) {
-    const rows = raw.filter((r: any) => r && r.label && r.value);
+    // TYPE COERCION (P0 fix 2026-08-18, Search & Matching QA run): the LEGACY array shape is stored
+    // by the source scraper verbatim, and Wasalt publishes NUMERIC values for noOfParkings /
+    // noOfFloors / floorNumber (`{"key":"noOfFloors","label":"Total Floors","value":2}`) — 2,977
+    // production_ready rows carry one. This branch used to pass the row object through untouched,
+    // so a number reached ResultCard's arAttrValue(), whose very first statement is
+    // `(value ?? '').trim()`. `(2).trim is not a function` threw an UNCAUGHT TypeError that
+    // unmounted the whole React tree: production served a BLANK WHITE PAGE for any search whose
+    // rendered cards included one of those listings (live-reproduced on
+    // https://ezhalah-app.vercel.app: تجاري → المباني والمرافق → «مبنى تجاري» → الرياض → «بحث»
+    // returned 40 real matches from the RPC, fetched all 40 raw cards, then rendered nothing at all
+    // — document.body had ONE div and zero text).
+    //
+    // The object branch below already ends every value with `String(v).trim()`; the array branch
+    // simply never did. The source value STAYS EXACTLY AS PUBLISHED (String(2) === '2') — this only
+    // fixes the type the renderer is handed, never the datum. (rule: never change source truth.)
+    // The truthiness filter is UNCHANGED on purpose — only the types of the surviving rows are
+    // normalised, so no row starts or stops being shown because of this fix.
+    const rows = raw
+      .filter((r: any) => r && r.label && r.value)
+      .map((r: any) => ({ key: String(r.key ?? r.label), label: String(r.label), value: String(r.value) }));
     return rows.length ? rows : null;
   }
   if (typeof raw !== 'object') return null;
