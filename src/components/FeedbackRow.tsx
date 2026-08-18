@@ -1,29 +1,52 @@
 // ChatGPT-style feedback row — thumbs up / down (mutually exclusive; highlighted when active) +
-// share. POSITION (owner 2026-07-09): rendered ONCE per results response, directly BELOW the
-// «عرضت لك أول N إعلانات. تبي أعرض لك المزيد…» message — NOT under each property card (it originally
-// shipped per-card; owner moved it). The «شكراً على ملاحظتك» confirmation is NOT rendered here — it
-// fires the `onFeedback` callback and the HOST shows a ChatGPT-style toast at the top of the chat
-// (owner 2026-07-09: toast above the conversation, not next to the buttons). Feedback is stored
-// LOCALLY only (lib/listingFeedback, keyed by the results-message id → rates the RESPONSE, not one
-// listing). UI-only: no search/cards/ranking.
-import { useState } from 'react';
+// share + read-aloud. POSITION (owner 2026-07-09): rendered ONCE per results response, directly
+// BELOW the «عرضت لك أول N إعلانات. تبي أعرض لك المزيد…» message — NOT under each property card (it
+// originally shipped per-card; owner moved it). The «شكراً على ملاحظتك» confirmation is NOT rendered
+// here — it fires the `onFeedback` callback and the HOST shows a ChatGPT-style toast at the top of
+// the chat (owner 2026-07-09: toast above the conversation, not next to the buttons). Feedback is
+// stored LOCALLY only (lib/listingFeedback, keyed by the results-message id → rates the RESPONSE,
+// not one listing). UI-only: no search/cards/ranking.
+import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { getListingFeedback, setListingFeedback, type FeedbackRating } from '@/lib/listingFeedback';
+import { readAloudLang, speakReadAloud, stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
 
 export default function FeedbackRow({
-  feedbackKey, shareUrl, onFeedback,
+  feedbackKey, shareUrl, onFeedback, readAloudText,
 }: {
   feedbackKey: string;
   shareUrl?: string;
   onFeedback?: () => void; // fired when a rating is SET (not cleared) — host shows the thanks toast
+  // The text this response's 🔊 button reads aloud. Omit to hide the button entirely (e.g. a
+  // results message with no summary text yet) rather than render a button that speaks nothing.
+  readAloudText?: string;
 }) {
   const { t, isRTL } = useI18n();
   const [rating, setRating] = useState<FeedbackRating | null>(() => getListingFeedback(feedbackKey));
   const [copied, setCopied] = useState(false);
+  // Free, on-device TTS only (owner P0, 2026-08-18) — see src/lib/readAloud.ts. `speaking` mirrors
+  // the ONE shared "who is talking right now" id, so tapping a DIFFERENT response's 🔊 flips this
+  // row back to idle automatically (single-speaker, no local queue to get out of sync).
+  const [speaking, setSpeaking] = useState(false);
+  const speakingRef = useRef(false); // mirrors `speaking` for the unmount-only cleanup below
+  useEffect(() => subscribeReadAloud((id) => {
+    const mine = id === feedbackKey;
+    speakingRef.current = mine;
+    setSpeaking(mine);
+  }), [feedbackKey]);
+  // Stop mid-speech ONLY if the row itself unmounts (e.g. the user navigates away) — never leaves a
+  // dangling utterance playing over a screen that no longer shows what's being read. Mount/unmount
+  // only ([] deps); speakingRef (not state) is what the cleanup reads, so a normal speaking->idle
+  // transition on this same row never calls stop() redundantly.
+  useEffect(() => () => { if (speakingRef.current) stopReadAloud(); }, []);
+  const onReadAloud = () => {
+    if (speaking) { stopReadAloud(); return; }
+    if (readAloudText) speakReadAloud(feedbackKey, readAloudText, readAloudLang(readAloudText));
+  };
 
   // Only one of up/down active; clicking the active one clears it (ChatGPT feel). The thanks toast
   // fires only when a rating is SET (not when cleared). Side effects run OUTSIDE any state updater
@@ -58,6 +81,14 @@ export default function FeedbackRow({
         <FbButton icon={rating === 'up' ? 'thumbs-up' : 'thumbs-up-outline'} active={rating === 'up'} onPress={() => vote('up')} label={t('Helpful')} />
         <FbButton icon={rating === 'down' ? 'thumbs-down' : 'thumbs-down-outline'} active={rating === 'down'} onPress={() => vote('down')} label={t('Not helpful')} />
         <FbButton icon={copied ? 'checkmark' : 'share-outline'} active={copied} onPress={onShare} label={t('Share')} />
+        {readAloudText ? (
+          <FbButton
+            icon={speaking ? 'stop-circle' : 'volume-high-outline'}
+            active={speaking}
+            onPress={onReadAloud}
+            label={speaking ? t('Stop reading') : t('Read aloud')}
+          />
+        ) : null}
       </View>
     </View>
   );
