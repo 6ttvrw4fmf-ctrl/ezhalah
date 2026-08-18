@@ -27,6 +27,19 @@ verify → continue — and does not send its report while safely fixable Ezhala
 run remain unfinished. §0.1 lists what that authority does NOT waive (source truth, destructive
 safety gates, the RED list).
 
+**Major certification work has a mandatory scale — `docs/ops/SEARCH_MATCH_QA_ENGINEER.md` §40
+(owner, 2026-08-18).** Any MAJOR certification of Filter, Advanced Filter, search, matching,
+location, rent period, pagination or result cards runs three layers together: **~200 real browser
+journeys (desktop AND mobile) + ~5,000 coverage-driven production RPC searches + exhaustive SQL
+differential validation over the full searchable inventory** (`missing = extra = duplicates =
+count mismatch = 0`). Every search proves *intended state = UI state = serialized request state* and
+*displayed count = RPC count = independent DB truth*. This does NOT apply to the daily heartbeat
+(§20) or to small unrelated changes. A different number needs a stated engineering reason **before**
+the run. §40.1 carries the measured load constants (338 ms/search, concurrency knee 3, ≤1.5 searches/s
+sustained, the finite 2,909-cell search space) — cite them, don't re-derive them. §40.8: a genuine
+safe in-rules defect found during certification is fixed, barriered, deployed and production-verified
+in the SAME run, never handed back as a report item.
+
 **The barriers are machine-enforced and do not depend on any agent remembering to run them.**
 `mon_run_all_detectors()` runs twice an hour (pg_cron jobid 38 at :29/:59) and returns a count per
 detector plus `failed`; **`failed` must be empty and every count 0** — but a count is NEWLY-raised or

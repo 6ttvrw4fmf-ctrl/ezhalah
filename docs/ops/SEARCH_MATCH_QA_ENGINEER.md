@@ -152,6 +152,9 @@ searches · 30+ randomized · every live فئة represented · every نوع on r
 15+ area experiments · 10+ price+area combos · 8+ «عرض المزيد» journeys · every live sort · 10
 diversity checks · 5+ honest-zero · 5+ new-listing findability. Never hurt Supabase to hit numbers.
 
+**This §20 is the DAILY heartbeat only.** A *major* certification — see §40 — runs at a much larger
+scale. Do not apply §40 scale to an ordinary daily run or to a small unrelated change.
+
 ## 21. One report at the end
 Test → fix → barrier → test → deploy → production verify → THEN one report (format in §28).
 
@@ -201,6 +204,9 @@ product behaviors needing owner choice — and the report must state exactly wha
 it cannot be fixed safely, and what evidence/decision is missing. Otherwise: fix before reporting.
 
 ## 28. Final report — only after fix + deploy + retest
+> For a **major** certification the report block in **§40.9** is REQUIRED in addition to this
+> section's content. §28 governs the daily heartbeat; §40.9 governs major runs.
+
 Order: full testing → fixes → barriers → regression suite → safe deployment → live production
 retest → final report. Header: `🧪 مهندس اختبار البحث والتطابق اليومي — Before: X/10 → After: X/10`.
 Include: total searches · combinations · فئات tested/total · أنواع tested/total (or ledger
@@ -278,6 +284,137 @@ tested-recently / not-yet-covered across فئات · أنواع · المدن ·
 «سنوي»/«شهري» · السعر · المساحة · غرف النوم · sorting · multiple أحياء · «عرض المزيد» · platforms ·
 card click-through. Random testing must not leave the same obscure نوع untested for weeks — the
 report must show the ledger split.
+
+## 40. MAJOR CERTIFICATION STANDARD (owner rule, 2026-08-18 — permanent default)
+
+**Applies to every MAJOR certification of: Normal Filter · Advanced Filter · search · matching ·
+location · rent period · pagination · result cards.** It does NOT apply to the daily heartbeat
+(§20) or to small unrelated changes — a two-line copy fix does not earn 5,000 searches.
+
+The standard is three layers, run together. Deviating from these numbers is allowed when there is a
+real engineering reason — **state the reason and the substitute numbers BEFORE running, not after.**
+
+| Layer | Scale | What it proves |
+|---|---|---|
+| **A. Real browser journeys** | **~200** | The website a user actually touches behaves — desktop AND mobile |
+| **B. Coverage-driven production RPC searches** | **~5,000** | Every populated corner of the taxonomy answers correctly |
+| **C. Exhaustive SQL differential validation** | **full searchable inventory** | The result SET is exactly right, not just its first page |
+
+The goal is maximum meaningful coverage at safe production load — never numbers for show.
+
+### 40.1 Why these numbers (measured 2026-08-18 — do not re-derive, cite this)
+Production is **2 vCPU / 8 GB** (`shared_buffers` 2GB, `effective_cache_size` 6GB,
+`max_connections` 160), DB **4.0 GB** — fits entirely in cache (100% `shared_blks_hit`).
+
+- **One certification RPC search costs ~338 ms of server exec time** (measured as a
+  `pg_stat_statements` delta around a controlled probe — NOT the all-callers mean, which is ~2,230 ms
+  and is dominated by heavier callers).
+- **Ambient baseline load is 0.35 cores (8-day avg) to 0.77 cores (peak sampled)** of the 2.
+- The **search RPC is already 64.4% of all database time**. It is the hottest thing in the system.
+- **Concurrency knee = 3.** p50 662 ms @2 workers, 657 ms @3, degrading to **992 ms @5** — at 5
+  workers a run draws ~1.28 cores (64% of the instance) and real users share that queuing.
+- A **full-predicate SQL scan of the whole index costs 61 ms** — **5.5× cheaper than one RPC search**
+  and it validates every matching row instead of the first page. This is why layer C exists.
+
+**The populated search space is finite** — this is why ~5,000 is the right B number and 100,000 is
+not: **91** populated (type × deal) cells · **2,909** (type × deal × city) · **20,304**
+(type × deal × city × district) · 194,648 production-ready rows · **56** enabled Advanced Filter
+cohorts · 16 UI-exposed AF fields. **~3,000 searches exhausts every populated type×deal×city cell**;
+~5,000 adds filter-shape variation on top. Beyond that you are re-testing the same predicate shapes
+with different numeric literals — new data, no new code path. Confidence about *data* belongs in
+layer C, not in more HTTP searches.
+
+### 40.2 Layer A — ~200 real browser journeys
+Drive the real site at `https://ezhalah-app.vercel.app`. Cover, across the run: **desktop AND
+mobile viewports** · Residential + Commercial · every property group · every property type · «شراء»
+· «إيجار» «سنوي» · «إيجار» «شهري» · «كلاهما» where supported · cities · districts · multi-district ·
+السعر · المساحة · غرف النوم · **Advanced Filter** · «عرض المزيد» · cards · click-through ·
+refresh/back state (§29) · new listings (§16).
+
+Budget: at ~16 s per param-fidelity journey and ~26 s per full journey (measured), ~200 journeys is
+roughly **1–1.5 hours** of browser time. Harvest the **request template** for every
+(category, group, type, deal) — layer B builds on those templates so no request it fires is invented.
+
+### 40.3 Layer B — ~5,000 coverage-driven RPC searches
+Coverage-driven, never random or repetitive. A planner must track cell coverage and deliberately
+fill under-tested dimensions. Spread across: all live property types · all 13 regions · populated
+cities · populated districts · type × deal × period · price ranges · area ranges · bedroom values ·
+multi-filter combinations · zero-result cases · very small cohorts · large cohorts ·
+Annual/Monthly/Both isolation · **all enabled Advanced Filter cohorts, questions and options**.
+
+### 40.4 What every search must prove
+1. **intended state = UI state = serialized/request state.** Read UI state from the app's OWN
+   «ملخص البحث» summary and chips — never from the harness's memory of what it clicked. (A previous
+   harness believed it had selected شقة while it had actually searched the whole group; this
+   assertion exists specifically to make that impossible.)
+2. **displayed count = RPC count = independent database truth.**
+3. **Every returned listing satisfies every selected predicate** — deal, period, category,
+   group/type, city, district, price (on the correct basis), area, bedrooms, and every Advanced
+   Filter answer, not just property type.
+
+### 40.5 Layer C — exhaustive SQL differential validation
+Independently reimplement the RPC's predicate in plain SQL and compare **result-ID sets**, over the
+full searchable inventory wherever technically possible — not the first page. Required outcome:
+
+```
+missing IDs = 0 · extra IDs = 0 · duplicates = 0 · count mismatch = 0
+```
+
+Report each of those four as its own number. `0` proven is a result; "not measured" is never PASS.
+
+### 40.6 Production safety envelope (certification is NOT a load test)
+- **Sustained rate ≤ 1.5 searches/sec at concurrency 2** (≈0.5 core, ~25% of the instance). Short
+  off-peak bursts at concurrency 3 (~2/s) are acceptable. **Never exceed concurrency 6.**
+- **Avoid heavy windows:** `sync-search-listings-ar` runs at **:14 every hour for ~46 s**; the heavy
+  scraper/cron batch is **01:00–06:00 UTC**. Also keep the existing :00/:15/:20 rule.
+- **Watch latency and DB health throughout, and slow or stop automatically** if p95 latency or DB
+  load crosses the safe threshold. Degrading Supabase to finish a run is a failed run.
+- All searches are **read-only** and hit **only Ezhalah's own index — never a source platform**, at
+  any scale. A certification must never generate source-platform traffic.
+
+### 40.7 Evidence — machine-readable ledger, every major run
+Persist one record per search: intended search · actual request · result count · rows validated ·
+unique listing IDs · latency · violations · PASS/FAIL · **bug classification**. Budget ~3.8 KB per
+record (measured) — ~5,000 searches ≈ 19 MB. Also record the run in `ops_qa_coverage_ledger` (§39).
+
+**Honesty rules, all permanent:**
+- Do NOT report estimates as exact counts.
+- Do NOT call a harness failure a product failure.
+- Do NOT hide a product failure as a harness failure without PROVING it is one.
+- Do NOT mark untested things as PASS. Untested is reported under `NOT TESTED:`.
+
+### 40.8 Defect handling — automatic, no permission needed
+A genuine, safe, in-rules defect found during certification is **fixed in the same run**, not
+reported for later:
+
+> 1 reproduce → 2 root-cause → 3 fix → 4 regression protection → 5 barrier/detector where
+> appropriate → 6 **prove the OLD behaviour FAILS the new regression test** → 7 re-run the full
+> relevant suite → 8 merge through the guarded process → 9 deploy if required →
+> 10 verify the live production website afterwards.
+
+Then re-run the failed searches and stop treating that dimension as green until they pass.
+
+**Stop and ask the owner only when** the issue needs a real product decision · a source-truth
+judgment that cannot be proven · a destructive operation · a taxonomy decision · or a choice between
+two genuinely different legitimate UX behaviours. That list is the same RED list as
+`docs/ops/AGENT_AUTHORITY.md`, which still governs. Otherwise:
+**find → fix → barrier → test → deploy → production verify.**
+
+### 40.9 Required final report block (every major certification)
+```
+REAL WEBSITE JOURNEYS:          RESULT ROWS VALIDATED:        DUPLICATES:
+RPC SEARCHES:                   UNIQUE LISTINGS VALIDATED:    ANNUAL/MONTHLY LEAKS:
+UNIQUE SEARCH COMBINATIONS:     ADVANCED FILTER COHORTS TESTED:   HARNESS ERRORS:
+PROPERTY TYPES COVERED:         ADVANCED FILTER ANSWER OPTIONS TESTED:  PRODUCT BUGS FOUND:
+REGIONS COVERED:                COUNT MISMATCHES:             PRODUCT BUGS FIXED:
+CITIES COVERED:                 MATCHING VIOLATIONS:          BARRIERS ADDED:
+DISTRICTS COVERED:              MISSING LISTINGS:             DESKTOP VERIFIED:
+                                EXTRA LISTINGS:               MOBILE VERIFIED:
+PRODUCTION DEPLOYED:            PRODUCTION VERIFIED:          NOT TESTED:
+FINAL RATING: X/10
+```
+Report the rating as `Rating Before → Rating After` per `docs/ops/ENGINEER_ROUTINES.md` — the single
+`FINAL RATING` line above is the "after" half and never replaces the pair.
 
 ## Final principle
 **MATCH → SOURCE TRUTH → DIVERSITY → USER JOURNEY → PERFORMANCE**, in that order. The engineer owns
