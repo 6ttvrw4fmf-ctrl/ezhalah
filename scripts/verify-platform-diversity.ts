@@ -297,13 +297,21 @@ console.log('\nPLATFORM DIVERSITY — owner permanent rule (MATCH FIRST → DIVE
   const CITIES = ['الرياض', 'جدة', 'الدمام', 'أبها'];
   const DISTRICTS = ['النرجس', 'الياسمين', 'الملقا', 'القادسية', 'الروضة'];
   let worseStreak = 0, lostPlatforms = 0, lostRows = 0, checked = 0;
+  // Owner rule (2026-08-19): سنوي+شهري together is a PREFERENCE BOUNDARY, never a ranking/balancing
+  // target — orderByScope's mixPeriods interleave (nested inside platform) must be the exact same
+  // kind of pure re-sort as the platform/geography/type keys above: it may re-ORDER a batch, it may
+  // never add, drop, duplicate a row, or change which periods are present. mixPeriods=true is
+  // exercised here with the SAME real batch shapes and permutation checks, plus a period-set check
+  // mirroring lostPlatforms (a naive "balance the mix" implementation would be the one bug shape
+  // that could pass every OTHER check here while still manufacturing/dropping period rows).
+  let lostPeriods = 0, checkedMixed = 0;
 
   for (const [limit, offset] of [[10, 0], [15, 10], [25, 25], [50, 50], [100, 100], [100, 300]] as const) {
     const batch = page(inventory(spec), limit, offset);      // the RPC's diversified order
     if (!batch.length) continue;
     checked++;
     const ranked: RankedRow[] = batch.map((r, i) => ({
-      l: { cleanType: null } as any,
+      l: { cleanType: null, rentPeriod: r.id % 3 === 0 ? 'monthly' : 'annual' } as any,
       platform: r.platform,
       city: CITIES[r.id % CITIES.length],
       region: 'الرياض',
@@ -319,6 +327,14 @@ console.log('\nPLATFORM DIVERSITY — owner permanent rule (MATCH FIRST → DIVE
         if (new Set(a).size < new Set(b).size) lostPlatforms++;
         if (a.length !== b.length || new Set(after.map((r) => r.rank)).size !== ranked.length) lostRows++;
       }
+      // mixPeriods=true — the combined سنوي+شهري search path
+      checkedMixed++;
+      const afterMixed = orderByScope(ranked, scope, false, true);
+      const beforePeriods = ranked.map((r) => r.l.rentPeriod).sort();
+      const afterPeriods = afterMixed.map((r) => r.l.rentPeriod).sort();
+      if (afterMixed.length !== ranked.length
+          || new Set(afterMixed.map((r) => r.rank)).size !== ranked.length) lostRows++;
+      if (JSON.stringify(beforePeriods) !== JSON.stringify(afterPeriods)) lostPeriods++;
     }
   }
   check(`15. client re-sort never lengthens a same-platform streak (${checked} real batch shapes × 8 scopes)`,
@@ -327,6 +343,10 @@ console.log('\nPLATFORM DIVERSITY — owner permanent rule (MATCH FIRST → DIVE
     lostPlatforms === 0, `${lostPlatforms} batches lost a platform`);
   check('15c. client re-sort is a pure permutation — no row invented, duplicated or lost',
     lostRows === 0, `${lostRows} batches changed membership`);
+  check(`15d. mixPeriods=true (owner combined-period rule 2026-08-19) is ALSO a pure permutation (${checkedMixed} batch×scope combos) — never adds/drops a row`,
+    lostRows === 0);
+  check('15e. mixPeriods=true never changes the MULTISET of periods present — no rebalancing, no manufactured/dropped period',
+    lostPeriods === 0, `${lostPeriods} batches had a different period multiset after reordering — this is exactly the "balance the mix" bug the owner banned`);
 }
 
 console.log(failures === 0
