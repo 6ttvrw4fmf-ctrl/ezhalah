@@ -253,7 +253,23 @@ function singleCleanType(q: SearchQuery): string | null {
 }
 
 // Is question `id` available for this query's cohort? Residential-only, single-type, deal-aware.
-// Monthly Rent (q.rentPeriod === 'monthly') matches NO key by construction — frozen per owner.
+// Monthly Rent was frozen until 2026-08-18 (owner unfreeze, 3 certified cohorts: Apartment/Room/
+// Villa) — RentMonthly entries in COHORT_QUESTIONS above are real now, not dead config.
+//
+// MIXED PERIOD (rentPeriod === 'both', owner feature 2026-08-19) — INTERSECTION, never union.
+// RentAnnual and RentMonthly are each independently profiled against real coverage data for THAT
+// period alone; a question absent from one list has zero evidence it's valid there. Since the
+// shared SQL predicates are strict-NULL-excluding (an unrated/unaged row FAILS a rating/age filter,
+// it does not pass through as "unknown"), offering a period-specific question in a combined search
+// would silently amputate the other period's rows the moment it's answered — e.g. Gathern `rating`
+// (Monthly-only signal, never profiled against Annual data) would exclude every Annual listing;
+// `rnpl`/`property_age` (Annual-tuned, ~2% known on Monthly Apartment) would exclude nearly every
+// Monthly listing. Requiring the id in BOTH lists guarantees an offered question's predicate is
+// safe against every row in a 'both' scope, for both periods, by construction — no new NULL-
+// handling code, no touching af_eligibility_clause() at all (cohort gating has always lived
+// client-side only, per docs/ADVANCED_FILTER_DESIGN_CONTRACT.md §9). A type with no certified
+// Monthly cohort correctly offers ZERO questions in 'both' mode (empty intersection) — there is no
+// evidence a mixed scope is meaningfully populated for that type either.
 function cohortAllows(q: SearchQuery, id: string): boolean {
   const type = singleCleanType(q);
   if (!type) return false;
@@ -263,13 +279,11 @@ function cohortAllows(q: SearchQuery, id: string): boolean {
   if (q.category !== (CLEAN_MACRO[type] ?? 'Residential')) return false;
   const cfg = COHORT_QUESTIONS[type];
   if (!cfg) return false;
-  const deal: 'RentAnnual' | 'RentMonthly' | 'Buy' | null =
-    q.deal === 'Buy' ? 'Buy'
-    : q.deal === 'Rent' && q.rentPeriod === 'monthly' ? 'RentMonthly'
-    : q.deal === 'Rent' ? 'RentAnnual'
-    : null;
-  if (!deal) return false;
-  return (cfg[deal] ?? []).includes(id);
+  if (q.deal === 'Buy') return (cfg.Buy ?? []).includes(id);
+  if (q.deal !== 'Rent') return false;
+  if (q.rentPeriod === 'monthly') return (cfg.RentMonthly ?? []).includes(id);
+  if (q.rentPeriod === 'both') return (cfg.RentAnnual ?? []).includes(id) && (cfg.RentMonthly ?? []).includes(id);
+  return (cfg.RentAnnual ?? []).includes(id); // plain Annual Rent (rentPeriod undefined or 'annual')
 }
 
 // Kept as named helpers (call sites + contract scripts reference them); now cohort-config-driven.

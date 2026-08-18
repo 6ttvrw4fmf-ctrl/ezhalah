@@ -665,11 +665,17 @@ export type CityOption = {
 // available at this point — a true Category×Deal ranking would need Category moved earlier, which
 // the owner explicitly declined (2026-07-20); Deal-only is the scoping this data can actually
 // support today. See supabase/migrations/20260720_trending_cities_districts_by_deal.sql.
-// Keyed by `${deal}:${period}` where period is '' (no filter / Buy), 'm' (monthly) or 'a' (annual).
-// paymentMonthly is the period truth: true→monthly, false→annual, null→no filter (Buy, or before a
-// Rent period is known). Period-scoping the pool means the Trending Top-6 AND the typed autocomplete
-// both reflect the chosen Monthly/Yearly period for Rent; Buy is always null → identical to before.
-const pmKey = (paymentMonthly: boolean | null) => (paymentMonthly === null ? '' : paymentMonthly ? 'm' : 'a');
+// Keyed by `${deal}:${period}` where period is '' (no filter / Buy), 'شهري', 'سنوي', or 'كلاهما'.
+// periodTok is the SAME Arabic RPC token remote.ts's rentPeriodParam() sends to the results RPC
+// (never a boolean — owner mixed-period feature 2026-08-19): null→no filter (Buy, or before a Rent
+// period is known), 'شهري'/'سنوي'→single period, 'كلاهما'→the exact union the results RPC returns,
+// NOT the same as null (null also sweeps in rent rows whose source published no period at all — see
+// docs/ARCHITECTURE.md §17). Before this, Trending only had a boolean (monthly/annual/no-filter), so
+// selecting Both period sent `null` here — a BROADER, wrong-scope pool than what Search actually
+// returns for "both". Using the identical token keeps Trending and Search's period interpretation
+// canonically ONE thing. Period-scoping the pool means the Trending Top-6 AND the typed autocomplete
+// both reflect the chosen period(s) for Rent; Buy is always null → identical to before.
+const pmKey = (periodTok: string | null) => periodTok ?? '';
 // COUNT-SCOPE PARITY (2026-08-14): the pool is now also keyed by the EFFECTIVE category the results
 // RPC will search (query.category once picked, else the implied 'Residential' default — see
 // IMPLIED_CATEGORY_DEFAULT in remote.ts), so the Top-6 ranking and every listing_count agree with
@@ -681,7 +687,7 @@ const pmKey = (paymentMonthly: boolean | null) => (paymentMonthly === null ? '' 
 // the Top-6 ranking, every listing_count, and the new total_in_cohort denominator all describe the
 // same cohort the user will actually search. Price is deliberately NOT part of this key.
 const typesKey = (types: string[] | null) => (types && types.length ? [...types].slice().sort().join('|') : '');
-const cityPoolKey = (deal: Deal, paymentMonthly: boolean | null, category: Category | null, types: string[] | null = null) => `${deal}:${pmKey(paymentMonthly)}:${category ?? ''}:${typesKey(types)}`;
+const cityPoolKey = (deal: Deal, periodTok: string | null, category: Category | null, types: string[] | null = null) => `${deal}:${pmKey(periodTok)}:${category ?? ''}:${typesKey(types)}`;
 const CITY_FIELD_POOLS = new Map<string, CityOption[]>();
 const _cityFieldPromises = new Map<string, Promise<CityOption[]>>();
 
@@ -694,12 +700,12 @@ const _cityFieldPromises = new Map<string, Promise<CityOption[]>>();
 export type PoolStatus = 'loading' | 'error' | 'ready';
 const _cityPoolStatus = new Map<string, PoolStatus>();
 const _districtPoolStatus = new Map<string, PoolStatus>();
-export function cityPoolStatus(deal: Deal, paymentMonthly: boolean | null, category: Category | null, types: string[] | null = null): PoolStatus {
-  const key = cityPoolKey(deal, paymentMonthly, category, types);
+export function cityPoolStatus(deal: Deal, periodTok: string | null, category: Category | null, types: string[] | null = null): PoolStatus {
+  const key = cityPoolKey(deal, periodTok, category, types);
   return CITY_FIELD_POOLS.has(key) ? 'ready' : _cityPoolStatus.get(key) ?? 'loading';
 }
-export function districtPoolStatus(cityId: number, deal: Deal, category: Category | null, paymentMonthly: boolean | null, types: string[] | null = null): PoolStatus {
-  const key = districtCacheKey(cityId, deal, category, paymentMonthly, types);
+export function districtPoolStatus(cityId: number, deal: Deal, category: Category | null, periodTok: string | null, types: string[] | null = null): PoolStatus {
+  const key = districtCacheKey(cityId, deal, category, periodTok, types);
   return _districtCache.has(key) ? 'ready' : _districtPoolStatus.get(key) ?? 'loading';
 }
 
@@ -707,8 +713,8 @@ export function districtPoolStatus(cityId: number, deal: Deal, category: Categor
 // most — small enough to fetch in one shot and search entirely client-side, same shape as
 // ensureLocationIndex above). Already sorted by listing_count desc so topCitiesByListings() below
 // is just a slice.
-export async function ensureCityFieldIndex(deal: Deal, paymentMonthly: boolean | null = null, category: Category | null = null, types: string[] | null = null): Promise<CityOption[]> {
-  const key = cityPoolKey(deal, paymentMonthly, category, types);
+export async function ensureCityFieldIndex(deal: Deal, periodTok: string | null = null, category: Category | null = null, types: string[] | null = null): Promise<CityOption[]> {
+  const key = cityPoolKey(deal, periodTok, category, types);
   const cached = CITY_FIELD_POOLS.get(key);
   if (cached) return cached;
   const inflight = _cityFieldPromises.get(key);
@@ -725,13 +731,16 @@ export async function ensureCityFieldIndex(deal: Deal, paymentMonthly: boolean |
       const _t = setTimeout(() => _ac.abort(), 15000);
       let data: any = null;
       try {
-        // p_payment_monthly is sent ONLY when a period is known (Rent). Omitting it when null keeps the
-        // call identical to the pre-period-scope behavior AND compatible with any environment where the
-        // function has not yet been migrated to the period-aware signature. If a period-scoped call
-        // errors (older function without the arg), fall back to the deal-only call so the field still
-        // populates rather than going blank.
+        // p_rent_period is sent ONLY when a period is known (Rent) — the same 'شهري'/'سنوي'/'كلاهما'
+        // token remote.ts's rentPeriodParam() sends to the results RPC (owner mixed-period feature
+        // 2026-08-19; was a boolean p_payment_monthly before, which had no representation for
+        // 'كلاهما' and silently sent null — a broader, wrong-scope pool — for a combined search).
+        // Omitting it when null keeps the call identical to the pre-period-scope behavior AND
+        // compatible with any environment where the function has not yet been migrated to the
+        // period-aware signature. If a period-scoped call errors (older function without the arg),
+        // fall back to the deal-only call so the field still populates rather than going blank.
         const args: Record<string, unknown> = { p_deal: dealAr(deal) };
-        if (paymentMonthly !== null) args.p_payment_monthly = paymentMonthly;
+        if (periodTok !== null) args.p_rent_period = periodTok;
         if (category !== null) args.p_category = category;
         if (types && types.length) args.p_types = types;
         let res = await supabase.rpc('top_cities_by_deal_ar', args).abortSignal(_ac.signal);
@@ -747,7 +756,7 @@ export async function ensureCityFieldIndex(deal: Deal, paymentMonthly: boolean |
           const { p_category: _dropped, ...noCat } = args;
           res = await supabase.rpc('top_cities_by_deal_ar', noCat).abortSignal(_ac.signal);
         }
-        if (res.error && paymentMonthly !== null) {
+        if (res.error && periodTok !== null) {
           res = await supabase.rpc('top_cities_by_deal_ar', { p_deal: dealAr(deal) }).abortSignal(_ac.signal);
         }
         data = res.data;
@@ -792,8 +801,8 @@ export async function ensureCityFieldIndex(deal: Deal, paymentMonthly: boolean |
 // this category" count (e.g. 9,358) instead of the exact selected type's count (e.g. 28, or 0). Every
 // call site must now pass its cohortTypesAr(query) explicitly; TypeScript refuses to compile a caller
 // that forgets it, so this class of drift can never silently reappear. [[cohortTypesAr]]
-export function topCitiesByListings(deal: Deal, paymentMonthly: boolean | null, category: Category | null, k: number, types: string[] | null): CityOption[] {
-  return (CITY_FIELD_POOLS.get(cityPoolKey(deal, paymentMonthly, category, types)) ?? []).filter((c) => c.listingCount > 0).slice(0, k);
+export function topCitiesByListings(deal: Deal, periodTok: string | null, category: Category | null, k: number, types: string[] | null): CityOption[] {
+  return (CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types)) ?? []).filter((c) => c.listingCount > 0).slice(0, k);
 }
 
 // ── District field (city_id-scoped) — mirrors the City field. ────────────────────────────────────
@@ -823,12 +832,12 @@ export type DistrictOption = {
 // unaffected; only the popularity ranking / listing_count used for the Top-6 slice changes.
 const _districtCache = new Map<string, DistrictOption[]>();
 const _districtPromises = new Map<string, Promise<DistrictOption[]>>();
-const districtCacheKey = (cityId: number, deal: Deal, category: Category | null, paymentMonthly: boolean | null, types: string[] | null = null) => `${cityId}:${deal}:${category ?? ''}:${pmKey(paymentMonthly)}:${typesKey(types)}`;
+const districtCacheKey = (cityId: number, deal: Deal, category: Category | null, periodTok: string | null, types: string[] | null = null) => `${cityId}:${deal}:${category ?? ''}:${pmKey(periodTok)}:${typesKey(types)}`;
 
 // Load (once, cached per city+deal+category) the full district catalog for a city_id. Never falls
 // back to another city.
-export async function ensureDistrictOptions(cityId: number, deal: Deal, category: Category | null, paymentMonthly: boolean | null = null, types: string[] | null = null): Promise<DistrictOption[]> {
-  const key = districtCacheKey(cityId, deal, category, paymentMonthly, types);
+export async function ensureDistrictOptions(cityId: number, deal: Deal, category: Category | null, periodTok: string | null = null, types: string[] | null = null): Promise<DistrictOption[]> {
+  const key = districtCacheKey(cityId, deal, category, periodTok, types);
   const cached = _districtCache.get(key);
   if (cached) return cached;
   const inflight = _districtPromises.get(key);
@@ -845,18 +854,19 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal, category
       const _t = setTimeout(() => _ac.abort(), 15000);
       let data: any = null;
       try {
-        // Same period-scope + graceful-fallback pattern as ensureCityFieldIndex: send p_payment_monthly
-        // only when a period is known, and fall back to the period-less call if an older function
-        // signature rejects it.
+        // Same period-scope + graceful-fallback pattern as ensureCityFieldIndex: send p_rent_period
+        // only when a period is known (the same 'شهري'/'سنوي'/'كلاهما' token, not a boolean — owner
+        // mixed-period feature 2026-08-19), and fall back to the period-less call if an older
+        // function signature rejects it.
         const args: Record<string, unknown> = { p_city_id: cityId, p_deal: dealAr(deal), p_category: category };
-        if (paymentMonthly !== null) args.p_payment_monthly = paymentMonthly;
+        if (periodTok !== null) args.p_rent_period = periodTok;
         if (types && types.length) args.p_types = types;
         let res = await supabase.rpc('district_options_ar', args).abortSignal(_ac.signal);
         if (res.error && types && types.length) {
           const { p_types: _droppedTypes, ...noTypes } = args;
           res = await supabase.rpc('district_options_ar', noTypes).abortSignal(_ac.signal);
         }
-        if (res.error && paymentMonthly !== null) {
+        if (res.error && periodTok !== null) {
           res = await supabase
             .rpc('district_options_ar', { p_city_id: cityId, p_deal: dealAr(deal), p_category: category })
             .abortSignal(_ac.signal);
@@ -894,15 +904,15 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal, category
 // already returns rows ordered by listing_count desc, so this is a filter + slice).
 // `types` (and every param before it) is REQUIRED — same compile-time barrier as topCitiesByListings
 // above, guarding the district pool's read-back cache key. [[cohortTypesAr]]
-export function topDistrictsForCityId(cityId: number, deal: Deal, category: Category | null, paymentMonthly: boolean | null, k: number, types: string[] | null): DistrictOption[] {
-  return (_districtCache.get(districtCacheKey(cityId, deal, category, paymentMonthly, types)) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
+export function topDistrictsForCityId(cityId: number, deal: Deal, category: Category | null, periodTok: string | null, k: number, types: string[] | null): DistrictOption[] {
+  return (_districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types)) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
 }
 
 // Typing: search the COMPLETE canonical catalog for THIS city (incl. zero-listing districts) by Arabic
 // substring, using the SAME norm() folding as the city field. Empty query → the Top-6 suggestions.
 // `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
-export function matchDistrictsByCityId(cityId: number, deal: Deal, category: Category | null, paymentMonthly: boolean | null, query: string, types: string[] | null): DistrictOption[] {
-  const all = _districtCache.get(districtCacheKey(cityId, deal, category, paymentMonthly, types)) ?? [];
+export function matchDistrictsByCityId(cityId: number, deal: Deal, category: Category | null, periodTok: string | null, query: string, types: string[] | null): DistrictOption[] {
+  const all = _districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types)) ?? [];
   const q = norm(query);
   if (!q) return all.filter((d) => d.listingCount > 0).slice(0, 6);
   const scored: { opt: DistrictOption; rank: number }[] = [];
@@ -921,11 +931,11 @@ export function matchDistrictsByCityId(cityId: number, deal: Deal, category: Cat
 // normalize_ar() applies — so "الري" matches "الرياض" exactly like a DB-side search would. Ranks
 // exact-prefix matches before substring matches, then by listing count (bigger cities first).
 // `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
-export function matchCitiesByText(deal: Deal, paymentMonthly: boolean | null, category: Category | null, query: string, types: string[] | null): CityOption[] {
+export function matchCitiesByText(deal: Deal, periodTok: string | null, category: Category | null, query: string, types: string[] | null): CityOption[] {
   const q = norm(query);
   if (!q) return [];
   const scored: { opt: CityOption; rank: number }[] = [];
-  for (const opt of CITY_FIELD_POOLS.get(cityPoolKey(deal, paymentMonthly, category, types)) ?? []) {
+  for (const opt of CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types)) ?? []) {
     const n = norm(opt.cityAr);
     if (n.startsWith(q)) scored.push({ opt, rank: 0 });
     else if (n.includes(q)) scored.push({ opt, rank: 1 });

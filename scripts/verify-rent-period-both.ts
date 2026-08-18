@@ -101,13 +101,22 @@ check("the diversity key reads the listing's own rentPeriod",
 check("remote.ts turns mixing on only for an actual both-search",
   /mixPeriods\s*=\s*!q\.bothDeals\s*&&\s*q\.deal\s*===\s*'Rent'\s*&&\s*q\.rentPeriod\s*===\s*'both'/.test(remote));
 
-// ── UI + copy ────────────────────────────────────────────────────────────────────────────────────
-check("the Filter offers three period choices",
-  /options=\{\['Monthly',\s*'Yearly',\s*'Both'\]\}/.test(index));
+// ── UI + copy (owner 2026-08-19: كلاهما button REMOVED — سنوي/شهري are independent toggles) ────────
+check("the Filter offers ONLY two period buttons (سنوي/شهري) — no third «Both» button in the UI",
+  /\(\['annual',\s*'monthly'\]\s*as const\)\.map/.test(index)
+  && !/options=\{\['Monthly',\s*'Yearly',\s*'Both'\]\}/.test(index),
+  'a third visible Both button was explicitly banned by the owner — both periods reach the same query value via independent toggles instead');
 
-check("city/district pools are period-unscoped on a both-search (paymentMonthly → null)",
-  /rentPeriod\s*===\s*'both'\s*\?\s*null/.test(index),
-  'a pool scoped to one period would hide cities that only have the other');
+check("both toggle buttons route through togglePeriodButton (one canonical transition function)",
+  /togglePeriodButton\(rentPeriod,\s*which\)/.test(index));
+
+check("city/district pools use the SAME 'شهري'/'سنوي'/'كلاهما' token as the results RPC, never a bare boolean",
+  /rentPeriod\s*===\s*'monthly'\s*\?\s*'شهري'[\s\S]{0,40}rentPeriod\s*===\s*'both'\s*\?\s*'كلاهما'/.test(index),
+  "a combined search must send the EXACT كلاهما token to Trending too — null would wrongly include unpublished-period rows (docs/ARCHITECTURE.md §17)");
+
+check("the old boolean-scoped 'both → null' Trending gap is gone",
+  !/rentPeriod\s*===\s*'both'\s*\?\s*null\s*:\s*rentPeriod\s*===\s*'monthly'/.test(index),
+  'this shape sent a broader, wrong-scope pool to Trending for a combined search — the exact gap this fix closes');
 
 // The owner's copy rule: state the price BASIS, never assert a lease length no source publishes.
 for (const [label, key] of [

@@ -64,5 +64,21 @@ check('a null category never fires', !isAgeFilterScope({ category: null }, ['Apa
 // An unknown/garbage type must not fire (Map.get → undefined must never === a category).
 check('an unknown type never fires', !isAgeFilterScope({ category: 'Residential' }, ['NotAType']));
 
+// ── Period gate (owner mixed-period feature 2026-08-19) ─────────────────────────────────────────────
+// property_age is never certified for Monthly inventory (COHORT_QUESTIONS excludes it from every
+// RentMonthly list — fresh-dead coverage). Monthly-only and combined ('both') scopes must never offer
+// it, even though the type+category gate alone would otherwise allow it. Buy and plain-Annual Rent
+// are unaffected.
+check('Apartment does NOT fire on a Monthly-only Rent scope',
+  !isAgeFilterScope({ category: 'Residential', deal: 'Rent', rentPeriod: 'monthly' }, ['Apartment']));
+check('Apartment does NOT fire on a combined (both) Rent scope',
+  !isAgeFilterScope({ category: 'Residential', deal: 'Rent', rentPeriod: 'both' }, ['Apartment']));
+check('Apartment STILL fires on a plain Annual Rent scope',
+  isAgeFilterScope({ category: 'Residential', deal: 'Rent', rentPeriod: 'annual' }, ['Apartment']));
+check('Apartment STILL fires on Rent with no rentPeriod set (defaults to annual)',
+  isAgeFilterScope({ category: 'Residential', deal: 'Rent' }, ['Apartment']));
+check('Apartment STILL fires on Buy regardless of rentPeriod (irrelevant field)',
+  isAgeFilterScope({ category: 'Residential', deal: 'Buy', rentPeriod: 'monthly' }, ['Apartment']));
+
 console.log(failed === 0 ? '\n✓ all age-filter-gate assertions passed' : `\n✗ ${failed} assertion(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

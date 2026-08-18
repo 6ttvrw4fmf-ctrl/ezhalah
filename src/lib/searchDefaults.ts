@@ -59,8 +59,45 @@ export function sanitizeForFilterRestore(q: SearchQuery): SearchQuery {
     areaMax: q.areaMax,
     priceMin: q.priceMin,                         // visible: price من/إلى
     priceMax: q.priceMax,
-    rentPeriod: q.rentPeriod ?? base.rentPeriod,  // visible: شهري/سنوي
+    rentPeriod: validRentPeriod(q.rentPeriod) ?? base.rentPeriod,  // visible: شهري/سنوي
   };
+}
+
+// Owner invariant (2026-08-19): the two period buttons can reach exactly {سنوي}, {شهري}, or
+// {سنوي+شهري} — NEVER an empty/neither state. That invariant is enforced at the button-tap level in
+// togglePeriodButton() below, but "everywhere this selection state can originate" also means a
+// restored/rehydrated query (this function), not just a direct tap — an unvalidated value read back
+// from storage/history could otherwise carry something that isn't one of the three valid tokens and
+// leave both buttons rendering unselected. Mirrors the same validation `src/data/agent.ts` already
+// applies before ever assigning an LLM-parsed rentPeriod (`b.rentPeriod === 'monthly' || ... `).
+export function validRentPeriod(v: unknown): 'monthly' | 'annual' | 'both' | undefined {
+  return v === 'monthly' || v === 'annual' || v === 'both' ? v : undefined;
+}
+
+// Rent-period toggle logic (owner feature 2026-08-19): the UI shows only two independent buttons,
+// سنوي (annual) and شهري (monthly) — no third «كلاهما» button — but selecting BOTH must still reach
+// the exact same 'both' query value the backend's already-proven كلاهما architecture expects
+// (docs/ARCHITECTURE.md §17). Pure/zero-dependency so the exact transition table the owner asked to
+// be tested (annual→monthly, monthly→annual, annual→both, monthly→both, both→annual, both→monthly)
+// can be asserted directly by a plain Node test, no react-native import chain required.
+//
+// INVARIANT: at least one of the two buttons must always stay selected — tapping the only currently-
+// active one is a no-op (mirrors every other exactly-one-or-more selector in this app; there is no
+// valid "no period" state for a Rent search once a period control exists at all).
+export function togglePeriodButton(
+  current: 'monthly' | 'annual' | 'both',
+  which: 'annual' | 'monthly',
+): 'monthly' | 'annual' | 'both' {
+  const annualOn = current === 'annual' || current === 'both';
+  const monthlyOn = current === 'monthly' || current === 'both';
+  if (which === 'annual') {
+    if (annualOn && monthlyOn) return 'monthly';   // turn سنوي off — شهري stays
+    if (annualOn) return current;                  // سنوي is the only one on — no-op, can't reach zero
+    return 'both';                                 // سنوي was off (شهري-only) — turn it on
+  }
+  if (monthlyOn && annualOn) return 'annual';       // turn شهري off — سنوي stays
+  if (monthlyOn) return current;                   // شهري is the only one on — no-op
+  return 'both';                                    // شهري was off (سنوي-only) — turn it on
 }
 
 export function hasActiveFilters(q: SearchQuery): boolean {

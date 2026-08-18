@@ -28,8 +28,12 @@ check('index.tsx derives the trending cohort from cohortTypesAr — never its ow
   /const cohortTypes = cohortTypesAr\(query\);/.test(idx) && !/typeArForTypes\(/.test(idx));
 
 // pool keys carry the types dimension → changing type recomputes by construction
-check('city pool key includes the cohort types', /cityPoolKey = \([^)]*types[^)]*\) => `\$\{deal\}:\$\{pmKey\(paymentMonthly\)\}:\$\{category \?\? ''\}:\$\{typesKey\(types\)\}`/.test(loc));
-check('district cache key includes the cohort types', /districtCacheKey = \([^)]*types[^)]*\)[^`]*`\$\{cityId\}:\$\{deal\}:\$\{category \?\? ''\}:\$\{pmKey\(paymentMonthly\)\}:\$\{typesKey\(types\)\}`/.test(loc));
+// pmKey's param was renamed paymentMonthly(boolean) -> periodTok(string) 2026-08-19 (owner mixed-
+// period feature: Trending now sends the same 'شهري'/'سنوي'/'كلاهما' token the results RPC uses,
+// never a boolean) — the KEY SHAPE this test protects (types must be part of the cache key) is
+// unchanged, only the period param's name/type changed.
+check('city pool key includes the cohort types', /cityPoolKey = \([^)]*types[^)]*\) => `\$\{deal\}:\$\{pmKey\(periodTok\)\}:\$\{category \?\? ''\}:\$\{typesKey\(types\)\}`/.test(loc));
+check('district cache key includes the cohort types', /districtCacheKey = \([^)]*types[^)]*\)[^`]*`\$\{cityId\}:\$\{deal\}:\$\{category \?\? ''\}:\$\{pmKey\(periodTok\)\}:\$\{typesKey\(types\)\}`/.test(loc));
 check('both RPC calls send p_types for the cohort',
   (loc.match(/args\.p_types = types;/g) || []).length === 2);
 check('both RPC calls degrade gracefully on a pre-p_types signature (drop types, never blank)',
