@@ -33,9 +33,26 @@ const check = (label: string, ok: boolean, detail = '') => {
 
 console.log('\nGoogle One Tap — our side of the contract\n');
 
-check('logged-out state is resolved via supabase getSession(), not just the store user',
-  /supabase\.auth\.getSession\(\)/.test(code) && /setSignedOut/.test(code),
-  'trusting the store user alone prompts signed-in visitors during session restore');
+// getSession() is LOCAL-only. A deleted account / revoked token can still parse locally, so it would
+// report "signed in" and we would never prompt — the owner's exact case (2026-08-18): a deleted
+// account, or someone who never signed up, must still get the prompt. getUser() validates server-side.
+check('logged-out state is resolved via server-validated getUser(), never getSession() alone',
+  /supabase\.auth\.getUser\(\)/.test(code) && /setSignedOut/.test(code)
+  && !/supabase\.auth\.getSession\(\)/.test(code),
+  'getSession() only reads local storage — a stale/deleted-account token then suppresses One Tap forever');
+check('any getUser error counts as signed out (deleted user, revoked token, network)',
+  /!!error\s*\|\|\s*!data\?\.user/.test(code));
+
+// auto_select:true silently signs a RETURNING visitor in and never renders the prompt — that is how
+// "it used to appear and then stopped" happens. The owner requires the prompt to be SHOWN.
+check('auto_select is false so Google actually RENDERS the prompt',
+  /auto_select:\s*false/.test(code),
+  'auto_select:true auto-signs returning visitors and the prompt is never displayed');
+
+// A failed token exchange looks identical to "Google suppressed it" unless we say so.
+check('token-exchange failures are recorded, never swallowed',
+  /exchangeError/.test(code) && !/signInWithIdToken\([^)]*\)\.catch\(\(\)\s*=>\s*\{\}\)/.test(code),
+  'swallowing this hides a real sign-in failure behind an apparent "no prompt"');
 check('prompt path requires signedOut === true AND no store user',
   /signedOut\s*!==\s*true\s*\|\|\s*user/.test(code));
 
