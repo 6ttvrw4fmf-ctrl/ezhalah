@@ -473,6 +473,91 @@ protecting its class, i.e. the fix would have been worse than the bug. It was ca
 the patched path and timing it**, not by reasoning about it. *A correctness fix is not finished
 until its COST has been measured.*
 
+## 24. One rule, applied at every stage — and barriers that watch the right clock (settled 2026-08-18, run #29)
+
+**24a. "Unambiguous inside the region the source published" is THE confident-match rule, and every
+stage must use it.** Saudi place names repeat across regions legitimately: «الباحة» exists in
+منطقة الباحة (city_id 1542, 835 served rows) *and* in منطقة حائل (2693); «القويعية» in four regions;
+«بيش» in two; «المجمعة» in four. A stage that demands the name be unique across the WHOLE catalog
+therefore throws away answers it has already determined. On 2026-08-18 that was happening in **three
+different places at once**, stranding 9 active listings whose own platform published both city and
+region — unreachable by every Filter combination:
+
+1. `resolve_english_city_overlay()` joined `loc_city_map → loc_catalog_region → loc_catalog_city`
+   (so the city was already pinned inside the published region) and then discarded it on
+   `count(*) from loc_catalog_city where city_norm = … = 1`.
+2. `listing_native_location_v2`'s **catchall** branch had the same global rule in its `lalc`
+   lateral — the v1 branch had carried the region-scoped `ulg2` fallback for a long time, and the
+   catchall never got the equivalent (now `lalc2`).
+3. `mon_detect_discarded_location_resolution` already encoded the correct rule in its branch (b) —
+   which is exactly why it could not see this cohort: it requires a matched
+   `listings_arabic_locations` row, and here the resolver had never written one.
+
+The generalisation: **when a rule is right, grep for every stage that implements it and check they
+agree.** A rule fixed in one place and left wrong in two others is indistinguishable, from the
+user's side, from never having fixed it. And the anti-ambiguity protection MOVES rather than
+disappears — `having count(distinct city_id) = 1` inside the published region. A name that is
+ambiguous even inside its own region still resolves to NOTHING.
+
+**24b. A barrier must measure the thing it protects, never a downstream stage's clock.**
+`mon_detect_discarded_location_resolution` raised **five times in 24 h** (8, 53, 32, 6, 19 rows) and
+self-resolved every time one to two hours later — because its cohort keyed on `search_listings_ar`,
+which only catches up when `sync-search-listings-ar` runs (jobid 28, hourly at :14). Every one of
+those raises was rows *in flight*. That is not merely noise: `mon_raise()` returns 0 for an
+already-open dedup key, so **a detector red half of every day cannot report the real thing** — the
+§23a wound from a third angle. Fixed by splitting the limbs: `pipeline_discard` (v2 itself resolves
+to nothing — immediate, no grace) and `sync_not_propagated` (v2 has it, search does not — 75 min,
+ledger-backed). Rows absent from v2 belong to `mon_detect_orphaned_search_row` and are excluded from
+both.
+
+The same run then wrote `mon_detect_english_overlay_stranded_city` **with the identical flaw an hour
+later**, and it raised on its own first sweep. Rewritten to key on the RESOLVER's output ("did the
+overlay write the matched row?") instead of on the search table. *Ask what your cohort's membership
+actually depends on: if a scheduled job's timing can move a row in or out, you are measuring the
+schedule.*
+
+**24c. A quiet limb is not a dead limb.** `pipeline_discard` cannot currently fire on live data,
+because v2's `ulg`/`ulg2`/`lalc2` fallbacks implement the same unambiguity rule as the cohort — so
+for any listing present in v2, "lal resolves it" implies "v2 resolves it". That makes it a
+**regression guard** on the fallback chain and on `listing_native_location_v1.best` precedence (the
+run #26 defect). A standing 0 is the healthy reading; it must never be tidied away. This was
+discovered by measurement, not by reading: the first injection attempt classified itself
+`sync_not_propagated`, because inserting the `listings_arabic_locations` row fed v2's own catchall
+lateral — *the injection resolved the listing instead of stranding it.*
+
+**24d. A run log that lies about its own timestamps.** `wasalt_liveness_runs` recorded
+`started_at`/`finished_at` **backwards on all 52 rows**: the insert sent `finished_at = now_iso`
+(captured at the TOP of the run) and never sent `started_at`, so it fell to its `now()` default,
+evaluated at INSERT time. This is the only audit record of the enum-strike sweep that inactivates
+listings in bulk. Repair rule that generalises: **a swap is only provable when the gap matches a
+runtime the run recorded itself** (here `runtime_s` in its own notes, delta −0.56 s..+3.88 s across
+52 rows), and a table that writes the same pair correctly (`scrape_runs`, 30,868 rows, 0 inverted)
+is the control that proves the shape is writer-specific rather than universal. Barrier:
+`mon_detect_run_log_timestamps_inverted` enumerates every base table with both columns, so a future
+run log inherits it without an edit.
+
+**24e. A fix whose premise was never verified is not a fix — and the run's own load is a suspect.**
+jobid 63 (`mon-aqar-ppm-as-total`) was cancelled by statement timeout at 07:25 after succeeding at
+04:25/05:25/06:25. It is genuinely heavy — `aqar_published_ppm()` plus an Arabic-digit regex over
+every active aqar Buy `source_text`, **20,989 ms** on an idle database — so "the job has no explicit
+`statement_timeout`, give it one" looked obvious, and it was applied. It was wrong twice over:
+
+- `pg_settings` reports `statement_timeout = 120000` from the configuration file, and the failed run
+  lasted **exactly 120.0 s**. The job already had 120 s; setting it to 120 s changed nothing. One
+  look at the value the system actually *resolves* — rather than the value the cron command fails to
+  mention — would have refuted the premise before the change was applied. Same shape as §23b, where
+  `kill_cap=150` *looked* computed.
+- The real cause was **this run's own contention**: full `listing_native_location_v2` scans and a
+  3.6 s detector in a loop at the same minute. Left alone the job recovered on its own — 08:25
+  succeeded in 26.8 s, against 22.1 s at 06:25. A ~27 s query under a 120 s ceiling has ~4× headroom
+  and needs no fix at all.
+
+Both the change and its stated reasoning were retracted in the same run (`20260818082800`), as a
+migration rather than a quiet revert, so the wrong reasoning does not outlive it. What was kept is
+the true and useful part: **record a heavy detector's measured cost in its `COMMENT ON`**, so a
+future run reads 21–27 s as normal and 60 s+ as a real regression. And before blaming production for
+a failure that coincides with your own sweep, check whether you were the load.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve

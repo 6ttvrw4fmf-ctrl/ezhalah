@@ -615,6 +615,9 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
         ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
         ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
         ...(q.directions?.length ? { p_directions: q.directions } : {}),
+        ...(q.ratingMin != null ? { p_rating_min: q.ratingMin } : {}),
+        ...(q.reviewsMin != null ? { p_reviews_min: q.reviewsMin } : {}),
+        ...(q.unitSubtypes?.length ? { p_unit_subtypes: q.unitSubtypes } : {}),
       }),
       AGE_COUNT_TIMEOUT_MS,
     );
@@ -660,6 +663,10 @@ export type GuidedCounts = {
   // Commercial expansion 2026-08-16: the utility chips the commercial market actually splits on.
   cnt_electricity: number; cnt_water_supply: number;
   cnt_selected: number;
+  // Monthly (2026-08-18): Gathern rating thresholds + unit-subtype chips. Data-derived cuts on the
+  // source-declared 1-10 scale — the only ones that split the distribution (<=8.0 keeps ~94%).
+  cnt_rating95: number; cnt_rating90: number; cnt_rating90_rc10: number;
+  cnt_sub_studio: number; cnt_sub_serviced: number; cnt_sub_regular: number;
 };
 
 // De-duped per the comment above fetchPropertyAgeOptionCounts — this is the function RNPL/amenities/
@@ -816,7 +823,26 @@ const GATHERN_ONLY_ADDL_KEYS = new Set<string>([
 function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; label: string; value: string }> | null {
   if (!raw) return null;
   if (Array.isArray(raw)) {
-    const rows = raw.filter((r: any) => r && r.label && r.value);
+    // TYPE COERCION (P0 fix 2026-08-18, Search & Matching QA run): the LEGACY array shape is stored
+    // by the source scraper verbatim, and Wasalt publishes NUMERIC values for noOfParkings /
+    // noOfFloors / floorNumber (`{"key":"noOfFloors","label":"Total Floors","value":2}`) — 2,977
+    // production_ready rows carry one. This branch used to pass the row object through untouched,
+    // so a number reached ResultCard's arAttrValue(), whose very first statement is
+    // `(value ?? '').trim()`. `(2).trim is not a function` threw an UNCAUGHT TypeError that
+    // unmounted the whole React tree: production served a BLANK WHITE PAGE for any search whose
+    // rendered cards included one of those listings (live-reproduced on
+    // https://ezhalah-app.vercel.app: تجاري → المباني والمرافق → «مبنى تجاري» → الرياض → «بحث»
+    // returned 40 real matches from the RPC, fetched all 40 raw cards, then rendered nothing at all
+    // — document.body had ONE div and zero text).
+    //
+    // The object branch below already ends every value with `String(v).trim()`; the array branch
+    // simply never did. The source value STAYS EXACTLY AS PUBLISHED (String(2) === '2') — this only
+    // fixes the type the renderer is handed, never the datum. (rule: never change source truth.)
+    // The truthiness filter is UNCHANGED on purpose — only the types of the surviving rows are
+    // normalised, so no row starts or stops being shown because of this fix.
+    const rows = raw
+      .filter((r: any) => r && r.label && r.value)
+      .map((r: any) => ({ key: String(r.key ?? r.label), label: String(r.label), value: String(r.value) }));
     return rows.length ? rows : null;
   }
   if (typeof raw !== 'object') return null;
@@ -1198,6 +1224,11 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     // Cohort-expansion answers (2026-08-15): both params exist on the live RPC signature.
     ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
     ...(q.directions?.length ? { p_directions: q.directions } : {}),
+    // Monthly guided answers (2026-08-18): params exist on the live signature (template rebuild).
+    // STRICT + UNKNOWN-safe by SQL: NULL rating/subtype rows can never satisfy them.
+    ...(q.ratingMin != null ? { p_rating_min: q.ratingMin } : {}),
+    ...(q.reviewsMin != null ? { p_reviews_min: q.reviewsMin } : {}),
+    ...(q.unitSubtypes?.length ? { p_unit_subtypes: q.unitSubtypes } : {}),
   };
 
   // RC-A rebase note (2026-07-16): main's baseRpcParams block above is the P0-fixed parameter source

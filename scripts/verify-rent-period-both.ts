@@ -120,8 +120,11 @@ for (const [label, key] of [
 // Comment-stripped: a NEGATIVE check must not be tripped by prose that merely QUOTES the banned copy
 // (the comment above these keys explains what was removed and why — that is documentation, not a claim).
 check("period hints never assert a contract/lease length (owner 2026-08-14)",
-  !/عقد لمدة 12 شهر|عقد من 1 إلى 11 شهر/.test(codeOnly(i18n)),
+  !/عقد لمدة 12 شهر|عقد من 1 إلى 11 شهر|من شهر إلى 11/.test(codeOnly(i18n)),
   'no source publishes the lease term — say what the displayed price means instead');
+
+check('the Monthly note is the OWNER-EXACT wording (2026-08-18): «الأسعار معروضة بالشهر» — price basis only, never a contract-length claim',
+  /'الأسعار معروضة بالشهر'/.test(i18n));
 check("'Both' and the both-verb are translated", /'Both':\s*'كلاهما'/.test(i18n) && /'to rent monthly or yearly':/.test(i18n));
 
 console.log(failures === 0

@@ -235,3 +235,33 @@ aqar special_position (1,798y CommLand, no index column) · aqar deed_area_m2 (~
 (hourly), legacy parity, normal-filter barrier, field integrity, manufactured negatives, price/size
 sanity trigger, filter-barrier leaks, PII sweep. Mutation-test protocol: single transaction, break →
 assert fired → RAISE rolls back; match the mutation to the barrier's contract before judging it.
+
+## Monthly Rent (شهري) — UNFROZEN and certified 2026-08-18 (owner order)
+
+The 2026-08-15 freeze was REPLACED by a certified-set guard (`af_registry_monthly_uncertified`, P1):
+only the cohorts below may carry `rent_period_ar='شهري'` in `af_cohort_registry`; anything else pages.
+Monthly = payment_monthly AND NOT rnpl (live search semantics). Designed from MONTHLY data — the
+fresh-dead Annual staples (kitchen 94/30,356 · AC 7 · age 564 · floor 53 · furnished 100%-true on
+Gathern) are contract-pinned OUT of every Monthly question list.
+
+| Cohort | n | Questions | Evidence |
+|---|---:|---|---|
+| شقة | 30,356 | rating · unit_subtype · amenities · bathrooms | 24,716 rated; استديو 9,218 / شقق مخدومة 2,040; elevator 62%, parking 33%, bathrooms 56% |
+| غرفة | 556 | rating · amenities | 446 rated; elevator 53%, parking 31%; bathrooms 0 known |
+| فيلا | 362 | rating · bathrooms · amenities | 245 rated; bathrooms 92%; parking 57% (elevator 5% self-gates) |
+
+NOT enabled (Normal-Filter-only, re-check before enabling): شاليه 287 (ZERO rated/elevator/parking/
+bathrooms — no question exists); Commercial Monthly 137 total (مكتب 124/معرض 7/محل 6 — owner:
+Normal-only); عمارة 40 · مخيم 28 · استراحة 24 · دور 18 · استوديو 16 (inventory floor).
+
+**Gathern rating** — the Monthly differentiator: SOURCE-DECLARED 1–10 scale (schema.org
+aggregateRating, bestRating 10/worstRating 1, live-page verified), a PROPERTY/UNIT rating on
+@type:VacationRental. Options 9.5+ / 9.0+ / 9.0+ مع 10 تقييمات أو أكثر (review-confidence).
+«لا يوجد تقييم» ⇒ NULL even over a stale stored numeric (444 rows). UNKNOWN never satisfies a
+rating answer (strict `>=` SQL). Never rescale to /5. Barriers:
+`mon_detect_gathern_rating_source_truth` (6 checks, 4 mutations proven) +
+`mon_detect_monthly_af_exactness` (chip=referee=landed, stale-RPC mutation proven).
+Ratings flow automatically: jobid 28 (:14 hourly) runs `sync_gathern_native_attrs()` after the index
+sync. Fields investigated and REJECTED: guest_capacity (constant 1), stay_nights (constant 30),
+booking_count (engagement, not a property fact — neutrality), check_in/out + house_rules (prose),
+nightly_price (monthly basis is the deal), rate_text as a filter (label, numeric is canonical).

@@ -66,11 +66,40 @@ check('furnished question is single-select, cohort-gated, true tri-state via fur
   /FURNISHED_QUESTION[\s\S]{0,400}selection:\s*'single'/.test(advSrc)
   && /FURNISHED_QUESTION[\s\S]{0,420}cohortAllows\(q, 'furnished'\)/.test(advSrc)
   && /furnishedPref:\s*true/.test(advSrc) && /furnishedPref:\s*false/.test(advSrc));
-check('COHORT_QUESTIONS exists, Monthly Rent has no key anywhere (frozen per owner), and no Buy list contains a rent-only question',
+// MONTHLY UNFROZEN BY OWNER ORDER 2026-08-18 ("Start building the Monthly Advanced Filter now") —
+// this check previously pinned the ABSENCE of any Monthly key (the 2026-08-15 freeze). The freeze is
+// replaced, not deleted: Monthly keys may exist ONLY on the certified cohorts (Apartment/Room/Villa),
+// may draw ONLY from the Monthly-certified question set, and may NEVER carry the fields that are
+// fresh-DEAD in Monthly data (kitchen 94/30,356 · AC 7 · age 564 · floor 53 · furnished 100%-true).
+// The DB half of the same contract is the af_registry_monthly_uncertified P1 guard.
+const cohortBlock = advSrc.slice(advSrc.indexOf('const COHORT_QUESTIONS'), advSrc.indexOf('function singleCleanType'));
+const monthlyLists = [...cohortBlock.matchAll(/RentMonthly:\s*\[([^\]]*)\]/g)].map((m) => m[1]);
+const MONTHLY_ALLOWED = ['rating', 'unit_subtype', 'amenities', 'bathrooms'];
+check('COHORT_QUESTIONS exists, Monthly keys exist ONLY for the certified cohorts (شقة/غرفة/فيلا)',
   /const COHORT_QUESTIONS/.test(advSrc)
-  && !/Monthly\s*:/.test(advSrc.slice(advSrc.indexOf('const COHORT_QUESTIONS'), advSrc.indexOf('function singleCleanType')))
-  && !/Buy:\s*\[[^\]]*'furnished'/.test(advSrc)
+  && monthlyLists.length === 3
+  && /Apartment:\s*\{[\s\S]{0,900}RentMonthly:/.test(cohortBlock)
+  && /Room:\s*\{[\s\S]{0,400}RentMonthly:/.test(cohortBlock)
+  && /Villa:\s*\{[\s\S]{0,700}RentMonthly:/.test(cohortBlock));
+check('every Monthly question list draws ONLY from the Monthly-certified set (no Annual copy-paste)',
+  monthlyLists.length > 0 && monthlyLists.every((l) =>
+    [...l.matchAll(/'([^']+)'/g)].every((m) => MONTHLY_ALLOWED.includes(m[1]))));
+check('no Monthly list carries a fresh-dead Annual staple (age/furnished/rnpl/street_width/direction)',
+  monthlyLists.every((l) => !/property_age|furnished|rnpl|street_width|direction/.test(l)));
+check('no Buy list contains a rent-only question',
+  !/Buy:\s*\[[^\]]*'furnished'/.test(advSrc)
   && !/Buy:\s*\[[^\]]*'rnpl'/.test(advSrc));
+check('the rating question is cohort-gated, single-select, monotone, and review-confidence rides WITH a rating floor',
+  /RATING_QUESTION[\s\S]{0,500}selection:\s*'single'/.test(advSrc)
+  && /RATING_QUESTION[\s\S]{0,600}cohortAllows\(q, 'rating'\)/.test(advSrc)
+  && /ratingMin:\s*Math\.max\(9\.5/.test(advSrc)
+  && /reviewsMin:\s*Math\.max\(10/.test(advSrc)
+  && !/reviewsMin[^}]*\}\s*;?\s*$/m.test('') // structural placeholder, kept simple
+  );
+check('the unit-subtype question is strict Gathern vocabulary and never rewrites the canonical taxonomy',
+  /UNIT_SUBTYPE_QUESTION[\s\S]{0,600}cohortAllows\(q, 'unit_subtype'\)/.test(advSrc)
+  && /'استديو'/.test(advSrc) && /'شقق مخدومة'/.test(advSrc)
+  && /unitSubtypes:\s*\[keys\[0\]\]/.test(advSrc));
 check('the pool carries the two new data-justified questions (street_width + direction)',
   /STREET_WIDTH_QUESTION, DIRECTION_QUESTION,/.test(advSrc)
   && /cnt_stw15/.test(advSrc) && /cnt_dir_n/.test(advSrc));
@@ -110,7 +139,7 @@ check('RNPL + amenities + bathrooms are cohort-gated through cohortAllows',
   /RNPL_QUESTION[\s\S]{0,420}cohortAllows\(q, 'rnpl'\)/.test(advSrc)
   && /cohortAllows\(q, 'amenities'\)/.test(advSrc)
   && /cohortAllows\(q, 'bathrooms'\)/.test(advSrc)
-  && /function cohortAllows[\s\S]{0,600}q\.rentPeriod !== 'monthly'/.test(advSrc));
+  && /function cohortAllows[\s\S]{0,700}q\.rentPeriod === 'monthly' \? 'RentMonthly'/.test(advSrc));
 check('Furnished chip is cohort-gated — never offered where the cohort config withholds it',
   /cohortAllows\(q, 'furnished'\)\)\s*defs\.push\(\{\s*key:\s*'furnished'/.test(advSrc));
 
