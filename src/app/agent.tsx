@@ -16,6 +16,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { isAppSessionStarted } from '@/lib/appSession';
+import { msgRTL } from '@/lib/textDirection';
+import { stopReadAloud } from '@/lib/readAloud';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import { CardIn, LoadingDots } from '@/components/CardReveal';
@@ -246,15 +248,9 @@ const hypePhrase = (locale: Locale, messageText?: string) => {
   return arr[Math.floor(Math.random() * arr.length)];
 };
 
-// PER-MESSAGE direction: each bubble keeps its OWN direction from its OWN text — an Arabic message is
-// RTL, an English message LTR — so sending a new Arabic message never re-flips older English bubbles.
-// (user request: never apply one global direction to the whole chat.) Dominant by word count.
-const msgRTL = (s: string): boolean => {
-  const words = (s || '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  let ar = 0, en = 0;
-  for (const w of words) { if (/[؀-ۿ]/.test(w)) ar++; else if (/[A-Za-z]/.test(w)) en++; }
-  return ar > en;
-};
+// msgRTL (per-message direction: each bubble keeps its OWN direction from its OWN text) now lives in
+// src/lib/textDirection.ts — imported above — so the read-aloud feature's language detection shares
+// the SAME definition instead of a second copy that could disagree about what language a message is in.
 
 // Pin a row to physical LTR so its children keep the SAME position in Arabic and English (the top bar
 // must NOT mirror when the language flips). Web-only DOM dir, same approach as the home top bar. (user request.)
@@ -389,7 +385,7 @@ export default function Agent() {
     fresh?: string;
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery } = useApp();
+  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth } = useApp();
   // Per-message "Load More" in flight, so a double-tap can't double-fetch the same page.
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -434,6 +430,30 @@ export default function Agent() {
     };
     node.addEventListener('keydown', onKeyDown);
     return () => node.removeEventListener('keydown', onKeyDown);
+  }, []);
+  // ── Mobile-web keyboard tracking (ChatGPT-style) ──────────────────────────────────────────────
+  // On mobile WEB, KeyboardAvoidingView is a no-op (its `behavior` is undefined off iOS-native), so
+  // when the on-screen keyboard opens the LAYOUT viewport is unchanged and the composer ends up
+  // hidden BEHIND the keyboard. The VISUAL viewport does shrink — track it and lift the composer by
+  // exactly the keyboard height, with NO hardcoded numbers. iPhone Safari + Android Chrome both fire
+  // these events continuously as the keyboard animates, so the composer follows it smoothly. Native
+  // apps keep their own KeyboardAvoidingView behavior, so this stays 0 there.
+  const [kbInset, setKbInset] = useState(0);
+  useEffect(() => {
+    if (!IS_WEB || typeof window === 'undefined' || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    let raf = 0;
+    const update = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        // keyboard height = the slice of the layout viewport the visual viewport no longer covers
+        setKbInset(Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)));
+      });
+    };
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    update();
+    return () => { cancelAnimationFrame(raf); vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
   }, []);
   const [busy, setBusy] = useState(false);
   // True once the user hit Stop mid-display: freezes the cards already shown and hides the "more
@@ -1141,6 +1161,7 @@ export default function Agent() {
     // agent — no auth gate. verify-search-is-free.ts fails the build if a gate comes back.
     setTyped('');
     finalizeReveal(); // stop the previous search's cards from drip-revealing now that the user moved on
+    stopReadAloud(); // a new turn starting is "another response" — stop any read-aloud from the last one
     setStopped(false); // new turn — re-enable the refine CTA and clear the stopped state
     setBusy(true);
     // REFINE INTERCEPT: if we just asked a «نتائج أدق» clarifying question, read THIS message as the answer,
@@ -1357,25 +1378,9 @@ export default function Agent() {
         if (run.cancelled) return;
         await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
         if (run.cancelled) return;
-        // INTRO-FIRST (owner 2026-08-16, supersedes the 2026-08-03 results-first rule): an eligible
-        // Filter search with MORE than 25 results opens the overlay on the calm INTRO — «لقينا N
-        // عقار» + the invitation — never a question (the 2026-08-03 objection was the quiz jumping
-        // over the cards; the intro is an invitation with «عرض النتائج» one tap away, and the
-        // results are already rendered behind it). ≤ 25 results, or an ineligible scope, keeps the
-        // pure results-first behavior — the interview never opens on a set that's already manageable.
-        {
-          const q2 = result.query ?? pending.q;
-          // matchTotal FIRST (the RPC's exact count(*) over(), same number as the «لقينا N» headline)
-          // — result.total is the page-fetch size and saturates at the 1,500 candidate cap, which is
-          // NOT the user's real total (verified live 2026-08-16: intro said 1,500 while the headline
-          // and the interview correctly said 8,458). Skip the exact number in the priceIsAnnual edge
-          // (same overstate risk the headline guards) — the intro just omits the count line there.
-          const introTotal = (!q2?.priceIsAnnual ? result.matchTotal : null) ?? null;
-          const gateTotal = introTotal ?? result.total ?? 0;
-          if (q2 && anyGuidedEligible(q2) && gateTotal > INTERVIEW_STOP_AT) {
-            void startAgeFlow(q2, false, { auto: true, total: introTotal });
-          }
-        }
+        // REMOVED (owner 2026-08-19): the auto-open AF intro popup after a filter search is killed.
+        // The advanced filter interview must ONLY appear inline below the result cards when the user
+        // manually taps «خلّنا نحدد الطلب أكثر». No popup, no overlay, no auto-open — ever.
         void promptSignupSoon(run); // guest used their free search (filter) → prompt sign-up
       } catch {
         if (!run.cancelled) {
@@ -1637,6 +1642,13 @@ export default function Agent() {
             so switching reads as one continuous control). (owner top-nav redesign, 2026-07-24.) */}
         <Text ref={noTranslateRef} style={s.title}>{t('Ezhalah')}</Text>
         <View style={{ flex: 1 }} />
+        {/* Logged-out sign-in (mobile only — desktop has the docked sidebar CTA). Owner 2026-08-19. */}
+        {!user && !docked && (
+          <Pressable style={s.topSignIn} onPress={openAuth} hitSlop={6}>
+            <Ionicons name="person-outline" size={15} color="#fff" />
+            <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
+          </Pressable>
+        )}
         {/* Note #5 — Share is ALWAYS visible the moment the user is in AI Agent mode. Not gated on
             results, not gated on a completed search. Throughout the entire experience. (user request.) */}
         {/* Redesigned to match the home screen's share button (design review 2026-07-24) — same
@@ -1667,7 +1679,10 @@ export default function Agent() {
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
 
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        // iOS-native does its own lifting. On mobile WEB this is a no-op, so we lift the whole column
+        // by the REAL keyboard height (kbInset, from visualViewport): the composer lands just above the
+        // keyboard and the scroll area shrinks — exactly the ChatGPT-mobile feel. (owner 2026-08-19)
+        style={[{ flex: 1 }, IS_WEB && kbInset > 0 ? { paddingBottom: kbInset } : null]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={insets.top + 52}
       >
@@ -1744,6 +1759,18 @@ export default function Agent() {
               // result intro → sort line → property cards. Slogan + summary persist from the searching
               // status into the same bubble (no duplicate slogan/summary block, no out-of-order intro).
               const rtl = msgRTL(m.text);
+              // Hoisted out of the RESULT INTRO block below (§3) so Read Aloud speaks the EXACT
+              // same sentence the reply types on screen — one computation, never a second copy that
+              // could drift from what's actually shown.
+              const introZeroResult = m.result.listings.length === 0;
+              const introTotal = m.result.matchTotal ?? m.result.listings.length;
+              const introCountSafe = !m.result.query?.priceIsAnnual && introTotal > 0
+                && !(m.result.query && hasClientOnlyNarrowing(m.result.query));
+              const introText = introZeroResult
+                ? (m.result.suggestion ?? t('No exact matches — try broadening your search.'))
+                : introCountSafe
+                  ? t('We found {n} listings matching your search.', { n: introTotal.toLocaleString('en-US') })
+                  : m.text;
               return (
                 // ARABIC: the whole assistant response (slogan + summary + intro) sits on the RIGHT,
                 // directly under the user's right-aligned message — so alignItems flex-end clusters the
@@ -1782,25 +1809,11 @@ export default function Agent() {
                       always written with animation"). For 0-result searches: type the empty-state
                       suggestion directly here so it animates; the static block below is suppressed to
                       avoid a duplicate. For searches with results: type the normal intro text. */}
-                  {(() => {
-                    const zeroResult = m.result.listings.length === 0;
-                    // EXACT count headline «لقينا N إعلان يطابق طلبك» from the RPC's count(*) over() (matchTotal).
-                    // Safe/exact for the standard path; the priceIsAnnual edge makes the RPC skip the price cap
-                    // (so the count would overstate) → fall back to the generic intro there. (owner: exact only if safe.)
-                    const total = m.result.matchTotal ?? m.result.listings.length;
-                    const countSafe = !m.result.query?.priceIsAnnual && total > 0
-                      && !(m.result.query && hasClientOnlyNarrowing(m.result.query));
-                    const txt = zeroResult
-                      ? (m.result.suggestion ?? t('No exact matches — try broadening your search.'))
-                      : countSafe
-                        ? t('We found {n} listings matching your search.', { n: total.toLocaleString('en-US') })
-                        : m.text;
-                    return (
-                      <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', marginTop: 6, alignSelf: 'stretch' }]}>
-                        {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
-                      </Text>
-                    );
-                  })()}
+                  {(() => (
+                    <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', marginTop: 6, alignSelf: 'stretch' }]}>
+                      {m.typing ? <Typer text={introText} onDone={() => markTyped(m.id)} /> : introText}
+                    </Text>
+                  ))()}
                   {/* GUIDED SUMMARY + REMOVABLE PILLS (owner 2026-08-16): after the interview, briefly
                       show what Ezhalah understood — «بناءً على: …» — and each committed answer as a
                       removable pill. Removing one rebuilds the query from the interview's baseQ with
@@ -1941,7 +1954,7 @@ export default function Agent() {
                         // cascade during typing — the thumbs must never appear before the closing
                         // message above them).
                         if ((m.typing && !doneTyping[m.id]) || shown < Math.min(FIRST_PAGE, fetched)) return null;
-                        return <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} />;
+                        return <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudText={introText} />;
                       })()}
                     </>
                   )}
@@ -1965,7 +1978,9 @@ export default function Agent() {
             brand green on focus, soft green-tinted lift that deepens with it, pill radius. Height
             GLIDES between line counts (inputHAnim) instead of snapping; the send arrow pins to the
             bottom edge as the box grows, and the input keeps paddingEnd so text never reaches it. */}
-        <View style={[s.composerWrap, { paddingBottom: insets.bottom + 8 }]}>
+        {/* When the keyboard is open (web), the home-indicator safe area sits behind it, so drop
+            insets.bottom and keep the composer tight above the keyboard instead of double-padding. */}
+        <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
           <View style={[s.col, s.composerCol]}>
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
               {/* The GLIDE lives on this wrapper, never on the textarea itself: a CSS height
@@ -2128,6 +2143,8 @@ const s = StyleSheet.create({
     elevation: 2,
   },
   shareIconPressed: { opacity: 0.85 },
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.primary, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },
 
   scroll: { paddingHorizontal: space.screenSide, alignItems: 'center', paddingTop: 4 },
@@ -2276,7 +2293,10 @@ const s = StyleSheet.create({
   inputGrow: { flex: 1, overflow: 'hidden', marginVertical: 6 },
   // 15/22 breathes better for Arabic script than the old 14/20. Height is the same numeric target
   // as the wrapper's — set state-wise, never transitioned (see the JSX note on measurement).
-  input: { width: '100%', fontSize: 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  // fontSize MUST be >=16 on web: mobile Safari/Chrome auto-zoom the page when focusing an input under
+  // 16px and never zoom back out — the single worst mobile-web chat bug. overflowY:'auto' gives the
+  // internal scroll once the textarea reaches COMPOSER_MAX_H. (owner 2026-08-19)
+  input: { width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any } : {}) },
   sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   sendBtnHover: { backgroundColor: colors.dark },
   sendDisabled: { opacity: 0.35 },
