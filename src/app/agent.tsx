@@ -435,6 +435,30 @@ export default function Agent() {
     node.addEventListener('keydown', onKeyDown);
     return () => node.removeEventListener('keydown', onKeyDown);
   }, []);
+  // ── Mobile-web keyboard tracking (ChatGPT-style) ──────────────────────────────────────────────
+  // On mobile WEB, KeyboardAvoidingView is a no-op (its `behavior` is undefined off iOS-native), so
+  // when the on-screen keyboard opens the LAYOUT viewport is unchanged and the composer ends up
+  // hidden BEHIND the keyboard. The VISUAL viewport does shrink — track it and lift the composer by
+  // exactly the keyboard height, with NO hardcoded numbers. iPhone Safari + Android Chrome both fire
+  // these events continuously as the keyboard animates, so the composer follows it smoothly. Native
+  // apps keep their own KeyboardAvoidingView behavior, so this stays 0 there.
+  const [kbInset, setKbInset] = useState(0);
+  useEffect(() => {
+    if (!IS_WEB || typeof window === 'undefined' || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    let raf = 0;
+    const update = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        // keyboard height = the slice of the layout viewport the visual viewport no longer covers
+        setKbInset(Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)));
+      });
+    };
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    update();
+    return () => { cancelAnimationFrame(raf); vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
+  }, []);
   const [busy, setBusy] = useState(false);
   // True once the user hit Stop mid-display: freezes the cards already shown and hides the "more
   // precise" CTA on the stopped results. Reset on every new turn. (user request.)
@@ -1674,7 +1698,10 @@ export default function Agent() {
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
 
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        // iOS-native does its own lifting. On mobile WEB this is a no-op, so we lift the whole column
+        // by the REAL keyboard height (kbInset, from visualViewport): the composer lands just above the
+        // keyboard and the scroll area shrinks — exactly the ChatGPT-mobile feel. (owner 2026-08-19)
+        style={[{ flex: 1 }, IS_WEB && kbInset > 0 ? { paddingBottom: kbInset } : null]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={insets.top + 52}
       >
@@ -1972,7 +1999,9 @@ export default function Agent() {
             brand green on focus, soft green-tinted lift that deepens with it, pill radius. Height
             GLIDES between line counts (inputHAnim) instead of snapping; the send arrow pins to the
             bottom edge as the box grows, and the input keeps paddingEnd so text never reaches it. */}
-        <View style={[s.composerWrap, { paddingBottom: insets.bottom + 8 }]}>
+        {/* When the keyboard is open (web), the home-indicator safe area sits behind it, so drop
+            insets.bottom and keep the composer tight above the keyboard instead of double-padding. */}
+        <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
           <View style={[s.col, s.composerCol]}>
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
               {/* The GLIDE lives on this wrapper, never on the textarea itself: a CSS height
@@ -2285,7 +2314,10 @@ const s = StyleSheet.create({
   inputGrow: { flex: 1, overflow: 'hidden', marginVertical: 6 },
   // 15/22 breathes better for Arabic script than the old 14/20. Height is the same numeric target
   // as the wrapper's — set state-wise, never transitioned (see the JSX note on measurement).
-  input: { width: '100%', fontSize: 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  // fontSize MUST be >=16 on web: mobile Safari/Chrome auto-zoom the page when focusing an input under
+  // 16px and never zoom back out — the single worst mobile-web chat bug. overflowY:'auto' gives the
+  // internal scroll once the textarea reaches COMPOSER_MAX_H. (owner 2026-08-19)
+  input: { width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any } : {}) },
   sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   sendBtnHover: { backgroundColor: colors.dark },
   sendDisabled: { opacity: 0.35 },
