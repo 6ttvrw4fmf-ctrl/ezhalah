@@ -35,9 +35,21 @@ load_dotenv()
 # "JSON could not be generated"; we also retry other gateway 5xx, rate-limits, request-timeouts, and
 # connection/SSL resets. Everything else (e.g. a real 400/schema error) raises immediately so genuine
 # bugs still surface. (Added 2026-06: scrapers were dying on transient 522s during DB-overload windows.)
+# PGRST002 ("Could not query the database for the schema cache. Retrying.") added 2026-08-18 after a
+# ~5-minute PostgREST schema-cache outage killed 12 of 95 aqar sweep shards outright (run 32083099544,
+# 00:05:32-00:10:57). It matched NONE of the markers above, so it re-raised on attempt 1 with no
+# backoff: 10 shards died inside begin_run(), and 2 died inside end_run() AFTER upserting ~150
+# listings each, leaving dangling scrape_runs rows that read as `rows_seen=0` and raised a false P1.
+# PostgREST's own message says "Retrying." — it is transient by construction.
+#
+# Deliberately the CODE, not the phrase "schema cache": PGRST202 ("Could not find the function ... in
+# the schema cache") and its PGRST203 overload sibling ALSO carry that phrase, and those are the real
+# missing-function/duplicate-overload bugs behind the 2026-07-16 search outage. They must keep failing
+# fast and loudly, exactly as the comment above promises.
 _TRANSIENT_MARKERS = ("522", "520", "524", "503", "502", "504", "429", "408",
                       "timed out", "timeout", "connection", "json could not be generated",
-                      "temporarily unavailable", "eof", "reset by peer", "server disconnected")
+                      "temporarily unavailable", "eof", "reset by peer", "server disconnected",
+                      "pgrst002")
 
 
 def _execute(query, *, what: str = "db", tries: int = 5):
