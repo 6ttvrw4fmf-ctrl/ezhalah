@@ -16,6 +16,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { isAppSessionStarted } from '@/lib/appSession';
+import { msgRTL } from '@/lib/textDirection';
+import { stopReadAloud } from '@/lib/readAloud';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import { CardIn, LoadingDots } from '@/components/CardReveal';
@@ -246,15 +248,9 @@ const hypePhrase = (locale: Locale, messageText?: string) => {
   return arr[Math.floor(Math.random() * arr.length)];
 };
 
-// PER-MESSAGE direction: each bubble keeps its OWN direction from its OWN text — an Arabic message is
-// RTL, an English message LTR — so sending a new Arabic message never re-flips older English bubbles.
-// (user request: never apply one global direction to the whole chat.) Dominant by word count.
-const msgRTL = (s: string): boolean => {
-  const words = (s || '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  let ar = 0, en = 0;
-  for (const w of words) { if (/[؀-ۿ]/.test(w)) ar++; else if (/[A-Za-z]/.test(w)) en++; }
-  return ar > en;
-};
+// msgRTL (per-message direction: each bubble keeps its OWN direction from its OWN text) now lives in
+// src/lib/textDirection.ts — imported above — so the read-aloud feature's language detection shares
+// the SAME definition instead of a second copy that could disagree about what language a message is in.
 
 // Pin a row to physical LTR so its children keep the SAME position in Arabic and English (the top bar
 // must NOT mirror when the language flips). Web-only DOM dir, same approach as the home top bar. (user request.)
@@ -1165,6 +1161,7 @@ export default function Agent() {
     // agent — no auth gate. verify-search-is-free.ts fails the build if a gate comes back.
     setTyped('');
     finalizeReveal(); // stop the previous search's cards from drip-revealing now that the user moved on
+    stopReadAloud(); // a new turn starting is "another response" — stop any read-aloud from the last one
     setStopped(false); // new turn — re-enable the refine CTA and clear the stopped state
     setBusy(true);
     // REFINE INTERCEPT: if we just asked a «نتائج أدق» clarifying question, read THIS message as the answer,
@@ -1381,25 +1378,9 @@ export default function Agent() {
         if (run.cancelled) return;
         await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
         if (run.cancelled) return;
-        // INTRO-FIRST (owner 2026-08-16, supersedes the 2026-08-03 results-first rule): an eligible
-        // Filter search with MORE than 25 results opens the overlay on the calm INTRO — «لقينا N
-        // عقار» + the invitation — never a question (the 2026-08-03 objection was the quiz jumping
-        // over the cards; the intro is an invitation with «عرض النتائج» one tap away, and the
-        // results are already rendered behind it). ≤ 25 results, or an ineligible scope, keeps the
-        // pure results-first behavior — the interview never opens on a set that's already manageable.
-        {
-          const q2 = result.query ?? pending.q;
-          // matchTotal FIRST (the RPC's exact count(*) over(), same number as the «لقينا N» headline)
-          // — result.total is the page-fetch size and saturates at the 1,500 candidate cap, which is
-          // NOT the user's real total (verified live 2026-08-16: intro said 1,500 while the headline
-          // and the interview correctly said 8,458). Skip the exact number in the priceIsAnnual edge
-          // (same overstate risk the headline guards) — the intro just omits the count line there.
-          const introTotal = (!q2?.priceIsAnnual ? result.matchTotal : null) ?? null;
-          const gateTotal = introTotal ?? result.total ?? 0;
-          if (q2 && anyGuidedEligible(q2) && gateTotal > INTERVIEW_STOP_AT) {
-            void startAgeFlow(q2, false, { auto: true, total: introTotal });
-          }
-        }
+        // REMOVED (owner 2026-08-19): the auto-open AF intro popup after a filter search is killed.
+        // The advanced filter interview must ONLY appear inline below the result cards when the user
+        // manually taps «خلّنا نحدد الطلب أكثر». No popup, no overlay, no auto-open — ever.
         void promptSignupSoon(run); // guest used their free search (filter) → prompt sign-up
       } catch {
         if (!run.cancelled) {
@@ -1778,6 +1759,18 @@ export default function Agent() {
               // result intro → sort line → property cards. Slogan + summary persist from the searching
               // status into the same bubble (no duplicate slogan/summary block, no out-of-order intro).
               const rtl = msgRTL(m.text);
+              // Hoisted out of the RESULT INTRO block below (§3) so Read Aloud speaks the EXACT
+              // same sentence the reply types on screen — one computation, never a second copy that
+              // could drift from what's actually shown.
+              const introZeroResult = m.result.listings.length === 0;
+              const introTotal = m.result.matchTotal ?? m.result.listings.length;
+              const introCountSafe = !m.result.query?.priceIsAnnual && introTotal > 0
+                && !(m.result.query && hasClientOnlyNarrowing(m.result.query));
+              const introText = introZeroResult
+                ? (m.result.suggestion ?? t('No exact matches — try broadening your search.'))
+                : introCountSafe
+                  ? t('We found {n} listings matching your search.', { n: introTotal.toLocaleString('en-US') })
+                  : m.text;
               return (
                 // ARABIC: the whole assistant response (slogan + summary + intro) sits on the RIGHT,
                 // directly under the user's right-aligned message — so alignItems flex-end clusters the
@@ -1816,25 +1809,11 @@ export default function Agent() {
                       always written with animation"). For 0-result searches: type the empty-state
                       suggestion directly here so it animates; the static block below is suppressed to
                       avoid a duplicate. For searches with results: type the normal intro text. */}
-                  {(() => {
-                    const zeroResult = m.result.listings.length === 0;
-                    // EXACT count headline «لقينا N إعلان يطابق طلبك» from the RPC's count(*) over() (matchTotal).
-                    // Safe/exact for the standard path; the priceIsAnnual edge makes the RPC skip the price cap
-                    // (so the count would overstate) → fall back to the generic intro there. (owner: exact only if safe.)
-                    const total = m.result.matchTotal ?? m.result.listings.length;
-                    const countSafe = !m.result.query?.priceIsAnnual && total > 0
-                      && !(m.result.query && hasClientOnlyNarrowing(m.result.query));
-                    const txt = zeroResult
-                      ? (m.result.suggestion ?? t('No exact matches — try broadening your search.'))
-                      : countSafe
-                        ? t('We found {n} listings matching your search.', { n: total.toLocaleString('en-US') })
-                        : m.text;
-                    return (
-                      <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', marginTop: 6, alignSelf: 'stretch' }]}>
-                        {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
-                      </Text>
-                    );
-                  })()}
+                  {(() => (
+                    <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', marginTop: 6, alignSelf: 'stretch' }]}>
+                      {m.typing ? <Typer text={introText} onDone={() => markTyped(m.id)} /> : introText}
+                    </Text>
+                  ))()}
                   {/* GUIDED SUMMARY + REMOVABLE PILLS (owner 2026-08-16): after the interview, briefly
                       show what Ezhalah understood — «بناءً على: …» — and each committed answer as a
                       removable pill. Removing one rebuilds the query from the interview's baseQ with
@@ -1975,7 +1954,7 @@ export default function Agent() {
                         // cascade during typing — the thumbs must never appear before the closing
                         // message above them).
                         if ((m.typing && !doneTyping[m.id]) || shown < Math.min(FIRST_PAGE, fetched)) return null;
-                        return <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} />;
+                        return <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudText={introText} />;
                       })()}
                     </>
                   )}
