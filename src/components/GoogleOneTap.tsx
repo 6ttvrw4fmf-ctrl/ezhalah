@@ -39,6 +39,8 @@ const GOOGLE_WEB_CLIENT_ID = '39473044808-06l9dgmb4jsta05h4c5hqdglbsoaqrb5.apps.
 const GIS_SRC = 'https://accounts.google.com/gsi/client';
 // FedCM resolves well under a second when it works; generous enough not to race a slow network.
 const FEDCM_FALLBACK_MS = 4000;
+// getUser() must never be able to stall the prompt indefinitely (see the bounded race below).
+const GETUSER_TIMEOUT_MS = 2500;
 
 type Diag = {
   fedcmSupported: boolean;
@@ -64,10 +66,19 @@ export default function GoogleOneTap() {
     // getSession() would report "signed in" and we would never prompt — the exact case the owner
     // raised: a deleted account, or someone who never signed up, must still get the prompt.
     // Any error (no session, deleted user, revoked token, network) means: not signed in → prompt.
+    // BOUNDED. With an invalid refresh token (deleted account, revoked session) supabase-js retries
+    // the refresh with backoff, so getUser() can take many seconds or never settle — and while it is
+    // unresolved we would never prompt, which is strictly worse than the bug it fixes. Measured live
+    // 2026-08-18: a stale token produced 0 prompt attempts for this exact reason.
+    // On timeout we default to SIGNED OUT, because that is the safe direction: a genuinely signed-in
+    // visitor is still protected by the store `user` gate below and by the cancel-on-sign-in effect.
+    const decide = (v: boolean) => { if (!cancelled) setSignedOut(v); };
+    let settled = false;
+    const t = setTimeout(() => { if (!settled) { settled = true; decide(true); } }, GETUSER_TIMEOUT_MS);
     supabase.auth.getUser()
-      .then(({ data, error }) => { if (!cancelled) setSignedOut(!!error || !data?.user); })
-      .catch(() => { if (!cancelled) setSignedOut(true); })
-    return () => { cancelled = true; };
+      .then(({ data, error }) => { if (!settled) { settled = true; clearTimeout(t); decide(!!error || !data?.user); } })
+      .catch(() => { if (!settled) { settled = true; clearTimeout(t); decide(true); } })
+    return () => { cancelled = true; clearTimeout(t); };
   }, []);
 
   useEffect(() => {
