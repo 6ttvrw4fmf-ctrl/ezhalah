@@ -273,7 +273,11 @@ def run_pilot(args) -> int:
     notes = (f"mode=pilot workers={args.workers} head_agree={head_agree}/{checked} "
              f"runtime_s={runtime} avg_kb_per_check={avg_kb:.1f}")
     db._execute(db.sb().table("wasalt_liveness_runs").insert({
-        "finished_at": now_iso, "shard": "oldest-last_seen", "mode": "pilot",
+        # started_at/finished_at must mean what they say (run #29): `now_iso` is captured at the TOP
+        # of the run, so writing it into finished_at — and letting started_at fall to its now()
+        # default at INSERT time, i.e. at the end — recorded every row backwards.
+        "started_at": now_iso, "finished_at": datetime.now(timezone.utc).isoformat(),
+        "shard": "oldest-last_seen", "mode": "pilot",
         "checked": checked, "live": live, "dead": dead, "failed": failed, "skipped": 0,
         "bytes_downloaded": total_bytes, "notes": notes}), what="wasalt_liveness_runs.insert")
     print(f"\n✓ Wasalt liveness pilot: checked={checked} live={live} dead={dead} failed={failed} "
@@ -358,7 +362,8 @@ def run_enforce(args) -> int:
              f"struck={struck} killed={killed} collapsed={collapsed} "
              f"runtime_s={runtime} avg_kb_per_check={avg_kb:.1f}")
     db._execute(db.sb().table("wasalt_liveness_runs").insert({
-        "finished_at": now_iso, "shard": f"enforce:{args.shard}/{args.shards}", "mode": "enforce",
+        "started_at": now_iso, "finished_at": datetime.now(timezone.utc).isoformat(),
+        "shard": f"enforce:{args.shard}/{args.shards}", "mode": "enforce",
         "checked": checked, "live": live, "dead": dead, "failed": failed, "skipped": int(collapsed),
         "bytes_downloaded": total_bytes, "notes": notes}), what="wasalt_liveness_runs.insert")
     print(f"\n✓ Wasalt liveness enforce: checked={checked} live={live} dead={dead} failed={failed} "
@@ -609,7 +614,8 @@ def run_enum_strike(args) -> int:
              f"aborted_flips={aborted_flips} dry_run={args.dry_run} runtime_s={runtime}")
     if not args.dry_run:
         db._execute(db.sb().table("wasalt_liveness_runs").insert({
-            "finished_at": now_iso, "shard": "enum", "mode": "enum-strike",
+            "started_at": now_iso, "finished_at": datetime.now(timezone.utc).isoformat(),
+            "shard": "enum", "mode": "enum-strike",
             "checked": checked, "live": live, "dead": dead, "failed": failed,
             "skipped": int(aborted_flips), "bytes_downloaded": total_bytes, "notes": notes}),
             what="wasalt_liveness_runs.insert")
