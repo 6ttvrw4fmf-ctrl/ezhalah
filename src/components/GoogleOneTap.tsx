@@ -1,121 +1,137 @@
-// Google One Tap (web only) — the small "Sign in with Google" prompt in the page corner that lets a
-// visitor sign in with one click, without ever leaving the page (owner 2026-08-14: "this pop up on
-// the top right… user just clicks on it and he signs in").
+// Google One Tap (web only) — the official Google prompt in the page corner (owner 2026-08-14).
 //
-// How it works: Google Identity Services renders its own prompt; on consent it hands us an ID token,
-// which Supabase exchanges for a real session (signInWithIdToken). The app's existing
-// onAuthStateChange listener in store.tsx then adopts the session — same end state as the
-// "Continue with Google" button, minus the redirect round-trip.
+// Google Identity Services renders its own prompt; on consent it hands us an ID token, which Supabase
+// exchanges for a real session (signInWithIdToken). The store's onAuthStateChange listener adopts it —
+// same end state as "Continue with Google", minus the redirect. We NEVER draw a fake prompt.
 //
-// The client id is the SAME public Google OAuth client Supabase already uses for the redirect flow
-// (it appears in every user's /auth/v1/authorize redirect — public by design, not a secret).
-// REQUIREMENT (Google Cloud Console, owner-only): the production origin
-// https://ezhalah-app.vercel.app must be listed under the OAuth client's "Authorized JavaScript
-// origins" — if it isn't, GIS logs a console warning and simply never shows the prompt; every other
-// sign-in path is unaffected. Fail-soft by construction.
+// ── ROOT CAUSE THIS FILE WAS REWRITTEN FOR (measured live 2026-08-15) ────────────────────────────
+// A live probe of production showed GIS loading and FedCM actually starting (requests to
+// gsi/fedcm.json + gsi/fedcm/listaccounts), yet our `[GoogleOneTap]` notification log NEVER appeared.
+// Reason: with `use_fedcm_for_prompt: true`, Google does NOT invoke the PromptMomentNotification
+// callback — those moment APIs are deprecated under FedCM, because the browser (not GIS) owns the UI.
+// Two Ezhalah-side bugs followed, both fixed here:
 //
-// IMPORTANT — what Google controls vs what we control:
+//   BUG 1 (why the prompt could stay hidden): the FedCM→legacy fallback lived INSIDE that callback.
+//   Under FedCM the callback never fires, so the fallback was UNREACHABLE — when FedCM failed (e.g.
+//   "FedCM get() rejects with NetworkError") we silently never retried. Fixed two ways: (a) a browser
+//   with no FedCM goes straight to the legacy path; (b) with FedCM, a bounded TIMER retries exactly
+//   once with FedCM off. Neither depends on a callback Google will not call.
 //
-// GOOGLE CONTROLS (we cannot override):
-//   - Prompt suppressed when user has no Google session in this browser
-//   - Exponential cooldown after dismissals: 2h → 1d → 7d → 30d
-//   - Prompt suppressed when user previously opted out of One Tap
-//   - FedCM availability depends on browser version + Google account state
-//   - Third-party cookie policies affect iframe mode
-//   - Incognito/private browsing usually prevents One Tap entirely
+//   BUG 2 (why we were blind): under FedCM we logged nothing. Diagnostics now record the path taken
+//   and any suppression reason, and are exposed on `window.__ezOneTap` for live inspection.
 //
-// WE CONTROL:
-//   - Loading the GIS script and calling prompt() at the right time
-//   - FedCM vs iframe fallback strategy (bug: was forcing FedCM with no fallback)
-//   - Not accidentally triggering cooldown via cancel() (bug: cleanup called cancel())
-//   - cancel_on_tap_outside: false to prevent accidental cooldown from stray clicks
-//   - Calling prompt() exactly once per page load (not on every re-render)
-//   - Notification callback to log the exact reason when Google suppresses the prompt
-import { useEffect, useRef } from 'react';
+// Also fixed: the component keyed off the store's `user`, which is null while Supabase restores the
+// session — so a SIGNED-IN visitor briefly looked logged out and got One Tap initialized + prompted.
+// The logged-out state is now resolved authoritatively via getSession() first.
+//
+// ── WHAT GOOGLE CONTROLS (we cannot override, and must not pretend to) ───────────────────────────
+//   - No Google session in the browser → no prompt. Fresh/incognito profiles almost never show it.
+//   - Exponential cooldown after dismissals: 2h → 1d → 7d → 30d.
+//   - Opt-out, FedCM availability, browser privacy / third-party-cookie settings.
+// Our contract: when the visitor is genuinely logged out we initialize and call prompt() on every page
+// load by a path that can actually work, we never burn the cooldown ourselves, and we record the reason.
+import { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import { useApp } from '@/store';
 
 const GOOGLE_WEB_CLIENT_ID = '39473044808-06l9dgmb4jsta05h4c5hqdglbsoaqrb5.apps.googleusercontent.com';
 const GIS_SRC = 'https://accounts.google.com/gsi/client';
+// FedCM resolves well under a second when it works; generous enough not to race a slow network.
+const FEDCM_FALLBACK_MS = 4000;
+
+type Diag = {
+  fedcmSupported: boolean;
+  attempts: Array<{ fedcm: boolean; at: number }>;
+  moments: Array<Record<string, unknown>>;
+  fallbackFired: boolean;
+  signedOut: boolean | null;
+};
 
 export default function GoogleOneTap() {
   const { user } = useApp();
-  // Guard: prompt() must fire exactly once per page load. Re-calling it after a skip/dismiss burns
-  // through Google's cooldown budget and makes the prompt disappear for hours/days.
-  const promptedRef = useRef(false);
+  // Authoritative logged-out check. The store's `user` is null during session restore, so trusting it
+  // alone would prompt signed-in visitors. null = not resolved yet.
+  const [signedOut, setSignedOut] = useState<boolean | null>(null);
+  const startedRef = useRef(false); // prompt() runs at most once per page load
 
-  // Effect 1: initialize + prompt (logged-out only, once per page load)
   useEffect(() => {
-    if (Platform.OS !== 'web' || user || !supabase) return;
-    if (typeof document === 'undefined') return;
-    if (promptedRef.current) return; // already prompted this page load
+    if (Platform.OS !== 'web' || !supabase) return;
+    let cancelled = false;
+    supabase.auth.getSession()
+      .then(({ data }) => { if (!cancelled) setSignedOut(!data?.session); })
+      .catch(() => { if (!cancelled) setSignedOut(true); }); // auth unreachable → treat as logged out
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !supabase) return;
+    if (typeof document === 'undefined' || typeof window === 'undefined') return;
+    if (signedOut !== true || user) return;   // unresolved, or genuinely signed in → never prompt
+    if (startedRef.current) return;
+    startedRef.current = true;
 
     let cancelled = false;
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+    let momentSeen = false;
 
-    const doPrompt = (useFedCM: boolean) => {
+    const fedcmSupported = 'IdentityCredential' in window;
+    const diag: Diag = { fedcmSupported, attempts: [], moments: [], fallbackFired: false, signedOut: true };
+    (window as any).__ezOneTap = diag;
+    const log = (...a: unknown[]) => { try { console.info('[GoogleOneTap]', ...a); } catch {} };
+
+    const run = (useFedCM: boolean) => {
       if (cancelled) return;
       const google = (globalThis as any).google;
-      if (!google?.accounts?.id) return;
+      if (!google?.accounts?.id) { log('GIS not available'); return; }
+      diag.attempts.push({ fedcm: useFedCM, at: Date.now() });
+      log('initialize + prompt', { fedcm: useFedCM, fedcmSupported });
       try {
         google.accounts.id.initialize({
           client_id: GOOGLE_WEB_CLIENT_ID,
           callback: async (resp: { credential?: string }) => {
             if (!resp?.credential || !supabase) return;
-            // Exchange Google's ID token for a Supabase session; the store's onAuthStateChange
-            // listener signs the user in from there. Errors fall through silently — the user still
-            // has every normal sign-in path via the green CTA / /auth screen.
             await supabase.auth.signInWithIdToken({ provider: 'google', token: resp.credential }).catch(() => {});
           },
           auto_select: true,
           use_fedcm_for_prompt: useFedCM,
-          // Prevent accidental cooldown: clicking outside the prompt dismisses it by default, which
-          // Google counts as a user dismissal and triggers exponential cooldown. Disable that.
+          // Clicking outside counts as a dismissal to Google and starts the exponential cooldown.
           cancel_on_tap_outside: false,
-          // Safari ITP support — uses an intermediate iframe to work around Intelligent Tracking
-          // Prevention, which blocks third-party cookies that the non-FedCM approach needs.
-          itp_support: true,
+          itp_support: true,   // Safari ITP
         });
-        google.accounts.id.prompt((notification: any) => {
-          const moment = notification.getMomentType?.();
-          // Diagnostic log — the ONLY way to know why Google suppressed the prompt. Check browser
-          // console for this when debugging "One Tap isn't showing".
-          if (notification.isNotDisplayed?.()) {
-            // eslint-disable-next-line no-console
-            console.info('[GoogleOneTap] not displayed:', notification.getNotDisplayedReason?.());
-          } else if (notification.isSkippedMoment?.()) {
-            const reason = notification.getSkippedReason?.();
-            // eslint-disable-next-line no-console
-            console.info('[GoogleOneTap] skipped:', reason);
-            // KEY FIX: if FedCM was attempted and skipped (e.g. FedCM NetworkError, browser doesn't
-            // support it, or Google account state prevents it), fall back to the traditional iframe
-            // approach. This is the main bug that was preventing One Tap from showing.
-            if (useFedCM && !cancelled) {
-              doPrompt(false);
-              return; // don't mark as prompted yet — the fallback will
-            }
-          } else if (notification.isDismissedMoment?.()) {
-            // eslint-disable-next-line no-console
-            console.info('[GoogleOneTap] dismissed:', notification.getDismissedReason?.());
-          } else if (notification.isDisplayMoment?.()) {
-            // eslint-disable-next-line no-console
-            console.info('[GoogleOneTap] displayed:', notification.isDisplayed?.() ? 'visible' : 'not visible');
-          }
-          // After both FedCM and iframe have been tried (or one succeeded), mark as prompted so we
-          // don't re-prompt on re-renders.
-          if (moment !== 'skipped' || !useFedCM) {
-            promptedRef.current = true;
-          }
+        google.accounts.id.prompt((n: any) => {
+          // Fires on the legacy path only — under FedCM Google does not call this.
+          momentSeen = true;
+          const rec = {
+            moment: n?.getMomentType?.(),
+            notDisplayed: n?.isNotDisplayed?.() ? (n.getNotDisplayedReason?.() ?? 'yes') : null,
+            skipped: n?.isSkippedMoment?.() ? (n.getSkippedReason?.() ?? 'yes') : null,
+            dismissed: n?.isDismissedMoment?.() ? (n.getDismissedReason?.() ?? 'yes') : null,
+            displayed: n?.isDisplayMoment?.() ? !!n.isDisplayed?.() : null,
+          };
+          diag.moments.push(rec);
+          log('moment', rec);   // THE suppression reason, when Google gives us one
         });
-      } catch {
-        // GIS unavailable/misconfigured (e.g. origin not authorized) — prompt simply doesn't show.
+      } catch (e) {
+        log('initialize/prompt threw', String(e));
       }
     };
 
     const start = () => {
       if (cancelled) return;
-      // Try FedCM first (works in modern Chrome without third-party cookies), fall back to iframe.
-      doPrompt(true);
+      // No FedCM in this browser → the legacy path is the only one that can work; spending the single
+      // attempt on FedCM there would guarantee no prompt.
+      if (!fedcmSupported) { run(false); return; }
+      run(true);
+      // Bounded single retry. Reaching it does not prove FedCM was rejected — if it simply had no
+      // account to offer, the legacy attempt is equally harmless (Google suppresses it the same way).
+      fallbackTimer = setTimeout(() => {
+        if (cancelled || momentSeen) return;
+        if (document.querySelector('[id*="credential_picker"], iframe[src*="gsi/iframe"]')) return;
+        diag.fallbackFired = true;
+        log('no FedCM prompt within', FEDCM_FALLBACK_MS, 'ms — retrying without FedCM');
+        run(false);
+      }, FEDCM_FALLBACK_MS);
     };
 
     const existing = document.querySelector(`script[src="${GIS_SRC}"]`) as HTMLScriptElement | null;
@@ -124,27 +140,22 @@ export default function GoogleOneTap() {
       else existing.addEventListener('load', start, { once: true });
     } else {
       const s = document.createElement('script');
-      s.src = GIS_SRC;
-      s.async = true;
-      s.defer = true;
+      s.src = GIS_SRC; s.async = true; s.defer = true;
       s.addEventListener('load', start, { once: true });
+      s.addEventListener('error', () => log('GIS script failed to load'), { once: true });
       document.head.appendChild(s);
     }
 
-    // IMPORTANT: do NOT call google.accounts.id.cancel() here. The previous implementation called
-    // cancel() in cleanup, which Google treats as a USER DISMISSAL and triggers exponential cooldown
-    // (2h → 1d → 7d → 30d). That was silently preventing One Tap from appearing for returning
-    // visitors. Cleanup should only set the cancelled flag to prevent late callbacks.
-    return () => { cancelled = true; };
-  }, [user]);
+    // NEVER call google.accounts.id.cancel() here. Google treats it as a USER dismissal and starts the
+    // exponential cooldown (2h → 1d → 7d → 30d) — that alone can make One Tap "disappear" for days.
+    return () => { cancelled = true; if (fallbackTimer) clearTimeout(fallbackTimer); };
+  }, [signedOut, user]);
 
-  // Effect 2: cancel the prompt ONLY when the user actually signs in. This is the one legitimate
-  // time to dismiss — the prompt is no longer needed. Separated from effect 1 so the cleanup of
-  // effect 1 (which runs on re-renders) doesn't accidentally trigger Google's cooldown.
+  // The one legitimate cancel: the visitor signed in, so the prompt is moot.
   useEffect(() => {
     if (Platform.OS !== 'web' || !user) return;
     try { (globalThis as any).google?.accounts?.id?.cancel(); } catch {}
   }, [user]);
 
-  return null; // GIS renders its own UI; nothing to draw here.
+  return null; // GIS renders its own UI.
 }
