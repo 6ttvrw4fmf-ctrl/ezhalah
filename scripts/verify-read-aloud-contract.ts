@@ -1,8 +1,9 @@
-// Read Aloud contract (owner P0, 2026-08-18): native/OS text-to-speech ONLY — never ElevenLabs,
-// Google Cloud TTS, Azure TTS, or any paid API, at any volume. This is the permanent, machine-
-// enforced version of that promise: if a future edit ever wires a paid provider into the read-aloud
-// path, or breaks single-speaker / no-autoplay / language-detection reuse, this script goes red in
-// `npm test` before it ships.
+// Read Aloud contract (owner P0, 2026-08-18; Arabic-only + voice tuning, 2026-08-19): native/OS
+// text-to-speech ONLY — never ElevenLabs, Google Cloud TTS, Azure TTS, or any paid API, at any
+// volume; every utterance is Arabic (ar-SA), no per-message language branch. This is the permanent,
+// machine-enforced version of that promise: if a future edit ever wires a paid provider into the
+// read-aloud path, reintroduces a language branch, or breaks single-speaker / no-autoplay / voice
+// preference, this script goes red in `npm test` before it ships.
 //
 //   node --experimental-strip-types scripts/verify-read-aloud-contract.ts   (wired into `npm test`)
 import { readFileSync } from 'node:fs';
@@ -41,10 +42,17 @@ check('a shared "who is speaking" id is exposed for callers to derive their own 
 check('FeedbackRow calls speakReadAloud only from its onReadAloud handler, itself only wired to onPress', /const onReadAloud = \(\) => \{[\s\S]{0,200}?speakReadAloud\(/.test(feedbackRow) && /onPress=\{onReadAloud\}/.test(feedbackRow));
 check('no speak call sits inside a bare useEffect (would autoplay without a tap)', !/useEffect\(\(\) => \{[\s\S]{0,200}?speakReadAloud\(/.test(feedbackRow) && !/useEffect\(\(\) => \{[\s\S]{0,400}?speakReadAloud\(/.test(agent));
 
-// ── LANGUAGE: ar-SA for Arabic, en-US for English, from the SAME detector the reply bubble's own
-//    RTL layout uses — never a second copy that could disagree about what language a message is. ──
-check("readAloudLang() returns exactly 'ar-SA'/'en-US' driven by the shared msgRTL detector", /export function readAloudLang[\s\S]{0,120}?return msgRTL\(text\) \? 'ar-SA' : 'en-US';/.test(readAloud));
-check('msgRTL has ONE definition (src/lib/textDirection.ts), imported everywhere it is used', /export const msgRTL = /.test(readFileSync(join(root, 'src/lib/textDirection.ts'), 'utf8')) && /import \{ msgRTL \} from '\.\/textDirection'/.test(readAloud) && /import \{ msgRTL \} from '@\/lib\/textDirection'/.test(agent));
+// ── LANGUAGE: Arabic ONLY (owner 2026-08-19) — every utterance speaks as ar-SA, no English branch,
+//    no per-message language detection to keep in sync with anything else. ──────────────────────────
+check("every speak() call is hardcoded to ar-SA — no English/other-language branch", /const AR_LANG = 'ar-SA';/.test(readAloud) && /language: AR_LANG/.test(readAloud) && !/en-US/.test(readAloud));
+check('msgRTL (bubble RTL layout) has ONE definition (src/lib/textDirection.ts) — read-aloud no longer needs or imports it', /export const msgRTL = /.test(readFileSync(join(root, 'src/lib/textDirection.ts'), 'utf8')) && /import \{ msgRTL \} from '@\/lib\/textDirection'/.test(agent) && !/textDirection/.test(readAloud));
+
+// ── VOICE QUALITY (owner feedback 2026-08-19 — "sounds robotic"): prefer an Enhanced-quality Arabic
+//    voice when the device has one, resolved ahead of time (never awaited inside speakReadAloud —
+//    that would break iOS Safari's synchronous-user-gesture requirement), plus a calmer rate. ───────
+check('an Enhanced-quality Arabic voice is preferred when available, resolved via a pre-warmed cache (never awaited at speak time)', /VoiceQuality\.Enhanced/.test(readAloud) && /void Speech\.getAvailableVoicesAsync\(\)/.test(readAloud) && !/await Speech\.getAvailableVoicesAsync\(\)[\s\S]{0,200}?export function speakReadAloud/.test(readAloud));
+check('speakReadAloud() itself has no await before Speech.speak() (stays synchronous for the iOS Safari gesture requirement)', !/export function speakReadAloud[\s\S]*?await[\s\S]*?Speech\.speak/.test(readAloud));
+check('rate is tuned below the engine default (1.0) — less clipped/robotic than the raw default', /const SPEECH_RATE = 0\.\d+;/.test(readAloud) && /rate: SPEECH_RATE/.test(readAloud));
 
 // ── CLEANUP: never leaves a dangling utterance playing after the row unmounts (page navigation), or
 //    across a new search on the same screen. ───────────────────────────────────────────────────────
