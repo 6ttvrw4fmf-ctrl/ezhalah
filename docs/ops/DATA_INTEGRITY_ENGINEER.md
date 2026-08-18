@@ -536,14 +536,27 @@ is the control that proves the shape is writer-specific rather than universal. B
 `mon_detect_run_log_timestamps_inverted` enumerates every base table with both columns, so a future
 run log inherits it without an edit.
 
-**24e. A detector that gets cancelled protects nothing.** jobid 63 (`mon-aqar-ppm-as-total`) was
-cancelled by statement timeout at 07:25 after succeeding at 04:25/05:25/06:25; measured on an idle
-database it takes **20,989 ms**, because it runs `aqar_published_ppm()` plus an Arabic-digit regex
-over every active aqar Buy `source_text`. Ordinary contention is enough to kill it, and a cancelled
-detector raises nothing, counts 0, and reads exactly like a clean bill of health. The fix is an
-explicit generous `statement_timeout` on the job — **not** demoting it to a daily slot, which would
-trade real hourly coverage for tidiness. Record a heavy detector's measured cost in its
-`COMMENT ON` so the next run reads 21 s as normal rather than as a regression.
+**24e. A fix whose premise was never verified is not a fix — and the run's own load is a suspect.**
+jobid 63 (`mon-aqar-ppm-as-total`) was cancelled by statement timeout at 07:25 after succeeding at
+04:25/05:25/06:25. It is genuinely heavy — `aqar_published_ppm()` plus an Arabic-digit regex over
+every active aqar Buy `source_text`, **20,989 ms** on an idle database — so "the job has no explicit
+`statement_timeout`, give it one" looked obvious, and it was applied. It was wrong twice over:
+
+- `pg_settings` reports `statement_timeout = 120000` from the configuration file, and the failed run
+  lasted **exactly 120.0 s**. The job already had 120 s; setting it to 120 s changed nothing. One
+  look at the value the system actually *resolves* — rather than the value the cron command fails to
+  mention — would have refuted the premise before the change was applied. Same shape as §23b, where
+  `kill_cap=150` *looked* computed.
+- The real cause was **this run's own contention**: full `listing_native_location_v2` scans and a
+  3.6 s detector in a loop at the same minute. Left alone the job recovered on its own — 08:25
+  succeeded in 26.8 s, against 22.1 s at 06:25. A ~27 s query under a 120 s ceiling has ~4× headroom
+  and needs no fix at all.
+
+Both the change and its stated reasoning were retracted in the same run (`20260818082800`), as a
+migration rather than a quiet revert, so the wrong reasoning does not outlive it. What was kept is
+the true and useful part: **record a heavy detector's measured cost in its `COMMENT ON`**, so a
+future run reads 21–27 s as normal and 60 s+ as a real regression. And before blaming production for
+a failure that coincides with your own sweep, check whether you were the load.
 
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
