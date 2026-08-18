@@ -417,10 +417,57 @@ Two things were found and both are now permanent:
    **aqar does not state a period for these listings.** Honest NULL is correct; «سنوي» must never be
    defaulted in. Nothing was written.
 
-So the residue is a **product** gap, not a data bug, and it is an owner decision (§16 stop condition 2):
+So the residue is a **product** gap, not a data bug, and it was an owner decision (§16 stop condition 2):
 leave as-is · surface period-less rentals under both chips · add an "unspecified" chip. An autonomous
 run must not pick one. The verdict is also attached to the detector via `COMMENT ON FUNCTION`, so it is
 recoverable from the database alone.
+
+### §22.2 THE OWNER DECIDED (2026-08-18, run #29) — permanent, do not re-open
+
+> "For a rental listing: if the source explicitly says or clearly publishes that the price is monthly,
+> classify it as شهري. If the source explicitly says annual/yearly, سنوي. If there is no monthly
+> indication, default the rental listing to سنوي. If the price is `0`, missing, or Price on Request /
+> السعر عند الطلب, and there is no monthly indication, classify it as سنوي. Do not infer monthly merely
+> because the numeric price looks small. … Explicit source period must always beat the fallback."
+> — and the closing principle: *"never invent a location, but for a confirmed rental with an unknown
+> period, our chosen product fallback is Annual unless there is evidence that it is Monthly."*
+
+**This rule applies ONLY to rent. It must never classify a sale listing.**
+
+Implemented in `sync_search_listings_ar` — the **only** writer of `search_listings_ar.rent_period_ar`,
+the canonical field Normal Filter, Advanced Filter, the AI/backend search, city/district/Trending
+counts, totals, types, price, area, bedrooms and pagination all already read. One classification, no
+special-case search behaviour for these listings, and every listing that arrives later inherits it for
+free. Sale is protected **by construction**: the fallback sits inside the pre-existing
+`case when lower(v.transaction_type)='rent' then … end`, so a sale row cannot reach it.
+
+**The raw scraper tables are deliberately NOT touched, and this is the whole point.** Everything §22
+above establishes still holds: aqar and the other probed platforms genuinely publish no period, the
+honest NULL is correct, and writing «سنوي» into `<platform>_*_listings` would fabricate a source value.
+The fallback is a **classification**, applied at the classification layer. Source truth stays NULL.
+
+One edge the owner's wording does not name, decided against the default: **gathern and aqarmonthly are
+monthly-only sources** (owner rule 2026-07-06, `MONTHLY_ONLY_TABLE` in `src/data/remote.ts`), so for
+those two the platform convention *is* monthly evidence and a period-less row falls back to شهري. Zero
+rows today; defaulting a future one to annual would understate its rent 12×.
+
+Measured impact, quantified before the change and verified after: **605 rows moved NULL → سنوي, 0 →
+شهري, 0 sale rows touched.** In the Residential search scope the annual chip went 39,933 → 40,413
+(+480) and `annual + monthly = both = unfiltered total` — closing a 480-listing gap where a rental was
+reachable by *neither* period chip.
+
+Guarded permanently by `mon_detect_rent_period_contract()` (9 limbs, all mutation-tested). All nine
+`ops_rent_period_sourceless` waivers were retired the same day: the fallback made every one of them
+suppress zero listings, and a waiver that waives nothing only stands by to swallow a future defect
+silently. **The probe evidence survives in `ops_rent_period_source_probe`** — removing the suppression
+did not remove the truth it rested on.
+
+**Eastabha is classified per LISTING, never platform-wide** (owner, same message). Its scraper already
+reads three ordered listing-level signals (the price-label qualifier, an explicit «الإيجار
+الشهري/السنوي» in title/description, then a شهري title marker), storing only `annual`/`monthly` and
+otherwise NULL; the hardcoded platform-wide `'annual'` was removed by the 2026-08-11 audit after 12
+live rows read «شهري». Its waiver row was the last platform-wide artifact and is gone. Limb 6b fires
+if one ever returns.
 
 **The general rule this pins:** when a field is missing and a re-enrich path exists, run it `--dry-run`
 FIRST and read the diff. "The parser dropped it" and "the source never published it" look identical in
@@ -557,6 +604,45 @@ migration rather than a quiet revert, so the wrong reasoning does not outlive it
 the true and useful part: **record a heavy detector's measured cost in its `COMMENT ON`**, so a
 future run reads 21–27 s as normal and 60 s+ as a real regression. And before blaming production for
 a failure that coincides with your own sweep, check whether you were the load.
+
+## 25. Unknown location means UNKNOWN, not excluded (owner decision 2026-08-18, run #29 — permanent)
+
+> "Do not guess a location. If a listing otherwise has valid searchable data but its source doesn't
+> provide enough information to resolve a city/district, keep the listing searchable without location.
+> It should appear in searches where no incompatible location constraint is selected, match its real
+> deal/type/period/price, NOT appear when the user specifically filters for a city/district we cannot
+> prove, and never be assigned a fake city or district just to make it searchable."
+
+This was found **already implemented** in `location_search_candidates_ar` and was proven live rather
+than changed — the admission predicate admits an unlocated row only when `p_cities`, `p_districts` and
+`p_region_ids` are all empty. Verified through the anon RPC on an unlocated Buy listing
+(`wasalt 441665`) and an unlocated Rent listing (`ramzalqasim 615836`): returned with no location
+filter, absent from city, city+district and region searches, present on the Annual and Both chips.
+
+**Why it cannot pollute city/district counts** — the owner's explicit worry, and the answer is
+structural, not incidental:
+
+1. `match_city_ids` is **trigger-derived** (`set_match_city_ids` → `trg_set_match_city_ids`, BEFORE
+   INSERT OR UPDATE, from `composite_match_city_ids`). A direct `update … set match_city_ids = array[1]`
+   reports 1 row updated and stores NULL. The defect is *unreachable* by writing data.
+2. Every count surface (`top_cities_by_deal_ar`, `district_options_ar`, `apartment_guided_counts_ar`,
+   `property_age_option_counts_ar`, `af_eligible_count`, `af_eligibility_clause`) is scoped to
+   `production_ready`, and `production_ready` means city **and** region both present.
+
+Proven arithmetically to the row: Residential rent, city counts give annual 40,385 + monthly 31,495 =
+71,880, while the search RPC gives 40,413 / 31,526 / 71,939. **Every difference is exactly the
+location-less rows** — 59 total = 28 annual + 31 monthly. Searchable, and absent from city counts.
+
+Guarded by `mon_detect_unlocated_search_contract()` (6 limbs, mutation-tested), which watches the RPC's
+unlocated arm AND all three guards on it, the trigger, and the `production_ready` scoping of every
+count surface.
+
+**One limb is deliberately narrower than it looks.** Limb (c) fires only on an unlocated row whose city
+text resolves to *exactly one* catalog city — a genuine resolver failure. Ambiguous names are ignored
+on purpose: the first version of this limb counted any catalog match and immediately raised P1 on five
+real rows (`«البريكه»` → 3 cities across 2 regions, `«العقيق»` → 4 across 3, `«المجمعة»` → 4 across 3),
+none of whose sources publish a region. **It was alarming on the very rule it exists to protect.** If
+this limb ever fires, the fix is to resolve the listing honestly — never to pick a candidate city.
 
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
