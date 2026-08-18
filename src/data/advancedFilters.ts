@@ -132,10 +132,15 @@ const AGE_QUESTION: AdvancedQuestion = {
 //                          deliberately not offered rather than pretending it is a real choice.
 //   Studio/RentAnnual    — n=30 nationwide, thin everything; enabled minimally, gates will suppress.
 //   Room/Buy (n=1) and Studio/Buy (n=2) — no cohort: genuinely not applicable.
-const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: string[] }> = {
+const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: string[]; RentMonthly?: string[] }> = {
   Apartment: {
     RentAnnual: ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished'],
     Buy: ['property_age', 'amenities', 'bathrooms', 'direction'],
+    // Monthly (owner order 2026-08-18) — designed from MONTHLY data, deliberately NOT a copy of
+    // RentAnnual: kitchen/AC/age/floor/furnished are fresh-DEAD in this cohort (94/7/564/53 known of
+    // 30,356; furnished 100% true on Gathern). What Monthly actually has: Gathern rating (24,716
+    // rated), unit subtype (استديو 9,218 / شقق مخدومة 2,040), elevator 62%, parking 33%, bathrooms 56%.
+    RentMonthly: ['rating', 'unit_subtype', 'amenities', 'bathrooms'],
   },
   Floor: {
     RentAnnual: ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished'],
@@ -147,6 +152,8 @@ const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: string[] }
   },
   Room: {
     RentAnnual: ['property_age', 'amenities', 'furnished'],
+    // Monthly 2026-08-18: n=556, 446 rated; elevator 53% / parking 31%. bathrooms dead (0 known).
+    RentMonthly: ['rating', 'amenities'],
   },
   Studio: {
     RentAnnual: ['property_age', 'amenities', 'furnished'],
@@ -159,6 +166,8 @@ const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: string[] }
   Villa: {
     RentAnnual: ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction'],
     Buy: ['property_age', 'amenities', 'bathrooms', 'street_width', 'direction'],
+    // Monthly 2026-08-18: n=362, 245 rated; bathrooms 92% known; parking 57% (elevator 5% self-gates).
+    RentMonthly: ['rating', 'bathrooms', 'amenities'],
   },
   // Commercial + rural + land cohorts (2026-08-16 overnight profiling, fresh-band designed).
   // AC is fresh-DEAD on commercial (aqar form change) and is deliberately enabled NOWHERE here
@@ -254,9 +263,10 @@ function cohortAllows(q: SearchQuery, id: string): boolean {
   if (q.category !== (CLEAN_MACRO[type] ?? 'Residential')) return false;
   const cfg = COHORT_QUESTIONS[type];
   if (!cfg) return false;
-  const deal: 'RentAnnual' | 'Buy' | null =
+  const deal: 'RentAnnual' | 'RentMonthly' | 'Buy' | null =
     q.deal === 'Buy' ? 'Buy'
-    : q.deal === 'Rent' && q.rentPeriod !== 'monthly' ? 'RentAnnual'
+    : q.deal === 'Rent' && q.rentPeriod === 'monthly' ? 'RentMonthly'
+    : q.deal === 'Rent' ? 'RentAnnual'
     : null;
   if (!deal) return false;
   return (cfg[deal] ?? []).includes(id);
@@ -458,9 +468,61 @@ const DIRECTION_QUESTION: AdvancedQuestion = {
   apply: (q, keys) => (keys.length ? { ...q, directions: [...new Set([...(q.directions ?? []), ...keys])] } : q),
 };
 
+// ── Monthly-only questions (owner order 2026-08-18) ─────────────────────────────────────────────
+// Gathern property rating — the Monthly differentiator. SOURCE-DECLARED 1-10 scale (schema.org
+// bestRating 10 / worstRating 1, verified against the live page); a PROPERTY/UNIT rating on
+// @type: VacationRental, never a host rating. STRICT + UNKNOWN-safe: `s.rating >= p_rating_min`
+// can never admit a NULL-rated listing, so unrated inventory (all non-Gathern + 444 «لا يوجد
+// تقييم» rows) is excluded by construction, never counted as low-rated. The third option answers
+// the owner's confidence question ("10.0 with 1 review ≠ 9.7 with 100 reviews") with the simplest
+// honest cut the data supports: the same 9.0 floor, but only listings with 10+ reviews.
+const RATING_QUESTION: AdvancedQuestion = {
+  id: 'rating',
+  titleKey: 'What rating would you prefer?',
+  selection: 'single',
+  eligibility: (q) => cohortAllows(q, 'rating'),
+  async resolveOptions(q) {
+    const floor = q.ratingMin ?? 0;
+    const rungs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
+      { key: '9.5',      labelKey: '9.5+',                        count: (c) => c.cnt_rating95 },
+      { key: '9.0',      labelKey: '9.0+',                        count: (c) => c.cnt_rating90 },
+      { key: '9.0_rc10', labelKey: '9.0+ with 10+ reviews',       count: (c) => c.cnt_rating90_rc10 },
+    ];
+    // Monotone like BATHROOMS: only rungs that can still NARROW the current answer are offered.
+    return guidedOptions(await fetchApartmentGuidedCounts(q),
+      rungs.filter((d) => parseFloat(d.key) > floor || (d.key === '9.0_rc10' && (q.reviewsMin ?? 0) < 10 && floor <= 9.0)));
+  },
+  apply: (q, keys) => {
+    const k = keys[0];
+    if (k === '9.5')      return { ...q, ratingMin: Math.max(9.5, q.ratingMin ?? 0) };
+    if (k === '9.0')      return { ...q, ratingMin: Math.max(9.0, q.ratingMin ?? 0) };
+    if (k === '9.0_rc10') return { ...q, ratingMin: Math.max(9.0, q.ratingMin ?? 0), reviewsMin: Math.max(10, q.reviewsMin ?? 0) };
+    return q;
+  },
+};
+
+// Gathern unit subtype — Monthly-only sub-classification (استديو / شقق مخدومة / شقة). The canonical
+// taxonomy is untouched: type_ar stays شقة for all three, so no cohort, count or barrier moves.
+// STRICT: a chip matches unit_subtype_ar exactly; non-Gathern rows (NULL subtype) stay UNKNOWN and
+// are excluded from any subtype answer — never bucketed as «شقة عادية» by default.
+const UNIT_SUBTYPE_QUESTION: AdvancedQuestion = {
+  id: 'unit_subtype',
+  titleKey: 'What kind of unit?',
+  selection: 'single',
+  eligibility: (q) => cohortAllows(q, 'unit_subtype') && !(q.unitSubtypes?.length),
+  async resolveOptions(q) {
+    return guidedOptions(await fetchApartmentGuidedCounts(q), [
+      { key: 'استديو',      labelKey: 'Studio unit',        count: (c) => c.cnt_sub_studio },
+      { key: 'شقق مخدومة',  labelKey: 'Serviced apartment', count: (c) => c.cnt_sub_serviced },
+      { key: 'شقة',         labelKey: 'Regular apartment',  count: (c) => c.cnt_sub_regular },
+    ]);
+  },
+  apply: (q, keys) => (keys[0] ? { ...q, unitSubtypes: [keys[0]] } : q),
+};
+
 export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
   RNPL_QUESTION, AGE_QUESTION, AMENITIES_QUESTION, BATHROOMS_QUESTION, FURNISHED_QUESTION,
-  STREET_WIDTH_QUESTION, DIRECTION_QUESTION,
+  STREET_WIDTH_QUESTION, DIRECTION_QUESTION, RATING_QUESTION, UNIT_SUBTYPE_QUESTION,
 ];
 
 // ── Contextual ranking (owner 2026-08-11) ────────────────────────────────────────────────────────
@@ -470,8 +532,8 @@ export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
 // the same "don't ask a question that barely changes the result set" rule the owner set, applied
 // with numbers. Unknown ≠ no throughout: options only ever count KNOWN matches.
 const SALIENCE: Record<string, number> = {
-  property_age: 1.0, furnished: 1.0, bathrooms: 0.9, street_width: 0.9, amenities: 0.8,
-  direction: 0.7, rnpl: 0.6,
+  property_age: 1.0, furnished: 1.0, rating: 1.0, unit_subtype: 0.95, bathrooms: 0.9, street_width: 0.9,
+  amenities: 0.8, direction: 0.7, rnpl: 0.6,
 };
 
 // ASK-FIRST TIER (owner 2026-08-15). Installments (رايز/إيجاري) is the PREFERRED opening question

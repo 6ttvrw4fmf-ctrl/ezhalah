@@ -134,6 +134,13 @@ export type SearchQuery = {
   // (confirmed >= N; unknown-bathroom listings excluded — owner 2026-07-20). Both optional, OR-safe.
   amenities?: string[] | null;
   bathMin?: number | null;
+  // Monthly-only (2026-08-18, Gathern-native): STRICT minimum property rating on the SOURCE-DECLARED
+  // 1-10 scale — NULL-rated listings are excluded by definition (UNKNOWN never satisfies a rating
+  // answer). `reviewsMin` is the review-confidence floor that rides WITH a rating answer; it is never
+  // sent alone. `unitSubtypes` = strict Gathern unit_type_ar values (استديو / شقق مخدومة / شقة).
+  ratingMin?: number | null;
+  reviewsMin?: number | null;
+  unitSubtypes?: string[] | null;
   // Furnished PREFERENCE from the interview's single-select (تفضلها مفروشة؟): true = confirmed
   // furnished only, false = confirmed unfurnished only, null/undefined = no preference (Skip).
   // Distinct from the 'furnished' amenity token (true-only). Maps to p_furnished on BOTH RPCs.
