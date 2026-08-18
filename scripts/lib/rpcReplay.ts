@@ -63,12 +63,28 @@ function extractDefinition(sql: string, fn: string): string | null {
  * functions, and each needle only matches its own target. That makes association implicit and exact:
  * a long distinctive needle cannot match the wrong function.
  */
+/** Join every quoted segment of a `'a' || 'b' || 'c'` expression, unescaping `''` in each. */
+function parseConcatenatedLiteral(expr: string): string {
+  const segRe = /'((?:[^']|'')*)'/g;
+  let out = '';
+  let m: RegExpExecArray | null;
+  while ((m = segRe.exec(expr))) out += m[1].replace(/''/g, "'");
+  return out;
+}
+
 function extractPatches(sql: string): { anchor: string; replacement: string }[] {
   // NAME [constant] text := 'literal';   (multi-line, '' = escaped quote)
+  //
+  // A declaration's literal may also be split across SEVERAL `||`-concatenated segments for
+  // readability (20260818221919: `replacement constant text := 'part one ' || 'part two';`).
+  // The declaration regex captures the whole `'...' || '...' ...` expression as one group;
+  // parseConcatenatedLiteral then pulls out and joins every quoted segment inside it. A plain
+  // single-literal declaration is just the zero-`||` case of the same shape, so this is additive.
   const decls = new Map<string, string>();
-  const declRe = /([A-Za-z_][A-Za-z0-9_]*)\s+(?:constant\s+)?text\s*:=\s*'((?:[^']|'')*)'\s*;/g;
+  const declRe =
+    /([A-Za-z_][A-Za-z0-9_]*)\s+(?:constant\s+)?text\s*:=\s*('(?:[^']|'')*'(?:\s*\|\|\s*'(?:[^']|'')*')*)\s*;/g;
   let d: RegExpExecArray | null;
-  while ((d = declRe.exec(sql))) decls.set(d[1], d[2].replace(/''/g, "'"));
+  while ((d = declRe.exec(sql))) decls.set(d[1], parseConcatenatedLiteral(d[2]));
 
   const out: { anchor: string; replacement: string }[] = [];
 
