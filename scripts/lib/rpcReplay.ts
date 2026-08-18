@@ -65,10 +65,30 @@ function extractDefinition(sql: string, fn: string): string | null {
  */
 function extractPatches(sql: string): { anchor: string; replacement: string }[] {
   // NAME [constant] text := 'literal';   (multi-line, '' = escaped quote)
+  //
+  // The value may also be several literals CONCATENATED with `||`, which is how a long needle or
+  // replacement is wrapped to stay inside the line limit:
+  //     replacement constant text :=
+  //       'case v.rent_period when ''monthly'' then ''شهري'' … '
+  //       || 'else case when v.platform in (''gathern'',''aqarmonthly'') then ''شهري'' … end end';
+  // Before this was taught (20260818221919, the owner's rent-period fallback), only the FIRST literal
+  // matched and the declaration needed a `;` right after it, so the variable never entered `decls`,
+  // the replace() pair resolved to undefined, the migration produced NO patches, and it fell through
+  // to looksLikeUninterpretedChange() — which flagged it against every tracked RPC whose name merely
+  // appeared in its comment header. Concatenation is a formatting choice, not a different idiom, so
+  // it is folded here rather than excused in AUDITED_UNINTERPRETABLE.
   const decls = new Map<string, string>();
-  const declRe = /([A-Za-z_][A-Za-z0-9_]*)\s+(?:constant\s+)?text\s*:=\s*'((?:[^']|'')*)'\s*;/g;
+  const declRe =
+    /([A-Za-z_][A-Za-z0-9_]*)\s+(?:constant\s+)?text\s*:=\s*((?:'(?:[^']|'')*'\s*(?:\|\|\s*)?)+);/g;
+  const litRe = /'((?:[^']|'')*)'/g;
   let d: RegExpExecArray | null;
-  while ((d = declRe.exec(sql))) decls.set(d[1], d[2].replace(/''/g, "'"));
+  while ((d = declRe.exec(sql))) {
+    let lit: RegExpExecArray | null;
+    let value = '';
+    litRe.lastIndex = 0;
+    while ((lit = litRe.exec(d[2]))) value += lit[1].replace(/''/g, "'");
+    decls.set(d[1], value);
+  }
 
   const out: { anchor: string; replacement: string }[] = [];
 
