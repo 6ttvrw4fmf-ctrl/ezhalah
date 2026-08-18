@@ -30,31 +30,33 @@
 
 do $$
 declare
-  v_def text; v_new text; v_before_md5 text; v_overloads int;
-  needle constant text :=
-    'district_tokens as (' || E'\n' ||
-    '    select norm_district_tok(d) as tok from unnest(coalesce(p_districts, ''{}'')) d' || E'\n' ||
-    '    union' || E'\n' ||
-    '    select norm_district_tok(b.district_ar)' || E'\n' ||
-    '    from unnest(coalesce(p_districts, ''{}'')) d' || E'\n' ||
-    '    join district_name_bridge b on norm_en_place(b.district_en) = norm_en_place(d)' || E'\n' ||
-    '  )';
-  replacement constant text :=
-    'district_tokens as (' || E'\n' ||
-    '    select norm_district_tok(d) as tok from unnest(coalesce(p_districts, ''{}'')) d' || E'\n' ||
-    '    union' || E'\n' ||
-    '    -- AMBIGUITY GUARD (2026-08-18, mirrors the city guard below): only bridge a name that' || E'\n' ||
-    '    -- resolves to exactly ONE canonical Arabic district. district_name_bridge is' || E'\n' ||
-    '    -- source-observed and noisy (''حقروصين'' -> both ''حقروصين'' and ''حي جعرانة''), so an' || E'\n' ||
-    '    -- unguarded join injects a FOREIGN حي as a search token and the user gets listings from a' || E'\n' ||
-    '    -- حي they did not select. Measured: 68 ambiguous names, 126 leaking pairs.' || E'\n' ||
-    '    select norm_district_tok(b.district_ar)' || E'\n' ||
-    '    from unnest(coalesce(p_districts, ''{}'')) d' || E'\n' ||
-    '    join district_name_bridge b on norm_en_place(b.district_en) = norm_en_place(d)' || E'\n' ||
-    '    where (select count(distinct norm_district_tok(b2.district_ar))' || E'\n' ||
-    '             from district_name_bridge b2' || E'\n' ||
-    '            where norm_en_place(b2.district_en) = norm_en_place(d)) = 1' || E'\n' ||
-    '  )';
+  v_src text; v_new text; v_overloads int;
+  -- Declared as PLAIN single literals (no `constant`, no || concatenation) so
+  -- scripts/verify-rpc-clause-invariants.ts can statically replay this patch and re-check the RPC's
+  -- invariants without a live database. That replayer is the reason this file reads a little
+  -- verbosely — it is a feature, not an accident.
+  needle text := 'district_tokens as (
+    select norm_district_tok(d) as tok from unnest(coalesce(p_districts, ''{}'')) d
+    union
+    select norm_district_tok(b.district_ar)
+    from unnest(coalesce(p_districts, ''{}'')) d
+    join district_name_bridge b on norm_en_place(b.district_en) = norm_en_place(d)
+  )';
+  replacement text := 'district_tokens as (
+    select norm_district_tok(d) as tok from unnest(coalesce(p_districts, ''{}'')) d
+    union
+    -- AMBIGUITY GUARD (2026-08-18, mirrors the city guard below): only bridge a name that
+    -- resolves to exactly ONE canonical Arabic district. district_name_bridge is
+    -- source-observed and noisy (''حقروصين'' -> both ''حقروصين'' and ''حي جعرانة''), so an
+    -- unguarded join injects a FOREIGN حي as a search token and the user gets listings from a
+    -- حي they did not select. Measured: 68 ambiguous names, 126 leaking pairs.
+    select norm_district_tok(b.district_ar)
+    from unnest(coalesce(p_districts, ''{}'')) d
+    join district_name_bridge b on norm_en_place(b.district_en) = norm_en_place(d)
+    where (select count(distinct norm_district_tok(b2.district_ar))
+             from district_name_bridge b2
+            where norm_en_place(b2.district_en) = norm_en_place(d)) = 1
+  )';
 begin
   select count(*) into v_overloads from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'public' and p.proname = 'location_search_candidates_ar';
@@ -62,20 +64,19 @@ begin
     raise exception 'expected exactly 1 overload of location_search_candidates_ar, found % — refusing (PGRST203 risk)', v_overloads;
   end if;
 
-  select pg_get_functiondef(p.oid) into v_def from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  select pg_get_functiondef(p.oid) into v_src from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'public' and p.proname = 'location_search_candidates_ar';
-  v_before_md5 := md5(v_def);
 
-  if position(needle in v_def) = 0 then
-    raise exception 'district_tokens needle not found — the CTE has changed shape; refusing to edit blind';
-  end if;
-  if position('AMBIGUITY GUARD (2026-08-18' in v_def) > 0 then
+  if position('AMBIGUITY GUARD (2026-08-18' in v_src) > 0 then
     raise notice 'district ambiguity guard already present — nothing to do';
     return;
   end if;
+  if position(needle in v_src) = 0 then
+    raise exception 'district_tokens needle not found — the CTE has changed shape; refusing to edit blind';
+  end if;
 
-  v_new := replace(v_def, needle, replacement);
-  if v_new = v_def then
+  v_new := replace(v_src, needle, replacement);
+  if v_new = v_src then
     raise exception 'replacement was a no-op';
   end if;
   execute v_new;
