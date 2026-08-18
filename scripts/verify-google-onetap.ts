@@ -27,8 +27,12 @@ const hasSeparateCancelEffect = /useEffect\(\(\)\s*=>\s*\{[^}]*!user\)\s*return;
 assert('cancel() NOT in main effect cleanup (prevents cooldown)', !hasCleanupCancel || hasSeparateCancelEffect);
 
 // 2. Must have FedCM fallback — if FedCM is skipped, retry with use_fedcm_for_prompt: false
-assert('FedCM fallback: calls doPrompt(false) when FedCM is skipped',
-  src.includes('doPrompt(false)') && src.includes('use_fedcm_for_prompt'));
+// Updated 2026-08-15: this used to assert `doPrompt(false)` INSIDE the prompt-moment callback. That
+// was measured on live production to be UNREACHABLE — under `use_fedcm_for_prompt: true` Google never
+// invokes the moment callback, so a callback-nested retry can never run and One Tap silently stayed
+// hidden whenever FedCM failed. The fallback is now timer-driven. See verify-google-one-tap.ts.
+assert('FedCM fallback is reachable without the moment callback (timer-driven)',
+  src.includes('run(false)') && src.includes('use_fedcm_for_prompt') && src.includes('setTimeout'));
 
 // 3. Must have notification callback on prompt() to log the reason Google suppresses
 assert('prompt() has notification callback',
@@ -39,8 +43,10 @@ assert('cancel_on_tap_outside: false set',
   src.includes('cancel_on_tap_outside: false') || src.includes('cancel_on_tap_outside:false'));
 
 // 5. Must use a ref guard to prevent multiple prompt() calls per page load
-assert('promptedRef guard prevents double-prompting',
-  src.includes('promptedRef') && (src.includes('useRef(false)') || src.includes('useRef<boolean>(false)')));
+// Renamed promptedRef → startedRef in the 2026-08-15 rewrite; the guarantee (prompt at most once per
+// page load, so we never burn Google's dismissal cooldown) is unchanged.
+assert('once-per-page-load guard prevents double-prompting',
+  src.includes('startedRef') && (src.includes('useRef(false)') || src.includes('useRef<boolean>(false)')));
 
 // 6. Must call cancel() ONLY when user signs in (separate effect with !user return guard)
 assert('cancel() only fires when user signs in (separate effect)',
