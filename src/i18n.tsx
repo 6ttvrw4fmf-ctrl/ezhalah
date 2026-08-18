@@ -531,6 +531,9 @@ const AR: Record<string, string> = {
   'Sorting results and mixing platforms…': 'نرتب النتائج وننوعها بين المنصات…',
   // Per-card feedback row (thumbs up/down + share)
   'Thanks for your feedback': 'شكراً على ملاحظتك',
+  // Read Aloud (owner P0, 2026-08-18) — native/OS TTS only, $0, never a paid API.
+  'Read aloud': 'استماع للرد',
+  'Stop reading': 'إيقاف الاستماع',
   'Here is what I found:': 'هذا ما وجدته:',
   'Here is what matches what you want': 'هذا اللي يناسب طلبك',
   'I found a few properties based on your search.': 'وجدت بعض العقارات بناءً على طلبك.',

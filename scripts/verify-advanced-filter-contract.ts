@@ -207,24 +207,19 @@ check('progress denominator = ageFlow.progressTotal (the eligible set), NOT the 
 check('agent builds a plan, presents via one confirm handler, and enters via anyGuidedEligible',
   /ageFlowPlanRef/.test(agentSrc) && /presentGuided/.test(agentSrc) && /onAgeConfirm/.test(agentSrc) && /anyGuidedEligible/.test(agentSrc));
 
-// ── Intro-first Filter search (owner 2026-08-16, supersedes the 2026-08-03 results-first rule) ──
-// An eligible تصفية search with MORE than 25 results auto-opens the overlay on the calm INTRO —
-// count + invitation — NEVER a question (the 2026-08-03 objection was the quiz jumping over the
-// cards; the intro is an invitation with «عرض النتائج» one tap away and the results already
-// rendered behind it). ≤ 25 results, or an ineligible scope, stays pure results-first: the
-// interview must never open on a set that's already manageable.
+// ── Intro-first Filter search (owner 2026-08-16, SUPERSEDED 2026-08-19) ──────────────────────────
+// The 2026-08-16 rule below (auto-open the AF overlay on an intro after >25 results) was ITSELF
+// killed by owner decision 2026-08-19: "The advanced filter interview must NEVER auto-open as a
+// popup/overlay after a search. It only appears when the user manually taps «خلّنا نحدد الطلب
+// أكثر»." The startAgeFlow(q, false, { auto: true }) trigger call site is gone; startAgeFlow's
+// `opts?.auto` PARAMETER is deliberately left in place (harmless, unused surface) rather than
+// stripped, since manual invocation still flows through the same function. Pinned in both
+// directions so neither the manual path nor the auto-open's return can regress silently.
 check('startAgeFlow takes a fallbackToRefine flag and only pops refine chips when it is set',
   /const startAgeFlow = async \(q: SearchQuery, fallbackToRefine = true/.test(agentSrc)
   && /if \(fallbackToRefine\) startRefine\(q\)/.test(agentSrc));
-check('the auto entry gates on eligibility AND the shared >25 constant, and opens as auto',
-  /anyGuidedEligible\(q2\) && gateTotal > INTERVIEW_STOP_AT/.test(agentSrc)
-  && /startAgeFlow\(q2, false, \{ auto: true/.test(agentSrc));
-// The intro count is the EXACT matchTotal (same number as the «لقينا N» headline) — never the
-// page-fetch size, which saturates at the 1,500 candidate cap (bug found live 2026-08-16).
-check('the intro count comes from matchTotal, never the page-capped result.total',
-  /const introTotal = \(!q2\?\.priceIsAnnual \? result\.matchTotal : null\) \?\? null/.test(agentSrc));
-check('the auto path opens on the INTRO phase, never a question',
-  /opts\?\.auto \? \{ phase: 'intro'/.test(agentSrc));
+check('the auto-open trigger call site (>25 results -> startAgeFlow(..., { auto: true })) stays REMOVED',
+  !/startAgeFlow\(q2, false, \{ auto: true/.test(agentSrc));
 check('the guided flow stays reachable on demand via the narrow-it-down button',
   /if \(q && anyGuidedEligible\(q\)\) void startAgeFlow\(q\)/.test(agentSrc));
 
