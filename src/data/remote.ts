@@ -1132,26 +1132,38 @@ const ID_CHUNK = 200;
 // returns a {data:null, error} shaped exactly like a backend error, so the EXISTING `error → return
 // null → retry UI` path fires instead of hanging. 15s matches the iframe guard in browser.tsx.
 const RPC_TIMEOUT_MS = Number(process.env.EXPO_PUBLIC_RPC_TIMEOUT_MS) || 15000;
-async function bounded<T = any>(builder: any, ms = RPC_TIMEOUT_MS): Promise<{ data: T | null; error: any }> {
+// Stop-button cancellation (owner 2026-08-18): `signal` is an EXTERNAL abort source (the pressed
+// Stop button), separate from the internal timeout controller above. Forwarding it into the same
+// controller means one `.abort()` call genuinely tears down the in-flight HTTP request — not just
+// makes the caller stop waiting on it. A signal already aborted before this call starts (Stop
+// pressed between two chunked requests) aborts immediately, before any network work begins.
+async function bounded<T = any>(builder: any, ms = RPC_TIMEOUT_MS, signal?: AbortSignal): Promise<{ data: T | null; error: any }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
+  const onExternalAbort = () => ctrl.abort();
+  if (signal) {
+    if (signal.aborted) ctrl.abort();
+    else signal.addEventListener('abort', onExternalAbort);
+  }
   try {
     return await builder.abortSignal(ctrl.signal);
   } catch (e: any) {
-    return { data: null, error: { message: String(e?.message || e), timeout: true } };
+    return { data: null, error: { message: String(e?.message || e), timeout: true, cancelled: signal?.aborted === true } };
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', onExternalAbort);
   }
 }
 
-async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[]): Promise<Listing[]> {
+async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[], signal?: AbortSignal): Promise<Listing[]> {
   const kind: SourceKind = tbl.includes('_commercial') ? 'com' : 'res';
   const out: Listing[] = [];
   for (let i = 0; i < ids.length; i += ID_CHUNK) {
+    if (signal?.aborted) throw new DOMException('cancelled', 'AbortError'); // Stop pressed between chunks
     // RC-A: capture the error (was silently dropped → a chunk that 500s produced a blank/partial grid
     // that contradicted the «لقينا N إعلان» headline). On any chunk failure, surface it so the caller
     // returns null → retry, rather than showing a misleadingly-short result set.
-    const { data, error } = await bounded(keptFiltersReq(q, tbl).in('id', ids.slice(i, i + ID_CHUNK)).limit(ID_CHUNK));
+    const { data, error } = await bounded(keptFiltersReq(q, tbl).in('id', ids.slice(i, i + ID_CHUNK)).limit(ID_CHUNK), RPC_TIMEOUT_MS, signal);
     if (error) throw new Error(`fetchRawByIds(${tbl}): ${error.message}`);
     if (data) out.push(...finalize(data, kind));
   }
@@ -1164,12 +1176,17 @@ async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[]): Promis
 // id — raw stays the single source of truth; the index only maps "location search → exact raw listing".
 // Returns null on a backend error (UI shows retry), [] when the location genuinely has no listings.
 // (user spec: route rent→rent_location_index, buy→buy_location_index, then fetch details from raw.)
-export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: number; limit?: number }): Promise<FetchListingsResult> {
+export async function fetchListingsForQuery(
+  q: SearchQuery,
+  opts?: { offset?: number; limit?: number; signal?: AbortSignal },
+): Promise<FetchListingsResult> {
   let pageCandidates = 0;
   let pageTotal = 0;
   const pageOffset = Math.max(0, opts?.offset ?? 0);
   const pageLimit = opts?.limit ?? QUERY_LIMIT;
+  const signal = opts?.signal;
   if (!supabase) return { listings: null, pageCandidates, pageTotal };
+  if (signal?.aborted) return { listings: null, pageCandidates, pageTotal }; // Stop pressed before any network call started
   // Location/table/region scope — shared with the advanced-filter option-count RPCs (resolveSearchScope).
   const scope = await resolveSearchScope(q);
   if (!scope) return { listings: [], pageCandidates, pageTotal };
@@ -1240,7 +1257,7 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
     p_per_platform: null,
     p_limit: pageLimit,
     p_offset: pageOffset,
-  }));
+  }), RPC_TIMEOUT_MS, signal);
   if (error) return { listings: null, pageCandidates, pageTotal };   // index error OR timeout (RC-A) → retry UI, not "no matches"
   pageCandidates = (cands as Cand[] | null)?.length ?? 0;   // this page's matching-candidate count → drives Load-More offset/hasMore
   // EXACT total match count from the RPC's count(*) over() (same on every page); fall back to this page's
@@ -1308,9 +1325,9 @@ export async function fetchListingsForQuery(q: SearchQuery, opts?: { offset?: nu
   const entries = [...byTable];
   let fetched: Listing[][];
   try {
-    fetched = await Promise.all(entries.map(([tbl, ids]) => fetchRawByIds(q, tbl, ids)));
+    fetched = await Promise.all(entries.map(([tbl, ids]) => fetchRawByIds(q, tbl, ids, signal)));
   } catch {
-    return { listings: null, pageCandidates, pageTotal };   // RC-A: a raw-card chunk failed or timed out → retry UI, not a misleadingly-partial grid
+    return { listings: null, pageCandidates, pageTotal };   // RC-A: a raw-card chunk failed or timed out → retry UI, not a misleadingly-partial grid (incl. Stop-cancelled)
   }
   const map = new Map<string, Listing>();
   entries.forEach(([tbl], i) => { for (const l of fetched[i]) map.set(`${tbl}:${l.id}`, l); });

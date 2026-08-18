@@ -286,10 +286,18 @@ const LOADER_EXIT_MS = 450;
 // search, so chat can't pre-flip to "searching"). Overlaps the round-trip; only the remainder waits.
 const THINK_MS = 700;
 
-// One in-flight chat turn. The Stop box cancels it: `cancelled` makes every awaited beat bail, and
-// flushing the pending timers/resolvers unblocks any beat currently waiting.
-type Run = { cancelled: boolean; timers: ReturnType<typeof setTimeout>[]; flush: (() => void)[] };
-const makeRun = (): Run => ({ cancelled: false, timers: [], flush: [] });
+// One in-flight chat turn. The Stop box cancels it: `cancelled` makes every awaited beat bail,
+// flushing the pending timers/resolvers unblocks any beat currently waiting, and `ac.abort()` tears
+// down the real in-flight network request(s) (see bounded()'s external-signal support) — not just
+// tells the UI to stop waiting on them.
+//
+// `origin` (owner 2026-08-18) decides what Stop DOES once cancellation is done: a run that began at
+// «بحث» on the normal Filter must return the user to that exact Filter screen — never a run that
+// began in the AI chat (typed message, a Start-here chip, or a refine tap), which keeps today's
+// stop-in-place chat behavior. Only sendFilter's run is ever tagged 'filter'; every other makeRun()
+// call site is a chat-style turn by construction, so the default covers them without repeating it.
+type Run = { cancelled: boolean; timers: ReturnType<typeof setTimeout>[]; flush: (() => void)[]; origin: 'filter' | 'chat'; ac: AbortController };
+const makeRun = (origin: Run['origin'] = 'chat'): Run => ({ cancelled: false, timers: [], flush: [], origin, ac: new AbortController() });
 const waitRun = (run: Run, ms: number) =>
   new Promise<void>((resolve) => {
     run.timers.push(setTimeout(resolve, ms));
@@ -692,6 +700,12 @@ export default function Agent() {
   // Stop box: cancel the current turn. Drop the in-flight "thinking/searching" bubbles (anything
   // already written — the reply, earlier results — stays), unblock any waiting beat, and re-enable
   // the composer. (user request: a box the user can click to stop the search.)
+  // FILTER → SEARCH → STOP → SAME FILTER (owner 2026-08-18). A search that began at «بحث» on the
+  // normal Filter must feel like it never happened: cancel everything for real, then land the user
+  // back on the exact Filter state they submitted — never a partial-results or empty Agent screen.
+  // A search that began in the AI chat keeps the existing ChatGPT-like stop-in-place behavior below
+  // unchanged; only sendFilter() ever tags its run 'filter' (see the Run type), so that's the one and
+  // only signal this reads — no separate "did the user come from Filter" tracking to keep in sync.
   const stop = () => {
     const run = runRef.current;
     // Was a REAL search turn in flight, or only a «عرض المزيد» card cascade? (review fix 2026-07-09:
@@ -699,15 +713,44 @@ export default function Agent() {
     const hadTurn = !!run;
     if (run) {
       run.cancelled = true;
+      run.ac.abort(); // real network cancellation — see bounded()'s external-signal support in remote.ts
       run.timers.forEach(clearTimeout);
       run.flush.forEach((r) => r());
     }
+    const wasFilterOrigin = run?.origin === 'filter';
     runRef.current = null;
     pendingFilterRef.current = null; // also cancels a filter flow still typing its request bubble
     clearReveals();   // stop revealing more cards immediately — never continue toward card #15
     revealActiveRef.current = null; // forget the in-progress reveal so the NEXT message never completes it
     setRevealing(false); // Stop reverts to Send
     if (!hadTurn) return; // cascade halted; cards stay frozen, «عرض المزيد» recovers via bufferMore
+
+    if (wasFilterOrigin) {
+      // Erase the cancelled turn rather than freezing/annotating it — if the user opens الوكيل الذكي
+      // again later, a dangling "بحث..." bubble from a search that (from their side) never completed
+      // would contradict "it should feel like the search never completed". A bare `/agent` (no
+      // filter/seed) then greets fresh, exactly like any other new chat.
+      setMsgs([]);
+      setBusy(false);
+      // The just-cancelled filter's JSON is still sitting in lastFilterRef (set by the param-consuming
+      // effect before sendFilter ran). Without clearing it, resubmitting the SAME filter unchanged would
+      // match `filter !== lastFilterRef.current` as false and the effect would silently no-op — the
+      // exact "keep searching → nothing pops up" class lastFilterRef exists to prevent, here triggered
+      // by Stop instead of a stale mount.
+      lastFilterRef.current = undefined;
+      lastSeedRef.current = undefined;
+      // The submitted Filter state already lives in the shared query context — the param-consuming
+      // effect wrote it verbatim from `?filter=` before this search began (setQuery(() => q)), and
+      // nothing between then and here ever touches query context again. router.replace('/') is the
+      // exact navigation «تصفية» already uses to leave this screen (ModeSwitch's onSwitch below), which
+      // is what lets the Filter form's own rehydration (city/district catalog matching against query
+      // context) and — when the screen never unmounted — its still-live local state (price/area inputs,
+      // bedroom pills, category/type) show the pre-search selections back exactly, city and districts
+      // included. No separate "snapshot the filter" mechanism needed: nothing here ever overwrote it.
+      router.replace('/');
+      return;
+    }
+
     setStopped(true); // hide the "I can get you something more precise" CTA on the stopped results
     setBusy(false);   // search no longer running
     // Drop the in-flight thinking/searching bubbles; the cards already shown stay frozen. Add Ezhalah's
@@ -973,7 +1016,7 @@ export default function Agent() {
     searchingAtRef.current[statusId] = Date.now();
     setMsgs((m) => [...m, { id: uid(), role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined }]);
     toBottom();
-    const result = await runQuery(refined);
+    const result = await runQuery(refined, true, run.ac.signal);
     if (run.cancelled) return;
     opts?.onFetched?.(result.total ?? null);
     if (opts?.guided) setGuidedPills({ msgId: statusId, baseQ: opts.guided.baseQ, facets: opts.guided.facets, total: result.total ?? null });
@@ -1257,7 +1300,7 @@ export default function Agent() {
         askCountRef.current = 0;
         saidRef.current = [];
         beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
-        const result = await runQuery(turn.query);
+        const result = await runQuery(turn.query, true, run.ac.signal);
         const reply = forcedBroad
           ? `${getLocale() !== 'en'
               ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
@@ -1295,7 +1338,7 @@ export default function Agent() {
           askCountRef.current = 0;
           saidRef.current = [];
           beginSearching(statusId, combined); // loader + min-beat overlap the fetch (like filter/refine)
-          const result = await runQuery(combined);
+          const result = await runQuery(combined, true, run.ac.signal);
           await playListings(run, statusId, buildScrapeIntro(result.query ?? combined), result, v);
           if (run.cancelled) return;
           void promptSignupSoon(run);
@@ -1334,7 +1377,7 @@ export default function Agent() {
     setBusy(true);
     askCountRef.current = 0;
     saidRef.current = [];
-    runRef.current = makeRun();
+    runRef.current = makeRun('filter'); // owner 2026-08-18: tags this turn so Stop returns to Filter
     // Filter search: open at the top and let the request bubble type itself out FIRST, on its own —
     // the SEARCHING loader (full platform roster + highlight wave) does not mount until the bubble
     // has fully finished typing (onBubbleDone). (owner 2026-07-15: reversed from the prior "loader
@@ -1374,7 +1417,7 @@ export default function Agent() {
       // layer) left the «إزهله يبحث» loader spinning forever with no recovery. Wrapped in try/catch/
       // finally (mirrors loadMore) so the loader ALWAYS clears and a thrown turn shows an inline retry.
       try {
-        const result = await runQuery(pending.q);
+        const result = await runQuery(pending.q, true, run.ac.signal);
         if (run.cancelled) return;
         await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
         if (run.cancelled) return;
