@@ -46,6 +46,7 @@ type Diag = {
   moments: Array<Record<string, unknown>>;
   fallbackFired: boolean;
   signedOut: boolean | null;
+  exchangeError?: string;
 };
 
 export default function GoogleOneTap() {
@@ -58,9 +59,14 @@ export default function GoogleOneTap() {
   useEffect(() => {
     if (Platform.OS !== 'web' || !supabase) return;
     let cancelled = false;
-    supabase.auth.getSession()
-      .then(({ data }) => { if (!cancelled) setSignedOut(!data?.session); })
-      .catch(() => { if (!cancelled) setSignedOut(true); }); // auth unreachable → treat as logged out
+    // getUser() validates the token WITH THE SERVER; getSession() only reads local storage. After an
+    // account deletion (or any revoked/invalid token) the stale JWT can still parse locally, so
+    // getSession() would report "signed in" and we would never prompt — the exact case the owner
+    // raised: a deleted account, or someone who never signed up, must still get the prompt.
+    // Any error (no session, deleted user, revoked token, network) means: not signed in → prompt.
+    supabase.auth.getUser()
+      .then(({ data, error }) => { if (!cancelled) setSignedOut(!!error || !data?.user); })
+      .catch(() => { if (!cancelled) setSignedOut(true); })
     return () => { cancelled = true; };
   }, []);
 
@@ -91,9 +97,22 @@ export default function GoogleOneTap() {
           client_id: GOOGLE_WEB_CLIENT_ID,
           callback: async (resp: { credential?: string }) => {
             if (!resp?.credential || !supabase) return;
-            await supabase.auth.signInWithIdToken({ provider: 'google', token: resp.credential }).catch(() => {});
+            // Never swallow this. If Google hands us a credential and the Supabase exchange fails, the
+            // visitor sees no prompt AND stays logged out — indistinguishable from "Google suppressed
+            // it" unless we say so. Record it in the diagnostics and the console.
+            try {
+              const { error } = await supabase.auth.signInWithIdToken({ provider: 'google', token: resp.credential });
+              if (error) { diag.exchangeError = String(error.message ?? error); log('token exchange FAILED', error.message ?? error); }
+              else log('signed in via One Tap');
+            } catch (e) {
+              diag.exchangeError = String(e); log('token exchange threw', String(e));
+            }
           },
-          auto_select: true,
+          // auto_select:true silently signs a RETURNING visitor in and NEVER renders the prompt —
+          // which is exactly how "it used to appear and then stopped" happens once you've signed in
+          // with Google here before. The owner's requirement is to SEE the prompt and click it, so
+          // auto-select is off: Google always renders the account chooser. (owner 2026-08-18.)
+          auto_select: false,
           use_fedcm_for_prompt: useFedCM,
           // Clicking outside counts as a dismissal to Google and starts the exponential cooldown.
           cancel_on_tap_outside: false,
