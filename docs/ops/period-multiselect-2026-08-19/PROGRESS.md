@@ -323,6 +323,33 @@ compliant, no changes needed to the matching/diversification code itself:**
   something introduced or worsened by rent-period multi-select; noting it in the final report as a
   genuine finding per the owner's instruction, not treating it as a bug to fix in this task.
 
+## FINAL STATUS (end of session)
+
+- PR #777 (`feat/rent-period-multiselect-2026-08-19`): full feature, all code changes described
+  above. `npm test` 1409+ assertions 0 failures, `tsc --noEmit` clean, CI green
+  (Production-target lock + no-bypass, Taxonomy + location index, Full verification suite all pass).
+- Backend migration `20260818231309_trending_rpcs_rent_period_token_owner_2026_08_19` already
+  applied to production under `ops_deploy_lock` and merged to `main` via a fast-tracked separate PR
+  (#779) to unblock a fleet-wide deploy-drift incident unrelated to this feature's UI (see below) —
+  confirmed live: `mon_detect_trending_cohort_drift()` → 0 violations; direct RPC parity
+  (`top_cities_by_deal_ar` vs `location_search_candidates_ar`, الرياض/كلاهما) → 29,549 == 29,549.
+- MID-SESSION INCIDENT (not caused by this feature, handled and resolved): a concurrent
+  "data-integrity run#29" session applied 8 of its own migrations to production
+  (`rent_period_product_fallback_annual_when_no_monthly_evidence` through
+  `probe_contradiction_oracle_reads_matview_not_union_view`) without mirroring them to git,
+  triggering `migration-drift-guard` and blocking ALL frontend deploys fleet-wide (4 failed deploy
+  attempts, including an unrelated PR #764). Verified precisely against `schema_migrations` that
+  only 1 of the 9 migrations in that drift window was mine; fast-tracked it into its own PR (#779,
+  merged) so my contribution to the drift set was resolved within minutes. The other 8 were the
+  coordinating session's responsibility (mirrored separately via PR #774) — explicitly told to
+  stand down once that was confirmed in flight.
+- Real browser verification completed against the LOCAL dev server (Metro, connected to the REAL
+  production Supabase project `aannarbkwcymrotzwdbo` — same data, same RPCs) — see "Browser
+  journeys" in the final report. Production-URL (`ezhalah-app.vercel.app`) verification is PENDING:
+  the frontend has not been deployed yet, deliberately, because the fleet-wide deploy freeze from
+  the concurrent drift incident was still being resolved by the coordinating session as of this
+  writing ("I'll let you know once the fleet-wide deploy freeze is cleared").
+
 ## Next steps (not yet done)
 - [ ] Get 2nd agent's findings (rebuild_af_filter_rpcs 4-surface detail already pulled directly by
       me via MCP — see above; still need: mon_af_predicate_parity exact check, COHORT_QUESTIONS
