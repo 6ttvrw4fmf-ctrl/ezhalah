@@ -62,8 +62,9 @@ check('auto_select is false so Google actually RENDERS the prompt',
 check('token-exchange failures are recorded, never swallowed',
   /exchangeError/.test(code) && !/signInWithIdToken\([^)]*\)\.catch\(\(\)\s*=>\s*\{\}\)/.test(code),
   'swallowing this hides a real sign-in failure behind an apparent "no prompt"');
-check('prompt path requires signedOut === true AND no store user',
-  /signedOut\s*!==\s*true\s*\|\|\s*user/.test(code));
+check('prompt gate uses ONLY the server-validated answer, never the local-session store user',
+  /signedOut\s*!==\s*true\) return;/.test(code) && !/signedOut\s*!==\s*true\s*\|\|\s*user/.test(code),
+  'the store user comes from a LOCAL getSession, so a stale/deleted token would block the prompt');
 
 check('calls google.accounts.id.initialize()', /google\.accounts\.id\.initialize\(/.test(code));
 check('calls google.accounts.id.prompt()', /google\.accounts\.id\.prompt\(/.test(code));
