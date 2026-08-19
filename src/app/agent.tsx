@@ -18,6 +18,7 @@ import { runAfterAnimation } from '@/lib/afterAnimation';
 import { isAppSessionStarted } from '@/lib/appSession';
 import { msgRTL } from '@/lib/textDirection';
 import { stopReadAloud } from '@/lib/readAloud';
+import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import { CardIn, LoadingDots } from '@/components/CardReveal';
@@ -2020,7 +2021,12 @@ export default function Agent() {
                         // cascade during typing — the thumbs must never appear before the closing
                         // message above them).
                         if ((m.typing && !doneTyping[m.id]) || shown < Math.min(FIRST_PAGE, fetched)) return null;
-                        return <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudText={introText} />;
+                        // Read Aloud script (owner structure requirement, 2026-08-19): إزهله -> pause ->
+                        // summary -> pause -> cards, in the SAME order shown on screen. Sliced to `shown`
+                        // FIRST (never past what's actually rendered right now — "no hidden listing should
+                        // be spoken"); the script builder caps further to READ_ALOUD_CARD_CAP.
+                        const readAloudSegments = buildResultsReadAloudSegments(introText, m.result.listings.slice(0, shown));
+                        return <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} />;
                       })()}
                     </>
                   )}

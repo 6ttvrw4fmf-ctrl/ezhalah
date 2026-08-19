@@ -12,6 +12,8 @@ import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readAloud = readFileSync(join(root, 'src/lib/readAloud.ts'), 'utf8');
+const readAloudScript = readFileSync(join(root, 'src/lib/readAloudScript.ts'), 'utf8');
+const listingDisplay = readFileSync(join(root, 'src/lib/listingDisplay.ts'), 'utf8');
 const feedbackRow = readFileSync(join(root, 'src/components/FeedbackRow.tsx'), 'utf8');
 const agent = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
 const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
@@ -52,7 +54,26 @@ check('msgRTL (bubble RTL layout) has ONE definition (src/lib/textDirection.ts) 
 //    that would break iOS Safari's synchronous-user-gesture requirement), plus a calmer rate. ───────
 check('an Enhanced-quality Arabic voice is preferred when available, resolved via a pre-warmed cache (never awaited at speak time)', /VoiceQuality\.Enhanced/.test(readAloud) && /void Speech\.getAvailableVoicesAsync\(\)/.test(readAloud) && !/await Speech\.getAvailableVoicesAsync\(\)[\s\S]{0,200}?export function speakReadAloud/.test(readAloud));
 check('speakReadAloud() itself has no await before Speech.speak() (stays synchronous for the iOS Safari gesture requirement)', !/export function speakReadAloud[\s\S]*?await[\s\S]*?Speech\.speak/.test(readAloud));
-check('rate is tuned below the engine default (1.0) — less clipped/robotic than the raw default', /const SPEECH_RATE = 0\.\d+;/.test(readAloud) && /rate: SPEECH_RATE/.test(readAloud));
+// CHATGPT-LIKE PACING (owner 2026-08-19): rate is a MEASURED value (real playback timing against the
+// documented ~4.5 syllable/second natural-Arabic-speech benchmark), not a guess — pinned distinctly
+// from "some slow-sounding default" so a future edit can't silently drift it back toward 0.92 without
+// this check moving too. Only the number itself may legitimately change (re-measure and update both).
+check('speech rate is the measured, documented value (1.3 — natural-pace-tuned, not an arbitrary slowdown)', /const SPEECH_RATE = 1\.3;/.test(readAloud) && /rate: SPEECH_RATE/.test(readAloud));
+
+// ── STRUCTURE (owner 2026-08-19): إزهله -> pause -> summary -> pause -> visible property cards, in
+//    the SAME order shown on screen, capped, never reading raw/internal fields. ─────────────────────
+check("script opens with the intro word 'إزهله' followed by a pause before anything else", /const INTRO_WORD = 'إزهله';/.test(readAloudScript) && /segments: ReadAloudSegment\[\] = \[\{ text: INTRO_WORD, pauseAfterMs: PAUSE_MS \}\];/.test(readAloudScript));
+check('the summary is spoken next (second segment), also followed by a pause', /if \(summary\) segments\.push\(\{ text: summary, pauseAfterMs: PAUSE_MS \}\);/.test(readAloudScript));
+check('cards are appended AFTER intro+summary, via Array.forEach over the listings array (preserves on-screen order — never re-sorted)', /capped\.forEach\(\(listing, i\) => \{\s*segments\.push\(\{ text: cardSpeech\(listing\)/.test(readAloudScript));
+check('no pause is added after the LAST card (nothing trails a natural end)', /pauseAfterMs: i < capped\.length - 1 \? PAUSE_MS : 0/.test(readAloudScript));
+check('a hard cap exists on how many cards are spoken, applied via .slice() (bounded, not "all of them")', /export const READ_ALOUD_CARD_CAP = 5;/.test(readAloudScript) && /visibleListings\.slice\(0, READ_ALOUD_CARD_CAP\)/.test(readAloudScript));
+check('the caller passes the VISIBLE (reveal-count-sliced) listings, never the full fetched set — no hidden listing can be spoken', /buildResultsReadAloudSegments\(introText, m\.result\.listings\.slice\(0, shown\)\)/.test(agent));
+// No raw/internal fields anywhere in the card-speech builder: id, source_url, source/platform name,
+// free-text description/title, or a raw JSON dump. Only the Arabic DISPLAY helpers (listingDisplay.ts)
+// and the plain numeric stat fields (beds/bathrooms/area) are touched.
+const NO_INTERNAL_FIELDS = /listing\.id\b|listing\.source_url|listing\.source\b|listing\.description|listing\.title|JSON\.stringify/;
+check('cardSpeech() never touches an id/URL/source/description/title field or serializes raw JSON', !NO_INTERNAL_FIELDS.test(readAloudScript));
+check('card facts come from the SAME Arabic display helpers ResultCard.tsx itself uses (one derivation, spoken can never disagree with shown)', /listingTypeAr\(listing\)/.test(readAloudScript) && /listingLocationAr\(listing\)/.test(readAloudScript) && /listingPriceAr\(listing\)/.test(readAloudScript) && /export function listingTypeAr/.test(listingDisplay) && /export function listingPriceAr/.test(listingDisplay));
 
 // ── CLEANUP: never leaves a dangling utterance playing after the row unmounts (page navigation), or
 //    across a new search on the same screen. ───────────────────────────────────────────────────────

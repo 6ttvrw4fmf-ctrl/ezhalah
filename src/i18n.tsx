@@ -1229,8 +1229,11 @@ export function tBudgetSub(opt: string): string {
 
 // A pre-formatted listing price ("SAR 120,000/year", "SAR 2.9M"). Localize the currency and the
 // period suffix; Western digits and the "M" magnitude stay as displayed across Saudi listings.
-export function tPrice(price: string): string {
-  if (_locale !== 'ar') return price;
+// `loc` defaults to the current app locale (every existing call site is unaffected) — an explicit
+// override lets an Arabic-only surface (Read Aloud, owner 2026-08-19) format Arabic prices even
+// while the visible UI locale is English, without touching the module-global _locale.
+export function tPrice(price: string, loc: Locale = _locale): string {
+  if (loc !== 'ar') return price;
   // RC-G (hardening 2026-07-13): finalize() emits 'Price on request' when a listing has no numeric
   // price (~2,600 live rows). tPrice localized the currency/period but NOT this phrase, so it leaked
   // the bare English string onto Arabic-only cards. Map it to the neutral Arabic equivalent here.
