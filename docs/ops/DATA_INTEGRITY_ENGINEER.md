@@ -558,6 +558,62 @@ the true and useful part: **record a heavy detector's measured cost in its `COMM
 future run reads 21–27 s as normal and 60 s+ as a real regression. And before blaming production for
 a failure that coincides with your own sweep, check whether you were the load.
 
+## 25. A detector that cannot stay RED, and a cohort that cannot contain its subject (settled 2026-08-19, run #31)
+
+`mon_detect_silent_scraper_death` is the roster's only **P0**. From 2026-07-16 to 2026-08-19 it raised
+**49 alerts, resolved 45 of them in the SAME MICROSECOND they were created, and dispatched zero.**
+Nobody could ever have seen one. Three defects, and they were *hiding each other*:
+
+**25a. Raise and resolve must share ONE predicate.** The raise window was POSITIONAL ("the last 3
+`scrape_runs` rows are all `ok=false` or 0-row"); the self-heal clause was TEMPORAL ("any healthy run
+in the last 2 days"). Any death younger than 48 h satisfies **both**, so the function raised the alert
+and resolved it inside the same transaction — leaving the detector structurally blind for exactly the
+first 48 hours of a scraper death, the only window in which a P0 is useful. §23a found detectors that
+could never go GREEN; this is the same wound from the other side, and §24b (a barrier keyed on a
+downstream job's clock) is the third face of it. **The cure is always the same shape: derive the live
+key set from the cohort that raises, and hand exactly that to `mon_resolve_stale_keys()` on the
+evaluated path.** Never write a second, independently-worded "self-heal" clause — two phrasings of
+"is it still broken?" will disagree, and the disagreement is invisible.
+
+**25b. A count is not a state — and this is how you notice.** The roster reported
+`silent_scraper_death: 1`, which reads as *newly raised, go look*, while `open_alerts` showed nothing,
+because `mon_raise()` counted the raise and the same call resolved it. §11a added `open_alerts`
+because an all-zero sweep could hide open alerts; here a NON-zero count hid an alert that no longer
+existed. **Reconcile the two: a detector whose count is non-zero but whose `open_alerts` contribution
+is zero is either flapping or self-resolving, and both are bugs.** The cheap query that finds this
+class across the whole system in one shot — run it when a detector looks odd:
+`select kind, count(*), count(*) filter (where resolved_at = created_at) insta,
+count(*) filter (where dispatched_at is not null) dispatched from alert_event group by kind;`
+It found four more kinds carrying the same pathology (`deletion_spike` 41/43 insta with 1 dispatch,
+`stale_active`, `cron_ordering_contract`, `sql_mirror_drift`).
+
+**25c. A barrier whose COHORT cannot contain its most important subject.** §11a says a barrier nothing
+calls is decoration. This is the sharper version: the cohort joined `scrape_runs.platform` to
+`platform_registry.platform`, but aqar logs its runs as `aqar_residential` / `aqar_commercial` and
+dealapp as `dealapp_recover`. The join simply never matched, so **the two largest platforms could not
+raise a P0 under any circumstances** — aqar read 1,478 h since its last healthy run (i.e. never).
+Nothing was red; nothing could be. Barrier: `mon_detect_unattributable_platform_runs` (P1), which asks
+whether a registered active platform's runs can be found *at all*. It reads 0, and per §24c a standing
+0 is the healthy reading — it guards the run-naming contract between the scrapers and the registry.
+
+**25d. Measure the platform's own clock, not a default.** souq24 had **no `platform_cadence` row**, so
+every cadence-aware barrier silently defaulted it to 24 h — while the owner had set `every_n_days: 2`
+(48 h) on 2026-07-07 to cut metered-proxy bandwidth. It is the only non-daily platform in the matrix.
+The monitoring was measuring a clock the platform had deliberately been taken off, so one ordinary
+missed cycle rated as a P0 death. Corrected to 48 h, and **the severity was made to DISCRIMINATE, not
+to go quiet** (§21): the freshness P2 still fires at 50.9 h because that genuinely exceeds souq24's own
+48 h, while "dead" now means 96 h — two consecutive missed cycles. *When a default silently supplies a
+threshold's input, the missing row is the defect; `coalesce(…, 24)` is how "we never configured this"
+becomes "we measured this".*
+
+**And the grain trap that produced the false positive.** Sharded platforms write many `scrape_runs`
+rows per crawl (wasalt 102 rows across 53 distinct seconds per day; `aqar_residential` 285), so "the
+last 3 runs" was three arbitrary sibling shard rows from inside ONE crawl, ordered non-deterministically
+among rows sharing a second. wasalt's three most recent rows were `FETCHED 0 ROWS — proxy/network block`
+guard rows while the same batch held `ok=true rows_seen=96` two seconds earlier. **Before counting "the
+last N runs", check how many rows one run actually writes** — and prefer a time-based question, which
+is grain-independent by construction.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve
