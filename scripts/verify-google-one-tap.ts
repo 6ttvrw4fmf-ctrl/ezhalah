@@ -33,6 +33,17 @@ const check = (label: string, ok: boolean, detail = '') => {
 
 console.log('\nGoogle One Tap — our side of the contract\n');
 
+// ── THE RULE (owner, 2026-08-19, stated verbatim) ────────────────────────────────────────────────
+// "A not-signed-in user should ALWAYS get this popup from Google no matter what — even if he signed
+//  up with an account and then deleted it. Unless he signed in through Google, or Apple when we
+//  activate it, or his phone number if we activate it."
+//
+// So the ONLY thing that may suppress the prompt on our side is a REAL, SERVER-VALIDATED SESSION.
+// Everything else prompts: never signed up, signed out, deleted account, revoked token, expired
+// session, a token that still parses locally. And the check must stay PROVIDER-AGNOSTIC — getUser()
+// asks "is there a valid session", not "which method"; that is what makes Apple and phone OTP work
+// the moment they are switched on, with no change here.
+
 // getSession() is LOCAL-only. A deleted account / revoked token can still parse locally, so it would
 // report "signed in" and we would never prompt — the owner's exact case (2026-08-18): a deleted
 // account, or someone who never signed up, must still get the prompt. getUser() validates server-side.
@@ -112,6 +123,16 @@ check('diagnostics are inspectable in production without a rebuild', /__ezOneTap
 check('diagnostics record which path ran and whether the fallback fired',
   /attempts/.test(code) && /fallbackFired/.test(code) && /fedcmSupported/.test(code));
 check('component renders nothing itself (Google owns the UI)', /return null;/.test(code));
+
+// Provider-agnostic by construction: the suppression decision must never branch on WHICH method was
+// used. If a future change gates on provider === 'google' (or apple/phone), then activating Apple or
+// phone sign-in would silently start prompting users who ARE signed in.
+{
+  const gate = code.slice(0, code.indexOf('const run ='));
+  check('the suppression decision never branches on the sign-in method',
+    !/provider\s*===|['"](apple|phone)['"]\s*===|===\s*['"](apple|phone)['"]/.test(gate),
+    'gate on "is there a valid session", never on which provider produced it');
+}
 
 console.log(failures === 0
   ? '\n✓ One Tap contract intact: authoritative logged-out gate, reachable fallback, no self-inflicted cooldown, reasons captured\n'

@@ -240,6 +240,28 @@ Gated by `isBackendLive` (`@/lib/auth`, Supabase). When the backend/provider isn
 self-contained visual **mocks** (fake Google/Apple accounts, timed Face ID) — that is the pre-backend
 preview, not the product. `pendingMessage` replays across the auth round-trip.
 
+### 7.1b Google One Tap — who sees it (owner rule 2026-08-19, PERMANENT)
+
+**"A not-signed-in user should ALWAYS get this popup from Google no matter what — even if he signed up
+with an account and then deleted it. Unless he signed in through Google, or Apple when we activate it,
+or his phone number if we activate it."**
+
+The ONLY thing that may suppress the prompt on Ezhalah's side is a **real, server-validated session**
+(`supabase.auth.getUser()`). Everything else prompts: never signed up, signed out, **account deleted**,
+revoked token, expired session, or a token that still parses locally. The check is deliberately
+**provider-agnostic** — it asks "is there a valid session", never "which method" — so Apple and phone
+OTP are covered automatically the moment they are activated, with no change to `GoogleOneTap.tsx`.
+
+Six separate bugs had each broken this (all fixed 2026-08-18, PRs #773/#776/#780/#781/#782/#783); the
+worst called `cancel()` on every page load whenever a stale token was present, which Google counts as a
+user dismissal and which escalates its 2h→1d→7d→30d cooldown until the prompt stops appearing at all.
+Full account: project memory `google-one-tap-six-causes-2026-08-18`. Barrier:
+`scripts/verify-google-one-tap.ts` (every clause pinned and mutation-tested).
+
+**Not ours to override, and never to be claimed as fixed:** Google itself suppresses One Tap when the
+browser has no Google session (so automated/incognito browsers always report `skipped`), during its
+dismissal cooldowns, on opt-out, and under some privacy/third-party-cookie settings.
+
 ### 7.2 Guest gating (owner decision 2026-07-06)
 
 **Guests are unlimited — `gated` is hardcoded `false` and that is intended.** The only difference for
