@@ -63,11 +63,17 @@ type Scope = { label: string; deals: string[]; dopt: Record<string, unknown>; se
 const SCOPES: Scope[] = [
   // Deal-only, before Category / Monthly is chosen — the original coverage.
   { label: 'default',         deals: [BUY, RENT], dopt: {},                          search: {} },
-  // Monthly toggle. district_options_ar counts payment_monthly rows (incl. RNPL); the search asks
-  // rent_period='شهري' which EXCLUDES RNPL (the FROZEN PERIOD=SOURCE / RNPL→ANNUAL rule). If a
-  // district's only monthly rows are RNPL this flags a dead end — that is the guard working; the
-  // remedy is data/coverage, NEVER the frozen RNPL rule. Live 2026-08-10: 0 monthly dead-ends.
-  { label: 'monthly',         deals: [RENT],      dopt: { p_payment_monthly: true }, search: { p_rent_period: 'شهري' } },
+  // Monthly toggle. district_options_ar took a boolean p_payment_monthly through 2026-08-18; the
+  // owner's سنوي+شهري multi-select (2026-08-19, PR#777) replaced it with the same p_rent_period
+  // token ('شهري'/'سنوي'/'كلاهما') the search RPC already takes — src/data/locations.ts's
+  // ensureDistrictOptions sends p_rent_period, never p_payment_monthly, so this probe now matches
+  // what the app actually calls. Live 2026-08-19: the stale p_payment_monthly arg 404'd every
+  // 'monthly' scope call (PGRST202 — no matching overload), so this scope silently checked 0
+  // suggestions instead of failing loud; p_rent_period restores real coverage. district_options_ar
+  // still excludes RNPL under 'شهري' (the FROZEN PERIOD=SOURCE / RNPL→ANNUAL rule) — if a
+  // district's only monthly rows are RNPL this flags a dead end, which is the guard working; the
+  // remedy is data/coverage, NEVER the frozen RNPL rule.
+  { label: 'monthly',         deals: [RENT],      dopt: { p_rent_period: 'شهري' }, search: { p_rent_period: 'شهري' } },
   // Category picked (non-frozen — a category-scope dead-end IS a real fixable bug).
   { label: 'cat:Residential', deals: [BUY, RENT], dopt: { p_category: 'Residential' }, search: { p_category: 'Residential' } },
   { label: 'cat:Commercial',  deals: [BUY, RENT], dopt: { p_category: 'Commercial' },  search: { p_category: 'Commercial' } },
