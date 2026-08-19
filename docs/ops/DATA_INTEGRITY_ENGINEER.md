@@ -584,8 +584,28 @@ is zero is either flapping or self-resolving, and both are bugs.** The cheap que
 class across the whole system in one shot — run it when a detector looks odd:
 `select kind, count(*), count(*) filter (where resolved_at = created_at) insta,
 count(*) filter (where dispatched_at is not null) dispatched from alert_event group by kind;`
-It found four more kinds carrying the same pathology (`deletion_spike` 41/43 insta with 1 dispatch,
-`stale_active`, `cron_ordering_contract`, `sql_mirror_drift`).
+**That query is a SCREEN, not a verdict — and run #31 proved it by getting this wrong in its own
+report.** It flagged four more kinds (`deletion_spike` 41/43 insta with 1 dispatch, `stale_active`,
+`cron_ordering_contract`, `sql_mirror_drift`) and all four were **false**, because a lifetime total
+cannot tell a live bug from a fixed one:
+
+- `deletion_spike`'s 41 were **42 rows under ONE dedup key** — a single pre-fix incident
+  (`deletion_spike:gathern:6`, one aborted cleanup, 301 candidates > the 300 floor, 2026-08-09 03:20
+  → 2026-08-10 11:56, one row per 30-minute sweep). The `not exists (dedup_key)` guard added by
+  `20260809153239` had **already fixed it**; the only alert since (`…:aqarcity:25`, 2026-08-16) was
+  raised once and *dispatched*. Its self-heal is correctly scoped to `detail->>'event' = 'ABORTED'`
+  and needs a strictly later successful non-dry run, so a SPIKE is never silently closed.
+- `stale_active`'s 9 were all one key inside a **two-hour window on 2026-07-16**; nothing in 34 days.
+- `sql_mirror_drift` raises and resolves in **mutually exclusive branches** of one predicate — it is
+  structurally incapable of self-resolving.
+- `cron_ordering_contract`'s single row was run #30's own both-directions proof — a test artifact.
+
+**Before believing a hit: group by `dedup_key` and read the date range.** One incident that predates
+its own fix, and a deliberate both-directions proof, both look exactly like a live defect in a
+lifetime total. What made `silent_scraper_death` real was that its self-resolves spanned the whole
+34 days and were *still happening in the current sweep* — recency and spread, not the raw count.
+Add `max(created_at)` and `count(distinct dedup_key)` to the screen and the four false hits collapse
+on sight.
 
 **25c. A barrier whose COHORT cannot contain its most important subject.** §11a says a barrier nothing
 calls is decoration. This is the sharper version: the cohort joined `scrape_runs.platform` to
