@@ -66,6 +66,13 @@ check('prompt gate uses ONLY the server-validated answer, never the local-sessio
   /signedOut\s*!==\s*true\) return;/.test(code) && !/signedOut\s*!==\s*true\s*\|\|\s*user/.test(code),
   'the store user comes from a LOCAL getSession, so a stale/deleted token would block the prompt');
 
+// The prompt effect must depend on signedOut ALONE. Adding `user` re-runs it when the store flips,
+// and the cleanup then cancels the in-flight start() while the re-run bails on startedRef — GIS ready,
+// gate passed, zero prompts (measured live 2026-08-18 with a stale token).
+check('the prompt effect depends on signedOut alone, never on the store user',
+  /\}, \[signedOut\]\);/.test(code) && !/\}, \[signedOut, user\]\);/.test(code),
+  'a user-triggered re-run cancels the in-flight prompt and then bails on the once-per-load guard');
+
 check('calls google.accounts.id.initialize()', /google\.accounts\.id\.initialize\(/.test(code));
 check('calls google.accounts.id.prompt()', /google\.accounts\.id\.prompt\(/.test(code));
 check('prompt runs at most once per page load (guard ref)', /startedRef\.current\s*=\s*true/.test(code));
