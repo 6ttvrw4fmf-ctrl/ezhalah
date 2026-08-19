@@ -23,7 +23,11 @@ console.log('verify-google-onetap:');
 const cleanupCancelPattern = /return\s*\(\)\s*=>\s*\{[^}]*cancel\(\)/;
 const hasCleanupCancel = cleanupCancelPattern.test(src);
 // Check that there IS a separate effect that cancels only when user is truthy
-const hasSeparateCancelEffect = /useEffect\(\(\)\s*=>\s*\{[^}]*!user\)\s*return;[^}]*cancel\(\)/s.test(src);
+// Updated 2026-08-18: the cancel effect no longer guards on `!user` — it must fire only on a real
+// no-user → user TRANSITION. A stale/deleted-account token makes the store `user` truthy at mount,
+// and the old unconditional shape then cancelled the prompt on EVERY load, escalating Google's
+// 2h→1d→7d→30d dismissal cooldown until One Tap stopped appearing. Detail: verify-google-one-tap.ts.
+const hasSeparateCancelEffect = /useEffect\(\(\)\s*=>\s*\{[\s\S]*?hadUserRef[\s\S]*?cancel\(\)/s.test(src);
 assert('cancel() NOT in main effect cleanup (prevents cooldown)', !hasCleanupCancel || hasSeparateCancelEffect);
 
 // 2. Must have FedCM fallback — if FedCM is skipped, retry with use_fedcm_for_prompt: false
@@ -49,7 +53,7 @@ assert('once-per-page-load guard prevents double-prompting',
   src.includes('startedRef') && (src.includes('useRef(false)') || src.includes('useRef<boolean>(false)')));
 
 // 6. Must call cancel() ONLY when user signs in (separate effect with !user return guard)
-assert('cancel() only fires when user signs in (separate effect)',
+assert('cancel() only fires on a genuine sign-in transition (separate effect)',
   hasSeparateCancelEffect);
 
 // 7. GIS script src must point to the official Google endpoint
