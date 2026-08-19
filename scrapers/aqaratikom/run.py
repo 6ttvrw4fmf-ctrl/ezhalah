@@ -65,7 +65,7 @@ MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.15"))
 
 # estate.category (Arabic) → canonical English type. ارض/عمارة are routed res/com by purpose below.
 TYPE_MAP_AR = {
-    "شقة": "Apartment", "شقه": "Apartment", "استوديو": "Apartment", "دوبلكس": "Villa",
+    "شقة": "Apartment", "شقه": "Apartment", "استوديو": "Apartment", "دوبلكس": "Duplex",
     "فيلا": "Villa", "فلة": "Villa", "قصر": "Villa", "دور": "Floor", "روف": "Floor",
     "بيت": "House", "منزل": "House", "غرفة": "Room", "غرفه": "Room",
     "عمارة": "Building", "عماره": "Building", "بناية": "Building",

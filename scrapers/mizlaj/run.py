@@ -64,7 +64,7 @@ MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 # propertyType.code (Arabic type word) → canonical English type. عمارة/ارض get usage-routed below.
 TYPE_MAP_AR = {
     "شقة": "Apartment", "شقه": "Apartment", "استوديو": "Studio",
-    "فيلا": "Villa", "فلة": "Villa", "دوبلكس": "Villa", "قصر": "Villa",
+    "فيلا": "Villa", "فلة": "Villa", "دوبلكس": "Duplex", "قصر": "Villa",
     "دور": "Floor", "روف": "Floor", "بيت": "House", "منزل": "House",
     "عمارة": "Building", "عماره": "Building", "بناية": "Building",
     "ارض": "Residential Land", "أرض": "Residential Land",

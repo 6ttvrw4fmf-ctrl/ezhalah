@@ -79,7 +79,7 @@ WORKERS = int(os.environ.get("EAQARTABUK_WORKERS", "5"))
 # ("اراضي للبيع", "عماير للبيع", "عقارات سكنية"). Substring-matched in priority order so a more
 # specific word wins over a generic one.
 TYPE_PATTERNS: list[tuple[str, str]] = [
-    ("فيلا", "Villa"), ("فلة", "Villa"), ("دوبلكس", "Villa"), ("قصر", "Villa"),
+    ("فيلا", "Villa"), ("فلة", "Villa"), ("دوبلكس", "Duplex"), ("قصر", "Villa"),
     ("استوديو", "Studio"),
     ("شقة", "Apartment"), ("شقه", "Apartment"), ("شقق", "Apartment"),
     ("ملحق", "Floor"), ("دور", "Floor"), ("روف", "Floor"),

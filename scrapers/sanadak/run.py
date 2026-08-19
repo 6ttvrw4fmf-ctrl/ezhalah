@@ -74,7 +74,7 @@ TYPE_MAP_AR = {
     "شقة": "Apartment", "فيلا": "Villa", "دور": "Floor", "عمارة": "Building", "قصر": "Villa",
     "غرفة": "Room", "استراحة": "Rest House", "إستراحة": "Rest House", "شاليه": "Chalet",
     "مزرعة": "Farm", "أرض": "Residential Land", "ارض": "Residential Land", "بيت": "House",
-    "دوبلكس": "Villa", "روف": "Floor",
+    "دوبلكس": "Duplex", "روف": "Floor",
     "مكتب": "Office", "محل": "Shop", "معرض": "Showroom", "مستودع": "Warehouse",
     "ورشة": "Workshop", "فندق": "Hotel", "مصنع": "Factory", "أرض تجارية": "Commercial Land",
 }

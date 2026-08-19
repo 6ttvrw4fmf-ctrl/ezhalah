@@ -51,7 +51,7 @@ MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.4"))
 
 TYPE_MAP_AR = {
     "شقة": "Apartment", "شقة دبلكسية": "Apartment", "شقه دبلكسية": "Apartment", "استوديو": "Apartment",
-    "دبلكس": "Villa", "فيلا": "Villa", "قصر": "Villa", "بيت": "House", "دور": "Floor",
+    "دبلكس": "Duplex", "فيلا": "Villa", "قصر": "Villa", "بيت": "House", "دور": "Floor",
     "عمارة": "Building", "روف": "Floor", "أرض": "Residential Land", "ارض": "Residential Land",
     "أرض سكنية": "Residential Land", "مزرعة": "Farm", "استراحة": "Rest House", "إستراحة": "Rest House",
     "شاليه": "Chalet", "غرفة": "Room",

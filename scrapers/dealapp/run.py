@@ -86,7 +86,7 @@ TYPE_MAP_AR = {
     # folded into Residential Land. (canon unification, audit item 7d, 2026-07-27.)
     "ارض زراعية": "Agriculture Plot", "أرض زراعية": "Agriculture Plot",
     "مزرعة": "Farm", "مزرعه": "Farm",
-    "دوبلكس": "Villa", "روف": "Floor", "بنتهاوس": "Apartment", "استوديو": "Apartment",
+    "دوبلكس": "Duplex", "روف": "Floor", "بنتهاوس": "Apartment", "استوديو": "Apartment",
     # commercial
     "مكتب": "Office", "محل": "Shop", "معرض": "Showroom", "مستودع": "Warehouse",
     "ورشة": "Workshop", "ورشه": "Workshop", "مصنع": "Factory", "فندق": "Hotel",

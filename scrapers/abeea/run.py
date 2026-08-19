@@ -90,7 +90,7 @@ TYPE_RULES = [
     ("apartment", "Apartment"),
     ("studio", "Apartment"),
     ("villa", "Villa"),
-    ("duplex", "Villa"),
+    ("duplex", "Duplex"),
     ("palace", "Villa"),
     ("townhouse", "Villa"),
     ("floor", "Floor"),

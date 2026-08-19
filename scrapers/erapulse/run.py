@@ -62,7 +62,7 @@ SOURCE = "Era Pulse"
 
 # Era Pulse subType (English enum) → our canonical taxonomy.
 SUBTYPE_MAP = {
-    "VILLA": "Villa", "DUPLEX": "Villa", "PALACE": "Villa",
+    "VILLA": "Villa", "DUPLEX": "Duplex", "PALACE": "Villa",
     "APARTMENT": "Apartment", "STUDIO": "Apartment",
     "FLOOR": "Floor", "ROOF": "Floor",
     "BUILDING": "Building", "RESIDENTIAL_BUILDING": "Building",

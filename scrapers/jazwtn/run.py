@@ -81,7 +81,7 @@ TYPE_RULES = [
     ("شقه", "Apartment"),
     ("فيلا", "Villa"),
     ("فلة", "Villa"),
-    ("دوبلكس", "Villa"),
+    ("دوبلكس", "Duplex"),
     ("قصر", "Villa"),
     ("بيت", "House"),
     ("منزل", "House"),

@@ -73,7 +73,7 @@ ID_END = int(os.environ.get("ALKHAAS_ID_END", "1040"))
 SECTION_MAP_AR = {
     "أراضي سكنية": "Residential Land", "اراضي سكنية": "Residential Land",
     "فلل": "Villa",
-    "دبلوكسات": "Villa", "دبلكسات": "Villa", "دوبلكسات": "Villa",
+    "دبلوكسات": "Duplex", "دبلكسات": "Duplex", "دوبلكسات": "Duplex",
     "شقق": "Apartment",
     "أدوار": "Floor", "ادوار": "Floor",
     "استراحات": "Rest House", "إستراحات": "Rest House",
