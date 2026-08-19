@@ -13,17 +13,19 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { getListingFeedback, setListingFeedback, type FeedbackRating } from '@/lib/listingFeedback';
-import { speakReadAloud, stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
+import { speakReadAloud, stopReadAloud, subscribeReadAloud, type ReadAloudSegment } from '@/lib/readAloud';
 
 export default function FeedbackRow({
-  feedbackKey, shareUrl, onFeedback, readAloudText,
+  feedbackKey, shareUrl, onFeedback, readAloudSegments,
 }: {
   feedbackKey: string;
   shareUrl?: string;
   onFeedback?: () => void; // fired when a rating is SET (not cleared) — host shows the thanks toast
-  // The text this response's 🔊 button reads aloud. Omit to hide the button entirely (e.g. a
-  // results message with no summary text yet) rather than render a button that speaks nothing.
-  readAloudText?: string;
+  // The structured script (إزهله -> pause -> summary -> pause -> cards, owner 2026-08-19) this
+  // response's 🔊 button reads. Omit/empty to hide the button entirely rather than render one that
+  // speaks nothing — the CALLER decides the script (src/lib/readAloudScript.ts for results
+  // messages), this component only ever plays whatever it's given.
+  readAloudSegments?: ReadAloudSegment[];
 }) {
   const { t, isRTL } = useI18n();
   const [rating, setRating] = useState<FeedbackRating | null>(() => getListingFeedback(feedbackKey));
@@ -45,7 +47,7 @@ export default function FeedbackRow({
   useEffect(() => () => { if (speakingRef.current) stopReadAloud(); }, []);
   const onReadAloud = () => {
     if (speaking) { stopReadAloud(); return; }
-    if (readAloudText) speakReadAloud(feedbackKey, readAloudText);
+    if (readAloudSegments?.length) speakReadAloud(feedbackKey, readAloudSegments);
   };
 
   // Only one of up/down active; clicking the active one clears it (ChatGPT feel). The thanks toast
@@ -81,7 +83,7 @@ export default function FeedbackRow({
         <FbButton icon={rating === 'up' ? 'thumbs-up' : 'thumbs-up-outline'} active={rating === 'up'} onPress={() => vote('up')} label={t('Helpful')} />
         <FbButton icon={rating === 'down' ? 'thumbs-down' : 'thumbs-down-outline'} active={rating === 'down'} onPress={() => vote('down')} label={t('Not helpful')} />
         <FbButton icon={copied ? 'checkmark' : 'share-outline'} active={copied} onPress={onShare} label={t('Share')} />
-        {readAloudText ? (
+        {readAloudSegments?.length ? (
           <FbButton
             icon={speaking ? 'stop-circle' : 'volume-high-outline'}
             active={speaking}

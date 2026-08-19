@@ -17,10 +17,17 @@ import * as Speech from 'expo-speech';
 import { VoiceQuality, type Voice } from 'expo-speech';
 
 const AR_LANG = 'ar-SA';
-// A touch slower than the engine's own default (1.0) reads calmer and less clipped — the cheapest,
-// still-$0 lever on how "robotic" the built-in voice sounds (owner feedback 2026-08-19). Pitch is
-// left at the engine default: pushing it further tends toward uncanny rather than more natural.
-const SPEECH_RATE = 0.92;
+// CHATGPT-LIKE PACING (owner 2026-08-19 — "don't assume slower is correct, compare against
+// ChatGPT and test a few real responses"). Measured, not guessed: timed the actual "Majed" voice at
+// several rates via real onstart/onend playback (browser Console, this session) against Standard
+// Arabic's documented natural rate (~4.5 syllables/second — Aldholmi et al., Interspeech 2021). The
+// PREVIOUS value here (0.92, picked to sound "less clipped") was measured at only ~3.2-3.75 syll/s —
+// SLOWER than natural speech, not faster; slowing it further was the wrong direction. 1.3 measured
+// closest to the natural-pace benchmark (~4.2-4.8 syll/s depending on syllable-count assumptions) —
+// also broadly consistent with ChatGPT voice mode's own default pace, which targets natural
+// conversational speed rather than an artificially slowed reading voice. Pitch is left at the engine
+// default: pushing it further tends toward uncanny rather than more natural.
+const SPEECH_RATE = 1.3;
 
 // VOICE QUALITY (owner feedback 2026-08-19 — "sounds robotic"): most platforms register more than
 // one voice per language, and expo-speech surfaces a first-class Enhanced/Default quality tier — an
@@ -71,32 +78,57 @@ function splitIntoChunks(text: string): string[] {
   return parts.length ? parts : [text.trim()];
 }
 
-// Speak `text` (always Arabic) as `id` (pass the message id a caller already has — e.g. the
-// results/agent message id FeedbackRow is keyed by). Must be called from a user-gesture handler
-// (onPress) — iOS Safari silently drops speak() calls made any other way, so this module cannot
-// self-trigger even if it wanted to; there's no queue/timer path in here that could fire one on its
-// own, and the voice lookup above is pre-resolved rather than awaited here for the same reason.
-export function speakReadAloud(id: string, text: string) {
+// One spoken block, with an optional silent gap AFTER it — e.g. {text:'إزهله', pauseAfterMs:450}
+// reads the word then leaves a short natural pause before the next segment starts. There's no SSML
+// <break> in the Web Speech API (or expo-speech), so a pause is just a real setTimeout gap between
+// utterances — the standard workaround (owner structure requirement, 2026-08-19: إزهله → pause →
+// summary → pause → cards in order).
+export type ReadAloudSegment = { text: string; pauseAfterMs?: number };
+
+type Unit = { kind: 'speak'; text: string } | { kind: 'pause'; ms: number };
+
+// Segments -> a flat ordered list of speak/pause units. Each segment's OWN text is still split on
+// sentence boundaries and chained with NO gap (the Chrome-15s-bug workaround above) — the pause only
+// ever sits BETWEEN segments, which is what makes it read as a structural beat, not just a breath.
+function buildUnits(segments: ReadAloudSegment[]): Unit[] {
+  const units: Unit[] = [];
+  for (const seg of segments) {
+    const trimmed = seg.text.trim();
+    if (!trimmed) continue;
+    for (const chunk of splitIntoChunks(trimmed)) units.push({ kind: 'speak', text: chunk });
+    if (seg.pauseAfterMs) units.push({ kind: 'pause', ms: seg.pauseAfterMs });
+  }
+  return units;
+}
+
+// Speak `segments` in order (always Arabic) as `id` (pass the message id a caller already has —
+// e.g. the results/agent message id FeedbackRow is keyed by). Must be called from a user-gesture
+// handler (onPress) — iOS Safari silently drops speak() calls made any other way, so this module
+// cannot self-trigger even if it wanted to; there's no queue/timer path in here that could fire one
+// on its own, and the voice lookup above is pre-resolved rather than awaited here for the same
+// reason. A pending inter-segment pause from a PREVIOUS call is harmless if it fires after a stop()
+// or a newer speakReadAloud() — the `currentId` check below turns it into a no-op.
+export function speakReadAloud(id: string, segments: ReadAloudSegment[]) {
   stopReadAloud();
-  const trimmed = text.trim();
-  if (!trimmed) return;
+  const units = buildUnits(segments);
+  if (!units.length) return;
   setCurrent(id);
-  const parts = splitIntoChunks(trimmed);
   let i = 0;
-  const speakNext = () => {
+  const advance = () => {
     if (currentId !== id) return; // superseded by a stop() or another speakReadAloud() meanwhile
-    if (i >= parts.length) { setCurrent(null); return; }
-    const part = parts[i++];
-    Speech.speak(part, {
+    if (i >= units.length) { setCurrent(null); return; }
+    const unit = units[i++];
+    if (unit.kind === 'pause') { setTimeout(advance, unit.ms); return; }
+    Speech.speak(unit.text, {
       language: AR_LANG,
       rate: SPEECH_RATE,
       ...(bestArabicVoice ? { voice: bestArabicVoice.identifier } : {}),
-      onDone: speakNext,
+      onDone: advance,
       onStopped: () => { if (currentId === id) setCurrent(null); },
       // No paid fallback on error (owner requirement) — if the device has no matching voice, the
       // OS/browser either substitutes its default voice or no-ops; either way we just stop cleanly.
       onError: () => { if (currentId === id) setCurrent(null); },
     });
   };
-  speakNext();
+  advance();
 }
