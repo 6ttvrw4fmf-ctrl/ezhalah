@@ -185,7 +185,11 @@ export default function GoogleOneTap() {
     // NEVER call google.accounts.id.cancel() here. Google treats it as a USER dismissal and starts the
     // exponential cooldown (2h → 1d → 7d → 30d) — that alone can make One Tap "disappear" for days.
     return () => { cancelled = true; if (fallbackTimer) clearTimeout(fallbackTimer); };
-  }, [signedOut, user]);
+    // DEPS: signedOut ONLY. `user` must not be here — it is no longer read in this effect, and with a
+    // stale/deleted-account token the store flips it mid-flight, which re-runs the effect: the cleanup
+    // sets cancelled = true on the in-flight start(), and the re-run bails on startedRef. Net effect,
+    // measured live 2026-08-18: GIS loaded and ready, gate passed, and STILL zero prompt attempts.
+  }, [signedOut]);
 
   // The one legitimate cancel: the visitor signed in WHILE the prompt was up, so it is moot.
   //
