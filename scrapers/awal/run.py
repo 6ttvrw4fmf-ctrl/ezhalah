@@ -98,7 +98,7 @@ TITLE_TYPE_RULES = [
     ("فيلا", "Villa"),
     ("فلة", "Villa"),
     ("قصر", "Villa"),
-    ("دوبلكس", "Villa"),
+    ("دوبلكس", "Duplex"),
     ("دور", "Floor"),
     ("روف", "Floor"),
     ("شقة", "Apartment"),

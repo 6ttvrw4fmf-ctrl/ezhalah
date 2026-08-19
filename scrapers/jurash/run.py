@@ -76,7 +76,7 @@ MAX_PAGES = int(os.environ.get("JURASH_MAX_PAGES", "25"))
 # resolved `type` label (Arabic) → canonical English. "الأرض" carries the definite article ال.
 TYPE_MAP_AR = {
     "شقة": "Apartment", "شقه": "Apartment", "استوديو": "Apartment",
-    "فيلا": "Villa", "فلة": "Villa", "دوبلكس": "Villa", "قصر": "Villa",
+    "فيلا": "Villa", "فلة": "Villa", "دوبلكس": "Duplex", "قصر": "Villa",
     "دور": "Floor", "روف": "Floor", "بيت": "House", "منزل": "House",
     "عمارة": "Building", "عماره": "Building", "بناية": "Building",
     "أرض": "Residential Land", "ارض": "Residential Land",

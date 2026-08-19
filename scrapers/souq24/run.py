@@ -90,7 +90,7 @@ _PROXIES = {"http": PROXY, "https": PROXY} if PROXY else None
 # Arabic property-type word (from realestate_name / heading) → canonical English type.
 TYPE_MAP_AR = {
     "شقة": "Apartment", "شقه": "Apartment", "شقق": "Apartment", "استوديو": "Apartment",
-    "فيلا": "Villa", "فله": "Villa", "فلة": "Villa", "فلل": "Villa", "دوبلكس": "Villa",
+    "فيلا": "Villa", "فله": "Villa", "فلة": "Villa", "فلل": "Villa", "دوبلكس": "Duplex",
     "دور": "Floor", "أدوار": "Floor", "ادوار": "Floor", "روف": "Floor",
     "عمارة": "Building", "عماره": "Building", "عمائر": "Building", "مبنى": "Building",
     "بيت": "House", "منزل": "House",

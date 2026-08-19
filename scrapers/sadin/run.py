@@ -66,7 +66,7 @@ TYPE_MAP_AR = [
     ("عمارة تجارية", "Commercial Building"), ("مجمع تجاري", "Commercial Building"),
     ("استراحة", "Rest House"), ("إستراحة", "Rest House"), ("استراحه", "Rest House"),
     ("شقق", "Apartment"), ("شقة", "Apartment"), ("شقه", "Apartment"), ("استوديو", "Studio"),
-    ("دوبلكس", "Villa"), ("دبلوكس", "Villa"), ("فيلا", "Villa"), ("فلة", "Villa"), ("قصر", "Villa"),
+    ("دوبلكس", "Duplex"), ("دبلوكس", "Duplex"), ("فيلا", "Villa"), ("فلة", "Villa"), ("قصر", "Villa"),
     ("دور", "Floor"), ("روف", "Floor"),
     ("عمارة", "Building"), ("عماره", "Building"), ("بناية", "Building"), ("مبنى", "Building"),
     ("بيت", "House"), ("منزل", "House"),

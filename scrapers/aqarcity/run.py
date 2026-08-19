@@ -69,7 +69,7 @@ WORKERS = int(os.environ.get("AQARCITY_WORKERS", "4"))
 # verbose labels (e.g. "شقَّة صغيرة (استوديو)") so we substring-match after exact lookup.
 TYPE_MAP_AR = {
     "شقة": "Apartment", "شقه": "Apartment", "شقَّة": "Apartment", "استوديو": "Studio",
-    "فيلا": "Villa", "فلة": "Villa", "دوبلكس": "Villa", "قصر": "Villa",
+    "فيلا": "Villa", "فلة": "Villa", "دوبلكس": "Duplex", "قصر": "Villa",
     "دور": "Floor", "روف": "Floor", "بيت": "House", "منزل": "House",
     "عمارة": "Building", "عماره": "Building", "بناية": "Building",
     "أرض": "Residential Land", "ارض": "Residential Land",

@@ -52,7 +52,7 @@ MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 # Al Hoshan propertyType slug → our canonical taxonomy.
 TYPE_MAP = {
     "villa": "Villa", "apartment": "Apartment", "floor": "Floor", "building": "Building",
-    "duplex": "Villa", "palace": "Villa", "room": "Room", "rest_house": "Rest House",
+    "duplex": "Duplex", "palace": "Villa", "room": "Room", "rest_house": "Rest House",
     "chalet": "Chalet", "farm": "Farm", "land_residential": "Residential Land",
     "land": "Residential Land", "house": "House",
     # commercial
