@@ -285,6 +285,27 @@ tested-recently / not-yet-covered across فئات · أنواع · المدن ·
 card click-through. Random testing must not leave the same obscure نوع untested for weeks — the
 report must show the ledger split.
 
+### 39.1 The differential oracle and the run ledger (built 2026-08-20 — use them, don't rebuild them)
+Layer C (§40.5) is a permanent DB object, not per-run throwaway SQL:
+
+- **`ops_qa_diff(ui_type, deal, period, cities, districts, region_ids, amin, amax, beds, bmin, pmin, pmax)`**
+  → `(n, h)`: the eligible-set **count** and the **md5 of its sorted `source_table:listing_id` set**,
+  computed by an INDEPENDENT reimplementation of the matching predicate that never calls
+  `location_search_candidates_ar`. Comparing it against the RPC's own answer is what proves
+  `missing = extra = duplicates = count mismatch = 0` over the FULL inventory. It deliberately does
+  not reimplement ordering, limit/offset or diversity — those are not matching.
+- **`ops_qa_cohort`** (نوع → the exact `p_types` cohort + `(scope, scope2)`) and **`ops_qa_scope`**
+  (scope label → the exact `source_table[]` the client sends). Both are HARVESTED from real browser
+  requests each run — §1 forbids a hardcoded control list, and trap §41.6 is what happens when the
+  mapping is guessed instead.
+- **`ops_qa_search_run`** + `ops_qa_load_run(blob)` + `ops_qa_adjudicate(limit)`: the §40.7 per-search
+  evidence ledger. The harness pushes one pipe-delimited line per search; `ops_qa_adjudicate` runs the
+  oracle in bounded batches (a single 280-search comparison exceeds the tool timeout) and stamps each
+  row `EXACT_SET_MATCH` / `COUNT_MATCH_PAGE_CAPPED` / `COUNT_MISMATCH` / `SET_MISMATCH`.
+
+A full-inventory hash comparison is only meaningful when `rpc_total <= p_limit`; above that the client
+holds a 1,500-row page of a larger set, so the count is the comparable quantity (`full_cmp=false`).
+
 ## 40. MAJOR CERTIFICATION STANDARD (owner rule, 2026-08-18 — permanent default)
 
 **Applies to every MAJOR certification of: Normal Filter · Advanced Filter · search · matching ·
@@ -415,6 +436,52 @@ FINAL RATING: X/10
 ```
 Report the rating as `Rating Before → Rating After` per `docs/ops/ENGINEER_ROUTINES.md` — the single
 `FINAL RATING` line above is the "after" half and never replaces the pair.
+
+## 41. Harness traps that produce FALSE product bugs (measured 2026-08-20 — read before driving the UI)
+
+§40.7 forbids reporting a harness failure as a product failure. Every trap below was hit on a real run
+and each one, unnoticed, would have produced a confident false report. Check them first when the site
+appears broken.
+
+1. **Chromium + the egress proxy needs `--ssl-version-max=tls1.2`.** The pre-installed browser
+   (`/opt/pw-browsers/chromium`, build 1194) fails every navigation with `ERR_CONNECTION_RESET`
+   through the MITM proxy under TLS 1.3. Launch with
+   `proxy={'server': os.environ['HTTPS_PROXY']}` plus
+   `args=['--no-sandbox','--disable-quic','--ignore-certificate-errors','--ssl-version-max=tls1.2']`.
+   Also pass `executable_path='/opt/pw-browsers/chromium'` — a pip-installed Playwright wants a
+   browser build that is not there.
+2. **Never click bare viewport coordinates.** «عرض المزيد» sits far below the fold; a
+   `mouse.click(x, y)` computed from `getBoundingClientRect()` silently lands on nothing and the
+   button appears dead. Get the element, `scroll_into_view_if_needed()`, then `click()`. This trap
+   alone made a healthy «عرض المزيد» look like a total pagination failure across 8 journeys.
+3. **«عرض المزيد» is not the only element with that text.** Card descriptions carry their own
+   «عرض المزيد» expander (5+ per screen). Filter to the pressable by height (≥25 px) or the harness
+   clicks a card's description instead of the pager.
+4. **Cards drip in; the pager is disabled while they do.** A search reveals 10, and each
+   «عرض المزيد» reveals **100 more** with an animation. Wait until the `#N` card count STOPS growing
+   before clicking again — and never treat a stable count of **0** as "settled": the app types an
+   intro before the first card, so a naive stability check returns 0 for a perfectly healthy search.
+5. **`location_search_candidates_ar` is also fired by autocomplete.** The حي option-count probes call
+   the SAME RPC with `p_limit: 1`. Reading `rpc[0]` blindly made the harness believe the user had
+   selected a حي they never touched. **Only requests with `p_limit > 1` are result searches.**
+6. **Do not assume the client's table scope — harvest it.** `p_tables` differs per نوع (residential,
+   commercial, both-kind, and a `dealapp_residential` overlay for مكتب), and the two monthly-only
+   sources are added **only for Residential-macro cohorts** on a شهري/كلاهما search. Guessing this
+   mapping made the differential oracle under-count five searches; they read as product defects until
+   the mapping was re-derived from the harvest. `ops_qa_cohort` / `ops_qa_scope` hold the harvested
+   truth — refresh them, never hand-edit them.
+7. **«شهري» alone needs two clicks, in order.** The period chips are a multi-select with a
+   minimum-one rule: سنوي is on by default and cannot be deselected while it is the only one.
+   Select شهري first (state becomes «كلاهما»), then deselect سنوي. There is no third «كلاهما»
+   button — both chips selected IS كلاهما (owner 2026-08-19).
+8. **Verify click-through without touching the source.** `openListing()` calls
+   `window.open(url,'_blank')` on web. Override `window.open` in an init script to record the URL and
+   return null, and abort any non-Ezhalah request at the route layer. That proves card → correct
+   listing identity with **zero source-platform traffic** (§40.6).
+9. **Similar cards are not duplicate cards.** Text-shaped dedup keys (platform+price+area+حي+snippet)
+   collide across genuinely distinct listings from the same agent/building — one run showed 150 false
+   "duplicates" in 210 مكتب cards. Identity is the click-through URL: 110 cards produced 110 distinct
+   destinations. §30 (similarity ≠ evidence) applies to the harness too.
 
 ## Final principle
 **MATCH → SOURCE TRUTH → DIVERSITY → USER JOURNEY → PERFORMANCE**, in that order. The engineer owns
