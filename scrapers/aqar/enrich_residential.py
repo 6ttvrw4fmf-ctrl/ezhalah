@@ -480,6 +480,14 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
 
     # Map our slug → canonical type, then localize deal.
     property_type = N.SLUG_TO_TYPE.get(type_slug)
+    if property_type is None:
+        # A slug Aqar publishes that we have no mapping for. Today this cannot happen (we only crawl
+        # discover.CATEGORIES, all of which are mapped) — but if Aqar ADDS a category (a duplex one, say),
+        # a silent None here would write a type-less row that never becomes searchable, and nobody would
+        # know. Say it loudly instead. Owner asked for exactly this guard on 2026-08-19.
+        print(f"⚠ aqar: UNMAPPED category slug {type_slug!r} (ad {ad_number}) — add it to "
+              f"normalize.SLUG_TO_TYPE and discover.CATEGORIES, or the listing is unreachable",
+              flush=True)
     transaction_type = "Rent" if deal_slug == "rent" else "Buy"
 
     # Land ZONING split: Aqar lumps every plot under one أراضي category (→ "Residential Land"). Read the
