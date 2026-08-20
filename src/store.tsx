@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } from '@/i18n';
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
 import { HOME_DEFAULT_QUERY } from '@/lib/searchDefaults';
+import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
 import { resolveLocation, ensureLocationIndex } from '@/data/locations';
@@ -173,7 +174,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // enforce the guest reset. (user request.)
   const { locale, setLocale } = useI18n();
   const localeInitRef = useRef(false);
-  const historyLoadedRef = useRef(false);
+  // WHICH account's history is currently loaded — not merely "did we load once". A boolean here was
+  // a real bug: the hydrate effect is one-shot, so a user who signed in DURING a session (the guard
+  // already having run while they were a guest) never had their own saved history read, and the
+  // sidebar stayed empty until a full reload. Holding the key makes the effect re-run whenever the
+  // account changes, which is the only correct trigger. null = nothing loaded yet.
+  const historyLoadedRef = useRef<string | null>(null);
 
   // React to auth state: signed-in → enable persistence + restore the saved language once; guest →
   // disable persistence, clear any saved value, and snap back to the Arabic default for this load.
@@ -204,20 +210,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
     AsyncStorage.setItem(LOCALE_KEY, locale).catch(() => {});
   }, [locale, user]);
 
-  // Restore saved chats on launch. SIGNED-IN users hydrate from their own bucket; GUESTS hydrate
-  // from a separate `history:guest` bucket so things like a starred chat survive a refresh in the
-  // same browser. (user request: click star → refresh → star still there.)
+  // Restore saved chats. SIGNED-IN only — see the persistence effect below for why a guest's
+  // searches are never written to disk (owner decision 2026-08-20: anonymous = temporary).
+  //
+  // Re-runs when the ACCOUNT changes, not once per mount. Guest → sign-in must pull that user's own
+  // saved history into the sidebar immediately; signing into a different account must replace it,
+  // never merge. Keyed on the storage key so both transitions are the same code path.
   useEffect(() => {
     if (!authChecked) return;
-    if (historyLoadedRef.current) return;
-    historyLoadedRef.current = true;
+    const key = user ? historyKey(user.sub) : null;
+    if (historyLoadedRef.current === (key ?? 'guest')) return;
+    historyLoadedRef.current = key ?? 'guest';
     // Purge the legacy shared key once — it's the source of the cross-account leak. From here on,
     // history lives only under this account's own key.
     AsyncStorage.removeItem(LEGACY_HISTORY_KEY).catch(() => {});
-    const key = historyKey(user ? user.sub : 'guest');
+    // Guests: nothing on disk to read, and anything a previous build left behind is removed rather
+    // than adopted, so an anonymous search can never resurface after a refresh.
+    if (!key) {
+      removeKeysSync([historyKey('guest')]);
+      AsyncStorage.removeItem(historyKey('guest')).catch(() => {});
+      setHistory([]);
+      return;
+    }
+    // Signing in from a guest session must not carry the guest's in-memory chats into the account —
+    // start from what this account itself has saved, nothing more.
+    setHistory([]);
     AsyncStorage.getItem(key)
       .then((v) => {
         if (!v) return;
+        // A later account switch could have landed while this read was in flight; only apply it if
+        // this is still the account we are showing.
+        if (historyLoadedRef.current !== key) return;
         try {
           const saved = JSON.parse(v);
           if (Array.isArray(saved)) setHistory(saved as HistoryItem[]);
@@ -226,12 +249,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, [authChecked, user]);
 
-  // Persist chats — for signed-in users under their own key, for guests under the shared `guest` key.
+  // Persist chats — SIGNED-IN USERS ONLY, under their own key.
+  //
+  // ACCOUNT-AWARE BY OWNER DECISION (2026-08-20): "Logged out → refresh = current temporary search
+  // disappears. Logged in → previous completed search is saved and recoverable from sidebar
+  // history." A guest's searches therefore live in memory for the session and are never written to
+  // disk, so a refresh cannot bring them back. This costs nothing visible: the sidebar's history
+  // list is rendered only for a signed-in user, so the old `history:guest` bucket was invisible
+  // retention of anonymous searches — exactly what the owner ruled against.
+  //
   // Writes localStorage DIRECTLY (synchronous) on web so a refresh immediately after a star/delete can
   // never lose the change. AsyncStorage on native handles the same job. (user-reported persistence bug.)
   useEffect(() => {
     if (!historyLoadedRef.current) return;
-    const key = historyKey(user ? user.sub : 'guest');
+    if (!user) return;                       // guests: session-only, nothing on disk
+    const key = historyKey(user.sub);
     const json = JSON.stringify(history);
     try {
       if (typeof localStorage !== 'undefined') localStorage.setItem(key, json);
@@ -263,16 +295,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // price) rather than the label text — so the same search recorded again, even after the UI language
   // flipped (which changes the label string), updates the one existing chat instead of spawning a
   // duplicate. The freshly-recorded chat becomes the active one (highlighted in the sidebar).
-  const sj = (v: unknown) => JSON.stringify(v ?? null);
-  const sameQuery = (a: SearchQuery, b: SearchQuery) =>
-    a.deal === b.deal && a.location.trim() === b.location.trim() && a.category === b.category &&
-    a.type === b.type && a.detail === b.detail && a.priceBand === b.priceBand &&
-    a.priceInput === b.priceInput && a.typeGroup === b.typeGroup &&
-    sj(a.types) === sj(b.types) && sj(a.contextBedsList) === sj(b.contextBedsList) &&
-    a.contextBeds === b.contextBeds && a.contextSize === b.contextSize &&
-    a.areaMin === b.areaMin && a.areaMax === b.areaMax &&
-    a.priceMin === b.priceMin && a.priceMax === b.priceMax &&
-    sj(a.districts) === sj(b.districts);
+  // Identity lives in src/lib/savedSearchIdentity.ts — read the header there for why. In short: this
+  // used to hand-list 17 of SearchQuery's 41 fields, so two searches differing ONLY in سنوي/شهري/
+  // كلاهما, in إيجار+شراء, or in ANY Advanced Filter answer were treated as the same chat; the newer
+  // one overwrote the older entry and that search disappeared from the sidebar (15/15 measured).
+  // Comparing everything-but-a-justified-ignore-list also means the next field added to SearchQuery
+  // is included automatically instead of silently reopening the hole.
+  const sameQuery = isSameSavedSearch;
   // If the user already has a chat for this query, KEEP it (its id and its starred flag) — just
   // refresh the label/timestamp and bump it to the top. Without this, re-running the same search was
   // creating a brand-new entry and silently nuking the star. (user-reported bug.)
@@ -368,7 +397,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // and an async-only removal can lose that race.
         removeKeysSync(['pendingMessage', LEGACY_HISTORY_KEY, historyKey('guest')]);
         AsyncStorage.multiRemove(['pendingMessage', LEGACY_HISTORY_KEY, historyKey('guest')]).catch(() => {});
-        historyLoadedRef.current = false;
+        historyLoadedRef.current = null;
         void signOutBackend();
       },
       deleteAccount: async () => {
@@ -400,7 +429,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSearchCount(0);
         setActiveChatId(null);
         setPendingMessageState(null);
-        historyLoadedRef.current = false;
+        historyLoadedRef.current = null;
         // No signOutBackend() here — deleteAccountBackend() above already signed out, and only after
         // the auth user was actually deleted.
         return true;
@@ -501,18 +530,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleStar: (id) =>
         setHistory((h) => {
           const next = h.map((it) => (it.id === id ? { ...it, starred: !it.starred } : it));
-          try {
-            const k = historyKey(user ? user.sub : 'guest');
-            if (typeof localStorage !== 'undefined') localStorage.setItem(k, JSON.stringify(next));
+          // Signed-in only, same rule as the persistence effect: a guest has nothing on disk to keep
+          // in step, and writing here would re-create the anonymous bucket the owner retired.
+          if (user) try {
+            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), JSON.stringify(next));
           } catch {}
           return next;
         }),
       deleteHistory: (id) =>
         setHistory((h) => {
           const next = h.filter((it) => it.id !== id);
-          try {
-            const k = historyKey(user ? user.sub : 'guest');
-            if (typeof localStorage !== 'undefined') localStorage.setItem(k, JSON.stringify(next));
+          if (user) try {
+            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), JSON.stringify(next));
           } catch {}
           return next;
         }),
