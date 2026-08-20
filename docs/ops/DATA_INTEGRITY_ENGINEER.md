@@ -634,6 +634,80 @@ guard rows while the same batch held `ok=true rows_seen=96` two seconds earlier.
 last N runs", check how many rows one run actually writes** — and prefer a time-based question, which
 is grain-independent by construction.
 
+## 26. Advanced Filter — the DATA LAYER is in scope (owner rule, 2026-08-20)
+
+Historically this file said "Ignore Advanced Filter" (line 90) because Advanced Filter belonged in
+full to the Senior Production Engineer (routine #2). The owner amended that on 2026-08-20 after
+asking this engineer to audit its own AF coverage: **the DATA LAYER underneath Advanced Filter is
+part of this routine's daily scope**. The boundary is drawn tightly — Data Integrity certifies
+everything up to and including the search index; the UI matching layer stays with Search QA
+(routine #4); the RPC surface, AI-Agent integration, and product taxonomy stay with the Senior
+(routine #2). The three routines still meet at Advanced Filter from three sides; none absorbs the
+others.
+
+**The daily obligation, restated:**
+
+```
+SOURCE  →  SCRAPER  →  RAW  →  CANONICAL  →  listing_extra_attrs  →  search_listings_ar
+                                                                     ↑ this routine ends here
+```
+
+Every AF field exposed to Search QA must be backed by correct, trustworthy, current data. The
+tri-state law of `docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md` §2 (`true` / `false` / **`NULL`** — a
+guessed `false` is a corruption incident, not a default) is the compliance criterion.
+
+### 26.1 What the daily audit already covers, and where it runs
+
+Six live detectors validate the AF data layer today; the run must confirm they executed and their
+counts. Cite this table when reporting AF coverage:
+
+| detector | what it certifies | where it runs |
+|---|---|---|
+| `mon_af_predicate_parity` | AF RPCs are 1 overload, byte-exact vs the build ledger, and share `af_eligible_count`'s eligibility params | hourly cron :43 |
+| `mon_af_new_listing_readiness` | (a) every certified-cohort platform has a `listing_extra_attrs` branch; (b) per platform × field × cohort segment, fresh-48 h capture rate hasn't collapsed vs all-time; (c) source-age reaches the resolver | daily 06:52 |
+| `mon_rich_attrs_barrier` | canonical → search parity for `listing_rich_attrs`: 1:1 key, every cohort platform mapped, persistent (not in-flight) drift | daily 06:52 |
+| `mon_detect_v2_discards_captured_attrs` | any AF attribute present in `listing_extra_attrs`/`listing_age_resolved` reaches `listing_native_location_v2` (no branch drops it) | roster (jobid 38, :29/:59) |
+| `mon_detect_monthly_af_exactness` | Rent/Monthly Residential: chip = referee = landed count, and no NULL-rated row satisfies a rating filter | roster |
+| `mon_detect_af_tri_state_violations` (added run #34) | (A) NULL→false silent conversion between `listing_extra_attrs` and `search_listings_ar` — must stay 0; (B) all-one-value stuck field per (platform × field × cohort segment) with cross-platform sanity — waivable by `ops_amenity_capture_verified` | roster |
+
+Everything the run touches for AF happens inside `af_cohort_registry`, which is the **live** scope
+definition — enumerate it each run, never hard-code its contents. It is edited by other routines
+between runs: it moved from 57 rows / 29 types to 56 rows / 32 types inside a single day
+(2026-08-20), so any count pinned in prose here is stale by the time it is read. The registry spans
+both Residential and Commercial types across Buy / Rent-Annual / Rent-Monthly; rows outside it are
+correctly excluded from the AF checks because they carry no AF chips. Report the counts the run
+actually measured:
+
+```sql
+select deal_ar, coalesce(rent_period_ar,'(n/a)') period, count(*) types
+from af_cohort_registry where enabled group by 1,2 order by 1,2;
+
+select count(*) filter (where production_ready) cohort_rows, count(distinct source_table) platforms
+from search_listings_ar s
+where af_in_certified_cohort(s.deal_ar, s.rent_period_ar, s.type_ar);
+```
+
+### 26.2 The core rule still overrides
+
+The impossible-value trap of §0.1 and §19 applies here directly. During the run #34 barrier design
+102 cohort rows had `street_width_m > 200 m` in the search index; aqar 124827's own captured page
+reads «عرض الشارع 7,779 م» — the source published 7,779 metres. Weird is not wrong. A barrier that
+would pressure a repair of source-published numbers is worse than no barrier, so
+`mon_detect_af_tri_state_violations` deliberately does **not** flag impossible values; it flags only
+what the pipeline itself can corrupt (silent NULL→false, and stuck parsers evidenced by cross-
+platform variance). Extreme source-published values remain preserved and searchable.
+
+### 26.3 What still belongs elsewhere — do not duplicate
+
+- The **~200 real browser journeys** and «intended state = UI state = serialized request state»
+  three-way equality of `SEARCH_MATCH_QA_ENGINEER.md` §40 are Search QA's certification; this
+  routine never runs a browser.
+- Deciding whether a certified cohort should be added to or retired from `af_cohort_registry` is
+  a product / taxonomy call for the owner (§0.1 RED list).
+- The AF **RPC-behaviour and AI-Agent** layer stays with the Senior (routine #2). The line drawn
+  is at `search_listings_ar`: this routine ensures the row in the search index is correct; the
+  Senior ensures the RPC and Agent surfaces read it correctly.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve

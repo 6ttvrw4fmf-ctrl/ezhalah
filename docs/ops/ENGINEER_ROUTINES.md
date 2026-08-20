@@ -10,7 +10,7 @@
 |---|---|---|---|---|---|
 | 1 | ⚡ Daily JUNIOR SCRAPING Engineer | `trig_01NpFaJ1ALUZbZKdKpCdWF16` | 05:00 | claude-sonnet-5 | Daily scraping layer ONLY |
 | 2 | 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit | `trig_01RCVx7ie1T1i5oPC6KzZAKd` | 06:00 | claude-opus-5 | Broad production engineering, **including Advanced Filter + AI Agent** |
-| 3 | 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) | `trig_01Tr6Rb6XPggFXqCf3EKG62y` | 07:00 | claude-opus-5 | Full scraped inventory / Normal Filter ONLY, **Advanced Filter explicitly out of scope** |
+| 3 | 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) | `trig_01Tr6Rb6XPggFXqCf3EKG62y` | 07:00 | claude-opus-5 | Full scraped inventory / Normal Filter, **and the DATA LAYER underneath Advanced Filter (source → scraper → parser → DB → canonical → search index).** AF UI matching stays with #4; AF RPC + AI Agent stay with #2. (2026-08-20 owner amendment.) |
 | 4 | 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA | `trig_016eagxsMuB2cCbMe9DK7JJD` | 08:00 | claude-opus-5 | Live production Normal Filter USED AS A REAL USER: matching → diversity → «عرض المزيد» → card click-through, end to end |
 
 Schedules are deliberately **staggered one hour apart** so the heavy DB phases never launch
@@ -48,7 +48,9 @@ Canonical spec: **`docs/ops/DATA_INTEGRITY_ENGINEER.md`** (file wins over the li
 divergence). 17-section owner spec: source-is-truth, everything-scraped accounted for, real-user
 search proof via the production RPC, daily inactive-resurrection audit (target 0 false
 inactivations), price/area barriers, one-report-only autonomous loop, the 10/10 honesty rule.
-**Ignore Advanced Filter** — that belongs to the senior (routine #2).
+**Advanced Filter data layer** (source → scraper → parser → DB → canonical → search index) is
+inside this routine's scope from 2026-08-20 onwards — see `DATA_INTEGRITY_ENGINEER.md` §26 and the
+six-detector table there. AF UI matching stays with #4; AF RPC surface + AI Agent stay with #2.
 
 Carries a **§0 standing operating contract** (owner, 2026-08-12): this engineer owns every safely
 fixable data-integrity problem it discovers from beginning to end, does not pause for permission on
@@ -142,9 +144,11 @@ revert is reported as a revert rather than rediscovered by hand.
 
 ## Boundary rules (permanent)
 
-- Junior detects & escalates; it never deep-audits. Senior owns Advanced Filter + AI Agent + broad
-  infra. Data Integrity owns Normal-Filter/full-inventory fidelity and never touches Advanced
-  Filter. No routine absorbs another's responsibilities.
+- Junior detects & escalates; it never deep-audits. Senior owns the Advanced Filter RPC surface +
+  AI Agent + broad infra. Data Integrity owns Normal-Filter/full-inventory fidelity **and the AF
+  DATA LAYER up to and including the search index** (2026-08-20 owner amendment — see
+  `DATA_INTEGRITY_ENGINEER.md` §26). Search QA owns real-user AF UI matching. No routine absorbs
+  another's responsibilities.
 - All three write durable state (`docs/ops/daily-metrics.jsonl` / `ops_senior_audit_run`) and obey
   the shared gates: deploy lock, migration-commit duty, PR `--head` discipline, cron minute-slot
   discipline (see AGENTS.md).
