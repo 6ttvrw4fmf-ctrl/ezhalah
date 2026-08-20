@@ -387,6 +387,36 @@ function rpcCountFilterParams(q: SearchQuery) {
   const { p_sort_by: _drop, ...rest } = rpcFilterParams(q) as ReturnType<typeof rpcFilterParams> & { p_sort_by?: string };
   return rest;
 }
+
+// EVERY answered Advanced-Filter question, as RPC params. rpcFilterParams() deliberately carries only
+// the NORMAL-filter narrowing (types/beds/price/area), so any count surface that needs to reflect the
+// user's advanced answers must add these on top — and the ones that forget silently overstate.
+//
+// This has now been the same bug twice. 2026-07-24: the age-bucket badges ignored an already-selected
+// amenity filter and showed counts "far larger than what Search actually returns". 2026-08-20 (AF
+// major certification): `fetchDistrictEligibleCounts` — the helper written specifically so that
+// "count and outcome cannot disagree" — re-ran the results RPC WITHOUT the advanced answers. Measured
+// live on Riyadh / Rent-Annual / شقة with amenities=[elevator] + bathMin=3: the top 8 districts
+// advertised 4,141 listings and returned 511 on click, an 8.1x overstatement, every row wrong.
+//
+// Keep this as the ONE definition. A new advanced question adds its param here and every count
+// surface that spreads it stays correct by construction; verify-af-count-params-carry-advanced.ts
+// fails if the district-count path stops spreading it.
+export function rpcAdvancedFilterParams(q: SearchQuery) {
+  return {
+    ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
+    ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
+    ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
+    ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
+    ...(q.directions?.length ? { p_directions: q.directions } : {}),
+    ...(q.ratingMin != null ? { p_rating_min: q.ratingMin } : {}),
+    ...(q.reviewsMin != null ? { p_reviews_min: q.reviewsMin } : {}),
+    ...(q.unitSubtypes?.length ? { p_unit_subtypes: q.unitSubtypes } : {}),
+    ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
+    ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
+    ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
+  };
+}
 const RPC_SORT_KEYS = new Set(['oldest', 'price_asc', 'price_desc', 'area_asc', 'area_desc', 'beds_desc']);
 
 export type SearchScope = {
@@ -737,6 +767,11 @@ export async function fetchDistrictEligibleCounts(
   const base = {
     ...scopeParams,
     ...rpcCountFilterParams(q),
+    // The user's answered ADVANCED questions belong here too: this helper's whole promise is that the
+    // number beside a district equals what selecting it returns, and the results RPC applies the
+    // advanced predicates whether or not this count call sends them. Omitting them made every district
+    // overstate by up to 8x (AF major certification 2026-08-20).
+    ...rpcAdvancedFilterParams(q),
     ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
     p_limit: 1,
     p_offset: 0,
