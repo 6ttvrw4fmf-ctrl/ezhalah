@@ -136,8 +136,16 @@ check('history de-dupes by QUERY, so a repeated search cannot create a second sa
   /const prior = h\.find\(\(it\) => sameQuery\(it\.query, q\)\)/.test(store));
 check('history is bucketed per account, so a signed-in user sees their own chats after a refresh',
   /const historyKey = \(sub: string\) =>/.test(store));
+// The rule this has always guarded is "a refresh cannot load the WRONG bucket". It used to be
+// written as the literal ternary historyKey(user ? user.sub : 'guest'), because a guest had a bucket
+// of their own. The owner's 2026-08-20 account-aware decision removed that bucket entirely — an
+// anonymous search is never persisted — so the contract is now STRICTER, not looser: hydration still
+// waits for the auth check, and the only key that can ever be read is the signed-in user's own.
+// (verify-saved-search-identity.ts owns the rest of the account-aware contract.)
 check('history hydration waits for the auth check, so a refresh cannot load the wrong bucket',
-  /if \(!authChecked\) return;[\s\S]{0,400}?historyKey\(user \? user\.sub : 'guest'\)/.test(store));
+  /if \(!authChecked\) return;[\s\S]{0,600}?const key = user \? historyKey\(user\.sub\) : null;/.test(store));
+check('a refresh as a GUEST loads no saved history at all (anonymous searches are never persisted)',
+  /if \(!key\) \{[\s\S]{0,400}?setHistory\(\[\]\);[\s\S]{0,120}?return;/.test(store));
 
 // 9) The runtime half. Static checks were ALL GREEN on the 2026-08-15 outage commit; only a real
 //    browser proves the built app behaves.
