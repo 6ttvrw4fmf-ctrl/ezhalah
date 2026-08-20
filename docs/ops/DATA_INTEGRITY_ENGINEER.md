@@ -670,10 +670,22 @@ counts. Cite this table when reporting AF coverage:
 | `mon_detect_monthly_af_exactness` | Rent/Monthly Residential: chip = referee = landed count, and no NULL-rated row satisfies a rating filter | roster |
 | `mon_detect_af_tri_state_violations` (added run #34) | (A) NULL→false silent conversion between `listing_extra_attrs` and `search_listings_ar` — must stay 0; (B) all-one-value stuck field per (platform × field × cohort segment) with cross-platform sanity — waivable by `ops_amenity_capture_verified` | roster |
 
-Everything the run touches for AF happens inside `af_cohort_registry` — 57 enabled rows spanning
-29 property types, both Residential and Commercial, across Buy / Rent-Annual / Rent-Monthly, ~194 k
-production-ready listings on ~50 source tables. Rows outside the registry (~1,096 today) are
-correctly excluded from the AF checks because they carry no AF chips.
+Everything the run touches for AF happens inside `af_cohort_registry`, which is the **live** scope
+definition — enumerate it each run, never hard-code its contents. It is edited by other routines
+between runs: it moved from 57 rows / 29 types to 56 rows / 32 types inside a single day
+(2026-08-20), so any count pinned in prose here is stale by the time it is read. The registry spans
+both Residential and Commercial types across Buy / Rent-Annual / Rent-Monthly; rows outside it are
+correctly excluded from the AF checks because they carry no AF chips. Report the counts the run
+actually measured:
+
+```sql
+select deal_ar, coalesce(rent_period_ar,'(n/a)') period, count(*) types
+from af_cohort_registry where enabled group by 1,2 order by 1,2;
+
+select count(*) filter (where production_ready) cohort_rows, count(distinct source_table) platforms
+from search_listings_ar s
+where af_in_certified_cohort(s.deal_ar, s.rent_period_ar, s.type_ar);
+```
 
 ### 26.2 The core rule still overrides
 
