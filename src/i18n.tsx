@@ -605,6 +605,10 @@ const AR: Record<string, string> = {
   // when the result set is already small enough that Advanced Filter has nothing useful left to offer.
   'I showed you the first {n} listings. Want me to show more?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد؟',
   'I showed you all {n} matching listings.': 'عرضت لك كل النتائج المطابقة ({n} إعلان).',
+  // CAPPED variants (owner 2026-08-20): when MORE than the browse cap actually match, the truth has two
+  // numbers — the real match total AND the capped number shown. Never imply that only {shown} matched.
+  'We found {total} listings matching your search, and showed you {shown}. Want help finding more precise ones?': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها. تبي أساعدك نلقى نتائج أدق؟',
+  'We found {total} listings matching your search, and showed you {shown}.': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها.',
   'I can show you 100 listings at a time.': 'أقدر أعرض لك 100 إعلان في كل مرة.',
   'Let’s narrow it down': 'خلّنا نحدد الطلب أكثر',
   'Help me find more precise results': 'ساعدني ألقى نتائج أدق',

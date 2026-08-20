@@ -32,12 +32,16 @@ console.log('\n≤25 Advanced Filter CTA gate — the manual "narrow it down" bu
 const ag = codeOnly(read('src/app/agent.tsx'));
 const i18n = read('src/i18n.tsx');
 
+// Name-agnostic (the raw total const was renamed trueTotal→rawTotal in the 2026-08-20 browse-cap
+// refactor, when `trueTotal` took on the cap-aware meaning). What matters is the SEMANTICS: some const
+// holds `m.result.matchTotal ?? fetched`, and canNarrowFurther gates on THAT const > INTERVIEW_STOP_AT.
+const rawTotalName = ag.match(/const\s+(\w+)\s*=\s*m\.result\.matchTotal\s*\?\?\s*fetched/)?.[1];
 check('the manual narrow-CTA count reads matchTotal FIRST, never fetched/listings.length alone',
-  /const\s+trueTotal\s*=\s*m\.result\.matchTotal\s*\?\?\s*fetched/.test(ag),
+  !!rawTotalName,
   'a page-capped fetched count would incorrectly hide the CTA on a large search whose page just has not filled yet, or show it on a small one');
 
-check("canNarrowFurther is gated on trueTotal > INTERVIEW_STOP_AT (the exact 25/26 boundary, not >=)",
-  /const\s+canNarrowFurther\s*=\s*trueTotal\s*>\s*INTERVIEW_STOP_AT/.test(ag));
+check("canNarrowFurther is gated on (matchTotal-first total) > INTERVIEW_STOP_AT (the exact 25/26 boundary, not >=)",
+  !!rawTotalName && new RegExp(`const\\s+canNarrowFurther\\s*=\\s*${rawTotalName}\\s*>\\s*INTERVIEW_STOP_AT`).test(ag));
 
 check("the «Let's narrow it down» Pressable only renders when canNarrowFurther is true",
   /\{canNarrowFurther\s*\?\s*\(\s*<Pressable[\s\S]{0,200}?onPress=\{\(\)\s*=>\s*\{\s*const q = m\.result\.query;/.test(ag),
