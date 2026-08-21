@@ -34,6 +34,8 @@ const SHARED_PARSER = 'scripts/build-repo-migration-versions.cjs';
 const WORKFLOW = '.github/workflows/migration-drift-guard.yml';
 const SAFE_DEPLOY = 'scripts/safe-deploy.sh';
 const PACKAGE_JSON = 'package.json';
+const DRIFT_MODULE = 'scripts/lib/migrationDrift.ts';
+const PURE_TEST = 'scripts/verify-migration-mirror-integrity.ts';
 
 const problems: string[] = [];
 const ok: string[] = [];
@@ -116,6 +118,38 @@ const versions: string[] = buildRepoMigrationVersions();
 check(versions.length > 100,
   `shared parser finds ${versions.length} migration identifiers (sanity floor: >100)`,
   `build-repo-migration-versions.cjs found only ${versions.length} identifiers — the glob or the parse regex may be broken`);
+
+// 7. The guard must cover ALL FOUR drift conditions the owner asked for (2026-08-21), not just the
+//    two the server RPC returns. The reverse-direction pair — committed-but-not-applied and duplicate
+//    versions — lives in the pure module and is proven by the offline pure test; both must stay wired,
+//    or two of the four conditions would silently stop being checked.
+for (const f of [DRIFT_MODULE, PURE_TEST]) {
+  check(existsSync(f), `${f} exists`, `${f} is missing — a drift condition has no detector/test`);
+}
+const mod = existsSync(DRIFT_MODULE) ? readFileSync(DRIFT_MODULE, 'utf8') : '';
+for (const fn of ['findCommittedNotApplied', 'findDuplicateMigrationVersions', 'driftIsClean']) {
+  check(mod.includes(`export function ${fn}`),
+    `migrationDrift.ts exports ${fn}`,
+    `${DRIFT_MODULE} no longer exports ${fn} — a drift condition lost its detector`);
+}
+check(/export const STRICT_ERA_BASELINE\s*=\s*'20260815000000'/.test(mod),
+  'the strict-era baseline is pinned',
+  `${DRIFT_MODULE}'s STRICT_ERA_BASELINE changed — moving it silently exempts or re-flags legacy files; change deliberately`);
+// The live checker must actually USE all four (server's two + the module's two), not just print them.
+for (const needle of ['findCommittedNotApplied', 'findDuplicateMigrationVersions', 'driftIsClean', 'applied_ids']) {
+  check(checkScript.includes(needle),
+    `the live checker uses ${needle}`,
+    `${CHECK_SCRIPT} no longer references ${needle} — a drift condition is computed but not gated on, or the server field it needs is gone`);
+}
+check(checkScript.includes('listMigrationFiles'),
+  'the live checker lists files through the shared parser',
+  `${CHECK_SCRIPT} must get its file list from ${SHARED_PARSER}'s listMigrationFiles, not a re-inlined scan`);
+// The pure test runs in `npm test` (unlike the live check) — it is offline and deterministic, so it
+// pins the detection logic on every PR without the collateral-blocking problem the live check has.
+check(testScript.includes(PURE_TEST),
+  'npm test runs the offline mirror-integrity test',
+  `package.json's "test" script no longer runs ${PURE_TEST} — the four-condition detection logic ` +
+  `(and its mutation proof) would go unchecked on PRs`);
 
 console.log('migration-drift-guard-wired: the continuous drift barrier must stay actually connected\n');
 for (const o of ok) console.log(`  ✓ ${o}`);

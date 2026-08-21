@@ -36,7 +36,8 @@
 //
 //   node --experimental-strip-types scripts/verify-migration-drift-vs-production.ts
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
-import { buildRepoMigrationVersions } from './build-repo-migration-versions.cjs';
+import { buildRepoMigrationVersions, listMigrationFiles } from './build-repo-migration-versions.cjs';
+import { findCommittedNotApplied, findDuplicateMigrationVersions, driftIsClean } from './lib/migrationDrift.ts';
 
 const { url: URL_BASE, key: ANON_KEY } = resolvePublicSupabase();
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -59,6 +60,7 @@ type PreflightResult = {
   baseline: string;
   missing_in_git: string[];
   missing_in_git_details: Array<{ version: string; name: string }>;
+  applied_ids: string[]; // every live schema_migrations version ∪ name — for the client-side reverse diff
   duplicate_overloads: string[];
   live_migrations_total: number;
   checked_at: string;
@@ -75,9 +77,22 @@ try {
   process.exit(0);
 }
 
+// The four drift conditions (owner permanent barrier). #1 missing_in_git and #4 duplicate_overloads
+// come from the server (it alone sees schema_migrations / pg_proc). #2 missing_in_prod and #3
+// duplicate_versions are computed HERE from the repo's own migration files — #2 needs the file
+// (version,name) PAIRS the server never receives (it gets a flattened id set), #3 needs the raw
+// filenames the shared parser de-duplicates away. driftIsClean() is the single "no drift" verdict.
+const repoFiles = listMigrationFiles();
 const missing = result.missing_in_git ?? [];
 const dups = result.duplicate_overloads ?? [];
-const drifted = missing.length > 0 || dups.length > 0;
+const missingInProd = findCommittedNotApplied(repoFiles, result.applied_ids ?? []);
+const dupVersions = findDuplicateMigrationVersions(repoFiles);
+const drifted = !driftIsClean({
+  missing_in_git: missing,
+  missing_in_prod: missingInProd,
+  duplicate_versions: dupVersions,
+  duplicate_overloads: dups,
+});
 
 // Best-effort dashboard side-effect. Never lets a write failure mask (or fake) the actual gate —
 // the exit code below is decided from `drifted` alone, computed before this block runs.
@@ -87,6 +102,8 @@ if (SERVICE_ROLE_KEY) {
       const detail = {
         missing_in_git_count: missing.length,
         missing_in_git_details: result.missing_in_git_details,
+        missing_in_prod: missingInProd,
+        duplicate_versions: dupVersions,
         duplicate_overloads: dups,
         live_migrations_total: result.live_migrations_total,
         baseline: result.baseline,
@@ -117,10 +134,20 @@ if (drifted) {
     for (const d of result.missing_in_git_details ?? []) console.error(`    ${d.version}  ${d.name}`);
     console.error(`  Recover verbatim from supabase_migrations.schema_migrations.statements into supabase/migrations/, commit, and open a PR.`);
   }
+  if (missingInProd.length) {
+    console.error(`  ${missingInProd.length} migration FILE(s) committed to git but NOT applied to prod:`);
+    for (const f of missingInProd) console.error(`    ${f}`);
+    console.error(`  Apply them to production (or remove the file), so git and prod agree.`);
+  }
+  if (dupVersions.length) {
+    console.error(`  ${dupVersions.length} duplicate migration VERSION(s) in git (two files claiming one timestamp):`);
+    for (const d of dupVersions) console.error(`    ${d.version}: ${d.files.join(', ')}`);
+    console.error(`  Renumber one — a version prefix must be unique.`);
+  }
   if (dups.length) {
     console.error(`  ${dups.length} public function(s) with duplicate overloads (the exact PGRST203 outage shape): ${dups.join(', ')}`);
   }
   process.exit(1);
 }
 
-console.log(`✓ migration-drift-vs-production: 0 missing, 0 duplicate overloads (${result.live_migrations_total} live migrations, baseline ${result.baseline}).`);
+console.log(`✓ migration-drift-vs-production: 0 missing_in_git, 0 missing_in_prod, 0 duplicate versions, 0 duplicate overloads (${result.live_migrations_total} live migrations, baseline ${result.baseline}).`);
