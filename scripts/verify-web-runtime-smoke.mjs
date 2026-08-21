@@ -256,6 +256,23 @@ try {
     const m = [...(await body()).matchAll(/لقينا ([\d,٬،]+) إعلان/g)];
     return m.length ? parseInt(m[m.length - 1][1].replace(/[^\d]/g, ''), 10) : null;
   };
+  // Poll for the count directly instead of `waitForBody(RESULT_COUNT,...)` + an immediate
+  // `landedCount()` read. The result intro line types itself out character-by-character, so the
+  // loose RESULT_COUNT text ("لقينا") can be on screen for a beat before its own trailing number
+  // finishes typing — reading the strict count the instant the loose text appears is a race
+  // (CI's slower main-thread scheduling loses it far more often than a fast local run does, which is
+  // why this passed locally every time yet failed once in CI: bug-hunt 2026-08-21, [E] baseline
+  // count=null while every Stop-then-resubmit check — reading the SAME text later — got 320). Poll
+  // for the digit-bearing pattern itself so "landed" and "readable" are the same instant.
+  const waitForCount = async (timeoutMs) => {
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) {
+      const c = await landedCount();
+      if (c !== null) return c;
+      await page.waitForTimeout(500);
+    }
+    return null;
+  };
   const fillOwnerExample = async () => {
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(5000);
@@ -276,9 +293,8 @@ try {
   await fillOwnerExample();
   const preStopInputs = await visibleInputs();
   await tap('بحث');
-  const baselineOk = await waitForBody(RESULT_COUNT, 45000);
-  const baselineCount = await landedCount();
-  check('[E] baseline (uninterrupted) owner-example search lands with a real count', baselineOk && Number.isFinite(baselineCount), `count=${baselineCount}`);
+  const baselineCount = await waitForCount(45000);
+  check('[E] baseline (uninterrupted) owner-example search lands with a real count', Number.isFinite(baselineCount), `count=${baselineCount}`);
 
   // ---- E: rapid Stop — pressed the instant the search starts. ----
   await fillOwnerExample();
@@ -292,10 +308,9 @@ try {
   check('[E] rapid-Stop restores city/district/area EXACTLY', JSON.stringify(postRapidInputs) === JSON.stringify(preStopInputs),
     `pre=${JSON.stringify(preStopInputs)} post=${JSON.stringify(postRapidInputs)}`);
   await tap('بحث');
-  const rapidResubmitOk = await waitForBody(RESULT_COUNT, 45000);
-  const rapidResubmitCount = await landedCount();
+  const rapidResubmitCount = await waitForCount(45000);
   check('[E] resubmitting untouched after rapid-Stop returns the EXACT SAME count as the uninterrupted baseline',
-    rapidResubmitOk && rapidResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${rapidResubmitCount}`);
+    Number.isFinite(rapidResubmitCount) && rapidResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${rapidResubmitCount}`);
 
   // ---- F: Stop pressed mid-flight (network artificially slowed), and the late response — which
   // resolves AFTER the user is already back on Filter — must never repopulate results or write history.
@@ -323,10 +338,9 @@ try {
     page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
   await page.unroute('**/rest/v1/rpc/location_search_candidates_ar', delayRoute);
   await tap('بحث');
-  const midResubmitOk = await waitForBody(RESULT_COUNT, 45000);
-  const midResubmitCount = await landedCount();
+  const midResubmitCount = await waitForCount(45000);
   check('[F] resubmitting untouched after a mid-flight Stop still returns the EXACT SAME count',
-    midResubmitOk && midResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${midResubmitCount}`);
+    Number.isFinite(midResubmitCount) && midResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${midResubmitCount}`);
 
   // ---- G: a CHAT-originated Stop must NOT navigate home — origin-tracking must not over-apply. ----
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -360,10 +374,9 @@ try {
   check('[H mobile] rapid-Stop restores city/district/area EXACTLY',
     JSON.stringify(postMobileInputs) === JSON.stringify(preStopInputsMobile));
   await tap('بحث');
-  const mobResubmitOk = await waitForBody(RESULT_COUNT, 45000);
-  const mobResubmitCount = await landedCount();
+  const mobResubmitCount = await waitForCount(45000);
   check('[H mobile] resubmitting untouched after rapid-Stop returns the EXACT SAME count as baseline',
-    mobResubmitOk && mobResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${mobResubmitCount}`);
+    Number.isFinite(mobResubmitCount) && mobResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${mobResubmitCount}`);
 
   check('no uncaught runtime error across the whole run', crashes.length === 0, crashes.join(' | '));
 } catch (e) {
