@@ -12,6 +12,18 @@
 -- session READS to reason about the location pipeline, so a stale one is how a session concludes
 -- "satel has no native resolution" and ships a fix for a problem that does not exist.
 --
+-- Re-verified 2026-08-20 (senior run #32, PR #812): UNCHANGED. Migrations 20260820063354 and
+--   20260820063839 repair listing_native_location_v2's catch-all and souq24 branches, which
+--   satisfied the UNION's column list with hardcoded NULL literals and so discarded the 14
+--   advanced-filter attributes that listing_extra_attrs/listing_age_resolved already held (170
+--   production_ready gathern listings were served amenity-less). Those migrations NAME this view
+--   only to contrast the two branches — the v1 branch LEFT JOINs both attribute tables, which is
+--   exactly the behaviour the catch-all was restored to. v1 itself was deliberately NOT redefined;
+--   the repair was again made one level up, in v2. Same any-mention trip as the 2026-08-18,
+--   2026-08-17, 2026-08-15, 2026-08-12 and 2026-08-10 entries. Re-ran
+--   md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against live
+--   production at 06:55Z: d7fff7ec0378d6095728e862aee80106, 13,385 chars — byte-identical to the
+--   digest this header already carries; only the verification date advances.
 -- Re-verified 2026-08-18 (senior run #28, PR #746): UNCHANGED. Migration 20260818064958 repairs the
 --   `lal_live_overlay` in listing_native_location_v2 — its catch-all branch read our own
 --   listings_arabic_locations resolution but gated it behind a hardcoded dealapp-only allowlist, so
