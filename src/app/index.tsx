@@ -16,7 +16,7 @@ import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCi
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, type SearchQuery } from '@/data/search';
 import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr } from '@/data/remote';
-import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod } from '@/lib/searchDefaults';
+import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { noTranslateRef } from '@/noTranslate';
@@ -473,7 +473,7 @@ export default function Home() {
   // (fetchDistrictEligibleCounts, one p_limit:1 call per row) and mark honesty from those. When no
   // narrowing is active there are no extra calls — scope count = results count there, a parity the
   // DB barrier (mon_trending_district_barrier) pins at 40/40 exact.
-  const districtNarrowingSig = JSON.stringify([query.type, query.typeGroup, query.types, query.detail,
+  const districtNarrowingSig = JSON.stringify([query.type, query.typeGroups, query.types, query.detail,
     query.contextBeds, query.contextBedsList, query.contextSize, query.priceInput, query.priceBand,
     query.priceMin, query.priceMax, query.areaMin, query.areaMax]);
   const hasDistrictNarrowing = useMemo(
@@ -652,7 +652,7 @@ export default function Home() {
 
   const detail = query.type ? detailFor(query.type) : null;
   // Context-level detail: shown at category/group level when no specific type is selected.
-  const ctx = !query.type ? detailForContext(query.category, query.typeGroup ?? null) : null;
+  const ctx = !query.type ? detailForContext(query.category, effectiveGroups(query)) : null;
   // A غرفة (Room) is a single room → bedrooms are locked to exactly 1. When Room is the SOLE selected
   // type the bedroom chips collapse to just "1" (and the strict beds filter → bedrooms=1). (owner 2026-07-06.)
   const roomOnly = query.types?.length === 1 && query.types[0] === 'Room';
@@ -1324,7 +1324,7 @@ export default function Home() {
                     label={t(cat)}
                     img={categoryImg(cat)}
                     selected={query.category === cat}
-                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, types: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, priceMin: null, priceMax: null, priceInput: '', priceBand: null })); scrollDown(groupAnchorRef); }}
+                    onPress={() => { setQuery((q) => setCategory(q, cat)); scrollDown(groupAnchorRef); }}
                   />
                 ))}
               </View>
@@ -1342,8 +1342,11 @@ export default function Home() {
                       key={g.group}
                       label={t(g.group)}
                       img={groupImg(g.group)}
-                      selected={query.typeGroup === g.group}
-                      onPress={() => { setQuery((q) => ({ ...q, typeGroup: q.typeGroup === g.group ? null : g.group, type: null, types: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, priceMin: null, priceMax: null, priceInput: '', priceBand: null })); scrollDown(typeAnchorRef); }}
+                      selected={effectiveGroups(query).includes(g.group)}
+                      // MULTI-SELECT (owner 2026-08-20). toggleGroup() is the ONE writer of the group
+                      // dimension: it OR-adds/removes the group and prunes any selected type that no
+                      // longer belongs to a remaining group, so an invisible orphan filter is impossible.
+                      onPress={() => { setQuery((q) => toggleGroup(q, g.group)); scrollDown(typeAnchorRef); }}
                       style={s.wrapCell}
                     />
                   ))}
@@ -1354,11 +1357,11 @@ export default function Home() {
             <View ref={withAnchor(typeAnchorRef)} />
             {/* Clean property type (scoped to the chosen group) — the EXACT/hard filter. Optional:
                 leaving it unselected keeps the broad group intent. */}
-            {query.typeGroup && (
+            {effectiveGroups(query).length > 0 && (
               <Reveal style={s.pick}>
                 <FieldLabel>{t('Property type')}</FieldLabel>
                 <View style={s.wrap}>
-                  {groupMembers(query.typeGroup).map((ty) => (
+                  {typesForGroups(query).map((ty) => (
                     <OptionBox
                       key={ty}
                       label={t(ty)}

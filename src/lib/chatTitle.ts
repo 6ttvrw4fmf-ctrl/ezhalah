@@ -110,9 +110,12 @@ function whatPhrase(q: SearchQuery, loc: string): string {
     const first = (A ? TYPE_PLURAL_AR[sel[0]] : TYPE_PLURAL_EN[sel[0]]) ?? sel[0];
     return A ? `${first} +${sel.length - 1}` : `${first} +${sel.length - 1}`;
   }
-  if (q.typeGroup) {
-    const g = A ? GROUP_PLURAL_AR[q.typeGroup] : q.typeGroup;
-    if (g) return g;
+  // Groups are multi-select (owner 2026-08-20): name the first and count the rest, the same way this
+  // function already handles several types, so the title stays one line.
+  const groups = q.typeGroups ?? [];
+  if (groups.length) {
+    const g = A ? GROUP_PLURAL_AR[groups[0]] : groups[0];
+    if (g) return groups.length > 1 ? `${g} +${groups.length - 1}` : g;
   }
   if (q.category === 'Commercial') return A ? 'عقارات تجارية' : 'Commercial property';
   if (q.category === 'Residential') return A ? 'عقارات سكنية' : 'Residential property';

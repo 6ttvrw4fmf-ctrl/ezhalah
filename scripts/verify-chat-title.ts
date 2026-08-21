@@ -25,7 +25,7 @@ const check = (label: string, ok: boolean, extra = '') => {
 
 const base: any = {
   deal: 'Rent', location: 'الرياض', category: 'Residential', type: null, types: ['Apartment'],
-  typeGroup: 'Apartments & Shared Housing', detail: null, priceInput: '', priceBand: null,
+  typeGroups: ['Apartments & Shared Housing'], detail: null, priceInput: '', priceBand: null,
   rentPeriod: 'annual', districts: null, districtLabel: null,
   contextBeds: null, contextBedsList: null, contextSize: null,
   areaMin: null, areaMax: null, priceMin: null, priceMax: null,
@@ -47,6 +47,12 @@ check('a filter search is titled by its نوع, never the bare category',
 check('a group-only search is titled by its group',
   autoTitleForQuery({ ...base, types: null }) === 'شقق وسكن مشترك للإيجار في الرياض',
   autoTitleForQuery({ ...base, types: null }));
+// Groups are multi-select since 2026-08-20 — several groups follow the same "+N" shape this file
+// already asserts for several types, so the title stays one line.
+check('a MULTI-group search names the first group and counts the rest',
+  autoTitleForQuery({ ...base, types: null, typeGroups: ['Apartments & Shared Housing', 'Villas & Houses'] })
+    === 'شقق وسكن مشترك +1 للإيجار في الرياض',
+  autoTitleForQuery({ ...base, types: null, typeGroups: ['Apartments & Shared Housing', 'Villas & Houses'] }));
 
 // ── A3. ADVANCED-FILTER SEARCHES MUST NOT LOOK IDENTICAL (owner §6) ─────────────────────────────
 const afA = { ...base, furnishedPref: true };

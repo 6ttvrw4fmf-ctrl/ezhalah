@@ -75,6 +75,29 @@ export const groupMembers = (group: string): string[] => {
     for (const g of HIERARCHY[macro]) if (g.group === group) return g.types;
   return [];
 };
+// MULTI-GROUP (owner decision 2026-08-20: Category → Group(s) → Type(s) → Advanced Filter).
+// The union of several groups' member types, in HIERARCHY order per group, deduped. This is what the
+// type boxes show when more than one group is picked: groups are OR'd, so a listing qualifies by
+// belonging to ANY selected group — a listing can never be in two groups at once, which is exactly
+// why AND across groups would return nothing.
+export const groupsMembers = (groups: string[]): string[] =>
+  [...new Set(groups.flatMap((g) => groupMembers(g)))];
+
+// Drop selected types that no longer belong to ANY selected group. Deselecting a group must take its
+// types with it: index.tsx gates the whole type row on there being a selected group, so a type left
+// behind would be an ACTIVE filter with no visible control to remove it — the user would see fewer
+// results than they asked for and have no way to find out why. Returns null (not []) when nothing
+// survives, matching how the query represents "no type selected" everywhere else.
+export const pruneTypesToGroups = (
+  types: string[] | null | undefined,
+  groups: string[],
+): string[] | null => {
+  if (!types || !types.length) return null;
+  const allowed = new Set(groupsMembers(groups));
+  const kept = types.filter((ty) => allowed.has(ty));
+  return kept.length ? kept : null;
+};
+
 export const isCleanType = (s: string): boolean => s in CLEAN_MACRO;
 export const isGroup = (s: string): boolean => groupMembers(s).length > 0;
 
