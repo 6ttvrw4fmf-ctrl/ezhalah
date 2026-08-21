@@ -239,20 +239,29 @@ def fetch_all_ads(deal_type: str, max_items: int = 0) -> list[dict]:
     return out
 
 
-def fetch_detail(ad_id: str) -> Optional[dict]:
-    """GET {BASE}/ad/<uuid> → the fuller record, or None if it is genuinely unavailable.
+def fetch_detail(ad_id: str) -> tuple[str, Optional[dict]]:
+    """GET {BASE}/ad/<uuid> → (status, record). status is one of:
+      "ok"      — the fuller record was captured; record is the dict.
+      "gone"    — a TERMINAL 404: the ad no longer exists. Not a capture failure — this is normal
+                  churn (an ad sold/delisted between the list fetch and the detail fetch) and MUST
+                  be excluded from detail-loss accounting, not folded into it.
+      "missing" — every retry was exhausted on a non-404 failure (timeout/exception, non-200,
+                  unparseable body, or a 200 with an unexpected shape). This IS a capture failure.
 
-    Only a 404 is terminal (the ad is gone). EVERY other failure is retried — including a 200 whose
-    body is unparseable or lacks the `data` object, which the previous version treated as
-    authoritative and returned None for on the FIRST attempt, with no retry at all.
+    Previously this returned a bare `Optional[dict]` and collapsed "gone" and "missing" into the
+    same `None` — the caller could not tell a confirmed-gone ad from a genuinely uncaptured one, so
+    every 404 silently inflated the detail-loss metric exactly like a real failure, contradicting
+    this function's own long-standing intent ("a 404 is not a capture failure"). Callers must use
+    the status tag to keep those two cases apart; the record itself is still None in both non-ok
+    cases so `map_listing`'s summary-only fallback behavior is unchanged.
 
-    That mattered: the detail call is the sole source of estate.details[] (bathrooms, halls, street
-    width, façade, lift, kitchen) AND of `subtype`, the rent period. `map_listing` still emits a row
-    when this returns None, so a single soft failure silently downgrades a listing to summary-only
-    and the crawl reports ok=true. Senior run #25 (2026-08-17) found 24 of 132 active aqaratikom rows
-    in exactly that state, 8 of them searchable Rent apartments whose NULL period made them
-    unreachable under BOTH period chips — while the source returned HTTP 200 with subtype=«سنوي» for
-    all 8 when re-probed.
+    That mattered independently of this status/None split: the detail call is the sole source of
+    estate.details[] (bathrooms, halls, street width, façade, lift, kitchen) AND of `subtype`, the
+    rent period. `map_listing` still emits a row when the record is None, so a single soft failure
+    silently downgrades a listing to summary-only and the crawl reports ok=true. Senior run #25
+    (2026-08-17) found 24 of 132 active aqaratikom rows in exactly that state, 8 of them searchable
+    Rent apartments whose NULL period made them unreachable under BOTH period chips — while the
+    source returned HTTP 200 with subtype=«سنوي» for all 8 when re-probed.
     """
     s = _session()
     url = f"{BASE}/ad/{ad_id}"
@@ -264,7 +273,7 @@ def fetch_detail(ad_id: str) -> Optional[dict]:
         except Exception:
             time.sleep(1.2 * (attempt + 1)); continue
         if r.status_code == 404:
-            return None  # terminal — the ad no longer exists; not a capture failure.
+            return "gone", None  # terminal — the ad no longer exists; not a capture failure.
         if r.status_code != 200:
             time.sleep(1.2 * (attempt + 1)); continue
         try:
@@ -273,10 +282,10 @@ def fetch_detail(ad_id: str) -> Optional[dict]:
             time.sleep(1.2 * (attempt + 1)); continue  # was: return None (no retry)
         d = j.get("data") if isinstance(j, dict) else None
         if isinstance(d, dict):
-            return d
+            return "ok", d
         time.sleep(1.2 * (attempt + 1))  # 200 with an unexpected shape — a block/interstitial
                                          # signature, not proof the ad has no detail record.
-    return None
+    return "missing", None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -624,13 +633,16 @@ def main() -> int:
         # detail-only field (bathrooms, halls, street width, façade, lift, kitchen) and, for a
         # rental, the rent period — so a crawl that loses most of its detail calls has captured
         # bad data while looking perfectly healthy. Counting it is what turns that into a signal.
-        detail_stats = {"ok": 0, "missing": 0}
+        # Three-way, not two-way: "gone" (terminal 404 — normal ad churn) must stay OUT of the
+        # loss ratio entirely, or a stable subset of sold/delisted ads on an otherwise-healthy
+        # catalog silently trips the guard on churn alone, exactly as it was doing since #721.
+        detail_stats = {"ok": 0, "gone": 0, "missing": 0}
         detail_lock = threading.Lock()
 
         def work(ad: dict) -> tuple[Optional[dict], str, bool]:
-            det = fetch_detail(ad.get("id"))
+            status, det = fetch_detail(ad.get("id"))
             with detail_lock:
-                detail_stats["ok" if det else "missing"] += 1
+                detail_stats[status] += 1
             return map_listing(ad, det)
 
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
@@ -685,19 +697,24 @@ def main() -> int:
         print(f"✓ Aqaratikom: {len(res)} residential + {len(com)} commercial upserted, "
               f"{sold_ct} sold (inactive), {pruned} stale pruned")
 
-        # ── Silent-partial-crawl guard (senior run #25) ──────────────────────────────────────────
+        # ── Silent-partial-crawl guard (senior run #25, honest 3-way accounting since run #26) ────
         # A 200 from the list endpoint proves the platform answered; it does NOT prove we captured
         # the listings. When the detail call fails, the row is still upserted from the summary alone
         # and the run used to report ok=true — so 24 of 132 active rows silently lost every
         # detail-only field, and 8 searchable rentals lost their period, for weeks. Detail loss is
         # now measured, recorded in the run notes, and fails CI past a floor rather than passing
-        # quietly. A 404 is NOT counted as a failure (that ad is simply gone).
-        d_ok, d_missing = detail_stats["ok"], detail_stats["missing"]
-        d_total = d_ok + d_missing
+        # quietly. "gone" (terminal 404 — the ad is simply no longer listed) is EXCLUDED from both
+        # the numerator and the denominator: it is normal churn, not a capture failure, matching
+        # fetch_detail's own long-standing intent. Only "missing" (a genuinely exhausted retry on a
+        # non-404 failure) counts as loss.
+        d_ok, d_gone, d_missing = detail_stats["ok"], detail_stats["gone"], detail_stats["missing"]
+        d_total = d_ok + d_missing  # attempted-and-resolvable universe; "gone" is outside it entirely.
         d_frac = (d_missing / d_total) if d_total else 0.0
         max_frac = float(os.environ.get("AQARATIKOM_MAX_DETAIL_MISS_FRAC", "0.20"))
-        detail_note = f"detail_ok={d_ok} detail_missing={d_missing} miss_frac={d_frac:.3f}"
-        print(f"  detail records: {d_ok}/{d_total} captured ({d_frac:.1%} missing)")
+        detail_note = (f"detail_ok={d_ok} detail_gone={d_gone} detail_missing={d_missing} "
+                        f"miss_frac={d_frac:.3f}")
+        print(f"  detail records: {d_ok} ok, {d_gone} gone(404), {d_missing} missing "
+              f"({d_frac:.1%} of {d_total} attempted)")
         # Only meaningful with enough samples — a 2-ad validation slice must not fail the fleet.
         detail_collapsed = d_total >= 20 and d_frac > max_frac
         if detail_collapsed:
