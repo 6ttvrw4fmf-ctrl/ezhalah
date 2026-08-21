@@ -155,7 +155,12 @@ try {
   await page.waitForTimeout(5000);
   check('home renders', (await body()).includes('تصفية'));
 
+  // Buy+Rent combined multi-select (owner 2026-08-20): شراء/إيجار are now two independent toggles,
+  // mirroring سنوي/شهري exactly — a single tap on the OFF button ADDS it (→ both), it never swaps.
+  // Home starts on شراء (HOME_DEFAULT_QUERY), so reaching إيجار-ONLY needs the same two-tap sequence
+  // reaching a single period already requires: tap إيجار (→ both), tap شراء (turns Buy off → Rent-only).
   await tap('إيجار');
+  await tap('شراء');
   await tap('سنوي');
   await pickCity('الرياض');
   await tap('الشقق والسكن المشترك');
@@ -259,7 +264,8 @@ try {
   const fillOwnerExample = async () => {
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(5000);
-    await tap('إيجار'); await tap('سنوي');
+    // Same two-tap deal sequence as journey A above (Buy+Rent combined multi-select, 2026-08-20).
+    await tap('إيجار'); await tap('شراء'); await tap('سنوي');
     await pickCity('الرياض');
     await page.click('input >> nth=1');
     await page.type('input >> nth=1', 'النرجس', { delay: 60 });

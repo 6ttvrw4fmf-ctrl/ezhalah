@@ -82,7 +82,12 @@ test('Filter mode — Buy in Riyadh returns Arabic results', async ({ page }) =>
 
 test('Filter mode — Rent + Monthly in Riyadh returns results', async ({ page }) => {
   await home(page);
-  await page.getByText('إيجار', { exact: true }).click();   // Rent
+  // Buy+Rent combined multi-select (owner 2026-08-20): شراء/إيجار are two independent toggles
+  // (mirrors سنوي/شهري) — a single tap on the OFF button ADDS it rather than swapping. Home starts
+  // on شراء, so reaching إيجار-ONLY needs the same two-tap sequence a single period already does:
+  // tap إيجار (→ both), tap شراء (turns Buy off → Rent-only) — only then does شهري exist to tap.
+  await page.getByText('إيجار', { exact: true }).click();   // Rent (both, briefly)
+  await page.getByText('شراء', { exact: true }).click();    // turn Buy off → Rent-only
   await page.getByText('شهري', { exact: true }).click();     // Monthly period
   await pickCity(page, 'الرياض');
   await runSearch(page);
