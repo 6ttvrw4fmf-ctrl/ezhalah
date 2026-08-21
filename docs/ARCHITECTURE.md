@@ -301,9 +301,34 @@ Opens the listing at its **real source**, in-app:
 **State (`src/store.tsx`, `useApp()`):** `query` (+ `setQuery`/`resetQuery`/`runQuery`); data source
 constant `'supabase'` (no whole-table load — each search fetches only its subset); `user` (+ auth
 methods, Supabase session adopt/`onAuthStateChange`); `searchCount`, `pendingMessage`, **`gated=false`**;
-`history` (max 50, **per-account** keyed by `sub`, `history:<sub>` / `history:guest`); `trackOpen` /
+`history` (max 50, **per-account** keyed by `sub`, `history:<sub>`); `trackOpen` /
 `findListing`; modals; intro. Persistence: AsyncStorage + synchronous `localStorage` on web so a refresh
 can't lose stars/history.
+
+**Sidebar history — account-aware persistence (owner, 2026-08-20).** Signed-in only: a completed search
+is saved under `history:<sub>`, survives refresh, and reopening restores the exact state (Normal Filter,
+deal, period, city/district, type/group, price/area/bedrooms, Advanced Filter answers) from the stored
+`query` + `snapshot`. Signed OUT nothing is persisted at all — **no `history:guest` bucket is written,
+and any legacy one is purged** — so a refresh returns an anonymous visitor to a fresh start.
+`historyLoadedRef` holds WHICH account key is hydrated, so switching accounts re-hydrates and an
+in-flight read for the previous account is discarded (no cross-user leakage, no stale rows).
+Entry identity is `src/lib/savedSearchIdentity.ts` — it compares ALL `SearchQuery` fields except four
+display-only ones, so two searches that differ in *any* real filter (period, deal, or an Advanced Filter
+answer) are separate entries. Barriers: `scripts/verify-saved-search-identity.ts`,
+`scripts/verify-refresh-restores-filter-search.ts`.
+
+**Sidebar titles (owner, 2026-08-21) — `src/lib/chatTitle.ts`, display metadata ONLY.** Each entry
+carries `title`, `titleSource: 'auto' | 'manual'`, `titleUpdatedAt`. `autoTitleForQuery()` builds a
+concise ChatGPT-like summary from the actual state (`شقق للإيجار في الرياض`, plus at most
+`MAX_DETAILS = 3` ` · ` chips for the strongest distinctions — furnishing, bathrooms, amenities, monthly
+period, price/area bounds) — never a dump of every filter; annual rent is the default and is left out.
+`autoTitleForPrompt()` summarizes a chat/AI turn with **local rules only, no model call**
+(«ابي شقة بالرياض قريبة من المترو وتكون تحت 5000 بالشهر» → «شقة بالرياض قرب المترو»). Signed-in users
+rename inline: double-click (web) or long-press (touch) → the row becomes a `TextInput`; Enter and blur
+save, Escape cancels and restores. A rename writes ONLY the three title keys — never `query`,
+`snapshot`, `label`, `id`, `starred` or `ts` — and once `titleSource='manual'` no auto-title may
+overwrite it (`canAutoRetitle`). Title is deliberately NOT coupled to `sameQuery()`. Barrier:
+`scripts/verify-chat-title.ts` (mutation-proven).
 
 **i18n (`src/i18n.tsx`):** EN-key → AR dictionary. **Arabic-only in production** — `readSavedLocale()`
 forces `'ar'` and deletes any saved `'en'`; `setLocale` early-returns unless `'ar'`. English is a latent
@@ -724,6 +749,12 @@ migration-drift-guard rule in `AGENTS.md`).
 10. **Regression prevention (#1 ops rule):** preserve work before risky git ops; never `git reset --hard`
     a dirty tree; before+after verify every deploy; deploy only to project `ezhalah-app`.
 11. **Compliance:** REGA FAL + PDPL (Saudi residency, no selling user data).
+12. **Search history is signed-in only; sidebar titles are display metadata.** Anonymous searches are
+    never persisted across a refresh. A saved entry auto-gets a concise ChatGPT-like title (local
+    rules, no model call); a signed-in user renames it inline by double-click/long-press. **Renaming
+    changes the title and nothing else** — never the messages, query, Advanced Filter answers, result
+    snapshot, identity/de-duplication or `ts` — and a manual title is never overwritten by a later
+    auto-title. §8 carries the full model. (owner, 2026-08-20 / 2026-08-21)
 
 ---
 
