@@ -23,9 +23,17 @@ check('note rendered while cleared and no new price typed',
 const I18N = readFileSync(new URL('../src/i18n.tsx', import.meta.url), 'utf8');
 check('note has a genuine Arabic translation',
   I18N.includes('تم مسح حدود السعر لأن وحدة السعر تغيّرت'));
-// 5) The sibling rule stayed intact: Buy↔Rent toggle still clears price state.
-check('Buy↔Rent toggle still clears price state (sibling rule untouched)',
-  NOWS.includes("deal:vasany,priceBand:null,priceMin:null,priceMax:null,priceInput:''"));
+// 5) The sibling rule stayed intact, in an owner-upgraded form (Buy+Rent combined multi-select,
+// 2026-08-20): priceMin/priceMax means "Buy budget" under Buy-only AND under Combined, but "Rent
+// budget" under Rent-only — so the شراء/إيجار toggle clears price state exactly when a press flips
+// WHICH deal that pair prices (Buy-only↔Rent-only, or Rent-only↔Both), never when the meaning stays
+// the same (Buy-only↔Both, Both↔Buy-only) — same "clear + explain" shape as the period rule above,
+// just no-longer an unconditional clear on every press (the old single-select Segmented control had
+// no "meaning didn't change" case to preserve; the two-button toggle does).
+check('Buy/Rent toggle clears price state exactly when priceMin/priceMax flips which deal it prices (owner-upgraded sibling rule)',
+  NOWS.includes('constflips=prevAppliesTo!==nextAppliesTo;') &&
+  NOWS.includes('setDealPriceCleared(flips);') &&
+  NOWS.includes('...(flips?{priceMin:null,priceMax:null,priceBand:null,priceInput:\'\'}:{}),'));
 
 if (failed) { console.error(`\n✗ ${failed} period-price-flip assertion(s) FAILED`); process.exit(1); }
 console.log('\n✓ all period-price-flip assertions passed (clear + explain, never silent unit inversion)');

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { OPEN_DELAY_MS, armOpen, cancelOpen, openShouldFire, type ArmedOpen } from '@/lib/rowClick';
 import Animated, {
   Easing,
   interpolate,
@@ -93,7 +94,33 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const [draft, setDraft] = useState('');
   const cancelledRef = useRef(false);
 
+  // OWNER BUG FIX: a single click OPENS, but the native dblclick below ALSO ran openHistory() on each
+  // click of the double-click → it navigated (to Filter/Agent) instead of only renaming. Fix: a click
+  // only ARMS a delayed open; beginRename (reached via the dblclick handler or long-press) CANCELS
+  // that armed open before it can fire, so a double-click renames ONLY. A cancelled open never calls
+  // openHistory → never navigates / switches view / resets the active chat/search. Two SLOW clicks
+  // (no dblclick) each still open. Barrier: src/lib/rowClick.ts + scripts/verify-sidebar-rename-isolation.ts.
+  const openArmRef = useRef<ArmedOpen | null>(null);
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (openTimerRef.current) clearTimeout(openTimerRef.current); }, []);
+  const cancelArmedOpen = () => {
+    openArmRef.current = cancelOpen(openArmRef.current);
+    if (openTimerRef.current) { clearTimeout(openTimerRef.current); openTimerRef.current = null; }
+  };
+  const armOpenRow = (c: HistoryItem) => {
+    if (editingId) return;                                   // never open/navigate while a title is being edited
+    if (Platform.OS !== 'web') { openHistory(c); return; }   // native: no dblclick; a tap opens immediately
+    const token = Date.now();
+    openArmRef.current = armOpen(token);
+    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    openTimerRef.current = setTimeout(() => {
+      openTimerRef.current = null;
+      if (openShouldFire(openArmRef.current, token)) { openArmRef.current = null; openHistory(c); }
+    }, OPEN_DELAY_MS);
+  };
+
   const beginRename = (c: HistoryItem) => {
+    cancelArmedOpen();   // a double-click / long-press must cancel the armed single-click open so it never navigates
     cancelledRef.current = false;
     setDraft(displayTitle(c, locale));
     setEditingId(c.id);
@@ -333,7 +360,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                           <Pressable
                             ref={bindDoubleClick(c)}
                             style={s.histItem}
-                            onPress={() => openHistory(c)}
+                            onPress={() => armOpenRow(c)}
                             // Web gets the owner's double-click (bound on the host node by
                             // `bindDoubleClick`); touch gets long-press as the equivalent.
                             onLongPress={() => beginRename(c)}

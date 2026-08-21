@@ -110,7 +110,9 @@ const AGE_QUESTION: AdvancedQuestion = {
 
 // Cohort gating lives in @/lib/afCohorts (moved 2026-08-20): that module is PURE, so barriers can
 // EXECUTE cohortAllows() against real queries instead of regexing this file, which is what makes the
-// multi-type intersection mutation-provable. The cohort DATA moved with it, unchanged.
+// multi-type intersection mutation-provable. The cohort DATA moved with it, unchanged. Buy+Rent
+// combined gating (q.dealCombined — owner feature 2026-08-20) lives there too, intersecting with
+// the multi-type/multi-period dimensions rather than being bolted on separately — see afCohorts.ts.
 import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips } from '@/lib/afCohorts';
 // Merge picked strict amenity tokens (kitchen/parking/elevator/furnished/rnpl) into q.amenities.
 function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
