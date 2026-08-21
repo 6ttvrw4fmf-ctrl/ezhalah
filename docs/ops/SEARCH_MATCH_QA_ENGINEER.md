@@ -482,6 +482,32 @@ appears broken.
    collide across genuinely distinct listings from the same agent/building — one run showed 150 false
    "duplicates" in 210 مكتب cards. Identity is the click-through URL: 110 cards produced 110 distinct
    destinations. §30 (similarity ≠ evidence) applies to the harness too.
+10. **Never click a walked-up "pressable" ancestor — click the row itself** (measured 2026-08-21).
+    The UI is react-native-web: every control is a `<div>`, and pressables carry `r-1loqt21`
+    (cursor:pointer). An autocomplete row (e.g. «الرياض / 20,359 إعلان») has **no** such ancestor,
+    so a helper that walks up looking for one runs out of levels and lands on a **~1500px page
+    container** — whose *centre* is a completely different control. Measured effect: picking a city
+    silently pressed the «الاستراحات والريف» group chip, so «إيجار» + الرياض searched
+    `p_types=["استراحة","إستراحة","شاليه","مخيم","مزرعة","أرض زراعية"]` and returned **632**
+    instead of **20,359**, with the app's own «ملخص البحث» reporting «نوع العقار: الاستراحات
+    والريف». That reads exactly like a P0 matching bug — a filter the user never chose, silently
+    applied. It is not: the product is correct and order-invariant
+    (rent→city == city→rent == 20,359 «سكني»). **Bound the ancestor walk by height** (row ≤ ~80px,
+    pressable ≤ ~120px) and fall back to the text element. Before reporting any "the app selected
+    something I never chose" defect, re-run the same journey with the gesture order reversed: if the
+    two disagree, suspect the harness first (§40.7).
+11. **A reload does NOT reset the filter — the app persists it (§29 requires that).** A browser
+    context keeps localStorage across `page.goto()`, so the next `press()` **toggles an
+    already-selected control OFF** and the control looks dead. Reset with «مسح الكل» (or a fresh
+    context) between journeys. This is what made all five «الاستراحات والريف» types look unreachable
+    during a taxonomy harvest.
+12. **The deal token sent to the RPC is «بيع», not «شراء».** «شراء» is the *button label*;
+    `p_deal` carries «بيع». A plan built from the label returns nothing and reads as a dead cohort.
+13. **The Normal Filter exposes no «الترتيب» control.** The six RPC sort keys
+    (`oldest, price_asc, price_desc, area_asc, area_desc, beds_desc`) are reachable from the agent
+    path and the RPC, so §11 is tested at the RPC level (set-invariance), not by clicking a sort
+    control that does not exist. Do not report a missing sort control as a regression without first
+    checking `RPC_SORT_KEYS` in `src/data/remote.ts`.
 
 ## Final principle
 **MATCH → SOURCE TRUTH → DIVERSITY → USER JOURNEY → PERFORMANCE**, in that order. The engineer owns
