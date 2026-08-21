@@ -1,6 +1,17 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-08-21 (data-integrity run #36, PR #851): UNCHANGED. That run's migrations
+--   20260821153734 / 20260821154150 / 20260821154316 redefine phasea_shadow_resolution (the
+--   priority-1 resolver this view READS) and add mon_detect_phasea_offregion_pick. They NAME this
+--   view only in prose — to say which refresh carries the fix through (jobid 17, hourly at :00) and
+--   which clock the barrier's cohort is therefore keyed on. v1 itself was deliberately NOT
+--   redefined. Confirmed against live production at 16:09 UTC:
+--   md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) =
+--   31036a9c8b92fddc5293b700985b869d (14127 chars) — byte-identical to the md5 recorded below, so
+--   the mirror body is untouched and only this re-verification date advances. Same shape as the
+--   2026-08-18 (run #28) entry further down.
+--
 -- Re-verified 2026-08-20 (prod-drift resolution): CHANGED and regenerated. Migration
 --   20260820074258_v1_legacy_city_resolution_scoped_to_published_region redefined this view
 --   (legacy city resolution scoped to the published region). Recorded md5: 31036a9c8b92fddc5293b700985b869d (14127 chars),
