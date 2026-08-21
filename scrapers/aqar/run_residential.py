@@ -19,6 +19,7 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Optional
 
 # Make the scrapers/ folder importable when running with `python -m`.
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,6 +29,7 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.aqar import discover as D
 from scrapers.aqar.enrich_residential import enrich_residential
 from scrapers.common import db
+from scrapers.common.emptiness import SliceOutcome, emptiness_is_source_published, run_may_allow_empty
 
 
 # How many listing pages to enrich CONCURRENTLY. 6 workers + the 0.3s per-host start-spacing in
@@ -37,16 +39,26 @@ from scrapers.common import db
 WORKERS = int(os.environ.get("SCRAPE_WORKERS", "6"))
 
 
-def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int, start_page: int = 1, max_listings: int) -> tuple[int, int]:
+def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int, start_page: int = 1,
+                 max_listings: int) -> tuple[int, int, Optional[SliceOutcome]]:
     print(f"\n── {type_key.upper():<10} {deal_key.upper():<4} {city_key.upper():<8} "
           f"(pages {start_page}–{max_pages}, limit≤{max_listings}, workers={WORKERS})")
     # Discovery is cheap (paginated search HTML) — collect the listing URLs first, then enrich them
     # in parallel. Discover is a generator with its own throttle, so this part stays polite too.
+    outcome = SliceOutcome()
     try:
-        urls = list(D.discover(type_key, deal_key, city_key, max_pages=max_pages, start_page=start_page, max_listings=max_listings))
+        urls = list(D.discover(type_key, deal_key, city_key, max_pages=max_pages, start_page=start_page,
+                               max_listings=max_listings, outcome=outcome))
     except KeyError:
         print(f"   (no Aqar slug for {type_key}/{deal_key} — skipping)")
-        return 0, 0
+        return 0, 0, None
+    if not urls:
+        # Say WHICH kind of nothing this was — the distinction decides whether the run is healthy.
+        print("   (0 listings) "
+              + ("source published its own empty state — genuinely empty"
+                 if emptiness_is_source_published(outcome)
+                 else f"NOT proven empty (fetch_failed={outcome.fetch_failed}, "
+                      f"pages_fetched={outcome.pages_fetched}, empty_state={outcome.source_empty_state})"))
 
     seen = len(urls)
     counter = {"done": 0, "upserted": 0}
@@ -76,7 +88,7 @@ def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int,
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         list(pool.map(work, enumerate(urls)))
 
-    return seen, counter["upserted"]
+    return seen, counter["upserted"], outcome
 
 
 def main() -> int:
@@ -108,18 +120,23 @@ def main() -> int:
     elif args.all_residential:
         type_list = list(D.RESIDENTIAL_TYPES)
 
+    outcomes: list[SliceOutcome] = []
     try:
         if type_list is not None:
             for t in type_list:
                 for d in ("rent", "buy"):
                     if (t, d) not in D.CATEGORIES:
                         continue
-                    s, u = scrape_slice(t, d, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit)
+                    s, u, o = scrape_slice(t, d, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit)
                     total_seen += s
                     total_upserted += u
+                    if o is not None:
+                        outcomes.append(o)
         else:
-            s, u = scrape_slice(args.type, args.deal, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit)
+            s, u, o = scrape_slice(args.type, args.deal, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit)
             total_seen, total_upserted = s, u
+            if o is not None:
+                outcomes.append(o)
         ok = True
         notes = None
     except Exception as e:
@@ -136,7 +153,20 @@ def main() -> int:
         # through that pass undetected. Found live 2026-08-10: shard runs 26390/26391 demoted
         # ok=False ("integrity guard tripped (degraded)") by end_run() but this file still
         # returned 0 for them.
-        healthy = db.end_run(run_id, ok=ok, rows_seen=total_seen, rows_upserted=total_upserted, notes=notes, check_tables=["aqar_residential_listings"])
+        #
+        # allow_empty is asserted ONLY when every slice PROVED its own emptiness — the source
+        # rendered its own «لا توجد نتائج» on an HTTP 200 page. A blocked or non-200 fetch anywhere
+        # keeps the run unhealthy, so RC-B still catches the silent-death case it exists for. This
+        # is what stops a genuinely empty city (badr) from painting the whole 95-job sweep red on
+        # every run — a check that is always red cannot report a NEW failure. See
+        # scrapers/common/emptiness.py.
+        allow_empty = ok and run_may_allow_empty(outcomes)
+        if allow_empty:
+            print("ℹ 0 rows, and every slice proved it: the source published its own empty state. "
+                  "Reporting healthy rather than red — this is not a blocked crawl.", flush=True)
+            notes = ((notes + " | ") if notes else "") + "source-published empty (all slices proven)"
+        healthy = db.end_run(run_id, ok=ok, rows_seen=total_seen, rows_upserted=total_upserted, notes=notes,
+                             allow_empty=allow_empty, check_tables=["aqar_residential_listings"])
 
     print(f"\n📊 Done. {total_upserted}/{total_seen} upserted across all slices. (run_id={run_id})")
     if ok and not healthy:

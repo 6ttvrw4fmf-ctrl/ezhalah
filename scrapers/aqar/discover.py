@@ -11,6 +11,7 @@ from typing import Iterator, Optional
 from urllib.parse import urljoin
 
 from scrapers.common.http import get
+from scrapers.common.emptiness import SliceOutcome
 
 
 BASE = "https://sa.aqar.fm"
@@ -220,6 +221,7 @@ def discover(
     max_pages: int = 1,
     start_page: int = 1,
     max_listings: Optional[int] = None,
+    outcome: Optional[SliceOutcome] = None,
 ) -> Iterator[str]:
     """Yield full listing URLs (https://sa.aqar.fm/...-NNNNNNN) for the given slice.
 
@@ -227,6 +229,10 @@ def discover(
     Pass start_page > 1 to walk a PAGE RANGE [start_page .. max_pages] only (batched deep
     scraping, e.g. start_page=26, max_pages=50 → pages 26–50), so deeper batches don't
     re-walk pages already covered by an earlier batch.
+
+    Pass `outcome` (a SliceOutcome) to learn WHY a slice produced nothing. Yielding zero URLs is
+    ambiguous on its own — a blocked fetch and a genuinely empty city look identical from out here —
+    and that ambiguity is what kept the aqar sweep permanently red (see scrapers/common/emptiness.py).
     """
     cat_slug = CATEGORIES[(type_key, deal_key)]
     city_ar = CITY_AR[city_key]
@@ -238,6 +244,11 @@ def discover(
         url = BASE + path
         r = get(url)
         if r is None:
+            # http.get() only returns a response on HTTP 200, so None means a non-200 or a 429 that
+            # survived every retry. That is BLOCKED, not empty — and the difference is the whole
+            # point of recording it.
+            if outcome is not None:
+                outcome.note_fetch_failure()
             break
         html = r.text
         # Cheap-and-effective: collect every href that looks like a listing URL.
@@ -255,7 +266,13 @@ def discover(
             yielded += 1
             yield full
             if max_listings and yielded >= max_listings:
+                # Record this page before the early exit, or a slice that hit its cap would look
+                # like a slice that was never fetched.
+                if outcome is not None:
+                    outcome.note_page(html, new_on_page)
                 return
+        if outcome is not None:
+            outcome.note_page(html, new_on_page)
         # Exhausted: once a page yields no NEW listings, the city has no more depth in this
         # slice. Stop instead of hammering empty pages all the way to max_pages — this is what
         # lets us safely set --pages very high (e.g. 150) and let each city stop where it ends.
