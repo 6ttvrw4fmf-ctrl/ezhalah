@@ -1,17 +1,17 @@
 # DATA INTEGRITY ENGINEER — NORMAL FILTER / FULL SCRAPED INVENTORY ONLY
 
 > Canonical spec (owner, 2026-08-10). The live cloud routine
-> (`trig_01Tr6Rb6XPggFXqCf3EKG62y`, daily 07:00 UTC) carries this text; **this file is the source of
+> (`trig_01Tr6Rb6XPggFXqCf3EKG62y`, daily 05:00 Arizona / 12:00 UTC) carries this text; **this file is the source of
 > truth** — if the routine prompt and this file ever differ, update the routine to match this file.
 > This is a SEPARATE routine from the 🎖️ Daily Senior Production Engineer (which keeps its own
-> original scope, daily 06:00 UTC): **Advanced Filter is out of scope for this routine** — it
+> original scope, daily 04:30 Arizona / 11:30 UTC): **Advanced Filter is out of scope for this routine** — it
 > belongs to the senior. See `docs/ops/ENGINEER_ROUTINES.md` for the three-engineer contract.
 
 ## §0. Standing operating contract (owner-granted, 2026-08-12 — permanent)
 
 **This section is attached to THIS existing job and no other:** routine #3,
 **🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter)**,
-`trig_01Tr6Rb6XPggFXqCf3EKG62y`, daily 07:00 UTC. The owner's instruction was explicit: *"Do not
+`trig_01Tr6Rb6XPggFXqCf3EKG62y`, daily 05:00 Arizona / 12:00 UTC. The owner's instruction was explicit: *"Do not
 create a different engineer or duplicate routine."* `docs/ops/ENGINEER_ROUTINES.md` is owner-locked
 at exactly four routines; strengthening this one is the only correct way to apply this rule.
 
