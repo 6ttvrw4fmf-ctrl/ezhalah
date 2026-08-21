@@ -72,6 +72,7 @@ type AppState = {
   clearHistory: () => void;
   toggleStar: (id: string) => void;
   deleteHistory: (id: string) => void;
+  renameHistory: (id: string, newLabel: string) => void;
   // Record a free-text user message as the active chat's sidebar entry. First message → creates a
   // new chat in Recent with the user's text as the title; subsequent messages → update the same
   // chat's title to the LATEST user text and bump it to the top. Signed-in users only — a guest's
@@ -540,6 +541,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       deleteHistory: (id) =>
         setHistory((h) => {
           const next = h.filter((it) => it.id !== id);
+          if (user) try {
+            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), JSON.stringify(next));
+          } catch {}
+          return next;
+        }),
+      renameHistory: (id, newLabel) =>
+        setHistory((h) => {
+          const trimmed = (newLabel ?? '').trim();
+          if (!trimmed) return h; // empty rename = no-op
+          const next = h.map((it) => (it.id === id ? { ...it, label: trimmed } : it));
           if (user) try {
             if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), JSON.stringify(next));
           } catch {}

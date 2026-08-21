@@ -1010,6 +1010,7 @@ const AR: Record<string, string> = {
   'Last 30 Days': 'آخر 30 يوماً',
   'Star': 'تمييز بنجمة',
   'Unstar': 'إزالة النجمة',
+  'Rename': 'إعادة تسمية',
   'Delete': 'حذف',
 
   // Settings (account)

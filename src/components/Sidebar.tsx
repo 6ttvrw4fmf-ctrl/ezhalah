@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
   interpolate,
@@ -67,7 +67,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, isRTL, locale } = useI18n();
-  const { user, history, setQuery, toggleStar, deleteHistory, openModal, openAuth, activeChatId, setActiveChat } = useApp();
+  const { user, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat } = useApp();
   // Row action menu (Star / Delete). Rendered as a panel-level overlay OUTSIDE the scrolling list so
   // it can never be clipped, and opened UP or DOWN from the click position so the full menu is always
   // on-screen near the top, middle, or bottom of the sidebar. (user request.)
@@ -82,6 +82,56 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   });
   const [menu, setMenu] = useState<{ id: string; top: number; openUp: boolean; panelH: number } | null>(null);
   const menuItem = menu ? history.find((c) => c.id === menu.id) ?? null : null;
+
+  // ── Inline rename (double-click = rename only, never navigate/clear) ──────────────────────────
+  // Owner rule (2026-08-20): double-click a sidebar title → inline editable text field. It must NEVER
+  // clear/reset the active chat, search results, filter state, or any conversation content.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const editRef = useRef<TextInput>(null);
+  // Click-delay pattern: single-click waits 250ms; if a second click arrives within the window, it's a
+  // double-click (rename). If not, the delayed single-click fires (openHistory). This prevents the
+  // double-click from navigating twice.
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const commitRename = (id: string, text: string) => {
+    const trimmed = (text ?? '').trim();
+    if (trimmed) renameHistory(id, trimmed);
+    setEditingId(null);
+  };
+
+  const startRename = (c: HistoryItem) => {
+    setEditingId(c.id);
+    setEditText(c.label || queryLabel(c.query));
+    // Focus the input on next tick (after React renders the TextInput).
+    setTimeout(() => editRef.current?.focus(), 50);
+  };
+
+  const handleRowPress = (c: HistoryItem) => {
+    // If we're already editing this row, ignore — the input handles its own events.
+    if (editingId === c.id) return;
+    // If we're editing a DIFFERENT row, commit that rename and treat this as a single click.
+    if (editingId) { commitRename(editingId, editText); }
+
+    if (Platform.OS !== 'web') {
+      // No double-click on touch — single tap always opens.
+      openHistory(c);
+      return;
+    }
+    // Web: disambiguate single-click (open) vs double-click (rename).
+    if (clickTimer.current) {
+      // Second click within 250ms → double-click → rename.
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+      startRename(c);
+    } else {
+      // First click → wait to see if a second click follows.
+      clickTimer.current = setTimeout(() => {
+        clickTimer.current = null;
+        openHistory(c);
+      }, 250);
+    }
+  };
 
   const openMenu = (id: string, e: any) => {
     if (menu?.id === id) { setMenu(null); return; }
@@ -270,10 +320,25 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                         Title still flows with its own text direction inside the bubble. (user request.) */}
                     {g.items.map((c) => (
                       <View key={c.id} style={[s.histRow, activeChatId === c.id && s.histRowActive, menu?.id === c.id && s.histRowOpen, { direction: 'ltr' } as any]}>
-                        <Pressable style={s.histItem} onPress={() => openHistory(c)}>
+                        <Pressable style={s.histItem} onPress={() => handleRowPress(c)}>
                           <Ionicons name="chatbubble-outline" size={15} color="#8a978f" />
-                          <Text style={s.histLabel} numberOfLines={1}>{c.label || queryLabel(c.query)}</Text>
-                          {c.starred && <Ionicons name="star" size={13} color={GOLD} />}
+                          {editingId === c.id ? (
+                            <TextInput
+                              ref={editRef}
+                              style={s.histLabelEdit}
+                              value={editText}
+                              onChangeText={setEditText}
+                              onSubmitEditing={() => commitRename(c.id, editText)}
+                              onBlur={() => commitRename(c.id, editText)}
+                              onKeyPress={(e: any) => { if (e.nativeEvent?.key === 'Escape') { setEditingId(null); } }}
+                              autoFocus
+                              selectTextOnFocus
+                              blurOnSubmit
+                            />
+                          ) : (
+                            <Text style={s.histLabel} numberOfLines={1}>{c.label || queryLabel(c.query)}</Text>
+                          )}
+                          {c.starred && editingId !== c.id && <Ionicons name="star" size={13} color={GOLD} />}
                         </Pressable>
                         <Pressable style={s.dots} hitSlop={6} onPress={(e) => openMenu(c.id, e)}>
                           <Ionicons name="ellipsis-horizontal" size={16} color="#9aa6a0" />
@@ -343,6 +408,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           menu.openUp ? { bottom: Math.max(8, menu.panelH - menu.top + 4) } : { top: menu.top + 4 },
         ]}
       >
+        <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && s.rowMenuItemHover]} onPress={() => { const item = history.find((h) => h.id === menu.id); if (item) startRename(item); setMenu(null); }}>
+          <Ionicons name="pencil-outline" size={15} color={colors.ink} />
+          <Text style={s.rowMenuText} numberOfLines={1}>{t('Rename')}</Text>
+        </Pressable>
         <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && s.rowMenuItemHover]} onPress={() => { toggleStar(menu.id); setMenu(null); }}>
           <Ionicons name={menuItem.starred ? 'star' : 'star-outline'} size={15} color={menuItem.starred ? GOLD : colors.ink} />
           <Text style={s.rowMenuText} numberOfLines={1}>{menuItem.starred ? t('Unstar') : t('Star')}</Text>
@@ -418,6 +487,7 @@ const s = StyleSheet.create({
   histRowActive: { backgroundColor: '#dcefe1' },
   histItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 8 },
   histLabel: { flex: 1, fontSize: 13.5, fontWeight: '500', color: colors.ink },
+  histLabelEdit: { flex: 1, fontSize: 13.5, fontWeight: '500', color: colors.ink, borderWidth: 1, borderColor: colors.primary, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6, backgroundColor: '#fff', outlineStyle: 'none' } as any,
   dots: { paddingVertical: 6, paddingHorizontal: 8, borderRadius: 8 },
   // Soft dim over the sidebar while the menu is open so the history text behind it recedes and the
   // floating card reads cleanly (it no longer blends into the list). Tap it to dismiss.
