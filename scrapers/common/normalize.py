@@ -258,6 +258,33 @@ def _norm_ar(s: str) -> str:
             .strip())
 
 
+# A city name that appears ONLY as the target of a road/route word is naming the ROAD, not the
+# locality — «طريق المدينة» is "Madinah Road", which can be hundreds of km from Medina.
+# (2026-08-21 data-integrity run #36: aqarcity ad 30334 publishes addressRegion «منطقة تبوك» and
+# addressLocality «مزارع جنوب طريق المدينه (الاولى)», and its own description reads
+# «اراضي للبيع في طريق المدينة - تبوك». The substring pass below matched the key «المدينه» inside
+# «طريق المدينه» and filed a Tabuk farm plot in منطقة المدينة المنورة, where real users saw it.)
+_ROAD_QUALIFIERS = ("طريق", "شارع", "مخرج")
+
+
+def _only_as_road_name(needle: str, hay: str) -> bool:
+    """True when EVERY occurrence of `needle` in `hay` is immediately preceded by a road word.
+
+    Deliberately "every", not "any": a string that names both a road and the real locality
+    («الرياض طريق مكة») must still resolve on the non-road occurrence. Returning True here only
+    suppresses a candidate — it never selects one — so the caller falls through to a shorter key or
+    to an honest None.
+    """
+    starts = [m.start() for m in re.finditer(re.escape(needle), hay)]
+    if not starts:
+        return False
+    for s in starts:
+        before = hay[:s].rstrip()
+        if not any(before.endswith(q) for q in _ROAD_QUALIFIERS):
+            return False
+    return True
+
+
 def map_city(raw_ar: str, overrides: Optional[dict[str, str]] = None) -> Optional[str]:
     """Look up the canonical English city name from an Arabic city name or URL slug.
     `overrides`: optional per-platform exact-match dict (matched on the raw stripped string, before
@@ -274,14 +301,14 @@ def map_city(raw_ar: str, overrides: Optional[dict[str, str]] = None) -> Optiona
     for ar, eng in CITY_MAP_AR.items():
         if _norm_ar(ar) == raw:
             return eng
-    # Else longest substring match so "أحد المسارحة" isn't shadowed by a shorter token.
+    # Else longest substring match so "أحد المسارحة" isn't shadowed by a shorter token — but never
+    # on a name that appears only as a ROAD's name (see _only_as_road_name above).
     best = None
     for ar, eng in CITY_MAP_AR.items():
         na = _norm_ar(ar)
-        if na in raw and (best is None or len(na) > len(best[0])):
+        if na in raw and not _only_as_road_name(na, raw) and (best is None or len(na) > len(best[0])):
             best = (na, eng)
     return best[1] if best else None
-    return None
 
 
 # ═══ English-vocabulary sources (Wasalt, Aldarim) — unified 2026-07-16 (fix/normalize-unification) ═══
