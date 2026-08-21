@@ -326,7 +326,7 @@ const pnum = (s: unknown): number | null => { const n = parseInt(String(s ?? '')
 function agentPriceCapAnnual(q: SearchQuery): number | null {
   const amount = parseInt((q.priceInput || '').replace(/[^\d]/g, ''), 10);
   if (!Number.isFinite(amount) || amount < 100) return null;
-  if (q.bothDeals) return null;                     // one cap over buy+rent — leave to the client
+  if (q.bothDeals || q.dealCombined) return null;    // one cap over buy+rent — leave to the client (Filter path sends priceMin/Max(Rent) explicitly instead)
   if (q.deal === 'Rent') {
     if (q.priceIsAnnual) return amount;             // agent already annualized a daily/weekly/monthly rent
     if (q.rentPeriod === 'annual') return amount;
@@ -376,6 +376,11 @@ function rpcFilterParams(q: SearchQuery) {
     // deliberate); sortListings() in search.ts still re-sorts the fetched page for those two, same as
     // before this fix.
     ...(RPC_SORT_KEYS.has(q.sort as string) ? { p_sort_by: q.sort } : {}),
+    // Buy+Rent combined multi-select (owner feature 2026-08-20, PR#817 backend): the Rent-side budget
+    // is its OWN independent price pair — p_price_min/max above stay the Buy budget unchanged. Only
+    // sent when dealCombined is true; every single-deal call shape stays byte-identical (these two
+    // params default to NULL server-side and are ignored whenever p_deal is not null — verified live).
+    ...(q.dealCombined ? { p_price_min_rent: pnum(q.priceMinRent), p_price_max_rent: pnum(q.priceMaxRent) } : {}),
   };
 }
 
@@ -524,7 +529,10 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
       : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
 
   return {
-    p_deal: q.bothDeals ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
+    // dealCombined (owner feature 2026-08-20, Filter شراء+إيجار both selected) → null, same as
+    // bothDeals: af_eligibility_clause() treats p_deal IS NULL as Buy ∪ Rent(any period) — verified
+    // live exact (PR#817). Unlike bothDeals it also carries independent dual price ranges above.
+    p_deal: (q.bothDeals || q.dealCombined) ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
     p_rent_period: rentPeriodParam(q),
     p_cities: cities && cities.length ? cities : null,
     p_districts: q.districts && q.districts.length ? q.districts : null,
@@ -895,8 +903,10 @@ function resTables(q: SearchQuery): string[] {
   // Gathern + Aqar Monthly on any search whose period scope INCLUDES monthly (see [[gathern-source]]).
   // 'both' must list them too — they are the two monthly-only sources, so omitting them would let a
   // "monthly AND annual" search silently return an annual-only pool. (owner feature 2026-08-14.)
-  const wantsMonthly = q.rentPeriod === 'monthly' || q.rentPeriod === 'both';
-  return (q.deal === 'Rent' && wantsMonthly)
+  // dealCombined (2026-08-20) ALWAYS wants monthly — combined mode's Rent side has no period selector
+  // and accepts Monthly unconditionally, so these two monthly-only sources must always be reachable.
+  const wantsMonthly = q.dealCombined || q.rentPeriod === 'monthly' || q.rentPeriod === 'both';
+  return ((q.deal === 'Rent' || q.dealCombined) && wantsMonthly)
     ? [...RES_TABLES, 'gathern_residential_listings', 'aqarmonthly_residential_listings']
     : RES_TABLES;
 }
@@ -906,7 +916,9 @@ function resTables(q: SearchQuery): string[] {
 // filter (and Buy stays untouched). Keeps the candidate budget filled with the correct period so monthly
 // results aren't crowded out by annual. (owner rent-period rule 2026-07-06.)
 function rentPeriodParam(q: SearchQuery): string | null {
-  if (q.bothDeals || q.deal !== 'Rent') return null;
+  // dealCombined's Rent side has no period selector — it accepts both known periods AND
+  // unpublished-period rows (no period filter at all), same as Buy/bothDeals. (owner 2026-08-20.)
+  if (q.bothDeals || q.dealCombined || q.deal !== 'Rent') return null;
   if (q.rentPeriod === 'monthly') return 'شهري';
   if (q.rentPeriod === 'annual') return 'سنوي';
   // 'كلاهما' is NOT the same as null. null = "apply no period filter", which also sweeps in the rent rows
@@ -1048,7 +1060,7 @@ export type FetchListingsResult = { listings: Listing[] | null; pageCandidates: 
 function keptFiltersReq(q: SearchQuery, table?: string) {
   const tbl = table ?? tableFor(q);
   let req = supabase!.from(tbl).select(LIST_SELECT).eq('active', true);
-  if (!q.bothDeals) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
+  if (!q.bothDeals && !q.dealCombined) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
   const types = dbTypesFor(q);
   if (types && types.length) req = req.in('property_type', types);
   // Rent-period filter only when the deal is actually Rent — NOT for a "rent or buy" (bothDeals) search,
@@ -1061,11 +1073,13 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   //  • BOTH: the union of the two KNOWN periods — mixed platforms must carry an explicit monthly OR
   //    annual rent_period (a null one is still neither, and never guessed); monthly-only platforms pass
   //    wholesale exactly as they do on a monthly search. (owner feature 2026-08-14.)
-  if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
+  // dealCombined (2026-08-20): same as bothDeals — Rent rows in combined mode have no period filter
+  // at all (accepts both known periods AND unpublished-period rows), so none of these branches apply.
+  if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
     if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.eq('rent_period', 'monthly');
-  } else if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'annual') {
+  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'annual') {
     req = req.eq('rent_period', 'annual');
-  } else if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'both') {
+  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'both') {
     if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.in('rent_period', ['monthly', 'annual']);
   }
   return req;

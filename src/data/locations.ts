@@ -14,9 +14,11 @@ import type { Category, Deal } from './taxonomy';
 
 // 'Buy'/'Rent' → the Arabic deal_ar value stored on search_listings_ar (same mapping remote.ts
 // uses inline for the main search RPC) — the single conversion point for the Top-6 city/district
-// scoping below.
-function dealAr(deal: Deal): string {
-  return deal === 'Buy' ? 'بيع' : 'إيجار';
+// scoping below. null (Filter شراء+إيجار both selected, owner feature 2026-08-20) → null: the
+// backend's top_cities_by_deal_ar/district_options_ar treat p_deal=null as Buy ∪ Rent(any period),
+// the exact combined-mode eligible set (verified live, PR#817) — never a fake third deal_ar string.
+function dealAr(deal: Deal | null): string | null {
+  return deal === null ? null : deal === 'Buy' ? 'بيع' : 'إيجار';
 }
 
 export type PlaceKind = 'country' | 'region' | 'city' | 'district';
@@ -687,7 +689,7 @@ const pmKey = (periodTok: string | null) => periodTok ?? '';
 // the Top-6 ranking, every listing_count, and the new total_in_cohort denominator all describe the
 // same cohort the user will actually search. Price is deliberately NOT part of this key.
 const typesKey = (types: string[] | null) => (types && types.length ? [...types].slice().sort().join('|') : '');
-const cityPoolKey = (deal: Deal, periodTok: string | null, category: Category | null, types: string[] | null = null) => `${deal}:${pmKey(periodTok)}:${category ?? ''}:${typesKey(types)}`;
+const cityPoolKey = (deal: Deal | null, periodTok: string | null, category: Category | null, types: string[] | null = null) => `${deal}:${pmKey(periodTok)}:${category ?? ''}:${typesKey(types)}`;
 const CITY_FIELD_POOLS = new Map<string, CityOption[]>();
 const _cityFieldPromises = new Map<string, Promise<CityOption[]>>();
 
@@ -700,11 +702,11 @@ const _cityFieldPromises = new Map<string, Promise<CityOption[]>>();
 export type PoolStatus = 'loading' | 'error' | 'ready';
 const _cityPoolStatus = new Map<string, PoolStatus>();
 const _districtPoolStatus = new Map<string, PoolStatus>();
-export function cityPoolStatus(deal: Deal, periodTok: string | null, category: Category | null, types: string[] | null = null): PoolStatus {
+export function cityPoolStatus(deal: Deal | null, periodTok: string | null, category: Category | null, types: string[] | null = null): PoolStatus {
   const key = cityPoolKey(deal, periodTok, category, types);
   return CITY_FIELD_POOLS.has(key) ? 'ready' : _cityPoolStatus.get(key) ?? 'loading';
 }
-export function districtPoolStatus(cityId: number, deal: Deal, category: Category | null, periodTok: string | null, types: string[] | null = null): PoolStatus {
+export function districtPoolStatus(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, types: string[] | null = null): PoolStatus {
   const key = districtCacheKey(cityId, deal, category, periodTok, types);
   return _districtCache.has(key) ? 'ready' : _districtPoolStatus.get(key) ?? 'loading';
 }
@@ -713,7 +715,7 @@ export function districtPoolStatus(cityId: number, deal: Deal, category: Categor
 // most — small enough to fetch in one shot and search entirely client-side, same shape as
 // ensureLocationIndex above). Already sorted by listing_count desc so topCitiesByListings() below
 // is just a slice.
-export async function ensureCityFieldIndex(deal: Deal, periodTok: string | null = null, category: Category | null = null, types: string[] | null = null): Promise<CityOption[]> {
+export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string | null = null, category: Category | null = null, types: string[] | null = null): Promise<CityOption[]> {
   const key = cityPoolKey(deal, periodTok, category, types);
   const cached = CITY_FIELD_POOLS.get(key);
   if (cached) return cached;
@@ -801,7 +803,7 @@ export async function ensureCityFieldIndex(deal: Deal, periodTok: string | null 
 // this category" count (e.g. 9,358) instead of the exact selected type's count (e.g. 28, or 0). Every
 // call site must now pass its cohortTypesAr(query) explicitly; TypeScript refuses to compile a caller
 // that forgets it, so this class of drift can never silently reappear. [[cohortTypesAr]]
-export function topCitiesByListings(deal: Deal, periodTok: string | null, category: Category | null, k: number, types: string[] | null): CityOption[] {
+export function topCitiesByListings(deal: Deal | null, periodTok: string | null, category: Category | null, k: number, types: string[] | null): CityOption[] {
   return (CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types)) ?? []).filter((c) => c.listingCount > 0).slice(0, k);
 }
 
@@ -832,11 +834,11 @@ export type DistrictOption = {
 // unaffected; only the popularity ranking / listing_count used for the Top-6 slice changes.
 const _districtCache = new Map<string, DistrictOption[]>();
 const _districtPromises = new Map<string, Promise<DistrictOption[]>>();
-const districtCacheKey = (cityId: number, deal: Deal, category: Category | null, periodTok: string | null, types: string[] | null = null) => `${cityId}:${deal}:${category ?? ''}:${pmKey(periodTok)}:${typesKey(types)}`;
+const districtCacheKey = (cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, types: string[] | null = null) => `${cityId}:${deal}:${category ?? ''}:${pmKey(periodTok)}:${typesKey(types)}`;
 
 // Load (once, cached per city+deal+category) the full district catalog for a city_id. Never falls
 // back to another city.
-export async function ensureDistrictOptions(cityId: number, deal: Deal, category: Category | null, periodTok: string | null = null, types: string[] | null = null): Promise<DistrictOption[]> {
+export async function ensureDistrictOptions(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null = null, types: string[] | null = null): Promise<DistrictOption[]> {
   const key = districtCacheKey(cityId, deal, category, periodTok, types);
   const cached = _districtCache.get(key);
   if (cached) return cached;
@@ -904,14 +906,14 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal, category
 // already returns rows ordered by listing_count desc, so this is a filter + slice).
 // `types` (and every param before it) is REQUIRED — same compile-time barrier as topCitiesByListings
 // above, guarding the district pool's read-back cache key. [[cohortTypesAr]]
-export function topDistrictsForCityId(cityId: number, deal: Deal, category: Category | null, periodTok: string | null, k: number, types: string[] | null): DistrictOption[] {
+export function topDistrictsForCityId(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, k: number, types: string[] | null): DistrictOption[] {
   return (_districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types)) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
 }
 
 // Typing: search the COMPLETE canonical catalog for THIS city (incl. zero-listing districts) by Arabic
 // substring, using the SAME norm() folding as the city field. Empty query → the Top-6 suggestions.
 // `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
-export function matchDistrictsByCityId(cityId: number, deal: Deal, category: Category | null, periodTok: string | null, query: string, types: string[] | null): DistrictOption[] {
+export function matchDistrictsByCityId(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, query: string, types: string[] | null): DistrictOption[] {
   const all = _districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types)) ?? [];
   const q = norm(query);
   if (!q) return all.filter((d) => d.listingCount > 0).slice(0, 6);
@@ -931,7 +933,7 @@ export function matchDistrictsByCityId(cityId: number, deal: Deal, category: Cat
 // normalize_ar() applies — so "الري" matches "الرياض" exactly like a DB-side search would. Ranks
 // exact-prefix matches before substring matches, then by listing count (bigger cities first).
 // `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
-export function matchCitiesByText(deal: Deal, periodTok: string | null, category: Category | null, query: string, types: string[] | null): CityOption[] {
+export function matchCitiesByText(deal: Deal | null, periodTok: string | null, category: Category | null, query: string, types: string[] | null): CityOption[] {
   const q = norm(query);
   if (!q) return [];
   const scored: { opt: CityOption; rank: number }[] = [];
