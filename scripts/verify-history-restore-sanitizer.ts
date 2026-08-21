@@ -15,6 +15,8 @@ const agentQuery: any = {
   deal: 'Buy',
   location: 'الرياض',
   category: 'Residential',
+  // Deliberately the LEGACY single-group shape: this fixture doubles as the migration test — an
+  // entry saved before 2026-08-20 must reopen with its group intact, as typeGroups. (owner multi-group)
   typeGroup: 'Villas & Houses',
   types: ['Villa'],
   areaMin: 200, areaMax: 400, priceMin: 500000, priceMax: 1000000,
@@ -46,7 +48,7 @@ for (const [k, want] of mustNotSurvive)
 // 2) Every visible Filter field IS preserved.
 const mustSurvive: Array<[string, any]> = [
   ['deal', 'Buy'], ['location', 'الرياض'], ['category', 'Residential'],
-  ['typeGroup', 'Villas & Houses'], ['areaMin', 200], ['areaMax', 400],
+  ['typeGroups', ['Villas & Houses']], ['areaMin', 200], ['areaMax', 400],
   ['priceMin', 500000], ['priceMax', 1000000], ['contextBeds', '3'], ['rentPeriod', 'annual'],
   ['districtLabel', 'حي الملقا'],
 ];

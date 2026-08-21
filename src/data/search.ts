@@ -119,7 +119,11 @@ export type SearchQuery = {
   // any clean type in that group. `type` (a single CLEAN property type, e.g. "Chalet") is the HARD
   // exact filter. Both feed the one engine; the filter sets these, the agent resolves to them.
   // (user: filter = structured AI input; group = head-start intent, type = exact.)
-  typeGroup?: string | null;
+  // Subcategory GROUPS — MULTI-SELECT (owner 2026-08-20: Category → Group(s) → Type(s) → AF).
+  // OR across the selected groups; the type boxes show the union of their members. Replaced the old
+  // single `typeGroup` string outright; legacy persisted values are migrated on read by
+  // migrateGroups() in @/lib/searchDefaults — there is no second live field.
+  typeGroups?: string[] | null;
   // Bedroom count selected at the CATEGORY/GROUP level — shown before the user picks a specific type.
   // Independent of `detail` so both beds and area can be set simultaneously. Ignored once a type is
   // selected (the type-level detail chip takes over). (user: no forced type selection for bed filter.)
@@ -191,6 +195,8 @@ export type SortKey =
 // Moved to src/lib/searchDefaults.ts (zero-dependency, so a plain Node test can execute it) —
 // re-exported here so every existing `import { emptyQuery } from '@/data/search'` keeps working.
 export { emptyQuery } from '@/lib/searchDefaults';
+// Imported for use INSIDE this module (the re-export below only republishes them to callers).
+import { effectiveTypes, effectiveGroups } from '@/lib/searchDefaults';
 
 export const locationPhrase = (q: SearchQuery) => q.location.trim() || 'Saudi Arabia';
 const placeText = (q: SearchQuery) => {
@@ -280,8 +286,8 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
   const selTypes = effectiveTypes(q);
   const whatPhrase = selTypes.length
     ? selTypes.map((x) => arabicOrTypeUnresolved(tWord(x))).join('، ')
-    : q.typeGroup
-      ? arabicOrTypeUnresolved(t(q.typeGroup))
+    : effectiveGroups(q).length
+      ? effectiveGroups(q).map((g) => arabicOrTypeUnresolved(t(g))).join('، ')
       : q.category
         ? t('{cat} property', { cat: arabicOrTypeUnresolved(tWord(q.category)) })
         : t('a property');
@@ -358,8 +364,8 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
 
   const subWhat = selTypes.length
     ? selTypes.map((x) => arabicOrTypeUnresolved(tWord(x))).join('، ')
-    : q.typeGroup
-      ? arabicOrTypeUnresolved(t(q.typeGroup))
+    : effectiveGroups(q).length
+      ? effectiveGroups(q).map((g) => arabicOrTypeUnresolved(t(g))).join('، ')
       : q.category
         ? t('{cat} properties', { cat: arabicOrTypeUnresolved(tWord(q.category)) })
         : t('properties');
@@ -452,7 +458,7 @@ function arabicOrUnresolved(s: string): string {
   return arabicOrPlaceholder(s, getLocale(), LOCATION_UNRESOLVED_AR);
 }
 
-// Same idea, for property-type/category words. q.type/q.types/q.category/q.typeGroup are normally a
+// Same idea, for property-type/category words. q.type/q.types/q.category/q.typeGroups are normally a
 // closed, fully-AR{}-translated set from the filter UI or agent parser — but the guided interview's
 // free-text "Something else" answer can set any of them to arbitrary custom text (buildQuery() in
 // src/app/interview.tsx has no dictionary-membership check), which tWord()/t() would otherwise leak
@@ -557,7 +563,7 @@ export function searchSummary(q: SearchQuery): string {
   // (user request: "if user just clicks search by default, it shows what the button clicked at.")
   const summaryTypes = effectiveTypes(q);
   if (summaryTypes.length) lines.push(`• ${t('Property Type')}: ${summaryTypes.map((x) => getLocale() === 'ar' ? arabicOrTypeUnresolved(tWord(x)) : x).join('، ')}`);
-  else if (q.typeGroup) lines.push(`• ${t('Property Type')}: ${arabicOrTypeUnresolved(t(q.typeGroup))}`);
+  else if (effectiveGroups(q).length) lines.push(`• ${t('Property Type')}: ${effectiveGroups(q).map((g) => arabicOrTypeUnresolved(t(g))).join('، ')}`);
   else if (q.category) lines.push(`• ${t('Property Type')}: ${arabicOrTypeUnresolved(t(q.category))}`);
   // For Rent, append the Monthly / Yearly period the user picked so the summary reflects the toggle. (owner UI request 2026-07-18.)
   // dealCombined's Rent side has no period selector (accepts both) so no period suffix applies there.
@@ -605,7 +611,7 @@ export function querySummaryLine(q: SearchQuery): string {
   const parts: string[] = [];
   const lineTypes = effectiveTypes(q);
   if (lineTypes.length) parts.push(lineTypes.map((x) => arabicOrTypeUnresolved(tWord(x))).join('، '));
-  else if (q.typeGroup) parts.push(arabicOrTypeUnresolved(t(q.typeGroup)));
+  else if (effectiveGroups(q).length) parts.push(effectiveGroups(q).map((g) => arabicOrTypeUnresolved(t(g))).join('، '));
   else if (q.category) parts.push(arabicOrTypeUnresolved(tWord(q.category)));
   parts.push(t(q.deal === 'Rent' ? 'Rent' : 'Buy'));
   if (q.location.trim()) parts.push(arabicOrUnresolved(tPlace(q.location.trim())));
@@ -691,7 +697,7 @@ function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run
   // over the whole fetched set and let matchesType decide. (The old keyword→mock-pool buckets only
   // covered a few residential types and would silently drop Shop/Office/Residential Building/etc.)
-  if (q.type || (q.types && q.types.length) || q.typeGroup) return allRows(pools);
+  if (q.type || (q.types && q.types.length) || effectiveGroups(q).length) return allRows(pools);
   const t = q.type?.toLowerCase();
   if (t) {
     if (t.includes('villa')) return pools.villa;
@@ -858,22 +864,21 @@ function sizeFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
 const cleanOf = (l: Listing): string => l.cleanType ?? l.type;
 
 // Does a listing satisfy the query's TYPE selection? CLEAN type (`q.type`) = EXACT match (a kept
-// "Apartment" never shows a Floor/Building sibling). A subcategory GROUP (`q.typeGroup`) = any clean
+// "Apartment" never shows a Floor/Building sibling). A subcategory GROUP (`q.typeGroups`) = any clean
 // type in that group (broad). Macro only (`q.category`, no type) = same macro_category — this is what
 // excludes a Commercial-Land row (macro=Commercial) from a Residential search even though it lives in
 // a residential table. Nothing kept → match all. (clean-type filter; strict-contract preserved.)
 // The selected clean types as a list: the filter's multi-select (`q.types`), else the single `q.type`
 // (agent path) as a 1-element list, else empty. One code path covers single + multi everywhere.
-export function effectiveTypes(q: SearchQuery): string[] {
-  if (q.types && q.types.length) return q.types;
-  return q.type ? [q.type] : [];
-}
+export { effectiveTypes, effectiveGroups } from '@/lib/searchDefaults';
 
 function matchesType(l: Listing, q: SearchQuery): boolean {
   const c = cleanOf(l);
   const sel = effectiveTypes(q);
   if (sel.length) return sel.some((s) => s === c || (SUBGROUPS[s]?.includes(c) ?? false)); // OR across selected clean types; a subgroup box (مرافق خدمية) matches any of its member types
-  if (q.typeGroup) return groupMembers(q.typeGroup).includes(c);
+  // OR across every selected group: a listing qualifies by belonging to ANY of them.
+  const grps = effectiveGroups(q);
+  if (grps.length) return grps.some((g) => groupMembers(g).includes(c));
   if (q.category) return (l.macro ?? CLEAN_MACRO[c] ?? 'Residential') === q.category;
   // NOTHING selected (no type, no group, no category — reached by deselecting the category pill).
   // remote.ts's kindsFor() only fetches residential-kind tables in this exact state ("Default
@@ -1403,8 +1408,8 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
   // fallback below rather than assert a specific cause this check cannot actually verify.
   const hasOtherFilters = !!(q.priceInput || q.priceBand || q.priceMin != null || q.priceMax != null
     || (q.districts && q.districts.length) || q.detail || q.contextBeds || (q.contextBedsList && q.contextBedsList.length)
-    || q.contextSize || q.areaMin != null || q.areaMax != null || q.type || (q.types && q.types.length) || q.typeGroup);
-  if (explicitPlace && !hasOtherFilters && countWith({ priceInput: '', priceBand: null, priceMin: null, priceMax: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, type: null, types: null, typeGroup: null }) === 0) {
+    || q.contextSize || q.areaMin != null || q.areaMax != null || q.type || (q.types && q.types.length) || effectiveGroups(q).length);
+  if (explicitPlace && !hasOtherFilters && countWith({ priceInput: '', priceBand: null, priceMin: null, priceMax: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, type: null, types: null, typeGroups: null }) === 0) {
     return t('No listings in this location right now.');
   }
   // "Did you mean X?" — fires for: (a) a free-typed unresolved place (typo/obscure town) whose lm has
@@ -1443,7 +1448,7 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
     if (distCount === 0) {
       return t("No matches in that specific area — but I can find some elsewhere in the same city. Want me to widen the area?");
     }
-    if (q.type || (q.types && q.types.length) || q.typeGroup) {
+    if (q.type || (q.types && q.types.length) || effectiveGroups(q).length) {
       return t("No matches for that property type here — other types are available. Want me to broaden the type?");
     }
   }

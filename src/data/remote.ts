@@ -5,7 +5,7 @@ import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
 import { normalizeType, queryForSelection, queryForTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
-import { effectiveTypes, bedroomTokens } from './search';
+import { effectiveTypes, effectiveGroups, bedroomTokens } from './search';
 import { scoreListingProximity } from './proximity';
 import { cityDisplay } from './locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
@@ -300,7 +300,11 @@ function regionIdsFor(lm: { exact?: boolean; kind?: string; region?: string } | 
 function effectiveCleanQuery(q: SearchQuery): CleanQuery | null {
   const types = q.types && q.types.length ? q.types : (q.type ? [q.type] : []);
   if (types.length) return queryForTypes(types);
-  if (q.typeGroup) return queryForSelection(q.typeGroup);
+  // MULTI-GROUP: queryForTypes unions over its argument list and accepts GROUP names as well as clean
+  // types, so several groups resolve to the union of their raw types — OR across the group dimension,
+  // through the one existing helper rather than a second expansion path. (owner 2026-08-20)
+  const groups = effectiveGroups(q);
+  if (groups.length) return groups.length === 1 ? queryForSelection(groups[0]) : queryForTypes(groups);
   return null;
 }
 
@@ -342,7 +346,9 @@ function agentPriceCapAnnual(q: SearchQuery): number | null {
 // disagree about what a selected type/group expands to (owner barriers #7/#17/#18, 2026-08-15).
 export function cohortTypesAr(q: SearchQuery): string[] | null {
   const sel = effectiveTypes(q);
-  return sel.length ? typeArForTypes(sel) : (q.typeGroup ? typeArForSelection(q.typeGroup) : null);
+  if (sel.length) return typeArForTypes(sel);
+  const groups = effectiveGroups(q);
+  return groups.length ? typeArForTypes(groups) : null;   // OR across groups — union of their types
 }
 
 function rpcFilterParams(q: SearchQuery) {
@@ -438,7 +444,7 @@ const inFlightDistrictCities = new Map<string, Promise<{ data: { city_ar: string
 export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | null> {
   const tables = tablesFor(q);
   if (!tables.length) return null;
-  const isBroadCommercial = q.category === 'Commercial' && !q.type && !(q.types && q.types.length) && !q.typeGroup;
+  const isBroadCommercial = q.category === 'Commercial' && !q.type && !(q.types && q.types.length) && !effectiveGroups(q).length;
 
   const lm = q.locationMatch;
   let cities: string[] | null = null;
@@ -512,9 +518,10 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   };
   const mainTables = isBroadCommercial ? platformScope(resTables(q)) : tables;
 
-  const isBroadResidential = q.category === 'Residential' && !q.type && !(q.types && q.types.length) && !q.typeGroup;
+  const isBroadResidential = q.category === 'Residential' && !q.type && !(q.types && q.types.length) && !effectiveGroups(q).length;
   const resSel = effectiveTypes(q);
-  const resSelectedTypeAr = resSel.length ? typeArForTypes(resSel) : (q.typeGroup ? typeArForSelection(q.typeGroup) : null);
+  const resGroups = effectiveGroups(q);
+  const resSelectedTypeAr = resSel.length ? typeArForTypes(resSel) : (resGroups.length ? typeArForTypes(resGroups) : null);
   const resMisfileTypes = isBroadResidential
     ? RESIDENTIAL_TYPE_AR_COM
     : (resSelectedTypeAr ? resSelectedTypeAr.filter((t) => RESIDENTIAL_TYPE_AR_COM.includes(t)) : []);

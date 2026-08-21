@@ -39,7 +39,8 @@ import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { openListing } from '@/lib/openListing';
-import { filterToChat, searchSummary, effectiveTypes, hasClientOnlyNarrowing, type SearchQuery, type SearchResult } from '@/data/search';
+import { filterToChat, searchSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, type SearchQuery, type SearchResult } from '@/data/search';
+import { migrateGroups } from '@/lib/searchDefaults';
 import { BROWSE_CAP, resultCounts } from '@/data/resultCount';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
@@ -939,7 +940,7 @@ export default function Agent() {
     // (audit item 5, owner rule 2026-07-27.)
     const bedsApplicable = q.type
       ? detailFor(q.type).isBedrooms
-      : (detailForContext(q.category ?? 'Residential', q.typeGroup ?? null)?.showBeds ?? true);
+      : (detailForContext(q.category ?? 'Residential', effectiveGroups(q))?.showBeds ?? true);
     if (!dim && !q.detail && bedsApplicable) {
       dim = 'beds';
       ask = ar ? 'كم غرفة نوم تبغى؟' : 'How many bedrooms?';
@@ -979,7 +980,7 @@ export default function Agent() {
     } else if (dim === 'type') {
       const p = parseQuery(a);
       if (p.type) refined.type = p.type;
-      if (p.typeGroup) refined.typeGroup = p.typeGroup;
+      if (p.typeGroups && p.typeGroups.length) refined.typeGroups = p.typeGroups;
       if (p.category) refined.category = p.category;
     } else if (dim === '__guided__') {
       // The chained guided flow (2026-07-20) already merged every answered step into `base` via each
@@ -1556,7 +1557,9 @@ export default function Agent() {
       lastFilterRef.current = filter;
       lastSeedRef.current = undefined;
       try {
-        const q = JSON.parse(filter) as SearchQuery;
+        // migrateGroups: a `?filter=` payload minted before the multi-group change carries the
+        // legacy single `typeGroup`; convert it at the boundary so nothing downstream sees it.
+        const q = migrateGroups(JSON.parse(filter) as SearchQuery);
         // Seed the shared filter state from the URL payload (Search & Matching QA §29, 2026-08-15).
         // The results already survive a hard refresh (PR#589) and `?filter=` carries the whole
         // SearchQuery — but that payload was never read back into the app context, which is the ONLY
