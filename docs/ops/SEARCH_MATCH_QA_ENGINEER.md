@@ -93,6 +93,17 @@ active («شراء»/«إيجار», «سنوي»/«شهري», المدينة, 
 platform diversity still works. If the first batch is correct but later ones are wrong, the test
 FAILS. Match-first-then-diversity applies to every batch.
 
+**The reveal is CAPPED, and the cap is the contract — not a pagination failure (owner 2026-08-20).**
+`src/app/agent.tsx` + `src/data/resultCount.ts`: `FIRST_PAGE = 10` (owner 2026-07-08),
+`REVEAL_STEP = 100`, **`BROWSE_CAP = 100`**. So a healthy search reveals **10 cards, then ONE
+«عرض المزيد» takes it to 100, and then the pager is GONE by design** — `min(trueTotal, BROWSE_CAP)`
+is the hard ceiling on what a user can browse even when thousands match; the true total is shown in
+the closing message («لقينا 9,879 إعلان يطابق طلبك، وعرضنا لك 100 منها…»), not in more cards.
+Verified live 2026-08-21: 9,879 matches → 10 → 100 → no pager, plus «خلّنا نحدد الطلب أكثر».
+Assert the cap. Do NOT report "«عرض المزيد» stopped working" for a search that reached 100 —
+and note that after 100 cards there are 50+ card-description «عرض المزيد» expanders and no pager,
+so a harness that clicks "the lowest «عرض المزيد»" clicks a CARD and sees 100→100 (trap §41.3/§41.10).
+
 ## 11. الترتيب
 Every live sorting choice. Sorting may change ORDER only, never the eligible set (450 qualify
 before sorting → every sort operates over the same 450). Then «عرض المزيد» while sorting is active.
@@ -220,10 +231,31 @@ new-listing findability · Arabic UI · Supabase health · barrier execution. Li
 **المشكلة → السبب → الإصلاح → الحاجز → تحقق الإنتاج**.
 
 ## 29. Refresh, back, and state persistence
-تصفية → بحث → النتائج → بطاقة عقار → رجوع: selections preserved where intended. Refresh on
-results. المدينة doesn't change · الحي doesn't disappear · multiple أحياء stay selected · السعر,
-المساحة, غرف النوم stay · فئة/نوع stay correct · «سنوي» never becomes «شهري» · «إيجار» never
-becomes «شراء» · «عرض المزيد» doesn't corrupt state. Ezhalah-side resets → fix + regression barrier.
+
+> **⚠️ THE REFRESH RULE WAS REVERSED BY OWNER DECISION ON 2026-08-16 — read this before reporting
+> anything.** Until then the rule was that a refresh RESTORED and re-ran the search, and earlier
+> versions of this section asserted that. The owner ruled it out in full: *"A browser refresh must
+> never accidentally count as a new user search. There should be no duplicate AI request, duplicate
+> property-search RPC, duplicate conversation message, duplicate analytics event, or duplicate saved
+> conversation caused simply by refreshing."*
+>
+> **The rule now, for guests and signed-in users alike:** a refresh inside a chat/search lands on the
+> **FILTER HOME screen**, with **zero AI calls, zero property RPCs, zero history writes**. The
+> contract and its root-cause fix are pinned by `scripts/verify-refresh-restores-filter-search.ts`
+> (in `npm test`) and `src/lib/webRefreshRoute.ts` / `src/lib/appSession.ts`.
+>
+> Therefore: **results NOT coming back after a refresh is CORRECT, and is never a §29 defect.**
+> Confirmed live 2026-08-21 — a refresh on a results screen returns to the filter home. Do not
+> "fix" it, and do not score it as a state-persistence failure.
+
+What §29 still tests: تصفية → بحث → النتائج → بطاقة عقار → **رجوع** preserves selections where
+intended · «سنوي» never silently becomes «شهري» · «إيجار» never becomes «شراء» · «عرض المزيد» never
+corrupts the active filter state · changing المدينة clears the selected أحياء (§9). A genuine
+Ezhalah-side reset of a selection the user still has on screen → fix + regression barrier.
+
+Note the flip side, which IS live and bit a harness on 2026-08-21: within one browser context the
+filter's own selections DO survive a reload, so an automated run that reloads without «مسح الكل»
+starts from the previous journey's state (trap §41.11).
 
 ## 30. Duplicates
 Inspect first batch, post-«عرض المزيد» batches, cross-platform syndication, duplicate source IDs,
