@@ -94,26 +94,12 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const [draft, setDraft] = useState('');
   const cancelledRef = useRef(false);
 
-  const beginRename = (c: HistoryItem) => {
-    cancelledRef.current = false;
-    setDraft(displayTitle(c, locale));
-    setEditingId(c.id);
-  };
-  const commitRename = (id: string) => {
-    if (cancelledRef.current) { cancelledRef.current = false; setEditingId(null); return; }
-    setEditingId(null);
-    renameHistory(id, draft);
-  };
-  const cancelRename = () => {
-    cancelledRef.current = true;   // consumed by the blur that Escape itself triggers
-    setEditingId(null);
-    setDraft('');
-  };
-  // OWNER BUG FIX: a single click OPENS, but the native dblclick below ALSO fired while every click
-  // still ran openHistory() → the double-click navigated (to Filter/Agent) instead of only renaming.
-  // Fix: a click only ARMS a delayed open; the dblclick CANCELS it before it can fire. A cancelled
-  // open never navigates. Two SLOW clicks (no dblclick) each fire their own open, unchanged. Pure
-  // logic + regression barrier live in src/lib/rowClick.ts + scripts/verify-sidebar-rename-isolation.ts.
+  // OWNER BUG FIX: a single click OPENS, but the native dblclick below ALSO ran openHistory() on each
+  // click of the double-click → it navigated (to Filter/Agent) instead of only renaming. Fix: a click
+  // only ARMS a delayed open; beginRename (reached via the dblclick handler or long-press) CANCELS
+  // that armed open before it can fire, so a double-click renames ONLY. A cancelled open never calls
+  // openHistory → never navigates / switches view / resets the active chat/search. Two SLOW clicks
+  // (no dblclick) each still open. Barrier: src/lib/rowClick.ts + scripts/verify-sidebar-rename-isolation.ts.
   const openArmRef = useRef<ArmedOpen | null>(null);
   const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (openTimerRef.current) clearTimeout(openTimerRef.current); }, []);
@@ -132,6 +118,23 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       if (openShouldFire(openArmRef.current, token)) { openArmRef.current = null; openHistory(c); }
     }, OPEN_DELAY_MS);
   };
+
+  const beginRename = (c: HistoryItem) => {
+    cancelArmedOpen();   // a double-click / long-press must cancel the armed single-click open so it never navigates
+    cancelledRef.current = false;
+    setDraft(displayTitle(c, locale));
+    setEditingId(c.id);
+  };
+  const commitRename = (id: string) => {
+    if (cancelledRef.current) { cancelledRef.current = false; setEditingId(null); return; }
+    setEditingId(null);
+    renameHistory(id, draft);
+  };
+  const cancelRename = () => {
+    cancelledRef.current = true;   // consumed by the blur that Escape itself triggers
+    setEditingId(null);
+    setDraft('');
+  };
   // react-native-web does NOT forward `onDoubleClick` to the DOM node (its forwardedProps allow-list
   // carries onClick/onContextMenu/pointer events and nothing else), so a prop-based double-click is
   // silently dropped — it was, and the browser run caught it. Bind the real `dblclick` event on the
@@ -140,7 +143,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const bindDoubleClick = (c: HistoryItem) => (node: any) => {
     if (Platform.OS !== 'web' || !node || typeof node.addEventListener !== 'function') return;
     if (node.__ezDbl) node.removeEventListener('dblclick', node.__ezDbl);
-    const handler = () => { cancelArmedOpen(); beginRename(c); };
+    const handler = () => beginRename(c);
     node.__ezDbl = handler;
     node.addEventListener('dblclick', handler);
   };
@@ -359,9 +362,8 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                             style={s.histItem}
                             onPress={() => armOpenRow(c)}
                             // Web gets the owner's double-click (bound on the host node by
-                            // `bindDoubleClick`), which cancels the armed open so it renames only;
-                            // touch gets long-press as the equivalent.
-                            onLongPress={() => { cancelArmedOpen(); beginRename(c); }}
+                            // `bindDoubleClick`); touch gets long-press as the equivalent.
+                            onLongPress={() => beginRename(c)}
                             delayLongPress={450}
                           >
                             <Ionicons name="chatbubble-outline" size={15} color="#8a978f" />
