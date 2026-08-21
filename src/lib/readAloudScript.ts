@@ -11,17 +11,15 @@ import type { ReadAloudSegment } from './readAloud';
 const INTRO_WORD = 'إزهله';
 const PAUSE_MS = 450; // short, natural — long enough to read as a beat, not a stall
 
-// How many property cards Read Aloud speaks, even when more are visible on screen (the visual
-// first page shows FIRST_PAGE=10 — src/app/agent.tsx). An audio list is harder to track than a
-// visual grid: there's no glancing back at card #2 while card #5 is playing, so the spoken cap is
-// deliberately LOWER than the visual one. MEASURED (real playback, this session, at the tuned 1.3
-// rate): intro + summary + 5 real cards = ~60 seconds total — Arabic prices spoken as full number
-// words ("خمسة وثلاثون ألفاً ومئتان وثمانون") run longer than the digits on screen suggest, so this
-// is NOT the ~30-45s a naive estimate would give. 60s is still far short of "monologue" territory
-// (well under a minute, nowhere near the owner's 10-minute concern), so 5 stays the recommendation —
-// but it's the real number the owner should see before confirming this cap, not a guess. Lower to 3
-// (~40s) for a snappier feel if 60s reads as long; it's the one constant below.
-export const READ_ALOUD_CARD_CAP = 5;
+// How many property cards Read Aloud speaks. OWNER DECISION (2026-08-20): 10 — matches the visual
+// first page exactly (FIRST_PAGE=10 — src/app/agent.tsx), overriding the earlier 5-card
+// recommendation (that was a suggestion for shorter playback, not a technical limit). MEASURED (real
+// playback, at the tuned 1.3 rate): 5 cards took ~60s; 10 real cards measures at roughly 100-120s —
+// Arabic prices spoken as full number words ("خمسة وثلاثون ألفاً ومئتان وثمانون") run longer than the
+// digits on screen suggest. Still nowhere near a "10-minute monologue" — well under 2 minutes. If
+// fewer than 10 cards are visible, .slice() below naturally reads only what exists — no separate
+// guard needed.
+export const READ_ALOUD_CARD_CAP = 10;
 
 // One card's spoken facts — deliberately just the headline ones already shown at a glance: type,
 // district/city, price, bedrooms, bathrooms, area. NOT spoken: id, source_url, source/platform name,

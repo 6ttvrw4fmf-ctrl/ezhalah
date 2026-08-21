@@ -66,7 +66,10 @@ check("script opens with the intro word 'إزهله' followed by a pause before 
 check('the summary is spoken next (second segment), also followed by a pause', /if \(summary\) segments\.push\(\{ text: summary, pauseAfterMs: PAUSE_MS \}\);/.test(readAloudScript));
 check('cards are appended AFTER intro+summary, via Array.forEach over the listings array (preserves on-screen order — never re-sorted)', /capped\.forEach\(\(listing, i\) => \{\s*segments\.push\(\{ text: cardSpeech\(listing\)/.test(readAloudScript));
 check('no pause is added after the LAST card (nothing trails a natural end)', /pauseAfterMs: i < capped\.length - 1 \? PAUSE_MS : 0/.test(readAloudScript));
-check('a hard cap exists on how many cards are spoken, applied via .slice() (bounded, not "all of them")', /export const READ_ALOUD_CARD_CAP = 5;/.test(readAloudScript) && /visibleListings\.slice\(0, READ_ALOUD_CARD_CAP\)/.test(readAloudScript));
+// CARD CAP (owner decision 2026-08-20): 10, matching the visual FIRST_PAGE exactly — the earlier 5
+// was Claude's shorter-playback suggestion, not a technical limit; pin the CURRENT owner-set number
+// so a future edit can't silently drift it without this check moving too.
+check('the card cap is the owner-set value (10 — matches the visual first page), applied via .slice() (bounded, not "all of them")', /export const READ_ALOUD_CARD_CAP = 10;/.test(readAloudScript) && /visibleListings\.slice\(0, READ_ALOUD_CARD_CAP\)/.test(readAloudScript));
 check('the caller passes the VISIBLE (reveal-count-sliced) listings, never the full fetched set — no hidden listing can be spoken', /buildResultsReadAloudSegments\(introText, m\.result\.listings\.slice\(0, shown\)\)/.test(agent));
 // No raw/internal fields anywhere in the card-speech builder: id, source_url, source/platform name,
 // free-text description/title, or a raw JSON dump. Only the Arabic DISPLAY helpers (listingDisplay.ts)
