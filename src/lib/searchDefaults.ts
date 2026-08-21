@@ -86,6 +86,31 @@ export function toggleGroup(q: SearchQuery, group: string): SearchQuery {
   };
 }
 
+// Category tap. Groups and types belong to ONE category (owner §1: "every group and property type
+// shown afterward must belong to that category"), so switching it clears the whole scope below it.
+// Pure + exported so a barrier can prove the clear actually happens — the old inline handler wrote
+// `typeGroup: null`, which silently became a no-op the moment that field was replaced by typeGroups,
+// and the compiler could not catch it through an object spread. (owner 2026-08-20)
+export function setCategory(q: SearchQuery, category: string | null): SearchQuery {
+  return {
+    ...q,
+    category: (q.category === category ? null : category) as SearchQuery['category'],
+    typeGroups: null,
+    type: null,
+    types: null,
+    detail: null,
+    contextBeds: null,
+    contextBedsList: null,
+    contextSize: null,
+    areaMin: null,
+    areaMax: null,
+    priceMin: null,
+    priceMax: null,
+    priceInput: '',
+    priceBand: null,
+  };
+}
+
 // The type boxes to show for the current group selection: the UNION of every selected group's members.
 export function typesForGroups(q: SearchQuery): string[] {
   return groupsMembers(effectiveGroups(q));

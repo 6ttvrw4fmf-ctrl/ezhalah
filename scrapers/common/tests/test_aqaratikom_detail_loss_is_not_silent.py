@@ -105,8 +105,9 @@ def test_200_with_unexpected_shape_is_retried_and_can_still_succeed(monkeypatch)
         _Resp(200, {"message": "Unauthenticated."}),  # soft block / interstitial
         _Resp(200, GOOD_DETAIL),                      # the real record on retry
     ])
-    got = aq.fetch_detail("uuid-1")
+    status, got = aq.fetch_detail("uuid-1")
     assert fake.calls == 2, "a 200 with an unexpected shape must be retried, not trusted"
+    assert status == "ok"
     assert got is not None and got.get("subtype") == "سنوي"
 
 
@@ -115,27 +116,33 @@ def test_unparseable_200_body_is_retried(monkeypatch):
         _Resp(200, raise_json=True),
         _Resp(200, GOOD_DETAIL),
     ])
-    got = aq.fetch_detail("uuid-1")
+    status, got = aq.fetch_detail("uuid-1")
     assert fake.calls == 2, "an unparseable 200 must be retried, not treated as authoritative"
+    assert status == "ok"
     assert got is not None and got.get("subtype") == "سنوي"
 
 
 def test_transient_5xx_is_retried(monkeypatch):
     fake = _install(monkeypatch, [_Resp(503), _Resp(200, GOOD_DETAIL)])
-    assert aq.fetch_detail("uuid-1") is not None
+    status, got = aq.fetch_detail("uuid-1")
+    assert status == "ok" and got is not None
     assert fake.calls == 2
 
 
-def test_exhausted_retries_return_none_rather_than_a_partial_guess(monkeypatch):
+def test_exhausted_retries_are_tagged_missing_not_gone(monkeypatch):
     fake = _install(monkeypatch, [_Resp(200, {"message": "blocked"})] * 3)
-    assert aq.fetch_detail("uuid-1") is None
+    status, got = aq.fetch_detail("uuid-1")
+    assert status == "missing", "an exhausted retry on a non-404 failure is a real capture loss"
+    assert got is None
     assert fake.calls == 3, "bounded at 3 attempts — no unbounded retry storm against the source"
 
 
 # ── A 404 is terminal: the ad is gone, and that is not a capture failure ─────────────────────────
 def test_404_is_terminal_and_not_retried(monkeypatch):
     fake = _install(monkeypatch, [_Resp(404, {"message": "No query results for model [Ad]"})])
-    assert aq.fetch_detail("gone") is None
+    status, got = aq.fetch_detail("gone")
+    assert status == "gone", "a 404 must be tagged distinctly from a genuine capture failure"
+    assert got is None
     assert fake.calls == 1, "a 404 means the ad no longer exists; retrying it only wastes budget"
 
 

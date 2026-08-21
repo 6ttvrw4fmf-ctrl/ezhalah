@@ -16,7 +16,7 @@ import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCi
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, type SearchQuery } from '@/data/search';
 import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr } from '@/data/remote';
-import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, effectiveGroups, toggleGroup, typesForGroups } from '@/lib/searchDefaults';
+import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { noTranslateRef } from '@/noTranslate';
@@ -1324,7 +1324,7 @@ export default function Home() {
                     label={t(cat)}
                     img={categoryImg(cat)}
                     selected={query.category === cat}
-                    onPress={() => { setQuery((q) => ({ ...q, category: q.category === cat ? null : cat, typeGroup: null, type: null, types: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, priceMin: null, priceMax: null, priceInput: '', priceBand: null })); scrollDown(groupAnchorRef); }}
+                    onPress={() => { setQuery((q) => setCategory(q, cat)); scrollDown(groupAnchorRef); }}
                   />
                 ))}
               </View>

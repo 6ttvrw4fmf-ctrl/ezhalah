@@ -25,7 +25,7 @@
 //   node --experimental-strip-types scripts/verify-multi-group-scope.ts     (wired into `npm test`)
 import type { SearchQuery } from '../src/data/search.ts';
 import { groupMembers, groupsMembers, pruneTypesToGroups, typeArForSelection, typeArForTypes } from '../src/data/propertyTypes.ts';
-import { effectiveGroups, effectiveTypes, toggleGroup, typesForGroups, migrateGroups, sanitizeForFilterRestore, hasActiveFilters, HOME_DEFAULT_QUERY } from '../src/lib/searchDefaults.ts';
+import { effectiveGroups, effectiveTypes, toggleGroup, typesForGroups, migrateGroups, sanitizeForFilterRestore, hasActiveFilters, HOME_DEFAULT_QUERY, setCategory } from '../src/lib/searchDefaults.ts';
 import { cohortAllows, scopeCleanTypes, intersectChips } from '../src/lib/afCohorts.ts';
 import { detailForContext } from '../src/data/taxonomy.ts';
 
@@ -108,6 +108,23 @@ check('toggleGroup clears type-DERIVED state (single type / detail / bed context
 })());
 check('deselecting the last group leaves typeGroups null (never [])',
   toggleGroup(q({ typeGroups: [APTS] }), APTS).typeGroups === null);
+
+// ── 3b. CHANGING CATEGORY CLEARS THE SCOPE BENEATH IT ────────────────────────────────────────────
+// REGRESSION GUARD: the old inline handler cleared `typeGroup`. When that field was replaced by
+// `typeGroups`, the write silently became a no-op — TypeScript cannot catch an extra property on an
+// object spread — so switching category would have kept Residential groups selected under
+// Commercial. Executed against the real writer so it cannot rot the same way twice.
+check('changing category clears groups, types and every type-derived field', (() => {
+  const before = q({ category: 'Residential', typeGroups: [APTS, VILLAS], types: ['Apartment'], detail: '3', contextBedsList: ['3'] });
+  const after = setCategory(before, 'Commercial');
+  return after.category === 'Commercial'
+    && after.typeGroups === null && after.types === null
+    && after.type === null && after.detail === null && after.contextBedsList === null;
+})(), 'a Residential group must never survive a switch to Commercial');
+check('re-tapping the active category deselects it and still clears the scope', (() => {
+  const after = setCategory(q({ category: 'Residential', typeGroups: [APTS] }), 'Residential');
+  return after.category === null && after.typeGroups === null;
+})());
 
 // ── 4. M2 — AF QUESTIONS INTERSECT ACROSS TYPES (never union) ────────────────────────────────────
 // Apartment/Buy certifies bathrooms; Residential Building/Buy does NOT. Union would offer it and

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
   interpolate,
@@ -17,6 +17,7 @@ import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import HeroBackground from '@/components/HeroBackground';
 import { useApp, type HistoryItem } from '@/store';
 import { queryLabel } from '@/data/search';
+import { displayTitle } from '@/lib/chatTitle';
 import { sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { useI18n } from '@/i18n';
 import { pickName, initialsOf } from '@/lib/nameSync';
@@ -67,7 +68,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, isRTL, locale } = useI18n();
-  const { user, history, setQuery, toggleStar, deleteHistory, openModal, openAuth, activeChatId, setActiveChat } = useApp();
+  const { user, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat, newChat } = useApp();
   // Row action menu (Star / Delete). Rendered as a panel-level overlay OUTSIDE the scrolling list so
   // it can never be clipped, and opened UP or DOWN from the click position so the full menu is always
   // on-screen near the top, middle, or bottom of the sidebar. (user request.)
@@ -82,6 +83,43 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   });
   const [menu, setMenu] = useState<{ id: string; top: number; openUp: boolean; panelH: number } | null>(null);
   const menuItem = menu ? history.find((c) => c.id === menu.id) ?? null : null;
+
+  // INLINE RENAME (owner 2026-08-21): double-click the title → it becomes an input; Enter saves,
+  // blur saves, Escape cancels and restores. `editingId` is which row is in edit mode; `draft` is
+  // the working text. `cancelledRef` is what makes Escape survive the blur that follows it —
+  // dismissing the input fires onBlur, and without this flag that blur would immediately re-save
+  // the very text Escape was meant to discard.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const cancelledRef = useRef(false);
+
+  const beginRename = (c: HistoryItem) => {
+    cancelledRef.current = false;
+    setDraft(displayTitle(c, locale));
+    setEditingId(c.id);
+  };
+  const commitRename = (id: string) => {
+    if (cancelledRef.current) { cancelledRef.current = false; setEditingId(null); return; }
+    setEditingId(null);
+    renameHistory(id, draft);
+  };
+  const cancelRename = () => {
+    cancelledRef.current = true;   // consumed by the blur that Escape itself triggers
+    setEditingId(null);
+    setDraft('');
+  };
+  // react-native-web does NOT forward `onDoubleClick` to the DOM node (its forwardedProps allow-list
+  // carries onClick/onContextMenu/pointer events and nothing else), so a prop-based double-click is
+  // silently dropped — it was, and the browser run caught it. Bind the real `dblclick` event on the
+  // host element instead: the browser owns the double-click threshold, so two deliberate slow clicks
+  // stay two opens.
+  const bindDoubleClick = (c: HistoryItem) => (node: any) => {
+    if (Platform.OS !== 'web' || !node || typeof node.addEventListener !== 'function') return;
+    if (node.__ezDbl) node.removeEventListener('dblclick', node.__ezDbl);
+    const handler = () => beginRename(c);
+    node.__ezDbl = handler;
+    node.addEventListener('dblclick', handler);
+  };
 
   const openMenu = (id: string, e: any) => {
     if (menu?.id === id) { setMenu(null); return; }
@@ -147,8 +185,11 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       withTiming(0.96, { duration: 80 }),
       withSpring(1, { damping: 8, stiffness: 220 }),
     );
-    // No chat is "current" on a fresh start — clear the highlighted row.
-    setActiveChat(null);
+    // A fresh start means FRESH STATE, not just a cleared highlight. This used to be
+    // setActiveChat(null) alone, which left the previous search's whole query (city, type, deal,
+    // period, price, beds…) sitting in the shared store for the new chat to inherit. The store owns
+    // that reset now. Saved chats in the sidebar are untouched. (owner rule 2026-08-20.)
+    newChat();
     // New Chat now takes the user back to the DEFAULT FILTER HOME (the search form), not the AI
     // agent screen. The `fresh` param makes the home reset its state if we're already on it. The
     // browser does a soft refresh-feel via the home page's own entrance animation on mount.
@@ -270,11 +311,39 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                         Title still flows with its own text direction inside the bubble. (user request.) */}
                     {g.items.map((c) => (
                       <View key={c.id} style={[s.histRow, activeChatId === c.id && s.histRowActive, menu?.id === c.id && s.histRowOpen, { direction: 'ltr' } as any]}>
-                        <Pressable style={s.histItem} onPress={() => openHistory(c)}>
-                          <Ionicons name="chatbubble-outline" size={15} color="#8a978f" />
-                          <Text style={s.histLabel} numberOfLines={1}>{c.label || queryLabel(c.query)}</Text>
-                          {c.starred && <Ionicons name="star" size={13} color={GOLD} />}
-                        </Pressable>
+                        {editingId === c.id ? (
+                          <View style={s.histItem}>
+                            <Ionicons name="chatbubble-outline" size={15} color="#8a978f" />
+                            <TextInput
+                              style={[s.histLabel, s.histInput]}
+                              value={draft}
+                              onChangeText={setDraft}
+                              autoFocus
+                              selectTextOnFocus
+                              returnKeyType="done"
+                              maxLength={120}
+                              onSubmitEditing={() => commitRename(c.id)}
+                              onBlur={() => commitRename(c.id)}
+                              // Escape cancels. RN-web forwards the DOM key event here; native has no
+                              // Escape key, where Enter/blur still save.
+                              onKeyPress={(e: any) => { if (e?.nativeEvent?.key === 'Escape') cancelRename(); }}
+                            />
+                          </View>
+                        ) : (
+                          <Pressable
+                            ref={bindDoubleClick(c)}
+                            style={s.histItem}
+                            onPress={() => openHistory(c)}
+                            // Web gets the owner's double-click (bound on the host node by
+                            // `bindDoubleClick`); touch gets long-press as the equivalent.
+                            onLongPress={() => beginRename(c)}
+                            delayLongPress={450}
+                          >
+                            <Ionicons name="chatbubble-outline" size={15} color="#8a978f" />
+                            <Text style={s.histLabel} numberOfLines={1}>{displayTitle(c, locale) || queryLabel(c.query)}</Text>
+                            {c.starred && <Ionicons name="star" size={13} color={GOLD} />}
+                          </Pressable>
+                        )}
                         <Pressable style={s.dots} hitSlop={6} onPress={(e) => openMenu(c.id, e)}>
                           <Ionicons name="ellipsis-horizontal" size={16} color="#9aa6a0" />
                         </Pressable>
@@ -418,6 +487,9 @@ const s = StyleSheet.create({
   histRowActive: { backgroundColor: '#dcefe1' },
   histItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 8 },
   histLabel: { flex: 1, fontSize: 13.5, fontWeight: '500', color: colors.ink },
+  // Editing keeps the row's exact metrics so entering rename mode never makes the list jump.
+  histInput: { paddingVertical: 0, borderRadius: 6, backgroundColor: '#ffffff',
+    borderWidth: 1, borderColor: colors.primary, paddingHorizontal: 6, ...(Platform.OS === 'web' ? { outlineStyle: 'none' } as any : null) },
   dots: { paddingVertical: 6, paddingHorizontal: 8, borderRadius: 8 },
   // Soft dim over the sidebar while the menu is open so the history text behind it recedes and the
   // floating card reads cleanly (it no longer blends into the list). Tap it to dismiss.
