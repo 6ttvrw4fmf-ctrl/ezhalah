@@ -17,6 +17,11 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
+      # PROPOSED 2026-08-21 (Approval Needed — see PR body): same shared-proxy capacity
+      # rationale as wasalt-residential-sweep.yml's max-parallel. This matrix is smaller
+      # (14 jobs), so keep it at the same conservative cap rather than a separate tuned
+      # value until the owner has real data on the proxy's concurrent-session limit.
+      max-parallel: 6
       matrix:
         slug: [shop, office, warehouse, commercial-land, showroom, building, land]
         deal: [sale, rent]
