@@ -6,17 +6,17 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
-import { Segmented, OptionBox, FieldLabel, Tappable, Reveal, DropdownReveal } from '@/components/ui';
+import { OptionBox, FieldLabel, Tappable, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
-import { CATEGORIES, DEALS, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
+import { CATEGORIES, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, type SearchQuery } from '@/data/search';
 import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr } from '@/data/remote';
-import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
+import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { noTranslateRef } from '@/noTranslate';
@@ -165,6 +165,13 @@ export default function Home() {
   // unexpected value here (e.g. from some future code path that bypasses TypeScript's own type)
   // must still fall back to the safe default rather than leaving both buttons unselected.
   const rentPeriod: 'monthly' | 'annual' | 'both' = validRentPeriod(query.rentPeriod) ?? 'annual';
+  // Buy+Rent combined multi-select (owner feature 2026-08-20): every Trending/pool call below reads
+  // effDeal instead of query.deal directly — null tells top_cities_by_deal_ar/district_options_ar
+  // (and every locations.ts pool wrapping them) to scope to the combined Buy ∪ Rent(any period) set,
+  // exactly like the backend's own p_deal IS NULL branch (verified live, PR#817). query.deal itself
+  // is untouched (still the last concrete button pressed) — the two-button toggle UI and any text
+  // that still needs a single-deal flavor keep reading it directly.
+  const effDeal = query.dealCombined ? null : query.deal;
   // Period token for the Trending-scope RPCs (top_cities_by_deal_ar / district_options_ar) — the
   // SAME 'شهري'/'سنوي'/'كلاهما' Arabic token remote.ts's rentPeriodParam() sends to the results RPC,
   // never a boolean (owner mixed-period feature 2026-08-19, fixing a real Trending-vs-results scope
@@ -172,8 +179,12 @@ export default function Home() {
   // so a combined search used to send `null` here — a BROADER pool than what Search actually returns
   // for 'كلاهما', since null also sweeps in rent rows whose source published no period at all).
   // Buy → null (no filter), same as before.
+  // dealCombined's Rent side has no period selector — it accepts both known periods AND unpublished-
+  // period rows (no period filter at all, matching the backend's p_rent_period IS NULL branch), same
+  // null-means-unrestricted convention Buy already uses. effDeal reads as null under combined mode,
+  // so `effDeal !== 'Rent'` already covers that case with no separate dealCombined check needed.
   const rentPeriodTok: string | null =
-    query.deal !== 'Rent' ? null
+    effDeal !== 'Rent' ? null
     : rentPeriod === 'monthly' ? 'شهري'
     : rentPeriod === 'both' ? 'كلاهما'
     : 'سنوي';
@@ -210,6 +221,10 @@ export default function Home() {
   const areaMaxRef = useRef<TextInput>(null);
   const priceMinRef = useRef<TextInput>(null);
   const priceMaxRef = useRef<TextInput>(null);
+  // Rent-side budget box, shown only when both شراء+إيجار are selected (owner feature 2026-08-20) —
+  // priceMin/priceMax stay the Buy budget unchanged.
+  const priceMinRentRef = useRef<TextInput>(null);
+  const priceMaxRentRef = useRef<TextInput>(null);
   const sizeBoxRef = useRef<TextInput>(null);
   // Web-only keydown guard for the whole-number price/area/size boxes. toWholeNumberDigits() already
   // truncates a decimal that arrives in one shot (paste, or a full value), but char-by-char typing on
@@ -307,6 +322,12 @@ export default function Home() {
   // Monthly↔Yearly flip cleared typed price bounds (unit changed) — drives the one-line explanation
   // under the period toggle; hides itself once the user types a new price. (audit item 3.)
   const [periodPriceCleared, setPeriodPriceCleared] = useState(false);
+  // Same "unit changed → clear + explain" precedent, for the شراء/إيجار toggle (owner feature
+  // 2026-08-20): priceMin/priceMax means "Buy budget" under Buy-only AND under Combined, but means
+  // "Rent budget (annual)" under Rent-only — so it must be cleared exactly when a toggle press
+  // flips WHICH deal that pair currently prices, never on a press that keeps the same meaning
+  // (Buy-only→Both keeps meaning Buy; Both→Buy keeps meaning Buy — no clear either time).
+  const [dealPriceCleared, setDealPriceCleared] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   // Share button press feel — reuses ModeSwitch's own spring constants (stiffness 260, damping 26,
   // mass 0.7) so the header's two controls share one motion language (design review 2026-07-24).
@@ -327,7 +348,7 @@ export default function Home() {
   // Category-aware ranking can't reach this field without moving Category earlier in the flow — a
   // bigger UX change the owner declined (2026-07-20). Deal-only is what this data can support today.
   useEffect(() => {
-    void ensureCityFieldIndex(query.deal, rentPeriodTok, effCategory, cohortTypes).then((pool) => {
+    void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes).then((pool) => {
       // EDGE CASE (found in testing, generalizes to every deal change too): a fetch can still be
       // pending when the user has already focused AND typed a query — matchCitiesByText() would have
       // run against a still-empty/stale-deal pool and (correctly, not a crash) returned []/old
@@ -337,9 +358,9 @@ export default function Home() {
       // replay only "when the section first appears or when the rankings change").
       if (cityTextRef.current) {
         const latin = isLatinOnlyInput(cityTextRef.current);
-        setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes));
+        setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes));
       } else if (cityFocus) {
-        setCitySuggestions(topCitiesByListings(query.deal, rentPeriodTok, effCategory, 6, cohortTypes));
+        setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes));
       }
       // REHYDRATION (bug fix 2026-08-04): returning to this screen after a search REMOUNTS it —
       // query.location persists in the app context (the field still shows the city), but
@@ -378,7 +399,7 @@ export default function Home() {
     // effCategory joined the deps with count-scope parity: the pool is now keyed by the effective
     // category, so a Residential↔Commercial pick re-warms the pool at its true scope.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.deal, rentPeriodTok, effCategory, cohortTypesSig]);
+  }, [effDeal, rentPeriodTok, effCategory, cohortTypesSig]);
 
   // Same reactive refresh for District, scoped to the currently-selected city — and ALSO to Category
   // (owner decision 2026-07-20, after proving live that Category matters more for districts than for
@@ -391,16 +412,16 @@ export default function Home() {
   useEffect(() => {
     if (!citySelected) return;
     const cid = citySelected.cityId;
-    void ensureDistrictOptions(cid, query.deal, effCategory, rentPeriodTok, cohortTypes).then(() => {
+    void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes).then(() => {
       if (districtTextRef.current) {
         const latin = isLatinOnlyInput(districtTextRef.current);
-        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes));
+        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes));
       } else if (districtFocus) {
-        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, effCategory, rentPeriodTok, 6, cohortTypes));
+        setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes));
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.deal, effCategory, citySelected, rentPeriodTok, cohortTypesSig]);
+  }, [effDeal, effCategory, citySelected, rentPeriodTok, cohortTypesSig]);
 
   // DISTRICT REHYDRATION — the districtsSelected twin of the citySelected fix above (2026-08-04).
   //
@@ -434,7 +455,7 @@ export default function Home() {
     districtsRehydrated.current = true;
     if (districtsSelected.length) return;   // a live pick already stands — nothing to restore
     let cancelled = false;
-    void ensureDistrictOptions(citySelected.cityId, query.deal, effCategory, rentPeriodTok, cohortTypes).then((pool) => {
+    void ensureDistrictOptions(citySelected.cityId, effDeal, effCategory, rentPeriodTok, cohortTypes).then((pool) => {
       if (cancelled) return;
       const wanted = new Set(want);
       const restored = pool.filter((d) => d.matchValues.some((v) => wanted.has(v)));
@@ -445,7 +466,7 @@ export default function Home() {
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [citySelected, query.deal, effCategory, rentPeriodTok, cohortTypesSig]);
+  }, [citySelected, effDeal, effCategory, rentPeriodTok, cohortTypesSig]);
 
   // ONE query builder shared by onSearch and the district live-count effect below — the count call
   // and the search call must be built from the SAME state or their numbers can drift apart, which
@@ -460,7 +481,9 @@ export default function Home() {
       ...query,
       location: lm.label,
       locationMatch: lm,
-      rentPeriod: query.deal === 'Rent' ? (query.rentPeriod ?? 'annual') : query.rentPeriod,
+      // effDeal reads null under combined mode, so this correctly skips the 'annual' default there too
+      // (harmless either way — remote.ts's rentPeriodParam forces null whenever dealCombined is set).
+      rentPeriod: effDeal === 'Rent' ? (query.rentPeriod ?? 'annual') : query.rentPeriod,
     } as SearchQuery;
   };
 
@@ -505,13 +528,13 @@ export default function Home() {
   // Arabic row. English typing is excluded on purpose: that case already has its own message
   // (ARABIC_ONLY_MSG under the field) and must keep it, unchanged.
   const cityLatin = !!query.location && isLatinOnlyInput(query.location);
-  const cityStatus = cityPoolStatus(query.deal, rentPeriodTok, effCategory, cohortTypes);
+  const cityStatus = cityPoolStatus(effDeal, rentPeriodTok, effCategory, cohortTypes);
   const cityZeroRow: 'loading' | 'error' | 'empty' | null =
     citySuggestions.length > 0 || cityLatin ? null
       : cityStatus !== 'ready' ? cityStatus
       : query.location ? 'empty' : null;
   const districtLatin = !!districtText && isLatinOnlyInput(districtText);
-  const districtStatus = citySelected ? districtPoolStatus(citySelected.cityId, query.deal, effCategory, rentPeriodTok, cohortTypes) : 'loading';
+  const districtStatus = citySelected ? districtPoolStatus(citySelected.cityId, effDeal, effCategory, rentPeriodTok, cohortTypes) : 'loading';
   const districtZeroRow: 'loading' | 'error' | 'empty' | null =
     !citySelected || districtSuggestions.length > 0 || districtLatin ? null
       : districtStatus !== 'ready' ? districtStatus
@@ -523,12 +546,12 @@ export default function Home() {
     clearBlurTimer(cityBlurTimer);
     cityRef.current?.focus();
     setCitySuggestions([]); // fresh [] reference → re-render → the row flips to «جاري التحميل…»
-    void ensureCityFieldIndex(query.deal, rentPeriodTok, effCategory, cohortTypes).then(() => {
+    void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes).then(() => {
       if (cityTextRef.current) {
         const latin = isLatinOnlyInput(cityTextRef.current);
-        setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes));
+        setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes));
       } else {
-        setCitySuggestions(topCitiesByListings(query.deal, rentPeriodTok, effCategory, 6, cohortTypes));
+        setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes));
       }
     });
   };
@@ -538,12 +561,12 @@ export default function Home() {
     clearBlurTimer(districtBlurTimer);
     districtRef.current?.focus();
     setDistrictSuggestions([]);
-    void ensureDistrictOptions(cid, query.deal, effCategory, rentPeriodTok, cohortTypes).then(() => {
+    void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes).then(() => {
       if (districtTextRef.current) {
         const latin = isLatinOnlyInput(districtTextRef.current);
-        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, query.deal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes));
+        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes));
       } else {
-        setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, effCategory, rentPeriodTok, 6, cohortTypes));
+        setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes));
       }
     });
   };
@@ -668,8 +691,12 @@ export default function Home() {
   const areaMaxValue = query.areaMax ? grouped(parseInt(query.areaMax, 10) || 0) : '';
   const priceMinValue = query.priceMin ? grouped(parseInt(query.priceMin, 10) || 0) : '';
   const priceMaxValue = query.priceMax ? grouped(parseInt(query.priceMax, 10) || 0) : '';
+  // Rent-side budget (dealCombined only) — same convention as priceMin/priceMaxValue above.
+  const priceMinRentValue = query.priceMinRent ? grouped(parseInt(query.priceMinRent, 10) || 0) : '';
+  const priceMaxRentValue = query.priceMaxRent ? grouped(parseInt(query.priceMaxRent, 10) || 0) : '';
   // Non-blocking helper notes under the Price / Area inputs (explain min>max, equal, 0=no-limit, one-sided).
   const priceHint = rangeHint(query.priceMin, query.priceMax, PRICE_HINT, grouped);
+  const priceRentHint = rangeHint(query.priceMinRent, query.priceMaxRent, PRICE_HINT, grouped);
   const areaHint = rangeHint(query.areaMin, query.areaMax, AREA_HINT, grouped);
   const sizeBoxValue = !detail || detail.isBedrooms || !query.detail
     ? ''
@@ -874,7 +901,48 @@ export default function Home() {
                 </Pressable>
               </Reveal>
             )}
-            <Segmented options={DEALS} value={query.deal} icons={DEAL_IMG} onChange={(v) => { setQuery((q) => ({ ...q, deal: v as any, priceBand: null, priceMin: null, priceMax: null, priceInput: '' })); scrollDown(cityAnchorRef); }} />
+            {/* شراء / إيجار — TWO independent toggle buttons, not a radio (owner feature 2026-08-20,
+                mirrors the already-shipped سنوي+شهري pattern exactly): both can be on at once, which
+                means "match either Buy or Rent — Rent side accepts both Annual and Monthly." No third
+                "both" button exists; toggleDealButton enforces at-least-one-selected the same way
+                togglePeriodButton does for the period pair. */}
+            <View style={s.row}>
+              {(['Buy', 'Rent'] as const).map((which) => (
+                <OptionBox
+                  key={which}
+                  label={t(which)}
+                  img={DEAL_IMG[which]}
+                  selected={query.dealCombined || query.deal === which}
+                  onPress={() => {
+                    const nextSel = toggleDealButton(dealSelectionFromQuery(query), which);
+                    const nextFields = dealSelectionToQuery(nextSel, query.deal);
+                    setQuery((q) => {
+                      // What priceMin/priceMax currently means (Buy budget under Buy-only/Combined,
+                      // Rent budget under Rent-only) vs. what it will mean after this press — clear
+                      // only when that flips, same "unit changed" rule the period toggle uses.
+                      const prevAppliesTo = q.dealCombined ? 'Buy' : q.deal;
+                      const nextAppliesTo = nextFields.dealCombined ? 'Buy' : nextFields.deal;
+                      const flips = prevAppliesTo !== nextAppliesTo;
+                      const leavingCombined = q.dealCombined && !nextFields.dealCombined;
+                      setDealPriceCleared(flips);
+                      return {
+                        ...q,
+                        ...nextFields,
+                        ...(flips ? { priceMin: null, priceMax: null, priceBand: null, priceInput: '' } : {}),
+                        // Leaving Combined drops the now-hidden, now-inert Rent-side budget box —
+                        // stale-state hygiene (owner barrier: no stale state can survive a deal-mode
+                        // transition), never silently carried forward into a mode that can't show it.
+                        ...(leavingCombined ? { priceMinRent: null, priceMaxRent: null } : {}),
+                      };
+                    });
+                    scrollDown(cityAnchorRef);
+                  }}
+                />
+              ))}
+            </View>
+            {dealPriceCleared && !query.priceMin && !query.priceMax && !query.priceInput ? (
+              <Text style={[s.rangeNote, s.rangeNoteWarn]}>{t('Price limits were cleared because Buy/Rent changed which budget they meant — please re-enter them.')}</Text>
+            ) : null}
 
             <View ref={withAnchor(cityAnchorRef)} />
 
@@ -884,8 +952,11 @@ export default function Home() {
                 docs/ARCHITECTURE.md §17) the old third button used to set explicitly. MOVED here,
                 directly above the City field (owner request 2026-07-21): the user picks the period
                 FIRST, then the Trending chips + City/District suggestions all reflect it. Rent-only
-                (Buy has no period). Still tells the engine which period a later typed price/size means. */}
-            {query.deal === 'Rent' && (
+                (Buy has no period). Still tells the engine which period a later typed price/size means.
+                HIDDEN under dealCombined (owner 2026-08-20): combined mode's Rent side already accepts
+                both periods automatically — "do not ask the user to choose Annual vs Monthly first in
+                this mode." */}
+            {query.deal === 'Rent' && !query.dealCombined && (
               <Reveal style={{ marginTop: 12 }}>
                 <View style={s.row}>
                   {(['annual', 'monthly'] as const).map((which) => (
@@ -958,8 +1029,8 @@ export default function Home() {
                     // in sync on every keystroke below) at resolution time, not the value captured in
                     // this closure at focus time.
                     if (!query.location) {
-                      void ensureCityFieldIndex(query.deal, rentPeriodTok, effCategory, cohortTypes).then(() => {
-                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(query.deal, rentPeriodTok, effCategory, 6, cohortTypes));
+                      void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes).then(() => {
+                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes));
                       });
                     } else {
                       // P2 fix: the field already holds text (a confirmed pick, or mid-typing
@@ -968,7 +1039,7 @@ export default function Home() {
                       // field used to show an empty box until a keystroke. English text keeps the
                       // existing behavior exactly (no autocomplete; the Arabic-only hint stands).
                       if (!isLatinOnlyInput(query.location)) {
-                        setCitySuggestions(matchCitiesByText(query.deal, rentPeriodTok, effCategory, query.location, cohortTypes));
+                        setCitySuggestions(matchCitiesByText(effDeal, rentPeriodTok, effCategory, query.location, cohortTypes));
                       }
                     }
                   }}
@@ -982,14 +1053,14 @@ export default function Home() {
                     clearDistrict(); // editing the city disables + clears District (no cross-city carry-over)
                     if (!v) {
                       // Cleared back to empty → the Top 6 list, same as a fresh focus.
-                      setCitySuggestions(topCitiesByListings(query.deal, rentPeriodTok, effCategory, 6, cohortTypes));
+                      setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes));
                       setLocMsg('');
                       return;
                     }
                     // Arabic-only product: English typing gets NO autocomplete and an Arabic hint —
                     // there is nothing to match against, since every city name here is Arabic. (user rule)
                     const latin = isLatinOnlyInput(v);
-                    setCitySuggestions(latin ? [] : matchCitiesByText(query.deal, rentPeriodTok, effCategory, v, cohortTypes));
+                    setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, v, cohortTypes));
                     setLocMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -1001,7 +1072,7 @@ export default function Home() {
                 </RNAnimated.View>
               ) : null}
               {query.location.length > 0 && (
-                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(query.deal, rentPeriodTok, effCategory, 6, cohortTypes)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
+                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
                 </Pressable>
               )}
@@ -1140,12 +1211,12 @@ export default function Home() {
                     // re-check the live text via districtTextRef before showing the Top-6.
                     if (!districtTextRef.current) {
                       const cid = citySelected.cityId;
-                      void ensureDistrictOptions(cid, query.deal, effCategory, rentPeriodTok, cohortTypes).then(() => {
-                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, query.deal, effCategory, rentPeriodTok, 6, cohortTypes));
+                      void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes).then(() => {
+                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes));
                       });
                     } else if (!isLatinOnlyInput(districtTextRef.current)) {
                       // P2 — refocusing mid-typing shows the current matches, not an empty box.
-                      setDistrictSuggestions(matchDistrictsByCityId(citySelected.cityId, query.deal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes));
+                      setDistrictSuggestions(matchDistrictsByCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes));
                     }
                   }}
                   onBlur={() => { districtBlurTimer.current = setTimeout(() => setDistrictFocus(false), 150); }}
@@ -1158,11 +1229,11 @@ export default function Home() {
                     // typed-but-unconfirmed string being searched; that stays true by construction,
                     // since districtText itself is never sent anywhere.)
                     if (!citySelected) return;
-                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, rentPeriodTok, 6, cohortTypes)); setDistrictMsg(''); return; }
+                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, 6, cohortTypes)); setDistrictMsg(''); return; }
                     // Arabic-only product: English typing gets NO autocomplete and the same Arabic hint the
                     // City field shows — every district name here is Arabic, so there is nothing to match. (owner UI request.)
                     const latin = isLatinOnlyInput(v);
-                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, query.deal, effCategory, rentPeriodTok, v, cohortTypes));
+                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, v, cohortTypes));
                     setDistrictMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -1180,7 +1251,7 @@ export default function Home() {
                   districtTextRef.current = '';
                   setDistrictText('');
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, rentPeriodTok, 6, cohortTypes));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, 6, cohortTypes));
                   districtRef.current?.focus();
                 }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
@@ -1235,7 +1306,7 @@ export default function Home() {
                   districtTextRef.current = '';
                   setDistrictText('');
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, query.deal, effCategory, rentPeriodTok, 6, cohortTypes));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, 6, cohortTypes));
                 };
                 const selectedLabels = new Set(districtsSelected.map((d) => d.districtAr));
                 return (
@@ -1450,10 +1521,14 @@ export default function Home() {
                     </>
                   )}
 
-                  {/* PRICE range (من / إلى ريال) — always available, independent of beds/area. HARD filter. */}
+                  {/* PRICE range (من / إلى ريال) — always available, independent of beds/area. HARD filter.
+                      When شراء+إيجار are BOTH selected (owner feature 2026-08-20), this box is the BUY
+                      budget and a SECOND, independent Rent budget box renders right below it — owner
+                      decision (asked and answered): two ranges shown together, never one shared/naive
+                      range that would misleadingly mix a sale price with a rent price. */}
                   <View style={[s.rangeHead, { marginTop: 14 }]}>
                     <Image source={RANGE_ICON.priceHead} style={s.rangeHeadIcon} />
-                    <Text style={[s.ctxSubLabel, s.rangeHeadLabel]}>{t('Price')}</Text>
+                    <Text style={[s.ctxSubLabel, s.rangeHeadLabel]}>{t(query.dealCombined ? 'Buy budget' : 'Price')}</Text>
                   </View>
                   <View style={s.rangeRow}>
                     <Pressable style={[s.field, s.rangeBox, query.priceMin ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(priceMinRef)}>
@@ -1475,6 +1550,36 @@ export default function Home() {
                   </View>
                   {priceHint && (
                     <Text style={[s.rangeNote, priceHint.warn ? s.rangeNoteWarn : null]}>{priceHint.text}</Text>
+                  )}
+
+                  {query.dealCombined && (
+                    <Reveal>
+                      <View style={[s.rangeHead, { marginTop: 14 }]}>
+                        <Image source={RANGE_ICON.priceHead} style={s.rangeHeadIcon} />
+                        <Text style={[s.ctxSubLabel, s.rangeHeadLabel]}>{t('Rent budget (yearly basis)')}</Text>
+                      </View>
+                      <View style={s.rangeRow}>
+                        <Pressable style={[s.field, s.rangeBox, query.priceMinRent ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(priceMinRentRef)}>
+                          <Image source={RANGE_ICON.priceFrom} style={s.rangeBoxIcon} accessibilityLabel={t('From')} />
+                          <Text style={s.rangeLabel}>{t('From')}</Text>
+                          <TextInput ref={mergeLtrRef(priceMinRentRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
+                            value={priceMinRentValue}
+                            onKeyPress={wholeNumberKeyGuard('priceMinRent')} onFocus={() => clearFracLock('priceMinRent')} onSelectionChange={() => clearFracLock('priceMinRent')} onChangeText={(v) => { clearFracLock('priceMinRent'); const d = toWholeNumberDigits(v).slice(0, 10); setQuery((q) => ({ ...q, priceMinRent: d || null })); }} />
+                          <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
+                        </Pressable>
+                        <Pressable style={[s.field, s.rangeBox, query.priceMaxRent ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(priceMaxRentRef)}>
+                          <Image source={RANGE_ICON.priceTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
+                          <Text style={s.rangeLabel}>{t('To')}</Text>
+                          <TextInput ref={mergeLtrRef(priceMaxRentRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
+                            value={priceMaxRentValue}
+                            onKeyPress={wholeNumberKeyGuard('priceMaxRent')} onFocus={() => clearFracLock('priceMaxRent')} onSelectionChange={() => clearFracLock('priceMaxRent')} onChangeText={(v) => { clearFracLock('priceMaxRent'); const d = toWholeNumberDigits(v).slice(0, 10); setQuery((q) => ({ ...q, priceMaxRent: d || null })); }} />
+                          <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
+                        </Pressable>
+                      </View>
+                      {priceRentHint && (
+                        <Text style={[s.rangeNote, priceRentHint.warn ? s.rangeNoteWarn : null]}>{priceRentHint.text}</Text>
+                      )}
+                    </Reveal>
                   )}
                 </View>
               </Reveal>

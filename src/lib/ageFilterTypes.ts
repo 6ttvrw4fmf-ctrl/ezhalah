@@ -69,11 +69,19 @@ export const AGE_FILTER_TYPES = new Map<string, AgeFilterMacro>([
 // silently exclude nearly all Monthly rows while the search still claims to cover both periods.
 // Eligible only for Buy or plain-Annual Rent — never 'monthly' or 'both' — matching what the cohort
 // ledger already asserts is true for this question.
+//
+// dealCombined (Buy+Rent both selected, owner feature 2026-08-20): also excluded, unconditionally,
+// same as 'both' — combined mode's eligible set includes Monthly Rent rows too (no period
+// selector), and property_age is never profiled against Monthly for ANY type (the exact gap this
+// gate exists to close). This mirrors advancedFilters.ts's cohortAllowsCombined() three-leg
+// intersection (Buy ∩ RentAnnual ∩ RentMonthly) — property_age is absent from every cohort's
+// RentMonthly list, so the intersection is empty for it regardless of type, exactly like here.
 export function isAgeFilterScope(
-  q: { category?: string | null; deal?: string | null; rentPeriod?: string | null },
+  q: { category?: string | null; deal?: string | null; rentPeriod?: string | null; dealCombined?: boolean },
   effectiveTypes: string[],
 ): boolean {
   if (effectiveTypes.length !== 1) return false;
+  if (q.dealCombined) return false;
   if (q.deal === 'Rent' && (q.rentPeriod === 'monthly' || q.rentPeriod === 'both')) return false;
   return !!q.category && AGE_FILTER_TYPES.get(effectiveTypes[0]) === q.category;
 }
