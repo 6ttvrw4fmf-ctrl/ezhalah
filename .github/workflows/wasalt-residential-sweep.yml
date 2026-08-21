@@ -19,6 +19,16 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
+      # PROPOSED 2026-08-21 (Approval Needed — see PR body): all 20 jobs share ONE
+      # WASALT_PROXY_URL (Webshare Saudi-residential proxy) secret and previously dispatched
+      # fully parallel with no cap, which measurably exceeded the proxy's concurrent-route
+      # capacity (evidence: PR body / scrape_runs timing signature, 2026-08-17 through 08-21
+      # step-change, ~58-68% failure rate). Mirrors the existing max-parallel: 18 pattern in
+      # small-sources-sync.yml for a comparable multi-source matrix. 6 is a conservative
+      # starting point picked without visibility into the actual Webshare plan's concurrent-
+      # session limit — the owner may need to tune this once real production behavior is
+      # observed against the account's real capacity.
+      max-parallel: 6
       matrix:
         slug: [apartment, villa-townhouse, floor, building, land, rest-house, chalet, farm, room, duplex]
         deal: [sale, rent]
