@@ -270,6 +270,24 @@ function singleCleanType(q: SearchQuery): string | null {
 // client-side only, per docs/ADVANCED_FILTER_DESIGN_CONTRACT.md §9). A type with no certified
 // Monthly cohort correctly offers ZERO questions in 'both' mode (empty intersection) — there is no
 // evidence a mixed scope is meaningfully populated for that type either.
+// BUY+RENT COMBINED (q.dealCombined, owner feature 2026-08-20) — INTERSECTION across all THREE
+// legs: Buy, RentAnnual, AND RentMonthly (combined mode's Rent side has no period selector — it
+// spans both periods too, exactly like rentPeriod==='both' above). This is the SAME
+// "intersection, never union" principle the mixed-period fix already established, extended one
+// more dimension, reusing the SAME already-profiled COHORT_QUESTIONS table with zero new data
+// work: a question must be independently certified for Buy AND Annual Rent AND Monthly Rent
+// before it can narrow a Buy∪Rent(any period) eligible set without risking a silent amputation of
+// whichever leg it was never validated against. This mechanically satisfies every owner rule for
+// combined-mode AF questions: Buy-only questions (fail the Rent legs) and Rent-only questions
+// (fail the Buy leg, e.g. rnpl — never in any cohort's Buy list) are excluded; a Monthly-only
+// signal like Gathern rating is excluded (never in any cohort's Buy or RentAnnual list); a type
+// with no certified Monthly cohort (most commercial/rural types — Monthly is Apartment/Room/Villa-
+// only) correctly offers ZERO combined-mode questions, matching the same conservative "no
+// evidence, don't ask" behavior 'both' already applies rather than needing a separate cohort audit.
+function cohortAllowsCombined(cfg: NonNullable<(typeof COHORT_QUESTIONS)[string]>, id: string): boolean {
+  return (cfg.Buy ?? []).includes(id) && (cfg.RentAnnual ?? []).includes(id) && (cfg.RentMonthly ?? []).includes(id);
+}
+
 function cohortAllows(q: SearchQuery, id: string): boolean {
   const type = singleCleanType(q);
   if (!type) return false;
@@ -279,6 +297,7 @@ function cohortAllows(q: SearchQuery, id: string): boolean {
   if (q.category !== (CLEAN_MACRO[type] ?? 'Residential')) return false;
   const cfg = COHORT_QUESTIONS[type];
   if (!cfg) return false;
+  if (q.dealCombined) return cohortAllowsCombined(cfg, id);
   if (q.deal === 'Buy') return (cfg.Buy ?? []).includes(id);
   if (q.deal !== 'Rent') return false;
   if (q.rentPeriod === 'monthly') return (cfg.RentMonthly ?? []).includes(id);
