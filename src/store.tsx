@@ -35,6 +35,9 @@ type AppState = {
   query: SearchQuery;
   setQuery: (updater: (q: SearchQuery) => SearchQuery) => void;
   resetQuery: () => void;
+  // New Chat = a genuinely fresh session. ONE owner for that reset, so callers never have to know
+  // which pieces of shared state a chat leaves behind (owner rule 2026-08-20).
+  newChat: () => void;
   // `signal` (owner 2026-08-18, Stop button): when the caller's turn is cancelled, the underlying
   // network calls abort AND the history/searchCount writes are skipped — see the guard at the call site.
   runQuery: (q: SearchQuery, record?: boolean, signal?: AbortSignal) => Promise<SearchResult>;
@@ -370,6 +373,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
       query,
       setQuery: (updater) => setQueryState((q) => updater(q)),
       resetQuery: () => setQueryState(emptyQuery()),
+      // NEW CHAT — the single owner of "start clean" (owner permanent rule 2026-08-20: a saved chat
+      // keeps its own state; New Chat never inherits anything from the previously active one).
+      //
+      // The bug this fixes: onNewChat only cleared the sidebar highlight and navigated home with a
+      // `fresh` param, and Home's only reaction to `fresh` was replaying the hero ANIMATION. Nothing
+      // reset the shared `query`, so the previous search's city, type, deal, period, price, beds and
+      // every other Filter field rode straight into the new chat. The handler's own comment claimed
+      // it reset state; the reset was never implemented.
+      //
+      // Resets to HOME_DEFAULT_QUERY (not emptyQuery): New Chat lands on the Filter home, whose true
+      // default is Buy-highlighted, and that is also the store's own initial state — so a New Chat is
+      // byte-identical to a cold app start, and to what «مسح الكل» already produces.
+      //
+      // Deliberately NOT touched: `history` (the saved chats must survive — that is the whole point)
+      // and `user`. Results, result counts, pagination and every Advanced-Filter answer live in
+      // agent.tsx's own component state, which is destroyed when New Chat navigates to '/', so they
+      // need no clearing here — and must not be duplicated into the store just to be cleared.
+      newChat: () => {
+        setQueryState(HOME_DEFAULT_QUERY());
+        setPendingMessageState(null);
+        AsyncStorage.removeItem('pendingMessage').catch(() => {});
+        setActiveChatId(null);
+      },
       dataSource,
       user,
       searchCount,

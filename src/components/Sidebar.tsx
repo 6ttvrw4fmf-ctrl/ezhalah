@@ -67,7 +67,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, isRTL, locale } = useI18n();
-  const { user, history, setQuery, toggleStar, deleteHistory, openModal, openAuth, activeChatId, setActiveChat } = useApp();
+  const { user, history, setQuery, toggleStar, deleteHistory, openModal, openAuth, activeChatId, setActiveChat, newChat } = useApp();
   // Row action menu (Star / Delete). Rendered as a panel-level overlay OUTSIDE the scrolling list so
   // it can never be clipped, and opened UP or DOWN from the click position so the full menu is always
   // on-screen near the top, middle, or bottom of the sidebar. (user request.)
@@ -147,8 +147,11 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       withTiming(0.96, { duration: 80 }),
       withSpring(1, { damping: 8, stiffness: 220 }),
     );
-    // No chat is "current" on a fresh start — clear the highlighted row.
-    setActiveChat(null);
+    // A fresh start means FRESH STATE, not just a cleared highlight. This used to be
+    // setActiveChat(null) alone, which left the previous search's whole query (city, type, deal,
+    // period, price, beds…) sitting in the shared store for the new chat to inherit. The store owns
+    // that reset now. Saved chats in the sidebar are untouched. (owner rule 2026-08-20.)
+    newChat();
     // New Chat now takes the user back to the DEFAULT FILTER HOME (the search form), not the AI
     // agent screen. The `fresh` param makes the home reset its state if we're already on it. The
     // browser does a soft refresh-feel via the home page's own entrance animation on mount.
