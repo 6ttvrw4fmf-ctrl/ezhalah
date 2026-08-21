@@ -4,6 +4,7 @@ import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } fro
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
 import { HOME_DEFAULT_QUERY } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
+import { autoTitleForQuery, autoTitleForPrompt, canAutoRetitle, type TitleSource } from '@/lib/chatTitle';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
 import { resolveLocation, ensureLocationIndex } from '@/data/locations';
@@ -29,7 +30,17 @@ export type AuthUser = {
 // chat renders instantly with zero network (owner 2026-08-14: "it should already show him the
 // property... this is just saved"). Capped at SNAPSHOT_CAP cards; «عرض المزيد» continues live
 // (loadMore de-dups against the held cards, so a truncated snapshot pages gap-free).
-export type HistoryItem = { id: string; label: string; query: SearchQuery; ts: number; starred?: boolean; snapshot?: SearchResult };
+// `title` + `titleSource` are the DISPLAY layer and nothing more (owner 2026-08-21): a title is
+// metadata, never identity. Saved-search de-duplication is savedSearchIdentity.ts's job and is
+// deliberately not coupled to it — two entries may carry the same title, and renaming one must not
+// merge, split or alter any search. `label` is still written so a browser holding an older cached
+// bundle (which reads `label`) keeps showing something sensible during a rollout; `title` wins
+// wherever both exist. `titleUpdatedAt` records only when the LABEL changed — `ts` continues to
+// mean "when this search last ran" and a rename must never move it.
+export type HistoryItem = {
+  id: string; label: string; query: SearchQuery; ts: number; starred?: boolean; snapshot?: SearchResult;
+  title?: string; titleSource?: TitleSource; titleUpdatedAt?: number;
+};
 
 type AppState = {
   query: SearchQuery;
@@ -74,6 +85,10 @@ type AppState = {
   history: HistoryItem[];
   clearHistory: () => void;
   toggleStar: (id: string) => void;
+  // Rename a sidebar entry. DISPLAY ONLY — it writes `title`/`titleSource`/`titleUpdatedAt` and
+  // touches nothing else on the entry: not the query, the snapshot, the id, the star, or `ts`.
+  // An empty/blank name clears the manual title and hands the row back to auto-titling.
+  renameHistory: (id: string, title: string) => void;
   deleteHistory: (id: string) => void;
   // Record a free-text user message as the active chat's sidebar entry. First message → creates a
   // new chat in Recent with the user's text as the title; subsequent messages → update the same
@@ -327,7 +342,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const prior = h.find((it) => sameQuery(it.query, q));
       const id = prior?.id ?? 'h' + Date.now();
       const starred = prior?.starred ?? false;
-      const next: HistoryItem = { id, label, query: q, ts: Date.now(), starred, ...(snapshot ? { snapshot } : {}) };
+      // TITLE (owner 2026-08-21). Auto-generate a concise summary, but a user-named row keeps its
+      // name: canAutoRetitle() is the single place that rule lives, so re-running a renamed search
+      // refreshes its results and timestamp WITHOUT reverting the title the user chose.
+      const keepTitle = prior && !canAutoRetitle(prior);
+      const title = keepTitle ? prior!.title : autoTitleForQuery(q, getLocale());
+      const titleSource: TitleSource = keepTitle ? 'manual' : 'auto';
+      const next: HistoryItem = {
+        id, label, query: q, ts: Date.now(), starred,
+        title, titleSource,
+        ...(keepTitle && prior!.titleUpdatedAt ? { titleUpdatedAt: prior!.titleUpdatedAt } : {}),
+        ...(snapshot ? { snapshot } : {}),
+      };
       setActiveChatId(id);
       const rest = h.filter((it) => it.id !== id);
       return [next, ...rest]
@@ -563,6 +589,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
           } catch {}
           return next;
         }),
+      // RENAME = DISPLAY ONLY (owner rule 3, 2026-08-21). Spreading `it` and then assigning ONLY the
+      // three title fields is what makes that structural rather than a promise: query, snapshot,
+      // starred, id and `ts` are carried through untouched, so the conversation a renamed row opens
+      // is byte-for-byte the search it always was. `ts` in particular must not move — it is "when
+      // this search ran", and bumping it would silently reorder the sidebar on a rename.
+      // Clearing the name (empty input) drops back to auto-titling rather than saving a blank row.
+      renameHistory: (id, title) =>
+        setHistory((h) => {
+          const clean = (title ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+          const next = h.map((it) => {
+            if (it.id !== id) return it;
+            return clean
+              ? { ...it, title: clean, titleSource: 'manual' as TitleSource, titleUpdatedAt: Date.now() }
+              : { ...it, title: autoTitleForQuery(it.query, getLocale()), titleSource: 'auto' as TitleSource, titleUpdatedAt: Date.now() };
+          });
+          if (user) try {
+            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), JSON.stringify(next));
+          } catch {}
+          return next;
+        }),
       deleteHistory: (id) =>
         setHistory((h) => {
           const next = h.filter((it) => it.id !== id);
@@ -583,12 +629,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setHistory((h) => {
           const idx = h.findIndex((it) => it.id === id);
           let next: HistoryItem[];
+          // A chat row is titled with a SHORT summary of what the user asked, not the whole
+          // message (owner 2026-08-21: «ابي شقة بالرياض قريبة من المترو وتكون تحت 5000 بالشهر» →
+          // «شقة بالرياض قرب المترو»). `label` keeps the raw text so nothing that reads the legacy
+          // field loses information; only the displayed title is summarized.
+          const auto = autoTitleForPrompt(v, getLocale());
           if (idx >= 0) {
             const prev = h[idx];
-            const updated: HistoryItem = { ...prev, label: v, ts: Date.now() };
+            const keep = !canAutoRetitle(prev);
+            const updated: HistoryItem = {
+              ...prev, label: v, ts: Date.now(),
+              title: keep ? prev.title : auto,
+              titleSource: keep ? 'manual' : 'auto',
+            };
             next = [updated, ...h.filter((it) => it.id !== id)];
           } else {
-            const entry: HistoryItem = { id, label: v, query: emptyQuery(), ts: Date.now() };
+            const entry: HistoryItem = { id, label: v, query: emptyQuery(), ts: Date.now(), title: auto, titleSource: 'auto' };
             next = [entry, ...h].slice(0, 50);
           }
           try {
