@@ -54,3 +54,4 @@ scrapers/.env
 
 # Local pytest cache — was accidentally staged 2026-08-08; never belongs in the repo.
 .pytest_cache/
+.claude/worktrees/
