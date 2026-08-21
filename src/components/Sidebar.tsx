@@ -33,7 +33,18 @@ export const DOCK_WIDTH = 300;
 export const DOCK_BREAKPOINT = 900;
 export function useDocked() {
   const { width } = useWindowDimensions();
-  return Platform.OS === 'web' && width >= DOCK_BREAKPOINT;
+  // Gate on mount (2026-08-21, React error #418 hydration mismatch — see issue #847). Static
+  // export has no real window, so the server always renders `false` (undocked). On the client,
+  // `useWindowDimensions()` reports the true viewport on the very first render — at >=900px that
+  // returns `true` immediately, a structural mismatch against the server HTML at the very top of
+  // the tree (React discards and re-renders the whole sidebar subtree, logging error #418).
+  // Forcing `false` until after mount makes the client's first render match the server exactly;
+  // the docked column then appears one frame later once `width` is known to be real.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+  return Platform.OS === 'web' && mounted && width >= DOCK_BREAKPOINT;
 }
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
