@@ -1,6 +1,10 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-08-20 (prod-drift resolution): CHANGED and regenerated. Migration
+--   20260820074258_v1_legacy_city_resolution_scoped_to_published_region redefined this view
+--   (legacy city resolution scoped to the published region). Recorded md5: 31036a9c8b92fddc5293b700985b869d (14127 chars),
+--   from md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against live production.
 -- Refreshed 2026-08-08 (senior run #7). The previous copy had drifted badly: it was missing the
 -- ENTIRE `satel` native branch (both the residential and commercial UNION ALL arms), and it still
 -- carried the older parenthesised rendering (`WHERE (p.city_id IS NOT NULL)`) from a superseded
@@ -306,13 +310,24 @@
             lal_1.source_table,
             lal_1.listing_id,
             lal_1.city_ar,
-            cc.city_id,
+            COALESCE(lsc.city_id, lgc.city_id) AS city_id,
             lal_1.district_ar,
-            cc.region_id,
+            COALESCE(lsc.region_id, lgc.region_id) AS region_id,
             'legacy_derived'::text AS source_method,
             NULL::text AS transaction_type
            FROM listings_arabic_locations lal_1
-             LEFT JOIN loc_catalog_city cc ON cc.city_norm = normalize_ar(lal_1.city_ar)
+             LEFT JOIN LATERAL ( SELECT min(c.city_id) AS city_id,
+                    min(c.region_id) AS region_id
+                   FROM loc_catalog_city c
+                     JOIN loc_catalog_region r ON r.region_id = c.region_id
+                  WHERE c.city_norm = normalize_ar(lal_1.city_ar) AND lal_1.region_ar IS NOT NULL AND normalize_ar(r.region_ar) = normalize_ar(lal_1.region_ar)
+                 HAVING count(DISTINCT c.city_id) = 1) lsc ON true
+             LEFT JOIN LATERAL ( SELECT c2.city_id,
+                    c2.region_id
+                   FROM loc_catalog_city c2
+                  WHERE c2.city_norm = normalize_ar(lal_1.city_ar)
+                  ORDER BY c2.city_id
+                 LIMIT 1) lgc ON true
           WHERE lal_1.city_ar IS NOT NULL
         ), ranked AS (
          SELECT native.platform,
@@ -350,7 +365,7 @@
             ranked.transaction_type,
             ranked.priority
            FROM ranked
-          ORDER BY ranked.platform, ranked.listing_id, ranked.priority
+          ORDER BY ranked.platform, ranked.listing_id, ranked.priority, ranked.source_method
         )
  SELECT b.platform,
     b.source_table,
