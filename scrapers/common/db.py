@@ -513,6 +513,14 @@ def _unknown_must_not_overwrite_known(r: dict[str, Any]) -> None:
     The cost is deliberate and was chosen with eyes open: a value the source has genuinely RETRACTED
     lingers until a later crawl reads a new one. Retracting on the strength of one silent fetch is
     the more dangerous error, and retirement is a job for corroborated evidence across fetches.
+
+    TRAP — READ THIS BEFORE SHIPPING A FABRICATION FIX. This guard cannot tell "the fetch was weak"
+    from "we just stopped inventing that value". When a scraper is corrected to emit None where it
+    used to fabricate, the OLD fabricated value survives every future crawl, and production stays
+    wrong while every test passes. It happened twice on 2026-08-09 — alhoshan's derived instalments
+    (round(price/12)) and eastabha EA21188's per-metre rate stored as a total. Removing a fabrication
+    from the code is therefore only half the job: it must be paired with a one-off, source-verified
+    RETRACTION of the rows that already carry it.
     """
     for col in [c for c, v in r.items() if v is None and c not in _CONTROL_COLS]:
         del r[col]
