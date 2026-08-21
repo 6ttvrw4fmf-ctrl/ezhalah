@@ -54,6 +54,36 @@ platform dominates due to an Ezhalah-side ranking bug. Diversity must NEVER intr
 that fails the user's filters. One platform with genuine matches → one-platform results are
 CORRECT. **Never manufacture diversity.**
 
+### 4.1 Test the REAL contract — an invented "fair share" quota produces false failures
+Diversity is **round-robin by within-platform RANK**, applied in the RPC's own `ORDER BY`
+(migration `platform_diversity_round_robin_ordering`): each platform's eligible rows are numbered
+1..n and the sort takes all rank-1 rows, then all rank-2 rows, and so on, over the WHOLE eligible
+set — one stable total order that page 0 and every «عرض المزيد» batch simply walk. The three
+falsifiable invariants are:
+
+- **A. Rank monotonicity** — walking the results, each row's within-platform rank is non-decreasing.
+- **B. No suppression** — every eligible platform's rank-1 row appears within the first
+  (#platforms) rows.
+- **C. Dominance is earned** — each platform contributed exactly
+  `min(its stock, rank reached at that row)` (±1 for the partial final round).
+
+Measured 2026-08-21, 12 checks, 0 failures. Worked example (شقة · إيجار سنوي · الرياض · حي النرجس,
+998 eligible, 7 platforms) — in the first 100 cards: wasalt 19, aqar 19, dealapp 19, sanadak 20,
+raghdan 13, aqaratikom 8, satel 2; rank reached = 20. wasalt holds **502** eligible rows and still
+takes only 19, while raghdan/aqaratikom/satel contributed **all** of their 13/8/2 because they were
+exhausted. That is the contract working perfectly.
+
+**Two wrong tests to avoid — both were written and both failed 9–11 of 12 healthy searches:**
+1. *"Within every window of #platforms rows, no platform may repeat."* Wrong: once a small platform
+   exhausts its stock the later rounds legitimately have fewer participants, so fixed-size windows
+   repeat by design.
+2. *"No platform may exceed `ceil(100/#platforms)` while any other still has stock."* Wrong and
+   nearly vacuous: on a large cohort every platform still has stock, so it fires constantly. A
+   platform having leftover inventory is NOT evidence of unfairness — only a violation of A, B or C is.
+
+A single-platform result (D12: محل · جدة, 1 eligible platform, 100% one platform) is **CORRECT**,
+never a diversity failure (§4's own rule).
+
 ## 5. السعر — heavy daily testing
 No price · min only · max only · min+max · very narrow · wide · low · high · strange boundaries ·
 exact boundary values — across cities, districts, «شراء»/«إيجار», «سنوي»/«شهري», فئات and أنواع.
