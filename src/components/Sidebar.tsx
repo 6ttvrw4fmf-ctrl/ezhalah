@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { OPEN_DELAY_MS, armOpen, cancelOpen, openShouldFire, type ArmedOpen } from '@/lib/rowClick';
 import Animated, {
   Easing,
   interpolate,
@@ -108,6 +109,29 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     setEditingId(null);
     setDraft('');
   };
+  // OWNER BUG FIX: a single click OPENS, but the native dblclick below ALSO fired while every click
+  // still ran openHistory() → the double-click navigated (to Filter/Agent) instead of only renaming.
+  // Fix: a click only ARMS a delayed open; the dblclick CANCELS it before it can fire. A cancelled
+  // open never navigates. Two SLOW clicks (no dblclick) each fire their own open, unchanged. Pure
+  // logic + regression barrier live in src/lib/rowClick.ts + scripts/verify-sidebar-rename-isolation.ts.
+  const openArmRef = useRef<ArmedOpen | null>(null);
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (openTimerRef.current) clearTimeout(openTimerRef.current); }, []);
+  const cancelArmedOpen = () => {
+    openArmRef.current = cancelOpen(openArmRef.current);
+    if (openTimerRef.current) { clearTimeout(openTimerRef.current); openTimerRef.current = null; }
+  };
+  const armOpenRow = (c: HistoryItem) => {
+    if (editingId) return;                                   // never open/navigate while a title is being edited
+    if (Platform.OS !== 'web') { openHistory(c); return; }   // native: no dblclick; a tap opens immediately
+    const token = Date.now();
+    openArmRef.current = armOpen(token);
+    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    openTimerRef.current = setTimeout(() => {
+      openTimerRef.current = null;
+      if (openShouldFire(openArmRef.current, token)) { openArmRef.current = null; openHistory(c); }
+    }, OPEN_DELAY_MS);
+  };
   // react-native-web does NOT forward `onDoubleClick` to the DOM node (its forwardedProps allow-list
   // carries onClick/onContextMenu/pointer events and nothing else), so a prop-based double-click is
   // silently dropped — it was, and the browser run caught it. Bind the real `dblclick` event on the
@@ -116,7 +140,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const bindDoubleClick = (c: HistoryItem) => (node: any) => {
     if (Platform.OS !== 'web' || !node || typeof node.addEventListener !== 'function') return;
     if (node.__ezDbl) node.removeEventListener('dblclick', node.__ezDbl);
-    const handler = () => beginRename(c);
+    const handler = () => { cancelArmedOpen(); beginRename(c); };
     node.__ezDbl = handler;
     node.addEventListener('dblclick', handler);
   };
@@ -333,10 +357,11 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                           <Pressable
                             ref={bindDoubleClick(c)}
                             style={s.histItem}
-                            onPress={() => openHistory(c)}
+                            onPress={() => armOpenRow(c)}
                             // Web gets the owner's double-click (bound on the host node by
-                            // `bindDoubleClick`); touch gets long-press as the equivalent.
-                            onLongPress={() => beginRename(c)}
+                            // `bindDoubleClick`), which cancels the armed open so it renames only;
+                            // touch gets long-press as the equivalent.
+                            onLongPress={() => { cancelArmedOpen(); beginRename(c); }}
                             delayLongPress={450}
                           >
                             <Ionicons name="chatbubble-outline" size={15} color="#8a978f" />
