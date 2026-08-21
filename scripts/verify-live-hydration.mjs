@@ -33,47 +33,67 @@ const FILTER_CARD_MARKER = 'أي مدينة؟';
 
 const fail = (msg) => { console.error(`FAIL  ${msg}`); process.exitCode = 1; };
 
+// EVERY VIEWPORT, NOT JUST ONE (2026-08-21). This gate used to open a single default 1280×720 page.
+// A width-gated hydration bug is invisible at every width on the wrong side of its breakpoint, so one
+// viewport is one sample on the exact axis the defect varies along. The P0 of 2026-08-21 proved it:
+// 0 errors at 375 and 768, 2 errors at 900 and above. These widths bracket both real breakpoints
+// (CARD_WIDE 820, DOCK 900) on both sides, including the exact boundary.
+const VIEWPORTS = [
+  { label: 'phone',            width: 375,  height: 812 },
+  { label: 'tablet',           width: 768,  height: 1024 },
+  { label: 'dock boundary',    width: 900,  height: 900 },
+  { label: 'desktop',          width: 1280, height: 720 },
+  { label: 'wide desktop',     width: 1920, height: 1080 },
+];
+
 const browser = await chromium.launch();
-const page = await browser.newPage();
-const consoleErrors = [];
-page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
-page.on('pageerror', (e) => consoleErrors.push(String(e)));
+console.log(`\nPost-deploy hydration gate → ${URL}`);
+console.log(`Checking ${VIEWPORTS.length} viewports (a width-gated mismatch hides at the wrong width)\n`);
 
-console.log(`\nPost-deploy hydration gate → ${URL}\n`);
-let bodyText = '';
-try {
-  await page.goto(URL, { waitUntil: 'networkidle', timeout: 60_000 });
-  // Hydration errors surface during/just after the client render, not necessarily by networkidle.
-  await page.waitForTimeout(4000);
-  bodyText = await page.evaluate(() => document.body.innerText);
-} catch (e) {
-  fail(`could not load ${URL}: ${e.message}`);
-}
+const otherErrorsAll = [];
+for (const vp of VIEWPORTS) {
+  const page = await browser.newPage({ viewport: { width: vp.width, height: vp.height } });
+  const consoleErrors = [];
+  page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+  page.on('pageerror', (e) => consoleErrors.push(String(e)));
 
-const hydrationErrors = consoleErrors.filter((t) => HYDRATION_ERR.test(t));
-if (hydrationErrors.length) {
-  fail(`REACT HYDRATION MISMATCH on ${URL} — the served HTML and the client render disagree.`);
-  for (const e of hydrationErrors.slice(0, 3)) console.error(`      ${e.slice(0, 300)}`);
-  console.error('      This is the PR #634 / PR #637 failure class. Do NOT leave this deploy live:');
-  console.error('      re-verify the served bundle, and roll back with scripts/emergency-rollback.sh if it persists.');
-} else {
-  console.log('PASS  no React hydration error on the live page');
-}
+  let bodyText = '';
+  try {
+    await page.goto(URL, { waitUntil: 'networkidle', timeout: 60_000 });
+    // Hydration errors surface during/just after the client render, not necessarily by networkidle.
+    await page.waitForTimeout(4000);
+    bodyText = await page.evaluate(() => document.body.innerText);
+  } catch (e) {
+    fail(`[${vp.label} ${vp.width}px] could not load ${URL}: ${e.message}`);
+  }
 
-if (bodyText && !bodyText.includes(FILTER_CARD_MARKER)) {
-  fail(`home page did not render its filter card (missing «${FILTER_CARD_MARKER}») — the user-visible symptom of both prior incidents`);
-} else if (bodyText) {
-  console.log('PASS  home page rendered its filter card');
+  const hydrationErrors = consoleErrors.filter((t) => HYDRATION_ERR.test(t));
+  if (hydrationErrors.length) {
+    fail(`[${vp.label} ${vp.width}px] REACT HYDRATION MISMATCH — the served HTML and the client render disagree.`);
+    for (const e of hydrationErrors.slice(0, 2)) console.error(`      ${e.slice(0, 300)}`);
+    console.error('      This is the PR #634 / #637 / 2026-08-21 failure class. Do NOT leave this deploy live:');
+    console.error('      re-verify the served bundle, and roll back with scripts/emergency-rollback.sh if it persists.');
+  } else {
+    console.log(`PASS  [${vp.label} ${String(vp.width).padStart(4)}px] no React hydration error`);
+  }
+
+  if (bodyText && !bodyText.includes(FILTER_CARD_MARKER)) {
+    fail(`[${vp.label} ${vp.width}px] home page did not render its filter card (missing «${FILTER_CARD_MARKER}»)`);
+  } else if (bodyText) {
+    console.log(`PASS  [${vp.label} ${String(vp.width).padStart(4)}px] filter card rendered`);
+  }
+
+  otherErrorsAll.push(...consoleErrors.filter((t) => !HYDRATION_ERR.test(t)));
+  await page.close();
 }
 
 // Surface non-hydration console errors as INFORMATION, never as a failure: the live page always logs a
 // Google-identity/FedCM error for a logged-out visitor, and failing on that would make this gate cry
 // wolf until someone mutes it — which is how the real protection gets lost.
-const other = consoleErrors.filter((t) => !HYDRATION_ERR.test(t));
-if (other.length) {
-  console.log(`\n(info) ${other.length} non-hydration console error(s), not failing on these:`);
-  for (const e of other.slice(0, 5)) console.log(`      ${e.slice(0, 160)}`);
+if (otherErrorsAll.length) {
+  console.log(`\n(info) ${otherErrorsAll.length} non-hydration console error(s) across all viewports, not failing on these:`);
+  for (const e of [...new Set(otherErrorsAll)].slice(0, 5)) console.log(`      ${e.slice(0, 160)}`);
 }
 
 await browser.close();
-console.log(process.exitCode ? '\n✗ hydration gate FAILED\n' : '\n✓ live page hydrates cleanly\n');
+console.log(process.exitCode ? '\n✗ hydration gate FAILED\n' : '\n✓ live page hydrates cleanly at every viewport\n');

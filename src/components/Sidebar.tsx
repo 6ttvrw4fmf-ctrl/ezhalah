@@ -23,17 +23,22 @@ import { sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { useI18n } from '@/i18n';
 import { pickName, initialsOf } from '@/lib/nameSync';
 import { noTranslateRef } from '@/noTranslate';
+import { DOCK_WIDTH, DOCK_BREAKPOINT } from '@/lib/responsive';
+import { useAtLeast } from '@/lib/useAtLeast';
 
 const GOLD = '#e3a008';
 const DAY = 86400000;
 
 // Persistent (docked) sidebar on the website: at/above this viewport width on web the drawer is
 // always shown as a fixed column instead of a tap-to-open overlay — no hamburger needed.
-export const DOCK_WIDTH = 300;
-export const DOCK_BREAKPOINT = 900;
+//
+// The breakpoint and the SSR-safety rule now live in lib/responsive.ts. This used to read the width
+// directly and compare it inline, which meant the server (no window ⇒ width 0 ⇒ undocked) and a
+// desktop client (docked) rendered DIFFERENT TREES on the first render — React #418, live on
+// production 2026-08-21. Re-exported here so existing importers keep working.
+export { DOCK_WIDTH, DOCK_BREAKPOINT };
 export function useDocked() {
-  const { width } = useWindowDimensions();
-  return Platform.OS === 'web' && width >= DOCK_BREAKPOINT;
+  return useAtLeast(DOCK_BREAKPOINT);
 }
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
