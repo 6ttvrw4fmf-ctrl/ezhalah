@@ -46,23 +46,40 @@ def _throttle(url: str) -> None:
 _local = threading.local()
 
 
+def _build_session() -> cc.Session:
+    s = cc.Session(impersonate="chrome124")
+    s.headers.update(
+        {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Cache-Control": "no-cache",
+        }
+    )
+    return s
+
+
 def session() -> cc.Session:
     s = getattr(_local, "session", None)
     if s is None:
-        s = cc.Session(impersonate="chrome124")
-        s.headers.update(
-            {
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
-                "Accept-Encoding": "gzip, deflate, br",
-                "Cache-Control": "no-cache",
-            }
-        )
+        s = _build_session()
         # When the URL we're about to fetch is wasalt.sa, route through the Saudi residential proxy
         # so the cloud workflows don't get blocked. Liveness uses this `get(url)` helper for every
         # check, so without this the cloud liveness for wasalt_*_listings would see every page as
         # "dead" and wrongly mark live listings inactive. Aqar URLs ignore the proxy (no env var).
         _local.session = s
+    return s
+
+
+def _rotate_session() -> cc.Session:
+    """Force a fresh TCP connection for this thread by discarding the cached session and
+    building a new one. 2026-08-21 incident fix: the OLD code reused ONE session/connection
+    across every retry attempt of get(), so through the shared Webshare Saudi-residential proxy
+    (see session()'s wasalt.sa note) a retry after a failed attempt was guaranteed to hang on the
+    exact same bad route again. Called between retries so a fresh attempt gets a real chance at a
+    different route (mirrors the same fix in scrapers/wasalt/run.py's RotatingSession)."""
+    s = _build_session()
+    _local.session = s
     return s
 
 
@@ -78,17 +95,26 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25) -> Optional[cc.Res
         purl = os.environ.get("WASALT_PROXY_URL", "").strip()
         if purl:
             proxies = {"http": purl, "https": purl}
+    host = urlsplit(url).netloc
     for attempt in range(max_retries):
         _throttle(url)
         try:
             r = s.get(url, timeout=timeout, allow_redirects=True, proxies=proxies)
-        except Exception:
+        except Exception as e:
+            print(f"   ⚠ http.get attempt {attempt + 1}/{max_retries} for {host} raised "
+                  f"{type(e).__name__}: {str(e)[:160]}")
+            if attempt < max_retries - 1:
+                s = _rotate_session()
             time.sleep(2 * (attempt + 1))
             continue
         if r.status_code == 200:
             return r
         if r.status_code in (429, 502, 503, 504):
-            # Server-side temporary hiccup — back off and retry.
+            # Server-side temporary hiccup — back off, rotate the connection, and retry.
+            print(f"   ⚠ http.get attempt {attempt + 1}/{max_retries} for {host} got "
+                  f"HTTP {r.status_code}")
+            if attempt < max_retries - 1:
+                s = _rotate_session()
             time.sleep(3 * (attempt + 1))
             continue
         # 4xx (other than rate-limit) is permanent — bail out.

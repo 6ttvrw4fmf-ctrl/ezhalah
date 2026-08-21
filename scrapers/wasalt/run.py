@@ -77,7 +77,7 @@ def _throttle() -> None:
     _last = time.monotonic()
 
 
-def session() -> cc.Session:
+def _build_session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
     s.headers.update({"Accept-Language": "en,ar;q=0.8"})
     # Route through a Saudi residential proxy when WASALT_PROXY_URL is set in the env.
@@ -90,7 +90,38 @@ def session() -> cc.Session:
     return s
 
 
-def fetch_page(s: cc.Session, deal: str, cat: str, slug: str, page: int) -> tuple[int, int, list[dict], bool]:
+class RotatingSession:
+    """Wraps one curl_cffi Session but lets a caller force a fresh TCP/proxy connection
+    (rotate()) between retries, while every existing call site keeps calling `.get(...)` on
+    the same object — no refactor needed anywhere `s` is passed around (map_property,
+    _fetch_additional_attributes, scrape_slice, ...).
+
+    2026-08-21 incident fix: the OLD code created ONE curl_cffi session per process and
+    reused it (and its underlying connection pool / proxy tunnel) across all 3 retry attempts
+    of every fetch_page() call. Through the shared Webshare Saudi-residential proxy, once an
+    attempt landed on a bad/overloaded exit route, all 3 retries stayed pinned to that exact
+    same route and were guaranteed to hang the full 30s timeout again — 59/103 wasalt runs/24h
+    failed this way (204.2-204.7s each), while runs in the SAME dispatch batch that happened to
+    get a healthy route succeeded in 5-37s (evidence: scrape_runs timing query, 2026-08-21).
+    rotate() opens a brand-new session (new TCP handshake, new proxy-gateway negotiation) so a
+    retry after a failure gets a real chance at a different route instead of 3 guaranteed-
+    identical failures."""
+
+    def __init__(self) -> None:
+        self._s = _build_session()
+
+    def rotate(self) -> None:
+        self._s = _build_session()
+
+    def get(self, *a, **kw):
+        return self._s.get(*a, **kw)
+
+
+def session() -> RotatingSession:
+    return RotatingSession()
+
+
+def fetch_page(s: RotatingSession, deal: str, cat: str, slug: str, page: int) -> tuple[int, int, list[dict], bool]:
     """Return (count, total_pages, properties[], valid) for one search page.
 
     `valid` is True only when the response carried a parseable __NEXT_DATA__ searchResult —
@@ -104,9 +135,17 @@ def fetch_page(s: cc.Session, deal: str, cat: str, slug: str, page: int) -> tupl
     for attempt in range(3):
         try:
             r = s.get(url, timeout=30)
-        except Exception:
+        except Exception as e:
+            print(f"   ⚠ wasalt fetch attempt {attempt + 1}/3 ({slug}/{deal} p{page}) raised "
+                  f"{type(e).__name__}: {str(e)[:160]}")
+            if attempt < 2:
+                s.rotate()  # fresh TCP/proxy route on the next attempt
             time.sleep(2 * (attempt + 1)); continue
         if r.status_code != 200:
+            print(f"   ⚠ wasalt fetch attempt {attempt + 1}/3 ({slug}/{deal} p{page}) got "
+                  f"HTTP {r.status_code}")
+            if attempt < 2:
+                s.rotate()
             time.sleep(2 * (attempt + 1)); continue
         m = NEXT_RE.search(r.text)
         if not m:
@@ -130,7 +169,7 @@ def _attr(prop: dict, key: str) -> Any:
 _DETAIL_CACHE: dict[str, list[dict[str, Any]]] = {}
 
 
-def _fetch_additional_attributes(s: cc.Session, slug: str) -> list[dict[str, Any]]:
+def _fetch_additional_attributes(s: "RotatingSession", slug: str) -> list[dict[str, Any]]:
     """Fetch the listing's detail page and return its additionalAttributes list (or [] on failure).
     Wasalt's detail page __NEXT_DATA__ exposes propertyDetailsV3.additionalAttributes — 20-30
     label/value rows that populate the on-site 'Additional Information' panel."""
@@ -185,7 +224,7 @@ def _base_additional_info(prop: dict, info: dict) -> list[dict[str, Any]]:
     return out
 
 
-def map_property(prop: dict, deal: str, s: Optional[cc.Session] = None) -> Optional[dict[str, Any]]:
+def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -> Optional[dict[str, Any]]:
     info = prop.get("propertyInfo") or {}
     pid = prop.get("id")
     slug = info.get("slug")
