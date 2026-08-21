@@ -12,6 +12,20 @@
 -- session READS to reason about the location pipeline, so a stale one is how a session concludes
 -- "satel has no native resolution" and ships a fix for a problem that does not exist.
 --
+-- Refreshed 2026-08-20 (data-integrity run #33, PR #814): BODY CHANGED — this is real drift, not
+--   an any-mention trip. Migrations 20260820074258 + 20260820075521 redefine this view. Its
+--   `legacy` CTE matched a city NAME against loc_catalog_city with NO region predicate, while
+--   listings_arabic_locations already carried the region the resolver had matched one column away;
+--   for a name repeating across regions (الهفوف / المجمعة / القويعية / الباحة / البدائع / بيش /
+--   تربة) that emitted several priority-2 candidates and `best`'s untiebroken DISTINCT ON picked
+--   one at random. 810 production_ready listings sat in a region their own source contradicted.
+--   The legacy branch now prefers the single catalog city inside the published region (lsc) and
+--   falls back to the old unscoped match made deterministic (lgc, ORDER BY city_id); `best` gains
+--   a source_method tiebreak so two priority-1 branches stop re-rolling a winner between rebuilds.
+--   Re-ran md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against live
+--   production at 08:05Z: 31036a9c8b92fddc5293b700985b869d, 14,127 chars — the digest this header
+--   now carries, replacing d7fff7ec0378d6095728e862aee80106 / 13,385 chars.
+--
 -- Re-verified 2026-08-18 (senior run #28, PR #746): UNCHANGED. Migration 20260818064958 repairs the
 --   `lal_live_overlay` in listing_native_location_v2 — its catch-all branch read our own
 --   listings_arabic_locations resolution but gated it behind a hardcoded dealapp-only allowlist, so
@@ -65,8 +79,8 @@
 -- with the body below (same 13,385 chars, same md5) — content genuinely unchanged, only the
 -- verification date needed to advance past that migration.
 --
--- Regenerated from pg_get_viewdef('listing_native_location_v1'::regclass, true) — 13,385 chars.
--- Verified byte-exact; md5 of everything below this header block: d7fff7ec0378d6095728e862aee80106
+-- Regenerated from pg_get_viewdef('listing_native_location_v1'::regclass, true) — 14,127 chars.
+-- Verified byte-exact; md5 of everything below this header block: 31036a9c8b92fddc5293b700985b869d
  WITH native AS (
          SELECT 'alhoshan'::text AS platform,
             'alhoshan_residential_listings'::text AS source_table,
