@@ -1011,6 +1011,7 @@ const AR: Record<string, string> = {
   'Star': 'تمييز بنجمة',
   'Unstar': 'إزالة النجمة',
   'Delete': 'حذف',
+  'Rename': 'إعادة تسمية',
 
   // Settings (account)
   'Display Name': 'الاسم المعروض',

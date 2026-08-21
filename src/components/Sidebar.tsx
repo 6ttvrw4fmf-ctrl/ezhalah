@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
   interpolate,
@@ -67,7 +67,43 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, isRTL, locale } = useI18n();
-  const { user, history, setQuery, toggleStar, deleteHistory, openModal, openAuth, activeChatId, setActiveChat } = useApp();
+  const { user, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat } = useApp();
+
+  // ── Inline rename (double-click on web, ⋯ menu on any platform) ──
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const editRef = useRef<TextInput>(null);
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const commitRename = (id: string, text: string) => {
+    const trimmed = (text ?? '').trim();
+    if (trimmed) renameHistory(id, trimmed);
+    setEditingId(null);
+  };
+
+  const startRename = (c: HistoryItem) => {
+    setEditingId(c.id);
+    setEditText(c.label || queryLabel(c.query));
+    setTimeout(() => editRef.current?.focus(), 50);
+  };
+
+  const handleRowPress = (c: HistoryItem) => {
+    if (editingId === c.id) return; // tapping the editing row is a no-op
+    if (editingId) { commitRename(editingId, editText); }
+    if (Platform.OS !== 'web') { openHistory(c); return; }
+    // Web: disambiguate single-click (open) vs double-click (rename)
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+      startRename(c);
+    } else {
+      clickTimer.current = setTimeout(() => {
+        clickTimer.current = null;
+        openHistory(c);
+      }, 250);
+    }
+  };
+
   // Row action menu (Star / Delete). Rendered as a panel-level overlay OUTSIDE the scrolling list so
   // it can never be clipped, and opened UP or DOWN from the click position so the full menu is always
   // on-screen near the top, middle, or bottom of the sidebar. (user request.)
@@ -270,9 +306,22 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                         Title still flows with its own text direction inside the bubble. (user request.) */}
                     {g.items.map((c) => (
                       <View key={c.id} style={[s.histRow, activeChatId === c.id && s.histRowActive, menu?.id === c.id && s.histRowOpen, { direction: 'ltr' } as any]}>
-                        <Pressable style={s.histItem} onPress={() => openHistory(c)}>
+                        <Pressable style={s.histItem} onPress={() => handleRowPress(c)}>
                           <Ionicons name="chatbubble-outline" size={15} color="#8a978f" />
-                          <Text style={s.histLabel} numberOfLines={1}>{c.label || queryLabel(c.query)}</Text>
+                          {editingId === c.id ? (
+                            <TextInput
+                              ref={editRef}
+                              style={s.histLabelEdit}
+                              value={editText}
+                              onChangeText={setEditText}
+                              onSubmitEditing={() => commitRename(c.id, editText)}
+                              onBlur={() => commitRename(c.id, editText)}
+                              onKeyPress={(e: any) => { if (e.nativeEvent?.key === 'Escape') setEditingId(null); }}
+                              selectTextOnFocus
+                            />
+                          ) : (
+                            <Text style={s.histLabel} numberOfLines={1}>{c.label || queryLabel(c.query)}</Text>
+                          )}
                           {c.starred && <Ionicons name="star" size={13} color={GOLD} />}
                         </Pressable>
                         <Pressable style={s.dots} hitSlop={6} onPress={(e) => openMenu(c.id, e)}>
@@ -347,6 +396,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           <Ionicons name={menuItem.starred ? 'star' : 'star-outline'} size={15} color={menuItem.starred ? GOLD : colors.ink} />
           <Text style={s.rowMenuText} numberOfLines={1}>{menuItem.starred ? t('Unstar') : t('Star')}</Text>
         </Pressable>
+        <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && s.rowMenuItemHover]} onPress={() => { const item = history.find(h => h.id === menu.id); if (item) startRename(item); setMenu(null); }}>
+          <Ionicons name="pencil-outline" size={15} color={colors.ink} />
+          <Text style={s.rowMenuText} numberOfLines={1}>{t('Rename')}</Text>
+        </Pressable>
         <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && s.rowMenuItemHover]} onPress={() => { deleteHistory(menu.id); setMenu(null); }}>
           <Ionicons name="trash-outline" size={15} color="#c0392b" />
           <Text style={[s.rowMenuText, { color: '#c0392b' }]} numberOfLines={1}>{t('Delete')}</Text>
@@ -418,6 +471,7 @@ const s = StyleSheet.create({
   histRowActive: { backgroundColor: '#dcefe1' },
   histItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 8 },
   histLabel: { flex: 1, fontSize: 13.5, fontWeight: '500', color: colors.ink },
+  histLabelEdit: { flex: 1, fontSize: 13.5, fontWeight: '500', color: colors.ink, borderBottomWidth: 1, borderBottomColor: colors.primary, paddingVertical: 2, outlineStyle: 'none' } as any,
   dots: { paddingVertical: 6, paddingHorizontal: 8, borderRadius: 8 },
   // Soft dim over the sidebar while the menu is open so the history text behind it recedes and the
   // floating card reads cleanly (it no longer blends into the list). Tap it to dismiss.
