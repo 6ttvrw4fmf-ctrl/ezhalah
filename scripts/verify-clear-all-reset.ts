@@ -61,7 +61,7 @@ const cases: Array<[string, Partial<ReturnType<typeof HOME_DEFAULT_QUERY>> & Rec
   ['location', { location: 'الرياض' }],
   ['deal', { deal: 'Rent' }],
   ['category', { category: 'Commercial' }],
-  ['typeGroup', { typeGroup: 'Villas & Houses' }],
+  ['typeGroups', { typeGroups: ['Villas & Houses'] }],   // multi-select since 2026-08-20
   ['type', { type: 'Villa' }],
   ['types', { types: ['Villa', 'House'] }],
   ['detail', { detail: '3' }],
@@ -91,7 +91,7 @@ const heavilyFilled = {
   location: 'جدة',
   deal: 'Rent',
   category: 'Commercial',
-  typeGroup: 'Retail & Workspace',
+  typeGroups: ['Retail & Workspace'],
   type: 'Shop',
   types: ['Shop', 'Showroom'],
   detail: '2',

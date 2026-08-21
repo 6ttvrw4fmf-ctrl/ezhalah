@@ -11,17 +11,19 @@
 // result while the search still claimed to cover both periods — the mirror image of the owner's
 // named Gathern-rating risk (Monthly-leaking-into-Annual), just in the Annual-into-Monthly direction.
 //
-// WHY SOURCE-TEXT ASSERTIONS, NOT A LIVE IMPORT: src/data/advancedFilters.ts's own relative imports
-// (`from './search'`, no extension) are unresolvable by Node's raw --experimental-strip-types loader
-// (it does not do TS-style extension inference the way a bundler does) — the same reason every other
-// non-zero-dependency module in this repo (verify-rent-period-both.ts, verify-advanced-filter-
-// contract.ts, etc.) asserts against the SHIPPED SOURCE rather than importing it live. Comments are
-// stripped first so prose describing the bug can never satisfy a check for the fix, or vice versa.
+// UPGRADED TO EXECUTED ASSERTIONS (2026-08-20): cohortAllows moved to src/lib/afCohorts.ts, a PURE
+// module with no runtime imports beyond other pure modules, specifically so barriers can CALL it
+// instead of regexing it. The period-intersection checks below now run the real function against
+// real queries — a regex could be satisfied by a branch that never executes. The few remaining
+// source-text checks (the old aliasing ternary, the separate age gate) assert the ABSENCE of a
+// shape, which execution cannot prove; comments are stripped so prose can never satisfy them.
 //
 //   node --experimental-strip-types scripts/verify-mixed-period-af-gating.ts   (wired into `npm test`)
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { SearchQuery } from '../src/data/search.ts';
+import { cohortAllows, COHORT_QUESTIONS } from '../src/lib/afCohorts.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -36,11 +38,24 @@ const check = (label: string, ok: boolean, detail = '') => {
 
 console.log('\nMixed-period (كلاهما) Advanced Filter gating — intersection-only, never union\n');
 
-const af = codeOnly(read('src/data/advancedFilters.ts'));
+const af = codeOnly(read('src/lib/afCohorts.ts'));
 const ageGate = codeOnly(read('src/lib/ageFilterTypes.ts'));
+
+// The REAL gate + the REAL certified config.
+const Q = (over: Record<string, unknown>) =>
+  ({ deal: 'Rent', location: '', category: 'Residential', type: null, detail: null,
+     priceInput: '', priceBand: null, rentPeriod: 'annual', ...over }) as unknown as SearchQuery;
 
 // ── cohortAllows: the 'both' branch must be an INTERSECTION of both period lists ────────────────────
 const bothBranch = /if\s*\(q\.rentPeriod\s*===\s*'both'\)\s*return\s*\(cfg\.RentAnnual\s*\?\?\s*\[\]\)\.includes\(id\)\s*&&\s*\(cfg\.RentMonthly\s*\?\?\s*\[\]\)\.includes\(id\)/;
+check("EXECUTED — 'both' refuses an Annual-only question (rnpl) and a Monthly-only one (rating)",
+  cohortAllows(Q({ rentPeriod: 'both', types: ['Apartment'] }), 'rnpl') === false
+  && cohortAllows(Q({ rentPeriod: 'both', types: ['Apartment'] }), 'rating') === false,
+  'a mixed search must never accept a question valid for only one period');
+check('EXECUTED — non-vacuous: a question certified for BOTH periods IS still offered on both-mode',
+  cohortAllows(Q({ rentPeriod: 'both', types: ['Apartment'] }), 'amenities') === true
+  && cohortAllows(Q({ rentPeriod: 'both', types: ['Apartment'] }), 'bathrooms') === true,
+  'kills the always-false mutant — intersection must keep the shared surface');
 check("cohortAllows has an explicit 'both' branch requiring membership in BOTH RentAnnual and RentMonthly",
   bothBranch.test(af),
   'a mixed search must never accept a question valid for only one period');
@@ -58,20 +73,23 @@ check("the OLD ternary that aliased 'both' to RentAnnual is gone",
   !/q\.deal === 'Rent' && q\.rentPeriod === 'monthly' \? 'RentMonthly'\s*:\s*q\.deal === 'Rent' \? 'RentAnnual'/.test(af),
   "this exact shape silently treats 'both' as annual-only — the bug this test locks out");
 
-check("cohortAllows still routes Buy independently of rentPeriod",
-  /if\s*\(q\.deal\s*===\s*'Buy'\)\s*return\s*\(cfg\.Buy\s*\?\?\s*\[\]\)\.includes\(id\)/.test(af));
-check("cohortAllows still routes plain Monthly to RentMonthly alone (not the intersection)",
-  /if\s*\(q\.rentPeriod\s*===\s*'monthly'\)\s*return\s*\(cfg\.RentMonthly\s*\?\?\s*\[\]\)\.includes\(id\)/.test(af));
+check('EXECUTED — Buy routes independently of rentPeriod',
+  cohortAllows(Q({ deal: 'Buy', rentPeriod: 'both', types: ['Apartment'] }), 'bathrooms') === true);
+check('EXECUTED — plain Monthly uses RentMonthly ALONE (rating allowed), not the intersection',
+  cohortAllows(Q({ rentPeriod: 'monthly', types: ['Apartment'] }), 'rating') === true
+  && cohortAllows(Q({ rentPeriod: 'monthly', types: ['Apartment'] }), 'rnpl') === false);
+check('EXECUTED — plain Annual uses RentAnnual ALONE (rnpl allowed)',
+  cohortAllows(Q({ rentPeriod: 'annual', types: ['Apartment'] }), 'rnpl') === true);
 
 // ── Data check: the certified Monthly cohorts really do have a NON-EMPTY but SMALLER intersection ──
 // (proves the fix has real, non-vacuous effect for the 3 certified Monthly types, not just Buy/annual)
+const apt = COHORT_QUESTIONS.Apartment ?? {};
 check('Apartment RentMonthly config includes rating (Monthly-only signal, unchanged by this fix)',
-  /Apartment:\s*\{[\s\S]{0,400}?RentMonthly:\s*\[[^\]]*'rating'/.test(af));
+  (apt.RentMonthly ?? []).includes('rating'));
 check('Apartment RentAnnual config includes rnpl (Annual-only signal, unchanged by this fix)',
-  /Apartment:\s*\{\s*RentAnnual:\s*\[[^\]]*'rnpl'/.test(af));
+  (apt.RentAnnual ?? []).includes('rnpl'));
 check('Apartment RentAnnual and RentMonthly share amenities+bathrooms (the actual both-mode surface)',
-  /Apartment:\s*\{[\s\S]{0,400}?RentAnnual:\s*\[[^\]]*'amenities'[^\]]*'bathrooms'/.test(af)
-  && /Apartment:\s*\{[\s\S]{0,400}?RentMonthly:\s*\[[^\]]*'amenities'[^\]]*'bathrooms'/.test(af));
+  ['amenities', 'bathrooms'].every((id) => (apt.RentAnnual ?? []).includes(id) && (apt.RentMonthly ?? []).includes(id)));
 
 // ── property_age (AGE_QUESTION) bypasses cohortAllows entirely via its own gate — must be fixed too ─
 check("AGE_QUESTION's eligibility gate (isAgeFilterScope) excludes Monthly AND both, not just Monthly",

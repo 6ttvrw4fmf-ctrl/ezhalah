@@ -6,17 +6,39 @@
 > not a refactor. If a routine's live prompt ever diverges from what this file describes, restore
 > the routine to match this file.
 
-| # | Engineer | Trigger ID | Daily time (UTC) | Model | Scope |
-|---|---|---|---|---|---|
-| 1 | ⚡ Daily JUNIOR SCRAPING Engineer | `trig_01NpFaJ1ALUZbZKdKpCdWF16` | 05:00 | claude-sonnet-5 | Daily scraping layer ONLY |
-| 2 | 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit | `trig_01RCVx7ie1T1i5oPC6KzZAKd` | 06:00 | claude-opus-5 | Broad production engineering, **including Advanced Filter + AI Agent** |
-| 3 | 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) | `trig_01Tr6Rb6XPggFXqCf3EKG62y` | 07:00 | claude-opus-5 | Full scraped inventory / Normal Filter ONLY, **Advanced Filter explicitly out of scope** |
-| 4 | 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA | `trig_016eagxsMuB2cCbMe9DK7JJD` | 08:00 | claude-opus-5 | Live production Normal Filter USED AS A REAL USER: matching → diversity → «عرض المزيد» → card click-through, end to end |
+| # | Engineer | Trigger ID | Daily time (Arizona) | Daily time (UTC) | Model | Scope |
+|---|---|---|---|---|---|---|
+| 1 | ⚡ Daily JUNIOR SCRAPING Engineer | `trig_01NpFaJ1ALUZbZKdKpCdWF16` | 04:00 | 11:00 | claude-sonnet-5 | Daily scraping layer ONLY |
+| 2 | 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit | `trig_01RCVx7ie1T1i5oPC6KzZAKd` | 04:30 | 11:30 | claude-opus-5 | Broad production engineering, **including Advanced Filter + AI Agent** |
+| 3 | 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) | `trig_01Tr6Rb6XPggFXqCf3EKG62y` | 05:00 | 12:00 | claude-opus-5 | Full scraped inventory / Normal Filter ONLY, **Advanced Filter explicitly out of scope** |
+| 4 | 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA | `trig_016eagxsMuB2cCbMe9DK7JJD` | 05:30 | 12:30 | claude-opus-5 | Live production Normal Filter USED AS A REAL USER: matching → diversity → «عرض المزيد» → card click-through, end to end |
 
-Schedules are deliberately **staggered one hour apart** so the heavy DB phases never launch
-simultaneously (2026-08-10 outage lesson: concurrent heavy jobs + cron stampede took the DB down).
-Each later engineer consumes the earlier ones' freshest reports as input. Routines are managed at
-https://claude.ai/code/routines (RemoteTrigger API); they cannot be deleted via API, only disabled.
+**Times are anchored to ARIZONA, not UTC (owner decision, 2026-08-21).** Arizona does not observe
+DST, so 04:00 America/Phoenix is 11:00 UTC every day of the year — the schedule never drifts and
+needs no seasonal correction. The UTC column is the value to enter if the routines UI is UTC-only;
+the two columns must always stay 7 hours apart, and if they ever disagree the Arizona column wins.
+
+Schedules are deliberately **staggered 30 minutes apart** so the heavy DB phases do not all launch
+at once (2026-08-10 outage lesson: concurrent heavy jobs + cron stampede took the DB down). That
+gap was one hour until 2026-08-21, when the owner moved the whole block into the early Arizona
+morning and chose 30 minutes; the outage lesson is why the gap exists at all and must not be
+compressed further. **The routines still overlap** — a run lasts 30–60+ minutes, so #1 is typically
+still working when #2 starts. That is accepted: correctness under overlap is protected by the
+production deploy lock (`acquire_deploy_lock`), which serialises anything that changes what
+production serves, and the stagger only reduces how long a routine sits waiting on it. If DB
+saturation is ever observed at 11:00–12:30 UTC, widen the gap back toward an hour rather than
+removing the lock discipline.
+
+Each later engineer consumes the earlier ones' freshest reports as input, so the ORDER above is
+load-bearing (the senior audit reads the junior's metrics and its `[DEEP AUDIT]` escalations);
+never reorder the four without also re-checking that dependency. Routines are managed at
+https://claude.ai/code/routines (RemoteTrigger API); they cannot be deleted via API, only disabled,
+and **no agent session can change their times** — the trigger schedule lives in that UI, so a
+schedule change is always an owner action, with this file recording the intended state.
+
+The 11:00–12:30 UTC block also sits clear of the heavy daily pipeline window (~03:00–07:00 UTC:
+scrapers 04:22/04:40, aqarmonthly 06:00, `sync-rich-attrs-wasalt` 06:47, the AF barriers 06:52), so
+each engineer audits settled data with that morning's detectors already run.
 
 ## 1. ⚡ Daily JUNIOR SCRAPING Engineer (original, unmodified)
 
