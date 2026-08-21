@@ -202,29 +202,36 @@ jobs:
       # a human opening the live site. Every repo-side check had passed: a hydration mismatch is a
       # property of the SERVED page and cannot be seen from source or from a static fetch.
       #
-      # ADVISORY, NOT BLOCKING — deliberately, and only for now. Measured on 2026-08-15 against the
-      # then-live build: React #418 is ALREADY present on production on a build that does NOT contain
-      # the "Both" feature (bundle entry-1b703a1e…, hasBothFeature=false, 2×#418). So the error is
-      # PRE-EXISTING and was never caused by the reverted feature. Making this blocking today would fail
-      # every deploy for a defect that predates it — so it reports loudly instead. Flip
-      # `continue-on-error` to false the moment that pre-existing #418 is fixed; a gate that cries wolf
-      # gets muted, which is how the real protection is lost.
-      - name: Post-deploy hydration gate (advisory — see comment)
+      # BLOCKING since 2026-08-21. It was advisory from 2026-08-15 for one stated reason: React #418
+      # was ALREADY on production on a build without the "Both" feature, so blocking then would have
+      # failed every deploy for a defect that predated it. That comment said to flip this "the moment
+      # that pre-existing #418 is fixed" — and it is now fixed: the pre-existing mismatch was two
+      # width-gated flags (Sidebar useDocked ≥900, ResultCard horizontal ≥820) reading the viewport
+      # before mount, so the server (no window ⇒ width 0) and a desktop client rendered different
+      # first trees. Both now go through lib/responsive.ts + useAtLeast, and
+      # scripts/verify-ssr-hydration-parity.ts holds the line pre-merge.
+      #
+      # The `|| true` that used to sit on the node call is gone too. With it, the gate DETECTED the
+      # mismatch, printed FAIL, and the step still passed — which is how a known P0 stayed live: a gate
+      # that cannot fail a deploy is decoration, not protection.
+      - name: Post-deploy hydration gate (blocking)
         if: always()
-        continue-on-error: true
         run: |
+          set -o pipefail
           npx playwright install chromium >/dev/null 2>&1 || true
-          node scripts/verify-live-hydration.mjs 2>&1 | tee /tmp/hydration.log || true
+          node scripts/verify-live-hydration.mjs 2>&1 | tee /tmp/hydration.log
+          status=$?
           {
             echo "### Hydration gate"
             if grep -q "REACT HYDRATION MISMATCH" /tmp/hydration.log; then
-              echo "⚠️ **React hydration mismatch on the live page.**"
-              echo "Known PRE-EXISTING as of 2026-08-15 (present without the \"Both\" feature)."
-              echo "If this is NEW for your change, treat it as a P0 and roll back."
+              echo "🚨 **React hydration mismatch on the live page — deploy FAILED.**"
+              echo "Roll back with \`scripts/emergency-rollback.sh\` and re-verify the served bundle."
+              grep -E "^FAIL" /tmp/hydration.log | head -5 | sed 's/^/- /'
             else
-              echo "✅ live page hydrates cleanly"
+              echo "✅ live page hydrates cleanly at every checked viewport"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
 
       - name: Report
         if: always()
