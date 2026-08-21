@@ -134,7 +134,7 @@ function primaryStep(a: Answers): Step | null {
     // Canonical applicability — the SAME rules as the Filter home: a picked type answers via
     // detailFor (Land/Warehouse/… are size-only, never bedrooms); otherwise the category/group
     // context answers via detailForContext (Commercial and land groups → size, not bedrooms).
-    const ctx = detailForContext(real(a.category) ? (a.category as string) : 'Residential', real(a.typeGroup) ? a.typeGroup : null);
+    const ctx = detailForContext(real(a.category) ? (a.category as string) : 'Residential', real(a.typeGroup) ? [a.typeGroup] : []);
     const isBed = real(a.type) ? detailFor(a.type).isBedrooms : (ctx?.showBeds ?? true);
     const opts = real(a.type) && !isBed ? detailFor(a.type).options : isBed ? BED_OPTS : ['Under 500 m²', '500–1,000 m²', '1,000–2,000 m²', '2,000+ m²'];
     return { key: 'size', group: 'Details', title: isBed ? 'How many bedrooms?' : 'Size?', opts };
@@ -162,7 +162,8 @@ function buildQuery(a: Answers): SearchQuery {
   if (real(a.neighborhood)) q.location = `${a.neighborhood}, ${a.city}`;
   else if (real(a.city)) q.location = a.city;
   if (real(a.category)) q.category = a.category as Category;
-  if (real(a.typeGroup)) q.typeGroup = a.typeGroup;
+  // The interview asks for ONE group; the query field is the multi-select array, so wrap it.
+  if (real(a.typeGroup)) q.typeGroups = [a.typeGroup];
   // Only CLEAN types reach the query (hierarchy options always are; a custom-typed answer that isn't
   // a clean type broadens instead of dead-ending — matchesType would reject every row otherwise).
   if (real(a.type) && isCleanType(a.type)) q.type = a.type;

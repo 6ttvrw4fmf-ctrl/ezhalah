@@ -55,12 +55,18 @@ export type Detail = { label: string; options: string[]; isBedrooms: boolean };
 // BEFORE the user picks a specific type. Land groups and Commercial → size only (no bedrooms).
 // All dwelling groups and bare Residential → show both. (user: show filters without forcing a type.)
 export type ContextDetail = { showBeds: boolean; showSize: boolean };
-export function detailForContext(category: string | null, typeGroup: string | null): ContextDetail | null {
+export function detailForContext(category: string | null, typeGroups: string[]): ContextDetail | null {
   if (!category) return null;
   if (category === 'Commercial') return { showBeds: false, showSize: true };
   // Residential land → area only; all other Residential groups (or none) → beds + area.
-  const isLandGroup = typeGroup === 'Residential Plots';
-  return { showBeds: !isLandGroup, showSize: true };
+  //
+  // MULTI-GROUP (owner 2026-08-20) — INTERSECTION, the same rule the AF gate uses. Bedrooms are an
+  // EXACT predicate, so answering them deletes every row that cannot carry a bedroom count. With a
+  // land group in the selection, offering beds would silently amputate the land side of the very
+  // search the user asked for — so beds appear only when EVERY selected group can carry them. An
+  // empty selection (bare Residential) is unchanged: beds shown.
+  const anyLandGroup = typeGroups.some((g) => g === 'Residential Plots');
+  return { showBeds: !anyLandGroup, showSize: true };
 }
 
 export function detailFor(type: string): Detail {

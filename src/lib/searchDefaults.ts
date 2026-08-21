@@ -7,6 +7,7 @@
 // unchanged; this file is simply where the one definition now lives.
 
 import type { SearchQuery } from '@/data/search';
+import { groupsMembers, pruneTypesToGroups } from '../data/propertyTypes.ts';
 
 // Defaults are Rent + Residential so a bare Search (nothing else chosen) returns residential
 // rentals nationwide — the filter only narrows from there, it's never required. (PRD §6.1)
@@ -20,6 +21,75 @@ export const emptyQuery = (): SearchQuery => ({
   priceBand: null,
   rentPeriod: 'annual',
 });
+
+// ── CATEGORY → GROUP(S) → TYPE(S) (owner decision 2026-08-20) ───────────────────────────────────
+// The property scope is chosen in that order, and BOTH the group and the type dimension are
+// multi-select. Semantics, permanently:
+//   • several groups  = OR  (a listing belongs to one group; AND would always return nothing)
+//   • several types   = OR
+//   • every OTHER dimension (deal, period, location, price, area, AF answers) stays AND
+//
+// `typeGroups` REPLACED the old single `typeGroup` string outright — there is no second live field
+// and no mirror to drift. Data written before the change (saved searches in storage, a `?filter=`
+// URL in flight) still carries the scalar, so it is migrated ON READ by migrateGroups() below, at
+// the two boundaries where old data can enter. Everything inside the app sees only `typeGroups`.
+
+// The selected groups as a list. The twin of effectiveTypes(): one code path covers none/one/many,
+// so no call site has to branch on arity.
+export function effectiveGroups(q: SearchQuery): string[] {
+  return q.typeGroups && q.typeGroups.length ? q.typeGroups : [];
+}
+
+// The selected clean types as a list: the filter's multi-select (`q.types`), else the single
+// `q.type` (agent path) as a 1-element list, else empty. Moved here from src/data/search.ts so the
+// pure scope helpers (and their barriers) can execute without that module's runtime import chain;
+// search.ts re-exports it, so every existing import keeps working. (2026-08-20)
+export function effectiveTypes(q: SearchQuery): string[] {
+  if (q.types && q.types.length) return q.types;
+  return q.type ? [q.type] : [];
+}
+
+// ONE-WAY MIGRATION for data written before typeGroups existed. Old saved searches and old
+// `?filter=` payloads carry `typeGroup: 'Villas & Houses'`; without this they would restore with the
+// group silently absent — and because the type row is gated on having a selected group, any saved
+// `types` would come back as an ACTIVE filter with no visible control to remove it. Accepts the
+// legacy shape structurally (the field no longer exists on SearchQuery) and never writes it back.
+export function migrateGroups<T extends Partial<SearchQuery>>(raw: T): T {
+  const legacy = (raw as { typeGroup?: unknown }).typeGroup;
+  const out = { ...raw } as T & { typeGroup?: unknown; typeGroups?: string[] | null };
+  delete out.typeGroup;                                   // never carried forward — one field only
+  if (out.typeGroups && out.typeGroups.length) return out as T;
+  out.typeGroups = typeof legacy === 'string' && legacy ? [legacy] : null;
+  return out as T;
+}
+
+// Group box tap — add or remove one group, then drop any selected type that no longer belongs to a
+// remaining group (owner: "when a group is removed, automatically remove any selected property types
+// that are no longer valid"). Pure, so the exact tap sequences are executable in a Node barrier.
+//
+// What it deliberately does NOT clear: price and area. Those are user-typed and type-independent, and
+// with groups now ADDITIVE, wiping a typed price because the user reached for a second group would
+// destroy work they never asked to lose. Type-DERIVED state (the single `type`, `detail`, the bedroom
+// context) is cleared, because those are only meaningful against a specific type selection.
+export function toggleGroup(q: SearchQuery, group: string): SearchQuery {
+  const cur = effectiveGroups(q);
+  const next = cur.includes(group) ? cur.filter((g) => g !== group) : [...cur, group];
+  return {
+    ...q,
+    typeGroups: next.length ? next : null,
+    types: pruneTypesToGroups(q.types, next),
+    type: null,
+    detail: null,
+    contextBeds: null,
+    contextBedsList: null,
+    contextSize: null,
+  };
+}
+
+// The type boxes to show for the current group selection: the UNION of every selected group's members.
+export function typesForGroups(q: SearchQuery): string[] {
+  return groupsMembers(effectiveGroups(q));
+}
 
 // The home/filter screen's (and the store's initial-state) TRUE default (Buy highlighted — user
 // request; emptyQuery() itself stays Rent-default for the agent path). "مسح الكل" (Clear All) resets
@@ -40,8 +110,11 @@ export const HOME_DEFAULT_QUERY = (): SearchQuery => ({ ...emptyQuery(), deal: '
 // Rule: a filter search may inherit ONLY what the Filter UI visibly represents; everything else
 // resets to the screen default. The agent replay itself is unaffected — it receives the full
 // query via router params, never through this store write.
-export function sanitizeForFilterRestore(q: SearchQuery): SearchQuery {
+export function sanitizeForFilterRestore(raw: SearchQuery): SearchQuery {
   const base = HOME_DEFAULT_QUERY();
+  // Entries saved before typeGroups existed carry the legacy scalar — migrate before reading it, or
+  // the group (and therefore the visible type row) would silently vanish on reopen.
+  const q = migrateGroups(raw);
   return {
     ...base,
     deal: q.deal ?? base.deal,                    // visible: شراء/إيجار toggle (bothDeals is NOT restored)
@@ -50,8 +123,9 @@ export function sanitizeForFilterRestore(q: SearchQuery): SearchQuery {
     districts: q.districts,                       // visible: district field
     districtLabel: q.districtLabel,
     category: q.category ?? base.category,        // visible: سكني/تجاري
-    typeGroup: q.typeGroup ?? null,               // visible: group boxes
-    types: q.types ?? null,                       // visible: type boxes
+    typeGroups: q.typeGroups ?? null,             // visible: group boxes (multi-select)
+    // Never restore a type whose group is not also restored — it would be an invisible active filter.
+    types: pruneTypesToGroups(q.types, q.typeGroups ?? []),
     contextBeds: q.contextBeds,                   // visible: bedroom chips
     contextBedsList: q.contextBedsList,
     contextSize: q.contextSize,                   // visible: area context
@@ -106,7 +180,7 @@ export function hasActiveFilters(q: SearchQuery): boolean {
     q.location.trim() !== d.location ||
     q.deal !== d.deal ||
     q.category !== d.category ||
-    (q.typeGroup ?? null) !== null ||
+    !!(q.typeGroups && q.typeGroups.length) ||
     q.type !== d.type ||
     !!(q.types && q.types.length) ||
     q.detail !== d.detail ||

@@ -102,7 +102,7 @@ check('live counts come from the RESULTS RPC (fetchDistrictEligibleCounts exists
 })());
 check('per-option match_values OVERRIDE the base q districts (spread order)', /\{ \.\.\.base, p_districts: opt\.matchValues \}/.test(readFileSync(join(root, 'src/data/remote.ts'), 'utf8')));
 check('marking prefers the live full-filter-state count over the scope count', /const live = districtLiveCounts\?\.\[opt\.districtAr\];\s*\n\s*const isEmpty = live != null \? live === 0 : opt\.listingCount === 0/.test(indexSrc));
-check('counts use the CURRENT filter state (narrowing signature covers type/group/types/beds/size/price/area)', /districtNarrowingSig = JSON\.stringify\(\[query\.type, query\.typeGroup, query\.types, query\.detail,[\s\S]{0,200}?query\.priceMin, query\.priceMax, query\.areaMin, query\.areaMax\]\)/.test(indexSrc));
+check('counts use the CURRENT filter state (narrowing signature covers type/group/types/beds/size/price/area)', /districtNarrowingSig = JSON\.stringify\(\[query\.type, query\.typeGroups, query\.types, query\.detail,[\s\S]{0,200}?query\.priceMin, query\.priceMax, query\.areaMin, query\.areaMax\]\)/.test(indexSrc));
 check('changing any relevant filter INVALIDATES the previous counts before refetch (no stale numbers)', /setDistrictLiveCounts\(null\);\s*\n\s*if \(!citySelected \|\| !hasDistrictNarrowing/.test(indexSrc));
 check('a live-count response is dropped if a newer request superseded it (race guard)', /if \(id === districtLiveReq\.current && counts\) setDistrictLiveCounts\(counts\)/.test(indexSrc));
 check('onSearch and the count effect share ONE query builder (no state drift between count and search)', /const base = buildFilterBaseQuery\(\)!/.test(indexSrc) && /const q = buildFilterBaseQuery\(\);/.test(indexSrc));
@@ -122,7 +122,7 @@ check('onSearch carries the summed listingCount of all picked districts', /distr
 {
   const searchSrc = readFileSync(join(root, 'src/data/search.ts'), 'utf8');
   check('SearchQuery carries districtListingCount', /districtListingCount\?: number/.test(searchSrc));
-  check('0-results diagnosis uses the real district count, not the empty pool', /distCount === 0[\s\S]{0,400}?widen the area[\s\S]{0,400}?q\.type[\s\S]{0,120}?broaden the type/.test(searchSrc));
+  check('0-results diagnosis uses the real district count, not the empty pool', /distCount === 0[\s\S]{0,400}?widen the area[\s\S]{0,400}?q\.type[\s\S]{0,260}?broaden the type/.test(searchSrc));
 }
 
 console.log(failed === 0 ? '\n✓ all district-field assertions passed' : `\n✗ ${failed} district-field assertion(s) FAILED`);
