@@ -2,7 +2,8 @@
 // search may only offer an Advanced Filter question that is independently certified valid for
 // Buy AND Annual Rent AND Monthly Rent for that clean type (INTERSECTION across all three legs,
 // never a union — the exact same principle rentPeriod==='both' already established one dimension
-// earlier; see the design comment above cohortAllowsCombined() in src/data/advancedFilters.ts).
+// earlier, and the SAME dimension multi-type intersection established a second time — see the
+// design comment above cohortAllowsCombined() in src/lib/afCohorts.ts).
 //
 // THE RISK THIS GUARDS AGAINST: without a dedicated combined-mode branch, cohortAllows() would
 // route q.dealCombined through whichever single-deal branch q.deal (the last concrete button
@@ -12,15 +13,19 @@
 // Buy ∪ Annual Rent ∪ Monthly Rent. property_age has its OWN separate eligibility gate
 // (isAgeFilterScope, never profiled against Monthly for any type) that must be fixed independently.
 //
-// WHY SOURCE-TEXT ASSERTIONS, NOT A LIVE IMPORT: same reason as verify-mixed-period-af-gating.ts —
-// advancedFilters.ts's relative imports (`from './search'`) are unresolvable by Node's raw
-// --experimental-strip-types loader. Comments are stripped first so prose describing the risk can
-// never satisfy a check for the fix, or vice versa.
+// EXECUTED ASSERTIONS (mirrors verify-mixed-period-af-gating.ts's 2026-08-20 upgrade): cohortAllows
+// lives in src/lib/afCohorts.ts, a PURE module with no runtime imports beyond other pure modules,
+// specifically so barriers can CALL it instead of regexing it — a regex could be satisfied by a
+// branch that never executes. The few remaining source-text checks assert the ABSENCE of a shape
+// (which execution cannot prove) or a data-file fact; comments are stripped so prose can never
+// satisfy them.
 //
 //   node --experimental-strip-types scripts/verify-buy-rent-combined-af-gating.ts   (wired into `npm test`)
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { SearchQuery } from '../src/data/search.ts';
+import { cohortAllows, COHORT_QUESTIONS } from '../src/lib/afCohorts.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -35,14 +40,29 @@ const check = (label: string, ok: boolean, detail = '') => {
 
 console.log('\nBuy+Rent combined (شراء+إيجار) Advanced Filter gating — 3-way intersection, never union\n');
 
-const af = codeOnly(read('src/data/advancedFilters.ts'));
+const af = codeOnly(read('src/lib/afCohorts.ts'));
 const ageGate = codeOnly(read('src/lib/ageFilterTypes.ts'));
 
-// ── cohortAllowsCombined: a 3-way intersection (Buy ∩ RentAnnual ∩ RentMonthly) ─────────────────────
+// The REAL gate + the REAL certified config.
+const Q = (over: Record<string, unknown>) =>
+  ({ deal: 'Buy', location: '', category: 'Residential', type: null, detail: null,
+     priceInput: '', priceBand: null, rentPeriod: 'annual', ...over }) as unknown as SearchQuery;
+
+// ── cohortAllowsCombined: EXECUTED — a 3-way intersection (Buy ∩ RentAnnual ∩ RentMonthly) ──────────
+check('EXECUTED — combined mode refuses a Buy-only question (direction, Apartment) and a Rent-only one (rnpl)',
+  cohortAllows(Q({ dealCombined: true, types: ['Apartment'] }), 'direction') === false
+  && cohortAllows(Q({ dealCombined: true, types: ['Apartment'] }), 'rnpl') === false,
+  'a combined search must never accept a question valid for only one or two of the three legs');
+check('EXECUTED — combined mode refuses Monthly-only signals (rating, unit_subtype, Apartment)',
+  cohortAllows(Q({ dealCombined: true, types: ['Apartment'] }), 'rating') === false
+  && cohortAllows(Q({ dealCombined: true, types: ['Apartment'] }), 'unit_subtype') === false);
+check('EXECUTED — non-vacuous: a question certified for ALL THREE legs IS still offered in combined mode',
+  cohortAllows(Q({ dealCombined: true, types: ['Apartment'] }), 'amenities') === true
+  && cohortAllows(Q({ dealCombined: true, types: ['Apartment'] }), 'bathrooms') === true,
+  'kills the always-false mutant — intersection must keep the genuinely shared surface');
 const combinedFn = /function cohortAllowsCombined\([^)]*\)[^{]*\{\s*return\s*\(cfg\.Buy\s*\?\?\s*\[\]\)\.includes\(id\)\s*&&\s*\(cfg\.RentAnnual\s*\?\?\s*\[\]\)\.includes\(id\)\s*&&\s*\(cfg\.RentMonthly\s*\?\?\s*\[\]\)\.includes\(id\)/;
 check('cohortAllowsCombined requires membership in Buy AND RentAnnual AND RentMonthly (all three legs)',
-  combinedFn.test(af),
-  'a combined search must never accept a question valid for only one or two of the three legs');
+  combinedFn.test(af));
 
 // ── cohortAllows: dealCombined must be checked and routed to cohortAllowsCombined BEFORE the
 // single-deal Buy/Rent branches — otherwise it falls through to whichever q.deal happens to hold.
@@ -53,6 +73,15 @@ const combinedIdx = af.search(dealCombinedBranch);
 const buyBranchIdx = af.search(/if\s*\(q\.deal\s*===\s*'Buy'\)\s*return\s*\(cfg\.Buy\s*\?\?\s*\[\]\)\.includes\(id\)/);
 check('the dealCombined check runs BEFORE the single-deal Buy branch (order matters — combined must never fall through to Buy-only)',
   combinedIdx !== -1 && buyBranchIdx !== -1 && combinedIdx < buyBranchIdx);
+check('EXECUTED — a real q.deal value does NOT override dealCombined (regression: falling through to Buy-only)',
+  cohortAllows(Q({ deal: 'Buy', dealCombined: true, types: ['Apartment'] }), 'direction') === false);
+
+// ── EXECUTED — combined mode intersects with the MULTI-TYPE dimension too (owner 2026-08-20, #841):
+// two types must each independently clear the 3-way deal intersection.
+check('EXECUTED — combined + 2 types (Apartment, Villa): only the surface shared by ALL SIX lists survives',
+  cohortAllows(Q({ dealCombined: true, types: ['Apartment', 'Villa'] }), 'amenities') === true
+  && cohortAllows(Q({ dealCombined: true, types: ['Apartment', 'Villa'] }), 'bathrooms') === true
+  && cohortAllows(Q({ dealCombined: true, types: ['Apartment', 'Villa'] }), 'direction') === false);
 
 // ── Data check: rnpl (Rent-only, never in ANY cohort's Buy list) must be excluded in combined mode ──
 check('rnpl never appears in a Buy list anywhere in COHORT_QUESTIONS (so combined mode always excludes it, correctly)',
@@ -67,19 +96,20 @@ check('unit_subtype never appears in a Buy or RentAnnual list (Monthly-only sign
 // ── Data check: the 3-way intersection has real, NON-VACUOUS effect for a certified cohort ──────────
 // Apartment: Buy=[property_age,amenities,bathrooms,direction], RentAnnual=[rnpl,property_age,
 // amenities,bathrooms,furnished], RentMonthly=[rating,unit_subtype,amenities,bathrooms] →
-// intersection = {amenities, bathrooms} exactly — proves combined mode genuinely offers something
-// (not an empty set everywhere) while still correctly excluding property_age/rnpl/furnished/
-// direction/rating/unit_subtype for this exact cohort.
+// intersection = {amenities, bathrooms} exactly.
+const apt = COHORT_QUESTIONS.Apartment ?? {};
 check('Apartment 3-way intersection is non-empty (amenities + bathrooms genuinely shared across Buy/RentAnnual/RentMonthly)',
-  /Apartment:\s*\{[\s\S]{0,400}?Buy:\s*\[[^\]]*'amenities'[^\]]*'bathrooms'/.test(af)
-  && /Apartment:\s*\{[\s\S]{0,50}?RentAnnual:\s*\[[^\]]*'amenities'[^\]]*'bathrooms'/.test(af)
-  && /Apartment:\s*\{[\s\S]{0,600}?RentMonthly:\s*\[[^\]]*'amenities'[^\]]*'bathrooms'/.test(af));
+  ['amenities', 'bathrooms'].every((id) =>
+    (apt.Buy ?? []).includes(id) && (apt.RentAnnual ?? []).includes(id) && (apt.RentMonthly ?? []).includes(id)));
 
 // ── Data check: a type with NO Buy cohort at all (Room, n=1) must offer ZERO combined questions ─────
 // (cfg.Buy is undefined → `?? []` → empty → intersection is empty regardless of the Rent lists —
 // mechanically correct: you cannot meaningfully combine Buy+Rent for a type where Buy barely exists.)
+const room = COHORT_QUESTIONS.Room;
 check('Room has no Buy entry in COHORT_QUESTIONS (so combined mode mechanically offers it zero questions)',
-  /Room:\s*\{\s*RentAnnual:/.test(af) && !/Room:\s*\{[\s\S]{0,200}?Buy:/.test(af));
+  room !== undefined && room.Buy === undefined && (room.RentAnnual ?? []).length > 0);
+check('EXECUTED — combined mode on Room offers nothing, even for a question in its RentAnnual list',
+  cohortAllows(Q({ dealCombined: true, types: ['Room'] }), 'amenities') === false);
 
 // ── property_age (AGE_QUESTION) bypasses cohortAllows entirely via its own gate — must be fixed too ─
 check("AGE_QUESTION's eligibility gate (isAgeFilterScope) also excludes dealCombined, unconditionally",
