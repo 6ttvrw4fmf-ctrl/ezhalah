@@ -42,6 +42,27 @@ export type SearchQuery = {
   // published a period is neither, and is excluded rather than guessed at (SOURCE IS TRUTH). A typed price
   // under 'both' is read on the ANNUAL basis — the only unit that can span both periods (see priceFilter).
   rentPeriod?: 'monthly' | 'annual' | 'both';
+  // Buy + Rent combined multi-select (owner feature 2026-08-20) — mirrors the شهري+سنوي pattern
+  // above (togglePeriodButton/rentPeriod): the Filter UI shows only two independent buttons, شراء
+  // and إيجار, and selecting BOTH sets this flag rather than a third button. NOT the same field as
+  // bothDeals (an AI-chat-ONLY fallback for when the agent can't tell Buy from Rent from free text —
+  // client-side post-filter only, one flat unshared price cap, no Advanced Filter/Trending
+  // integration, and deliberately excluded from Filter-history restoration). dealCombined is a
+  // first-class Filter-UI field with full backend wiring (p_deal=null, independent dual price
+  // ranges, null-safe Trending) and IS restored from Filter history — see sanitizeForFilterRestore.
+  // Meaning when true: eligible set = Buy ∪ Annual Rent ∪ Monthly Rent (docs/ARCHITECTURE.md §22).
+  // `deal` itself keeps its last concrete value (whichever button was pressed most recently) so
+  // toggling either button back off restores exactly that one; every search/count/Advanced
+  // Filter/Trending call must check dealCombined FIRST, before branching on `deal`.
+  dealCombined?: boolean;
+  // The Rent-side budget when dealCombined is true — owner decision (asked and answered): TWO
+  // independent price ranges shown together, never one naive shared range. priceMin/priceMax stay
+  // the Buy budget (byte-identical meaning to every existing single-deal call). Same raw-digit-
+  // string convention as priceMin/priceMax. Read on the ANNUAL basis — combined-mode Rent has no
+  // period selector (accepts both شهري+سنوي, and unknown-period rows too — no period filter is
+  // applied at all), mirroring the already-shipped rentPeriod==='both' annual-basis precedent.
+  priceMinRent?: string | null;
+  priceMaxRent?: string | null;
   // What the filter's AI-assisted location resolver understood from a free-typed location (district /
   // city / area nickname / landmark / geography). Drives the Search Summary's location lines so the
   // user sees exactly what Ezhalah matched. Absent on the agent path (Gemini resolves there). (user request.)
@@ -188,7 +209,7 @@ const placeText = (q: SearchQuery) => {
   return dist ? t('{district}, {city}', { district: arabicOrUnresolved(tPlace(dist)), city: cityText }) : cityText;
 };
 const verbText = (q: SearchQuery) => {
-  if (q.bothDeals) return t('to rent or buy');
+  if (q.bothDeals || q.dealCombined) return t('to rent or buy');
   if (q.deal === 'Rent') {
     // Reflect the Monthly / Yearly the user selected in the filter's rent-period toggle. Absent
     // (agent free-text path never sets it) → plain "to rent". (owner UI request 2026-07-18.)
@@ -545,9 +566,10 @@ export function searchSummary(q: SearchQuery): string {
   else if (effectiveGroups(q).length) lines.push(`• ${t('Property Type')}: ${effectiveGroups(q).map((g) => arabicOrTypeUnresolved(t(g))).join('، ')}`);
   else if (q.category) lines.push(`• ${t('Property Type')}: ${arabicOrTypeUnresolved(t(q.category))}`);
   // For Rent, append the Monthly / Yearly period the user picked so the summary reflects the toggle. (owner UI request 2026-07-18.)
-  const period = q.deal === 'Rent' && q.rentPeriod
+  // dealCombined's Rent side has no period selector (accepts both) so no period suffix applies there.
+  const period = q.deal === 'Rent' && !q.dealCombined && q.rentPeriod
     ? ` (${t(q.rentPeriod === 'monthly' ? 'Monthly' : q.rentPeriod === 'both' ? 'Both' : 'Yearly')})` : '';
-  lines.push(`• ${t('Transaction Type')}: ${q.bothDeals ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}${period}`);
+  lines.push(`• ${t('Transaction Type')}: ${(q.bothDeals || q.dealCombined) ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}${period}`);
   // Platform filter line — when the user restricted to specific platforms ("Aqar only"), show which,
   // so the filter is visibly confirmed. (user: "when I type alkhaas it must be al khaas, not aqar".)
   if (q.sources && q.sources.length) {
@@ -683,10 +705,11 @@ function pickPool(q: SearchQuery, pools: Pools): Listing[] {
     if (t.includes('apartment') || t === 'floor') return pools.apartment;
     if (t.includes('land') || t.includes('plot') || t === 'warehouse' || t === 'factory') return pools.land;
   }
-  // "Rent or Buy" (deal unknown) with no specific type → draw from BOTH the rent and buy mixes so the
-  // results can actually contain each (runSearch then keeps both). Otherwise the rent-only mix would
-  // never surface a Buy listing for a "Both" search. (bothDeals correctness.)
-  if (q.bothDeals) return [...pools.mixRent, ...pools.mixBuy];
+  // "Rent or Buy" (deal unknown, OR the Filter's شراء+إيجار both selected) with no specific type →
+  // draw from BOTH the rent and buy mixes so the results can actually contain each (runSearch then
+  // keeps both). Otherwise the rent-only mix would never surface a Buy listing. (bothDeals/
+  // dealCombined correctness.)
+  if (q.bothDeals || q.dealCombined) return [...pools.mixRent, ...pools.mixBuy];
   if (q.deal === 'Buy') {
     const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10);
     if (amount > 50_000 && amount <= 700_000) return pools.budget;
@@ -1181,9 +1204,13 @@ function rankResults(listings: Listing[], q: SearchQuery, cap: number | null): L
 
 export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean; visitOffset?: number }): SearchResult {
   let eligible = pickPool(q, pools)
-    // bothDeals (agent searched without knowing rent/buy) → show BOTH; otherwise filter to the deal.
-    .filter((l) => q.bothDeals || l.deal === q.deal)
-    .filter((l) => supports(l.source, q.deal))
+    // bothDeals (agent searched without knowing rent/buy) or dealCombined (Filter شراء+إيجار both
+    // selected) → show BOTH; otherwise filter to the single selected deal. supports() checks the
+    // ROW'S OWN deal (not q.deal) so it stays correct in both modes without a separate branch —
+    // Gathern (rent-only) still can never pass a Buy row, combined or not. (owner rule: deal
+    // flexibility must never weaken any other filter.)
+    .filter((l) => q.bothDeals || q.dealCombined || l.deal === q.deal)
+    .filter((l) => supports(l.source, l.deal))
     // Clean-type match — exact for a kept type, group-member for a subcategory, macro for category. (audit.)
     .filter((l) => matchesType(l, q))
     .sort((a, b) => (RECENCY[a.listed] ?? 99) - (RECENCY[b.listed] ?? 99));

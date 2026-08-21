@@ -193,10 +193,27 @@ export function scopeCleanTypes(q: SearchQuery): string[] {
 // shared SQL predicates are strict-NULL-excluding, offering it would amputate that type's rows the
 // moment it is answered — the user asks for شقة+غرفة and gets zero غرفة back.
 //
-// BOTH DIMENSIONS INTERSECT AT ONCE: `.every` intersects across the selected TYPES, and the period
-// branches inside it intersect across PERIODS, so a 'both'-period × 2-type scope must clear all four
-// lists before a question is offered. An empty scope returns false explicitly — [].every() is `true`,
-// which would otherwise turn "nothing selected" into "everything allowed".
+// BUY+RENT COMBINED (q.dealCombined, owner feature 2026-08-20) — a THIRD dimension that intersects
+// at once with type and period, exactly like the other two: INTERSECTION across all three legs of a
+// cohort — Buy, RentAnnual, AND RentMonthly (combined mode's Rent side has no period selector, so it
+// spans both periods too). Same principle the mixed-period branch above already established, reusing
+// the SAME already-profiled COHORT_QUESTIONS table with zero new data work: a question must be
+// independently certified for Buy AND Annual Rent AND Monthly Rent before it can narrow a
+// Buy∪Rent(any period) eligible set without risking a silent amputation of whichever leg it was
+// never validated against. Mechanically excludes Buy-only questions (fail the Rent legs), Rent-only
+// questions like rnpl (never in any cohort's Buy list), and Monthly-only signals like Gathern rating
+// (never in Buy or RentAnnual); a type with no certified Monthly cohort (most commercial/rural types)
+// correctly offers ZERO combined-mode questions — the same conservative "no evidence, don't ask"
+// behavior 'both' already applies.
+function cohortAllowsCombined(cfg: NonNullable<(typeof COHORT_QUESTIONS)[string]>, id: string): boolean {
+  return (cfg.Buy ?? []).includes(id) && (cfg.RentAnnual ?? []).includes(id) && (cfg.RentMonthly ?? []).includes(id);
+}
+
+// BOTH DIMENSIONS INTERSECT AT ONCE: `.every` intersects across the selected TYPES, and the period/
+// deal branches inside it intersect across PERIODS and DEAL, so a 'both'-period × 2-type scope (or a
+// dealCombined × 2-type scope) must clear every relevant list before a question is offered. An empty
+// scope returns false explicitly — [].every() is `true`, which would otherwise turn "nothing
+// selected" into "everything allowed".
 export function cohortAllows(q: SearchQuery, id: string): boolean {
   const types = scopeCleanTypes(q);
   if (!types.length) return false;
@@ -207,6 +224,7 @@ export function cohortAllows(q: SearchQuery, id: string): boolean {
     if (q.category !== (CLEAN_MACRO[type] ?? 'Residential')) return false;
     const cfg = COHORT_QUESTIONS[type];
     if (!cfg) return false;                 // uncertified type = EMPTY cohort, never "no constraint"
+    if (q.dealCombined) return cohortAllowsCombined(cfg, id);
     if (q.deal === 'Buy') return (cfg.Buy ?? []).includes(id);
     if (q.deal !== 'Rent') return false;
     if (q.rentPeriod === 'monthly') return (cfg.RentMonthly ?? []).includes(id);

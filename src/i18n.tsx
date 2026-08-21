@@ -164,6 +164,10 @@ const AR: Record<string, string> = {
   'Commercial Buildings & Facilities': 'المباني والمرافق',
   'Commercial & Industrial Plots': 'الأراضي التجارية والصناعية',
   'Price': 'السعر',
+  // Buy+Rent combined multi-select (owner feature 2026-08-20): the two independent price ranges
+  // shown together when شراء+إيجار are both selected — never one shared/naive range.
+  'Buy budget': 'ميزانية الشراء',
+  'Rent budget (yearly basis)': 'ميزانية الإيجار (سنوياً)',
   ' /yr': ' / سنوياً',
   'Max price': 'السعر الأقصى',
   'Search': 'بحث',
@@ -292,6 +296,9 @@ const AR: Record<string, string> = {
   // number would silently mean something else — cleared + explained instead.
   'Price limits were cleared because the price unit changed (monthly ↔ yearly) — please re-enter them.':
     'تم مسح حدود السعر لأن وحدة السعر تغيّرت (شهري ↔ سنوي) — الرجاء إدخالها من جديد.',
+  // Same clear+explain precedent for the شراء/إيجار toggle (owner feature 2026-08-20).
+  'Price limits were cleared because Buy/Rent changed which budget they meant — please re-enter them.':
+    'تم مسح حدود السعر لأن التبديل بين الشراء والإيجار غيّر المقصود بالميزانية — الرجاء إدخالها من جديد.',
   "What's your max budget?": 'ما هو حدّك الأقصى للميزانية؟',
   "What's your rent budget?": 'ما هي ميزانية الإيجار لديك؟',
   'Skip — show me more options': 'تخطَّ — أرني المزيد من الخيارات',
