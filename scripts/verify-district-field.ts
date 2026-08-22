@@ -102,7 +102,19 @@ check('live counts come from the RESULTS RPC (fetchDistrictEligibleCounts exists
 })());
 check('per-option match_values OVERRIDE the base q districts (spread order)', /\{ \.\.\.base, p_districts: opt\.matchValues \}/.test(readFileSync(join(root, 'src/data/remote.ts'), 'utf8')));
 check('marking prefers the live full-filter-state count over the scope count', /const live = districtLiveCounts\?\.\[opt\.districtAr\];\s*\n\s*const isEmpty = live != null \? live === 0 : opt\.listingCount === 0/.test(indexSrc));
-check('counts use the CURRENT filter state (narrowing signature covers type/group/types/beds/size/price/area)', /districtNarrowingSig = JSON\.stringify\(\[query\.type, query\.typeGroups, query\.types, query\.detail,[\s\S]{0,200}?query\.priceMin, query\.priceMax, query\.areaMin, query\.areaMax\]\)/.test(indexSrc));
+// The signature must cover the NORMAL narrowing (type/group/types/beds/size/price/area) AND every
+// ADVANCED answer. The advanced half was added 2026-08-20 by the AF major certification: without it
+// an advanced-only narrowing never triggered the live-count path at all (falling back to
+// district_options_ar's deal/category/period scope count), and changing an answer did not invalidate
+// the cached numbers. Measured on Riyadh / Rent-Annual / شقة with amenities=[elevator] + bathMin=3:
+// the top 8 districts advertised 4,141 and returned 511 on click (re-measured live 2026-08-22:
+// 4,449 -> 592, 7.5x). Do NOT re-pin the closing bracket here — a new advanced question must be
+// free to extend the array, and verify-af-count-params-carry-advanced.ts owns the completeness half
+// of this contract. `typeGroups` is plural: main's multi-group work renamed it, and the singular
+// form would silently read undefined, dropping group changes out of the invalidation signature.
+check('counts use the CURRENT filter state (narrowing signature covers type/group/types/beds/size/price/area)', /districtNarrowingSig = JSON\.stringify\(\[query\.type, query\.typeGroups, query\.types, query\.detail,[\s\S]{0,200}?query\.priceMin, query\.priceMax, query\.areaMin, query\.areaMax/.test(indexSrc));
+check('narrowing signature ALSO covers the advanced answers (AF-only narrowing must refetch + invalidate)',
+  /districtNarrowingSig = JSON\.stringify\(\[[\s\S]{0,600}?query\.amenities[\s\S]{0,400}?query\.bathMin[\s\S]{0,400}?query\.ratingMin/.test(indexSrc));
 check('changing any relevant filter INVALIDATES the previous counts before refetch (no stale numbers)', /setDistrictLiveCounts\(null\);\s*\n\s*if \(!citySelected \|\| !hasDistrictNarrowing/.test(indexSrc));
 check('a live-count response is dropped if a newer request superseded it (race guard)', /if \(id === districtLiveReq\.current && counts\) setDistrictLiveCounts\(counts\)/.test(indexSrc));
 check('onSearch and the count effect share ONE query builder (no state drift between count and search)', /const base = buildFilterBaseQuery\(\)!/.test(indexSrc) && /const q = buildFilterBaseQuery\(\);/.test(indexSrc));

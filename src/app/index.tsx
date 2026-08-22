@@ -496,9 +496,19 @@ export default function Home() {
   // (fetchDistrictEligibleCounts, one p_limit:1 call per row) and mark honesty from those. When no
   // narrowing is active there are no extra calls — scope count = results count there, a parity the
   // DB barrier (mon_trending_district_barrier) pins at 40/40 exact.
+  // ADVANCED answers narrow just as hard as نوع/سعر/مساحة and must be in this signature for two
+  // reasons: they decide whether the live-count path runs AT ALL (an AF-only narrowing would
+  // otherwise fall back to district_options_ar's deal/category/period scope count), and they must
+  // INVALIDATE cached counts when an answer changes. Measured 2026-08-20 (AF major certification)
+  // and re-measured 2026-08-22 on live production: Riyadh / Rent-Annual / شقة with
+  // amenities=[elevator] + bathMin=3 advertised 4,449 across the top 8 districts and returned 592
+  // on click — 7.5x, every row wrong in the same direction.
   const districtNarrowingSig = JSON.stringify([query.type, query.typeGroups, query.types, query.detail,
     query.contextBeds, query.contextBedsList, query.contextSize, query.priceInput, query.priceBand,
-    query.priceMin, query.priceMax, query.areaMin, query.areaMax]);
+    query.priceMin, query.priceMax, query.areaMin, query.areaMax,
+    query.amenities, query.bathMin, query.furnishedPref, query.streetWidthMin, query.directions,
+    query.ratingMin, query.reviewsMin, query.unitSubtypes, query.ageMin, query.ageMax,
+    query.isNewConstruction]);
   const hasDistrictNarrowing = useMemo(
     () => (JSON.parse(districtNarrowingSig) as unknown[]).some((v) =>
       Array.isArray(v) ? v.length > 0 : v != null && v !== ''),
