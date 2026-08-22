@@ -1993,7 +1993,15 @@ export default function Agent() {
                             {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
                                 «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches — but only
                                 when there is genuinely more than INTERVIEW_STOP_AT=25 left to narrow. */}
-                            {(hasMore || canNarrowFurther) ? (
+                            {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
+                                user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
+                                the old CTA row must not sit behind it competing for the same decision.
+                                `ageFlow` covers every AF phase (loading → intro → asking → mining), so
+                                the row is gone from the tap until the flow closes, and returns by itself
+                                afterwards because closing sets ageFlow back to null. The AF card is an
+                                absolute overlay, so without this gate the two buttons stayed rendered
+                                (and reachable) underneath it. */}
+                            {(hasMore || canNarrowFurther) && !ageFlow ? (
                               <View style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
                                 {hasMore ? (
                                   // Active state = calm pulsing dots (owner 2026-07-09: the button must
