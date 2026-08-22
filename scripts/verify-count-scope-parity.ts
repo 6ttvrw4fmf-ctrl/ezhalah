@@ -23,7 +23,11 @@ const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`
 // ── ONE source for the implied default — remote.ts owns it, everyone imports it. ──
 check("remote.ts exports IMPLIED_CATEGORY_DEFAULT ('Residential', as const)", /export const IMPLIED_CATEGORY_DEFAULT = 'Residential' as const;/.test(remoteSrc));
 check('impliedCategory() itself uses the shared constant (no second literal)', /return effectiveCleanQuery\(q\) \? null : IMPLIED_CATEGORY_DEFAULT;/.test(remoteSrc));
-check('index.tsx imports it from remote.ts', /import \{ fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAdvancedFilterParams \} from '@\/data\/remote'/.test(indexSrc));
+// Assert the INTENT — the shared constant is imported from remote.ts — not the exact import list.
+// Pinning the whole line made this fail for an unrelated import change (2026-08-22: Trending moved to
+// rpcAllNarrowingParams), which is noise, not a parity violation.
+check('index.tsx imports it from remote.ts',
+  /import \{[^}]*\bIMPLIED_CATEGORY_DEFAULT\b[^}]*\} from '@\/data\/remote'/.test(indexSrc));
 check('effCategory = query.category ?? IMPLIED_CATEGORY_DEFAULT (the one derivation)', /const effCategory: Category = query\.category \?\? IMPLIED_CATEGORY_DEFAULT;/.test(indexSrc));
 check("index.tsx never re-duplicates the literal ('Residential' appears in no pool wiring)", !/\?\? 'Residential'/.test(indexSrc));
 

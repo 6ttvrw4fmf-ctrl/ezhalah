@@ -89,12 +89,12 @@ check(
 
 // ── 4. The last-resort fallback must not silently drop the advanced answers ──────────────────────
 check(
-  /const hasAf = Object\.keys\(af \?\? \{\}\)\.length > 0/.test(loc),
+  /const hasNarrowing = Object\.keys\(af \?\? \{\}\)\.length > 0/.test(loc),
   'the code knows whether any advanced answer is present',
-  'src/data/locations.ts: no `hasAf` guard — the fallback chain cannot tell an AF search from a plain one.',
+  'src/data/locations.ts: no `hasNarrowing` guard — the fallback chain cannot tell a narrowed search from a plain one (renamed + widened 2026-08-22 to cover bedrooms/price/area too).',
 );
 check(
-  /if \(res\.error && periodTok !== null && !hasAf\)/.test(loc),
+  /if \(res\.error && periodTok !== null && !hasNarrowing\)/.test(loc),
   'the deal-only fallback is AF-gated (no pre-AF count once answers exist)',
   'src/data/locations.ts: the last-resort `{ p_deal }` fallback still runs when advanced answers are ' +
     'present. That call drops every advanced answer, so it returns exactly the overstated numbers ' +
@@ -103,9 +103,9 @@ check(
 
 // ── 5. Every call site passes them ───────────────────────────────────────────────────────────────
 check(
-  /const cityAfParams = useMemo\(\(\) => rpcAdvancedFilterParams\(query\)/.test(idx),
-  'index.tsx builds cityAfParams from the ONE shared rpcAdvancedFilterParams()',
-  'src/app/index.tsx: cityAfParams is not derived from rpcAdvancedFilterParams(query). A second, ' +
+  /rpcAllNarrowingParams\(query\)/.test(idx) && /const cityAfParams = useMemo\(\(\) => cityAfRaw/.test(idx),
+  'index.tsx builds cityAfParams from the ONE shared builder — rpcAllNarrowingParams(), which spreads rpcAdvancedFilterParams()',
+  'src/app/index.tsx: cityAfParams is not derived from the shared builder. A second, ' +
     'hand-written mapping is how the district and city surfaces drift apart.',
 );
 check(
@@ -116,15 +116,18 @@ check(
 );
 // The memo must depend on the answers themselves, or a changed answer keeps the old object identity
 // and therefore the old cache key.
-for (const dep of ['query.amenities', 'query.bathMin', 'query.ratingMin', 'query.unitSubtypes', 'query.isNewConstruction']) {
-  const m = idx.match(/const cityAfParams = useMemo\([\s\S]{0,600}?\]\)/);
-  check(
-    !!m && m[0].includes(dep),
-    `cityAfParams invalidates on ${dep}`,
-    `src/app/index.tsx: cityAfParams' dependency list omits ${dep}, so changing that answer reuses ` +
-      `the previous object identity, the previous cache key, and the previous (wrong) counts.`,
-  );
-}
+// IDENTITY IS KEYED ON CONTENT, NOT A HAND-WRITTEN DEP LIST (2026-08-22). The enumeration below used
+// to name each answer by hand — but a forgotten field is exactly how Trending lost bedrooms/price/
+// area, so the list itself was the hazard. cityAfParams is now memoised on JSON.stringify of the
+// params it just built, so its identity changes if and only if a real predicate changed: strictly
+// stronger than any enumeration, and it cannot rot when a new filter is added.
+check(
+  /const cityAfSig = JSON\.stringify\(cityAfRaw\)/.test(idx)
+  && /const cityAfParams = useMemo\(\(\) => cityAfRaw, \[cityAfSig\]\)/.test(idx),
+  'cityAfParams identity is keyed on its own CONTENT signature (covers every predicate, present and future)',
+  "src/app/index.tsx: cityAfParams is not memoised on its content signature, so a changed filter can "
+    + 'reuse the previous object identity, the previous cache key, and the previous (wrong) counts.',
+);
 for (const [label, re] of [
   ['ensureCityFieldIndex', /ensureCityFieldIndex\(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams\)/],
   ['topCitiesByListings', /topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)/],
