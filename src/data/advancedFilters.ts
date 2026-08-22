@@ -47,6 +47,17 @@ export type AdvancedQuestion = {
 // minOptionsFor / INTERVIEW_STOP_AT / MIN_TOTAL_TO_SHOW / MIN_REAL_OPTION_COUNT / meaningful() now
 // live in @/lib/afRanking (imported/re-exported above) — unchanged in value or behavior, just pure.
 
+// Minimum USEFUL questions to open the interview at all (owner 2026-08-22). "Useful" = passes
+// scoreQuestion() above — real narrowing power over the CURRENT eligible set, not merely
+// structurally eligible (cohortAllows/isAgeFilterScope). A cohort with only one useful question
+// would open Advanced Filter, spend the user's attention on that single weak question, and still
+// close on a set the >25 result-count gate alone left large — not a niche shortlist, just a tax on
+// the user's time. This SECOND, independent condition composes with INTERVIEW_STOP_AT/
+// MIN_TOTAL_TO_SHOW (the result-count gate) — both must hold before Advanced Filter may open; this
+// constant governs the OPENING decision only, never the continuation loop (rankQuestions/
+// presentGuided keep asking down to the last useful question, however many remain).
+export const MIN_USEFUL_QUESTIONS_TO_SHOW = 2;
+
 // Engine-level LIVE result count for a query — the footer «Show {N}» on every card. Generic: the count
 // RPC applies whatever the query carries (types/scope/amenities/bath/age), so this works for every
 // question and type. null on error → the card holds the last good number rather than flashing.

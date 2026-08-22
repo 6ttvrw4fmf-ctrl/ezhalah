@@ -48,7 +48,7 @@ import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESO
 import { noTranslateRef } from '@/noTranslate';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard } from '@/components/AdvancedQuestionCard';
 import MiningTransition from '@/components/MiningTransition';
-import { ADVANCED_QUESTIONS, INTERVIEW_STOP_AT, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type RankedQuestion } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type RankedQuestion } from '@/data/advancedFilters';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
 // below a results block — NEVER before first results — and ONLY for a strict single-type Residential
@@ -1146,8 +1146,18 @@ export default function Agent() {
       .map((r) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount, total: r.total }))
       .filter((p) => p.options.length >= minOptionsFor(p.question.selection));
     if (ageFlowTotalRef.current == null && ranked.length) ageFlowTotalRef.current = ranked[0].total;
-    if (!ageFlowPlanRef.current.length) {
-      // AUTO path: a filter user didn't ask to narrow, so an empty plan closes silently — never a chip.
+    // MIN 2 USEFUL QUESTIONS TO OPEN (owner 2026-08-22): a lone useful question — answered or
+    // skipped — still closes the interview on whatever the result-count gate alone left large; not
+    // a niche shortlist, just a tax on the user's attention. Reuses the SAME plan (ranked, already
+    // scored by scoreQuestion via rankQuestions — real narrowing power, not just structural
+    // eligibility) rather than a second computation, so this can never disagree with what the
+    // interview actually asks, and it is computed AFTER cohortAllows' combined-period intersection
+    // (rankQuestions -> eligibleQuestions -> question.eligibility) for free. 0 or 1 useful ⇒ the
+    // SAME fallback an empty plan already used: AUTO closes silently, a manual tap falls through to
+    // the plain refine chips — never a NEW code path. This gate governs the OPENING decision only;
+    // presentGuided's own re-rank after each answer/skip is untouched below, so an already-open
+    // interview still keeps asking down to the very last useful question (owner §2/§6).
+    if (ageFlowPlanRef.current.length < MIN_USEFUL_QUESTIONS_TO_SHOW) {
       setAgeFlow(null);
       if (fallbackToRefine) startRefine(q);
       return;

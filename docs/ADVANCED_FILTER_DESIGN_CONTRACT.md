@@ -247,7 +247,7 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
   hand-written inverse — then re-search immediately (no mining beat on removal).
 
 
-## Amendment 2026-08-22 — the narrowing gate (owner-approved, supersedes the 8%-90% option band)
+## Amendment 2026-08-22 (a) — the narrowing gate (owner-approved, supersedes the 8%-90% option band)
 
 **Bug report that triggered this:** owner selected Villa + 6 Riyadh districts (~5,154 matches),
 answered/skipped through the interview, and it stopped after ~2 questions at ~1,874 remaining —
@@ -290,3 +290,45 @@ Regression: `scripts/verify-af-narrowing-gate.ts` calls `scoreQuestion()` direct
 mutation-provable) with synthetic scopes proving (a) a 2%-share option that used to be dropped is now
 included, (b) a 97%-share-only option is included but scores below a balanced one, (c) a question
 where every option ties at `N` is still excluded, (d) ordering still favors the more balanced split.
+
+## Amendment 2026-08-22 (b) — 2+ useful questions to open (owner-approved)
+
+The owner's brief: «Advanced Filter should only appear when there are multiple useful questions
+available that can actually help narrow the result set» — opening the interview on exactly one
+useful question means the user answers or skips it and still closes on whatever the result-count
+gate alone left large, which is a tax on their attention, not a niche shortlist. Pinned by
+`scripts/verify-af-min-useful-questions-gate.ts`.
+
+- **A SECOND, independent gate, composed with the existing result-count gate, never replacing it.**
+  Advanced Filter may open only when BOTH hold: the scope's true total is
+  `> INTERVIEW_STOP_AT (25)` **and** the scope has `>= MIN_USEFUL_QUESTIONS_TO_SHOW (2)` useful
+  questions. 0 or 1 useful question ⇒ AF does not open, even if the result-count gate alone would
+  allow it — the manual "narrow it down" tap falls through to the pre-existing plain refine-chip
+  flow (the SAME fallback an empty plan already used; this is a threshold widening, not a new code
+  path).
+- **"Useful" already has one definition — `scoreQuestion()`, unchanged by this rule.** Per Amendment
+  (a) above, a question is useful when the scope clears `MIN_TOTAL_TO_SHOW` and has at least
+  `minOptionsFor(selection)` options that would actually narrow the current set (`count < N`).
+  `rankQuestions()` already computes exactly this set (`ranked`); this gate counts `ranked.length`
+  at the OPENING decision only — it does not re-derive "useful" a second, potentially-disagreeing
+  way, and automatically picks up whatever "useful" means as Amendment (a)'s definition evolves.
+- **Computed AFTER every other narrowing the eligibility layer already applies** — combined-period
+  (سنوي+شهري) cohort intersection (`cohortAllows`'s `RentAnnual ∩ RentMonthly`), the Buy+Rent
+  3-way intersection, and multi-type intersection all run inside `eligibleQuestions()` /
+  `cohortAllows()`, which `rankQuestions()` calls before scoring — so a question valid for only one
+  leg of a combined search can never count toward the 2-question threshold on that search.
+  Recomputing the gate from a second, independent implementation was deliberately avoided.
+- **Governs the OPENING decision only.** Once the interview is open, the existing continuation loop
+  (`presentGuided`'s re-rank after every answer/skip) is unchanged: it keeps offering the next
+  useful question for as long as at least one remains, and stops only when the re-ranked plan is
+  genuinely empty (`plan.length === 0`) — an already-open interview is never retroactively closed
+  for dropping to exactly one remaining useful question. This is the owner's dynamic-loop rule
+  (§2/§6 of the brief): narrow while anything useful remains; stop at niche or at "nothing left to
+  ask," never earlier.
+- **Skip is unchanged and was already correct.** `onConfirm([])` (a confirm with nothing selected)
+  and `onSkip()` were traced end to end and found structurally identical: both mark the question
+  asked and advance to the next plan index; neither calls a question's `apply()`, sets the
+  query-changed flag, or records a facet. Skip therefore already applies no predicate, does not
+  reduce the eligible set, and does not treat an unknown value as "no" — this amendment did not
+  need to touch that path, and the barrier locks the two handlers' shapes so a future edit can't
+  quietly split them.
