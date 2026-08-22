@@ -56,6 +56,17 @@ on:
       grace:
         description: "Consecutive 404 sweeps before a unit is marked inactive"
         default: "3"
+      recheck_dead:
+        # RESURRECTION PASS (2026-08-22, Data Integrity run #37). Re-probes rows this sweep already
+        # killed and RESTORES any the source still serves. Measured that day: 3 of 60 randomly
+        # sampled killed rows returned a full HTTP 200 page (replicated 5/5 each) against a 10/10
+        # live control -- ~5% of a 2,515-row cohort a user can no longer find. The pass can ONLY
+        # restore: it never inactivates, never raises missing_count, and needs no kill cap.
+        # DISPATCH-ONLY BY DESIGN: the daily 06:00 schedule keeps doing exactly what it did before,
+        # so turning this on can never change the automatic sweep's behaviour.
+        description: "Re-probe previously-killed rows and restore any the source still serves (dispatch only; ignored on the schedule)"
+        type: boolean
+        default: false
 
 concurrency:
   group: gathern-liveness
@@ -115,4 +126,5 @@ jobs:
             --min-stale-days ${{ inputs.min_stale_days || '3' }} \
             --grace ${{ inputs.grace || '3' }} \
             ${{ inputs.kill_cap && format('--kill-cap {0}', inputs.kill_cap) || '' }} \
+            ${{ (github.event_name != 'schedule' && inputs.recheck_dead) && '--recheck-dead' || '' }} \
             $APPLY_FLAG
