@@ -72,6 +72,15 @@ for (const key of ['p_beds_exact', 'p_beds_min', 'p_price_min', 'p_price_max', '
 }
 const dropped = (builder.match(/const \{([^}]*)\}\s*=\s*\n?\s*rpcFilterParams/)?.[1] ?? '')
   .split(',').map((x) => x.trim().split(':')[0].trim()).filter((x) => x && x !== '...normal');
+// UNSET PREDICATES MUST BE OMITTED, NOT SENT AS NULL. Two things depend on it: the trending pool
+// decides "is the user narrowed?" by asking whether this object is empty, and — measured — sending
+// p_beds_*/p_price_*/p_area_* as explicit NULLs pushed top_cities_by_deal_ar into a statement
+// timeout on an unfiltered call, emptying the city suggestion list entirely.
+check('rpcAllNarrowingParams omits unset predicates (never sends explicit nulls)',
+  /v === null \|\| v === undefined\) continue;/.test(builder)
+  && /Array\.isArray\(v\) && v\.length === 0\) continue;/.test(builder),
+  'an always-present null key makes every search look "narrowed" AND times the trending RPC out');
+
 check('rpcAllNarrowingParams drops ONLY p_types and p_sort_by',
   dropped.length === 2 && dropped.includes('p_types') && dropped.includes('p_sort_by'),
   `it discards: ${dropped.join(', ') || '(nothing parsed)'} — any other key here is a predicate Trending will silently stop applying`);

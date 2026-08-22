@@ -454,7 +454,22 @@ const RPC_SORT_KEYS = new Set(['oldest', 'price_asc', 'price_desc', 'area_asc', 
 export function rpcAllNarrowingParams(q: SearchQuery) {
   const { p_types: _types, p_sort_by: _sort, ...normal } =
     rpcFilterParams(q) as ReturnType<typeof rpcFilterParams> & { p_sort_by?: string };
-  return { ...normal, ...rpcAdvancedFilterParams(q) };
+  // ONLY the predicates the user actually SET. rpcFilterParams always returns its keys (the search
+  // RPC wants the explicit nulls), but here an unset key must be OMITTED, for two reasons:
+  //   • CORRECTNESS OF THE "is the user narrowed?" TEST — the trending pool decides whether a
+  //     widening fallback is allowed by asking whether this object is empty. Always-present null
+  //     keys would make every search look narrowed.
+  //   • PERFORMANCE, measured: sending p_beds_*/p_price_*/p_area_* as explicit NULLs made
+  //     top_cities_by_deal_ar hit the statement timeout on an unfiltered call, while omitting them
+  //     returned immediately — the CI web-runtime smoke test caught exactly this (the city
+  //     suggestion list came back empty, so «الرياض» could not be picked).
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries({ ...normal, ...rpcAdvancedFilterParams(q) })) {
+    if (v === null || v === undefined) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    out[k] = v;
+  }
+  return out;
 }
 
 
