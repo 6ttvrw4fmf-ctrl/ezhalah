@@ -144,12 +144,17 @@ export type AdvancedQuestionCardProps = {
 };
 
 // Soft press-compression wrapper (same feel as ui.tsx's Tappable, local so the card owns its motion).
-function Tap({ children, onPress, style }: { children: React.ReactNode; onPress: () => void; style?: object | object[] }) {
+// `testID` is forwarded onto the inner Pressable (the node that actually handles the tap), not the
+// animated wrapper — a test that queries the wrapper would find an element whose click does nothing.
+// Tap silently DROPPED testID before, which is why af-confirm resolved to null in the first scoped
+// production run (2026-08-22).
+function Tap({ children, onPress, style, testID }: { children: React.ReactNode; onPress: () => void; style?: object | object[]; testID?: string }) {
   const press = useSharedValue(0);
   const a = useAnimatedStyle(() => ({ transform: [{ scale: 1 - press.value * 0.03 }] }));
   return (
     <Reanimated.View style={[style as object, a]}>
       <Pressable
+        testID={testID}
         onPress={onPress}
         onPressIn={() => { press.value = withTiming(1, PRESS_IN); }}
         onPressOut={() => { press.value = withSpring(0, RELEASE); }}
