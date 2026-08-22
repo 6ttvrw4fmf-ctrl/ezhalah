@@ -34,6 +34,11 @@ SAFETY (deletion-safety + resurrection pins — see reference_scraper-repo-and-i
     feed still reactivates the row via the crawl upsert (active=True, missing_count=0).
   • Gathern rate-limits detail pages GLOBALLY (429 above ~2 req/s across ALL IPs), so this runs as a
     SINGLE runner at SCRAPE_MIN_INTERVAL≈1.0 — never a shard matrix.
+  • EVIDENCE: every decision writes one row to `gathern_liveness_detail` (listing, raw HTTP status,
+    verdict, missing_count before/after, applied), on EVERY run including dry-runs, so "was that
+    kill correct?" is answerable from our own data instead of an expiring Actions log. `applied` is
+    false for a dry run and for a kill batch the anomaly cap quarantined. Best-effort: a failed
+    evidence write never blocks or rolls back a sweep, and it never drives inactivation.
 
   python -m scrapers.gathern.liveness --limit 50                # dry-run report on 50 oldest-stale
   python -m scrapers.gathern.liveness --limit 3000 --apply      # actually strike (owner-gated)
@@ -132,6 +137,40 @@ def _collect_stale(client, cutoff_iso: str, limit: int) -> list[dict]:
         offset += page
 
 
+def _collect_killed(client, limit: int) -> list[dict]:
+    """Worklist for --recheck-dead: rows THIS sweep previously killed (inactive, missing_count ≥
+    grace), newest kill first.
+
+    WHY THIS EXISTS (2026-08-22, Data Integrity run #37). The sweep's own rule is "HTTP 200 → alive
+    → rescue". It only ever applied that rule to rows that happened to still be ACTIVE, so one
+    source fact — a live detail page — produced a rescue for one row and permanent removal for
+    another, decided purely by our own prior state. Nothing re-probed a killed row again: the
+    docstring's stated recovery path is the crawl upsert, which only fires if the unit re-enters
+    gathern's enumeration feed, and a unit can keep a live page while sitting out of that feed
+    (e.g. fully booked). Measured that day: of 60 randomly sampled killed rows, 57 were still 404
+    but 3 returned a full 200 page, replicated 5/5 each — against a 10/10 200 control, so the probe
+    itself was demonstrably healthy.
+
+    This worklist is READ-ONLY and the mode it feeds can only ever restore a row, never inactivate
+    one, so it cannot deepen an inactivation mistake — only undo one, and only on a live 200."""
+    work: list[dict] = []
+    offset = 0
+    page = 1000
+    while True:
+        q = (client.table(TABLE).select("id, ad_number, listing_url, missing_count")
+             .eq("source", SOURCE).eq("active", False).gte("missing_count", 3)
+             .not_.is_("listing_url", "null")
+             .order("deactivated_at", desc=True).order("id", desc=False)
+             .range(offset, offset + page - 1))
+        batch = q.execute().data or []
+        work.extend(batch)
+        if limit and len(work) >= limit:
+            return work[:limit]
+        if len(batch) < page:
+            return work
+        offset += page
+
+
 # ── Cross-session write lock (2026-07-27) ────────────────────────────────────────────────────────
 # Reuses the repo's existing deploy-lock RPCs (supabase/migrations/20260716_deploy_lock.sql) under a
 # DISTINCT lock_name so a liveness --apply never blocks (or is blocked by) a frontend deploy.
@@ -177,6 +216,93 @@ def _apply_lock_holder_info(client) -> str:
         return "(unknown)"
 
 
+def _recheck_dead(client, args, run_id: int, mode: str, now_iso: str,
+                  holder: str, holding_lock: bool) -> int:
+    """Resurrection pass — restore killed rows the source still serves.
+
+    Structurally NON-DESTRUCTIVE: the only write it can make is a restore (active=true,
+    missing_count=0, last_seen_at refreshed, deactivated_at cleared) and only on a literal HTTP 200.
+    404/410 and every transient leave the row exactly as it was, so a blocked proxy or a bad day at
+    the source degrades this pass to a no-op rather than to damage. That is why it needs no kill cap.
+
+    The restore payload is the SAME one the kill pass's own `alive` branch writes — this mode does
+    not invent a rescue rule, it applies the existing one to the rows the kill pass stopped looking
+    at. Every decision is recorded in gathern_liveness_detail like any other."""
+    work = _collect_killed(client, args.limit)
+    print(f"Gathern liveness RECHECK-DEAD [{mode}]: {len(work)} previously-killed rows "
+          f"(~{MIN_INTERVAL:.1f}s/req)", flush=True)
+
+    s = detail_session()
+    seen = restored = still_dead = transient = 0
+    detail: list[dict] = []
+    started = time.time()
+
+    def _flush() -> None:
+        for i in range(0, len(detail), 500):
+            chunk = detail[i:i + 500]
+            try:
+                client.table("gathern_liveness_detail").insert(chunk).execute()
+            except Exception as exc:  # noqa: BLE001 — logging must not break the lifecycle
+                print(f"⚠ detail-log insert failed (non-fatal, {len(chunk)} rows): "
+                      f"{str(exc)[:160]}", flush=True)
+        detail.clear()
+
+    try:
+        for row in work:
+            url = (row.get("listing_url") or "").strip()
+            if not url:
+                continue
+            seen += 1
+            status = probe(s, url)
+            mc_before = int(row.get("missing_count") or 0)
+
+            if status == 200:
+                restored += 1
+                verdict, mc_after = "alive", 0
+                if args.apply:
+                    client.table(TABLE).update({
+                        "active": True, "missing_count": 0,
+                        "last_seen_at": now_iso, "deactivated_at": None,
+                    }).eq("id", row["id"]).execute()
+            elif looks_dead(status):
+                still_dead += 1
+                verdict, mc_after = "dead_confirmed", mc_before
+            else:
+                transient += 1
+                verdict, mc_after = "transient", mc_before
+
+            detail.append({
+                "listing_id": row["id"],
+                "http_status": status or None,
+                "verdict": verdict,
+                "missing_count_before": mc_before,
+                "missing_count_after": mc_after,
+                # Only a restore writes anything; a confirmed-dead or transient changes no row.
+                "applied": bool(args.apply) and verdict == "alive",
+            })
+            if len(detail) >= 500:
+                _flush()
+
+            if seen % 50 == 0:
+                rate = seen / (time.time() - started or 1)
+                print(f"  [{seen}] restored={restored} still_dead={still_dead} "
+                      f"transient={transient} ({rate:.1f}/s)", flush=True)
+    except KeyboardInterrupt:
+        print("\nInterrupted — finalizing.", flush=True)
+    finally:
+        _flush()
+
+    verb = "restored" if args.apply else "WOULD restore"
+    notes = (f"RECHECK-DEAD {mode} scanned={seen} {verb}={restored} "
+             f"still_dead={still_dead} transient={transient}")
+    print(f"\n✓ Gathern liveness recheck done. {notes}", flush=True)
+    end_run(run_id, ok=True, rows_seen=seen, rows_upserted=(restored if args.apply else 0),
+            notes=notes, allow_empty=(len(work) == 0))
+    if holding_lock:
+        _release_apply_lock(client, holder)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Gathern detail-page liveness sweep (owner-gated)")
     ap.add_argument("--limit", type=int, default=0, help="probe at most N oldest-stale rows (0 = all stale)")
@@ -197,6 +323,14 @@ def main() -> int:
                          "transient site-wide 404 event could mass-kill live listings the same "
                          "way, invisibly. Pass an explicit cap to intentionally release a "
                          "reviewed backlog.")
+    ap.add_argument("--recheck-dead", action="store_true",
+                    help="RESURRECTION PASS (2026-08-22). Instead of probing stale ACTIVE rows, "
+                         "re-probe rows this sweep previously killed and RESTORE any the source "
+                         "still serves (HTTP 200). This mode can only ever set active=true; it "
+                         "never inactivates anything, never touches missing_count upward, and "
+                         "never consults the kill cap — there is nothing for the cap to guard. "
+                         "404/410 leaves the row inactive; a transient leaves it untouched. "
+                         "Honours --apply (dry-run by default) and --limit like the kill pass.")
     args = ap.parse_args()
 
     client = sb()
@@ -228,6 +362,9 @@ def main() -> int:
             return 0
         holding_lock = True
         print(f"✓ acquired '{LOCK_NAME}' apply lock (holder={holder}, ttl={_LOCK_TTL_SECONDS}s)", flush=True)
+
+    if args.recheck_dead:
+        return _recheck_dead(client, args, run_id, mode, now_iso, holder, holding_lock)
 
     work = _collect_stale(client, cutoff, args.limit)
     print(f"Gathern liveness [{mode}]: {len(work)} active rows stale >{args.min_stale_days}d "
@@ -269,6 +406,26 @@ def main() -> int:
     kill_pending: list[tuple[int, int]] = []  # (row id, new_missing) — flipped ONLY after the cap gate
     started = time.time()
 
+    # ── Per-row evidence (gathern_liveness_detail, migration 20260812113726) ──────────────────────
+    # The sweep already KNOWS the raw HTTP status behind every verdict; until now it threw that away
+    # and persisted only the aggregate line in scrape_runs.notes, so "was that kill correct?" could
+    # not be answered from our own data — it needed the source re-fetched by hand, and the per-row
+    # 404s survived only in expiring GitHub Actions logs. Mirrors wasalt_liveness_pilot_detail.
+    # Evidence only: this never drives inactivation and touches no safety gate.
+    detail_buf: list[dict] = []          # non-kill decisions — `applied` is known immediately
+    kill_detail: list[dict] = []         # kill decisions — `applied` waits on the cap gate below
+
+    def _flush_detail(rows: list[dict]) -> None:
+        """Best-effort: an audit-log write must never fail or roll back a liveness sweep."""
+        for i in range(0, len(rows), 500):
+            chunk = rows[i:i + 500]
+            try:
+                client.table("gathern_liveness_detail").insert(chunk).execute()
+            except Exception as exc:  # noqa: BLE001 — logging must not break the lifecycle
+                print(f"⚠ detail-log insert failed (non-fatal, {len(chunk)} rows): "
+                      f"{str(exc)[:160]}", flush=True)
+        rows.clear()
+
     def _flush_alive() -> None:
         if args.apply and alive_ids:
             for i in range(0, len(alive_ids), 200):
@@ -282,7 +439,26 @@ def main() -> int:
             if not url:
                 continue
             seen += 1
-            action, new_missing = classify(probe(s, url), row.get("missing_count"), args.grace)
+            status = probe(s, url)
+            mc_before = int(row.get("missing_count") or 0)
+            action, new_missing = classify(status, row.get("missing_count"), args.grace)
+            evidence = {
+                "listing_id": row["id"],
+                "http_status": status or None,   # 0 = no verdict after retries, not a real status
+                "verdict": action,
+                "missing_count_before": mc_before,
+                "missing_count_after": new_missing,
+                # A dry run proves what WOULD have happened; a transient never writes anything.
+                "applied": bool(args.apply) and action != "transient",
+            }
+            if action == "kill":
+                # `applied` is not knowable yet — the anomaly cap may quarantine the whole batch.
+                kill_detail.append(evidence)
+            else:
+                detail_buf.append(evidence)
+                # Flush as we go so a SIGINT (CI timeout) keeps the evidence it already earned.
+                if len(detail_buf) >= 500:
+                    _flush_detail(detail_buf)
 
             if action in ("kill", "strike"):
                 dead += 1
@@ -311,6 +487,7 @@ def main() -> int:
         print("\nInterrupted — finalizing.", flush=True)
     finally:
         _flush_alive()
+        _flush_detail(detail_buf)
 
     # ── Anomaly cap gate (2026-07-27): the kill batch lands as one reviewed decision, not a drip ──
     anomaly = args.apply and is_anomaly(len(kill_pending), kill_cap)
@@ -327,6 +504,13 @@ def main() -> int:
             for rid, nm in kill_pending:
                 client.table(TABLE).update({"missing_count": nm, "active": False}).eq("id", rid).execute()
             applied_kills = len(kill_pending)
+
+    # A kill's evidence is real either way, but `applied` must state whether a row actually flipped:
+    # false for a dry run AND false for a batch the anomaly cap quarantined (strikes recorded, no
+    # inactivation). Written after the gate because that is the first moment the answer is known.
+    for e in kill_detail:
+        e["applied"] = bool(args.apply) and not anomaly
+    _flush_detail(kill_detail)
 
     verb = "inactivated" if args.apply else "WOULD inactivate"
     kill_shown = applied_kills if args.apply else len(kill_pending)
