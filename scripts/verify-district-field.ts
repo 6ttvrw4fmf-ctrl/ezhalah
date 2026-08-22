@@ -118,7 +118,13 @@ check('narrowing signature ALSO covers the advanced answers (AF-only narrowing m
 check('changing any relevant filter INVALIDATES the previous counts before refetch (no stale numbers)', /setDistrictLiveCounts\(null\);\s*\n\s*if \(!citySelected \|\| !hasDistrictNarrowing/.test(indexSrc));
 check('a live-count response is dropped if a newer request superseded it (race guard)', /if \(id === districtLiveReq\.current && counts\) setDistrictLiveCounts\(counts\)/.test(indexSrc));
 check('onSearch and the count effect share ONE query builder (no state drift between count and search)', /const base = buildFilterBaseQuery\(\)!/.test(indexSrc) && /const q = buildFilterBaseQuery\(\);/.test(indexSrc));
-check('trending rows show the Arabic zero message under narrowing (never a silent dead-end)', /sublabel: districtLiveCounts\?\.\[opt\.districtAr\] === 0[\s\S]{0,40}\? t\('No listings here right now'\)[\s\S]{0,80}cohortCountLabel\(opt\.listingCount\)/.test(indexSrc));
+// The zero message is the intent here; the COUNT expression beside it changed on 2026-08-22 — a
+// non-zero live count is now DISPLAYED rather than only used to detect zero (a district was
+// advertising 1,064 while its whole city had 705 eligible). Assert both properties, not the old text.
+check('trending rows show the Arabic zero message under narrowing (never a silent dead-end)',
+  /sublabel: districtLiveCounts\?\.\[opt\.districtAr\] === 0[\s\S]{0,40}\? t\('No listings here right now'\)/.test(indexSrc));
+check('trending rows display the LIVE count when one exists (not the wider scope count)',
+  /cohortCountLabel\(districtLiveCounts\?\.\[opt\.districtAr\] \?\? opt\.listingCount\)/.test(indexSrc));
 // The owner explicitly praised and locked the Arabic zero-listing message: it must exist, stay
 // TRANSLATED (no English leak in the user-visible string), and stay wired to the empty rows.
 {
