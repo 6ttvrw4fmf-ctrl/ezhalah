@@ -56,6 +56,17 @@ export function minOptionsFor(selection: 'single' | 'multi'): number {
 export const INTERVIEW_STOP_AT = 25;
 export const MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT + 1;
 
+// Minimum USEFUL questions to open the interview at all (owner 2026-08-22). "Useful" = passes
+// scoreQuestion() below — real narrowing power over the CURRENT eligible set, not merely
+// structurally eligible (cohortAllows/isAgeFilterScope). A cohort with only one useful question
+// would open Advanced Filter, spend the user's attention on that single weak question, and still
+// close on a set the >25 result-count gate alone left large — not a niche shortlist, just a tax on
+// the user's time. This SECOND, independent condition composes with INTERVIEW_STOP_AT/
+// MIN_TOTAL_TO_SHOW (the result-count gate) — both must hold before Advanced Filter may open; this
+// constant governs the OPENING decision only, never the continuation loop (rankQuestions/
+// presentGuided keep asking down to the last useful question, however many remain).
+export const MIN_USEFUL_QUESTIONS_TO_SHOW = 2;
+
 // Per-OPTION floor — one value for EVERY question (contract §9; the old >0-chips vs >=5-buckets split
 // is banned). An option backed by fewer than this many listings is not a meaningful choice and is hidden.
 export const MIN_REAL_OPTION_COUNT = 5;
