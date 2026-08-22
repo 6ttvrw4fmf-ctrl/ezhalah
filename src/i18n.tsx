@@ -544,6 +544,9 @@ const AR: Record<string, string> = {
   // Read Aloud (owner P0, 2026-08-18) — native/OS TTS only, $0, never a paid API.
   'Read aloud': 'استماع للرد',
   'Stop reading': 'إيقاف الاستماع',
+  // Graceful failure (owner root-cause fix, 2026-08-22): shown ONLY when the device/browser has no
+  // Arabic voice at all — never silently read Arabic text with a non-Arabic (usually English) voice.
+  'Listening isn\'t available on this device': 'الاستماع غير متاح على هذا الجهاز',
   'Here is what I found:': 'هذا ما وجدته:',
   'Here is what matches what you want': 'هذا اللي يناسب طلبك',
   'I found a few properties based on your search.': 'وجدت بعض العقارات بناءً على طلبك.',
