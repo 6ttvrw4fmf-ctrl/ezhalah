@@ -32,7 +32,10 @@ const RELEASE = { damping: 18, stiffness: 260 };
 function Shell({ children, onClose, countChip }: { children: React.ReactNode; onClose: () => void; countChip?: number | null }) {
   const { t } = useI18n();
   return (
-    <View style={s.overlay}>
+    // testIDs (2026-08-22): stable hooks so a production browser test can scope to THIS card. Arabic
+    // label matching is unsafe here — «عرض المزيد» alone maps from THREE different English keys
+    // (Load more / Show more / See more), and a global text match reads listing cards instead.
+    <View style={s.overlay} testID="af-card">
       <Pressable style={s.backdrop} onPress={onClose} />
       <Reveal style={s.card}>
         <View style={s.bar}>
@@ -41,7 +44,7 @@ function Shell({ children, onClose, countChip }: { children: React.ReactNode; on
             <Text style={s.barTitle} numberOfLines={1}>{t('Ezhalah AI Agent')}</Text>
           </View>
           <View style={s.barSide}>
-            {countChip != null ? <AnimatedCount value={countChip} /> : null}
+            {countChip != null ? <View testID="af-count-chip"><AnimatedCount value={countChip} /></View> : null}
             <Pressable onPress={onClose} style={s.xBtn} hitSlop={6}>
               <Ionicons name="close" size={18} color={colors.muted} />
             </Pressable>
@@ -174,7 +177,7 @@ function OptionRow({ option, selected, selection, first, onPress }: {
   const checkA = useAnimatedStyle(() => ({ opacity: sel.value, transform: [{ scale: 0.6 + sel.value * 0.4 }] }));
   return (
     <Reanimated.View style={[s.row, first && s.rowFirst, selected && s.rowOn, rowA]}>
-      <Pressable
+      <Pressable testID={`af-option-${option.key}`}
         style={s.rowPress}
         onPress={onPress}
         onPressIn={() => { press.value = withTiming(1, PRESS_IN); }}
@@ -263,7 +266,7 @@ export default function AdvancedQuestionCard({
       ) : null}
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <Reanimated.View style={enterA}>
-          <Text style={s.qt}>{t(titleKey)}</Text>
+          <Text style={s.qt} testID="af-question-title">{t(titleKey)}</Text>
           {descriptionKey ? <Text style={s.desc}>{t(descriptionKey)}</Text> : null}
           {brandImage && BRAND_IMAGES[brandImage] ? (
             <View style={s.brandStrip}>
@@ -280,7 +283,7 @@ export default function AdvancedQuestionCard({
               come from what we actually know about the current listings — say that plainly, once. */}
           <Text style={s.note}>{t('Options reflect the information available for the current listings')}</Text>
           <View style={s.foot}>
-            <Tap style={s.primaryBtn} onPress={() => onConfirm(sel)}>
+            <Tap style={s.primaryBtn} testID="af-confirm" onPress={() => onConfirm(sel)}>
               <Text style={s.primaryTxt}>
                 {selection === 'multi'
                   ? (count != null ? t('Continue · {count} results', { count: grouped(count) }) : t('Continue'))
@@ -288,10 +291,10 @@ export default function AdvancedQuestionCard({
               </Text>
             </Tap>
             <View style={s.footRow}>
-              <Pressable style={s.skipLink} onPress={onSkip} hitSlop={8}>
+              <Pressable style={s.skipLink} testID="af-skip" onPress={onSkip} hitSlop={8}>
                 <Text style={s.skipTxt}>{t('Skip')}</Text>
               </Pressable>
-              <Pressable style={s.skipLink} onPress={onSkipAll} hitSlop={8}>
+              <Pressable style={s.skipLink} testID="af-skip-all" onPress={onSkipAll} hitSlop={8}>
                 <Text style={s.skipAllTxt}>{t('Show results')}</Text>
               </Pressable>
             </View>
