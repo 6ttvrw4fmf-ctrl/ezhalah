@@ -5,7 +5,7 @@ import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
 import { normalizeType, queryForSelection, queryForTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
-import { effectiveTypes, bedroomTokens } from './search';
+import { effectiveTypes, effectiveGroups, bedroomTokens } from './search';
 import { scoreListingProximity } from './proximity';
 import { cityDisplay } from './locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
@@ -300,7 +300,11 @@ function regionIdsFor(lm: { exact?: boolean; kind?: string; region?: string } | 
 function effectiveCleanQuery(q: SearchQuery): CleanQuery | null {
   const types = q.types && q.types.length ? q.types : (q.type ? [q.type] : []);
   if (types.length) return queryForTypes(types);
-  if (q.typeGroup) return queryForSelection(q.typeGroup);
+  // MULTI-GROUP: queryForTypes unions over its argument list and accepts GROUP names as well as clean
+  // types, so several groups resolve to the union of their raw types — OR across the group dimension,
+  // through the one existing helper rather than a second expansion path. (owner 2026-08-20)
+  const groups = effectiveGroups(q);
+  if (groups.length) return groups.length === 1 ? queryForSelection(groups[0]) : queryForTypes(groups);
   return null;
 }
 
@@ -326,7 +330,7 @@ const pnum = (s: unknown): number | null => { const n = parseInt(String(s ?? '')
 function agentPriceCapAnnual(q: SearchQuery): number | null {
   const amount = parseInt((q.priceInput || '').replace(/[^\d]/g, ''), 10);
   if (!Number.isFinite(amount) || amount < 100) return null;
-  if (q.bothDeals) return null;                     // one cap over buy+rent — leave to the client
+  if (q.bothDeals || q.dealCombined) return null;    // one cap over buy+rent — leave to the client (Filter path sends priceMin/Max(Rent) explicitly instead)
   if (q.deal === 'Rent') {
     if (q.priceIsAnnual) return amount;             // agent already annualized a daily/weekly/monthly rent
     if (q.rentPeriod === 'annual') return amount;
@@ -342,7 +346,9 @@ function agentPriceCapAnnual(q: SearchQuery): number | null {
 // disagree about what a selected type/group expands to (owner barriers #7/#17/#18, 2026-08-15).
 export function cohortTypesAr(q: SearchQuery): string[] | null {
   const sel = effectiveTypes(q);
-  return sel.length ? typeArForTypes(sel) : (q.typeGroup ? typeArForSelection(q.typeGroup) : null);
+  if (sel.length) return typeArForTypes(sel);
+  const groups = effectiveGroups(q);
+  return groups.length ? typeArForTypes(groups) : null;   // OR across groups — union of their types
 }
 
 function rpcFilterParams(q: SearchQuery) {
@@ -376,6 +382,11 @@ function rpcFilterParams(q: SearchQuery) {
     // deliberate); sortListings() in search.ts still re-sorts the fetched page for those two, same as
     // before this fix.
     ...(RPC_SORT_KEYS.has(q.sort as string) ? { p_sort_by: q.sort } : {}),
+    // Buy+Rent combined multi-select (owner feature 2026-08-20, PR#817 backend): the Rent-side budget
+    // is its OWN independent price pair — p_price_min/max above stay the Buy budget unchanged. Only
+    // sent when dealCombined is true; every single-deal call shape stays byte-identical (these two
+    // params default to NULL server-side and are ignored whenever p_deal is not null — verified live).
+    ...(q.dealCombined ? { p_price_min_rent: pnum(q.priceMinRent), p_price_max_rent: pnum(q.priceMaxRent) } : {}),
   };
 }
 
@@ -463,7 +474,7 @@ const inFlightDistrictCities = new Map<string, Promise<{ data: { city_ar: string
 export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | null> {
   const tables = tablesFor(q);
   if (!tables.length) return null;
-  const isBroadCommercial = q.category === 'Commercial' && !q.type && !(q.types && q.types.length) && !q.typeGroup;
+  const isBroadCommercial = q.category === 'Commercial' && !q.type && !(q.types && q.types.length) && !effectiveGroups(q).length;
 
   const lm = q.locationMatch;
   let cities: string[] | null = null;
@@ -537,9 +548,10 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   };
   const mainTables = isBroadCommercial ? platformScope(resTables(q)) : tables;
 
-  const isBroadResidential = q.category === 'Residential' && !q.type && !(q.types && q.types.length) && !q.typeGroup;
+  const isBroadResidential = q.category === 'Residential' && !q.type && !(q.types && q.types.length) && !effectiveGroups(q).length;
   const resSel = effectiveTypes(q);
-  const resSelectedTypeAr = resSel.length ? typeArForTypes(resSel) : (q.typeGroup ? typeArForSelection(q.typeGroup) : null);
+  const resGroups = effectiveGroups(q);
+  const resSelectedTypeAr = resSel.length ? typeArForTypes(resSel) : (resGroups.length ? typeArForTypes(resGroups) : null);
   const resMisfileTypes = isBroadResidential
     ? RESIDENTIAL_TYPE_AR_COM
     : (resSelectedTypeAr ? resSelectedTypeAr.filter((t) => RESIDENTIAL_TYPE_AR_COM.includes(t)) : []);
@@ -554,7 +566,10 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
       : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
 
   return {
-    p_deal: q.bothDeals ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
+    // dealCombined (owner feature 2026-08-20, Filter شراء+إيجار both selected) → null, same as
+    // bothDeals: af_eligibility_clause() treats p_deal IS NULL as Buy ∪ Rent(any period) — verified
+    // live exact (PR#817). Unlike bothDeals it also carries independent dual price ranges above.
+    p_deal: (q.bothDeals || q.dealCombined) ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
     p_rent_period: rentPeriodParam(q),
     p_cities: cities && cities.length ? cities : null,
     p_districts: q.districts && q.districts.length ? q.districts : null,
@@ -930,8 +945,10 @@ function resTables(q: SearchQuery): string[] {
   // Gathern + Aqar Monthly on any search whose period scope INCLUDES monthly (see [[gathern-source]]).
   // 'both' must list them too — they are the two monthly-only sources, so omitting them would let a
   // "monthly AND annual" search silently return an annual-only pool. (owner feature 2026-08-14.)
-  const wantsMonthly = q.rentPeriod === 'monthly' || q.rentPeriod === 'both';
-  return (q.deal === 'Rent' && wantsMonthly)
+  // dealCombined (2026-08-20) ALWAYS wants monthly — combined mode's Rent side has no period selector
+  // and accepts Monthly unconditionally, so these two monthly-only sources must always be reachable.
+  const wantsMonthly = q.dealCombined || q.rentPeriod === 'monthly' || q.rentPeriod === 'both';
+  return ((q.deal === 'Rent' || q.dealCombined) && wantsMonthly)
     ? [...RES_TABLES, 'gathern_residential_listings', 'aqarmonthly_residential_listings']
     : RES_TABLES;
 }
@@ -941,7 +958,9 @@ function resTables(q: SearchQuery): string[] {
 // filter (and Buy stays untouched). Keeps the candidate budget filled with the correct period so monthly
 // results aren't crowded out by annual. (owner rent-period rule 2026-07-06.)
 function rentPeriodParam(q: SearchQuery): string | null {
-  if (q.bothDeals || q.deal !== 'Rent') return null;
+  // dealCombined's Rent side has no period selector — it accepts both known periods AND
+  // unpublished-period rows (no period filter at all), same as Buy/bothDeals. (owner 2026-08-20.)
+  if (q.bothDeals || q.dealCombined || q.deal !== 'Rent') return null;
   if (q.rentPeriod === 'monthly') return 'شهري';
   if (q.rentPeriod === 'annual') return 'سنوي';
   // 'كلاهما' is NOT the same as null. null = "apply no period filter", which also sweeps in the rent rows
@@ -1083,7 +1102,7 @@ export type FetchListingsResult = { listings: Listing[] | null; pageCandidates: 
 function keptFiltersReq(q: SearchQuery, table?: string) {
   const tbl = table ?? tableFor(q);
   let req = supabase!.from(tbl).select(LIST_SELECT).eq('active', true);
-  if (!q.bothDeals) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
+  if (!q.bothDeals && !q.dealCombined) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
   const types = dbTypesFor(q);
   if (types && types.length) req = req.in('property_type', types);
   // Rent-period filter only when the deal is actually Rent — NOT for a "rent or buy" (bothDeals) search,
@@ -1096,11 +1115,13 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   //  • BOTH: the union of the two KNOWN periods — mixed platforms must carry an explicit monthly OR
   //    annual rent_period (a null one is still neither, and never guessed); monthly-only platforms pass
   //    wholesale exactly as they do on a monthly search. (owner feature 2026-08-14.)
-  if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
+  // dealCombined (2026-08-20): same as bothDeals — Rent rows in combined mode have no period filter
+  // at all (accepts both known periods AND unpublished-period rows), so none of these branches apply.
+  if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
     if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.eq('rent_period', 'monthly');
-  } else if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'annual') {
+  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'annual') {
     req = req.eq('rent_period', 'annual');
-  } else if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'both') {
+  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'both') {
     if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.in('rent_period', ['monthly', 'annual']);
   }
   return req;

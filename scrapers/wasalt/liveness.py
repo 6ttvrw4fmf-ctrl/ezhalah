@@ -93,6 +93,26 @@ def _backoff(attempt: int) -> None:
     time.sleep(min(8.0, 2.0 ** attempt) + random.uniform(0.0, 0.5))
 
 
+# Diagnostics for the bare `except Exception` below (alert_event 507, 2026-08-21): a "failed"
+# verdict used to discard the real exception, so a listing stuck failing forever (timeout? TLS?
+# connection reset? something route-specific?) left no trace of which. Print the exception TYPE
+# once per (call-site, type) per process — never the URL/message (may carry query params) — so a
+# run's logs show what class of failure is actually happening without flooding on every one of a
+# large shard's rows hitting the same known issue.
+_seen_exc_kinds: set[tuple[str, str]] = set()
+_seen_exc_lock = threading.Lock()
+
+
+def _note_exc(where: str, exc: BaseException) -> None:
+    kind = type(exc).__name__
+    key = (where, kind)
+    with _seen_exc_lock:
+        if key in _seen_exc_kinds:
+            return
+        _seen_exc_kinds.add(key)
+    print(f"  (diagnostic) {where}: first {kind} this run — {exc}", file=sys.stderr, flush=True)
+
+
 def head_status(url: str, tries: int = 3):
     """HEAD status code (cheap), or None after transient failures."""
     s = _session()
@@ -100,8 +120,9 @@ def head_status(url: str, tries: int = 3):
         try:
             _throttle()
             return s.head(url, timeout=20, allow_redirects=True).status_code
-        except Exception:
+        except Exception as e:
             if attempt == tries - 1:
+                _note_exc("head_status", e)
                 return None
             _backoff(attempt)
     return None
@@ -131,8 +152,9 @@ def get_verdict(url: str, tries: int = 3):
                 except Exception:
                     pdv = None
             return ("live" if pdv else "dead", r.status_code, nbytes)
-        except Exception:
+        except Exception as e:
             if attempt == tries - 1:
+                _note_exc("get_verdict", e)
                 return ("failed", 0, 0)
             _backoff(attempt)
     return ("failed", 0, 0)

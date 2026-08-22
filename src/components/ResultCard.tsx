@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Animated, Easing, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
@@ -7,6 +7,8 @@ import type { Listing } from '@/data/listings';
 import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText } from '@/lib/arabicText';
+import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
+import { useAtLeast } from '@/lib/useAtLeast';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -133,8 +135,11 @@ export function ResultCard({
     locale,
     TYPE_UNRESOLVED_AR,
   );
-  const { width } = useWindowDimensions();
-  const horizontal = IS_WEB && width >= 820; // desktop 3-column layout
+  // desktop 3-column layout. Goes through useAtLeast so the FIRST client render reproduces the
+  // server's answer (no window ⇒ compact); comparing the width inline here was the second half of
+  // the React #418 P0 of 2026-08-21 — it differs only in style attributes, but React compares those
+  // during hydration too, which is why the live page logged two errors and not one.
+  const horizontal = useAtLeast(CARD_WIDE_BREAKPOINT);
   const [expanded, setExpanded] = useState(false);
   const txtAlign = isRTL ? ('right' as const) : ('left' as const);
   const wDir = isRTL ? ('rtl' as const) : ('ltr' as const);

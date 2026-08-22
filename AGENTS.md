@@ -278,20 +278,37 @@ never in git, so nobody could see it coming) and it has recurred at least twice 
 engineer heartbeats on 2026-08-04 and 2026-08-10 each independently found 20-30+ migrations applied
 to prod with zero git record, discovered up to 24h after the fact).
 
-**If you apply a migration via MCP, commit the identical SQL to `supabase/migrations/` in the same
-session, before you consider the work done.** `apply_migration` mints its own server-side version
-timestamp — copy the SQL verbatim into a file named `<that timestamp>_<a name>.sql` (or recover it
-later from `supabase_migrations.schema_migrations.statements`, which is exact and queryable).
+**The engineer who applies a migration owns mirroring it (owner, 2026-08-21).** Applying a
+migration to production is not "done" until the matching git file exists in the same change.
+`apply_migration` mints its own server-side version timestamp — copy the SQL verbatim into a file
+named `<that timestamp>_<a name>.sql` (or recover it later from
+`supabase_migrations.schema_migrations.statements`, which is exact and queryable). Do not leave it
+for the next deploy, the drift sweep, or another session to clean up: the person/session that ran
+`apply_migration` is responsible, immediately.
+
+**The guard checks all FOUR drift conditions (owner extended it 2026-08-21), in both directions:**
+1. **applied-but-not-committed** — a migration live in prod with no git file (the classic drift).
+2. **committed-but-not-applied** — a git migration file whose version was never applied to prod.
+3. **duplicate migration versions** — two git files claiming one 14-digit version timestamp.
+4. **duplicate function overloads** — a public function with >1 overload (the PGRST203 outage shape).
+Conditions 1 & 4 come from the server (`ops_deploy_preflight_checks`, which alone sees
+`schema_migrations`/`pg_proc`); 2 & 3 are pure set-math over the repo's own files (the server is
+handed only a flattened id set, so it can't see file pairs or filename collisions) and live in
+`scripts/lib/migrationDrift.ts`. Both eras are grandfathered below `STRICT_ERA_BASELINE`
+(`20260815000000`) — legacy files whose hand-picked prefix/name diverged from how they were applied.
 
 **You do not have to catch your own drift by memory — the barrier catches it for you, continuously:**
 - `scripts/verify-migration-drift-vs-production.ts` asks `ops_deploy_preflight_checks` (the same
-  RPC `scripts/safe-deploy.sh` already gates deploys on) whether every migration live in production
-  is present in git. It is deliberately **NOT** wired into `npm test`, and must not be: `npm test`
-  (`full-verification-ci.yml`) is a REQUIRED status check on every PR, so wiring the live check in
-  would fail every unrelated PR whenever drift exists anywhere in production. That decision is
-  pinned in BOTH directions by `scripts/verify-migration-drift-guard-wired.ts` (which asserts the
-  live check is absent from `npm test` and that the structural guard itself is present). Drift is
-  caught by the dedicated workflow below, not by your next push.
+  RPC `scripts/safe-deploy.sh` already gates deploys on) for conditions 1 & 4, and computes 2 & 3
+  from the repo files via `migrationDrift.ts` — failing on ANY of the four. It is deliberately
+  **NOT** wired into `npm test`, and must not be: `npm test` (`full-verification-ci.yml`) is a
+  REQUIRED status check on every PR, so wiring the live check in would fail every unrelated PR
+  whenever drift exists anywhere in production. That decision is pinned in BOTH directions by
+  `scripts/verify-migration-drift-guard-wired.ts`. Drift is caught by the dedicated workflow below,
+  not by your next push.
+- `scripts/verify-migration-mirror-integrity.ts` (offline, deterministic, **in `npm test`**) pins
+  the four-condition detection logic and its mutation proof, and asserts the repo itself carries no
+  duplicate versions — so a refactor can't silently blind a condition on a PR.
 - `.github/workflows/migration-drift-guard.yml` runs that same check **every 15 minutes**,
   independent of any push — because the failure mode this exists for is a session that applies a
   migration and pushes nothing at all, which a push-triggered check alone would never catch. On

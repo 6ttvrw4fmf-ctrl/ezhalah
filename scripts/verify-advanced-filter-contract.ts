@@ -11,6 +11,8 @@ import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const advSrc = readFileSync(join(root, 'src/data/advancedFilters.ts'), 'utf8');
+// Cohort config + gate live here since 2026-08-20 (pure module → executable by barriers).
+const cohortSrc = readFileSync(join(root, 'src/lib/afCohorts.ts'), 'utf8');
 const cardSrc = readFileSync(join(root, 'src/components/AdvancedQuestionCard.tsx'), 'utf8');
 const agentSrc = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
 
@@ -72,11 +74,11 @@ check('furnished question is single-select, cohort-gated, true tri-state via fur
 // may draw ONLY from the Monthly-certified question set, and may NEVER carry the fields that are
 // fresh-DEAD in Monthly data (kitchen 94/30,356 · AC 7 · age 564 · floor 53 · furnished 100%-true).
 // The DB half of the same contract is the af_registry_monthly_uncertified P1 guard.
-const cohortBlock = advSrc.slice(advSrc.indexOf('const COHORT_QUESTIONS'), advSrc.indexOf('function singleCleanType'));
+const cohortBlock = cohortSrc.slice(cohortSrc.indexOf('export const COHORT_QUESTIONS'), cohortSrc.indexOf('export function scopeCleanTypes'));
 const monthlyLists = [...cohortBlock.matchAll(/RentMonthly:\s*\[([^\]]*)\]/g)].map((m) => m[1]);
 const MONTHLY_ALLOWED = ['rating', 'unit_subtype', 'amenities', 'bathrooms'];
 check('COHORT_QUESTIONS exists, Monthly keys exist ONLY for the certified cohorts (شقة/غرفة/فيلا)',
-  /const COHORT_QUESTIONS/.test(advSrc)
+  /export const COHORT_QUESTIONS/.test(cohortSrc)
   && monthlyLists.length === 3
   && /Apartment:\s*\{[\s\S]{0,900}RentMonthly:/.test(cohortBlock)
   && /Room:\s*\{[\s\S]{0,400}RentMonthly:/.test(cohortBlock)
@@ -123,30 +125,32 @@ check('one shared per-option floor (MIN_REAL_OPTION_COUNT via meaningful()); the
 // Residential-only), no commercial list carries rnpl/furnished-question on Buy, no NEW cohort
 // carries the fresh-dead 'ac' chip, and mapped types render EXACTLY their COHORT_CHIPS list.
 check('cohortAllows matches the clean type macro and COHORT_CHIPS scopes commercial chips',
-  /q\.category !== \(CLEAN_MACRO\[type\] \?\? 'Residential'\)/.test(advSrc)
-  && /const COHORT_CHIPS/.test(advSrc)
-  && !/COHORT_CHIPS[\s\S]{0,900}'ac'/.test(advSrc.slice(advSrc.indexOf('const COHORT_CHIPS'), advSrc.indexOf('const COHORT_CHIPS') + 1200))
+  /q\.category !== \(CLEAN_MACRO\[type\] \?\? 'Residential'\)/.test(cohortSrc)
+  && /export const COHORT_CHIPS/.test(cohortSrc)
+  && !/COHORT_CHIPS[\s\S]{0,900}'ac'/.test(cohortSrc.slice(cohortSrc.indexOf('export const COHORT_CHIPS'), cohortSrc.indexOf('export const COHORT_CHIPS') + 1200))
   && /chipAllow\.includes\(d\.key\)/.test(advSrc));
 
 // Villa cohort (2026-08-16): rnpl leads Rent only; Buy carries neither rnpl nor furnished; the two
 // villa-form chips (car_entrance/sanitation) are Villa-scoped so certified cohorts' cards never change.
 check('Villa cohort lists exist and the villa chips are Villa-scoped',
-  /Villa:\s*\{\s*RentAnnual:\s*\['rnpl'/.test(advSrc)
-  && /Villa:\s*\{[\s\S]{0,400}Buy:\s*\[(?![^\]]*'rnpl')(?![^\]]*'furnished')[^\]]*\]/.test(advSrc)
-  && /singleCleanType\(q\) === 'Villa'[\s\S]{0,320}car_entrance[\s\S]{0,200}sanitation/.test(advSrc));
+  /Villa:\s*\{\s*RentAnnual:\s*\['rnpl'/.test(cohortSrc)
+  && /Villa:\s*\{[\s\S]{0,400}Buy:\s*\[(?![^\]]*'rnpl')(?![^\]]*'furnished')[^\]]*\]/.test(cohortSrc)
+  // Multi-type safe since 2026-08-20: EVERY selected type must be Villa before the villa-form chips
+  // are offered — a Villa+Apartment scope must not inherit a chip only villa ads carry.
+  && /scope\.every\(\(ty\) => ty === 'Villa'\)[\s\S]{0,320}car_entrance[\s\S]{0,200}sanitation/.test(advSrc));
 
 check('RNPL + amenities + bathrooms are cohort-gated through cohortAllows',
   /RNPL_QUESTION[\s\S]{0,420}cohortAllows\(q, 'rnpl'\)/.test(advSrc)
   && /cohortAllows\(q, 'amenities'\)/.test(advSrc)
   && /cohortAllows\(q, 'bathrooms'\)/.test(advSrc)
-  && /function cohortAllows[\s\S]{0,700}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(advSrc));
+  && /export function cohortAllows[\s\S]{0,900}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(cohortSrc));
 
 // Mixed period ('both', owner 2026-08-19): cohortAllows must require BOTH RentAnnual and RentMonthly
 // membership — union would let a period-specific question fire against the other period's rows.
 // Full behavioral coverage lives in scripts/verify-mixed-period-af-gating.ts (mutation-tested); this
 // is a lighter structural check that the contract-level pool still routes 'both' through that gate.
 check("cohortAllows has an explicit 'both' branch (intersection of RentAnnual and RentMonthly), never aliasing to Annual",
-  /q\.rentPeriod === 'both'\) return \(cfg\.RentAnnual \?\? \[\]\)\.includes\(id\) && \(cfg\.RentMonthly \?\? \[\]\)\.includes\(id\)/.test(advSrc));
+  /q\.rentPeriod === 'both'\) return \(cfg\.RentAnnual \?\? \[\]\)\.includes\(id\) && \(cfg\.RentMonthly \?\? \[\]\)\.includes\(id\)/.test(cohortSrc));
 check('Furnished chip is cohort-gated — never offered where the cohort config withholds it',
   /cohortAllows\(q, 'furnished'\)\)\s*defs\.push\(\{\s*key:\s*'furnished'/.test(advSrc));
 

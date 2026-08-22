@@ -347,10 +347,16 @@ layer C, not in more HTTP searches.
 
 ### 40.2 Layer A — ~200 real browser journeys
 Drive the real site at `https://ezhalah-app.vercel.app`. Cover, across the run: **desktop AND
-mobile viewports** · Residential + Commercial · every property group · every property type · «شراء»
-· «إيجار» «سنوي» · «إيجار» «شهري» · «كلاهما» where supported · cities · districts · multi-district ·
-السعر · المساحة · غرف النوم · **Advanced Filter** · «عرض المزيد» · cards · click-through ·
-refresh/back state (§29) · new listings (§16).
+mobile viewports** · Residential + Commercial · every property group · every property type · **deal
+state: «شراء» alone · «إيجار» alone · «شراء»+«إيجار» combined (owner feature 2026-08-20, §17a) — a
+major certification of Filter/search/matching/Advanced-Filter/Trending/pagination/cards is
+INCOMPLETE without covering all three, never just the two single-deal states** · «إيجار» «سنوي» ·
+«إيجار» «شهري» · «كلاهما» where supported (combined mode has no period selector — its Rent side
+always spans both) · cities · districts · multi-district · السعر (independent Buy/Rent budgets under
+combined mode) · المساحة · غرف النوم · **Advanced Filter** (assert the 3-way Buy∩RentAnnual∩RentMonthly
+intersection under combined mode — no Buy-only/Rent-only/Monthly-only question ever appears) ·
+«عرض المزيد» · cards · click-through · refresh/back state (§29) · new listings (§16) · the full
+deal-transition matrix (Buy↔Rent, Buy↔Both, Rent↔Both, both directions).
 
 Budget: at ~16 s per param-fidelity journey and ~26 s per full journey (measured), ~200 journeys is
 roughly **1–1.5 hours** of browser time. Harvest the **request template** for every
@@ -361,7 +367,10 @@ Coverage-driven, never random or repetitive. A planner must track cell coverage 
 fill under-tested dimensions. Spread across: all live property types · all 13 regions · populated
 cities · populated districts · type × deal × period · price ranges · area ranges · bedroom values ·
 multi-filter combinations · zero-result cases · very small cohorts · large cohorts ·
-Annual/Monthly/Both isolation · **all enabled Advanced Filter cohorts, questions and options**.
+Annual/Monthly/Both isolation · **Buy-only / Rent-only / Buy+Rent-combined isolation, each
+independently — a cell grid that only varies type×region×period and holds deal fixed at one value
+under-covers the search space** · **all enabled Advanced Filter cohorts, questions and options**
+(under combined mode: only the 3-way-certified intersection).
 
 ### 40.4 What every search must prove
 1. **intended state = UI state = serialized/request state.** Read UI state from the app's OWN

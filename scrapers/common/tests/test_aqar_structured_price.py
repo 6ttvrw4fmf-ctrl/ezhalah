@@ -27,6 +27,21 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scrapers.aqar import enrich_residential as ER  # noqa: E402
+from scrapers.common.db import (  # noqa: E402
+    AUTHORITATIVE_NULL, _unknown_must_not_overwrite_known,
+)
+
+
+def _written_value(row: dict, col: str):
+    """What the upsert would actually SEND for `col` — the only question that matters.
+
+    Returns the sentinel ``_DROPPED`` when the key is removed (a read failure: the stored value
+    survives), or the value the guard leaves behind (a real NULL overwrites).
+    Owner decision 2026-08-22: only an AUTHORITATIVE absence may blank a stored price.
+    """
+    r = dict(row)
+    _unknown_must_not_overwrite_known(r)
+    return r[col] if col in r else "_DROPPED"
 
 
 def _page(listing: dict, *, prose: str = "") -> str:
@@ -74,7 +89,11 @@ def test_unpublished_price_stays_null_even_though_the_payload_carries_a_number()
     """`published: false` renders «طلب تسويق» — aqar shows no price, so neither do we."""
     row = _parse(_page({"id": 6600001, "price": 20000, "published": False, "rent_period": 3},
                        prose="طلب تسويق"))
-    assert row["price_annual"] is None
+    # aqar SETTLED it: no displayed price. That is authoritative, so it must overwrite a previously
+    # stored figure rather than be dropped — otherwise «طلب تسويق» can never take effect on a
+    # listing that once had a price (the aqar 6686450 defect, 2026-08-22).
+    assert row["price_annual"] is AUTHORITATIVE_NULL
+    assert _written_value(row, "price_annual") is None
 
 
 def test_no_price_at_source_is_not_filled_from_a_neighbouring_listing_card():
@@ -85,12 +104,14 @@ def test_no_price_at_source_is_not_filled_from_a_neighbouring_listing_card():
     """
     row = _parse(_page({"id": 6600001, "price": None, "published": True},
                        prose="2,000 § سنوي 2,400 § سنوي"))     # related-listing strip
-    assert row["price_annual"] is None
+    assert row["price_annual"] is AUTHORITATIVE_NULL
+    assert _written_value(row, "price_annual") is None
 
 
 def test_zero_price_is_absence_not_a_price():
     row = _parse(_page({"id": 6600001, "price": 0, "published": True}, prose=""))
-    assert row["price_annual"] is None
+    assert row["price_annual"] is AUTHORITATIVE_NULL
+    assert _written_value(row, "price_annual") is None
 
 
 # ── rent period: evidence or nothing ─────────────────────────────────────────────────────────────
@@ -290,3 +311,19 @@ def test_a_prose_instalment_equal_to_the_rent_is_dropped_not_published():
     row = _parse("<div>/rnpl/ 45,000 § سنوي ابتداءً من 45,000 § شهريا تفاصيل الإعلان</div>")
     assert row["price_annual"] == 45000
     assert row["rent_now_pay_later_monthly"] is None
+
+
+# ── the other direction: only an AUTHORITATIVE absence may blank a stored price ──────────────────
+
+def test_an_unreadable_payload_never_blanks_a_stored_price():
+    """A page whose payload we cannot read is not evidence of anything (owner rule 2026-08-13).
+
+    `_structured_price()` returns authoritative=False here, so the price key must be DROPPED from
+    the upsert and whatever we already had survives. This is the half that keeps a blocked fetch,
+    a proxy failure or a parser regression from erasing 200k verified prices.
+    """
+    row = _parse("<html><body>no payload here at all</body></html>")
+    if row is None:
+        pytest.skip("parser rejects a payload-less page outright, which is also safe")
+    assert row.get("price_annual") is not AUTHORITATIVE_NULL
+    assert _written_value(row, "price_annual") == "_DROPPED"

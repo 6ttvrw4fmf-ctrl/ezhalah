@@ -23,9 +23,15 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-function buildRepoMigrationVersions(migrationsDir) {
+// The one place that lists the repo's migration files, so no caller re-inlines its own dir scan
+// (the continuous drift checker and the duplicate-version detector both go through this).
+function listMigrationFiles(migrationsDir) {
   const dir = migrationsDir || path.join(__dirname, '..', 'supabase', 'migrations');
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql'));
+  return fs.readdirSync(dir).filter((f) => f.endsWith('.sql'));
+}
+
+function buildRepoMigrationVersions(migrationsDir) {
+  const files = listMigrationFiles(migrationsDir);
   const ids = new Set();
   for (const f of files) {
     const base = f.replace(/\.sql$/, '');
@@ -40,7 +46,7 @@ function buildRepoMigrationVersions(migrationsDir) {
   return [...ids].sort();
 }
 
-module.exports = { buildRepoMigrationVersions };
+module.exports = { buildRepoMigrationVersions, listMigrationFiles };
 
 if (require.main === module) {
   process.stdout.write(JSON.stringify({ p_repo_versions: buildRepoMigrationVersions() }));
