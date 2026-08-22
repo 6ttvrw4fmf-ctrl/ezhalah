@@ -245,3 +245,48 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
   committed answer as a removable pill. Removal is PURE recomputation: rebuild from the interview's
   baseQ by re-applying the remaining facets through each question's own `apply()` — never a
   hand-written inverse — then re-search immediately (no mining beat on removal).
+
+
+## Amendment 2026-08-22 — the narrowing gate (owner-approved, supersedes the 8%-90% option band)
+
+**Bug report that triggered this:** owner selected Villa + 6 Riyadh districts (~5,154 matches),
+answered/skipped through the interview, and it stopped after ~2 questions at ~1,874 remaining —
+while several more source-certified Villa questions (street width, direction, amenities…) existed
+and had genuinely never been asked. **"We still have thousands of listings" must never end in "but
+we ran out of questions to ask" while a valid, source-backed one exists.**
+
+**Root cause.** `scoreQuestion()`'s pre-2026-08-22 gate required every candidate question to have an
+option between 8% and 90% of the current scope, AND at least one option ≤ 75% — a *selectivity*
+requirement, not a *validity* one. Once 1-2 answers had already skimmed the cleanest splits off a
+large scope, the remaining unasked questions' real, source-backed options frequently fell outside
+that band (too small a minority, or too large a majority) and were entirely dropped — not ranked
+lower, REMOVED from the pool — even though picking them would still have genuinely narrowed the set.
+
+**The fix — separate ELIGIBILITY from ORDERING, permanently:**
+- **Eligibility** (may this question be asked at all): the scope must clear `MIN_TOTAL_TO_SHOW`
+  (unchanged), and the question must have at least `minOptionsFor(selection)` options where
+  `count < N` — i.e. an option that would actually change the result if picked. Every option here
+  already cleared the absolute per-option floor (`meaningful()`, `MIN_REAL_OPTION_COUNT = 5`)
+  upstream, so this is never a fabricated or thin option — only genuinely small or genuinely
+  lopsided ones are now included instead of hidden. An option where `count === N` (100% of the
+  current scope already has it) is correctly excluded — not for being unpopular, but because
+  selecting it is a no-op.
+- **Ordering** (which eligible question is asked first): unchanged — `score = bestSplit × salience`,
+  where `bestSplit` still peaks at a 50/50 split. A well-balanced question is still asked before a
+  lopsided one; a lopsided-but-real one is now asked LATER instead of never.
+- **Never affected:** the ≤ 25 stop rule (`INTERVIEW_STOP_AT`/`MIN_TOTAL_TO_SHOW`, unchanged — the
+  interview still closes once the remaining scope is small), the ask-first RNPL tier (still applied
+  only among questions that clear the gate above), cohort availability (`COHORT_QUESTIONS` —
+  unchanged; this amendment only touches whether an *available* question is *live-useful right now*),
+  and Skip semantics (still "no preference" — never a predicate, never false, unknowns stay eligible).
+- **This is not "ask every question no matter what."** A question with ZERO real narrowing option
+  (every value ties at `N`, or nothing clears the per-option floor) is still excluded — the gate
+  distinguishes "genuinely nothing to ask" from "asked in the wrong order for the current scope."
+  Reaching the end of a cohort's certified list with every remaining question honestly exhausted is
+  a correct stop, not a bug — the fix is that this must be the REAL reason, not a selectivity
+  side-effect.
+
+Regression: `scripts/verify-af-narrowing-gate.ts` calls `scoreQuestion()` directly (pure function,
+mutation-provable) with synthetic scopes proving (a) a 2%-share option that used to be dropped is now
+included, (b) a 97%-share-only option is included but scores below a balanced one, (c) a question
+where every option ties at `N` is still excluded, (d) ordering still favors the more balanced split.
