@@ -30,7 +30,7 @@ const home = readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf
 
 // ── 1. rehydration exists, in the right effect, correctly gated ──
 check('ensureCityFieldIndex .then receives the pool (rehydration source)',
-  home.includes('ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes).then((pool)'));
+  home.includes('ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then((pool)'));
 check('surviving-resolution path gated on persisted kind:city exact match',
   home.includes("lm.kind === 'city' && lm.exact === true"));
 check('rehydration gated on field text === verified label (edited/cleared text never rehydrates)',
