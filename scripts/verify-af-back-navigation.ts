@@ -167,6 +167,14 @@ check('re-validation keeps a skip, and drops only ineligible or zero-yield later
 check('a re-presented question re-resolves its option counts against the CURRENT scope',
   /fresh = await st\.question\.resolveOptions\(q0\)/.test(agentSrc)
   && /const options = fresh\?\.options\.length \? fresh\.options : st\.options;/.test(agentSrc));
+// Found live on production 2026-08-22: with the auto-advance gone, a user can sit on a SELECTED but
+// uncommitted option and leave via «عرض النتائج». That exit used to run finishGuided directly, so it
+// discarded the visible answer and landed on a different count than the chip had just promised
+// (10,945 delivered against a chip reading 2,488). Every exit now runs the ONE commit path.
+check('«عرض النتائج» commits the visible selection instead of discarding it',
+  /onPress=\{\(\) => onSkipAll\(sel\)\}/.test(cardSrc)
+  && /const onAgeSkipAll = \(keys: string\[\]\) => \{ void commitGuidedStep\(keys, true\); \}/.test(agentSrc)
+  && !/const onAgeSkipAll = \(\) => finishGuided/.test(agentSrc));
 check('the query is REBUILT from the record, never mutated in place by a handler',
   /deriveGuided\(ageFlowBaseQRef\.current, ageFlowStepsRef\.current, upTo\)/.test(agentSrc)
   && !/ageFlowQueryRef\.current = question\.apply\(/.test(agentSrc));
@@ -239,6 +247,10 @@ mustCatch('a handler mutating the query in place again',
 mustCatch('a re-presented step showing stale per-option counts',
   !/fresh = await st\.question\.resolveOptions\(q0\)/.test(
     mut(agentSrc, 'fresh = await st.question.resolveOptions(q0)', 'fresh = null')));
+mustCatch('«عرض النتائج» going back to discarding the visible selection',
+  /const onAgeSkipAll = \(\) => finishGuided/.test(
+    mut(agentSrc, /const onAgeSkipAll = \(keys: string\[\]\) => \{ void commitGuidedStep\(keys, true\); \}/,
+      'const onAgeSkipAll = () => finishGuided(ageFlowTokenRef.current);')));
 mustCatch('the restored answer no longer reaching the card',
   !/initialKeys=\{ageFlow\.initialKeys\}/.test(mut(agentSrc, 'initialKeys={ageFlow.initialKeys}', '')));
 

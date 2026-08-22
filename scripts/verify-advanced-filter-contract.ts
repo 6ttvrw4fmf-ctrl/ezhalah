@@ -217,8 +217,10 @@ check('«رجوع» renders on the question card and rides onBack',
 // CONTRACT CHANGE (owner 2026-08-16, conversational refresh): the always-available escape is a calm
 // «عرض النتائج» link — «The user must always be able to go straight to the properties … never feel
 // trapped in the interview.» No question-count arithmetic in the link anymore.
-check('the always-available escape link reads «عرض النتائج» and rides onSkipAll',
-  /onPress=\{onSkipAll\}/.test(cardSrc) && /skipAllTxt/.test(cardSrc));
+// Since 2026-08-22 the escape carries the VISIBLE selection with it — leaving must not land the
+// user on a different count than the chip beside the link was just promising.
+check('the always-available escape link reads «عرض النتائج» and rides onSkipAll with the selection',
+  /onPress=\{\(\) => onSkipAll\(sel\)\}/.test(cardSrc) && /skipAllTxt/.test(cardSrc));
 // Multi-select commits via «متابعة · N نتيجة» with the LIVE count (owner 2026-08-16 §4); single
 // keeps «عرض N نتيجة». Both numbers come from the same liveCount pipe — never a placeholder.
 check('multi-select primary reads Continue · {count} results with the live count',
