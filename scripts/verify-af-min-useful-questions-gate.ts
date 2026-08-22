@@ -87,27 +87,25 @@ check('presentGuided (the re-rank-after-every-answer continuation loop) contains
   presentGuidedBody.length > 0 && !presentGuidedBody.includes('MIN_USEFUL_QUESTIONS_TO_SHOW'),
   'the >=2 gate must apply ONLY at the opening decision in startAgeFlow — presentGuided already stops correctly at plan.length===0 (finishGuided), and must keep asking at exactly 1 remaining useful question');
 check('presentGuided still finishes (finishGuided) only when its own re-ranked plan is truly empty, not on any count threshold',
-  /if\s*\(plan\.length\)\s*\{[\s\S]{0,400}?return;\s*\}\s*finishGuided\(token\);/.test(presentGuidedBody));
+  /if \(!plan\.length\) \{ finishGuided\(token\); return; \}/.test(presentGuidedBody));
 
-// ── SKIP vs CONFIRM-WITH-EMPTY parity (brief's named suspicion — traced, found NOT diverging;
-// locked here so a future edit can't quietly split them). Both must, and only, (1) mark the question
-// asked and (2) advance to the next planIndex — CONFIRM must gate every OTHER effect (apply/
-// ageFlowChangedRef/facets) behind `keys.length`, so an empty confirm has zero side effects beyond
-// those two, identical to Skip.
-const onAgeConfirmBody = ag.match(/const onAgeConfirm = \(keys: string\[\]\) => \{[\s\S]*?\n  \};/)?.[0] ?? '';
+// ── SKIP vs CONFIRM-WITH-EMPTY parity (brief's named suspicion — traced, found NOT diverging).
+// Since the «رجوع» rebuild (owner 2026-08-22) this is no longer a parity that has to be checked
+// effect-by-effect: Skip and Confirm are THE SAME FUNCTION called with a different answer, and an
+// empty answer contributes nothing because the query is rebuilt from the record, which skips
+// empty-keyed steps outright. Asserted in that stronger form — plus the absence of any separate
+// skip-only side effect, so a future edit cannot re-split them.
+const onAgeConfirmLine = ag.match(/const onAgeConfirm = \(keys: string\[\]\) => \{[^\n]*\};/)?.[0] ?? '';
 const onAgeSkipLine = ag.match(/const onAgeSkip = \(\) => \{[^\n]*\};/)?.[0] ?? '';
 
-check('onAgeConfirm gates apply()/ageFlowChangedRef/facets behind `if (keys.length)` — an empty confirm applies NO predicate',
-  /if\s*\(keys\.length\)\s*\{\s*ageFlowQueryRef\.current = question\.apply\(q, keys\);\s*ageFlowChangedRef\.current = true;/.test(onAgeConfirmBody));
-check('onAgeConfirm marks the question asked and advances UNCONDITIONALLY (outside the keys.length guard) — same as Skip',
-  (() => {
-    const guardEnd = onAgeConfirmBody.indexOf('ageFlowAskedRef.current.add(question.id);');
-    const guardBlockEnd = onAgeConfirmBody.lastIndexOf('}', guardEnd); // the closing brace of `if (keys.length) {...}`
-    return guardEnd !== -1 && guardBlockEnd !== -1 && guardEnd > guardBlockEnd; // add() runs AFTER the guard closes, so unconditionally
-  })());
-check('onAgeSkip does exactly the two unconditional steps (mark asked, advance) and nothing else — no apply/changed/facets call',
-  /ageFlowAskedRef\.current\.add\(ageFlow\.question\.id\);\s*void presentGuided\(ageFlow\.planIndex \+ 1, ageFlowTokenRef\.current\);/.test(onAgeSkipLine)
-  && !/question\.apply|ageFlowChangedRef\.current = true|ageFlowFacetsRef/.test(onAgeSkipLine));
+check('Skip and Confirm are the SAME commit path — Skip is simply the empty answer',
+  /void commitGuidedStep\(keys\);/.test(onAgeConfirmLine) && /void commitGuidedStep\(\[\]\);/.test(onAgeSkipLine));
+check('neither Skip nor Confirm applies a predicate directly — the query is rebuilt from the record',
+  !/question\.apply|ageFlowChangedRef\.current = true|ageFlowFacetsRef\.current\.push/.test(onAgeConfirmLine + onAgeSkipLine)
+  && /const d = deriveGuided\(/.test(ag));
+check('an empty answer contributes no predicate (enforced in the shared derivation, not per handler)',
+  /if \(!st\.keys\.length\) continue;/.test(
+    readFileSync(join(import.meta.dirname, '..', 'src', 'lib', 'afSteps.ts'), 'utf8')));
 
 console.log(failures === 0
   ? '\n✓ AF 2+ useful-questions gate intact: correct threshold, correct wiring, continuation loop untouched, Skip = confirm-empty\n'

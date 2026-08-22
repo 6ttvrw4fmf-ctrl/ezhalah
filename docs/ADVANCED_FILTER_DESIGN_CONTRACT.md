@@ -208,8 +208,25 @@ free.
   **Skip = no preference**: nothing is filtered, no false is written, unknowns stay eligible.
 - `FURNISHED_QUESTION` (single, Rent-only) is true tri-state via `q.furnishedPref` → `p_furnished`;
   «غير مفروشة» counts EXPLICIT unfurnished only (`cnt_unfurnished` = furnished IS FALSE).
-- Single-select auto-advances ~260 ms after the tap (plain `setTimeout`, never an animation
-  callback). Multi stays select-then-confirm.
+- **Single tap = select ONLY; double tap = select + confirm + advance one** (owner 2026-08-22,
+  SUPERSEDES the 2026-08-11 ~260 ms auto-advance, which is now banned). The user must be able to see
+  the picked row and the recomputed count before committing. Both taps run through the SAME single
+  `onPress` path — there is deliberately no second double-click/long-press handler, so a double tap
+  can never fire "select" and "advance" as competing handlers and skip two questions; and a single
+  tap is never delayed waiting to see whether another follows. Multi is select-then-«متابعة» only.
+- **«رجوع» on every question** (owner 2026-08-22). It steps back exactly one question and restores
+  that question's recorded answer — including restoring a skip AS a skip (open, no predicate).
+  From the FIRST question it leaves the interview and hands the pre-AF controls back
+  («خلّنا نحدد الطلب أكثر» + «عرض المزيد»), which is automatic: that row is gated on `!ageFlow`.
+- **The interview is ONE ordered step record** (`ageFlowStepsRef`), and query/asked/labels/facets are
+  DERIVED from it by `syncGuidedFromSteps(cursor)` — the query is rebuilt from `baseQ` by re-applying
+  the steps *before* the cursor, never un-applied by a per-question inverse. This is what makes "no
+  stale hidden predicate" structural: a changed or dropped answer simply stops contributing to the
+  rebuild, and an appending answer (amenities) cannot accumulate twice from being re-answered.
+- **Changing an earlier answer re-validates every later one** (`revalidateStepsAfter`): a later
+  answer is KEPT if its question is still eligible for the new scope and its keys still select
+  something (live count > 0), and DROPPED only if it has become incompatible. A skip is always kept —
+  it carries no predicate.
 - No numeric «Question N of M» caption — the denominator legitimately changes as the set narrows;
   the thin bar and the shrinking live count are the only progress signals.
 - Normal-Filter territory (location, deal, period, category/type, price, size, **bedrooms**) is
@@ -235,8 +252,9 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
   للإعلانات الحالية» — replaces the technical unknown-count phrasing. No coverage/NULL/backend
   language anywhere user-facing.
 - **Micro-motion, reduced-motion-safe.** Press compression, check fade/scale, count settle, question
-  fade-rise. Decoration only: every hand-off (auto-advance, mining dismissal) is a plain
-  `setTimeout`, never an animation callback (`src/lib/afterAnimation.ts`).
+  fade-rise. Decoration only: every hand-off (mining dismissal, and the double-tap threshold, which
+  is a timestamp comparison rather than a timer) never rides an animation callback
+  (`src/lib/afterAnimation.ts`).
 - **The mining transition.** After the interview commits ≥1 answer, the «digging through the market»
   beat plays over the final search: fragments drift inward, copy uses REAL numbers («نراجع N عقار
   ونطلع لك الأنسب» → «لقينا N عقار أقرب لطلبك»), minimum ~1.4 s, dismissed by setTimeout latches
