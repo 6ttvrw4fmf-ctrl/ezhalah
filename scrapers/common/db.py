@@ -490,6 +490,38 @@ _CONTROL_COLS = frozenset({
 })
 
 
+class _AuthoritativeNull:
+    """The source AFFIRMATIVELY states this field has NO value. Not "we could not read it".
+
+    Owner decision 2026-08-22, after aqar ad 6686450 was served at 500,000 SAR while the source
+    rendered «طلب تسويق». `_unknown_must_not_overwrite_known()` could not tell three different
+    situations apart and treated all of them as "unknown", so the source's own statement that a
+    listing has no price could never take effect once a price had ever been stored:
+
+        1. AUTHORITATIVE ABSENCE — the payload says so (aqar `published:false`, or a `price` key
+           that is present and not a number). Only THIS may overwrite a known value with NULL.
+        2. READ FAILURE — the fetch failed, was blocked, or the field could not be parsed.
+        3. INCONCLUSIVE — the payload was unreadable or lacks the key entirely.
+
+    2 and 3 stay exactly as they were: the key is dropped and the stored value survives. There is no
+    way to construct this sentinel by accident — a missing dict key, a None, a failed parse and an
+    exception all produce None, never this object. A writer has to name it deliberately, and it is
+    only ever named where the source itself settled the question.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:            # pragma: no cover - debugging aid only
+        return "AUTHORITATIVE_NULL"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+#: Sentinel a scraper assigns INSTEAD of None when the source states there is no value.
+AUTHORITATIVE_NULL = _AuthoritativeNull()
+
+
 def _unknown_must_not_overwrite_known(r: dict[str, Any]) -> None:
     """SOURCE IS TRUTH — a field this fetch could not read must not erase what a previous fetch did.
 
@@ -511,11 +543,19 @@ def _unknown_must_not_overwrite_known(r: dict[str, Any]) -> None:
     prune/reactivate/kill paths break.
 
     The cost is deliberate and was chosen with eyes open: a value the source has genuinely RETRACTED
-    lingers until a later crawl reads a new one. Retracting on the strength of one silent fetch is
-    the more dangerous error, and retirement is a job for corroborated evidence across fetches.
+    lingers until a later crawl reads a new one — UNLESS the source itself states the value is gone,
+    which is what `AUTHORITATIVE_NULL` is for (owner decision 2026-08-22). A writer that passes the
+    sentinel is saying "the source settled this", and only then is NULL written. Everything that
+    merely FAILED still produces None, and None is still dropped.
     """
-    for col in [c for c, v in r.items() if v is None and c not in _CONTROL_COLS]:
-        del r[col]
+    for col, v in list(r.items()):
+        if isinstance(v, _AuthoritativeNull):
+            # The source spoke. Write the NULL — even over a previously known value. Control columns
+            # take this path too: they were always writable, so nothing changes for them.
+            r[col] = None
+        elif v is None and col not in _CONTROL_COLS:
+            # Could not read it / not in the payload. Drop the key so the stored value survives.
+            del r[col]
 
 
 def _ensure_capture(r: dict[str, Any]) -> None:
