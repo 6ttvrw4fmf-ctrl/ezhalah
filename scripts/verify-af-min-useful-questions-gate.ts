@@ -21,7 +21,7 @@
 //
 //   node --experimental-strip-types scripts/verify-af-min-useful-questions-gate.ts   (wired into `npm test`)
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
@@ -51,8 +51,14 @@ check('MIN_USEFUL_QUESTIONS_TO_SHOW is declared, exported, and exactly 2 (owner:
 // no re-filtering that could silently redefine "useful" a second, disagreeing way.
 check('scoreQuestion remains the sole "useful" gate — rankQuestions pushes a question onto `ranked` only when scoreQuestion(...) is non-null',
   /const scored = scoreQuestion\(question, probes\[i\]\);\s*if \(scored\) ranked\.push/.test(adv));
+// scoreQuestion's OWN body (the N < MIN_TOTAL_TO_SHOW check) lives in src/data/advancedFilters.ts
+// directly, OR — after PR #914's pure-module extraction (src/lib/afRanking.ts, 2026-08-22) — in
+// afRanking.ts, with advancedFilters.ts keeping a thin same-signature wrapper. Either shape is
+// correct; what must never happen is the check disappearing from BOTH.
+const afRankingPath = join(root, 'src/lib/afRanking.ts');
+const afRankingSrc = existsSync(afRankingPath) ? codeOnly(readFileSync(afRankingPath, 'utf8')) : '';
 check('scoreQuestion itself is unmodified by this change: N < MIN_TOTAL_TO_SHOW still returns null (the existing, separate result-count gate)',
-  /if \(N < MIN_TOTAL_TO_SHOW\) return null;/.test(adv));
+  /if \(N < MIN_TOTAL_TO_SHOW\) return null;/.test(adv) || /if \(N < MIN_TOTAL_TO_SHOW\) return null;/.test(afRankingSrc));
 
 // ── agent.tsx WIRING — source-text (agent.tsx cannot be imported by a plain Node runner) ───────────
 const ag = codeOnly(read('src/app/agent.tsx'));
