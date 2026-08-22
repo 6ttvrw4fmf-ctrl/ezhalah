@@ -757,31 +757,35 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
         if (periodTok !== null) args.p_rent_period = periodTok;
         if (category !== null) args.p_category = category;
         if (types && types.length) args.p_types = types;
-        // ADVANCED answers (owner rule 2026-08-22). top_cities_by_deal_ar gained the AF parameters
-        // in migration 20260822_top_cities_by_deal_ar_understands_advanced_filter; before that the
-        // chip count was pre-AF BY CONSTRUCTION — the RPC had nowhere to put an answered question.
+        // EVERY narrowing the user has chosen — advanced answers AND the normal filters (bedrooms,
+        // price, area, combined-mode rent budget). `af` is rpcAllNarrowingParams(query): one object,
+        // so a future filter reaches Trending automatically instead of waiting to be remembered here.
+        // (Owner rule 2026-08-22: Trending IS the location breakdown of the user's eligible set.)
         Object.assign(args, af ?? {});
-        const hasAf = Object.keys(af ?? {}).length > 0;
+        // "Is the user narrowed at all?" — gates every widening fallback below. Named for what it
+        // now means; it covers bedrooms/price/area since 2026-08-22, not just advanced answers.
+        const hasNarrowing = Object.keys(af ?? {}).length > 0;
         let res = await supabase.rpc('top_cities_by_deal_ar', args).abortSignal(_ac.signal);
-        if (res.error && types && types.length) {
+        // EVERY fallback below WIDENS the scope, so each is gated on the user not being narrowed:
+        // a widened count under an active filter is exactly the overstatement this fix removes, and
+        // it fails silently because a fallback looks like a success. Narrowed + error ⇒ no count.
+        if (res.error && !hasNarrowing && types && types.length) {
           // pre-p_types signature: drop the cohort types (counts widen to the category scope)
           const { p_types: _droppedTypes, ...noTypes } = args;
           res = await supabase.rpc('top_cities_by_deal_ar', noTypes).abortSignal(_ac.signal);
         }
-        if (res.error && category !== null) {
+        if (res.error && !hasNarrowing && category !== null) {
           // TODO(pending migration 2026-08-14): top_cities_by_deal_ar is gaining `p_category text
           // default null` — until that migration is applied everywhere, an older signature rejects
           // the arg; drop it (counts fall back to the pre-category scope) rather than going blank.
           const { p_category: _dropped, ...noCat } = args;
           res = await supabase.rpc('top_cities_by_deal_ar', noCat).abortSignal(_ac.signal);
         }
-        // LAST-RESORT FALLBACK IS AF-GATED. The deal-only call drops every advanced answer, so on a
-        // pre-AF backend it would hand back exactly the overstated numbers this fix exists to remove
-        // — and silently, because a fallback looks like a success. Once an advanced question is
-        // answered, no count is strictly better than a wrong one (owner: "No pre-AF count is allowed
-        // once AF answers exist"), so the field goes empty and cityPoolStatus reports 'error'
-        // instead of showing a fabricated chip.
-        if (res.error && periodTok !== null && !hasAf) {
+        // LAST-RESORT FALLBACK, same gate. The deal-only call drops every narrowing, so under an
+        // active filter it would hand back exactly the overstated numbers this fix exists to remove.
+        // No count is strictly better than a wrong one (owner): the field goes empty and
+        // cityPoolStatus reports 'error' instead of showing a fabricated chip.
+        if (res.error && periodTok !== null && !hasNarrowing) {
           res = await supabase.rpc('top_cities_by_deal_ar', { p_deal: dealAr(deal) }).abortSignal(_ac.signal);
         }
         data = res.data;
