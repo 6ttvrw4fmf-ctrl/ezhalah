@@ -494,7 +494,7 @@ class _AuthoritativeNull:
     """The source AFFIRMATIVELY states this field has NO value. Not "we could not read it".
 
     Owner decision 2026-08-22, after aqar ad 6686450 was served at 500,000 SAR while the source
-    rendered «طلب تسويق». `_unknown_must_not_overwrite_known()` could not tell three different
+    rendered «طلب تسويق». The no-clobber guard below could not tell three different
     situations apart and treated all of them as "unknown", so the source's own statement that a
     listing has no price could never take effect once a price had ever been stored:
 
