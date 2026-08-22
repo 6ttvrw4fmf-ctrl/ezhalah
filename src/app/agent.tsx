@@ -40,7 +40,7 @@ import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { openListing } from '@/lib/openListing';
-import { filterToChat, searchSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, type SearchQuery, type SearchResult } from '@/data/search';
+import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups } from '@/lib/searchDefaults';
 import { BROWSE_CAP, resultCounts } from '@/data/resultCount';
@@ -1989,7 +1989,7 @@ export default function Agent() {
                   {guidedPills && guidedPills.msgId === m.id && guidedPills.facets.length ? (
                     <View style={{ alignSelf: 'stretch', gap: 7, marginTop: 2 }}>
                       <Text style={[s.guidedBasedOn, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
-                        {t('Based on: {labels}', { labels: guidedPills.facets.flatMap((f) => f.labels).join(' · ') })}
+                        {buildAfSummary(guidedPills.facets)}
                       </Text>
                       <View style={[s.guidedPillRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
                         {guidedPills.facets.map((f, i) => (
