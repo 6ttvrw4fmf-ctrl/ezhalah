@@ -171,7 +171,14 @@ check(
 );
 check(
   'NEW (owner request 2026-07-20, extended 2026-07-21 to also gate on rent-period change, 2026-08-14 on category, 2026-08-20 on dealCombined via effDeal): flipping Buy<->Rent, Monthly<->Yearly or Residential<->Commercial live-refreshes an already-open Top-6 list instead of leaving a stale ranking on screen',
-  /\}, \[effDeal, rentPeriodTok, effCategory, cohortTypesSig, cityAfSig\]\);/.test(indexSrc) && /else if \(cityFocus\) \{\s*setCitySuggestions\(topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)\);/.test(indexSrc),
+  // The warm/REHYDRATE effect is keyed on deal/period/category/types. cityAfSig deliberately is NOT
+  // in this list any more (2026-08-22): it made the effect — which also rehydrates citySelected —
+  // re-run on every bedroom/price/area edit, and a mid-flight rehydration left the form in a state
+  // where «بحث» issued no search at all (caught by the web-runtime smoke test). Narrowing-driven
+  // count refreshes moved to their OWN effect below, which never touches citySelected.
+  /\}, \[effDeal, rentPeriodTok, effCategory, cohortTypesSig\]\);/.test(indexSrc)
+  && /\}, \[cityAfSig, cityFocus\]\);/.test(indexSrc)
+  && /else if \(cityFocus\) \{\s*setCitySuggestions\(topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)\);/.test(indexSrc),
 );
 check('onChangeText clears citySelected on every keystroke (never silently reuses a stale pick)', /onChangeText=\{\(v\) => \{[\s\S]{0,300}?setCitySelected\(null\)/.test(indexSrc));
 check('onSearch blocks when citySelected is falsy, using CITY_REQUIRED_MSG (never calls the old free-text resolveLocation guessing path)', /if \(!citySelected\) \{[\s\S]{0,600}?setLocMsg\(CITY_REQUIRED_MSG\);[\s\S]{0,600}?return;/.test(indexSrc));
