@@ -1376,9 +1376,18 @@ export default function Home() {
                             // narrower filter is active and this district's LIVE eligible count is 0,
                             // say so in Arabic — same message the typed list already uses — instead of
                             // presenting a popular-at-category-scope district that would dead-end.
+                            // THE NUMBER MUST BE THE ONE THE USER WILL LAND ON (owner 2026-08-22).
+                            // districtLiveCounts is this district's count under the FULL current
+                            // filter state, fetched from the results RPC itself; opt.listingCount is
+                            // only the deal/category/period SCOPE count. Until now the live value was
+                            // consulted solely to detect zero, so a narrowed search still displayed the
+                            // scope number — measured live with 3 beds + 120-180 m² + 70k-100k, حي
+                            // النرجس advertised 1,064 while the whole CITY had 705 eligible listings.
+                            // Prefer the live count whenever it exists; fall back to the scope count
+                            // only when no narrowing is active (there the two are equal by definition).
                             sublabel: districtLiveCounts?.[opt.districtAr] === 0
                               ? t('No listings here right now')
-                              : cohortCountLabel(opt.listingCount),
+                              : cohortCountLabel(districtLiveCounts?.[opt.districtAr] ?? opt.listingCount),
                             icon: LOC_IMG.district, // restored designed art (see TrendingList.tsx note)
                           }))}
                           onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
@@ -1409,10 +1418,13 @@ export default function Home() {
                           <Image source={LOC_IMG.district} style={[s.suggLocIcon, isEmpty && s.suggIconEmpty]} />
                           <View style={{ flex: 1 }}>
                             <Text style={[s.suggCity, isEmpty && s.suggCityEmpty]}>{opt.districtAr}</Text>
+                            {/* Same rule as the trending rows above: show the count the user will
+                                actually land on (live, under the full filter state) whenever it has
+                                been fetched, never the wider deal/category scope count. */}
                             {isEmpty
                               ? <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text>
-                              : (cohortCountLabel(opt.listingCount)
-                                  ? <Text style={s.suggDist}>{cohortCountLabel(opt.listingCount)}</Text>
+                              : (cohortCountLabel(live ?? opt.listingCount)
+                                  ? <Text style={s.suggDist}>{cohortCountLabel(live ?? opt.listingCount)}</Text>
                                   : null)}
                           </View>
                           {isPicked ? <Ionicons name="checkmark-circle" size={18} color={colors.primary} /> : null}
