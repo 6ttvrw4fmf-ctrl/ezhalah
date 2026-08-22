@@ -15,7 +15,7 @@ import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, type SearchQuery } from '@/data/search';
-import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAdvancedFilterParams } from '@/data/remote';
+import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -197,26 +197,32 @@ export default function Home() {
   const effCategory: Category = query.category ?? IMPLIED_CATEGORY_DEFAULT;
   // The cohort's Arabic types — the EXACT array the search RPC receives (one shared definition in
   // remote.ts), so Trending cities/districts, their counts, and their percentages always describe
-  // the same inventory pressing Search returns. Price is deliberately absent (owner, 2026-08-15).
+  // the same inventory pressing Search returns.
   const cohortTypes = cohortTypesAr(query);
   const cohortTypesSig = cohortTypes ? cohortTypes.join('|') : '';
-  // The advanced answers, in the SAME shape the search RPC receives (rpcAdvancedFilterParams is the
-  // one shared definition — the district counts and the results call both use it). Trending CITY
-  // counts were pre-AF by construction until 2026-08-22: top_cities_by_deal_ar had no advanced
-  // parameters at all, so an answered question could not reach the chip and the number shown was a
-  // different quantity from the number clicking it returns. Owner rule: they must be equal.
-  // Memoised on the answers themselves, so a changed answer produces a new object identity, a new
-  // city-pool cache key, and a refetch — the stale-cache half of the same defect.
-  const cityAfParams = useMemo(() => rpcAdvancedFilterParams(query), [
-    query.amenities, query.bathMin, query.furnishedPref, query.streetWidthMin, query.directions,
-    query.ratingMin, query.reviewsMin, query.unitSubtypes, query.ageMin, query.ageMax,
-    query.isNewConstruction,
-  ]);
-  // Stable string form for the reactive-refresh effect's dependency list. An object identity would
-  // work for the cache key but not here: the effect below must re-run when an ANSWER changes, the
-  // same way it already does for deal/period/category/types, or an already-open Top-6 list keeps
-  // showing the pre-answer ranking and counts.
-  const cityAfSig = JSON.stringify(cityAfParams);
+  // EVERY predicate the user has already chosen, in the SAME shape the search RPC receives — the
+  // advanced answers AND the normal narrowing (bedrooms, price, area, combined-mode rent budget).
+  //
+  // OWNER RULE (2026-08-22, supersedes the 2026-08-15 "price is deliberately absent" scoping):
+  // «Trending is not a generic location suggestion. It is the location breakdown of the user's exact
+  // current eligible set.» The number beside a city must be "listings matching EVERYTHING I picked,
+  // in that city" — not the type/deal total for that city.
+  //
+  // Measured live on production BEFORE this fix, Apartment + Rent + Annual + 3 bedrooms:
+  // picking the bedroom count changed NOTHING — الرياض stayed 10,618 against a truth of 3,863 — and
+  // every top_cities_by_deal_ar request went out with beds/area/price all null. Adding the owner's
+  // full example (+120-180 m² +70k-100k) the truth is 705: a 15x overstatement, and جدة 78x, مكة 708x.
+  //
+  // IDENTITY IS KEYED ON THE CONTENT, NOT A HAND-WRITTEN DEP LIST. The params are derived from many
+  // query fields (bedroomTokens alone reads type, detail, types and beds), so an explicit dependency
+  // array is a standing invitation to forget one — which is precisely the defect being fixed here.
+  // Recomputing each render is cheap; memoising on the SIGNATURE gives a stable object identity that
+  // changes if and only if a real predicate changed, so the pool cache key and the refresh effect
+  // below can never serve a count for a filter state the user has already left.
+  const cityAfRaw = rpcAllNarrowingParams(query);
+  const cityAfSig = JSON.stringify(cityAfRaw);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const cityAfParams = useMemo(() => cityAfRaw, [cityAfSig]);
   // «N إعلان» — how many ACTIVE listings this option really has, in the current cohort.
   //
   // The share percentage that used to trail this label («… · 38٪») was REMOVED on owner instruction
@@ -344,7 +350,6 @@ export default function Home() {
   // "Rent budget (annual)" under Rent-only — so it must be cleared exactly when a toggle press
   // flips WHICH deal that pair currently prices, never on a press that keeps the same meaning
   // (Buy-only→Both keeps meaning Buy; Both→Buy keeps meaning Buy — no clear either time).
-  const [dealPriceCleared, setDealPriceCleared] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   // Share button press feel — reuses ModeSwitch's own spring constants (stiffness 260, damping 26,
   // mass 0.7) so the header's two controls share one motion language (design review 2026-07-24).
@@ -951,7 +956,6 @@ export default function Home() {
                       const nextAppliesTo = nextFields.dealCombined ? 'Buy' : nextFields.deal;
                       const flips = prevAppliesTo !== nextAppliesTo;
                       const leavingCombined = q.dealCombined && !nextFields.dealCombined;
-                      setDealPriceCleared(flips);
                       return {
                         ...q,
                         ...nextFields,
@@ -967,8 +971,15 @@ export default function Home() {
                 />
               ))}
             </View>
-            {dealPriceCleared && !query.priceMin && !query.priceMax && !query.priceInput ? (
-              <Text style={[s.rangeNote, s.rangeNoteWarn]}>{t('Price limits were cleared because Buy/Rent changed which budget they meant — please re-enter them.')}</Text>
+            {/* Deal-pair helper (owner 2026-08-22). The old note here was a RED WARNING that fired
+                whenever the price basis flipped — which includes the ordinary Buy→Rent switch, so a
+                user who simply wanted Rent got a scary "limits were cleared" message about a budget
+                they had usually never typed. Buy-only and Rent-only now say NOTHING. The only state
+                that genuinely needs explaining is the combined one, where the two deals really do
+                keep SEPARATE budgets (Buy budget + Rent budget boxes below), and that is said once,
+                calmly, in muted helper type — never as an error. The clearing LOGIC is unchanged. */}
+            {query.dealCombined ? (
+              <Text style={s.rangeNote}>{t('When you choose Buy and Rent together, each one has its own budget.')}</Text>
             ) : null}
 
             <View ref={withAnchor(cityAnchorRef)} />
@@ -1531,7 +1542,7 @@ export default function Home() {
                               area ≤ 7 digits (9,999,999 م²), price ≤ 10 digits (9,999,999,999 ر.س). maxLength counts
                               the GROUPED display (digits + commas) and stops TYPING early; the .slice() in onChangeText
                               hard-caps the stored digits too, covering PASTE (maxLength can't police programmatic sets). */}
-                          <TextInput ref={mergeLtrRef(areaMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
+                          <TextInput testID="area-min-input" ref={mergeLtrRef(areaMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
                             value={areaMinValue}
                             onKeyPress={wholeNumberKeyGuard('areaMin')} onFocus={() => clearFracLock('areaMin')} onSelectionChange={() => clearFracLock('areaMin')} onChangeText={(v) => { clearFracLock('areaMin'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
@@ -1539,7 +1550,7 @@ export default function Home() {
                         <Pressable style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(areaMaxRef)}>
                           <Image source={RANGE_ICON.areaTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
                           <Text style={s.rangeLabel}>{t('To')}</Text>
-                          <TextInput ref={mergeLtrRef(areaMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
+                          <TextInput testID="area-max-input" ref={mergeLtrRef(areaMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
                             value={areaMaxValue}
                             onKeyPress={wholeNumberKeyGuard('areaMax')} onFocus={() => clearFracLock('areaMax')} onSelectionChange={() => clearFracLock('areaMax')} onChangeText={(v) => { clearFracLock('areaMax'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
@@ -1564,7 +1575,7 @@ export default function Home() {
                     <Pressable style={[s.field, s.rangeBox, query.priceMin ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(priceMinRef)}>
                       <Image source={RANGE_ICON.priceFrom} style={s.rangeBoxIcon} accessibilityLabel={t('From')} />
                       <Text style={s.rangeLabel}>{t('From')}</Text>
-                      <TextInput ref={mergeLtrRef(priceMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
+                      <TextInput testID="price-min-input" ref={mergeLtrRef(priceMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
                         value={priceMinValue}
                         onKeyPress={wholeNumberKeyGuard('priceMin')} onFocus={() => clearFracLock('priceMin')} onSelectionChange={() => clearFracLock('priceMin')} onChangeText={(v) => { clearFracLock('priceMin'); const d = toWholeNumberDigits(v).slice(0, 10); setQuery((q) => ({ ...q, priceMin: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
@@ -1572,7 +1583,7 @@ export default function Home() {
                     <Pressable style={[s.field, s.rangeBox, query.priceMax ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(priceMaxRef)}>
                       <Image source={RANGE_ICON.priceTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
                       <Text style={s.rangeLabel}>{t('To')}</Text>
-                      <TextInput ref={mergeLtrRef(priceMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
+                      <TextInput testID="price-max-input" ref={mergeLtrRef(priceMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
                         value={priceMaxValue}
                         onKeyPress={wholeNumberKeyGuard('priceMax')} onFocus={() => clearFracLock('priceMax')} onSelectionChange={() => clearFracLock('priceMax')} onChangeText={(v) => { clearFracLock('priceMax'); const d = toWholeNumberDigits(v).slice(0, 10); setQuery((q) => ({ ...q, priceMax: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
