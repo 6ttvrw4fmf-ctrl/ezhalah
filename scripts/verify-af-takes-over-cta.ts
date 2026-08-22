@@ -20,6 +20,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const src = readFileSync(join(import.meta.dirname, '..', 'src', 'app', 'agent.tsx'), 'utf8');
+// The interview's state rules moved into a pure module (owner 2026-08-22, «رجوع») so a barrier can
+// execute them; Skip's "writes no predicate" guarantee now lives there, so read both.
+const stepsSrc = readFileSync(join(import.meta.dirname, '..', 'src', 'lib', 'afSteps.ts'), 'utf8');
 const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
 
 let failures = 0;
@@ -55,8 +58,12 @@ check('closing the flow restores the CTA by setting ageFlow back to null',
   'if close did not null ageFlow the CTA row would never come back');
 
 // ── unchanged product logic (this was a UI gate, not a redesign) ─────────────────────────────────
-check('Skip still advances the plan without applying a restriction',
-  /onAgeSkip = \(\) => \{[^}]*ageFlowAskedRef\.current\.add\(ageFlow\.question\.id\)[^}]*presentGuided\(ageFlow\.planIndex \+ 1/.test(code),
+// Skip now rides the SAME commit path as an answer, with an EMPTY answer (owner 2026-08-22) — so
+// it is recorded on the step (walking Back restores it AS a skip) while still contributing no
+// predicate, because the query rebuild skips empty-keyed steps outright.
+check('Skip still advances without applying a restriction, and stays recorded as open',
+  /onAgeSkip = \(\) => \{ void commitGuidedStep\(\[\]\); \}/.test(code)
+  && /if \(!st\.keys\.length\) continue;/.test(stepsSrc),
   'Skip must keep meaning "no preference", never a filter');
 check('the AF card still receives its live count callback',
   /liveCount=\{\(keys\) =>/.test(code) && /liveResultCount\(/.test(code),

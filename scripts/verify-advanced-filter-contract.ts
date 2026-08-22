@@ -47,8 +47,15 @@ check('the pool contains all five questions and rankQuestions re-ranks it contex
   && /INTERVIEW_STOP_AT = 25/.test(rankingSrc)
   && /MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT \+ 1/.test(rankingSrc)
   && /INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW/.test(advSrc));
+// MECHANISM CHANGE (owner 2026-08-22, «رجوع»): asked-tracking is no longer an incremental
+// `.add()` on a Set that only ever grows — it is DERIVED from the ordered step record by
+// syncGuidedFromSteps(cursor), so walking Back genuinely un-asks the steps behind the cursor
+// instead of leaving them permanently marked. Same guarantee (never re-ask what is still
+// committed), now reversible. Pinned in both directions: derived, and never re-grown by hand.
 check('the orchestrator re-ranks after every answer and tracks asked questions (never re-asks)',
-  /rankQuestions\(q, ageFlowAskedRef\.current\)/.test(agentSrc) && /ageFlowAskedRef\.current\.add\(/.test(agentSrc));
+  /rankQuestions\(q, ageFlowAskedRef\.current\)/.test(agentSrc)
+  && /ageFlowAskedRef\.current = new Set\(/.test(agentSrc)
+  && !/ageFlowAskedRef\.current\.add\(/.test(agentSrc));
 // ASK-FIRST TIER (owner 2026-08-15): installments is the PREFERRED opening question, and only that.
 // The tier must reorder ONLY questions that already passed scoreQuestion()'s usefulness gates — it
 // must never bypass them, or a scope with too little installment coverage would be asked a useless
@@ -196,8 +203,17 @@ check('progress is animated and shared',
 // thin animated bar stays as the only progress signal.
 check('no numeric Question-N-of-M caption renders (subtle bar only)',
   !/Question \{cur\} of \{total\}/.test(cardSrc));
-check('single-select auto-advances after a short hold via plain setTimeout (never an animation callback)',
-  /setTimeout\(\(\) => onConfirm\(next\), 260\)/.test(cardSrc));
+// CONTRACT CHANGE (owner 2026-08-22): the ~260 ms single-select auto-advance is GONE. A single tap
+// selects only — the user must see the pick and the recomputed count before committing — and a
+// second tap on the same option within DOUBLE_TAP_MS confirms. Asserted in BOTH directions so the
+// old behaviour cannot creep back: no confirm-on-a-timer anywhere, and the double-tap path present.
+check('a single tap NEVER auto-advances (no timer-driven onConfirm)',
+  !/setTimeout\([^)]*onConfirm/.test(cardSrc) && !/onConfirm\([^)]*\),\s*\d+\s*\)/.test(cardSrc));
+check('double tap on the same option confirms, via the SAME onPress path (no rival dbl handler)',
+  /DOUBLE_TAP_MS/.test(cardSrc) && /lastTapRef/.test(cardSrc) &&
+  !/onDoubleClick|onLongPress|doubleTapHandler/.test(cardSrc));
+check('«رجوع» renders on the question card and rides onBack',
+  /testID="af-back"/.test(cardSrc) && /onPress=\{onBack\}/.test(cardSrc) && /t\('Back'\)/.test(cardSrc));
 // CONTRACT CHANGE (owner 2026-08-16, conversational refresh): the always-available escape is a calm
 // «عرض النتائج» link — «The user must always be able to go straight to the properties … never feel
 // trapped in the interview.» No question-count arithmetic in the link anymore.

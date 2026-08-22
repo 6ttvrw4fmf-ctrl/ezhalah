@@ -73,16 +73,28 @@ check('speech rate is the measured, documented value (1.3 — natural-pace-tuned
 //    the SAME order shown on screen, capped, never reading raw/internal fields. ─────────────────────
 check("script opens with the intro word 'إزهله' followed by a pause before anything else", /const INTRO_WORD = 'إزهله';/.test(readAloudScript) && /segments: ReadAloudSegment\[\] = \[\{ text: INTRO_WORD, pauseAfterMs: PAUSE_MS \}\];/.test(readAloudScript));
 check('the summary is spoken next (second segment), also followed by a pause', /if \(summary\) segments\.push\(\{ text: summary, pauseAfterMs: PAUSE_MS \}\);/.test(readAloudScript));
-check('cards are appended AFTER intro+summary, via Array.forEach over the listings array (preserves on-screen order — never re-sorted)', /capped\.forEach\(\(listing, i\) => \{\s*segments\.push\(\{ text: cardSpeech\(listing\)/.test(readAloudScript));
-check('no pause is added after the LAST card (nothing trails a natural end)', /pauseAfterMs: i < capped\.length - 1 \? PAUSE_MS : 0/.test(readAloudScript));
-check('a hard cap exists on how many cards are spoken, applied via .slice() (bounded, not "all of them")', /export const READ_ALOUD_CARD_CAP = 5;/.test(readAloudScript) && /visibleListings\.slice\(0, READ_ALOUD_CARD_CAP\)/.test(readAloudScript));
+check('cards are appended AFTER intro+summary, via Array.forEach over the listings array (preserves on-screen order — never re-sorted)', /visibleListings\.forEach\(\(listing, i\) => \{\s*segments\.push\(\{ text: cardSpeech\(listing\)/.test(readAloudScript));
+check('no pause is added after the LAST card (nothing trails a natural end)', /pauseAfterMs: i < visibleListings\.length - 1 \? PAUSE_MS : 0/.test(readAloudScript));
+// NO CAP (owner request, 2026-08-22: "it doesn't do it for all the cards... do it all" — the old
+// READ_ALOUD_CARD_CAP=5 stopped short). Every visible card is spoken now; the only bound left is the
+// caller's own reveal-count slice (checked next), never a second, stricter one in the script itself.
+check('no card cap remains in the script — every visibleListings entry is spoken, not a .slice()-bounded subset', !/READ_ALOUD_CARD_CAP/.test(readAloudScript) && !/visibleListings\.slice\(/.test(readAloudScript));
 check('the caller passes the VISIBLE (reveal-count-sliced) listings, never the full fetched set — no hidden listing can be spoken', /buildResultsReadAloudSegments\(introText, m\.result\.listings\.slice\(0, shown\)\)/.test(agent));
-// No raw/internal fields anywhere in the card-speech builder: id, source_url, source/platform name,
-// free-text description/title, or a raw JSON dump. Only the Arabic DISPLAY helpers (listingDisplay.ts)
-// and the plain numeric stat fields (beds/bathrooms/area) are touched.
+// No raw/internal fields anywhere in the card-speech builder: id, source_url, free-text
+// description/title, or a raw JSON dump. Platform name IS spoken (owner request, 2026-08-22) but only
+// via the shared listingPlatformAr() display helper, never a raw listing.source read in this file.
 const NO_INTERNAL_FIELDS = /listing\.id\b|listing\.source_url|listing\.source\b|listing\.description|listing\.title|JSON\.stringify/;
-check('cardSpeech() never touches an id/URL/source/description/title field or serializes raw JSON', !NO_INTERNAL_FIELDS.test(readAloudScript));
+check('cardSpeech() never touches a raw id/URL/source/description/title field or serializes raw JSON (platform name comes only from listingPlatformAr)', !NO_INTERNAL_FIELDS.test(readAloudScript));
 check('card facts come from the SAME Arabic display helpers ResultCard.tsx itself uses (one derivation, spoken can never disagree with shown)', /listingTypeAr\(listing\)/.test(readAloudScript) && /listingLocationAr\(listing\)/.test(readAloudScript) && /listingPriceAr\(listing\)/.test(readAloudScript) && /export function listingTypeAr/.test(listingDisplay) && /export function listingPriceAr/.test(listingDisplay));
+
+// ── PLATFORM NAME (owner request, 2026-08-22): speak which platform hosts each card, using the exact
+//    SAME 'Hosted on {name}' i18n key and sourceName() mapping ResultCard.tsx's visible "مستضاف على X"
+//    badge uses — moved to listingDisplay.ts as the ONE shared mapping so the spoken platform can
+//    never drift from what the card shows. ──────────────────────────────────────────────────────────
+const resultCard = readFileSync(join(root, 'src/components/ResultCard.tsx'), 'utf8');
+check('every card speaks its platform name last, via the shared listingPlatformAr() helper', /sentences\.push\(listingPlatformAr\(listing\)\);/.test(readAloudScript) && /import \{ listingTypeAr, listingLocationAr, listingPriceAr, listingPlatformAr \} from '\.\/listingDisplay';/.test(readAloudScript));
+check('listingPlatformAr() reuses the SAME \'Hosted on {name}\' i18n key the visible card badge renders — cannot say a different platform than what is shown', /export function listingPlatformAr[\s\S]{0,120}?translate\('ar', 'Hosted on \{name\}', \{ name: translate\('ar', sourceName\(listing\.source\)\) \}\)/.test(listingDisplay));
+check('sourceName() (the platform-slug-to-label mapping) lives in ONE place, listingDisplay.ts — ResultCard.tsx imports it rather than keeping its own copy', /export function sourceName\(source: string\): string \{/.test(listingDisplay) && /import \{ sourceName \} from '@\/lib\/listingDisplay';/.test(resultCard) && !/^function sourceName/m.test(resultCard));
 
 // ── CLEANUP: never leaves a dangling utterance playing after the row unmounts (page navigation), or
 //    across a new search on the same screen. ───────────────────────────────────────────────────────
