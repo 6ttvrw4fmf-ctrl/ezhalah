@@ -1012,7 +1012,10 @@ export default function Home() {
                 </View>
                 <Text style={s.rentHint}>
                   {t(rentPeriod === 'monthly' ? 'Monthly: the displayed price is the monthly price.'
-                    : rentPeriod === 'both' ? 'Both: monthly and yearly listings together — each card shows its own price basis.'
+                    // Owner feedback (2026-08-22): drop the "this means you want both, so you get
+                    // both" framing — selecting both buttons is already self-explanatory. Keep only
+                    // the one genuinely non-obvious fact: mixed results show mixed price units.
+                    : rentPeriod === 'both' ? 'Each listing shows its own price basis (monthly or yearly).'
                     : 'Yearly: the displayed price is the yearly price.')}
                 </Text>
                 {periodPriceCleared && !query.priceMin && !query.priceMax && !query.priceInput ? (
