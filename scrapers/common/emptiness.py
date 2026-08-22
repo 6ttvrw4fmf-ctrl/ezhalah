@@ -71,6 +71,11 @@ class SliceOutcome:
     listings_found: int = 0
     #: the last page we actually fetched rendered the source's own empty state.
     source_empty_state: bool = False
+    #: the source served a page that is NOT scoped to the city we asked for — aqar answers an
+    #: unrecognised city slug with a nationwide feed instead of a 404 (2026-08-22). A third state,
+    #: distinct from "blocked" and from "empty": we reached the source fine, and it simply has no
+    #: such city page. See discover()'s city-scope guard.
+    city_filter_ignored: bool = False
 
     def note_page(self, html: str, new_listings: int) -> None:
         self.pages_fetched += 1
@@ -81,15 +86,25 @@ class SliceOutcome:
     def note_fetch_failure(self) -> None:
         self.fetch_failed = True
 
+    def note_city_filter_ignored(self) -> None:
+        self.city_filter_ignored = True
+
 
 def emptiness_is_source_published(o: SliceOutcome) -> bool:
     """Did the SOURCE tell us this slice is empty, rather than us failing to see it?"""
     if o.fetch_failed:
         return False          # blocked / non-200 — we do not know what the source holds
-    if o.pages_fetched == 0:
+    if o.pages_fetched == 0 and not o.city_filter_ignored:
         return False          # we never even looked
     if o.listings_found > 0:
         return False          # not an empty slice at all
+    if o.city_filter_ignored:
+        # We reached the source and PROVED it has no page for this city — it answered with a
+        # nationwide feed. Zero rows is then a fact about the source, not a scraper failure, so it
+        # must not redden the run. It is still NOT a claim that the city has no inventory: the
+        # right response is to fix the slug, which is why run_residential prints it loudly and
+        # mon_detect_aqar_city_slug_broken() raises on it.
+        return True
     return o.source_empty_state
 
 

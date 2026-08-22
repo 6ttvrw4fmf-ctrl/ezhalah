@@ -165,6 +165,18 @@ def main() -> int:
             print("ℹ 0 rows, and every slice proved it: the source published its own empty state. "
                   "Reporting healthy rather than red — this is not a blocked crawl.", flush=True)
             notes = ((notes + " | ") if notes else "") + "source-published empty (all slices proven)"
+
+        # A slice whose city filter aqar ignored is NOT a quiet success: it means our slug does not
+        # match any aqar city page, so that city is getting ZERO coverage while the run looks fine.
+        # Recorded in the run notes so mon_detect_aqar_city_slug_broken() can raise on it without
+        # anyone having to read CI logs — the 2026-08-22 defect went unnoticed precisely because its
+        # only symptom was a slow job.
+        n_ignored = sum(1 for o in outcomes if o.city_filter_ignored)
+        if n_ignored:
+            print(f"✗ {n_ignored} slice(s) got a NATIONWIDE feed instead of a city page — the aqar "
+                  f"slug for this city is wrong, and the city is getting no coverage. Fix CITY_AR.",
+                  flush=True)
+            notes = ((notes + " | ") if notes else "") + f"city_filter_ignored={n_ignored}"
         healthy = db.end_run(run_id, ok=ok, rows_seen=total_seen, rows_upserted=total_upserted, notes=notes,
                              allow_empty=allow_empty, check_tables=["aqar_residential_listings"])
 
