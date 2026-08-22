@@ -17,18 +17,38 @@ class _Res:
 
 
 class _Table:
+    """NOTE (2026-08-22 safety audit): eq/gte/lt used to be no-ops that returned every row
+    regardless of the filter — meaning min_inactive_days and min_missing_count were enforced ONLY
+    by the real Postgres query in production, with ZERO test coverage proving that predicate is
+    correct. They now actually filter, so a mutation that weakens either predicate in cleanup.py
+    (e.g. dropping the .lt(last_seen_at) clause, or flipping .gte to .gt) fails a test here
+    instead of only being caught by the real query in production, if at all."""
     def __init__(self, client, name):
         self.c, self.name, self._op, self._ids = client, name, None, None
+        self._filters = []
     def select(self, *a, **k): return self
-    def eq(self, *a, **k): return self
-    def gte(self, *a, **k): return self
-    def lt(self, *a, **k): return self
+    def eq(self, col, val): self._filters.append(("eq", col, val)); return self
+    def gte(self, col, val): self._filters.append(("gte", col, val)); return self
+    def lt(self, col, val): self._filters.append(("lt", col, val)); return self
+    def is_(self, col, val): self._filters.append(("is", col, val)); return self
     def order(self, *a, **k): return self
     def limit(self, *a, **k): return self
     def update(self, payload): self._op = ("update", payload); return self
     def insert(self, payload): self._op = ("insert", payload); return self
     def delete(self): self._op = ("delete", None); return self
-    def in_(self, col, ids): self._ids = list(ids); return self
+    def in_(self, col, ids):
+        self._ids = list(ids)                              # used by delete/update targeting
+        self._filters.append(("in", col, list(ids)))        # also usable as a select filter
+        return self
+    def _matches(self, row):
+        for op, col, val in self._filters:
+            v = row.get(col)
+            if op == "eq" and v != val: return False
+            if op == "gte" and not (v is not None and v >= val): return False
+            if op == "lt" and not (v is not None and v < val): return False
+            if op == "is" and val == "null" and v is not None: return False
+            if op == "in" and v not in val: return False
+        return True
     def execute(self):
         if self._op and self._op[0] == "delete":
             self.c.deleted.setdefault(self.name, []).extend(self._ids); return _Res([])
@@ -36,7 +56,7 @@ class _Table:
             self.c.updated.setdefault(self.name, []).append((self._ids, self._op[1])); return _Res([])
         if self._op and self._op[0] == "insert":
             self.c.inserted.setdefault(self.name, []).append(self._op[1]); return _Res([])
-        rows = self.c.rows.get(self.name, [])
+        rows = [r for r in self.c.rows.get(self.name, []) if self._matches(r)]
         return _Res(rows, count=len(rows))
 
 
@@ -47,7 +67,10 @@ class _Client:
 
 def _install(monkey_rows, policy, probe, platform="testp", tables=("testp_listings",), dead_marker=(lambda b: b == "DEAD")):
     rows = dict(monkey_rows)
-    rows["platform_retention_policy"] = [policy]
+    # "platform" must be present for _load_policy's real .eq("platform", platform) filter to match
+    # now that _Table actually filters (see _Table docstring) — a bare dict without it would make
+    # every test silently fall through to DEFAULT_POLICY instead of the POL(...) the test asked for.
+    rows["platform_retention_policy"] = [{**policy, "platform": platform}]
     rows.setdefault("cleanup_runs", [])
     client = _Client(rows)
     C.sb = lambda: client
@@ -61,7 +84,7 @@ def _install(monkey_rows, policy, probe, platform="testp", tables=("testp_listin
 
 POL = lambda **k: {"min_inactive_days": 30, "min_missing_count": 3, "require_source_recheck": True,
                    "max_delete_per_run": 500, "anomaly_floor": 300, "anomaly_factor": 4, "enabled": True, **k}
-def _cand(i): return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": "2026-01-01T00:00:00+00:00"}
+def _cand(i): return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": "2026-01-01T00:00:00+00:00", "active": False}
 
 
 def test_live_row_is_reactivated_never_deleted():
@@ -131,7 +154,7 @@ def test_anomaly_abort_stays_quiet_when_the_fraction_gate_would_pass():
 
 
 def _cand_ts(i, ts):
-    return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": ts}
+    return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": ts, "active": False}
 
 
 def test_bounded_cap_never_exceeds_what_unbounded_gates_would_allow():
@@ -249,6 +272,94 @@ def test_aqarcity_expired_marker_deletes_clean_200_self_heals():
                   platform="aqarcity", tables=("aqarcity_residential_listings",), dead_marker=None)
     s2 = C.run("aqarcity", force=True)
     assert s2["deleted"] == 1 and c2.deleted["aqarcity_residential_listings"] == [2]
+
+
+def test_below_missing_count_threshold_never_becomes_a_candidate():
+    """Barrier 6 (repeated dead confirmations): a row with FEWER strikes than policy requires must
+    never even be FETCHED as a candidate, no matter how old it is. Mutation-proof: if cleanup.py's
+    .gte("missing_count", ...) filter were ever dropped or weakened, this row (dead_marker always
+    fires 404) would get force-deleted and this test would catch it — it did not have coverage
+    before 2026-08-22 because the old test fake ignored every filter."""
+    old_but_unstruck = {**_cand(1), "missing_count": 2}   # only 2 of the required 3 strikes
+    c = _install({"testp_listings": [old_but_unstruck]}, POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["eligible_total"] == 0 and s["deleted"] == 0 and c.deleted == {}
+
+
+def test_below_min_age_never_becomes_a_candidate():
+    """Barrier 5 (minimum inactive age): a row with enough strikes but still INSIDE the grace
+    window (last_seen_at recent) must never be fetched as a candidate. Mutation-proof: if
+    cleanup.py's .lt("last_seen_at", cutoff) filter were ever dropped, this row would get
+    force-deleted 5 days after going inactive instead of waiting the full 30."""
+    import datetime
+    recent = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=5)).isoformat()
+    struck_but_young = {**_cand(1), "last_seen_at": recent}
+    c = _install({"testp_listings": [struck_but_young]}, POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["eligible_total"] == 0 and s["deleted"] == 0 and c.deleted == {}
+
+
+def test_at_exactly_the_thresholds_is_eligible():
+    """The converse of the two tests above: a row that exactly meets both floors (missing_count ==
+    min, well past the age cutoff) IS eligible — proves the predicates aren't silently off-by-one
+    in the safe direction either, which would shrink the real eligible population without anyone
+    noticing (the two tests above already prove the unsafe direction is blocked)."""
+    c = _install({"testp_listings": [_cand(1)]}, POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["eligible_total"] == 1 and s["deleted"] == 1
+
+
+def test_degraded_platform_health_freezes_deletion_before_measuring_candidates():
+    """Barrier 2 (platform health precondition): an open scraper_failure_step_change (or
+    silent_scraper_death) alert for THIS platform must abort the run BEFORE any candidate is even
+    fetched — proactive, not the reactive anomaly gate. Mirrors the real wasalt alert 686
+    (standing since 2026-08-18)."""
+    c = _install({"testp_listings": [_cand(1)],
+                  "alert_event": [{"id": 686, "kind": "scraper_failure_step_change",
+                                    "platform": "testp", "severity": "P1", "resolved_at": None}]},
+                 POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is True and s["deleted"] == 0 and c.deleted == {}
+    assert s["eligible_total"] == 0            # never even measured — the precondition ran first
+    assert "platform health degraded" in s["abort_reason"]
+    assert "686" in s["abort_reason"]
+
+
+def test_health_gate_ignores_other_platforms_and_resolved_alerts():
+    """The gate must be platform-scoped (an open alert on a DIFFERENT platform must not freeze
+    this one) and status-scoped (a RESOLVED alert on this platform must not freeze it either)."""
+    c = _install({"testp_listings": [_cand(1)],
+                  "alert_event": [
+                      {"id": 1, "kind": "scraper_failure_step_change", "platform": "otherplatform",
+                       "severity": "P1", "resolved_at": None},
+                      {"id": 2, "kind": "scraper_failure_step_change", "platform": "testp",
+                       "severity": "P1", "resolved_at": "2026-08-20T00:00:00+00:00"},
+                  ]}, POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is False and s["deleted"] == 1
+
+
+def test_health_gate_ignores_unrelated_alert_kinds():
+    """A data-fidelity alert unrelated to capture health (e.g. field_integrity) must NOT freeze
+    deletion — the gate is deliberately narrow to alert kinds that speak to whether the CRAWL
+    itself is currently trustworthy, not general platform noise."""
+    c = _install({"testp_listings": [_cand(1)],
+                  "alert_event": [{"id": 3, "kind": "field_integrity", "platform": "testp",
+                                    "severity": "P1", "resolved_at": None}]},
+                 POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is False and s["deleted"] == 1
+
+
+def test_health_gate_is_not_bypassed_by_force():
+    """force overrides policy.enabled=false only. A degraded-platform freeze is a live safety
+    signal, not a policy toggle, and must survive --force."""
+    c = _install({"testp_listings": [_cand(1)],
+                  "alert_event": [{"id": 4, "kind": "silent_scraper_death", "platform": "testp",
+                                    "severity": "P1", "resolved_at": None}]},
+                 POL(enabled=False), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is True and "platform health degraded" in s["abort_reason"]
 
 
 def test_verdict_status_mapping():
