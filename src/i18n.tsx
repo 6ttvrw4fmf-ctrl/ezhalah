@@ -170,6 +170,8 @@ const AR: Record<string, string> = {
   // Buy+Rent combined multi-select (owner feature 2026-08-20): the two independent price ranges
   // shown together when شراء+إيجار are both selected — never one shared/naive range.
   'Buy budget': 'ميزانية الشراء',
+  'When you choose Buy and Rent together, each one has its own budget.':
+    'عند اختيار الشراء والإيجار معًا، ستكون لكل منهما ميزانية مستقلة.',
   'Rent budget (yearly basis)': 'ميزانية الإيجار (سنوياً)',
   ' /yr': ' / سنوياً',
   'Max price': 'السعر الأقصى',

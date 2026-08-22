@@ -430,6 +430,34 @@ export function rpcAdvancedFilterParams(q: SearchQuery) {
 }
 const RPC_SORT_KEYS = new Set(['oldest', 'price_asc', 'price_desc', 'area_asc', 'area_desc', 'beds_desc']);
 
+// EVERY predicate the user's current state implies — the NORMAL narrowing (bedrooms, price, area,
+// combined-mode rent budget) AND the answered Advanced-Filter questions — in ONE object.
+//
+// WHY THIS EXISTS (owner-reported live defect, 2026-08-22). Trending is not a generic location
+// suggestion: it is the LOCATION BREAKDOWN OF THE USER'S EXACT CURRENT ELIGIBLE SET. It was only
+// ever handed rpcAdvancedFilterParams(), i.e. the ADVANCED half, so bedrooms / price / area were
+// silently dropped from every city and district count. Measured live on
+// Apartment + Rent + Annual + 3 beds + 120-180 m² + 70k-100k:
+//     الرياض  trending said 10,618  · truth   705   (15x)
+//     جدة     trending said  5,937  · truth    76   (78x)
+//     مكة     trending said    708  · truth     1   (708x)
+// The user picked a city from those numbers and landed on a completely different result count.
+//
+// The split into two builders is what made the bug structural — a count surface had to REMEMBER to
+// spread both halves, and this one remembered only one. This is the single definition that means
+// "everything the user has chosen", so a surface that spreads it cannot forget a predicate, and a
+// future filter is carried by every such surface for free.
+//
+// p_types and p_sort_by are deliberately NOT included: every caller already passes its own cohort
+// type array, and count surfaces have no ordering (leaking p_sort_by into a count RPC is what made
+// both count calls 404 with PGRST202 in the 2026-07-30 bug-hunt).
+export function rpcAllNarrowingParams(q: SearchQuery) {
+  const { p_types: _types, p_sort_by: _sort, ...normal } =
+    rpcFilterParams(q) as ReturnType<typeof rpcFilterParams> & { p_sort_by?: string };
+  return { ...normal, ...rpcAdvancedFilterParams(q) };
+}
+
+
 export type SearchScope = {
   p_deal: string | null;
   p_rent_period: string | null;
