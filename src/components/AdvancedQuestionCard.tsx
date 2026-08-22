@@ -144,7 +144,7 @@ export type AdvancedQuestionCardProps = {
   onConfirm: (keys: string[]) => void; // commit the selection (empty = no preference) and advance/search
   onSkip: () => void;                   // skip THIS question
   onBack: () => void;                   // one question back — from the first question, out of AF entirely
-  onSkipAll: () => void;                // commit accumulated + search now
+  onSkipAll: (keys: string[]) => void;  // commit accumulated + the VISIBLE selection, search now
   onClose: () => void;                  // abandon
 };
 
@@ -330,7 +330,13 @@ export default function AdvancedQuestionCard({
               <Pressable style={s.skipLink} testID="af-skip" onPress={onSkip} hitSlop={8}>
                 <Text style={s.skipTxt}>{t('Skip')}</Text>
               </Pressable>
-              <Pressable style={s.skipLink} testID="af-skip-all" onPress={onSkipAll} hitSlop={8}>
+              {/* «عرض النتائج» must honour what is on screen: the chip and «عرض N نتيجة» already
+                  promise the count for the CURRENT selection, so leaving by this link commits that
+                  selection too. Before 2026-08-22 a single tap auto-committed within 260ms and this
+                  window barely existed; now that a tap only selects, exiting here would silently
+                  discard a visible answer and land the user on a different number than the one they
+                  were just shown. */}
+              <Pressable style={s.skipLink} testID="af-skip-all" onPress={() => onSkipAll(sel)} hitSlop={8}>
                 <Text style={s.skipAllTxt}>{t('Show results')}</Text>
               </Pressable>
             </View>

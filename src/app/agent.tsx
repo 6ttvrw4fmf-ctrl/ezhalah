@@ -1261,7 +1261,7 @@ export default function Agent() {
   // AND skip — `keys` is ≤1 entry for single, ≥0 for multi, and `[]` for a skip (no preference: no
   // predicate is written, the step is simply marked answered so the re-ranker moves on). The answer
   // is stored on the step; the query is then REBUILT from it, never mutated in place.
-  const commitGuidedStep = async (keys: string[]) => {
+  const commitGuidedStep = async (keys: string[], finish = false) => {
     if (ageFlow?.phase !== 'asking') return;
     const token = ageFlowTokenRef.current;
     const { stepIndex } = ageFlow;
@@ -1275,6 +1275,7 @@ export default function Agent() {
     // after it to invalidate, and re-confirming the same answer leaves the later scope identical.
     if (changedAnswer) await revalidateStepsAfter(stepIndex, token);
     if (ageFlowTokenRef.current !== token) return;
+    if (finish) { finishGuided(token); return; }
     void presentGuided(stepIndex + 1, token);
   };
 
@@ -1301,7 +1302,10 @@ export default function Agent() {
     }
     void presentGuided(stepIndex - 1, ageFlowTokenRef.current);
   };
-  const onAgeSkipAll = () => finishGuided(ageFlowTokenRef.current);
+  // «عرض النتائج» leaves the interview NOW — but through the same commit path, so the answer the
+  // user can currently see selected is recorded first. Otherwise the card's own «عرض N نتيجة» chip
+  // and the results it lands on would disagree.
+  const onAgeSkipAll = (keys: string[]) => { void commitGuidedStep(keys, true); };
   const onAgeClose = () => { ageFlowTokenRef.current++; setAgeFlow(null); };
 
   // Tap on a refine answer chip → lock that question's chips so it can't be answered twice, then run.
