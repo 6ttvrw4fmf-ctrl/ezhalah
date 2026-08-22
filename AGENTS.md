@@ -120,6 +120,18 @@ Summary of the split (the linked file is authoritative):
   destructive or high-risk schema changes; anything not easily reversible; weakening a safety gate
   or adding a deploy entrypoint; genuine ambiguity.
 
+**Per-engineer standing authority (permanent, 2026-08-12):** the Search, Matching & Testing
+Engineer (routine #4, `docs/ops/SEARCH_MATCH_QA_ENGINEER.md` §0) carries a broader standing
+approval within its scope: for any safely-fixable Ezhalah-side defect surfacing through the
+Normal Filter journey (matching, filter predicates, counts, sync, pagination, «عرض المزيد»,
+sorting, diversification, duplicate cards, Arabic leaks, cron, migrations, barriers — including
+frontend/backend/scraper/parser/mapping changes when those are the root cause), that engineer
+follows `detect → reproduce → establish source truth → fix root cause → regression test → barrier
+→ deploy → production verify → retest → continue` end-to-end and reports once, without asking.
+The RED list above still binds it; the P0 deploy-safety floor (§0.1 of its spec) still binds it.
+A barrier alone is NOT considered a fix — the underlying user-visible defect must be repaired
+too. See `docs/ops/SEARCH_MATCH_QA_ENGINEER.md` §0 for the verbatim owner grant.
+
 **Autonomy is walking through the safety gates yourself — never removing or routing around them.**
 Every P0 rule below (production target lock, deploy lock, `safe-deploy.sh` as the only frontend
 deploy path, preflight, taxonomy gate, no-bypass check, source-fidelity rules) remains fully in
