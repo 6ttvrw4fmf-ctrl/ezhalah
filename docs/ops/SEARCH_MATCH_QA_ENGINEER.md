@@ -492,6 +492,52 @@ appears broken.
    "duplicates" in 210 مكتب cards. Identity is the click-through URL: 110 cards produced 110 distinct
    destinations. §30 (similarity ≠ evidence) applies to the harness too.
 
+## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
+
+> **What the user sees must match the actual listing/search truth exactly, in clean Arabic, with no
+> English leaks, no admin-region junk, no stale labels, no mismatched city/district text.**
+
+This is a rule about the *rendered card*, not only about matching. A search can select exactly the
+right rows and still break this contract by mislabelling them.
+
+**42.1 Location labels.** The search index carries the ARABIC-CANONICAL location, not the raw source
+string — `src/data/remote.ts` has always claimed this; since 2026-08-22 the data enforces it:
+- `city_ar` is the canonical `loc_catalog_city` name of the row's own `city_id`. The visible city
+  must equal `city_id`'s name — always, with no orthographic drift.
+- `district_ar` is one canonical rendering per `(city_id, normalised district)`, so a single result
+  list can never show «حي النرجس» and «النرجس» as if they were two places.
+- Written at source by `loc_display_city_ar()` / `loc_display_district_ar()` inside
+  `sync_search_listings_ar()`; `backfill_location_display_labels()` repairs stored rows.
+- **Never guess.** An unresolved city stays unresolved: `loc_display_city_ar()` returns NULL rather
+  than show «امارة منطقة الرياض - الجبيله» as if it were a city name.
+- **Source truth is untouched.** Only the index's DISPLAY columns are canonicalised; the raw labels
+  remain in `listing_native_location_v2` and the per-platform source tables.
+
+**42.2 Relabelling must never move the eligible set.** The RPC's city arm is
+`normalize_ar(city_ar) ∈ tokens OR city_id ∈ ids OR match_city_ids && ids`, so `city_ar` IS a match
+arm. A label rewrite is only safe when the new label is the row's own `city_id`'s name (arm 2
+already matched it) and no row's OLD label resolved to a city that identity does not cover — measure
+that BEFORE writing, and re-run the differential after. District rewrites must be
+`norm_district_tok`-preserving. (2026-08-22: 1,439 rows changed, rows that would narrow = 0,
+114 EXACT_SET_MATCH / 40 COUNT_MATCH_PAGE_CAPPED unchanged across the fix.)
+
+**42.3 English in an Arabic card.** Zero English in any *label* Ezhalah renders (city, district,
+region, type, deal, period, rooms, baths, area, price). But an advertiser's own description is
+SOURCE CONTENT — a landlord who wrote their ad in English stays as published. Never "fix" a
+description to chase a leak count; check labels, not free text.
+
+**42.4 Match first, then diversify.** Ranking and diversification operate strictly INSIDE the
+eligible set: they may reorder, never introduce a listing that fails the user's filters, never
+duplicate one, never change the count shown. The proof is a key-set md5 of what the RPC actually
+returned against `ops_qa_diff` — equal hashes prove all four at once. Repeated identical searches
+must return the identical set.
+
+**42.5 The barriers.** `mon_detect_card_label_contract()` (English leakage · city text ≠ city_id ·
+admin-region label as city · guessed unknown location · district non-canonical · district rendered
+two ways) and `mon_detect_ranking_diversity_contract()` (daily-gated; drives the real RPC). Both are
+in the `mon_run_all_detectors()` roster. All six label conditions and the ranking comparison are
+mutation-proven — each shown to read 0 on clean data and 1 on a deliberately broken row.
+
 ## Final principle
 **MATCH → SOURCE TRUTH → DIVERSITY → USER JOURNEY → PERFORMANCE**, in that order. The engineer owns
 the entire journey: اختيار التصفية → بحث → النتائج → عرض المزيد → بطاقة العقار → المصدر الصحيح.
