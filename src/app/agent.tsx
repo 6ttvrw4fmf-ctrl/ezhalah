@@ -21,6 +21,7 @@ import { stopReadAloud } from '@/lib/readAloud';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
+import ReadAloudPlayer from '@/components/ReadAloudPlayer';
 import { CardIn, LoadingDots } from '@/components/CardReveal';
 
 // Memoized card: during the reveal cascade the list re-renders every ~55ms — already-revealed cards
@@ -2271,6 +2272,10 @@ export default function Agent() {
           <Text style={s.fbToastText}>{t('Thanks for your feedback')}</Text>
         </View>
       </View>
+      {/* Floating Read Aloud playback controller (owner 2026-08-22) — ONE instance for the whole
+          screen (there is only ever one active reading session), self-hides when nothing is playing,
+          self-positions fixed/top regardless of scroll. See src/components/ReadAloudPlayer.tsx. */}
+      <ReadAloudPlayer />
       {/* عمر العقار advanced-question overlay (owner 2026-07-13) — a transient card over the CURRENT
           results, reached only via «خلّنا نحدد الطلب أكثر» in an apartment-only scope. Absolutely
           positioned over the whole screen, same visual language as the interview overlay (dimmed
