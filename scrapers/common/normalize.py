@@ -628,6 +628,7 @@ def price_evidence(
     kind: str = "total",
     unit: str = "total",
     origin: str = "structured",
+    authoritative_absent: bool = False,
 ) -> dict[str, Any]:
     """Describe where a stored price came from, in the source's own terms.
 
@@ -656,4 +657,10 @@ def price_evidence(
         "unit": unit,
         "origin": origin,
         "found": raw is not None,
+        # The SOURCE stated this listing has no price (aqar `published:false`, or a `price` key
+        # present and non-numeric — the «طلب تسويق» shape), as opposed to us failing to read one.
+        # Owner decision 2026-08-22. This is the durable, queryable half of db.AUTHORITATIVE_NULL:
+        # the sentinel makes the NULL get written, this records WHY, so a blanked price can be
+        # audited from the row alone without re-fetching the source.
+        "authoritative_absent": bool(authoritative_absent),
     }
