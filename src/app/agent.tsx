@@ -2060,8 +2060,8 @@ export default function Agent() {
                         if ((m.typing && !doneTyping[m.id]) || shown < Math.min(FIRST_PAGE, fetched)) return null;
                         // Read Aloud script (owner structure requirement, 2026-08-19): إزهله -> pause ->
                         // summary -> pause -> cards, in the SAME order shown on screen. Sliced to `shown`
-                        // FIRST (never past what's actually rendered right now — "no hidden listing should
-                        // be spoken"); the script builder caps further to READ_ALOUD_CARD_CAP.
+                        // — never past what's actually rendered right now ("no hidden listing should be
+                        // spoken") — but otherwise reads every visible card (owner 2026-08-22: no further cap).
                         const readAloudSegments = buildResultsReadAloudSegments(introText, m.result.listings.slice(0, shown));
                         return <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} />;
                       })()}
