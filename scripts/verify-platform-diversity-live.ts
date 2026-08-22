@@ -90,13 +90,24 @@ function streakExplained(platforms: string[], run: { plat: string; start: number
   return Object.entries(first).every(([p, idx]) => p === run.plat || idx < run.start);
 }
 
-type Q = { name: string; args: Record<string, unknown>; deal?: string };
+// AF-narrowed cases (2026-08-22, owner cert pass): same params verify-af-independent-oracle.ts already
+// proved correct in isolation — here we prove diversity ordering doesn't smuggle an ineligible row back
+// in when it's LAYERED on top of a real AF predicate (requirement #11: diversification must not
+// introduce an ineligible listing, specifically for the AF-narrowed case, not just the base search).
+type Q = { name: string; args: Record<string, unknown>; deal?: string; afRest?: string };
 const QUERIES: Q[] = [
   { name: 'Buy · الرياض · شقة', args: { p_deal: BUY, p_cities: ['الرياض'], p_types: ['شقة'] }, deal: BUY },
   { name: 'Buy · جدة (broad)', args: { p_deal: BUY, p_cities: ['جدة'] }, deal: BUY },
   { name: 'Rent annual · الرياض', args: { p_deal: RENT, p_cities: ['الرياض'], p_rent_period: 'سنوي' }, deal: RENT },
   { name: 'Rent monthly · الرياض', args: { p_deal: RENT, p_cities: ['الرياض'], p_rent_period: 'شهري' }, deal: RENT },
   { name: 'Commercial · الرياض', args: { p_category: 'تجاري', p_cities: ['الرياض'] } },
+  { name: 'AF-narrowed: Buy · الرياض · فيلا/تاون هاوس/بيت · bathrooms ≥ 3',
+    args: { p_deal: BUY, p_cities: ['الرياض'], p_types: ['فيلا', 'تاون هاوس', 'بيت'], p_bath_min: 3 },
+    deal: BUY, afRest: 'bathrooms=gte.3' },
+  { name: 'AF-narrowed: Rent annual · الرياض · شقة/مبنى شقق مخدومة/ملحق علوي · confirmed furnished',
+    args: { p_deal: RENT, p_cities: ['الرياض'], p_types: ['شقة', 'مبنى شقق مخدومة', 'ملحق علوي'],
+      p_rent_period: 'سنوي', p_furnished: true },
+    deal: RENT, afRest: 'furnished=is.true' },
 ];
 
 async function main() {
@@ -134,6 +145,15 @@ async function main() {
       const sample = ids0.slice(0, 150);
       const matched = await countIdsMatching(sample, `deal_ar=eq.${enc(q.deal)}`);
       check(`${q.name}: every returned row satisfies the deal filter (0 ineligible inserted)`,
+        matched === sample.length, `matched=${matched}/${sample.length}`);
+    }
+
+    // (11) AF-narrowed case: every returned row ALSO satisfies the AF predicate — diversity ordering
+    // never pulls in a row the AF answer would have excluded.
+    if (q.afRest) {
+      const sample = ids0.slice(0, 150);
+      const matched = await countIdsMatching(sample, q.afRest);
+      check(`${q.name}: every returned row satisfies the AF predicate (0 ineligible inserted by diversity)`,
         matched === sample.length, `matched=${matched}/${sample.length}`);
     }
   }
