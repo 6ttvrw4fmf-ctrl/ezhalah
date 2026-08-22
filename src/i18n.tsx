@@ -131,8 +131,11 @@ const AR: Record<string, string> = {
   // claim about contract length (the old «من شهر إلى 11 شهر» wording is banned; a guard pins it out).
   'Monthly: the displayed price is the monthly price.': 'الأسعار معروضة بالشهر',
   'Yearly: the displayed price is the yearly price.': 'سنوي: السعر المعروض سنوي.',
-  'Both: monthly and yearly listings together — each card shows its own price basis.':
-    'كلاهما: نعرض الشهري والسنوي معاً — كل إعلان يوضّح أساس سعره.',
+  // Owner feedback (2026-08-22): trimmed — the old wording ("Both: we show monthly and yearly
+  // together") re-explained what selecting both buttons already makes obvious. Kept only the one
+  // fact worth surfacing: mixed results carry mixed price units.
+  'Each listing shows its own price basis (monthly or yearly).':
+    'كل إعلان يوضّح أساس سعره (شهري أو سنوي).',
   // Monthly Advanced Filter (2026-08-18)
   'What rating would you prefer?': 'كم التقييم اللي تفضله؟',
   '9.5+': '9.5+',
