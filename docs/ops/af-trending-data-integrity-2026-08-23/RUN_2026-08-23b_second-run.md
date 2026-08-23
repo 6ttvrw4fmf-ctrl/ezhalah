@@ -6,9 +6,11 @@ scale was not attempted and must not be inferred from this log. Exact scope belo
 
 ## Carried in from run #1
 
-- **PR #952 (duplicate refine question on double-tap) merged and is LIVE.** Run #1 left it open behind a
-  flaky required check. Production serves `816cfbe` (now `0bfe439`), which contains it; the guard line
-  `if (!q || pendingRefineRef.current) return;` is in the shipped source. Nothing left open from run #1.
+- **PR #952 (duplicate refine question on double-tap) merged, live, and now PRODUCTION-VERIFIED.**
+  Run #1 left it merged-but-unverified behind a flaky required check. This run drove the exact gesture
+  against `https://ezhalah-app.vercel.app`: a rapid double-tap on «خلّنا نحدد الطلب أكثر» rendered
+  **exactly one** refine question («أي حي تفضّل في الرياض؟»), zero duplicates; the single-tap control
+  behaved identically. Nothing left open from run #1.
 - Run #1 flagged "AF fell through to the legacy refine chips twice, worth a follow-up run's attention."
   **That is now root-caused** — see finding 2.
 
@@ -171,3 +173,19 @@ fallback presented as filtered truth. One per-district count RPC per visible row
 14 rows written to `ops_qa_coverage_ledger` under this routine's own prefixes (`af_data_integrity`,
 `af_reachability`, `af_interview`, `af_counts`, `trending_cities`, `trending_districts`), which are
 distinguishable from routine #4's rows in the same table.
+
+## What this run shipped
+
+| PR | scope | state |
+|---|---|---|
+| **#987** | `scrapers/**` — aqar maid/driver room read structurally + 3 mutation-proven barriers | **merged** (5/5 checks green) |
+| **#989** | `scripts/verify-af-group-cohort-coverage.ts` + `npm test` wiring | **merged** (all checks green) |
+| **#990** | this run log | docs only |
+
+**Deployments: 0.** Nothing in either code PR touches `src/`, so no frontend deploy was required or
+performed — per `AGENTS.md`, `Deployments: 0` is the correct result when no verified change needs one.
+
+**Propagation.** `aqar-sweep.yml` is triggered every 8 hours by pg_cron jobid 2 (`5 */8 * * *`) against
+the default branch, so the corrected parser is live on the next sweep. At ~17,000 rows re-captured per
+day the active cohort repairs over roughly one to two weeks. The `af_field_stuck_no_variance` alert is
+deliberately **left open** — it must self-resolve when real `false` values land, not be silenced by hand.
