@@ -75,13 +75,20 @@ check('default speech rate is the measured, documented value (1.3 — natural-pa
 //    the SAME order shown on screen, capped, never reading raw/internal fields. ─────────────────────
 check("script opens with the intro word 'إزهله' followed by a pause before anything else", /const INTRO_WORD = 'إزهله';/.test(readAloudScript) && /segments: ReadAloudSegment\[\] = \[\{ text: INTRO_WORD, pauseAfterMs: PAUSE_MS \}\];/.test(readAloudScript));
 check('the summary is spoken next (second segment), also followed by a pause', /if \(summary\) segments\.push\(\{ text: summary, pauseAfterMs: PAUSE_MS \}\);/.test(readAloudScript));
-check('cards are appended AFTER intro+summary, via Array.forEach over the listings array (preserves on-screen order — never re-sorted)', /visibleListings\.forEach\(\(listing, i\) => \{\s*segments\.push\(\{ text: cardSpeech\(listing\)/.test(readAloudScript));
-check('no pause is added after the LAST card (nothing trails a natural end)', /pauseAfterMs: i < visibleListings\.length - 1 \? PAUSE_MS : 0/.test(readAloudScript));
+check('cards are appended AFTER intro+summary, via Array.forEach over the listings array (preserves on-screen order — never re-sorted)', /visibleListings\.forEach\(\(listing, i\) => \{[\s\S]{0,120}?segments\.push\(\{ text: cardSpeech\(listing\)/.test(readAloudScript));
+check('no pause trails the LAST card when there is no closing note; a pause DOES separate the last card from a closing note when one is supplied', /pauseAfterMs: isLast && !note \? 0 : PAUSE_MS/.test(readAloudScript));
 // NO CAP (owner request, 2026-08-22: "it doesn't do it for all the cards... do it all" — the old
 // READ_ALOUD_CARD_CAP=5 stopped short). Every visible card is spoken now; the only bound left is the
 // caller's own reveal-count slice (checked next), never a second, stricter one in the script itself.
 check('no card cap remains in the script — every visibleListings entry is spoken, not a .slice()-bounded subset', !/READ_ALOUD_CARD_CAP/.test(readAloudScript) && !/visibleListings\.slice\(/.test(readAloudScript));
-check('the caller passes the VISIBLE (reveal-count-sliced) listings, never the full fetched set — no hidden listing can be spoken', /buildResultsReadAloudSegments\(introText, m\.result\.listings\.slice\(0, shown\)\)/.test(agent));
+check('the caller passes the VISIBLE (reveal-count-sliced) listings, never the full fetched set — no hidden listing can be spoken', /buildResultsReadAloudSegments\(introText, m\.result\.listings\.slice\(0, shown\), readAloudClosingNote\)/.test(agent));
+// CLOSING NOTE (owner request, 2026-08-23 — "read the note... and say the button also"): the
+// «عرضت لك أول N إعلانات...» text + an available-actions sentence, spoken as the FINAL segment —
+// appended, never re-derived, from the exact same variables agent.tsx's visible Text/buttons use.
+check('buildResultsReadAloudSegments() accepts an optional closingNote and appends it as the final segment, trimmed and only when non-empty', /export function buildResultsReadAloudSegments\(summaryText: string, visibleListings: Listing\[\], closingNote\?: string\)/.test(readAloudScript) && /const note = closingNote\?\.trim\(\);/.test(readAloudScript) && /if \(note\) segments\.push\(\{ text: note, pauseAfterMs: 0 \}\);/.test(readAloudScript));
+check('agent.tsx builds the closing note from the SAME moreNoteText the visible <Text> renders, never a re-derived copy', /<Text style=\{\[s\.replyText,[\s\S]{0,120}?\{moreNoteText\}/.test(agent) && /const readAloudClosingNote = \[moreNoteText, spokenActionsNote\]\.filter\(Boolean\)\.join\(' '\);/.test(agent));
+check('the spoken available-actions sentence names only button(s) that are ACTUALLY on screen (gated by the same showActionsRow used for the visible buttons row, incl. the Advanced-Filter-open hide)', /const showActionsRow = \(hasMore \|\| canNarrowFurther\) && !ageFlow;/.test(agent) && /const spokenActionsNote = !showActionsRow \? ''/.test(agent) && /\{showActionsRow \? \(/.test(agent));
+check('the spoken action label(s) are the exact SAME t(\'Load more\')/t(\'Let’s narrow it down\') strings the visible buttons render — never a separately-worded copy', /const spokenActionLabels = \[hasMore && t\('Load more'\), canNarrowFurther && t\('Let’s narrow it down'\)\]\.filter\(Boolean\) as string\[\];/.test(agent));
 // No raw/internal fields anywhere in the card-speech builder: id, source_url, free-text
 // description/title, or a raw JSON dump. Platform name IS spoken (owner request, 2026-08-22) but only
 // via the shared listingPlatformAr() display helper, never a raw listing.source read in this file.
@@ -169,7 +176,7 @@ check('relativeStartsMs extends forward/backward from the given anchor using per
 // SPEED CONTROL: cycles the exact owner-specified steps, restarts only the CURRENT unit (the Web
 // Speech API cannot change an in-flight utterance's rate), and — critically — never touches voice
 // selection, since that would risk reopening the root-cause bug this file exists to prevent.
-check('RATE_STEPS is exactly the owner-specified cycle: 0.8x, 1x, 1.2x, 1.3x', /export const RATE_STEPS = \[0\.8, 1, 1\.2, 1\.3\] as const;/.test(readAloud));
+check('RATE_STEPS is exactly the owner-specified cycle, extended with faster options: 0.8x, 1x, 1.2x, 1.3x, 1.5x, 1.75x, 2x', /export const RATE_STEPS = \[0\.8, 1, 1\.2, 1\.3, 1\.5, 1\.75, 2\] as const;/.test(readAloud));
 {
   const rateFnMatch = readAloud.match(/export function cycleReadAloudRate\(\)[\s\S]*?\n\}/);
   const rateFnBody = rateFnMatch ? rateFnMatch[0] : '';
@@ -201,9 +208,13 @@ check('the controller\'s row direction is the RTL-CORRECT choice (verified live)
 check('the appear/disappear animation is a plain fade+scale (~180ms), not a spring/bounce, and is skipped entirely under reduced motion', /useReducedMotion/.test(readAloudPlayer) && /duration = reducedMotion \? 0 : ANIM_MS/.test(readAloudPlayer) && !/Animated\.spring/.test(readAloudPlayer));
 check('every control passes its accessibility label as label={t(...)} — never a raw literal string prop that could leak English into the Arabic UI', !/label="[A-Za-z]/.test(readAloudPlayer) && /label=\{t\(playing \? 'Pause reading' : 'Resume reading'\)\}/.test(readAloudPlayer) && /label=\{t\('Close'\)\}/.test(readAloudPlayer) && /label=\{t\('Back 15 seconds'\)\}/.test(readAloudPlayer) && /label=\{t\('Forward 15 seconds'\)\}/.test(readAloudPlayer) && /accessibilityLabel=\{t\('Playback speed'\)\}/.test(readAloudPlayer));
 
-for (const key of ['Read aloud', 'Stop reading', 'Pause reading', 'Resume reading', 'Back 15 seconds', 'Forward 15 seconds', 'Playback speed']) {
+for (const key of ['Read aloud', 'Stop reading', 'Pause reading', 'Resume reading', 'Back 15 seconds', 'Forward 15 seconds', 'Playback speed', 'You can tap {a} or {b}.', 'You can tap {a}.']) {
   const m = i18n.match(new RegExp(`'${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}': '([^']+)'`));
-  check(`AR dict has «${key}» with an Arabic, Latin-free value`, !!m && /[؀-ۿ]/.test(m![1]) && !/[A-Za-z]/.test(m![1]));
+  // Strip {placeholder} tokens before the Latin-free check — a param name like {a}/{b}/{n} is
+  // necessarily Latin, not an English-word leak; the actual INTERPOLATED value at speak time is
+  // always the Arabic button label (t('Load more') etc.), never the raw token.
+  const withoutPlaceholders = m ? m[1].replace(/\{[a-zA-Z]+\}/g, '') : '';
+  check(`AR dict has «${key}» with an Arabic, Latin-free value`, !!m && /[؀-ۿ]/.test(m![1]) && !/[A-Za-z]/.test(withoutPlaceholders));
 }
 {
   // Key contains an escaped apostrophe in source ('Listening isn\'t ...') — matched directly rather
