@@ -836,6 +836,33 @@ migration-drift-guard rule in `AGENTS.md`).
     the valid combined set." Never widen `Deal` to a 3rd value; never reuse `bothDeals`; never mix
     Buy/Rent prices into one shared range; Advanced Filter offers only the 3-way (Buy ∩ RentAnnual ∩
     RentMonthly) intersection. §17a carries the full model. (owner, 2026-08-20)
+14. **The Saudi residential proxy is ONE shared, capacity-limited resource — treat it as such.**
+    (owner-approved 2026-08-23, PR #827.) Every consumer authenticates with the same
+    `WASALT_PROXY_URL` secret and competes for one pool of concurrent sessions. Exceeding it does
+    **not** fail cleanly: requests plateau at a ~204s connect timeout while other jobs in the same
+    batch succeed in seconds, which reads as a random per-slug source block and is not one. That
+    misreading cost five days on 2026-08-17 (wasalt: failure 0.1% → 66.7%, daily rows ~100k → ~3k).
+    - **Both wasalt sweep matrices stay capped, and are tuned together.** `wasalt-residential-sweep`
+      (20 jobs, `40 */8`) and `wasalt-commercial-sweep` (14 jobs, `45 */8`) fire five minutes apart
+      into **separate** concurrency groups, so they overlap by design. Capping only one leaves the
+      peak unbounded — 6+6 bounds it at 12 instead of 34. `mon_detect_proxy_contention()` watches
+      the realised peak and fires if the cap is raised, bypassed, or a new consumer appears.
+    - **Adding a proxy consumer means re-checking the clock, not just the cap.** The current
+      consumers and their windows: wasalt sweeps 00:40/00:45, 08:40/08:45, 16:40/16:45; wasalt
+      cleanup + enum-liveness 03:15–03:19 and 21:01; wasalt enrich 05:00; enrich-ar `15 */4`
+      (short, ≤8.3 min); souq24 ~04:38.
+    - **souq24's failure is NOT proxy contention** — measured 2026-08-23, recorded so it is not
+      re-guessed: souq24 has no proxy neighbour in its window. Its signature is a 16-minute
+      `harvest_ids` followed by a ~2h stall in the 8-worker fetch loop, ending in a SIGINT kill with
+      zero rows. Still open; do not fold it into a proxy fix.
+15. **Deletion is frozen whenever the evidence behind it is inconclusive.** (2026-08-23.)
+    `cleanup.py`'s `verdict()` has always refused to delete an individual row on 403/429/5xx/network
+    error. It now also aborts the **entire run** — discarding deletions it had already judged
+    "dead" — once the inconclusive rate clears 30% over a ≥20-probe sample, because a source or
+    proxy degrading mid-run makes every verdict in that run suspect. **Reactivations are always
+    kept**: a `live` verdict needs HTTP 200 plus no dead-marker, and restoring a wrongly-inactive
+    listing is the fail-safe direction. Never widen the freeze to reactivations, and never key its
+    rate on `stats["skipped"]` (that counter also holds rows with no URL, which never reach a probe).
 
 ---
 
