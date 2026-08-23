@@ -97,6 +97,23 @@ _HARVEST_WORKERS = int(os.environ.get("SOUQ24_HARVEST_WORKERS", "8"))
 _HARVEST_PAGE_TIMEOUT_S = int(os.environ.get("SOUQ24_HARVEST_PAGE_TIMEOUT_S", "15"))
 _HARVEST_BUDGET_S = int(os.environ.get("SOUQ24_HARVEST_BUDGET_S", "600"))
 
+# Detail-sweep budget (2026-08-23, second pass). Bounding harvest_ids() alone only moved the
+# bottleneck: fetch_one() had the SAME unbounded shape — 3 attempts x 40s + backoff = 122.4s worst
+# case per id, and with ~1,316 candidates at 8 workers that is 1316/8 x 122.4s ~= 336 MINUTES
+# against a timeout-minutes: 150 job budget. Under proxy denial the run cannot finish; it just gets
+# SIGINT-killed from the detail phase instead of the harvest phase, which is the exact failure this
+# work set out to remove. Observed live on run 34331: 14+ minutes and climbing where the previous
+# healthy run took 4.1.
+#
+# Same three levers that fixed the harvest, for the same reasons: a denied request hangs the FULL
+# timeout, so a shorter one costs less and buys more draws; and a wall-clock budget converts "killed
+# with nothing" into "short, and it says so".
+_SWEEP_TIMEOUT_S = int(os.environ.get("SOUQ24_SWEEP_TIMEOUT_S", "15"))
+_SWEEP_BUDGET_S = int(os.environ.get("SOUQ24_SWEEP_BUDGET_S", "2700"))   # 45 min inside the 150 job
+# Set when the budget is spent. fetch_one() checks it and returns immediately so the remaining
+# queued futures drain in milliseconds instead of each burning its own retry ladder.
+_SWEEP_ABORT = threading.Event()
+
 # Arabic property-type word (from realestate_name / heading) → canonical English type.
 TYPE_MAP_AR = {
     "شقة": "Apartment", "شقه": "Apartment", "شقق": "Apartment", "استوديو": "Apartment",
@@ -383,11 +400,16 @@ def harvest_ids(s: cc.Session) -> tuple[set[int], int, bool]:
 def fetch_one(pid: int) -> Optional[tuple[int, str]]:
     """Fetch a detail page by id. Returns (pid, body) only when it is a REAL active listing
     (non-empty realestate_name). Sold/deleted/expired ids fall back to the homepage shell → None."""
+    if _SWEEP_ABORT.is_set():
+        # The sweep already spent its wall-clock budget. Returning straight away lets the remaining
+        # queued futures drain in milliseconds rather than each burning a full retry ladder — the
+        # difference between ending the run and being SIGINT-killed hours later with nothing.
+        return None
     s = _session()
     url = f"{BASE}/{pid}/x"
     for attempt in range(3):
         try:
-            r = s.get(url, timeout=40, allow_redirects=True)
+            r = s.get(url, timeout=_SWEEP_TIMEOUT_S, allow_redirects=True)
         except Exception:
             time.sleep(0.8 * (attempt + 1))
             continue
@@ -686,8 +708,17 @@ def main() -> int:
                 db.upsert_souq24_commercial_batch(com_buf)
                 com_buf = []
 
+        _SWEEP_ABORT.clear()
+        sweep_t0 = time.monotonic()
+        swept = 0
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
             for result in ex.map(fetch_one, candidate_ids):
+                swept += 1
+                if not _SWEEP_ABORT.is_set() and time.monotonic() - sweep_t0 > _SWEEP_BUDGET_S:
+                    _SWEEP_ABORT.set()
+                    print(f"  ⚠ sweep: hit the {_SWEEP_BUDGET_S}s budget after {swept}/"
+                          f"{len(candidate_ids)} ids — abandoning the rest. The catalogue is "
+                          f"INCOMPLETE, so this run will NOT prune", flush=True)
                 if not result:
                     continue
                 pid, body = result
@@ -718,14 +749,18 @@ def main() -> int:
 
         # Full run: prune listings that were active before but not seen this crawl.
         pruned = 0
-        if not harvest_complete:
-            # The seed set is short, so ids above the 1300 numeric floor may simply never have been
-            # visited. Those listings are live but unscraped, and pruning here would inactivate
-            # them. Upserts still land; only the destructive half is withheld.
-            print("⚠ 24 Souq: skipping prune — the browse harvest was incomplete, so an unseen "
-                  "listing cannot be distinguished from a delisted one", flush=True)
+        # TWO ways the enumeration can be short, and both forbid pruning for the same reason: a
+        # listing we never visited is indistinguishable from one that was delisted.
+        #   - harvest incomplete -> ids ABOVE the 1300 numeric floor may never have been seeded.
+        #   - sweep aborted      -> ids we DID intend to visit were abandoned mid-run.
+        # Upserts still land either way; only the destructive half is withheld.
+        sweep_incomplete = _SWEEP_ABORT.is_set()
+        if not harvest_complete or sweep_incomplete:
+            which = "browse harvest" if not harvest_complete else "id sweep"
+            print(f"⚠ 24 Souq: skipping prune — the {which} was incomplete, so an unseen listing "
+                  f"cannot be distinguished from a delisted one", flush=True)
             healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
-                                 notes="pruned=0 (harvest incomplete: prune withheld)",
+                                 notes=f"pruned=0 ({which} incomplete: prune withheld)",
                                  check_tables=["souq24_residential_listings",
                                                "souq24_commercial_listings"])
             return 0 if healthy else 1

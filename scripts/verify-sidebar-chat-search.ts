@@ -93,11 +93,20 @@ check('«أبها» finds «ابها» (normalised comparison, both directions)'
     && JSON.stringify(chats) === snapshot);
 }
 
-// ── 7. the Search control exists, discoverable, in the sidebar hierarchy ────────────────────────
-check('a Search button with a stable testID renders under New Chat (not buried in a menu)',
+// ── 7. the Search entry point: a header-level 🔍, and NEVER a permanently visible field ─────────
+// (owner 2026-08-24 rev 2: the field must not sit under «محادثة جديدة» in the normal sidebar — the
+// circular header button is the ONLY resting affordance, ChatGPT-style hierarchy.)
+check('the Search button lives at HEADER level — inside brandRow, BEFORE New Chat',
   /testID="sidebar-search-btn"/.test(sidebar)
-  && sidebar.indexOf('sidebar-search-btn') > sidebar.indexOf("t('New Chat')")
-  && sidebar.indexOf('sidebar-search-btn') < sidebar.indexOf('<ScrollView style={s.hist}'));
+  && sidebar.indexOf('sidebar-search-btn') > sidebar.indexOf('<View style={s.brandRow}>')
+  && sidebar.indexOf('sidebar-search-btn') < sidebar.indexOf("t('New Chat')"));
+check('the header button is a quiet ~42px circular target, not a big outlined bar',
+  /searchTopBtn: \{ width: 42, height: 42, borderRadius: 21/.test(sidebar));
+check('NO permanent search field: the ONE input renders only inside the searching branch',
+  (sidebar.match(/testID="sidebar-search-input"/g) ?? []).length === 1
+  && /\{searching \? \(\s*<Animated\.View style=\{\[s\.searchRow/.test(sidebar));
+check('exactly ONE search affordance at a time: the header 🔍 steps aside while searching',
+  /\{!searching && \(\s*<Pressable/.test(sidebar));
 check('search mode is an in-place morph — input + close carry stable testIDs, no route/modal',
   /testID="sidebar-search-input"/.test(sidebar) && /testID="sidebar-search-close"/.test(sidebar)
   && !/router\.(push|replace)\([^)]*search/i.test(sidebar));
@@ -172,6 +181,11 @@ mustCatch('a raw (unnormalised) matcher would be caught («أبها» vs «اب�
 // source defects
 mustCatch('the Search button losing its testID',
   !/testID="sidebar-search-btn"/.test(mut(sidebar, 'testID="sidebar-search-btn"', '')));
+mustCatch('a permanent second field creeping back in (two inputs)',
+  (mut(sidebar, 'testID="sidebar-search-input"', 'testID="sidebar-search-input"§testID="sidebar-search-input"')
+    .match(/testID="sidebar-search-input"/g) ?? []).length !== 1);
+mustCatch('the header 🔍 staying visible during search (two affordances at once)',
+  !/\{!searching && \(\s*<Pressable/.test(mut(sidebar, '{!searching && (', '{true && (')));
 mustCatch('the input bypassing the sanitiser',
   !/onChangeText=\{onSearchChange\}/.test(mut(sidebar, 'onChangeText={onSearchChange}', 'onChangeText={setSearchText}')));
 mustCatch('close forgetting to clear the text (stale query on reopen)',
