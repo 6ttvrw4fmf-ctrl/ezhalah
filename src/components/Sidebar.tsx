@@ -20,6 +20,7 @@ import { useApp, type HistoryItem } from '@/store';
 import { sanitizeArabicSearch, isSearchableQuery, filterChats } from '@/lib/chatSearch';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { queryLabel } from '@/data/search';
+import { HOLD_MS, HOLD_SLOP_PX, canReorder, dragTargetIndex, neighboursAt, sortByOrder } from '@/lib/sidebarReorder';
 import { displayTitle } from '@/lib/chatTitle';
 import { sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { useI18n } from '@/i18n';
@@ -52,6 +53,22 @@ const SLIDE_IN = { duration: 320, easing: Easing.bezier(0.22, 1, 0.36, 1) };
 const SLIDE_OUT = { duration: 230, easing: Easing.in(Easing.cubic) };
 const SLIDE_PX = 360; // a bit wider than the panel so it fully clears the edge
 
+// ── PRESS-HOLD-DRAG REORDER (owner 2026-08-24) ───────────────────────────────────────────────────
+// Motion language: a quick 120ms lift when the hold lands (scale 1.02 + soft shadow — felt, not
+// flashy), the dragged row then follows the pointer with NO transition (attached to the finger),
+// siblings glide aside on a 170ms standard-decelerate curve, and the drop settles in 190ms. No
+// spring, no bounce. Honors prefers-reduced-motion (drag stays functional; the glides go instant).
+const EASE_CALM = 'cubic-bezier(0.2, 0, 0, 1)';
+const REDUCED_MOTION = Platform.OS === 'web'
+  && typeof window !== 'undefined'
+  && typeof window.matchMedia === 'function'
+  && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const GLIDE = REDUCED_MOTION ? 'none' : `transform 170ms ${EASE_CALM}`;
+const SETTLE_MS = 190;
+const AUTOSCROLL_EDGE_PX = 48;   // start auto-scrolling when the pointer is this close to an edge
+const AUTOSCROLL_STEP_PX = 6;    // per 16ms tick — controlled, never a fling
+const ROW_H_FALLBACK = 37;
+
 // Note #9 — TWO sections only: Starred (always kept) and Recent (last 60 DAYS, newest first).
 // Anything older than 60 days drops out of Recent but Starred items stay forever. Both buckets are
 // sorted by most-recent activity. (user request: "Recent chats should be ordered by most recent
@@ -59,10 +76,12 @@ const SLIDE_PX = 360; // a bit wider than the panel so it fully clears the edge
 const RECENT_WINDOW_DAYS = 60;
 function groupHistory(items: HistoryItem[]): { key: string; items: HistoryItem[] }[] {
   const now = Date.now();
-  const starred = items.filter((c) => c.starred).sort((a, b) => b.ts - a.ts);
-  const recent = items
-    .filter((c) => !c.starred && now - c.ts <= RECENT_WINDOW_DAYS * DAY)
-    .sort((a, b) => b.ts - a.ts);
+  // sortByOrder ranks by `order ?? ts` — identical to the old ts sort until a chat is manually
+  // dragged (press-hold reorder, owner 2026-08-24), after which the dragged slot wins until that
+  // chat's next activity re-tops it (Note #9's most-recent-activity contract, unchanged).
+  const starred = sortByOrder(items.filter((c) => c.starred));
+  const recent = sortByOrder(items
+    .filter((c) => !c.starred && now - c.ts <= RECENT_WINDOW_DAYS * DAY));
   return [
     { key: 'Starred', items: starred },
     { key: 'Recent', items: recent },
@@ -183,12 +202,198 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // silently dropped — it was, and the browser run caught it. Bind the real `dblclick` event on the
   // host element instead: the browser owns the double-click threshold, so two deliberate slow clicks
   // stay two opens.
-  const bindDoubleClick = (c: HistoryItem) => (node: any) => {
+  // (The double-click rename binding now lives in bindRowHost below, alongside the hold-to-drag
+  // pointer binding, so the two gestures are coordinated on one host node and can never race.)
+
+  // ═══ PRESS-HOLD-DRAG REORDER ═══════════════════════════════════════════════════════════════════
+  // Web pointer events only: the shipped product is the web app (desktop + mobile browsers), and
+  // pointer events unify mouse and touch there. Native gets rename via the ⋯ menu and keeps taps;
+  // its drag can adopt this same pure logic (sidebarReorder.ts) when the native app ships.
+  //
+  // Gesture contract (owner): a quick tap OPENS (armOpenRow, unchanged) · double-click RENAMES
+  // (unchanged) · a 380ms motionless hold LIFTS the row for vertical reorder. Movement past
+  // HOLD_SLOP before the hold lands means scroll/click — the timer cancels and nothing lifts.
+  const { reorderHistory } = useApp();
+  const [drag, setDrag] = useState<{ id: string; bucket: string; from: number; to: number } | null>(null);
+  const dragRef = useRef<{
+    id: string; bucket: string; from: number; to: number; count: number;
+    node: any; startY: number; lastY: number; scrollStart: number; rowH: number;
+    active: boolean; timer: ReturnType<typeof setTimeout> | null;
+    ids: string[]; // the bucket's visible order at grab time, WITHOUT the dragged id
+    scrollTick: ReturnType<typeof setInterval> | null; scrollDir: 0 | 1 | -1;
+    cleanup: () => void;
+  } | null>(null);
+  const histScrollRef = useRef<ScrollView>(null);
+  const histScrollY = useRef(0);
+  const rowHRef = useRef(ROW_H_FALLBACK);
+  // Chat-history search: the feature doesn't exist in the sidebar yet — when it lands, its filter
+  // state MUST replace this constant so reorder stays disabled over filtered results (owner rule;
+  // pinned by scripts/verify-sidebar-reorder.ts). Search finds chats; normal mode orders them.
+  const histSearchActive = false;
+  const reorderEnabled = canReorder({ editing: !!editingId, searchActive: histSearchActive });
+  // Screen-reader confirmation after a drop — a polite live region, cleared shortly after.
+  const [dropAnnounce, setDropAnnounce] = useState('');
+
+  const applyDragTransform = () => {
+    const d = dragRef.current;
+    if (!d?.active || !d.node?.style) return;
+    const raw = d.lastY - d.startY + (histScrollY.current - d.scrollStart);
+    // Physical bounds: the row cannot be carried past its bucket (crossing buckets would change
+    // its Starred state, which reorder must never do). Vertical only — X is never touched.
+    const dy = Math.max((0 - d.from) * d.rowH - 6, Math.min((d.count - 1 - d.from) * d.rowH + 6, raw));
+    d.node.style.transform = `translateY(${dy}px) scale(1.02)`;
+    const to = dragTargetIndex(d.from, dy, d.rowH, d.count);
+    if (to !== d.to) { d.to = to; setDrag((cur) => (cur && cur.id === d.id ? { ...cur, to } : cur)); }
+  };
+
+  const stopAutoScroll = () => {
+    const d = dragRef.current;
+    if (d?.scrollTick) { clearInterval(d.scrollTick); d.scrollTick = null; d.scrollDir = 0; }
+  };
+  const maybeAutoScroll = () => {
+    const d = dragRef.current;
+    if (!d?.active) return;
+    const scroller: any = (histScrollRef.current as any)?.getScrollableNode?.();
+    if (!scroller?.getBoundingClientRect) return;
+    const r = scroller.getBoundingClientRect();
+    const dir: 0 | 1 | -1 = d.lastY < r.top + AUTOSCROLL_EDGE_PX ? -1
+      : d.lastY > r.bottom - AUTOSCROLL_EDGE_PX ? 1 : 0;
+    if (dir === d.scrollDir) return;
+    stopAutoScroll();
+    if (dir === 0) return;
+    d.scrollDir = dir;
+    d.scrollTick = setInterval(() => {
+      const dd = dragRef.current;
+      if (!dd?.active) { stopAutoScroll(); return; }
+      histScrollRef.current?.scrollTo({ y: Math.max(0, histScrollY.current + dir * AUTOSCROLL_STEP_PX), animated: false });
+      // onScroll updates histScrollY on the next frame; nudge locally so the row keeps tracking
+      // even while the browser coalesces scroll events.
+      histScrollY.current = Math.max(0, histScrollY.current + dir * AUTOSCROLL_STEP_PX);
+      applyDragTransform();
+    }, 16);
+  };
+
+  const settleDrag = (commit: boolean) => {
+    const d = dragRef.current;
+    if (!d) return;
+    if (d.timer) clearTimeout(d.timer);
+    stopAutoScroll();
+    d.cleanup();
+    if (!d.active) { dragRef.current = null; return; }
+    const node = d.node;
+    const finalDy = commit ? (d.to - d.from) * d.rowH : 0;
+    if (node?.style) {
+      node.style.transition = REDUCED_MOTION ? 'none' : `transform ${SETTLE_MS}ms ${EASE_CALM}, box-shadow ${SETTLE_MS}ms ${EASE_CALM}`;
+      node.style.transform = `translateY(${finalDy}px) scale(1)`;
+      node.style.boxShadow = 'none';
+    }
+    const { id, to, ids } = d;
+    dragRef.current = null;
+    // Hand-off on a TIMER, never an animation callback (repo rule: rAF freezes in hidden tabs).
+    setTimeout(() => {
+      if (commit) {
+        const { prevId, nextId } = neighboursAt(ids, to);
+        reorderHistory(id, prevId, nextId);
+        setDropAnnounce(t('Conversation order changed'));
+        setTimeout(() => setDropAnnounce(''), 1600);
+      }
+      if (node?.style) {
+        node.style.transition = ''; node.style.transform = ''; node.style.zIndex = '';
+        node.style.boxShadow = ''; node.style.position = ''; node.style.background = '';
+        node.style.cursor = '';
+      }
+      setDrag(null);
+    }, REDUCED_MOTION ? 0 : SETTLE_MS + 10);
+  };
+
+  const beginHold = (c: HistoryItem, bucket: string, index: number, count: number, ids: string[], node: any, e: PointerEvent) => {
+    if (!reorderEnabled || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    if (dragRef.current) return;
+    const prevent = (ev: Event) => ev.preventDefault();
+    const onMove = (ev: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      d.lastY = ev.clientY;
+      if (!d.active) {
+        // Wandered before the hold landed → it's a scroll or a click, never a lift.
+        if (Math.abs(ev.clientY - d.startY) > HOLD_SLOP_PX || Math.abs(ev.clientX - (e.clientX ?? 0)) > HOLD_SLOP_PX) settleDrag(false);
+        return;
+      }
+      ev.preventDefault();
+      applyDragTransform();
+      maybeAutoScroll();
+    };
+    const onUp = () => settleDrag(dragRef.current?.active === true);
+    const onCancel = () => settleDrag(false);
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') settleDrag(false); };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('keydown', onKey);
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('touchmove', prevent);
+      try { (document.body as any).style.userSelect = ''; } catch {}
+    };
+    dragRef.current = {
+      id: c.id, bucket, from: index, to: index, count, node,
+      startY: e.clientY, lastY: e.clientY, scrollStart: histScrollY.current,
+      rowH: rowHRef.current, active: false, timer: null, ids,
+      scrollTick: null, scrollDir: 0, cleanup,
+    };
+    dragRef.current.timer = setTimeout(() => {
+      const d = dragRef.current;
+      if (!d || d.active) return;
+      d.active = true;
+      // The hold landed: this must never also open or rename.
+      cancelArmedOpen();
+      setMenu(null);
+      // Subtle, free haptic where the platform offers one (Android Chrome).
+      try { (navigator as any).vibrate?.(10); } catch {}
+      // Stop the page from scrolling under the drag (finger is stationary, so no scroll started).
+      window.addEventListener('touchmove', prevent, { passive: false });
+      try { (document.body as any).style.userSelect = 'none'; } catch {}
+      if (d.node?.style) {
+        d.node.style.transition = REDUCED_MOTION ? 'none' : `transform 120ms ${EASE_CALM}, box-shadow 120ms ${EASE_CALM}`;
+        d.node.style.zIndex = '30';
+        d.node.style.position = 'relative';
+        d.node.style.background = '#ffffff';
+        d.node.style.cursor = 'grabbing';
+        d.node.style.transform = 'translateY(0px) scale(1.02)';
+        d.node.style.boxShadow = '0 6px 18px rgba(11,20,15,0.16)';
+        // After the lift lands, drop the transition so the row is glued to the pointer.
+        setTimeout(() => { const dd = dragRef.current; if (dd?.active && dd.node?.style) dd.node.style.transition = REDUCED_MOTION ? 'none' : `box-shadow 120ms ${EASE_CALM}`; }, 130);
+      }
+      setDrag({ id: c.id, bucket, from: index, to: index });
+    }, HOLD_MS);
+  };
+
+  // One host binding per row: the double-click rename (existing) plus the hold-to-drag pointerdown.
+  const bindRowHost = (c: HistoryItem, bucket: string, index: number, count: number, ids: string[]) => (node: any) => {
     if (Platform.OS !== 'web' || !node || typeof node.addEventListener !== 'function') return;
     if (node.__ezDbl) node.removeEventListener('dblclick', node.__ezDbl);
-    const handler = () => beginRename(c);
-    node.__ezDbl = handler;
-    node.addEventListener('dblclick', handler);
+    const dbl = () => { if (!dragRef.current?.active) beginRename(c); };
+    node.__ezDbl = dbl;
+    node.addEventListener('dblclick', dbl);
+    if (node.__ezHold) node.removeEventListener('pointerdown', node.__ezHold);
+    const hold = (e: PointerEvent) => beginHold(c, bucket, index, count, ids, node, e);
+    node.__ezHold = hold;
+    node.addEventListener('pointerdown', hold);
+    // Suppress iOS Safari's long-press text-selection/callout on the rows themselves.
+    node.style.webkitUserSelect = 'none';
+    node.style.userSelect = 'none';
+    (node.style as any).webkitTouchCallout = 'none';
+  };
+
+  // How far a sibling row steps aside while the drag hovers over its slot.
+  const siblingShift = (bucket: string, index: number): number => {
+    if (!drag || drag.bucket !== bucket) return 0;
+    if (drag.from < drag.to && index > drag.from && index <= drag.to) return -rowHRef.current;
+    if (drag.from > drag.to && index >= drag.to && index < drag.from) return rowHRef.current;
+    return 0;
   };
 
   const openMenu = (id: string, e: any) => {
@@ -432,7 +637,16 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
             ) : null}
 
             {/* History */}
-            <ScrollView style={s.hist} contentContainerStyle={{ paddingBottom: 8 }} onScrollBeginDrag={() => setMenu(null)}>
+            <ScrollView
+              ref={histScrollRef}
+              style={s.hist}
+              contentContainerStyle={{ paddingBottom: 8 }}
+              onScrollBeginDrag={() => setMenu(null)}
+              // Drag math needs the live offset: a row's translation is pointer travel PLUS how far
+              // the list scrolled under it (auto-scroll near the edges moves the list, not the finger).
+              onScroll={(e) => { histScrollY.current = e.nativeEvent.contentOffset.y; }}
+              scrollEventThrottle={16}
+            >
               {groups.length === 0 ? (
                 <Text style={s.empty}>{searchActive ? t('No chat with that name') : t('Your searches will appear here.')}</Text>
               ) : (
@@ -447,10 +661,27 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                     {/* Note #8 — chat row layout is IDENTICAL in both languages: icon → title → star → ⋯
                         on the right. `direction: ltr` locks the row so Arabic doesn't auto-flip it.
                         Title still flows with its own text direction inside the bubble. (user request.) */}
-                    {g.items.map((c) => { const hot = hotRowId === c.id && activeChatId !== c.id && editingId !== c.id; return (
-                      <View key={c.id}
-                        style={[s.histRow, WEB_SMOOTH, hot && s.histRowHot, activeChatId === c.id && s.histRowActive, menu?.id === c.id && s.histRowOpen, { direction: 'ltr' } as any]}
-                        {...(Platform.OS === 'web' ? { onMouseEnter: () => setHotRowId(c.id), onMouseLeave: () => setHotRowId((h) => (h === c.id ? null : h)) } as any : null)}>
+                    {g.items.map((c, idx) => { const hot = hotRowId === c.id && activeChatId !== c.id && editingId !== c.id; return (
+                      <View
+                        key={c.id}
+                        // The OUTER row hosts both gestures (dblclick rename + hold-to-drag) and is
+                        // what lifts/moves, so the ⋯ button travels with its row. First row measures
+                        // the shared row height the slot math uses. (Merged 2026-08-24 with the
+                        // hot-row hover from main — hover paint and drag wiring share this host.)
+                        ref={bindRowHost(c, g.key, idx, g.items.length, g.items.filter((x) => x.id !== c.id).map((x) => x.id)) as any}
+                        onLayout={idx === 0 ? (e) => { const h = e.nativeEvent.layout.height; if (h > 20) rowHRef.current = h; } : undefined}
+                        style={[s.histRow, WEB_SMOOTH, hot && s.histRowHot, activeChatId === c.id && s.histRowActive, menu?.id === c.id && s.histRowOpen, { direction: 'ltr' } as any,
+                          // Siblings glide aside (translateY only — X never moves, RTL layout untouched)
+                          // while a drag from this bucket hovers over their slot. The dragged row's own
+                          // transform is applied directly to its DOM node so it tracks the pointer with
+                          // zero React churn.
+                          drag && drag.bucket === g.key && drag.id !== c.id
+                            ? ({ transform: [{ translateY: siblingShift(g.key, idx) }],
+                                 ...(Platform.OS === 'web' ? { transition: GLIDE } as any : null) })
+                            : null,
+                        ]}
+                        {...(Platform.OS === 'web' ? { onMouseEnter: () => setHotRowId(c.id), onMouseLeave: () => setHotRowId((h) => (h === c.id ? null : h)) } as any : null)}
+                      >
                         {editingId === c.id ? (
                           <View style={s.histItem}>
                             <Ionicons name="chatbubble-outline" size={15} color="#8a978f" />
@@ -471,17 +702,17 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                           </View>
                         ) : (
                           <Pressable
-                            ref={bindDoubleClick(c)}
                             style={s.histItem}
                             onPress={() => armOpenRow(c)}
                             // Touch has no hover: pressIn paints the dark feedback, pressOut ALWAYS
                             // clears it, so the pressed state can never remain stuck after release.
                             onPressIn={() => { if (Platform.OS !== 'web') setHotRowId(c.id); }}
                             onPressOut={() => { if (Platform.OS !== 'web') setHotRowId((h) => (h === c.id ? null : h)); }}
-                            // Web gets the owner's double-click (bound on the host node by
-                            // `bindDoubleClick`); touch gets long-press as the equivalent.
-                            onLongPress={() => beginRename(c)}
-                            delayLongPress={450}
+                            // Hold now belongs to REORDER (owner 2026-08-24): the web pointer binding
+                            // on the row host runs the 380ms hold → lift → drag. Touch rename moved
+                            // to the ⋯ menu; web keeps the double-click. No onLongPress here — a hold
+                            // must never rename, and a double-click must never drag.
+                            accessibilityHint={t('Hold to reorder the conversation')}
                           >
                             <Ionicons name="chatbubble-outline" size={15} color={hot ? colors.surface : '#8a978f'} />
                             <Text style={[s.histLabel, hot && s.histLabelHot]} numberOfLines={1}>{displayTitle(c, locale) || queryLabel(c.query)}</Text>
@@ -556,6 +787,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           menu.openUp ? { bottom: Math.max(8, menu.panelH - menu.top + 4) } : { top: menu.top + 4 },
         ]}
       >
+        <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && s.rowMenuItemHover]} onPress={() => { const item = history.find((c) => c.id === menu.id); setMenu(null); if (item) beginRename(item); }}>
+          <Ionicons name="pencil-outline" size={15} color={colors.ink} />
+          <Text style={s.rowMenuText} numberOfLines={1}>{t('Rename')}</Text>
+        </Pressable>
         <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && s.rowMenuItemHover]} onPress={() => { toggleStar(menu.id); setMenu(null); }}>
           <Ionicons name={menuItem.starred ? 'star' : 'star-outline'} size={15} color={menuItem.starred ? GOLD : colors.ink} />
           <Text style={s.rowMenuText} numberOfLines={1}>{menuItem.starred ? t('Unstar') : t('Star')}</Text>
@@ -580,6 +815,9 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       <View ref={panelRef} style={[s.dockPanel, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, LTR_PIN]}>
         <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />
         {body}
+        {dropAnnounce ? (
+          <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
+        ) : null}
         {menuOverlay}
       </View>
     );
@@ -593,6 +831,9 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />
         {body}
         {menuOverlay}
+        {dropAnnounce ? (
+          <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
+        ) : null}
       </Animated.View>
     </View>
   );
@@ -699,6 +940,8 @@ const s = StyleSheet.create({
   userName: { fontSize: 13.5, fontWeight: '700', color: colors.ink, textAlign: 'left', writingDirection: 'auto' as any },
   userSub: { fontSize: 11.5, color: colors.muted, textAlign: 'left', marginTop: 2 },
 
+  // Visually hidden, still announced: the post-drop «تم تغيير ترتيب المحادثة» confirmation.
+  srOnly: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 },
   cta: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 13 },
   ctaTitle: { fontSize: 13, fontWeight: '700', color: '#fff' },
   ctaSub: { fontSize: 10.5, color: 'rgba(255,255,255,0.75)', marginTop: 1 },

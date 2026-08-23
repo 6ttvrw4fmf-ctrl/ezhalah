@@ -191,9 +191,13 @@ const sbCode = sb.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 // react-native-web drops an `onDoubleClick` PROP (it is not on its forwardedProps allow-list), so the
 // double-click must be bound as a real DOM event on the host node — a prop-shaped test would pass on
 // code that never fires. This asserts the binding AND that the row actually wires it up.
+// 2026-08-24: the dblclick binding moved into bindRowHost, where it is COORDINATED with the
+// press-hold-drag reorder gesture (a double-click mid-hold must not rename, and a hold must not
+// open) — see scripts/verify-sidebar-reorder.ts for that side of the contract.
 check('B12. double-click enters rename mode',
-  /addEventListener\('dblclick'/.test(sbCode) && /const handler = \(\) => beginRename\(c\);/.test(sbCode)
-  && /ref=\{bindDoubleClick\(c\)\}/.test(sbCode));
+  /addEventListener\('dblclick'/.test(sbCode)
+  && /const dbl = \(\) => \{ if \(!dragRef\.current\?\.active\) beginRename\(c\); \};/.test(sbCode)
+  && /ref=\{bindRowHost\(/.test(sbCode));
 check('B12.1 double-click is not left as an un-forwarded react-native-web prop',
   !/onDoubleClick=?[:{]/.test(sbCode));
 check('B13. the row becomes an inline TextInput (no modal)', /<TextInput/.test(sbCode) && /editingId === c\.id \?/.test(sbCode));
@@ -202,7 +206,10 @@ check('B15. blur saves', /onBlur=\{\(\) => commitRename\(c\.id\)\}/.test(sbCode)
 check('B16. Escape cancels', /=== 'Escape'\) cancelRename\(\)/.test(sbCode));
 check('B17. Escape survives the blur it triggers (otherwise blur re-saves the discarded text)',
   /cancelledRef/.test(sbCode) && /if \(cancelledRef\.current\)/.test(sbCode));
-check('B18. touch devices get a long-press equivalent', /onLongPress=\{\(\) => beginRename\(c\)\}/.test(sbCode));
+// 2026-08-24 (owner): HOLD now belongs to REORDER — click opens, double-click renames, hold drags,
+// and the three must never trigger each other. Touch rename therefore moved to the ⋯ row menu.
+check('B18. touch devices can still rename — via the ⋯ menu (hold now belongs to reorder)',
+  /\{t\('Rename'\)\}/.test(sbCode) && !/onLongPress=\{\(\) => beginRename/.test(sbCode));
 check('B19. the row renders through the single displayTitle precedence helper', /displayTitle\(c, locale\)/.test(sbCode));
 check('B20. history rows (and therefore rename) stay signed-in only', /\{user \? \(/.test(sbCode));
 

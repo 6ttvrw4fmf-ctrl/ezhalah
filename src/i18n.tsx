@@ -1068,6 +1068,11 @@ const AR: Record<string, string> = {
   'Star': 'تمييز بنجمة',
   'Unstar': 'إزالة النجمة',
   'Delete': 'حذف',
+  'Rename': 'إعادة تسمية',
+  // Press-hold-drag reorder (owner 2026-08-24) — accessibility strings, Arabic-first.
+  'Hold to reorder the conversation': 'اضغط مطولًا لإعادة ترتيب المحادثة',
+  'Move conversation': 'نقل المحادثة',
+  'Conversation order changed': 'تم تغيير ترتيب المحادثة',
 
   // Settings (account)
   'Display Name': 'الاسم المعروض',
