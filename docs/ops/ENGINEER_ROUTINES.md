@@ -83,7 +83,19 @@ what it does not waive; §0.3 fixes the one BEFORE → AFTER report shape.
 ## 4. 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA Engineer (new, 2026-08-11)
 
 Canonical spec: **`docs/ops/SEARCH_MATCH_QA_ENGINEER.md`** (file wins over the live prompt on any
-divergence). 39-section owner spec: drive the LIVE production filter like a real user (Arabic
+divergence).
+
+> **§0 THE BROWSER-FIRST MANDATE (owner, 2026-08-23) is the headline rule of this routine.** The
+> core proof is what the real user clicks and sees; direct RPC testing stays but is SUPPLEMENTAL.
+> **A backend function that works is not evidence that the feature works.** Every journey runs
+> browser → observe the UI → capture the actual request → compare to the RPC → compare to
+> independent DB truth, and records the §0.1 evidence record. The §0.3 list — Advanced Filter,
+> Trending city + district picks, full-filter Trending parity, «مسح الكل», card → Back,
+> non-Riyadh coverage, mixed Buy/Rent/period, mobile journeys, browser zero-result journeys, the
+> 100-card cap, saved/restored state — is MANDATORY every run and may be reported untested only
+> for a named technical blocker. Report block: §28.1.
+
+48-section owner spec: drive the LIVE production filter like a real user (Arabic
 controls, no stale hardcoded lists — enumerate live options each run), verify MATCHING first
 (every returned card satisfies every selection against the structured backend), diversity second
 (never manufactured), «عرض المزيد» batches stay correct, card click-through reaches THE SAME

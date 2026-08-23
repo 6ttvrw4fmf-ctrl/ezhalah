@@ -21,10 +21,74 @@ The daily question:
 على العقار، هل يوصل لنفس العقار الصحيح؟» — If not, because of a fixable Ezhalah-side bug: fix it.
 Do not ask first.
 
+## 0. THE BROWSER-FIRST MANDATE (owner permanent rule, 2026-08-23)
+
+> **Test like a real user, not like an RPC tester. The core proof is what the actual person clicks
+> and sees. Direct RPC testing stays — it is valuable — but it is SUPPLEMENTAL.**
+
+The owner set this after a run that was strong on RPC differentials and still left whole user
+journeys untested. **A backend function that works is not evidence that the feature works.** The
+only thing that proves the product works is driving the real UI at
+`https://ezhalah-app.vercel.app` and watching what happens.
+
+**Every journey runs in this order, and skipping a step invalidates the journey:**
+
+```
+browser → interact with the real UI → observe what the USER sees
+        → capture the ACTUAL network request → compare to the RPC answer
+        → compare to INDEPENDENT DB truth
+```
+
+### 0.1 The per-journey evidence record — record ALL of it, every browser journey
+| field | meaning |
+|---|---|
+| `intended_state` | what the test meant to select |
+| `visible_ui_state` | what the app itself shows — «ملخص البحث», chips, live counts. NEVER the harness's memory of what it clicked |
+| `request_body` | the real outgoing RPC body, captured from the network |
+| `displayed_count` | the number the user reads on screen |
+| `rpc_count` | `total_count` from the RPC response |
+| `db_count` | independent DB truth (`ops_qa_diff`, §39.1) |
+| `returned_ids` | the result-ID set where practical |
+| `duplicates` | duplicate ids in what was served |
+| `ineligible_rows` | returned rows failing any selected predicate |
+| `click_through` | destination reached from a sampled card |
+
+### 0.2 The three mismatch classes — each is a DEFECT, not a note
+```
+intended_state ≠ visible_ui_state     → INTENT→UI MISMATCH
+visible_ui_state ≠ request_body       → UI→REQUEST MISMATCH
+request_body ≠ results                → REQUEST→RESULT MISMATCH
+```
+Do not merely report these. For a clear correctness bug the loop is, in full:
+**reproduce → root cause → fix → regression test → permanent barrier → mutation-proof the barrier
+→ merge/deploy through the guarded path → production re-test.** Every real defect gets a
+meaningful permanent barrier (§19, §26).
+
+### 0.3 MANDATORY every run — these are journeys, never "NOT TESTED" notes
+Each is a first-class ledger dimension (§39) and appears in the report block (§28.1). A run may
+report one as untested **only for a real technical blocker, named explicitly** — never because it
+was skipped.
+
+1. **Advanced Filter cohorts** — as a real person, §43
+2. **Trending city picks** — §44
+3. **Trending district picks** — §44
+4. **Full-filter Trending parity** — §44.3
+5. **«مسح الكل»** (Clear All) — §45
+6. **Card → Back to results** — §46
+7. **Wider non-Riyadh city coverage** — §8.1
+8. **Mixed Buy / Rent / period states** — §40.2, incl. Buy+Rent combined
+9. **Mobile user journeys** — §34
+10. **Honest zero-result journeys, in the browser** — §13
+11. **The 100-card cap behaviour** — §47
+12. **Saved / restored UI state where applicable** — §29, §46
+
 ## 1. Test the ACTUAL Arabic filter — live, not a stale list
 Use the real production UI at https://ezhalah-app.vercel.app. Refer to user-facing controls by
 their actual Arabic names: «شراء» · «إيجار» · «سنوي» · «شهري» · المنطقة · المدينة · الحي ·
-الأحياء الرائجة · اختيار أكثر من حي · فئة العقار · نوع العقار · غرف النوم · السعر · المساحة ·
+«الأكثر رواجًا الآن» (trending cities) · «الأحياء الأكثر رواجًا في {city}» (trending districts —
+NOT «الأحياء الرائجة», which is a stale label that appeared in this file until 2026-08-23) ·
+«مسح الكل» · «خلّنا نحدد الطلب أكثر» (the Advanced Filter launcher) ·
+اختيار أكثر من حي · فئة العقار · نوع العقار · غرف النوم · السعر · المساحة ·
 «بحث» · الترتيب · «عرض المزيد» · removable filter selections — plus every other control visible in
 production. **Do NOT maintain a hardcoded control list**: at the start of each run, inspect the
 live filter and enumerate every active option. A new فئة or نوع that appears in production later is
@@ -80,11 +144,29 @@ districts · low-inventory · districts expected zero for some types. Verify the
 المنطقة → المدينة → الحي. Never guess an ambiguous location. Every returned card belongs to the
 requested location.
 
+### 8.1 DO NOT LET THE RUN BECOME RIYADH-HEAVY (owner, 2026-08-23)
+الرياض is the biggest cohort and therefore the lazy default; a routine that proves الرياض works
+every day proves very little about the product. **Every run must include meaningful NON-Riyadh
+browser journeys** — not merely non-Riyadh RPC calls.
+
+- **≥3 non-Riyadh cities per run must be driven in the BROWSER**, end to end (filter → «بحث» →
+  cards → «عرض المزيد» → card click), and at least one of them a smaller city, not only جدة/الدمام.
+- **Rotate across regions**, choosing the stalest first from the ledger (§39.2). All 13 regions
+  exist in `loc_catalog_region`; a region untouched for a week is a coverage bug.
+- Report `NON-RIYADH COVERAGE: X cities / X regions` (§28.1). Riyadh-only runs fail this line.
+- **`p_cities` and `p_region_ids` must be a consistent pair** — see trap §41.11. Read the region id
+  from `loc_catalog_region`; never guess it.
+
 ## 9. Multiple الأحياء (multi-district, live since 2026-08-11 PR#512)
 النرجس + الملقا + الياسمين means النرجس OR الملقا OR الياسمين, ANDed with everything else. Test
-daily: 1 حي · 2 · 3+ · الأحياء الرائجة · searched حي · trending+searched mixed · selecting the same
-حي twice (must not duplicate) · removing one selected حي · changing المدينة after selecting
-(selections must clear). Every result must belong to ≥1 selected حي.
+daily: 1 حي · 2 · 3+ · a TRENDING حي pick (§44.2) · searched حي · trending+searched mixed ·
+selecting the same حي twice (must not duplicate) · removing one selected حي · changing المدينة
+after selecting (selections must clear). Every result must belong to ≥1 selected حي.
+
+**A selected حي renders as a removable CHIP, and the الحي input stays EMPTY** (placeholder
+«أي حي؟ اختياري», hint «تقدر تختار أكثر من حي»). Reading `input_value()` to decide whether a حي is
+selected is wrong and will report a false "district not selected" — read the chips and «ملخص
+البحث» instead (verified live 2026-08-23; trap §41.10).
 
 ## 10. «عرض المزيد» — every day, actually clicked in production
 Choose searches with enough results, click it for real. After EVERY batch: all filters remain
@@ -117,6 +199,16 @@ Deliberately create likely-zero searches daily (unusual نوع in a small city �
 area · restrictive district+type). On zero: verify the database, classify **HONEST ZERO** (DB has
 none — correct) or **SEARCH BUG** (DB has matches, production showed none — fix automatically).
 Never silently widen the user's request.
+
+**At least 2 zero-result journeys per run must be driven in the BROWSER, not only over REST**
+(owner §0, 2026-08-23). An RPC returning `[]` proves the predicate; it does not prove the user is
+told anything sane. In the browser also assert: the empty state actually RENDERS, it is in Arabic,
+it does not show a spinner forever, «مسح الكل» / the filter remain reachable so the user can
+recover, and the app does NOT silently broaden the search to avoid showing zero.
+
+**An honest zero adjudicates as `EXACT_SET_MATCH`, never `SET_MISMATCH`** — `rpc_total = 0` AND
+`sql_total = 0` is a PASS, and `ops_qa_verdict()` is required to say so for every empty-set
+sentinel (migration `20260823084345`, barrier `mon_detect_qa_adjudicator_zero_contract`).
 
 ## 14. Property cards
 Sample real cards: نوع · المدينة · الحي · السعر · «سنوي»/«شهري» · غرف النوم · دورات المياه where
@@ -156,8 +248,28 @@ migration drift · deploy lock). Uncovered new class → fix the bug AND add the
 never manually rediscover the same bug class.
 
 ## 20. Daily coverage targets (never at Supabase's expense)
-Golden tests + randomized exploration, not the same searches daily. When health allows: 15 golden
-searches · 30+ randomized · every live فئة represented · every نوع on rotation · multiple
+
+### 20.A Browser journeys — the CORE proof (owner §0, 2026-08-23)
+These are not optional and not substitutable by RPC calls. When health allows, per run:
+
+| Journey | Minimum |
+|---|---|
+| **REAL-USER BROWSER JOURNEYS** (full: filter → «بحث» → cards → «عرض المزيد» → card click) | **≥ 20** |
+| Advanced Filter user journeys (§43) | **≥ 2**, different cohorts, ≥1 answering + ≥1 skipping |
+| Trending city picks (§44.1) | **≥ 2** — one unnarrowed, one narrowed |
+| Trending district picks (§44.2) | **≥ 2** |
+| Full-filter Trending parity (§44.3) | **≥ 1** four-way equality proof |
+| «مسح الكل» (§45) | **≥ 1**, from a complex state |
+| Card → Back (§46) | **≥ 2** |
+| Non-Riyadh browser journeys (§8.1) | **≥ 3 cities**, rotating regions |
+| Mobile journeys (§34) | **≥ 3** |
+| Zero-result browser journeys (§13) | **≥ 2** |
+| 100-card cap journey (§47) | **≥ 1** |
+| Buy-only / Rent-only / Buy+Rent-combined | **all three**, in the browser |
+
+### 20.B Supplemental RPC sweep — valuable, but never the core proof
+Golden tests + coverage-driven exploration, not the same searches daily: 15 golden searches · 30+
+coverage-driven · every live فئة represented · every نوع on rotation · multiple
 «شراء»/«إيجار»/«سنوي»/«شهري» · 10+ city/district combos · multi-district · 15+ price experiments ·
 15+ area experiments · 10+ price+area combos · 8+ «عرض المزيد» journeys · every live sort · 10
 diversity checks · 5+ honest-zero · 5+ new-listing findability. Never hurt Supabase to hit numbers.
@@ -229,6 +341,36 @@ bugs discovered/fixed · barriers added/strengthened · deployments · productio
 new-listing findability · Arabic UI · Supabase health · barrier execution. List each bug as:
 **المشكلة → السبب → الإصلاح → الحاجز → تحقق الإنتاج**.
 
+### 28.1 REQUIRED recurring report block (owner permanent rule, 2026-08-23)
+Every daily report carries this block, verbatim keys, in addition to §28's content. A line may read
+`NOT TESTED — <blocker>` **only** for a real technical blocker that is named; "ran out of time" and
+"covered by RPC instead" are not blockers.
+
+```
+REAL-USER BROWSER JOURNEYS:     X
+ADVANCED FILTER USER JOURNEYS:  PASS/FAIL
+TRENDING CITY PICKS:            PASS/FAIL
+TRENDING DISTRICT PICKS:        PASS/FAIL
+FULL-FILTER TRENDING PARITY:    PASS/FAIL
+CLEAR ALL:                      PASS/FAIL
+CARD → BACK STATE:              PASS/FAIL
+NON-RIYADH COVERAGE:            X cities / X regions
+MOBILE JOURNEYS:                PASS/FAIL
+INTENT→UI MISMATCHES:           X
+UI→REQUEST MISMATCHES:          X
+REQUEST→RESULT MISMATCHES:      X
+COUNT MISMATCHES:               X
+INELIGIBLE RESULTS:             X
+DUPLICATES:                     X
+BUGS FOUND/FIXED:               X/X
+BARRIERS ADDED/STRENGTHENED:    X
+PRODUCTION VERIFIED:            YES/NO
+```
+
+The three mismatch counters are the §0.2 classes. They are counts of DEFECTS, so any non-zero value
+must be accompanied by its **المشكلة → السبب → الإصلاح → الحاجز → تحقق الإنتاج** entry — a non-zero
+mismatch line with no fix beside it is an incomplete run, not a report.
+
 ## 29. Refresh, back, and state persistence
 
 > ⚠️ **The REFRESH half of this section was REVERSED by the owner on 2026-08-16 — do not "fix"
@@ -282,6 +424,13 @@ Test the primary mobile viewport: Arabic visible · buttons tappable · no hidde
 don't overlap · prices don't overflow · selected أحياء legible · «بحث» and «عرض المزيد»
 accessible · RTL correct · loading/zero states render. A backend PASS with broken mobile UI = FAIL.
 
+**Mobile is a JOURNEY requirement, not a screenshot check (owner §0, 2026-08-23).** Every run drives
+**≥3 complete journeys** at the mobile viewport (390×844), each recording the full §0.1 evidence
+record — not merely a viewport resize with a layout assertion. Cover at least: one search + «عرض
+المزيد» + card click; one Advanced Filter entry; one non-Riyadh city. Assert alongside the layout
+checks that mobile and desktop agree on **displayed count, RPC count and DB truth for the same
+intended state** — a mobile-only count divergence is a defect. Report `MOBILE JOURNEYS: PASS/FAIL`.
+
 ## 35. Golden searches must survive every deploy
 Maintain a small permanent set of production searches with known INVARIANTS (not frozen counts —
 inventory changes): every result matches المدينة · نوع · within السعر · within المساحة · satisfies
@@ -314,6 +463,28 @@ tested-recently / not-yet-covered across فئات · أنواع · المدن ·
 «سنوي»/«شهري» · السعر · المساحة · غرف النوم · sorting · multiple أحياء · «عرض المزيد» · platforms ·
 card click-through. Random testing must not leave the same obscure نوع untested for weeks — the
 report must show the ledger split.
+
+### 39.2 The §0.3 journeys are FIRST-CLASS ledger dimensions, and coverage must SHRINK (owner, 2026-08-23)
+The owner's instruction is explicit: *"update the coverage ledger so these are first-class routine
+keys, not 'NOT TESTED' notes every day"* and *"actively rotate stale coverage until those uncovered
+keys decrease over time."*
+
+**These dimensions are seeded permanently and must be exercised, not annotated:**
+`advanced_filter` · `trending_city` · `trending_district` · `trending_full_filter_parity` ·
+`clear_all` · `card_back_state` · `non_riyadh_rotation` · `mobile_journey` ·
+`zero_result_journey` · `browse_cap` · `ui_state_restore` · `browser_journey`.
+
+**The rotation rule, every run:**
+1. Read the ledger **stalest-first** BEFORE testing, and let it choose that run's targets — the
+   plan follows the ledger, not the other way round.
+2. Every run must retire **at least 10 of the stalest keys** (`last_tested_at` NULL or oldest),
+   in addition to the §20.A mandatory journeys.
+3. **`not_yet_covered` must trend DOWN week over week.** A run that leaves it flat or rising has
+   not rotated; say so plainly in the report and fix it next run by targeting only stale keys.
+4. A key is only marked PASS when a real journey exercised it. Recording a key that was not
+   actually driven is the §27 "faking it" failure and is strictly forbidden.
+5. Seeding a NEW key with `last_tested_at = NULL` is correct and encouraged — that is how a newly
+   discovered surface enters rotation instead of being forgotten.
 
 ### 39.1 The differential oracle and the run ledger (built 2026-08-20 — use them, don't rebuild them)
 Layer C (§40.5) is a permanent DB object, not per-run throwaway SQL:
@@ -538,6 +709,28 @@ appears broken.
     commit, which then looks like «بحث» doing nothing — assert `input_value()` actually contains the
     city before searching, and treat a miss as a harness error.
 
+Traps 13–17 were each hit while building the §0 browser-first journeys (2026-08-23). Every one of
+them produced a confident FALSE product bug before it was run down.
+
+13. **The Advanced Filter CTA renders LATE — roughly 36 s after «بحث».** «خلّنا نحدد الطلب أكثر»
+    only appears once the assistant's closing message («…أو أساعدك نلقى نتائج أدق؟») has finished
+    typing, which is long after the card count settles. A harness that checks right after the cards
+    stabilise concludes "AF is not offered" and reports a gate defect that does not exist. Poll for
+    the CTA text with a generous timeout; do not conclude from one early look.
+14. **A selected حي is a CHIP; the الحي input stays EMPTY.** `input_value()` on the حي field returns
+    `''` even when a district is firmly selected and present in `p_districts` and «ملخص البحث».
+    Read the chips/summary, never the input, or you will report a false "district not selected".
+15. **An AF option chip carries its own count inside its box.** Matching the outermost element
+    containing «يقبل التقسيط» grabs the whole question card and the click does nothing — the live
+    count simply does not move, which reads as "single tap is broken". Click the SMALLEST pressable
+    carrying the text.
+16. **«مسح الكل» is a small text button (height < 20 px).** A pressable finder with a ≥20 px floor
+    will not find it and will report the control missing from the UI.
+17. **A transient navigation failure is not an outage.** `ERR_TIMED_OUT` on `page.goto` happened
+    once during this run while production was demonstrably healthy (3/3 direct fetches, HTTP 200 in
+    ~250 ms). Retry navigation with backoff, and confirm health independently before reporting the
+    site down.
+
 ## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
 
 > **What the user sees must match the actual listing/search truth exactly, in clean Arabic, with no
@@ -584,8 +777,148 @@ two ways) and `mon_detect_ranking_diversity_contract()` (daily-gated; drives the
 in the `mon_run_all_detectors()` roster. All six label conditions and the ranking comparison are
 mutation-proven — each shown to read 0 on clean data and 1 on a deliberately broken row.
 
+## 43. ADVANCED FILTER — test it as a real person (owner permanent rule, 2026-08-23)
+
+Not "call the AF RPC with a predicate". **Start from a real Normal-Filter search and walk the
+interview by clicking.** Mechanics below were captured live on production 2026-08-23; the state
+rules themselves live in the pure module `src/lib/afSteps.ts` and its barriers
+(`verify-af-back-navigation.ts`, `verify-af-min-useful-questions-gate.ts`,
+`verify-af-narrowing-gate.ts`, `verify-af-takes-over-cta.ts`) — those files win on semantics.
+
+### 43.1 The journey
+1. **Start from a real normal-filter search** (filter → «بحث» → results on screen).
+2. **Enter AF from the VISIBLE CTA** — «خلّنا نحدد الطلب أكثر», in the row under the closing
+   message «عرضت لك أول 10 إعلانات. تبي أعرض لك المزيد، أو أساعدك نلقى نتائج أدق؟». Never deep-link
+   or call the RPC to "enter" AF; if the user cannot reach it by clicking, it does not exist.
+3. **Single tap SELECTS ONLY** — it must NOT advance. It recomputes the live count in place:
+   verified live فيلا/إيجار/سنوي/الرياض, header + «متابعة» both moved 4,137 → 3,034 on one tap and
+   the question stayed put. The banned behaviour is the ~260 ms auto-advance retired 2026-08-11.
+4. **Second tap on the SAME option** — on a single-select (REPLACING) question it confirms and
+   advances **exactly one** question. On a multi-select (APPENDING) question it **toggles the option
+   off** (verified live: 3,034 → 4,137, same question) and «متابعة» is what advances. Know which
+   kind the question is before asserting — `afSteps.ts` is the authority.
+5. **«متابعة · N نتيجة»** advances, and the N it shows must equal the count the next screen is
+   computed from.
+6. **«تخطي»** (also «تخطي الباقي وابحث الآن») means **open / no restriction** — it must write **no
+   predicate at all**, not a permissive one. Assert the outgoing request gains nothing.
+7. **«رجوع»** returns exactly ONE question and restores that question's recorded answer, including
+   restoring a SKIP as a skip. **From the FIRST question, «رجوع» leaves the interview** and hands
+   the pre-AF controls back — verified live; that is correct, not a crash.
+8. **Changing an earlier answer recomputes later state**: the eligible set, the true count, and
+   which later answers are still valid. Valid ones survive, incompatible ones are dropped.
+9. **No stale predicate may survive** any of the above — re-read the request body and prove it.
+10. **The gate**: 0 or 1 useful questions → AF is **hidden**; 2+ useful questions → AF is offered
+    (`MIN_USEFUL_QUESTIONS_TO_SHOW = 2`, #908). Test both sides — a tiny cohort must NOT offer AF.
+11. **«ملخص البحث» reflects the COMMITTED AF state exactly** — no answer shown that was skipped, no
+    answer missing that was committed.
+12. **final displayed count = RPC count = independent DB truth.**
+13. **Every returned listing satisfies EVERY selected predicate**, AF answers included — not just
+    property type.
+
+### 43.2 AF mechanics observed live (so a future run does not re-derive them)
+- AF screen header is «إزهله بالذكاء الصناعي» followed by the live «N نتيجة».
+- Controls are «متابعة · N نتيجة» · «رجوع» · «تخطي» · «عرض النتائج».
+- Option chips carry their own option count («يقبل التقسيط» / «3,034») and the note
+  «الخيارات تعتمد على المعلومات المتوفرة للإعلانات الحالية».
+- Option-count RPCs seen: `property_age_option_counts_ar`, `apartment_guided_counts_ar`. They carry
+  the full normal-filter state.
+- The pre-AF CTA row is correctly HIDDEN for the whole interview and restored after (owner
+  2026-08-21) — assert it, it is a real contract.
+
+## 44. TRENDING — test the actual visible chips (owner permanent rule, 2026-08-22 / 2026-08-23)
+
+> **OWNER RULE (2026-08-22):** *"If the user has selected category, group, property type, Buy/Rent,
+> Annual/Monthly, bedrooms, price, area and any Advanced Filter answers, then ALL of that must be
+> passed into Trending."* The number beside a city or حي means **"listings matching everything I
+> picked, in that place"** — so it must equal what the user lands on after clicking it.
+> Canonical guard: `scripts/verify-trending-carries-full-filter-state.ts`.
+
+### 44.1 Trending CITY picks — before a city is selected
+- Trending cities render **inside the المدينة dropdown**, under «🔥 الأكثر رواجًا الآن», as numbered
+  rows «N.» / city / «COUNT إعلان». They are NOT on the page until the input is focused — a page-text
+  scan alone will report them missing (trap §41.12).
+- Test **unnarrowed and narrowed**. Verified live 2026-08-23: unnarrowed الرياض 36,908 · جدة 20,437
+  · الدمام 6,899; after شقة + إيجار/سنوي + 3 غرف + 70–100k + 120–180 م² the same list read
+  الرياض **702** · الخبر 119 · جدة 76 · الدمام 24 · الظهران 4 · المدينة المنورة 2.
+- Backing RPC `top_cities_by_deal_ar`, which must carry the full state. On the narrowed probe it
+  sent `p_deal`, `p_rent_period`, `p_category`, `p_types`, `p_beds_exact`, `p_price_min/max`,
+  `p_area_min/max`. **A trending call going out with those null while the user has set them is the
+  exact 2026-08-22 defect** (الرياض shown 10,618 vs truth 705) — treat it as P0.
+- **Click the visible row** and verify the landed state matches the row you clicked.
+
+### 44.2 Trending DISTRICT picks — after a city is selected
+- Header is «الأحياء الأكثر رواجًا في {city}»; same numbered-row shape.
+- Counts come from **per-district `location_search_candidates_ar` calls with `p_limit: 1`**, each
+  carrying the full narrowing state; the number is that response's `total_count`. This is why
+  §41.5 exists — those probes are NOT result searches and must never be read as one.
+- Verified live under the narrowed state above: حي النرجس 165 · حي العارض 86 · حي الملقا 85 ·
+  حي الياسمين 58 · حي الرمال 16 · حي العقيق 11.
+- Clicking a trending حي adds it as a **chip**; the الحي input stays empty (§9).
+
+### 44.3 THE PERMANENT EQUALITY
+```
+visible Trending count = Trending RPC = click-through result total = independent DB truth
+```
+All four, every run, at least once end to end. Verified live 2026-08-23 on
+شقة/إيجار/سنوي/الرياض/حي النرجس + 3 غرف + 70–100k + 120–180 م²: **165 = 165 = 165 = 165**.
+
+Trending must respect the ENTIRE current filter state — category · group · type · Buy/Rent ·
+Annual/Monthly · bedrooms · area min/max · price min/max · AF answers · location state. A single
+predicate silently dropped is a defect even when the number "looks reasonable": the failure mode is
+a user choosing a place from a number that was never theirs.
+
+## 45. «مسح الكل» (Clear All)
+1. **Build a genuinely complex state** — deal + period + city + حي + فئة + نوع + غرف + سعر + مساحة
+   (and AF answers where present). Do not test Clear All from a trivial state.
+2. Press **«مسح الكل»**.
+3. **Prove every USER-VISIBLE predicate is cleared**: city input empty, حي chips gone, period row
+   gone, bedrooms/price/area reset, نوع/فئة back to default. «مسح الكل» itself disappears once
+   there is nothing left to clear — that is correct.
+4. **Prove the SERIALIZED state is cleared too — this is the part that actually catches bugs.**
+   Run a fresh minimal search afterwards and read the outgoing request: **no stale hidden parameter
+   may survive.** Verified live 2026-08-23 — after clearing a
+   جدة/شهري/حي الصفا/شقة/2 غرف/3–9k/90–200م² state, the next request carried only `p_deal`,
+   `p_cities`, `p_region_ids`, `p_category`, `p_types`/`p_types2`, `p_limit`, `p_offset` — with no
+   `p_rent_period`, `p_districts`, `p_beds_exact`, `p_price_*` or `p_area_*`.
+5. A predicate that vanishes from the UI but survives in the request is a **UI→REQUEST MISMATCH**
+   (§0.2) and one of the nastiest bugs in the product: the user believes they cleared it.
+
+Note: «مسح الكل» renders as a small text button (height < 20 px); a harness with a larger minimum
+height will not find it and will wrongly report the control missing (trap §41.13).
+
+## 46. CARD → BACK — the return journey
+1. Run a real search and let the results settle.
+2. **Open a real listing card** and verify the destination is the correct external listing (§22) —
+   platform identity, deal, city, and listing identity all matching the card.
+3. **Return to Ezhalah** and confirm the prior result state is still correct: same «ملخص البحث»,
+   same displayed count, same cards, same scroll position where applicable.
+4. **No duplicate search and no corrupted state.** Count the result-search RPCs (`p_limit > 1`)
+   before and after: the click must add **zero**. Verified live 2026-08-23 — after opening card #1
+   the app stayed on `/agent` with headline 10,937, 10 cards, identical summary, and still exactly
+   **one** result search fired.
+5. On web the listing opens via `window.open(url,'_blank')`, so Ezhalah's own tab is never
+   navigated away — which makes this cheap to assert and therefore inexcusable to skip. Override
+   `window.open` to capture the URL (§41.8) so the source platform is never contacted.
+
+## 47. THE 100-CARD CAP («BROWSE_CAP») — a journey, not a bug
+`BROWSE_CAP = 100` (`src/data/resultCount.ts`, owner 2026-08-20). The user browses
+`min(trueTotal, BROWSE_CAP)` cards; the closing message states the **TRUE total**, never the cap and
+never the buffer length.
+
+Every run, drive one search with `trueTotal > 100` and assert:
+- «عرض المزيد» reveals cards up to 100 and then **correctly stops being offered** — the pager
+  disappearing at the cap is CORRECT, not a pagination failure;
+- the headline still quotes the true total (verified live 2026-08-23: 100 cards shown,
+  «لقينا 1,058 إعلان يطابق طلبك.»);
+- no duplicates across the revealed set, and every revealed card still matches every filter;
+- a search with `trueTotal ≤ 100` reveals all of them and ends with the "all available" message.
+
+Do not "fix" the cap, and do not report it as a defect. The defect would be the cap being presented
+as the result count, or the true total being replaced by 100.
+
 ## Final principle
-**MATCH → SOURCE TRUTH → DIVERSITY → USER JOURNEY → PERFORMANCE**, in that order. The engineer owns
-the entire journey: اختيار التصفية → بحث → النتائج → عرض المزيد → بطاقة العقار → المصدر الصحيح.
-Any proven Ezhalah-side failure anywhere in it: find → prove → fix root cause → barrier →
-regression test → deploy safely → production retest → report once.
+**MATCH → SOURCE TRUTH → DIVERSITY → USER JOURNEY → PERFORMANCE**, in that order, and **proved in
+the BROWSER first** (§0) — the backend working is not evidence that the feature works. The engineer
+owns the entire journey: اختيار التصفية → بحث → النتائج → عرض المزيد → بطاقة العقار → المصدر الصحيح
+→ الرجوع. Any proven Ezhalah-side failure anywhere in it: find → prove → fix root cause → barrier →
+mutation-proof the barrier → regression test → deploy safely → production retest → report once.
