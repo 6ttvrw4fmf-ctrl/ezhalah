@@ -936,8 +936,21 @@ export default function Agent() {
   // CLICKABLE answer chips (never typed). The tapped answer is merged into the SAME filter query and
   // re-searched. One question at a time; never shows more listings itself. A typed reply still works as a
   // fallback (the refine intercept in send). (user 2026-06-27: clickable, not typed.)
+  //
+  // GUARD (AF+Trending Data Integrity run, 2026-08-23): `pendingRefineRef` is the single source of truth
+  // for "a refine question is already on screen awaiting an answer" — `send()`'s REFINE INTERCEPT and
+  // `runRefine()` both already treat it that way (only ONE pending refine is ever a valid state). Nothing
+  // previously stopped a second startRefine() call while one was already pending: both call sites route
+  // through this ONE function via «خلّنا نحدد الطلب أكثر» (the fallback when the AF plan has <2 useful
+  // questions — see startAgeFlow) and the outline «نتائج أدق» button, and NEITHER call site disables
+  // itself while its own async work is in flight. A rapid double-tap on either (or the AF entry re-showing
+  // its CTA the instant `setAgeFlow(null)` fires, one tick before this runs) fired startRefine() twice and
+  // appended the IDENTICAL question+chips twice into the chat — reproduced live 2026-08-23 on a real
+  // production search (شقة/3 غرف/الصفاء، جدة → «كم ميزانيتك تقريباً؟» rendered as two back-to-back
+  // messages with duplicate, independently-tappable chip sets). Root-caused here, the one shared function
+  // every caller already routes through, rather than patched at each Pressable.
   const startRefine = (q?: SearchQuery) => {
-    if (!q) return;
+    if (!q || pendingRefineRef.current) return;
     const ar = getLocale() !== 'en'; // Arabic-first; English session → English labels.
     let dim = ''; let ask = ''; let options: { label: string; value: string }[] = [];
     // DISTRICT first — only when a city is set AND we have real, listing-backed neighbourhoods to offer.

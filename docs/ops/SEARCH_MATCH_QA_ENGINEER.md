@@ -97,6 +97,16 @@ FAILS. Match-first-then-diversity applies to every batch.
 Every live sorting choice. Sorting may change ORDER only, never the eligible set (450 qualify
 before sorting → every sort operates over the same 450). Then «عرض المزيد» while sorting is active.
 
+**Where the sorts actually live (verified 2026-08-23).** The Normal Filter results screen exposes
+**no sort control** — don't hunt the DOM for «الترتيب» and don't report its absence as a defect.
+`p_sort_by` is driven by the الوكيل الذكي path, and the six live keys are
+`oldest · price_asc · price_desc · area_asc · area_desc · beds_desc`
+(`RPC_SORT_KEYS`, `src/data/remote.ts`) plus the default relevance order when the param is omitted.
+Test the substantive invariant at the RPC level: re-issue one search per key and assert the
+returned ID **set** is identical (missing = extra = duplicates = 0) while the ORDER changes. Pick a
+cohort under `p_limit` so the whole set is comparable — 2026-08-23 used شقة/إيجار/سنوي/الرياض/
+حي النرجس (1,058 rows): 6/6 sorts set-identical, order changed on every one.
+
 ## 12. Verify the FULL PATH
 For sample searches prove the chain agrees end to end:
 user clicks → filter state → RPC/network parameters → shared eligibility backend → database
@@ -220,10 +230,30 @@ new-listing findability · Arabic UI · Supabase health · barrier execution. Li
 **المشكلة → السبب → الإصلاح → الحاجز → تحقق الإنتاج**.
 
 ## 29. Refresh, back, and state persistence
-تصفية → بحث → النتائج → بطاقة عقار → رجوع: selections preserved where intended. Refresh on
-results. المدينة doesn't change · الحي doesn't disappear · multiple أحياء stay selected · السعر,
-المساحة, غرف النوم stay · فئة/نوع stay correct · «سنوي» never becomes «شهري» · «إيجار» never
-becomes «شراء» · «عرض المزيد» doesn't corrupt state. Ezhalah-side resets → fix + regression barrier.
+
+> ⚠️ **The REFRESH half of this section was REVERSED by the owner on 2026-08-16 — do not "fix"
+> production back to the old rule.** Until then §29 required a refresh on the results screen to
+> restore the search, and that is what an earlier version of this file said. The owner ruled it
+> out in full: *"A browser refresh must never accidentally count as a new user search. There
+> should be no duplicate AI request, duplicate property-search RPC, duplicate conversation
+> message, duplicate analytics event, or duplicate saved conversation caused simply by
+> refreshing."* The canonical statement and its regression guard live in
+> `scripts/verify-refresh-restores-filter-search.ts` (in `npm test`); that file wins on any
+> divergence.
+
+**Refresh, THE RULE NOW (owner 2026-08-16), for guests and signed-in users alike:** a refresh
+inside a chat/search lands on the **FILTER HOME screen** and performs **ZERO AI calls, ZERO
+property RPCs, ZERO history writes**. A signed-in user's conversation is already saved in the
+sidebar (written at SEARCH time, de-duped by query) and reopens only when clicked; a guest has
+no visible history to restore. A refresh that re-runs or reconstructs the search is the DEFECT.
+Verified in production 2026-08-23: refresh → `/` filter home, 0 cards, **0 RPCs fired**, on both
+desktop and the 390 px mobile viewport.
+
+**Everything else in this section still stands.** تصفية → بحث → النتائج → بطاقة عقار → رجوع:
+selections preserved where intended · المدينة doesn't change · الحي doesn't disappear · multiple
+أحياء stay selected · السعر, المساحة, غرف النوم stay · فئة/نوع stay correct · «سنوي» never becomes
+«شهري» · «إيجار» never becomes «شراء» · «عرض المزيد» doesn't corrupt state (all filters stay
+active across every batch). Ezhalah-side resets in THOSE paths → fix + regression barrier.
 
 ## 30. Duplicates
 Inspect first batch, post-«عرض المزيد» batches, cross-platform syndication, duplicate source IDs,
@@ -491,6 +521,22 @@ appears broken.
    collide across genuinely distinct listings from the same agent/building — one run showed 150 false
    "duplicates" in 210 مكتب cards. Identity is the click-through URL: 110 cards produced 110 distinct
    destinations. §30 (similarity ≠ evidence) applies to the harness too.
+10. **The UI label is not the serialized value — «شراء» goes out as `p_deal: 'بيع'`.** Feeding the
+    oracle the Arabic control label instead of the captured request value makes every Buy search
+    read 0 and look like a total matching failure (hit 2026-08-23 on دور and عمارة سكنية). §40.4
+    already says to read state from the app's own «ملخص البحث» and its real request: pass
+    `ops_qa_diff` the **captured** `p_deal`/`p_rent_period`, never what you clicked.
+11. **`p_cities` and `p_region_ids` must be a CONSISTENT pair.** The RPC ANDs them, so a mismatched
+    pair correctly returns 0 — it is not an inventory finding. الدمام is region **5** (المنطقة
+    الشرقية), not 4 (القصيم); guessing that cost a false "major city has no apartments" scare on
+    2026-08-23. The real UI derives the region from the chosen city and can never send a
+    contradictory pair, so neither should the harness: read the id from `loc_catalog_region`.
+12. **An unconfirmed المدينة is a REFUSAL, not a broken search.** If the city is typed but no
+    dropdown option is committed, production deliberately declines to search and says
+    «الرجاء اختيار مدينة من القائمة.» / «لا توجد مدينة مطابقة — اختر من القائمة». That is correct
+    behaviour. Substring-matching the suggestion picks a huge outer container and silently fails to
+    commit, which then looks like «بحث» doing nothing — assert `input_value()` actually contains the
+    city before searching, and treat a miss as a harness error.
 
 ## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
 

@@ -77,8 +77,15 @@ export default function ReadAloudPlayer() {
   const onSeekForward = () => snap.canSeekForward && seekReadAloud(SEEK_MS);
   const onClose = () => stopReadAloud(); // stops speech AND dismisses (single source of truth)
 
+  // ROOT-CAUSE FIX (found live on a mobile viewport, 2026-08-23 — reported as "the voice thing
+  // doesn't work"): the original `insets.top + 12` sat almost at the very top of the screen, at the
+  // SAME height as agent.tsx's own top bar (hamburger/title/share — `s.topBar`, paddingTop
+  // `insets.top + 8`), so the pill rendered overlapping/crammed into that bar instead of below it —
+  // full-width, cramped, no longer reading as a compact floating pill. `insets.top + 54` is the SAME
+  // proven "clears the top bar" offset agent.tsx's own feedback toast already uses (`fbToastWrap`) —
+  // reused rather than re-guessed, so it can't drift from the one thing already known to clear it.
   return (
-    <View pointerEvents="box-none" style={[pl.wrap, { top: insets.top + 12 }]}>
+    <View pointerEvents="box-none" style={[pl.wrap, { top: insets.top + 54 }]}>
       <Animated.View
         style={[
           pl.pill,
