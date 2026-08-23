@@ -164,7 +164,23 @@ fallback presented as filtered truth. One per-district count RPC per visible row
 - The `af_field_stuck_no_variance` alert also names **satel** (kitchen/AC 45 true / 0 false),
   **sanadak**, **wasalt** and **aqaratikom** (driver_room all-false). Only the aqar rows were adjudicated
   against source this run; the all-false shapes are the opposite (and potentially worse) direction and
-  are **not** cleared.
+  are **not** cleared. **Partial trace done for sanadak so the next run starts here rather than from
+  zero — read this before re-deriving it:**
+  - `sanadak_residential_listings.driver_room` / `.maid_room` are **100% NULL** (1,441/1,441 rows), yet
+    `search_listings_ar` carries 951 false / 32 true for driver_room and 134 true for maid_room across
+    its 983 sanadak rows — a 983/983 disagreement with that table.
+  - That is **explained, not a defect**: `listing_extra_attrs` holds exactly those values
+    (951 false / 32 true, matching the index perfectly), and
+    `20260811105728_listing_rich_attrs_fleet_wide_generated_branches.sql` states that sanadak is a
+    **bespoke branch** reading platform-specific JSONB rather than the boolean columns. So the boolean
+    columns are simply unused for sanadak, and the JSONB is the operative source.
+  - **The real open question is one hop further up**: does that bespoke JSONB branch turn *absence* into
+    `false`? 951 explicit negatives from a platform whose boolean columns are entirely NULL is what
+    `af_field_stuck_no_variance` is pointing at, and it can only be settled by adjudicating live sanadak
+    pages the way this run did for aqar. **Not attempted here, not cleared.**
+  - Barrier gap worth noting: `mon_detect_af_tri_state_violations` compares `search_listings_ar` against
+    `listing_extra_attrs`. Those two agree here, so it stays silent — the hop it cannot see is
+    *platform source → `listing_extra_attrs`*.
 - Trending district rows beyond the first 6 per city (spec barrier item 22) not probed live.
 - No region rotation beyond الرياض / جدة / الدمام / الخبر / عنيزة / الجبيل.
 
