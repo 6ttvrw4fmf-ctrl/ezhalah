@@ -87,6 +87,16 @@ PROXY = (os.environ.get("SOUQ24_PROXY_URL") or os.environ.get("SCRAPE_PROXY_URL"
          or os.environ.get("WASALT_PROXY_URL") or "").strip()
 _PROXIES = {"http": PROXY, "https": PROXY} if PROXY else None
 
+# Browse-page harvest budget (2026-08-23). harvest_ids() was the one remaining SERIAL stage in this
+# scraper, at a 40s per-page timeout, over a page list whose size the sitemap controls and we do
+# not. That is an unbounded cost by construction, and it is what killed three consecutive runs.
+# These three constants bound it: concurrency, per-page ceiling, and a total wall-clock wall.
+# The budget is the important one — it converts "the run dies with zero rows" into "the harvest is
+# short, we say so, and we skip pruning".
+_HARVEST_WORKERS = int(os.environ.get("SOUQ24_HARVEST_WORKERS", "8"))
+_HARVEST_PAGE_TIMEOUT_S = int(os.environ.get("SOUQ24_HARVEST_PAGE_TIMEOUT_S", "15"))
+_HARVEST_BUDGET_S = int(os.environ.get("SOUQ24_HARVEST_BUDGET_S", "600"))
+
 # Arabic property-type word (from realestate_name / heading) → canonical English type.
 TYPE_MAP_AR = {
     "شقة": "Apartment", "شقه": "Apartment", "شقق": "Apartment", "استوديو": "Apartment",
@@ -266,14 +276,25 @@ def _redact(text: Optional[str]) -> Optional[str]:
 # ── Enumeration ────────────────────────────────────────────────────────────────
 def browse_pages(s: cc.Session) -> list[str]:
     """All faceted browse URLs: /properties + the /view/<slug> pages from the sitemap +
-    explicit /properties/for-sell|for-rent/<type-slug> pages."""
+    explicit /properties/for-sell|for-rent/<type-slug> pages.
+
+    The sitemap arm is the ONLY variable-size input here, so it is the one that decides how long
+    harvest_ids() takes. It is logged for exactly that reason — see the note on harvest_ids()."""
     pages: set[str] = {f"{BASE}/properties"}
+    t0 = time.monotonic()
+    n_sitemap = 0
     try:
-        sm = s.get(SITEMAP, timeout=30).text
+        sm = s.get(SITEMAP, timeout=_HARVEST_PAGE_TIMEOUT_S).text
         for u in re.findall(r"<loc>(https://24\.com\.sa/view/[^<]+)</loc>", sm):
             pages.add(u.strip())
-    except Exception:
-        pass
+            n_sitemap += 1
+        print(f"  browse: sitemap {len(sm)} bytes, {n_sitemap} /view/ pages "
+              f"in {time.monotonic() - t0:.1f}s", flush=True)
+    except Exception as e:
+        # A failed sitemap is NOT fatal — the fixed facet pages below still seed the sweep — but it
+        # must be visible, because it silently shrinks the seed set.
+        print(f"  ⚠ browse: sitemap fetch failed after {time.monotonic() - t0:.1f}s: "
+              f"{type(e).__name__}: {str(e)[:120]}", flush=True)
     for deal in ("for-sell", "for-rent"):
         for t in ("شقق", "فلل", "أراضي", "أدوار", "عمائر", "استراحات", "مكاتب", "محلات",
                   "مستودعات", "مزارع", "مجمعات-سكنية"):
@@ -281,18 +302,69 @@ def browse_pages(s: cc.Session) -> list[str]:
     return list(pages)
 
 
-def harvest_ids(s: cc.Session) -> tuple[set[int], int]:
-    """Collect active listing ids linked from the browse pages. Returns (ids, max_id_seen)."""
+def harvest_ids(s: cc.Session) -> tuple[set[int], int, bool]:
+    """Collect active listing ids linked from the browse pages.
+
+    Returns (ids, max_id_seen, complete). `complete` is False when the harvest ran out of time
+    budget before visiting every browse page — see the pruning note below for why that matters.
+
+    2026-08-23: this function is why souq24 died. It used to walk every browse page SERIALLY at a
+    40s timeout each, so its cost was (number of pages) x (per-page latency) with no ceiling. The
+    page count is driven by the sitemap's /view/ section, which is outside our control and grew.
+    Measured: it went from seconds to 16+ minutes (04:22:44 process start -> 04:38:26 begin_run),
+    after which the 8-worker id sweep had no budget left and the job was SIGINT-killed at ~134 min
+    with ZERO rows, three scheduled runs running. So:
+
+      - fetch the browse pages CONCURRENTLY (the id sweep below already uses a pool; this half was
+        the only serial stage left),
+      - drop the per-page timeout so one hung page costs seconds, not 40s,
+      - and put a hard wall-clock BUDGET on the whole stage so it can never eat the run again.
+
+    UNDER-ENUMERATION SAFETY. The numeric sweep in main() floors at id 1300 regardless of what this
+    returns, so a short harvest cannot hide ids <= 1300. It CAN hide ids ABOVE that floor, which are
+    discoverable only from these browse pages — and a listing that is never scraped is exactly what
+    prune_unseen() marks stale. That is why an incomplete harvest reports complete=False and main()
+    then refuses to prune: a truncated crawl must never be allowed to inactivate live listings."""
+    pages = browse_pages(s)
+    t0 = time.monotonic()
     ids: set[int] = set()
-    for u in browse_pages(s):
+    lock = threading.Lock()
+    visited = 0
+    failed = 0
+    ran_out = threading.Event()
+
+    def one(u: str) -> None:
+        nonlocal visited, failed
+        if ran_out.is_set():
+            return
+        if time.monotonic() - t0 > _HARVEST_BUDGET_S:
+            ran_out.set()
+            return
         try:
-            b = s.get(u, timeout=40).text
+            b = s.get(u, timeout=_HARVEST_PAGE_TIMEOUT_S).text
         except Exception:
-            continue
-        for x in re.findall(r"24\.com\.sa/(\d+)/", b):
-            ids.add(int(x))
+            with lock:
+                failed += 1
+            return
+        found = re.findall(r"24\.com\.sa/(\d+)/", b)
+        with lock:
+            visited += 1
+            for x in found:
+                ids.add(int(x))
+
+    with ThreadPoolExecutor(max_workers=_HARVEST_WORKERS) as ex:
+        list(ex.map(one, pages))
+
+    elapsed = time.monotonic() - t0
+    complete = not ran_out.is_set()
     mx = max(ids) if ids else 0
-    return ids, mx
+    print(f"  harvest: {visited}/{len(pages)} browse pages in {elapsed:.1f}s "
+          f"({failed} failed, {_HARVEST_WORKERS} workers, {_HARVEST_PAGE_TIMEOUT_S}s/page) "
+          f"-> {len(ids)} seed ids, max id {mx}", flush=True)
+    if not complete:
+        print(f"  ⚠ harvest: hit the {_HARVEST_BUDGET_S}s budget before visiting every page — "
+              f"seed set is INCOMPLETE, so this run will NOT prune", flush=True)
+    return ids, mx, complete
 
 
 def fetch_one(pid: int) -> Optional[tuple[int, str]]:
@@ -565,23 +637,30 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
-    seed_ids, mx = harvest_ids(s)
-    # Sweep the whole numeric range so older-but-active ads the facets hide are still caught.
-    # Pad above the highest browse id; cap defensively.
-    top = min(max(mx + 30, 1300, max(seed_ids, default=0) + 30), ID_CAP)
-    candidate_ids = sorted(set(range(1, top + 1)) | seed_ids, reverse=True)
-    if args.limit:
-        # newest-first; take a generous slice so inactive ids don't starve the target count
-        candidate_ids = candidate_ids[: max(args.limit * 8, 120)]
-    print(f"24 Souq: {len(seed_ids)} browse-seeded ids, sweeping ids 1..{top} "
-          f"({len(candidate_ids)} candidates, {WORKERS} workers)"
-          f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
 
+    # begin_run() FIRST, before any crawling (2026-08-23). It used to sit after harvest_ids(), so a
+    # run that stalled in the harvest never wrote a scrape_runs row at all: it read as "never ran"
+    # rather than "ran and is stuck", and was therefore invisible to EVERY scrape_runs-based
+    # barrier, including mon_detect_run_duration_explosion which exists to catch exactly this. Three
+    # consecutive souq24 deaths went unseen that way. Registering up front costs nothing and makes
+    # the whole run observable from second one; the except-handler below already closes the run out
+    # as ok=False if anything after this raises.
     run_id = None if args.limit else db.begin_run("souq24")
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
     try:
+        seed_ids, mx, harvest_complete = harvest_ids(s)
+        # Sweep the whole numeric range so older-but-active ads the facets hide are still caught.
+        # Pad above the highest browse id; cap defensively.
+        top = min(max(mx + 30, 1300, max(seed_ids, default=0) + 30), ID_CAP)
+        candidate_ids = sorted(set(range(1, top + 1)) | seed_ids, reverse=True)
+        if args.limit:
+            # newest-first; take a generous slice so inactive ids don't starve the target count
+            candidate_ids = candidate_ids[: max(args.limit * 8, 120)]
+        print(f"24 Souq: {len(seed_ids)} browse-seeded ids, sweeping ids 1..{top} "
+              f"({len(candidate_ids)} candidates, {WORKERS} workers)"
+              f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
         res_buf: list[dict] = []
         com_buf: list[dict] = []
 
@@ -626,6 +705,17 @@ def main() -> int:
 
         # Full run: prune listings that were active before but not seen this crawl.
         pruned = 0
+        if not harvest_complete:
+            # The seed set is short, so ids above the 1300 numeric floor may simply never have been
+            # visited. Those listings are live but unscraped, and pruning here would inactivate
+            # them. Upserts still land; only the destructive half is withheld.
+            print("⚠ 24 Souq: skipping prune — the browse harvest was incomplete, so an unseen "
+                  "listing cannot be distinguished from a delisted one", flush=True)
+            healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
+                                 notes="pruned=0 (harvest incomplete: prune withheld)",
+                                 check_tables=["souq24_residential_listings",
+                                               "souq24_commercial_listings"])
+            return 0 if healthy else 1
         for tbl, rows_seen in (("souq24_residential_listings", res),
                                ("souq24_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="24 Souq")
