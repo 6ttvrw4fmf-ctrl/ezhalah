@@ -204,50 +204,149 @@ def _redact(text: Optional[str]) -> Optional[str]:
 
 
 # ── Sitemap enumeration ───────────────────────────────────────────────────────
-# raghdan.sa's sitemap.xml is intermittently unreachable to automated fetchers (2026-08-23: 2
-# consecutive daily CI runs logged "Raghdan: 0 candidate listings" while a direct probe from a
-# different network fetched the same sitemap successfully with 376 property URLs moments later —
-# and a same-network repeat request then timed out again). Same lesson as jazwtn's 07-23→08-03
-# incidents: never conclude "blocked" or "empty catalog" from one response. Retry across TLS
-# fingerprints with backoff, treat a 0-entry body as a FAILED attempt (not a healthy empty
-# catalog), and RAISE after exhausting attempts so the run fails LOUD with a real reason instead of
-# silently reporting an empty catalog (the old bare `except Exception: pass` swallowed the actual
-# error — timeout vs reset vs decoy body were all indistinguishable from a genuinely empty source).
+# raghdan.sa's sitemap.xml is ONE urlset that has outgrown a buffered fetch. Measured 2026-08-23
+# from a clean network: the document is >4.73 MB and STILL not finished after a 300 s transfer
+# (no closing </urlset>), because its /ar/market/ analytics section dwarfs the catalogue —
+# 5,115 market URLs before the property block and 4,105+ after it, versus 376 properties. The 376
+# /ar/property/ entries are contiguous but sit at bytes 2.98 MB–3.26 MB, so ~69% of the document
+# must arrive before the catalogue is even complete.
+#
+# That is what killed capture on 2026-08-22 and 2026-08-23 (two daily runs, "0 candidate
+# listings"): `sess.get(..., timeout=30).text` is an all-or-nothing buffered read, so a transfer
+# that is merely SLOW raises and the bytes already received — often containing every property URL —
+# are thrown away. Reproduced exactly: `curl (28) timed out after 30000 ms with 148767 bytes
+# received`. Retrying across TLS fingerprints (the 2026-08-23 08:26 fix) cannot help, because
+# every attempt re-runs the same 30 s buffered read against the same slow 4.7 MB body; it just
+# multiplies one failure by five.
+#
+# So: STREAM the body and keep what arrives, with a budget sized for a multi-megabyte document.
+#
+# Keeping a partial body introduces the one risk that matters here — UNDER-enumeration silently
+# pruning live listings (prune_unseen would inactivate any property the truncated list missed). So
+# a partial body is only trusted when the property section is PROVABLY complete, and the proof does
+# not assume a fixed byte offset or a fixed section order: the block is contiguous, so seeing any
+# non-property <loc> AFTER the final property <loc> proves the catalogue ended inside the bytes we
+# hold. A body that ends mid-property-block fails that test and counts as a FAILED attempt.
+#
+# Same standing lesson as jazwtn's 07-23→08-03 incidents: never conclude "blocked" or "empty
+# catalog" from one response. Retry across TLS fingerprints with backoff, treat an unproven body as
+# a failed attempt, and RAISE after exhausting attempts so the run fails LOUD with a real reason
+# instead of silently reporting an empty catalog.
 _SITEMAP_IMPERSONATES = ("chrome124", "chrome131", "chrome136", "safari184", None)
+# Measured origin throughput: HTTP 200, TTFB 1.2 s, then a steady ~15.8 KB/s (4,738,522 bytes in
+# 300 s, still unfinished). At that rate the end of the property block (byte 3,258,997) arrives at
+# ~206 s — which is why the 30 s budget never stood a chance, and why simply raising it a little
+# would not either: the /ar/market/ section that grows sits BEFORE the catalogue, so any fixed
+# byte/time budget decays as the site adds market pages.
+#
+# So the read STOPS as soon as completeness is proven rather than trying to outlast the document.
+# That is safe precisely because completeness is proven and not assumed (see
+# _harvest_property_urls), and it means we stop at ~3.3 MB instead of chasing a body that never
+# ends. 420 s leaves ~2x headroom over the measured 206 s for the same work.
+_SITEMAP_TIMEOUT_S = 420
+# Hard ceiling so a pathological/endless stream can never exhaust the runner's memory.
+_SITEMAP_MAX_BYTES = 24_000_000
+# Re-test completeness every quarter-megabyte; ~14 cheap regex passes to cover the block, versus
+# one pass per 32 KB chunk.
+_SITEMAP_PROBE_EVERY_BYTES = 262_144
+_LOC_RE = re.compile(r"<loc>([^<]+)</loc>")
+# SECTION membership, deliberately WIDER than PROP_URL_RE (which matches only the /ar/ URLs we
+# harvest). The property section ALTERNATES each listing's Arabic URL with its English twin —
+# 376 /ar/property/ and 375 /en/property/ entries, one after the other. So "a non-harvested <loc>
+# follows the last harvested one" is true after the very FIRST listing, and using it as the
+# end-of-section proof stops the read ~1/3 of the way in: measured live, that returned 249 of 376
+# URLs while reporting success, which is precisely the short list that would drive prune_unseen()
+# to inactivate 127 live listings. The proof must therefore key on a <loc> outside the property
+# section ENTIRELY (the /ar/market/ tail), not merely outside the harvest set.
+_PROP_SECTION_RE = re.compile(r"https://raghdan\.sa/(?:ar|en)/property/")
+
+
+def _harvest_property_urls(body: str) -> tuple[list[str], bool]:
+    """Parse property URLs out of a (possibly truncated) sitemap body.
+
+    Returns (urls, property_section_complete). Completeness is PROVEN, not assumed: either the
+    document closed cleanly, or a <loc> from OUTSIDE the property section follows the last one
+    inside it — which can only happen once the contiguous section has ended. The distinction
+    between "outside the harvest set" and "outside the section" is load-bearing; see the
+    _PROP_SECTION_RE note above for the 249-of-376 near-miss that proved it."""
+    seen: set[str] = set()
+    urls: list[str] = []
+    saw_section = False
+    outside_section_after_last = False
+    for m in _LOC_RE.finditer(body):
+        u = m.group(1)
+        if _PROP_SECTION_RE.match(u):
+            if PROP_URL_RE.match(u):
+                u = u if u.endswith("/") else u + "/"
+                if u not in seen:
+                    seen.add(u)
+                    urls.append(u)
+            saw_section = True
+            outside_section_after_last = False
+        elif saw_section:
+            outside_section_after_last = True
+    complete = bool(urls) and (
+        outside_section_after_last or body.rstrip().endswith("</urlset>"))
+    return urls, complete
+
+
+def _stream_sitemap_body(sess: cc.Session) -> str:
+    """GET the sitemap as a stream, returning whatever arrived even if the transfer dies midway.
+
+    A mid-transfer timeout/reset with bytes in hand is NOT re-raised — the buffer may already hold
+    the whole property block, and _harvest_property_urls() decides whether it does. A failure with
+    an EMPTY buffer is re-raised, because that carries no information at all."""
+    buf = bytearray()
+    probed_at = 0
+    try:
+        with sess.stream("GET", SITEMAP, timeout=_SITEMAP_TIMEOUT_S) as r:
+            for chunk in r.iter_content():
+                buf.extend(chunk)
+                if len(buf) - probed_at >= _SITEMAP_PROBE_EVERY_BYTES:
+                    probed_at = len(buf)
+                    if _harvest_property_urls(buf.decode("utf-8", "replace"))[1]:
+                        print(f"  sitemap: property block complete at {len(buf)} bytes — "
+                              f"stopping read (the /ar/market/ tail is not needed)")
+                        break
+                if len(buf) >= _SITEMAP_MAX_BYTES:
+                    print(f"  sitemap: hit {_SITEMAP_MAX_BYTES} byte ceiling, stopping read")
+                    break
+    except Exception:
+        if not buf:
+            raise
+        print(f"  sitemap: transfer ended early with {len(buf)} bytes held — "
+              f"checking whether the property block completed")
+    return buf.decode("utf-8", "replace")
 
 
 def sitemap_urls(s: cc.Session) -> list[str]:
     """Return de-duped /ar/property/<firebaseId>/ URLs from sitemap.xml (one big urlset).
     EXCLUDES the /ar/properties/ plural index, /ar/market/, /ar/news/, /ar/public-profile/ …
-    Retries across TLS fingerprints with backoff; raises after exhausting them so the run is
-    marked failed instead of silently reporting an empty catalog (see module note above)."""
+    Streams the body (it is >4.7 MB and slow) and retries across TLS fingerprints with backoff;
+    raises after exhausting them so the run is marked failed instead of silently reporting an
+    empty catalog (see module note above)."""
     last_err: Optional[Exception] = None
     for attempt, imp in enumerate(_SITEMAP_IMPERSONATES):
         try:
             sess = s if attempt == 0 else (cc.Session(impersonate=imp) if imp else cc.Session())
-            body = sess.get(SITEMAP, timeout=30).text
-            seen: set[str] = set()
-            urls: list[str] = []
-            for u in re.findall(r"<loc>([^<]+)</loc>", body):
-                if PROP_URL_RE.match(u):
-                    u = u if u.endswith("/") else u + "/"
-                    if u not in seen:
-                        seen.add(u)
-                        urls.append(u)
-            if urls:
-                if attempt:
-                    print(f"  sitemap recovered on retry {attempt + 1} "
-                          f"(impersonate={imp}, {len(body)} bytes, {len(urls)} urls)")
+            body = _stream_sitemap_body(sess)
+            urls, complete = _harvest_property_urls(body)
+            if complete:
+                print(f"  sitemap ok on attempt {attempt + 1} (impersonate={imp}, "
+                      f"{len(body)} bytes, {len(urls)} property urls)")
                 return urls
+            # Refusing a body that holds SOME properties but cannot prove it holds them all is the
+            # point: handing a short list to prune_unseen() would inactivate live listings.
             print(f"  sitemap attempt {attempt + 1} (impersonate={imp}): {len(body)} bytes, "
-                  f"0 property urls — decoy body, retrying")
-        except Exception as e:  # curl 28/35 timeouts/resets land here
+                  f"{len(urls)} property urls but the block did not provably end — retrying")
+        except Exception as e:  # curl 28/35 timeouts/resets with an empty buffer land here
             last_err = e
             print(f"  sitemap attempt {attempt + 1} (impersonate={imp}) failed: {e}")
         time.sleep(4 * (attempt + 1))
     raise RuntimeError(
-        f"raghdan sitemap: no property urls after {len(_SITEMAP_IMPERSONATES)} fingerprint attempts"
-        + (f" (last error: {last_err})" if last_err else " (all attempts returned decoy bodies)"))
+        f"raghdan sitemap: no provably complete property block after "
+        f"{len(_SITEMAP_IMPERSONATES)} fingerprint attempts"
+        + (f" (last error: {last_err})" if last_err else " (all attempts returned partial bodies)"))
 
 
 def fetch_one(url: str) -> Optional[tuple[str, str]]:
