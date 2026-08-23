@@ -29,15 +29,20 @@ from scrapers.aqar import enrich_residential as E  # noqa: E402
 PROSE_CLAIMING_PARKING = "شقة للإيجار بها مواقف سيارات ومصعد ومطبخ راكب"
 
 
-def _page(extended: dict | str | None, *, prose: str = PROSE_CLAIMING_PARKING) -> str:
+def _page(extended: dict | str | None, *, prose: str = PROSE_CLAIMING_PARKING,
+          flat: dict | None = None) -> str:
+    """`flat` adds/overrides keys on the listing object itself — the level `maid`/`driver`/`lift`
+    live at, as opposed to the nested extended_details block `extended` fills."""
     listing: dict = {"id": 6503022, "lift": 1, "ketchen": 0, "furnished": 0}
     if extended is not None:
         listing["extended_details"] = extended
+    if flat:
+        listing.update(flat)
     return f'<html><body>{prose}<script>{{"listing":{json.dumps(listing)}}}</script></body></html>'
 
 
-def _amenities(extended, *, prose: str = PROSE_CLAIMING_PARKING) -> dict:
-    html = _page(extended, prose=prose)
+def _amenities(extended, *, prose: str = PROSE_CLAIMING_PARKING, flat: dict | None = None) -> dict:
+    html = _page(extended, prose=prose, flat=flat)
     obj = E._listing_json(html)
     assert obj is not None, "fixture must parse — otherwise the test proves nothing"
     return E._amenities(html, html, obj)
@@ -149,8 +154,33 @@ def test_flat_structured_keys_are_untouched_by_the_extended_read():
 
 
 def test_columns_with_no_structured_counterpart_still_use_prose_as_a_positive_hint():
-    """Unchanged behaviour: aqar publishes no maid-room key anywhere, so a prose hit is the only
-    signal available and stays a positive-only hint (never False)."""
-    am = _amenities(None, prose="شقة بها غرفة خادمة")
-    assert am["maid_room"] is True
-    assert _amenities(None, prose="شقة")["maid_room"] is None
+    """Unchanged behaviour, corrected example (2026-08-23).
+
+    The rule this pins is unchanged: a column aqar answers NOWHERE may still be raised to True by a
+    prose hit, and stays UNKNOWN otherwise — never False.
+
+    The example moved. This test used to demonstrate it with `maid_room`, on the premise that "aqar
+    publishes no maid-room key anywhere". That premise was wrong, in exactly the way this same file's
+    header already records for `parking`: aqar publishes `maid` (and `driver`) as native 0/1/null
+    keys in the flat listing payload. Measured over 36 live pages, 0 fetch failures: aqar published
+    `driver` on 13 of them and only 2 stored values agreed — 9 rows had discarded an explicit 0, one
+    had discarded a published 1, and ad 6738742 stored TRUE against a published 0. Both columns are
+    now read structurally (_STRUCTURED_AMENITY_KEYS), so a prose hit can no longer overturn them —
+    which is what this assertion, written against the old premise, would have blocked.
+
+    `extension` («إمكانية التوسعة») is a genuine prose-only column: it appears in no flat key and no
+    extended_details key, so it still demonstrates the rule the test was written for.
+    """
+    am = _amenities(None, prose="فيلا مع إمكانية التوسعة")
+    assert am["extension"] is True
+    assert _amenities(None, prose="فيلا")["extension"] is None
+
+
+def test_maid_and_driver_room_are_read_structurally_not_from_prose():
+    """The correction itself: aqar's published answer wins over the page text, in both directions."""
+    assert _amenities({}, flat={"maid": 1, "driver": 1})["maid_room"] is True
+    no = _amenities({}, flat={"maid": 0, "driver": 0}, prose="فيلا بها غرفة خادمة و غرفة سائق")
+    assert no["maid_room"] is False, "a published 0 must survive a prose hit"
+    assert no["driver_room"] is False
+    silent = _amenities(None, prose="فيلا بها غرفة خادمة")
+    assert silent["maid_room"] is None, "aqar silent -> UNKNOWN, never True from prose alone"
