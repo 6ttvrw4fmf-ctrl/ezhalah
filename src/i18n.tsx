@@ -549,6 +549,14 @@ const AR: Record<string, string> = {
   // Graceful failure (owner root-cause fix, 2026-08-22): shown ONLY when the device/browser has no
   // Arabic voice at all — never silently read Arabic text with a non-Arabic (usually English) voice.
   'Listening isn\'t available on this device': 'الاستماع غير متاح على هذا الجهاز',
+  // Floating playback controller (owner 2026-08-22, ChatGPT-style pill — Arabic-branded, own layout).
+  // Every accessibility label on the controller must be Arabic, no English leak ('Close' reuses the
+  // existing app-wide key just below — same word, same meaning, one definition).
+  'Pause reading': 'إيقاف مؤقت',
+  'Resume reading': 'متابعة',
+  'Back 15 seconds': 'رجوع ١٥ ثانية',
+  'Forward 15 seconds': 'تقديم ١٥ ثانية',
+  'Playback speed': 'سرعة القراءة',
   'Here is what I found:': 'هذا ما وجدته:',
   'Here is what matches what you want': 'هذا اللي يناسب طلبك',
   'I found a few properties based on your search.': 'وجدت بعض العقارات بناءً على طلبك.',

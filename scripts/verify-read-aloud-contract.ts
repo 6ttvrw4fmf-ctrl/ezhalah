@@ -15,6 +15,7 @@ const readAloud = readFileSync(join(root, 'src/lib/readAloud.ts'), 'utf8');
 const readAloudScript = readFileSync(join(root, 'src/lib/readAloudScript.ts'), 'utf8');
 const listingDisplay = readFileSync(join(root, 'src/lib/listingDisplay.ts'), 'utf8');
 const feedbackRow = readFileSync(join(root, 'src/components/FeedbackRow.tsx'), 'utf8');
+const readAloudPlayer = readFileSync(join(root, 'src/components/ReadAloudPlayer.tsx'), 'utf8');
 const agent = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
 const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 const pkg = readFileSync(join(root, 'package.json'), 'utf8');
@@ -27,6 +28,7 @@ const PAID_TTS_SIGNS = /elevenlabs|texttospeech\.googleapis\.com|cognitiveservic
 check('readAloud.ts names no paid TTS provider/endpoint', !PAID_TTS_SIGNS.test(readAloud));
 check('FeedbackRow.tsx names no paid TTS provider/endpoint', !PAID_TTS_SIGNS.test(feedbackRow));
 check('agent.tsx names no paid TTS provider/endpoint', !PAID_TTS_SIGNS.test(agent));
+check('ReadAloudPlayer.tsx (the floating controller) names no paid TTS provider/endpoint', !PAID_TTS_SIGNS.test(readAloudPlayer) && !/fetch\(/.test(readAloudPlayer));
 // The ONLY speech dependency is expo-speech (wraps window.speechSynthesis on web, native OS TTS on
 // iOS/Android) — free at any volume, never a network call Ezhalah is billed for.
 check("package.json depends on expo-speech (the free native/OS TTS wrapper) and nothing else speech-related", /"expo-speech":/.test(pkg) && !/"@google-cloud\/text-to-speech"|"elevenlabs"|"microsoft-cognitiveservices-speech-sdk"/.test(pkg));
@@ -36,7 +38,7 @@ check('readAloud.ts imports expo-speech, not a fetch-based TTS client', /import 
 //    queue, so "only one response speaks" and "starting another stops the previous" hold by
 //    construction rather than needing separate bookkeeping that could drift out of sync. ──────────
 check('speakReadAloud() stops any in-progress utterance before starting a new one', /export function speakReadAloud[\s\S]{0,80}?\{\s*stopReadAloud\(\);/.test(readAloud));
-check('a shared "who is speaking" id is exposed for callers to derive their own state from', /let currentId: string \| null = null/.test(readAloud) && /export function subscribeReadAloud/.test(readAloud));
+check('a shared "who is speaking" id is exposed for callers to derive their own state from', /let sessionId: string \| null = null/.test(readAloud) && /export function subscribeReadAloud/.test(readAloud));
 
 // ── NEVER AUTOPLAYS: the only call site is a Pressable onPress — iOS Safari silently drops
 //    speak() calls made outside a user-gesture handler anyway, but this is pinned independently so
@@ -67,7 +69,7 @@ check('FeedbackRow shows the graceful "not available" message only when speakRea
 // documented ~4.5 syllable/second natural-Arabic-speech benchmark), not a guess — pinned distinctly
 // from "some slow-sounding default" so a future edit can't silently drift it back toward 0.92 without
 // this check moving too. Only the number itself may legitimately change (re-measure and update both).
-check('speech rate is the measured, documented value (1.3 — natural-pace-tuned, not an arbitrary slowdown)', /const SPEECH_RATE = 1\.3;/.test(readAloud) && /rate: SPEECH_RATE/.test(readAloud));
+check('default speech rate is the measured, documented value (1.3 — natural-pace-tuned, not an arbitrary slowdown)', /const DEFAULT_RATE = 1\.3;/.test(readAloud) && /let rate: number = DEFAULT_RATE;/.test(readAloud));
 
 // ── STRUCTURE (owner 2026-08-19): إزهله -> pause -> summary -> pause -> visible property cards, in
 //    the SAME order shown on screen, capped, never reading raw/internal fields. ─────────────────────
@@ -103,11 +105,72 @@ check('starting a new search/turn stops any read-aloud left over from the previo
 
 // ── UI: no fabricated fallback voice/provider on error — the OS/browser's own behavior is the whole
 //    story, per owner instruction ("do not switch to a paid service"). ─────────────────────────────
-check('onError never falls back to a different (paid) speech path — just clears the speaking state', /onError: \(\) => \{ if \(currentId === id\) setCurrent\(null\); \}/.test(readAloud));
+check('a unit error just ends the session cleanly (finishSession) — never falls back to a different (paid) speech path', /\(\) => finishSession\(\),/.test(readAloud) && /function finishSession\(\) \{/.test(readAloud) && !/(elevenlabs|googleapis|azure|cognitiveservices)/i.test(readAloud));
 
-// ── i18n: the two new labels exist, Arabic, no Latin leak (same pattern every other AR-dict check
-//    in this repo uses). ────────────────────────────────────────────────────────────────────────
-for (const key of ['Read aloud', 'Stop reading']) {
+// ── FLOATING PLAYBACK CONTROLLER (owner 2026-08-22 — ChatGPT-popup-style pill, Ezhalah-branded,
+//    interaction reference only, not pixel-copied). ─────────────────────────────────────────────────
+
+// WEB PAUSE/RESUME BUG AVOIDANCE: expo-speech's own web shim remaps SpeechSynthesisUtterance's
+// native onpause event to its OWN 'speakingStopped' event and deletes that utterance's callback
+// registration — confirmed reading node_modules/expo-speech/build/ExponentSpeech.web.js. Calling
+// Speech.pause() would therefore both mis-report "stopped" and permanently break that utterance's
+// completion callback. The fix speaks/pauses/resumes/cancels via the raw Web Speech API directly on
+// web instead (voice RESOLUTION still goes through expo-speech's getAvailableVoicesAsync — untouched,
+// unaffected by this bug — only actual playback moves).
+check('web playback bypasses expo-speech\'s buggy Speech.speak()/pause()/resume(), using window.speechSynthesis directly instead', /window\.speechSynthesis\.speak\(utterance\)/.test(readAloud) && /window\.speechSynthesis\.pause\(\)/.test(readAloud) && /window\.speechSynthesis\.resume\(\)/.test(readAloud) && /window\.speechSynthesis\.cancel\(\)/.test(readAloud));
+check('voice RESOLUTION is untouched by the playback-engine rewrite — still expo-speech\'s getAvailableVoicesAsync via the same bounded poll', /Speech\.getAvailableVoicesAsync\(\)/.test(readAloud) && /const POLL_TIMEOUTS_MS = \[/.test(readAloud));
+check('the raw web utterance still gets the exact confirmed Arabic voice object (resolved back from bestArabicVoice.identifier), never left unset', /function resolveWebVoiceObject\(\)/.test(readAloud) && /v\.voiceURI === bestArabicVoice!\.identifier/.test(readAloud) && /if \(voice\) utterance\.voice = voice;/.test(readAloud));
+check('native (iOS) pause/resume still go through expo-speech\'s Speech.pause()/Speech.resume() directly — no such remapping bug exists there', /void Speech\.pause\(\); \} \/\/ iOS only/.test(readAloud) && /void Speech\.resume\(\); \} \/\/ iOS only/.test(readAloud));
+check('Android (no native pause/resume in expo-speech) never silently no-ops a pause tap — it cancels the current unit and restarts it on resume, an honest degraded behavior, not a fake pause', /else if \(isAndroid\(\)\) \{/.test(readAloud) && /pendingRestart = true;/.test(readAloud));
+
+// TRUE PAUSE PRESERVES THE QUEUE: a real pause (web/iOS) must NOT invalidate the in-flight
+// utterance's own eventual completion callback — only an actual CANCEL (stop/seek/rate-change) may
+// bump playToken. If pause bumped it too, the exact same "onDone never fires after resume" bug the
+// web-shim workaround above exists to avoid would just be reintroduced by this file's own pause path.
+{
+  const pauseFnMatch = readAloud.match(/export function pauseReadAloud\(\) \{[\s\S]*?\n\}/);
+  const pauseFnBody = pauseFnMatch ? pauseFnMatch[0] : '';
+  check('pauseReadAloud() itself never increments playToken on the true-pause path (only the Android cancel-fallback branch does)', !!pauseFnBody && /pauseSpeakingNow\(\);/.test(pauseFnBody) && (pauseFnBody.match(/playToken\+\+/g) ?? []).length === 1);
+}
+check('stopReadAloud(), a seek jump, and a speed change all invalidate the in-flight callback via playToken++ before cancelling — a cancelled utterance can never fire a stale onDone/onError', (readAloud.match(/playToken\+\+/g) ?? []).length >= 4);
+
+// ELAPSED TIME: a real wall-clock tick, not a fabricated always-zero display or a naive re-render-
+// driven counter that would keep ticking while paused.
+check('elapsed time is tracked by a real ticking interval, started on play/resume and stopped on pause/stop/finish (frozen, not zeroed, while paused)', /function startTicking\(\)/.test(readAloud) && /function stopTicking\(\)/.test(readAloud) && /elapsedMs \+= now - lastTickAtMs;/.test(readAloud));
+check('a new speakReadAloud() session resets elapsed to zero; pauseReadAloud()/resumeReadAloud() never reset it', /elapsedMs = 0;/.test(readAloud) && !/export function pauseReadAloud[\s\S]{0,400}?elapsedMs = 0/.test(readAloud) && !/export function resumeReadAloud[\s\S]{0,400}?elapsedMs = 0/.test(readAloud));
+
+// SEEK ±15s IS HONEST, NOT FAKED: native TTS has no scrubbable timeline, so seeking jumps to the
+// nearest sentence-level UNIT boundary along an ESTIMATED per-unit timeline — never a fabricated
+// in-utterance text offset (which would require re-picking a voice mid-utterance, a real risk to the
+// voice contract) and never a silence-only landing spot.
+check('seeking is estimate-based and jumps to a real unit boundary (jumpTo), documented explicitly as an estimate rather than a literal audio position', /function estimateUnitMs\(/.test(readAloud) && /function cumulativeStartsMs\(/.test(readAloud) && /function jumpTo\(/.test(readAloud) && /ESTIMATE-BASED SEEK/.test(readAloud));
+check('seeking never lands on a silence-only unit — it walks forward to the next real speak unit', /while \(idx < sessionUnits\.length - 1 && sessionUnits\[idx\]\.kind === 'pause'\) idx\+\+;/.test(readAloud));
+check('seek target is clamped to [0, total estimated duration] — never negative, never past the end', /Math\.max\(0, Math\.min\(currentPos \+ deltaMs, total\)\)/.test(readAloud));
+check('exported seek entrypoint takes a signed delta (±15000 per the owner spec), not a hardcoded direction', /export function seekReadAloud\(deltaMs: number\)/.test(readAloud));
+
+// SPEED CONTROL: cycles the exact owner-specified steps, restarts only the CURRENT unit (the Web
+// Speech API cannot change an in-flight utterance's rate), and — critically — never touches voice
+// selection, since that would risk reopening the root-cause bug this file exists to prevent.
+check('RATE_STEPS is exactly the owner-specified cycle: 0.8x, 1x, 1.2x, 1.3x', /export const RATE_STEPS = \[0\.8, 1, 1\.2, 1\.3\] as const;/.test(readAloud));
+{
+  const rateFnMatch = readAloud.match(/export function cycleReadAloudRate\(\)[\s\S]*?\n\}/);
+  const rateFnBody = rateFnMatch ? rateFnMatch[0] : '';
+  check('cycleReadAloudRate() restarts only the current unit on a live change, and never references voice selection (bestArabicVoice/pickBestArabic/resolveVoice)', !!rateFnBody && /cancelSpeaking\(\);/.test(rateFnBody) && /playCurrentUnit\(\);/.test(rateFnBody) && !/bestArabicVoice|pickBestArabic|resolveVoice/.test(rateFnBody));
+}
+
+// SINGLE ACTIVE SESSION / CLOSE STOPS SPEECH: the floating controller's close button routes through
+// the SAME stopReadAloud() every other stop path uses — one source of truth, not a second reset that
+// could drift (e.g. leaving FeedbackRow's own icon stuck on "stop").
+check('the controller\'s Close button calls the shared stopReadAloud() — not a separate/duplicate stop implementation', /const onClose = \(\) => stopReadAloud\(\);/.test(readAloudPlayer));
+check('ReadAloudPlayer renders nothing when idle — it does not linger as an invisible-but-present overlay over the result cards', /if \(!mounted \|\| !snap\) return null;/.test(readAloudPlayer));
+check('ReadAloudPlayer is mounted exactly ONCE in agent.tsx (one active session ⇒ one controller, not one per card/response)', (agent.match(/<ReadAloudPlayer \/>/g) ?? []).length === 1 && !/<FeedbackRow[\s\S]{0,500}?<ReadAloudPlayer/.test(agent));
+check('the controller is NOT a full-screen modal — no absoluteFill/dimmed backdrop, just a small top-anchored pill', !/StyleSheet\.absoluteFill/.test(readAloudPlayer) && !/rgba\(8,18,12/.test(readAloudPlayer));
+check('the controller stays fixed on web while the page scrolls (position: fixed on web, absolute on native) and respects the top safe-area inset', /Platform\.OS === 'web' \? 'fixed' : 'absolute'/.test(readAloudPlayer) && /useSafeAreaInsets/.test(readAloudPlayer) && /insets\.top/.test(readAloudPlayer));
+check('the controller\'s row direction follows the app\'s own isRTL, not a hardcoded LTR copy of the reference screenshot', /flexDirection: isRTL \? 'row-reverse' : 'row'/.test(readAloudPlayer));
+check('the appear/disappear animation is a plain fade+scale (~180ms), not a spring/bounce, and is skipped entirely under reduced motion', /useReducedMotion/.test(readAloudPlayer) && /duration = reducedMotion \? 0 : ANIM_MS/.test(readAloudPlayer) && !/Animated\.spring/.test(readAloudPlayer));
+check('every control passes its accessibility label as label={t(...)} — never a raw literal string prop that could leak English into the Arabic UI', !/label="[A-Za-z]/.test(readAloudPlayer) && /label=\{t\(playing \? 'Pause reading' : 'Resume reading'\)\}/.test(readAloudPlayer) && /label=\{t\('Close'\)\}/.test(readAloudPlayer) && /label=\{t\('Back 15 seconds'\)\}/.test(readAloudPlayer) && /label=\{t\('Forward 15 seconds'\)\}/.test(readAloudPlayer) && /accessibilityLabel=\{t\('Playback speed'\)\}/.test(readAloudPlayer));
+
+for (const key of ['Read aloud', 'Stop reading', 'Pause reading', 'Resume reading', 'Back 15 seconds', 'Forward 15 seconds', 'Playback speed']) {
   const m = i18n.match(new RegExp(`'${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}': '([^']+)'`));
   check(`AR dict has «${key}» with an Arabic, Latin-free value`, !!m && /[؀-ۿ]/.test(m![1]) && !/[A-Za-z]/.test(m![1]));
 }
@@ -155,6 +218,44 @@ function pickBestArabicReplica(voices: TestVoice[]): TestVoice | null {
   check('best-of-all-worlds: exact ar-SA + local + Enhanced wins over every partial match', pickBestArabicReplica([majed, arSARemote, arEG, { ...arSA, quality: 'Enhanced' }])?.identifier === 'ar-sa-1');
   check('zero Arabic voices on the device (Windows/Android with no AR language pack) correctly returns null — never an English voice', pickBestArabicReplica([en]) === null);
   check('English-only voice list never gets picked even when it is the ONLY voice present', pickBestArabicReplica([en])?.identifier !== 'samantha');
+}
+
+// ── EXECUTED: a faithful replica of readAloud.ts's ESTIMATE-BASED SEEK math (owner 2026-08-22),
+//    run against a concrete unit timeline — proves seeking clamps to [0, total], never lands on a
+//    silence-only unit, and moves forward/backward by real unit boundaries, not fabricated positions.
+//    Same constant (14 chars/sec at rate 1) and algorithm structure as the real cumulativeStartsMs/
+//    seekReadAloud in readAloud.ts. ──────────────────────────────────────────────────────────────────
+type TestUnit = { kind: 'speak'; text: string } | { kind: 'pause'; ms: number };
+function estimateUnitMsReplica(u: TestUnit, atRate: number): number {
+  if (u.kind === 'pause') return u.ms;
+  return (u.text.length / (14 * atRate)) * 1000;
+}
+function seekTargetIndexReplica(units: TestUnit[], currentIndex: number, atRate: number, deltaMs: number): number {
+  const starts: number[] = [];
+  let acc = 0;
+  for (const u of units) { starts.push(acc); acc += estimateUnitMsReplica(u, atRate); }
+  const total = starts.length ? starts[starts.length - 1] + estimateUnitMsReplica(units[units.length - 1], atRate) : 0;
+  const currentPos = starts[currentIndex] ?? 0;
+  const target = Math.max(0, Math.min(currentPos + deltaMs, total));
+  let idx = 0;
+  for (let i = 0; i < starts.length; i++) { if (starts[i] <= target) idx = i; else break; }
+  while (idx < units.length - 1 && units[idx].kind === 'pause') idx++;
+  return idx;
+}
+{
+  const speak = (len: number): TestUnit => ({ kind: 'speak', text: 'x'.repeat(len) });
+  const pause = (ms: number): TestUnit => ({ kind: 'pause', ms });
+  // إزهله -> pause -> summary -> pause -> card1(4 sentences: headline/price/stats/platform) -> pause -> card2…
+  const timeline: TestUnit[] = [speak(5), pause(450), speak(30), pause(450), speak(40), speak(20), speak(25), speak(20), pause(450), speak(40)];
+
+  check('seeking +15s from the very start clamps to the LAST real unit, not past the end of the reading', seekTargetIndexReplica(timeline, 0, 1.3, 15000) === 9);
+  check('a modest forward seek lands on the correct real unit a few sentences ahead — real unit-boundary movement, not an arbitrary/fabricated jump', seekTargetIndexReplica(timeline, 0, 1.3, 3000) === 4);
+  check('seeking -15s from mid-reading clamps to unit 0, never negative', seekTargetIndexReplica(timeline, 6, 1.3, -15000) === 0);
+  check('a seek that estimates into the middle of a SILENCE gap snaps FORWARD to the next real speak unit — never lands on dead air', seekTargetIndexReplica(timeline, 2, 1.3, 1700) === 4);
+  // A faster rate (1.3) makes each unit's ESTIMATED duration shorter, so the same 3000ms delta covers
+  // MORE units (reaches an equal-or-higher index) than the slower 0.8x rate — confirms the estimate
+  // actually reacts to the current speed, not a rate-blind fixed unit-count skip.
+  check('a faster rate reaches an equal-or-later unit than a slower rate for the identical seek delta (the estimate reacts to current speed)', seekTargetIndexReplica(timeline, 0, 1.3, 3000) >= seekTargetIndexReplica(timeline, 0, 0.8, 3000) && seekTargetIndexReplica(timeline, 0, 1.3, 3000) === 4 && seekTargetIndexReplica(timeline, 0, 0.8, 3000) === 2);
 }
 
 console.log(failed === 0 ? '\n✓ read-aloud contract holds — native/OS TTS only, $0 at any volume' : `\n✗ ${failed} assertion(s) FAILED`);
