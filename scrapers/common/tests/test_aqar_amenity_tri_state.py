@@ -39,6 +39,7 @@ sys.path.insert(0, ".")
 
 from scrapers.aqar.enrich_residential import (  # noqa: E402
     _amenities, _listing_json, _tri_state, FEATURE_PATTERNS,
+    _STRUCTURED_AMENITY_KEYS, _EXTENDED_DETAIL_KEYS,
 )
 
 
@@ -85,13 +86,75 @@ def test_negation_can_never_read_as_present() -> None:
     assert a["elevator"] is None, "and with no structured key it is unknown, not False"
 
 
-# ── parking: aqar publishes no such field at all ─────────────────────────────────────────────────
-def test_parking_is_always_unknown_because_aqar_never_publishes_it() -> None:
+# ── parking: no FLAT key, and a prose hit is never a source statement ────────────────────────────
+def test_parking_stays_unknown_when_the_page_carries_no_structured_answer() -> None:
+    """Superseded rationale, kept assertion (2026-08-09): the original claim here was that aqar
+    publishes no parking field ANYWHERE. That was wrong — it publishes
+    `listing.extended_details.special_parking`, one level deeper than the parser was then reading,
+    and `_EXTENDED_DETAIL_KEYS` now maps it. What still holds, and is what this pins, is the rule
+    underneath: with no structured answer on the page, «مواقف» in the prose is not aqar saying yes.
+    """
     body = "مواقف سيارة متوفرة موقف سيارة"
     for obj in ({"id": 1}, {"id": 1, "lift": 1, "ketchen": 1, "furnished": 1}):
         assert _amenities(_page(obj, body), body)["parking"] is None, (
-            "aqar has no parking key in its ~88-key listing object; a prose hit is not a source "
-            "statement. This is the 93.6%-vs-14.5% fabrication."
+            "no structured answer on this page; a prose hit is not a source statement. This is the "
+            "93.6%-vs-14.5% fabrication."
+        )
+
+
+# ── maid + driver room: aqar's flat `maid`/`driver` keys (2026-08-23) ─────────────────────────────
+# Both columns drive live Advanced Filter chips («غرفة خادمة» / «غرفة سائق») and both were routed
+# through the prose fallback, which can only ever emit True-or-UNKNOWN. Live evidence, 36 aqar pages
+# fetched 2026-08-23 (0 fetch failures): aqar published `driver` on 13 of them and only 2 stored
+# values agreed — 9 rows held UNKNOWN where aqar published 0, one held UNKNOWN where aqar published
+# 1, and one held TRUE where aqar published 0 (ad 6738742, on BOTH columns). Discarding every
+# published negative is why the two columns carry 15,987/6,982 trues and ZERO falses across 117,734
+# rows — the shape `af_field_stuck_no_variance` had been reporting since 2026-08-20.
+def test_maid_and_driver_room_read_aqars_own_keys() -> None:
+    yes = _amenities(_page({"id": 1, "maid": 1, "driver": 1}), "")
+    assert yes["maid_room"] is True and yes["driver_room"] is True
+
+    no = _amenities(_page({"id": 1, "maid": 0, "driver": 0}), "")
+    assert no["maid_room"] is False, "aqar published 0 — an explicit NO must be recorded, not dropped"
+    assert no["driver_room"] is False, "the state these two columns could never reach before"
+
+
+def test_a_published_no_is_never_overwritten_by_a_prose_hit() -> None:
+    """The exact defect: ad 6738742 stored maid_room=true while aqar published `maid: 0`."""
+    body = "فيلا فخمة فيها غرفة خادمة و غرفة سائق"
+    a = _amenities(_page({"id": 1, "maid": 0, "driver": 0}, body), body)
+    assert a["maid_room"] is False, "prose must not overturn aqar's own published 0"
+    assert a["driver_room"] is False
+
+
+def test_maid_and_driver_stay_unknown_when_aqar_is_silent() -> None:
+    """Silence is still UNKNOWN — the fix must not swing the other way into manufacturing False."""
+    body = "فيلا فيها غرفة خادمة"
+    a = _amenities(_page({"id": 1}, body), body)
+    assert a["maid_room"] is None, "no structured key -> unknown, even with the phrase in the prose"
+    assert a["driver_room"] is None
+
+
+def test_no_column_is_read_from_both_a_structured_key_and_prose() -> None:
+    """THE BUG CLASS, pinned: a column aqar answers structurally must never ALSO be reachable
+    through `FEATURE_PATTERNS`, because the prose path can only raise True and would overwrite a
+    published 0. `_structured_amenities()` enforces this by skipping structured columns in its prose
+    loop; this test fails if a future edit removes that skip or re-adds a prose-only duplicate.
+    """
+    structured = set(_STRUCTURED_AMENITY_KEYS.values()) | set(_EXTENDED_DETAIL_KEYS.values()) | {"private_entrance"}
+    body = " ".join(["مصعد", "مطبخ", "مكيف", "غرفة خادمة", "غرفة سائق", "مدخل سيارة", "مدخل خاص"])
+    # every structured column, published as an explicit 0, with prose shouting the opposite
+    obj = {"id": 1}
+    obj.update({k: 0 for k in _STRUCTURED_AMENITY_KEYS})
+    obj["extended_details"] = {k: False for k in _EXTENDED_DETAIL_KEYS}
+    a = _amenities(_page(obj, body), body)
+    for col in structured:
+        if col == "private_entrance":
+            continue  # composed from two keys, neither of which this fixture sets
+        assert a[col] is not True, (
+            f"{col}: aqar published 0 but the stored value is True — a prose pattern is overwriting "
+            f"a structured negative. This is the class that produced 15,987 maid_room trues and "
+            f"zero falses."
         )
 
 
