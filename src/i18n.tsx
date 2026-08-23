@@ -1102,7 +1102,9 @@ const AR: Record<string, string> = {
   "Note: to change your {provider} account, you'll need to delete this account and sign up again with the new one.":
     'ملاحظة: لتغيير حساب {provider}، عليك حذف هذا الحساب وإنشاء حساب جديد بالحساب الآخر.',
 
-  // About Us — «من نحن» copy is the OWNER'S EXACT wording (2026-07-09); never rewrite or shorten it.
+  // About Us — the long-form «من نحن» copy below is the OWNER'S EXACT wording (2026-07-09); never
+  // rewrite or shorten it (still referenced by src/app/about.tsx). The modal now uses the compact
+  // 2026-08-23 redesign strings further down, approved by the owner's premium-redesign brief.
   'Close': 'إغلاق',
   'A Saudi property-search tool, powered by AI.': 'أداة بحث عقارية سعودية، مدعومة بالذكاء الاصطناعي.',
   'Ezhalah is your first destination for property search in Saudi Arabia, fully powered by AI.':
@@ -1130,6 +1132,31 @@ const AR: Record<string, string> = {
   'All listings are sourced directly from third-party platforms. Ezhalah does not own or verify any listing. Always confirm details directly with the original platform before making any decision.':
     'جميع الإعلانات مصدرها منصات خارجية مباشرة. لا تملك إزهله أي إعلان ولا تتحقق منه. تأكّد دائماً من التفاصيل مباشرة مع المنصة الأصلية قبل اتخاذ أي قرار.',
   'Data & privacy': 'البيانات والخصوصية',
+
+  // «من نحن» premium single-screen redesign (owner 2026-08-23): compact verb-led copy approved by
+  // the owner's brief; the four legal facts survive verbatim-compact; NO Arabic dashes («—») in any
+  // of these strings; the only number shown is derived from PLATFORM_META.length at compile time.
+  'Smarter property search, bringing the Saudi market together in one place.':
+    'بحث عقاري أذكى، يجمع السوق السعودي في مكان واحد.',
+  'We gather': 'نجمع',
+  'Property listings from the licensed platforms in the Kingdom, in one place.':
+    'إعلانات العقارات من المنصات المرخّصة في المملكة، في مكان واحد.',
+  '+{n} platforms': '+{n} منصة',
+  'We organize': 'نرتب',
+  'One organized screen that makes comparing fast and easy.':
+    'شاشة واحدة منظّمة تسهّل عليك المقارنة بسرعة.',
+  'We help': 'نساعد',
+  'AI-powered search instead of browsing dozens of sites.':
+    'بحث مدعوم بالذكاء الاصطناعي بدل التنقّل بين عشرات المواقع.',
+  'We point you to the source': 'نوجّهك للمصدر',
+  'We take you to the listing so you contact its original platform directly.':
+    'نوصلك إلى الإعلان لتتواصل مباشرة مع منصته الأصلية.',
+  'Ezhalah is a search platform only. We do not own, list, sell, or rent properties, and we run no transactions and take no commission.':
+    'إزهله منصة بحث فقط. لا نملك العقارات ولا ندرجها ولا نبيعها ولا نؤجّرها، ولا نجري معاملات ولا نتقاضى عمولة.',
+  'Every listing is published by its source platform and remains subject to its licensing. Ezhalah does not issue or own listings.':
+    'كل إعلان منشور من منصته المصدر ويظل خاضعاً لترخيصها. إزهله لا تُصدر الإعلانات ولا تملكها.',
+  'Listings come from external platforms and we do not verify them. Confirm the details with the original platform before any decision.':
+    'الإعلانات من منصات خارجية ولا نتحقق منها. تأكّد من التفاصيل مع المنصة الأصلية قبل أي قرار.',
 
   // Support
   'Questions about your account, searches, or technical issues.':

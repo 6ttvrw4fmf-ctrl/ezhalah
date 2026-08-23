@@ -112,15 +112,35 @@ check(
     (reserved < footprint ? `  → ${footprint - reserved}px of the heading is painted UNDER the ×` : ''),
 );
 
-// ── The sibling that escapes structurally: the About header ────────────────────────────────────
-// «من نحن» never needed padding because its eagle badge holds the RTL-leading slot. That is a real
-// guarantee only while the badge is wider than the button's footprint — pin it, so shrinking the
-// badge can't quietly hand the About title the same bug.
-const badgeW = Number(src.match(/brandBadge:\s*\{\s*\n?\s*width:\s*([\d.]+)/)?.[1] ?? NaN);
-const headGap = Number(src.match(/head:\s*\{[^}]*gap:\s*([\d.]+)/)?.[1] ?? NaN);
+// ── The sibling: the About hero (2026-08-23 premium redesign) ───────────────────────────────────
+// «من نحن» clears the × VERTICALLY: its first line (the eyebrow) starts BELOW the button's top
+// band, via TOP_CLEAR = CLOSE_INSET + CLOSE_SIZE + CLOSE_GAP applied as paddingTop on BOTH the
+// mobile body (`bodyPadM`) and the desktop hero column (`heroCol`). The RTL reading edge is the
+// physical right — exactly where the button lives — so a hardcoded smaller padding re-paints the
+// hero's first line under the ×. Pin the derivation, not a literal.
+const topClearExpr = src.match(/^const TOP_CLEAR = ([^;]+);/m)?.[1]?.trim() ?? '';
+let topClear: number | null = null;
+if (SAFE.test(topClearExpr)) {
+  try {
+    topClear = Number(
+      new Function('BODY_PAD', 'CLOSE_INSET', 'CLOSE_SIZE', 'CLOSE_GAP', `return (${topClearExpr});`)(
+        BODY_PAD, CLOSE_INSET, CLOSE_SIZE, CLOSE_GAP,
+      ),
+    );
+  } catch { /* reported below */ }
+}
 check(
-  `the About header's eagle badge (${badgeW}px + ${headGap}px gap) still holds its title clear of the button`,
-  Number.isFinite(badgeW) && Number.isFinite(headGap) && (BODY_PAD ?? 0) + badgeW + headGap >= footprint + (CLOSE_GAP ?? 0),
+  `TOP_CLEAR is declared, evaluable, and ≥ the button's vertical band (${footprint}px + ${CLOSE_GAP}px gap)`,
+  Number.isFinite(topClear) && (topClear as number) >= footprint + (CLOSE_GAP ?? 0),
+  `expr: ${topClearExpr || '(missing)'} → ${topClear}`,
+);
+check(
+  'the About mobile body (`bodyPadM`) takes its paddingTop from TOP_CLEAR (no re-hardcoded literal)',
+  /bodyPadM:\s*\{[^}]*paddingTop:\s*TOP_CLEAR/.test(src),
+);
+check(
+  'the About desktop hero column (`heroCol`) takes its paddingTop from TOP_CLEAR (no re-hardcoded literal)',
+  /heroCol:\s*\{[^}]*paddingTop:\s*TOP_CLEAR/.test(src),
 );
 
 console.log(
