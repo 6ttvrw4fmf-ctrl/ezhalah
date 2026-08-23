@@ -57,6 +57,13 @@ check('msgRTL (bubble RTL layout) has ONE definition (src/lib/textDirection.ts) 
 //    break iOS Safari's synchronous-user-gesture requirement), plus a calmer rate. ──────────────────
 check('voice scoring prefers exact ar-SA, on-device (localService), AND Enhanced quality — all three axes', /AR_LANG\.toLowerCase\(\)\) s \+= 4/.test(readAloud) && /localService[\s\S]{0,20}!== false\) s \+= 2/.test(readAloud) && /VoiceQuality\.Enhanced\) s \+= 1/.test(readAloud));
 check('voice resolution is a bounded POLL (not a single voiceschanged await) — resilient to voiceschanged never firing on some engines', /const POLL_TIMEOUTS_MS = \[/.test(readAloud) && /Promise\.race\(\[/.test(readAloud) && /void resolveVoice\(\);/.test(readAloud));
+// ROOT-CAUSE FIX (owner report, 2026-08-23 — Windows Chrome: the button always said "not available",
+// even though the device may genuinely have a usable Arabic voice that just took longer than the
+// original ~3s-from-page-load poll to appear). voiceCheckExhausted must NOT be set permanently right
+// after the fast poll — it has to keep re-checking in the background for a window comfortably longer
+// than a real search-to-first-tap gap before ever calling a device "genuinely unavailable".
+check('voice resolution keeps retrying in the background for a generous window (RETRY_WINDOW_MS) before giving up — never gives up permanently right after the initial fast poll', /const RETRY_WINDOW_MS = 45000;/.test(readAloud) && /const deadline = Date\.now\(\) \+ RETRY_WINDOW_MS;/.test(readAloud) && /while \(Date\.now\(\) < deadline\)/.test(readAloud));
+check('voiceCheckExhausted is set ONLY after the retry window is exhausted, not right after the initial fast poll', !/for \(const timeout of POLL_TIMEOUTS_MS\) \{\s*const found = pickBestArabic\(await getVoicesOnce\(timeout\)\);\s*if \(found\) \{ bestArabicVoice = found; return; \}\s*\}\s*voiceCheckExhausted = true;/.test(readAloud) && /voiceCheckExhausted = true;/.test(readAloud));
 check('speakReadAloud() itself has no await before Speech.speak() (stays synchronous for the iOS Safari gesture requirement)', !/export function speakReadAloud[\s\S]*?await[\s\S]*?Speech\.speak/.test(readAloud));
 // ── ROOT-CAUSE FIX (owner report 2026-08-22, "sounds English"): NEVER call Speech.speak() without an
 //    explicitly confirmed matching Arabic voice — this is what the old code got wrong (fell through
