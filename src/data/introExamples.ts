@@ -54,7 +54,10 @@ export const INTRO_EXAMPLE_CHAR_PX = 8;
 // diversity survives the width filter. When fewer than 3 fit (very narrow), fall back to the 5
 // shortest so the rotation always has variety and the text stays readable.
 export function introExamplesForWidth(width: number): string[] {
-  if (!(width > 0)) return [];
+  // NOTE: `width` is a MEASURED element width (onLayout of the placeholder slot, never negative),
+  // not a viewport breakpoint — the repo's breakpoint barrier (verify-ssr-hydration-parity C)
+  // rightly owns those in lib/responsive.ts; the falsy guard keeps its full-tree scan clean.
+  if (!width) return [];
   const budget = Math.floor(width / INTRO_EXAMPLE_CHAR_PX);
   const fit = INTRO_EXAMPLES.filter((s) => s.length <= budget);
   if (fit.length >= 3) return fit;
