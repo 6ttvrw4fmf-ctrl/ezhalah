@@ -119,8 +119,8 @@ check('a landed hold cannot rename, and a double-click mid-hold cannot fire rena
 check('touch long-press rename is gone from the row (hold belongs to reorder now)',
   !/onLongPress=\{\(\) => beginRename/.test(sidebar));
 check('touch rename lives in the ⋯ menu instead', /pencil-outline/.test(sidebar) && /\{t\('Rename'\)\}/.test(sidebar));
-check('the drag gate is the executable canReorder, fed by editing AND the search flag',
-  /canReorder\(\{ editing: !!editingId, searchActive: histSearchActive \}\)/.test(sidebar));
+check('the drag gate is the executable canReorder, fed by editing AND the LIVE search mode',
+  /canReorder\(\{ editing: !!editingId, searchActive: searching \}\)/.test(sidebar));
 {
   // Scoped to the DRAG ENGINE (beginHold → siblingShift): the drawer's own slide-in legitimately
   // uses translateX; the reorder itself must be vertical-only so RTL rows never move sideways.

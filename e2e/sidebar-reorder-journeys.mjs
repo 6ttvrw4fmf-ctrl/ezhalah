@@ -128,6 +128,22 @@ const storedOrder = (page) => page.evaluate((sub) => {
   await page.keyboard.press('Escape'); await page.waitForTimeout(400);
   t('Journey E — no reorder from the double-click', (await rowOrder(page)).join() === before.join());
 
+  // SEARCH MODE — reorder must be disabled while chat-search is open (owner rule)
+  {
+    const btn = page.locator('[data-testid="sidebar-search-btn"]');
+    if (await btn.count()) {
+      const beforeS = await rowOrder(page);
+      await btn.click(); await page.waitForTimeout(700);
+      await holdDrag(page, beforeS[0], 37 * 2 + 8);
+      const inSearch = await rowOrder(page);
+      t('search mode — hold-drag does NOT reorder', inSearch.join() === beforeS.join(), inSearch.join());
+      await page.locator('[data-testid="sidebar-search-close"]').click().catch(() => {});
+      await page.waitForTimeout(600);
+    } else {
+      t('search mode — search button present', false, 'sidebar-search-btn not found');
+    }
+  }
+
   // F — five reorders → zero duplicates, zero junk browser-history
   const h0 = await page.evaluate(() => history.length);
   for (let i = 0; i < 5; i++) {

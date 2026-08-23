@@ -226,11 +226,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const histScrollRef = useRef<ScrollView>(null);
   const histScrollY = useRef(0);
   const rowHRef = useRef(ROW_H_FALLBACK);
-  // Chat-history search: the feature doesn't exist in the sidebar yet — when it lands, its filter
-  // state MUST replace this constant so reorder stays disabled over filtered results (owner rule;
-  // pinned by scripts/verify-sidebar-reorder.ts). Search finds chats; normal mode orders them.
-  const histSearchActive = false;
-  const reorderEnabled = canReorder({ editing: !!editingId, searchActive: histSearchActive });
+  // Chat-search landed the same day (owner 2026-08-24): reorder is disabled the moment search MODE
+  // opens — strictly, not merely when a filter query is active — because a drop inside a filtered
+  // list doesn't mean what the user sees. Search finds chats; the normal sidebar orders them.
+  const reorderEnabled = canReorder({ editing: !!editingId, searchActive: searching });
   // Screen-reader confirmation after a drop — a polite live region, cleared shortly after.
   const [dropAnnounce, setDropAnnounce] = useState('');
 
