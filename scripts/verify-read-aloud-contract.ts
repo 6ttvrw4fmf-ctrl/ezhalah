@@ -130,8 +130,18 @@ check('Android (no native pause/resume in expo-speech) never silently no-ops a p
 {
   const pauseFnMatch = readAloud.match(/export function pauseReadAloud\(\) \{[\s\S]*?\n\}/);
   const pauseFnBody = pauseFnMatch ? pauseFnMatch[0] : '';
-  check('pauseReadAloud() itself never increments playToken on the true-pause path (only the Android cancel-fallback branch does)', !!pauseFnBody && /pauseSpeakingNow\(\);/.test(pauseFnBody) && (pauseFnBody.match(/playToken\+\+/g) ?? []).length === 1);
+  check('pauseReadAloud() never increments playToken on the true-pause path itself — only its two cancel-fallback branches do (Android, which has no pause API; and the web-verify-timeout catching an iOS Safari no-op pause)', !!pauseFnBody && /pauseSpeakingNow\(\);/.test(pauseFnBody) && (pauseFnBody.match(/playToken\+\+/g) ?? []).length === 2);
 }
+// IOS SAFARI PAUSE-NO-OP HARDENING (found live, reported as "the voice thing doesn't work",
+// 2026-08-23): WebKit has a long-documented bug where speechSynthesis.pause() silently does nothing
+// — never trust it blindly. Verify shortly after that `speechSynthesis.paused` actually became true;
+// if not, force the same cancel+restart fallback Android already uses (Android has no pause API at
+// all, so that fallback was already proven). AND: if pause() no-ops and the utterance finishes
+// naturally instead, the onDone callback must NOT auto-advance to the next unit while `state` is
+// still 'paused' — that would speak straight through the pause, the exact "doesn't work" shape.
+check('a real pause attempt is VERIFIED, not trusted blindly — falls back to cancel+restart if speechSynthesis.paused never actually became true', /const WEB_PAUSE_VERIFY_MS = 120;/.test(readAloud) && /!window\.speechSynthesis\.paused\)/.test(readAloud));
+check('the pause-verify fallback is gated on the SAME pause attempt still being current (token + state check) — a resume or a new pause in the verify window is never overridden by a stale check', /playToken === tokenAtPause && !window\.speechSynthesis\.paused/.test(readAloud));
+check('a unit that finishes naturally while state is "paused" (the iOS no-op case) does NOT auto-advance to the next unit — it waits for an explicit resume instead of talking through the pause', /if \(state !== 'playing'\) \{ pendingRestart = true; return; \}/.test(readAloud));
 check('stopReadAloud(), a seek jump, and a speed change all invalidate the in-flight callback via playToken++ before cancelling — a cancelled utterance can never fire a stale onDone/onError', (readAloud.match(/playToken\+\+/g) ?? []).length >= 4);
 
 // ELAPSED TIME: a real wall-clock tick, not a fabricated always-zero display or a naive re-render-
@@ -174,6 +184,14 @@ check('ReadAloudPlayer renders nothing when idle — it does not linger as an in
 check('ReadAloudPlayer is mounted exactly ONCE in agent.tsx (one active session ⇒ one controller, not one per card/response)', (agent.match(/<ReadAloudPlayer \/>/g) ?? []).length === 1 && !/<FeedbackRow[\s\S]{0,500}?<ReadAloudPlayer/.test(agent));
 check('the controller is NOT a full-screen modal — no absoluteFill/dimmed backdrop, just a small top-anchored pill', !/StyleSheet\.absoluteFill/.test(readAloudPlayer) && !/rgba\(8,18,12/.test(readAloudPlayer));
 check('the controller stays fixed on web while the page scrolls (position: fixed on web, absolute on native) and respects the top safe-area inset', /Platform\.OS === 'web' \? 'fixed' : 'absolute'/.test(readAloudPlayer) && /useSafeAreaInsets/.test(readAloudPlayer) && /insets\.top/.test(readAloudPlayer));
+// ROOT-CAUSE FIX (found live on a mobile viewport, reported as "the voice thing doesn't work",
+// 2026-08-23): the original `insets.top + 12` sat at the same height as agent.tsx's own top bar
+// (hamburger/title/share), so the pill rendered cramped/overlapping it instead of below it — not
+// literally silent, but exactly the kind of visibly-broken layout a user would describe that way.
+// `insets.top + 54` is the SAME already-proven "clears the top bar" offset the app's own feedback
+// toast (fbToastWrap in agent.tsx) uses — reused, not re-guessed, so it can't drift back to a value
+// that overlaps again.
+check('the pill sits at the SAME proven below-the-top-bar offset as the app\'s own feedback toast (insets.top + 54) — never the too-shallow +12 that overlapped the top bar on mobile', /top: insets\.top \+ 54/.test(readAloudPlayer) && !/top: insets\.top \+ 12/.test(readAloudPlayer) && /top: insets\.top \+ 54/.test(agent));
 // Verified LIVE on production (screenshot): Ezhalah's document is dir="rtl" whenever Arabic is
 // active, and plain 'row' already flows right-to-left there (it follows the ambient inline
 // direction) — 'row-reverse' would DOUBLE-reverse it back to an LTR-looking layout, which is

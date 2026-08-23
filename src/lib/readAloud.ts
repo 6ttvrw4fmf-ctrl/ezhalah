@@ -335,7 +335,16 @@ function playCurrentUnit() {
   speakUnitText(
     unit.text,
     token,
-    () => { unitIndex++; playCurrentUnit(); },
+    () => {
+      // Real WebKit/iOS Safari bug (documented, several versions): speechSynthesis.pause() can be a
+      // silent no-op — audio just keeps playing. If that happens, this utterance finishes NATURALLY
+      // while `state` is still 'paused'. Auto-advancing here would speak straight through the pause
+      // (the exact "it doesn't work" shape) — instead, land ready to resume from the NEXT unit and
+      // stay silent until the user actually taps resume.
+      unitIndex++;
+      if (state !== 'playing') { pendingRestart = true; return; }
+      playCurrentUnit();
+    },
     () => finishSession(),
   );
 }
@@ -386,11 +395,20 @@ export function speakReadAloud(id: string, segments: ReadAloudSegment[]): boolea
   return true;
 }
 
-// Pause in place. TRUE pause on web and iOS (the OS/engine freezes the actual audio mid-utterance —
-// see the WEB PAUSE/RESUME BUG note above for why web bypasses expo-speech to get this correctly).
-// Android has no native pause (expo-speech implements none there): the current unit is cancelled and
-// restarts from its own beginning on resume — never a silent no-op, and never a fake "paused" state
-// that isn't actually holding anything.
+// iOS Safari has a real, long-documented WebKit bug where speechSynthesis.pause() silently no-ops —
+// it returns normally, `speechSynthesis.paused` never becomes true, and audio just keeps playing.
+// Trusting pause() blindly there would make "Pause" visibly do nothing — plausibly exactly what "the
+// voice thing doesn't work" describes on an iPhone. Rather than assume it worked, verify shortly
+// after and fall back to cancel+restart (the same safe primitive Android already uses, since Android
+// has no pause API at all) if the engine ignored it.
+const WEB_PAUSE_VERIFY_MS = 120;
+
+// Pause in place. TRUE pause on web and iOS when the engine actually honours it (the OS/engine
+// freezes the actual audio mid-utterance — see the WEB PAUSE/RESUME BUG note above for why web
+// bypasses expo-speech to get this correctly). Falls back to cancel+restart-current-unit — same as
+// Android, which has no pause API at all — whenever the engine doesn't actually hold (iOS Safari,
+// or a natural completion race): never a silent no-op, and never a fake "paused" state that isn't
+// actually holding anything.
 export function pauseReadAloud() {
   if (state !== 'playing') return;
   state = 'paused';
@@ -403,7 +421,20 @@ export function pauseReadAloud() {
     cancelSpeaking();
     pendingRestart = true;
   } else {
+    const tokenAtPause = playToken;
     pauseSpeakingNow();
+    if (isWeb()) {
+      setTimeout(() => {
+        // Still the same pause attempt and still meant to be paused, but the engine silently ignored
+        // pause() (the iOS Safari bug this exists for) — force it the same way Android always does.
+        if (state === 'paused' && playToken === tokenAtPause && !window.speechSynthesis.paused) {
+          playToken++;
+          cancelSpeaking();
+          pendingRestart = true;
+          notifyPlayback();
+        }
+      }, WEB_PAUSE_VERIFY_MS);
+    }
   }
   notifyPlayback();
 }
