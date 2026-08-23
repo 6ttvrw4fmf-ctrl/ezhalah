@@ -179,6 +179,23 @@ check('the query is REBUILT from the record, never mutated in place by a handler
   /deriveGuided\(ageFlowBaseQRef\.current, ageFlowStepsRef\.current, upTo\)/.test(agentSrc)
   && !/ageFlowQueryRef\.current = question\.apply\(/.test(agentSrc));
 
+// ── 11. reentrancy guard (bug-hunt 2026-08-23) ──────────────────────────────────────────────────
+// presentGuided's re-rank is a real network round trip before the next question replaces the
+// current one on screen. Without a guard, a second confirm/skip tap landing in that gap — slow
+// network, or an impatient double-tap while the card looks unresponsive — was processed as a
+// SECOND answer to the SAME visual step (nothing rejected the stale stepIndex closure): confirmed
+// once more, an already-selected single-select option reads as a re-click and clears back to
+// unanswered, silently downgrading a real answer to "no preference". Reproduced live (production
+// and a local instrumented build) at a 100% rate under fast synthetic clicking before this fix.
+check('commitGuidedStep checks the reentrancy guard BEFORE touching any state',
+  /const commitGuidedStep = async \(keys: string\[\], finish = false\) => \{\s*\n\s*if \(ageFlowCommittingRef\.current\) return;/.test(agentSrc));
+check('the guard is set before the async work starts and released in a finally (never on just one exit path)',
+  /ageFlowCommittingRef\.current = true;\s*\n\s*try \{/.test(agentSrc)
+  && /\} finally \{\s*\n\s*ageFlowCommittingRef\.current = false;\s*\n\s*\}/.test(agentSrc));
+check('presentGuided is AWAITED inside commitGuidedStep — the guard must span its network round trip, not just the synchronous part',
+  /await presentGuided\(stepIndex \+ 1, token\);/.test(agentSrc)
+  && !/void presentGuided\(stepIndex \+ 1, token\);/.test(agentSrc));
+
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
 // Each assertion is re-run against a deliberately broken variant; a check that no longer fails on
 // its own defect has stopped testing anything.
@@ -253,6 +270,15 @@ mustCatch('«عرض النتائج» going back to discarding the visible select
       'const onAgeSkipAll = () => finishGuided(ageFlowTokenRef.current);')));
 mustCatch('the restored answer no longer reaching the card',
   !/initialKeys=\{ageFlow\.initialKeys\}/.test(mut(agentSrc, 'initialKeys={ageFlow.initialKeys}', '')));
+mustCatch('the reentrancy guard check being removed from commitGuidedStep',
+  !/const commitGuidedStep = async \(keys: string\[\], finish = false\) => \{\s*\n\s*if \(ageFlowCommittingRef\.current\) return;/.test(
+    mut(agentSrc, /if \(ageFlowCommittingRef\.current\) return;[^\n]*\n/, '')));
+mustCatch('the guard release reverting to an early-return path that skips the finally',
+  !/\} finally \{\s*\n\s*ageFlowCommittingRef\.current = false;\s*\n\s*\}/.test(
+    mut(agentSrc, '    } finally {\n      ageFlowCommittingRef.current = false;\n    }', '    }')));
+mustCatch('presentGuided reverting to fire-and-forget (guard would release before the re-rank finishes)',
+  /void presentGuided\(stepIndex \+ 1, token\);/.test(
+    mut(agentSrc, 'await presentGuided(stepIndex + 1, token);', 'void presentGuided(stepIndex + 1, token);')));
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }
