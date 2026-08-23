@@ -219,6 +219,10 @@ bugs discovered/fixed · barriers added/strengthened · deployments · productio
 new-listing findability · Arabic UI · Supabase health · barrier execution. List each bug as:
 **المشكلة → السبب → الإصلاح → الحاجز → تحقق الإنتاج**.
 
+**Every daily heartbeat and every major certification MUST also emit the §42 Trending Parity
+block verbatim** — no dimension in it may be silently omitted; use `N/A` when the case genuinely
+does not apply (e.g. AF fields when the run does not touch AF) and explain in one line why.
+
 ## 29. Refresh, back, and state persistence
 تصفية → بحث → النتائج → بطاقة عقار → رجوع: selections preserved where intended. Refresh on
 results. المدينة doesn't change · الحي doesn't disappear · multiple أحياء stay selected · السعر,
@@ -441,10 +445,30 @@ CITIES COVERED:                 MATCHING VIOLATIONS:          BARRIERS ADDED:
 DISTRICTS COVERED:              MISSING LISTINGS:             DESKTOP VERIFIED:
                                 EXTRA LISTINGS:               MOBILE VERIFIED:
 PRODUCTION DEPLOYED:            PRODUCTION VERIFIED:          NOT TESTED:
+
+TRENDING FULL-STATE VERIFIED:   YES/NO
+CITY TRENDING PARITY:           YES/NO
+DISTRICT TRENDING PARITY:       YES/NO
+BEDROOMS INCLUDED:              YES/NO
+AREA INCLUDED:                  YES/NO
+PRICE INCLUDED:                 YES/NO
+AF STATE INCLUDED:              YES/NO/N/A
+NO-CITY-SELECTED CASE:          PASS/FAIL
+STALE TRENDING COUNTS:          X
+COUNT→CLICK→RESULT MISMATCHES:  X
+DIVERSITY INTRODUCED WRONG RESULTS: X
+RENT-ONLY MESSAGE CLEAN:        YES/NO
+BUY+RENT HELPER ONLY WHEN BOTH: YES/NO
+
 FINAL RATING: X/10
 ```
 Report the rating as `Rating Before → Rating After` per `docs/ops/ENGINEER_ROUTINES.md` — the single
 `FINAL RATING` line above is the "after" half and never replaces the pair.
+
+The Trending Parity block above is required by §42 and appears in **both** the daily heartbeat
+report (§28) and every major certification report — a run that omits any of its lines is
+INCOMPLETE. Use `N/A` (with a one-line reason) only when the case genuinely doesn't apply this
+run — e.g. `AF STATE INCLUDED: N/A (AF not exercised)`.
 
 ## 41. Harness traps that produce FALSE product bugs (measured 2026-08-20 — read before driving the UI)
 
@@ -537,6 +561,136 @@ admin-region label as city · guessed unknown location · district non-canonical
 two ways) and `mon_detect_ranking_diversity_contract()` (daily-gated; drives the real RPC). Both are
 in the `mon_run_all_detectors()` roster. All six label conditions and the ranking comparison are
 mutation-proven — each shown to read 0 on clean data and 1 on a deliberately broken row.
+
+## 42. FULL-FILTER TRENDING PARITY (owner permanent rule, 2026-08-22)
+
+**Permanent rule.** Trending must always reflect the user's **full current filter state** — never
+a partial subset built from a narrower parameter set. This section is normal recurring QA
+contract, not a one-off. **Do not treat it as "already fixed so no need to test again."**
+
+### 42.1 The full state Trending must honour
+
+Every Trending computation (city Trending AND district Trending) must be a function of the
+**full current eligible-set state**, which includes:
+
+* `category` (macro: Residential / Commercial)
+* `group` (property group)
+* `property type` (نوع العقار)
+* «شراء» / «إيجار» (deal)
+* «سنوي» / «شهري» / both (rent period)
+* region (المنطقة)
+* city (المدينة)
+* district (الحي)
+* bedrooms (غرف النوم)
+* area min / area max (المساحة)
+* price min / price max (السعر)
+* Advanced Filter answers when active (bathrooms, furnished, property age, amenities, etc.)
+
+Any new filter field added to the product must be propagated into Trending at the same time it is
+added to the results RPC. The routine **actively watches** for a new filter field that is not
+propagated into Trending (§42.6).
+
+### 42.2 The three quantities that must agree — every run
+
+For BOTH city Trending and district Trending, prove:
+```
+shown count = Trending RPC count = click-through landed count = independent backend/DB truth
+```
+It is **not sufficient** to check that the RPC "returned something", or that its count is
+plausible. Compare all four numbers explicitly. Any inequality is a defect — record it and fix
+the root cause per §18.
+
+### 42.3 The minimum recurring case matrix
+
+Every recurring Search & Matching run (heartbeat OR major) must include **at least** these cases,
+run for BOTH city Trending and district Trending:
+
+* no extra narrowing filters
+* bedroom only
+* area only
+* price only
+* bedroom + area
+* bedroom + price
+* area + price
+* bedroom + area + price
+* AF answer(s) layered on top where AF is applicable
+
+For each case above, prove §42.2 four-way agreement.
+
+### 42.4 The no-city-selected case
+
+If the user has **not selected a city yet**, city Trending must still be computed from the **full
+currently-filtered eligible set** (deal / period / type / bedrooms / area / price / AF). It is a
+defect for Trending to fall back to "all cities" or to be silently blank when other filters are
+active.
+
+After selecting a city, **district Trending must inherit the same full state** — the same
+narrowing that scoped city Trending must scope district Trending, not a wider or reset scope.
+
+### 42.5 Stale-state invalidation
+
+Changing **any** of the fields in §42.1 must invalidate / recompute Trending. No old Trending
+count may survive after the eligibility state changes. Specifically watch, as a minimum:
+
+* bedrooms change
+* area min / area max change
+* price min / price max change
+* property type change
+* deal change
+* period change (سنوي ↔ شهري)
+* AF answer change
+
+The routine must catch a cached-signature bug that keeps yesterday's number visible under
+today's filters.
+
+### 42.6 Architectural rule (permanent — do not undo)
+
+**All count surfaces use ONE full-narrowing parameter builder.** No separate partial builders that
+can silently drop filters. If a new filter field is added to the results RPC but the Trending RPC
+call site is not updated at the same time, that is the exact defect this rule exists to prevent —
+the routine detects this by comparing the Normal Filter's active parameter set against the
+Trending call's serialized parameters on the wire, per case in §42.3, per run.
+
+### 42.7 Permanent barriers (add if missing; verify they still execute)
+
+Keep permanent barriers for:
+
+* bedrooms dropped from Trending
+* area min/max dropped from Trending
+* price min/max dropped from Trending
+* AF state dropped from Trending
+* city Trending request missing current filter state
+* district Trending request missing current filter state
+* district render showing a wider/stale count than the narrowed RPC count
+* stale cache / signature after a filter change
+* count → click → result mismatch (§42.2)
+
+Follow the roster rule (`mon_detect_*` wrapper + `mon_run_all_detectors()` entry in the SAME
+migration; `mon_detect_orphaned_detectors()` catches unreachable ones). **Mutation-prove the
+important ones** — weaken the barrier temporarily, verify it fires, restore.
+
+### 42.8 The separate UX rule from this work (frontend state sanity)
+
+* «إيجار» only → **no** warning/helper message
+* «شراء» only → **no** warning/helper message
+* «شراء» + «إيجار» combined → **one calm Arabic helper explaining separate budgets**
+
+Verified as a lightweight frontend state sanity test each run: three states, three expected
+message renderings, mismatch = defect (§18).
+
+### 42.9 The priority order this rule lives under
+
+**MATCH FIRST → DIVERSIFY SECOND** (permanent, §4). Trending is computed on the exact eligible
+set FIRST. Diversification / ranking must never change the true eligible count and must never
+introduce an ineligible listing into a Trending count. This is why the routine (a) computes the
+DB-truth eligibility count separately and (b) compares it against both the Trending RPC count
+and the click-through landed count.
+
+### 42.10 Required report block
+
+The Trending Parity block in §28 (mirrored in §40.9 for major certs) is **required in every
+run** and MUST include every line — never silently omitted. Use `N/A` (with a one-line reason)
+only when the case genuinely does not apply this run.
 
 ## Final principle
 **MATCH → SOURCE TRUTH → DIVERSITY → USER JOURNEY → PERFORMANCE**, in that order. The engineer owns
