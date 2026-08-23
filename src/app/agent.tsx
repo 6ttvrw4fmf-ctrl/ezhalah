@@ -52,6 +52,7 @@ import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
+import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard } from '@/components/AdvancedQuestionCard';
 import MiningTransition from '@/components/MiningTransition';
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
@@ -135,12 +136,16 @@ const bedsLabel = (n: string, ar: boolean): string => {
 // playful "you got it" in Najdi colour, never a recommendation or any judgement on the search (user
 // request: speak in the Saudi dialect, plain and simple, never advise). The English locale gets
 // equivalent breezy one-liners so a non-Arabic user reads the same energy.
-// The opening greeting Ezhalah types into a fresh chat (user-authored, verbatim). Language follows
-// the UI locale — Arabic in Arabic mode, English in English mode, never mixed. Rendered live from
-// the locale (not frozen at send time) so flipping language re-renders it in the other language.
-// Welcome banner: user request — just the word «ازهله», no flourishes / jokes / "son of AI" line.
+// The opening greeting Ezhalah types into a fresh chat (owner-authored FINAL copy, 2026-08-23 —
+// verbatim, do not edit without an explicit owner instruction; the intro-rotator barrier pins it
+// byte-exact). One warm Saudi sentence that says exactly what Ezhalah does. Language follows the UI
+// locale — rendered live (not frozen at send time) so flipping language re-renders it. The English
+// branch stays the bare brand word: the product is Arabic-only and English is latent code — no
+// English marketing copy is invented here (owner brief §10).
 const greetingText = (locale: Locale): string =>
-  locale === 'ar' ? 'ازهله' : 'Ezhalah';
+  locale === 'ar'
+    ? 'ارحب، أنا إزهله. قلّي وش العقار اللي تدور عليه، وأنا أبحث لك بين المنصات العقارية وأطابق الخيارات مع طلبك لين نلقى اللي يناسبك… إزهلها وفالك الطيب.'
+    : 'Ezhalah';
 
 // Ezhalah's SEARCHING-phase voice — one Najdi-flavoured swagger line chosen at random before each
 // search (its recognizable Saudi personality, NOT generic "searching now"). Shown ONLY while searching,
@@ -430,6 +435,73 @@ function BrandReveal({ brand, text, onDone }: { brand: string; text: string; onD
   );
 }
 
+// ── Rotating composer examples (owner brief 2026-08-23) ─────────────────────────────────────────
+// Real, PROVEN search sentences rotating in the placeholder slot of the EMPTY AI landing screen —
+// they teach what to ask, then get out of the way the moment the user interacts. Decorative
+// guidance only: absolutely positioned inside the input's own clipped wrapper (it can never move
+// the mic/Send or create overflow), pointerEvents none (taps land on the real input), aria-hidden
+// (a screen reader hears ONLY the composer's stable Arabic label, never 25 rotating sentences).
+// Transition = the transport the owner asked for: the old sentence fades out with a subtle upward
+// slide, the new one settles in softly — no typewriter, no bounce. State drives the target style,
+// a web-only CSS transition supplies the glide (the file's TOAST_EASE idiom; native = instant
+// swap, web is the live surface). Reduced motion → ONE static example, zero repeating animation
+// (owner brief §3/§11 allows "a static example"). Width-adaptive: the measured slot width picks
+// which pool members rotate, so narrow screens show SHORT examples instead of squeezing long ones
+// (owner brief §9). This component NEVER touches `typed` or any other state — render-only, so user
+// text is structurally impossible to overwrite.
+const INTRO_EX_FADE_MS = 220;
+function IntroExampleRotator({ reducedMotion }: { reducedMotion: boolean }) {
+  const [w, setW] = useState(0);
+  const pool = useMemo(() => introExamplesForWidth(w), [w]);
+  const [i, setI] = useState(0);
+  const [phase, setPhase] = useState<'in' | 'shown' | 'out'>('shown');
+  const text = pool.length ? pool[i % pool.length] : '';
+  // Hold each example long enough to read, then leave. Plain timers, never rAF (hidden-tab rule).
+  useEffect(() => {
+    if (reducedMotion || pool.length <= 1 || phase !== 'shown') return;
+    const hold = setTimeout(() => setPhase('out'), introExampleHoldMs(text));
+    return () => clearTimeout(hold);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [i, pool, phase, reducedMotion]);
+  useEffect(() => {
+    if (phase === 'out') {
+      // old sentence has finished fading up+out → swap the text in its enter-start pose…
+      const t1 = setTimeout(() => { setI((n) => n + 1); setPhase('in'); }, INTRO_EX_FADE_MS);
+      return () => clearTimeout(t1);
+    }
+    if (phase === 'in') {
+      // …then release it to settle (two-frame beat so the enter pose paints without a transition).
+      const t2 = setTimeout(() => setPhase('shown'), 40);
+      return () => clearTimeout(t2);
+    }
+  }, [phase]);
+  const ease = IS_WEB && !reducedMotion && phase !== 'in'
+    ? ({ transitionProperty: 'opacity, transform', transitionDuration: `${INTRO_EX_FADE_MS}ms`, transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)' } as any)
+    : null;
+  const pose = reducedMotion || phase === 'shown'
+    ? { opacity: 1, transform: [{ translateY: 0 }] }
+    : phase === 'out'
+      ? { opacity: 0, transform: [{ translateY: -6 }] }
+      : { opacity: 0, transform: [{ translateY: 6 }] };
+  return (
+    <View
+      testID="intro-example-rotator"
+      pointerEvents="none"
+      aria-hidden
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={s.introRotator}
+      onLayout={(e) => setW(e.nativeEvent.layout.width)}
+    >
+      {text ? (
+        <Text numberOfLines={1} ellipsizeMode="tail" style={[s.introRotatorText, ease, pose]}>
+          {text}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 export default function Agent() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -448,6 +520,12 @@ export default function Agent() {
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [typed, setTyped] = useState('');
+  // Rotating-example interaction latch (owner brief §6): the FIRST click/tap into the composer, the
+  // first typed character, or a mic tap stops the rotating placeholder for good — it never fights
+  // the user and never restarts mid-session. Only a genuinely fresh empty chat (sendGreeting: New
+  // Chat, or first mount) re-arms it. Deliberately NOT reset on blur/clear — "may restart" is
+  // optional in the brief, and staying away once the user has engaged is the calmer reading.
+  const [introInteracted, setIntroInteracted] = useState(false);
   // Composer height: single line by default, grows only as text wraps (ChatGPT-style). (owner 2026-07-08)
   // Composer sizing (redesign 2026-08-16, owner brief: "closer to ChatGPT/Claude, but Ezhalah").
   // MIN = one 22px Arabic line; MAX = ~5 lines, then the input scrolls internally. `inputH` holds
@@ -588,6 +666,7 @@ export default function Agent() {
 
   const startVoice = async () => {
     if (voiceActiveRef.current || busy) return; // mic tapped twice → one state transition
+    setIntroInteracted(true); // mic tap stops the rotating examples cleanly (owner brief §6/§7)
     // Voice input and Read Aloud never share audio (owner brief §19): starting the mic stops any
     // reading immediately, and the subscription below keeps read-aloud out for the whole session.
     stopReadAloud();
@@ -1924,6 +2003,9 @@ export default function Agent() {
     greetTimerRef.current = setTimeout(() => {
       setMsgs((m) => (m.length === 0 ? [{ id: uid(), role: 'agent', text: '', greeting: true, typing: true }] : m));
     }, 150);
+    // A genuinely fresh empty chat re-arms the rotating composer examples (owner brief §6) — the
+    // ONLY re-arm point, so they can never restart while the user is mid-interaction.
+    setIntroInteracted(false);
   };
 
   // REFRESH MUST NEVER RE-EXECUTE A SEARCH (owner 2026-08-16). The search params are a ONE-SHOT
@@ -2095,6 +2177,15 @@ export default function Agent() {
     return <View style={{ flex: 1, backgroundColor: colors.paper }} />;
   }
 
+  // Rotating examples show ONLY on the clean AI-search entry screen (owner brief §2): the chat holds
+  // nothing but the greeting (no user/results/status turn — so results screens, conversations, and
+  // replayed history are all excluded structurally), the composer is empty, the user hasn't
+  // interacted, no recording, no turn in flight. Filter mode is a different screen (index.tsx) and
+  // never renders this component at all.
+  const introLanding = msgs.every((m) => m.role === 'agent' && !!m.greeting);
+  const showIntroExamples =
+    introLanding && !introInteracted && !typed && voiceState === 'idle' && !busy;
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
@@ -2214,7 +2305,7 @@ export default function Agent() {
                       <View style={s.replyIcon}>
                         <Ionicons name="sparkles" size={14} color={colors.primary} />
                       </View>
-                      <Text style={[s.replyText, m.greeting && s.greetingText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
+                      <Text testID={m.greeting ? 'intro-greeting' : undefined} style={[s.replyText, m.greeting && s.greetingText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
                         {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
                       </Text>
                     </View>
@@ -2548,16 +2639,24 @@ export default function Agent() {
                 // writingDirection RTL for Arabic (the parent col is LTR-pinned, so without this the
                 // placeholder's trailing «...» lands on the wrong side — it must read «…السعودية»). (owner 2026-07-09)
                 style={[s.input, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr', height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) } as any]}
-                placeholder={t("Type the property you're looking for in Saudi Arabia...")}
+                // While the rotating examples occupy the placeholder slot, the input's own static
+                // placeholder yields (empty string) so the two never overlap; the moment the
+                // rotation stops (any interaction) the familiar static placeholder returns.
+                placeholder={showIntroExamples ? '' : t("Type the property you're looking for in Saudi Arabia...")}
                 placeholderTextColor={colors.muted}
                 selectionColor={colors.primary}
+                // Stable Arabic label (owner brief §11): a screen reader always hears this one
+                // sentence for the field — never the rotating examples (those are aria-hidden).
+                accessibilityLabel={t('Describe the property you are looking for')}
                 value={typed}
-                onChangeText={(v: string) => { setTyped(v); if (!v) setInputH(COMPOSER_MIN_H); }}
+                onChangeText={(v: string) => { setIntroInteracted(true); setTyped(v); if (!v) setInputH(COMPOSER_MIN_H); }}
                 // Grows only as text wraps, capped at COMPOSER_MAX_H (then scrolls internally); the
                 // TARGET comes from RN's own line metrics (native + web), the MOTION from INPUT_EASE.
                 // (owner 2026-07-08 metrics; owner 2026-08-16 smooth growth.)
                 onContentSizeChange={(e: any) => setInputH(Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, e.nativeEvent.contentSize.height)))}
-                onFocus={() => setComposerFocused(true)}
+                // Clicking/tapping into the composer counts as interaction — the rotating examples
+                // stop cleanly and the static placeholder takes over (owner brief §6).
+                onFocus={() => { setComposerFocused(true); setIntroInteracted(true); }}
                 onBlur={() => setComposerFocused(false)}
                 // The language does NOT flip while typing a chat message — it switches only when the
                 // message is SENT (see send(): an English message → English UI, Arabic → Arabic).
@@ -2571,6 +2670,10 @@ export default function Agent() {
                 returnKeyType="search"
                 blurOnSubmit={!IS_WEB}
               />
+              {/* Rotating real-query examples in the placeholder slot — EMPTY AI landing only.
+                  Absolutely positioned inside this clipped wrapper: it can never resize the
+                  composer, push the mic/Send, or overflow horizontally (owner brief §7/§9). */}
+              {showIntroExamples ? <IntroExampleRotator reducedMotion={reducedMotion} /> : null}
               </View>
               {busy || revealing ? (
                 // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
@@ -2879,8 +2982,15 @@ const s = StyleSheet.create({
   replyIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   replyText: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.ink },
   // The opening greeting is larger and a touch heavier than a normal reply so it reads as a proper
-  // welcome, not just another line. (user request: make it bigger.)
-  greetingText: { fontSize: 18, lineHeight: 27, fontWeight: '600', color: colors.dark },
+  // welcome, not just another line. (user request: make it bigger.) 17/27 since the 2026-08-23 copy
+  // became a full marketing sentence — still clearly the welcome, without turning into a wall.
+  greetingText: { fontSize: 17, lineHeight: 27, fontWeight: '600', color: colors.dark },
+  // Rotating composer examples (owner brief 2026-08-23): the absolute overlay fills the input's own
+  // clipped wrapper (inputGrow), so it is structurally unable to move the mic/Send or overflow; the
+  // text mirrors the input's placeholder metrics exactly (16px web / muted / RTL right-aligned) so
+  // it reads as the placeholder, not as a second element.
+  introRotator: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, justifyContent: 'center' },
+  introRotatorText: { fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.muted, paddingHorizontal: 2, textAlign: 'right', writingDirection: 'rtl' as any },
   brand: { fontWeight: '700', color: colors.primary },
 
   emptyRes: { fontSize: 14, color: colors.muted },
