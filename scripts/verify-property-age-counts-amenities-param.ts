@@ -62,13 +62,25 @@ const guidedMatch = remoteSrc.match(
 );
 check('fetchApartmentGuidedCounts() is still defined (the sibling pattern this fix mirrors)', guidedMatch !== null);
 if (guidedMatch) {
+  // 2026-08-23: this call site's hand-copied param list is exactly what drifted — the three Monthly
+  // params (rating / reviews / unit-subtype) were never added to it, so the Advanced Filter's footer
+  // and every later question's option counts ignored those answers. It now spreads the ONE shared
+  // definition, rpcAdvancedFilterParams(), instead. The ASSERTION here is unchanged in strength —
+  // "the sibling still forwards these" — but it must accept either shape: the literal conditional, or
+  // the shared spread WITH the param present in the shared helper's own body. (Shape-only agreement
+  // would let an emptied helper pass.) verify-guided-counts-carry-monthly-af.ts owns the full set.
+  const guidedSrc = guidedMatch[0];
+  const helperBody = remoteSrc.match(/export function rpcAdvancedFilterParams\(q: SearchQuery\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+  const viaSharedHelper = guidedSrc.includes('...rpcAdvancedFilterParams(q)');
+  const forwards = (literal: RegExp, param: string) =>
+    literal.test(guidedSrc) || (viaSharedHelper && helperBody.includes(param));
   check(
     'fetchApartmentGuidedCounts() still forwards p_amenities (unchanged sibling behavior)',
-    /\.\.\.\(q\.amenities\?\.length \? \{ p_amenities: q\.amenities \} : \{\}\)/.test(guidedMatch[0]),
+    forwards(/\.\.\.\(q\.amenities\?\.length \? \{ p_amenities: q\.amenities \} : \{\}\)/, 'p_amenities'),
   );
   check(
     'fetchApartmentGuidedCounts() still forwards p_bath_min (unchanged sibling behavior)',
-    /\.\.\.\(q\.bathMin != null \? \{ p_bath_min: q\.bathMin \} : \{\}\)/.test(guidedMatch[0]),
+    forwards(/\.\.\.\(q\.bathMin != null \? \{ p_bath_min: q\.bathMin \} : \{\}\)/, 'p_bath_min'),
   );
 }
 

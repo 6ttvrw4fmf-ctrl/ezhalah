@@ -295,7 +295,11 @@ export default function AdvancedQuestionCard({
           </View>
         </View>
       ) : null}
-      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+      {/* ONLY the question body scrolls. The action row below is a SIBLING of this scroller, never a
+          child of it — see the s.foot comment. `flexShrink` is set explicitly (not left to the RN /
+          react-native-web defaults, which differ) so the scroller is the element that gives up height
+          when the card hits its maxHeight, and the footer keeps its own. */}
+      <ScrollView style={s.scroll} contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <Reanimated.View style={enterA}>
           <Text style={s.qt} testID="af-question-title">{t(titleKey)}</Text>
           {descriptionKey ? <Text style={s.desc}>{t(descriptionKey)}</Text> : null}
@@ -313,42 +317,52 @@ export default function AdvancedQuestionCard({
           {/* One tiny availability line instead of database language (owner 2026-08-16): the numbers
               come from what we actually know about the current listings — say that plainly, once. */}
           <Text style={s.note}>{t('Options reflect the information available for the current listings')}</Text>
-          <View style={s.foot}>
-            <Tap style={s.primaryBtn} testID="af-confirm" onPress={() => onConfirm(sel)}>
-              <Text style={s.primaryTxt}>
-                {selection === 'multi'
-                  ? (count != null ? t('Continue · {count} results', { count: grouped(count) }) : t('Continue'))
-                  : (count != null ? t('Show {count} results', { count: grouped(count) }) : t('Show results'))}
-              </Text>
-            </Tap>
-            <View style={s.footRow}>
-              {/* «رجوع» is on EVERY question, including the first — from the first one it leaves the
-                  interview entirely and hands the pre-AF controls back (owner 2026-08-22 §2). */}
-              <Pressable style={s.skipLink} testID="af-back" onPress={onBack} hitSlop={8}>
-                <Text style={s.backTxt}>{t('Back')}</Text>
-              </Pressable>
-              <Pressable style={s.skipLink} testID="af-skip" onPress={onSkip} hitSlop={8}>
-                <Text style={s.skipTxt}>{t('Skip')}</Text>
-              </Pressable>
-              {/* «عرض النتائج» must honour what is on screen: the chip and «عرض N نتيجة» already
-                  promise the count for the CURRENT selection, so leaving by this link commits that
-                  selection too. Before 2026-08-22 a single tap auto-committed within 260ms and this
-                  window barely existed; now that a tap only selects, exiting here would silently
-                  discard a visible answer and land the user on a different number than the one they
-                  were just shown. */}
-              <Pressable style={s.skipLink} testID="af-skip-all" onPress={() => onSkipAll(sel)} hitSlop={8}>
-                <Text style={s.skipAllTxt}>{t('Show results')}</Text>
-              </Pressable>
-            </View>
-          </View>
         </Reanimated.View>
       </ScrollView>
+      {/* PINNED action row — outside the ScrollView on purpose (see s.foot). */}
+      <Reanimated.View style={[s.foot, enterA]}>
+        <Tap style={s.primaryBtn} testID="af-confirm" onPress={() => onConfirm(sel)}>
+          {/* The primary button COMMITS THIS ANSWER AND ADVANCES ONE QUESTION — for single and multi
+              alike (onConfirm → commitGuidedStep without `finish`). It therefore reads «متابعة · N
+              نتيجة» for BOTH. Until 2026-08-23 the label branched on arity and a single-select read
+              «عرض N نتيجة»: the user tapped a button promising results, the card simply moved to the
+              next question, and no results turn was ever produced. The card cannot know whether a
+              question is the last one either — the pool is re-ranked after every answer — so an
+              arity- or ordinal-based «عرض» promise can never be honest here. The ONE terminal
+              control is «عرض النتائج» in the row below. */}
+          <Text style={s.primaryTxt}>
+            {count != null ? t('Continue · {count} results', { count: grouped(count) }) : t('Continue')}
+          </Text>
+        </Tap>
+        <View style={s.footRow}>
+          {/* «رجوع» is on EVERY question, including the first — from the first one it leaves the
+              interview entirely and hands the pre-AF controls back (owner 2026-08-22 §2). */}
+          <Pressable style={s.skipLink} testID="af-back" onPress={onBack} hitSlop={8}>
+            <Text style={s.backTxt}>{t('Back')}</Text>
+          </Pressable>
+          <Pressable style={s.skipLink} testID="af-skip" onPress={onSkip} hitSlop={8}>
+            <Text style={s.skipTxt}>{t('Skip')}</Text>
+          </Pressable>
+          {/* «عرض النتائج» must honour what is on screen: the chip and «عرض N نتيجة» already
+              promise the count for the CURRENT selection, so leaving by this link commits that
+              selection too. Before 2026-08-22 a single tap auto-committed within 260ms and this
+              window barely existed; now that a tap only selects, exiting here would silently
+              discard a visible answer and land the user on a different number than the one they
+              were just shown. */}
+          <Pressable style={s.skipLink} testID="af-skip-all" onPress={() => onSkipAll(sel)} hitSlop={8}>
+            <Text style={s.skipAllTxt}>{t('Show results')}</Text>
+          </Pressable>
+        </View>
+      </Reanimated.View>
     </Shell>
   );
 }
 
 const s = StyleSheet.create({
-  overlay: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.screenSide },
+  // paddingVertical (not just horizontal): `maxHeight: '100%'` resolves against this content box, so
+  // the card can never grow flush to the top/bottom edges and drop the pinned footer under a phone's
+  // home indicator or the browser's own bottom chrome.
+  overlay: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.screenSide, paddingVertical: space.screenSide },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.scrim },
   card: {
     width: '100%', maxWidth: 380, maxHeight: '100%', backgroundColor: colors.paper,
@@ -376,7 +390,11 @@ const s = StyleSheet.create({
   introFoot: { marginTop: 20, alignSelf: 'stretch', gap: 12, alignItems: 'center' },
   introLink: { paddingVertical: 4 },
 
-  body: { paddingHorizontal: space.card, paddingTop: space.base, paddingBottom: 20 },
+  // The scroller must be the ONLY thing that gives up height when the card is taller than the
+  // screen. RN and react-native-web disagree on the default (RNW's ScrollView already ships
+  // flexGrow/flexShrink 1, bare RN does not), so state it here rather than inherit either.
+  scroll: { flexShrink: 1 },
+  body: { paddingHorizontal: space.card, paddingTop: space.base, paddingBottom: 16 },
   qt: { fontFamily: font.family.bold, fontSize: 19, color: colors.ink, lineHeight: 27, paddingHorizontal: 2, paddingTop: 8 },
   desc: { fontFamily: font.family.regular, fontSize: 12.5, color: colors.muted, paddingHorizontal: 2, paddingTop: 5 },
 
@@ -410,7 +428,17 @@ const s = StyleSheet.create({
 
   note: { marginTop: 12, marginHorizontal: 2, fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, lineHeight: 16 },
 
-  foot: { marginTop: 18, gap: 10 },
+  // PINNED footer (defect 2026-08-23). It used to be the last child INSIDE the body ScrollView, so a
+  // question with many options pushed «متابعة / رجوع / تخطي / عرض النتائج» past the bottom of the
+  // card — on an iPhone 13 (664pt) the amenities question (7 options) put the whole secondary row at
+  // y=656..682, ~8px of glyph visible, recoverable only by discovering 38px of scroll with no
+  // scrollbar or fade cue. The action row is now a SIBLING of the scroller and therefore always on
+  // screen; only the question body scrolls. Never move it back inside the ScrollView —
+  // scripts/verify-af-footer-onscreen.ts fails if it is.
+  foot: {
+    gap: 10, paddingHorizontal: space.card, paddingTop: 12, paddingBottom: space.card,
+    borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.paper,
+  },
   tapInner: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: 13 },
   primaryBtn: { backgroundColor: colors.primary, borderRadius: radius.chip, alignSelf: 'stretch' },
   primaryTxt: { fontFamily: font.family.bold, fontSize: 14.5, color: colors.surface },

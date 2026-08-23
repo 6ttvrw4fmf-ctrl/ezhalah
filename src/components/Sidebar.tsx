@@ -519,8 +519,12 @@ const s = StyleSheet.create({
   histRowActive: { backgroundColor: '#dcefe1' },
   histItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 8 },
   histLabel: { flex: 1, fontSize: 13.5, fontWeight: '500', color: colors.ink },
-  // Editing keeps the row's exact metrics so entering rename mode never makes the list jump.
-  histInput: { paddingVertical: 0, borderRadius: 6, backgroundColor: '#ffffff',
+  // Editing keeps the row's metrics as close as it can so the list barely moves on rename.
+  // fontSize >= 16 on web keeps mobile Safari from zooming on focus and stranding the user zoomed in
+  // (scripts/verify-input-font-no-ios-zoom.ts). This is the one place where the bigger web font costs a
+  // little: measured, the row goes 37px -> 40px while renaming (it already grew 35 -> 37 for the border).
+  // A 3px wobble on the row you are actively editing beats an unrecoverable page zoom.
+  histInput: { fontSize: Platform.OS === 'web' ? 16 : 13.5, paddingVertical: 0, borderRadius: 6, backgroundColor: '#ffffff',
     borderWidth: 1, borderColor: colors.primary, paddingHorizontal: 6, ...(Platform.OS === 'web' ? { outlineStyle: 'none' } as any : null) },
   dots: { paddingVertical: 6, paddingHorizontal: 8, borderRadius: 8 },
   // Soft dim over the sidebar while the menu is open so the history text behind it recedes and the

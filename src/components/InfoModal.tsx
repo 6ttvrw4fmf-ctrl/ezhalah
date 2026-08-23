@@ -22,6 +22,20 @@ const IS_WEB = Platform.OS === 'web';
 // Smooth hover/press transitions for the close button (web only).
 const WEB_SMOOTH = IS_WEB ? ({ transitionProperty: 'background-color, transform, box-shadow', transitionDuration: '150ms' } as any) : null;
 
+// Dialog geometry. The close button is absolutely positioned over the card's PHYSICAL top-right,
+// so anything laid out in that band has to give up its footprint or the button paints on top of it
+// (2026-08-23: the Support heading «المساعدة/تواصل معنا» lost its first word under the ×).
+// CLOSE_CLEAR is DERIVED from the button, never hand-tuned separately, so resizing/moving the
+// button keeps the heading clear. scripts/verify-info-modal-header-clearance.ts pins the arithmetic.
+const BODY_PAD = 24; // body horizontal padding — already buys the heading this much
+const CLOSE_INSET = 14; // button offset from the card's top/right edges
+const CLOSE_SIZE = 34; // button diameter
+const CLOSE_GAP = 8; // minimum breathing room between the heading and the button
+// Extra PHYSICAL-right padding a heading needs. `paddingRight` is physical in React Native and
+// react-native-web alike (only the *Start/*End variants flip under RTL) — which is exactly what we
+// want, because the button is pinned to the physical right in both LTR and RTL.
+const CLOSE_CLEAR = CLOSE_INSET + CLOSE_SIZE + CLOSE_GAP - BODY_PAD;
+
 const EAGLE = require('../../assets/images/eagle-mark.png');
 const HERO = require('../../assets/images/hero-bg.png');
 
@@ -206,8 +220,8 @@ const s = StyleSheet.create({
   card: { width: '100%', backgroundColor: colors.paper, borderRadius: 24, overflow: 'hidden', ...cardShadow, shadowOpacity: 0.26, shadowRadius: 32 },
   // Circular close pinned to the PHYSICAL top-right (RN `right` is physical — RTL never flips it).
   xBtn: {
-    position: 'absolute', top: 14, right: 14, zIndex: 5,
-    width: 34, height: 34, borderRadius: 17,
+    position: 'absolute', top: CLOSE_INSET, right: CLOSE_INSET, zIndex: 5,
+    width: CLOSE_SIZE, height: CLOSE_SIZE, borderRadius: CLOSE_SIZE / 2,
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine,
     alignItems: 'center', justifyContent: 'center',
     shadowColor: 'rgba(20,40,30,1)', shadowOpacity: 0.14, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 3,
@@ -215,7 +229,7 @@ const s = StyleSheet.create({
   },
   xBtnHover: { backgroundColor: '#eef3ef', transform: [{ scale: 1.06 }] },
   scroll: { paddingTop: 0, paddingBottom: 0 },
-  bodyPad: { paddingHorizontal: 24, paddingTop: 26, paddingBottom: 8 },
+  bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 26, paddingBottom: 8 },
 
   // ——— About: header ———
   head: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 22, paddingTop: 6 },
@@ -247,7 +261,10 @@ const s = StyleSheet.create({
   footerLine: { fontSize: 13, fontWeight: '700', color: colors.dark, marginBottom: 16 },
 
   // ——— Support (content unchanged; shares the upgraded shell) ———
-  h: { fontSize: 23, fontWeight: '700', color: colors.ink, marginBottom: 16, paddingTop: 4 },
+  // paddingRight keeps the heading out from under the close button (see CLOSE_CLEAR). The About
+  // header needs no such padding: its 56px eagle badge already holds that slot, which is why only
+  // this heading was hit.
+  h: { fontSize: 23, fontWeight: '700', color: colors.ink, marginBottom: 16, paddingTop: 4, paddingRight: CLOSE_CLEAR },
   supCard: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.fieldLine, padding: 18, alignItems: 'center', marginBottom: 12 },
   cardIc: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   mail: { fontSize: 15.5, fontWeight: '700', color: colors.ink },

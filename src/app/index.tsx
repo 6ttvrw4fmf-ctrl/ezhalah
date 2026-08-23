@@ -22,7 +22,7 @@ import { runAfterAnimation } from '@/lib/afterAnimation';
 import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
-import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG } from '@/i18n';
+import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG, DISTRICT_UNCONFIRMED_MSG } from '@/i18n';
 
 const MAX_W = 560; // desktop-web: keep the mobile-first column centered
 
@@ -123,7 +123,9 @@ export default function Home() {
   const [districtSuggestions, setDistrictSuggestions] = useState<DistrictOption[]>([]);
   const [districtsSelected, setDistrictsSelected] = useState<DistrictOption[]>([]);
   const [districtFocus, setDistrictFocus] = useState(false);
-  const [districtMsg, setDistrictMsg] = useState(''); // Arabic-only: shown when the user types the district in English
+  // One inline message line under the district field: the Arabic-only warning while typing, and
+  // (2026-08-23) the "you typed a حي but never picked it" block that onSearch raises — see there.
+  const [districtMsg, setDistrictMsg] = useState('');
   const districtRef = useRef<TextInput>(null);
   const districtTextRef = useRef('');
   // One place to wipe all district state — called wherever the city changes/clears.
@@ -660,6 +662,23 @@ export default function Home() {
       cityRef.current?.focus();
       return;
     }
+    // DISTRICT FIELD — same "no silent drop" rule, for the optional field (2026-08-23).
+    // The district box is a SEARCH box over the catalog: only a TAPPED suggestion becomes a chip in
+    // districtsSelected, and only chips are ever searched. So typed-but-never-confirmed text was
+    // dropped here in complete silence — reproduced live: pick الرياض, type «النرجس», the dropdown
+    // offers «حي النرجس · 1,699 إعلان», press «بحث» without tapping it → the search runs city-wide
+    // (36,908), no chip, no «• الحي» line in the summary, no warning, and the field still reads
+    // «النرجس». That breaks the standing rule that the VISIBLE form state must equal the COMMITTED
+    // request state. It is NOT fixable by resolving the text ourselves — that would be guessing a
+    // location, which this screen never does (see the City rule above) — so Search stops and names
+    // the two honest choices: tap the district, or clear the text and search the whole city.
+    // Whitespace-only text is not a filter the user can see, so it never blocks.
+    if (districtText.trim()) {
+      setDistrictMsg(DISTRICT_UNCONFIRMED_MSG);
+      scrollDown(districtAnchorRef);
+      districtRef.current?.focus();
+      return;
+    }
     // Base = the SAME builder the district live-count effect uses (see buildFilterBaseQuery above) —
     // one construction site, so the counts shown and the search run can never be built from
     // different state.
@@ -944,8 +963,16 @@ export default function Home() {
           {/* Filter / AI Agent — the hero's focal choice: centered between the headline and the search
               card so opening Ezhalah reads as "pick how you search," then flows into the card. Moved
               here from the top-right corner. (owner redesign 2026-07-24 r3.) */}
+          {/* REPLACE, never push (defect fix 2026-08-23): the pill is a MODE TOGGLE between two peer
+              screens, not a step into a child screen — and the return trip (agent.tsx's ModeSwitch)
+              has always been router.replace('/'). Pushing on the way out and replacing on the way
+              back left the pushed /agent slot occupied by a duplicate '/', so every Filter→AI→Filter
+              round trip added a junk history entry and leaked another mounted Filter screen: the
+              Back button then just re-showed the same page N times before leaving the site. Both
+              halves of the toggle replace, so toggling costs no history and mounts no duplicates.
+              (Search «بحث» still PUSHES — results ARE a child of the form; see onSearch above.) */}
           <RNAnimated.View style={[s.modeWrap, reveal(badgeAnim, 12)]}>
-            <ModeSwitch active="filter" onSwitch={() => router.push('/agent')} t={t} />
+            <ModeSwitch active="filter" onSwitch={() => router.replace('/agent')} t={t} />
           </RNAnimated.View>
 
           {/* Search card */}
@@ -1854,7 +1881,10 @@ const s = StyleSheet.create({
   // City + District are Arabic text fields → right-align so the caret sits on the RIGHT and the
   // Arabic value/placeholder reads correctly (the numeric area/price inputs stay LTR — rangeInput/
   // sizeInput). Fixes the caret/placeholder appearing on the far left. (owner UI request 2026-07-19.)
-  flInput: { fontSize: 14, color: colors.ink, padding: 0, height: '100%', textAlign: 'right', writingDirection: 'rtl', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  // iOS focus-zoom trap: mobile Safari zooms the page on focus for any input under 16px and never
+  // zooms back out. The web font is pinned to 16 (native keeps the designed 14). The field box is a
+  // fixed 52px with height:'100%' here, so nothing reflows. See scripts/verify-input-font-no-ios-zoom.ts.
+  flInput: { fontSize: Platform.OS === 'web' ? 16 : 14, color: colors.ink, padding: 0, height: '100%', textAlign: 'right', writingDirection: 'rtl', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
   flInputUp: { paddingTop: 15 },
 
   suggBox: { marginTop: 8, maxHeight: 268, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, backgroundColor: colors.surface, overflow: 'hidden' },
