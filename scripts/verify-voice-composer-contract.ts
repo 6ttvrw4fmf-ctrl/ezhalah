@@ -109,8 +109,8 @@ check(
 check(
   '6b. capture is cancelled on unmount AND on navigation blur AND on New Chat',
   /useEffect\(\(\) => \(\) => \{ cancelVoiceInput\(\); \}, \[\]\)/.test(agent) &&
-    /useFocusEffect\(useCallback\(\(\) => \(\) => \{ cancelVoiceInput\(\);/.test(agent) &&
-    /greetTimerRef\.current\);[\s\S]{0,400}cancelVoiceInput\(\);/.test(agent),
+    /useFocusEffect\(useCallback\(\(\) => \(\) => \{[^\n]{0,120}cancelVoiceInput\(\);/.test(agent) &&
+    /greetTimerRef\.current\);[\s\S]{0,600}cancelVoiceInput\(\);/.test(agent),
 );
 check(
   '6c. a cancel during the permission prompt still stops the late-granted stream (generation guard)',
@@ -188,6 +188,18 @@ check(
 check(
   "16. every exit path (cancel/stop/send/failure) returns voiceState to 'idle'",
   (agent.match(/setVoiceState\('idle'\)/g) ?? []).length >= 5,
+);
+
+// ── 17. Rapid-tap safety: voiceActiveRef is SYNCHRONOUS truth, flipped inside every transition ──
+// (found in journey E: a render-assigned mirror stays stale for the rest of the tick, letting a
+// same-tick Stop→Send pass both guards and submit the base text without the transcript.)
+check(
+  '17. every transition flips voiceActiveRef synchronously; the ref is never render-derived',
+  /const stopVoice = \(\) => \{[\s\S]{0,150}voiceActiveRef\.current = false;/.test(agent) &&
+    /const cancelVoice = \(\) => \{[\s\S]{0,150}voiceActiveRef\.current = false;/.test(agent) &&
+    /voiceFinalizingRef\.current = true;\s*\n\s*voiceActiveRef\.current = false;/.test(agent) &&
+    /voiceActiveRef\.current = true; \/\/ synchronous latch/.test(agent) &&
+    !/voiceActiveRef\.current = voiceState ===/.test(agent),
 );
 
 // ── Wiring: this barrier itself must be in npm test, or it is decoration ────────────────────────

@@ -551,8 +551,11 @@ export default function Agent() {
   // this block is only the UI state machine. Text typed before recording is preserved: the
   // transcript is APPENDED to it on Stop/Send, and X restores exactly the pre-recording composer.
   const [voiceState, setVoiceState] = useState<'idle' | 'recording'>('idle');
-  const voiceActiveRef = useRef(false); // mirror for the raw-DOM Enter handler (no re-binding)
-  voiceActiveRef.current = voiceState === 'recording';
+  // The SYNCHRONOUS truth for every guard (and the raw-DOM Enter handler). Managed explicitly in
+  // each transition, never derived from render — a render-assigned mirror stays stale for the rest
+  // of the tick, which let Stop→Send in the SAME tick pass both guards and submit the base text
+  // without the transcript (found tracing journey E; sub-16ms, but real).
+  const voiceActiveRef = useRef(false);
   const voiceBaseRef = useRef(''); // `typed` at the moment recording started (owner brief §8/§15)
   // Reentrancy latch (owner brief §5/§17): sendVoice's finalize+submit is atomic — double tap,
   // Stop+Send races and late recognizer events all collapse into at most ONE submission (send()'s
@@ -576,9 +579,11 @@ export default function Agent() {
     stopReadAloud();
     if (!isVoiceInputSupported()) { showVoiceNotice(t('Voice input is not supported on this browser')); return; }
     voiceBaseRef.current = typed;
+    voiceActiveRef.current = true; // synchronous latch — a second tap in the same tick is a no-op
     setVoiceState('recording'); // morph now; a denied permission gracefully restores below
     await startVoiceInput({
       onFailure: (kind) => {
+        voiceActiveRef.current = false;
         setVoiceState('idle'); // composer restores cleanly — never stuck in recording mode
         showVoiceNotice(kind === 'denied'
           ? t('Microphone access is needed for voice input. Enable it in your browser settings.')
@@ -590,6 +595,7 @@ export default function Agent() {
   // the user to inspect/edit; Send is theirs to tap (owner brief §5/§9).
   const stopVoice = () => {
     if (!voiceActiveRef.current) return; // Stop tapped twice → one finalization
+    voiceActiveRef.current = false;
     const transcript = stopVoiceInput();
     setVoiceState('idle');
     const merged = [voiceBaseRef.current.trim(), transcript].filter(Boolean).join(' ');
@@ -599,6 +605,7 @@ export default function Agent() {
   // was never touched during recording, so the composer returns to its exact pre-recording state.
   const cancelVoice = () => {
     if (!voiceActiveRef.current) return;
+    voiceActiveRef.current = false;
     cancelVoiceInput();
     setVoiceState('idle');
   };
@@ -606,6 +613,7 @@ export default function Agent() {
   const sendVoice = () => {
     if (voiceFinalizingRef.current || !voiceActiveRef.current) return;
     voiceFinalizingRef.current = true;
+    voiceActiveRef.current = false;
     const transcript = stopVoiceInput(); // synchronous teardown — no late event can re-enter
     setVoiceState('idle');
     voiceFinalizingRef.current = false;
@@ -619,7 +627,7 @@ export default function Agent() {
   // LIFECYCLE SAFETY (owner brief §16): the mic dies the moment this screen unmounts or loses
   // navigation focus (route change, sidebar navigation, in-app browser) — never a hidden capture.
   useEffect(() => () => { cancelVoiceInput(); }, []);
-  useFocusEffect(useCallback(() => () => { cancelVoiceInput(); setVoiceState('idle'); }, []));
+  useFocusEffect(useCallback(() => () => { voiceActiveRef.current = false; cancelVoiceInput(); setVoiceState('idle'); }, []));
   // While the mic is live, a Read Aloud started from an old message is stopped instantly — the two
   // audio paths can never run together (owner brief §19).
   useEffect(() => {
@@ -1940,6 +1948,7 @@ export default function Agent() {
     if (greetTimerRef.current) clearTimeout(greetTimerRef.current);
     // New Chat kills any live mic capture instantly (owner brief §16) — and inherits nothing from
     // it (PR #832 contract: the store owns newChat(); this only stops hardware, adds no state).
+    voiceActiveRef.current = false;
     cancelVoiceInput();
     setVoiceState('idle');
     runAfterAnimation(
