@@ -169,7 +169,9 @@ def test_incomplete_harvest_suppresses_pruning():
     src = inspect.getsource(sq.main)
     assert "harvest_complete" in src, "main() must read the harvest's completeness flag"
     prune_at = src.index("db.prune_unseen(")
-    guard_at = src.index("if not harvest_complete:")
+    # The guard was later widened to cover an aborted detail sweep too; match on the harvest limb
+    # so this test keeps asserting ITS property without pinning the sweep limb's exact wording.
+    guard_at = src.index("if not harvest_complete")
     assert guard_at < prune_at, (
         "the incomplete-harvest guard must come BEFORE prune_unseen() — otherwise a truncated "
         "crawl inactivates live listings, the exact harm this guard exists to prevent"
@@ -228,6 +230,72 @@ def test_a_partial_page_failure_is_also_incomplete():
         "a partially-read harvest must not count as complete: the missing pages may hold the very "
         "ids above the 1300 numeric floor that pruning would then inactivate"
     )
+
+
+# ── The SECOND unbounded loop (2026-08-23, second pass) ──────────────────────────────────────
+# Bounding harvest_ids() alone only moved the bottleneck. fetch_one() had the identical shape:
+# 3 attempts x 40s + backoff = 122.4s per id, and 1316 candidates at 8 workers = ~336 MINUTES
+# against a timeout-minutes: 150 job. Under proxy denial the run could not finish — it just got
+# SIGINT-killed from the detail phase instead of the harvest phase.
+
+def test_detail_sweep_worst_case_fits_inside_the_job_timeout():
+    """THE ARITHMETIC THAT MATTERS. Whatever the constants are, the sweep's worst case must be
+    bounded below the CI job budget — otherwise total denial guarantees a kill with zero rows,
+    which is the failure this whole exercise removed from the harvest."""
+    per_id = 3 * sq._SWEEP_TIMEOUT_S + (0.8 + 1.6)
+    worst_min = (sq.ID_CAP / sq.WORKERS) * per_id / 60.0
+    assert sq._SWEEP_BUDGET_S / 60.0 < 150, "the sweep budget must sit inside timeout-minutes: 150"
+    assert min(worst_min, sq._SWEEP_BUDGET_S / 60.0) < 150, (
+        f"worst-case sweep is {worst_min:.0f} min against a 150 min job budget and the "
+        f"{sq._SWEEP_BUDGET_S/60:.0f} min budget does not save it"
+    )
+    assert sq._SWEEP_TIMEOUT_S <= 20, "a denied detail fetch must cost seconds, not 40s"
+
+
+def test_fetch_one_returns_immediately_once_the_sweep_is_aborted():
+    """The abort flag is what makes the budget real. ex.map() has already queued every future, so
+    without this each remaining id would still burn its own full retry ladder and the budget would
+    save nothing. Aborted fetches must cost no network at all."""
+    calls = []
+
+    class _Boom:
+        def get(self, *a, **kw):
+            calls.append(a)
+            raise AssertionError("aborted sweep must not touch the network")
+
+    sq._SWEEP_ABORT.set()
+    try:
+        with mock.patch.object(sq, "_session", lambda: _Boom()):
+            assert sq.fetch_one(1234) is None
+        assert calls == [], "no request may be made once the sweep has aborted"
+    finally:
+        sq._SWEEP_ABORT.clear()
+
+
+def test_fetch_one_uses_the_bounded_timeout():
+    """A constant nothing reads is decoration — prove the ceiling reaches s.get()."""
+    seen = []
+
+    class _S:
+        def get(self, url, timeout=None, **kw):
+            seen.append(timeout)
+            return mock.Mock(status_code=404)
+
+    sq._SWEEP_ABORT.clear()
+    with mock.patch.object(sq, "_session", lambda: _S()):
+        sq.fetch_one(99)
+    assert seen and all(t <= 20 for t in seen), f"unbounded detail timeout leaked: {seen}"
+
+
+def test_an_aborted_sweep_also_suppresses_pruning():
+    """Same hazard as a truncated harvest, reached by a different route: ids we INTENDED to visit
+    were abandoned, so an unseen listing cannot be told apart from a delisted one. Structural,
+    because the branch is the contract."""
+    src = inspect.getsource(sq.main)
+    assert "sweep_incomplete" in src, "main() must consider an aborted sweep"
+    guard = src.index("if not harvest_complete or sweep_incomplete:")
+    prune = src.index("db.prune_unseen(")
+    assert guard < prune, "the incomplete-enumeration guard must precede prune_unseen()"
 
 
 if __name__ == "__main__":
