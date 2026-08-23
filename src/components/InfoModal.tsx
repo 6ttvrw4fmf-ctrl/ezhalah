@@ -96,18 +96,18 @@ function Sheet({ kind, onClose }: { kind: 'support' | 'about'; onClose: () => vo
     });
   };
 
-  // «من نحن» on desktop is a single-screen composition (880×648, zero scroll); everything else
+  // «من نحن» on desktop is a single-screen composition (800×580, zero scroll); everything else
   // keeps the classic 560×680 column.
   const aboutWide = kind === 'about' && width >= ABOUT_WIDE_MIN_W;
   const availH = height - insets.top - insets.bottom - 48;
-  const maxH = Math.min(availH, aboutWide ? 648 : 680);
+  const maxH = Math.min(availH, kind === 'about' ? (aboutWide ? 580 : 620) : 680);
 
   return (
     <View style={s.overlay}>
       {/* Blurred + softly darkened page behind the dialog — the popup is the single clear focus.
           (owner: keep the blur, increase it slightly, add a subtle dark overlay.) */}
       <AnimatedPressable style={[s.backdrop, backdropStyle]} onPress={close} />
-      <Animated.View style={[s.card, { maxWidth: Math.min(width - 32, aboutWide ? 880 : 560), maxHeight: maxH }, cardStyle]}>
+      <Animated.View style={[s.card, { maxWidth: Math.min(width - 32, aboutWide ? 800 : 560), maxHeight: maxH }, cardStyle]}>
         {/* Close — a circular button pinned to the PHYSICAL top-right (owner: right side, premium,
             subtle shadow, gentle hover — like modern Apple/Notion dialogs). */}
         <Pressable
@@ -149,7 +149,7 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
 // Desktop (≥768): one row — hero column (wordmark + thesis sentence + four verb-led value blocks)
 // beside a 340px abstract Saudi map panel (street grid, parcels, two pinned listing abstractions,
 // the hand-drawn skyline settling at its base under «إزهله وفالك طيب»), closed by a four-column
-// small-print legal strip. Fits 880×648 with zero scroll.
+// small-print legal strip. Fits 800×580 with zero scroll (owner 2026-08-24: compact dialog, not a screen takeover).
 // Mobile: the same story stacked — hero, value list, legal card, skyline footer — about one screen.
 //
 // Motion: the Sheet entrance is the container's only large motion. Inside, a single subtle stagger
@@ -298,7 +298,7 @@ function VisualPanel({ t }: { t: Tr }) {
   return (
     <>
       <LinearGradient colors={['#f6faf7', '#ecf5ef']} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={StyleSheet.absoluteFill} />
-      {Array.from({ length: 7 }, (_, i) => (
+      {Array.from({ length: 6 }, (_, i) => (
         <View key={'v' + i} style={[a.gridV, { left: 20 + i * 50 }]} />
       ))}
       {Array.from({ length: 10 }, (_, i) => (
@@ -307,7 +307,7 @@ function VisualPanel({ t }: { t: Tr }) {
       <View style={[a.diagonal, { left: 90, top: -60, transform: [{ rotate: '18deg' }] }]} />
       <View style={[a.diagonal, { left: 230, top: -80, transform: [{ rotate: '-24deg' }] }]} />
       <View style={[a.parcel, { left: 38, top: 96, width: 64, height: 46 }]} />
-      <View style={[a.parcel, { left: 216, top: 300, width: 52, height: 64 }]} />
+      <View style={[a.parcel, { left: 216, top: 236, width: 52, height: 64 }]} />
       <View style={[a.marker, { left: 150, top: 130 }]} />
       <View style={[a.connector, { left: 153.5, top: 138 }]} />
       <MiniCard left={96} top={150} width={132} bars={[64, 88, 46]} />
@@ -406,8 +406,8 @@ const a = StyleSheet.create({
   eyebrow: { fontSize: 12, lineHeight: 18, fontWeight: '700', color: colors.muted },
   lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   eagle: { width: 30, height: 30, opacity: 0.9 },
-  wordmark: { fontSize: 42, lineHeight: 50, fontWeight: '800', color: colors.ink },
-  wordDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: colors.accentLeaf, alignSelf: 'flex-end', marginBottom: 9 },
+  wordmark: { fontSize: 38, lineHeight: 46, fontWeight: '800', color: colors.ink },
+  wordDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: colors.accentLeaf, alignSelf: 'flex-end', marginBottom: 8 },
   heroLine: { fontSize: 17, lineHeight: 28, fontWeight: '500', color: colors.body },
   valueMarker: { width: 6, height: 6, borderRadius: 2, backgroundColor: colors.primary },
   valueLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -421,15 +421,15 @@ const a = StyleSheet.create({
   aboutMain: { flexDirection: 'row', flex: 1, minHeight: 0 },
   // TOP_CLEAR (not plain padding) so the hero's first line — whose RTL reading edge is the physical
   // right, under the × — always starts below the button.
-  heroCol: { flex: 1, justifyContent: 'center', paddingHorizontal: 44, paddingTop: TOP_CLEAR, paddingBottom: 40 },
-  eyebrowGapD: { marginBottom: 10 },
-  lockupGapD: { marginBottom: 16 },
-  heroLineGapD: { marginBottom: 26 },
-  valueGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 24, rowGap: 22 },
-  valueCell: { width: '46%', minWidth: 200 },
+  heroCol: { flex: 1, justifyContent: 'center', paddingHorizontal: 36, paddingTop: TOP_CLEAR, paddingBottom: 32 },
+  eyebrowGapD: { marginBottom: 8 },
+  lockupGapD: { marginBottom: 14 },
+  heroLineGapD: { marginBottom: 20 },
+  valueGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 20, rowGap: 18 },
+  valueCell: { width: '46%', minWidth: 170 },
 
   // ——— visual panel (desktop only) ———
-  panel: { width: 340, alignSelf: 'stretch', overflow: 'hidden' },
+  panel: { width: 320, alignSelf: 'stretch', overflow: 'hidden' },
   gridV: { position: 'absolute', top: 0, bottom: 0, width: 1, backgroundColor: 'rgba(47,114,71,0.07)' },
   gridH: { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: 'rgba(47,114,71,0.07)' },
   diagonal: { position: 'absolute', width: 1.5, height: 700, backgroundColor: 'rgba(47,114,71,0.10)' },
@@ -441,12 +441,12 @@ const a = StyleSheet.create({
   miniDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
   barDark: { height: 6, borderRadius: 3, backgroundColor: '#dfe7e2' },
   barLight: { height: 6, borderRadius: 3, backgroundColor: '#ecf1ee', marginTop: 6 },
-  pin: { position: 'absolute', left: 60, top: 320, width: 24, height: 24, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: 'rgba(20,40,30,1)', shadowOpacity: 0.28, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
+  pin: { position: 'absolute', left: 60, top: 252, width: 24, height: 24, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: 'rgba(20,40,30,1)', shadowOpacity: 0.28, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
   skyline: { position: 'absolute', left: 0, right: 0, bottom: 28, height: 120, opacity: 0.35 },
   skylineMelt: { position: 'absolute', left: 0, right: 0, bottom: 88, height: 60 },
 
   // ——— legal (desktop strip) ———
-  legalStrip: { borderTopWidth: 1, borderTopColor: colors.line, paddingHorizontal: 28, paddingTop: 18, paddingBottom: 16, flexDirection: 'row', columnGap: 22 },
+  legalStrip: { borderTopWidth: 1, borderTopColor: colors.line, paddingHorizontal: 24, paddingTop: 14, paddingBottom: 12, flexDirection: 'row', columnGap: 20 },
   legalCol: { flex: 1 },
   legalLabel: { fontSize: 11.5, lineHeight: 16, fontWeight: '800', color: colors.dark, marginBottom: 6 },
   legalText: { fontSize: 11.5, lineHeight: 19, fontWeight: '400', color: '#5f6d65' },
