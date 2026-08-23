@@ -311,7 +311,7 @@ check('removable pills rebuild the query from baseQ via the questions’ own app
   /removeGuidedFacet/.test(agentSrc)
   && /for \(const f of remaining\)/.test(agentSrc)
   && /question\.apply\(q, f\.keys\)/.test(agentSrc)
-  && /Based on: \{labels\}/.test(agentSrc));
+  && /buildAfSummary\(guidedPills\.facets\)/.test(agentSrc));
 
 // ── Count RPCs must never receive p_sort_by (bug-hunt 2026-07-30) ────────────────────────────────
 // PostgREST resolves RPCs by exact param-name match; leaking p_sort_by 404s BOTH counts calls the
