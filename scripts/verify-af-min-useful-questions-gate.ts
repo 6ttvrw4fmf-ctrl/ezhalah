@@ -73,19 +73,60 @@ check("startAgeFlow's opening guard reads `ageFlowPlanRef.current.length < MIN_U
 check('the OLD 0-only guard (`if (!ageFlowPlanRef.current.length)`) is gone — regression to the pre-fix 1-question-opens-AF bug',
   !/if\s*\(!ageFlowPlanRef\.current\.length\)/.test(ag));
 
-check('the new gate sits BEFORE presentGuided(0, token) is ever called — a <2 plan never reaches the asking phase',
+// ── THE GATE NOW HAS TWO PLACEMENTS, ONE PER ENTRY PATH (owner amendment 2026-08-23) ─────────────
+// The scope hierarchy (CATEGORY→GROUP→TYPE) made a single placement impossible. With an unresolved
+// hierarchy the ranked plan is empty BY CONSTRUCTION — cohortAllows intersects across every clean
+// type in scope and treats an uncertified type as an empty cohort — so gating at startAgeFlow closed
+// the interview before the first scope question could ever render. That is the exact bug that left
+// 5 of 8 shipped groups unable to open Advanced Filter on either deal. So:
+//   • SCOPE ALREADY RESOLVED → the gate stays exactly where it was, in startAgeFlow, before asking.
+//   • SCOPE UNRESOLVED       → startAgeFlow hands off to the hierarchy, and the gate is re-evaluated
+//                              at the scope→advanced transition inside presentGuided.
+// Both are pinned below. Losing EITHER placement re-opens a real defect, in opposite directions.
+check('the resolved-scope gate still sits BEFORE presentGuided(0, token) — a <2 plan never reaches the asking phase',
   (() => {
     const gateIdx = ag.search(/if\s*\(ageFlowPlanRef\.current\.length\s*<\s*MIN_USEFUL_QUESTIONS_TO_SHOW\)/);
-    const presentIdx = ag.indexOf('void presentGuided(0, token);');
+    // LAST occurrence, deliberately: since 2026-08-23 startAgeFlow contains TWO
+    // `void presentGuided(0, token);` calls — the unresolved-scope bypass (which must precede the
+    // gate) and the real resolved-scope hand-off (which must follow it). indexOf would find the
+    // bypass and read the correct ordering as a violation.
+    const presentIdx = ag.lastIndexOf('void presentGuided(0, token);');
     return gateIdx !== -1 && presentIdx !== -1 && gateIdx < presentIdx;
   })());
+
+check('an UNRESOLVED scope bypasses that gate and opens on the hierarchy instead (the 2026-08-23 fix)',
+  (() => {
+    const bypassIdx = ag.search(/if\s*\(unresolvedScopeTiers\(q\)\.length\)\s*\{\s*void presentGuided\(0, token\);\s*return;\s*\}/);
+    const gateIdx = ag.search(/if\s*\(ageFlowPlanRef\.current\.length\s*<\s*MIN_USEFUL_QUESTIONS_TO_SHOW\)/);
+    return bypassIdx !== -1 && gateIdx !== -1 && bypassIdx < gateIdx;   // bypass must precede the gate
+  })(),
+  'without this, a category-only or group-only scope ranks to an empty plan and the interview closes before asking anything');
 
 // ── The continuation loop is UNTOUCHED — presentGuided must keep asking down to the LAST useful
 // question (owner §2/§6), never re-apply the >=2 threshold after the interview has already opened.
 const presentGuidedBody = ag.match(/const presentGuided = async[\s\S]*?\n  \};/)?.[0] ?? '';
-check('presentGuided (the re-rank-after-every-answer continuation loop) contains no reference to MIN_USEFUL_QUESTIONS_TO_SHOW',
-  presentGuidedBody.length > 0 && !presentGuidedBody.includes('MIN_USEFUL_QUESTIONS_TO_SHOW'),
-  'the >=2 gate must apply ONLY at the opening decision in startAgeFlow — presentGuided already stops correctly at plan.length===0 (finishGuided), and must keep asking at exactly 1 remaining useful question');
+check('presentGuided body located (extraction must fail loudly, never silently pass)', presentGuidedBody.length > 0);
+
+// presentGuided may now reference the constant EXACTLY ONCE, and only for the scope→advanced
+// transition. The property that actually matters — and that the old "appears nowhere" check was a
+// proxy for — is that the threshold is an OPENING decision and never throttles the continuation
+// loop: once the interview is open on a resolved scope it must keep asking down to the LAST useful
+// question (owner §2/§6). So instead of banning the constant, pin the guard it must be part of.
+const transitionGate = presentGuidedBody.match(
+  /if \(steps\.length && steps\.every\(\(st\) => isScopeQuestionId\(st\.question\.id\)\)\s*\n?\s*&& plan\.length < MIN_USEFUL_QUESTIONS_TO_SHOW\) \{ finishGuided\(token\); return; \}/,
+);
+check('the transition gate exists and is guarded by "every recorded step so far is a SCOPE step"',
+  !!transitionGate,
+  'the >=2 threshold may only be re-evaluated at the scope→advanced hand-off — never on a later answer');
+check('presentGuided references the threshold EXACTLY once (only that transition gate)',
+  (presentGuidedBody.match(/MIN_USEFUL_QUESTIONS_TO_SHOW/g) ?? []).length === 1,
+  `found ${(presentGuidedBody.match(/MIN_USEFUL_QUESTIONS_TO_SHOW/g) ?? []).length}`);
+check('the transition gate counts ADVANCED questions only — it reads plan.length, never steps.length',
+  /&& plan\.length < MIN_USEFUL_QUESTIONS_TO_SHOW/.test(presentGuidedBody),
+  'hierarchy steps are what earned the right to ask; they must never count toward the 2');
+check('at the transition the interview STOPS CLEANLY (finishGuided) and never bounces to startRefine',
+  !!transitionGate && !/startRefine/.test(transitionGate[0]),
+  'by this point the user has answered real scope questions — their narrowing must be honoured, not discarded for the legacy chips');
 check('presentGuided still finishes (finishGuided) only when its own re-ranked plan is truly empty, not on any count threshold',
   /if \(!plan\.length\) \{ finishGuided\(token\); return; \}/.test(presentGuidedBody));
 

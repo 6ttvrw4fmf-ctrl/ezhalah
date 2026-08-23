@@ -148,8 +148,39 @@ check('the card restores the recorded answer instead of clearing on every questi
   /setSel\(initialKeys \?\? \[\]\)/.test(cardSrc) && !/^\s*setSel\(\[\]\);$/m.test(cardSrc));
 
 // ── 10. the orchestrator: cursor, restoration, revalidation, back-to-start ──────────────────────
+// onAgeBack is read SEMANTICALLY, not as a literal line: the walk-back is the part of the handler
+// after the stepIndex<=0 early exit, and what matters there is (a) the cursor moves back exactly
+// one, and (b) the token handed to that walk is a freshly BUMPED one. Pinning the old exact spelling
+// `presentGuided(stepIndex - 1, ageFlowTokenRef.current)` made this guard fail on the 2026-08-23
+// token-bump fix even though the cursor semantics never changed.
+const backBody = (src: string) => src.slice(src.indexOf('const onAgeBack = () => {'), src.indexOf('const onAgeSkipAll'));
+const backWalk = (src: string) => {
+  const b = backBody(src);
+  return b.slice(b.lastIndexOf('}', b.indexOf('presentGuided(')) + 1); // past the stepIndex<=0 exit
+};
+// every presentGuided cursor argument on the walk-back path, however the token arg is spelled
+const backCursors = (src: string) => [...backBody(src).matchAll(/presentGuided\(([^,)]*)/g)].map((m) => m[1].trim());
 check('Back steps the cursor back exactly one question',
-  /presentGuided\(stepIndex - 1, ageFlowTokenRef\.current\)/.test(agentSrc));
+  backCursors(agentSrc).length === 1 && backCursors(agentSrc)[0] === 'stepIndex - 1',
+  `presentGuided cursor args in onAgeBack: ${JSON.stringify(backCursors(agentSrc))}`);
+// Owner 2026-08-23. The abandoned step may still have probes in flight — a SCOPE step fires one
+// count RPC per taxonomy option, which widens that window materially — and every probe guards on the
+// token it captured. Back must therefore supersede them BEFORE walking back, and must carry the
+// POST-bump value: `const back = ageFlowTokenRef.current++` (postfix, old value) would hand
+// presentGuided a token that is already stale and kill the walk-back outright.
+const backTokenOk = (src: string) => {
+  const walk = backWalk(src);
+  const stmts = walk.split(';').map((x) => x.trim());
+  const bumpIdx = stmts.findIndex((x) => /\+\+\s*ageFlowTokenRef\.current|ageFlowTokenRef\.current\s*(?:\+\+|\+= 1)/.test(x));
+  const callIdx = stmts.findIndex((x) => x.includes('presentGuided('));
+  if (bumpIdx < 0 || callIdx <= bumpIdx) return false;               // no bump, or bumped too late
+  const arg2 = (walk.match(/presentGuided\([^,)]*,\s*([^)]*)\)/) ?? [])[1]?.trim() ?? '';
+  const prefixLocal = (stmts[bumpIdx].match(/^(?:const|let)\s+(\w+)\s*=\s*\+\+\s*ageFlowTokenRef\.current$/) ?? [])[1];
+  const standalone = /^(?:\+\+\s*ageFlowTokenRef\.current|ageFlowTokenRef\.current\s*(?:\+\+|\+= 1))$/.test(stmts[bumpIdx]);
+  return arg2 === prefixLocal || (standalone && arg2 === 'ageFlowTokenRef.current');
+};
+check('Back bumps the supersession token first and walks back under the BUMPED one (an abandoned in-flight probe cannot re-show the step just left)',
+  backTokenOk(agentSrc), backWalk(agentSrc).trim());
 check('Back from the FIRST question leaves AF (which is what restores the pre-AF controls)',
   /if \(stepIndex <= 0\) \{[\s\S]{0,220}?setAgeFlow\(null\);/.test(agentSrc)
   && /\(hasMore \|\| canNarrowFurther\) && !ageFlow/.test(agentSrc));
@@ -246,6 +277,14 @@ mustCatch('«رجوع» losing its testID',
   !/testID="af-back"/.test(mut(cardSrc, 'testID="af-back"', '')));
 mustCatch('the card going back to clearing the selection on every question',
   !/setSel\(initialKeys \?\? \[\]\)/.test(mut(cardSrc, 'setSel(initialKeys ?? [])', 'setSel([])')));
+mustCatch('Back walking the cursor somewhere other than exactly one question back',
+  backCursors(mut(agentSrc, 'presentGuided(stepIndex - 1, back)', 'presentGuided(stepIndex, back)'))[0] !== 'stepIndex - 1');
+mustCatch('Back skipping two questions at once',
+  backCursors(mut(agentSrc, 'presentGuided(stepIndex - 1, back)', 'presentGuided(stepIndex - 2, back)'))[0] !== 'stepIndex - 1');
+mustCatch('the supersession bump being dropped from the walk-back (a stale probe could re-show the abandoned step)',
+  !backTokenOk(mut(agentSrc, 'const back = ++ageFlowTokenRef.current;', '')));
+mustCatch('the walk-back capturing the PRE-bump token (postfix ++ hands presentGuided an already-superseded token)',
+  !backTokenOk(mut(agentSrc, 'const back = ++ageFlowTokenRef.current;', 'const back = ageFlowTokenRef.current++;')));
 mustCatch('Back-to-start no longer restoring the pre-AF controls',
   !/if \(stepIndex <= 0\) \{[\s\S]{0,220}?setAgeFlow\(null\);/.test(
     mut(agentSrc, /if \(stepIndex <= 0\) \{/, 'if (false) {')));

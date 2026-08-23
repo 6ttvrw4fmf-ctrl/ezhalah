@@ -54,7 +54,8 @@ import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESO
 import { noTranslateRef } from '@/noTranslate';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard } from '@/components/AdvancedQuestionCard';
 import MiningTransition from '@/components/MiningTransition';
-import { ADVANCED_QUESTIONS, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
+import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
 // below a results block — NEVER before first results — and ONLY for a strict single-type Residential
@@ -71,8 +72,18 @@ import { ADVANCED_QUESTIONS, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, el
 // The guided flow is offered when ANY advanced question is eligible for the scope — each question owns
 // its own eligibility gate now (see docs/ADVANCED_FILTER_DESIGN_CONTRACT.md). Otherwise the tap falls
 // through to the pre-existing plain refine chips.
+// SCOPE PREFIX (owner 2026-08-23): an unresolved CATEGORY→GROUP→TYPE hierarchy is itself a reason to
+// open the interview. Without this clause the tap could never open Advanced Filter above the type
+// level — cohortAllows() intersects across every clean type in scope and treats an uncertified type
+// as an empty cohort, so a category-only scope resolved to zero eligible questions and a group-only
+// scope to zero for 5 of the 8 shipped groups. The interview then fell through to the legacy refine
+// chips, which is what made the feature look absent rather than blocked.
+//
+// The client-only-narrowing kill switch still wins: where counts cannot be honest, no question may be
+// asked — a scope option's count would be exactly as dishonest as an advanced one's.
 function anyGuidedEligible(q: SearchQuery): boolean {
-  return eligibleQuestions(q).length > 0;
+  if (hasClientOnlyNarrowing(q)) return false;
+  return unresolvedScopeTiers(q).length > 0 || eligibleQuestions(q).length > 0;
 }
 
 const IS_WEB = Platform.OS === 'web';
@@ -1128,14 +1139,15 @@ export default function Agent() {
       ask = ar ? 'كم غرفة نوم تبغى؟' : 'How many bedrooms?';
       options = ['1', '2', '3', '4', '5'].map((n) => ({ label: bedsLabel(n, ar), value: n }));
     }
-    if (!dim && !q.type) {
-      dim = 'type';
-      ask = ar ? 'أي نوع عقار تفضّل؟' : 'Which property type?';
-      const pairs: [string, string][] = ar
-        ? [['شقة', 'شقة'], ['فيلا', 'فيلا'], ['دور', 'دور'], ['أرض', 'أرض']]
-        : [['Apartment', 'apartment'], ['Villa', 'villa'], ['Floor', 'floor'], ['Land', 'land']];
-      options = pairs.map(([label, value]) => ({ label, value }));
-    }
+    // THE LEGACY TYPE QUESTION IS DELETED (owner 2026-08-23). It hardcoded four labels
+    // (شقة/فيلا/دور/أرض) that were NOT the canonical taxonomy — no group tier, no Studio/Room/
+    // Residential Building/Rest House/Duplex, nothing commercial — and wrote only the scalar
+    // `q.type`, bypassing the typeGroups/types multi-select the whole app is built on. It was
+    // reachable from the same «خلّنا نحدد الطلب أكثر» button as the interview, so which type
+    // question a user got depended on live counts. Property type is now asked in exactly ONE place,
+    // the Advanced Filter's scope prefix, always from HIERARCHY. `applyRefinement`'s 'type' branch
+    // is deliberately kept: an in-flight `pendingRefineRef` from before this change, and the
+    // free-text path, can still deliver a typed type answer.
     if (!dim) { // everything already specified → open free-form question (typed answer)
       dim = 'free';
       ask = ar ? 'وش تحب نضيّق فيه أكثر؟ (الميزانية، الحي، عدد الغرف، نوع العقار…)'
@@ -1231,7 +1243,10 @@ export default function Agent() {
     const remaining = guidedPills.facets.filter((_, i) => i !== facetIndex);
     let q = guidedPills.baseQ;
     for (const f of remaining) {
-      const question = ADVANCED_QUESTIONS.find((x) => x.id === f.id);
+      // SCOPE questions live outside ADVANCED_QUESTIONS, so the lookup must span BOTH pools: a
+      // surviving group/type facet whose question could not be resolved would be silently dropped
+      // from the rebuild and quietly widen the search (owner 2026-08-23).
+      const question = ADVANCED_QUESTIONS.find((x) => x.id === f.id) ?? SCOPE_QUESTIONS.find((x) => x.id === f.id);
       if (question) q = question.apply(q, f.keys);
     }
     const label = t('Without: {label}', { label: removed.labels.join('، ') });
@@ -1274,6 +1289,47 @@ export default function Agent() {
       });
       return;
     }
+    // ── THE SCOPE PREFIX RUNS FIRST: CATEGORY → GROUP → TYPE (owner 2026-08-23) ──────────────────
+    // This is not merely a preferred ask-order. The advanced pool's OWN eligibility depends on the
+    // resolved type scope, so ranking it before the scope is chosen scores every question against a
+    // scope the user has not picked yet — and for a category-only scope that ranking is empty by
+    // construction. Resolving the hierarchy first is what makes the cohort intersection non-empty,
+    // by NARROWING, never by loosening cohortAllows (a union there would silently amputate rows).
+    const scopeQ = ageFlowQueryRef.current;
+    const tier = scopeQ ? nextScopeTier(scopeQ, ageFlowAskedRef.current) : null;
+    if (tier && scopeQ) {
+      const question = scopeQuestionFor(tier);
+      let res: AdvancedQuestionResult | null = null;
+      try { res = await question.resolveOptions(scopeQ); } catch { res = null; }
+      if (ageFlowTokenRef.current !== token) return;
+      const opts = res?.options ?? [];
+      if (opts.length <= 1) {
+        // Nothing to CHOOSE between. One option is not a question — it is the scope the user already
+        // has, so it is recorded as ANSWERED with that single key: the result set cannot move (every
+        // other branch here is empty), while the cohort scope becomes a certified single type, which
+        // is precisely what unlocks the advanced questions for a one-member group like «Residential
+        // Plots». Zero options records an open skip. Either way the walk moves DOWN a tier instead of
+        // stalling, and neither case invents a predicate the user did not ask for.
+        const auto = opts.length === 1 ? [opts[0].key] : [];
+        ageFlowStepsRef.current = [...steps, { question, options: opts, unknownCount: 0, total: res?.total ?? 0, keys: auto }];
+        // ADVANCE PAST the step we just recorded. Re-entering on the SAME cursor would find the step
+        // now present in the record and take the REPLAY branch above — rendering the very question
+        // that had nothing to choose between. Moving to stepIndex + 1 both skips it and makes
+        // syncGuidedFromSteps apply its auto-committed answer to the scope.
+        await presentGuided(stepIndex + 1, token);
+        return;
+      }
+      ageFlowStepsRef.current = [...steps, { question, options: opts, unknownCount: res!.unknownCount, total: res!.total, keys: null }];
+      ageFlowTotalRef.current = res!.total;
+      setAgeFlow({
+        phase: 'asking', stepIndex, question, options: opts, unknownCount: res!.unknownCount, initialKeys: [],
+        // The advanced plan does not exist yet (it cannot be ranked until this answer lands), so the
+        // bar shows "at least one more to come" rather than a number it would have to invent. The
+        // design contract bans a numeric «N of M» caption, so this only drives the bar's fill.
+        progressCur: stepIndex + 1, progressTotal: stepIndex + 2,
+      });
+      return;
+    }
     // CONTEXTUAL re-ranking (owner 2026-08-11): after any answer the remaining pool is re-probed and
     // re-scored against the NARROWED set, so the next question is always the most useful one for the
     // listings the user actually has left — and the flow stops by itself the moment the set drops to
@@ -1288,6 +1344,16 @@ export default function Agent() {
         .filter((pl) => pl.options.length >= minOptionsFor(pl.question.selection));
     }
     const plan = ageFlowPlanRef.current;
+    // THE ≥2-USEFUL GATE, EVALUATED AT THE SCOPE→ADVANCED TRANSITION (owner 2026-08-23). It cannot
+    // run at startAgeFlow any more: with an unresolved hierarchy the ranked plan is empty by
+    // construction, so the old placement closed the interview before the first scope question could
+    // render. It is evaluated exactly once — the first time the cursor leaves a record made only of
+    // scope steps — and it counts ADVANCED questions only: the hierarchy steps are what earned the
+    // right to ask, never two of the two. 0 or 1 useful advanced question ends the interview
+    // CLEANLY on the results the scope answers already narrowed to; it never bounces to the legacy
+    // chips, because by this point the user has answered real questions we must honour.
+    if (steps.length && steps.every((st) => isScopeQuestionId(st.question.id))
+        && plan.length < MIN_USEFUL_QUESTIONS_TO_SHOW) { finishGuided(token); return; }
     if (!plan.length) { finishGuided(token); return; }
     const { question, options, unknownCount, total } = plan[0];
     ageFlowStepsRef.current = [...steps, { question, options, unknownCount, total, keys: null }];
@@ -1313,7 +1379,15 @@ export default function Agent() {
     for (const st of later) {
       if (st.keys == null) continue;                    // never answered — let the re-ranker pick afresh
       if (!st.keys.length) { kept.push(st); continue; } // a skip stays a skip: open, no predicate
-      if (!eligibleQuestions(q).some((x) => x.id === st.question.id)) continue; // out of scope now
+      // SCOPE steps are not members of the advanced pool, so eligibleQuestions() can never vouch for
+      // them — they need their own in-scope test: every picked group/type must STILL be a candidate
+      // under the answer that changed above it. This is what makes «Back to Group, pick a different
+      // group» drop a type that no longer belongs to it (owner 2026-08-23), rather than leaving a
+      // stale type predicate behind or dropping a type that is still perfectly valid.
+      const stillInScope = isScopeQuestionId(st.question.id)
+        ? st.keys.every((k) => scopeCandidates(st.question.id as ScopeTier, q!).includes(k))
+        : eligibleQuestions(q).some((x) => x.id === st.question.id);
+      if (!stillInScope) continue;                    // out of scope now
       const n = await liveResultCount(st.question.apply(q, st.keys));
       if (ageFlowTokenRef.current !== token) return;
       if (n == null || n <= 0) continue;                // incompatible: it would select nothing
@@ -1380,6 +1454,13 @@ export default function Agent() {
     // feels instant. A manual «خلّنا نحدد الطلب أكثر» tap skips the intro (the user already opted in).
     setAgeFlow(opts?.auto ? { phase: 'intro', total: opts?.total ?? null } : { phase: 'loading' });
     ageFlowAskedRef.current = new Set();
+    // SCOPE PREFIX SHORT-CIRCUIT (owner 2026-08-23): when CATEGORY→GROUP→TYPE is not yet resolved,
+    // the interview opens on the hierarchy and there is nothing to rank yet — ranking the advanced
+    // pool here would probe the whole pool against a scope the user has not chosen (and, for a
+    // category-only scope, return empty by construction and close the interview before it started).
+    // The ≥2-useful gate is deliberately NOT applied on this path; it moves to the scope→advanced
+    // transition in presentGuided, where the type scope finally exists to judge it against.
+    if (unresolvedScopeTiers(q).length) { void presentGuided(0, token); return; }
     // Rank the pool against the user's ACTUAL current result set (score = split × salience over the
     // live counts). Below the >25 floor rankQuestions returns [], so the interview simply never
     // opens on a small result set — the ≤25 rule and the entry gate are the same constant.
@@ -1449,6 +1530,11 @@ export default function Agent() {
       const changedAnswer = prev != null && !sameKeys(prev, keys);
       ageFlowStepsRef.current = steps.map((st, i) => (i === stepIndex ? { ...st, keys } : st));
       syncGuidedFromSteps(stepIndex + 1);
+      // A SCOPE answer redefines what the advanced pool even means, so the plan ranked for the OLD
+      // scope must not survive it. presentGuided only re-ranks past the end of the record, so
+      // without this a group/type change could hand the user a question ranked for the scope they
+      // just left (owner 2026-08-23).
+      if (isScopeQuestionId(steps[stepIndex].question.id)) ageFlowPlanRef.current = [];
       // Only a CHANGED earlier answer can invalidate what came after it — a first answer has nothing
       // after it to invalidate, and re-confirming the same answer leaves the later scope identical.
       if (changedAnswer) await revalidateStepsAfter(stepIndex, token);
@@ -1485,7 +1571,12 @@ export default function Agent() {
       setAgeFlow(null);
       return;
     }
-    void presentGuided(stepIndex - 1, ageFlowTokenRef.current);
+    // Bump the token BEFORE walking back: the step being abandoned may still have an in-flight
+    // resolveOptions/rankQuestions probe, and every one of those guards on the token it captured. A
+    // scope step fires one count per taxonomy option, which widens that window materially — without
+    // this, a slow probe for the question the user just left could re-show it over the earlier one.
+    const back = ++ageFlowTokenRef.current;
+    void presentGuided(stepIndex - 1, back);
   };
   // «عرض النتائج» leaves the interview NOW — but through the same commit path, so the answer the
   // user can currently see selected is recorded first. Otherwise the card's own «عرض N نتيجة» chip
@@ -2212,10 +2303,22 @@ export default function Agent() {
                       </Text>
                       <View style={[s.guidedPillRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
                         {guidedPills.facets.map((f, i) => (
-                          <Pressable key={`${f.id}-${i}`} style={s.guidedPill} onPress={() => removeGuidedFacet(i)} disabled={busy}>
-                            <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
-                            <Ionicons name="close" size={13} color={colors.primary} />
-                          </Pressable>
+                          // SCOPE facets (group/type) are deliberately NOT removable (owner
+                          // 2026-08-23). Every other advanced answer only ever NARROWS, so removing
+                          // its pill widens back to a scope the user already had; removing a TYPE
+                          // pill would instead broaden the search past anything they ever asked for,
+                          // with no re-interview and no control to get it back. It renders as a plain
+                          // chip — same row, no «×», not pressable.
+                          isScopeQuestionId(f.id) ? (
+                            <View key={`${f.id}-${i}`} style={s.guidedPill}>
+                              <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
+                            </View>
+                          ) : (
+                            <Pressable key={`${f.id}-${i}`} style={s.guidedPill} onPress={() => removeGuidedFacet(i)} disabled={busy}>
+                              <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
+                              <Ionicons name="close" size={13} color={colors.primary} />
+                            </Pressable>
+                          )
                         ))}
                       </View>
                     </View>

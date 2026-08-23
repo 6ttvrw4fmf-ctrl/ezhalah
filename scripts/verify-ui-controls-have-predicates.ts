@@ -182,6 +182,29 @@ try {
     }
     check("bedrooms stays 'normal' tier and appears in NO interview question",
       tier.get('bedrooms') === 'normal' && !/bedrooms/.test(JSON.stringify(INTERVIEW_FIELDS)));
+
+    // ── 6b. THE 2026-08-23 CARVE-OUT (owner) — property GROUP + TYPE, and NOTHING else ────────────
+    // The interview now resolves CATEGORY → GROUP → TYPE before asking a certified question (see
+    // docs/ADVANCED_FILTER_DESIGN_CONTRACT.md «Amendment 2026-08-23»). Scope dimensions have never
+    // had af_field_registry rows — that registry lists listing ATTRIBUTE fields — so the tier check
+    // above cannot see them, and simply omitting them here would let the boundary rule silently stop
+    // covering the interview at exactly the moment it grew. These assertions are that coverage:
+    // the interview may ask these two scope ids and NO other piece of Normal-Filter territory.
+    const AUTHORIZED_SCOPE_IDS = ['property_group', 'property_type'];
+    const scopeIds = [...advSrcTier.matchAll(/id: (SCOPE_[A-Z_]+_ID)/g)].map((m) => m[1]);
+    check('the scope pool declares exactly TWO scope questions', scopeIds.length === 2,
+      `found ${scopeIds.length}: ${scopeIds.join(', ')}`);
+    const planSrc = read('src/lib/afPlan.ts');
+    for (const id of AUTHORIZED_SCOPE_IDS)
+      check(`scope id '${id}' is the owner-authorized one, declared in afPlan.ts`,
+        new RegExp(`SCOPE_(GROUP|TYPE)_ID = '${id}'`).test(planSrc));
+    check('afPlan ships EXACTLY the two authorized scope tiers — no third tier crept in',
+      /SCOPE_QUESTION_IDS = \[SCOPE_GROUP_ID, SCOPE_TYPE_ID\] as const/.test(planSrc));
+    // The teeth: no Normal-Filter dimension other than group/type may be asked by the interview.
+    for (const banned of ['bedrooms', 'priceInput', 'priceMin', 'priceMax', 'areaMin', 'areaMax', 'location', 'districts', 'deal', 'rentPeriod'])
+      check(`the scope prefix never writes Normal-Filter '${banned}'`,
+        !new RegExp(`\\b${banned}\\b`).test(planSrc),
+        `afPlan.ts must only ever write typeGroups/types/type — found '${banned}'`);
   }
 } catch (e) {
   check('field registry reachable for the backend-only check', false, String(e));

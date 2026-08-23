@@ -84,8 +84,32 @@ check('eligibleQuestions returns NO questions when a client-only narrower is act
   /export function eligibleQuestions\([\s\S]{0,200}?if \(hasClientOnlyNarrowing\(q\)\) return \[\];/.test(adv));
 check('eligibleQuestions still applies each question\'s own eligibility() gate',
   /return ADVANCED_QUESTIONS\.filter\(\(question\) => question\.eligibility\(q\)\);/.test(adv));
-check('the offer gate (anyGuidedEligible) routes through eligibleQuestions',
-  /function anyGuidedEligible\(q: SearchQuery\): boolean \{\s*return eligibleQuestions\(q\)\.length > 0;/.test(agent));
+// 2026-08-23 scope-hierarchy rework: the gate is no longer a one-line delegation — an unresolved
+// CATEGORY→GROUP→TYPE scope is now its own reason to open the interview, and the client-only-narrowing
+// kill switch was HOISTED to the gate itself (it used to be inherited one layer down inside
+// eligibleQuestions, which an `unresolvedScopeTiers(q).length > 0` term would have walked straight
+// past — a scope option's count is exactly as dishonest as an advanced one's).
+//
+// agent.tsx cannot be imported, so we lift the SHIPPED gate body out of the source and EXECUTE it
+// against stubs. That tests what it does, not how it is spelled: dropping either the kill switch or
+// the eligibleQuestions term flips a row of this truth table.
+const gateBody = agent.match(/function anyGuidedEligible\(q: SearchQuery\): boolean \{\n([\s\S]*?)\n\}/)?.[1];
+check('anyGuidedEligible body located in agent.tsx (extraction must fail loudly, never silently pass)',
+  !!gateBody);
+const gate = (clientOnly: boolean, unresolved: string[], eligible: unknown[]) =>
+  new Function('q', 'hasClientOnlyNarrowing', 'unresolvedScopeTiers', 'eligibleQuestions',
+    gateBody ?? 'throw new Error("gate body not found")')(
+    {}, () => clientOnly, () => unresolved, () => eligible);
+eq('the offer gate (anyGuidedEligible) still consults eligibleQuestions — advanced questions alone open it',
+  gate(false, [], ['q1']), true);
+eq('...and a resolved scope with NO eligible advanced question does not open it',
+  gate(false, [], []), false);
+eq('an unresolved scope tier is itself a reason to open (the 2026-08-23 fix)',
+  gate(false, ['property_group', 'property_type'], []), true);
+eq('THE KILL SWITCH: a client-only narrower zeroes the offer even with advanced questions eligible',
+  gate(true, [], ['q1']), false);
+eq('THE KILL SWITCH AT THE GATE: an unresolved scope must NOT sneak past client-only narrowing',
+  gate(true, ['property_group', 'property_type'], []), false);
 // 2026-08-11 contextual rework: startAgeFlow routes through rankQuestions(), whose first line is
 // eligibleQuestions() — the client-only-narrowing gate is preserved one layer down. Pin both halves.
 check('the flow planner (startAgeFlow) routes through rankQuestions -> eligibleQuestions',
