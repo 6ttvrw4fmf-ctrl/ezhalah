@@ -1,20 +1,3 @@
--- Wire a watchdog that already existed but nobody was listening to.
---
--- public.mon_region_label_as_city has been sitting in the database as a VIEW: rows whose city_ar is
--- the name of one of the 13 catalog REGIONS, yet which carry a concrete city_id. That is the
--- exact-location-only violation the 2026-08-10 audit named — «منطقة الرياض» is an administrative
--- area, never a city, so resolving it to الرياض city fabricates precision the source never gave.
---
--- The view was correct and is currently empty. No detector read it, so if it ever stopped being
--- empty, nothing would have said so. That is the same failure shape as the incident on 2026-08-23:
--- a guard that exists but is not wired to anything decays into decoration. mon_detect_orphaned_
--- detectors() catches a detector nothing reaches; this closes the case of a monitoring VIEW nothing
--- reaches.
---
--- Pairs with the code-side fix in the same batch: to_catalog() was hardened in the 2026-08-10 audit
--- and resolve() on 2026-08-23. This is the data-side proof that both actually hold in production —
--- code review says the rule is written down, this says the rows obey it.
-
 create or replace function public.mon_detect_region_label_as_city()
 returns integer language plpgsql security definer set search_path to 'public' as $$
 declare v_rows bigint; n int := 0; sample jsonb;
