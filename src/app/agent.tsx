@@ -1271,26 +1271,49 @@ export default function Agent() {
   };
   const onIntroShowResults = () => { ageFlowTokenRef.current++; setAgeFlow(null); };
 
+  // REENTRANCY GUARD (bug-hunt 2026-08-23): presentGuided's re-rank does a real network round trip
+  // (rankQuestions) before the next question's card actually replaces the current one on screen. A
+  // second confirm/skip tap landing in that gap — a slow network, or just an impatient double-tap
+  // while the card looks unresponsive — used to be processed as a SECOND answer to the SAME visual
+  // step (stale `ageFlow.stepIndex` closure, nothing rejected it): confirmed once more, an
+  // already-selected single-select option reads as a re-click and clears back to unanswered, silently
+  // downgrading a real answer to "no preference" and re-showing the question the user already
+  // answered. Never lost EARLIER answers (each is its own step, independently recorded) — but it did
+  // quietly discard the one landed on. One ref, held for exactly the span a tap could double-fire
+  // across: set before the async work starts, released only once the NEXT question is actually on
+  // screen (or the flow has genuinely finished) — never released early by a fire-and-forget call.
+  const ageFlowCommittingRef = useRef(false);
+
   // Record the answer for the step under the cursor and advance one. ONE handler for single, multi
   // AND skip — `keys` is ≤1 entry for single, ≥0 for multi, and `[]` for a skip (no preference: no
   // predicate is written, the step is simply marked answered so the re-ranker moves on). The answer
   // is stored on the step; the query is then REBUILT from it, never mutated in place.
   const commitGuidedStep = async (keys: string[], finish = false) => {
+    if (ageFlowCommittingRef.current) return; // a previous confirm/skip is still mid-transition — ignore the duplicate tap, don't double-process
     if (ageFlow?.phase !== 'asking') return;
-    const token = ageFlowTokenRef.current;
-    const { stepIndex } = ageFlow;
-    const steps = ageFlowStepsRef.current;
-    if (!steps[stepIndex]) return;
-    const prev = steps[stepIndex].keys;
-    const changedAnswer = prev != null && !sameKeys(prev, keys);
-    ageFlowStepsRef.current = steps.map((st, i) => (i === stepIndex ? { ...st, keys } : st));
-    syncGuidedFromSteps(stepIndex + 1);
-    // Only a CHANGED earlier answer can invalidate what came after it — a first answer has nothing
-    // after it to invalidate, and re-confirming the same answer leaves the later scope identical.
-    if (changedAnswer) await revalidateStepsAfter(stepIndex, token);
-    if (ageFlowTokenRef.current !== token) return;
-    if (finish) { finishGuided(token); return; }
-    void presentGuided(stepIndex + 1, token);
+    ageFlowCommittingRef.current = true;
+    try {
+      const token = ageFlowTokenRef.current;
+      const { stepIndex } = ageFlow;
+      const steps = ageFlowStepsRef.current;
+      if (!steps[stepIndex]) return;
+      const prev = steps[stepIndex].keys;
+      const changedAnswer = prev != null && !sameKeys(prev, keys);
+      ageFlowStepsRef.current = steps.map((st, i) => (i === stepIndex ? { ...st, keys } : st));
+      syncGuidedFromSteps(stepIndex + 1);
+      // Only a CHANGED earlier answer can invalidate what came after it — a first answer has nothing
+      // after it to invalidate, and re-confirming the same answer leaves the later scope identical.
+      if (changedAnswer) await revalidateStepsAfter(stepIndex, token);
+      if (ageFlowTokenRef.current !== token) return;
+      if (finish) { finishGuided(token); return; }
+      // Awaited (not fire-and-forget): the guard above must stay held for presentGuided's own
+      // network round trip too, since THAT is the actual window a duplicate tap lands in — releasing
+      // the guard the instant commitGuidedStep's own synchronous part finishes would leave it wide
+      // open for the entire re-rank, which is the one gap this guard exists to close.
+      await presentGuided(stepIndex + 1, token);
+    } finally {
+      ageFlowCommittingRef.current = false;
+    }
   };
 
   const onAgeConfirm = (keys: string[]) => { void commitGuidedStep(keys); };
