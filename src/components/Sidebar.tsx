@@ -17,6 +17,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import HeroBackground from '@/components/HeroBackground';
 import { useApp, type HistoryItem } from '@/store';
+import { sanitizeArabicSearch, isSearchableQuery, filterChats } from '@/lib/chatSearch';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 import { queryLabel } from '@/data/search';
 import { displayTitle } from '@/lib/chatTitle';
 import { sanitizeForFilterRestore } from '@/lib/searchDefaults';
@@ -98,6 +100,42 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const cancelledRef = useRef(false);
+
+  // CHAT SEARCH (owner 2026-08-24): ChatGPT-style in-sidebar search. The 🔍 control under New Chat
+  // morphs into an Arabic-only input — never a route change, never a modal. Latin characters are
+  // stripped calmly at the boundary (src/lib/chatSearch.ts) and one quiet hint appears instead of
+  // an error; the hint clears when the field empties or search closes, never per keystroke.
+  // Search is READ-ONLY discovery: it filters the same history rows and opening a result rides the
+  // exact same armOpenRow/openHistory path as a normal row — so it can never create, rename,
+  // duplicate or lose a conversation.
+  const [searching, setSearching] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [hadLatin, setHadLatin] = useState(false);
+  // ROW INTERACTION COLOR (owner 2026-08-24): normal rows are light/neutral; the DARK green is the
+  // interaction color. One id covers both surfaces — mouseenter/leave on web, pressIn/Out on touch
+  // — so the pressed state can never stick (out always clears) and the hover style always reverts.
+  // The SELECTED chat keeps its persistent light-green highlight and deliberately does NOT take the
+  // hover fill: current ≠ hovered must stay visually distinct.
+  const [hotRowId, setHotRowId] = useState<string | null>(null);
+  const reducedMotion = useReducedMotion();
+  const searchEnter = useSharedValue(1);
+  const searchEnterA = useAnimatedStyle(() => ({
+    opacity: searchEnter.value,
+    transform: [{ translateY: (1 - searchEnter.value) * -4 }],
+  }));
+  const openSearch = () => {
+    setMenu(null);
+    setSearching(true);
+    searchEnter.value = reducedMotion ? 1 : 0;
+    searchEnter.value = withTiming(1, { duration: 180, easing: Easing.bezier(0.22, 1, 0.36, 1) });
+  };
+  const closeSearch = () => { setSearching(false); setSearchText(''); setHadLatin(false); };
+  const onSearchChange = (raw: string) => {
+    const { text, hadLatin: stripped } = sanitizeArabicSearch(raw);
+    setSearchText(text);
+    if (stripped) setHadLatin(true);
+    else if (!text) setHadLatin(false);
+  };
 
   // OWNER BUG FIX: a single click OPENS, but the native dblclick below ALSO ran openHistory() on each
   // click of the double-click → it navigated (to Filter/Agent) instead of only renaming. Fix: a click
@@ -262,6 +300,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // render in their final state straight away. (user request — "view all the chat history, it
   // doesn't re-write".)
   const openHistory = (c: HistoryItem) => {
+    closeSearch(); // leaving via a result exits search mode; the docked panel stays mounted
     // Search is FREE, always (owner rule 2026-08-15) — reopening a saved search never routes to
     // sign-in. (History rows only exist for signed-in users anyway; the retired gate was dead code.)
     // STRICT allowlist into the shared store the Filter home binds to — agent-only fields
@@ -282,7 +321,15 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     });
   };
 
-  const groups = groupHistory(history);
+  // Search mode filters the SAME rows (read-only, order preserved — history is most-recent-first);
+  // otherwise the normal Starred/Recent grouping. 'Results' renders headerless below.
+  const searchActive = searching && isSearchableQuery(searchText);
+  const searchMatches = searchActive
+    ? filterChats(history, (c) => `${displayTitle(c, locale)} ${c.label ?? ''} ${queryLabel(c.query)}`, searchText)
+    : null;
+  const groups = searchMatches
+    ? (searchMatches.length ? [{ key: 'Results', items: searchMatches }] : [])
+    : groupHistory(history);
   const NavLinks = (
     <View style={s.nav}>
       <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && s.navLinkHover]} onPress={() => (user ? go('/settings') : openSignIn())}>
@@ -304,45 +351,106 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     <>
         {user ? (
           <>
-            {/* Top: logo + New Chat */}
+            {/* Top header: logo + name + the Search entry point (owner 2026-08-24, rev 2):
+                the search field is NOT permanently visible — a clean circular 🔍 sits at the
+                header level (ChatGPT-style hierarchy, Ezhalah-branded) and only tapping it
+                reveals the field below. While search is open the header icon steps aside so
+                there is exactly ONE search affordance on screen at a time. */}
             <View style={s.brandRow}>
               <RNImage source={require('../../assets/images/eagle-mark.png')} style={s.logo} resizeMode="contain" />
               <Text ref={noTranslateRef} style={s.word}>{t('EZHALAH')}</Text>
+              {!searching && (
+                <Pressable
+                  style={({ hovered, pressed }: any) => [s.searchTopBtn, WEB_SMOOTH, (hovered || pressed) && s.searchTopBtnHover]}
+                  onPress={openSearch}
+                  hitSlop={4}
+                  accessibilityLabel={t('Search chats')}
+                  testID="sidebar-search-btn"
+                >
+                  <Ionicons name="search" size={18} color={colors.dark} />
+                </Pressable>
+              )}
             </View>
             <Animated.View style={newChatAnim}>
               {/* Owner 2026-08-14: the old white-on-white outline button disappeared into the
                   sidebar. Solid brand green + white text so it reads as THE primary action, with a
                   darker hover/press fill (ChatGPT-style affordance). RN-web Pressable exposes
                   `hovered` in the style function; native ignores it and keeps the press state. */}
+              {/* Owner 2026-08-24 (supersedes 2026-08-14 solid green): LIGHT green default with
+                  dark-green text — the sidebar should feel light; dark green is the INTERACTION
+                  color. Hover/keyboard-focus/press turn the fill dark and the text white, on the
+                  same restrained 160ms web transition. Children-as-function so the icon + label
+                  flip with the fill (a style-only callback can't reach them). */}
               <Pressable
                 style={(state) => [
                   s.newChat,
+                  WEB_SMOOTH,
                   // `hovered` is react-native-web only; RN's PressableStateCallbackType omits it.
-                  (((state as { hovered?: boolean }).hovered ?? false) || state.pressed) && s.newChatHover,
+                  ((((state as { hovered?: boolean }).hovered ?? false) || state.pressed || (state as { focused?: boolean }).focused) ?? false) && s.newChatHover,
                 ]}
                 onPress={onNewChat}
               >
-                <Ionicons name="add" size={18} color={colors.surface} />
-                <Text style={s.newChatText}>{t('New Chat')}</Text>
+                {(state) => {
+                  const on = (((state as { hovered?: boolean }).hovered ?? false) || state.pressed || ((state as { focused?: boolean }).focused ?? false));
+                  return (
+                    <>
+                      <Ionicons name="add" size={18} color={on ? colors.surface : colors.dark} />
+                      <Text style={[s.newChatText, on && s.newChatTextOn]}>{t('New Chat')}</Text>
+                    </>
+                  );
+                }}
               </Pressable>
             </Animated.View>
+
+            {/* Search mode (owner 2026-08-24, rev 2): the field appears ONLY after the top 🔍
+                is tapped — the normal sidebar never shows an input. Same Arabic-only engine,
+                same results area (the list below filters live). */}
+            {searching ? (
+              <Animated.View style={[s.searchRow, searchEnterA]}>
+                <Pressable style={s.searchClose} hitSlop={8} onPress={closeSearch}
+                  accessibilityLabel={t('Close search')} testID="sidebar-search-close">
+                  <Ionicons name="close" size={16} color="#9aa6a0" />
+                </Pressable>
+                <TextInput
+                  style={s.searchInput}
+                  value={searchText}
+                  onChangeText={onSearchChange}
+                  placeholder={t('Search your chats…')}
+                  placeholderTextColor="#9aa6a0"
+                  autoFocus={Platform.OS === 'web'}
+                  returnKeyType="search"
+                  maxLength={80}
+                  accessibilityLabel={t('Search chats')}
+                  testID="sidebar-search-input"
+                  onKeyPress={(e: any) => { if (e?.nativeEvent?.key === 'Escape') closeSearch(); }}
+                />
+                <Ionicons name="search" size={15} color="#9aa6a0" />
+              </Animated.View>
+            ) : null}
+            {searching && hadLatin ? (
+              <Text style={s.searchHint}>{t('Type in Arabic to search your chats')}</Text>
+            ) : null}
 
             {/* History */}
             <ScrollView style={s.hist} contentContainerStyle={{ paddingBottom: 8 }} onScrollBeginDrag={() => setMenu(null)}>
               {groups.length === 0 ? (
-                <Text style={s.empty}>{t('Your searches will appear here.')}</Text>
+                <Text style={s.empty}>{searchActive ? t('No chat with that name') : t('Your searches will appear here.')}</Text>
               ) : (
                 groups.map((g) => (
                   <View key={g.key} style={s.group}>
-                    <View style={s.groupHead}>
-                      {g.key === 'Starred' && <Ionicons name="star" size={11} color={GOLD} />}
-                      <Text style={s.groupTitle}>{t(g.key)}</Text>
-                    </View>
+                    {g.key !== 'Results' && (
+                      <View style={s.groupHead}>
+                        {g.key === 'Starred' && <Ionicons name="star" size={11} color={GOLD} />}
+                        <Text style={s.groupTitle}>{t(g.key)}</Text>
+                      </View>
+                    )}
                     {/* Note #8 — chat row layout is IDENTICAL in both languages: icon → title → star → ⋯
                         on the right. `direction: ltr` locks the row so Arabic doesn't auto-flip it.
                         Title still flows with its own text direction inside the bubble. (user request.) */}
-                    {g.items.map((c) => (
-                      <View key={c.id} style={[s.histRow, activeChatId === c.id && s.histRowActive, menu?.id === c.id && s.histRowOpen, { direction: 'ltr' } as any]}>
+                    {g.items.map((c) => { const hot = hotRowId === c.id && activeChatId !== c.id && editingId !== c.id; return (
+                      <View key={c.id}
+                        style={[s.histRow, WEB_SMOOTH, hot && s.histRowHot, activeChatId === c.id && s.histRowActive, menu?.id === c.id && s.histRowOpen, { direction: 'ltr' } as any]}
+                        {...(Platform.OS === 'web' ? { onMouseEnter: () => setHotRowId(c.id), onMouseLeave: () => setHotRowId((h) => (h === c.id ? null : h)) } as any : null)}>
                         {editingId === c.id ? (
                           <View style={s.histItem}>
                             <Ionicons name="chatbubble-outline" size={15} color="#8a978f" />
@@ -366,21 +474,25 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                             ref={bindDoubleClick(c)}
                             style={s.histItem}
                             onPress={() => armOpenRow(c)}
+                            // Touch has no hover: pressIn paints the dark feedback, pressOut ALWAYS
+                            // clears it, so the pressed state can never remain stuck after release.
+                            onPressIn={() => { if (Platform.OS !== 'web') setHotRowId(c.id); }}
+                            onPressOut={() => { if (Platform.OS !== 'web') setHotRowId((h) => (h === c.id ? null : h)); }}
                             // Web gets the owner's double-click (bound on the host node by
                             // `bindDoubleClick`); touch gets long-press as the equivalent.
                             onLongPress={() => beginRename(c)}
                             delayLongPress={450}
                           >
-                            <Ionicons name="chatbubble-outline" size={15} color="#8a978f" />
-                            <Text style={s.histLabel} numberOfLines={1}>{displayTitle(c, locale) || queryLabel(c.query)}</Text>
+                            <Ionicons name="chatbubble-outline" size={15} color={hot ? colors.surface : '#8a978f'} />
+                            <Text style={[s.histLabel, hot && s.histLabelHot]} numberOfLines={1}>{displayTitle(c, locale) || queryLabel(c.query)}</Text>
                             {c.starred && <Ionicons name="star" size={13} color={GOLD} />}
                           </Pressable>
                         )}
                         <Pressable style={s.dots} hitSlop={6} onPress={(e) => openMenu(c.id, e)}>
-                          <Ionicons name="ellipsis-horizontal" size={16} color="#9aa6a0" />
+                          <Ionicons name="ellipsis-horizontal" size={16} color={hot ? '#cfe0d5' : '#9aa6a0'} />
                         </Pressable>
                       </View>
-                    ))}
+                    ); })}
                   </View>
                 ))
               )}
@@ -501,12 +613,26 @@ const s = StyleSheet.create({
   dockPanel: { width: DOCK_WIDTH, height: '100%', backgroundColor: colors.paper, paddingHorizontal: 14, borderRightWidth: 1, borderRightColor: colors.line },
 
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 4 },
+  // Header search entry (owner 2026-08-24 rev 2): a quiet ~42px circular target at header level —
+  // neutral by default, a soft green wash on hover/press. Never a big outlined button.
+  searchTopBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', marginLeft: 'auto' },
+  searchTopBtnHover: { backgroundColor: colors.tint },
   logo: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   word: { fontSize: 15, fontWeight: '800', letterSpacing: 2, color: colors.ink },
 
-  newChat: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 13, marginTop: 12 },
-  newChatHover: { backgroundColor: colors.dark },
-  newChatText: { fontSize: 14, fontWeight: '600', color: colors.surface },
+  // Owner 2026-08-24: LIGHT green default (dark-green text) → DARK green with white text only on
+  // hover/focus/press. The dark green is the interaction color, never the resting color.
+  newChat: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: colors.tint, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 13, marginTop: 12, borderWidth: 1, borderColor: colors.tintLine },
+  newChatHover: { backgroundColor: colors.dark, borderColor: colors.dark },
+  newChatText: { fontSize: 14, fontWeight: '600', color: colors.dark },
+  newChatTextOn: { color: colors.surface },
+  // Chat search (owner 2026-08-24). The button mirrors the nav-link language (quiet, discoverable);
+  // the input row keeps the exact same footprint so the sidebar never jumps when it morphs.
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingVertical: 6, paddingHorizontal: 10, marginTop: 8, borderWidth: 1, borderColor: colors.primary, backgroundColor: '#ffffff' },
+  searchClose: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f4f2' },
+  // Arabic-first: the field itself presents RTL even though the panel is dir=ltr locked.
+  searchInput: { flex: 1, minWidth: 0, fontSize: Platform.OS === 'web' ? 16 : 13.5, paddingVertical: 4, color: colors.ink, textAlign: 'right', ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : null) } as any,
+  searchHint: { fontSize: 11.5, color: '#9aa6a0', paddingHorizontal: 8, paddingTop: 5, textAlign: 'right' },
 
   hist: { flex: 1, marginTop: 14, marginBottom: 8 },
   empty: { fontSize: 13, color: colors.muted, paddingVertical: 12, paddingHorizontal: 6 },
@@ -514,6 +640,11 @@ const s = StyleSheet.create({
   groupHead: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 6, paddingBottom: 6 },
   groupTitle: { fontSize: 11, fontWeight: '700', color: '#9aa6a0', textTransform: 'uppercase', letterSpacing: 0.5 },
   histRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 10 },
+  // Interaction color for rows (owner 2026-08-24): dark-green fill with white label on hover/press.
+  // DISTINCT from histRowActive below — the current chat keeps its persistent light-green highlight
+  // and never takes this fill, so hovered vs selected can't be confused.
+  histRowHot: { backgroundColor: colors.dark },
+  histLabelHot: { color: colors.surface },
   histRowOpen: { backgroundColor: '#f3f5f3' },
   // The chat the user is currently in — a light green wash so it's obvious which conversation is open.
   histRowActive: { backgroundColor: '#dcefe1' },
