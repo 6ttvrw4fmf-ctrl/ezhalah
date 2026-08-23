@@ -19,15 +19,27 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      # PROPOSED 2026-08-21 (Approval Needed — see PR body): all 20 jobs share ONE
+      # OWNER-APPROVED 2026-08-23 (proposed 08-21 as PR #827). All 20 jobs here share ONE
       # WASALT_PROXY_URL (Webshare Saudi-residential proxy) secret and previously dispatched
-      # fully parallel with no cap, which measurably exceeded the proxy's concurrent-route
-      # capacity (evidence: PR body / scrape_runs timing signature, 2026-08-17 through 08-21
-      # step-change, ~58-68% failure rate). Mirrors the existing max-parallel: 18 pattern in
-      # small-sources-sync.yml for a comparable multi-source matrix. 6 is a conservative
-      # starting point picked without visibility into the actual Webshare plan's concurrent-
-      # session limit — the owner may need to tune this once real production behavior is
-      # observed against the account's real capacity.
+      # fully parallel with no cap. Worse, this sweep (jobid 4, `40 */8`) and the 14-job
+      # commercial sweep (jobid 5, `45 */8`) fire FIVE MINUTES apart into SEPARATE concurrency
+      # groups, so up to 34 concurrent sessions hit one proxy. That is wasalt's own
+      # self-contention, and it is what the 2026-08-17 step change looks like: daily
+      # scrape_runs failure went 0.0% (11 straight days) -> 57.8-69.1% and stayed there, with
+      # failing runs plateauing at a near-constant 204.2-204.7s (a proxy connect timeout) while
+      # runs in the SAME dispatch batch succeeded in 5.2-36.7s, randomly interleaved across
+      # unrelated slugs — the signature of a shared resource, not a per-content block.
+      #
+      # 6 here + 6 in the commercial sweep caps the realistic peak at 12 instead of 34. It is a
+      # deliberately conservative starting value: this repo has no visibility into the Webshare
+      # plan's actual concurrent-session limit, so tune it up if the sweep cadence suffers, or
+      # down if failures persist. mon_detect_proxy_contention() now watches that directly.
+      #
+      # SCOPE NOTE (2026-08-23, measured — do not widen this without re-measuring): this is a
+      # WASALT fix. souq24 also reuses WASALT_PROXY_URL, but it does NOT overlap these sweeps:
+      # souq24 runs ~04:38-06:52 while wasalt's proxy work lands at 00:40/00:45, 03:15-03:19,
+      # 08:40/08:45, 16:40/16:45 and 21:01. souq24's own failure is a separate, still-open
+      # defect (see mon_detect_run_duration_explosion / docs) and must not be attributed here.
       max-parallel: 6
       matrix:
         slug: [apartment, villa-townhouse, floor, building, land, rest-house, chalet, farm, room, duplex]
