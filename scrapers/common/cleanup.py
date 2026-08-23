@@ -76,6 +76,15 @@ DEFAULT_POLICY = {
 # is enabled=false anyway. Apply it only where the percentage means something.
 FRAC_GUARD_MIN_ROWS = 500
 
+# Run-level inconclusive-evidence freeze (2026-08-23). See the long note at the freeze itself.
+# _FREEZE_MIN_SAMPLE keeps a 3-row run from aborting on one transient 429: below this many
+# rechecks the rate is statistical noise and the per-row "unknown → never delete" rule is
+# protection enough. _FREEZE_MAX_INCONCLUSIVE_RATE is the ceiling above which the run's evidence
+# is treated as untrustworthy as a whole. Healthy production runs measure ~0% inconclusive, so
+# there is a wide margin between normal and this ceiling — it is not a hair trigger.
+_FREEZE_MIN_SAMPLE = 20
+_FREEZE_MAX_INCONCLUSIVE_RATE = 0.30
+
 
 def _probe(url: str) -> tuple[int | None, str]:
     """Fetch the real listing page and return (status_code, body). Unlike common.http.get (which
@@ -290,6 +299,10 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                 to_delete: dict[str, list] = {}
                 to_reactivate: dict[str, list] = {}
                 log_rows: list[dict] = []
+                # Counted separately from stats["skipped"], which is ALSO incremented for rows
+                # with no listing_url — those never reach _probe(), so folding them in would
+                # inflate the rate and could freeze a perfectly healthy run.
+                inconclusive = 0
                 now = datetime.now(timezone.utc)
                 for t, r in cands:
                     url = (r.get("listing_url") or "").strip()
@@ -300,6 +313,8 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                         status, body = _probe(url)
                         stats["rechecked"] += 1
                         v = verdict(status, body, dead_marker)
+                        if v == "unknown":
+                            inconclusive += 1
                     else:
                         status, v = None, "dead"     # explicit opt-out (not used by default policy)
                     if v == "dead":
@@ -318,6 +333,42 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                         stats["reactivated"] += 1
                     else:
                         stats["skipped"] += 1
+
+                # ── run-level inconclusive-evidence freeze (2026-08-23) ────────────────────────
+                # verdict() already refuses to delete any INDIVIDUAL row whose recheck was
+                # inconclusive (network error / 403 / 429 / 5xx → "unknown"). That is per-row and
+                # it holds. What it cannot see is the run as a whole: when the source or the
+                # shared Saudi proxy degrades mid-run, a large share of probes come back
+                # inconclusive, and at that point every OTHER verdict in the same run is suspect
+                # too — including the "dead" ones, because we are no longer confident we are
+                # talking to the real origin rather than an edge/error surface. Deleting on that
+                # evidence is exactly the "source-health degradation causes false deletion" shape.
+                #
+                # So: freeze DELETIONS for the whole run and abort. Healthy runs sit at ~0%
+                # inconclusive (2026-08-23 production: aqarcity 231 rechecked / 0 skipped,
+                # gathern 300 rechecked / 0 skipped), so this threshold cannot fire on a healthy
+                # run — it needs a real degradation.
+                #
+                # REACTIVATIONS ARE DELIBERATELY KEPT. A "live" verdict requires HTTP 200 AND the
+                # absence of the dead-marker, and restoring a wrongly-inactive listing is the
+                # fail-safe direction. Freezing those too would turn a source wobble into lost
+                # inventory, which is the harm this guard exists to prevent.
+                if stats["rechecked"] >= _FREEZE_MIN_SAMPLE:
+                    inconclusive_rate = inconclusive / stats["rechecked"]
+                    if inconclusive_rate > _FREEZE_MAX_INCONCLUSIVE_RATE:
+                        frozen = sum(len(v) for v in to_delete.values())
+                        to_delete = {}
+                        log_rows = []
+                        _abort(
+                            f"inconclusive source health: {inconclusive}/{stats['rechecked']} "
+                            f"rechecks ({100.0 * inconclusive_rate:.1f}%) returned no usable "
+                            f"evidence (network error / 403 / 429 / 5xx), over the "
+                            f"{100.0 * _FREEZE_MAX_INCONCLUSIVE_RATE:.0f}% ceiling. DELETION "
+                            f"FROZEN for this run — {frozen} row(s) that had been judged 'dead' "
+                            f"were discarded rather than deleted, because a degraded source/proxy "
+                            f"makes every verdict in this run untrustworthy. "
+                            f"{stats['reactivated']} reactivation(s) were KEPT (fail-safe "
+                            f"direction). Re-run once the source is healthy; nothing was lost.")
 
                 if not dry_run:
                     for t, ids in to_reactivate.items():   # self-heal a wrongly-inactive live listing
