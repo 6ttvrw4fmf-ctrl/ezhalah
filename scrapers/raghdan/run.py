@@ -224,9 +224,11 @@ def _redact(text: Optional[str]) -> Optional[str]:
 # Keeping a partial body introduces the one risk that matters here — UNDER-enumeration silently
 # pruning live listings (prune_unseen would inactivate any property the truncated list missed). So
 # a partial body is only trusted when the property section is PROVABLY complete, and the proof does
-# not assume a fixed byte offset or a fixed section order: the block is contiguous, so seeing any
-# non-property <loc> AFTER the final property <loc> proves the catalogue ended inside the bytes we
-# hold. A body that ends mid-property-block fails that test and counts as a FAILED attempt.
+# not assume a fixed byte offset or a fixed section order: the section is contiguous, so seeing a
+# <loc> from OUTSIDE that section after the final one inside it proves the catalogue ended within
+# the bytes we hold. A body that ends mid-section fails that test and counts as a FAILED attempt.
+# "Outside the section" is NOT the same as "outside the harvest set" — see _PROP_SECTION_RE below;
+# confusing the two is what silently returned 249 of 376 URLs.
 #
 # Same standing lesson as jazwtn's 07-23→08-03 incidents: never conclude "blocked" or "empty
 # catalog" from one response. Retry across TLS fingerprints with backoff, treat an unproven body as
