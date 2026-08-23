@@ -417,10 +417,54 @@ Two things were found and both are now permanent:
    **aqar does not state a period for these listings.** Honest NULL is correct; «سنوي» must never be
    defaulted in. Nothing was written.
 
-So the residue is a **product** gap, not a data bug, and it is an owner decision (§16 stop condition 2):
-leave as-is · surface period-less rentals under both chips · add an "unspecified" chip. An autonomous
-run must not pick one. The verdict is also attached to the detector via `COMMENT ON FUNCTION`, so it is
+So the residue was a **product** gap, not a data bug, and the disposition was an owner decision
+(§16 stop condition 2). The verdict is also attached to the detector via `COMMENT ON FUNCTION`, so it is
 recoverable from the database alone.
+
+### 22.1 The owner ANSWERED this on 2026-08-18 — do not re-litigate it, and do not read the fallback as a fabrication
+
+**This section used to end "an autonomous run must not pick one." That is no longer true, and leaving
+it standing was itself a trap** — Data Integrity run #38 (2026-08-23) re-derived the whole cohort from
+scratch, found `search_listings_ar.rent_period_ar = 'سنوي'` on 338 aqar rows whose canonical
+`rent_period` is NULL, and came within one step of filing an owner-approved classification as a
+source-fidelity violation to be reverted. Read the migration before you conclude anything here:
+`20260818221919_rent_period_product_fallback_annual_when_no_monthly_evidence.sql`.
+
+The owner's rule, verbatim from that migration:
+
+> Confirmed rent + monthly evidence → **شهري** · Confirmed rent + no monthly evidence → **سنوي**
+> (including price 0 / missing / السعر عند الطلب) · An explicit source period always beats the
+> fallback · **NEVER** applies to a sale listing · Never infer monthly just because the number
+> looks small.
+
+**The layer is the whole point, and it is what keeps §22 and this section consistent.** The fallback
+lives in `sync_search_listings_ar` — the only writer of `search_listings_ar.rent_period_ar`, which every
+read surface already consumes — so Normal Filter, Advanced Filter, city/district/Trending counts and
+pagination all inherit one classification and no listing gets special search behaviour. The raw
+`<platform>_*_listings` tables are deliberately **not** touched: writing سنوي there would fabricate a
+source value and destroy the honest NULL that run #29's live probes proved correct (37/38 HTTP 200
+showing the source publishes no period). **Source truth stays NULL; the PRODUCT fallback is a
+classification, applied where classification belongs.** §22's "«سنوي» must never be defaulted in"
+still binds — at the *source* layer, which is where it was always about.
+
+gathern and aqarmonthly fall back to **شهري**, not سنوي: they are monthly-only sources (owner rule
+2026-07-06, `MONTHLY_ONLY_TABLE` in `src/data/remote.ts`), so there the platform convention *is* monthly
+evidence. Defaulting a period-less row there to annual would understate its rent 12×.
+
+Sale listings are protected **by construction** — the fallback sits inside the existing
+`case when lower(v.transaction_type)='rent' then … end`, so a Buy row can never reach it.
+
+Measured 2026-08-23 (run #38), for comparison against the 605 rows the migration measured at
+implementation: **740 active rent rows now carry the fallback** across 17 platforms — aqar 338,
+raghdan 129, eaqartabuk 111, dealapp 49, eastabha 30, alkhaas 23, mustqr 10, aqaratikom 10, sadin 9,
+souq24 8, mizlaj 7, hajer 6, aldarim 3, ramzalqasim 3, abeea 2, alhoshan 1, jurash 1 — of which 318 are
+priced. **Buy rows carrying `rent_period_ar`: 0 on every platform**, so the structural guarantee holds.
+
+**What to check here on a future run** (all of these are the barrier, not the number): the canonical
+`rent_period` on the raw tables is still NULL for these rows · no Buy row carries `rent_period_ar` ·
+gathern/aqarmonthly still fall back to شهري · an explicit source period still beats the fallback. A
+*rise* in the fallback count is worth investigating as a possible parser regression upstream; the
+absolute count is not a defect.
 
 **The general rule this pins:** when a field is missing and a re-enrich path exists, run it `--dry-run`
 FIRST and read the diff. "The parser dropped it" and "the source never published it" look identical in
