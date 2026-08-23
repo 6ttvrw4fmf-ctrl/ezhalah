@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   KeyboardAvoidingView,
@@ -11,13 +11,16 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { isAppSessionStarted } from '@/lib/appSession';
 import { msgRTL } from '@/lib/textDirection';
-import { stopReadAloud } from '@/lib/readAloud';
+import { stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
+import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupported } from '@/lib/voiceInput';
+import VoiceWaveform from '@/components/VoiceWaveform';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
@@ -466,7 +469,10 @@ export default function Agent() {
       const isEnter = ev.key === 'Enter' || ev.key === 'Return' || ev.keyCode === 13;
       if (isEnter && !ev.shiftKey && !ev.isComposing) {
         ev.preventDefault();
-        sendRef.current();
+        // Enter while recording = the voice Send (atomic finalize + one submission), never a raw
+        // send() of the pre-recording text out from under the live transcript.
+        if (voiceActiveRef.current) sendVoiceRef.current();
+        else sendRef.current();
       }
     };
     node.addEventListener('keydown', onKeyDown);
@@ -537,6 +543,97 @@ export default function Agent() {
     fbToastTimer.current = setTimeout(() => setFbToast(false), 2400);
   };
   useEffect(() => () => { if (fbToastTimer.current) clearTimeout(fbToastTimer.current); }, []);
+
+  // ── Voice input (owner brief 2026-08-23 — ChatGPT-style recording composer) ────────────────────
+  // The composer itself morphs into recording mode: [X · live waveform · ■ · ↑] layered over the
+  // normal controls inside the SAME s.composer surface — never a modal/sheet/second composer.
+  // Capture + transcription live in src/lib/voiceInput.ts (free/native Web Speech, Arabic-only);
+  // this block is only the UI state machine. Text typed before recording is preserved: the
+  // transcript is APPENDED to it on Stop/Send, and X restores exactly the pre-recording composer.
+  const [voiceState, setVoiceState] = useState<'idle' | 'recording'>('idle');
+  const voiceActiveRef = useRef(false); // mirror for the raw-DOM Enter handler (no re-binding)
+  voiceActiveRef.current = voiceState === 'recording';
+  const voiceBaseRef = useRef(''); // `typed` at the moment recording started (owner brief §8/§15)
+  // Reentrancy latch (owner brief §5/§17): sendVoice's finalize+submit is atomic — double tap,
+  // Stop+Send races and late recognizer events all collapse into at most ONE submission (send()'s
+  // own busy guard is the second wall; stopVoiceInput() hands the transcript out exactly once).
+  const voiceFinalizingRef = useRef(false);
+  // Transient Arabic notice above the composer (permission denied / unsupported) — the fbToast
+  // pattern with its own text. Never surfaces raw browser error text (owner brief §15).
+  const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
+  const voiceNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showVoiceNotice = (msg: string) => {
+    setVoiceNotice(msg);
+    if (voiceNoticeTimer.current) clearTimeout(voiceNoticeTimer.current);
+    voiceNoticeTimer.current = setTimeout(() => setVoiceNotice(null), 3200);
+  };
+  useEffect(() => () => { if (voiceNoticeTimer.current) clearTimeout(voiceNoticeTimer.current); }, []);
+
+  const startVoice = async () => {
+    if (voiceActiveRef.current || busy) return; // mic tapped twice → one state transition
+    // Voice input and Read Aloud never share audio (owner brief §19): starting the mic stops any
+    // reading immediately, and the subscription below keeps read-aloud out for the whole session.
+    stopReadAloud();
+    if (!isVoiceInputSupported()) { showVoiceNotice(t('Voice input is not supported on this browser')); return; }
+    voiceBaseRef.current = typed;
+    setVoiceState('recording'); // morph now; a denied permission gracefully restores below
+    await startVoiceInput({
+      onFailure: (kind) => {
+        setVoiceState('idle'); // composer restores cleanly — never stuck in recording mode
+        showVoiceNotice(kind === 'denied'
+          ? t('Microphone access is needed for voice input. Enable it in your browser settings.')
+          : t('Voice input is not available right now.'));
+      },
+    });
+  };
+  // ■ Stop — finish listening WITHOUT submitting: the transcript lands in the normal composer for
+  // the user to inspect/edit; Send is theirs to tap (owner brief §5/§9).
+  const stopVoice = () => {
+    if (!voiceActiveRef.current) return; // Stop tapped twice → one finalization
+    const transcript = stopVoiceInput();
+    setVoiceState('idle');
+    const merged = [voiceBaseRef.current.trim(), transcript].filter(Boolean).join(' ');
+    if (merged) setTyped(merged);
+  };
+  // X — cancel: discard capture AND transcript, send nothing, add nothing to the chat; `typed`
+  // was never touched during recording, so the composer returns to its exact pre-recording state.
+  const cancelVoice = () => {
+    if (!voiceActiveRef.current) return;
+    cancelVoiceInput();
+    setVoiceState('idle');
+  };
+  // ↑ Send while recording — atomic: stop capture, finalize the transcript, submit exactly once.
+  const sendVoice = () => {
+    if (voiceFinalizingRef.current || !voiceActiveRef.current) return;
+    voiceFinalizingRef.current = true;
+    const transcript = stopVoiceInput(); // synchronous teardown — no late event can re-enter
+    setVoiceState('idle');
+    voiceFinalizingRef.current = false;
+    const merged = [voiceBaseRef.current.trim(), transcript].filter(Boolean).join(' ');
+    if (!merged) return; // nothing was said — exit recording, never send an empty message
+    setTyped('');
+    void send(merged);
+  };
+  const sendVoiceRef = useRef<() => void>(() => {});
+  sendVoiceRef.current = sendVoice;
+  // LIFECYCLE SAFETY (owner brief §16): the mic dies the moment this screen unmounts or loses
+  // navigation focus (route change, sidebar navigation, in-app browser) — never a hidden capture.
+  useEffect(() => () => { cancelVoiceInput(); }, []);
+  useFocusEffect(useCallback(() => () => { cancelVoiceInput(); setVoiceState('idle'); }, []));
+  // While the mic is live, a Read Aloud started from an old message is stopped instantly — the two
+  // audio paths can never run together (owner brief §19).
+  useEffect(() => {
+    if (voiceState !== 'recording') return;
+    return subscribeReadAloud((id) => { if (id) stopReadAloud(); });
+  }, [voiceState]);
+  // Morph motion (owner brief §3/§11): one physical surface, ~180ms soft cross-fade + a few px of
+  // settle — state drives the target, CSS drives the motion (the TOAST_EASE idiom). Reduced motion
+  // collapses to a plain opacity state change; the waveform keeps showing real amplitude, which is
+  // information, not decoration (owner brief §18).
+  const reducedMotion = useReducedMotion();
+  const VOICE_EASE = IS_WEB && !reducedMotion
+    ? ({ transitionProperty: 'opacity, transform', transitionDuration: '180ms', transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)' } as any)
+    : null;
   // True WHILE the property cards are popping in one-by-one — so the Send button shows as a Stop button
   // for the whole reveal (not just the network wait), letting the user halt the drip. (user request.)
   const [revealing, setRevealing] = useState(false);
@@ -1841,6 +1938,10 @@ export default function Agent() {
     if (fresh === undefined) return;
     if (runRef.current) runRef.current.cancelled = true;
     if (greetTimerRef.current) clearTimeout(greetTimerRef.current);
+    // New Chat kills any live mic capture instantly (owner brief §16) — and inherits nothing from
+    // it (PR #832 contract: the store owns newChat(); this only stops hardware, adds no state).
+    cancelVoiceInput();
+    setVoiceState('idle');
     runAfterAnimation(
       (onFinished) => Animated.timing(freshFade, { toValue: 0, duration: 110, useNativeDriver: true }).start(onFinished),
       () => {
@@ -2310,6 +2411,14 @@ export default function Agent() {
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
           <View style={[s.col, s.composerCol]}>
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
+              {/* ── Normal controls ── keep LAYOUT ownership even while recording (the recording row
+                  is an absolute overlay on the same surface), so the composer's size never jumps
+                  during the morph — one physical object changing state, not a component swap
+                  (owner brief §3). While recording they fade out and go inert. */}
+              <View
+                pointerEvents={voiceState === 'recording' ? 'none' : 'auto'}
+                style={[s.composerInner, VOICE_EASE, voiceState === 'recording' && s.composerInnerHidden]}
+              >
               {/* The GLIDE lives on this wrapper, never on the textarea itself: a CSS height
                   transition on the measured element corrupts RNW's content measurement (it reads
                   mid-transition heights and ratchets an empty box to max — observed live). The
@@ -2352,22 +2461,80 @@ export default function Agent() {
                   <Ionicons name="stop" size={15} color="#fff" />
                 </Pressable>
               ) : (
+                <>
+                  {/* Mic — enters recording mode (owner brief §2): immediate press feedback, then the
+                      composer itself morphs. Sits immediately left of Send, same 34px control family. */}
+                  <Pressable
+                    testID="voice-mic"
+                    onPress={() => { void startVoice(); }}
+                    hitSlop={8}
+                    accessibilityLabel={t('Voice input')}
+                    style={({ pressed }: any) => [s.micBtn, pressed && s.micBtnPressed]}
+                  >
+                    <Ionicons name="mic-outline" size={19} color={colors.body} />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => send()}
+                    disabled={!typed.trim()}
+                    onPressIn={() => sendSpring(0.9)}
+                    onPressOut={() => sendSpring(1)}
+                    onHoverIn={() => { setSendHover(true); sendSpring(1.06); }}
+                    onHoverOut={() => { setSendHover(false); sendSpring(1); }}
+                    hitSlop={6}
+                    accessibilityLabel={t('Search')}
+                    style={!typed.trim() ? s.sendDisabled : undefined}
+                  >
+                    <Animated.View style={[s.sendBtn, sendHover && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
+                      <Ionicons name="arrow-up" size={17} color="#fff" />
+                    </Animated.View>
+                  </Pressable>
+                </>
+              )}
+              </View>
+              {/* ── Recording mode ── same composer surface, ChatGPT's spatial hierarchy, PHYSICALLY
+                  pinned LTR (owner brief §13 — the page is RTL but these four controls never mirror):
+                  [ X ] [———— live waveform ————] [ ■ ] [ ↑ ]. Absolute overlay: amplitude can never
+                  resize the row or push Stop/Send (owner brief §1/§4). Always mounted so the ~180ms
+                  cross-fade runs both directions; inert + invisible while idle. */}
+              <View
+                testID="voice-recording-row"
+                pointerEvents={voiceState === 'recording' ? 'auto' : 'none'}
+                style={[s.voiceRow, VOICE_EASE, voiceState !== 'recording' && s.voiceRowHidden]}
+              >
                 <Pressable
-                  onPress={() => send()}
-                  disabled={!typed.trim()}
+                  testID="voice-cancel"
+                  onPress={cancelVoice}
+                  hitSlop={8}
+                  accessibilityLabel={t('Cancel recording')}
+                  style={({ pressed }: any) => [s.voiceRoundBtn, pressed && s.micBtnPressed]}
+                >
+                  <Ionicons name="close" size={18} color={colors.body} />
+                </Pressable>
+                <View style={s.voiceWaveWrap} testID="voice-waveform">
+                  {voiceState === 'recording' ? <VoiceWaveform /> : null}
+                </View>
+                <Pressable
+                  testID="voice-stop"
+                  onPress={stopVoice}
+                  hitSlop={8}
+                  accessibilityLabel={t('Stop recording')}
+                  style={({ pressed }: any) => [s.voiceRoundBtn, pressed && s.micBtnPressed]}
+                >
+                  <View style={s.voiceStopSquare} />
+                </Pressable>
+                <Pressable
+                  testID="voice-send"
+                  onPress={sendVoice}
                   onPressIn={() => sendSpring(0.9)}
                   onPressOut={() => sendSpring(1)}
-                  onHoverIn={() => { setSendHover(true); sendSpring(1.06); }}
-                  onHoverOut={() => { setSendHover(false); sendSpring(1); }}
                   hitSlop={6}
-                  accessibilityLabel={t('Search')}
-                  style={!typed.trim() ? s.sendDisabled : undefined}
+                  accessibilityLabel={t('Send')}
                 >
-                  <Animated.View style={[s.sendBtn, sendHover && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
+                  <Animated.View style={[s.sendBtn, { transform: [{ scale: sendScale }] }]}>
                     <Ionicons name="arrow-up" size={17} color="#fff" />
                   </Animated.View>
                 </Pressable>
-              )}
+              </View>
             </View>
             <Text style={s.disc}>
               {t('Ezhalah displays listings from third-party property platforms. We do not own, verify, or recommend any listing. Please review all details carefully before making a decision.')}
@@ -2383,6 +2550,14 @@ export default function Agent() {
         <View style={[s.fbToast, { opacity: fbToast ? 1 : 0, transform: [{ translateY: fbToast ? 0 : -8 }] }, TOAST_EASE]}>
           <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
           <Text style={s.fbToastText}>{t('Thanks for your feedback')}</Text>
+        </View>
+      </View>
+      {/* Voice-input notice (permission denied / unsupported) — same toast family as the feedback
+          one; concise Arabic via t(), never raw browser error text (owner brief §2/§15). */}
+      <View pointerEvents="none" style={[s.fbToastWrap, { top: insets.top + 54 }]}>
+        <View style={[s.fbToast, { opacity: voiceNotice ? 1 : 0, transform: [{ translateY: voiceNotice ? 0 : -8 }] }, TOAST_EASE]}>
+          <Ionicons name="mic-off-outline" size={16} color={colors.primary} />
+          <Text style={s.fbToastText}>{voiceNotice ?? ''}</Text>
         </View>
       </View>
       {/* Floating Read Aloud playback controller (owner 2026-08-22) — ONE instance for the whole
@@ -2633,6 +2808,22 @@ const s = StyleSheet.create({
   sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   sendBtnHover: { backgroundColor: colors.dark },
   sendDisabled: { opacity: 0.35 },
+  // ── Voice recording composer (owner brief 2026-08-23) ──
+  // composerInner keeps the normal controls' exact pre-voice layout (it owns the composer's size at
+  // all times); the recording row overlays it absolutely so the morph never changes the surface.
+  composerInner: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
+  composerInnerHidden: { opacity: 0 },
+  micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
+  micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
+  // direction 'ltr' pins the PHYSICAL order X → waveform → ■ → ↑ against the page's RTL (owner
+  // brief §13 — verified by scripts/verify-voice-composer-contract.ts).
+  voiceRow: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 8, paddingRight: 8, direction: 'ltr' },
+  voiceRowHidden: { opacity: 0, transform: [{ translateY: 4 }] },
+  voiceRoundBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.segTrack, alignItems: 'center', justifyContent: 'center' },
+  voiceStopSquare: { width: 12, height: 12, borderRadius: 3, backgroundColor: colors.ink },
+  // flex:1 + overflow hidden: the waveform owns ALL flexible middle space and can never push the
+  // fixed-width controls, whatever the amplitude (owner brief §1/§4).
+  voiceWaveWrap: { flex: 1, alignSelf: 'stretch', minHeight: 34, overflow: 'hidden' },
   stopBtn: { width: 34, height: 34, borderRadius: 12, backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center' },
   disc: { fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 10, paddingHorizontal: 12 },
   // Centered Filter/AI pill band under the header (see the JSX note). Explicit height on BOTH ends
