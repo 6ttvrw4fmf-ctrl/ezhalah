@@ -1,6 +1,9 @@
 import type { SearchQuery } from './search';
 import { effectiveTypes, hasClientOnlyNarrowing } from './search';
-import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, type AgeOptionCounts, type GuidedCounts } from './remote';
+import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, fetchScopeOptionCounts, type AgeOptionCounts, type GuidedCounts } from './remote';
+import {
+  SCOPE_GROUP_ID, SCOPE_TYPE_ID, scopeCandidates, applyScopeAnswer, unresolvedScopeTiers, type ScopeTier,
+} from '@/lib/afPlan';
 import { isAgeFilterScope as isAgeFilterScopeFor } from '@/lib/ageFilterTypes';
 import { CLEAN_MACRO } from './propertyTypes';
 import { t } from '@/i18n';
@@ -360,6 +363,52 @@ export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
   RNPL_QUESTION, AGE_QUESTION, AMENITIES_QUESTION, BATHROOMS_QUESTION, FURNISHED_QUESTION,
   STREET_WIDTH_QUESTION, DIRECTION_QUESTION, RATING_QUESTION, UNIT_SUBTYPE_QUESTION,
 ];
+
+// ── THE SCOPE PREFIX: CATEGORY → GROUP → TYPE → the pool above (owner 2026-08-23) ────────────────
+// These satisfy the same AdvancedQuestion contract (so the card, the step record, Back, skip, the
+// facets and the summary all work unchanged) but are deliberately NOT members of ADVANCED_QUESTIONS
+// and never pass through rankQuestions/scoreQuestion. A scope step is a PREREQUISITE of the pool,
+// not a ranked peer of it — and scoreQuestion's usefulness gates would delete real taxonomy
+// branches (MIN_REAL_OPTION_COUNT hides a group with 4 listings; the `o.count < N` no-op filter
+// retires a group with one populated type). The tier logic itself is pure and lives in
+// @/lib/afPlan so a barrier can execute it; only the live counts need this module's remote import.
+//
+// Options are ordered by the canonical HIERARCHY, never by count — the taxonomy is the taxonomy.
+// A zero-count option is dropped: it is a dead end that would promise results it cannot deliver.
+// NO other usefulness floor is applied, so a genuinely small branch (4 listings) is still offered —
+// hiding it would be the silent amputation of a real part of the tree.
+async function scopeQuestionOptions(tier: ScopeTier, q: SearchQuery): Promise<AdvancedQuestionResult> {
+  const keys = scopeCandidates(tier, q);
+  const counts = await fetchScopeOptionCounts(keys.map((key) => ({ key, query: applyScopeAnswer(tier, q, [key]) })));
+  const options = keys
+    .filter((key) => (counts?.[key] ?? 0) > 0)
+    .map((key) => ({ key, label: t(key), count: counts![key] }));
+  // `total` is the scope the user is answering FROM. Groups partition the category and types
+  // partition their groups, so the sum of the offered options is that scope by construction.
+  return { options, unknownCount: 0, total: options.reduce((n, o) => n + o.count, 0) };
+}
+
+const GROUP_QUESTION: AdvancedQuestion = {
+  id: SCOPE_GROUP_ID,
+  titleKey: 'Which kind of property are you looking for?',
+  selection: 'multi',                              // several groups OR together
+  eligibility: (q) => unresolvedScopeTiers(q).includes(SCOPE_GROUP_ID),
+  resolveOptions: (q) => scopeQuestionOptions(SCOPE_GROUP_ID, q),
+  apply: (q, keys) => applyScopeAnswer(SCOPE_GROUP_ID, q, keys),
+};
+
+const TYPE_QUESTION: AdvancedQuestion = {
+  id: SCOPE_TYPE_ID,
+  titleKey: 'Which property type?',
+  selection: 'multi',                              // several types OR together
+  eligibility: (q) => unresolvedScopeTiers(q).includes(SCOPE_TYPE_ID),
+  resolveOptions: (q) => scopeQuestionOptions(SCOPE_TYPE_ID, q),
+  apply: (q, keys) => applyScopeAnswer(SCOPE_TYPE_ID, q, keys),
+};
+
+export const SCOPE_QUESTIONS: AdvancedQuestion[] = [GROUP_QUESTION, TYPE_QUESTION];
+export const scopeQuestionFor = (tier: ScopeTier): AdvancedQuestion =>
+  tier === SCOPE_GROUP_ID ? GROUP_QUESTION : TYPE_QUESTION;
 
 // Contextual ranking + the narrowing gate (owner 2026-08-11; narrowing-gate rework 2026-08-22) now
 // live in @/lib/afRanking (SALIENCE, ASK_FIRST_TIER, askTier, scoreQuestion — imported above as
