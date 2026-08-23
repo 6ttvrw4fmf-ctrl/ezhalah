@@ -115,6 +115,35 @@ def verdict(status: int | None, body: str, dead_marker) -> str:
     return "dead" if dead_marker(body) else "live"
 
 
+# Alert kinds that mean this platform's scraper/liveness signal cannot currently be trusted for
+# the irreversible delete step (owner-directed safety audit, 2026-08-22). This is a PROACTIVE
+# precondition, checked BEFORE any candidate is even measured — distinct from the anomaly/fraction
+# gates below, which are reactive: they catch the SYMPTOM (a spike in eligible rows) only after a
+# degraded platform has already poisoned the candidate population. Wasalt's open
+# scraper_failure_step_change (alert 686, standing since 2026-08-18: run-failure rate stepped to
+# 60%+ above its own 15-day baseline) is the exact real-world case this exists for — that alert's
+# own text already says "partial capture loss degrades freshness and enrichment while every
+# count-based check stays green", which is precisely the blind spot a delete step must not inherit.
+_HEALTH_GATE_ALERT_KINDS = ("scraper_failure_step_change", "silent_scraper_death")
+
+
+def _platform_health_ok(client, platform: str) -> tuple[bool, str | None]:
+    """(ok, reason). False iff an unresolved alert says this platform's scraper/liveness signal
+    cannot currently be trusted. Deliberately narrow to alert KINDS that speak directly to capture
+    health (not e.g. a data-fidelity alert unrelated to whether the crawl itself is working) — a
+    broader net would freeze deletion on unrelated noise and teach operators to ignore the freeze."""
+    rows = (client.table("alert_event").select("id, kind, severity")
+            .eq("platform", platform).is_("resolved_at", "null")
+            .in_("kind", list(_HEALTH_GATE_ALERT_KINDS)).limit(5).execute().data or [])
+    if rows:
+        kinds = ", ".join(sorted({r["kind"] for r in rows}))
+        ids = ", ".join(str(r["id"]) for r in rows)
+        return False, (f"platform health degraded: open alert(s) {kinds} (id {ids}) say this "
+                        f"platform's scraper/liveness signal cannot currently be trusted — "
+                        f"freezing hard-delete for this platform until resolved.")
+    return True, None
+
+
 def _load_policy(client, platform: str) -> dict:
     row = (client.table("platform_retention_policy").select("*").eq("platform", platform).limit(1).execute().data or [])
     p = dict(DEFAULT_POLICY)
@@ -200,12 +229,21 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
         print(f"✗ cleanup {platform}: ABORT — {reason}", flush=True)
 
     try:
+        health_ok, health_reason = (True, None)
         if not force and not pol["enabled"]:
             _abort("policy disabled (enabled=false)")
         elif not tables:
             _abort("no tables registered for platform (default-deny)")
         elif pol["require_source_recheck"] and dead_marker is None:
             _abort("require_source_recheck but no dead-check registered — cannot verify, refusing to delete")
+        else:
+            # Platform-health precondition — NOT bypassed by --force. force exists to override
+            # enabled=false (a policy toggle); it was never meant to override a live signal that
+            # this platform's capture is currently degraded. Checked here, before ANY candidate is
+            # measured, so a degraded platform can never even build an eligible population.
+            health_ok, health_reason = _platform_health_ok(client, platform)
+            if not health_ok:
+                _abort(health_reason)
 
         if not stats["aborted"]:
             cutoff = (datetime.now(timezone.utc) - _days(pol["min_inactive_days"])).isoformat()
