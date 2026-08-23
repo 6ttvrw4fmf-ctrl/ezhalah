@@ -94,6 +94,23 @@ _STRUCTURED_AMENITY_KEYS: dict[str, str] = {
     "ac": "air_conditioner",
     "car_entrance": "car_entrance",
     "furnished": "furnished",
+    # Maid + driver room (2026-08-23). aqar publishes BOTH as native 0/1/null flat keys, exactly
+    # like `lift`/`ketchen`/`ac` above — this parser simply never looked, so both columns fell
+    # through to the prose fallback at the bottom of _structured_amenities(), which can only ever
+    # emit True-or-UNKNOWN. That is the SAME mistake the `parking` comment below documents, made
+    # again on two more columns, and it is user-visible: both drive live Advanced Filter chips
+    # («غرفة خادمة» / «غرفة سائق»).
+    #
+    # Measured 2026-08-23 over 36 live pages (0 fetch failures) against aqar_residential_listings:
+    #   • driver: aqar published a value on 13 rows — only 2 agreed. 9 rows stored UNKNOWN where
+    #     aqar published 0 (an explicit NO, discarded); 1 stored UNKNOWN where aqar published 1
+    #     (a real driver room the user can never filter to); 1 stored TRUE where aqar published 0.
+    #   • maid: aqar published a value on 15 rows — 2 stored UNKNOWN where aqar published 0, and
+    #     ad 6738742 stored TRUE where aqar published 0 (a fabricated attribute).
+    # The discarded negatives are why the columns carry 15,987/6,982 trues and literally ZERO
+    # falses across 117,734 rows, which is what `af_field_stuck_no_variance` has been reporting.
+    "maid": "maid_room",
+    "driver": "driver_room",
     # Utility availability: aqar publishes all three as native booleans and they carry real
     # negatives (2026-08-09, 24 live pages: water 21T/1F, electrical 21T/1F, drainage 18T/4F).
     # They were previously matched from «توفر الماء» / «كهرباء» / «صرف صحي», which cannot say "no".
