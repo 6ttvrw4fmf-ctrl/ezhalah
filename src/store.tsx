@@ -4,6 +4,7 @@ import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } fro
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
 import { HOME_DEFAULT_QUERY } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
+import { applyMove } from '@/lib/sidebarReorder';
 import { autoTitleForQuery, autoTitleForPrompt, canAutoRetitle, type TitleSource } from '@/lib/chatTitle';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
@@ -40,6 +41,12 @@ export type AuthUser = {
 export type HistoryItem = {
   id: string; label: string; query: SearchQuery; ts: number; starred?: boolean; snapshot?: SearchResult;
   title?: string; titleSource?: TitleSource; titleUpdatedAt?: number;
+  // MANUAL SIDEBAR POSITION (owner 2026-08-24, press-hold-drag reorder). Display rank is
+  // `order ?? ts` descending — absent on legacy items (timestamp order, unchanged), stamped by a
+  // drag (midpoint between neighbours), and DROPPED again when the chat has new activity so the
+  // "most recent activity first" contract (Note #9) still wins over an old manual slot. Rides the
+  // existing per-account persistence untouched: it is just another field in the stored JSON.
+  order?: number;
 };
 
 type AppState = {
@@ -89,6 +96,10 @@ type AppState = {
   // touches nothing else on the entry: not the query, the snapshot, the id, the star, or `ts`.
   // An empty/blank name clears the manual title and hands the row back to auto-titling.
   renameHistory: (id: string, title: string) => void;
+  // Press-hold-drag reorder: place `id` between prevId (above) and nextId (below). POSITION ONLY —
+  // the pure contract (no duplicate, no loss, no field but `order` touched) lives in
+  // src/lib/sidebarReorder.ts and is executed by scripts/verify-sidebar-reorder.ts.
+  reorderHistory: (id: string, prevId: string | null, nextId: string | null) => void;
   deleteHistory: (id: string) => void;
   // Record a free-text user message as the active chat's sidebar entry. First message → creates a
   // new chat in Recent with the user's text as the title; subsequent messages → update the same
@@ -609,6 +620,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
           } catch {}
           return next;
         }),
+      // POSITION ONLY, by construction: applyMove maps a new `order` onto the moved row (or
+      // renormalizes its bucket's orders) and carries every other field through untouched — it can
+      // never rename, star, delete, duplicate, navigate, or touch the active chat. Same synchronous
+      // localStorage write as toggleStar so a refresh right after the drop keeps the new order.
+      reorderHistory: (id, prevId, nextId) =>
+        setHistory((h) => {
+          const next = applyMove(h, id, prevId, nextId);
+          if (next === h) return h;
+          if (user) try {
+            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), JSON.stringify(next));
+          } catch {}
+          return next;
+        }),
       deleteHistory: (id) =>
         setHistory((h) => {
           const next = h.filter((it) => it.id !== id);
@@ -641,6 +665,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
               ...prev, label: v, ts: Date.now(),
               title: keep ? prev.title : auto,
               titleSource: keep ? 'manual' : 'auto',
+              // New activity outranks an old manual slot (Note #9: most recent activity first).
+              // Dropping `order` lets the fresh ts govern, exactly like recordHistory's new object.
+              order: undefined,
             };
             next = [updated, ...h.filter((it) => it.id !== id)];
           } else {
