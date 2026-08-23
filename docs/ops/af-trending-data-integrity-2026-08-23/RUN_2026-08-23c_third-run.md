@@ -127,9 +127,38 @@ backfill entrypoint, which goes **150 pages** deep and therefore *can* reach sta
 settings (`workers=8`, `min_interval=0.15`, `max_parallel=4`). Riyadh baseline captured at 22:02 for
 proof: 39,085 rows, maid 6,698 true / **85** false / 32,302 unknown; driver 2,883 / **109** / 36,093.
 
-**Status: PROPAGATION PENDING — mechanism proven, coverage incomplete.** The sync demonstrably
-carries `false` for six other platforms (wasalt 1,996 / gathern 29,054 / aldarim 158 / sanadak 1,104
-/ aqaratikom 68), so aqar sitting at 0 in the index is a coverage problem, not a broken pipeline.
+### 4a. The chain completed during this run — source → parser → canonical → index → user
+
+The hourly `sync_search_listings_ar()` run at **22:16:11 UTC** succeeded and the repairs reached the
+search index for the first time:
+
+| | before | after |
+|---|---|---|
+| index aqar `maid_room is false` | **0** | **1,332** |
+| index aqar `driver_room is false` | **0** | **1,704** |
+
+Verified through to the **user-visible** layer over anon REST with RLS enforced (Villa group / Buy,
+all-Saudi — the same shape as the run-2 baseline):
+
+| `apartment_guided_counts_ar` | baseline | now | Δ |
+|---|---|---|---|
+| `cnt_maid_room` | 5,585 | **5,476** | −109 |
+| `cnt_driver_room` | 2,955 | **2,912** | −43 |
+
+Small and plausible, tracking the ~11% re-capture coverage — prose-derived TRUEs being replaced by
+the source's own structural answer. Cross-checked against the index by hand: summing `maid_true`
+per platform for Riyadh villa-group/Buy gives 76 + 1,547 + 12 + 1 = **1,636**, exactly the RPC's
+`cnt_maid_room`. RPC and index agree to the row.
+
+> **A false alarm I caught before reporting it.** Comparing the *Riyadh* figure (1,636) against the
+> *all-Saudi* baseline (5,585) first looked like a 71% collapse in a user-visible count. It was an
+> apples-to-oranges query shape, not a regression — the all-Saudi figure moved by 109. Recorded
+> because a 71% drop would have been an alarming and completely wrong headline.
+
+**Status: PROPAGATION STARTED AND PROVEN END-TO-END — coverage still incomplete.** The pipeline is
+no longer in question; only 11.2% of aqar rows have been re-read. The sync demonstrably carries
+`false` for six other platforms (wasalt 1,996 / gathern 29,054 / aldarim 158 / sanadak 1,104 /
+aqaratikom 68), so the remaining aqar gap is coverage, not plumbing.
 
 **Villa/Apartment are therefore NOT yet fully source-faithful, and are not claimed to be.**
 
@@ -210,8 +239,9 @@ peer type refreshed at `21:46`. Most likely crowded out of the 3-page sweep wind
 | Per-cohort count correctness (16 cohorts) | **FIXED + VERIFIED** — exact vs independent oracle |
 | Oracle group-expansion defect | **FIXED + VERIFIED** (harness) |
 | property_age source fidelity | **RESOLVED — no defect, no change** (24/25; run 2) |
-| aqar maid/driver canonical repair | **PROPAGATION PENDING** — 11.2% done, deep-fill dispatched |
-| aqar maid/driver → search index | **AWAITING FIRST PRODUCTION EXECUTION** of the hourly sync |
+| aqar maid/driver canonical repair | **PROPAGATION IN PROGRESS** — 11.2% done, deep-fill dispatched |
+| aqar maid/driver → search index | **FIXED + VERIFIED** — 22:16 sync carried it; 0 → 1,332 / 1,704 |
+| aqar maid/driver → user-visible AF counts | **FIXED + VERIFIED** — maid −109, driver −43 (anon REST) |
 | Chalet | **SOURCE INCONCLUSIVE** (upheld, mechanism identified) |
 | Camp / Staff Housing | **INSUFFICIENT INVENTORY** |
 | عمارة browser leg | **NOT PROVEN** (harness navigation failure) |
