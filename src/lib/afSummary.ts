@@ -24,6 +24,14 @@ export function buildAfSummary(facets: Array<{ id: string; keys: string[]; label
         for (let i = 0; i < f.keys.length; i++)
           items.push(`${f.labels[i]} ${AMENITY_EMOJI[f.keys[i]] ?? '✅'}`);
         break;
+      // SCOPE tiers (owner 2026-08-23) — multi-select like amenities, so each picked group/type is
+      // its own item. Without these they would fall through `default:` and print as bare labels.
+      case 'property_group':
+        for (const l of f.labels) items.push(`${l} 🏘️`);
+        break;
+      case 'property_type':
+        for (const l of f.labels) items.push(`${l} 🏡`);
+        break;
       case 'bathrooms':
         items.push(`${f.labels[0]} حمامات 🚿`);
         break;

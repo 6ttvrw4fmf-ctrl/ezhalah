@@ -818,6 +818,50 @@ export async function fetchGuidedLiveCount(q: SearchQuery, amenities: string[], 
 // narrowing filter beyond district_options_ar's scope is active; the base scope needs no calls
 // because scope-count = results there (pinned by mon_trending_district_barrier, 40/40 exact).
 // Each option's own match_values OVERRIDE any districts already in q (spread order is load-bearing).
+// Per-option counts for the Advanced Filter's SCOPE steps — «أي مجموعة عقارات؟» / «أي نوع عقار؟»
+// (owner 2026-08-23). The number beside «فيلا» must equal what picking فيلا actually returns.
+//
+// Unlike every other option-count helper, a scope candidate changes the SCOPE ITSELF, so one shared
+// base is not enough: picking a group or type re-derives p_types (via cohortTypesAr) AND p_types2 /
+// p_tables / p_tables2 / p_category (via resolveSearchScope, whose isBroadCommercial branch flips on
+// exactly this selection). Each candidate therefore resolves its own scope from its own candidate
+// query — a hand-rolled p_types override on a shared base would silently keep the OLD table set and
+// overstate every option. The rest of the user's state (location, price, area, bedrooms, and any AF
+// answers already committed) rides along unchanged, which is what makes the count "exact result
+// count if that option were applied ON TOP OF the current committed state" rather than a bare
+// type total.
+export async function fetchScopeOptionCounts(
+  candidates: { key: string; query: SearchQuery }[],
+): Promise<Record<string, number> | null> {
+  if (!supabase || !candidates.length) return null;
+  const out: Record<string, number> = {};
+  await Promise.all(candidates.map(async ({ key, query }) => {
+    const scope = await resolveSearchScope(query);
+    if (!scope) return;                            // unresolvable scope → absent key, never a fake 0
+    const { isBroadCommercial, ...scopeParams } = scope;
+    const result = await withTimeout(
+      supabase!.rpc('location_search_candidates_ar', {
+        ...scopeParams,
+        ...rpcCountFilterParams(query),
+        ...rpcAdvancedFilterParams(query),
+        // p_types is deliberately excluded from rpcCountFilterParams (every caller passes its own
+        // cohort array); for a scope candidate that array IS the answer being priced.
+        p_types: isBroadCommercial ? COMMERCIAL_TYPE_AR_RES : cohortTypesAr(query),
+        p_limit: 1,
+        p_offset: 0,
+      }),
+      AGE_COUNT_TIMEOUT_MS,
+    );
+    if ('timedOut' in result) return;              // absent key → the option is dropped, never shown as 0
+    const { data, error } = result;
+    if (error) return;
+    out[key] = data && (data as { total_count: number }[]).length
+      ? Number((data as { total_count: number }[])[0].total_count) || 0
+      : 0;                                         // empty result set = an honest zero
+  }));
+  return out;
+}
+
 export async function fetchDistrictEligibleCounts(
   q: SearchQuery,
   options: { districtAr: string; matchValues: string[] }[],

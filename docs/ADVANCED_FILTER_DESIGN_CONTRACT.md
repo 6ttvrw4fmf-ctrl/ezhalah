@@ -229,8 +229,10 @@ free.
   it carries no predicate.
 - No numeric «Question N of M» caption — the denominator legitimately changes as the set narrows;
   the thin bar and the shrinking live count are the only progress signals.
-- Normal-Filter territory (location, deal, period, category/type, price, size, **bedrooms**) is
-  never asked by the interview — enforced as data via `af_field_registry.filter_tier`.
+- Normal-Filter territory (location, deal, period, price, size, **bedrooms**) is never asked by the
+  interview — enforced as data via `af_field_registry.filter_tier`. **AMENDED 2026-08-23: property
+  GROUP and property TYPE are carved out — see «Amendment 2026-08-23» below. Everything else in this
+  list is unchanged, and bedrooms in particular remains permanently off-limits.**
 
 
 ## Amendment 2026-08-16 — the conversational refresh (owner-approved)
@@ -385,3 +387,122 @@ Post-fix on the same device the row sits at y=604..630, fully visible, and «ع�
 no scrolling at all. Pinned by `scripts/verify-af-footer-onscreen.ts` (wired into `npm test`), which
 fails if any of the four footer controls, or the `s.foot` container, moves back inside the scroller —
 including via an `position: 'absolute'` substitute that would overlap the last option instead.
+
+
+## Amendment 2026-08-23 — the SCOPE PREFIX: CATEGORY → GROUP → TYPE (owner-approved)
+
+**This amendment carves property GROUP and property TYPE out of the "Normal-Filter territory is never
+asked" boundary rule above. Nothing else moves. Bedrooms in particular stays permanently off-limits.**
+
+### The defect
+
+«سكني» / «تجاري» is only the CATEGORY. It was never enough information to ask about bathrooms, age or
+amenities — and, measured, it was not enough to ask *anything*:
+
+- `cohortAllows()` intersects across every clean type in scope (`afCohorts.ts:220`) and treats an
+  uncertified type as an **empty** cohort, never as "no constraint" (`afCohorts.ts:226`).
+- So ONE uncertified sibling zeroed a whole group. Riyadh / Rent / annual, measured 2026-08-23:
+  `Villa` alone certifies **7** questions over **4,140** listings; `Duplex` has **3** listings and
+  certifies none; the «Villas & Houses» group therefore certified **zero**.
+- **5 of the 8 shipped groups could not open Advanced Filter on Buy, and 5 of 8 could not on Rent.**
+  A category-only scope could *never* open it (`cohortAllows` short-circuits on an empty type list,
+  `afCohorts.ts:219`).
+- The tap then fell through to `startRefine()`'s legacy hardcoded 4-chip type question
+  (شقة/فيلا/دور/أرض) — not the canonical taxonomy, no group tier, scalar `q.type` only. That legacy
+  flow is what users actually saw, which is why the feature read as *present but wrong* rather than
+  *blocked*. **It has been deleted**; property type is now asked in exactly one place.
+
+### The rule
+
+The interview resolves the property hierarchy before asking any certified question:
+
+```
+CATEGORY → PROPERTY GROUP → PROPERTY TYPE → certified ADVANCED questions
+```
+
+- **Category** is never asked. It is chosen in the Filter home and is a precondition.
+- **Group** is asked only when neither a group nor a type is selected. Options are
+  `groupsFor(category)` — never hardcoded, never another category's groups.
+- **Type** is asked whenever no type is selected. Options are the member types of the selected
+  group(s); if the group step was skipped, every type in the category.
+- An explicit **type** pick resolves *both* tiers — a user who already chose فيلا is asked neither.
+- Several groups **OR**; several types **OR**. Every other dimension stays AND.
+- The advanced questions offered for a multi-type scope remain the **safe semantic INTERSECTION**
+  across the selected types. `cohortAllows` is deliberately **unchanged**: the hierarchy makes the
+  intersection non-empty by NARROWING the scope, never by loosening the gate. A `.some()`/union there
+  would offer a question uncertified for a scoped type, and because the shared SQL predicates are
+  strict-NULL-excluding, answering it would silently amputate that type's rows — ask for شقة+غرفة,
+  get zero غرفة back.
+
+### Skip
+
+Every scope step supports «تخطي». Skip means **"I do not care / I am open"** — permanently, and
+identically to every other interview question:
+
+- it applies **zero** predicate and returns the query byte-identically ⇒ **count delta is exactly 0**;
+- it is never a "no", never `false`, and never silently selects an option;
+- a skipped tier counts as **resolved** (the walk moves down, it never re-asks);
+- skip GROUP ⇒ the TYPE step offers every type in the category;
+- skip BOTH ⇒ only questions safely shared across the whole effective type set may be asked, and if
+  that is below the useful floor the interview **stops cleanly and shows results**. It never invents a
+  type to keep going.
+
+### A tier with nothing to choose between
+
+If a tier resolves to exactly **one** option it is not a question: it is auto-committed and never
+rendered. The result set cannot move (every other branch of that tier is empty here), while the
+cohort scope becomes a certified single type — which is what lets a one-member group like
+«Residential Plots» → `Residential Land` reach the advanced questions at all. Zero options records an
+open skip. Neither case invents a predicate the user did not ask for.
+
+### Where the ≥2-useful gate now runs
+
+`MIN_USEFUL_QUESTIONS_TO_SHOW` is **still 2**, and still governs only the OPENING decision — but it is
+evaluated at the **scope→advanced transition**, not at `startAgeFlow`. With an unresolved hierarchy
+the ranked plan is empty *by construction*, so the old placement closed the interview before the first
+scope question could render. It counts **advanced** questions only: the hierarchy steps are what
+earned the right to ask, never two of the two. At the transition, 0 or 1 useful advanced question ends
+the interview **cleanly** on the results the scope answers already narrowed to — it never bounces to
+the refine chips, because by then the user has answered real questions we must honour.
+
+### Counts
+
+Each scope option shows the **exact** result count that picking it would return, on top of the
+current committed state (location, price, area, bedrooms and any AF answers already given). A scope
+candidate changes five RPC params (`p_types`, `p_types2`, `p_tables`, `p_tables2`, `p_category`), so
+each candidate resolves its **own** scope via `resolveSearchScope(candidateQ)` —
+`fetchScopeOptionCounts` in `src/data/remote.ts`. Options are ordered by the canonical HIERARCHY,
+never by count. A **zero-count** option is dropped (it promises results it cannot deliver); **no other
+usefulness floor applies**, so a genuinely small branch — 4 listings — is still offered. Hiding it
+would be the silent amputation of a real part of the taxonomy.
+
+### Pills
+
+Scope answers render as **non-removable** chips in the results row. Every other advanced answer only
+ever narrows, so removing its pill returns to a scope the user already had; removing a TYPE pill would
+instead broaden the search past anything they ever asked for, with no re-interview and no control to
+get it back.
+
+### Where this lives
+
+- `src/lib/afPlan.ts` — the tier logic, **pure** (no `./remote`, no `@/i18n`) so a barrier executes it
+  rather than grepping for it.
+- `src/data/advancedFilters.ts` — `SCOPE_QUESTIONS` / `scopeQuestionFor()`. Deliberately **not**
+  members of `ADVANCED_QUESTIONS` and never ranked by `rankQuestions`/`scoreQuestion`: a scope step is
+  a prerequisite of that pool, not a ranked peer, and `scoreQuestion`'s usefulness gates would delete
+  real taxonomy branches (`MIN_REAL_OPTION_COUNT` hides a 4-listing group; the `o.count < N` no-op
+  filter retires a group with one populated type).
+- `src/app/agent.tsx` — the scope prefix inside `presentGuided`, the moved gate, the plan
+  invalidation on a scope commit, and the scope-aware `revalidateStepsAfter`.
+- `scripts/verify-af-scope-hierarchy.ts` — the barrier, wired into `npm test`. It EXECUTES the real
+  tier logic, the real cohort gate and the real step-rebuild, and carries a mutation proof that a
+  `.some()`/union "fix" to `cohortAllows` is detected.
+
+### Registry note
+
+`af_field_registry` is a registry of listing **attribute** fields (bathrooms, furnished, kitchen…).
+Scope dimensions — location, deal, category, type — have never had rows in it, so this amendment adds
+none: inventing rows for them would pollute the registry with non-fields. The boundary rule keeps its
+teeth where it matters, in `scripts/verify-ui-controls-have-predicates.ts`: the interview may ask
+exactly the two authorized scope ids and nothing else from Normal-Filter territory, and `bedrooms`
+must remain `'normal'` tier and appear in no interview question.

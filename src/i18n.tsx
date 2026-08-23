@@ -396,6 +396,11 @@ const AR: Record<string, string> = {
   'Sewage connection': 'صرف صحي',
   'Water supply': 'توفر الماء',
   // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
+  // The Advanced Filter's SCOPE steps (owner 2026-08-23) — asked before any certified question when
+  // the user has chosen only a category (or only a group). The option LABELS reuse the group/type
+  // keys the Filter home already ships, so the two surfaces can never drift apart.
+  'Which kind of property are you looking for?': 'أي نوع من العقارات تبحث عنه؟',
+  'Which property type?': 'أي نوع عقار تحديدًا؟',
   'How many bathrooms?': 'كم دورة مياه تفضل؟',
   'Any number': 'أي عدد',
   '1+': '+١',
