@@ -95,9 +95,7 @@ function pickBestArabic(voices: Voice[]): Voice | null {
 // attempt re-checks getAvailableVoicesAsync()'s synchronous fast path first (it returns immediately
 // once the platform has actually populated its voice list, from ANY attempt, not just its own), and
 // is individually timeout-bounded so an engine that never fires voiceschanged at all can't hang this
-// forever — it just correctly falls through to "no Arabic voice found" after the last attempt. Total
-// worst case ~3s, and every real user reaches the Read Aloud button well after that (a search itself
-// takes at least a second or two) — this resolves LONG before any real tap in practice.
+// forever.
 const POLL_TIMEOUTS_MS = [120, 250, 500, 900, 1200];
 function getVoicesOnce(timeoutMs: number): Promise<Voice[]> {
   return Promise.race([
@@ -105,9 +103,29 @@ function getVoicesOnce(timeoutMs: number): Promise<Voice[]> {
     new Promise<Voice[]>((resolve) => setTimeout(() => resolve([]), timeoutMs)),
   ]);
 }
+// ROOT-CAUSE FIX (owner report, 2026-08-23 — Windows Chrome: tapping the button always said "not
+// available on this device"). The original fast poll gave up and set voiceCheckExhausted PERMANENTLY
+// after ~3s TOTAL, measured from PAGE LOAD (resolveVoice() runs unconditionally at module import).
+// But a real tap happens long after that — a full search + results cycle, routinely 10-40+ seconds
+// in this app's own observed behaviour — so a platform whose voice list populates slower than macOS's
+// instant local voices (e.g. Windows Chrome enumerating a remote/network voice, or a slower SAPI
+// voice-list build) could have a real, usable Arabic voice arrive well AFTER the poll had already
+// given up and cached failure forever. Fix: after the fast poll, keep quietly re-checking in the
+// background at a slower cadence for a much longer window — one that comfortably covers a real
+// search-to-tap gap — before finally giving up. Still resolves in ~1s on the common fast-path
+// (macOS/most engines); this only changes how long a SLOW engine gets before being called "genuinely
+// unavailable".
+const BACKGROUND_RETRY_MS = 3000;
+const RETRY_WINDOW_MS = 45000; // generous vs. any real page-load-to-first-tap gap observed in this app
 async function resolveVoice() {
+  const deadline = Date.now() + RETRY_WINDOW_MS;
   for (const timeout of POLL_TIMEOUTS_MS) {
     const found = pickBestArabic(await getVoicesOnce(timeout));
+    if (found) { bestArabicVoice = found; return; }
+  }
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, BACKGROUND_RETRY_MS));
+    const found = pickBestArabic(await getVoicesOnce(500));
     if (found) { bestArabicVoice = found; return; }
   }
   voiceCheckExhausted = true;
