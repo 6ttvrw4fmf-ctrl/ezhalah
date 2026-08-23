@@ -111,6 +111,56 @@ def city_ar_for(city_id: Optional[int]) -> Optional[str]:
 _SLUG_STOP = {"شارع", "طريق", "حي", "امارة", "منطقه", "مدينه", "ممر", "مخطط", "حى", "ال"}
 
 
+# Trailing admin markers, in NORMALISED form (norm_ar folds ة→ه, so «منطقة»→«منطقه»).
+_ADMIN_SUFFIX_TOKENS = ("اماره", "منطقه")
+
+
+def strip_city_suffix(district_ar: Optional[str], city_ar: Optional[str]) -> Optional[str]:
+    """Strip a TRAILING run of city/admin tokens that a delimiter-less source slug glued onto the
+    district — e.g. «...حي-المهدية-الرياض-...» captured as district «حي المهدية الرياض».
+
+    Bug found live 2026-07-21; the SQL backfill (20260721104637) cleaned the history, but this guard
+    shipped WITHOUT two of that migration's rules and so kept re-introducing the corruption on every
+    re-scrape (38 rows dirty again by 2026-08-22, 0 of them catchable here). The two missing rules,
+    now restored so code and backfill are the same algorithm:
+
+      1. Compare NORMALISED tokens (norm_ar: أإآٱ→ا, ة→ه, ى→ي, tatweel/bidi stripped). Raw comparison
+         missed «حي المروج ابها» against city «أبها» — same word, different alef — and «أبهــــا».
+      2. Also strip the city's FIRST token alone, for sources that abbreviate an official two-word
+         city: «حي أم الجود مكة» in «مكة المكرمة», «حي بني حارثة المدينة» in «المدينة المنورة».
+
+    Deliberately conservative, and never a source of invented precision:
+      * Only a TRAILING run is removed, so a district whose own name contains the city name keeps it
+        («حي أبها الجديدة ابها» → «حي أبها الجديدة», not «الجديدة»).
+      * At least two tokens always survive, so «حي أحد» in «احد رفيده» is untouched.
+      * Only THIS row's resolved city is stripped. A foreign city token is left exactly as published
+        («حي المطار ابها خميس» in «خميس مشيط» → «حي المطار ابها»).
+      * It only ever REMOVES tokens the source glued on. It never renames a district, never upgrades
+        a region label into a city, and never fills a blank — an unresolved location stays unresolved
+        (see to_catalog, which must keep refusing «منطقة X» → city X; audit 2026-08-10).
+    """
+    if not district_ar or not city_ar:
+        return district_ar
+    dist_tokens = district_ar.split()
+    dist_norm = [norm_ar(t) for t in dist_tokens]
+    city_norm = norm_ar(city_ar).split()
+    if not city_norm:
+        return district_ar
+    while len(dist_tokens) > 2:
+        cn = len(city_norm)
+        if len(dist_tokens) > cn and dist_norm[-cn:] == city_norm:   # full city name
+            dist_tokens, dist_norm = dist_tokens[:-cn], dist_norm[:-cn]
+            continue
+        if dist_norm[-1] == city_norm[0]:                            # official name abbreviated
+            dist_tokens, dist_norm = dist_tokens[:-1], dist_norm[:-1]
+            continue
+        if dist_norm[-1] in _ADMIN_SUFFIX_TOKENS:                    # امارة / منطقة marker
+            dist_tokens, dist_norm = dist_tokens[:-1], dist_norm[:-1]
+            continue
+        break
+    return " ".join(dist_tokens)
+
+
 def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None) -> dict:
     """DETERMINISTIC Arabic R/C/D parse from an Aqar-style slug/title, VALIDATED against the catalog
     (no loose substring matching). Priority within the parser:
@@ -189,26 +239,7 @@ def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None)
         return {"city_ar": None, "city_id": None, "region_id": region_id, "district_ar": district_ar, "confidence": "unresolved"}
     cid, rid = best
     city_ar_val = _CID_AR.get(cid)
-    if district_ar and city_ar_val:
-        # Bug found live 2026-07-21: Aqar's own slug embeds district+city(+امارة/منطقة marker)
-        # back-to-back with no delimiter (e.g. «...حي-المهدية-الرياض-...»), so the up-to-3-token
-        # capture above can swallow the city name and/or an admin marker as trailing "district"
-        # tokens — e.g. district_ar came out "حي المهدية الرياض" instead of "حي المهدية". Strip a
-        # TRAILING run of tokens that are either the just-resolved city name or a known admin marker
-        # (never a LEADING token, so a district whose own name happens to equal the city name, e.g.
-        # "حي المحالة" in المحالة city, is preserved — just de-duplicated to one occurrence instead
-        # of erased). Keeps at minimum "حي" + one content word.
-        dist_tokens = district_ar.split()
-        city_tokens = city_ar_val.split()
-        while len(dist_tokens) > 2:
-            if len(dist_tokens) > len(city_tokens) and dist_tokens[-len(city_tokens):] == city_tokens:
-                dist_tokens = dist_tokens[:-len(city_tokens)]
-                continue
-            if dist_tokens[-1] in ("امارة", "منطقة", "منطقه"):
-                dist_tokens = dist_tokens[:-1]
-                continue
-            break
-        district_ar = " ".join(dist_tokens)
+    district_ar = strip_city_suffix(district_ar, city_ar_val)
     return {"city_ar": city_ar_val, "city_id": cid, "region_id": rid or region_id,
             "district_ar": district_ar, "confidence": "slug"}
 
@@ -342,25 +373,31 @@ def resolve(
 
     # Try the plain hint-based resolution first (region-unambiguous, or region_hint confirms it).
     hit = _pick_candidate(n, hint)
-    stripped = n
-    for pre in ("محافظه ", "منطقه "):
-        if n.startswith(pre):
-            stripped = n[len(pre):]
-            break
-    if not hit and stripped != n:
-        hit = _pick_candidate(stripped, hint)
+    # «محافظة X» (governorate) IS named after its seat city, so retrying it as a city is a real
+    # resolution. «منطقة X» is NOT — audit 2026-08-10: one of the 13 regions is an administrative
+    # area that merely shares a city's name, so retrying it as a city silently upgrades a
+    # region-level source value into a specific city and fabricates precision the source never gave
+    # (exact-location-only: honest unknown, never invent). to_catalog() was fixed then; resolve()
+    # kept the hole and still returned city_id=3/confidence="city" for «منطقة الرياض» until
+    # 2026-08-23 — and resolve() is the path this module tells new scrapers to use, and the one
+    # scrapers/gathern/run.py already calls. Two strings for two different jobs: only the
+    # governorate form may retry as a CITY; the region form is stripped solely to look up a REGION.
+    city_stripped = n[len("محافظه "):] if n.startswith("محافظه ") else n
+    region_stripped = n[len("منطقه "):] if n.startswith("منطقه ") else city_stripped
+    if not hit and city_stripped != n:
+        hit = _pick_candidate(city_stripped, hint)
     if hit:
         return _finish(hit[0], hit[1], "city")
 
     # Region hint didn't narrow it — try district-based disambiguation before giving up.
     if d_norm:
         hit = _pick_candidate(n, hint, district_norm=d_norm) or (
-            _pick_candidate(stripped, hint, district_norm=d_norm) if stripped != n else None)
+            _pick_candidate(city_stripped, hint, district_norm=d_norm) if city_stripped != n else None)
         if hit:
             return _finish(hit[0], hit[1], "city+district")
 
     # Unresolved as a city — same region-label fallback to_catalog() uses.
-    rid = _REGION_NORM.get(n) or _REGION_NORM.get(stripped) or _REGION_NORM.get("منطقه " + n) or hint
+    rid = _REGION_NORM.get(n) or _REGION_NORM.get(region_stripped) or _REGION_NORM.get("منطقه " + n) or hint
     if rid:
         return {"city_ar": None, "city_id": None, "region_id": rid, "region_ar": _REGION_AR_FOR.get(rid),
                 "district_ar": d_ar, "district_id": None, "confidence": "region_only"}
