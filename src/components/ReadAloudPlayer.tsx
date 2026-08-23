@@ -82,7 +82,15 @@ export default function ReadAloudPlayer() {
       <Animated.View
         style={[
           pl.pill,
-          { flexDirection: isRTL ? 'row-reverse' : 'row' },
+          // Ezhalah's document is dir="rtl" whenever Arabic is active (Read Aloud is Arabic-only,
+          // so this is effectively always). Plain 'row' ALREADY flows right-to-left in an RTL
+          // document — it follows the ambient inline direction, not literal screen-left-to-right —
+          // so it's what places the primary play/pause control (first in DOM) at the right (the
+          // Arabic reading-start side) and Close (last in DOM) at the left, a genuine RTL-native
+          // mirror rather than a copy of the LTR reference screenshot's left-to-right order.
+          // Verified live on production: 'row-reverse' here double-reversed it back to an
+          // LTR-looking layout (play on the left) — confirmed empirically, not assumed.
+          { flexDirection: isRTL ? 'row' : 'row-reverse' },
           { opacity: anim, transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }, { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) }] },
         ]}
       >

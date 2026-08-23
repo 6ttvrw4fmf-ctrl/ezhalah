@@ -166,7 +166,12 @@ check('ReadAloudPlayer renders nothing when idle — it does not linger as an in
 check('ReadAloudPlayer is mounted exactly ONCE in agent.tsx (one active session ⇒ one controller, not one per card/response)', (agent.match(/<ReadAloudPlayer \/>/g) ?? []).length === 1 && !/<FeedbackRow[\s\S]{0,500}?<ReadAloudPlayer/.test(agent));
 check('the controller is NOT a full-screen modal — no absoluteFill/dimmed backdrop, just a small top-anchored pill', !/StyleSheet\.absoluteFill/.test(readAloudPlayer) && !/rgba\(8,18,12/.test(readAloudPlayer));
 check('the controller stays fixed on web while the page scrolls (position: fixed on web, absolute on native) and respects the top safe-area inset', /Platform\.OS === 'web' \? 'fixed' : 'absolute'/.test(readAloudPlayer) && /useSafeAreaInsets/.test(readAloudPlayer) && /insets\.top/.test(readAloudPlayer));
-check('the controller\'s row direction follows the app\'s own isRTL, not a hardcoded LTR copy of the reference screenshot', /flexDirection: isRTL \? 'row-reverse' : 'row'/.test(readAloudPlayer));
+// Verified LIVE on production (screenshot): Ezhalah's document is dir="rtl" whenever Arabic is
+// active, and plain 'row' already flows right-to-left there (it follows the ambient inline
+// direction) — 'row-reverse' would DOUBLE-reverse it back to an LTR-looking layout, which is
+// exactly what shipped wrong in PR#921 and was caught this way. 'row' is the genuine RTL-native
+// choice (primary play/pause — first in DOM — lands at the right, the Arabic reading-start side).
+check('the controller\'s row direction is the RTL-CORRECT choice (verified live) — plain \'row\' in this RTL document, not \'row-reverse\' which would double-mirror it back to an LTR-looking layout', /flexDirection: isRTL \? 'row' : 'row-reverse'/.test(readAloudPlayer));
 check('the appear/disappear animation is a plain fade+scale (~180ms), not a spring/bounce, and is skipped entirely under reduced motion', /useReducedMotion/.test(readAloudPlayer) && /duration = reducedMotion \? 0 : ANIM_MS/.test(readAloudPlayer) && !/Animated\.spring/.test(readAloudPlayer));
 check('every control passes its accessibility label as label={t(...)} — never a raw literal string prop that could leak English into the Arabic UI', !/label="[A-Za-z]/.test(readAloudPlayer) && /label=\{t\(playing \? 'Pause reading' : 'Resume reading'\)\}/.test(readAloudPlayer) && /label=\{t\('Close'\)\}/.test(readAloudPlayer) && /label=\{t\('Back 15 seconds'\)\}/.test(readAloudPlayer) && /label=\{t\('Forward 15 seconds'\)\}/.test(readAloudPlayer) && /accessibilityLabel=\{t\('Playback speed'\)\}/.test(readAloudPlayer));
 
