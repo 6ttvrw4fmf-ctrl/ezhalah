@@ -58,12 +58,32 @@ eq('bare agent-path scalar `type` also resolves both tiers', unresolvedScopeTier
 // This is THE defect. The group intersects to zero; resolving the scope to Villa restores all seven.
 const AF_IDS = ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction'];
 const allowed = (q: SearchQuery) => AF_IDS.filter((id) => cohortAllows(q, id));
-check('«Villas & Houses» group-only still intersects to ZERO (gate deliberately unchanged)',
-  allowed(groupOnly).length === 0, `got ${JSON.stringify(allowed(groupOnly))}`);
+// These are stated as INVARIANTS, not as magic numbers, on purpose: the cohort tables are certified
+// incrementally by other runs (PR #995 certified Duplex/Buy on 2026-08-23 while this branch was open),
+// and a barrier that pinned "= 7" or "= 0" would either break on every certification or, worse, go
+// quietly stale. What must hold forever is the SHAPE of the defect and of the fix.
 const villaResolved = applyScopeAnswer(SCOPE_TYPE_ID, groupOnly, ['Villa']);
-eq('resolving that group to «Villa» restores all 7 certified questions', allowed(villaResolved).length, 7);
-check('…and Duplex, chosen deliberately, still honestly offers none',
-  allowed(applyScopeAnswer(SCOPE_TYPE_ID, groupOnly, ['Duplex'])).length === 0);
+const members = groupMembers('Villas & Houses');
+check('a group can never offer MORE than its weakest member (intersection, by definition)',
+  allowed(groupOnly).length <= Math.min(...members.map((t) => allowed(RENT({ types: [t] })).length)),
+  `group=${allowed(groupOnly).length} members=${JSON.stringify(members.map((t) => [t, allowed(RENT({ types: [t] })).length]))}`);
+check('«Villas & Houses» group-only is BELOW the useful floor — the defect, still reproducible',
+  allowed(groupOnly).length < 2, `got ${JSON.stringify(allowed(groupOnly))}`);
+check('…while resolving it to «Villa» clears that floor — the fix',
+  allowed(villaResolved).length >= 2, `Villa=${JSON.stringify(allowed(villaResolved))}`);
+check('resolving to a certified member STRICTLY increases what can be asked',
+  allowed(villaResolved).length > allowed(groupOnly).length);
+// CERTIFYING THE SIBLING IS NOT A SUBSTITUTE FOR ASKING. Measured after PR #995 certified Duplex/Buy:
+// «Villas & Houses» on Buy moved 0 → 1 question and is STILL blocked. The intersection is bounded by
+// the weakest member, so each new certification can only add what EVERY member already shares — which
+// is why 5 of 8 groups stayed blocked on both deals. This assertion states that bound directly.
+for (const macro of ['Residential', 'Commercial'] as const)
+  for (const g of HIERARCHY[macro]) {
+    const q = RENT({ category: macro, typeGroups: [g.group] });
+    const mem = groupMembers(g.group);
+    check(`«${g.group}» group offering never exceeds any single member's`,
+      mem.every((t) => allowed(q).length <= allowed(RENT({ category: macro, types: [t] })).length));
+  }
 // Every shipped group with >=1 certified member must become answerable by picking that member.
 for (const macro of ['Residential', 'Commercial'] as const)
   for (const g of HIERARCHY[macro]) {
@@ -122,7 +142,10 @@ eq('multi-type answers are stored as an OR list, all of them kept',
 
 // ── 12. ADVANCED QUESTIONS ACROSS MULTIPLE TYPES = SAFE INTERSECTION, NEVER UNION (barrier 12) ───
 const bothTypes = applyScopeAnswer(SCOPE_TYPE_ID, groupOnly, ['Villa', 'Duplex']);
-eq('Villa+Duplex intersects to ZERO (Duplex certifies nothing) — never Villa\'s union', allowed(bothTypes).length, 0);
+check('Villa+Duplex offers only what BOTH certify — never Villa\'s union',
+  allowed(bothTypes).every((id) => cohortAllows(RENT({ types: ['Villa'] }), id) && cohortAllows(RENT({ types: ['Duplex'] }), id))
+  && allowed(bothTypes).length <= Math.min(allowed(RENT({ types: ['Villa'] })).length, allowed(RENT({ types: ['Duplex'] })).length),
+  `both=${JSON.stringify(allowed(bothTypes))}`);
 const aptRoom = RENT({ typeGroups: ['Apartments & Co-living'], types: ['Apartment', 'Room'] });
 check('Apartment+Room offers only what BOTH certify (a strict subset of Apartment alone)',
   allowed(aptRoom).every((id) => allowed(RENT({ types: ['Apartment'] })).includes(id))
