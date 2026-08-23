@@ -550,9 +550,16 @@ export default function Home() {
   // and re-measured 2026-08-22 on live production: Riyadh / Rent-Annual / شقة with
   // amenities=[elevator] + bathMin=3 advertised 4,449 across the top 8 districts and returned 592
   // on click — 7.5x, every row wrong in the same direction.
+  // priceMinRent/priceMaxRent are the COMBINED-mode (شراء+إيجار) Rent-side budget. They were missing
+  // here, so a combined search narrowed ONLY by a rent budget looked un-narrowed: hasDistrictNarrowing
+  // stayed false, the live-count fetch never ran, and every district row kept district_options_ar's
+  // deal/category/period scope count. Measured live: حي العارض advertised 2,914 and the search landed
+  // on 1,231 (2.4x), while the CITY list on the same screen was correct — the two contradicted each
+  // other in one state. The engine does apply the bound (rpcFilterParams spreads p_price_min_rent /
+  // p_price_max_rent whenever dealCombined), so only the COUNT was lying. (owner Trending rule.)
   const districtNarrowingSig = JSON.stringify([query.type, query.typeGroups, query.types, query.detail,
     query.contextBeds, query.contextBedsList, query.contextSize, query.priceInput, query.priceBand,
-    query.priceMin, query.priceMax, query.areaMin, query.areaMax,
+    query.priceMin, query.priceMax, query.priceMinRent, query.priceMaxRent, query.areaMin, query.areaMax,
     query.amenities, query.bathMin, query.furnishedPref, query.streetWidthMin, query.directions,
     query.ratingMin, query.reviewsMin, query.unitSubtypes, query.ageMin, query.ageMax,
     query.isNewConstruction]);
@@ -560,6 +567,9 @@ export default function Home() {
     () => (JSON.parse(districtNarrowingSig) as unknown[]).some((v) =>
       Array.isArray(v) ? v.length > 0 : v != null && v !== ''),
     [districtNarrowingSig]);
+  // Upper bound on how many district rows get a live, filter-aware count. Must cover everything the
+  // dropdown can render (matchDistrictsByCityId caps its typed matches at 30) — see the fetch below.
+  const DISTRICT_COUNT_FETCH_MAX = 30;
   const [districtLiveCounts, setDistrictLiveCounts] = useState<Record<string, number> | null>(null);
   const districtLiveReq = useRef(0);
   useEffect(() => {
@@ -570,7 +580,12 @@ export default function Home() {
     const id = ++districtLiveReq.current;
     const q = buildFilterBaseQuery();
     if (!q) return;
-    const visible = districtSuggestions.slice(0, 12)
+    // EVERY rendered row, not the first 12. matchDistrictsByCityId returns up to 30 typed matches and
+    // all of them are rendered, so a 12-row fetch left rows 13-30 falling back to the deal/category
+    // SCOPE count — presented identically to a real one, and wrong whenever a filter is active.
+    // DISTRICT_COUNT_FETCH_MAX is deliberately >= that 30 so the two can't drift apart silently; the
+    // render below still refuses to print a number for any row this fetch did not cover.
+    const visible = districtSuggestions.slice(0, DISTRICT_COUNT_FETCH_MAX)
       .map((o) => ({ districtAr: o.districtAr, matchValues: o.matchValues }));
     void fetchDistrictEligibleCounts(q, visible).then((counts) => {
       if (id === districtLiveReq.current && counts) setDistrictLiveCounts(counts);
@@ -1410,9 +1425,17 @@ export default function Home() {
                             // النرجس advertised 1,064 while the whole CITY had 705 eligible listings.
                             // Prefer the live count whenever it exists; fall back to the scope count
                             // only when no narrowing is active (there the two are equal by definition).
+                            // NEVER PRINT THE SCOPE COUNT AS IF IT WERE THE FILTERED ONE. With a
+                            // narrowing filter active the only honest number is the live one; if this
+                            // row has no live count yet (still loading, or beyond the fetch bound),
+                            // show NOTHING rather than the wider deal/category number — the same
+                            // "no count beats a wrong count" rule the city pool already follows.
                             sublabel: districtLiveCounts?.[opt.districtAr] === 0
                               ? t('No listings here right now')
-                              : cohortCountLabel(districtLiveCounts?.[opt.districtAr] ?? opt.listingCount),
+                              : hasDistrictNarrowing
+                                ? (districtLiveCounts?.[opt.districtAr] != null
+                                    ? cohortCountLabel(districtLiveCounts[opt.districtAr]) : '')
+                                : cohortCountLabel(opt.listingCount),
                             icon: LOC_IMG.district, // restored designed art (see TrendingList.tsx note)
                           }))}
                           onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
@@ -1446,11 +1469,14 @@ export default function Home() {
                             {/* Same rule as the trending rows above: show the count the user will
                                 actually land on (live, under the full filter state) whenever it has
                                 been fetched, never the wider deal/category scope count. */}
-                            {isEmpty
-                              ? <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text>
-                              : (cohortCountLabel(live ?? opt.listingCount)
-                                  ? <Text style={s.suggDist}>{cohortCountLabel(live ?? opt.listingCount)}</Text>
-                                  : null)}
+                            {/* Same rule as the trending rows: under an active filter only a LIVE
+                                count may be printed; without one the row shows no number at all. */}
+                            {(() => {
+                              if (isEmpty) return <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text>;
+                              const n = hasDistrictNarrowing ? live : (live ?? opt.listingCount);
+                              const label = n != null ? cohortCountLabel(n) : '';
+                              return label ? <Text style={s.suggDist}>{label}</Text> : null;
+                            })()}
                           </View>
                           {isPicked ? <Ionicons name="checkmark-circle" size={18} color={colors.primary} /> : null}
                         </Tappable>

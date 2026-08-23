@@ -124,12 +124,14 @@ check('district counts carry the NORMAL narrowing (bedrooms / price / area)',
 // only to detect zero, so a narrowed search still displayed the wider deal/category SCOPE count:
 // measured live with 3 beds + 120-180 m² + 70k-100k, حي النرجس advertised 1,064 while the whole city
 // had 705 eligible listings — a district claiming more than its own city.
-check('the trending district row RENDERS the live count, not the scope count',
-  /cohortCountLabel\(districtLiveCounts\?\.\[opt\.districtAr\] \?\? opt\.listingCount\)/.test(index),
-  'a fetched-but-unrendered live count is the same lie as never fetching it');
-check('the typed district row RENDERS the live count too',
-  /cohortCountLabel\(live \?\? opt\.listingCount\)/.test(index),
-  'both district surfaces must show the number the user will land on');
+check('the trending district row RENDERS the live count, never the wider scope count under narrowing',
+  /hasDistrictNarrowing[\s\S]{0,200}districtLiveCounts\?\.\[opt\.districtAr\] != null[\s\S]{0,120}: ''/.test(index),
+  'a fetched-but-unrendered live count is the same lie as never fetching it; and under an active '
+  + 'filter a MISSING live count must print nothing rather than the wider number '
+  + '(tightened 2026-08-22 — see scripts/verify-district-counts-honest.ts)');
+check('the typed district row applies the same rule',
+  /const n = hasDistrictNarrowing \? live : \(live \?\? opt\.listingCount\);/.test(index),
+  'both district surfaces must show the number the user will land on, or none at all');
 
 check('district counts carry the ADVANCED answers',
   /rpcAdvancedFilterParams\(q\)/.test(districtFn));
