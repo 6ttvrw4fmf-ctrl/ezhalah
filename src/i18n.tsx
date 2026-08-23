@@ -1036,6 +1036,13 @@ const AR: Record<string, string> = {
 
   // Drawer / sidebar
   'New Chat': 'محادثة جديدة',
+  // Sidebar chat search (owner 2026-08-24): ChatGPT-style in-sidebar search, Arabic-first. The
+  // empty state + hint are deliberately calm Saudi copy — never an English "No results".
+  'Search chats': 'البحث في المحادثات',
+  'Search your chats…': 'ابحث في محادثاتك…',
+  'Close search': 'إغلاق البحث',
+  'Type in Arabic to search your chats': 'اكتب بالعربي للبحث في محادثاتك',
+  'No chat with that name': 'ما لقينا محادثة بهذا الاسم',
   'About Us': 'من نحن',
   'Sign up / Log in': 'إنشاء حساب / تسجيل الدخول',
   'Get more. Sign up free.': 'احصل على المزيد. سجل مجاناً.',
