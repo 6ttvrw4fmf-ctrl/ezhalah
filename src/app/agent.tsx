@@ -619,7 +619,10 @@ export default function Agent() {
     voiceFinalizingRef.current = false;
     const merged = [voiceBaseRef.current.trim(), transcript].filter(Boolean).join(' ');
     if (!merged) return; // nothing was said — exit recording, never send an empty message
-    setTyped('');
+    // Land the transcript in the composer FIRST: if send() proceeds it clears it (its own
+    // setTyped('')), and if send() refuses (busy — e.g. a replayed pending message raced in), the
+    // words the user spoke are sitting in the input instead of vanishing.
+    setTyped(merged);
     void send(merged);
   };
   const sendVoiceRef = useRef<() => void>(() => {});

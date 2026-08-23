@@ -115,6 +115,10 @@ export async function startVoiceInput(handlers: VoiceHandlers): Promise<boolean>
   try {
     const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
     audioCtx = new Ctx();
+    // Autoplay policy: a context can be born 'suspended'; the mic tap is a real user gesture, so an
+    // explicit resume always brings it up. Without this, levels honestly read 0 (flat waveform) —
+    // never wrong, but needlessly degraded.
+    void audioCtx!.resume?.().catch(() => {});
     const source = audioCtx!.createMediaStreamSource(mediaStream);
     const analyser = audioCtx!.createAnalyser();
     analyser.fftSize = 512;
