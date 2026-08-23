@@ -61,11 +61,15 @@ check("both new ≤25 copy variants have real Arabic translations (no English ke
 
 // FeedbackRow (👍/Share) must remain UNCONDITIONAL — the owner's spec says the ≤25 action area keeps
 // exactly the normal lightweight actions; it must never be swept into the same count gate. Matched
-// loosely on the two load-bearing props (not the full prop list) so an unrelated feature adding a
-// new prop to the same call (e.g. readAloudText) can't produce a false failure here — what this
-// guards against is a NEW count-based condition wrapping the return, not the exact prop list.
+// loosely on the two load-bearing props (not the full prop list, and not requiring a bare `return`
+// prefix — owner 2026-08-23 merged this into the same block as the closing-message View so Read
+// Aloud could reuse its computed text, so FeedbackRow now sits inside a returned Fragment alongside
+// it rather than being the sole return value) so an unrelated feature adding a new prop to the same
+// call (e.g. readAloudSegments) or restructuring the surrounding JSX can't produce a false failure
+// here — what this guards against is a NEW count-based condition wrapping the tag, not its exact
+// prop list or return-statement shape.
 check('FeedbackRow stays unconditional (no count gate added around it — 👍/Share always present)',
-  /return <FeedbackRow[^>]*\bfeedbackKey=\{m\.id\}[^>]*\bonFeedback=\{showFbToast\}[^>]*\/>;/.test(ag),
+  /<FeedbackRow[^>]*\bfeedbackKey=\{m\.id\}[^>]*\bonFeedback=\{showFbToast\}[^>]*\/>/.test(ag),
   'FeedbackRow must render regardless of canNarrowFurther/trueTotal — only the typing/reveal gate above it may apply');
 check('no canNarrowFurther/trueTotal condition wraps the FeedbackRow return (still gated only on typing/reveal)',
   !/canNarrowFurther[\s\S]{0,200}<FeedbackRow/.test(ag) && !/trueTotal[\s\S]{0,200}<FeedbackRow/.test(ag));

@@ -2088,6 +2088,8 @@ export default function Agent() {
                         // condition the cards use — NOT on `m.typing` alone: a live results message keeps typing=true
                         // even after the intro finishes (only doneTyping flips), so gating on m.typing hid this block.
                         // min(FIRST_PAGE, fetched): a search with <10 matches still gets its closing message.
+                        // ALSO gates FeedbackRow/Read Aloud below (merged into one block, owner 2026-08-23 — the
+                        // spoken closing note must reuse this SAME computed text, never re-derive it separately).
                         if ((m.typing && !doneTyping[m.id]) || shown < Math.min(FIRST_PAGE, fetched)) return null;
                         // RESULT-CAP RULE (owner 2026-08-20) — the browse cap, the "load more" gate and the
                         // closing count all come from ONE pure function (src/data/resultCount.ts), so they can
@@ -2120,91 +2122,99 @@ export default function Agent() {
                         // was falsely lighting every visible «عرض المزيد»).
                         const fetching = !!loadingMore[m.id];
                         const cascading = revealing && revealActiveRef.current?.id === m.id;
+                        const moreNoteText = rc.endKind === 'more'
+                          ? (canNarrowFurther
+                              ? t('I showed you the first {n} listings. Want me to show more, or help you find more precise ones?', { n: rc.endShown.toLocaleString('en-US') })
+                              : t('I showed you the first {n} listings. Want me to show more?', { n: rc.endShown.toLocaleString('en-US') }))
+                          : quoteTotal
+                            // More than the cap matched: two honest numbers — the true total AND the {cap} shown.
+                            ? (canNarrowFurther
+                                ? t('We found {total} listings matching your search, and showed you {shown}. Want help finding more precise ones?', { total: rc.endTotal.toLocaleString('en-US'), shown: rc.endShown.toLocaleString('en-US') })
+                                : t('We found {total} listings matching your search, and showed you {shown}.', { total: rc.endTotal.toLocaleString('en-US'), shown: rc.endShown.toLocaleString('en-US') }))
+                            // Everything matching is on screen (≤ cap, or a hidden-total narrowed search):
+                            // state the real matched count — which equals what's shown.
+                            : (canNarrowFurther
+                                ? t('I showed you all {n} matching listings. Want help finding more precise ones?', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') })
+                                : t('I showed you all {n} matching listings.', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') }));
+                        // HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21) — see the comment on the
+                        // buttons row below; the SAME gate decides whether Read Aloud may mention them too.
+                        const showActionsRow = (hasMore || canNarrowFurther) && !ageFlow;
+                        // Read Aloud closing note (owner request, 2026-08-23: "read the note... and say the
+                        // button also") — names the SAME button label(s) actually rendered below, in the same
+                        // order, so it can never mention an action that isn't on screen to tap.
+                        const spokenActionLabels = [hasMore && t('Load more'), canNarrowFurther && t('Let’s narrow it down')].filter(Boolean) as string[];
+                        const spokenActionsNote = !showActionsRow ? ''
+                          : spokenActionLabels.length === 2
+                            ? t('You can tap {a} or {b}.', { a: spokenActionLabels[0], b: spokenActionLabels[1] })
+                            : t('You can tap {a}.', { a: spokenActionLabels[0] });
+                        const readAloudClosingNote = [moreNoteText, spokenActionsNote].filter(Boolean).join(' ');
+                        const readAloudSegments = buildResultsReadAloudSegments(introText, m.result.listings.slice(0, shown), readAloudClosingNote);
                         return (
-                          <View style={{ gap: 8, marginTop: 14, alignSelf: 'stretch' }}>
-                            <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
-                              {rc.endKind === 'more'
-                                ? (canNarrowFurther
-                                    ? t('I showed you the first {n} listings. Want me to show more, or help you find more precise ones?', { n: rc.endShown.toLocaleString('en-US') })
-                                    : t('I showed you the first {n} listings. Want me to show more?', { n: rc.endShown.toLocaleString('en-US') }))
-                                : quoteTotal
-                                  // More than the cap matched: two honest numbers — the true total AND the {cap} shown.
-                                  ? (canNarrowFurther
-                                      ? t('We found {total} listings matching your search, and showed you {shown}. Want help finding more precise ones?', { total: rc.endTotal.toLocaleString('en-US'), shown: rc.endShown.toLocaleString('en-US') })
-                                      : t('We found {total} listings matching your search, and showed you {shown}.', { total: rc.endTotal.toLocaleString('en-US'), shown: rc.endShown.toLocaleString('en-US') }))
-                                  // Everything matching is on screen (≤ cap, or a hidden-total narrowed search):
-                                  // state the real matched count — which equals what's shown.
-                                  : (canNarrowFurther
-                                      ? t('I showed you all {n} matching listings. Want help finding more precise ones?', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') })
-                                      : t('I showed you all {n} matching listings.', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') }))}
-                            </Text>
-                            {/* The old «100 at a time» line was a hardcoded 100 that read as a result count even
-                                when far fewer matched (owner 2026-08-20). Removed: with the browse cap one «عرض
-                                المزيد» reveals everything up to the cap, so the button needs no count caption. */}
-                            {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
-                                «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches — but only
-                                when there is genuinely more than INTERVIEW_STOP_AT=25 left to narrow. */}
-                            {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
-                                user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
-                                the old CTA row must not sit behind it competing for the same decision.
-                                `ageFlow` covers every AF phase (loading → intro → asking → mining), so
-                                the row is gone from the tap until the flow closes, and returns by itself
-                                afterwards because closing sets ageFlow back to null. The AF card is an
-                                absolute overlay, so without this gate the two buttons stayed rendered
-                                (and reachable) underneath it. */}
-                            {(hasMore || canNarrowFurther) && !ageFlow ? (
-                              <View style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
-                                {hasMore ? (
-                                  // Active state = calm pulsing dots (owner 2026-07-09: the button must
-                                  // visibly work, not sit static) — while THIS message's page fetches or
-                                  // its new cards cascade in. Fixed min-size → zero layout shift on swap.
-                                  // Disabled during any reveal or a live turn (never two drips at once).
-                                  <Pressable
-                                    style={({ hovered, pressed }: any) => [s.mBtnPrimary, (hovered || pressed) && !fetching && !revealing && s.mBtnPrimaryHover]}
-                                    disabled={fetching || revealing || busy}
-                                    onPress={() => loadMore(m)}
-                                  >
-                                    {fetching || cascading
-                                      ? <LoadingDots />
-                                      : <Text style={s.mBtnPrimaryTx}>{t('Load more')}</Text>}
-                                  </Pressable>
-                                ) : null}
-                                {canNarrowFurther ? (
-                                  <Pressable
-                                    style={s.mBtnAlt}
-                                    onPress={() => {
-                                      const q = m.result.query;
-                                      if (q && anyGuidedEligible(q)) void startAgeFlow(q);
-                                      else startRefine(q);
-                                    }}
-                                  >
-                                    <Text style={s.mBtnAltTx}>{t('Let’s narrow it down')}</Text>
-                                  </Pressable>
-                                ) : null}
-                              </View>
-                            ) : null}
-                          </View>
+                          <>
+                            <View style={{ gap: 8, marginTop: 14, alignSelf: 'stretch' }}>
+                              <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
+                                {moreNoteText}
+                              </Text>
+                              {/* The old «100 at a time» line was a hardcoded 100 that read as a result count even
+                                  when far fewer matched (owner 2026-08-20). Removed: with the browse cap one «عرض
+                                  المزيد» reveals everything up to the cap, so the button needs no count caption. */}
+                              {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
+                                  «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches — but only
+                                  when there is genuinely more than INTERVIEW_STOP_AT=25 left to narrow. */}
+                              {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
+                                  user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
+                                  the old CTA row must not sit behind it competing for the same decision.
+                                  `ageFlow` covers every AF phase (loading → intro → asking → mining), so
+                                  the row is gone from the tap until the flow closes, and returns by itself
+                                  afterwards because closing sets ageFlow back to null. The AF card is an
+                                  absolute overlay, so without this gate the two buttons stayed rendered
+                                  (and reachable) underneath it. */}
+                              {showActionsRow ? (
+                                <View style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
+                                  {hasMore ? (
+                                    // Active state = calm pulsing dots (owner 2026-07-09: the button must
+                                    // visibly work, not sit static) — while THIS message's page fetches or
+                                    // its new cards cascade in. Fixed min-size → zero layout shift on swap.
+                                    // Disabled during any reveal or a live turn (never two drips at once).
+                                    <Pressable
+                                      style={({ hovered, pressed }: any) => [s.mBtnPrimary, (hovered || pressed) && !fetching && !revealing && s.mBtnPrimaryHover]}
+                                      disabled={fetching || revealing || busy}
+                                      onPress={() => loadMore(m)}
+                                    >
+                                      {fetching || cascading
+                                        ? <LoadingDots />
+                                        : <Text style={s.mBtnPrimaryTx}>{t('Load more')}</Text>}
+                                    </Pressable>
+                                  ) : null}
+                                  {canNarrowFurther ? (
+                                    <Pressable
+                                      style={s.mBtnAlt}
+                                      onPress={() => {
+                                        const q = m.result.query;
+                                        if (q && anyGuidedEligible(q)) void startAgeFlow(q);
+                                        else startRefine(q);
+                                      }}
+                                    >
+                                      <Text style={s.mBtnAltTx}>{t('Let’s narrow it down')}</Text>
+                                    </Pressable>
+                                  ) : null}
+                                </View>
+                              ) : null}
+                            </View>
+                            {/* Response-level feedback (thumbs up/down + share) — the LAST element of the
+                                response, so the order reads: cards → «تبي أعرض لك المزيد…» message + buttons
+                                → this row. MOVED here from under each card (owner 2026-07-09: one row,
+                                directly below the more-message, nowhere else). Still shows when the
+                                more-block is hidden (few results / all shown) — it belongs to the response.
+                                Keyed by the results-message id → rates the RESPONSE, not one listing.
+                                Read Aloud script (owner structure requirement, 2026-08-19): إزهله -> pause ->
+                                summary -> pause -> cards, in the SAME order shown on screen, -> pause -> the
+                                closing note + available actions above (owner 2026-08-23). Sliced to `shown`
+                                — never past what's actually rendered right now ("no hidden listing should be
+                                spoken") — but otherwise reads every visible card (owner 2026-08-22: no further cap). */}
+                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} />
+                          </>
                         );
-                      })()}
-                      {/* Response-level feedback (thumbs up/down + share) — the LAST element of the
-                          response, so the order reads: cards → «تبي أعرض لك المزيد…» message + buttons
-                          → this row. MOVED here from under each card (owner 2026-07-09: one row,
-                          directly below the more-message, nowhere else). Still shows when the
-                          more-block is hidden (few results / all shown) — it belongs to the response.
-                          Keyed by the results-message id → rates the RESPONSE, not one listing. */}
-                      {(() => {
-                        const fetched = m.result.listings.length;
-                        const shown = revealCount[m.id] ?? (m.typing ? 0 : Math.min(FIRST_PAGE, fetched));
-                        // Wait for the cards to be on screen AND the intro text to finish (cards now
-                        // cascade during typing — the thumbs must never appear before the closing
-                        // message above them).
-                        if ((m.typing && !doneTyping[m.id]) || shown < Math.min(FIRST_PAGE, fetched)) return null;
-                        // Read Aloud script (owner structure requirement, 2026-08-19): إزهله -> pause ->
-                        // summary -> pause -> cards, in the SAME order shown on screen. Sliced to `shown`
-                        // — never past what's actually rendered right now ("no hidden listing should be
-                        // spoken") — but otherwise reads every visible card (owner 2026-08-22: no further cap).
-                        const readAloudSegments = buildResultsReadAloudSegments(introText, m.result.listings.slice(0, shown));
-                        return <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} />;
                       })()}
                     </>
                   )}

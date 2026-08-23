@@ -1,8 +1,11 @@
 // Builds the spoken script for a property-search response (owner structure requirement, 2026-08-19):
 //   "إزهله" -> short pause -> the AI summary -> short pause -> visible property cards, in order,
-//   each separated by a short pause. Never reads raw JSON, ids, URLs, source-table names, or any
-//   other internal field — every card fact comes from the SAME Arabic display helpers ResultCard.tsx
-//   itself uses (src/lib/listingDisplay.ts), so what's spoken can never disagree with what's shown.
+//   each separated by a short pause -> short pause -> the closing "showed you N, want more?" note
+//   and its available actions (owner request, 2026-08-23), when the caller supplies one. Never reads
+//   raw JSON, ids, URLs, source-table names, or any other internal field — every card fact comes
+//   from the SAME Arabic display helpers ResultCard.tsx itself uses (src/lib/listingDisplay.ts), and
+//   `closingNote` is text the CALLER already renders on screen (agent.tsx) — never re-derived here
+//   — so what's spoken can never disagree with what's shown.
 import type { Listing } from '@/data/listings';
 import { translate } from '@/i18n';
 import { listingTypeAr, listingLocationAr, listingPriceAr, listingPlatformAr } from './listingDisplay';
@@ -35,12 +38,22 @@ function cardSpeech(listing: Listing): string {
 // «عرض المزيد» is never spoken (owner requirement: "no hidden listing should be spoken"). No further
 // cap here — owner request, 2026-08-22: read every visible card, not just the first few ("it
 // doesn't do it for all the cards... do it all"). Previously capped at 5; removed.
-export function buildResultsReadAloudSegments(summaryText: string, visibleListings: Listing[]): ReadAloudSegment[] {
+//
+// `closingNote` (owner request, 2026-08-23 — "read the note... and say the button also"): the same
+// «عرضت لك أول N إعلانات...» text + available-action sentence agent.tsx already renders below the
+// cards, already composed by the caller from the SAME variables the visible Text/buttons use — this
+// function only ever appends it, verbatim, as the final spoken segment. Omit/empty when that block
+// isn't rendered (e.g. an Advanced Filter interview is open) — never speak an action that isn't on
+// screen to tap.
+export function buildResultsReadAloudSegments(summaryText: string, visibleListings: Listing[], closingNote?: string): ReadAloudSegment[] {
   const segments: ReadAloudSegment[] = [{ text: INTRO_WORD, pauseAfterMs: PAUSE_MS }];
   const summary = summaryText.trim();
   if (summary) segments.push({ text: summary, pauseAfterMs: PAUSE_MS });
+  const note = closingNote?.trim();
   visibleListings.forEach((listing, i) => {
-    segments.push({ text: cardSpeech(listing), pauseAfterMs: i < visibleListings.length - 1 ? PAUSE_MS : 0 });
+    const isLast = i === visibleListings.length - 1;
+    segments.push({ text: cardSpeech(listing), pauseAfterMs: isLast && !note ? 0 : PAUSE_MS });
   });
+  if (note) segments.push({ text: note, pauseAfterMs: 0 });
   return segments;
 }

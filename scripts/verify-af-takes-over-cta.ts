@@ -35,12 +35,19 @@ const check = (label: string, ok: boolean, detail = '') => {
 console.log('\nAdvanced Filter takes over the CTA space\n');
 
 // ── the gate itself ──────────────────────────────────────────────────────────────────────────────
+// Owner 2026-08-23 hoisted the inline `(hasMore || canNarrowFurther) && !ageFlow` ternary condition
+// into a named `showActionsRow` const (Read Aloud's spoken closing note needed the SAME gate, to
+// decide whether it may mention the buttons) — same gate, same semantics, just named. Accept either
+// shape: the definition carrying the exact boolean expression, and the JSX still branching on it.
 check('the pre-AF CTA row is hidden while the AF flow is open',
-  /\{\(hasMore \|\| canNarrowFurther\) && !ageFlow \? \(/.test(code),
-  'without `&& !ageFlow` the two buttons keep rendering underneath the AF overlay');
+  /const showActionsRow = \(hasMore \|\| canNarrowFurther\) && !ageFlow;/.test(code)
+  && /\{showActionsRow \? \(/.test(code),
+  'without `&& !ageFlow` in the gate (or a branch that no longer uses it) the two buttons keep rendering underneath the AF overlay');
 
-// It must be the WHOLE row, so neither button can survive alone.
-const rowStart = code.indexOf('(hasMore || canNarrowFurther) && !ageFlow');
+// It must be the WHOLE row, so neither button can survive alone. Anchored on the JSX branch itself
+// (not the const definition, which now sits earlier, ahead of unrelated Read Aloud text-building
+// code) — this is the same position relative to the two buttons the old inline ternary was.
+const rowStart = code.indexOf('showActionsRow ? (');
 const rowChunk = code.slice(rowStart, rowStart + 2600);  // the row spans ~1.9k chars
 check('the gate wraps BOTH buttons (Load more + the AF launcher)',
   /Load more/.test(rowChunk) && /Let’s narrow it down/.test(rowChunk),
