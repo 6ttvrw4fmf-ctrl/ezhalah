@@ -384,6 +384,124 @@ try {
   check('[H mobile] resubmitting untouched after rapid-Stop returns the EXACT SAME count as baseline',
     Number.isFinite(mobResubmitCount) && mobResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${mobResubmitCount}`);
 
+  // ---- Journey I: Advanced Filter reentrancy — a rapid double-tap on «متابعة»/confirm must never
+  // downgrade or lose an already-recorded answer (bug-hunt 2026-08-23, fixed in commitGuidedStep's
+  // ageFlowCommittingRef guard). presentGuided's re-rank is a real network round trip before the next
+  // question replaces the current one on screen; a second tap landing in that gap used to be
+  // processed as a second answer to the SAME step, and a single-select re-click reads as "clear the
+  // selection" — silently downgrading a real answer to unanswered and re-showing the same question.
+  // This journey deliberately fires that double-tap on several questions and asserts none of it ever
+  // happened: no question is ever re-presented, the live count never goes back UP after an answer,
+  // and the interview lands on a genuinely narrowed set — never back at the unfiltered start count.
+  // Expo Router's Stack keeps a replaced screen's prior instance mounted-but-hidden rather than
+  // fully unmounting it (the SAME pre-existing behaviour `visibleInputs` above already works
+  // around) — a stale af-card can briefly linger alongside the fresh one. `document.querySelector`
+  // returns the FIRST match in document order, which is not guaranteed to be the visible one.
+  // Scope every AF read to `offsetParent !== null`, exactly like `visibleInputs`.
+  const afPresent = () => page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid="af-card"]')).some((e) => e.offsetParent !== null));
+  const afSnapshot = () => page.evaluate(() => {
+    const visible = (sel) => Array.from(document.querySelectorAll(sel)).find((e) => e.offsetParent !== null);
+    const title = visible('[data-testid="af-question-title"]')?.innerText?.trim() ?? null;
+    const options = Array.from(document.querySelectorAll('[data-testid^="af-option-"]')).filter((e) => e.offsetParent !== null).map((e) => e.getAttribute('data-testid'));
+    const countChip = visible('[data-testid="af-count-chip"]')?.innerText?.trim() ?? null;
+    return { title, options, count: countChip ? parseInt(countChip.replace(/[^\d]/g, ''), 10) : null };
+  });
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(4000);
+  await tap('إيجار'); await tap('شراء'); await tap('سنوي');
+  await pickCity('الرياض');
+  for (const name of ['النرجس', 'الملقا', 'الياسمين', 'الربيع', 'القيروان', 'العارض']) {
+    await page.click('input >> nth=1');
+    await page.type('input >> nth=1', name, { delay: 40 });
+    await page.waitForTimeout(1600);
+    await tap(`حي ${name}`);
+    await page.waitForTimeout(300);
+  }
+  await tap('الفلل والبيوت'); await tap('فيلا');
+  await tap('بحث');
+  const reentrancyStart = await waitForCount(45000);
+  check('[I] reentrancy-journey scope lands with a real start count', Number.isFinite(reentrancyStart), `start=${reentrancyStart}`);
+
+  let afOpened = false;
+  for (let i = 0; i < 6 && !afOpened; i++) {
+    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+    await page.waitForTimeout(1200);
+    afOpened = await afPresent();
+  }
+  check('[I] Advanced Filter opens on this large multi-district scope', afOpened);
+
+  const seenTitles = [];
+  let doubleProcessed = 0, countIncreased = 0, prevCount = reentrancyStart;
+  let guard = 0;
+  while (afOpened && guard < 10) {
+    guard++;
+    let snap = await afSnapshot();
+    for (let r = 0; r < 10 && !snap.title; r++) { await page.waitForTimeout(800); snap = await afSnapshot(); }
+    if (!snap.title || !snap.options.length) break;
+    if (seenTitles.includes(snap.title)) doubleProcessed++;
+    seenTitles.push(snap.title);
+    if (snap.count !== null && snap.count > prevCount) countIncreased++;
+    await page.waitForTimeout(1200); // let the just-rendered row finish mounting before targeting it
+    // Pick the option covering the LARGEST slice (a real, meaningfully-narrowing answer).
+    const opt = snap.options[0];
+    const askedTitle = snap.title;
+    await page.locator(`[data-testid="${opt}"]:visible`).first().click({ timeout: 10000 });
+    await page.waitForTimeout(300);
+    // THE double-tap: fire the confirm click TWICE back-to-back, no wait in between — exactly the
+    // race window commitGuidedStep's reentrancy guard exists to close.
+    const confirmSel = page.locator('[data-testid="af-confirm"]:visible').first();
+    await Promise.allSettled([confirmSel.click({ timeout: 8000 }), confirmSel.click({ timeout: 8000 })]);
+    // af-card stays MOUNTED continuously between questions (only unmounts once the mining
+    // transition starts) — so "is af-card present" is a no-op wait condition mid-interview. Poll for
+    // the actual signal: either the QUESTION TITLE changing (the next card really replaced this one)
+    // or the card disappearing (interview finished) or the real results text landing. Racing this
+    // read against the still-in-flight rankQuestions() call is the same class of bug PR#842 fixed
+    // for Stop/resubmit reads — wait for the real signal, not a fixed delay.
+    let waited = 0;
+    // NOTE: RESULT_COUNT (`لقينا|ما لقينا`) is NOT a valid exit signal here — the results screen
+    // stays mounted (dimmed) BEHIND this overlay the whole time, so that text is on the page from
+    // the very first check regardless of whether the interview has actually advanced or finished.
+    while (waited < 45000) {
+      await page.waitForTimeout(500); waited += 500;
+      const stillThere = await afPresent();
+      if (!stillThere) break; // interview genuinely finished (mining phase unmounts af-card)
+      const nowTitle = (await afSnapshot()).title;
+      if (nowTitle && nowTitle !== askedTitle) break; // the next question really replaced this one
+    }
+    afOpened = await afPresent();
+    if (afOpened) {
+      const s2 = await afSnapshot();
+      if (s2.count !== null) { if (s2.count > prevCount) countIncreased++; prevCount = s2.count; }
+    }
+  }
+  const reentrancyFinalOpen = await afPresent();
+  // af-card disappearing does NOT mean the new search has landed — finishGuided's mining transition
+  // has its own guaranteed minimum beat (>=1.4s hold + 1.1s fade, src/app/agent.tsx finishGuided)
+  // during which the OLD (pre-AF) results are still what's on screen underneath. Reading the count
+  // the instant af-card vanishes catches that stale text — the same class of race PR#842 fixed for
+  // Stop/resubmit. Give the mining beat's own floor time to elapse, then require the count to be
+  // STABLE across two reads a second apart before trusting it.
+  let reentrancyFinal = null;
+  if (!reentrancyFinalOpen) {
+    await page.waitForTimeout(3000);
+    let stableSince = null;
+    const until = Date.now() + 45000;
+    while (Date.now() < until) {
+      const c = await landedCount();
+      if (c !== null) {
+        if (stableSince !== null && stableSince.value === c && Date.now() - stableSince.at >= 1000) { reentrancyFinal = c; break; }
+        if (stableSince === null || stableSince.value !== c) stableSince = { value: c, at: Date.now() };
+      }
+      await page.waitForTimeout(500);
+    }
+  }
+  check('[I] double-tap NEVER re-presents an already-answered question', doubleProcessed === 0, `repeats=${doubleProcessed} sequence=${JSON.stringify(seenTitles)}`);
+  check('[I] the live count NEVER goes back up after an answer (no silent downgrade-to-unanswered)', countIncreased === 0, `count-increases=${countIncreased}`);
+  check('[I] the interview lands on a genuinely narrowed set, never back at the unfiltered start',
+    !reentrancyFinalOpen && Number.isFinite(reentrancyFinal) && reentrancyFinal < reentrancyStart && reentrancyFinal !== reentrancyStart,
+    `start=${reentrancyStart} final=${reentrancyFinal}`);
+
   check('no uncaught runtime error across the whole run', crashes.length === 0, crashes.join(' | '));
 } catch (e) {
   failed++;
