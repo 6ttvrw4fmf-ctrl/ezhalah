@@ -634,6 +634,12 @@ const AR: Record<string, string> = {
   'We found {total} listings matching your search, and showed you {shown}.': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها.',
   'I can show you 100 listings at a time.': 'أقدر أعرض لك 100 إعلان في كل مرة.',
   'Let’s narrow it down': 'خلّنا نحدد الطلب أكثر',
+  // Read Aloud closing note (owner request, 2026-08-23 — "read the note... and say the button
+  // also"): spoken ONLY when the matching buttons are actually on screen (agent.tsx gates this the
+  // same way), naming the exact same button label(s) so it can never mention an action that isn't
+  // there to tap.
+  'You can tap {a} or {b}.': 'تقدر تضغط على {a} أو {b}.',
+  'You can tap {a}.': 'تقدر تضغط على {a}.',
   'Help me find more precise results': 'ساعدني ألقى نتائج أدق',
   'I can get you something more precise.': 'أقدر أجيب لك نتائج أدق.',
   // Composer placeholder (owner wording 2026-08-16) — names the domain and the country, in the

@@ -41,11 +41,14 @@ const AR_LANG = 'ar-SA';
 // conversational speed rather than an artificially slowed reading voice. Pitch is left at the engine
 // default: pushing it further tends toward uncanny rather than more natural.
 const DEFAULT_RATE = 1.3;
-// Speed-control steps (owner 2026-08-22: "cycle through 0.8x → 1x → 1.2x → 1.3x"). The label IS the
-// real SpeechSynthesisUtterance.rate multiplier, not a separately-normalized "feel" scale — the Web
+// Speed-control steps (owner 2026-08-22: "cycle through 0.8x → 1x → 1.2x → 1.3x"; extended
+// 2026-08-23 — owner: "let the user make the speed faster"). The label IS the real
+// SpeechSynthesisUtterance.rate multiplier, not a separately-normalized "feel" scale — the Web
 // Speech API's `rate` is already defined as a multiplier of the voice's own default pace, so "1.3x"
-// on screen already means exactly what it says. Kept as the visible, tappable speed chip.
-export const RATE_STEPS = [0.8, 1, 1.2, 1.3] as const;
+// on screen already means exactly what it says. 1.3 stays the DEFAULT a fresh reading starts at
+// (it's the measured natural-pace value — see DEFAULT_RATE above); these extra faster steps are an
+// explicit user choice via the speed chip, not a change to what a first-time listener hears.
+export const RATE_STEPS = [0.8, 1, 1.2, 1.3, 1.5, 1.75, 2] as const;
 
 // VOICE RESOLUTION (rewritten 2026-08-22 — see the file-header root-cause note). Three real states,
 // not a boolean: `bestArabicVoice` is the confirmed match the moment one is found (read directly by
