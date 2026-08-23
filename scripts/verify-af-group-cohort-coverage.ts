@@ -68,7 +68,12 @@ const SHAPES: Array<{ label: string; extra: Record<string, unknown> }> = [
 // 2026-08-23 and reported to the owner as a product/taxonomy decision — NOT waived, and not to be
 // grown. Shrinking it is the goal; either direction must be a deliberate edit to this list.
 const UNCERTIFIED_IN_SHIPPED_GROUPS = [
-  'Camp', 'Chalet', 'Duplex', 'Factory', 'Service Facilities', 'Staff Housing',
+  // Duplex and Factory were certified 2026-08-23 after a source audit (see afCohorts.ts). These four
+  // were audited the same day and did NOT earn a cohort: Camp (4 rows rent-annual / 28 monthly, 0
+  // fresh), Chalet (passes every DB gate but HALF of 24 source-adjudicated rows now have both
+  // structured keys null on the live page), Staff Housing (3 rows / 1), Service Facilities (40 rows
+  // total across six unrelated raw types, largest 11).
+  'Camp', 'Chalet', 'Service Facilities', 'Staff Housing',
 ].sort();
 
 // ── BASELINE 2: how many cohort-gated questions each shipped group allows, per shape ─────────────
@@ -76,11 +81,13 @@ const UNCERTIFIED_IN_SHIPPED_GROUPS = [
 // because MIN_USEFUL_QUESTIONS_TO_SHOW is 2. Pinned so a change is visible on the PR that causes it.
 const EXPECTED: Record<string, Record<string, number>> = {
   'Apartments & Co-living': { Buy: 0, 'Rent/Annual': 1, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
-  'Villas & Houses': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
+  // Buy 0 -> 1 on 2026-08-23: Duplex certified with its one source-verified field (bathrooms).
+  'Villas & Houses': { Buy: 1, 'Rent/Annual': 0, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
   'Vacation & Rural': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
   'Residential Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
   'Retail & Workspace': { Buy: 1, 'Rent/Annual': 1, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
-  'Industrial & Logistics': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
+  // 0 -> 1 on both deals: Factory certified with street_width. Capped at 1 by Warehouse ∩ Workshop.
+  'Industrial & Logistics': { Buy: 1, 'Rent/Annual': 1, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
   'Commercial Buildings & Facilities': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
   'Commercial & Industrial Plots': { Buy: 2, 'Rent/Annual': 0, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
 };
@@ -139,6 +146,51 @@ for (const { macro, group, types } of shippedGroups) {
         `"${group}" / ${label}: ${n} cohort-gated question(s) eligible, pinned ${expected[label]}.\n` +
         `      Advanced Filter needs MIN_USEFUL_QUESTIONS_TO_SHOW (2) to open, so this changes\n` +
         `      whether the feature is reachable at all for that group. Intentional? Update the pin.`,
+      );
+    }
+  }
+}
+
+// ── 2b. the CEILING: is a group blocked by uncertified types, or by its certified ones? ──────────
+// The 2026-08-23 audit's most actionable finding. Certifying every uncertified member of a group
+// cannot lift it above the intersection of the members ALREADY certified — so a group whose ceiling
+// is already < 2 can never be fixed by certification, however much inventory arrives. That is a
+// PRODUCT question about the intersection rule, not a data question, and this pin makes the two
+// cases distinguishable on sight instead of being rediscovered by another browser journey.
+//
+// `property_age` is excluded here for a load-bearing reason: its eligibility is isAgeFilterScopeFor(),
+// which requires a SINGLE selected type, so it can never fire for a group search whatever a cohort
+// lists. Counting it would overstate every ceiling below.
+const CEILING: Record<string, Record<string, number>> = {
+  'Apartments & Co-living': { Buy: 0, 'Rent/Annual': 1, 'Rent/Monthly': 2 },
+  'Villas & Houses': { Buy: 1, 'Rent/Annual': 6, 'Rent/Monthly': 3 },
+  'Vacation & Rural': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
+  'Residential Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
+  'Retail & Workspace': { Buy: 1, 'Rent/Annual': 1, 'Rent/Monthly': 0 },
+  'Industrial & Logistics': { Buy: 1, 'Rent/Annual': 1, 'Rent/Monthly': 0 },
+  'Commercial Buildings & Facilities': { Buy: 2, 'Rent/Annual': 1, 'Rent/Monthly': 0 },
+  'Commercial & Industrial Plots': { Buy: 2, 'Rent/Annual': 0, 'Rent/Monthly': 0 },
+};
+const DEAL_KEYS: Array<[string, 'Buy' | 'RentAnnual' | 'RentMonthly']> = [
+  ['Buy', 'Buy'], ['Rent/Annual', 'RentAnnual'], ['Rent/Monthly', 'RentMonthly'],
+];
+for (const { group, types } of shippedGroups) {
+  const expected = CEILING[group];
+  if (!expected) { fail(`Shipped group "${group}" has no pinned ceiling row.`); continue; }
+  for (const [label, key] of DEAL_KEYS) {
+    const certified = types.filter((t) => (COHORT_QUESTIONS as Record<string, Record<string, string[]>>)[t]?.[key]);
+    let inter: string[] | null = null;
+    for (const t of certified) {
+      const list = ((COHORT_QUESTIONS as Record<string, Record<string, string[]>>)[t][key])
+        .filter((q) => (COHORT_GATED_IDS as readonly string[]).includes(q));
+      inter = inter === null ? list : inter.filter((q) => list.includes(q));
+    }
+    const ceil = certified.length ? (inter ?? []).length : 0;
+    if (ceil !== expected[label]) {
+      fail(
+        `"${group}" / ${label}: best-case ceiling is ${ceil}, pinned ${expected[label]}. A ceiling\n` +
+        `      below 2 means NO amount of certifying that group's remaining types can ever open\n` +
+        `      Advanced Filter for it — only a change to the intersection rule could.`,
       );
     }
   }

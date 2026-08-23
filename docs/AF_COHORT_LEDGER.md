@@ -305,3 +305,58 @@ only which questions the client is willing to SURFACE changes. Full architecture
 intersection, not union" reasoning: `docs/ARCHITECTURE.md` §17. Mutation-tested barrier:
 `scripts/verify-mixed-period-af-gating.ts` (npm test) — proves the old union-shaped bug fails this
 test, and `scripts/verify-age-filter-gate.ts` covers the property_age half.
+
+## Re-audit of the six uncertified types — 2026-08-23 (owner order)
+
+Six clean types sat outside `COHORT_QUESTIONS`, and because `cohortAllows()` intersects across every
+selected type and treats an uncertified type as an EMPTY cohort, each one zeroed Advanced Filter for
+every shipped GROUP containing it. Owner order: audit them individually against real source data and
+certify only what is genuinely supported — "do not copy Villa questions into Duplex merely because
+they seem similar."
+
+Measured against TODAY's production inventory, then adjudicated against the LIVE source page.
+
+| type | cohort | n (fresh/7d) | platforms | supported | unsupported | certified | source evidence |
+|---|---|---|---|---|---|---|---|
+| **Duplex** | Buy | 117 (5) | 9, top 40.2% | `bathrooms` 76/117 = 65%, 4 rungs | age 12, street 14, dir 9, kitchen 7, parking 6, furnished 1, rnpl 0 | **1** | **YES** — 6/6 exact vs hajerhouses' «دورات المياه» |
+| Duplex | Rent/Annual | 17 (1) | 8 | — | below the 26-row scope floor entirely | 0 | n/a |
+| **Factory** | Rent/Annual | 72 (7) | 2, top 94.4% | `street_width` 68/72 = 94% | bath 1, dir 3, rnpl 66 known/0 yes | **1** | **YES** — 10/10 exact vs aqar's structured `street_width` key |
+| **Factory** | Buy | 34 (2) | 2, top 94.1% | `street_width` 29/34 = 85% | bath 0, dir 5 | **1** | **YES** — same probe |
+| Chalet | Rent/Annual | 61 (4) | 5, top 85.2% | age 53, bath 54, street 56 pass every DB gate | — | **0** | **MIXED** — of 24 rows adjudicated, **12 now have BOTH structured keys null** on the live page |
+| Chalet | Buy / Monthly | 25 / 292 (0) | 6 / 1 | — | Buy below floor; Monthly has ZERO coverage on every AF field | 0 | n/a |
+| Camp | Rent ×2 | 4 / 28 (0) | 1–2 | — | no inventory | 0 | n/a |
+| Staff Housing | Rent ×2 | 3 / 1 | 1 | — | no inventory | 0 | n/a |
+| Service Facilities | — | **40 total** | — | — | six unrelated raw types (bank 11 / parking 10 / telecom tower 9 / school 6 / health centre 4); largest 11 | 0 | n/a |
+
+`property_age` is source-verified 10/10 for Factory but deliberately **not** listed: `AGE_FILTER_TYPES`
+has no Factory entry and that gate's own floor is 150 rows (Factory has 72/34), so the question could
+never be offered. Listing it would be availability for a question the type can never be asked.
+
+**Certifying these does NOT open Advanced Filter for any group, and that is the audit's main finding.**
+Every group's best case is the intersection of its ALREADY-CERTIFIED members, and `property_age` cannot
+count toward it at all (its eligibility requires a SINGLE selected type, so it never fires for a group).
+Measured ceilings, now pinned by `scripts/verify-af-group-cohort-coverage.ts`:
+
+| group | Buy | Rent/Annual | blocked by |
+|---|---|---|---|
+| Apartments & Co-living | 0 | 1 | its own certified members |
+| **Villas & Houses** | 1 | **6** | Duplex needs a SECOND supported field it does not have (Rent side: Duplex n=17) |
+| Vacation & Rural | 2 | 2 | Camp — uncertifiable at 4 rows |
+| Residential Plots | **2** ✅ | **2** ✅ | — |
+| Retail & Workspace | 1 | 1 | its own certified members |
+| Industrial & Logistics | 1 | 1 | Warehouse ∩ Workshop — Factory cannot lift it |
+| Commercial Buildings & Facilities | 2 | 1 | Staff Housing + Service Facilities |
+| Commercial & Industrial Plots | **2** ✅ | 0 | — |
+
+So three groups (Apartments & Co-living, Retail & Workspace, Industrial & Logistics) can never be
+opened by certification at all — only a change to the intersection rule would, and that is a product
+decision, not a data one.
+
+Registry: 56 → 59 enabled rows (`20260823205033`), floor raised with it.
+
+**Also adjudicated the same day:** `af_field_stuck_no_variance` / sanadak `driver_room` is a
+SOURCE-PUBLISHED negative, not a manufactured one — 4/4 live pages carry an explicit
+`"isDriverRoomAvailable": false` (land listings included), and the field is two-sided platform-wide
+(32 true / 951 false over 983 rows). Acknowledged for that one segment only (`20260823205435`).
+The aqar maid/driver segments in the same alert are fixed at the parser level (#987) and clear as the
+8-hourly sweep re-enriches; satel, wasalt and aqaratikom segments remain **unadjudicated**.
