@@ -653,6 +653,9 @@ const AR: Record<string, string> = {
   // Composer placeholder (owner wording 2026-08-16) — names the domain and the country, in the
   // conversational register the rest of the agent speaks.
   "Type the property you're looking for in Saudi Arabia...": 'اكتب العقار اللي تبحث عنه في السعودية...',
+  // Stable composer accessibility label (owner brief 2026-08-23 §11) — the ONE sentence a screen
+  // reader hears for the AI input; the rotating examples are aria-hidden decoration.
+  'Describe the property you are looking for': 'اكتب وصف العقار اللي تبحث عنه',
   'Want more accurate results?': 'تريد نتائج أدق؟',
   'I can ask you a few questions to find your perfect match.': 'يمكنني طرح بعض الأسئلة لإيجاد ما يناسبك تماماً.',
   'Ezhalah displays listings sourced from third party platforms. We do not recommend, verify or own any listing. The choice is yours.':
