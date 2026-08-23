@@ -16,6 +16,7 @@
 // 5 of 8 shipped groups could not open Advanced Filter on Buy; 5 of 8 could not on Rent; a
 // category-only scope could NEVER open it. The fix resolves the scope by ASKING, and must never be
 // "fixed" instead by loosening cohortAllows' `.every()` — see the mutation proof at the end.
+import { readFileSync } from 'node:fs';
 import type { SearchQuery } from '../src/data/search.ts';
 import {
   SCOPE_GROUP_ID, SCOPE_TYPE_ID, SCOPE_QUESTION_IDS, isScopeQuestionId,
@@ -212,6 +213,24 @@ check('isScopeQuestionId recognises both and nothing else',
   check('MUTATION: a .some()/union gate would offer «bathrooms» to Villa+Duplex — and is caught here',
     realIntersect === false && mutatedUnion === true,
     `intersection=${realIntersect} union=${mutatedUnion} — if these are equal this proof has gone blind`);
+}
+
+// ── THE AUTO-RESOLVE MUST ADVANCE THE CURSOR (regression, found by reading 2026-08-23) ───────────
+// A tier with <=1 option is recorded and skipped rather than rendered. The first implementation
+// re-entered presentGuided on the SAME stepIndex — but the step had just been pushed, so the replay
+// branch (stepIndex < steps.length) matched and rendered the very question that had nothing to
+// choose between. Verified live afterwards: «الأراضي السكنية» (one member type) now goes straight
+// from the group answer to «كم عرض الشارع تفضل؟». agent.tsx cannot be imported, so this is pinned
+// on the source — but on the SEMANTIC invariant (advance past what you just recorded), not spelling.
+{
+  const ag = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
+  const block = ag.slice(ag.indexOf('const auto = opts.length === 1'), ag.indexOf('const auto = opts.length === 1') + 900);
+  check('the auto-resolved scope step ADVANCES the cursor (never re-enters on the same index)',
+    /presentGuided\(stepIndex \+ 1, token\)/.test(block) && !/presentGuided\(stepIndex, token\)/.test(block),
+    'auto-resolving on the same cursor makes the replay branch render the skipped question');
+  check('a single-option tier is recorded as ANSWERED with that key, not as a skip',
+    /const auto = opts\.length === 1 \? \[opts\[0\]\.key\] : \[\];/.test(block),
+    'recording it as a skip would leave the scope unresolved and the cohort intersection empty');
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll scope-hierarchy assertions passed');

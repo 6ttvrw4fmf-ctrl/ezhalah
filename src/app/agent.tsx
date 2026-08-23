@@ -1312,7 +1312,11 @@ export default function Agent() {
         // stalling, and neither case invents a predicate the user did not ask for.
         const auto = opts.length === 1 ? [opts[0].key] : [];
         ageFlowStepsRef.current = [...steps, { question, options: opts, unknownCount: 0, total: res?.total ?? 0, keys: auto }];
-        await presentGuided(stepIndex, token);      // same cursor: the auto-resolved step is not shown
+        // ADVANCE PAST the step we just recorded. Re-entering on the SAME cursor would find the step
+        // now present in the record and take the REPLAY branch above — rendering the very question
+        // that had nothing to choose between. Moving to stepIndex + 1 both skips it and makes
+        // syncGuidedFromSteps apply its auto-committed answer to the scope.
+        await presentGuided(stepIndex + 1, token);
         return;
       }
       ageFlowStepsRef.current = [...steps, { question, options: opts, unknownCount: res!.unknownCount, total: res!.total, keys: null }];
