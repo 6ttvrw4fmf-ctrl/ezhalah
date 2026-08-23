@@ -185,6 +185,51 @@ def test_harvest_ids_returns_the_completeness_flag():
     assert isinstance(out[2], bool)
 
 
+def test_all_pages_failing_is_INCOMPLETE_even_though_the_budget_was_never_hit():
+    """THE 2026-08-17 SHAPE. The egress failed, every browse page errored, the harvest still
+    finished fast — so the budget was never touched. If completeness keyed only on the budget,
+    this returns complete=True on an EMPTY seed set and the run goes on to prune. That day souq24
+    returned 8 rows instead of 43 and reported ok=true: an 81% silent loss no barrier caught."""
+
+    class _AllFail(_FakeSession):
+        def get(self, url, timeout=None, **kw):
+            if url == sq.SITEMAP:
+                return super().get(url, timeout=timeout, **kw)
+            raise ConnectionError("simulated egress denial")
+
+    s = _AllFail(sitemap_pages=3)
+    ids, mx, complete = sq.harvest_ids(s)
+    assert ids == set(), "no page was readable, so there can be no seed ids"
+    assert complete is False, (
+        "every page failing must be INCOMPLETE — keying completeness on the budget alone lets a "
+        "total egress failure through as a 'complete' empty harvest, and the run then prunes"
+    )
+
+
+def test_a_partial_page_failure_is_also_incomplete():
+    """The dangerous middle case: most pages answer, a few do not. The seed set is short but
+    non-empty, so neither an emptiness check nor prune_unseen's collapse guard would catch it.
+    An unread page is an un-enumerated page."""
+    state = {"n": 0}
+
+    class _SomeFail(_FakeSession):
+        def get(self, url, timeout=None, **kw):
+            if url == sq.SITEMAP:
+                return super().get(url, timeout=timeout, **kw)
+            state["n"] += 1
+            if state["n"] % 5 == 0:
+                raise ConnectionError("simulated intermittent denial")
+            return super().get(url, timeout=timeout, **kw)
+
+    s = _SomeFail(sitemap_pages=10)
+    ids, mx, complete = sq.harvest_ids(s)
+    assert ids, "most pages answered, so there ARE seed ids — this is the subtle case"
+    assert complete is False, (
+        "a partially-read harvest must not count as complete: the missing pages may hold the very "
+        "ids above the 1300 numeric floor that pruning would then inactivate"
+    )
+
+
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-v"]))

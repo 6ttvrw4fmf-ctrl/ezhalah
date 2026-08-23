@@ -356,14 +356,27 @@ def harvest_ids(s: cc.Session) -> tuple[set[int], int, bool]:
         list(ex.map(one, pages))
 
     elapsed = time.monotonic() - t0
-    complete = not ran_out.is_set()
     mx = max(ids) if ids else 0
+    # Completeness needs BOTH halves. The budget is only one way to end up with a short seed set;
+    # the other is every page answering with an error, which never touches the budget at all. That
+    # is not hypothetical — it is precisely what 2026-08-17 looked like: the egress failed, the
+    # harvest still finished quickly, and souq24 returned 8 rows instead of 43 while reporting
+    # ok=true. An 81% silent data loss that no barrier caught. So a page we could not read is a
+    # page we did not enumerate, full stop, and any read failure makes this harvest incomplete.
+    #
+    # Deliberately strict: one transient page failure suppresses this run's prune. Pruning is
+    # destructive and irreversible, souq24 only runs every two days, and mon_detect_enumeration_
+    # incomplete() now surfaces a suppressed prune — so the cost of being strict is visible and
+    # recoverable, while the cost of being lax is inactivating live listings.
+    complete = (not ran_out.is_set()) and failed == 0 and visited == len(pages)
     print(f"  harvest: {visited}/{len(pages)} browse pages in {elapsed:.1f}s "
           f"({failed} failed, {_HARVEST_WORKERS} workers, {_HARVEST_PAGE_TIMEOUT_S}s/page) "
           f"-> {len(ids)} seed ids, max id {mx}", flush=True)
     if not complete:
-        print(f"  ⚠ harvest: hit the {_HARVEST_BUDGET_S}s budget before visiting every page — "
-              f"seed set is INCOMPLETE, so this run will NOT prune", flush=True)
+        why = ("hit the %ds budget" % _HARVEST_BUDGET_S) if ran_out.is_set() else \
+              ("%d page(s) unreadable" % (failed + (len(pages) - visited - failed)))
+        print(f"  ⚠ harvest: {why} — seed set is INCOMPLETE, so this run will NOT prune "
+              f"(an unread page is an un-enumerated page)", flush=True)
     return ids, mx, complete
 
 
