@@ -1,0 +1,40 @@
+name: Gathern nightly-scale source probe (read-only)
+
+# ONE question, answered against the source itself: does gathern PUBLISH a nightly price of 99,000
+# SAR for the units we store that way, or is that figure the ×100 artifact of the pre-#503 Arabic
+# decimal separator bug (fixed 2026-08-12), left behind on rows written before the fix?
+#
+# Five of the six flagged rows were adjudicated source-real on 2026-08-17 and permanently exempted
+# from `field_integrity_extreme_magnitude` via ops_price_source_verified. That adjudication's proof
+# — "price_annual / 12 / nightly ≈ 30, so the chain is internally consistent" — is scale-invariant:
+# if the parser inflated nightly AND monthly by the same 100×, the ratio is still 30. Only the RAW
+# string settles it, and the audit container's egress policy hard-403s gathern. Actions reaches it
+# every day (this is where the production scraper runs), so the probe runs here.
+#
+# READ-ONLY BY CONSTRUCTION: no Supabase secrets are passed to this job, so it cannot write to the
+# database even if it wanted to — it only prints evidence to the log.
+#
+# Dispatch-only — there is nothing to schedule; this answers a one-off adjudication question.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: gathern-nightly-scale-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Probe the source (no DB credentials in this job)
+        run: python scripts/diagnose_gathern_nightly_scale.py
