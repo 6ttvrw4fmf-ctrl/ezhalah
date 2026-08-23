@@ -60,7 +60,7 @@ check(
 );
 check(
   "9b/13. the row is PHYSICALLY pinned direction:'ltr' so the page's RTL can never mirror it",
-  /voiceRow: \{[^}]*direction: 'ltr'/.test(agent),
+  /testID="voice-recording-row"[\s\S]{0,600}s\.voiceRow, \{ direction: 'ltr' \} as any/.test(agent),
 );
 
 // ── 2. X discards completely — nothing sent, transcript dropped, composer text untouched ────────

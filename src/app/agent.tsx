@@ -2499,7 +2499,9 @@ export default function Agent() {
               <View
                 testID="voice-recording-row"
                 pointerEvents={voiceState === 'recording' ? 'auto' : 'none'}
-                style={[s.voiceRow, VOICE_EASE, voiceState !== 'recording' && s.voiceRowHidden]}
+                // direction:'ltr' pins the PHYSICAL order X → waveform → ■ → ↑ against the page's
+                // RTL (owner brief §13; Sidebar's LTR_PIN idiom — inline, not StyleSheet.create).
+                style={[s.voiceRow, { direction: 'ltr' } as any, VOICE_EASE, voiceState !== 'recording' && s.voiceRowHidden]}
               >
                 <Pressable
                   testID="voice-cancel"
@@ -2815,9 +2817,9 @@ const s = StyleSheet.create({
   composerInnerHidden: { opacity: 0 },
   micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
-  // direction 'ltr' pins the PHYSICAL order X → waveform → ■ → ↑ against the page's RTL (owner
-  // brief §13 — verified by scripts/verify-voice-composer-contract.ts).
-  voiceRow: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 8, paddingRight: 8, direction: 'ltr' },
+  // The LTR pin that fixes the physical order lives INLINE on the row (Sidebar's LTR_PIN idiom —
+  // RNW rejects `direction` inside StyleSheet.create but honours it as an inline style).
+  voiceRow: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 8, paddingRight: 8 },
   voiceRowHidden: { opacity: 0, transform: [{ translateY: 4 }] },
   voiceRoundBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.segTrack, alignItems: 'center', justifyContent: 'center' },
   voiceStopSquare: { width: 12, height: 12, borderRadius: 3, backgroundColor: colors.ink },
