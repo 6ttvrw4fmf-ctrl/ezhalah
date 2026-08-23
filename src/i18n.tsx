@@ -742,6 +742,11 @@ const AR: Record<string, string> = {
     'لم أجد شيئاً بسعر {amount}، لكن إليك بعض الخيارات المشابهة لما تبحث عنه:',
   '{a}/month': '{a}/شهرياً',
   ' for {a}': ' بسعر {a}',
+  // COMBINED شراء+إيجار states TWO labelled budgets (Buy side + Rent side) instead of one bare price,
+  // so the bubble needs a "with …" carrier and an "and" that joins them. AR 'و' attaches with no
+  // trailing space, so the joiner is ' و' and the carrier ' ب' + the label. (2026-08-23 combined-budget fix.)
+  ' with {a}': ' ب{a}',
+  ' and ': ' و',
   ' for {a}/month': ' بسعر {a}/شهرياً',
   "You entered {a}/month × 12 = {b}/year, so I'm searching up to {b}. ": 'أدخلت {a}/شهرياً × 12 = {b}/سنوياً، لذا أبحث حتى {b}. ',
   ' for up to {a}/year': ' بسعر حتى {a}/سنوياً',
@@ -1179,6 +1184,16 @@ export const ARABIC_ONLY_MSG = 'هذا التطبيق يدعم اللغة الع
 // the ONLY way to explain why the button didn't proceed. Direct constant, not routed through t(),
 // same reasoning as ARABIC_ONLY_MSG above (this field has no English mode at all).
 export const CITY_REQUIRED_MSG = 'الرجاء اختيار مدينة من القائمة.';
+
+// District field, same rule as CITY_REQUIRED_MSG above but for an OPTIONAL field: the district text
+// box is a search box over the catalog — only a TAPPED suggestion (a chip) is ever searched. Typed
+// text that was never confirmed used to be dropped in silence: the field kept showing «النرجس»
+// while the search ran over the whole city and said nothing about it (live 2026-08-23: dropdown
+// advertised «حي النرجس · 1,699 إعلان», «بحث» landed on 36,908 city-wide, zero chips, zero warning).
+// Visible UI state must equal the committed request state, so Search now stops and says which of the
+// two honest outcomes the user has to choose: confirm the district, or clear the text and search the
+// whole city. Direct constant, not routed through t(), same reasoning as ARABIC_ONLY_MSG above.
+export const DISTRICT_UNCONFIRMED_MSG = 'الرجاء اختيار الحي من القائمة، أو مسح النص للبحث في المدينة كاملة.';
 
 // Neutral, honest label for a listing whose city/district could not be resolved to a real place —
 // NEVER invent a location, and NEVER show a raw scraper junk sentinel (e.g. the literal word

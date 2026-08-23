@@ -124,6 +124,15 @@ export function ResultCard({
     if (!raw) return '';
     const m = raw.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
     if (m) return m[1];
+    // ISO-8601 — «2025-09-21T20:33:43+03:00» — is what aqarcity, eaqartabuk and eastabha publish.
+    // This function only knew DD/MM/YYYY, so an ISO stamp (25 chars) fell through the `length <= 12`
+    // tail and returned '' — the «أضيف» chip silently vanished on 2,544 live listings that DO carry
+    // a source-published date (audit 2026-08-23: 76 of 595 audited cards, every one ISO).
+    // Read TEXTUALLY, never via `new Date()`: these stamps are +03:00 Saudi local, and re-reading the
+    // day in the viewer's timezone would shift the date the SOURCE published by a day. The digits are
+    // reordered into the card's one date format — same fact, nothing derived.
+    const iso = raw.match(/^\s*(\d{4})-(\d{2})-(\d{2})(?!\d)/);
+    if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
     if (/^\s*recently\s*$|مؤخر/.test(raw)) return t('recently');
     return raw.length <= 12 ? raw : '';
   };

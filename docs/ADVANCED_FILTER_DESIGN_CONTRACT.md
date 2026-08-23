@@ -245,9 +245,18 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
   rendered behind). ≤ 25, or an ineligible scope, keeps pure results-first. A manual «خلّنا نحدد
   الطلب أكثر» tap skips the intro (the user already opted in).
 - **The narrowing is always visible.** A live «N نتيجة» chip sits in the card bar and follows every
-  tentative selection; multi-select commits via «متابعة · N نتيجة» with the same live number. All
+  tentative selection; the primary commits via «متابعة · N نتيجة» with the same live number. All
   numbers come from the production count RPCs — never placeholders, never unknown-as-no.
 - **The escape is always one tap.** «عرض النتائج» replaces the question-count skip-all arithmetic.
+- **The primary ADVANCES; «عرض النتائج» TERMINATES** (owner 2026-08-23, corrects a shipped defect).
+  The primary reads «متابعة · N نتيجة» on single AND multi, because `onConfirm` is
+  `commitGuidedStep(keys)` in both cases: it records the answer and presents the next question.
+  Until this correction the label branched on ARITY and a single-select read «عرض N نتيجة» — a
+  button that promised results and delivered the next question instead. Arity was never a proxy for
+  terminality, and neither is ordinality: the pool is re-ranked after every answer, so the card
+  cannot know whether another question is coming. The one terminal control is the «عرض النتائج»
+  link (`af-skip-all` → `commitGuidedStep(keys, true)` → `finishGuided`). Pinned by
+  `scripts/verify-af-primary-advances-not-shows.ts`.
 - **Availability is explained naturally.** One tiny line — «الخيارات تعتمد على المعلومات المتوفرة
   للإعلانات الحالية» — replaces the technical unknown-count phrasing. No coverage/NULL/backend
   language anywhere user-facing.
@@ -350,3 +359,29 @@ gate alone left large, which is a tax on their attention, not a niche shortlist.
   reduce the eligible set, and does not treat an unknown value as "no" — this amendment did not
   need to touch that path, and the barrier locks the two handlers' shapes so a future edit can't
   quietly split them.
+
+---
+
+## Amendment 2026-08-23 — the footer is PINNED, only the question body scrolls
+
+§2's diagram already put the footer at the bottom of the card, but the implementation rendered it as
+the last child *inside* the card's body `ScrollView`. On a short question that was invisible; on a
+tall one it was the whole exit. Measured on production at 390×664 (iPhone 13): the bathrooms question
+kept «عرض النتائج» at y=541..558, and the very next question (amenities, 7 options) put the entire
+secondary row at y=656..682 against `innerHeight=664` — about 8px of glyph left. The card's inner
+scroller was `clientHeight=601 / scrollHeight=639`: 38px of scroll room, no scrollbar, no fade cue.
+«رجوع», «تخطي» and «عرض النتائج» all lived down there, so the only visible way out of the interview
+was the ✕.
+
+**The rule, for every question:** the action row — primary `Show {N}` / `Continue · {N}` plus the
+`Back / Skip / Show results` row — is a **flex sibling of the body scroller**, never a descendant of
+it. Only the title, description, brand strip, option list and availability note scroll. The scroller
+carries the explicit `flexShrink`, so it is the element that gives up height when the card hits
+`maxHeight: '100%'`; the footer keeps its own. The overlay reserves vertical padding, so the card's
+bottom edge is never the viewport's bottom edge and the pinned row cannot land under a phone's home
+indicator or the browser's bottom chrome.
+
+Post-fix on the same device the row sits at y=604..630, fully visible, and «عرض النتائج» commits with
+no scrolling at all. Pinned by `scripts/verify-af-footer-onscreen.ts` (wired into `npm test`), which
+fails if any of the four footer controls, or the `s.foot` container, moves back inside the scroller —
+including via an `position: 'absolute'` substitute that would overlap the last option instead.

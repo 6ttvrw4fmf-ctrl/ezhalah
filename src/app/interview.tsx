@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -589,7 +589,10 @@ const s = StyleSheet.create({
   lbl: { fontSize: 14.5, fontWeight: '500', color: '#15201b' },
   lblMuted: { color: '#9aa6a0' },
   sub2: { fontSize: 11.5, fontWeight: '500', color: '#8a978f', marginTop: 2 },
-  customInput: { flex: 1, fontSize: 14.5, color: '#15201b', padding: 0 },
+  // >= 16 on web or mobile Safari zooms on focus and never zooms back (scripts/verify-input-font-no-ios-zoom.ts).
+  // Measured: the row is sized by the 26px number badge, so the option list height is unchanged (50px).
+  // minWidth: 0 pairs with the 16px web bump — see the note on AuthModal.phoneInput.
+  customInput: { flex: 1, minWidth: 0, fontSize: Platform.OS === 'web' ? 16 : 14.5, color: '#15201b', padding: 0 },
 
   note: { marginTop: 10, marginHorizontal: 2, fontSize: 12, color: '#b06a1f', backgroundColor: '#fdf6ec', borderWidth: 1, borderColor: '#f3e2c6', borderRadius: 10, paddingVertical: 9, paddingHorizontal: 11, lineHeight: 17 },
 

@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { Listing } from './listings';
+import { listingPriceString, type Listing } from './listings';
 import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
@@ -9,6 +9,7 @@ import { effectiveTypes, effectiveGroups, bedroomTokens } from './search';
 import { scoreListingProximity } from './proximity';
 import { cityDisplay } from './locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
+import { decodeEntities } from '@/lib/htmlEntities';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import saLocations from './sa-locations.json';
@@ -773,14 +774,17 @@ export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<Guided
         ...scopeParams,
         ...rpcCountFilterParams(q),
         ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
-        ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
-        ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
-        ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
-        ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
-        ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
-        ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
-        ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
-        ...(q.directions?.length ? { p_directions: q.directions } : {}),
+        // THE SHARED DEFINITION, not a hand-copied list (2026-08-23 fix). This call site used to
+        // spread the eight advanced params it knew about one by one, and the three Monthly ones
+        // added on 2026-08-18 (p_rating_min / p_reviews_min / p_unit_subtypes) were never added
+        // here — so every surface this function feeds (the «عرض N نتيجة» footer + header pill via
+        // cnt_selected, and EVERY later question's option counts via cnt_sub_*/cnt_bath*/…) was
+        // computed over a scope that ignored the rating and unit-subtype answers. Measured live on
+        // Riyadh / Rent-Monthly / شقة: after answering «9.5+» the card still promised 8,873 (truth
+        // 4,946) and offered «استديو / 3,719» (truth 2,361); the search itself applied both and
+        // landed the user on 2,361. rpcAdvancedFilterParams() carries exactly this same set plus
+        // those three, so a future advanced question is carried here for free.
+        ...rpcAdvancedFilterParams(q),
       }),
       AGE_COUNT_TIMEOUT_MS,
     );
@@ -935,7 +939,11 @@ function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; la
     // normalised, so no row starts or stops being shown because of this fix.
     const rows = raw
       .filter((r: any) => r && r.label && r.value)
-      .map((r: any) => ({ key: String(r.key ?? r.label), label: String(r.label), value: String(r.value) }));
+      .map((r: any) => ({ key: String(r.key ?? r.label), label: String(r.label), value: String(r.value) }))
+      // …then decode the source's HTML escapes, exactly as the object branch below does. Kept as a
+      // separate step so the `value: String(r.value)` coercion contract stays literal for
+      // scripts/verify-card-attr-value-coercion.ts.
+      .map((r) => ({ ...r, value: decodeEntities(r.value) }));
     return rows.length ? rows : null;
   }
   if (typeof raw !== 'object') return null;
@@ -964,6 +972,9 @@ function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; la
     else if (typeof v === 'object') continue;
     else v = String(v).trim();
     if (!v || v === '0') continue;
+    // Source free text → decode HTML escapes before it is shown (Gathern's house_rules stores
+    // `&amp;#34;`). No-op for every value without an entity. See src/lib/htmlEntities.ts.
+    v = decodeEntities(v);
     if (v.length > 120) v = v.slice(0, 117) + '…';
     seen.add(label);
     out.push({ key, label, value: v });
@@ -1619,15 +1630,9 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // `cleanType`; `type` keeps the raw value for the engine + debugging. (clean-type filter, step 2.)
     const norm = normalizeType(r.property_type, kind);
     // A genuinely MONTHLY rental → show its monthly figure (price_annual was stored as monthly×12, so
-    // dividing back gives the exact monthly rent). Annual rentals keep the yearly figure. (user request.)
-    const isMonthlyRent = deal === 'Rent' && r.rent_period === 'monthly' && typeof r.price_annual === 'number';
-    const amount = deal === 'Rent'
-      ? (isMonthlyRent ? Math.round(r.price_annual / 12) : r.price_annual)
-      : r.price_total;
-    const priceStr =
-      typeof amount === 'number'
-        ? `SAR ${amount.toLocaleString('en-US')}${deal === 'Rent' ? (isMonthlyRent ? '/mo' : '/yr') : ''}`
-        : 'Price on request';
+    // dividing back gives the exact monthly rent). Annual rentals keep the yearly figure. A rent row
+    // whose source published NO period gets the bare figure with no suffix — see listingPriceString().
+    const priceStr = listingPriceString(deal, r.rent_period, r.price_annual, r.price_total);
     // Aqar (both residential & commercial) scrapes its own "no photo" placeholder graphic
     // (villa-default.png, at one of a couple CDN sizes, sometimes with a corrupted trailing
     // backslash) as a literal photo_urls entry - filter it out so a listing with only this
@@ -1663,7 +1668,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // A genuine, unmapped city name still passes through untouched.
       city: isJunkLocationToken(r.city) ? '' : (r.city ?? ''),
       district: r.neighborhood ?? '',
-      road: r.street_name ?? '',
+      road: decodeEntities(r.street_name ?? ''),
       price: priceStr,
       // Passed through VERBATIM — no rounding, no unit conversion, no derivation. The decision of
       // whether to SHOW it (and the «سعر المتر 1» placeholder rule) lives in ResultCard, so this
@@ -1674,7 +1679,8 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // CRITICAL: source comes from the DB row, never hardcoded — the card's logo, "Hosted on X",
       // and click-through hostname all derive from it. Wasalt rows have source='Wasalt'.
       source: r.source ?? 'Aqar',
-      rentPeriod: deal === 'Rent' ? (r.rent_period ?? 'annual') : null,
+      // Same rule as priceStr above: an unpublished period stays NULL, it never becomes 'annual'.
+      rentPeriod: deal === 'Rent' ? (r.rent_period ?? null) : null,
       listed: r.date_added ?? 'recently',
       photo,
       source_url: r.listing_url,
@@ -1685,12 +1691,17 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       halls: r.halls ?? 0,
       reception_rooms_majlis: r.reception_rooms_majlis ?? 0,
       property_age: r.property_age ?? null,
-      direction: r.direction ?? null,
-      street_name: r.street_name ?? null,
-      title: r.title ?? null,
-      description: r.description ?? null,
-      residence_type: r.residence_type ?? null,
-      project_name: r.project_name ?? null,
+      direction: decodeEntities(r.direction ?? null),
+      street_name: decodeEntities(r.street_name ?? null),
+      // SOURCE FREE TEXT — decoded, never rewritten. The scraped markup keeps the platform's HTML
+      // escapes (`&amp;bull;`, `&amp;quot;`, `&amp;lrm;`), and RN <Text> has no HTML parser, so the
+      // escape sequence itself used to be what the user read on the card. 5,652 active rows across
+      // 8 platforms carry one. decodeEntities() is a byte-identical no-op for everything else and
+      // never touches a digit — see src/lib/htmlEntities.ts for the full defect note.
+      title: decodeEntities(r.title ?? null),
+      description: decodeEntities(r.description ?? null),
+      residence_type: decodeEntities(r.residence_type ?? null),
+      project_name: decodeEntities(r.project_name ?? null),
       driver_room: !!r.driver_room,
       rega_location_verified: !!r.rega_location_verified,
       rating,

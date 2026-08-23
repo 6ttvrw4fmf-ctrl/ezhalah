@@ -39,8 +39,9 @@ import { parseQuery, respond } from '@/data/agent';
 import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
+import { regionOrCityChoice, scopedLocation, scopeNamedForTwin } from '@/lib/regionOrCityAnswer';
 import { openListing } from '@/lib/openListing';
-import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, type SearchQuery, type SearchResult } from '@/data/search';
+import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups } from '@/lib/searchDefaults';
 import { BROWSE_CAP, resultCounts } from '@/data/resultCount';
@@ -181,6 +182,17 @@ const WHOLE_AREA = /كامل|كاملة|بالكامل|كلها|كل المدي�
 // audit). Guarding every use defensively, same pattern as search.ts's locationLines().
 const arLabel = (s: string) => arabicOrPlaceholder(s, 'ar', LOCATION_UNRESOLVED_AR);
 
+// The region-AND-city TWIN NAME behind the «مدينة X ولا منطقة X كاملة؟» question (and behind the
+// whole-region question for the same names), so send() knows which name the user is answering about on
+// the next turn. Accepts either form the query can carry («الرياض» or «منطقة الرياض»). null when the
+// location is not one of those twins — a plain city/region/district ask is untouched.
+function regionOrCityTwin(loc: string | undefined): string | null {
+  const bare = (loc ?? '').trim().replace(/^منطقة\s+/, '').trim();
+  if (!bare) return null;
+  const lm = resolveLocation(bare, 'ar');
+  return lm.regionOrCity ? arLabel(lm.label) : null;
+}
+
 function locationClarification(q: SearchQuery, userText: string): string | null {
   const loc = (q.location ?? '').trim();
   if (!loc) {
@@ -198,6 +210,12 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
   // The user explicitly asked for the whole area (or the whole Kingdom) — honour it, don't ask to narrow.
   if (WHOLE_AREA.test(userText) || KINGDOM_WIDE.test(userText)) return null;
   const lm = resolveLocation(loc, 'ar');
+  // The user NAMED the scope in THIS message — «مدينة الرياض» / «منطقة الرياض» — either answering the
+  // region-vs-city question below or saying it up front. That word IS the answer, and send() has
+  // already committed it to q.location, so asking again is asking a question the user just answered.
+  // (defect `agent-clarify-loop`, found live 2026-08-23: this backstop re-asked the identical question
+  // every turn, then the 2-ask cap discarded the answered city and searched the whole Kingdom.)
+  const scopeChoice = regionOrCityChoice(userText);
   // Bug-fix #3: a TWIN CITY (same name in 2+ catalog regions, e.g. «الهفوف» Eastern vs Riyadh) → ask
   // WHICH REGION. The resolver flags ambiguous=true on kind='city' for these; the engine refuses to
   // fan out cross-region until the user picks. Per locked rule: same name in 2 regions → never guess.
@@ -210,6 +228,7 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
   // Region-vs-city SAME NAME (الرياض/جازان/تبوك/حائل/نجران/الباحة/الجوف) → ask مدينة ولا منطقة, never
   // default to the city. Must precede the generic city branch below. (audit #4 / Q38.)
   if (lm.regionOrCity) {
+    if (scopeChoice) return null; // they picked one of the two options — search it, don't re-ask it
     const label = arLabel(lm.label);
     return `«${label}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${label} ولا منطقة ${label} كاملة؟`;
   }
@@ -225,6 +244,15 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
   }
   // 2) A REGION → ask the WHOLE region or a specific city (name a couple of its real, in-inventory cities).
   if (lm.kind === 'region') {
+    // «منطقة X» for a name that is ALSO a city is literally one of the two options the twin question
+    // above offers, and it means the whole region — same standing as the WHOLE_AREA wording. Asking
+    // «كاملة، أو مدينة معيّنة؟» right after would re-ask what they just picked. Scoped to those twins on
+    // purpose: a plain region («منطقة مكة», «المنطقة الشرقية») was never offered as an option and keeps
+    // its normal narrowing question.
+    // STRICT, for the same reason as the rewrite in send(): «منطقة» is an ordinary Arabic noun, so a
+    // stray one («في منطقة هادئة») must NOT be read as "they already chose the whole region" and
+    // silence the question. Only a scope named ON THIS TWIN counts.
+    if (scopeNamedForTwin(userText, regionOrCityTwin(loc)) === 'region') return null;
     const cities = topCitiesInRegion(lm.region ?? lm.city ?? loc, 2).map((c) => cityDisplay(c, 'ar'));
     const hint = cities.length ? ` مثل ${cities.join(' أو ')}` : '';
     return `تقصد ${arLabel(lm.label)} كاملة، أو مدينة معيّنة${hint}؟`;
@@ -717,6 +745,11 @@ export default function Agent() {
   // whatever we have. (user request: "Ask maximum 2 times per field. If no answer → skip → scrape.")
   const saidRef = useRef<string[]>([]);
   const askCountRef = useRef(0);
+  // The region-AND-city twin name we last asked «تقصد مدينة X ولا منطقة X كاملة؟» about. That question
+  // is OURS (deterministic, generated below), so its answer is committed deterministically too — the
+  // model replied to it with a greeting or yet another question often enough that leaving the answer to
+  // the model WAS the loop. Read-and-cleared once per turn; also cleared by New Chat.
+  const pendingScopeRef = useRef<string | null>(null);
 
   const toBottom = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
   const toTop = () => requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
@@ -1064,8 +1097,12 @@ export default function Agent() {
     toBottom();
     const result = await runQuery(refined, true, run.ac.signal);
     if (run.cancelled) return;
-    opts?.onFetched?.(result.total ?? null);
-    if (opts?.guided) setGuidedPills({ msgId: statusId, baseQ: opts.guided.baseQ, facets: opts.guided.facets, total: result.total ?? null });
+    // quotableTotal, never `result.total` — that is this page's buffer length (≤ the 1500-row
+    // QUERY_LIMIT), so the mining overlay quoted «لقينا 1,500 عقار» on every set larger than a page
+    // while the results headline behind it stated the real match total. ONE total for both.
+    const honestTotal = quotableTotal(result);
+    opts?.onFetched?.(honestTotal);
+    if (opts?.guided) setGuidedPills({ msgId: statusId, baseQ: opts.guided.baseQ, facets: opts.guided.facets, total: honestTotal });
     await playListings(run, statusId, buildScrapeIntro(result.query ?? refined), result, label);
     if (run.cancelled) return;
     void promptSignupSoon(run);
@@ -1425,8 +1462,33 @@ export default function Agent() {
       .slice(-10);
     // Pass auth state: a guest searches on any property query; a logged-in user only gets listings
     // when their message is a direct order, otherwise Ezhalah replies conversationally. (user request.)
-    const turn = await respond(v, { loggedIn: !!user, history, attemptTexts: saidRef.current });
+    let turn = await respond(v, { loggedIn: !!user, history, attemptTexts: saidRef.current });
     if (run.cancelled) return;
+
+    // ── The user NAMED a scope: «مدينة الرياض» / «منطقة الرياض» ────────────────────────────────────
+    // Either answering our own «تقصد مدينة X ولا منطقة X كاملة؟» question or saying it up front. Either
+    // way it is an EXACT scope in the user's own words, so this turn SEARCHES it — «منطقة X» the whole
+    // region, «مدينة X» the city — instead of re-asking it or falling through to the 2-ask cap's
+    // Kingdom-wide «ما قدرت أحدد الموقع بدقة» (defect `agent-clarify-loop`, found live 2026-08-23:
+    // answering «مدينة الرياض» never produced a search in 7/7 fresh runs).
+    const askedTwin = pendingScopeRef.current;
+    pendingScopeRef.current = null;
+    const scopeChoice = regionOrCityChoice(v);
+    if (turn.kind === 'listings') {
+      // Rewrite ONLY when the model's own location is that same twin — never override a different city
+      // the user just named, and never invent one.
+      const twin = regionOrCityTwin(turn.query.location);
+      // AND only when the user really did name a scope FOR THIS TWIN. «منطقة» is an ordinary Arabic
+      // noun, so «شقة في الرياض في منطقة هادئة» must NOT widen the city of Riyadh into the region —
+      // that would be the same EXACT-LOCATION violation this fix exists to prevent, reversed. When we
+      // just asked the twin question (askedTwin), a bare «مدينة» IS an answer, because we asked.
+      const named = scopeNamedForTwin(v, twin) ?? (askedTwin ? scopeChoice : null);
+      if (twin && named) turn = { ...turn, query: { ...turn.query, location: scopedLocation(twin, named) } };
+    } else if (scopeChoice && askedTwin && turn.kind === 'message') {
+      // The model drifted off the thread (a greeting, or another question). The user still answered a
+      // question WE asked, so run their search from everything said this attempt, scoped to their pick.
+      turn = { kind: 'listings', reply: '', query: { ...parseQuery(saidRef.current.join(' ')), location: scopedLocation(askedTwin, scopeChoice) } };
+    }
     // Hold "Ezhalah is thinking…" for at least THINK_MS even if the network came back faster, so the
     // thinking beat always reads as a deliberate ~3s pause before the reply types out (user request).
     const elapsed = Date.now() - startedAt;
@@ -1448,6 +1510,9 @@ export default function Agent() {
       const clarifyQ = locationClarification(turn.query, v);
       if (clarifyQ && askCountRef.current < 2) {
         askCountRef.current += 1;
+        // Remember WHICH twin name this question is about, so the user's next message can commit their
+        // pick even if the model answers with something else entirely.
+        pendingScopeRef.current = regionOrCityTwin(turn.query.location);
         setMsgs((m) =>
           m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: clarifyQ, typing: true } : x)),
         );
@@ -1781,6 +1846,7 @@ export default function Agent() {
       () => {
         setBusy(false);
         setMsgs([]);
+        pendingScopeRef.current = null; // New Chat inherits nothing — not even a half-answered question
         // Forget the last-handled filter/seed so a re-search AFTER New Chat re-runs even if it's
         // identical to a previous one (otherwise the change-detection would skip it and leave just
         // the greeting).
@@ -1967,12 +2033,13 @@ export default function Agent() {
               // same sentence the reply types on screen — one computation, never a second copy that
               // could drift from what's actually shown.
               const introZeroResult = m.result.listings.length === 0;
-              const introTotal = m.result.matchTotal ?? m.result.listings.length;
-              const introCountSafe = !m.result.query?.priceIsAnnual && introTotal > 0
-                && !(m.result.query && hasClientOnlyNarrowing(m.result.query));
+              // Same helper the mining overlay quotes (src/data/search.ts) — one definition of "the
+              // total we may state", so the interview's closing beat and this headline, describing the
+              // SAME search, can never name two different numbers. null ⇒ no honest count ⇒ say nothing.
+              const introTotal = quotableTotal(m.result);
               const introText = introZeroResult
                 ? (m.result.suggestion ?? t('No exact matches — try broadening your search.'))
-                : introCountSafe
+                : introTotal != null
                   ? t('We found {n} listings matching your search.', { n: introTotal.toLocaleString('en-US') })
                   : m.text;
               return (

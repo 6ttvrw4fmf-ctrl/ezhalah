@@ -28,8 +28,10 @@ export type Listing = {
   // debug); the CARD and filter use these. Computed at read-time via propertyTypes.normalizeType.
   cleanType?: string; // clean_property_type — e.g. raw "Building"(res) → "Residential Building"
   macro?: 'Residential' | 'Commercial'; // macro_category
-  // Rent billing period: 'monthly' | 'annual' (null for Buy / mock data). When 'monthly', `price` is
-  // the per-month figure; otherwise yearly. Drives the per-month filter + the /mo vs /yr label. (user.)
+  // Rent billing period AS PUBLISHED BY THE SOURCE: 'monthly' | 'annual', or null when the source
+  // published no period at all (and for Buy / mock data). When 'monthly', `price` is the per-month
+  // figure; when 'annual', the yearly one. Drives the per-month filter + the /mo vs /yr label.
+  // NEVER defaulted — an unpublished period stays null. See listingPriceString().
   rentPeriod?: string | null;
   listed: string; // human recency (display only — NOT sortable, see recencyRank)
   // True RPC recency rank for real fetched listings (0 = newest, per the RPC's `last_updated desc`
@@ -97,6 +99,34 @@ export type Listing = {
   // ranking step. 0 / undefined = the listing doesn't express the asked relationship. Per-query only.
   proximityBoost?: number;
 };
+
+// The card's price line, built from the RAW DB row. Zero-dep on purpose so it is unit-testable
+// (scripts/verify-unknown-rent-period-not-annual.ts) without remote.ts's supabase/react-native chain.
+//
+// PERIOD = SOURCE (owner rule). Only a period the source actually PUBLISHED earns a suffix:
+//   rent_period='monthly' → '/mo' on the per-month figure (price_annual is stored as monthly×12)
+//   rent_period='annual'  → '/yr'
+//   rent_period IS NULL   → NO suffix. The source published a number and no period; rendering
+//                           «/سنوياً» would turn an unknown fact into a known one.
+// The NULL case is reachable: hundreds of active Rent rows carry no rent_period (raghdan 598090 —
+// raghdan.sa publishes «إيجار» + 70000 with no سنوي/شهري token), and combined Buy+Rent mode applies
+// no period filter at all, so they land on the card. keptFiltersReq() already refuses this same
+// guess on the annual branch ("a null rent_period ... is NOT annual ... never guess"); the display
+// used to make it anyway. Bug found live 2026-08-23.
+export function listingPriceString(
+  deal: Deal,
+  rentPeriod: string | null | undefined,
+  priceAnnual: unknown,
+  priceTotal: unknown,
+): string {
+  const isMonthlyRent = deal === 'Rent' && rentPeriod === 'monthly' && typeof priceAnnual === 'number';
+  const amount = deal === 'Rent'
+    ? (isMonthlyRent ? Math.round((priceAnnual as number) / 12) : priceAnnual)
+    : priceTotal;
+  if (typeof amount !== 'number') return 'Price on request';
+  const suffix = isMonthlyRent ? '/mo' : (deal === 'Rent' && rentPeriod === 'annual') ? '/yr' : '';
+  return `SAR ${amount.toLocaleString('en-US')}${suffix}`;
+}
 
 export const LISTED_SEQ = ['today', '2 days ago', '2 months ago', '8 months ago', '1 year ago'];
 const PQ = '?w=600&h=420&q=70&auto=format&fit=crop';

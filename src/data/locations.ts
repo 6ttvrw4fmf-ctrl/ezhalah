@@ -8,7 +8,7 @@
 import raw from './sa-locations.json';
 import { supabase } from '@/lib/supabase';
 import { CITY_AR_DISPLAY, CITY_TOKENS, cityTokensReverseLookup } from '@/lib/cityDisplay';
-import { arabicOrPlaceholder } from '@/lib/arabicText';
+import { arabicOrPlaceholder, cutPlaceName } from '@/lib/arabicText';
 import { LOCATION_UNRESOLVED_AR } from '@/i18n';
 import type { Category, Deal } from './taxonomy';
 
@@ -239,7 +239,14 @@ for (const [cityId, regionId, en, ar] of DATA.districts) {
 // misspelling ("riydah" → "Riyadh", "jedah" → "Jeddah") still surfaces the place.
 function editDistance(a: string, b: string): number {
   const m = a.length, n = b.length;
-  if (Math.abs(m - n) > 2) return 3; // we only care about distances ≤ 2
+  // Length-gap short-circuit. It MUST return a value bigger than any caller's budget: here the true
+  // distance is already ≥ |m − n| ≥ 3, and Math.max(m, n) is a truthful upper bound on it. Returning
+  // the literal 3 made this sentinel a LIE — nearbyCityWithListings() allows maxD = 3 for long
+  // queries, so EVERY live city sharing the query's first folded letter scored exactly 3, passed the
+  // gate, and the `n` tie-break then offered the biggest one. That is how the invented city
+  // «مدينة زقنبوطية الشمالية» was answered with «هل تقصد مكة المكرمة؟» (2026-08-23). A distance this
+  // function reports must never be smaller than the truth. (rule: never invent a location.)
+  if (Math.abs(m - n) > 2) return Math.max(m, n);
   const dp = Array.from({ length: m + 1 }, (_, i) => i);
   for (let j = 1; j <= n; j++) {
     let prev = dp[0];
@@ -431,6 +438,10 @@ export type LocationResolution = {
 
 // Letters/digits only (drops spaces, punctuation, Arabic diacritics) — for phrase `includes` tests.
 const flatLoc = (s: string) => s.toLowerCase().replace(/[ً-ْ]/g, '').replace(/[^a-z0-9ء-ي]/gu, '');
+// flatLoc keeps أ/إ/آ, ة and ى distinct — fine for an `includes` test, wrong when SUBTRACTING one
+// place name from another, because `norm` (which built the search keys that matched the city in the
+// first place) folds them. cutPlaceName does that subtraction fold-blind; it lives in @/lib/arabicText
+// so its behavior is executable by a test. (defect abha-city-rescope, 2026-08-23.)
 // Whole words — for single-keyword tests (geography/lifestyle) so "بحره" (a town) never trips "بحر".
 const wordsOf = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 
@@ -1195,8 +1206,15 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
       probe = probe.replace(ci.key, '').replace(flatLoc(ci.city), '');
     }
   }
-  if (cityKey) probe = probe.replace(cityKey, '');
-  if (cityKeyAr) probe = probe.replace(cityKeyAr, '');
+  // EXACT LOCATION ONLY — an exact city must stay that exact city. These two subtractions are the
+  // whole basis of the "input is just a city" guard below, so they MUST be blind to Arabic
+  // alef/ta-marbuta/ya spelling variants (cutPlaceName, never String.replace): the catalog spells
+  // Abha «ابها» while users and the AI agent write «أبها», so a plain replace() subtracted nothing,
+  // the entire city name survived as a "district probe", word-matched the live district «روابي أبها»
+  // — and the CITY of Abha was silently re-scoped to one neighbourhood (0 results where 15 exist,
+  // 22 where 770 exist). 27 city spellings Kingdom-wide resolved to a district the same way.
+  // (defect abha-city-rescope, 2026-08-23; barrier verify-city-never-rescoped-to-district.ts.)
+  probe = cutPlaceName(cutPlaceName(probe, cityKey), cityKeyAr);
   if (probe.length < 2) return []; // input is just a city (or nothing district-specific)
   // Add the OTHER-script equivalents of the probe so a Latin query reaches Arabic-tagged districts and
   // vice-versa (the catalog provides the en↔ar pairing). (user: Al Olaya missed its Arabic listings.)
@@ -1204,8 +1222,8 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   const probeF = fuzzyFold(probe);
   // Fuzzy-match the probe against the WORDS of a district name (not just the glued whole), so a typo'd
   // or partial district token still hits — "Rakk" ≈ the "Rakah" in "Al Rakah Al Shamaliyah". Shared
-  // first letter + a small edit distance keeps it tight. CAP at 2: editDistance() returns 3 as its
-  // "too different" sentinel (length diff > 2), so a budget of 3 would let unrelated tokens through.
+  // first letter + a small edit distance keeps it tight. CAP at 2: a 3-edit gap on a short district
+  // token is a different word, not a typo (the ±1 length guard below already rules most of them out).
   const tokenMaxD = probeF.length <= 3 ? 1 : 2;
   const fuzzyTokenHit = (district: string): boolean => {
     if (probeF.length < 4) return false;

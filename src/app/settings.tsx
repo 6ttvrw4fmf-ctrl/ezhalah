@@ -492,7 +492,8 @@ const s = StyleSheet.create({
   savedTag: { flexDirection: 'row', alignItems: 'center', gap: 3, ...(Platform.OS === 'web' ? ({ transitionProperty: 'opacity', transitionDuration: '200ms' } as any) : {}) },
   savedTx: { fontSize: 11, fontWeight: '600', color: colors.primary },
   v: { fontSize: 15, fontWeight: '600', color: colors.ink, marginTop: 3 },
-  input: { fontSize: 15, fontWeight: '600', color: colors.ink, marginTop: 3, borderBottomWidth: 1, borderBottomColor: colors.primary, paddingVertical: 2, ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  // >= 16 on web or mobile Safari zooms on focus and never restores (scripts/verify-input-font-no-ios-zoom.ts).
+  input: { fontSize: Platform.OS === 'web' ? 16 : 15, fontWeight: '600', color: colors.ink, marginTop: 3, borderBottomWidth: 1, borderBottomColor: colors.primary, paddingVertical: 2, ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
   // Compact green Save button under the name field — app-green, noticeable but not oversized,
   // self-sized to its content so it sits neatly under the input. (user request.)
   saveBtn: {
@@ -556,7 +557,9 @@ const s = StyleSheet.create({
   phField: { flexDirection: 'row', gap: 8, marginTop: 18, width: '100%' },
   phCc: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 48, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: '#dfe3e0', backgroundColor: '#fff' },
   phCcText: { fontSize: 14, fontWeight: '600', color: colors.ink },
-  phInput: { flex: 1, height: 48, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, borderColor: '#dfe3e0', fontSize: 15, color: colors.ink, backgroundColor: '#fff', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  // Same iOS focus-zoom guard; height is fixed at 48 so the box does not reflow.
+  // minWidth: 0 pairs with the 16px web bump — see the note on AuthModal.phoneInput.
+  phInput: { flex: 1, minWidth: 0, height: 48, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, borderColor: '#dfe3e0', fontSize: Platform.OS === 'web' ? 16 : 15, color: colors.ink, backgroundColor: '#fff', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
   phCcList: { width: '100%', marginTop: 6, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.line, borderRadius: 12, padding: 6 },
   phCcItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 9 },
   phCcItemSel: { backgroundColor: '#eef6f0' },
@@ -568,5 +571,6 @@ const s = StyleSheet.create({
   otpBox: { width: 38, height: 48, borderRadius: 11, borderWidth: 1.5, borderColor: '#dfe3e0', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
   otpBoxActive: { borderColor: colors.primary },
   otpDigit: { fontSize: 20, fontWeight: '700', color: colors.ink },
-  otpHidden: { position: 'absolute', opacity: 0, width: 1, height: 1 },
+  // autoFocus'd + invisible, but iOS zooms to the focused element's font-size all the same.
+  otpHidden: { position: 'absolute', opacity: 0, width: 1, height: 1, fontSize: 16 },
 });

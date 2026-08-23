@@ -192,8 +192,8 @@ check('ONE shared row template — no separate single/multi bodies',
   /function OptionRow/.test(cardSrc) && !/MultiChips/.test(cardSrc));
 
 // ── Same footer / skip / count / progress for EVERY question (rendered once, mode-independent) ───
-check('footer Show-{N} primary + Skip + Skip-all render for every question',
-  /Show \{count\} results/.test(cardSrc) && /onSkip\b/.test(cardSrc) && /onSkipAll\b/.test(cardSrc) && /primaryBtn/.test(cardSrc));
+check('footer Continue-{N} primary + Skip + Skip-all render for every question',
+  /Continue · \{count\} results/.test(cardSrc) && /onSkip\b/.test(cardSrc) && /onSkipAll\b/.test(cardSrc) && /primaryBtn/.test(cardSrc));
 check('a live count pill renders on EVERY option row (both modes)',
   /countPill/.test(cardSrc) && /grouped\(option\.count\)/.test(cardSrc));
 check('progress is animated and shared',
@@ -221,9 +221,11 @@ check('«رجوع» renders on the question card and rides onBack',
 // user on a different count than the chip beside the link was just promising.
 check('the always-available escape link reads «عرض النتائج» and rides onSkipAll with the selection',
   /onPress=\{\(\) => onSkipAll\(sel\)\}/.test(cardSrc) && /skipAllTxt/.test(cardSrc));
-// Multi-select commits via «متابعة · N نتيجة» with the LIVE count (owner 2026-08-16 §4); single
-// keeps «عرض N نتيجة». Both numbers come from the same liveCount pipe — never a placeholder.
-check('multi-select primary reads Continue · {count} results with the live count',
+// The primary commits via «متابعة · N نتيجة» with the LIVE count (owner 2026-08-16 §4) — for
+// SINGLE and MULTI alike since 2026-08-23, because the button advances one question in both cases
+// and the arity-branched «عرض N نتيجة» promised results it never delivered. Pinned in detail by
+// scripts/verify-af-primary-advances-not-shows.ts. The number comes from the same liveCount pipe.
+check('the primary reads Continue · {count} results with the live count, for every arity',
   /Continue · \{count\} results/.test(cardSrc));
 // §11: one tiny plain-language availability line; the technical unknown-count phrasing is gone.
 check('availability is explained naturally (no database language, no unknown-count phrasing)',
@@ -285,9 +287,21 @@ check('the guided flow stays reachable on demand via the narrow-it-down button',
 // now Read Aloud too). Without a guard, a future edit could reinstate the page-capped count that
 // once displayed 1,500 (the candidate cap) when the true total was 8,458. Re-anchored to its new
 // home rather than re-deleted.
-check('the result-intro count comes from matchTotal, never a page-capped listings length',
-  /const introTotal = m\.result\.matchTotal \?\? m\.result\.listings\.length/.test(agentSrc)
-  && /const introCountSafe = !m\.result\.query\?\.priceIsAnnual && introTotal > 0/.test(agentSrc));
+// The rule moved into ONE helper (search.ts quotableTotal) on 2026-08-23 so the results headline and
+// the mining overlay cannot drift apart — the overlay was quoting the 1,500-row PAGE CAP as if it
+// were the match total. Assert the call site uses it AND that the helper still puts matchTotal first
+// and still refuses to quote a total the RPC never actually applied.
+check('the result-intro count comes from matchTotal via quotableTotal(), never a page-capped length',
+  /const introTotal = quotableTotal\(m\.result\)/.test(agentSrc));
+{
+  const searchSrc = readFileSync(join(root, 'src/data/search.ts'), 'utf8');
+  const fn = searchSrc.slice(searchSrc.indexOf('export function quotableTotal'),
+                             searchSrc.indexOf('export function quotableTotal') + 400);
+  check('quotableTotal prefers matchTotal over the page-capped listings length',
+    /const total = r\.matchTotal \?\? r\.listings\.length/.test(fn));
+  check('quotableTotal refuses to quote a total the RPC never applied (client-only / annualized)',
+    /priceIsAnnual \|\| hasClientOnlyNarrowing\(r\.query\)\)\) return null/.test(fn));
+}
 
 // ── Mining transition (owner 2026-08-16 §9) ─────────────────────────────────────────────────────
 // The «digging through the market» beat is DECORATION: its dismissal is driven by plain setTimeout

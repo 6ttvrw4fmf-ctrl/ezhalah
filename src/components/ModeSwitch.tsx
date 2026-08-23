@@ -20,8 +20,9 @@
 //     screen's control animates the indicator FROM that side into place, so navigation reads as one
 //     continuous control, not two separate headers. Fresh loads start settled (no animation).
 // JS driver on web (native driver only off-web), same as the rest of the codebase. Tokens only.
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, cardShadow, font, radius } from '@/theme/tokens';
 
@@ -63,14 +64,24 @@ export default function ModeSwitch({
   // settled if this is a fresh load or we're already there.
   const from = lastMode && lastMode !== active ? (lastMode === 'filter' ? 0 : SEG_W) : toX;
   const x = useRef(new Animated.Value(from)).current;
-  useEffect(() => {
-    lastMode = active;
-    if (from === toX) return;
-    const anim = Animated.spring(x, { toValue: toX, ...GLIDE, useNativeDriver: !IS_WEB });
-    anim.start();
-    return () => anim.stop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // The indicator settles on `active` EVERY TIME this control is the one on screen — not just on
+  // mount. `active` is the committed truth (which screen you are actually on); the animated value is
+  // only a picture of it and must always be made to agree.
+  //
+  // Mount-only was a real bug (2026-08-23): `press()` below optimistically glides the indicator to
+  // the tab you are navigating TO, but the screen you are leaving normally STAYS MOUNTED in the
+  // stack. Tap «المساعد الذكي», then press browser Back: the Filter screen comes back with its
+  // indicator parked over «المساعد الذكي», and it can never recover — `press` early-returns for the
+  // already-active tab, so tapping «تصفية» does nothing. Re-settling on focus is also what plays the
+  // cross-screen entrance glide from `lastMode`, so this one effect owns the whole motion.
+  useFocusEffect(
+    useCallback(() => {
+      lastMode = active;
+      const anim = Animated.spring(x, { toValue: toX, ...GLIDE, useNativeDriver: !IS_WEB });
+      anim.start();
+      return () => anim.stop();
+    }, [active, toX, x]),
+  );
 
   // The AI side is quietly "alive": when it is NOT the selected mode, its sparkle breathes — a soft,
   // slow scale+opacity swell that reads as "come talk to me" without any flash. Selected AI is calm

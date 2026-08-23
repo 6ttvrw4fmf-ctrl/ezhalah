@@ -8,6 +8,7 @@ import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
 import { supports } from './platforms';
 import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
+import { combinedBudgetParts } from '@/lib/combinedBudget';
 import { rediversifyByPlatform } from '@/lib/platformDiversity';
 import { bedroomTokensPure } from '@/lib/roomBedrooms';
 import { translitPlace } from '@/lib/translitPlace';
@@ -184,6 +185,11 @@ const numOrNull = (s: string | null | undefined): number | null => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
+// The five already-translated words @/lib/combinedBudget needs (it is deliberately dependency-free).
+// The two LABELS are the SAME i18n keys as the two Filter budget boxes the user typed the figures
+// into («ميزانية الشراء» / «ميزانية الإيجار (سنوياً)»), so the restatement echoes the form verbatim.
+const budgetWords = () => ({ buy: t('Buy budget'), rent: t('Rent budget (yearly basis)'), from: t('From'), to: t('To'), sar: t('SAR') });
+
 // The objective sort keys the agent/UI may request. NEVER a quality/popularity ordering.
 export type SortKey =
   | 'newest' | 'oldest'
@@ -321,7 +327,13 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
   let tooLow = false;
   let tooLowAmount = '';
   const pLo = numOrNull(q.priceMin), pHi = numOrNull(q.priceMax);
-  if (pLo != null || pHi != null) {
+  if (q.dealCombined) {
+    // COMBINED شراء+إيجار = TWO independent caps (Buy priceMin/Max, Rent priceMinRent/MaxRent). State
+    // BOTH, each named for the box it came from — the shared unlabelled phrase below can only ever
+    // state one of them, so it hid the rent cap and mislabelled the buy cap. See @/lib/combinedBudget.
+    const both = combinedBudgetParts(q, ' ', budgetWords());
+    if (both.length) pricePhrase = t(' with {a}', { a: both.join(t(' and ')) });
+  } else if (pLo != null || pHi != null) {
     // Filter من/إلى price range (HARD filter) — show verbatim, no monthly/per-m² math.
     const rng = pLo != null && pHi != null ? `${t('From')} ${grouped(pLo)} ${t('To')} ${grouped(pHi)}`
       : pLo != null ? `${t('From')} ${grouped(pLo)}` : `${t('To')} ${grouped(pHi!)}`;
@@ -390,6 +402,9 @@ function budgetLines(q: SearchQuery): string[] {
   // If the user gave a foreign currency, lead with their original figure so both are visible:
   // "Your budget: USD 100,000" then the SAR line(s) used for the actual search. (user request.)
   const orig = q.priceOriginal ? [`${t('Your budget')}: ${q.priceOriginal}`] : [];
+  // COMBINED شراء+إيجار → one labelled bullet per budget half the user filled, never a single
+  // unlabelled `Budget` read off the Buy boxes alone. See @/lib/combinedBudget.
+  if (q.dealCombined) return [...orig, ...combinedBudgetParts(q, ': ', budgetWords())];
   const pLo = numOrNull(q.priceMin), pHi = numOrNull(q.priceMax);
   if (pLo != null || pHi != null) {
     const r = pLo != null && pHi != null ? `${t('From')} ${grouped(pLo)} ${t('To')} ${grouped(pHi)}`
@@ -823,6 +838,29 @@ export function hasClientOnlyNarrowing(q: SearchQuery): boolean {
     if (digits && parseInt(digits, 10) >= 100) return true;
   }
   return false;
+}
+
+// THE ONE TOTAL THAT MAY BE QUOTED to the user for a finished search — the results headline
+// («لقينا N إعلان يطابق طلبك») and the guided interview's closing beat («لقينا N عقار أقرب لطلبك»)
+// must state the SAME number, because they describe the SAME search.
+//
+// It is `matchTotal` — the RPC's count(*) over() across the WHOLE filtered set — and NEVER
+// `SearchResult.total`, which is `listings.length`: this page's buffer, hard-capped by the 1500-row
+// QUERY_LIMIT and the SHOW_ALL_MAX slice. Quoting `total` renders the PAGE LIMIT as if it were the
+// match count on every broad search (live 2026-08-23: the mining overlay claimed «لقينا 1,500 عقار
+// أقرب لطلبك» for a 3,897-row set, while the chat line right behind it correctly said 3,897).
+// A display/page cap and the true total are two different numbers — see src/data/resultCount.ts.
+//
+// null = there is NO honest number to quote, so the caller says nothing rather than a wrong count:
+//   • nothing matched — the caller has its own no-results copy;
+//   • client-only narrowing, or an agent-annualized budget (priceIsAnnual nulls the RPC price bound
+//     in remote.ts) — the RPC never applied that filter, so its count OVERSTATES the set the user
+//     can actually reach. This is the same gate the results headline has used since 2026-07-30.
+export function quotableTotal(r: SearchResult): number | null {
+  const total = r.matchTotal ?? r.listings.length;
+  if (!(total > 0)) return null;
+  if (r.query && (r.query.priceIsAnnual || hasClientOnlyNarrowing(r.query))) return null;
+  return total;
 }
 
 // Parse a detail value into an area range in m² — or null when it's a bedroom count (not a size).
