@@ -17,6 +17,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import HeroBackground from '@/components/HeroBackground';
 import { useApp, type HistoryItem } from '@/store';
+import { sanitizeArabicSearch, isSearchableQuery, filterChats } from '@/lib/chatSearch';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 import { queryLabel } from '@/data/search';
 import { displayTitle } from '@/lib/chatTitle';
 import { sanitizeForFilterRestore } from '@/lib/searchDefaults';
@@ -98,6 +100,36 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const cancelledRef = useRef(false);
+
+  // CHAT SEARCH (owner 2026-08-24): ChatGPT-style in-sidebar search. The 🔍 control under New Chat
+  // morphs into an Arabic-only input — never a route change, never a modal. Latin characters are
+  // stripped calmly at the boundary (src/lib/chatSearch.ts) and one quiet hint appears instead of
+  // an error; the hint clears when the field empties or search closes, never per keystroke.
+  // Search is READ-ONLY discovery: it filters the same history rows and opening a result rides the
+  // exact same armOpenRow/openHistory path as a normal row — so it can never create, rename,
+  // duplicate or lose a conversation.
+  const [searching, setSearching] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [hadLatin, setHadLatin] = useState(false);
+  const reducedMotion = useReducedMotion();
+  const searchEnter = useSharedValue(1);
+  const searchEnterA = useAnimatedStyle(() => ({
+    opacity: searchEnter.value,
+    transform: [{ translateY: (1 - searchEnter.value) * -4 }],
+  }));
+  const openSearch = () => {
+    setMenu(null);
+    setSearching(true);
+    searchEnter.value = reducedMotion ? 1 : 0;
+    searchEnter.value = withTiming(1, { duration: 180, easing: Easing.bezier(0.22, 1, 0.36, 1) });
+  };
+  const closeSearch = () => { setSearching(false); setSearchText(''); setHadLatin(false); };
+  const onSearchChange = (raw: string) => {
+    const { text, hadLatin: stripped } = sanitizeArabicSearch(raw);
+    setSearchText(text);
+    if (stripped) setHadLatin(true);
+    else if (!text) setHadLatin(false);
+  };
 
   // OWNER BUG FIX: a single click OPENS, but the native dblclick below ALSO ran openHistory() on each
   // click of the double-click → it navigated (to Filter/Agent) instead of only renaming. Fix: a click
@@ -262,6 +294,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // render in their final state straight away. (user request — "view all the chat history, it
   // doesn't re-write".)
   const openHistory = (c: HistoryItem) => {
+    closeSearch(); // leaving via a result exits search mode; the docked panel stays mounted
     // Search is FREE, always (owner rule 2026-08-15) — reopening a saved search never routes to
     // sign-in. (History rows only exist for signed-in users anyway; the retired gate was dead code.)
     // STRICT allowlist into the shared store the Filter home binds to — agent-only fields
@@ -282,7 +315,15 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     });
   };
 
-  const groups = groupHistory(history);
+  // Search mode filters the SAME rows (read-only, order preserved — history is most-recent-first);
+  // otherwise the normal Starred/Recent grouping. 'Results' renders headerless below.
+  const searchActive = searching && isSearchableQuery(searchText);
+  const searchMatches = searchActive
+    ? filterChats(history, (c) => `${displayTitle(c, locale)} ${c.label ?? ''} ${queryLabel(c.query)}`, searchText)
+    : null;
+  const groups = searchMatches
+    ? (searchMatches.length ? [{ key: 'Results', items: searchMatches }] : [])
+    : groupHistory(history);
   const NavLinks = (
     <View style={s.nav}>
       <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && s.navLinkHover]} onPress={() => (user ? go('/settings') : openSignIn())}>
@@ -327,17 +368,57 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               </Pressable>
             </Animated.View>
 
+            {/* Search chats (owner 2026-08-24): clearly visible right under New Chat — same
+                hierarchy as ChatGPT's sidebar search, Ezhalah-branded. Morphs in place. */}
+            {searching ? (
+              <Animated.View style={[s.searchRow, searchEnterA]}>
+                <Pressable style={s.searchClose} hitSlop={8} onPress={closeSearch}
+                  accessibilityLabel={t('Close search')} testID="sidebar-search-close">
+                  <Ionicons name="close" size={16} color="#9aa6a0" />
+                </Pressable>
+                <TextInput
+                  style={s.searchInput}
+                  value={searchText}
+                  onChangeText={onSearchChange}
+                  placeholder={t('Search your chats…')}
+                  placeholderTextColor="#9aa6a0"
+                  autoFocus={Platform.OS === 'web'}
+                  returnKeyType="search"
+                  maxLength={80}
+                  accessibilityLabel={t('Search chats')}
+                  testID="sidebar-search-input"
+                  onKeyPress={(e: any) => { if (e?.nativeEvent?.key === 'Escape') closeSearch(); }}
+                />
+                <Ionicons name="search" size={15} color="#9aa6a0" />
+              </Animated.View>
+            ) : (
+              <Pressable
+                style={({ hovered, pressed }: any) => [s.searchBtn, WEB_SMOOTH, (hovered || pressed) && s.searchBtnHover]}
+                onPress={openSearch}
+                accessibilityLabel={t('Search chats')}
+                testID="sidebar-search-btn"
+              >
+                <Ionicons name="search" size={16} color={colors.ink} />
+                <Text style={s.searchBtnText}>{t('Search chats')}</Text>
+              </Pressable>
+            )}
+            {searching && hadLatin ? (
+              <Text style={s.searchHint}>{t('Type in Arabic to search your chats')}</Text>
+            ) : null}
+
             {/* History */}
             <ScrollView style={s.hist} contentContainerStyle={{ paddingBottom: 8 }} onScrollBeginDrag={() => setMenu(null)}>
               {groups.length === 0 ? (
-                <Text style={s.empty}>{t('Your searches will appear here.')}</Text>
+                <Text style={s.empty}>{searchActive ? t('No chat with that name') : t('Your searches will appear here.')}</Text>
               ) : (
                 groups.map((g) => (
                   <View key={g.key} style={s.group}>
-                    <View style={s.groupHead}>
-                      {g.key === 'Starred' && <Ionicons name="star" size={11} color={GOLD} />}
-                      <Text style={s.groupTitle}>{t(g.key)}</Text>
-                    </View>
+                    {g.key !== 'Results' && (
+                      <View style={s.groupHead}>
+                        {g.key === 'Starred' && <Ionicons name="star" size={11} color={GOLD} />}
+                        <Text style={s.groupTitle}>{t(g.key)}</Text>
+                      </View>
+                    )}
                     {/* Note #8 — chat row layout is IDENTICAL in both languages: icon → title → star → ⋯
                         on the right. `direction: ltr` locks the row so Arabic doesn't auto-flip it.
                         Title still flows with its own text direction inside the bubble. (user request.) */}
@@ -507,6 +588,16 @@ const s = StyleSheet.create({
   newChat: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 13, marginTop: 12 },
   newChatHover: { backgroundColor: colors.dark },
   newChatText: { fontSize: 14, fontWeight: '600', color: colors.surface },
+  // Chat search (owner 2026-08-24). The button mirrors the nav-link language (quiet, discoverable);
+  // the input row keeps the exact same footprint so the sidebar never jumps when it morphs.
+  searchBtn: { flexDirection: 'row', alignItems: 'center', gap: 9, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 13, marginTop: 8, borderWidth: 1, borderColor: '#e3e8e5' },
+  searchBtnHover: { backgroundColor: '#eef1ef' },
+  searchBtnText: { fontSize: 13.5, fontWeight: '600', color: colors.ink },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingVertical: 6, paddingHorizontal: 10, marginTop: 8, borderWidth: 1, borderColor: colors.primary, backgroundColor: '#ffffff' },
+  searchClose: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f4f2' },
+  // Arabic-first: the field itself presents RTL even though the panel is dir=ltr locked.
+  searchInput: { flex: 1, fontSize: Platform.OS === 'web' ? 16 : 13.5, paddingVertical: 4, color: colors.ink, textAlign: 'right', ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : null) } as any,
+  searchHint: { fontSize: 11.5, color: '#9aa6a0', paddingHorizontal: 8, paddingTop: 5, textAlign: 'right' },
 
   hist: { flex: 1, marginTop: 14, marginBottom: 8 },
   empty: { fontSize: 13, color: colors.muted, paddingVertical: 12, paddingHorizontal: 6 },
