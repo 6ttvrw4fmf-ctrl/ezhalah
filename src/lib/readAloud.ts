@@ -437,9 +437,7 @@ export function resumeReadAloud() {
 // this file exists to protect). The honest, contract-safe implementation: ±15s jumps along an
 // ESTIMATED per-unit timeline (unit length in characters ÷ an assumed reading speed, scaled by the
 // current rate) to the START of the nearest not-yet-finished unit — real inter-sentence granularity,
-// not a fabricated audio position. `elapsedMs` itself is real wall-clock time DURING normal playback;
-// only a seek re-anchors it to this estimate, which is disclosed here and in the UI's honest framing
-// (a seek always lands on a sentence boundary, never a fabricated arbitrary second).
+// not a fabricated audio position.
 // ESTIMATED_CHARS_PER_SEC_AT_RATE_1 is a documented estimate, not a live measurement — this session
 // has no infrastructure to time individual utterances in production; it's derived from the ~60s/
 // 5-card measurement already on file at rate 1.3 (see DEFAULT_RATE above) and standard TTS reading
@@ -449,10 +447,25 @@ function estimateUnitMs(unit: Unit, atRate: number): number {
   if (unit.kind === 'pause') return unit.ms; // exact — a scheduled silence, not an estimate
   return (unit.text.length / (ESTIMATED_CHARS_PER_SEC_AT_RATE_1 * atRate)) * 1000;
 }
-function cumulativeStartsMs(atRate: number): number[] {
-  const starts: number[] = [];
-  let acc = 0;
-  for (const unit of sessionUnits) { starts.push(acc); acc += estimateUnitMs(unit, atRate); }
+// ROOT-CAUSE FIX (found live, 2026-08-22, testing the controller right after it shipped): a forward
+// seek made the displayed time jump BACKWARD. Cause: the original version built one ABSOLUTE
+// timeline from unit 0 using ONLY estimates, then re-anchored `elapsedMs` (which is REAL wall-clock
+// during normal playback) to that absolute estimate on every seek. Real playback at this measured
+// rate runs meaningfully slower than the 14-chars/sec estimate, so by several units in, real elapsed
+// (e.g. 85s) had drifted far ahead of what the absolute estimate thought that unit's start was (e.g.
+// 46s) — seeking "+15s" from the ESTIMATE (46+15=61s) landed BEHIND where real playback already was.
+// Fix: anchor the timeline at the REAL current position (`elapsedMs`, exactly where we are — never an
+// estimate) and use the character-count estimate only for the RELATIVE distance to NEIGHBOURING units
+// forward/backward from right now. Estimation error can now only affect "how many units is 15
+// estimated seconds," never "what does now mean" — so the displayed time can no longer run backward
+// on a forward seek, or vice versa, however far a long reading has drifted from the estimate.
+function relativeStartsMs(fromIndex: number, fromPosMs: number, atRate: number): number[] {
+  const starts: number[] = new Array(sessionUnits.length);
+  starts[fromIndex] = fromPosMs;
+  let acc = fromPosMs;
+  for (let i = fromIndex + 1; i < sessionUnits.length; i++) { acc += estimateUnitMs(sessionUnits[i - 1], atRate); starts[i] = acc; }
+  acc = fromPosMs;
+  for (let i = fromIndex - 1; i >= 0; i--) { acc -= estimateUnitMs(sessionUnits[i], atRate); starts[i] = Math.max(0, acc); }
   return starts;
 }
 
@@ -476,11 +489,9 @@ function jumpTo(targetIndex: number, anchorElapsedMs: number) {
 // deltaMs > 0 seeks forward, < 0 seeks backward (owner spec: ±15000).
 export function seekReadAloud(deltaMs: number) {
   if (state === 'idle' || !sessionId || !sessionUnits.length) return;
-  const starts = cumulativeStartsMs(rate);
-  const total = starts.length
-    ? starts[starts.length - 1] + estimateUnitMs(sessionUnits[sessionUnits.length - 1], rate)
-    : 0;
-  const currentPos = starts[unitIndex] ?? 0;
+  const currentPos = elapsedMs; // REAL current position — see relativeStartsMs's note above
+  const starts = relativeStartsMs(unitIndex, currentPos, rate);
+  const total = starts[starts.length - 1] + estimateUnitMs(sessionUnits[sessionUnits.length - 1], rate);
   const target = Math.max(0, Math.min(currentPos + deltaMs, total));
   let idx = 0;
   for (let i = 0; i < starts.length; i++) { if (starts[i] <= target) idx = i; else break; }

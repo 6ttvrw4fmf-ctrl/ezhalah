@@ -143,10 +143,18 @@ check('a new speakReadAloud() session resets elapsed to zero; pauseReadAloud()/r
 // nearest sentence-level UNIT boundary along an ESTIMATED per-unit timeline — never a fabricated
 // in-utterance text offset (which would require re-picking a voice mid-utterance, a real risk to the
 // voice contract) and never a silence-only landing spot.
-check('seeking is estimate-based and jumps to a real unit boundary (jumpTo), documented explicitly as an estimate rather than a literal audio position', /function estimateUnitMs\(/.test(readAloud) && /function cumulativeStartsMs\(/.test(readAloud) && /function jumpTo\(/.test(readAloud) && /ESTIMATE-BASED SEEK/.test(readAloud));
+check('seeking is estimate-based and jumps to a real unit boundary (jumpTo), documented explicitly as an estimate rather than a literal audio position', /function estimateUnitMs\(/.test(readAloud) && /function relativeStartsMs\(/.test(readAloud) && /function jumpTo\(/.test(readAloud) && /ESTIMATE-BASED SEEK/.test(readAloud));
 check('seeking never lands on a silence-only unit — it walks forward to the next real speak unit', /while \(idx < sessionUnits\.length - 1 && sessionUnits\[idx\]\.kind === 'pause'\) idx\+\+;/.test(readAloud));
 check('seek target is clamped to [0, total estimated duration] — never negative, never past the end', /Math\.max\(0, Math\.min\(currentPos \+ deltaMs, total\)\)/.test(readAloud));
 check('exported seek entrypoint takes a signed delta (±15000 per the owner spec), not a hardcoded direction', /export function seekReadAloud\(deltaMs: number\)/.test(readAloud));
+// ROOT-CAUSE FIX (found LIVE, 2026-08-22, immediately after shipping): seeking must anchor its
+// timeline at the REAL current position (elapsedMs), never an absolute estimate accumulated from
+// unit 0 — the old version made a forward seek jump the displayed time BACKWARD once real playback
+// had drifted from the character-count estimate (confirmed live: real 85s vs. the old absolute
+// estimate's 46s for the same unit — a +15s seek from the estimate landed at 61s, behind where
+// real playback already was).
+check('seeking anchors the timeline at REAL elapsedMs (the actual current position), never an absolute unit-0 estimate that can drift from real playback over a long reading', /const currentPos = elapsedMs;/.test(readAloud) && /relativeStartsMs\(unitIndex, currentPos, rate\)/.test(readAloud));
+check('relativeStartsMs extends forward/backward from the given anchor using per-unit estimates for the RELATIVE distance only — the anchor itself is never re-derived from an estimate', /function relativeStartsMs\(fromIndex: number, fromPosMs: number, atRate: number\)/.test(readAloud) && /starts\[fromIndex\] = fromPosMs;/.test(readAloud));
 
 // SPEED CONTROL: cycles the exact owner-specified steps, restarts only the CURRENT unit (the Web
 // Speech API cannot change an in-flight utterance's rate), and — critically — never touches voice
@@ -225,23 +233,34 @@ function pickBestArabicReplica(voices: TestVoice[]): TestVoice | null {
   check('English-only voice list never gets picked even when it is the ONLY voice present', pickBestArabicReplica([en])?.identifier !== 'samantha');
 }
 
-// ── EXECUTED: a faithful replica of readAloud.ts's ESTIMATE-BASED SEEK math (owner 2026-08-22),
-//    run against a concrete unit timeline — proves seeking clamps to [0, total], never lands on a
-//    silence-only unit, and moves forward/backward by real unit boundaries, not fabricated positions.
-//    Same constant (14 chars/sec at rate 1) and algorithm structure as the real cumulativeStartsMs/
-//    seekReadAloud in readAloud.ts. ──────────────────────────────────────────────────────────────────
+// ── EXECUTED: a faithful replica of readAloud.ts's ESTIMATE-BASED SEEK math (owner 2026-08-22;
+//    real-anchor root-cause fix, same day), run against a concrete unit timeline — proves seeking
+//    clamps to [0, total], never lands on a silence-only unit, moves by real unit boundaries (not
+//    fabricated positions), and — the fix itself — never runs the displayed position backward on a
+//    forward seek (or forward on a backward seek) however far real playback has drifted from the
+//    character-count estimate. Same constant (14 chars/sec at rate 1) and algorithm structure as the
+//    real estimateUnitMs/relativeStartsMs/seekReadAloud in readAloud.ts. ────────────────────────────
 type TestUnit = { kind: 'speak'; text: string } | { kind: 'pause'; ms: number };
 function estimateUnitMsReplica(u: TestUnit, atRate: number): number {
   if (u.kind === 'pause') return u.ms;
   return (u.text.length / (14 * atRate)) * 1000;
 }
-function seekTargetIndexReplica(units: TestUnit[], currentIndex: number, atRate: number, deltaMs: number): number {
-  const starts: number[] = [];
-  let acc = 0;
-  for (const u of units) { starts.push(acc); acc += estimateUnitMsReplica(u, atRate); }
-  const total = starts.length ? starts[starts.length - 1] + estimateUnitMsReplica(units[units.length - 1], atRate) : 0;
-  const currentPos = starts[currentIndex] ?? 0;
-  const target = Math.max(0, Math.min(currentPos + deltaMs, total));
+function relativeStartsMsReplica(units: TestUnit[], fromIndex: number, fromPosMs: number, atRate: number): number[] {
+  const starts: number[] = new Array(units.length);
+  starts[fromIndex] = fromPosMs;
+  let acc = fromPosMs;
+  for (let i = fromIndex + 1; i < units.length; i++) { acc += estimateUnitMsReplica(units[i - 1], atRate); starts[i] = acc; }
+  acc = fromPosMs;
+  for (let i = fromIndex - 1; i >= 0; i--) { acc -= estimateUnitMsReplica(units[i], atRate); starts[i] = Math.max(0, acc); }
+  return starts;
+}
+// `currentPosMs` mirrors the real elapsedMs the live app passes in — an explicit parameter here
+// (rather than derived from an absolute per-unit estimate) so a test can deliberately simulate real
+// playback having drifted away from what the estimate alone would predict for `currentIndex`.
+function seekTargetIndexReplica(units: TestUnit[], currentIndex: number, currentPosMs: number, atRate: number, deltaMs: number): number {
+  const starts = relativeStartsMsReplica(units, currentIndex, currentPosMs, atRate);
+  const total = starts[starts.length - 1] + estimateUnitMsReplica(units[units.length - 1], atRate);
+  const target = Math.max(0, Math.min(currentPosMs + deltaMs, total));
   let idx = 0;
   for (let i = 0; i < starts.length; i++) { if (starts[i] <= target) idx = i; else break; }
   while (idx < units.length - 1 && units[idx].kind === 'pause') idx++;
@@ -252,15 +271,38 @@ function seekTargetIndexReplica(units: TestUnit[], currentIndex: number, atRate:
   const pause = (ms: number): TestUnit => ({ kind: 'pause', ms });
   // إزهله -> pause -> summary -> pause -> card1(4 sentences: headline/price/stats/platform) -> pause -> card2…
   const timeline: TestUnit[] = [speak(5), pause(450), speak(30), pause(450), speak(40), speak(20), speak(25), speak(20), pause(450), speak(40)];
+  // No-drift baseline positions (currentPosMs == what the pure estimate would say for that index) —
+  // reproduces the exact numbers the tests pinned before the real-anchor fix, since anchoring at
+  // (index, its own no-drift estimate) is mathematically identical to the old absolute-from-0 timeline.
+  const noDriftPos = (idx: number) => { let acc = 0; for (let i = 0; i < idx; i++) acc += estimateUnitMsReplica(timeline[i], 1.3); return acc; };
 
-  check('seeking +15s from the very start clamps to the LAST real unit, not past the end of the reading', seekTargetIndexReplica(timeline, 0, 1.3, 15000) === 9);
-  check('a modest forward seek lands on the correct real unit a few sentences ahead — real unit-boundary movement, not an arbitrary/fabricated jump', seekTargetIndexReplica(timeline, 0, 1.3, 3000) === 4);
-  check('seeking -15s from mid-reading clamps to unit 0, never negative', seekTargetIndexReplica(timeline, 6, 1.3, -15000) === 0);
-  check('a seek that estimates into the middle of a SILENCE gap snaps FORWARD to the next real speak unit — never lands on dead air', seekTargetIndexReplica(timeline, 2, 1.3, 1700) === 4);
+  check('seeking +15s from the very start clamps to the LAST real unit, not past the end of the reading', seekTargetIndexReplica(timeline, 0, 0, 1.3, 15000) === 9);
+  check('a modest forward seek lands on the correct real unit a few sentences ahead — real unit-boundary movement, not an arbitrary/fabricated jump', seekTargetIndexReplica(timeline, 0, 0, 1.3, 3000) === 4);
+  check('seeking -15s from mid-reading clamps to unit 0, never negative', seekTargetIndexReplica(timeline, 6, noDriftPos(6), 1.3, -15000) === 0);
+  check('a seek that estimates into the middle of a SILENCE gap snaps FORWARD to the next real speak unit — never lands on dead air', seekTargetIndexReplica(timeline, 2, noDriftPos(2), 1.3, 1700) === 4);
+  // ── ROOT-CAUSE REGRESSION (found live, 2026-08-22): with the OLD absolute-from-unit-0 timeline, a
+  //    forward seek could land BEHIND where real playback already was, once real elapsed had drifted
+  //    ahead of the estimate — confirmed live (real 85s vs. the old estimate's 46s for the same unit;
+  //    a "+15s" seek from 46s landed at 61s, behind the real 85s it started from). Simulate the same
+  //    shape here: anchor at unit 4 with a real position FAR ahead of what the estimate would predict
+  //    for unit 4 (drifted), and prove a forward seek can never move to an EARLIER real position, nor
+  //    a backward seek to a LATER one — the fix (anchoring at the real position) holds regardless of
+  //    how far the estimate has drifted. ─────────────────────────────────────────────────────────────
+  {
+    const driftedPos = noDriftPos(4) + 50000; // real elapsed is 50s further along than the estimate thinks
+    const fwdIdx = seekTargetIndexReplica(timeline, 4, driftedPos, 1.3, 15000);
+    const fwdStarts = relativeStartsMsReplica(timeline, 4, driftedPos, 1.3);
+    const bwdIdx = seekTargetIndexReplica(timeline, 4, driftedPos, 1.3, -15000);
+    const bwdStarts = relativeStartsMsReplica(timeline, 4, driftedPos, 1.3);
+    check('forward seek from a DRIFTED real position never lands at an earlier real time than where playback already was (the exact live bug: +15s landed BEHIND the real position)', fwdStarts[fwdIdx] >= driftedPos);
+    check('forward seek from a drifted position moves the unit index forward (or stays, at the end) — never backward', fwdIdx >= 4);
+    check('backward seek from a drifted real position never lands at a LATER real time than where playback already was', bwdStarts[bwdIdx] <= driftedPos);
+    check('the anchor unit itself always keeps exactly the real position passed in, regardless of drift (relativeStartsMs never re-derives "now" from the estimate)', relativeStartsMsReplica(timeline, 4, driftedPos, 1.3)[4] === driftedPos);
+  }
   // A faster rate (1.3) makes each unit's ESTIMATED duration shorter, so the same 3000ms delta covers
   // MORE units (reaches an equal-or-higher index) than the slower 0.8x rate — confirms the estimate
   // actually reacts to the current speed, not a rate-blind fixed unit-count skip.
-  check('a faster rate reaches an equal-or-later unit than a slower rate for the identical seek delta (the estimate reacts to current speed)', seekTargetIndexReplica(timeline, 0, 1.3, 3000) >= seekTargetIndexReplica(timeline, 0, 0.8, 3000) && seekTargetIndexReplica(timeline, 0, 1.3, 3000) === 4 && seekTargetIndexReplica(timeline, 0, 0.8, 3000) === 2);
+  check('a faster rate reaches an equal-or-later unit than a slower rate for the identical seek delta (the estimate reacts to current speed)', seekTargetIndexReplica(timeline, 0, 0, 1.3, 3000) >= seekTargetIndexReplica(timeline, 0, 0, 0.8, 3000) && seekTargetIndexReplica(timeline, 0, 0, 1.3, 3000) === 4 && seekTargetIndexReplica(timeline, 0, 0, 0.8, 3000) === 2);
 }
 
 console.log(failed === 0 ? '\n✓ read-aloud contract holds — native/OS TTS only, $0 at any volume' : `\n✗ ${failed} assertion(s) FAILED`);
