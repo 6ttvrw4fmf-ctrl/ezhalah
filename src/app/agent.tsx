@@ -345,6 +345,45 @@ const waitRun = (run: Run, ms: number) =>
 // Feedback toast fade + slide (web CSS transition; native just toggles — acceptable, web ships).
 const TOAST_EASE = Platform.OS === 'web' ? ({ transitionProperty: 'opacity, transform', transitionDuration: '250ms' } as any) : null;
 
+// Drives a typewriter's `n` from 0 to `total` at TYPE_CHARS/TYPE_TICK_MS, AND guarantees `onDone`
+// fires within a bounded ceiling even if the interval itself gets starved.
+//
+// ROOT-CAUSE FIX (owner report, 2026-08-23 — "the advanced filter doesn't work in every property
+// type"). The AF "narrow it down" button, the Load-more/feedback row, and the Read Aloud button are
+// ALL gated on `doneTyping`, which only this interval's completion sets. Measured LIVE on two
+// independent real browsers (this session's own test pane AND the owner's actual Windows Chrome,
+// cross-checked specifically to rule out a tooling artifact) with a MutationObserver on the intro
+// text: while the 10-card results cascade renders alongside it, ticks that should fire every 24ms
+// were landing ~1000ms apart instead — a ~40x stall, some runs taking 40-60+ real seconds before the
+// intro sentence's LAST character (and every button gated behind it) ever appeared. The interval's
+// own state machine was never wrong — recomputing `n` and comparing to `total` is trivial — the
+// SIBLING render load (reconciling the heavy card list on every tick) is what starves it of main-
+// thread time between ticks. Properly insulating that render path is a larger, riskier change; the
+// fix that doesn't require it is the one this codebase already uses for exactly this class of
+// problem (src/lib/afterAnimation.ts's runAfterAnimation): THE ANIMATION IS DECORATION, THE HAND-OFF
+// IS THE FUNCTION — so a bounded fallback timer forces `onDone` through even when the interval
+// that's supposed to drive it is being starved. The ceiling is generous relative to any real typing
+// duration (a natural intro sentence needs well under a second of TYPE_TICK_MS-paced reveal), so it
+// never fires under normal rendering — only when something has gone this wrong.
+function runTypewriter(total: number, setN: (n: number) => void, onDone?: () => void): () => void {
+  if (total <= 0) { onDone?.(); return () => {}; }
+  let i = 0;
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    setN(total);
+    onDone?.();
+  };
+  const id = setInterval(() => {
+    i += TYPE_CHARS;
+    if (i >= total) { clearInterval(id); finish(); } else { setN(i); }
+  }, TYPE_TICK_MS);
+  const expectedMs = Math.ceil(total / TYPE_CHARS) * TYPE_TICK_MS;
+  const fallback = setTimeout(finish, Math.max(4000, expectedMs * 3));
+  return () => { clearInterval(id); clearTimeout(fallback); };
+}
+
 // Typewriter — reveals the text one character at a time, spread evenly across `duration` ms (so a
 // short or long sentence both take the same ~5s), making a filter search read as if Ezhalah is
 // writing it out (prototype parity: ezhalah-mobile.jsx Typer). Renders an unstyled <Text> so it
@@ -353,25 +392,7 @@ function Typer({ text, onDone }: { text: string; onDone?: () => void }) {
   const [n, setN] = useState(0);
   useEffect(() => {
     setN(0);
-    const total = text.length;
-    if (total === 0) {
-      onDone?.();
-      return;
-    }
-    // Constant cadence: reveal TYPE_CHARS every TYPE_TICK_MS, the SAME for short and long text. Total
-    // time = length × speed, so nothing ever bursts faster or crawls slower than anything else.
-    let i = 0;
-    const id = setInterval(() => {
-      i += TYPE_CHARS;
-      if (i >= total) {
-        setN(total);
-        clearInterval(id);
-        onDone?.();
-      } else {
-        setN(i);
-      }
-    }, TYPE_TICK_MS);
-    return () => clearInterval(id);
+    return runTypewriter(text.length, setN, onDone);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
   return <Text>{text.slice(0, n)}</Text>;
@@ -386,25 +407,7 @@ function BrandReveal({ brand, text, onDone }: { brand: string; text: string; onD
   const [n, setN] = useState(0);
   useEffect(() => {
     setN(0);
-    const total = full.length;
-    if (total === 0) {
-      onDone?.();
-      return;
-    }
-    // Same constant cadence as Typer (TYPE_CHARS per TYPE_TICK_MS) so the listings reply types at the
-    // EXACT same speed as a plain chat reply — no separate, faster "found" animation.
-    let i = 0;
-    const id = setInterval(() => {
-      i += TYPE_CHARS;
-      if (i >= total) {
-        setN(total);
-        clearInterval(id);
-        onDone?.();
-      } else {
-        setN(i);
-      }
-    }, TYPE_TICK_MS);
-    return () => clearInterval(id);
+    return runTypewriter(full.length, setN, onDone);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [full]);
   const shown = full.slice(0, n);
