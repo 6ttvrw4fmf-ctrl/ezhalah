@@ -204,23 +204,50 @@ def _redact(text: Optional[str]) -> Optional[str]:
 
 
 # ── Sitemap enumeration ───────────────────────────────────────────────────────
+# raghdan.sa's sitemap.xml is intermittently unreachable to automated fetchers (2026-08-23: 2
+# consecutive daily CI runs logged "Raghdan: 0 candidate listings" while a direct probe from a
+# different network fetched the same sitemap successfully with 376 property URLs moments later —
+# and a same-network repeat request then timed out again). Same lesson as jazwtn's 07-23→08-03
+# incidents: never conclude "blocked" or "empty catalog" from one response. Retry across TLS
+# fingerprints with backoff, treat a 0-entry body as a FAILED attempt (not a healthy empty
+# catalog), and RAISE after exhausting attempts so the run fails LOUD with a real reason instead of
+# silently reporting an empty catalog (the old bare `except Exception: pass` swallowed the actual
+# error — timeout vs reset vs decoy body were all indistinguishable from a genuinely empty source).
+_SITEMAP_IMPERSONATES = ("chrome124", "chrome131", "chrome136", "safari184", None)
+
+
 def sitemap_urls(s: cc.Session) -> list[str]:
     """Return de-duped /ar/property/<firebaseId>/ URLs from sitemap.xml (one big urlset).
-    EXCLUDES the /ar/properties/ plural index, /ar/market/, /ar/news/, /ar/public-profile/ …"""
-    urls: list[str] = []
-    try:
-        body = s.get(SITEMAP, timeout=90).text
-        for u in re.findall(r"<loc>([^<]+)</loc>", body):
-            if PROP_URL_RE.match(u):
-                urls.append(u if u.endswith("/") else u + "/")
-    except Exception:
-        pass
-    seen, out = set(), []
-    for u in urls:
-        if u not in seen:
-            seen.add(u)
-            out.append(u)
-    return out
+    EXCLUDES the /ar/properties/ plural index, /ar/market/, /ar/news/, /ar/public-profile/ …
+    Retries across TLS fingerprints with backoff; raises after exhausting them so the run is
+    marked failed instead of silently reporting an empty catalog (see module note above)."""
+    last_err: Optional[Exception] = None
+    for attempt, imp in enumerate(_SITEMAP_IMPERSONATES):
+        try:
+            sess = s if attempt == 0 else (cc.Session(impersonate=imp) if imp else cc.Session())
+            body = sess.get(SITEMAP, timeout=30).text
+            seen: set[str] = set()
+            urls: list[str] = []
+            for u in re.findall(r"<loc>([^<]+)</loc>", body):
+                if PROP_URL_RE.match(u):
+                    u = u if u.endswith("/") else u + "/"
+                    if u not in seen:
+                        seen.add(u)
+                        urls.append(u)
+            if urls:
+                if attempt:
+                    print(f"  sitemap recovered on retry {attempt + 1} "
+                          f"(impersonate={imp}, {len(body)} bytes, {len(urls)} urls)")
+                return urls
+            print(f"  sitemap attempt {attempt + 1} (impersonate={imp}): {len(body)} bytes, "
+                  f"0 property urls — decoy body, retrying")
+        except Exception as e:  # curl 28/35 timeouts/resets land here
+            last_err = e
+            print(f"  sitemap attempt {attempt + 1} (impersonate={imp}) failed: {e}")
+        time.sleep(4 * (attempt + 1))
+    raise RuntimeError(
+        f"raghdan sitemap: no property urls after {len(_SITEMAP_IMPERSONATES)} fingerprint attempts"
+        + (f" (last error: {last_err})" if last_err else " (all attempts returned decoy bodies)"))
 
 
 def fetch_one(url: str) -> Optional[tuple[str, str]]:
@@ -649,17 +676,20 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
-    urls = sitemap_urls(s)
-    if args.limit:
-        urls = urls[: max(args.limit * 3, 30)]
-    print(f"Raghdan: {len(urls)} candidate listings ({WORKERS} workers)"
-          f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
-
+    # begin_run BEFORE the sitemap fetch (same fix as jazwtn 2026-07-27): sitemap_urls() can now
+    # raise (see its module note), and that raise must still land a scrape_runs row via the
+    # except-arm below, not vanish before any row exists.
     run_id = None if args.limit else db.begin_run("raghdan")
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
     try:
+        urls = sitemap_urls(s)
+        if args.limit:
+            urls = urls[: max(args.limit * 3, 30)]
+        print(f"Raghdan: {len(urls)} candidate listings ({WORKERS} workers)"
+              f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
+
         res_buf: list[dict] = []
         com_buf: list[dict] = []
 
