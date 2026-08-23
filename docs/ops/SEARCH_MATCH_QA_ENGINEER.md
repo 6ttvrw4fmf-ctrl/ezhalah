@@ -589,3 +589,64 @@ mutation-proven — each shown to read 0 on clean data and 1 on a deliberately b
 the entire journey: اختيار التصفية → بحث → النتائج → عرض المزيد → بطاقة العقار → المصدر الصحيح.
 Any proven Ezhalah-side failure anywhere in it: find → prove → fix root cause → barrier →
 regression test → deploy safely → production retest → report once.
+
+---
+
+## 40. THE LIVE BROWSER SWEEP — permanent, scheduled, and part of this routine
+
+**Owner, 2026-08-23: «Make the real live-browser hunt permanent. I do not want these 16 barriers to
+be the only protection. The routine must actually drive the production site like a real user every
+run.»**
+
+`npm test`'s barriers read SOURCE and query the DATABASE. They are blind in exactly the place users
+live: they cannot see what a browser RENDERS. Every defect in the 2026-08-22 hunt — a city silently
+re-scoped to a neighbourhood, an AF chip promising 8,914 and landing on 2,364, the RPC page cap
+quoted as a match total, a district visible in the field but never searched — **passed `npm test`**
+and was obvious within seconds of driving the real site.
+
+So the browser sweep is a SECOND, PERMANENT layer:
+
+| | |
+|---|---|
+| what | `e2e/live-sweep/` (`run.mjs` · `journeys.mjs` · `sweep.mjs`) |
+| when | daily, `.github/workflows/live-search-sweep.yml` (`23 2 * * *`) + `workflow_dispatch` |
+| locally | `npm run sweep:live` (add `BASE_URL=…` to point it at a local build) |
+| shape guarded by | `scripts/verify-live-sweep-coverage-contract.ts`, inside `npm test` |
+
+### The six layers — clicking a control is never the assertion
+Every journey captures the whole chain, and **any mismatch between adjacent layers is a defect**:
+
+`INTENT → visible UI → actual request → RPC result → INDEPENDENT DB truth → rendered results`
+
+Layer 5 is built from **PostgREST's own filter operators** — a different implementation from the
+app's SQL — so agreement is evidence rather than self-confirmation. It is derived from the app's OWN
+captured request body, and when a scope cannot be expressed faithfully the sweep **skips that layer
+and says so**. It never guesses: on its first run an imprecise oracle "found" three defects that were
+purely its own missing predicates, and an oracle that accuses the product for its own imprecision is
+worse than no oracle.
+
+### Rotation — never Riyadh-heavy
+Coverage is drawn from `ops_qa_coverage_ledger` **stalest-first** (`ops_qa_sweep_plan`), and what was
+covered is written back (`ops_qa_record_coverage`). Cities are discovered LIVE from the index, never
+a hardcoded list that can rot. Rotated dimensions: city · region · property type · deal/period ·
+AF cohort.
+
+### Minimum coverage per run — ASSERTED, not hoped for
+≥3 non-Riyadh cities · ≥1 mobile · ≥1 Advanced Filter · ≥1 Trending city · ≥1 Trending district ·
+≥1 Buy+Rent · ≥1 monthly-rent · ≥1 honest-zero · ≥1 card → external site → Back.
+
+**A run that covers less than the floor FAILS.** Silent shrinkage is exactly how a rotation system
+rots, so the floors are enforced by exit code and pinned by the barrier above.
+
+### Permanent watches (one per defect fixed 2026-08-23)
+`exact-city-never-rescoped` · `monthly-af-counts-update` · `true-total-never-page-cap` ·
+`buyrent-summary-both-budgets` · `unknown-period-stays-unknown` · `no-html-entities-rendered` ·
+`typed-district-not-dropped` · `clarification-answer-commits` · `tab-switch-no-junk-history`
+
+Deleting a watch fails the barrier. `exact-city-never-rescoped` and `true-total-never-page-cap` are
+asserted on **every** journey, not by one probe.
+
+### When the sweep is RED
+It found a real, user-visible defect. Handle it the way §25 and §26 already require:
+**reproduce → root cause → fix → regression → barrier → mutation-proof → merge → deploy → re-test.**
+Never close it by loosening the sweep.
