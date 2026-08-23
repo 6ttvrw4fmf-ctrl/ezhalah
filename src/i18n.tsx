@@ -131,8 +131,11 @@ const AR: Record<string, string> = {
   // claim about contract length (the old «من شهر إلى 11 شهر» wording is banned; a guard pins it out).
   'Monthly: the displayed price is the monthly price.': 'الأسعار معروضة بالشهر',
   'Yearly: the displayed price is the yearly price.': 'سنوي: السعر المعروض سنوي.',
-  'Both: monthly and yearly listings together — each card shows its own price basis.':
-    'كلاهما: نعرض الشهري والسنوي معاً — كل إعلان يوضّح أساس سعره.',
+  // Owner feedback (2026-08-22): trimmed — the old wording ("Both: we show monthly and yearly
+  // together") re-explained what selecting both buttons already makes obvious. Kept only the one
+  // fact worth surfacing: mixed results carry mixed price units.
+  'Each listing shows its own price basis (monthly or yearly).':
+    'كل إعلان يوضّح أساس سعره (شهري أو سنوي).',
   // Monthly Advanced Filter (2026-08-18)
   'What rating would you prefer?': 'كم التقييم اللي تفضله؟',
   '9.5+': '9.5+',
@@ -167,6 +170,8 @@ const AR: Record<string, string> = {
   // Buy+Rent combined multi-select (owner feature 2026-08-20): the two independent price ranges
   // shown together when شراء+إيجار are both selected — never one shared/naive range.
   'Buy budget': 'ميزانية الشراء',
+  'When you choose Buy and Rent together, each one has its own budget.':
+    'سيتم عرض عقارات البيع والإيجار معًا، ولكل منهما ميزانية مستقلة.',
   'Rent budget (yearly basis)': 'ميزانية الإيجار (سنوياً)',
   ' /yr': ' / سنوياً',
   'Max price': 'السعر الأقصى',
@@ -541,6 +546,17 @@ const AR: Record<string, string> = {
   // Read Aloud (owner P0, 2026-08-18) — native/OS TTS only, $0, never a paid API.
   'Read aloud': 'استماع للرد',
   'Stop reading': 'إيقاف الاستماع',
+  // Graceful failure (owner root-cause fix, 2026-08-22): shown ONLY when the device/browser has no
+  // Arabic voice at all — never silently read Arabic text with a non-Arabic (usually English) voice.
+  'Listening isn\'t available on this device': 'الاستماع غير متاح على هذا الجهاز',
+  // Floating playback controller (owner 2026-08-22, ChatGPT-style pill — Arabic-branded, own layout).
+  // Every accessibility label on the controller must be Arabic, no English leak ('Close' reuses the
+  // existing app-wide key just below — same word, same meaning, one definition).
+  'Pause reading': 'إيقاف مؤقت',
+  'Resume reading': 'متابعة',
+  'Back 15 seconds': 'رجوع ١٥ ثانية',
+  'Forward 15 seconds': 'تقديم ١٥ ثانية',
+  'Playback speed': 'سرعة القراءة',
   'Here is what I found:': 'هذا ما وجدته:',
   'Here is what matches what you want': 'هذا اللي يناسب طلبك',
   'I found a few properties based on your search.': 'وجدت بعض العقارات بناءً على طلبك.',

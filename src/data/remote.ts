@@ -398,7 +398,80 @@ function rpcCountFilterParams(q: SearchQuery) {
   const { p_sort_by: _drop, ...rest } = rpcFilterParams(q) as ReturnType<typeof rpcFilterParams> & { p_sort_by?: string };
   return rest;
 }
+
+// EVERY answered Advanced-Filter question, as RPC params. rpcFilterParams() deliberately carries only
+// the NORMAL-filter narrowing (types/beds/price/area), so any count surface that needs to reflect the
+// user's advanced answers must add these on top — and the ones that forget silently overstate.
+//
+// This has now been the same bug twice. 2026-07-24: the age-bucket badges ignored an already-selected
+// amenity filter and showed counts "far larger than what Search actually returns". 2026-08-20 (AF
+// major certification): `fetchDistrictEligibleCounts` — the helper written specifically so that
+// "count and outcome cannot disagree" — re-ran the results RPC WITHOUT the advanced answers. Measured
+// live on Riyadh / Rent-Annual / شقة with amenities=[elevator] + bathMin=3: the top 8 districts
+// advertised 4,141 listings and returned 511 on click, an 8.1x overstatement, every row wrong.
+//
+// Keep this as the ONE definition. A new advanced question adds its param here and every count
+// surface that spreads it stays correct by construction; verify-af-count-params-carry-advanced.ts
+// fails if the district-count path stops spreading it.
+export function rpcAdvancedFilterParams(q: SearchQuery) {
+  return {
+    ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
+    ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
+    ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
+    ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
+    ...(q.directions?.length ? { p_directions: q.directions } : {}),
+    ...(q.ratingMin != null ? { p_rating_min: q.ratingMin } : {}),
+    ...(q.reviewsMin != null ? { p_reviews_min: q.reviewsMin } : {}),
+    ...(q.unitSubtypes?.length ? { p_unit_subtypes: q.unitSubtypes } : {}),
+    ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
+    ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
+    ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
+  };
+}
 const RPC_SORT_KEYS = new Set(['oldest', 'price_asc', 'price_desc', 'area_asc', 'area_desc', 'beds_desc']);
+
+// EVERY predicate the user's current state implies — the NORMAL narrowing (bedrooms, price, area,
+// combined-mode rent budget) AND the answered Advanced-Filter questions — in ONE object.
+//
+// WHY THIS EXISTS (owner-reported live defect, 2026-08-22). Trending is not a generic location
+// suggestion: it is the LOCATION BREAKDOWN OF THE USER'S EXACT CURRENT ELIGIBLE SET. It was only
+// ever handed rpcAdvancedFilterParams(), i.e. the ADVANCED half, so bedrooms / price / area were
+// silently dropped from every city and district count. Measured live on
+// Apartment + Rent + Annual + 3 beds + 120-180 m² + 70k-100k:
+//     الرياض  trending said 10,618  · truth   705   (15x)
+//     جدة     trending said  5,937  · truth    76   (78x)
+//     مكة     trending said    708  · truth     1   (708x)
+// The user picked a city from those numbers and landed on a completely different result count.
+//
+// The split into two builders is what made the bug structural — a count surface had to REMEMBER to
+// spread both halves, and this one remembered only one. This is the single definition that means
+// "everything the user has chosen", so a surface that spreads it cannot forget a predicate, and a
+// future filter is carried by every such surface for free.
+//
+// p_types and p_sort_by are deliberately NOT included: every caller already passes its own cohort
+// type array, and count surfaces have no ordering (leaking p_sort_by into a count RPC is what made
+// both count calls 404 with PGRST202 in the 2026-07-30 bug-hunt).
+export function rpcAllNarrowingParams(q: SearchQuery) {
+  const { p_types: _types, p_sort_by: _sort, ...normal } =
+    rpcFilterParams(q) as ReturnType<typeof rpcFilterParams> & { p_sort_by?: string };
+  // ONLY the predicates the user actually SET. rpcFilterParams always returns its keys (the search
+  // RPC wants the explicit nulls), but here an unset key must be OMITTED, for two reasons:
+  //   • CORRECTNESS OF THE "is the user narrowed?" TEST — the trending pool decides whether a
+  //     widening fallback is allowed by asking whether this object is empty. Always-present null
+  //     keys would make every search look narrowed.
+  //   • PERFORMANCE, measured: sending p_beds_*/p_price_*/p_area_* as explicit NULLs made
+  //     top_cities_by_deal_ar hit the statement timeout on an unfiltered call, while omitting them
+  //     returned immediately — the CI web-runtime smoke test caught exactly this (the city
+  //     suggestion list came back empty, so «الرياض» could not be picked).
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries({ ...normal, ...rpcAdvancedFilterParams(q) })) {
+    if (v === null || v === undefined) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 
 export type SearchScope = {
   p_deal: string | null;
@@ -752,6 +825,11 @@ export async function fetchDistrictEligibleCounts(
   const base = {
     ...scopeParams,
     ...rpcCountFilterParams(q),
+    // The user's answered ADVANCED questions belong here too: this helper's whole promise is that the
+    // number beside a district equals what selecting it returns, and the results RPC applies the
+    // advanced predicates whether or not this count call sends them. Omitting them made every district
+    // overstate by up to 8x (AF major certification 2026-08-20).
+    ...rpcAdvancedFilterParams(q),
     ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
     p_limit: 1,
     p_offset: 0,

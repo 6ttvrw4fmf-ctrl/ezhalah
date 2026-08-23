@@ -15,7 +15,7 @@ import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, type SearchQuery } from '@/data/search';
-import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr } from '@/data/remote';
+import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -197,9 +197,32 @@ export default function Home() {
   const effCategory: Category = query.category ?? IMPLIED_CATEGORY_DEFAULT;
   // The cohort's Arabic types — the EXACT array the search RPC receives (one shared definition in
   // remote.ts), so Trending cities/districts, their counts, and their percentages always describe
-  // the same inventory pressing Search returns. Price is deliberately absent (owner, 2026-08-15).
+  // the same inventory pressing Search returns.
   const cohortTypes = cohortTypesAr(query);
   const cohortTypesSig = cohortTypes ? cohortTypes.join('|') : '';
+  // EVERY predicate the user has already chosen, in the SAME shape the search RPC receives — the
+  // advanced answers AND the normal narrowing (bedrooms, price, area, combined-mode rent budget).
+  //
+  // OWNER RULE (2026-08-22, supersedes the 2026-08-15 "price is deliberately absent" scoping):
+  // «Trending is not a generic location suggestion. It is the location breakdown of the user's exact
+  // current eligible set.» The number beside a city must be "listings matching EVERYTHING I picked,
+  // in that city" — not the type/deal total for that city.
+  //
+  // Measured live on production BEFORE this fix, Apartment + Rent + Annual + 3 bedrooms:
+  // picking the bedroom count changed NOTHING — الرياض stayed 10,618 against a truth of 3,863 — and
+  // every top_cities_by_deal_ar request went out with beds/area/price all null. Adding the owner's
+  // full example (+120-180 m² +70k-100k) the truth is 705: a 15x overstatement, and جدة 78x, مكة 708x.
+  //
+  // IDENTITY IS KEYED ON THE CONTENT, NOT A HAND-WRITTEN DEP LIST. The params are derived from many
+  // query fields (bedroomTokens alone reads type, detail, types and beds), so an explicit dependency
+  // array is a standing invitation to forget one — which is precisely the defect being fixed here.
+  // Recomputing each render is cheap; memoising on the SIGNATURE gives a stable object identity that
+  // changes if and only if a real predicate changed, so the pool cache key and the refresh effect
+  // below can never serve a count for a filter state the user has already left.
+  const cityAfRaw = rpcAllNarrowingParams(query);
+  const cityAfSig = JSON.stringify(cityAfRaw);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const cityAfParams = useMemo(() => cityAfRaw, [cityAfSig]);
   // «N إعلان» — how many ACTIVE listings this option really has, in the current cohort.
   //
   // The share percentage that used to trail this label («… · 38٪») was REMOVED on owner instruction
@@ -327,7 +350,6 @@ export default function Home() {
   // "Rent budget (annual)" under Rent-only — so it must be cleared exactly when a toggle press
   // flips WHICH deal that pair currently prices, never on a press that keeps the same meaning
   // (Buy-only→Both keeps meaning Buy; Both→Buy keeps meaning Buy — no clear either time).
-  const [dealPriceCleared, setDealPriceCleared] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   // Share button press feel — reuses ModeSwitch's own spring constants (stiffness 260, damping 26,
   // mass 0.7) so the header's two controls share one motion language (design review 2026-07-24).
@@ -348,7 +370,7 @@ export default function Home() {
   // Category-aware ranking can't reach this field without moving Category earlier in the flow — a
   // bigger UX change the owner declined (2026-07-20). Deal-only is what this data can support today.
   useEffect(() => {
-    void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes).then((pool) => {
+    void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then((pool) => {
       // EDGE CASE (found in testing, generalizes to every deal change too): a fetch can still be
       // pending when the user has already focused AND typed a query — matchCitiesByText() would have
       // run against a still-empty/stale-deal pool and (correctly, not a crash) returned []/old
@@ -358,9 +380,9 @@ export default function Home() {
       // replay only "when the section first appears or when the rankings change").
       if (cityTextRef.current) {
         const latin = isLatinOnlyInput(cityTextRef.current);
-        setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes));
+        setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes, cityAfParams));
       } else if (cityFocus) {
-        setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes));
+        setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
       }
       // REHYDRATION (bug fix 2026-08-04): returning to this screen after a search REMOUNTS it —
       // query.location persists in the app context (the field still shows the city), but
@@ -399,7 +421,32 @@ export default function Home() {
     // effCategory joined the deps with count-scope parity: the pool is now keyed by the effective
     // category, so a Residential↔Commercial pick re-warms the pool at its true scope.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    // DEPS: deal / period / category / types ONLY — deliberately NOT cityAfSig.
+    //
+    // This effect does two jobs: warm the city pool, and REHYDRATE citySelected after a remount
+    // (returning from a search, or the post-Stop restore). Adding the narrowing signature here made
+    // it re-run on every bedroom, price and area edit, and re-entering the rehydration path that
+    // often mid-flight left the form in a state where pressing «بحث» issued no search at all — the
+    // web-runtime smoke test caught it as «resubmitting after rapid-Stop» never landing a count.
+    // Counts still follow the narrowing: the effect BELOW refreshes the pool whenever the field is
+    // actually open, which is the only time those numbers are on screen.
   }, [effDeal, rentPeriodTok, effCategory, cohortTypesSig]);
+
+  // Narrowing changed (bedrooms / price / area / an advanced answer) — the CITY COUNTS are now stale.
+  // Refetch for the new key and re-render the list, but ONLY while the field is actually in use, and
+  // WITHOUT touching rehydration: this effect never sets citySelected, so it cannot disturb the form.
+  useEffect(() => {
+    if (!cityFocus && !cityTextRef.current) return;
+    void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then(() => {
+      if (cityTextRef.current) {
+        const latin = isLatinOnlyInput(cityTextRef.current);
+        setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes, cityAfParams));
+      } else if (cityFocus) {
+        setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cityAfSig, cityFocus]);
 
   // Same reactive refresh for District, scoped to the currently-selected city — and ALSO to Category
   // (owner decision 2026-07-20, after proving live that Category matters more for districts than for
@@ -496,13 +543,33 @@ export default function Home() {
   // (fetchDistrictEligibleCounts, one p_limit:1 call per row) and mark honesty from those. When no
   // narrowing is active there are no extra calls — scope count = results count there, a parity the
   // DB barrier (mon_trending_district_barrier) pins at 40/40 exact.
+  // ADVANCED answers narrow just as hard as نوع/سعر/مساحة and must be in this signature for two
+  // reasons: they decide whether the live-count path runs AT ALL (an AF-only narrowing would
+  // otherwise fall back to district_options_ar's deal/category/period scope count), and they must
+  // INVALIDATE cached counts when an answer changes. Measured 2026-08-20 (AF major certification)
+  // and re-measured 2026-08-22 on live production: Riyadh / Rent-Annual / شقة with
+  // amenities=[elevator] + bathMin=3 advertised 4,449 across the top 8 districts and returned 592
+  // on click — 7.5x, every row wrong in the same direction.
+  // priceMinRent/priceMaxRent are the COMBINED-mode (شراء+إيجار) Rent-side budget. They were missing
+  // here, so a combined search narrowed ONLY by a rent budget looked un-narrowed: hasDistrictNarrowing
+  // stayed false, the live-count fetch never ran, and every district row kept district_options_ar's
+  // deal/category/period scope count. Measured live: حي العارض advertised 2,914 and the search landed
+  // on 1,231 (2.4x), while the CITY list on the same screen was correct — the two contradicted each
+  // other in one state. The engine does apply the bound (rpcFilterParams spreads p_price_min_rent /
+  // p_price_max_rent whenever dealCombined), so only the COUNT was lying. (owner Trending rule.)
   const districtNarrowingSig = JSON.stringify([query.type, query.typeGroups, query.types, query.detail,
     query.contextBeds, query.contextBedsList, query.contextSize, query.priceInput, query.priceBand,
-    query.priceMin, query.priceMax, query.areaMin, query.areaMax]);
+    query.priceMin, query.priceMax, query.priceMinRent, query.priceMaxRent, query.areaMin, query.areaMax,
+    query.amenities, query.bathMin, query.furnishedPref, query.streetWidthMin, query.directions,
+    query.ratingMin, query.reviewsMin, query.unitSubtypes, query.ageMin, query.ageMax,
+    query.isNewConstruction]);
   const hasDistrictNarrowing = useMemo(
     () => (JSON.parse(districtNarrowingSig) as unknown[]).some((v) =>
       Array.isArray(v) ? v.length > 0 : v != null && v !== ''),
     [districtNarrowingSig]);
+  // Upper bound on how many district rows get a live, filter-aware count. Must cover everything the
+  // dropdown can render (matchDistrictsByCityId caps its typed matches at 30) — see the fetch below.
+  const DISTRICT_COUNT_FETCH_MAX = 30;
   const [districtLiveCounts, setDistrictLiveCounts] = useState<Record<string, number> | null>(null);
   const districtLiveReq = useRef(0);
   useEffect(() => {
@@ -513,7 +580,12 @@ export default function Home() {
     const id = ++districtLiveReq.current;
     const q = buildFilterBaseQuery();
     if (!q) return;
-    const visible = districtSuggestions.slice(0, 12)
+    // EVERY rendered row, not the first 12. matchDistrictsByCityId returns up to 30 typed matches and
+    // all of them are rendered, so a 12-row fetch left rows 13-30 falling back to the deal/category
+    // SCOPE count — presented identically to a real one, and wrong whenever a filter is active.
+    // DISTRICT_COUNT_FETCH_MAX is deliberately >= that 30 so the two can't drift apart silently; the
+    // render below still refuses to print a number for any row this fetch did not cover.
+    const visible = districtSuggestions.slice(0, DISTRICT_COUNT_FETCH_MAX)
       .map((o) => ({ districtAr: o.districtAr, matchValues: o.matchValues }));
     void fetchDistrictEligibleCounts(q, visible).then((counts) => {
       if (id === districtLiveReq.current && counts) setDistrictLiveCounts(counts);
@@ -528,7 +600,7 @@ export default function Home() {
   // Arabic row. English typing is excluded on purpose: that case already has its own message
   // (ARABIC_ONLY_MSG under the field) and must keep it, unchanged.
   const cityLatin = !!query.location && isLatinOnlyInput(query.location);
-  const cityStatus = cityPoolStatus(effDeal, rentPeriodTok, effCategory, cohortTypes);
+  const cityStatus = cityPoolStatus(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams);
   const cityZeroRow: 'loading' | 'error' | 'empty' | null =
     citySuggestions.length > 0 || cityLatin ? null
       : cityStatus !== 'ready' ? cityStatus
@@ -546,12 +618,12 @@ export default function Home() {
     clearBlurTimer(cityBlurTimer);
     cityRef.current?.focus();
     setCitySuggestions([]); // fresh [] reference → re-render → the row flips to «جاري التحميل…»
-    void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes).then(() => {
+    void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then(() => {
       if (cityTextRef.current) {
         const latin = isLatinOnlyInput(cityTextRef.current);
-        setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes));
+        setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes, cityAfParams));
       } else {
-        setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes));
+        setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
       }
     });
   };
@@ -924,7 +996,6 @@ export default function Home() {
                       const nextAppliesTo = nextFields.dealCombined ? 'Buy' : nextFields.deal;
                       const flips = prevAppliesTo !== nextAppliesTo;
                       const leavingCombined = q.dealCombined && !nextFields.dealCombined;
-                      setDealPriceCleared(flips);
                       return {
                         ...q,
                         ...nextFields,
@@ -940,8 +1011,15 @@ export default function Home() {
                 />
               ))}
             </View>
-            {dealPriceCleared && !query.priceMin && !query.priceMax && !query.priceInput ? (
-              <Text style={[s.rangeNote, s.rangeNoteWarn]}>{t('Price limits were cleared because Buy/Rent changed which budget they meant — please re-enter them.')}</Text>
+            {/* Deal-pair helper (owner 2026-08-22). The old note here was a RED WARNING that fired
+                whenever the price basis flipped — which includes the ordinary Buy→Rent switch, so a
+                user who simply wanted Rent got a scary "limits were cleared" message about a budget
+                they had usually never typed. Buy-only and Rent-only now say NOTHING. The only state
+                that genuinely needs explaining is the combined one, where the two deals really do
+                keep SEPARATE budgets (Buy budget + Rent budget boxes below), and that is said once,
+                calmly, in muted helper type — never as an error. The clearing LOGIC is unchanged. */}
+            {query.dealCombined ? (
+              <Text style={s.rangeNote}>{t('When you choose Buy and Rent together, each one has its own budget.')}</Text>
             ) : null}
 
             <View ref={withAnchor(cityAnchorRef)} />
@@ -985,7 +1063,10 @@ export default function Home() {
                 </View>
                 <Text style={s.rentHint}>
                   {t(rentPeriod === 'monthly' ? 'Monthly: the displayed price is the monthly price.'
-                    : rentPeriod === 'both' ? 'Both: monthly and yearly listings together — each card shows its own price basis.'
+                    // Owner feedback (2026-08-22): drop the "this means you want both, so you get
+                    // both" framing — selecting both buttons is already self-explanatory. Keep only
+                    // the one genuinely non-obvious fact: mixed results show mixed price units.
+                    : rentPeriod === 'both' ? 'Each listing shows its own price basis (monthly or yearly).'
                     : 'Yearly: the displayed price is the yearly price.')}
                 </Text>
                 {periodPriceCleared && !query.priceMin && !query.priceMax && !query.priceInput ? (
@@ -1029,8 +1110,8 @@ export default function Home() {
                     // in sync on every keystroke below) at resolution time, not the value captured in
                     // this closure at focus time.
                     if (!query.location) {
-                      void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes).then(() => {
-                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes));
+                      void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then(() => {
+                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
                       });
                     } else {
                       // P2 fix: the field already holds text (a confirmed pick, or mid-typing
@@ -1039,7 +1120,7 @@ export default function Home() {
                       // field used to show an empty box until a keystroke. English text keeps the
                       // existing behavior exactly (no autocomplete; the Arabic-only hint stands).
                       if (!isLatinOnlyInput(query.location)) {
-                        setCitySuggestions(matchCitiesByText(effDeal, rentPeriodTok, effCategory, query.location, cohortTypes));
+                        setCitySuggestions(matchCitiesByText(effDeal, rentPeriodTok, effCategory, query.location, cohortTypes, cityAfParams));
                       }
                     }
                   }}
@@ -1053,14 +1134,14 @@ export default function Home() {
                     clearDistrict(); // editing the city disables + clears District (no cross-city carry-over)
                     if (!v) {
                       // Cleared back to empty → the Top 6 list, same as a fresh focus.
-                      setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes));
+                      setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
                       setLocMsg('');
                       return;
                     }
                     // Arabic-only product: English typing gets NO autocomplete and an Arabic hint —
                     // there is nothing to match against, since every city name here is Arabic. (user rule)
                     const latin = isLatinOnlyInput(v);
-                    setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, v, cohortTypes));
+                    setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, v, cohortTypes, cityAfParams));
                     setLocMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -1072,7 +1153,7 @@ export default function Home() {
                 </RNAnimated.View>
               ) : null}
               {query.location.length > 0 && (
-                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
+                <Pressable onPress={() => { cityTextRef.current = ''; setQuery((q) => ({ ...q, location: '' })); setCitySelected(null); clearDistrict(); setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams)); setLocMsg(''); cityRef.current?.focus(); }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
                 </Pressable>
               )}
@@ -1335,9 +1416,26 @@ export default function Home() {
                             // narrower filter is active and this district's LIVE eligible count is 0,
                             // say so in Arabic — same message the typed list already uses — instead of
                             // presenting a popular-at-category-scope district that would dead-end.
+                            // THE NUMBER MUST BE THE ONE THE USER WILL LAND ON (owner 2026-08-22).
+                            // districtLiveCounts is this district's count under the FULL current
+                            // filter state, fetched from the results RPC itself; opt.listingCount is
+                            // only the deal/category/period SCOPE count. Until now the live value was
+                            // consulted solely to detect zero, so a narrowed search still displayed the
+                            // scope number — measured live with 3 beds + 120-180 m² + 70k-100k, حي
+                            // النرجس advertised 1,064 while the whole CITY had 705 eligible listings.
+                            // Prefer the live count whenever it exists; fall back to the scope count
+                            // only when no narrowing is active (there the two are equal by definition).
+                            // NEVER PRINT THE SCOPE COUNT AS IF IT WERE THE FILTERED ONE. With a
+                            // narrowing filter active the only honest number is the live one; if this
+                            // row has no live count yet (still loading, or beyond the fetch bound),
+                            // show NOTHING rather than the wider deal/category number — the same
+                            // "no count beats a wrong count" rule the city pool already follows.
                             sublabel: districtLiveCounts?.[opt.districtAr] === 0
                               ? t('No listings here right now')
-                              : cohortCountLabel(opt.listingCount),
+                              : hasDistrictNarrowing
+                                ? (districtLiveCounts?.[opt.districtAr] != null
+                                    ? cohortCountLabel(districtLiveCounts[opt.districtAr]) : '')
+                                : cohortCountLabel(opt.listingCount),
                             icon: LOC_IMG.district, // restored designed art (see TrendingList.tsx note)
                           }))}
                           onPress={(_item, i) => districtOnPress(districtSuggestions[i])}
@@ -1368,11 +1466,17 @@ export default function Home() {
                           <Image source={LOC_IMG.district} style={[s.suggLocIcon, isEmpty && s.suggIconEmpty]} />
                           <View style={{ flex: 1 }}>
                             <Text style={[s.suggCity, isEmpty && s.suggCityEmpty]}>{opt.districtAr}</Text>
-                            {isEmpty
-                              ? <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text>
-                              : (cohortCountLabel(opt.listingCount)
-                                  ? <Text style={s.suggDist}>{cohortCountLabel(opt.listingCount)}</Text>
-                                  : null)}
+                            {/* Same rule as the trending rows above: show the count the user will
+                                actually land on (live, under the full filter state) whenever it has
+                                been fetched, never the wider deal/category scope count. */}
+                            {/* Same rule as the trending rows: under an active filter only a LIVE
+                                count may be printed; without one the row shows no number at all. */}
+                            {(() => {
+                              if (isEmpty) return <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text>;
+                              const n = hasDistrictNarrowing ? live : (live ?? opt.listingCount);
+                              const label = n != null ? cohortCountLabel(n) : '';
+                              return label ? <Text style={s.suggDist}>{label}</Text> : null;
+                            })()}
                           </View>
                           {isPicked ? <Ionicons name="checkmark-circle" size={18} color={colors.primary} /> : null}
                         </Tappable>
@@ -1501,7 +1605,7 @@ export default function Home() {
                               area ≤ 7 digits (9,999,999 م²), price ≤ 10 digits (9,999,999,999 ر.س). maxLength counts
                               the GROUPED display (digits + commas) and stops TYPING early; the .slice() in onChangeText
                               hard-caps the stored digits too, covering PASTE (maxLength can't police programmatic sets). */}
-                          <TextInput ref={mergeLtrRef(areaMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
+                          <TextInput testID="area-min-input" ref={mergeLtrRef(areaMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
                             value={areaMinValue}
                             onKeyPress={wholeNumberKeyGuard('areaMin')} onFocus={() => clearFracLock('areaMin')} onSelectionChange={() => clearFracLock('areaMin')} onChangeText={(v) => { clearFracLock('areaMin'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
@@ -1509,7 +1613,7 @@ export default function Home() {
                         <Pressable style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(areaMaxRef)}>
                           <Image source={RANGE_ICON.areaTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
                           <Text style={s.rangeLabel}>{t('To')}</Text>
-                          <TextInput ref={mergeLtrRef(areaMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
+                          <TextInput testID="area-max-input" ref={mergeLtrRef(areaMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
                             value={areaMaxValue}
                             onKeyPress={wholeNumberKeyGuard('areaMax')} onFocus={() => clearFracLock('areaMax')} onSelectionChange={() => clearFracLock('areaMax')} onChangeText={(v) => { clearFracLock('areaMax'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, priceBand: null })); }} />
                           <Text style={s.sizeUnit}>{t('م²')}</Text>
@@ -1534,7 +1638,7 @@ export default function Home() {
                     <Pressable style={[s.field, s.rangeBox, query.priceMin ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(priceMinRef)}>
                       <Image source={RANGE_ICON.priceFrom} style={s.rangeBoxIcon} accessibilityLabel={t('From')} />
                       <Text style={s.rangeLabel}>{t('From')}</Text>
-                      <TextInput ref={mergeLtrRef(priceMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
+                      <TextInput testID="price-min-input" ref={mergeLtrRef(priceMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
                         value={priceMinValue}
                         onKeyPress={wholeNumberKeyGuard('priceMin')} onFocus={() => clearFracLock('priceMin')} onSelectionChange={() => clearFracLock('priceMin')} onChangeText={(v) => { clearFracLock('priceMin'); const d = toWholeNumberDigits(v).slice(0, 10); setQuery((q) => ({ ...q, priceMin: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
@@ -1542,7 +1646,7 @@ export default function Home() {
                     <Pressable style={[s.field, s.rangeBox, query.priceMax ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(priceMaxRef)}>
                       <Image source={RANGE_ICON.priceTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
                       <Text style={s.rangeLabel}>{t('To')}</Text>
-                      <TextInput ref={mergeLtrRef(priceMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
+                      <TextInput testID="price-max-input" ref={mergeLtrRef(priceMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
                         value={priceMaxValue}
                         onKeyPress={wholeNumberKeyGuard('priceMax')} onFocus={() => clearFracLock('priceMax')} onSelectionChange={() => clearFracLock('priceMax')} onChangeText={(v) => { clearFracLock('priceMax'); const d = toWholeNumberDigits(v).slice(0, 10); setQuery((q) => ({ ...q, priceMax: d || null, priceInput: '', priceBand: null })); }} />
                       <Text style={s.sizeUnit}>{t('SAR currency')}</Text>

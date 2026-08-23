@@ -21,6 +21,7 @@ import { stopReadAloud } from '@/lib/readAloud';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
+import ReadAloudPlayer from '@/components/ReadAloudPlayer';
 import { CardIn, LoadingDots } from '@/components/CardReveal';
 
 // Memoized card: during the reveal cascade the list re-renders every ~55ms — already-revealed cards
@@ -39,7 +40,8 @@ import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { openListing } from '@/lib/openListing';
-import { filterToChat, searchSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, type SearchQuery, type SearchResult } from '@/data/search';
+import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, type SearchQuery, type SearchResult } from '@/data/search';
+import { deriveGuided, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups } from '@/lib/searchDefaults';
 import { BROWSE_CAP, resultCounts } from '@/data/resultCount';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
@@ -48,7 +50,7 @@ import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESO
 import { noTranslateRef } from '@/noTranslate';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard } from '@/components/AdvancedQuestionCard';
 import MiningTransition from '@/components/MiningTransition';
-import { ADVANCED_QUESTIONS, INTERVIEW_STOP_AT, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type RankedQuestion } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
 // below a results block — NEVER before first results — and ONLY for a strict single-type Residential
@@ -540,7 +542,7 @@ export default function Agent() {
     // overlay opens on this calm invitation — the count, «خلّنا نحدد طلبك أكثر», one soft line —
     // never a question. Begin is opt-in; «عرض النتائج» closes it (the results are already behind).
     | { phase: 'intro'; total: number | null }
-    | { phase: 'asking'; planIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number; progressCur: number; progressTotal: number }
+    | { phase: 'asking'; stepIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number; initialKeys: string[]; progressCur: number; progressTotal: number }
     // The «digging through the market» beat (owner 2026-08-16): shown once after the interview
     // finishes while the final search runs behind it. Dismissal is driven by plain setTimeout
     // latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts rule).
@@ -567,6 +569,29 @@ export default function Agent() {
   // the REMAINING facets — removal is pure recomputation, never an ad-hoc inverse per question.
   const ageFlowBaseQRef = useRef<SearchQuery | null>(null);
   const ageFlowFacetsRef = useRef<Array<{ id: string; keys: string[]; labels: string[] }>>([]);
+  // THE interview record (owner 2026-08-22, «رجوع»): one ordered list of every question presented,
+  // each carrying the answer given for it. `keys: null` = presented but not answered yet; `[]` =
+  // skipped (no preference, NO predicate). A cursor walks it, so Back is simply "move the cursor
+  // back one and show that step again".
+  //
+  // Every guided ref above is DERIVED from this list by syncGuidedFromSteps — the query is rebuilt
+  // from baseQ by re-applying the steps before the cursor, never un-applied by a hand-written
+  // inverse. That is what makes «no stale hidden predicate» structural rather than a promise: a
+  // step that is dropped or changed simply stops contributing to the rebuild, and an amenity list
+  // (which appends) can never accumulate twice from re-answering the same question.
+  const ageFlowStepsRef = useRef<GuidedStep[]>([]);
+
+  // Rebuild query/asked/labels/facets from steps[0 .. upTo-1]. `upTo` is the CURSOR: the step being
+  // asked is deliberately NOT applied, so its option counts and live count read against the scope
+  // the user is answering from — re-answering a question never stacks on top of its own old answer.
+  const syncGuidedFromSteps = (upTo: number) => {
+    const d = deriveGuided(ageFlowBaseQRef.current, ageFlowStepsRef.current, upTo);
+    ageFlowQueryRef.current = d.query;
+    ageFlowAskedRef.current = new Set(d.askedIds);
+    ageFlowLabelsRef.current = d.labels;
+    ageFlowFacetsRef.current = d.facets;
+    ageFlowChangedRef.current = d.facets.length > 0;
+  };
   // Intro «يلا نبدأ» tapped before the ranked plan resolved — present the first question the moment
   // it lands instead of leaving the user waiting on a silent card.
   const introBeginRef = useRef(false);
@@ -1054,31 +1079,87 @@ export default function Agent() {
     if (!remaining.length) setGuidedPills(null);
   };
 
-  // Present plan[planIndex]. Once the query has been narrowed by an answer, re-resolve for LIVE counts;
-  // a planned question that drops below its option floor after narrowing is skipped. `progressCur/Total`
-  // are 1-based over the PLAN (the questions that actually show). `token` supersedes a stale flow.
-  const presentGuided = async (planIndex: number, token: number) => {
+  // Present the step at `stepIndex`. A step the user has already seen (walked Back to, or one
+  // preserved past a changed earlier answer) is shown again with its recorded answer restored;
+  // beyond the end of the record we re-rank against the NARROWED set and append the most useful
+  // next question. `token` supersedes a stale flow.
+  const presentGuided = async (stepIndex: number, token: number) => {
+    // The cursor moved: query/asked/facets must reflect the steps BEFORE it before anything reads them.
+    syncGuidedFromSteps(stepIndex);
+    const steps = ageFlowStepsRef.current;
+    if (stepIndex < steps.length) {
+      const st = steps[stepIndex];
+      // Re-resolve this question's options against the CURRENT scope before showing it again. The
+      // stored options were live for the scope the step was first presented in — after the user
+      // changes an EARLIER answer that scope has moved, and re-showing the captured numbers would
+      // put stale per-option counts on screen. Count honesty applies to the option pills exactly as
+      // it does to the header chip. If the re-probe fails we keep what we had rather than blanking
+      // the card; the header chip is independently live either way.
+      const q0 = ageFlowQueryRef.current;
+      let fresh: AdvancedQuestionResult | null = null;
+      if (q0) {
+        try { fresh = await st.question.resolveOptions(q0); } catch { fresh = null; }
+        if (ageFlowTokenRef.current !== token) return;
+      }
+      const options = fresh?.options.length ? fresh.options : st.options;
+      const unknownCount = fresh?.options.length ? fresh.unknownCount : st.unknownCount;
+      const total = fresh?.options.length ? fresh.total : st.total;
+      ageFlowStepsRef.current = steps.map((x, i) => (i === stepIndex ? { ...x, options, unknownCount, total } : x));
+      ageFlowTotalRef.current = total;
+      setAgeFlow({
+        phase: 'asking', stepIndex, question: st.question, options,
+        unknownCount, initialKeys: st.keys ?? [],
+        progressCur: stepIndex + 1, progressTotal: Math.max(steps.length, stepIndex + 1),
+      });
+      return;
+    }
     // CONTEXTUAL re-ranking (owner 2026-08-11): after any answer the remaining pool is re-probed and
-    // re-scored against the NARROWED set, so plan[0] is always the most useful next question for the
+    // re-scored against the NARROWED set, so the next question is always the most useful one for the
     // listings the user actually has left — and the flow stops by itself the moment the set drops to
-    // ≤ INTERVIEW_STOP_AT (rankQuestions returns nothing below the floor). planIndex survives only as
-    // the answered-so-far count for the subtle progress bar.
-    if (ageFlowChangedRef.current || ageFlowAskedRef.current.size) {
+    // ≤ INTERVIEW_STOP_AT (rankQuestions returns nothing below the floor).
+    if (stepIndex > 0) {
       const q = ageFlowQueryRef.current;
       if (!q || ageFlowTokenRef.current !== token) return;
       const ranked = await rankQuestions(q, ageFlowAskedRef.current);
       if (ageFlowTokenRef.current !== token) return;
-      ageFlowPlanRef.current = ranked.map((r: RankedQuestion) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount, total: r.total }));
+      ageFlowPlanRef.current = ranked
+        .map((r: RankedQuestion) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount, total: r.total }))
+        .filter((pl) => pl.options.length >= minOptionsFor(pl.question.selection));
     }
     const plan = ageFlowPlanRef.current;
-    if (plan.length) {
-      const answered = ageFlowAskedRef.current.size;
-      const { question, options, unknownCount, total } = plan[0];
-      ageFlowTotalRef.current = total; // the narrowed set the user is answering against, always real
-      setAgeFlow({ phase: 'asking', planIndex, question, options, unknownCount, progressCur: answered + 1, progressTotal: answered + plan.length });
-      return;
+    if (!plan.length) { finishGuided(token); return; }
+    const { question, options, unknownCount, total } = plan[0];
+    ageFlowStepsRef.current = [...steps, { question, options, unknownCount, total, keys: null }];
+    ageFlowTotalRef.current = total; // the narrowed set the user is answering against, always real
+    setAgeFlow({
+      phase: 'asking', stepIndex, question, options, unknownCount, initialKeys: [],
+      progressCur: stepIndex + 1, progressTotal: stepIndex + plan.length,
+    });
+  };
+
+  // Re-validate the answers given AFTER `from` against the scope `from`'s NEW answer produces
+  // (owner 2026-08-22 §1.4/§1.5): keep every later answer that still selects something, drop only
+  // the ones that have become incompatible — no longer offered in this scope, or would now select
+  // nothing. A skip is always compatible: it carries no predicate. Whatever survives is re-applied
+  // from baseQ by syncGuidedFromSteps, so a dropped answer leaves nothing behind.
+  const revalidateStepsAfter = async (from: number, token: number) => {
+    const steps = ageFlowStepsRef.current;
+    const later = steps.slice(from + 1);
+    if (!later.length) return;
+    let q = ageFlowQueryRef.current; // already rebuilt through steps[0..from]
+    if (!q) return;
+    const kept: GuidedStep[] = [];
+    for (const st of later) {
+      if (st.keys == null) continue;                    // never answered — let the re-ranker pick afresh
+      if (!st.keys.length) { kept.push(st); continue; } // a skip stays a skip: open, no predicate
+      if (!eligibleQuestions(q).some((x) => x.id === st.question.id)) continue; // out of scope now
+      const n = await liveResultCount(st.question.apply(q, st.keys));
+      if (ageFlowTokenRef.current !== token) return;
+      if (n == null || n <= 0) continue;                // incompatible: it would select nothing
+      kept.push(st);
+      q = st.question.apply(q, st.keys);
     }
-    finishGuided(token);
+    ageFlowStepsRef.current = [...steps.slice(0, from + 1), ...kept];
   };
 
   // End of the flow: if the user answered ≥1 step, re-search the accumulated query in ONE combined
@@ -1129,6 +1210,7 @@ export default function Agent() {
     ageFlowPlanRef.current = [];
     ageFlowBaseQRef.current = q;
     ageFlowFacetsRef.current = [];
+    ageFlowStepsRef.current = [];
     ageFlowTotalRef.current = opts?.total ?? null;
     introBeginRef.current = false;
     // AUTO entry (owner 2026-08-16, supersedes the 2026-08-03 results-first rule): an eligible
@@ -1146,8 +1228,18 @@ export default function Agent() {
       .map((r) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount, total: r.total }))
       .filter((p) => p.options.length >= minOptionsFor(p.question.selection));
     if (ageFlowTotalRef.current == null && ranked.length) ageFlowTotalRef.current = ranked[0].total;
-    if (!ageFlowPlanRef.current.length) {
-      // AUTO path: a filter user didn't ask to narrow, so an empty plan closes silently — never a chip.
+    // MIN 2 USEFUL QUESTIONS TO OPEN (owner 2026-08-22): a lone useful question — answered or
+    // skipped — still closes the interview on whatever the result-count gate alone left large; not
+    // a niche shortlist, just a tax on the user's attention. Reuses the SAME plan (ranked, already
+    // scored by scoreQuestion via rankQuestions — real narrowing power, not just structural
+    // eligibility) rather than a second computation, so this can never disagree with what the
+    // interview actually asks, and it is computed AFTER cohortAllows' combined-period intersection
+    // (rankQuestions -> eligibleQuestions -> question.eligibility) for free. 0 or 1 useful ⇒ the
+    // SAME fallback an empty plan already used: AUTO closes silently, a manual tap falls through to
+    // the plain refine chips — never a NEW code path. This gate governs the OPENING decision only;
+    // presentGuided's own re-rank after each answer/skip is untouched below, so an already-open
+    // interview still keeps asking down to the very last useful question (owner §2/§6).
+    if (ageFlowPlanRef.current.length < MIN_USEFUL_QUESTIONS_TO_SHOW) {
       setAgeFlow(null);
       if (fallbackToRefine) startRefine(q);
       return;
@@ -1166,32 +1258,55 @@ export default function Agent() {
   };
   const onIntroShowResults = () => { ageFlowTokenRef.current++; setAgeFlow(null); };
 
-  // Confirm the current question's selection (empty = no preference) and advance/search. ONE handler
-  // for single and multi — `keys` has ≤1 entry for single, ≥0 for multi.
-  const onAgeConfirm = (keys: string[]) => {
+  // Record the answer for the step under the cursor and advance one. ONE handler for single, multi
+  // AND skip — `keys` is ≤1 entry for single, ≥0 for multi, and `[]` for a skip (no preference: no
+  // predicate is written, the step is simply marked answered so the re-ranker moves on). The answer
+  // is stored on the step; the query is then REBUILT from it, never mutated in place.
+  const commitGuidedStep = async (keys: string[], finish = false) => {
     if (ageFlow?.phase !== 'asking') return;
-    const { question, planIndex, options } = ageFlow;
-    const q = ageFlowQueryRef.current;
-    if (!q) return;
-    if (keys.length) {
-      ageFlowQueryRef.current = question.apply(q, keys);
-      ageFlowChangedRef.current = true;
-      const labels: string[] = [];
-      for (const k of keys) { const o = options.find((x) => x.key === k); if (o?.label) labels.push(o.label); }
-      ageFlowLabelsRef.current.push(...labels);
-      // Record the answer as a removable FACET for the results pills (owner 2026-08-16) — removal
-      // later rebuilds the query from baseQ by re-applying the remaining facets in order.
-      ageFlowFacetsRef.current.push({ id: question.id, keys, labels });
-    }
-    ageFlowAskedRef.current.add(question.id);
-    void presentGuided(planIndex + 1, ageFlowTokenRef.current);
+    const token = ageFlowTokenRef.current;
+    const { stepIndex } = ageFlow;
+    const steps = ageFlowStepsRef.current;
+    if (!steps[stepIndex]) return;
+    const prev = steps[stepIndex].keys;
+    const changedAnswer = prev != null && !sameKeys(prev, keys);
+    ageFlowStepsRef.current = steps.map((st, i) => (i === stepIndex ? { ...st, keys } : st));
+    syncGuidedFromSteps(stepIndex + 1);
+    // Only a CHANGED earlier answer can invalidate what came after it — a first answer has nothing
+    // after it to invalidate, and re-confirming the same answer leaves the later scope identical.
+    if (changedAnswer) await revalidateStepsAfter(stepIndex, token);
+    if (ageFlowTokenRef.current !== token) return;
+    if (finish) { finishGuided(token); return; }
+    void presentGuided(stepIndex + 1, token);
   };
+
+  const onAgeConfirm = (keys: string[]) => { void commitGuidedStep(keys); };
 
   // Skip THIS question → next; skip-all → finish now; X (close) → abandon the flow.
   // Skip = NO PREFERENCE (owner): nothing is filtered, no false is written, the question is just
-  // marked asked for this session so the re-ranker moves on to the next useful one.
-  const onAgeSkip = () => { if (ageFlow?.phase === 'asking') { ageFlowAskedRef.current.add(ageFlow.question.id); void presentGuided(ageFlow.planIndex + 1, ageFlowTokenRef.current); } };
-  const onAgeSkipAll = () => finishGuided(ageFlowTokenRef.current);
+  // marked answered-as-open for this session — and walking Back to it restores it as skipped.
+  const onAgeSkip = () => { void commitGuidedStep([]); };
+
+  // «رجوع» — one question back (owner 2026-08-22). From the FIRST question it leaves the interview
+  // entirely: the record is dropped and ageFlow goes null, which is exactly what the pre-AF CTA row
+  // is gated on, so «خلّنا نحدد الطلب أكثر» + «عرض المزيد» come straight back. Nothing was searched
+  // during the interview, so there is nothing else to undo.
+  const onAgeBack = () => {
+    if (ageFlow?.phase !== 'asking') return;
+    const { stepIndex } = ageFlow;
+    if (stepIndex <= 0) {
+      ageFlowTokenRef.current++;
+      ageFlowStepsRef.current = [];
+      syncGuidedFromSteps(0);
+      setAgeFlow(null);
+      return;
+    }
+    void presentGuided(stepIndex - 1, ageFlowTokenRef.current);
+  };
+  // «عرض النتائج» leaves the interview NOW — but through the same commit path, so the answer the
+  // user can currently see selected is recorded first. Otherwise the card's own «عرض N نتيجة» chip
+  // and the results it lands on would disagree.
+  const onAgeSkipAll = (keys: string[]) => { void commitGuidedStep(keys, true); };
   const onAgeClose = () => { ageFlowTokenRef.current++; setAgeFlow(null); };
 
   // Tap on a refine answer chip → lock that question's chips so it can't be answered twice, then run.
@@ -1874,7 +1989,7 @@ export default function Agent() {
                   {guidedPills && guidedPills.msgId === m.id && guidedPills.facets.length ? (
                     <View style={{ alignSelf: 'stretch', gap: 7, marginTop: 2 }}>
                       <Text style={[s.guidedBasedOn, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
-                        {t('Based on: {labels}', { labels: guidedPills.facets.flatMap((f) => f.labels).join(' · ') })}
+                        {buildAfSummary(guidedPills.facets)}
                       </Text>
                       <View style={[s.guidedPillRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
                         {guidedPills.facets.map((f, i) => (
@@ -1993,7 +2108,15 @@ export default function Agent() {
                             {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
                                 «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches — but only
                                 when there is genuinely more than INTERVIEW_STOP_AT=25 left to narrow. */}
-                            {(hasMore || canNarrowFurther) ? (
+                            {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
+                                user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
+                                the old CTA row must not sit behind it competing for the same decision.
+                                `ageFlow` covers every AF phase (loading → intro → asking → mining), so
+                                the row is gone from the tap until the flow closes, and returns by itself
+                                afterwards because closing sets ageFlow back to null. The AF card is an
+                                absolute overlay, so without this gate the two buttons stayed rendered
+                                (and reachable) underneath it. */}
+                            {(hasMore || canNarrowFurther) && !ageFlow ? (
                               <View style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
                                 {hasMore ? (
                                   // Active state = calm pulsing dots (owner 2026-07-09: the button must
@@ -2042,8 +2165,8 @@ export default function Agent() {
                         if ((m.typing && !doneTyping[m.id]) || shown < Math.min(FIRST_PAGE, fetched)) return null;
                         // Read Aloud script (owner structure requirement, 2026-08-19): إزهله -> pause ->
                         // summary -> pause -> cards, in the SAME order shown on screen. Sliced to `shown`
-                        // FIRST (never past what's actually rendered right now — "no hidden listing should
-                        // be spoken"); the script builder caps further to READ_ALOUD_CARD_CAP.
+                        // — never past what's actually rendered right now ("no hidden listing should be
+                        // spoken") — but otherwise reads every visible card (owner 2026-08-22: no further cap).
                         const readAloudSegments = buildResultsReadAloudSegments(introText, m.result.listings.slice(0, shown));
                         return <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} />;
                       })()}
@@ -2149,6 +2272,10 @@ export default function Agent() {
           <Text style={s.fbToastText}>{t('Thanks for your feedback')}</Text>
         </View>
       </View>
+      {/* Floating Read Aloud playback controller (owner 2026-08-22) — ONE instance for the whole
+          screen (there is only ever one active reading session), self-hides when nothing is playing,
+          self-positions fixed/top regardless of scroll. See src/components/ReadAloudPlayer.tsx. */}
+      <ReadAloudPlayer />
       {/* عمر العقار advanced-question overlay (owner 2026-07-13) — a transient card over the CURRENT
           results, reached only via «خلّنا نحدد الطلب أكثر» in an apartment-only scope. Absolutely
           positioned over the whole screen, same visual language as the interview overlay (dimmed
@@ -2180,8 +2307,10 @@ export default function Agent() {
               liveCount={(keys) => (ageFlowQueryRef.current
                 ? liveResultCount(ageFlow.question.apply(ageFlowQueryRef.current, keys))
                 : Promise.resolve(null))}
+              initialKeys={ageFlow.initialKeys}
               onConfirm={onAgeConfirm}
               onSkip={onAgeSkip}
+              onBack={onAgeBack}
               onSkipAll={onAgeSkipAll}
               onClose={onAgeClose}
             />

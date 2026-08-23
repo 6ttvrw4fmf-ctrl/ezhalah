@@ -13,6 +13,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const advSrc = readFileSync(join(root, 'src/data/advancedFilters.ts'), 'utf8');
 // Cohort config + gate live here since 2026-08-20 (pure module → executable by barriers).
 const cohortSrc = readFileSync(join(root, 'src/lib/afCohorts.ts'), 'utf8');
+// Ranking + the narrowing gate live here since 2026-08-22 (same reasoning — pure module → executable
+// by scripts/verify-af-narrowing-gate.ts instead of regexed; see that script for the EXECUTED half).
+const rankingSrc = readFileSync(join(root, 'src/lib/afRanking.ts'), 'utf8');
 const cardSrc = readFileSync(join(root, 'src/components/AdvancedQuestionCard.tsx'), 'utf8');
 const agentSrc = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
 
@@ -38,10 +41,21 @@ check('the pool contains all five questions and rankQuestions re-ranks it contex
   /ADVANCED_QUESTIONS[^=]*=\s*\[\s*RNPL_QUESTION,\s*AGE_QUESTION,\s*AMENITIES_QUESTION,\s*BATHROOMS_QUESTION,\s*FURNISHED_QUESTION/.test(advSrc)
   && /export async function rankQuestions/.test(advSrc)
   && /export function scoreQuestion/.test(advSrc)
-  && /INTERVIEW_STOP_AT = 25/.test(advSrc)
-  && /MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT \+ 1/.test(advSrc));
+  // INTERVIEW_STOP_AT/MIN_TOTAL_TO_SHOW moved to afRanking.ts (2026-08-22, pure-module extraction);
+  // advancedFilters.ts still re-exports them (checked separately below) so every existing importer
+  // is unaffected.
+  && /INTERVIEW_STOP_AT = 25/.test(rankingSrc)
+  && /MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT \+ 1/.test(rankingSrc)
+  && /INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW/.test(advSrc));
+// MECHANISM CHANGE (owner 2026-08-22, «رجوع»): asked-tracking is no longer an incremental
+// `.add()` on a Set that only ever grows — it is DERIVED from the ordered step record by
+// syncGuidedFromSteps(cursor), so walking Back genuinely un-asks the steps behind the cursor
+// instead of leaving them permanently marked. Same guarantee (never re-ask what is still
+// committed), now reversible. Pinned in both directions: derived, and never re-grown by hand.
 check('the orchestrator re-ranks after every answer and tracks asked questions (never re-asks)',
-  /rankQuestions\(q, ageFlowAskedRef\.current\)/.test(agentSrc) && /ageFlowAskedRef\.current\.add\(/.test(agentSrc));
+  /rankQuestions\(q, ageFlowAskedRef\.current\)/.test(agentSrc)
+  && /ageFlowAskedRef\.current = new Set\(/.test(agentSrc)
+  && !/ageFlowAskedRef\.current\.add\(/.test(agentSrc));
 // ASK-FIRST TIER (owner 2026-08-15): installments is the PREFERRED opening question, and only that.
 // The tier must reorder ONLY questions that already passed scoreQuestion()'s usefulness gates — it
 // must never bypass them, or a scope with too little installment coverage would be asked a useless
@@ -51,11 +65,20 @@ check('installments is ask-first via a TIER applied in the sort, never by bypass
   /ASK_FIRST_TIER/.test(advSrc)
   && /askTier\(b\.question\.id\) - askTier\(a\.question\.id\) \|\| b\.score - a\.score/.test(advSrc)
   && !/ASK_FIRST_TIER|askTier/.test(advSrc.slice(advSrc.indexOf('export function scoreQuestion'), advSrc.indexOf('export type RankedQuestion'))));
-check('scoreQuestion still gates on scope size, option band, and genuine narrowing',
-  /if \(N < MIN_TOTAL_TO_SHOW\) return null;/.test(advSrc)
-  && /Math\.max\(15, Math\.ceil\(0\.08 \* N\)\)/.test(advSrc)
-  && /o\.count <= 0\.9 \* N/.test(advSrc)
-  && /if \(!useful\.some\(\(o\) => o\.count <= 0\.75 \* N\)\) return null;/.test(advSrc));
+// NARROWING GATE (owner 2026-08-22, supersedes the 2026-08-11 8%-90% option band — see the design
+// contract's "Amendment 2026-08-22"): a question is asked whenever it has a real option that would
+// actually change the result (count < N) — selectivity orders the ask sequence, it no longer decides
+// inclusion. scripts/verify-af-narrowing-gate.ts mutation-proves this by calling scoreQuestion() with
+// synthetic scopes (now pure, in afRanking.ts); this check only pins that the OLD selectivity-as-
+// inclusion gate is gone from BOTH the pure implementation and advancedFilters.ts's thin wrapper.
+check('scoreQuestion gates on scope size and genuine narrowing, not selectivity',
+  /if \(N < MIN_TOTAL_TO_SHOW\) return null;/.test(rankingSrc)
+  && /const narrowing = result\.options\.filter\(\(o\) => o\.count < N\);/.test(rankingSrc)
+  && /if \(narrowing\.length < minOptionsFor\(selection\)\) return null;/.test(rankingSrc)
+  && !/Math\.max\(15, Math\.ceil\(0\.08 \* N\)\)/.test(rankingSrc)
+  && !/o\.count <= 0\.9 \* N/.test(rankingSrc)
+  && !/Math\.max\(15, Math\.ceil\(0\.08 \* N\)\)/.test(advSrc)
+  && !/o\.count <= 0\.9 \* N/.test(advSrc));
 // The installment answer means ONLY "source-confirmed supported". No invented payment frequency.
 check('the installment question stays a single binary source-confirmed chip (no invented frequencies)',
   /RNPL_QUESTION[\s\S]{0,600}labelKey: 'Offers installments'/.test(advSrc)
@@ -116,7 +139,11 @@ check("age's eligibility lives in its own config, and agent.tsx no longer holds 
   /AGE_QUESTION[\s\S]{0,400}eligibility:\s*\(q\)\s*=>\s*isAgeFilterScopeFor/.test(advSrc)
   && !/isAgeFilterScope/.test(agentSrc));
 check('one shared per-option floor (MIN_REAL_OPTION_COUNT via meaningful()); the >0-chips vs >=5-buckets split is banned',
-  /MIN_REAL_OPTION_COUNT/.test(advSrc) && /function meaningful/.test(advSrc)
+  // Definition moved to afRanking.ts (2026-08-22); advancedFilters.ts imports+re-exports the constant
+  // and imports meaningful() (checked separately below), so this only needs to prove the definition
+  // still exists somewhere real, not that advancedFilters.ts re-declares it.
+  /export const MIN_REAL_OPTION_COUNT/.test(rankingSrc) && /export function meaningful/.test(rankingSrc)
+  && /MIN_REAL_OPTION_COUNT/.test(advSrc) && /\bmeaningful\(/.test(advSrc)
   && !/MIN_REAL_BUCKET_COUNT/.test(advSrc) && !/\.count\(counts\)\s*>\s*0/.test(advSrc));
 // RNPL is a rent concept → rent-only; amenities + bathrooms extend to Buy where the cohort's data
 // justifies them. Both now enforced as DATA (COHORT_QUESTIONS) rather than per-question functions —
@@ -176,13 +203,24 @@ check('progress is animated and shared',
 // thin animated bar stays as the only progress signal.
 check('no numeric Question-N-of-M caption renders (subtle bar only)',
   !/Question \{cur\} of \{total\}/.test(cardSrc));
-check('single-select auto-advances after a short hold via plain setTimeout (never an animation callback)',
-  /setTimeout\(\(\) => onConfirm\(next\), 260\)/.test(cardSrc));
+// CONTRACT CHANGE (owner 2026-08-22): the ~260 ms single-select auto-advance is GONE. A single tap
+// selects only — the user must see the pick and the recomputed count before committing — and a
+// second tap on the same option within DOUBLE_TAP_MS confirms. Asserted in BOTH directions so the
+// old behaviour cannot creep back: no confirm-on-a-timer anywhere, and the double-tap path present.
+check('a single tap NEVER auto-advances (no timer-driven onConfirm)',
+  !/setTimeout\([^)]*onConfirm/.test(cardSrc) && !/onConfirm\([^)]*\),\s*\d+\s*\)/.test(cardSrc));
+check('double tap on the same option confirms, via the SAME onPress path (no rival dbl handler)',
+  /DOUBLE_TAP_MS/.test(cardSrc) && /lastTapRef/.test(cardSrc) &&
+  !/onDoubleClick|onLongPress|doubleTapHandler/.test(cardSrc));
+check('«رجوع» renders on the question card and rides onBack',
+  /testID="af-back"/.test(cardSrc) && /onPress=\{onBack\}/.test(cardSrc) && /t\('Back'\)/.test(cardSrc));
 // CONTRACT CHANGE (owner 2026-08-16, conversational refresh): the always-available escape is a calm
 // «عرض النتائج» link — «The user must always be able to go straight to the properties … never feel
 // trapped in the interview.» No question-count arithmetic in the link anymore.
-check('the always-available escape link reads «عرض النتائج» and rides onSkipAll',
-  /onPress=\{onSkipAll\}/.test(cardSrc) && /skipAllTxt/.test(cardSrc));
+// Since 2026-08-22 the escape carries the VISIBLE selection with it — leaving must not land the
+// user on a different count than the chip beside the link was just promising.
+check('the always-available escape link reads «عرض النتائج» and rides onSkipAll with the selection',
+  /onPress=\{\(\) => onSkipAll\(sel\)\}/.test(cardSrc) && /skipAllTxt/.test(cardSrc));
 // Multi-select commits via «متابعة · N نتيجة» with the LIVE count (owner 2026-08-16 §4); single
 // keeps «عرض N نتيجة». Both numbers come from the same liveCount pipe — never a placeholder.
 check('multi-select primary reads Continue · {count} results with the live count',
@@ -273,7 +311,7 @@ check('removable pills rebuild the query from baseQ via the questions’ own app
   /removeGuidedFacet/.test(agentSrc)
   && /for \(const f of remaining\)/.test(agentSrc)
   && /question\.apply\(q, f\.keys\)/.test(agentSrc)
-  && /Based on: \{labels\}/.test(agentSrc));
+  && /buildAfSummary\(guidedPills\.facets\)/.test(agentSrc));
 
 // ── Count RPCs must never receive p_sort_by (bug-hunt 2026-07-30) ────────────────────────────────
 // PostgREST resolves RPCs by exact param-name match; leaking p_sort_by 404s BOTH counts calls the

@@ -160,18 +160,25 @@ check('index.tsx placeholder text is "Which city?" (renders أي مدينة؟), 
 // query.dealCombined, else query.deal) instead of query.deal directly, so combined mode scopes
 // Trending/pools to the same Buy∪Rent(any period) set the backend's p_deal IS NULL branch does —
 // see verify-buy-rent-combined-effdeal-threading.ts for that contract specifically.
-check('onFocus with empty text shows the deal+period+category-scoped Top 6 (topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6))', /onFocus=\{\(\) => \{[\s\S]{0,1800}?topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes\)/.test(indexSrc));
+check('onFocus with empty text shows the deal+period+category-scoped Top 6 (topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6))', /onFocus=\{\(\) => \{[\s\S]{0,1800}?topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)/.test(indexSrc));
 check(
   'REGRESSION (found live in testing): the Top-6-on-focus promise callback re-checks cityTextRef at resolution time before overwriting citySuggestions — without this guard, a keystroke typed right after focus can have its correctly-filtered results silently clobbered back to the stale Top 6 by the async callback resolving a moment later',
-  /if \(!cityTextRef\.current\) setCitySuggestions\(topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes\)\);/.test(indexSrc) && /cityTextRef\.current = v;/.test(indexSrc),
+  /if \(!cityTextRef\.current\) setCitySuggestions\(topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)\);/.test(indexSrc) && /cityTextRef\.current = v;/.test(indexSrc),
 );
 check(
   'REGRESSION (found live in testing, now also gates on deal AND period change): the deal+period-scoped ensureCityFieldIndex() fetch re-runs the match against cityTextRef once it resolves — without this, a user who types before a slow-connection fetch finishes would see an empty dropdown forever, since nothing else re-triggers matchCitiesByText() once the data actually arrives',
-  /void ensureCityFieldIndex\(effDeal, rentPeriodTok, effCategory, cohortTypes\)\.then\(\(pool\) => \{[\s\S]{0,700}?if \(cityTextRef\.current\) \{[\s\S]{0,200}?setCitySuggestions\(latin \? \[\] : matchCitiesByText\(effDeal, rentPeriodTok, effCategory, cityTextRef\.current, cohortTypes\)\);/.test(indexSrc),
+  /void ensureCityFieldIndex\(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams\)\.then\(\(pool\) => \{[\s\S]{0,700}?if \(cityTextRef\.current\) \{[\s\S]{0,200}?setCitySuggestions\(latin \? \[\] : matchCitiesByText\(effDeal, rentPeriodTok, effCategory, cityTextRef\.current, cohortTypes, cityAfParams\)\);/.test(indexSrc),
 );
 check(
   'NEW (owner request 2026-07-20, extended 2026-07-21 to also gate on rent-period change, 2026-08-14 on category, 2026-08-20 on dealCombined via effDeal): flipping Buy<->Rent, Monthly<->Yearly or Residential<->Commercial live-refreshes an already-open Top-6 list instead of leaving a stale ranking on screen',
-  /\}, \[effDeal, rentPeriodTok, effCategory, cohortTypesSig\]\);/.test(indexSrc) && /else if \(cityFocus\) \{\s*setCitySuggestions\(topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes\)\);/.test(indexSrc),
+  // The warm/REHYDRATE effect is keyed on deal/period/category/types. cityAfSig deliberately is NOT
+  // in this list any more (2026-08-22): it made the effect — which also rehydrates citySelected —
+  // re-run on every bedroom/price/area edit, and a mid-flight rehydration left the form in a state
+  // where «بحث» issued no search at all (caught by the web-runtime smoke test). Narrowing-driven
+  // count refreshes moved to their OWN effect below, which never touches citySelected.
+  /\}, \[effDeal, rentPeriodTok, effCategory, cohortTypesSig\]\);/.test(indexSrc)
+  && /\}, \[cityAfSig, cityFocus\]\);/.test(indexSrc)
+  && /else if \(cityFocus\) \{\s*setCitySuggestions\(topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)\);/.test(indexSrc),
 );
 check('onChangeText clears citySelected on every keystroke (never silently reuses a stale pick)', /onChangeText=\{\(v\) => \{[\s\S]{0,300}?setCitySelected\(null\)/.test(indexSrc));
 check('onSearch blocks when citySelected is falsy, using CITY_REQUIRED_MSG (never calls the old free-text resolveLocation guessing path)', /if \(!citySelected\) \{[\s\S]{0,600}?setLocMsg\(CITY_REQUIRED_MSG\);[\s\S]{0,600}?return;/.test(indexSrc));

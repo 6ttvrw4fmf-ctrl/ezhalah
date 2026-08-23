@@ -102,11 +102,40 @@ check('live counts come from the RESULTS RPC (fetchDistrictEligibleCounts exists
 })());
 check('per-option match_values OVERRIDE the base q districts (spread order)', /\{ \.\.\.base, p_districts: opt\.matchValues \}/.test(readFileSync(join(root, 'src/data/remote.ts'), 'utf8')));
 check('marking prefers the live full-filter-state count over the scope count', /const live = districtLiveCounts\?\.\[opt\.districtAr\];\s*\n\s*const isEmpty = live != null \? live === 0 : opt\.listingCount === 0/.test(indexSrc));
-check('counts use the CURRENT filter state (narrowing signature covers type/group/types/beds/size/price/area)', /districtNarrowingSig = JSON\.stringify\(\[query\.type, query\.typeGroups, query\.types, query\.detail,[\s\S]{0,200}?query\.priceMin, query\.priceMax, query\.areaMin, query\.areaMax\]\)/.test(indexSrc));
+// The signature must cover the NORMAL narrowing (type/group/types/beds/size/price/area) AND every
+// ADVANCED answer. The advanced half was added 2026-08-20 by the AF major certification: without it
+// an advanced-only narrowing never triggered the live-count path at all (falling back to
+// district_options_ar's deal/category/period scope count), and changing an answer did not invalidate
+// the cached numbers. Measured on Riyadh / Rent-Annual / شقة with amenities=[elevator] + bathMin=3:
+// the top 8 districts advertised 4,141 and returned 511 on click (re-measured live 2026-08-22:
+// 4,449 -> 592, 7.5x). Do NOT re-pin the closing bracket here — a new advanced question must be
+// free to extend the array, and verify-af-count-params-carry-advanced.ts owns the completeness half
+// of this contract. `typeGroups` is plural: main's multi-group work renamed it, and the singular
+// form would silently read undefined, dropping group changes out of the invalidation signature.
+// Field-by-field, not a contiguous literal: the combined-mode Rent budget (priceMinRent/MaxRent) was
+// inserted into this list on 2026-08-22 and an order-sensitive regex would have rejected the fix.
+{
+  const sigBlock = indexSrc.slice(indexSrc.indexOf('const districtNarrowingSig'),
+                                  indexSrc.indexOf('const hasDistrictNarrowing'));
+  for (const f of ['type', 'typeGroups', 'types', 'detail', 'priceMin', 'priceMax',
+                   'priceMinRent', 'priceMaxRent', 'areaMin', 'areaMax']) {
+    check(`counts use the CURRENT filter state — signature covers query.${f}`,
+      new RegExp(`query\\.${f}\\b`).test(sigBlock));
+  }
+}
+check('narrowing signature ALSO covers the advanced answers (AF-only narrowing must refetch + invalidate)',
+  /districtNarrowingSig = JSON\.stringify\(\[[\s\S]{0,600}?query\.amenities[\s\S]{0,400}?query\.bathMin[\s\S]{0,400}?query\.ratingMin/.test(indexSrc));
 check('changing any relevant filter INVALIDATES the previous counts before refetch (no stale numbers)', /setDistrictLiveCounts\(null\);\s*\n\s*if \(!citySelected \|\| !hasDistrictNarrowing/.test(indexSrc));
 check('a live-count response is dropped if a newer request superseded it (race guard)', /if \(id === districtLiveReq\.current && counts\) setDistrictLiveCounts\(counts\)/.test(indexSrc));
 check('onSearch and the count effect share ONE query builder (no state drift between count and search)', /const base = buildFilterBaseQuery\(\)!/.test(indexSrc) && /const q = buildFilterBaseQuery\(\);/.test(indexSrc));
-check('trending rows show the Arabic zero message under narrowing (never a silent dead-end)', /sublabel: districtLiveCounts\?\.\[opt\.districtAr\] === 0[\s\S]{0,40}\? t\('No listings here right now'\)[\s\S]{0,80}cohortCountLabel\(opt\.listingCount\)/.test(indexSrc));
+// The zero message is the intent here; the COUNT expression beside it changed on 2026-08-22 — a
+// non-zero live count is now DISPLAYED rather than only used to detect zero (a district was
+// advertising 1,064 while its whole city had 705 eligible). Assert both properties, not the old text.
+check('trending rows show the Arabic zero message under narrowing (never a silent dead-end)',
+  /sublabel: districtLiveCounts\?\.\[opt\.districtAr\] === 0[\s\S]{0,40}\? t\('No listings here right now'\)/.test(indexSrc));
+check('trending rows display the LIVE count, and NEVER the wider scope count while narrowing is active',
+  /hasDistrictNarrowing[\s\S]{0,200}districtLiveCounts\?\.\[opt\.districtAr\] != null[\s\S]{0,120}: ''/.test(indexSrc)
+  && /: cohortCountLabel\(opt\.listingCount\),/.test(indexSrc));
 // The owner explicitly praised and locked the Arabic zero-listing message: it must exist, stay
 // TRANSLATED (no English leak in the user-visible string), and stay wired to the empty rows.
 {
@@ -114,7 +143,10 @@ check('trending rows show the Arabic zero message under narrowing (never a silen
   const m = i18nSrc.match(/'No listings here right now': '([^']+)'/);
   check('the zero-listing message is translated and its Arabic contains no Latin letters', !!m && !/[A-Za-z]/.test(m[1]));
 }
-check('empty district rows are marked with a "no listings here" note', /isEmpty[\s\S]{0,40}\? <Text style=\{s\.suggEmptyNote\}>\{t\('No listings here right now'\)\}<\/Text>/.test(indexSrc));
+// Accepts either the ternary or the IIFE form the row now uses (2026-08-22: the count branch grew a
+// narrowing-aware rule, so the marking became an early return).
+check('empty district rows are marked with a "no listings here" note',
+  /isEmpty[\s\S]{0,60}(\?|return) <Text style=\{s\.suggEmptyNote\}>\{t\('No listings here right now'\)\}<\/Text>/.test(indexSrc));
 check('the "No listings here right now" string is translated to Arabic', /'No listings here right now': '[^']+'/.test(readFileSync(join(root, 'src/i18n.tsx'), 'utf8')));
 // The picked districts' live counts ride along to the search (multi: the SUM — folds are disjoint,
 // so the sum IS the union size) so the 0-results path can tell an empty area from a type mismatch.

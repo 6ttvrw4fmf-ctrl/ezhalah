@@ -689,7 +689,19 @@ const pmKey = (periodTok: string | null) => periodTok ?? '';
 // the Top-6 ranking, every listing_count, and the new total_in_cohort denominator all describe the
 // same cohort the user will actually search. Price is deliberately NOT part of this key.
 const typesKey = (types: string[] | null) => (types && types.length ? [...types].slice().sort().join('|') : '');
-const cityPoolKey = (deal: Deal | null, periodTok: string | null, category: Category | null, types: string[] | null = null) => `${deal}:${pmKey(periodTok)}:${category ?? ''}:${typesKey(types)}`;
+// Advanced-filter answers scope the city pool exactly as hard as نوع/سعر/مساحة do, so they belong
+// in the CACHE KEY as well as in the request (owner rule 2026-08-22: the city count shown must equal
+// what clicking that city returns, under the full current AF state). Without the key, answering or
+// changing an advanced question would serve the previously-cached pre-AF pool and the chip would go
+// back to overstating — the stale-cache half of the same defect PR #822 fixed for districts.
+// Stable by construction: entries sorted, so {elevator,bath} and {bath,elevator} share one key.
+export type AfParams = Record<string, unknown>;
+const afKey = (af: AfParams | null) => {
+  if (!af) return '';
+  const ks = Object.keys(af).sort();
+  return ks.length ? ks.map((k) => `${k}=${JSON.stringify((af as any)[k])}`).join('&') : '';
+};
+const cityPoolKey = (deal: Deal | null, periodTok: string | null, category: Category | null, types: string[] | null = null, af: AfParams | null = null) => `${deal}:${pmKey(periodTok)}:${category ?? ''}:${typesKey(types)}:${afKey(af)}`;
 const CITY_FIELD_POOLS = new Map<string, CityOption[]>();
 const _cityFieldPromises = new Map<string, Promise<CityOption[]>>();
 
@@ -702,8 +714,8 @@ const _cityFieldPromises = new Map<string, Promise<CityOption[]>>();
 export type PoolStatus = 'loading' | 'error' | 'ready';
 const _cityPoolStatus = new Map<string, PoolStatus>();
 const _districtPoolStatus = new Map<string, PoolStatus>();
-export function cityPoolStatus(deal: Deal | null, periodTok: string | null, category: Category | null, types: string[] | null = null): PoolStatus {
-  const key = cityPoolKey(deal, periodTok, category, types);
+export function cityPoolStatus(deal: Deal | null, periodTok: string | null, category: Category | null, types: string[] | null, af: AfParams | null): PoolStatus {
+  const key = cityPoolKey(deal, periodTok, category, types, af);
   return CITY_FIELD_POOLS.has(key) ? 'ready' : _cityPoolStatus.get(key) ?? 'loading';
 }
 export function districtPoolStatus(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, types: string[] | null = null): PoolStatus {
@@ -715,8 +727,8 @@ export function districtPoolStatus(cityId: number, deal: Deal | null, category: 
 // most — small enough to fetch in one shot and search entirely client-side, same shape as
 // ensureLocationIndex above). Already sorted by listing_count desc so topCitiesByListings() below
 // is just a slice.
-export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string | null = null, category: Category | null = null, types: string[] | null = null): Promise<CityOption[]> {
-  const key = cityPoolKey(deal, periodTok, category, types);
+export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string | null = null, category: Category | null = null, types: string[] | null = null, af: AfParams | null = null): Promise<CityOption[]> {
+  const key = cityPoolKey(deal, periodTok, category, types, af);
   const cached = CITY_FIELD_POOLS.get(key);
   if (cached) return cached;
   const inflight = _cityFieldPromises.get(key);
@@ -745,20 +757,35 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
         if (periodTok !== null) args.p_rent_period = periodTok;
         if (category !== null) args.p_category = category;
         if (types && types.length) args.p_types = types;
+        // EVERY narrowing the user has chosen — advanced answers AND the normal filters (bedrooms,
+        // price, area, combined-mode rent budget). `af` is rpcAllNarrowingParams(query): one object,
+        // so a future filter reaches Trending automatically instead of waiting to be remembered here.
+        // (Owner rule 2026-08-22: Trending IS the location breakdown of the user's eligible set.)
+        Object.assign(args, af ?? {});
+        // "Is the user narrowed at all?" — gates every widening fallback below. Named for what it
+        // now means; it covers bedrooms/price/area since 2026-08-22, not just advanced answers.
+        const hasNarrowing = Object.keys(af ?? {}).length > 0;
         let res = await supabase.rpc('top_cities_by_deal_ar', args).abortSignal(_ac.signal);
-        if (res.error && types && types.length) {
+        // EVERY fallback below WIDENS the scope, so each is gated on the user not being narrowed:
+        // a widened count under an active filter is exactly the overstatement this fix removes, and
+        // it fails silently because a fallback looks like a success. Narrowed + error ⇒ no count.
+        if (res.error && !hasNarrowing && types && types.length) {
           // pre-p_types signature: drop the cohort types (counts widen to the category scope)
           const { p_types: _droppedTypes, ...noTypes } = args;
           res = await supabase.rpc('top_cities_by_deal_ar', noTypes).abortSignal(_ac.signal);
         }
-        if (res.error && category !== null) {
+        if (res.error && !hasNarrowing && category !== null) {
           // TODO(pending migration 2026-08-14): top_cities_by_deal_ar is gaining `p_category text
           // default null` — until that migration is applied everywhere, an older signature rejects
           // the arg; drop it (counts fall back to the pre-category scope) rather than going blank.
           const { p_category: _dropped, ...noCat } = args;
           res = await supabase.rpc('top_cities_by_deal_ar', noCat).abortSignal(_ac.signal);
         }
-        if (res.error && periodTok !== null) {
+        // LAST-RESORT FALLBACK, same gate. The deal-only call drops every narrowing, so under an
+        // active filter it would hand back exactly the overstated numbers this fix exists to remove.
+        // No count is strictly better than a wrong one (owner): the field goes empty and
+        // cityPoolStatus reports 'error' instead of showing a fabricated chip.
+        if (res.error && periodTok !== null && !hasNarrowing) {
           res = await supabase.rpc('top_cities_by_deal_ar', { p_deal: dealAr(deal) }).abortSignal(_ac.signal);
         }
         data = res.data;
@@ -803,8 +830,8 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
 // this category" count (e.g. 9,358) instead of the exact selected type's count (e.g. 28, or 0). Every
 // call site must now pass its cohortTypesAr(query) explicitly; TypeScript refuses to compile a caller
 // that forgets it, so this class of drift can never silently reappear. [[cohortTypesAr]]
-export function topCitiesByListings(deal: Deal | null, periodTok: string | null, category: Category | null, k: number, types: string[] | null): CityOption[] {
-  return (CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types)) ?? []).filter((c) => c.listingCount > 0).slice(0, k);
+export function topCitiesByListings(deal: Deal | null, periodTok: string | null, category: Category | null, k: number, types: string[] | null, af: AfParams | null): CityOption[] {
+  return (CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af)) ?? []).filter((c) => c.listingCount > 0).slice(0, k);
 }
 
 // ── District field (city_id-scoped) — mirrors the City field. ────────────────────────────────────
@@ -933,11 +960,11 @@ export function matchDistrictsByCityId(cityId: number, deal: Deal | null, catego
 // normalize_ar() applies — so "الري" matches "الرياض" exactly like a DB-side search would. Ranks
 // exact-prefix matches before substring matches, then by listing count (bigger cities first).
 // `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
-export function matchCitiesByText(deal: Deal | null, periodTok: string | null, category: Category | null, query: string, types: string[] | null): CityOption[] {
+export function matchCitiesByText(deal: Deal | null, periodTok: string | null, category: Category | null, query: string, types: string[] | null, af: AfParams | null): CityOption[] {
   const q = norm(query);
   if (!q) return [];
   const scored: { opt: CityOption; rank: number }[] = [];
-  for (const opt of CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types)) ?? []) {
+  for (const opt of CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af)) ?? []) {
     const n = norm(opt.cityAr);
     if (n.startsWith(q)) scored.push({ opt, rank: 0 });
     else if (n.includes(q)) scored.push({ opt, rank: 1 });
