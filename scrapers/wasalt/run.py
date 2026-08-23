@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -39,6 +40,45 @@ BASE = "https://wasalt.sa"
 NEXT_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.4"))
 PAGE_SIZE = 32
+
+# STARTUP JITTER (2026-08-23, production degradation investigation). wasalt-residential-sweep.yml
+# (20 jobs) and wasalt-commercial-sweep.yml (14 jobs) dispatch fully parallel with no `max-parallel`,
+# all sharing ONE WASALT_PROXY_URL secret (Webshare Saudi-residential proxy). PR#824 (merged
+# 2026-08-21) proved every failing attempt hung the full 30s timeout and added session rotation on
+# retry — verified NOT to have fixed the regression: the platform's daily scrape_runs failure rate
+# was 65.7% the day #824 merged and is still 60-69% three days later (re-measured 2026-08-23), because
+# rotating a session changes WHICH connection a retry uses, not HOW MANY of our own jobs open a
+# connection through the shared pool in the same instant. PR#824's own evidence: 34 jobs' first
+# requests landed inside a ~4s window. A `max-parallel` cap (PR#827) is the other half of the fix but
+# needs owner tuning against the account's real concurrency ceiling, which no session here can see,
+# so it stays a proposed workflow-YAML change pending that decision.
+# This jitter is the scraper-side half that needs no such tuning: spreading the SAME 34 jobs' first
+# connection attempts across up to a minute (instead of a 4s burst) can only lower peak simultaneous
+# demand on the shared proxy, regardless of what its true ceiling turns out to be — it is a strict
+# improvement, not a guess at a number. Scoped to GITHUB_ACTIONS (set by every Actions job
+# automatically, no workflow-YAML change required to enable it) so a local/manual single-slug run
+# never waits — only the cloud matrix, where the contention actually happens, jitters.
+def _jitter_max_s() -> float:
+    raw = os.environ.get(
+        "WASALT_STARTUP_JITTER_MAX_S",
+        "60" if os.environ.get("GITHUB_ACTIONS", "").strip().lower() == "true" else "0",
+    )
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0  # a bad env value degrades to "no jitter", never a crash
+
+
+def startup_jitter() -> float:
+    """Sleep a random [0, cap) seconds before the first request, cap = _jitter_max_s(). Returns the
+    delay actually slept (0 when jitter is disabled/misconfigured), so callers/tests can observe it
+    without re-reading the env var."""
+    cap = _jitter_max_s()
+    if cap <= 0:
+        return 0.0
+    delay = random.uniform(0, cap)
+    time.sleep(delay)
+    return delay
 
 # Detail-page fetch is EXPENSIVE: one extra ~400KB HTML request PER listing. Through the Saudi
 # residential PROXY (cloud sweeps) that would burn the metered proxy bandwidth fast, so it's OFF by
@@ -530,6 +570,12 @@ def main() -> int:
     p.add_argument("--pages", type=int, default=3)
     p.add_argument("--all", action="store_true", help="sweep every type × sale+rent")
     args = p.parse_args()
+
+    # Spread this job's first proxy connection out over the cloud matrix's burst window (see the
+    # module-level note on WASALT_STARTUP_JITTER_MAX_S) — a no-op locally/manually.
+    jittered = startup_jitter()
+    if jittered:
+        print(f"   (startup jitter: waited {jittered:.1f}s to spread cloud-matrix load on the shared proxy)")
 
     s = session()
     run_id = db.begin_run("wasalt")
