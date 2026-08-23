@@ -1,15 +1,32 @@
-# Weekly hard-delete sweep — removes Aqar rows that have been marked inactive (active=false)
-# for more than 30 days. The 30-day buffer is the safety net: if liveness ever falsely kills a
-# real listing, there's a full month to notice and flip `active` back to true before the row is
-# permanently gone.
+# Weekly Aqar retention cleanup via the unified engine (scrapers/common/cleanup.py).
 #
-# Runs once a week — Sunday 02:00 UTC = Sunday 05:00 KSA, quiet time on Aqar so the load matters
-# even less than the discovery sweep.
-
+# MIGRATED 2026-08-22 (owner-directed safety audit) from the legacy scrapers/aqar/cleanup.py, which
+# hard-deleted on missing_count>=3 + 30-day age ALONE — no final live re-check before deleting, no
+# anomaly/spike circuit breaker, no fraction-of-platform guard, no per-row audit trail. Same filename,
+# same pg_cron schedule (gh-aqar-cleanup, Sun 02:00 UTC), same 30-day/3-strike thresholds — this only
+# adds the safety layers the legacy script never had. aqar has been registered in the unified engine
+# with a working dead-marker check since 2026-07-27; this migration just turns it on
+# (platform_retention_policy.enabled, see the paired migration).
+#
+# Honors the aqar platform_retention_policy row. Deletes a listing ONLY after re-fetching its real
+# aqar URL and confirming a dead marker (404/410/"ad removed" text) — a live 200 is never deleted,
+# it is reactivated (self-heal). A run whose eligible population spikes past the anomaly or
+# fraction-of-platform threshold ABORTS and deletes nothing, raising a P1 (mon_detect_deletion_spike).
+#
+# REQUIRED FIRST RUN: dispatch manually with dry_run=true and review the report BEFORE letting the
+# next scheduled Sunday run go live. Do not skip this — see the PR this workflow shipped in.
 name: Aqar cleanup
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true = probe + classify + report, delete NOTHING (use this before any first real run)"
+        required: false
+        # MUST default to "false": the weekly pg_cron trigger (gh-aqar-cleanup) dispatches with NO
+        # inputs, so the default is what the scheduled job gets. Defaulting to "true" here would
+        # silently turn the real weekly cleanup into a no-op.
+        default: "false"
 
 concurrency:
   group: aqar-cleanup
@@ -17,29 +34,21 @@ concurrency:
 
 jobs:
   cleanup:
-    name: Cleanup ${{ matrix.table }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false   # residential + commercial cleaned independently
-      matrix:
-        table:
-          - aqar_residential_listings
-          - aqar_commercial_listings
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: "pip"
           cache-dependency-path: scrapers/requirements.txt
-
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
-
-      - name: Run cleanup (${{ matrix.table }})
+      - name: Run aqar cleanup
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: exec python -m scrapers.aqar.cleanup --table ${{ matrix.table }}
+        run: |
+          exec python -m scrapers.common.cleanup --platform aqar \
+            ${{ inputs.dry_run == 'true' && '--dry-run' || '' }}

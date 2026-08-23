@@ -1,17 +1,24 @@
-# ENGINEER ROUTINES — THE FOUR DAILY ENGINEERS (canonical, owner-locked 2026-08-11)
+# ENGINEER ROUTINES — THE FIVE DAILY ENGINEERS (canonical, owner-locked 2026-08-11, extended 2026-08-23)
 
-> Owner rule: there are **exactly FOUR separate cloud routines, all DAILY** (the fourth added by
-> the owner 2026-08-11). They are never merged, renamed into each other, or scope-swapped.
-> Converting one into another (which happened once on 2026-08-10 and was reverted) is a violation,
-> not a refactor. If a routine's live prompt ever diverges from what this file describes, restore
-> the routine to match this file.
+> Owner rule: there are **exactly FIVE separate cloud routines, all DAILY** (the fourth added by
+> the owner 2026-08-11; the fifth added 2026-08-23). They are never merged, renamed into each
+> other, or scope-swapped. Converting one into another (which happened once on 2026-08-10 and was
+> reverted) is a violation, not a refactor. If a routine's live prompt ever diverges from what this
+> file describes, restore the routine to match this file.
 
 | # | Engineer | Trigger ID | Daily time (Arizona) | Daily time (UTC) | Model | Scope |
 |---|---|---|---|---|---|---|
 | 1 | ⚡ Daily JUNIOR SCRAPING Engineer | `trig_01NpFaJ1ALUZbZKdKpCdWF16` | 04:00 | 11:00 | claude-sonnet-5 | Daily scraping layer ONLY |
-| 2 | 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit | `trig_01RCVx7ie1T1i5oPC6KzZAKd` | 04:30 | 11:30 | claude-opus-5 | Broad production engineering, **including Advanced Filter + AI Agent** |
-| 3 | 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) | `trig_01Tr6Rb6XPggFXqCf3EKG62y` | 05:00 | 12:00 | claude-opus-5 | Full scraped inventory / Normal Filter ONLY, **Advanced Filter explicitly out of scope** |
+| 2 | 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit | `trig_01RCVx7ie1T1i5oPC6KzZAKd` | 04:30 | 11:30 | claude-opus-5 | Broad production engineering, **including AI Agent — Advanced Filter moved to routine #5 on 2026-08-23** |
+| 3 | 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) | `trig_01Tr6Rb6XPggFXqCf3EKG62y` | 05:00 | 12:00 | claude-opus-5 | Full scraped inventory / Normal Filter ONLY, **Advanced Filter explicitly out of scope (belongs to routine #5)** |
 | 4 | 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA | `trig_016eagxsMuB2cCbMe9DK7JJD` | 05:30 | 12:30 | claude-opus-5 | Live production Normal Filter USED AS A REAL USER: matching → diversity → «عرض المزيد» → card click-through, end to end |
+| 5 | 🎯 Senior Advanced Filter + Trending Data Integrity Engineer | `trig_01FmaKmMVJgT5VHFj8Mk9q13` | 04:00 | 11:00 | claude-opus-5 | Advanced Filter + Trending Cities/Districts + the data integrity behind every AF predicate, end to end |
+
+**Schedule note (2026-08-23):** routine #5 runs at the SAME 04:00 Arizona slot as routine #1
+(owner's explicit instruction), not staggered 30 minutes like #1–#4 are from each other. It does
+not share #1's heavy scraping-DB phase, so this is not expected to reproduce the 2026-08-10
+stampede — but if DB saturation is ever observed at 04:00, restagger #5 to a later slot (e.g. 06:00
+Arizona) rather than silently accept degraded runs.
 
 **Times are anchored to ARIZONA, not UTC (owner decision, 2026-08-21).** Arizona does not observe
 DST, so 04:00 America/Phoenix is 11:00 UTC every day of the year — the schedule never drifts and
@@ -70,7 +77,7 @@ Canonical spec: **`docs/ops/DATA_INTEGRITY_ENGINEER.md`** (file wins over the li
 divergence). 17-section owner spec: source-is-truth, everything-scraped accounted for, real-user
 search proof via the production RPC, daily inactive-resurrection audit (target 0 false
 inactivations), price/area barriers, one-report-only autonomous loop, the 10/10 honesty rule.
-**Ignore Advanced Filter** — that belongs to the senior (routine #2).
+**Ignore Advanced Filter** — that belongs to routine #5 (moved from #2 on 2026-08-23).
 
 Carries a **§0 standing operating contract** (owner, 2026-08-12): this engineer owns every safely
 fixable data-integrity problem it discovers from beginning to end, does not pause for permission on
@@ -95,7 +102,34 @@ example, §38 deploy safety overrides autonomy). One report at the end, 10/10 on
 
 Distinct from #3: the Data Integrity engineer verifies the INVENTORY (scrape → canonical → index),
 this engineer verifies the USER EXPERIENCE (filter → results → cards → source click-through).
-They meet at the Normal Filter from opposite sides; neither replaces the other.
+They meet at the Normal Filter from opposite sides; neither replaces the other. Distinct from #5:
+this engineer owns the **Normal Filter** journey; #5 owns **Advanced Filter + Trending**.
+
+## 5. 🎯 Senior Advanced Filter + Trending Data Integrity Engineer (new, 2026-08-23)
+
+Canonical spec: **`docs/ops/AF_TRENDING_DATA_INTEGRITY_ENGINEER.md`** (file wins over the live
+prompt on any divergence). Owner spec, 8 parts: Advanced Filter correctness (0/1/2+-question
+visibility, single/double-tap, Skip = unrestricted with 0 predicate and 0 count change, Back/state
+restoration, every live AF field, UNKNOWN never becomes false, multi-amenity is AND not OR);
+Trending Cities (full filter-state inheritance — category/group/type/deal/period/bedrooms/area/
+price/AF all apply BEFORE city selection; visible count = RPC = click-through = DB truth);
+Trending Districts (same inheritance after city selection, plus: never show a wider unfiltered
+count as if it were filtered truth — show no count rather than a false one); the data integrity
+behind every AF predicate (source → scraper → parser → canonical → index fidelity, same
+source-is-truth discipline as routine #3); mandatory real browser testing (desktop + mobile,
+rotated across cities/regions, the INTENT=UI=REQUEST=RPC=DB=RESULTS correctness chain); a minimum
+25-item barrier list, mutation-proven; autonomous fix→barrier→deploy→production-verify authority,
+same four stop-conditions as every other engineer (source-truth ambiguity, destructive ambiguity,
+product/taxonomy decision, safety-gate weakening).
+
+**Scope carved out of routine #2 and clarified against routine #3 on creation** — Advanced Filter
+correctness previously sat inside #2's broad "production engineering" scope and was explicitly
+excluded from #3; both references were updated the same day this routine was created so nobody
+reads a stale hand-off. Trending Cities/Districts had no dedicated owner before this routine.
+
+Boundary vs. #4: #4 owns the Normal Filter user journey; #5 owns Advanced Filter + Trending. Where
+AF sits downstream of a Normal Filter search (the count gate, cohort inheritance), the two
+coordinate via each other's freshest report rather than duplicate coverage.
 
 ## Reporting rules (permanent, owner-locked 2026-08-13)
 
@@ -164,11 +198,13 @@ revert is reported as a revert rather than rediscovered by hand.
 
 ## Boundary rules (permanent)
 
-- Junior detects & escalates; it never deep-audits. Senior owns Advanced Filter + AI Agent + broad
-  infra. Data Integrity owns Normal-Filter/full-inventory fidelity and never touches Advanced
-  Filter. No routine absorbs another's responsibilities.
-- All three write durable state (`docs/ops/daily-metrics.jsonl` / `ops_senior_audit_run`) and obey
-  the shared gates: deploy lock, migration-commit duty, PR `--head` discipline, cron minute-slot
-  discipline (see AGENTS.md).
+- Junior detects & escalates; it never deep-audits. Senior owns AI Agent + broad infra (Advanced
+  Filter moved out 2026-08-23). Data Integrity owns Normal-Filter/full-inventory fidelity and never
+  touches Advanced Filter. Search & Matching QA owns the Normal Filter user journey. AF + Trending
+  Data Integrity owns Advanced Filter + Trending Cities/Districts end to end. No routine absorbs
+  another's responsibilities.
+- All five write durable state (`docs/ops/daily-metrics.jsonl` / `ops_senior_audit_run` /
+  `ops_qa_coverage_ledger`) and obey the shared gates: deploy lock, migration-commit duty, PR
+  `--head` discipline, cron minute-slot discipline (see AGENTS.md).
 - Changing any routine's schedule, scope, or prompt is an owner decision; record the change here in
   the same session.

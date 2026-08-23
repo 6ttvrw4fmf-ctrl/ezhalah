@@ -74,6 +74,7 @@ class Q:
     def eq(self,c,v): return self
     def gte(self,c,v): return self
     def lt(self,c,v): return self
+    def is_(self,c,v): return self
     def order(self,*a,**k): return self
     def limit(self,n): self._limit=n; return self
     def in_(self,c,vals):
@@ -92,6 +93,11 @@ class Q:
         if self.t=="cleanup_deletion_log":
             if self.op=="insert": LOGGED.extend(self.payload)
             return R(data=[], count=None)
+        if self.t=="alert_event":
+            # Platform-health precondition (barrier 2, 2026-08-22). Empty by default (healthy) so
+            # every pre-existing scenario is unaffected; a scenario opts into the degraded case by
+            # setting "alert_event_rows" explicitly (see the health-gate scenario below).
+            return R(data=SCENARIO.get("alert_event_rows", []), count=None)
         if self.t==TABLE:
             if self._count:
                 # two count queries per table: eligible, then total rows
@@ -224,6 +230,30 @@ check('a large FRACTION of the platform going eligible aborts even under the flo
 check('  …and the abort names the mass-inactivation guard', !!mass && /mass-inactivation/.test(String(mass.stats.abort_reason)));
 check('  …and it deletes NOTHING', !!mass && mass.deleted === 0);
 
+// 5b. PLATFORM HEALTH PRECONDITION (barrier 2, 2026-08-22) — an open scraper_failure_step_change
+// or silent_scraper_death alert for this platform must freeze deletion BEFORE any candidate is
+// even measured (eligible_total stays 0), distinct from the anomaly gate above which only reacts
+// AFTER a degraded platform has already produced a spike.
+const degraded = scenario('degraded-health', {
+  policy: POLICY(), eligible: 488, platform_rows: 31688, probe: [404, ''],
+  alert_event_rows: [{ id: 686, kind: 'scraper_failure_step_change', platform: 'gathern', severity: 'P1' }],
+});
+check('an open scraper_failure_step_change alert freezes deletion before measuring candidates',
+      !!degraded && degraded.stats.aborted === true && degraded.deleted === 0);
+check('  …eligible_total is never even measured',
+      !!degraded && degraded.stats.eligible_total === 0,
+      degraded ? `eligible_total=${degraded.stats.eligible_total}` : '');
+check('  …the abort names the degraded platform',
+      !!degraded && /platform health degraded/.test(String(degraded.stats.abort_reason)));
+
+// 5c. …and a HEALTHY platform (no matching alert) must proceed exactly as before — the gate must
+// not be a blanket freeze that happens to look right only because the mock defaults to healthy.
+const healthy = scenario('healthy', {
+  policy: POLICY(), eligible: 488, platform_rows: 31688, probe: [404, ''], alert_event_rows: [],
+});
+check('a healthy platform (no matching alert) proceeds normally',
+      !!healthy && healthy.stats.aborted === false && healthy.stats.eligible_total === 488);
+
 // 6. DRY RUN — classifies but never writes.
 const dry = scenario('dry', {
   policy: POLICY(), eligible: 488, platform_rows: 31688, probe: [404, ''], dry_run: true,
@@ -239,6 +269,9 @@ check('the cap-saturating `max_delete_per_run + 1` measurement never returns',
       !/max_delete_per_run"\] \+ 1/.test(src));
 check('the work-set SELECT is capped by max_delete_per_run', /\.limit\(pol\["max_delete_per_run"\]\)/.test(src));
 check('require_source_recheck is still honoured', /require_source_recheck/.test(src));
+check('the platform-health precondition function still exists', /_platform_health_ok/.test(src));
+check('the health check runs before eligible_total is ever measured',
+      src.indexOf('_platform_health_ok(client, platform)') < src.indexOf('eligible_total = 0'));
 
 console.log('');
 if (failures > 0) {
