@@ -18,8 +18,11 @@
 //   1. §0 must name THIS job. The owner's instruction was "Do not create a different engineer or
 //      duplicate routine" — a contract that stops naming routine #3 / trig_01Tr6Rb6XPggFXqCf3EKG62y
 //      could be silently re-attached to a different engineer, or copied into a fifth one.
-//   2. ENGINEER_ROUTINES.md must still be owner-locked at FOUR routines and still name this one.
-//      That file is what prevents overlapping duplicate engineers from accumulating.
+//   2. ENGINEER_ROUTINES.md must still be owner-locked at a fixed, explicit routine count (FOUR,
+//      then FIVE from 2026-08-23 when the owner added routine #5 — AF + Trending Data Integrity,
+//      a distinctly-scoped engineer, not a duplicate of #3) and still name this one. That file is
+//      what prevents overlapping duplicate engineers from accumulating; the count itself may only
+//      change via an explicit owner-authorized addition, never silently.
 //
 // And, as with the authority contract, AGENTS.md must keep pointing here: AGENTS.md is loaded into
 // every session and declared as overriding, so the contract only has force while AGENTS.md routes
@@ -118,10 +121,14 @@ check(lc.includes('remaining genuine source limitations'),
   `${SPEC} no longer requires source limitations / owner decisions to be reported separately — ` +
   `without it they can be quietly folded into the score`);
 
-// ── 5. Structural: exactly four routines, this one among them ────────────────────────────────
-check(/exactly\s+FOUR separate cloud routines/i.test(routines),
-  'ENGINEER_ROUTINES.md is still owner-locked at four routines (no duplicate engineers)',
-  `${ROUTINES} no longer states the owner lock of exactly FOUR routines — duplicate/overlapping ` +
+// ── 5. Structural: an explicit owner-locked routine count, this one among them ────────────────
+// The exact number moves only via an explicit, dated owner authorization recorded in the header
+// (FOUR until 2026-08-11, FIVE from 2026-08-23 — routine #5, AF + Trending Data Integrity, a
+// distinctly-scoped engineer the owner added, not a duplicate of this one). What must never
+// happen is the lock disappearing silently — check the header still states SOME exact count.
+check(/exactly\s+(FOUR|FIVE|SIX|SEVEN|EIGHT)\s+separate cloud routines/i.test(routines),
+  'ENGINEER_ROUTINES.md is still owner-locked at an explicit routine count (no silent duplicate engineers)',
+  `${ROUTINES} no longer states an explicit owner-locked routine count — duplicate/overlapping ` +
   `engineers are exactly what the owner said not to create`);
 
 check(routines.includes('trig_01Tr6Rb6XPggFXqCf3EKG62y') && /Data Integrity Engineer/i.test(routines),
