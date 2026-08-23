@@ -98,9 +98,13 @@ check(
 );
 
 // ── 6. Mic can NEVER stay active after leaving: teardown stops tracks; unmount/blur/New Chat all cancel
+// Matched against teardown()'s OWN body — a track.stop() elsewhere (e.g. the permission-race
+// path) must not satisfy this (mutation-proof finding: it did, before this was scoped).
+const teardownBody = voice.match(/function teardown\(\) \{[\s\S]*?\n\}/)?.[0] ?? '';
 check(
-  '6a. module teardown stops every mic track, aborts the recognizer, closes the audio graph',
-  /track\.stop\(\)/.test(voice) && /\.abort\(\)/.test(voice) && /audioCtx\.close\(\)/.test(voice),
+  '6a. teardown() invalidates continuations, stops every mic track, aborts recognizer, closes audio',
+  /generation\+\+/.test(teardownBody) && /track\.stop\(\)/.test(teardownBody) &&
+    /\.abort\(\)/.test(teardownBody) && /audioCtx\.close\(\)/.test(teardownBody),
 );
 check(
   '6b. capture is cancelled on unmount AND on navigation blur AND on New Chat',
