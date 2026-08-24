@@ -212,15 +212,25 @@ try {
 
   // Count real search traffic, not renders: the property-search RPC and the agent function.
   let searchCalls = 0;
-  // The LAST property-search RPC body seen. This is the Stop/resubmit oracle (2026-08-23, see the
-  // [E] comment below): identical QUERY, not identical live count.
+  // The last MAIN property-search RPC body seen. This is the Stop/resubmit oracle (2026-08-23, see
+  // the [E] comment below): identical QUERY, not identical live count.
+  //
+  // MAIN means the body carries p_per_platform — sent by exactly ONE call site in the app, the
+  // results fetch in src/data/remote.ts fetchListings (always present, always null). Without that
+  // gate the listener records ANY search-RPC body, and the district-marking count calls
+  // (fetchDistrictEligibleCounts: p_limit:1, per-district p_districts override, no p_per_platform)
+  // that fire around the results screen can land AFTER the main request and poison the capture:
+  // CI run 32730714706 (2026-08-24) recorded a p_limit:1 marking probe for حي العقيق — a district
+  // the user never picked, straight from the trending list — as the [E] baseline, failing all
+  // three E/F/H signature checks at once while the app behaved perfectly.
   let lastSearchBody = null;
   const countSearch = (u) => /\/rest\/v1\/rpc\/(location_search_candidates_ar|search_listings)/.test(u)
     || /\/functions\/v1\/agent/.test(u);
   const isSearchRpc = (u) => /\/rest\/v1\/rpc\/(location_search_candidates_ar|search_listings)/.test(u);
   page.on('request', (r) => {
     if (countSearch(r.url())) searchCalls++;
-    if (isSearchRpc(r.url()) && r.method() === 'POST') lastSearchBody = r.postData() ?? null;
+    if (isSearchRpc(r.url()) && r.method() === 'POST'
+      && (r.postData() ?? '').includes('"p_per_platform"')) lastSearchBody = r.postData();
   });
   // Key-order-insensitive signature of a search request body, so an incidental serializer reorder
   // can never masquerade as a query change. A body that does not parse is compared verbatim.

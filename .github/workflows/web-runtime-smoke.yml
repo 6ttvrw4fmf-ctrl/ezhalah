@@ -7,6 +7,17 @@
 # post-deploy smoke test calls the search RPC directly (which stayed HTTP 200 while the UI was dead).
 # See scripts/verify-web-runtime-smoke.mjs for the full story and its three-way proof.
 #
+# 2026-08-23 (PR #1012): the E/F/H "resubmit after Stop returns the EXACT SAME count" checks were
+# re-oracled to compare the SERIALIZED SEARCH REQUEST (key-order-insensitive signature) instead of
+# the landed count. Root cause of the false failures: both counts were live production reads taken
+# minutes apart, so any run straddling a data-refresh tick (MV refresh pg_cron jobid 17 at :00,
+# sync_search_listings_ar jobid 28 at :14) saw the inventory legitimately move and failed with the
+# query perfectly intact — observed baseline=347 → resubmit=1940 on an untouched filter; 6146bc0's
+# main run failed at 22:08+ while the 22:00 runs passed, and two PR-branch runs in the same window
+# failed identically. The request oracle is exactly as strict about what Stop must preserve and
+# immune to data movement; the landed count stays only as a finite-liveness check. Full story in
+# the ORACLE CHANGE comment at the [E] resubmit check in the script.
+#
 # Kept OUT of the required `npm test` on purpose (that suite is hermetic and runs in seconds; a
 # 2-minute build + browser would slow every unrelated PR and add flake to a required check) — same
 # precedent as the live migration-drift check in AGENTS.md.

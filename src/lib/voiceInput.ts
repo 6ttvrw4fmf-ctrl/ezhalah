@@ -24,12 +24,18 @@
 import { Platform } from 'react-native';
 
 export type VoiceHandlers = {
-  // Fired when capture could not start or died: 'denied' = mic permission refused/revoked,
-  // 'unavailable' = no mic / no recognizer on this platform, 'error' = the recognizer failed in a
-  // way a silent restart couldn't cover. The session is already fully torn down when this fires —
-  // the caller only needs to restore its UI and show a graceful Arabic message (never the raw
-  // browser error text).
-  onFailure: (kind: 'denied' | 'unavailable' | 'error') => void;
+  // Fired when capture could not start or died: 'denied' = the browser/OS genuinely refused
+  // microphone permission (the ONE case where "enable it in your settings" is correct advice),
+  // 'unavailable' = no mic / no recognizer on this platform, 'blocked' = the recognizer API exists
+  // and permission was never the problem, but the recognition attempt itself failed — the service
+  // refused/throttled the request, the mic hardware/session couldn't be captured (e.g. iOS Safari's
+  // stricter audio-session model rejecting a second concurrent capture), a network hiccup, or any
+  // other non-permission recognizer error (owner report, 2026-08-24: real iPhone Safari showed the
+  // permission-denied message for exactly this class of failure — conflating them is the bug), and
+  // 'error' = the keep-alive restart itself failed. The session is already fully torn down when this
+  // fires — the caller only needs to restore its UI and show a graceful Arabic message (never the
+  // raw browser error text).
+  onFailure: (kind: 'denied' | 'unavailable' | 'blocked' | 'error') => void;
 };
 
 export function isVoiceInputSupported(): boolean {
@@ -116,9 +122,13 @@ export async function startVoiceInput(handlers: VoiceHandlers): Promise<boolean>
     const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
     audioCtx = new Ctx();
     // Autoplay policy: a context can be born 'suspended'; the mic tap is a real user gesture, so an
-    // explicit resume always brings it up. Without this, levels honestly read 0 (flat waveform) —
-    // never wrong, but needlessly degraded.
-    void audioCtx!.resume?.().catch(() => {});
+    // explicit resume always brings it up. AWAITED, not fire-and-forget: letting this fully settle
+    // before touching the recognizer avoids racing two audio-session operations — a documented
+    // source of spurious recognizer failures on iOS Safari, whose audio-session negotiation is
+    // stricter than desktop browsers'. Never throws (rejection is swallowed), so a stuck/blocked
+    // context degrades to a flat waveform — it can never block starting the recognizer.
+    await audioCtx!.resume?.().catch(() => {});
+    if (gen !== generation) return false; // cancelled while the context was resuming
     const source = audioCtx!.createMediaStreamSource(mediaStream);
     const analyser = audioCtx!.createAnalyser();
     analyser.fftSize = 512;
@@ -159,10 +169,16 @@ export async function startVoiceInput(handlers: VoiceHandlers): Promise<boolean>
     const code = String(ev?.error ?? '');
     // 'no-speech'/'aborted' are routine (silence, engine hiccup) — onend's keep-alive restart
     // covers them. Silence NEVER auto-submits and never ends the session (owner brief §6).
-    if (code === 'not-allowed' || code === 'service-not-allowed') {
-      teardown();
-      handlers.onFailure('denied');
-    }
+    if (code === 'no-speech' || code === 'aborted') return;
+    teardown();
+    // 'not-allowed' is the ONE code that means the user/OS genuinely refused microphone permission.
+    // Everything else — 'service-not-allowed' (the recognition SERVICE refused/throttled the
+    // request), 'audio-capture' (the mic hardware/session couldn't be captured), 'network', or any
+    // other/future code — is a real failure but NOT a permission problem, so it must never produce
+    // the "enable it in your settings" message (that was the actual bug: every non-'not-allowed'
+    // code used to be silently swallowed with NO feedback at all, leaving the composer stuck in
+    // recording mode forever — 'blocked' now guarantees every one of them resolves gracefully).
+    handlers.onFailure(code === 'not-allowed' ? 'denied' : 'blocked');
   };
   rec.onend = () => {
     if (gen !== generation) return;

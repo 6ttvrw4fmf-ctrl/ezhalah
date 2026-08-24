@@ -1,12 +1,14 @@
 # AF + Trending Data Integrity — Run 2026-08-24
 
-**Rating: 9.4/10 (94%) → 9.4/10 (94%).** No AF or Trending *behaviour* changed, and none needed to:
-every interaction, count and click-through tested this run was exact. What changed is that a
-barrier which had been reporting "clean" on a cohort it could not see now sees it — and it is red,
-honestly, on 8,183 attribute assertions Ezhalah invented.
+**Rating: 9.4/10 (94%) → 9.7/10 (97%).** No AF or Trending *behaviour* changed, and none needed to:
+every interaction, count and click-through tested this run was exact. What changed is that a barrier
+which had been reporting "clean" on a cohort it could not see now sees it — and the 8,183 attribute
+assertions Ezhalah had invented are gone.
 
-The rating does not move because the defect was already live when the run started and the bulk of it
-is still live: only 57 of those assertions could be repaired inside this run's authority.
+The rating moves because the defect is closed end to end: barrier extended and mutation-proven, all
+8,183 fabricated values cleared to UNKNOWN under owner authorization, propagated to the search index,
+and confirmed on the live Advanced Filter card. It is not a 10 because Villa's own `true` values were
+never source-proven — see §5.
 
 ---
 
@@ -99,16 +101,65 @@ None of the 51 listings happened to sit in the Riyadh / إيجار سنوي / ش
 measured earlier. Searchable inventory still carries **4,713 maid + 1,544 driver** fabricated trues
 on non-Villa aqar rows; that is the user-facing size of what remains.
 
-### Still open — owner decision
+### Owner-authorized cohort repair — COMPLETE
 
-Clearing the remaining **~8,126** assertions is a bulk field rewrite → **RED #4** in
-`docs/ops/AGENT_AUTHORITY.md`. Not done here. The barrier is deliberately left **red (P1,
-`fabricated_unpublished_amenity`)** and will stay red until it is — silencing it to get a green tick
-is exactly what the rules forbid.
+The owner approved the bulk repair on 2026-08-24 with explicit limits: do not broaden beyond what
+is source-proven, preserve Villa, never write `false`, never write `true`, UNKNOWN stays UNKNOWN.
 
-Proposed remedy on approval: clear `maid_room` / `driver_room` to NULL for
-`aqar_residential_listings` where `property_type <> 'Villa'`, one evidence row per listing, then let
-the hourly `sync-search-listings-ar` carry it to the index.
+**Completing the sample first changed the metric, not the answer.** The original probe counted
+*key presence*. Sampling the four property types it had not covered (Building, Rest House, Room,
+House — 24 more pages) turned up a case that shows why key presence is the wrong test: **House
+carries the `maid`/`driver` keys on 6/6 pages and their value is `null` on 6/6.** A present-but-null
+key is not a published value — the same shape already recorded for `aqar_commercial.parking` ("key
+appears on ~21% of pages but ALWAYS null"), and the reason House stays *in* scope rather than being
+carved out of it. Re-scored on published VALUE:
+
+| segment | pages | published a maid/driver value |
+|---|---|---|
+| non-Villa (apartment, floor, land, building, rest house, room, house) | 90 | **0** |
+| Villa — positive control | 10 | **10/10** (`maid:0, driver:0`, matching our stored false) |
+
+100 live pages total, 0 fetch failures.
+
+**Dry run before the write.** Cohort `coalesce(property_type,'') <> 'Villa'`: **7,316 rows**,
+**8,126 field values** — 6,124 maid + 2,002 driver, every one `true`, not a single `false`. Zero
+rows have a NULL `property_type`, so the cohort predicate and the detector's own predicate select
+exactly the same set.
+
+**Trigger safety proven before the write.** The table carries three `BEFORE UPDATE` triggers
+(`trg_aqar_parse`, `trg_aqar_reject_price_artifact`, `trg_redact_user_visible_pii`). A rolled-back
+300-row rehearsal updated through all three and changed **0** other columns.
+
+**The migration aborts itself if it exceeds its promise.** It snapshots every other column of every
+affected row and raises — rolling the whole thing back — if any unrelated column moves, if any Villa
+value moves, or if the cohort does not reach zero.
+
+| check | result |
+|---|---|
+| rows repaired | 7,316 |
+| maid values cleared | 6,124 |
+| driver values cleared | 2,002 |
+| fabricated values remaining in cohort | **0** |
+| Villa values changed | **0** (11,947 maid / 8,001 driver non-null before and after; 2,454 / 3,192 falses intact) |
+| unrelated fields changed | **0** |
+| detector open alerts | **0** — `fabricated_unpublished_amenity` self-resolved via `mon_resolve_key` |
+| search index synced | YES — the 13:14 `sync-search-listings-ar` |
+
+**Production verified, user-facing.** Riyadh / إيجار سنوي / شقة, the cohort measured before the
+repair:
+
+* «غرفة خادمة» **298 → 26**; «غرفة سائق» **21 → chip gone entirely** — with the fabricated values
+  cleared the option can no longer narrow usefully, so the engine correctly retires it.
+* Tapped the maid chip in the live browser: footer 26 = advertised 26 → committed headline **26** →
+  final RPC `p_amenities=['maid_room']` total **26**. Chain intact.
+* Every other chip unchanged (kitchen 4,350 · elevator 1,810 · AC 2,876 · private entrance 811 ·
+  furnished 1,060 — identical to the pre-repair reading), which is the user-facing confirmation that
+  nothing unrelated moved.
+
+The residual 26 maid / 4 driver in that cohort are **not aqar**: 18 + 8 from wasalt and sanadak, and
+the driver values from wasalt and aqaratikom. Those platforms were never in this scope and carry
+their own separately adjudicated source semantics (sanadak `driver_room` was verified PASS on
+2026-08-23). Aqar rows remaining in the cohort: **0**.
 
 ---
 
@@ -196,8 +247,28 @@ are recorded here so neither is misread later as a product finding.
 | Trending Districts advertised = click-through = DB | **VERIFIED** — 2 click-throughs against an independent oracle |
 | Cohort-blind fabricated-amenity barrier | **FIXED + VERIFIED** — extended, mutation-proven, live and correctly red |
 | aqar non-Villa maid/driver, 51 probed listings | **FIXED + VERIFIED** — 57 assertions cleared on row-level source proof |
-| aqar non-Villa maid/driver, remaining ~8,126 | **OWNER DECISION REQUIRED** — bulk field rewrite, RED #4 |
+| aqar non-Villa maid/driver, remaining 8,126 | **FIXED + VERIFIED** — owner-authorized; 7,316 rows, detector 0, index synced, live AF card confirmed |
+| Villa's own `true` values | **UNPROVEN — untouched** (§5), out of the authorized scope |
 
-**ALL GOOD: NO** — and deliberately so. Everything tested behaves correctly; the one open item is a
-bulk repair whose authority sits with the owner, and the barrier now names it out loud.
+## 5. Residual question — Villa's own `true` values are unproven, and deliberately untouched
+
+Villa is excluded from the repair because aqar genuinely publishes `maid`/`driver` on the Villa ad
+form — proven by 10/10 control pages whose published `maid:0, driver:0` matched the `false` we
+already stored. That proof covers Villa's **falses**. It does **not** cover Villa's 9,493 maid and
+4,809 driver **trues**: the control sample was drawn from rows stored as `false`, so no page in it
+could confirm a stored `true`.
+
+There is good reason to expect they are fine — Villa is the one cohort where the source answers at
+all, and it carries a healthy two-sided split rather than the one-directional signature that gave
+the non-Villa cohort away. But "expected to be fine" is not evidence, and this file should not imply
+it is. Nothing was done about it: the owner's authorization was explicitly scoped to the non-Villa
+cohort and said not to broaden it, so confirming Villa's trues is a probe for a future run, not a
+change for this one.
+
+---
+
+**ALL GOOD: YES** for everything in scope. Every AF, Trending and count behaviour tested was exact;
+the fabricated-attribute class is closed end to end and its barrier is green on its own evidence
+rather than on a waiver. The one thing left is a question, not a defect: Villa's own `true` values
+have never been source-proven (§5), and confirming them was outside the authorized scope.
 Deployments: **0** — no `src/` change required one.
