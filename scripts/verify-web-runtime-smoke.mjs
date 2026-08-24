@@ -610,7 +610,12 @@ try {
 
   let jTitles = [];
   if (jOpened) {
-    const snap = await afSnapshot();
+    // Same render race Journey I already guards against: af-card can mount a beat before its
+    // question TITLE/options actually paint (real network round trip via rankQuestions), and CI's
+    // slower main thread loses this far more often than a fast local run does — poll instead of a
+    // single immediate read.
+    let snap = await afSnapshot();
+    for (let r = 0; r < 10 && !snap.title; r++) { await page.waitForTimeout(800); snap = await afSnapshot(); }
     if (snap.title) jTitles.push(snap.title);
     check('[J] exactly one question is shown (street_width)', jTitles.length === 1, JSON.stringify(jTitles));
     if (snap.options.length) {
