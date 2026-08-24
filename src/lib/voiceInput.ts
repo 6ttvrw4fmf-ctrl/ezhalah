@@ -34,8 +34,11 @@ export type VoiceHandlers = {
   // permission-denied message for exactly this class of failure — conflating them is the bug), and
   // 'error' = the keep-alive restart itself failed. The session is already fully torn down when this
   // fires — the caller only needs to restore its UI and show a graceful Arabic message (never the
-  // raw browser error text).
-  onFailure: (kind: 'denied' | 'unavailable' | 'blocked' | 'error') => void;
+  // raw browser error text). `detail` is the short, standardized API code that caused it (e.g.
+  // 'NotReadableError', 'audio-capture') — never a raw Error message/stack — surfaced only as a
+  // compact parenthetical tag so a real-device report can be traced to its exact cause (owner
+  // report, 2026-08-24: two blind fixes both missed on a real iPhone; this closes that gap).
+  onFailure: (kind: 'denied' | 'unavailable' | 'blocked' | 'error', detail?: string) => void;
 };
 
 export function isVoiceInputSupported(): boolean {
@@ -109,7 +112,7 @@ function teardown() {
 // active supersedes it (the old one is discarded) — "another recording beginning" is a stop cause.
 export async function startVoiceInput(handlers: VoiceHandlers): Promise<boolean> {
   teardown();
-  if (!isVoiceInputSupported()) { handlers.onFailure('unavailable'); return false; }
+  if (!isVoiceInputSupported()) { handlers.onFailure('unavailable', 'unsupported'); return false; }
   const gen = generation;
   finalText = '';
   interimText = '';
@@ -127,8 +130,8 @@ export async function startVoiceInput(handlers: VoiceHandlers): Promise<boolean>
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err: any) {
       if (gen !== generation) return false; // cancelled while the prompt was up — nothing to clean
-      const name = String(err?.name ?? '');
-      handlers.onFailure(name === 'NotAllowedError' || name === 'SecurityError' ? 'denied' : 'unavailable');
+      const name = String(err?.name ?? '') || 'unknown';
+      handlers.onFailure(name === 'NotAllowedError' || name === 'SecurityError' ? 'denied' : 'unavailable', name);
       return false;
     }
     if (gen !== generation) {
@@ -200,21 +203,21 @@ export async function startVoiceInput(handlers: VoiceHandlers): Promise<boolean>
     // the "enable it in your settings" message (that was the actual bug: every non-'not-allowed'
     // code used to be silently swallowed with NO feedback at all, leaving the composer stuck in
     // recording mode forever — 'blocked' now guarantees every one of them resolves gracefully).
-    handlers.onFailure(code === 'not-allowed' ? 'denied' : 'blocked');
+    handlers.onFailure(code === 'not-allowed' ? 'denied' : 'blocked', code || 'unknown-error');
   };
   rec.onend = () => {
     if (gen !== generation) return;
     // KEEP-ALIVE: browser recognizers end themselves after silence. The user owns the decision to
     // finish (Send / Stop / X) — so while the session is still active, quietly restart, keeping
     // every final already accumulated. This is the standard free-API pattern, not a product rule.
-    try { rec.start(); } catch {
+    try { rec.start(); } catch (err: any) {
       teardown();
-      handlers.onFailure('error');
+      handlers.onFailure('error', `restart-threw:${String(err?.name ?? err?.message ?? 'unknown')}`);
     }
   };
-  try { rec.start(); } catch {
+  try { rec.start(); } catch (err: any) {
     teardown();
-    handlers.onFailure('unavailable');
+    handlers.onFailure('unavailable', `start-threw:${String(err?.name ?? err?.message ?? 'unknown')}`);
     return false;
   }
   recognizer = rec;
