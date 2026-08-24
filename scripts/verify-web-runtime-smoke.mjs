@@ -121,12 +121,34 @@ const tap = async (txt) => {
   await page.mouse.click(box.x, box.y);
   await page.waitForTimeout(1200);
 };
+// For ASYNC-rendered suggestion rows only (run 32681927077: «حي النرجس» rendered after the fixed
+// 2200ms wait on a loaded runner and the strict tap threw). Polls for the row, then taps. Static
+// controls keep the strict tap — a missing static control is a real defect, not a render race.
+const tapWhenRendered = async (txt, timeoutMs = 8000) => {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    if (await page.evaluate(CLICK_LEAF, txt)) return tap(txt);
+    await page.waitForTimeout(300);
+  }
+  throw new Error(`control never rendered: ${txt}`);
+};
+// VERIFIED select (2026-08-24): type → tap the suggestion → CONFIRM the app registered it, retrying
+// the whole gesture when it did not. On a loaded CI runner the suggestion row can render after the
+// tap fires; the tap then hits nothing, the city stays unresolved, and «بحث» rightly refuses with
+// «الرجاء اختيار مدينة من القائمة» — which surfaced as journey [H] "count=null" three runs straight
+// while the app itself was fine (run 32679574637's page dump). `selected-city-visual` renders iff
+// `citySelected` (src/app/index.tsx), so it is the app's OWN confirmation, not a DOM guess.
 const pickCity = async (name) => {
-  await page.click('input >> nth=0');
-  await page.fill('input >> nth=0', '');
-  await page.type('input >> nth=0', name, { delay: 60 });
-  await page.waitForTimeout(2200);
-  await tap(name);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await page.click('input >> nth=0');
+    await page.fill('input >> nth=0', '');
+    await page.type('input >> nth=0', name, { delay: 60 });
+    await tapWhenRendered(name).catch(() => {}); // confirmation below decides; a miss just retries
+
+    const took = await page.waitForSelector('[data-testid="selected-city-visual"]', { timeout: 4000 }).catch(() => null);
+    if (took) return;
+  }
+  throw new Error(`pickCity(${name}): the app never confirmed the selection after 3 attempts`);
 };
 const body = () => page.innerText('body');
 // Poll instead of sleeping a fixed budget: this journey ends on a TYPEWRITER, whose duration varies
@@ -190,9 +212,23 @@ try {
 
   // Count real search traffic, not renders: the property-search RPC and the agent function.
   let searchCalls = 0;
+  // The LAST property-search RPC body seen. This is the Stop/resubmit oracle (2026-08-23, see the
+  // [E] comment below): identical QUERY, not identical live count.
+  let lastSearchBody = null;
   const countSearch = (u) => /\/rest\/v1\/rpc\/(location_search_candidates_ar|search_listings)/.test(u)
     || /\/functions\/v1\/agent/.test(u);
-  page.on('request', (r) => { if (countSearch(r.url())) searchCalls++; });
+  const isSearchRpc = (u) => /\/rest\/v1\/rpc\/(location_search_candidates_ar|search_listings)/.test(u);
+  page.on('request', (r) => {
+    if (countSearch(r.url())) searchCalls++;
+    if (isSearchRpc(r.url()) && r.method() === 'POST') lastSearchBody = r.postData() ?? null;
+  });
+  // Key-order-insensitive signature of a search request body, so an incidental serializer reorder
+  // can never masquerade as a query change. A body that does not parse is compared verbatim.
+  const reqSig = (body) => {
+    if (body == null) return null;
+    try { const o = JSON.parse(body); return JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]])); }
+    catch { return body; }
+  };
 
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(12000);
@@ -278,6 +314,25 @@ try {
     }
     return null;
   };
+  // Submit that CONFIRMS a search request left the app, re-tapping when one did not (2026-08-24).
+  // Four CI runs failed [H mobile] with a tap that fired nothing while the same build+script+backend
+  // passed locally end to end: after Stop's restore the form REHYDRATES citySelected in an effect
+  // (src/app/index.tsx ~426), and on a loaded runner a fast follow-up tap lands inside that gap —
+  // the app correctly refuses to search with an unresolved city, exactly once. A real user's second
+  // tap succeeds; so does this one. A genuinely wedged app fires nothing in 3 attempts and still
+  // fails — and every capture window starts null, so the sig oracle only ever sees THIS submit.
+  const submitSearch = async () => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      lastSearchBody = null;
+      await tap('بحث');
+      const until = Date.now() + 5000;
+      while (Date.now() < until) {
+        if (lastSearchBody != null) return;
+        await page.waitForTimeout(250);
+      }
+    }
+    // leave lastSearchBody null — the request-sig check fails and says exactly why
+  };
   const fillOwnerExample = async () => {
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(5000);
@@ -286,8 +341,7 @@ try {
     await pickCity('الرياض');
     await page.click('input >> nth=1');
     await page.type('input >> nth=1', 'النرجس', { delay: 60 });
-    await page.waitForTimeout(2200);
-    await tap('حي النرجس');
+    await tapWhenRendered('حي النرجس');
     await tap('الشقق والسكن المشترك'); await tap('شقة');
     await tap('3');
     await page.fill('input >> nth=2', '80');
@@ -298,9 +352,11 @@ try {
   await page.setViewportSize({ width: 1440, height: 900 });
   await fillOwnerExample();
   const preStopInputs = await visibleInputs();
-  await tap('بحث');
+  await submitSearch(); // each capture window starts empty — a check must never read a leftover body
   const baselineCount = await waitForCount(45000);
   check('[E] baseline (uninterrupted) owner-example search lands with a real count', Number.isFinite(baselineCount), `count=${baselineCount}`);
+  const baselineReq = lastSearchBody;
+  check('[E] baseline search request was captured (the oracle below depends on it)', baselineReq != null);
 
   // ---- E: rapid Stop — pressed the instant the search starts. ----
   await fillOwnerExample();
@@ -313,10 +369,20 @@ try {
   const postRapidInputs = await visibleInputs();
   check('[E] rapid-Stop restores city/district/area EXACTLY', JSON.stringify(postRapidInputs) === JSON.stringify(preStopInputs),
     `pre=${JSON.stringify(preStopInputs)} post=${JSON.stringify(postRapidInputs)}`);
-  await tap('بحث');
-  const rapidResubmitCount = await waitForCount(45000);
-  check('[E] resubmitting untouched after rapid-Stop returns the EXACT SAME count as the uninterrupted baseline',
-    Number.isFinite(rapidResubmitCount) && rapidResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${rapidResubmitCount}`);
+  await submitSearch(); // the sig below must be THIS resubmit's request, never [E]-baseline leftovers
+  const rapidResubmitCount = await waitForCount(90000);
+  // ORACLE CHANGE (2026-08-23). This used to assert resubmitCount === baselineCount — but both are
+  // LIVE production reads taken minutes apart, and this suite runs against real prod on a schedule.
+  // Any run straddling a data-refresh tick (MV refresh at :00, sync_search_listings_ar at :14) sees
+  // the inventory legitimately move and fails with a huge honest delta (observed 2026-08-23:
+  // baseline=347 resubmit=1940 — on main itself, commit 6146bc0, alongside two innocent PR heads).
+  // What Stop must actually guarantee is that the QUERY survived intact — so the oracle is the
+  // serialized search request, compared key-order-insensitively. The count stays only as a
+  // liveness check: the resubmit must land real results, whatever today's inventory is.
+  check('[E] resubmitting untouched after rapid-Stop fires the EXACT SAME serialized search request as the uninterrupted baseline',
+    reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
+    `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  check('[E] the rapid-Stop resubmit still lands a real result count', Number.isFinite(rapidResubmitCount), `count=${rapidResubmitCount}`);
 
   // ---- F: Stop pressed mid-flight (network artificially slowed), and the late response — which
   // resolves AFTER the user is already back on Filter — must never repopulate results or write history.
@@ -343,10 +409,12 @@ try {
   check('[F] still on the Filter home after the late response lands (no surprise navigation into results)',
     page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
   await page.unroute('**/rest/v1/rpc/location_search_candidates_ar', delayRoute);
-  await tap('بحث');
-  const midResubmitCount = await waitForCount(45000);
-  check('[F] resubmitting untouched after a mid-flight Stop still returns the EXACT SAME count',
-    Number.isFinite(midResubmitCount) && midResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${midResubmitCount}`);
+  await submitSearch();
+  const midResubmitCount = await waitForCount(90000);
+  check('[F] resubmitting untouched after a mid-flight Stop still fires the EXACT SAME serialized search request',
+    reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
+    `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  check('[F] the mid-flight-Stop resubmit still lands a real result count', Number.isFinite(midResubmitCount), `count=${midResubmitCount}`);
 
   // ---- G: a CHAT-originated Stop must NOT navigate home — origin-tracking must not over-apply. ----
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -379,10 +447,16 @@ try {
   const postMobileInputs = await visibleInputs();
   check('[H mobile] rapid-Stop restores city/district/area EXACTLY',
     JSON.stringify(postMobileInputs) === JSON.stringify(preStopInputsMobile));
-  await tap('بحث');
-  const mobResubmitCount = await waitForCount(45000);
-  check('[H mobile] resubmitting untouched after rapid-Stop returns the EXACT SAME count as baseline',
-    Number.isFinite(mobResubmitCount) && mobResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${mobResubmitCount}`);
+  await submitSearch(); // never inherit [F]/[G] traffic — this window proves the MOBILE resubmit
+  const mobResubmitCount = await waitForCount(90000);
+  check('[H mobile] resubmitting untouched after rapid-Stop fires the EXACT SAME serialized search request as baseline',
+    reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
+    `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  // Failed twice in CI (2026-08-24) while the request fired+matched, [E] desktop landed, a direct
+  // prod repro rendered in 5s, and [I] read a fresh count seconds later — so on a null read, dump
+  // the page state: the next failure must explain itself instead of costing another guessing round.
+  check('[H mobile] the mobile resubmit still lands a real result count', Number.isFinite(mobResubmitCount),
+    `count=${mobResubmitCount} url=${page.url()} body=${(await body()).slice(0, 400).replace(/\n/g, ' | ')}`);
 
   // ---- Journey I: Advanced Filter reentrancy — a rapid double-tap on «متابعة»/confirm must never
   // downgrade or lose an already-recorded answer (bug-hunt 2026-08-23, fixed in commitGuidedStep's
