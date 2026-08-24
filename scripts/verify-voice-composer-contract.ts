@@ -120,7 +120,7 @@ check(
 // ── 7. Permission denial restores the normal composer with a graceful Arabic notice ─────────────
 check(
   '7. onFailure restores voiceState to idle and shows a t()-translated notice (no raw browser text)',
-  /onFailure: \(kind\) => \{[\s\S]{0,300}setVoiceState\('idle'\);[\s\S]{0,300}showVoiceNotice\(kind === 'denied'/.test(agent),
+  /onFailure: \(kind, detail\) => \{[\s\S]{0,300}setVoiceState\('idle'\);[\s\S]{0,300}kind === 'denied'/.test(agent),
 );
 
 // ── 18. On platforms where voice input can never work (owner report, phone mic "doesn't work" —

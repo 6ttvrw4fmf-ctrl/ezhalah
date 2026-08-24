@@ -689,16 +689,19 @@ export default function Agent() {
     voiceActiveRef.current = true; // synchronous latch — a second tap in the same tick is a no-op
     setVoiceState('recording'); // morph now; a denied permission gracefully restores below
     await startVoiceInput({
-      onFailure: (kind) => {
+      onFailure: (kind, detail) => {
         voiceActiveRef.current = false;
         setVoiceState('idle'); // composer restores cleanly — never stuck in recording mode
         // 'blocked' (service/hardware failure, not permission) gets its own honest message —
         // never the "check your settings" text, which is only correct for a true 'denied'.
-        showVoiceNotice(kind === 'denied'
+        const msg = kind === 'denied'
           ? t('Microphone access is needed for voice input. Enable it in your browser settings.')
           : kind === 'blocked'
           ? t("The microphone couldn't be reached. Please try again.")
-          : t('Voice input is not available right now.'));
+          : t('Voice input is not available right now.');
+        // A short, standardized API code tag (never a raw Error message/stack) so a real-device
+        // report can be traced to its exact cause instead of guessed at (owner report, 2026-08-24).
+        showVoiceNotice(detail ? `${msg} (${detail})` : msg);
       },
     });
   };

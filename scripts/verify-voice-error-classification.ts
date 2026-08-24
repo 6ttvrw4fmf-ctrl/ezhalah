@@ -41,11 +41,11 @@ check(
 );
 check(
   "every OTHER code reaches teardown() + handlers.onFailure(...) — no code can silently do nothing (the exact 'audio-capture' bug: previously ANY code besides not-allowed/service-not-allowed produced zero feedback and left the composer stuck in recording mode forever)",
-  /if \(code === 'no-speech' \|\| code === 'aborted'\) return;\s*\n\s*teardown\(\);\s*\n[\s\S]{0,700}handlers\.onFailure\(code === 'not-allowed' \? 'denied' : 'blocked'\);/.test(onerrorBody),
+  /if \(code === 'no-speech' \|\| code === 'aborted'\) return;\s*\n\s*teardown\(\);\s*\n[\s\S]{0,700}handlers\.onFailure\(code === 'not-allowed' \? 'denied' : 'blocked', code \|\| 'unknown-error'\);/.test(onerrorBody),
 );
 check(
   "'not-allowed' is the ONLY code mapped to 'denied' — service-not-allowed/audio-capture/network/anything else fall through to 'blocked', never the permission message",
-  /handlers\.onFailure\(code === 'not-allowed' \? 'denied' : 'blocked'\)/.test(onerrorBody),
+  /handlers\.onFailure\(code === 'not-allowed' \? 'denied' : 'blocked', code \|\| 'unknown-error'\)/.test(onerrorBody),
 );
 check(
   "getUserMedia's own catch block is untouched — NotAllowedError/SecurityError still map to 'denied', everything else to 'unavailable' (that classification was already correct; only the RECOGNIZER's error mapping was the bug)",
@@ -55,7 +55,7 @@ check(
 // ── SOURCE: 'blocked' is a real, typed kind — not a stringly-typed afterthought ─────────────────
 check(
   "VoiceHandlers.onFailure's kind union includes 'blocked' alongside denied/unavailable/error",
-  /onFailure: \(kind: 'denied' \| 'unavailable' \| 'blocked' \| 'error'\) => void;/.test(voice),
+  /onFailure: \(kind: 'denied' \| 'unavailable' \| 'blocked' \| 'error', detail\?: string\) => void;/.test(voice),
 );
 
 // ── SOURCE: the resume() race fix ────────────────────────────────────────────────────────────────
@@ -71,14 +71,14 @@ check(
 
 // ── SOURCE: agent.tsx surfaces THREE distinct messages, not two — 'blocked' never reuses the
 //    settings-check text, and never silently reuses the plain "not available" text either ────────
-const onFailureBody = agent.match(/onFailure: \(kind\) => \{[\s\S]*?\n      \},/)?.[0] ?? '';
+const onFailureBody = agent.match(/onFailure: \(kind, detail\) => \{[\s\S]*?\n      \},/)?.[0] ?? '';
 check(
   "agent.tsx's onFailure handler branches on kind === 'blocked' with its OWN t() string, distinct from both the 'denied' settings-check text and the generic 'not available' fallback",
   /kind === 'blocked'\s*\n\s*\? t\("The microphone couldn't be reached\. Please try again\."\)/.test(onFailureBody),
 );
 check(
   "the 'denied' branch (settings-check text) is evaluated FIRST and only for kind === 'denied' — 'blocked' can never fall into it",
-  /showVoiceNotice\(kind === 'denied'\s*\n\s*\? t\('Microphone access is needed[^']*'\)\s*\n\s*: kind === 'blocked'/.test(onFailureBody),
+  /const msg = kind === 'denied'\s*\n\s*\? t\('Microphone access is needed[^']*'\)\s*\n\s*: kind === 'blocked'/.test(onFailureBody),
 );
 
 // ── i18n: the new Arabic string exists, is non-empty, and carries no Latin leak ──────────────────
@@ -115,6 +115,38 @@ check(
   "an unrecognized/future code (e.g. bad-grammar) still resolves gracefully to 'blocked' — never silently swallowed",
   classifyRecognizerError('bad-grammar').failed === true && classifyRecognizerError('bad-grammar').kind === 'blocked',
 );
+
+// ── Diagnostic detail threading (owner report, 2026-08-24 — two blind fixes both missed on a real
+//    iPhone; without seeing the actual API code, further fixes are guesses). Every onFailure call
+//    site now passes the short, standardized code that caused it, and the UI appends it as a
+//    parenthetical tag — never a raw Error message/stack, never silently dropped. ─────────────────
+check(
+  "onFailure's detail param threads from getUserMedia's own catch (the error's .name, e.g. 'NotReadableError')",
+  /handlers\.onFailure\(name === 'NotAllowedError' \|\| name === 'SecurityError' \? 'denied' : 'unavailable', name\)/.test(voice),
+);
+check(
+  "the unsupported early-return and the two rec.start() throw sites all pass a non-empty detail too — no onFailure call site is silently detail-less",
+  /handlers\.onFailure\('unavailable', 'unsupported'\)/.test(voice) &&
+    /handlers\.onFailure\('error', `restart-threw:\$\{String\(err\?\.name \?\? err\?\.message \?\? 'unknown'\)\}`\)/.test(voice) &&
+    /handlers\.onFailure\('unavailable', `start-threw:\$\{String\(err\?\.name \?\? err\?\.message \?\? 'unknown'\)\}`\)/.test(voice),
+);
+check(
+  'agent.tsx appends the detail as a parenthetical ONLY when present — a call with no detail shows the plain human message, never "(undefined)"',
+  /showVoiceNotice\(detail \? `\$\{msg\} \(\$\{detail\}\)` : msg\)/.test(agent),
+);
+
+{
+  // EXECUTED: the exact message-composition line, proving both branches concretely.
+  const compose = (msg: string, detail?: string) => (detail ? `${msg} (${detail})` : msg);
+  check(
+    'with a detail present, the composed notice is "<message> (<code>)" — exactly what a real-device report needs to be traceable',
+    compose('غير متاح حالياً.', 'NotReadableError') === 'غير متاح حالياً. (NotReadableError)',
+  );
+  check(
+    'with no detail, the composed notice is the plain message — no stray parenthesis ever appears',
+    compose('غير متاح حالياً.', undefined) === 'غير متاح حالياً.',
+  );
+}
 
 // ── Wiring ───────────────────────────────────────────────────────────────────────────────────────
 check(
