@@ -139,6 +139,67 @@ check(
     + 'time out, re-derive this barrier rather than deleting it: liveResultCount still returns null on error.',
 );
 
+// ── 5. THE IN-FLIGHT WINDOW IS THE SAME LIE, JUST SHORTER ───────────────────────────────────────
+// Extends this barrier rather than adding a second one: same contract, same effect, the other half
+// of its lifetime. Sections 1–4 make the RESOLVED value honest. They deliberately left the PENDING
+// window holding the previous number ("no per-tap flicker"). Driving the real timeout branch on
+// production (2026-08-24, after the section-1 fix was already live) measured what that costs:
+//
+//   الرياض / إيجار سنوي / شقة → «كم عمر العقار تقريباً؟», tap «جديد» (4,537),
+//   then tap «١٠+ سنوات» with the count RPC delayed past its 4s timeout:
+//     t+0.5s … t+3s   «١٠+ سنوات» selected, its own pill reading 1,196,
+//                     chip «4,537 نتيجة», button «متابعة · 4,537 نتيجة»
+//     t+4.5s          chip gone, button «متابعة»          ← sections 1–4, working
+//
+// Two numbers on one card disagreeing about one selection, with the wrong one on the primary
+// action, for up to the full 4s timeout. The owner's rule does not carve out a grace period: the UI
+// must never present an old count as though it belongs to the newly selected answer. So the clear
+// is hoisted to the START of the effect and the pending window says what the post-timeout window
+// already says — nothing.
+const effectFull = (() => {
+  const dep = /\}\s*,\s*\[\s*sel\.join\([^)]*\)\s*,\s*titleKey\s*\]\s*\)/.exec(cardSrc);
+  if (!dep) return '';
+  const s = cardSrc.lastIndexOf('useEffect(', dep.index);
+  return s < 0 ? '' : cardSrc.slice(s, dep.index + dep[0].length);
+})();
+
+/** Exported so the mutation proof below runs the REAL predicate, not a paraphrase of it. */
+export function clearsBeforeFetch(effectSrc: string): boolean {
+  const clear = effectSrc.search(/setCount\(\s*null\s*\)/);
+  const fetch = effectSrc.search(/liveCount\s*\(/);
+  return clear >= 0 && fetch >= 0 && clear < fetch;
+}
+
+check(
+  'the stale number is cleared BEFORE the new one is awaited (the in-flight window shows no number)',
+  clearsBeforeFetch(effectFull),
+  'expected `setCount(null)` to run before `liveCount(sel)` inside the selection-keyed effect, so the '
+    + "previous answer's count is never displayed against the new selection while the fetch is pending.",
+);
+
+// Mutation proof — the check above must be the thing that fails, not decoration.
+{
+  const PENDING_LIE = `useEffect(() => { let alive = true;
+    liveCount(sel).then((n) => { if (alive) setCount(n); });
+  }, [sel.join(','), titleKey])`;
+  const FIXED = `useEffect(() => { let alive = true; setCount(null);
+    liveCount(sel).then((n) => { if (alive) setCount(n); });
+  }, [sel.join(','), titleKey])`;
+  const CLEARED_TOO_LATE = `useEffect(() => { let alive = true;
+    liveCount(sel).then((n) => { if (alive) setCount(n); }); setCount(null);
+  }, [sel.join(','), titleKey])`;
+  const cases: Array<[string, boolean]> = [
+    ['the exact pre-fix effect is flagged', clearsBeforeFetch(PENDING_LIE) === false],
+    ['the fixed effect passes', clearsBeforeFetch(FIXED) === true],
+    ['clearing AFTER the fetch is still flagged — order is the whole point',
+      clearsBeforeFetch(CLEARED_TOO_LATE) === false],
+  ];
+  for (const [label, ok] of cases) {
+    if (ok) console.log(`  PASS  mutation: ${label}`);
+    else { failures++; console.error(`  FAIL  mutation: ${label}`); }
+  }
+}
+
 if (failures) {
   console.error(`\n❌ ${failures} check(s) failed — the AF count could show a number that belongs to a different selection.\n`);
   process.exit(1);
