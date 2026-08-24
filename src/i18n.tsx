@@ -625,6 +625,7 @@ const AR: Record<string, string> = {
   'Voice input is not supported on this browser': 'الإدخال الصوتي غير مدعوم على هذا المتصفح',
   'Microphone access is needed for voice input. Enable it in your browser settings.': 'نحتاج إذن المايكروفون للإدخال الصوتي. فعّله من إعدادات المتصفح.',
   'Voice input is not available right now.': 'الإدخال الصوتي غير متاح حالياً.',
+  "The microphone couldn't be reached. Please try again.": 'تعذّر الوصول للمايكروفون. حاول مرة ثانية.',
   'Ranked by most recent': 'مرتبة حسب الأحدث',
   'Ranked by closest match.': 'مرتبة حسب الأقرب لطلبك.',
   'Show more': 'عرض المزيد',
