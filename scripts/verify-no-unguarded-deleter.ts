@@ -58,6 +58,12 @@ for (const line of (r.stdout || '').split('\n')) {
   if (!line.trim()) continue;
   const file = line.split(':')[0];
   if (SANCTIONED.has(file) || NON_LISTING_DELETES.has(file)) continue;
+  // A COMMENT that mentions a delete documents the ban — it cannot execute one. Without this,
+  // mirroring migration 20260824121106 (barrier 14, whose header EXPLAINS raw deletes) tripped the
+  // guard, and a verbatim mirror may never be edited to appease a grep. Only the comment marker is
+  // skipped; a real `delete from …_listings` statement in any file still fails this check.
+  const content = line.split(':').slice(2).join(':').trimStart();
+  if (/^(--|#|\/\/|\*)/.test(content)) continue;
   offenders.push(line);
 }
 
