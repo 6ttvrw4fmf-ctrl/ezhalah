@@ -89,6 +89,16 @@ before-state written to `ops_amenity_defabrication_evidence` *before* the write.
 **NULL (UNKNOWN), never to `false`** — aqar did not say "no", it said nothing. Villa's 2,454
 source-backed falses are untouched, guarded in the statement itself.
 
+**Production verified.** The 12:14 `sync-search-listings-ar` carried the repair to the user-visible
+index: the 57 assertions went **57 → 0** in `search_listings_ar`, and
+`mon_detect_fabricated_unpublished_amenity()` re-ran itself through the companion migration, so its
+open alert moved **8,183 → 8,126** rather than reporting the state that motivated the repair.
+
+None of the 51 listings happened to sit in the Riyadh / إيجار سنوي / شقة cohort, so that card's
+`cnt_maid_room` is still 298 — the repair is real and propagated, it just did not touch the one chip
+measured earlier. Searchable inventory still carries **4,713 maid + 1,544 driver** fabricated trues
+on non-Villa aqar rows; that is the user-facing size of what remains.
+
 ### Still open — owner decision
 
 Clearing the remaining **~8,126** assertions is a bulk field rewrite → **RED #4** in
