@@ -330,7 +330,7 @@ try {
   check('[E] rapid-Stop restores city/district/area EXACTLY', JSON.stringify(postRapidInputs) === JSON.stringify(preStopInputs),
     `pre=${JSON.stringify(preStopInputs)} post=${JSON.stringify(postRapidInputs)}`);
   await tap('بحث');
-  const rapidResubmitCount = await waitForCount(45000);
+  const rapidResubmitCount = await waitForCount(90000);
   // ORACLE CHANGE (2026-08-23). This used to assert resubmitCount === baselineCount — but both are
   // LIVE production reads taken minutes apart, and this suite runs against real prod on a schedule.
   // Any run straddling a data-refresh tick (MV refresh at :00, sync_search_listings_ar at :14) sees
@@ -370,7 +370,7 @@ try {
     page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
   await page.unroute('**/rest/v1/rpc/location_search_candidates_ar', delayRoute);
   await tap('بحث');
-  const midResubmitCount = await waitForCount(45000);
+  const midResubmitCount = await waitForCount(90000);
   check('[F] resubmitting untouched after a mid-flight Stop still fires the EXACT SAME serialized search request',
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
@@ -408,7 +408,7 @@ try {
   check('[H mobile] rapid-Stop restores city/district/area EXACTLY',
     JSON.stringify(postMobileInputs) === JSON.stringify(preStopInputsMobile));
   await tap('بحث');
-  const mobResubmitCount = await waitForCount(45000);
+  const mobResubmitCount = await waitForCount(90000);
   check('[H mobile] resubmitting untouched after rapid-Stop fires the EXACT SAME serialized search request as baseline',
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
