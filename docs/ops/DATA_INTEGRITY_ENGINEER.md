@@ -700,11 +700,22 @@ evidence.**
 deactivate (`gone` → kill · `live` → self-heal, `missing_count` 0 + `last_seen_at` refreshed ·
 `unknown` → hold the strike, kill nothing). Opt-in per platform, so a platform without a
 control-validated oracle keeps the previous behaviour byte-for-byte.
-**Barrier:** `mon_detect_prune_kill_without_source_verdict()` (P1, cron `mon-prune-kill-without-source-verdict`,
-08:42 UTC) over `ops_oracle_required_platform`. It cannot re-derive liveness — SQL cannot fetch a
-page — so it checks the thing it actually can: every deactivation on a registered platform must
-carry a recorded `GONE` verdict. Both directions proven on live data (raised 07:57:31 → resolved
-07:57:59, `insta_resolves = 0`).
+**Barrier:** `mon_detect_prune_kill_without_source_verdict()` (P1) over
+`ops_oracle_required_platform`. It cannot re-derive liveness — SQL cannot fetch a page — so it checks
+the thing it actually can: every deactivation on a registered platform must carry a recorded `GONE`
+verdict. Both directions proven on live data, twice (raised 07:57:31 → resolved 07:57:59; and again
+after the roster change, 11:58:06 → 11:58:10), `insta_resolves = 0` in both.
+
+**It is roster-wired, and the reasoning that first kept it out of the roster was wrong** (owner
+directive, 2026-08-24). It originally got its own daily cron to avoid lengthening the twice-hourly
+sweep — a caution copied from §24e without measuring it. Measured: the detector runs in **12 ms**,
+against a sweep using ~170 s of a 900 s budget. Roster membership is strictly better (twice hourly
+instead of daily, and it inherits `mon_detect_detector_sweep_budget` /
+`mon_detect_stalled_daily_detector` coverage), so `20260824115720` moved it in and removed the
+standalone job. Same lesson as §24e from the other side: **a cost you did not measure is not a
+reason.** The migration inserts one element into the *live* roster rather than re-emitting the whole
+~40-entry array from a snapshot — with concurrent sessions editing it, a wholesale
+`CREATE OR REPLACE` would silently drop another session's detector.
 **Regression test:** `scrapers/common/tests/test_prune_requires_source_verdict_to_kill.py`, 6 of its
 8 cases fail on the pre-fix code.
 
