@@ -88,9 +88,26 @@ nearby, fix it in the same edit.
 **PR safety in this shared repo (permanent, 2026-08-10):** this working directory is shared by
 concurrent sessions with no per-session isolation — a background `gh pr create` with no `--head` can
 silently pick up whatever branch another session has checked out and open/merge the wrong PR (this
-happened once). Always pass `--head <exact-branch> --base main` explicitly; verify the PR's file list
-(`gh pr view N --json files`) right after creating it AND again immediately before `gh pr merge`, not
-just once.
+happened once). Always pass `--head <exact-branch> --base main` explicitly.
+
+**Merge gate — use `scripts/safe-pr-merge.ts`, never a bare `gh pr merge` (permanent, 2026-08-24):**
+`gh pr checks --watch` returning means "nothing is still running" — NOT "safe to merge." PR #1046
+merged on 2026-08-24 while its required checks had been CANCELLED by a rebase/force-push race; the
+code turned out fine (confirmed after the fact by an independent push-triggered run on `main`), but
+the merge itself proceeded on stale evidence — exactly the shape of gap that would merge genuinely
+broken code next time.
+
+  node --experimental-strip-types scripts/safe-pr-merge.ts <PR_NUMBER> [--expect-files a.ts,b.ts]
+
+It re-reads the PR's CURRENT state immediately before merging and refuses unless: every required
+check's conclusion is exactly `SUCCESS` (cancelled/failure/timed_out/skipped/neutral/still-pending
+all block, including a stale success sitting next to a fresh cancellation for the same context), the
+branch is not BEHIND, `mergeable` is `MERGEABLE`, `mergeStateStatus` is clean, and — when
+`--expect-files` is passed — the file list has not moved since it was first verified. Logic is pure
+and mutation-proven in `scripts/lib/mergeGate.ts` / `scripts/verify-merge-gate.ts` (wired into
+`npm test`). This supersedes the old "verify the file list right after creation and again right
+before merge" prose rule by enforcing the "again" half automatically — pass the file list from your
+post-creation check as `--expect-files` and the tool does the second verification for you.
 
 # Autonomous engineering authority (owner-granted, 2026-08-04)
 
