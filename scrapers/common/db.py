@@ -702,7 +702,23 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         _ensure_capture(r)
         _reject_placeholder_location(r, table=table)
         seen[r["ad_number"]] = r
-    _execute(sb().table(table).upsert(list(seen.values()), on_conflict="ad_number"), what=table)
+    # SOURCE IS TRUTH across a BATCH, not just a row (owner rule 2026-08-09, see
+    # `_unknown_must_not_overwrite_known`). That guard drops a None/unread key from each row so a
+    # fetch that couldn't read a field can't NULL a stored value. But a Supabase bulk upsert sends
+    # the UNION of every row's keys, and PostgREST writes each column for EVERY row in the payload —
+    # NULL for a row that lacks it. So one summary-only row (its detail fetch failed → no amenity
+    # keys) sharing a batch with full rows still had its stored elevator/kitchen/driver_room erased
+    # to NULL, defeating the guard. Proven on aqaratikom (2026-08-24): detail-miss rows whose
+    # source-faithful FALSE amenities were nulled, which the af_null_to_false barrier then read as a
+    # fabrication and daily "self-resolved" by propagating the loss into search. Upsert each distinct
+    # key-set on its own so PostgREST only ever writes the columns a row actually carries; ON CONFLICT
+    # DO UPDATE then touches only those columns and a value a row didn't observe survives. A
+    # homogeneous batch (the common case) stays exactly one request.
+    groups: dict[frozenset, list[dict[str, Any]]] = defaultdict(list)
+    for r in seen.values():
+        groups[frozenset(r.keys())].append(r)
+    for grp in groups.values():
+        _execute(sb().table(table).upsert(grp, on_conflict="ad_number"), what=table)
 
 
 def upsert_wasalt_residential_batch(rows: list[dict[str, Any]]) -> None:
