@@ -238,6 +238,18 @@ are recorded here so neither is misread later as a product finding.
 
 ---
 
+## 4. Status vocabulary
+
+| item | status |
+|---|---|
+| AF interaction contract (10 behaviours) | **VERIFIED** — live, desktop + mobile |
+| Trending Cities full-filter-state inheritance | **VERIFIED** — 5 journeys, UI = RPC exact |
+| Trending Districts advertised = click-through = DB | **VERIFIED** — 2 click-throughs against an independent oracle |
+| Cohort-blind fabricated-amenity barrier | **FIXED + VERIFIED** — extended, mutation-proven, live and correctly red |
+| aqar non-Villa maid/driver, 51 probed listings | **FIXED + VERIFIED** — 57 assertions cleared on row-level source proof |
+| aqar non-Villa maid/driver, remaining 8,126 | **FIXED + VERIFIED** — owner-authorized; 7,316 rows, detector 0, index synced, live AF card confirmed |
+| Villa's own `true` values | **UNPROVEN — untouched** (§5), out of the authorized scope |
+
 ## 5. Residual question — Villa's own `true` values are unproven, and deliberately untouched
 
 Villa is excluded from the repair because aqar genuinely publishes `maid`/`driver` on the Villa ad
@@ -254,18 +266,6 @@ cohort and said not to broaden it, so confirming Villa's trues is a probe for a 
 change for this one.
 
 ---
-
-## 4. Status vocabulary
-
-| item | status |
-|---|---|
-| AF interaction contract (10 behaviours) | **VERIFIED** — live, desktop + mobile |
-| Trending Cities full-filter-state inheritance | **VERIFIED** — 5 journeys, UI = RPC exact |
-| Trending Districts advertised = click-through = DB | **VERIFIED** — 2 click-throughs against an independent oracle |
-| Cohort-blind fabricated-amenity barrier | **FIXED + VERIFIED** — extended, mutation-proven, live and correctly red |
-| aqar non-Villa maid/driver, 51 probed listings | **FIXED + VERIFIED** — 57 assertions cleared on row-level source proof |
-| aqar non-Villa maid/driver, remaining 8,126 | **FIXED + VERIFIED** — owner-authorized; 7,316 rows, detector 0, index synced, live AF card confirmed |
-| Villa's own `true` values | **UNPROVEN — untouched** (§5), out of the authorized scope |
 
 **ALL GOOD: YES** for everything in scope. Every AF, Trending and count behaviour tested was exact;
 the fabricated-attribute class is closed end to end and its barrier is green on its own evidence
