@@ -78,18 +78,31 @@ check(
 );
 check(
   "the 'denied' branch (settings-check text) is evaluated FIRST and only for kind === 'denied' — 'blocked' can never fall into it",
-  /const msg = kind === 'denied'\s*\n\s*\? t\('Microphone access is needed[^']*'\)\s*\n\s*: kind === 'blocked'/.test(onFailureBody),
+  /const msg = kind === 'denied'\s*\n\s*\? t\('Microphone access is needed[^']*'\)\s*\n\s*: detail === 'service-not-allowed'/.test(onFailureBody),
+);
+check(
+  "'service-not-allowed' gets its own actionable message ahead of the generic 'blocked' text — Apple's on-device speech service refusing (Dictation off / no on-device Arabic model) is real, distinct, and fixable by the USER via one iOS setting, unlike a generic service hiccup (owner report, 2026-08-24: this exact code fired on a real iPhone after mic permission was already granted)",
+  /: detail === 'service-not-allowed'\s*\n\s*\? t\('Speech recognition is turned off on your device\. Enable Dictation in your iPhone Settings, then try again\.'\)\s*\n\s*: kind === 'blocked'/.test(onFailureBody),
 );
 
-// ── i18n: the new Arabic string exists, is non-empty, and carries no Latin leak ──────────────────
+// ── i18n: both new Arabic strings exist, are non-empty, and carry no Latin leak ──────────────────
 const arEntry = i18n.match(/"The microphone couldn't be reached\. Please try again\.": '([^']+)'/)?.[1] ?? '';
 check(
-  "the new 'blocked' message has a real Arabic dictionary entry",
+  "the 'blocked' message has a real Arabic dictionary entry",
   arEntry.length > 0,
 );
 check(
   'that Arabic entry contains no Latin-letter leak',
   arEntry.length > 0 && !/[a-zA-Z]/.test(arEntry),
+);
+const serviceArEntry = i18n.match(/'Speech recognition is turned off on your device\. Enable Dictation in your iPhone Settings, then try again\.': '([^']+)'/)?.[1] ?? '';
+check(
+  "the 'service-not-allowed' message has a real Arabic dictionary entry",
+  serviceArEntry.length > 0,
+);
+check(
+  'that Arabic entry ALSO carries no Latin-letter leak (iPhone renders as the already-established آيفون, not the Latin word — matches the existing i18n entry for "iPhone")',
+  serviceArEntry.length > 0 && !/[a-zA-Z]/.test(serviceArEntry),
 );
 
 // ── EXECUTED: a faithful replica of the onerror classification, run against every code that
@@ -134,6 +147,29 @@ check(
   'agent.tsx appends the detail as a parenthetical ONLY when present — a call with no detail shows the plain human message, never "(undefined)"',
   /showVoiceNotice\(detail \? `\$\{msg\} \(\$\{detail\}\)` : msg\)/.test(agent),
 );
+
+{
+  // EXECUTED: a faithful replica of agent.tsx's full message-selection ternary chain, proving
+  // 'service-not-allowed' picks its own actionable text while every other blocked/denied/unavailable
+  // case is unaffected (owner report, 2026-08-24: real iPhone hit exactly this code after mic
+  // permission was already granted — "try again" is useless advice when the real fix is one
+  // specific iOS toggle, so this code alone gets pulled out of the generic 'blocked' bucket).
+  const DENIED_MSG = 'settings-check-text';
+  const SERVICE_MSG = 'enable-dictation-text';
+  const BLOCKED_MSG = 'try-again-text';
+  const UNAVAILABLE_MSG = 'not-available-text';
+  const selectMessage = (kind: string, detail?: string) =>
+    kind === 'denied' ? DENIED_MSG
+    : detail === 'service-not-allowed' ? SERVICE_MSG
+    : kind === 'blocked' ? BLOCKED_MSG
+    : UNAVAILABLE_MSG;
+  check("kind='denied' always wins, regardless of detail", selectMessage('denied', 'service-not-allowed') === DENIED_MSG);
+  check("kind='blocked' + detail='service-not-allowed' → the specific Dictation message, not the generic 'try again'", selectMessage('blocked', 'service-not-allowed') === SERVICE_MSG);
+  check("kind='blocked' + any OTHER detail (e.g. 'audio-capture') → the generic 'try again' text, unaffected by the new branch", selectMessage('blocked', 'audio-capture') === BLOCKED_MSG);
+  check("kind='blocked' with NO detail → still the generic 'try again' text", selectMessage('blocked', undefined) === BLOCKED_MSG);
+  check("kind='unavailable' → the plain 'not available' fallback, untouched", selectMessage('unavailable', undefined) === UNAVAILABLE_MSG);
+  check("kind='error' → the plain 'not available' fallback (no dedicated 'error' text exists)", selectMessage('error', undefined) === UNAVAILABLE_MSG);
+}
 
 {
   // EXECUTED: the exact message-composition line, proving both branches concretely.
