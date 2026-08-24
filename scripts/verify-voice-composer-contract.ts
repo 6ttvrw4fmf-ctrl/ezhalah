@@ -108,8 +108,8 @@ check(
 );
 check(
   '6b. capture is cancelled on unmount AND on navigation blur AND on New Chat',
-  /useEffect\(\(\) => \(\) => \{ cancelVoiceInput\(\); \}, \[\]\)/.test(agent) &&
-    /useFocusEffect\(useCallback\(\(\) => \(\) => \{[^\n]{0,120}cancelVoiceInput\(\);/.test(agent) &&
+  /useEffect\(\(\) => \(\) => \{[^\n]{0,60}cancelVoiceInput\(\); \}, \[\]\)/.test(agent) &&
+    /useFocusEffect\(useCallback\(\(\) => \(\) => \{[^\n]{0,160}cancelVoiceInput\(\);/.test(agent) &&
     /greetTimerRef\.current\);[\s\S]{0,600}cancelVoiceInput\(\);/.test(agent),
 );
 check(

@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   KeyboardAvoidingView,
   Platform,
@@ -361,6 +362,12 @@ const waitRun = (run: Run, ms: number) =>
 // Feedback toast fade + slide (web CSS transition; native just toggles — acceptable, web ships).
 const TOAST_EASE = Platform.OS === 'web' ? ({ transitionProperty: 'opacity, transform', transitionDuration: '250ms' } as any) : null;
 
+// Brief "finishing up" beat after Stop, before the transcript lands in the composer — a ChatGPT-
+// style confirming pause rather than an instant cut (user request, 2026-08-24). Capture itself
+// already stopped synchronously the moment Stop was tapped; this delay is purely the loading
+// indicator's minimum dwell time, never a gate on when recording actually ends.
+const STOP_PROCESSING_MS = 450;
+
 // Drives a typewriter's `n` from 0 to `total` at TYPE_CHARS/TYPE_TICK_MS, AND guarantees `onDone`
 // fires within a bounded ceiling even if the interval itself gets starved.
 //
@@ -642,7 +649,13 @@ export default function Agent() {
   // Capture + transcription live in src/lib/voiceInput.ts (free/native Web Speech, Arabic-only);
   // this block is only the UI state machine. Text typed before recording is preserved: the
   // transcript is APPENDED to it on Stop/Send, and X restores exactly the pre-recording composer.
-  const [voiceState, setVoiceState] = useState<'idle' | 'recording'>('idle');
+  // 'processing' is the brief post-Stop beat only — capture has already fully torn down by the
+  // time it's entered; it exists purely to show a loading indicator instead of an instant cut.
+  const [voiceState, setVoiceState] = useState<'idle' | 'recording' | 'processing'>('idle');
+  // Invalidates a pending "processing" beat's setTimeout if superseded (new recording, cancel,
+  // unmount, navigation) — the same generation-token idiom voiceInput.ts uses, so a stale timeout
+  // can never stomp a newer state or fire setTyped after this screen is gone.
+  const voiceStopGenRef = useRef(0);
   // The SYNCHRONOUS truth for every guard (and the raw-DOM Enter handler). Managed explicitly in
   // each transition, never derived from render — a render-assigned mirror stays stale for the rest
   // of the tick, which let Stop→Send in the SAME tick pass both guards and submit the base text
@@ -671,6 +684,7 @@ export default function Agent() {
     // reading immediately, and the subscription below keeps read-aloud out for the whole session.
     stopReadAloud();
     if (!isVoiceInputSupported()) { showVoiceNotice(t('Voice input is not supported on this browser')); return; }
+    voiceStopGenRef.current++; // invalidate any pending "processing" beat from a previous Stop
     voiceBaseRef.current = typed;
     voiceActiveRef.current = true; // synchronous latch — a second tap in the same tick is a no-op
     setVoiceState('recording'); // morph now; a denied permission gracefully restores below
@@ -688,21 +702,30 @@ export default function Agent() {
       },
     });
   };
-  // ■ Stop — finish listening WITHOUT submitting: the transcript lands in the normal composer for
-  // the user to inspect/edit; Send is theirs to tap (owner brief §5/§9).
+  // ■ Stop — finish listening WITHOUT submitting: capture stops instantly (synchronous teardown,
+  // exactly as before); a brief "processing" beat then shows a loading indicator in the waveform's
+  // place — ChatGPT-style — before the transcript lands in the composer for the user to inspect/edit
+  // (Send is theirs to tap, owner brief §5/§9). The beat is purely cosmetic dwell time: it never
+  // delays when recording actually ends, only when the UI settles back to idle.
   const stopVoice = () => {
     if (!voiceActiveRef.current) return; // Stop tapped twice → one finalization
     voiceActiveRef.current = false;
-    const transcript = stopVoiceInput();
-    setVoiceState('idle');
+    const transcript = stopVoiceInput(); // mic is fully torn down NOW, regardless of the beat below
     const merged = [voiceBaseRef.current.trim(), transcript].filter(Boolean).join(' ');
-    if (merged) setTyped(merged);
+    setVoiceState('processing');
+    const myGen = ++voiceStopGenRef.current;
+    setTimeout(() => {
+      if (voiceStopGenRef.current !== myGen) return; // superseded — a newer action already resolved this
+      setVoiceState('idle');
+      if (merged) setTyped(merged);
+    }, STOP_PROCESSING_MS);
   };
   // X — cancel: discard capture AND transcript, send nothing, add nothing to the chat; `typed`
   // was never touched during recording, so the composer returns to its exact pre-recording state.
   const cancelVoice = () => {
     if (!voiceActiveRef.current) return;
     voiceActiveRef.current = false;
+    voiceStopGenRef.current++; // invalidate a pending "processing" beat — X wins outright
     cancelVoiceInput();
     setVoiceState('idle');
   };
@@ -726,8 +749,8 @@ export default function Agent() {
   sendVoiceRef.current = sendVoice;
   // LIFECYCLE SAFETY (owner brief §16): the mic dies the moment this screen unmounts or loses
   // navigation focus (route change, sidebar navigation, in-app browser) — never a hidden capture.
-  useEffect(() => () => { cancelVoiceInput(); }, []);
-  useFocusEffect(useCallback(() => () => { voiceActiveRef.current = false; cancelVoiceInput(); setVoiceState('idle'); }, []));
+  useEffect(() => () => { voiceStopGenRef.current++; cancelVoiceInput(); }, []);
+  useFocusEffect(useCallback(() => () => { voiceStopGenRef.current++; voiceActiveRef.current = false; cancelVoiceInput(); setVoiceState('idle'); }, []));
   // While the mic is live, a Read Aloud started from an old message is stopped instantly — the two
   // audio paths can never run together (owner brief §19).
   useEffect(() => {
@@ -2627,13 +2650,14 @@ export default function Agent() {
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
           <View style={[s.col, s.composerCol]}>
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
-              {/* ── Normal controls ── keep LAYOUT ownership even while recording (the recording row
-                  is an absolute overlay on the same surface), so the composer's size never jumps
-                  during the morph — one physical object changing state, not a component swap
-                  (owner brief §3). While recording they fade out and go inert. */}
+              {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
+                  recording row is an absolute overlay on the same surface), so the composer's size
+                  never jumps during the morph — one physical object changing state, not a component
+                  swap (owner brief §3). Inert and faded out for the whole voice flow, not just while
+                  the mic is literally live — the brief post-Stop beat is still part of that flow. */}
               <View
-                pointerEvents={voiceState === 'recording' ? 'none' : 'auto'}
-                style={[s.composerInner, VOICE_EASE, voiceState === 'recording' && s.composerInnerHidden]}
+                pointerEvents={voiceState !== 'idle' ? 'none' : 'auto'}
+                style={[s.composerInner, VOICE_EASE, voiceState !== 'idle' && s.composerInnerHidden]}
               >
               {/* The GLIDE lives on this wrapper, never on the textarea itself: a CSS height
                   transition on the measured element corrupts RNW's content measurement (it reads
@@ -2729,14 +2753,15 @@ export default function Agent() {
               {/* ── Recording mode ── same composer surface, ChatGPT's spatial hierarchy, PHYSICALLY
                   pinned LTR (owner brief §13 — the page is RTL but these four controls never mirror):
                   [ X ] [———— live waveform ————] [ ■ ] [ ↑ ]. Absolute overlay: amplitude can never
-                  resize the row or push Stop/Send (owner brief §1/§4). Always mounted so the ~180ms
-                  cross-fade runs both directions; inert + invisible while idle. */}
+                  resize the row or push Stop/Send (owner brief §1/§4). Stays mounted through the
+                  brief post-Stop "processing" beat too (waveform swaps for a loading indicator) —
+                  only fully hides once idle; inert (pointerEvents) the instant recording itself ends. */}
               <View
                 testID="voice-recording-row"
                 pointerEvents={voiceState === 'recording' ? 'auto' : 'none'}
                 // direction:'ltr' pins the PHYSICAL order X → waveform → ■ → ↑ against the page's
                 // RTL (owner brief §13; Sidebar's LTR_PIN idiom — inline, not StyleSheet.create).
-                style={[s.voiceRow, { direction: 'ltr' } as any, VOICE_EASE, voiceState !== 'recording' && s.voiceRowHidden]}
+                style={[s.voiceRow, { direction: 'ltr' } as any, VOICE_EASE, voiceState === 'idle' && s.voiceRowHidden]}
               >
                 <Pressable
                   testID="voice-cancel"
@@ -2748,7 +2773,11 @@ export default function Agent() {
                   <Ionicons name="close" size={18} color={colors.body} />
                 </Pressable>
                 <View style={s.voiceWaveWrap} testID="voice-waveform">
-                  {voiceState === 'recording' ? <VoiceWaveform /> : null}
+                  {voiceState === 'recording' ? (
+                    <VoiceWaveform />
+                  ) : voiceState === 'processing' ? (
+                    <ActivityIndicator testID="voice-processing" size="small" color={colors.muted} />
+                  ) : null}
                 </View>
                 <Pressable
                   testID="voice-stop"
