@@ -150,6 +150,29 @@ for (const [k, ar] of [
   check(`i18n: «${k}» → Arabic`, i18n.includes(`'${k}': '${ar}'`));
 }
 
+
+// ── THE HUMAN GESTURE (live «I still can't drag it», owner 2026-08-24) ──────────────────────────
+// The first ship required a motionless 380ms hold before ANY movement — but a real person on a
+// desktop presses and pulls in one motion, and a real finger wobbles more than 8px while holding.
+// preActivate() is the pure decision; execute it rather than trusting the wiring text.
+{
+  const { preActivate, HOLD_SLOP_PX, TOUCH_HOLD_SLOP_PX } = await import('../src/lib/sidebarReorder.ts');
+  check('MOUSE: a vertical pull past slop activates the drag immediately (no motionless hold)',
+    preActivate('mouse', 0, HOLD_SLOP_PX + 2) === 'activate');
+  check('MOUSE: a horizontally-dominant pull is NOT a reorder (text/row intent) — cancels',
+    preActivate('mouse', HOLD_SLOP_PX + 2, 1) === 'cancel');
+  check('MOUSE: micro-jitter inside slop keeps waiting for the hold',
+    preActivate('mouse', 2, 3) === 'wait');
+  check('TOUCH: an immediate move stays a SCROLL — never an instant drag',
+    preActivate('touch', 0, TOUCH_HOLD_SLOP_PX + 2) === 'cancel');
+  check('TOUCH: natural finger wobble (<= 12px) does not kill the long-press',
+    preActivate('touch', 9, 9) === 'wait' && TOUCH_HOLD_SLOP_PX >= 12);
+  check('the Sidebar routes pre-activation movement through preActivate()',
+    /preActivate\(e\.pointerType \?\? ''/.test(sidebar));
+  check("a completed drag's release can never arm an open (the row travels with the pointer)",
+    /if \(dragRef\.current\?\.active\) return;/.test(sidebar));
+}
+
 console.log(failures === 0
   ? '\n✓ hold-drag reorder changes position only, persists, and never collides with open/rename/search\n'
   : `\n✗ ${failures} check(s) FAILED — the reorder contract is broken\n`);
