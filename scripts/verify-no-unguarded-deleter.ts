@@ -16,7 +16,9 @@
 // It scans every TRACKED file for a Supabase/PostgREST hard-delete against a listings table and
 // fails if one appears outside the sanctioned engine.
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+
+const MIGRATIONS_DIR = 'supabase/migrations';
 
 // Two shapes of hard delete, both scoped to SOURCE listing rows:
 //   1. the PostgREST/supabase-py client delete — `.delete()`. As of 2026-08-23 there is exactly ONE
@@ -47,6 +49,34 @@ const NON_LISTING_DELETES = new Set([
   'scrapers/common/tests/test_verify_deletions.py',
 ]);
 
+// A COMMENT CANNOT DELETE ANYTHING. This guard's own barrier-14 migration explains the failure it
+// prevents, and quoting `delete from <platform>_residential_listings` in that explanation tripped it
+// (CI, 2026-08-24) — the same false positive the wasalt-cleanup.sh check already had to solve by
+// stripping comments before testing. The rule is the one that was already established there: only an
+// EXECUTABLE occurrence counts. Documentation of the ban is not a violation of it, and a guard that
+// punishes writing the rule down teaches people to describe the danger vaguely.
+//
+// This does NOT narrow what the guard catches: stripping is per file type and removes only comment
+// syntax, so any real statement — including one on the same line as a comment — still matches.
+// codeOnly() is exercised in both directions by the self-test at the bottom of this file.
+export function codeOnly(path: string, text: string): string {
+  const ext = path.slice(path.lastIndexOf('.'));
+  // Markdown is prose by definition: nothing in a .md file executes, so a fenced example of the
+  // banned statement is documentation, not a deleter.
+  if (ext === '.md') return '';
+  let out = text;
+  if (ext === '.sql' || ext === '.ts' || ext === '.js') {
+    out = out.replace(/\/\*[\s\S]*?\*\//g, ' ');            // /* block */
+  }
+  const lineComment = ext === '.sql' ? /--.*$/gm
+    : (ext === '.ts' || ext === '.js') ? /\/\/.*$/gm
+    : /#.*$/gm;                                            // .py .sh .yml .yaml and friends
+  return out.replace(lineComment, ' ');
+}
+
+const CODE_PATTERNS = PATTERNS.map((p) =>
+  new RegExp(p.replace(/\[\[:space:\]\]/g, '\\s'), 'i'));
+
 const r = spawnSync('git', ['grep', '-nIE', PATTERNS.join('|')], { encoding: 'utf8' });
 if (r.status !== 0 && r.status !== 1) {
   console.error(`❌ no-unguarded-deleter: git grep failed (status ${r.status}). ${r.stderr || ''}`);
@@ -54,16 +84,14 @@ if (r.status !== 0 && r.status !== 1) {
 }
 
 const offenders: string[] = [];
+const commentOnly: string[] = [];
 for (const line of (r.stdout || '').split('\n')) {
   if (!line.trim()) continue;
   const file = line.split(':')[0];
   if (SANCTIONED.has(file) || NON_LISTING_DELETES.has(file)) continue;
-  // A COMMENT that mentions a delete documents the ban — it cannot execute one. Without this,
-  // mirroring migration 20260824121106 (barrier 14, whose header EXPLAINS raw deletes) tripped the
-  // guard, and a verbatim mirror may never be edited to appease a grep. Only the comment marker is
-  // skipped; a real `delete from …_listings` statement in any file still fails this check.
-  const content = line.split(':').slice(2).join(':').trimStart();
-  if (/^(--|#|\/\/|\*)/.test(content)) continue;
+  // git grep found the text; the file's code, with comments removed, decides whether it can run.
+  const code = codeOnly(file, readFileSync(file, 'utf8'));
+  if (!CODE_PATTERNS.some((re) => re.test(code))) { commentOnly.push(line); continue; }
   offenders.push(line);
 }
 
@@ -76,6 +104,9 @@ const check = (ok: boolean, msg: string) => {
 check(offenders.length === 0,
   'no hard-delete of listing rows outside scrapers/common/cleanup.py');
 for (const o of offenders) console.error(`     ${o}`);
+if (commentOnly.length) {
+  console.log(`     (${commentOnly.length} occurrence(s) in comments/docs — explanation, not code)`);
+}
 
 // The two retired entrypoints must STAY retired. They are kept as loud refusals rather than deleted
 // so an external crontab still calling them fails visibly — but a future edit could quietly restore
@@ -112,6 +143,56 @@ check(/_FREEZE_MAX_INCONCLUSIVE_RATE/.test(engine),
   'the engine still freezes on inconclusive source health');
 check(/max_delete_per_run/.test(engine),
   'the engine still caps the batch');
+
+// ── Barrier 14: the runtime half. ───────────────────────────────────────────────────────────────
+// Everything above is static: it proves no TRACKED FILE hard-deletes a listings table outside the
+// engine. It cannot see a `delete from aqar_residential_listings` typed into psql, run through an
+// MCP session, or buried in a migration — and neither could the two runtime barriers that existed,
+// because mon_detect_deletion_spike reads cleanup_runs and mon_detect_cleanup_evidence_gap limb B
+// reads scrape_runs, and a raw statement writes neither. Barrier 14 closes that by taking the
+// evidence at the table itself. Pinned here so the migration cannot be reverted or hollowed out
+// without CI going red — a barrier nobody can see disappear is not a barrier.
+const barrier14 = readdirSync(MIGRATIONS_DIR)
+  .filter((f) => f.endsWith('.sql'))
+  .map((f) => ({ f, sql: readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8') }))
+  .find(({ sql }) => /create\s+trigger\s+trg_archive_hard_delete/i.test(sql));
+
+check(!!barrier14, 'a migration arms trg_archive_hard_delete on the listings tables');
+if (barrier14) {
+  const sql = barrier14.sql;
+  // The arming must be a PATTERN LOOP over the listings tables, never a hand-listed set: a new
+  // platform's table would otherwise ship unaudited, and nothing would say so.
+  check(/table_name\s+like\s+'%\\_residential\\_listings'/i.test(sql)
+        && /table_name\s+like\s+'%\\_commercial\\_listings'/i.test(sql),
+    '  …over every *_{residential,commercial}_listings table, by pattern, not a hardcoded list');
+  check(/create\s+or\s+replace\s+function\s+public\.mon_detect_unledgered_hard_delete/i.test(sql),
+    '  …and defines mon_detect_unledgered_hard_delete()');
+  check(/cleanup_deletion_log/.test(sql) && /purged_listings_archive/.test(sql),
+    '  …which compares what vanished against the engine ledger');
+  // The detector must never key on deletion_reason: a bypass path can set that GUC as easily as it
+  // can skip the ledger, so trusting it would let the caught actor silence its own alarm.
+  const detectorBody = sql.slice(sql.indexOf('mon_detect_unledgered_hard_delete'));
+  check(!/deletion_reason\s*(=|<>|!=|like|in\b)/i.test(detectorBody),
+    '  …and does NOT trust deletion_reason, which the deleter itself writes');
+  check(/pg_get_functiondef/i.test(sql) && /mon_run_all_detectors/i.test(sql),
+    '  …and is wired into the detector roster by a guarded needle-edit');
+}
+
+// ── Self-test: the comment-stripping must not become a way through. ─────────────────────────────
+// Both directions, because only one of them is obvious. If codeOnly() ever over-strips, the guard
+// goes quiet on a real deleter and nothing else in the suite would notice.
+const REAL = 'delete from aqar_residential_listings where id = 1;';
+const hits = (path: string, body: string) =>
+  CODE_PATTERNS.some((re) => re.test(codeOnly(path, body)));
+check(hits('x.sql', REAL), 'self-test: a real SQL delete is still caught');
+check(hits('x.sql', `-- explaining ${REAL}\n${REAL}`),
+  '  …including one sitting under a comment that quotes it');
+check(hits('x.py', `client.table("aqar_residential_listings").delete().execute()`),
+  '  …and a client-side .delete() in python');
+check(!hits('x.sql', `-- a bypass could run \`${REAL}\` and nothing would see it`),
+  '  …while the same statement inside a comment is not a violation');
+check(!hits('x.md', `A bypass could run \`${REAL}\`.`),
+  '  …nor is documenting it in markdown');
 
 console.log(failed
   ? '\n❌ verify-no-unguarded-deleter: failed.'
