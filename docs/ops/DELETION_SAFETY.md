@@ -94,6 +94,14 @@ point of the table:
   re-probed. The other **10,617** are `unverifiable_no_source_key`: an internal bigint PK does not
   resolve to a source page, and `storage.objects` is empty, so no raw capture survives.
 
+Those 65 were re-probed on 2026-08-24 through the wasalt proxy (`verify_deletions --legacy`, run
+`backaudit:wasalt` 34757): `calibration=valid probed=65 dead=65 live=0 inconclusive=0` — every one
+of them 404s at the source, so **0 restorations were warranted and 0 were made**. Read it for what
+it is: 65 rows is 0.3% of 21,371, drawn from whichever rows happened to appear in a July ops
+snapshot, so it is not a random sample and it does not clear the legacy path. The measurements that
+speak to the path's actual failure rate are the engine's own re-checks above (28% at gathern,
+1.9% then 4-of-4 at aqar), and the 10,617 remain permanently unknowable either way.
+
 The rules for reading it, which apply to any future back-audit:
 
 * restore a row **only** on an authoritative `live` verdict, and re-ingest it through the normal
