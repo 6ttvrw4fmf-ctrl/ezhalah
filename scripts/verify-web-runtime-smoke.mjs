@@ -412,7 +412,11 @@ try {
   check('[H mobile] resubmitting untouched after rapid-Stop fires the EXACT SAME serialized search request as baseline',
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
-  check('[H mobile] the mobile resubmit still lands a real result count', Number.isFinite(mobResubmitCount), `count=${mobResubmitCount}`);
+  // Failed twice in CI (2026-08-24) while the request fired+matched, [E] desktop landed, a direct
+  // prod repro rendered in 5s, and [I] read a fresh count seconds later — so on a null read, dump
+  // the page state: the next failure must explain itself instead of costing another guessing round.
+  check('[H mobile] the mobile resubmit still lands a real result count', Number.isFinite(mobResubmitCount),
+    `count=${mobResubmitCount} url=${page.url()} body=${(await body()).slice(0, 400).replace(/\n/g, ' | ')}`);
 
   // ---- Journey I: Advanced Filter reentrancy — a rapid double-tap on «متابعة»/confirm must never
   // downgrade or lose an already-recorded answer (bug-hunt 2026-08-23, fixed in commitGuidedStep's
