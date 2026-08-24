@@ -4,13 +4,22 @@
 // follow-up request: the composer should show a brief loading beat after Stop, like ChatGPT, before
 // the transcript lands, instead of an instant cut).
 //
-// PART A — iOS capture path: iOS's audio-session model is stricter than desktop browsers' about a
-// page holding two independent audio captures at once. Our own code held TWO: a getUserMedia-driven
-// AnalyserNode (for the real waveform) PLUS SpeechRecognition's own internal capture. On iOS-family
-// WebKit (iPhone/iPad — iPadOS masquerades as "Macintosh" in its User-Agent but is touch-capable,
-// unlike any real Mac) we now skip our own getUserMedia/AnalyserNode entirely and let the recognizer
-// own the ONE capture session outright. isVoiceInputSupported() itself is UNTOUCHED — the mic still
-// shows exactly where it already correctly does; only how the stream is ACQUIRED changes.
+// PART A — iOS capture path: iOS Safari's audio-session model is stricter than desktop browsers'
+// about a page holding two independent audio captures at once. Our own code held TWO: a
+// getUserMedia-driven AnalyserNode (for the real waveform) PLUS SpeechRecognition's own internal
+// capture. On genuine iOS Safari (iPhone/iPad's OWN browser — iPadOS masquerades as "Macintosh" in
+// its User-Agent but is touch-capable, unlike any real Mac) we skip our own getUserMedia/AnalyserNode
+// entirely and let the recognizer own the ONE capture session outright. isVoiceInputSupported() itself
+// is UNTOUCHED — the mic still shows exactly where it already correctly does; only how the stream is
+// ACQUIRED changes.
+//
+// NARROWED to Safari alone, not "any iOS WebKit browser" (owner report, 2026-08-24, SAME iPhone):
+// the first version of this fix applied to every iOS browser, including Chrome-for-iOS — but
+// real-device evidence showed Chrome does NOT share Safari's contention (recognition worked there),
+// so forcing the waveform-less fallback onto it was an unnecessary, user-visible regression (the
+// owner explicitly noticed the missing waveform on Chrome). Every third-party iOS browser carries its
+// own UA token specifically so it CAN be told apart from Safari despite sharing WebKit: Chrome uses
+// 'CriOS', Firefox 'FxiOS', Edge 'EdgiOS', Opera 'OPiOS'.
 //
 // PART B — stop-loading beat: Stop now enters a brief 'processing' voiceState (capture has already
 // stopped synchronously — this is pure UI dwell time) showing a loading indicator in the waveform's
@@ -34,48 +43,60 @@ console.log('\nVoice-input iOS capture path + stop-loading barrier (owner report
 
 // ═══ PART A — iOS capture path ═════════════════════════════════════════════════════════════════
 check(
-  'isIOSWebKitFamily() detects iPhone/iPad/iPod via UA, AND the iPad-masquerading-as-Mac case via MacIntel+multi-touch',
-  /function isIOSWebKitFamily\(\): boolean \{/.test(voice) &&
-    /if \(\/iPad\|iPhone\|iPod\/\.test\(ua\)\) return true;/.test(voice) &&
-    /navigator\.platform === 'MacIntel' && \(navigator as any\)\.maxTouchPoints > 1;/.test(voice),
+  'isIOSSafariEngine() detects iPhone/iPad/iPod via UA (AND the iPad-masquerading-as-Mac case via MacIntel+multi-touch), then EXCLUDES third-party iOS browser UA tokens',
+  /function isIOSSafariEngine\(\): boolean \{/.test(voice) &&
+    /\/iPad\|iPhone\|iPod\/\.test\(ua\) \|\| \(navigator\.platform === 'MacIntel' && \(navigator as any\)\.maxTouchPoints > 1\)/.test(voice) &&
+    /return !\/CriOS\|FxiOS\|EdgiOS\|OPiOS\/\.test\(ua\);/.test(voice),
 );
 check(
-  'the getUserMedia + AnalyserNode block is skipped entirely on iOS-family WebKit — guarded by if (!isIOSWebKitFamily())',
-  /if \(!isIOSWebKitFamily\(\)\) \{[\s\S]{0,200}navigator\.mediaDevices\.getUserMedia/.test(voice),
+  'the getUserMedia + AnalyserNode block is skipped entirely on genuine iOS Safari only — guarded by if (!isIOSSafariEngine())',
+  /if \(!isIOSSafariEngine\(\)\) \{[\s\S]{0,200}navigator\.mediaDevices\.getUserMedia/.test(voice),
 );
 check(
-  "isVoiceInputSupported() is UNTOUCHED by the iOS branch — support detection stays a pure capability check, never gated on isIOSWebKitFamily() (the owner's explicit rule: don't hide the mic as a workaround)",
-  !/isVoiceInputSupported\(\)[\s\S]{0,50}isIOSWebKitFamily/.test(voice) &&
+  "isVoiceInputSupported() is UNTOUCHED by the Safari branch — support detection stays a pure capability check, never gated on isIOSSafariEngine() (the owner's explicit rule: don't hide the mic as a workaround)",
+  !/isVoiceInputSupported\(\)[\s\S]{0,50}isIOSSafariEngine/.test(voice) &&
     /export function isVoiceInputSupported\(\): boolean \{\s*\n\s*if \(Platform\.OS !== 'web' \|\| typeof window === 'undefined'\) return false;\s*\n\s*const w = window as any;\s*\n\s*return !!\(w\.SpeechRecognition \|\| w\.webkitSpeechRecognition\) && !!navigator\.mediaDevices\?\.getUserMedia;/.test(voice),
 );
 check(
-  'the recognizer (step 3) is reached unconditionally regardless of the iOS branch — iOS still gets a working recognizer, just without the extra getUserMedia/analyser capture',
+  'the recognizer (step 3) is reached unconditionally regardless of the Safari branch — every platform still gets a working recognizer, just without the extra getUserMedia/analyser capture on Safari specifically',
   /\}\s*\n\s*\n\s*\/\/ 3\. The recognizer/.test(voice),
 );
 
-// EXECUTED: a faithful replica of isIOSWebKitFamily(), against real device/browser UA strings.
-function isIOSWebKitFamilyReplica(nav: { userAgent: string; platform?: string; maxTouchPoints?: number }): boolean {
+// EXECUTED: a faithful replica of isIOSSafariEngine(), against real device/browser UA strings —
+// including the exact Chrome-for-iOS case the owner's real device disproved the OLD blanket rule on.
+function isIOSSafariEngineReplica(nav: { userAgent: string; platform?: string; maxTouchPoints?: number }): boolean {
   const ua = nav.userAgent || '';
-  if (/iPad|iPhone|iPod/.test(ua)) return true;
-  return nav.platform === 'MacIntel' && (nav.maxTouchPoints ?? 0) > 1;
+  const isIOSFamily = /iPad|iPhone|iPod/.test(ua) || (nav.platform === 'MacIntel' && (nav.maxTouchPoints ?? 0) > 1);
+  if (!isIOSFamily) return false;
+  return !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
 }
-const UA_IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
-const UA_IPAD_MODERN = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+const UA_IPHONE_SAFARI = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+const UA_IPHONE_CHROME = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/128.0.6613.113 Mobile/15E148 Safari/604.1';
+const UA_IPHONE_FIREFOX = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/130.0 Mobile/15E148 Safari/605.1.15';
+const UA_IPAD_MODERN_SAFARI = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 const UA_MAC_SAFARI = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Safari/605.1.15';
 const UA_ANDROID_CHROME = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36';
 const UA_DESKTOP_CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 
-check('iPhone UA → iOS-family (true)', isIOSWebKitFamilyReplica({ userAgent: UA_IPHONE }) === true);
+check('iPhone Safari UA → genuine Safari (true) — the platform this fix is FOR', isIOSSafariEngineReplica({ userAgent: UA_IPHONE_SAFARI }) === true);
 check(
-  'iPad running a modern iPadOS (UA claims "Macintosh", but touch-capable) → iOS-family (true) — the exact masquerade trap',
-  isIOSWebKitFamilyReplica({ userAgent: UA_IPAD_MODERN, platform: 'MacIntel', maxTouchPoints: 5 }) === true,
+  "iPhone Chrome UA (CriOS) → NOT genuine Safari (false) — the exact owner-reported regression: Chrome-for-iOS must keep its real getUserMedia/waveform path, it doesn't share Safari's contention",
+  isIOSSafariEngineReplica({ userAgent: UA_IPHONE_CHROME }) === false,
 );
 check(
-  'real macOS Safari (UA also says "Macintosh", but zero touch points — no real Mac has a touchscreen) → NOT iOS-family (false) — must never misclassify the machine this fix was proven on',
-  isIOSWebKitFamilyReplica({ userAgent: UA_MAC_SAFARI, platform: 'MacIntel', maxTouchPoints: 0 }) === false,
+  'iPhone Firefox UA (FxiOS) → NOT genuine Safari (false) — same exemption for every third-party iOS browser, not just Chrome',
+  isIOSSafariEngineReplica({ userAgent: UA_IPHONE_FIREFOX }) === false,
 );
-check('Android Chrome UA → NOT iOS-family (false)', isIOSWebKitFamilyReplica({ userAgent: UA_ANDROID_CHROME, platform: 'Linux armv81' }) === false);
-check('desktop Chrome UA on a real Mac (platform MacIntel, 0 touch points) → NOT iOS-family (false)', isIOSWebKitFamilyReplica({ userAgent: UA_DESKTOP_CHROME, platform: 'MacIntel', maxTouchPoints: 0 }) === false);
+check(
+  'iPad running a modern iPadOS Safari (UA claims "Macintosh", but touch-capable, no CriOS/FxiOS token) → genuine Safari (true) — the exact masquerade trap, still correctly caught',
+  isIOSSafariEngineReplica({ userAgent: UA_IPAD_MODERN_SAFARI, platform: 'MacIntel', maxTouchPoints: 5 }) === true,
+);
+check(
+  'real macOS Safari (UA also says "Macintosh", but zero touch points — no real Mac has a touchscreen) → NOT genuine Safari for this purpose (false) — must never misclassify the machine this fix was proven safe on',
+  isIOSSafariEngineReplica({ userAgent: UA_MAC_SAFARI, platform: 'MacIntel', maxTouchPoints: 0 }) === false,
+);
+check('Android Chrome UA → false (not iOS at all)', isIOSSafariEngineReplica({ userAgent: UA_ANDROID_CHROME, platform: 'Linux armv81' }) === false);
+check('desktop Chrome UA on a real Mac (platform MacIntel, 0 touch points) → false', isIOSSafariEngineReplica({ userAgent: UA_DESKTOP_CHROME, platform: 'MacIntel', maxTouchPoints: 0 }) === false);
 
 // ═══ PART B — stop-loading beat ════════════════════════════════════════════════════════════════
 check(
