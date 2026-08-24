@@ -531,7 +531,21 @@ appears broken.
     الشرقية), not 4 (القصيم); guessing that cost a false "major city has no apartments" scare on
     2026-08-23. The real UI derives the region from the chosen city and can never send a
     contradictory pair, so neither should the harness: read the id from `loc_catalog_region`.
-12. **An unconfirmed المدينة is a REFUSAL, not a broken search.** If the city is typed but no
+12. **The agent image's Chromium is PINNED and will not match the driver.** `/opt/pw-browsers` ships
+    one build (1194 on 2026-08-24); the repo's Playwright wants whatever build ITS version pins
+    (1234), and `chromium.launch()` with no `executablePath` looks for the latter and finds nothing.
+    Every journey then dies with *"Executable doesn't exist at …chromium_headless_shell-1234…"*, the
+    sweep reports 0 journeys and `SEARCH & MATCHING HEALTH: 1/10`, and it reads exactly like a total
+    production outage. It is trap §40.7 in its purest form — a harness failure wearing a product
+    failure's clothes. `e2e/live-sweep/sweep.mjs` now takes both fixes from the environment, so CI
+    (which runs `playwright install`) is unaffected and the agent container just sets them:
+    `PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium npm run sweep:live` — and `HTTPS_PROXY`, when set,
+    additionally supplies the proxy plus `--ssl-version-max=tls1.2` from trap 1. Do NOT "fix" this by
+    running `playwright install`; the image deliberately pre-installs the browser.
+    Corollary, also learned the hard way: **never read the sweep's exit code through a pipe.**
+    `npm run sweep:live | tail` reports `tail`'s status, so a run that correctly exited 1 on nine
+    missed coverage floors looks like a pass. Redirect to a file and read `$?`.
+13. **An unconfirmed المدينة is a REFUSAL, not a broken search.** If the city is typed but no
     dropdown option is committed, production deliberately declines to search and says
     «الرجاء اختيار مدينة من القائمة.» / «لا توجد مدينة مطابقة — اختر من القائمة». That is correct
     behaviour. Substring-matching the suggestion picks a huge outer container and silently fails to

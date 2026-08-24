@@ -281,8 +281,26 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
 }
 
 // ── the browser ──────────────────────────────────────────────────────────────────────────────────
+// Launch options are ENV-DRIVEN and default to nothing, so CI (which runs `playwright install`) is
+// byte-for-byte unaffected. They exist for the agent containers the daily routine actually runs in,
+// where two things differ and both make every journey fail to launch — which reads as a total
+// product outage until you notice it is the harness (SEARCH_MATCH_QA_ENGINEER.md §40.7, §41.1):
+//   PW_EXECUTABLE_PATH — the image ships a pinned Chromium build (/opt/pw-browsers/chromium) that
+//                        does not match the build number this Playwright driver would download.
+//   HTTPS_PROXY        — behind the MITM egress proxy Chromium resets every connection under
+//                        TLS 1.3, so the proxy is passed through with --ssl-version-max=tls1.2.
+// Read at CALL time, not module-eval time: a caller that imports this module and then sets the env
+// var would otherwise get the empty options object it captured on import.
+const launchOpts = () => ({
+  ...(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {}),
+  ...(process.env.HTTPS_PROXY
+    ? { proxy: { server: process.env.HTTPS_PROXY },
+        args: ['--no-sandbox', '--disable-quic', '--ignore-certificate-errors', '--ssl-version-max=tls1.2'] }
+    : {}),
+});
+
 async function withPage(mobile, fn) {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOpts());
   const ctx = await browser.newContext(
     mobile ? { ...devices['iPhone 13'], locale: 'ar-SA' }
            : { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 1100 }, locale: 'ar-SA' });

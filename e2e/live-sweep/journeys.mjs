@@ -73,10 +73,26 @@ export async function trendingDistrict(plan) {
     // this journey exists for (the count that ignores the active filter).
     if (plan.priceMax) { await page.locator('[data-testid="price-max-input"]').fill(String(plan.priceMax)).catch(() => {}); await sleep(1600); }
     await page.locator('[data-testid="district-input"]').click(); await sleep(4200);
+    // Match the trending list's STRUCTURE — «1.» / name / «N إعلان» — not the district's spelling.
+    // Until 2026-08-24 this tested /^حي /, which is not a property of a district name: 1,082 of the
+    // index's 3,694 (city, district) pairs — 32,712 production-ready rows — carry no «حي » prefix,
+    // and whole cities have none at all. بيش renders «الخضراء 1 · 4 إعلان», «الحزم 1», «الصفاء»;
+    // the harness saw zero rows, skipped, and failed the run on a missed coverage floor while
+    // production was working perfectly. A barrier that cannot see 16% of the inventory reports its
+    // own blindness as a defect (§40.7), and silently drops the journey the floor exists to force.
     const rows = await page.evaluate(() => {
       const t = document.body.innerText.split('\n').map((s) => s.trim()).filter(Boolean);
       const out = [];
-      for (let i = 0; i < t.length - 1; i++) if (/^حي /.test(t[i]) && /إعلان/.test(t[i + 1])) out.push([t[i], t[i + 1]]);
+      for (let i = 0; i < t.length - 2; i++) {
+        // ordinal marker, then the name, then its count line
+        if (/^\d+\.$/.test(t[i]) && /إعلان/.test(t[i + 2]) && !/إعلان/.test(t[i + 1])) out.push([t[i + 1], t[i + 2]]);
+      }
+      // Fallback for a rendering without ordinals: any line immediately followed by a count line.
+      if (!out.length) {
+        for (let i = 0; i < t.length - 1; i++) {
+          if (/إعلان/.test(t[i + 1]) && !/إعلان/.test(t[i]) && t[i].length < 40 && /[؀-ۿ]/.test(t[i])) out.push([t[i], t[i + 1]]);
+        }
+      }
       return out.slice(0, 6);
     });
     if (!rows.length) { note(`${name}: no numbered district rows — skipped`); return null; }
