@@ -20,7 +20,7 @@ import { useApp, type HistoryItem } from '@/store';
 import { sanitizeArabicSearch, isSearchableQuery, filterChats } from '@/lib/chatSearch';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { queryLabel } from '@/data/search';
-import { HOLD_MS, HOLD_SLOP_PX, canReorder, dragTargetIndex, neighboursAt, sortByOrder } from '@/lib/sidebarReorder';
+import { HOLD_MS, canReorder, dragTargetIndex, neighboursAt, preActivate, sortByOrder } from '@/lib/sidebarReorder';
 import { displayTitle } from '@/lib/chatTitle';
 import { sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { useI18n } from '@/i18n';
@@ -171,6 +171,9 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   };
   const armOpenRow = (c: HistoryItem) => {
     if (editingId) return;                                   // never open/navigate while a title is being edited
+    // A drag's release fires this too (the row follows the pointer, so the pointer is still inside
+    // at pointerup). `.active` only — a plain click also passes through beginHold's pre-active state.
+    if (dragRef.current?.active) return;
     if (Platform.OS !== 'web') { openHistory(c); return; }   // native: no dblclick; a tap opens immediately
     const token = Date.now();
     openArmRef.current = armOpen(token);
@@ -287,7 +290,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       node.style.boxShadow = 'none';
     }
     const { id, to, ids } = d;
-    dragRef.current = null;
+    // dragRef stays SET (active) through the settle window on purpose: RN-web dispatches the row's
+    // onPress asynchronously after pointerup, so nulling here let a finished drag arm an open and
+    // NAVIGATE (reproduced: the drag landed on /agent). armOpenRow's `.active` guard needs the ref
+    // alive until the commit below; a new drag is blocked for the same ~190ms, which is fine.
     // Hand-off on a TIMER, never an animation callback (repo rule: rAF freezes in hidden tabs).
     setTimeout(() => {
       if (commit) {
@@ -302,6 +308,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         node.style.cursor = '';
       }
       setDrag(null);
+      dragRef.current = null;
     }, REDUCED_MOTION ? 0 : SETTLE_MS + 10);
   };
 
@@ -314,9 +321,14 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       if (!d) return;
       d.lastY = ev.clientY;
       if (!d.active) {
-        // Wandered before the hold landed → it's a scroll or a click, never a lift.
-        if (Math.abs(ev.clientY - d.startY) > HOLD_SLOP_PX || Math.abs(ev.clientX - (e.clientX ?? 0)) > HOLD_SLOP_PX) settleDrag(false);
-        return;
+        // Movement before the hold lands: preActivate() decides per pointer type — a mouse pulled
+        // vertically IS the drag (activate now, no motionless hold), a mouse pulled sideways or a
+        // touch moved past wobble is a scroll/click and cancels. ('wait' = still inside slop.)
+        const verdict = preActivate(e.pointerType ?? '', Math.abs(ev.clientX - (e.clientX ?? 0)), Math.abs(ev.clientY - d.startY));
+        if (verdict === 'cancel') { settleDrag(false); return; }
+        if (verdict === 'wait') return;
+        activateDrag();
+        if (!dragRef.current?.active) return;
       }
       ev.preventDefault();
       applyDragTransform();
@@ -343,7 +355,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       rowH: rowHRef.current, active: false, timer: null, ids,
       scrollTick: null, scrollDir: 0, cleanup,
     };
-    dragRef.current.timer = setTimeout(() => {
+    const activateDrag = () => {
       const d = dragRef.current;
       if (!d || d.active) return;
       d.active = true;
@@ -367,7 +379,8 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         setTimeout(() => { const dd = dragRef.current; if (dd?.active && dd.node?.style) dd.node.style.transition = REDUCED_MOTION ? 'none' : `box-shadow 120ms ${EASE_CALM}`; }, 130);
       }
       setDrag({ id: c.id, bucket, from: index, to: index });
-    }, HOLD_MS);
+    };
+    dragRef.current.timer = setTimeout(activateDrag, HOLD_MS);
   };
 
   // One host binding per row: the double-click rename (existing) plus the hold-to-drag pointerdown.

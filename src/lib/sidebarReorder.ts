@@ -90,6 +90,25 @@ export function canReorder(state: { editing: boolean; searchActive: boolean }): 
 export const HOLD_SLOP_PX = 8;
 /** Long-press activation delay — inside the owner's 350–500ms window. */
 export const HOLD_MS = 380;
+// A REAL finger wobbles while holding — 8px cancelled genuine long-presses on phones. 12px still
+// sits far below any deliberate scroll gesture.
+export const TOUCH_HOLD_SLOP_PX = 12;
+
+// What a movement BEFORE the hold lands means, per pointer type. This is the fix for the live
+// «I still can't drag it» report (owner 2026-08-24): a human on a desktop presses and pulls in one
+// motion — nobody holds a mouse motionless for 380ms first. So for a MOUSE, a vertically-dominant
+// pull past slop IS the drag and activates immediately (the owner's «click-and-hold / drag» spec);
+// a horizontally-dominant pull is not a reorder and cancels. For TOUCH the hold stays mandatory —
+// an immediate move must remain a scroll — but natural wobble is tolerated up to TOUCH_HOLD_SLOP_PX.
+export type PreActivateDecision = 'activate' | 'cancel' | 'wait';
+export function preActivate(pointerType: string, dx: number, dy: number): PreActivateDecision {
+  if (pointerType === 'mouse') {
+    if (dy > HOLD_SLOP_PX && dy >= dx) return 'activate';
+    if (dx > HOLD_SLOP_PX && dx > dy) return 'cancel';
+    return 'wait';
+  }
+  return dx > TOUCH_HOLD_SLOP_PX || dy > TOUCH_HOLD_SLOP_PX ? 'cancel' : 'wait';
+}
 
 /**
  * Which slot the dragged row currently occupies, from its vertical travel. Pure math so the
