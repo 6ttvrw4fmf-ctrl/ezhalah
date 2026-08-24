@@ -289,16 +289,18 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
 //                        does not match the build number this Playwright driver would download.
 //   HTTPS_PROXY        — behind the MITM egress proxy Chromium resets every connection under
 //                        TLS 1.3, so the proxy is passed through with --ssl-version-max=tls1.2.
-const LAUNCH = {
+// Read at CALL time, not module-eval time: a caller that imports this module and then sets the env
+// var would otherwise get the empty options object it captured on import.
+const launchOpts = () => ({
   ...(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {}),
   ...(process.env.HTTPS_PROXY
     ? { proxy: { server: process.env.HTTPS_PROXY },
         args: ['--no-sandbox', '--disable-quic', '--ignore-certificate-errors', '--ssl-version-max=tls1.2'] }
     : {}),
-};
+});
 
 async function withPage(mobile, fn) {
-  const browser = await chromium.launch(LAUNCH);
+  const browser = await chromium.launch(launchOpts());
   const ctx = await browser.newContext(
     mobile ? { ...devices['iPhone 13'], locale: 'ar-SA' }
            : { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 1100 }, locale: 'ar-SA' });
