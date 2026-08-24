@@ -123,28 +123,52 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       } catch {}
     }
   });
-  const tap = async (txt) => {
-    const box = await page.evaluate(CLICK_LEAF, txt);
-    if (!box) throw new Error(`control not found: ${txt}`);
+  // A GitHub Actions runner measurably slower than a laptop turned this exact race real in CI
+  // (run 32730730607, 2026-08-24): the city-suggestion row rendered after this journey's fixed
+  // wait had already elapsed, so the strict tap threw "control not found: الرياض" — the same class
+  // of failure verify-web-runtime-smoke.mjs's tapWhenRendered() was built to close. Every control
+  // in this setup chain is reachable only after a prior async step (typeahead results, or a
+  // category/group/type list that only renders once its parent is selected), so ALL of them poll
+  // here rather than trusting a fixed wait to have been long enough.
+  const tap = async (txt, timeoutMs = 8000) => {
+    const until = Date.now() + timeoutMs;
+    let box = null;
+    while (Date.now() < until) {
+      box = await page.evaluate(CLICK_LEAF, txt);
+      if (box) break;
+      await page.waitForTimeout(300);
+    }
+    if (!box) throw new Error(`control never rendered: ${txt}`);
     await page.mouse.click(box.x, box.y);
     await page.waitForTimeout(900);
   };
   const body = () => page.evaluate(() => document.body.innerText);
+  // Confirmed pick, retried (verify-web-runtime-smoke.mjs's proven pattern): a slow runner can have
+  // the suggestion row not yet mounted when the poll gives up once — retry the whole gesture and
+  // let the app's OWN confirmation testID (citySelected → selected-city-visual) decide, rather than
+  // trusting that a single click landed.
+  const pickCity = async (name) => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await page.click('input >> nth=0');
+      await page.fill('input >> nth=0', '');
+      await page.type('input >> nth=0', name, { delay: 60 });
+      await tap(name).catch(() => {});
+      const took = await page.waitForSelector('[data-testid="selected-city-visual"]', { timeout: 4000 }).catch(() => null);
+      if (took) return;
+    }
+    throw new Error(`pickCity(${name}): the app never confirmed the selection after 3 attempts`);
+  };
 
   try {
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(5000);
     for (const d of deal) await tap(d);
     if (category) await tap(category);
-    await page.click('input >> nth=0');
-    await page.type('input >> nth=0', city, { delay: 60 });
-    await page.waitForTimeout(1800);
-    await tap(city);
+    await pickCity(city);
     await page.waitForTimeout(800);
     if (district) {
       await page.click('input >> nth=1');
       await page.type('input >> nth=1', district, { delay: 60 });
-      await page.waitForTimeout(2200);
       await tap(district);
     }
     await tap(group);
@@ -172,7 +196,11 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       return;
     }
 
-    const btn = await page.evaluate(CLICK_LEAF, 'خلّنا نحدد الطلب أكثر');
+    // Poll rather than a single evaluate: a slow CI runner can still be laying out the results
+    // page (and the CTA row under it) when this check runs — the SAME class of race fixed above
+    // for city/group/type. Persistent absence after the poll is the real "not eligible" case.
+    let btn = null;
+    for (let i = 0; i < 20 && !btn; i++) { btn = await page.evaluate(CLICK_LEAF, 'خلّنا نحدد الطلب أكثر'); if (!btn) await page.waitForTimeout(300); }
     if (!btn) { check(`${name}: AF launcher present`, false, 'not eligible on this scope — cannot test AF here'); await ctx.close(); return; }
     await page.mouse.click(btn.x, btn.y);
     await page.waitForTimeout(4000);
