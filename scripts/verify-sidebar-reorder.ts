@@ -173,6 +173,19 @@ for (const [k, ar] of [
     /if \(dragRef\.current\?\.active\) return;/.test(sidebar));
 }
 
+
+// ── THE LIFTED ROW'S TITLE MUST STAY VISIBLE ────────────────────────────────────────────────────
+// The row under the pointer is ALWAYS hovered while dragging, and hover paints the label white
+// (histLabelHot). The first ship force-painted the lifted card white too — white-on-white, so the
+// title vanished for the whole drag (seen in a production screenshot). The pair must be owned by
+// ONE place: the dragging row uses the SAME dark-card/white-label pair as hover.
+check('the drag styling never force-paints the card a raw color (no node.style.background)',
+  !/style\.background = '/.test(sidebar));
+check('the dragged row gets the dark card via React state (histRowDragging on the row)',
+  /drag\?\.id === c\.id && s\.histRowDragging/.test(sidebar) && /histRowDragging: \{ backgroundColor: colors\.dark \}/.test(sidebar));
+check('…and the label goes white for the SAME condition (hover OR dragging — never one without the other)',
+  /\(hot \|\| drag\?\.id === c\.id\) && s\.histLabelHot/.test(sidebar));
+
 console.log(failures === 0
   ? '\n✓ hold-drag reorder changes position only, persists, and never collides with open/rename/search\n'
   : `\n✗ ${failures} check(s) FAILED — the reorder contract is broken\n`);
