@@ -16,7 +16,9 @@
 // It scans every TRACKED file for a Supabase/PostgREST hard-delete against a listings table and
 // fails if one appears outside the sanctioned engine.
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+
+const MIGRATIONS_DIR = 'supabase/migrations';
 
 // Two shapes of hard delete, both scoped to SOURCE listing rows:
 //   1. the PostgREST/supabase-py client delete — `.delete()`. As of 2026-08-23 there is exactly ONE
@@ -106,6 +108,40 @@ check(/_FREEZE_MAX_INCONCLUSIVE_RATE/.test(engine),
   'the engine still freezes on inconclusive source health');
 check(/max_delete_per_run/.test(engine),
   'the engine still caps the batch');
+
+// ── Barrier 14: the runtime half. ───────────────────────────────────────────────────────────────
+// Everything above is static: it proves no TRACKED FILE hard-deletes a listings table outside the
+// engine. It cannot see a `delete from aqar_residential_listings` typed into psql, run through an
+// MCP session, or buried in a migration — and neither could the two runtime barriers that existed,
+// because mon_detect_deletion_spike reads cleanup_runs and mon_detect_cleanup_evidence_gap limb B
+// reads scrape_runs, and a raw statement writes neither. Barrier 14 closes that by taking the
+// evidence at the table itself. Pinned here so the migration cannot be reverted or hollowed out
+// without CI going red — a barrier nobody can see disappear is not a barrier.
+const barrier14 = readdirSync(MIGRATIONS_DIR)
+  .filter((f) => f.endsWith('.sql'))
+  .map((f) => ({ f, sql: readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8') }))
+  .find(({ sql }) => /create\s+trigger\s+trg_archive_hard_delete/i.test(sql));
+
+check(!!barrier14, 'a migration arms trg_archive_hard_delete on the listings tables');
+if (barrier14) {
+  const sql = barrier14.sql;
+  // The arming must be a PATTERN LOOP over the listings tables, never a hand-listed set: a new
+  // platform's table would otherwise ship unaudited, and nothing would say so.
+  check(/table_name\s+like\s+'%\\_residential\\_listings'/i.test(sql)
+        && /table_name\s+like\s+'%\\_commercial\\_listings'/i.test(sql),
+    '  …over every *_{residential,commercial}_listings table, by pattern, not a hardcoded list');
+  check(/create\s+or\s+replace\s+function\s+public\.mon_detect_unledgered_hard_delete/i.test(sql),
+    '  …and defines mon_detect_unledgered_hard_delete()');
+  check(/cleanup_deletion_log/.test(sql) && /purged_listings_archive/.test(sql),
+    '  …which compares what vanished against the engine ledger');
+  // The detector must never key on deletion_reason: a bypass path can set that GUC as easily as it
+  // can skip the ledger, so trusting it would let the caught actor silence its own alarm.
+  const detectorBody = sql.slice(sql.indexOf('mon_detect_unledgered_hard_delete'));
+  check(!/deletion_reason\s*(=|<>|!=|like|in\b)/i.test(detectorBody),
+    '  …and does NOT trust deletion_reason, which the deleter itself writes');
+  check(/pg_get_functiondef/i.test(sql) && /mon_run_all_detectors/i.test(sql),
+    '  …and is wired into the detector roster by a guarded needle-edit');
+}
 
 console.log(failed
   ? '\n❌ verify-no-unguarded-deleter: failed.'
