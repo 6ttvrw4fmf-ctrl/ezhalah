@@ -694,8 +694,16 @@ export default function Agent() {
         setVoiceState('idle'); // composer restores cleanly — never stuck in recording mode
         // 'blocked' (service/hardware failure, not permission) gets its own honest message —
         // never the "check your settings" text, which is only correct for a true 'denied'.
+        // 'service-not-allowed' specifically is Apple's own on-device speech-recognition service
+        // refusing the request — confirmed real on an actual iPhone, 2026-08-24 (mic permission had
+        // already been granted cleanly; this fired anyway). That's an iOS Settings state (Dictation
+        // disabled, or no on-device Arabic model), not anything this code can force — but the generic
+        // "try again" is actively unhelpful when the real fix is one specific toggle, so this exact
+        // code gets its own actionable message instead of the generic 'blocked' text.
         const msg = kind === 'denied'
           ? t('Microphone access is needed for voice input. Enable it in your browser settings.')
+          : detail === 'service-not-allowed'
+          ? t('Speech recognition is turned off on your device. Enable Dictation in your iPhone Settings, then try again.')
           : kind === 'blocked'
           ? t("The microphone couldn't be reached. Please try again.")
           : t('Voice input is not available right now.');

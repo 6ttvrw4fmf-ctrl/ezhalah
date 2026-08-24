@@ -120,7 +120,10 @@ check(
 // ── 7. Permission denial restores the normal composer with a graceful Arabic notice ─────────────
 check(
   '7. onFailure restores voiceState to idle and shows a t()-translated notice (no raw browser text)',
-  /onFailure: \(kind, detail\) => \{[\s\S]{0,300}setVoiceState\('idle'\);[\s\S]{0,300}kind === 'denied'/.test(agent),
+  // Window widened past 300 (owner, 2026-08-24): the 'service-not-allowed' branch's explanatory
+  // comment sits between setVoiceState('idle') and the kind==='denied' check it documents — a
+  // comment-length change, not a shape change; the same invariant still holds.
+  /onFailure: \(kind, detail\) => \{[\s\S]{0,300}setVoiceState\('idle'\);[\s\S]{0,1000}kind === 'denied'/.test(agent),
 );
 
 // ── 18. On platforms where voice input can never work (owner report, phone mic "doesn't work" —
