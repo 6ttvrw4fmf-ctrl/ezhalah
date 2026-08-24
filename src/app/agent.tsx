@@ -1175,7 +1175,7 @@ export default function Agent() {
   // for "a refine question is already on screen awaiting an answer" — `send()`'s REFINE INTERCEPT and
   // `runRefine()` both already treat it that way (only ONE pending refine is ever a valid state). Nothing
   // previously stopped a second startRefine() call while one was already pending: both call sites route
-  // through this ONE function via «خلّنا نحدد الطلب أكثر» (the fallback when the AF plan has <2 useful
+  // through this ONE function via «خلّنا نحدد الطلب أكثر» (the fallback when the AF plan has 0 useful
   // questions — see startAgeFlow) and the outline «نتائج أدق» button, and NEITHER call site disables
   // itself while its own async work is in flight. A rapid double-tap on either (or the AF entry re-showing
   // its CTA the instant `setAgeFlow(null)` fires, one tick before this runs) fired startRefine() twice and
@@ -1423,14 +1423,16 @@ export default function Agent() {
         .filter((pl) => pl.options.length >= minOptionsFor(pl.question.selection));
     }
     const plan = ageFlowPlanRef.current;
-    // THE ≥2-USEFUL GATE, EVALUATED AT THE SCOPE→ADVANCED TRANSITION (owner 2026-08-23). It cannot
-    // run at startAgeFlow any more: with an unresolved hierarchy the ranked plan is empty by
-    // construction, so the old placement closed the interview before the first scope question could
-    // render. It is evaluated exactly once — the first time the cursor leaves a record made only of
-    // scope steps — and it counts ADVANCED questions only: the hierarchy steps are what earned the
-    // right to ask, never two of the two. 0 or 1 useful advanced question ends the interview
-    // CLEANLY on the results the scope answers already narrowed to; it never bounces to the legacy
-    // chips, because by this point the user has answered real questions we must honour.
+    // THE >=1-USEFUL GATE, EVALUATED AT THE SCOPE→ADVANCED TRANSITION (owner 2026-08-23; REVISED
+    // owner 2026-08-24 — 0 closes, 1+ asks, superseding the original ">=2" brief). It cannot run at
+    // startAgeFlow any more: with an unresolved hierarchy the ranked plan is empty by construction,
+    // so the old placement closed the interview before the first scope question could render. It is
+    // evaluated exactly once — the first time the cursor leaves a record made only of scope steps —
+    // and it counts ADVANCED questions only: the hierarchy steps are what earned the right to ask,
+    // never toward this count. 0 useful advanced questions ends the interview CLEANLY on the results
+    // the scope answers already narrowed to; it never bounces to the legacy chips, because by this
+    // point the user has answered real questions we must honour. 1+ proceeds into `plan[0]` below
+    // exactly like any other useful question — the continuation loop then asks down to the last one.
     if (steps.length && steps.every((st) => isScopeQuestionId(st.question.id))
         && plan.length < MIN_USEFUL_QUESTIONS_TO_SHOW) { finishGuided(token); return; }
     if (!plan.length) { finishGuided(token); return; }
@@ -1549,17 +1551,18 @@ export default function Agent() {
       .map((r) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount, total: r.total }))
       .filter((p) => p.options.length >= minOptionsFor(p.question.selection));
     if (ageFlowTotalRef.current == null && ranked.length) ageFlowTotalRef.current = ranked[0].total;
-    // MIN 2 USEFUL QUESTIONS TO OPEN (owner 2026-08-22): a lone useful question — answered or
-    // skipped — still closes the interview on whatever the result-count gate alone left large; not
-    // a niche shortlist, just a tax on the user's attention. Reuses the SAME plan (ranked, already
-    // scored by scoreQuestion via rankQuestions — real narrowing power, not just structural
-    // eligibility) rather than a second computation, so this can never disagree with what the
-    // interview actually asks, and it is computed AFTER cohortAllows' combined-period intersection
-    // (rankQuestions -> eligibleQuestions -> question.eligibility) for free. 0 or 1 useful ⇒ the
-    // SAME fallback an empty plan already used: AUTO closes silently, a manual tap falls through to
-    // the plain refine chips — never a NEW code path. This gate governs the OPENING decision only;
-    // presentGuided's own re-rank after each answer/skip is untouched below, so an already-open
-    // interview still keeps asking down to the very last useful question (owner §2/§6).
+    // MIN 1 USEFUL QUESTION TO OPEN (owner 2026-08-22; REVISED owner 2026-08-24 — 0 closes, 1+
+    // asks, superseding the original ">=2" brief that withheld a lone useful question). A genuinely
+    // useful question — one that passes scoreQuestion(), real narrowing power over the CURRENT
+    // eligible set — is a real, honest step for the user even when it is the only one; only a
+    // TRULY empty plan (0 useful) closes silently. Reuses the SAME plan (ranked, already scored by
+    // scoreQuestion via rankQuestions) rather than a second computation, so this can never disagree
+    // with what the interview actually asks, and it is computed AFTER cohortAllows' combined-period
+    // intersection (rankQuestions -> eligibleQuestions -> question.eligibility) for free. 0 useful ⇒
+    // the SAME fallback an empty plan already used: AUTO closes silently, a manual tap falls through
+    // to the plain refine chips — never a NEW code path. This gate governs the OPENING decision
+    // only; presentGuided's own re-rank after each answer/skip is untouched below, so an already-
+    // open interview still keeps asking down to the very last useful question (owner §2/§6).
     if (ageFlowPlanRef.current.length < MIN_USEFUL_QUESTIONS_TO_SHOW) {
       setAgeFlow(null);
       if (fallbackToRefine) startRefine(q);

@@ -1,12 +1,13 @@
-// ADVANCED FILTER "2+ USEFUL QUESTIONS TO OPEN" GATE (owner brief, 2026-08-22) — Advanced Filter must
-// never open for a cohort with 0 or 1 "useful" question (one that passes scoreQuestion() — real
-// narrowing power over the CURRENT eligible set — not merely structurally eligible via cohortAllows/
-// isAgeFilterScope). Opening on exactly one useful question means the user answers or skips it and the
-// interview still closes on whatever the >25 result-count gate alone left large — a tax on the user's
-// attention, not a niche shortlist. This is a SECOND, independent condition that composes with the
-// existing INTERVIEW_STOP_AT/MIN_TOTAL_TO_SHOW result-count gate — both must hold, neither replaces
-// the other. It governs the OPENING decision only: once open, the interview still keeps asking down to
-// the very last useful question (unchanged continuation loop, proved absent from this gate below).
+// ADVANCED FILTER "1+ USEFUL QUESTIONS TO OPEN" GATE (owner brief 2026-08-22, REVISED owner
+// 2026-08-24 — supersedes the original ">=2" rule) — Advanced Filter must never open for a cohort
+// with 0 "useful" questions (one that passes scoreQuestion() — real narrowing power over the CURRENT
+// eligible set — not merely structurally eligible via cohortAllows/isAgeFilterScope), but MUST open
+// and ask a cohort with exactly 1 useful question — a single genuinely useful question is still a
+// real, honest narrowing step; withholding it was the defect the 2026-08-24 revision fixes. This is
+// a SECOND, independent condition that composes with the existing INTERVIEW_STOP_AT/MIN_TOTAL_TO_SHOW
+// result-count gate — both must hold, neither replaces the other. It governs the OPENING decision
+// only: once open, the interview still keeps asking down to the very last useful question (unchanged
+// continuation loop, proved absent from this gate below).
 //
 // EXECUTION NOTE: advancedFilters.ts (scoreQuestion's home) is not standalone-importable by a plain
 // Node runner — like every other AF barrier in this repo that touches it (verify-advanced-filter-
@@ -35,13 +36,15 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.error(`FAIL  ${label}${detail ? `\n      ${detail}` : ''}`);
 };
 
-console.log('\nAdvanced Filter "2+ useful questions to open" gate\n');
+console.log('\nAdvanced Filter "1+ useful questions to open" gate\n');
 
 const adv = codeOnly(read('src/data/advancedFilters.ts'));
 
-// ── The threshold itself is exactly 2 (owner-specified, not 0/1/3) ─────────────────────────────────
-check('MIN_USEFUL_QUESTIONS_TO_SHOW is declared, exported, and exactly 2 (owner: 0/1 hide AF, 2+ may show it)',
-  /export const MIN_USEFUL_QUESTIONS_TO_SHOW = 2;/.test(adv));
+// ── The threshold itself is exactly 1 (owner-specified 2026-08-24, not 0/2/3) ──────────────────────
+check('MIN_USEFUL_QUESTIONS_TO_SHOW is declared, exported, and exactly 1 (owner 2026-08-24: 0 hides AF, 1+ shows it)',
+  /export const MIN_USEFUL_QUESTIONS_TO_SHOW = 1;/.test(adv));
+check('the OLD threshold (2) is gone — regression to the superseded ">=2" rule that withheld a lone useful question',
+  !/export const MIN_USEFUL_QUESTIONS_TO_SHOW = 2;/.test(adv));
 
 // ── "Useful" is defined ONCE, by scoreQuestion, and this gate counts exactly ITS output ────────────
 // rankQuestions() (unchanged by this fix) already filters the pool to questions where scoreQuestion
@@ -68,9 +71,9 @@ check('agent.tsx imports MIN_USEFUL_QUESTIONS_TO_SHOW from @/data/advancedFilter
 
 check("startAgeFlow's opening guard reads `ageFlowPlanRef.current.length < MIN_USEFUL_QUESTIONS_TO_SHOW` (not just an empty-plan check)",
   /if\s*\(ageFlowPlanRef\.current\.length\s*<\s*MIN_USEFUL_QUESTIONS_TO_SHOW\)\s*\{\s*setAgeFlow\(null\);\s*if\s*\(fallbackToRefine\)\s*startRefine\(q\);\s*return;\s*\}/.test(ag),
-  'this exact shape is the fix: 0 OR 1 useful question must take the same silent-close/fallback-to-refine path an empty plan already used');
+  'this exact shape is the fix: 0 useful questions must take the silent-close/fallback-to-refine path an empty plan already used');
 
-check('the OLD 0-only guard (`if (!ageFlowPlanRef.current.length)`) is gone — regression to the pre-fix 1-question-opens-AF bug',
+check('the guard reads the NAMED constant, not a magic `!ageFlowPlanRef.current.length` literal — one source of truth for the threshold, even though `< 1` and `!length` are numerically identical today',
   !/if\s*\(!ageFlowPlanRef\.current\.length\)/.test(ag));
 
 // ── THE GATE NOW HAS TWO PLACEMENTS, ONE PER ENTRY PATH (owner amendment 2026-08-23) ─────────────
@@ -83,7 +86,7 @@ check('the OLD 0-only guard (`if (!ageFlowPlanRef.current.length)`) is gone — 
 //   • SCOPE UNRESOLVED       → startAgeFlow hands off to the hierarchy, and the gate is re-evaluated
 //                              at the scope→advanced transition inside presentGuided.
 // Both are pinned below. Losing EITHER placement re-opens a real defect, in opposite directions.
-check('the resolved-scope gate still sits BEFORE presentGuided(0, token) — a <2 plan never reaches the asking phase',
+check('the resolved-scope gate still sits BEFORE presentGuided(0, token) — a <1 (i.e. empty) plan never reaches the asking phase',
   (() => {
     const gateIdx = ag.search(/if\s*\(ageFlowPlanRef\.current\.length\s*<\s*MIN_USEFUL_QUESTIONS_TO_SHOW\)/);
     // LAST occurrence, deliberately: since 2026-08-23 startAgeFlow contains TWO
@@ -103,7 +106,7 @@ check('an UNRESOLVED scope bypasses that gate and opens on the hierarchy instead
   'without this, a category-only or group-only scope ranks to an empty plan and the interview closes before asking anything');
 
 // ── The continuation loop is UNTOUCHED — presentGuided must keep asking down to the LAST useful
-// question (owner §2/§6), never re-apply the >=2 threshold after the interview has already opened.
+// question (owner §2/§6), never re-apply the >=1 threshold after the interview has already opened.
 const presentGuidedBody = ag.match(/const presentGuided = async[\s\S]*?\n  \};/)?.[0] ?? '';
 check('presentGuided body located (extraction must fail loudly, never silently pass)', presentGuidedBody.length > 0);
 
@@ -117,7 +120,7 @@ const transitionGate = presentGuidedBody.match(
 );
 check('the transition gate exists and is guarded by "every recorded step so far is a SCOPE step"',
   !!transitionGate,
-  'the >=2 threshold may only be re-evaluated at the scope→advanced hand-off — never on a later answer');
+  'the >=1 threshold may only be re-evaluated at the scope→advanced hand-off — never on a later answer');
 check('presentGuided references the threshold EXACTLY once (only that transition gate)',
   (presentGuidedBody.match(/MIN_USEFUL_QUESTIONS_TO_SHOW/g) ?? []).length === 1,
   `found ${(presentGuidedBody.match(/MIN_USEFUL_QUESTIONS_TO_SHOW/g) ?? []).length}`);
@@ -149,6 +152,6 @@ check('an empty answer contributes no predicate (enforced in the shared derivati
     readFileSync(join(import.meta.dirname, '..', 'src', 'lib', 'afSteps.ts'), 'utf8')));
 
 console.log(failures === 0
-  ? '\n✓ AF 2+ useful-questions gate intact: correct threshold, correct wiring, continuation loop untouched, Skip = confirm-empty\n'
-  : `\n✗ ${failures} check(s) FAILED — the AF 2+ useful-questions gate is broken\n`);
+  ? '\n✓ AF 1+ useful-questions gate intact: correct threshold, correct wiring, continuation loop untouched, Skip = confirm-empty\n'
+  : `\n✗ ${failures} check(s) FAILED — the AF 1+ useful-questions gate is broken\n`);
 process.exit(failures === 0 ? 0 : 1);

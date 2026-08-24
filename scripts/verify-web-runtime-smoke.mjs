@@ -576,6 +576,101 @@ try {
     !reentrancyFinalOpen && Number.isFinite(reentrancyFinal) && reentrancyFinal < reentrancyStart && reentrancyFinal !== reentrancyStart,
     `start=${reentrancyStart} final=${reentrancyFinal}`);
 
+  // ---- Journey J: MIN_USEFUL_QUESTIONS_TO_SHOW's 1-question case (owner 2026-08-24 — supersedes
+  // the original ">=2" brief: 0 useful questions closes cleanly, 1+ opens and asks every one of them,
+  // down to the last — a lone genuinely useful question is still a real, honest narrowing step, not a
+  // "tax on attention" to withhold). src/data/advancedFilters.ts pins the threshold value and
+  // scripts/verify-af-min-useful-questions-gate.ts pins the source shape, but neither ever drives the
+  // real interview against real data — this does. Factory + Annual Rent + الرياض is a REAL, currently
+  // live cohort with EXACTLY one certified question (src/lib/afCohorts.ts: `Factory: { RentAnnual:
+  // ['street_width'] }`, evidence n=72 nationwide, 10/10 exact against aqar's own structured field) —
+  // chosen because a same-type, same-city scope with Buy ADDED (dealCombined) has ZERO certified
+  // questions (street_width is Buy+RentAnnual certified but not RentMonthly, so the 3-way combined
+  // intersection is empty), giving both boundary cases (0 and 1) real, live coverage in one journey
+  // without inventing synthetic data.
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(4000);
+  await tap('تجاري');
+  await tap('الصناعة واللوجستيات'); await page.waitForTimeout(300);
+  await tap('مصنع'); await page.waitForTimeout(300);
+  await tap('إيجار'); await page.waitForTimeout(300); // add Rent (Buy is on by default)
+  await tap('شراء'); await page.waitForTimeout(300);  // then drop Buy — Rent-only, never combined
+  await pickCity('الرياض');
+  await tap('بحث');
+  const jStart = await waitForCount(45000);
+  check('[J] 1-question scope (Factory/RentAnnual/الرياض) lands with a real start count', Number.isFinite(jStart), `start=${jStart}`);
+
+  let jOpened = false;
+  for (let i = 0; i < 6 && !jOpened; i++) {
+    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+    await page.waitForTimeout(1200);
+    jOpened = await afPresent();
+  }
+  check('[J] Advanced Filter OPENS for a cohort with exactly ONE useful question (the 1-question fix)', jOpened);
+
+  let jTitles = [];
+  if (jOpened) {
+    const snap = await afSnapshot();
+    if (snap.title) jTitles.push(snap.title);
+    check('[J] exactly one question is shown (street_width)', jTitles.length === 1, JSON.stringify(jTitles));
+    if (snap.options.length) {
+      await page.locator(`[data-testid="${snap.options[0]}"]:visible`).first().click({ timeout: 8000 });
+      await page.waitForTimeout(300);
+      await page.locator('[data-testid="af-confirm"]:visible').first().click({ timeout: 8000 });
+    }
+    let waited = 0;
+    while (waited < 45000) {
+      await page.waitForTimeout(500); waited += 500;
+      if (!(await afPresent())) break;
+    }
+  }
+  const jFinalOpen = await afPresent();
+  check('[J] after answering the single question, the interview closes CLEANLY (no second question)', !jFinalOpen);
+  // Same staleness trap Journey I already documents: af-card unmounting is NOT "the new count
+  // landed" — finishGuided's mining transition holds the OLD pre-AF results on screen underneath for
+  // a guaranteed minimum beat first. Give that floor time, then require two reads a second apart to
+  // agree before trusting the number (else this reads back the stale pre-answer count, e.g. 43 when
+  // the true narrowed count is 39 — a HARNESS race, not a product defect).
+  let jFinal = null;
+  if (!jFinalOpen) {
+    await page.waitForTimeout(3000);
+    let stableSince = null;
+    const until = Date.now() + 45000;
+    while (Date.now() < until) {
+      const c = await landedCount();
+      if (c !== null) {
+        if (stableSince !== null && stableSince.value === c && Date.now() - stableSince.at >= 1000) { jFinal = c; break; }
+        if (stableSince === null || stableSince.value !== c) stableSince = { value: c, at: Date.now() };
+      }
+      await page.waitForTimeout(500);
+    }
+  }
+  check('[J] the closed interview lands on a genuinely narrowed, non-null result',
+    !jFinalOpen && Number.isFinite(jFinal) && jFinal < jStart, `start=${jStart} final=${jFinal}`);
+
+  // Boundary case: the SAME type+city with Buy ALSO selected (dealCombined) has ZERO certified
+  // questions (street_width is Buy+RentAnnual certified but not RentMonthly, so the 3-way
+  // Buy∩RentAnnual∩RentMonthly intersection cohortAllowsCombined requires is empty) — the interview
+  // must never open at all; the button falls through to plain refine chips. Fresh page load rather
+  // than mutating the just-finished journey's state — a clean, independently reproducible scope.
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(4000);
+  await tap('تجاري');
+  await tap('الصناعة واللوجستيات'); await page.waitForTimeout(300);
+  await tap('مصنع'); await page.waitForTimeout(300);
+  await tap('إيجار'); await page.waitForTimeout(300); // Buy is on by default; add Rent → combined
+  await pickCity('الرياض');
+  await tap('بحث');
+  const jZeroStart = await waitForCount(45000);
+  check('[J0] 0-question scope (Factory/Buy+Rent-combined/الرياض) lands with a real start count', Number.isFinite(jZeroStart), `start=${jZeroStart}`);
+  let jZeroOpened = false;
+  for (let i = 0; i < 4 && !jZeroOpened; i++) {
+    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+    await page.waitForTimeout(1200);
+    jZeroOpened = await afPresent();
+  }
+  check('[J0] 0-question cohort (same type+city, Buy+Rent combined) never opens Advanced Filter', !jZeroOpened);
+
   check('no uncaught runtime error across the whole run', crashes.length === 0, crashes.join(' | '));
 } catch (e) {
   failed++;
