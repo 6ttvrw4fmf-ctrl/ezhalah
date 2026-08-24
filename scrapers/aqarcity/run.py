@@ -730,10 +730,39 @@ def main() -> int:
             return 0
 
         # Full run: prune listings that were active before but weren't seen this crawl.
+        #
+        # SITEMAP ABSENCE IS NOT DEATH (2026-08-24 data-integrity incident). Aqar City's sitemap is a
+        # ~1,799-entry WINDOW, not the full live catalogue: 252 residential + 16 commercial listings
+        # were deactivated over 30 days for missing three crawls in a row, and a direct fetch found
+        # 252/252 and 16/16 of them STILL SERVED — most with ids inside the sitemap's own id range.
+        # Every prune guard behaved correctly (coverage ~99.6%, collapse never near 30%); they guard
+        # against a broken crawl, and this was a perfect crawl of an incomplete index. So the kill now
+        # requires the source's own verdict, via the same oracle platform_retention_policy already
+        # documents for aqarcity ("soft-expire: 200 + expired banner = dead; clean 200 = live").
+        # _probe_id() maps straight onto it: notfound/exists → gone, live → live, error → unknown.
+        prune_session = session()
+        try:
+            prune_session.get(f"{BASE}/", timeout=30, allow_redirects=True)  # warm the CF cookie once
+        except Exception:
+            pass
+
+        def _verify_gone(ad_number: str) -> str:
+            pid = re.sub(r"\D", "", ad_number or "")
+            if not pid:
+                return "unknown"
+            status = _probe_id(prune_session, f"{BASE}/property/{pid}")
+            time.sleep(float(os.environ.get("AQARCITY_PROBE_DELAY", "0.25")))
+            if status in ("notfound", "exists"):
+                return "gone"   # removed, or the source's own «هذا الإعلان منتهي» expired banner
+            if status == "live":
+                return "live"
+            return "unknown"    # transient/blocked — never proof of death
+
         pruned = 0
         for tbl, rows_seen in (("aqarcity_residential_listings", res),
                                ("aqarcity_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Aqarcity")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Aqarcity",
+                                verify_gone=_verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
