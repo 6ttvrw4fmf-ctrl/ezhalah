@@ -37,7 +37,16 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
-const WAIVED: Record<string, string> = {};
+const WAIVED: Record<string, string> = {
+  // The repair and the detector that watches its class landed as two migrations one minute apart,
+  // so the repair file itself never reaches a mon_detect_* in executed SQL. The class IS watched:
+  // 20260824115704 re-asserts this exact UPDATE idempotently and then calls
+  // mon_detect_fabricated_unpublished_amenity(), which is on the mon_run_all_detectors() roster and
+  // runs twice an hour. Open that companion to check this reason rather than taking it on trust.
+  '20260824114314_defabricate_probed_aqar_non_villa_maid_driver.sql':
+    'watched by its companion 20260824115704_defabrication_reruns_its_watching_detector.sql, which '
+    + 're-asserts the same UPDATE and re-runs mon_detect_fabricated_unpublished_amenity()',
+};
 
 // Enforcement starts here — the day this rule landed.
 const REPAIR_GUARD_BASELINE = '20260823000000';

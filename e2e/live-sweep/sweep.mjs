@@ -41,6 +41,12 @@ const OUT_DIR = process.env.SWEEP_OUT || '/tmp/live-sweep';
 const ONLY = process.env.SWEEP_ONLY || '';
 const SEARCH_RPC = '/rpc/location_search_candidates_ar';
 
+// The RPC serves at most one page (1,500). An ID-set comparison is only meaningful when the WHOLE
+// eligible set fits inside it; above that the client legitimately holds a page of a larger set and
+// only the count is comparable. Kept below the cap so a set sitting exactly at 1,500 is never
+// mistaken for a complete one.
+const ID_SET_CAP = 1200;
+
 mkdirSync(OUT_DIR, { recursive: true });
 const JOURNAL = `${OUT_DIR}/journeys.jsonl`;
 writeFileSync(JOURNAL, '');
@@ -109,10 +115,47 @@ async function dbCount(filters) {
   return null;
 }
 
+// ── the published taxonomy, fetched as DATA (never a hardcoded list — §1) ────────────────────────
+// known_type_ar maps a نوع to its macro category. The oracle needs it to express p_category the way
+// the PRODUCT defines it ("this type belongs to سكني"), which is a taxonomy fact, not RPC code. Two
+// types are macro 'both' (عمارة, غير معروف) and are placed by the source table's own suffix.
+let _taxonomy = null;
+async function taxonomy() {
+  if (_taxonomy) return _taxonomy;
+  try {
+    const r = await fetch(`${SUPA}/rest/v1/known_type_ar?select=type_ar,macro`, { headers: H, signal: AbortSignal.timeout(30000) });
+    const rows = await r.json();
+    if (!Array.isArray(rows) || !rows.length) return null;
+    _taxonomy = rows;
+  } catch { return null; }
+  return _taxonomy;
+}
+
+/** LAYER 5b — the DB's own ID SET, so a count that matches by coincidence cannot pass. */
+async function dbIds(filters, cap) {
+  const q = `${SUPA}/rest/v1/search_listings_ar`
+    + `?select=source_table,listing_id&production_ready=is.true&${filters}&limit=${cap}`;
+  for (let a = 0; a < 3; a++) {
+    try {
+      const r = await fetch(q, { headers: H, signal: AbortSignal.timeout(60000) });
+      const rows = await r.json();
+      if (Array.isArray(rows)) return rows.map((x) => `${x.source_table}:${x.listing_id}`);
+    } catch { /* retry */ }
+    await sleep(1500 * (a + 1));
+  }
+  return null;
+}
+
 /** LAYER 4 — replay the app's OWN captured request body against the live RPC. */
 const rpcTotal = async (body) => {
   const j = await post(SEARCH_RPC, { ...body, p_limit: 1, p_offset: 0, p_per_platform: null });
   return Array.isArray(j) ? (j.length ? Number(j[0].total_count) : 0) : null;
+};
+
+/** LAYER 4b — the RPC's OWN ID list. An ARRAY, not a Set: repeats are a finding, not a detail. */
+const rpcIds = async (body, cap) => {
+  const j = await post(SEARCH_RPC, { ...body, p_limit: cap, p_offset: 0, p_per_platform: null });
+  return Array.isArray(j) ? j.map((r) => `${r.source_table}:${r.listing_id}`) : null;
 };
 
 const ledgerPlan = (dimension, limit) => post('/rpc/ops_qa_sweep_plan', { p_dimension: dimension, p_limit: limit });
@@ -206,27 +249,89 @@ const visibleState = (page) => page.evaluate(() => {
  * "found" three defects that were purely the oracle's own imprecision. A sweep that accuses the
  * product for its own missing predicate is worse than one that stays quiet: skip, and say why.
  */
-function dbFilterFromRequest(req) {
+function dbFilterFromRequest(req, tax) {
   const enc = encodeURIComponent;
   const unsupported = [];
-  for (const k of ['p_districts', 'p_region_ids', 'p_price_min', 'p_price_max', 'p_price_min_rent',
+  for (const k of ['p_price_min', 'p_price_max', 'p_price_min_rent',
                    'p_price_max_rent', 'p_area_min', 'p_area_max', 'p_beds_exact', 'p_beds_min',
                    'p_bath_min', 'p_amenities', 'p_age_min', 'p_age_max', 'p_is_new_construction',
                    'p_street_width_min', 'p_directions', 'p_furnished', 'p_rating_min',
-                   'p_reviews_min', 'p_unit_subtypes', 'p_tables2', 'p_platforms']) {
+                   'p_reviews_min', 'p_unit_subtypes', 'p_platforms']) {
     const v = req?.[k];
     if (v != null && !(Array.isArray(v) && v.length === 0)) unsupported.push(k);
   }
   if (unsupported.length) return { comparable: false, reason: `not expressible here: ${unsupported.join(',')}` };
+
+  // ── الحي: expressible, but only inside ONE city ────────────────────────────────────────────────
+  // The product's promise (§9) is "every result belongs to ≥1 selected حي". The RPC keeps that
+  // promise by comparing a NORMALISED token; this oracle keeps it by comparing the SERVED LABEL
+  // exactly. Two different implementations of one contract — which is the whole point of layer 5,
+  // and is why this is not a copy of the RPC.
+  //
+  // They coincide only because §42.1 guarantees ONE canonical rendering per (city_id, token). That
+  // guarantee is per-CITY: 232 tokens are rendered differently in different cities (measured
+  // 2026-08-24), so across a multi-city request label-equality would legitimately under-count and
+  // this oracle would accuse a healthy product. One city → the guarantee holds → exact and safe.
+  // More than one → say so and skip, rather than guess.
+  //
+  // Deliberately NOT excluded: «ناوان» and «العمارية», the 2 labels (of 1,575) whose English
+  // district_name_bridge entry contributes a different token («جعرانة»). Today neither city holds a
+  // جعرانة listing, so the extra token yields nothing and the two agree. If that ever changes the
+  // user is getting a حي they did not select, and this oracle SHOULD fail — hardcoding them out
+  // would be building the blind spot back in.
+  if (req.p_districts?.length) {
+    if ((req.p_cities?.length ?? 0) !== 1) {
+      return { comparable: false,
+               reason: `p_districts with ${req.p_cities?.length ?? 0} cities: one canonical rendering is only guaranteed per city` };
+    }
+  }
+
   let f = '';
+  if (req.p_districts?.length) f += `&district_ar=in.(${enc(req.p_districts.map((d) => `"${d}"`).join(','))})`;
+  // p_region_ids is a plain column predicate in the served index, so it needs no interpretation.
+  if (req.p_region_ids?.length) f += `&region_id=in.(${req.p_region_ids.map((n) => Number(n)).join(',')})`;
   if (req.p_deal) f += `&deal_ar=eq.${enc(req.p_deal)}`;
   if (req.p_rent_period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`;
   if (req.p_rent_period === 'شهري') f += '&payment_monthly=is.true&rent_now_pay_later=not.is.true';
   if (req.p_cities?.length) f += `&city_ar=in.(${enc(req.p_cities.map((c) => `"${c}"`).join(','))})`;
-  if (req.p_types?.length) f += `&type_ar=in.(${enc(req.p_types.map((t) => `"${t}"`).join(','))})`;
+
+  // ── the SCOPE arm: (tables ∧ types) OR (tables2 ∧ types2) ─────────────────────────────────────
   // p_tables IS the category scope (residential vs commercial source tables) — omitting it was the
-  // 36,916-vs-39,883 false alarm on the first run.
-  if (req.p_tables?.length) f += `&source_table=in.(${enc(req.p_tables.map((t) => `"${t}"`).join(','))})`;
+  // 36,916-vs-39,883 false alarm on the first run. p_tables2/p_types2 carry the SECOND arm: a
+  // Residential-macro search still reaches commercial tables for types that live in both.
+  const inList = (xs) => `(${xs.map((x) => `"${x}"`).join(',')})`;
+  const arm = (tables, types) => {
+    const parts = [];
+    if (tables?.length) parts.push(`source_table.in.${inList(tables)}`);
+    if (types?.length) parts.push(`type_ar.in.${inList(types)}`);
+    return parts.length > 1 ? `and(${parts.join(',')})` : (parts[0] ?? null);
+  };
+  const a1 = arm(req.p_tables, req.p_types);
+  const a2 = (req.p_tables2?.length && req.p_types2?.length) ? arm(req.p_tables2, req.p_types2) : null;
+  const clauses = [];
+  if (a1 && a2) clauses.push(`or(${a1},${a2})`);
+  else if (a1) clauses.push(a1);
+  else if (a2) clauses.push(a2);
+
+  // ── the CATEGORY gate, expressed from the PUBLISHED TAXONOMY, not from the RPC ────────────────
+  // p_category means "this نوع belongs to سكني/تجاري". That is a fact recorded in known_type_ar, so
+  // the oracle reads the taxonomy as data and applies it itself. Two types are macro 'both'
+  // (عمارة, غير معروف) and are placed by the source table's own suffix.
+  if (req.p_category) {
+    if (!tax) return { comparable: false, reason: 'known_type_ar unavailable — refusing to guess the category scope' };
+    const macroTypes = tax.filter((t) => t.macro === req.p_category).map((t) => t.type_ar);
+    const bothTypes = tax.filter((t) => t.macro === 'both').map((t) => t.type_ar);
+    const suffix = req.p_category === 'Residential' ? '*_residential_listings'
+                 : req.p_category === 'Commercial' ? '*_commercial_listings' : null;
+    if (!macroTypes.length || !suffix) {
+      return { comparable: false, reason: `p_category=${req.p_category} has no taxonomy mapping here` };
+    }
+    clauses.push(bothTypes.length
+      ? `or(type_ar.in.${inList(macroTypes)},and(type_ar.in.${inList(bothTypes)},source_table.like.${suffix}))`
+      : `type_ar.in.${inList(macroTypes)}`);
+  }
+
+  if (clauses.length) f += `&and=(${enc(clauses.join(','))})`;
   return { comparable: true, filter: f.replace(/^&/, '') };
 }
 
@@ -258,10 +363,28 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
   if (j.rpc == null) { note('RPC replay unavailable — skipping 4/5 for this journey'); journeys.push(j); return j; }
 
   // 4→5 RPC vs INDEPENDENT DB TRUTH — derived from the app's OWN request, or skipped honestly.
-  const dbf = dbFilterFromRequest(req);
+  const dbf = dbFilterFromRequest(req, await taxonomy());
   if (dbf.comparable) {
     j.db = await dbCount(dbf.filter);
     if (j.db != null && j.db !== j.rpc) { defect(name, 'RPC→DB', `RPC ${j.rpc} vs independent DB ${j.db}`); j.ok = false; }
+
+    // 4b→5b THE ID SETS. Equal counts are not equal sets: one missing row plus one extra row is a
+    // real matching bug that every count-only check reports as healthy. Only meaningful while the
+    // whole set fits inside one RPC page — above the cap the client holds a page of a larger set,
+    // so the count is the comparable quantity and the set comparison is skipped, not faked.
+    if (j.rpc != null && j.rpc > 0 && j.rpc <= ID_SET_CAP) {
+      const [rIds, dIds] = await Promise.all([rpcIds(req, ID_SET_CAP), dbIds(dbf.filter, ID_SET_CAP)]);
+      if (rIds && dIds) {
+        const rSet = new Set(rIds); const dSet = new Set(dIds);
+        const missing = [...dSet].filter((x) => !rSet.has(x));   // DB has it, the user never sees it
+        const extra   = [...rSet].filter((x) => !dSet.has(x));   // served but fails the user's filters
+        const dupes   = rIds.length - rSet.size;
+        j.idSet = { rpc: rIds.length, db: dIds.length, missing: missing.length, extra: extra.length, duplicates: dupes };
+        if (missing.length) { defect(name, 'RPC→DB', `${missing.length} eligible listing(s) never served, e.g. ${missing.slice(0, 3).join(' ')}`); j.ok = false; }
+        if (extra.length)   { defect(name, 'RPC→DB', `${extra.length} served listing(s) fail the user's own filters, e.g. ${extra.slice(0, 3).join(' ')}`); j.ok = false; }
+        if (dupes > 0)      { defect(name, 'RPC→DB', `${dupes} duplicate listing(s) in one result set`); j.ok = false; }
+      } else { j.idSetSkipped = 'id fetch failed'; }
+    } else if (j.rpc > ID_SET_CAP) { j.idSetSkipped = `set larger than one RPC page (${j.rpc} > ${ID_SET_CAP})`; }
   } else { j.dbSkipped = dbf.reason; }
   // 5→6 what the user actually sees
   if (rendered != null && j.rpc != null && rendered !== j.rpc) {
@@ -281,8 +404,26 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
 }
 
 // ── the browser ──────────────────────────────────────────────────────────────────────────────────
+// Launch options are ENV-DRIVEN and default to nothing, so CI (which runs `playwright install`) is
+// byte-for-byte unaffected. They exist for the agent containers the daily routine actually runs in,
+// where two things differ and both make every journey fail to launch — which reads as a total
+// product outage until you notice it is the harness (SEARCH_MATCH_QA_ENGINEER.md §40.7, §41.1):
+//   PW_EXECUTABLE_PATH — the image ships a pinned Chromium build (/opt/pw-browsers/chromium) that
+//                        does not match the build number this Playwright driver would download.
+//   HTTPS_PROXY        — behind the MITM egress proxy Chromium resets every connection under
+//                        TLS 1.3, so the proxy is passed through with --ssl-version-max=tls1.2.
+// Read at CALL time, not module-eval time: a caller that imports this module and then sets the env
+// var would otherwise get the empty options object it captured on import.
+const launchOpts = () => ({
+  ...(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {}),
+  ...(process.env.HTTPS_PROXY
+    ? { proxy: { server: process.env.HTTPS_PROXY },
+        args: ['--no-sandbox', '--disable-quic', '--ignore-certificate-errors', '--ssl-version-max=tls1.2'] }
+    : {}),
+});
+
 async function withPage(mobile, fn) {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOpts());
   const ctx = await browser.newContext(
     mobile ? { ...devices['iPhone 13'], locale: 'ar-SA' }
            : { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 1100 }, locale: 'ar-SA' });

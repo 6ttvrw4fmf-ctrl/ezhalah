@@ -304,7 +304,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       }
       if (node?.style) {
         node.style.transition = ''; node.style.transform = ''; node.style.zIndex = '';
-        node.style.boxShadow = ''; node.style.position = ''; node.style.background = '';
+        node.style.boxShadow = ''; node.style.position = '';
         node.style.cursor = '';
       }
       setDrag(null);
@@ -371,7 +371,6 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         d.node.style.transition = REDUCED_MOTION ? 'none' : `transform 120ms ${EASE_CALM}, box-shadow 120ms ${EASE_CALM}`;
         d.node.style.zIndex = '30';
         d.node.style.position = 'relative';
-        d.node.style.background = '#ffffff';
         d.node.style.cursor = 'grabbing';
         d.node.style.transform = 'translateY(0px) scale(1.02)';
         d.node.style.boxShadow = '0 6px 18px rgba(11,20,15,0.16)';
@@ -682,7 +681,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                         // hot-row hover from main — hover paint and drag wiring share this host.)
                         ref={bindRowHost(c, g.key, idx, g.items.length, g.items.filter((x) => x.id !== c.id).map((x) => x.id)) as any}
                         onLayout={idx === 0 ? (e) => { const h = e.nativeEvent.layout.height; if (h > 20) rowHRef.current = h; } : undefined}
-                        style={[s.histRow, WEB_SMOOTH, hot && s.histRowHot, activeChatId === c.id && s.histRowActive, menu?.id === c.id && s.histRowOpen, { direction: 'ltr' } as any,
+                        style={[s.histRow, WEB_SMOOTH, hot && s.histRowHot, activeChatId === c.id && s.histRowActive, menu?.id === c.id && s.histRowOpen, drag?.id === c.id && s.histRowDragging, { direction: 'ltr' } as any,
                           // Siblings glide aside (translateY only — X never moves, RTL layout untouched)
                           // while a drag from this bucket hovers over their slot. The dragged row's own
                           // transform is applied directly to its DOM node so it tracks the pointer with
@@ -727,7 +726,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                             accessibilityHint={t('Hold to reorder the conversation')}
                           >
                             <Ionicons name="chatbubble-outline" size={15} color={hot ? colors.surface : '#8a978f'} />
-                            <Text style={[s.histLabel, hot && s.histLabelHot]} numberOfLines={1}>{displayTitle(c, locale) || queryLabel(c.query)}</Text>
+                            <Text style={[s.histLabel, (hot || drag?.id === c.id) && s.histLabelHot]} numberOfLines={1}>{displayTitle(c, locale) || queryLabel(c.query)}</Text>
                             {c.starred && <Ionicons name="star" size={13} color={GOLD} />}
                           </Pressable>
                         )}
@@ -897,6 +896,10 @@ const s = StyleSheet.create({
   // DISTINCT from histRowActive below — the current chat keeps its persistent light-green highlight
   // and never takes this fill, so hovered vs selected can't be confused.
   histRowHot: { backgroundColor: colors.dark },
+  // The row being DRAGGED: same dark-card/white-label pair as hover — deterministic regardless of
+  // hover flicker, and opaque so rows it glides over never show through. (A forced-white card here
+  // once made the hovered-white title invisible for the whole drag.)
+  histRowDragging: { backgroundColor: colors.dark },
   histLabelHot: { color: colors.surface },
   histRowOpen: { backgroundColor: '#f3f5f3' },
   // The chat the user is currently in — a light green wash so it's obvious which conversation is open.
