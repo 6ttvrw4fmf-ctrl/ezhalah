@@ -244,11 +244,24 @@ export default function AdvancedQuestionCard({
   }, [progressCur, progressTotal, progress]);
   const fillWidth = progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
 
-  // Live footer count for the current tentative selection (empty = the scope total). Holds the last
-  // good number on a failed/racey fetch rather than flashing a wrong one.
+  // Live footer count for the current tentative selection (empty = the scope total).
+  //
+  // THE DISPLAYED NUMBER MUST BELONG TO THE DISPLAYED SELECTION (certification 2026-08-24).
+  // While a fetch is in flight nothing is written, so the previous number stays on screen and there
+  // is no per-tap flicker. But when the fetch RESOLVES NULL — `fetchApartmentGuidedCounts` is wrapped
+  // in withTimeout(AGE_COUNT_TIMEOUT_MS = 4000) and a slow count RPC trips it — the old `n != null`
+  // guard PINNED the previous selection's total to the new selection, permanently and silently.
+  // Measured live on production: جدة / Buy+Rent / TYPE tier, scope 27,378; the user ticks «شقة»
+  // whose own row reads 25,030; the count RPC returned 25,030; the header chip and the primary
+  // button both kept reading «27,378» for >12s. The button that promises «متابعة · 27,378 نتيجة»
+  // was promising the count of a query the user was no longer asking for.
+  //
+  // Clearing is the honest failure mode and it is already handled downstream: the chip renders
+  // nothing when `countChip == null` (Shell, above) and the primary button falls back to a bare
+  // «متابعة» (below). Showing no number is not a regression; showing another selection's number is.
   useEffect(() => {
     let alive = true;
-    liveCount(sel).then((n) => { if (alive && n != null) setCount(n); });
+    liveCount(sel).then((n) => { if (alive) setCount(n); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel.join(','), titleKey]);
