@@ -50,16 +50,18 @@ export type AdvancedQuestion = {
 // minOptionsFor / INTERVIEW_STOP_AT / MIN_TOTAL_TO_SHOW / MIN_REAL_OPTION_COUNT / meaningful() now
 // live in @/lib/afRanking (imported/re-exported above) — unchanged in value or behavior, just pure.
 
-// Minimum USEFUL questions to open the interview at all (owner 2026-08-22). "Useful" = passes
-// scoreQuestion() above — real narrowing power over the CURRENT eligible set, not merely
-// structurally eligible (cohortAllows/isAgeFilterScope). A cohort with only one useful question
-// would open Advanced Filter, spend the user's attention on that single weak question, and still
-// close on a set the >25 result-count gate alone left large — not a niche shortlist, just a tax on
-// the user's time. This SECOND, independent condition composes with INTERVIEW_STOP_AT/
-// MIN_TOTAL_TO_SHOW (the result-count gate) — both must hold before Advanced Filter may open; this
-// constant governs the OPENING decision only, never the continuation loop (rankQuestions/
-// presentGuided keep asking down to the last useful question, however many remain).
-export const MIN_USEFUL_QUESTIONS_TO_SHOW = 2;
+// Minimum USEFUL questions to open the interview at all (owner 2026-08-22; REVISED owner 2026-08-24
+// — supersedes the original ">=2" brief). "Useful" = passes scoreQuestion() above — real narrowing
+// power over the CURRENT eligible set, not merely structurally eligible (cohortAllows/
+// isAgeFilterScope). The rule is now: 0 useful questions closes cleanly (nothing worth asking); 1
+// or more useful questions opens and asks every one of them, down to the last. A single genuinely
+// useful question is still a real, honest narrowing step for the user — it is not "a tax on their
+// attention" to ask the one question that actually moves their result set; withholding it was the
+// defect. This SECOND, independent condition composes with INTERVIEW_STOP_AT/MIN_TOTAL_TO_SHOW (the
+// result-count gate) — both must hold before Advanced Filter may open; this constant governs the
+// OPENING decision only, never the continuation loop (rankQuestions/presentGuided keep asking down
+// to the last useful question, however many remain — unchanged by this revision).
+export const MIN_USEFUL_QUESTIONS_TO_SHOW = 1;
 
 // Engine-level LIVE result count for a query — the footer «Show {N}» on every card. Generic: the count
 // RPC applies whatever the query carries (types/scope/amenities/bath/age), so this works for every

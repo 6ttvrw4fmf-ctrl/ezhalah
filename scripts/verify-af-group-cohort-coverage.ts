@@ -12,7 +12,8 @@
 //      must not be offered a question only some of its types carry;
 //   2. an UNCERTIFIED type (no `COHORT_QUESTIONS` entry) is treated as an EMPTY cohort, never as
 //      "no constraint" (afCohorts.ts:226) — deliberately conservative;
-//   3. `MIN_USEFUL_QUESTIONS_TO_SHOW = 2` (owner 2026-08-22).
+//   3. `MIN_USEFUL_QUESTIONS_TO_SHOW` (owner 2026-08-22; REVISED owner 2026-08-24 to 1 — a lone
+//      useful question now opens and is asked, it no longer hides the feature).
 //
 // Put together: ONE uncertified type inside a shipped GROUP zeroes Advanced Filter for that whole
 // group, and the user simply never sees the feature. «Villas & Houses» is exactly this — `Duplex`
@@ -77,8 +78,9 @@ const UNCERTIFIED_IN_SHIPPED_GROUPS = [
 ].sort();
 
 // ── BASELINE 2: how many cohort-gated questions each shipped group allows, per shape ─────────────
-// A 0 means Advanced Filter is UNREACHABLE for that group+shape; a 1 means it is unreachable too,
-// because MIN_USEFUL_QUESTIONS_TO_SHOW is 2. Pinned so a change is visible on the PR that causes it.
+// A 0 means Advanced Filter is UNREACHABLE for that group+shape. A 1 IS reachable (owner
+// 2026-08-24: MIN_USEFUL_QUESTIONS_TO_SHOW is now 1, not 2) — the lone certified question opens
+// and is asked. Pinned so a change to the underlying cohort data is visible on the PR that causes it.
 const EXPECTED: Record<string, Record<string, number>> = {
   'Apartments & Co-living': { Buy: 0, 'Rent/Annual': 1, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
   // Buy 0 -> 1 on 2026-08-23: Duplex certified with its one source-verified field (bathrooms).
@@ -144,7 +146,7 @@ for (const { macro, group, types } of shippedGroups) {
     if (n !== expected[label]) {
       fail(
         `"${group}" / ${label}: ${n} cohort-gated question(s) eligible, pinned ${expected[label]}.\n` +
-        `      Advanced Filter needs MIN_USEFUL_QUESTIONS_TO_SHOW (2) to open, so this changes\n` +
+        `      Advanced Filter needs MIN_USEFUL_QUESTIONS_TO_SHOW (now 1) to open, so this changes\n` +
         `      whether the feature is reachable at all for that group. Intentional? Update the pin.`,
       );
     }
