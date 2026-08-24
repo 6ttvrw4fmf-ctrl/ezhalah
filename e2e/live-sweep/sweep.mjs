@@ -252,11 +252,14 @@ const visibleState = (page) => page.evaluate(() => {
 function dbFilterFromRequest(req, tax) {
   const enc = encodeURIComponent;
   const unsupported = [];
-  for (const k of ['p_price_min', 'p_price_max', 'p_price_min_rent',
-                   'p_price_max_rent', 'p_area_min', 'p_area_max', 'p_beds_exact', 'p_beds_min',
-                   'p_bath_min', 'p_amenities', 'p_age_min', 'p_age_max', 'p_is_new_construction',
-                   'p_street_width_min', 'p_directions', 'p_furnished', 'p_rating_min',
-                   'p_reviews_min', 'p_unit_subtypes', 'p_platforms']) {
+  // What STAYS unexpressible, and why — each is a deliberate refusal, not an oversight:
+  //   p_directions  norm_direction_ar() is the RPC's own normaliser; reimplementing it would make
+  //                 agreement self-confirmation rather than evidence (the norm_district_tok rule).
+  //   p_amenities   the RPC validates the token vocabulary and fails the whole predicate on an
+  //                 unknown token; expressing the boolean columns without that gate would silently
+  //                 disagree exactly when a bad token is sent — the case worth catching.
+  //   p_platforms   diversity/ranking territory, not matching.
+  for (const k of ['p_directions', 'p_platforms']) {
     const v = req?.[k];
     if (v != null && !(Array.isArray(v) && v.length === 0)) unsupported.push(k);
   }
@@ -331,7 +334,94 @@ function dbFilterFromRequest(req, tax) {
       : `type_ar.in.${inList(macroTypes)}`);
   }
 
-  if (clauses.length) f += `&and=(${enc(clauses.join(','))})`;
+
+  // ── NUMERIC PREDICATES ────────────────────────────────────────────────────────────────────────
+  // Two DIFFERENT unset conventions live here and mixing them up manufactures false mismatches:
+  //   • السعر and المساحة treat 0 as UNSET (nullif(x,0)) — a 0 budget means "no budget".
+  //   • street width / floor / age treat 0 as a REAL VALUE and only null means unset.
+  // Each is encoded below exactly as the product defines it, not as whichever is convenient.
+  const nz = (v) => (v == null || Number(v) === 0 ? null : Number(v));   // 0-as-unset
+  const nn = (v) => (v == null ? null : Number(v));                      // 0 is a real value
+  const range = (col, min, max, requireNotNull) => {
+    const parts = [];
+    if (requireNotNull) parts.push(`${col}.not.is.null`);
+    if (min != null) parts.push(`${col}.gte.${min}`);
+    if (max != null) parts.push(`${col}.lte.${max}`);
+    return parts.length ? (parts.length > 1 ? `and(${parts.join(',')})` : parts[0]) : null;
+  };
+
+  // السعر. The contract, per deal mode:
+  //   combined (p_deal null) — Buy ∪ Rent, each side judged by its OWN budget, and a side with no
+  //     budget set is unconstrained. The Rent side is annual: combined mode has no period selector.
+  //   single deal — بيع against price_total; إيجار against price_annual, with a شهري budget
+  //     multiplied by 12 because the index stores the ANNUAL price.
+  // A listing with no usable price (null or 0) is excluded once a budget applies, and included
+  // when none does — that asymmetry is the product's, and the oracle must reproduce it.
+  const pmin = nz(req.p_price_min), pmax = nz(req.p_price_max);
+  const rmin = nz(req.p_price_min_rent), rmax = nz(req.p_price_max_rent);
+  if (req.p_deal == null) {
+    const buy = (pmin == null && pmax == null) ? 'deal_ar.eq.بيع'
+      : `and(deal_ar.eq.بيع,price_total.gt.0,${range('price_total', pmin, pmax, false)})`;
+    const rent = (rmin == null && rmax == null) ? 'deal_ar.eq.إيجار'
+      : `and(deal_ar.eq.إيجار,price_annual.gt.0,${range('price_annual', rmin, rmax, false)})`;
+    if (!(pmin == null && pmax == null && rmin == null && rmax == null)) clauses.push(`or(${buy},${rent})`);
+  } else if (pmin != null || pmax != null) {
+    const k = req.p_rent_period === 'شهري' ? 12 : 1;
+    if (req.p_deal === 'بيع') clauses.push(`and(price_total.gt.0,${range('price_total', pmin, pmax, false)})`);
+    else if (req.p_deal === 'إيجار') {
+      clauses.push(`and(price_annual.gt.0,${range('price_annual', pmin == null ? null : pmin * k, pmax == null ? null : pmax * k, false)})`);
+    } else return { comparable: false, reason: `p_deal=${req.p_deal} with a budget: unknown deal mode` };
+  }
+
+  // المساحة — 0 is unset; once set, an unknown area is excluded (area_m2 must exist).
+  const amin = nz(req.p_area_min), amax = nz(req.p_area_max);
+  if (amin != null || amax != null) clauses.push(range('area_m2', amin, amax, true));
+
+  // غرف النوم / دورات المياه — exact-list and minimum are ORed, not ANDed.
+  for (const [col, exact, min] of [['bedrooms', req.p_beds_exact, req.p_beds_min],
+                                   ['bathrooms', req.p_bath_exact, req.p_bath_min]]) {
+    const alts = [];
+    if (exact?.length) alts.push(`${col}.in.(${exact.map((n) => Number(n)).join(',')})`);
+    if (min != null) alts.push(`and(${col}.not.is.null,${col}.gte.${Number(min)})`);
+    if (alts.length) clauses.push(alts.length > 1 ? `or(${alts.join(',')})` : alts[0]);
+  }
+
+  // عرض الشارع / الدور / عمر العقار — null-unset (0 is a real width, floor and age).
+  for (const [col, min, max] of [['street_width_m', nn(req.p_street_width_min), nn(req.p_street_width_max)],
+                                 ['floor_number', nn(req.p_floor_min), nn(req.p_floor_max)],
+                                 ['property_age', nn(req.p_age_min), nn(req.p_age_max)]]) {
+    if (min != null || max != null) clauses.push(range(col, min, max, true));
+  }
+  if (req.p_age_unknown != null) clauses.push(req.p_age_unknown ? 'property_age.is.null' : 'property_age.not.is.null');
+  if (req.p_is_new_construction != null) {
+    clauses.push(req.p_is_new_construction ? 'property_age.eq.0' : 'or(property_age.is.null,property_age.neq.0)');
+  }
+
+  // التقييم / عدد المراجعات — a plain minimum; a null rating fails it, as in the product.
+  if (req.p_rating_min != null) clauses.push(`and(rating.not.is.null,rating.gte.${Number(req.p_rating_min)})`);
+  if (req.p_reviews_min != null) clauses.push(`and(reviews_count.not.is.null,reviews_count.gte.${Number(req.p_reviews_min)})`);
+  if (req.p_furnished != null) clauses.push(req.p_furnished ? 'furnished.is.true' : 'furnished.is.false');
+
+  // المميزات — each token is a boolean column, ANDed. The token→column mapping is a PRODUCT fact
+  // (the chips the user taps), not RPC logic. The RPC additionally fails the WHOLE predicate closed
+  // on a token outside its vocabulary; rather than reproduce that behaviour (which would be copying
+  // it), the oracle REFUSES to compare when it sees an unknown token — the one case where the two
+  // would legitimately differ is then reported, not silently averaged away.
+  if (req.p_amenities?.length) {
+    const COL = { elevator: 'elevator', parking: 'parking', kitchen: 'kitchen', ac: 'air_conditioner',
+      maid_room: 'maid_room', driver_room: 'driver_room', private_entrance: 'private_entrance',
+      car_entrance: 'car_entrance', sanitation: 'sanitation', electricity: 'electricity',
+      water_supply: 'water_supply', furnished: 'furnished',
+      rnpl: 'rent_now_pay_later', rent_now_pay_later: 'rent_now_pay_later' };
+    const unknown = req.p_amenities.filter((t) => !COL[t]);
+    if (unknown.length) {
+      return { comparable: false, reason: `amenity token(s) outside the known vocabulary: ${unknown.join(',')}` };
+    }
+    for (const t of [...new Set(req.p_amenities.map((t) => COL[t]))]) clauses.push(`${t}.is.true`);
+  }
+  if (req.p_unit_subtypes?.length) clauses.push(`unit_subtype_ar.in.${inList(req.p_unit_subtypes)}`);
+
+  if (clauses.length) f += `&and=(${enc(clauses.filter(Boolean).join(','))})`;
   return { comparable: true, filter: f.replace(/^&/, '') };
 }
 

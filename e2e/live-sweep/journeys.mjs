@@ -116,8 +116,12 @@ export async function trendingDistrict(plan) {
 /** 4 — ADVANCED FILTER: the chip's promised count must be the count the user lands on. */
 export async function advancedFilter(plan) {
   const name = `af:${plan.city}/${plan.deal}${plan.period ? '/' + plan.period : ''}/${plan.typeLabel ?? 'any'}`;
-  const TITLES = ['تفضل تدفع الإيجار على دفعات؟', 'كم عمر العقار تقريباً؟', 'وش المميزات المهمة لك؟', 'كم دورة مياه تفضل؟',
-    'تفضلها مفروشة؟', 'كم عرض الشارع تفضل؟', 'وش الاتجاه اللي تفضله؟', 'كم التقييم اللي تفضله؟', 'وش نوع الوحدة اللي تبغاها؟'];
+  // The AF question set is DISCOVERED, never hardcoded (§1). A fixed list of nine titles made the
+  // harness blind to «أي نوع من العقارات تبحث عنه؟» — the question commercial cohorts open with —
+  // so every Commercial AF journey reported "no question rendered" while production was rendering
+  // one perfectly (جدة/محل, 3,002 results, 2026-08-24). A new AF question shipping tomorrow is now
+  // automatically in scope instead of silently uncovered.
+  const INTRO = /عرضت لك أول|تبي أعرض لك المزيد/;
   return withPage(false, async (page, requests) => {
     await setDeal(page, plan.deal);
     await setPeriod(page, plan.period);
@@ -133,13 +137,17 @@ export async function advancedFilter(plan) {
     }
     await narrow.first().scrollIntoViewIfNeeded(); await narrow.first().click();
     await sleep(9500);
-    const card = await page.evaluate((TT) => {
-      const t = TT.find((x) => document.body.innerText.includes(x)); if (!t) return null;
+    const card = await page.evaluate((introSrc) => {
+      const intro = new RegExp(introSrc);
+      // any rendered question that is not the intro prompt
+      const t = document.body.innerText.split('\n').map((x) => x.trim())
+        .filter((x) => x.endsWith('؟') && x.length > 8 && !intro.test(x)).pop();
+      if (!t) return null;
       const el = [...document.querySelectorAll('div,span')].reverse().find((e) => (e.innerText || '').trim() === t);
       if (!el) return null;
       let c = el; for (let i = 0; i < 10 && c.parentElement; i++) { c = c.parentElement; if ((c.innerText || '').includes('تخطي')) break; }
       return { title: t, text: c.innerText || '' };
-    }, TITLES);
+    }, INTRO.source);
     if (!card) { note(`${name}: AF opened but no question rendered — skipped`); return null; }
     const lines = card.text.split('\n').map((x) => x.trim()).filter(Boolean);
     const chips = [];
@@ -152,7 +160,20 @@ export async function advancedFilter(plan) {
     const pick = chips[0];
     // MONTHLY WATCH: the card's own live footer must MOVE when an answer is selected.
     const footBefore = num((card.text.match(/(?:عرض|متابعة)[^\n]*?([\d,٬]+)\s*نتيجة/) || [])[1]);
-    await page.getByText(pick.label, { exact: true }).first().click({ timeout: 12000 });
+    // Click the chip that is actually VISIBLE and inside the AF card. `.first()` matched an
+    // off-screen or duplicate node and timed out on 3 of 7 cohorts (2026-08-24) — which looked like
+    // a broken Advanced Filter until the same journey was driven by hand and worked perfectly.
+    // §40.7: a harness selector failure must never be reported as a product failure.
+    const chip = page.getByText(pick.label, { exact: true });
+    const n = await chip.count();
+    let clicked = false;
+    for (let i = n - 1; i >= 0 && !clicked; i--) {
+      const c = chip.nth(i);
+      if (!await c.isVisible().catch(() => false)) continue;
+      await c.scrollIntoViewIfNeeded().catch(() => {});
+      clicked = await c.click({ timeout: 8000 }).then(() => true).catch(() => false);
+    }
+    if (!clicked) { note(`${name}: chip «${pick.label}» not clickable (${n} match(es)) — harness, skipped`); return null; }
     await sleep(2600);
     const footAfter = await page.evaluate(() => (document.body.innerText.match(/(?:عرض|متابعة)[^\n]*?([\d,٬]+)\s*نتيجة/) || [])[1] ?? null);
     const footAfterN = num(footAfter);

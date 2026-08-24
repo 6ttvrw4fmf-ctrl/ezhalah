@@ -678,8 +678,12 @@ export default function Agent() {
       onFailure: (kind) => {
         voiceActiveRef.current = false;
         setVoiceState('idle'); // composer restores cleanly — never stuck in recording mode
+        // 'blocked' (service/hardware failure, not permission) gets its own honest message —
+        // never the "check your settings" text, which is only correct for a true 'denied'.
         showVoiceNotice(kind === 'denied'
           ? t('Microphone access is needed for voice input. Enable it in your browser settings.')
+          : kind === 'blocked'
+          ? t("The microphone couldn't be reached. Please try again.")
           : t('Voice input is not available right now.'));
       },
     });

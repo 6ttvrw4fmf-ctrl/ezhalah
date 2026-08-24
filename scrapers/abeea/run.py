@@ -685,7 +685,8 @@ def map_listing(body: str, url: str,
     return row, category, gone
 
 
-def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+def _pin_sold_inactive(table: str, ad_numbers: list[str],
+                       live_ad_numbers: Optional[set[str]] = None) -> None:
     """Make source-confirmed SOLD/RENTED rows inactive NOW and survivors of the nightly
     auto_recover_false_inactive() sweep.
 
@@ -699,13 +700,48 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     stuck in on 2026-07-16). prune_unseen() never undoes the pin: it only selects active=true
     rows. When a listing is later relisted, its next upsert carries active=true and the upsert's
     own missing_count=0 reset applies — the pin is only written for ids that are gone THIS
-    crawl."""
-    for i in range(0, len(ad_numbers), 200):
+    crawl.
+
+    A CONTRADICTORY SOURCE IS NOT AUTHORITATIVE GONE EVIDENCE (owner rule, 2026-08-24). Abeea
+    publishes some properties TWICE — two posts carrying the same «Property ID», e.g.
+    `…-al-sadafah-district/` and `…-al-sadafah-district-2/`. Measured that day: 4 of 245 posts are
+    such duplicates and 3 of those pairs DISAGREE, one post reading "For Sale"/"For Rent" while its
+    twin reads "Rented". Ezhalah keys on Property ID, so both posts collapse onto one row: the live
+    post upserts it available, then this pin — which runs after every upsert — unconditionally
+    killed it. ABRE300, ABRE277 and ABRE104 were inactive while abeea was still advertising them.
+
+    So the pin now skips any ad_number that was ALSO seen LIVE in the same crawl. That is the
+    owner's rule applied literally: authoritative GONE inactivates, and anything inconclusive —
+    including a source that contradicts itself — HOLDS. It cannot mask a real sale either: when the
+    remaining live twin also flips to Sold/Rented, no live sighting exists that crawl and the pin
+    applies normally."""
+    live = set(live_ad_numbers or ())
+    conflicted = sorted(a for a in set(ad_numbers) if a in live)
+    pinnable = [a for a in ad_numbers if a not in live]
+    if conflicted:
+        print(f"{table}: {len(conflicted)} ad_number(s) marked gone on one post but seen LIVE on "
+              f"another THIS crawl — HELD active, not pinned (contradictory source is not "
+              f"authoritative): {', '.join(conflicted[:10])}", flush=True)
+    if not pinnable:
+        return
+    for i in range(0, len(pinnable), 200):
         db._execute(
             db.sb().table(table).update({"active": False, "missing_count": 3})
-            .in_("ad_number", ad_numbers[i:i + 200]),
+            .in_("ad_number", pinnable[i:i + 200]),
             what=table + ".sold_pin",
         )
+    # Durable per-row evidence, so "the SOURCE said gone" is provable in SQL and not only in a CI
+    # log. mon_detect_prune_kill_without_source_verdict() reads this: without it, every correct
+    # sold-pin would read as an unverified deactivation and the barrier would cry wolf on the one
+    # path that is actually well-evidenced. Monitoring must never fail the pin itself.
+    try:
+        rows = [{"source_table": table, "ad_number": a, "verdict": "GONE",
+                 "oracle": "abeea.sold_pin.property_status"} for a in pinnable]
+        for i in range(0, len(rows), 200):
+            db._execute(db.sb().table("ops_stale_inactivation_probe").insert(rows[i:i + 200]),
+                        what="ops_stale_inactivation_probe.insert")
+    except Exception as e:
+        print(f"{table}: could not record sold-pin evidence ({type(e).__name__}: {e})")
 
 
 # ── Main ────────────────────────────────────────────────────────────────────────
@@ -770,10 +806,14 @@ def main() -> int:
         # Pin sold/rented rows immediately after the upserts: gone rows are never upserted here,
         # but without the pin an already-listed row stays active for 3 more crawls (prune's
         # 3-strike) while the site explicitly says gone. See _pin_sold_inactive.
+        # The live sighting set is what makes a contradictory duplicate post non-authoritative:
+        # an ad_number upserted as available THIS crawl must not then be pinned by its twin.
+        live_res = {r["ad_number"] for r in res}
+        live_com = {r["ad_number"] for r in com}
         if sold_res:
-            _pin_sold_inactive("abeea_residential_listings", sold_res)
+            _pin_sold_inactive("abeea_residential_listings", sold_res, live_res)
         if sold_com:
-            _pin_sold_inactive("abeea_commercial_listings", sold_com)
+            _pin_sold_inactive("abeea_commercial_listings", sold_com, live_com)
 
         if args.limit:
             print(f"✓ Abeea VALIDATION: {len(res)} residential + {len(com)} commercial upserted "
@@ -790,11 +830,19 @@ def main() -> int:
         # Gone rows are already active=false + missing_count=3 by now; prune_unseen never touches
         # them (it only reads active=true rows), so their absence from the seen set is harmless.
         # SITEMAP ABSENCE IS NOT DEATH (2026-08-24 data-integrity incident — see the same guard in
-        # scrapers/aqarcity/run.py and the docstring of db.prune_unseen). 9 abeea listings were
-        # deactivated over 30 days for missing three crawls in a row; a direct fetch found 9/9 still
-        # served. abeea's oracle is unambiguous and was control-validated in that run: a slug that no
-        # longer exists returns a HARD HTTP 404 (not a soft-404 shell), while a live listing returns
-        # 200 with a property-specific page. So only a real 404 may deactivate.
+        # scrapers/aqarcity/run.py and the docstring of db.prune_unseen).
+        #
+        # THE FIRST VERSION OF THIS ORACLE WAS CONTROL-VALIDATED AGAINST THE WRONG FAILURE MODE, and
+        # that is the lesson worth keeping. It tested a bogus slug, saw a hard HTTP 404, and concluded
+        # "404 = gone, 200 = live". True as far as it goes — but abeea does NOT delete a property when
+        # it stops being available. The post stays up, returns 200, renders in full, and only its
+        # Houzez «Property Status» flips to "Sold" / "Rented". So the oracle proved a page EXISTS and
+        # called that alive. On the strength of it, 9 rows were restored on 2026-08-24 and the next
+        # crawl re-inactivated 5 of them — correctly, because the source really did say Rented/Sold.
+        #
+        # An oracle needs a control for the failure mode the platform ACTUALLY uses, not for the one
+        # that is easiest to test. Here that is the same GONE_STATUS check map_listing() already
+        # applies, read from the same detail-wrap block, so oracle and parser can never disagree.
         def _verify_gone(ad_number: str) -> str:
             try:
                 got = db.sb().table("abeea_residential_listings").select("listing_url") \
@@ -814,9 +862,14 @@ def main() -> int:
                     time.sleep(1.2 * (attempt + 1))
                     continue
                 if r.status_code == 404:
-                    return "gone"
+                    return "gone"          # post deleted outright
                 if r.status_code == 200 and len(r.text) > 2000:
-                    return "live"
+                    status = (_detail_items(r.text).get("Property Status") or "").lower()
+                    if not status:
+                        # The page rendered but carried no status cell — we cannot read the field
+                        # that decides this. Unreadable is UNKNOWN, never "live" and never "gone".
+                        return "unknown"
+                    return "gone" if any(g in status for g in GONE_STATUS) else "live"
                 time.sleep(1.0 * (attempt + 1))
             return "unknown"   # unreachable/blocked is never proof of death
 
