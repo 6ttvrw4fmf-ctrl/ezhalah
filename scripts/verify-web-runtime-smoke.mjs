@@ -190,9 +190,23 @@ try {
 
   // Count real search traffic, not renders: the property-search RPC and the agent function.
   let searchCalls = 0;
+  // The LAST property-search RPC body seen. This is the Stop/resubmit oracle (2026-08-23, see the
+  // [E] comment below): identical QUERY, not identical live count.
+  let lastSearchBody = null;
   const countSearch = (u) => /\/rest\/v1\/rpc\/(location_search_candidates_ar|search_listings)/.test(u)
     || /\/functions\/v1\/agent/.test(u);
-  page.on('request', (r) => { if (countSearch(r.url())) searchCalls++; });
+  const isSearchRpc = (u) => /\/rest\/v1\/rpc\/(location_search_candidates_ar|search_listings)/.test(u);
+  page.on('request', (r) => {
+    if (countSearch(r.url())) searchCalls++;
+    if (isSearchRpc(r.url()) && r.method() === 'POST') lastSearchBody = r.postData() ?? null;
+  });
+  // Key-order-insensitive signature of a search request body, so an incidental serializer reorder
+  // can never masquerade as a query change. A body that does not parse is compared verbatim.
+  const reqSig = (body) => {
+    if (body == null) return null;
+    try { const o = JSON.parse(body); return JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]])); }
+    catch { return body; }
+  };
 
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(12000);
@@ -301,6 +315,8 @@ try {
   await tap('بحث');
   const baselineCount = await waitForCount(45000);
   check('[E] baseline (uninterrupted) owner-example search lands with a real count', Number.isFinite(baselineCount), `count=${baselineCount}`);
+  const baselineReq = lastSearchBody;
+  check('[E] baseline search request was captured (the oracle below depends on it)', baselineReq != null);
 
   // ---- E: rapid Stop — pressed the instant the search starts. ----
   await fillOwnerExample();
@@ -315,8 +331,18 @@ try {
     `pre=${JSON.stringify(preStopInputs)} post=${JSON.stringify(postRapidInputs)}`);
   await tap('بحث');
   const rapidResubmitCount = await waitForCount(45000);
-  check('[E] resubmitting untouched after rapid-Stop returns the EXACT SAME count as the uninterrupted baseline',
-    Number.isFinite(rapidResubmitCount) && rapidResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${rapidResubmitCount}`);
+  // ORACLE CHANGE (2026-08-23). This used to assert resubmitCount === baselineCount — but both are
+  // LIVE production reads taken minutes apart, and this suite runs against real prod on a schedule.
+  // Any run straddling a data-refresh tick (MV refresh at :00, sync_search_listings_ar at :14) sees
+  // the inventory legitimately move and fails with a huge honest delta (observed 2026-08-23:
+  // baseline=347 resubmit=1940 — on main itself, commit 6146bc0, alongside two innocent PR heads).
+  // What Stop must actually guarantee is that the QUERY survived intact — so the oracle is the
+  // serialized search request, compared key-order-insensitively. The count stays only as a
+  // liveness check: the resubmit must land real results, whatever today's inventory is.
+  check('[E] resubmitting untouched after rapid-Stop fires the EXACT SAME serialized search request as the uninterrupted baseline',
+    reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
+    `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  check('[E] the rapid-Stop resubmit still lands a real result count', Number.isFinite(rapidResubmitCount), `count=${rapidResubmitCount}`);
 
   // ---- F: Stop pressed mid-flight (network artificially slowed), and the late response — which
   // resolves AFTER the user is already back on Filter — must never repopulate results or write history.
@@ -345,8 +371,10 @@ try {
   await page.unroute('**/rest/v1/rpc/location_search_candidates_ar', delayRoute);
   await tap('بحث');
   const midResubmitCount = await waitForCount(45000);
-  check('[F] resubmitting untouched after a mid-flight Stop still returns the EXACT SAME count',
-    Number.isFinite(midResubmitCount) && midResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${midResubmitCount}`);
+  check('[F] resubmitting untouched after a mid-flight Stop still fires the EXACT SAME serialized search request',
+    reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
+    `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  check('[F] the mid-flight-Stop resubmit still lands a real result count', Number.isFinite(midResubmitCount), `count=${midResubmitCount}`);
 
   // ---- G: a CHAT-originated Stop must NOT navigate home — origin-tracking must not over-apply. ----
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -381,8 +409,10 @@ try {
     JSON.stringify(postMobileInputs) === JSON.stringify(preStopInputsMobile));
   await tap('بحث');
   const mobResubmitCount = await waitForCount(45000);
-  check('[H mobile] resubmitting untouched after rapid-Stop returns the EXACT SAME count as baseline',
-    Number.isFinite(mobResubmitCount) && mobResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${mobResubmitCount}`);
+  check('[H mobile] resubmitting untouched after rapid-Stop fires the EXACT SAME serialized search request as baseline',
+    reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
+    `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  check('[H mobile] the mobile resubmit still lands a real result count', Number.isFinite(mobResubmitCount), `count=${mobResubmitCount}`);
 
   // ---- Journey I: Advanced Filter reentrancy — a rapid double-tap on «متابعة»/confirm must never
   // downgrade or lose an already-recorded answer (bug-hunt 2026-08-23, fixed in commitGuidedStep's
