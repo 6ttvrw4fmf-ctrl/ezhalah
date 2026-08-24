@@ -123,6 +123,14 @@ check(
   /onFailure: \(kind\) => \{[\s\S]{0,300}setVoiceState\('idle'\);[\s\S]{0,300}showVoiceNotice\(kind === 'denied'/.test(agent),
 );
 
+// ── 18. On platforms where voice input can never work (owner report, phone mic "doesn't work" —
+//        iOS Safari/Chrome-iOS: WebKit has never implemented SpeechRecognition), the mic button is
+//        hidden entirely rather than offered as a control that can only flash a toast and revert.
+check(
+  '18. the mic button only renders when isVoiceInputSupported() is true',
+  /\{isVoiceInputSupported\(\) \? \(\s*<Pressable\s*\n\s*testID="voice-mic"/.test(agent),
+);
+
 // ── 8/10. Waveform owns ONLY the flexible middle: overflow-clipped flex:1, fixed-size controls ──
 check(
   '8/10. waveform wrapper is flex:1 + overflow hidden; canvas absolutely pinned; controls fixed 34px',

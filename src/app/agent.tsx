@@ -2684,7 +2684,11 @@ export default function Agent() {
               ) : (
                 <>
                   {/* Mic — enters recording mode (owner brief §2): immediate press feedback, then the
-                      composer itself morphs. Sits immediately left of Send, same 34px control family. */}
+                      composer itself morphs. Sits immediately left of Send, same 34px control family.
+                      Hidden entirely where isVoiceInputSupported() is false (iOS Safari/Chrome-iOS —
+                      WebKit has never implemented SpeechRecognition, a permanent platform gap) —
+                      showing a mic that can only ever flash a toast and revert reads as broken. */}
+                  {isVoiceInputSupported() ? (
                   <Pressable
                     testID="voice-mic"
                     onPress={() => { void startVoice(); }}
@@ -2694,6 +2698,7 @@ export default function Agent() {
                   >
                     <Ionicons name="mic-outline" size={19} color={colors.body} />
                   </Pressable>
+                  ) : null}
                   <Pressable
                     onPress={() => send()}
                     disabled={!typed.trim()}
