@@ -259,8 +259,27 @@ export default function AdvancedQuestionCard({
   // Clearing is the honest failure mode and it is already handled downstream: the chip renders
   // nothing when `countChip == null` (Shell, above) and the primary button falls back to a bare
   // «متابعة» (below). Showing no number is not a regression; showing another selection's number is.
+  //
+  // THE IN-FLIGHT WINDOW IS THE SAME LIE, JUST SHORTER (measured 2026-08-24, after the fix above
+  // was already live). The note above accepts holding the previous number while a fetch is in
+  // flight, to avoid a per-tap flicker. Driving the real timeout branch on production shows what
+  // that costs: الرياض / إيجار سنوي / شقة → «كم عمر العقار تقريباً؟», tap «جديد» (4,537), then tap
+  // «١٠+ سنوات» with the count RPC delayed past its 4s timeout —
+  //
+  //   t+0.5s … t+3s   option «١٠+ سنوات» selected, its own pill reading 1,196,
+  //                   chip «4,537 نتيجة», button «متابعة · 4,537 نتيجة»
+  //   t+4.5s          chip gone, button «متابعة»            ← the fix above, working
+  //
+  // For those four seconds the card shows TWO numbers that disagree about one selection, and the
+  // bigger one is on the button the user is about to press. A flicker is a cosmetic cost; a wrong
+  // number on the primary action is a correctness cost, and the owner's rule settles which loses:
+  // the UI must never present an old count as though it belongs to the newly selected answer.
+  // So the same clear the null-resolution path performs is hoisted to the START of the effect —
+  // the pending window now says exactly what the post-timeout window says: nothing. The tapped
+  // option's own pill still carries its exact number, so the user is never left without one.
   useEffect(() => {
     let alive = true;
+    setCount(null);
     liveCount(sel).then((n) => { if (alive) setCount(n); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
