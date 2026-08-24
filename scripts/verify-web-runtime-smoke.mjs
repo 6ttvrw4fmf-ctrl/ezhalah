@@ -121,6 +121,17 @@ const tap = async (txt) => {
   await page.mouse.click(box.x, box.y);
   await page.waitForTimeout(1200);
 };
+// For ASYNC-rendered suggestion rows only (run 32681927077: «حي النرجس» rendered after the fixed
+// 2200ms wait on a loaded runner and the strict tap threw). Polls for the row, then taps. Static
+// controls keep the strict tap — a missing static control is a real defect, not a render race.
+const tapWhenRendered = async (txt, timeoutMs = 8000) => {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    if (await page.evaluate(CLICK_LEAF, txt)) return tap(txt);
+    await page.waitForTimeout(300);
+  }
+  throw new Error(`control never rendered: ${txt}`);
+};
 // VERIFIED select (2026-08-24): type → tap the suggestion → CONFIRM the app registered it, retrying
 // the whole gesture when it did not. On a loaded CI runner the suggestion row can render after the
 // tap fires; the tap then hits nothing, the city stays unresolved, and «بحث» rightly refuses with
@@ -132,8 +143,8 @@ const pickCity = async (name) => {
     await page.click('input >> nth=0');
     await page.fill('input >> nth=0', '');
     await page.type('input >> nth=0', name, { delay: 60 });
-    await page.waitForTimeout(2200);
-    await tap(name);
+    await tapWhenRendered(name).catch(() => {}); // confirmation below decides; a miss just retries
+
     const took = await page.waitForSelector('[data-testid="selected-city-visual"]', { timeout: 4000 }).catch(() => null);
     if (took) return;
   }
@@ -330,8 +341,7 @@ try {
     await pickCity('الرياض');
     await page.click('input >> nth=1');
     await page.type('input >> nth=1', 'النرجس', { delay: 60 });
-    await page.waitForTimeout(2200);
-    await tap('حي النرجس');
+    await tapWhenRendered('حي النرجس');
     await tap('الشقق والسكن المشترك'); await tap('شقة');
     await tap('3');
     await page.fill('input >> nth=2', '80');
