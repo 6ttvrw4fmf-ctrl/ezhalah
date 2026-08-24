@@ -47,20 +47,30 @@ export function isVoiceInputSupported(): boolean {
   return !!(w.SpeechRecognition || w.webkitSpeechRecognition) && !!navigator.mediaDevices?.getUserMedia;
 }
 
-// iOS-family WebKit (iPhone, iPad — iPadOS 13+ reports as "Macintosh" in its User-Agent but is
-// touch-capable, unlike any real Mac, which never is). Documented, real-world failure mode (owner
-// report, 2026-08-24): the OS permission prompt is granted, then the recognizer STILL fails
-// immediately — iOS's audio-session model is stricter than desktop browsers' about a page holding
-// two independent audio captures at once (our own getUserMedia-driven AnalyserNode for the waveform,
-// PLUS SpeechRecognition's own internal capture). On this platform family we skip our own
+// Genuine iOS Safari specifically (iPhone/iPad's OWN browser — iPadOS 13+ reports as "Macintosh" in
+// its User-Agent but is touch-capable, unlike any real Mac). Documented, real-world failure mode
+// (owner report, 2026-08-24): the OS permission prompt is granted, then the recognizer STILL fails
+// immediately — iOS Safari's audio-session model is stricter than desktop browsers' about a page
+// holding two independent audio captures at once (our own getUserMedia-driven AnalyserNode for the
+// waveform, PLUS SpeechRecognition's own internal capture). On genuine Safari we skip our own
 // getUserMedia/AnalyserNode entirely and let the recognizer own the ONE capture session outright —
 // support itself is unaffected (isVoiceInputSupported() above is untouched, so the mic still shows
 // exactly where it already correctly does); only how we ACQUIRE the stream changes.
-function isIOSWebKitFamily(): boolean {
+//
+// NARROWED to Safari alone (owner report, 2026-08-24, SAME iPhone): Chrome for iOS is WebKit under
+// the hood too, but real-device evidence shows it does NOT share this contention — recognition works
+// there even with our own capture active elsewhere in the session, so forcing the same waveform-less
+// fallback onto it was an unnecessary regression (the owner explicitly noticed the missing waveform
+// on Chrome and called it out as "feels odd"). Every third-party iOS browser self-identifies with its
+// own UA token specifically so it CAN be told apart from Apple's own Safari despite the shared
+// rendering engine — Chrome uses 'CriOS', Firefox 'FxiOS', Edge 'EdgiOS', Opera 'OPiOS'. Only a UA
+// with NONE of those tokens is actually Safari.
+function isIOSSafariEngine(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent || '';
-  if (/iPad|iPhone|iPod/.test(ua)) return true;
-  return navigator.platform === 'MacIntel' && (navigator as any).maxTouchPoints > 1;
+  const isIOSFamily = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && (navigator as any).maxTouchPoints > 1);
+  if (!isIOSFamily) return false;
+  return !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
 }
 
 const AR_LANG = 'ar-SA';
@@ -117,14 +127,15 @@ export async function startVoiceInput(handlers: VoiceHandlers): Promise<boolean>
   finalText = '';
   interimText = '';
 
-  // 1/2. Everywhere EXCEPT iOS-family WebKit: our own mic stream first — it owns the permission
+  // 1/2. Everywhere EXCEPT genuine iOS Safari: our own mic stream first — it owns the permission
   //    prompt, and its rejection is the ONE reliable cross-browser denial signal — then real level
   //    sampling for the waveform (RMS of the time-domain signal, normalized to ~0..1) hangs off that
-  //    same stream. On iOS-family WebKit, skip BOTH: the recognizer below acquires and owns the mic
+  //    same stream. On genuine iOS Safari specifically (Chrome/Firefox/Edge-for-iOS are exempt — see
+  //    isIOSSafariEngine's own comment), skip BOTH: the recognizer below acquires and owns the mic
   //    entirely on its own (it negotiates its own permission prompt independently of getUserMedia),
   //    and the waveform stays flat — the same honest "no level available" state an analyser failure
   //    already degrades to below, just chosen proactively rather than discovered by a live failure.
-  if (!isIOSWebKitFamily()) {
+  if (!isIOSSafariEngine()) {
     let mediaStream: MediaStream;
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
