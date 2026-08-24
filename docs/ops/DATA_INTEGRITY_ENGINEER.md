@@ -678,6 +678,64 @@ guard rows while the same batch held `ok=true rows_seen=96` two seconds earlier.
 last N runs", check how many rows one run actually writes** — and prefer a time-based question, which
 is grain-independent by construction.
 
+## 26. A perfect crawl of an incomplete index (settled 2026-08-24, run #57)
+
+**Every guard on the prune path protects against a BROKEN crawl. None of them can see a PERFECT
+crawl of an INCOMPLETE discovery index — and the two have an identical signature and opposite
+meanings.** `prune_unseen()` carries four of them (empty-seen skip, 30% collapse guard, 0.80
+coverage floor, 3-strike grace). On aqarcity every one read healthy — coverage ~99.6%, misses a
+handful per crawl, three strikes honestly counted — while **252 aqarcity + 9 abeea listings were
+deactivated over 30 days and 261 of 261 were still being served by their source.**
+
+The mechanism: aqarcity's `sitemap.xml` publishes a **~1,799-entry window**, not the live catalogue.
+Of the 252 killed rows, **0 appear in that sitemap, and most have ids INSIDE its own id range**
+(26858..30637) — so this is not a rolling "older than the floor" window, it simply omits live
+listings. `last_seen_at` therefore measures *presence in the index*, never *existence at the source*,
+and the 3-strike rule silently promotes one into the other. §4 already forbids exactly this
+("missing from one crawl ≠ inactive") — **repeating a miss three times does not turn it into
+evidence.**
+
+**Restored:** all 261, per-row evidence in `ops_stale_inactivation_probe`.
+**Fixed:** `prune_unseen(verify_gone=…)` — the source's own verdict is now the only thing that may
+deactivate (`gone` → kill · `live` → self-heal, `missing_count` 0 + `last_seen_at` refreshed ·
+`unknown` → hold the strike, kill nothing). Opt-in per platform, so a platform without a
+control-validated oracle keeps the previous behaviour byte-for-byte.
+**Barrier:** `mon_detect_prune_kill_without_source_verdict()` (P1) over
+`ops_oracle_required_platform`. It cannot re-derive liveness — SQL cannot fetch a page — so it checks
+the thing it actually can: every deactivation on a registered platform must carry a recorded `GONE`
+verdict. Both directions proven on live data, twice (raised 07:57:31 → resolved 07:57:59; and again
+after the roster change, 11:58:06 → 11:58:10), `insta_resolves = 0` in both.
+
+**It is roster-wired, and the reasoning that first kept it out of the roster was wrong** (owner
+directive, 2026-08-24). It originally got its own daily cron to avoid lengthening the twice-hourly
+sweep — a caution copied from §24e without measuring it. Measured: the detector runs in **12 ms**,
+against a sweep using ~170 s of a 900 s budget. Roster membership is strictly better (twice hourly
+instead of daily, and it inherits `mon_detect_detector_sweep_budget` /
+`mon_detect_stalled_daily_detector` coverage), so `20260824115720` moved it in and removed the
+standalone job. Same lesson as §24e from the other side: **a cost you did not measure is not a
+reason.** The migration inserts one element into the *live* roster rather than re-emitting the whole
+~40-entry array from a snapshot — with concurrent sessions editing it, a wholesale
+`CREATE OR REPLACE` would silently drop another session's detector.
+**Regression test:** `scrapers/common/tests/test_prune_requires_source_verdict_to_kill.py`, 6 of its
+8 cases fail on the pre-fix code.
+
+Three rules this pins:
+
+- **An oracle needs a CONTROL before it is an oracle.** A bare HTTP 200 proves nothing: aqarcity
+  answers 200 with `<title>Page Not Found</title>` for a bogus id, mustqr serves a byte-identical
+  18,951-byte shell for real and bogus ids alike, aqargate a 751-byte stub. Probing a known-bad id
+  first is what separated the three platforms that were falsely killed from the two that were
+  correctly killed. **mustqr and aqargate were deliberately NOT restored** — their inactivations are
+  consistent with genuinely gone, and restoring them would have been fabrication in the opposite
+  direction.
+- **Unverifiable is its own verdict, and it means DO NOTHING.** sanadak is a JS SPA: its raw HTML is
+  identical for a real and a bogus slug, so its 228 stale inactivations could be neither confirmed
+  nor refuted. They were left untouched and reported, not restored. "I could not check" is never
+  "it is fine" and never "restore it".
+- **A restore is not finished at `active = true`.** The row must clear the matview refresh (:00) and
+  `sync_search_listings_ar` (:14) before a user can reach it, and `last_seen_at` must be refreshed
+  or the next crawl re-kills it in three days. Verify through the anon RPC, not the table.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve

@@ -789,10 +789,42 @@ def main() -> int:
         # Full run: prune listings active before but not seen this crawl (full catalog fetched).
         # Gone rows are already active=false + missing_count=3 by now; prune_unseen never touches
         # them (it only reads active=true rows), so their absence from the seen set is harmless.
+        # SITEMAP ABSENCE IS NOT DEATH (2026-08-24 data-integrity incident — see the same guard in
+        # scrapers/aqarcity/run.py and the docstring of db.prune_unseen). 9 abeea listings were
+        # deactivated over 30 days for missing three crawls in a row; a direct fetch found 9/9 still
+        # served. abeea's oracle is unambiguous and was control-validated in that run: a slug that no
+        # longer exists returns a HARD HTTP 404 (not a soft-404 shell), while a live listing returns
+        # 200 with a property-specific page. So only a real 404 may deactivate.
+        def _verify_gone(ad_number: str) -> str:
+            try:
+                got = db.sb().table("abeea_residential_listings").select("listing_url") \
+                        .eq("ad_number", ad_number).limit(1).execute().data \
+                      or db.sb().table("abeea_commercial_listings").select("listing_url") \
+                        .eq("ad_number", ad_number).limit(1).execute().data
+            except Exception:
+                return "unknown"
+            url = (got[0].get("listing_url") if got else None) or ""
+            if not url:
+                return "unknown"
+            s = _session()
+            for attempt in range(2):
+                try:
+                    r = s.get(url, timeout=45, allow_redirects=True)
+                except Exception:
+                    time.sleep(1.2 * (attempt + 1))
+                    continue
+                if r.status_code == 404:
+                    return "gone"
+                if r.status_code == 200 and len(r.text) > 2000:
+                    return "live"
+                time.sleep(1.0 * (attempt + 1))
+            return "unknown"   # unreachable/blocked is never proof of death
+
         pruned = 0
         for tbl, rows_seen in (("abeea_residential_listings", res),
                                ("abeea_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Abeea")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Abeea",
+                                verify_gone=_verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

@@ -17,7 +17,7 @@ import signal
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from dotenv import load_dotenv
 from supabase import Client, create_client
@@ -766,6 +766,7 @@ def prune_unseen(
     min_coverage: Optional[float] = None,
     shards: int = 1,
     shard: int = 0,
+    verify_gone: Optional[Callable[[str], str]] = None,
 ) -> int:
     """Age out active rows whose ad_number wasn't seen this crawl — CONSERVATIVELY.
 
@@ -804,6 +805,29 @@ def prune_unseen(
         through still declines to prune rather than ageing out the rows it never reached.
     `shards == 1` (the default) is byte-for-byte the previous behaviour for every other caller.
 
+    SOURCE RE-PROBE BEFORE THE KILL (`verify_gone`, added 2026-08-24 after a measured incident).
+    Every guard above protects against a BROKEN CRAWL. None of them protects against a crawl that
+    worked perfectly against an INCOMPLETE DISCOVERY INDEX — and that is a different failure with an
+    identical signature. Aqar City's sitemap.xml publishes a ~1,799-entry window while the site keeps
+    serving listings outside it, so a live listing misses three consecutive crawls not because it is
+    gone but because it is un-enumerable. Coverage read ~99.6% (far above the 0.80 floor), the
+    collapse guard never came near 30%, the 3-strike counter did exactly what it was told — and 252
+    aqarcity + 9 abeea listings were deactivated over 30 days while every one of them was still being
+    served by the source. All 261 were re-probed and restored on 2026-08-24; evidence per row is in
+    `ops_stale_inactivation_probe`.
+
+    So: absence from the crawl is EVIDENCE OF ABSENCE FROM THE INDEX, never evidence the listing is
+    dead (DATA_INTEGRITY_ENGINEER.md §4 — "missing from one crawl ≠ inactive", which does not become
+    true by repeating it three times). When `verify_gone` is supplied it is called for each ad_number
+    that is about to cross the grace threshold, and ONLY its verdict may deactivate:
+      • 'gone'    → deactivate (the source itself confirms removal)
+      • 'live'    → SELF-HEAL: missing_count back to 0 and last_seen_at refreshed. The listing was
+                    never missing from the platform, only from its index.
+      • 'unknown' → hold: the strike is recorded, but nothing is deactivated. An unreachable source
+                    is not evidence (§4: timeout/403/429/5xx ≠ inactive).
+    A caller that passes no `verify_gone` keeps the previous behaviour byte-for-byte, so this is
+    opt-in per platform and only for platforms with a control-validated oracle.
+
     Returns the number of rows actually DEACTIVATED this run (0 when misses were only counted),
     or -1 when a circuit breaker tripped and nothing was changed, so the caller can flag the
     run degraded.
@@ -840,12 +864,62 @@ def prune_unseen(
     for m, ads in by_count.items():
         new_missing = m + 1
         payload: dict[str, Any] = {"missing_count": new_missing}
-        if new_missing >= grace:
+        doomed = new_missing >= grace
+        if doomed:
             payload["active"] = False
+        if doomed and verify_gone is not None:
+            # Only rows about to be deactivated are probed — a strike that is merely ticking up
+            # costs nothing and needs no network call.
+            confirmed_gone, still_live = [], []
+            for ad in ads:
+                try:
+                    verdict = (verify_gone(ad) or "unknown").lower()
+                except Exception as e:  # an oracle that throws is UNKNOWN, never "gone"
+                    print(f"{table}: verify_gone({ad}) raised {type(e).__name__}: {e} → unknown")
+                    verdict = "unknown"
+                if verdict == "gone":
+                    confirmed_gone.append(ad)
+                elif verdict == "live":
+                    still_live.append(ad)
+            held = len(ads) - len(confirmed_gone) - len(still_live)
+            if still_live:
+                # Self-heal: the source serves it, so it was never missing — only un-indexed.
+                for i in range(0, len(still_live), 200):
+                    _execute(c.table(table).update({"missing_count": 0, "last_seen_at": datetime.now(timezone.utc).isoformat()})
+                             .in_("ad_number", still_live[i:i + 200]),
+                             what=table + ".prune_selfheal")
+            if held:
+                # Record the strike but do NOT deactivate on an unreachable source.
+                pending = [a for a in ads if a not in set(confirmed_gone) | set(still_live)]
+                for i in range(0, len(pending), 200):
+                    _execute(c.table(table).update({"missing_count": new_missing})
+                             .in_("ad_number", pending[i:i + 200]),
+                             what=table + ".prune_update")
+            print(f"{table}: verify_gone on {len(ads)} at-grace row(s) → "
+                  f"{len(confirmed_gone)} gone, {len(still_live)} live (self-healed), {held} unknown (held)")
+            # Durable per-row evidence, so "the probe ran and the SOURCE said gone" is provable in
+            # SQL rather than only in a CI log. mon_detect_prune_kill_without_source_verdict() reads
+            # this: a deactivation on an oracle-required platform with no matching GONE row is a P1.
+            # Monitoring must never fail the prune itself — the rows are written either way.
+            try:
+                evidence = (
+                    [{"source_table": table, "ad_number": a, "verdict": "GONE",
+                      "oracle": "prune_unseen.verify_gone", "listing_url": ""} for a in confirmed_gone]
+                    + [{"source_table": table, "ad_number": a, "verdict": "LIVE",
+                        "oracle": "prune_unseen.verify_gone", "listing_url": ""} for a in still_live]
+                )
+                for i in range(0, len(evidence), 200):
+                    _execute(c.table("ops_stale_inactivation_probe").insert(evidence[i:i + 200]),
+                             what="ops_stale_inactivation_probe.insert")
+            except Exception as e:
+                print(f"{table}: could not record prune probe evidence ({type(e).__name__}: {e})")
+            ads, payload = confirmed_gone, {"missing_count": new_missing, "active": False}
+            if not ads:
+                continue
         for i in range(0, len(ads), 200):
             _execute(c.table(table).update(payload).in_("ad_number", ads[i:i + 200]),
                      what=table + ".prune_update")
-        if new_missing >= grace:
+        if doomed:
             killed += len(ads)
     return killed
 
