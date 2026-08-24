@@ -175,7 +175,15 @@ async function main() {
   line('REQUEST→RPC MISMATCHES', byPair('REQUEST→RPC'));
   line('RPC→DB MISMATCHES', byPair('RPC→DB'));
   line('INELIGIBLE RESULTS', byPair('RPC→RENDERED') + byPair('RENDERED'));
-  line('DUPLICATES', 0);
+  // A SKIPPED LAYER IS NOT A PASS. When the oracle cannot express a scope faithfully it returns
+  // null, and null contributes zero mismatches — which reads exactly like agreement unless it is
+  // printed. These two lines keep the gap visible on every run, so nobody can quietly inherit a
+  // sweep that "passes" because it stopped checking.
+  const dbSkipped = journeys.filter((j) => j.dbSkipped).length;
+  const idSets = journeys.filter((j) => j.idSet).length;
+  line('DB-TRUTH LAYER SKIPPED', dbSkipped ? `${dbSkipped} — ${[...new Set(journeys.filter((j) => j.dbSkipped).map((j) => j.dbSkipped))].join(' | ')}` : 0);
+  line('ID-SET COMPARISONS (missing/extra/dupes proven 0)', idSets);
+  line('DUPLICATES', journeys.reduce((n, j) => n + (j.idSet?.duplicates ?? 0), 0));
   line('BUGS FOUND', findings.length);
   line('BUGS FIXED', 0);
   line('BARRIERS ADDED/STRENGTHENED', 0);
