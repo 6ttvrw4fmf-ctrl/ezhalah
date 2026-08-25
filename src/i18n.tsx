@@ -649,6 +649,10 @@ const AR: Record<string, string> = {
   'We found {total} listings matching your search, and showed you {shown}.': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها.',
   'I can show you 100 listings at a time.': 'أقدر أعرض لك 100 إعلان في كل مرة.',
   'Let’s narrow it down': 'خلّنا نحدد الطلب أكثر',
+  // COMPLETED-ROUND RECEIPT (owner 2026-08-24) — replaces the action buttons on the results turn a
+  // finished Advanced Filter round was opened from. A record of what happened, never a control.
+  'Continued with the advanced filter': 'تابع المستخدم باستخدام التصفية المتقدمة',
+  'Your choices: {summary}': 'اختياراتك: {summary}',
   // Read Aloud closing note (owner request, 2026-08-23 — "read the note... and say the button
   // also"): spoken ONLY when the matching buttons are actually on screen (agent.tsx gates this the
   // same way), naming the exact same button label(s) so it can never mention an action that isn't
