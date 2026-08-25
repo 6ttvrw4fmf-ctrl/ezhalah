@@ -92,6 +92,31 @@ for (const [field, param] of AF_QUERY_FIELDS) {
   }
 }
 
+// ── (F) the age-bucket count path spreads it too, MINUS its own dimension ───────────────────────
+// It used to hand-copy 8 of the helper's keys, so a newly added advanced question would silently
+// stop being carried here (the 2026-07-24 bug, re-armed). It must spread the shared builder — but
+// strip p_age_min/p_age_max/p_is_new_construction, because this RPC applies those to the very scope
+// it then buckets: verified live 2026-08-25 (Riyadh/Rent-Monthly, p_age_min=3,p_age_max=5) every
+// bucket but 3_5 collapsed to 0. AGE_QUESTION.apply REPLACES the age answer, so the buckets must be
+// priced un-narrowed by it or a re-ask can never change the answer.
+const ageFn = remote.match(/export async function fetchPropertyAgeOptionCounts\(([\s\S]*?)\n\}/);
+check('fetchPropertyAgeOptionCounts() found', !!ageFn);
+const ageBody = ageFn?.[1] ?? '';
+check(
+  '    age count spreads rpcAdvancedFilterParams(q) via ageAgnostic()',
+  /\.\.\.ageAgnostic\(rpcAdvancedFilterParams\(q\)\)/.test(ageBody),
+  'a hand-copied param list stops carrying any advanced question added later',
+);
+for (const p of REQUIRED_PARAMS) {
+  check(`    age count does not re-list ${p} by hand`, !ageBody.includes(p));
+}
+const stripFn = remote.match(/function ageAgnostic<[\s\S]*?\n\}/)?.[0] ?? '';
+check('ageAgnostic() found', !!stripFn);
+for (const p of ['p_age_min', 'p_age_max', 'p_is_new_construction']) {
+  check(`    ageAgnostic() strips ${p}`, stripFn.includes(p),
+    'sending it collapses every other age bucket to 0');
+}
+
 console.log(
   failures === 0
     ? '\n✓ verify-af-count-params-carry-advanced: all checks passed.'
