@@ -2968,11 +2968,14 @@ export default function Agent() {
                 <>
                   {/* Mic — enters recording mode (owner brief §2): immediate press feedback, then the
                       composer itself morphs. Sits immediately left of Send, same 34px control family.
-                      Hidden entirely where isVoiceInputSupported() is false — a LIVE runtime check,
-                      not a browser-name assumption (owner correction, 2026-08-24: macOS Safari has
-                      shipped webkitSpeechRecognition since Safari 14.1 and correctly shows the mic;
-                      only engines that genuinely lack it — e.g. iOS/iPadOS WebKit — hide it). Showing
-                      a mic that can only ever flash a toast and revert reads as broken. */}
+                      Hidden entirely where isVoiceInputSupported() is false — a LIVE runtime check
+                      (macOS Safari correctly shows it; engines with no SpeechRecognition hide it),
+                      plus ONE deliberate product exclusion: genuine iOS Safari (owner decision
+                      2026-08-24 — Apple's on-device service refused every attempt on a real, fully-
+                      configured iPhone across three production-verified fixes; the full evidence
+                      trail lives in isVoiceInputSupported's own comment). Chrome/Firefox/Edge on
+                      the same iPhone keep the mic — recognition is proven working there. Showing
+                      a mic that can only ever flash a failure toast and revert reads as broken. */}
                   {isVoiceInputSupported() ? (
                   <Pressable
                     testID="voice-mic"
