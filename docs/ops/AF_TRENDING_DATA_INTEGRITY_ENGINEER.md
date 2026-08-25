@@ -42,7 +42,12 @@ overrides any more-timid wording anywhere, including in this file.
 
 Test AF like a real user in the live browser. Start from real searches and verify:
 - AF hidden with 0 useful questions
-- AF hidden with 1 useful question
+- **AF SHOWN with exactly 1 useful question** — owner revision 2026-08-24 supersedes the original
+  ">=2 to open" brief this file was written against: a single genuinely useful question is a real,
+  honest narrowing step, and withholding it was the defect. The threshold now lives in code as
+  `MIN_USEFUL_QUESTIONS_TO_SHOW = 1` (`src/data/advancedFilters.ts`) and is pinned in both directions
+  by `scripts/verify-af-min-useful-questions-gate.ts` (in `npm test`). Do not re-test this file's
+  original wording — it would fail against correct production behaviour.
 - AF shown with 2+ useful questions
 - useful questions continue while valid narrowing remains
 - no fake/unsupported question
@@ -230,6 +235,41 @@ list the exact remaining blockers.
 
 **Do not inflate the score. Do not lower the score because of unrelated backlog.** The score must
 represent the actual health of Advanced Filter + Trending + their data integrity, nothing else.
+
+## Harness notes (cumulative — save the next run the rediscovery)
+
+Things that cost a previous run real time, and are NOT product defects:
+
+1. **Chromium must be launched with `--ssl-version-max=tls1.2`** (2026-08-25). The cloud egress proxy
+   re-terminates TLS and resets Chromium's TLS-1.3 ClientHello: every navigation to an *allowed* host
+   dies with `ERR_CONNECTION_RESET` while `curl` to the same URL returns 200, which reads exactly like
+   the site being down. `ERR_TUNNEL_CONNECTION_FAILED` is the different, honest error meaning the host
+   is genuinely blocked by policy. Also pass `--proxy-server=http://127.0.0.1:34919` and use the
+   pinned browser at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` (`pip install playwright`
+   fetches a client whose default build number does not match the pre-installed one).
+2. **A fresh page already has «شراء» selected** (visibly filled green — this is honest UI, not a
+   hidden default). Buy/Rent is MULTI-select, so clicking «إيجار» on a fresh page yields *combined*
+   Buy+Rent (`p_deal: null`) with its own banner, not rent-only. For rent-only, click «إيجار» then
+   click «شراء» to deselect it. Rent period behaves the same way: «سنوي» is pre-selected, so clicking
+   «شهري» gives `p_rent_period: 'كلاهما'`, not monthly-only.
+3. **Trending is rendered on focus, and cached.** City trending appears when the city input is
+   focused; district trending when the district input is focused, *after* a city is chosen. The RPC
+   fires once per distinct parameter set per page session — clearing a captured-request list and then
+   re-focusing yields nothing. Use a fresh browser context per case, and pair responses to requests by
+   the request OBJECT (several in-flight calls share one RPC name, and name-matching silently pairs
+   the wrong totals).
+4. **District rows carry two different counts.** `district_options_ar` returns *scope* counts plus a
+   `match_values` array; under any extra narrowing the UI then fires one real
+   `location_search_candidates_ar` per row and replaces them with live counts. An oracle that counts
+   only the row's displayed label will disagree with the UI wherever `match_values` merges name
+   variants (live 2026-08-25: جدة «الصفاء» = `['الصفاء','حي الصفا']` = 304 + 105 = the advertised 409).
+   Count over the whole `match_values` set.
+5. **Advanced Filter lives in the «الوكيل الذكي» (agent) flow, not the Normal Filter «بحث» flow.**
+   Reaching it: send an Arabic request, answer the agent's disambiguation (a city that is also a
+   region needs «مدينة …»; «تقصد المدينة كاملة، أو حي معيّن؟» needs «المدينة كاملة»), then click
+   «خلّنا نحدد الطلب أكثر». A selected AF option shows a checkmark child at `opacity:1/scale(1)` and a
+   bolder label — the option container's own background does NOT change, so a background-colour probe
+   reports every option unselected.
 
 ## Hard safety rails (same as every other engineer — non-negotiable)
 
