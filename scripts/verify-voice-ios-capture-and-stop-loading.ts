@@ -4,22 +4,23 @@
 // follow-up request: the composer should show a brief loading beat after Stop, like ChatGPT, before
 // the transcript lands, instead of an instant cut).
 //
-// PART A — iOS capture path: iOS Safari's audio-session model is stricter than desktop browsers'
-// about a page holding two independent audio captures at once. Our own code held TWO: a
-// getUserMedia-driven AnalyserNode (for the real waveform) PLUS SpeechRecognition's own internal
-// capture. On genuine iOS Safari (iPhone/iPad's OWN browser — iPadOS masquerades as "Macintosh" in
-// its User-Agent but is touch-capable, unlike any real Mac) we skip our own getUserMedia/AnalyserNode
-// entirely and let the recognizer own the ONE capture session outright. isVoiceInputSupported() itself
-// is UNTOUCHED — the mic still shows exactly where it already correctly does; only how the stream is
-// ACQUIRED changes.
-//
-// NARROWED to Safari alone, not "any iOS WebKit browser" (owner report, 2026-08-24, SAME iPhone):
-// the first version of this fix applied to every iOS browser, including Chrome-for-iOS — but
-// real-device evidence showed Chrome does NOT share Safari's contention (recognition worked there),
-// so forcing the waveform-less fallback onto it was an unnecessary, user-visible regression (the
-// owner explicitly noticed the missing waveform on Chrome). Every third-party iOS browser carries its
-// own UA token specifically so it CAN be told apart from Safari despite sharing WebKit: Chrome uses
-// 'CriOS', Firefox 'FxiOS', Edge 'EdgiOS', Opera 'OPiOS'.
+// PART A — capture path + real waveform amplitude. The architecture settled on 2026-08-24 after a
+// full day of real-iPhone evidence, in three movements:
+//   1. Genuine iOS Safari is excluded at the SUPPORT GATE itself (isVoiceInputSupported → false
+//      there; owner decision, option B of their own framing — Apple's on-device service refused
+//      every attempt on a real, fully-configured iPhone across three production-verified fixes, and
+//      no free alternative exists). So NOTHING voice-related runs on iOS Safari, and startVoiceInput
+//      now has ONE unified capture path for every platform that can actually reach it — the old
+//      Safari-only skip-branch is deliberately gone (dead code once the gate excludes Safari).
+//   2. Chrome/Firefox/Edge-for-iOS keep the FULL feature — recognition is proven working there on
+//      the owner's own iPhone. Third-party iOS browsers carry their own UA tokens (CriOS/FxiOS/
+//      EdgiOS/OPiOS) precisely so they can be told apart from Safari despite sharing WebKit.
+//   3. THE FROZEN-WAVEFORM FIX (owner report: iPhone Chrome transcribed fine but the waveform never
+//      moved): WebKit only PROCESSES an audio graph that reaches the destination — an analyser with
+//      no path to output never receives data, so RMS reads flat silence forever. The standard fix is
+//      a ZERO-GAIN tap into the destination: the graph runs, and gain 0 guarantees nothing audible
+//      (no echo/feedback). Blink/Gecko pump sourceless-sink graphs anyway — which is exactly why
+//      desktop Chrome never showed the bug — and are unharmed by the tap.
 //
 // PART B — stop-loading beat: Stop now enters a brief 'processing' voiceState (capture has already
 // stopped synchronously — this is pure UI dwell time) showing a loading indicator in the waveform's
@@ -49,17 +50,26 @@ check(
     /return !\/CriOS\|FxiOS\|EdgiOS\|OPiOS\/\.test\(ua\);/.test(voice),
 );
 check(
-  'the getUserMedia + AnalyserNode block is skipped entirely on genuine iOS Safari only — guarded by if (!isIOSSafariEngine())',
-  /if \(!isIOSSafariEngine\(\)\) \{[\s\S]{0,200}navigator\.mediaDevices\.getUserMedia/.test(voice),
+  'genuine iOS Safari is excluded at the SUPPORT GATE (owner decision 2026-08-24) — and startVoiceInput therefore has ONE unified capture path: getUserMedia runs unconditionally, no Safari skip-branch survives',
+  /if \(isIOSSafariEngine\(\)\) return false;/.test(voice) &&
+    !/if \(!isIOSSafariEngine\(\)\) \{/.test(voice) &&
+    /let mediaStream: MediaStream;\s*\n\s*try \{\s*\n\s*mediaStream = await navigator\.mediaDevices\.getUserMedia\(\{ audio: true \}\);/.test(voice),
 );
 check(
-  "isVoiceInputSupported() is UNTOUCHED by the Safari branch — support detection stays a pure capability check, never gated on isIOSSafariEngine() (the owner's explicit rule: don't hide the mic as a workaround)",
-  !/isVoiceInputSupported\(\)[\s\S]{0,50}isIOSSafariEngine/.test(voice) &&
-    /export function isVoiceInputSupported\(\): boolean \{\s*\n\s*if \(Platform\.OS !== 'web' \|\| typeof window === 'undefined'\) return false;\s*\n\s*const w = window as any;\s*\n\s*return !!\(w\.SpeechRecognition \|\| w\.webkitSpeechRecognition\) && !!navigator\.mediaDevices\?\.getUserMedia;/.test(voice),
+  'THE WEBKIT GRAPH-PULL FIX: the analyser is tapped into the destination through a ZERO-gain node — source → analyser → gain(0) → destination — so WebKit actually processes the graph and RMS reads real amplitude, while gain 0 guarantees nothing audible',
+  /const sink = audioCtx!\.createGain\(\);\s*\n\s*sink\.gain\.value = 0;\s*\n\s*analyser\.connect\(sink\);\s*\n\s*sink\.connect\(audioCtx!\.destination\);/.test(voice),
 );
 check(
-  'the recognizer (step 3) is reached unconditionally regardless of the Safari branch — every platform still gets a working recognizer, just without the extra getUserMedia/analyser capture on Safari specifically',
+  "an interrupted/suspended context mid-session re-resumes itself (onstatechange) — iOS can yank a running context on Siri/calls/route changes, and without this the waveform freezes for the rest of the recording",
+  /onstatechange = \(\) => \{ if \(audioCtx && \(audioCtx as any\)\.state !== 'running'\) void audioCtx\.resume\?\.\(\)\.catch\(\(\) => \{\}\); \};/.test(voice),
+);
+check(
+  'the recognizer (step 3) is reached unconditionally after capture setup — every supported platform gets a working recognizer even if the analyser graph failed (its try/catch is non-fatal)',
   /\}\s*\n\s*\n\s*\/\/ 3\. The recognizer/.test(voice),
+);
+check(
+  'the RMS sampling itself is untouched real math over getByteTimeDomainData — no Math.random, no fabricated animation anywhere in the level path',
+  /analyser\.getByteTimeDomainData\(buf\);/.test(voice) && !/Math\.random/.test(voice),
 );
 
 // EXECUTED: a faithful replica of isIOSSafariEngine(), against real device/browser UA strings —
@@ -78,7 +88,7 @@ const UA_MAC_SAFARI = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebK
 const UA_ANDROID_CHROME = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36';
 const UA_DESKTOP_CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 
-check('iPhone Safari UA → genuine Safari (true) — the platform this fix is FOR', isIOSSafariEngineReplica({ userAgent: UA_IPHONE_SAFARI }) === true);
+check('iPhone Safari UA → genuine Safari (true) — the one browser the owner excluded at the support gate', isIOSSafariEngineReplica({ userAgent: UA_IPHONE_SAFARI }) === true);
 check(
   "iPhone Chrome UA (CriOS) → NOT genuine Safari (false) — the exact owner-reported regression: Chrome-for-iOS must keep its real getUserMedia/waveform path, it doesn't share Safari's contention",
   isIOSSafariEngineReplica({ userAgent: UA_IPHONE_CHROME }) === false,
