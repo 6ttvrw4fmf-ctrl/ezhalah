@@ -14,9 +14,9 @@
 //     the right to ask — they must never spend the budget, exactly as the scope→advanced transition
 //     gate already counts advanced questions only.
 //   • Cap turned into a QUALITY filter (a "strength" threshold on which questions may be asked): that
-//     silently reverts the owner's permanent 2026-08-22 narrowing rule, which superseded the old
-//     8%-90% band and says every truthful question with real narrowing power may be asked. The 2-4 is
-//     a COUNT cap. scoreQuestion() alone decides WHICH questions. The two must never merge.
+//     silently reverts the owner's narrowing rule (2026-08-22, AMENDED 2026-08-25), which replaced
+//     the old 8%-90% band and says every truthful question whose options can really narrow may be
+//     asked. The 2-4 is a COUNT cap. scoreQuestion() alone decides WHICH questions. Never merge them.
 //   • Cap fused with MIN_USEFUL_QUESTIONS_TO_SHOW: that constant is the OPEN gate (owner PR #1045,
 //     barrier-pinned at 1 by verify-af-min-useful-questions-gate.ts). Reusing it as the round size
 //     would make every round exactly one question long — or, if raised to 4 to serve as the cap,
@@ -73,13 +73,16 @@ check('the round size is a DIFFERENT constant with a DIFFERENT value — MIN_USE
   Number.isFinite(minUseful) && AF_ROUND_MAX_QUESTIONS > minUseful,
   `AF_ROUND_MAX_QUESTIONS=${String(AF_ROUND_MAX_QUESTIONS)} vs MIN_USEFUL_QUESTIONS_TO_SHOW=${String(minUseful)}`);
 
-// ── 3. A COUNT CAP, NEVER A QUALITY FILTER (owner's permanent 2026-08-22 ASK rule) ───────────────
+// ── 3. A COUNT CAP, NEVER A QUALITY FILTER (owner's ASK rule: 2026-08-22, amended 2026-08-25) ────
 // scoreQuestion() is the sole judge of WHICH questions may be asked. If the round cap ever leaks into
 // it — or into rankQuestions — a truthful question starts being suppressed for being "weak", which is
-// precisely the rule the owner made permanent on 2026-08-22.
+// precisely what the owner banned. NOTE (2026-08-25): the ASK rule itself moved that day — an option
+// must now also NARROW meaningfully (optionNarrowsMeaningfully, see verify-af-narrowing-gate.ts).
+// That is a change to the rule scoreQuestion applies, NOT permission for the round cap to enter it:
+// the two assertions below are unchanged and still say the cap must never reach either body.
 const scoreBody = rank.match(/export function scoreQuestion\([\s\S]*?\n\}/)?.[0] ?? '';
 check('scoreQuestion body located (extraction must fail loudly, never silently pass)', scoreBody.length > 0);
-check('scoreQuestion never sees the round cap — the ASK gate stays exactly the owner\'s 2026-08-22 narrowing rule',
+check('scoreQuestion never sees the round cap — WHICH questions is the narrowing gate\'s call alone',
   !!scoreBody && !/AF_ROUND_MAX_QUESTIONS/.test(scoreBody),
   'a round is capped by COUNT; which questions it asks is scoreQuestion\'s decision alone');
 const rankBody = adv.match(/export async function rankQuestions\([\s\S]*?\n\}/)?.[0] ?? '';

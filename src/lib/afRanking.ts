@@ -100,6 +100,16 @@ export function optionNarrowsMeaningfully(count: number, total: number): boolean
 // (`meaningful()`, MIN_REAL_OPTION_COUNT = 5) upstream; minOptionsFor() still decides whether what
 // survives is a real choice (single ≥2, multi ≥1); and selectivity (bestSplit) still decides ASK
 // ORDER only, never inclusion. See docs/ADVANCED_FILTER_DESIGN_CONTRACT.md "Amendment 2026-08-25".
+//
+// (e) TWO KNOCK-ON EFFECTS, NAMED SO THEY ARE NOT MISTAKEN FOR BUGS. First, ASK ORDER can shift:
+// bestSplit is a max over the SURVIVING options, so a question whose most balanced option was a
+// near-no-op now scores lower and may be asked later. That is the ranking telling the truth about
+// what the question can still do. Second, a question can die at the QUESTION level even though the
+// gate is one-sided at the OPTION level: a single-select split 92%/6% loses its 92% chip, is left
+// with one survivor, and fails MIN_OPTIONS_SINGLE — so a 94%-cut option can disappear with its
+// partner. That is the owner's specified design (filter the options, then let minOptionsFor decide),
+// not an accident; it is written down here because it is the one way this rule can cost a GOOD
+// question, and a future reader deserves to find it stated rather than discover it.
 export function scoreQuestion(
   questionId: string, selection: 'single' | 'multi', result: AdvancedQuestionResult,
 ): { score: number; options: AdvancedOption[] } | null {
@@ -135,6 +145,13 @@ export const AF_ROUND_MAX_QUESTIONS = 4;
 // — tap, open, close. Sharing the predicate makes offer and round agree by construction. (The
 // old explicit `o.count < total` guard is gone because it is now implied: with total > INTERVIEW_STOP_AT,
 // count === total removes 0% and fails the fraction, so a no-op option can never earn an offer.)
+//
+// CONSEQUENCE, STATED PLAINLY: on the advanced-pool path this is now a TAUTOLOGY, and that is the
+// point rather than a smell. agent.tsx probes it with rankQuestions' OWN output — options scoreQuestion
+// has already filtered through this same predicate — so it cannot say no to a question the round would
+// say yes to. "Tap, open, immediately close" stops being unlikely and becomes unrepresentable. Keep the
+// function: it is what makes the shared rule explicit at the call site, it still guards the
+// ≤INTERVIEW_STOP_AT hide, and it is the seam a future non-ranked caller would have to go through.
 export function offersMeaningfulNarrowing(total: number, options: readonly AdvancedOption[]): boolean {
   if (total <= INTERVIEW_STOP_AT) return false;
   return options.some((o) => optionNarrowsMeaningfully(o.count, total));

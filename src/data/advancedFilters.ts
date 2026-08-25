@@ -433,7 +433,7 @@ export const SCOPE_QUESTIONS: AdvancedQuestion[] = [GROUP_QUESTION, TYPE_QUESTIO
 export const scopeQuestionFor = (tier: ScopeTier): AdvancedQuestion =>
   tier === SCOPE_GROUP_ID ? GROUP_QUESTION : TYPE_QUESTION;
 
-// Contextual ranking + the narrowing gate (owner 2026-08-11; narrowing-gate rework 2026-08-22) now
+// Contextual ranking + the narrowing gate (owner 2026-08-11; reworked 2026-08-22 and 2026-08-25) now
 // live in @/lib/afRanking (SALIENCE, ASK_FIRST_TIER, askTier, scoreQuestion — imported above as
 // scoreQuestionPure). This thin wrapper is the only thing that still needs the full AdvancedQuestion
 // object (for its id/selection) so rankQuestions() below is unchanged; the pure gate itself takes

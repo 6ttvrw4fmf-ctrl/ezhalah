@@ -122,20 +122,71 @@ check('a balanced split scores higher than a lopsided one (ask-order still rewar
 check('…but the lopsided one is still INCLUDED, not dropped — selectivity never decides inclusion',
   lopsided !== null);
 
-// ── 6. THE ONE-SIDEDNESS, SWEPT (owner 2026-08-25) ──────────────────────────────────────────────
-// The permanent half of the 2026-08-22 rule, asserted as a property rather than one fixture: over
-// every scope size and every count, an option is NEVER rejected for being small. Whatever else this
-// gate learns to do, "a small slice is a great question" must survive it.
+// ── 6. THE PREDICATE ITSELF — BOUNDARY TABLE, EXECUTED (owner 2026-08-25) ───────────────────────
+// §1-§5 above run the predicate through scoreQuestion(), where minOptionsFor() and the scope floor
+// can mask an arithmetic slip. This block calls optionNarrowsMeaningfully() directly, so each corner
+// of the owner's rule is pinned on its own and a future edit cannot move one without going red.
 {
-  let smallRejected = 0; let first = '';
-  for (let N = 26; N <= 2000; N += 1) {
-    for (const k of [0, 1, 5, 25, 26, Math.ceil(N * 0.05), Math.ceil(N * 0.5), Math.floor(N * 0.9)]) {
-      if (k > N) continue;
-      if (k <= N * 0.9 && !optionNarrowsMeaningfully(k, N)) { smallRejected++; if (!first) first = `N=${N} k=${k}`; }
+  const cases: Array<[number, number, boolean, string]> = [
+    // N,    k,     expect, why
+    [100, 100, false, 'the gym: 100/100 have it, 0% cut'],
+    [100, 98, false, "the owner's 'same if 98/100 have it' — 2% cut"],
+    [100, 91, false, '9% cut — the first count past the line'],
+    [100, 90, true, 'EXACTLY 10% removed QUALIFIES — the boundary is ≥, never >'],
+    [100, 80, true, '20% cut'],
+    [100, 8, true, 'SMALL SLICE: 8% share is a 92% CUT — the 2026-08-22 protection'],
+    [1874, 60, true, 'the owner’s own 2026-08-22 repro: 3.2% share, 96.8% cut'],
+    [1874, 1820, false, '97.1% share, 2.9% cut — the gym at scale'],
+    [30, 27, true, '0.9×30 = 27 exactly; an exact 10% cut must not fall to float rounding'],
+    [30, 28, false, '6.7% cut'],
+    [26, 25, true, `only 3.8% removed, but it LANDS at ≤${INTERVIEW_STOP_AT} — the escape clause`],
+    [26, 26, false, 'no-op even at the smallest askable scope'],
+    [10000, 10000, false, 'k === N is rejected at every scale, not just small ones'],
+    [10000, 25, true, 'the escape clause has no upper bound on N'],
+  ];
+  let bad = 0; let firstBad = '';
+  for (const [N_, k, expect, why] of cases) {
+    if (optionNarrowsMeaningfully(k, N_) === expect) continue;
+    bad++; if (!firstBad) firstBad = `N=${N_} k=${k} expected ${expect} (${why})`;
+  }
+  check(`the predicate's ${cases.length}-case boundary table holds (10% inclusive · k=N rejected · ≤${INTERVIEW_STOP_AT} escape · small slices ask)`,
+    bad === 0, `${bad} wrong, first ${firstBad}`);
+}
+
+// ── 6b. THE ONE-SIDEDNESS, SWEPT (owner 2026-08-25) ─────────────────────────────────────────────
+// The permanent half of the 2026-08-22 rule, asserted as a PROPERTY rather than one fixture: over
+// every scope size and every count, an option is NEVER rejected for being small. Whatever else this
+// gate learns to do, "a small slice is a great question" must survive it. Sweeping is what stops the
+// 2026-08-11 two-sided band ("also drop anything under 8% of N") from creeping back in — a band would
+// pass every fixture in §1-§5 and still re-break the owner's Villa repro at some other N.
+//
+// The oracle is EXACT INTEGER arithmetic (10·(N−k) ≥ N), independent of the shipped float form, so
+// this also pins that no 0.9×N rounding hazard exists at any scope size the app can reach.
+{
+  let smallRejected = 0; let firstSmall = '';
+  let disagreements = 0; let firstDis = '';
+  const oracle = (k: number, N_: number) => 10 * (N_ - k) >= N_ || k <= INTERVIEW_STOP_AT;
+  for (let N_ = 26; N_ <= 1500; N_ += 1) {
+    for (let k = 0; k <= N_; k += 1) {
+      const got = optionNarrowsMeaningfully(k, N_);
+      if (got !== oracle(k, N_)) { disagreements++; if (!firstDis) firstDis = `N=${N_} k=${k}`; }
+      // "removes ≥10%" in exact integers — every such option MUST be asked, forever.
+      if (10 * (N_ - k) >= N_ && !got) { smallRejected++; if (!firstSmall) firstSmall = `N=${N_} k=${k}`; }
+    }
+  }
+  // …and again at the float-boundary counts only, far past where exhaustive is affordable.
+  for (let N_ = 1501; N_ <= 200000; N_ += 7) {
+    for (const k of [Math.floor(N_ * 0.9), Math.ceil(N_ * 0.9), N_ - Math.ceil(N_ / 10), N_ - Math.floor(N_ / 10)]) {
+      if (k < 0 || k > N_) continue;
+      if (optionNarrowsMeaningfully(k, N_) !== oracle(k, N_)) { disagreements++; if (!firstDis) firstDis = `N=${N_} k=${k}`; }
+      if (10 * (N_ - k) >= N_ && !optionNarrowsMeaningfully(k, N_)) { smallRejected++; if (!firstSmall) firstSmall = `N=${N_} k=${k}`; }
     }
   }
   check('no option that removes ≥10% is EVER rejected — the gate is one-sided, small slices always ask',
-    smallRejected === 0, `${smallRejected} rejection(s), first ${first}`);
+    smallRejected === 0,
+    `${smallRejected} rejection(s), first ${firstSmall} — this is the 2026-08-11 two-sided band coming back`);
+  check('the shipped float form matches EXACT integer arithmetic at every count (no 0.9×N rounding hazard)',
+    disagreements === 0, `${disagreements} disagreement(s), first ${firstDis}`);
   check(`the ≤${INTERVIEW_STOP_AT} escape survives: a 3.8%-cut option that LANDS at the target still asks`,
     optionNarrowsMeaningfully(25, 26) === true,
     'the last step to the target must never be blocked by a percentage');
