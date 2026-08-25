@@ -20,8 +20,8 @@ export function minOptionsFor(selection: 'single' | 'multi'): number {
 }
 
 // Scope-size floor: don't ask a question unless the current scope has MORE results than the
-// interview's stop line (owner 2026-08-11 contextual-interview rework — unchanged by this file's
-// 2026-08-22 narrowing-gate rework below).
+// interview's stop line (owner 2026-08-11 contextual-interview rework — unchanged by the 2026-08-22
+// and 2026-08-25 narrowing-gate reworks below).
 export const INTERVIEW_STOP_AT = 25;
 export const MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT + 1;
 
@@ -34,7 +34,7 @@ export function meaningful(options: AdvancedOption[]): AdvancedOption[] {
   return options.filter((o) => o.count >= MIN_REAL_OPTION_COUNT);
 }
 
-// ── Contextual ranking (owner 2026-08-11; narrowing-gate rework 2026-08-22) ──────────────────────
+// ── Contextual ranking (owner 2026-08-11; narrowing-gate reworks 2026-08-22, 2026-08-25) ───────
 // score = split × salience, computed from the CURRENT candidate set's counts. `split` peaks when an
 // option covers half the set (1 − |2k/N − 1|) — this is an ORDERING signal only (asks the most
 // informative question first), never an inclusion gate. Unknown ≠ no throughout: options only ever
@@ -52,23 +52,70 @@ export const SALIENCE: Record<string, number> = {
 export const ASK_FIRST_TIER: Record<string, number> = { rnpl: 1 };
 export function askTier(id: string): number { return ASK_FIRST_TIER[id] ?? 0; }
 
-// NARROWING GATE (owner rule, 2026-08-22 — supersedes the 2026-08-11 "8%-90% option band"): a
-// question is asked whenever it has a real, source-backed choice that would actually change the
-// result set — never suppressed just because that choice is a small slice or a lopsided majority.
-// "We still have thousands of listings" must never end in "but we ran out of questions to ask"
-// while a valid one exists. Every option here already cleared the ABSOLUTE per-option floor
-// (`meaningful()`, MIN_REAL_OPTION_COUNT = 5) upstream — this gate only asks "does picking this
-// option change anything for THIS user's current scope", i.e. `count < N`. An option where
-// count === N is a genuine no-op (100% of the scope already has it) and is correctly excluded — not
-// because it is unpopular, but because selecting it would never narrow anything. Selectivity still
-// decides ASK ORDER (bestSplit below feeds the sort in rankQuestions), it just no longer decides
-// inclusion — see docs/ADVANCED_FILTER_DESIGN_CONTRACT.md "Amendment 2026-08-22".
+// ── THE NARROWING PREDICATE — ONE rule, used by BOTH gates ──────────────────────────────────────
+// The ONLY place the owner's 10% lives. scoreQuestion() below calls it to decide whether an OPTION
+// may be asked about; offersMeaningfulNarrowing() at the bottom of this file calls it to decide
+// whether «تحديد أكثر» may be OFFERED at all. Two copies of this arithmetic would eventually drift
+// into a button that opens a round and immediately closes it — the exact bug shape PR #1094 had to
+// fix for a different cause. One predicate makes that unrepresentable.
+//
+// Removal form (`total - count >= total * FRACTION`), so EXACTLY 10% qualifies: at N=50 a count of
+// 45 is the last qualifying answer, not the first rejected one. The second clause exists so the LAST
+// step to the target is never blocked by a percentage: at N=26 a count of 25 removes only 3.8% but
+// lands AT the target, which is the whole point of the round.
+export const MEANINGFUL_NARROWING_FRACTION = 0.1;
+export function optionNarrowsMeaningfully(count: number, total: number): boolean {
+  return total - count >= total * MEANINGFUL_NARROWING_FRACTION || count <= INTERVIEW_STOP_AT;
+}
+
+// NARROWING GATE (owner rule, 2026-08-25 — supersedes the 2026-08-22 wording quoted below, which
+// itself superseded the 2026-08-11 "8%-90% option band"; the history is kept on purpose, this has
+// now moved twice).
+//
+// (a) WHAT IT DOES. An option is included only when answering it can actually move the set:
+// `optionNarrowsMeaningfully(count, N)` — remove ≥10% of the current scope, OR land at/under
+// INTERVIEW_STOP_AT. The owner's worked case: "You have 100 properties. If the next question is
+// 'do you want a gym?' but 100/100 have a gym, asking it is pointless — the answer cannot narrow
+// anything. Same if 98/100 have it." Bathrooms at N=100 with rungs 100/98/60/20: «1+»=100 (0% cut)
+// and «2+»=98 (2% cut) are DROPPED, «3+»=60 (40%) and «4+»=20 (80%) are KEPT — the question survives
+// with a real choice of two, and the user never sees a chip that does nothing. Gym at 100/100 loses
+// its only option, so that question dies entirely. That is the point, not a side effect.
+//
+// (b) ONE-SIDED, DELIBERATELY. It rejects only NEAR-NO-OP options; it must never reject an option for
+// being a SMALL slice. An option matching 8 of 100 removes 92% and is an excellent question. Only the
+// lopsided end is the gym problem.
+//
+// (c) WHAT THE 2026-08-22 RULE PROTECTED IS PRESERVED. That rule said: "a question is asked whenever
+// it has a real, source-backed choice that would actually change the result set — never suppressed
+// just because that choice is a small slice or a lopsided majority. 'We still have thousands of
+// listings' must never end in 'but we ran out of questions to ask' while a valid one exists." It was
+// written against the 2026-08-11 band, which rejected BOTH extremes — and the small-slice half of
+// that ban was the real bug (street_width «30m+» at 60 of 1,874 = 3.2%, dropped while it would have
+// taken the user from 1,874 to 60). That half stays banned forever. The over-correction was keeping
+// options like 1,820 of 1,874 (97.1%), which cost the user a tap and moved nothing. Nothing is
+// invented and nothing is forced to reach the ≤25 target: when no meaningful truthful option remains,
+// the Advanced Filter is DONE, at 50 or 100 results, and only «عرض المزيد» is left.
+//
+// (d) UNCHANGED AROUND IT. Every option here already cleared the ABSOLUTE per-option floor
+// (`meaningful()`, MIN_REAL_OPTION_COUNT = 5) upstream; minOptionsFor() still decides whether what
+// survives is a real choice (single ≥2, multi ≥1); and selectivity (bestSplit) still decides ASK
+// ORDER only, never inclusion. See docs/ADVANCED_FILTER_DESIGN_CONTRACT.md "Amendment 2026-08-25".
+//
+// (e) TWO KNOCK-ON EFFECTS, NAMED SO THEY ARE NOT MISTAKEN FOR BUGS. First, ASK ORDER can shift:
+// bestSplit is a max over the SURVIVING options, so a question whose most balanced option was a
+// near-no-op now scores lower and may be asked later. That is the ranking telling the truth about
+// what the question can still do. Second, a question can die at the QUESTION level even though the
+// gate is one-sided at the OPTION level: a single-select split 92%/6% loses its 92% chip, is left
+// with one survivor, and fails MIN_OPTIONS_SINGLE — so a 94%-cut option can disappear with its
+// partner. That is the owner's specified design (filter the options, then let minOptionsFor decide),
+// not an accident; it is written down here because it is the one way this rule can cost a GOOD
+// question, and a future reader deserves to find it stated rather than discover it.
 export function scoreQuestion(
   questionId: string, selection: 'single' | 'multi', result: AdvancedQuestionResult,
 ): { score: number; options: AdvancedOption[] } | null {
   const N = result.total;
   if (N < MIN_TOTAL_TO_SHOW) return null;
-  const narrowing = result.options.filter((o) => o.count < N);
+  const narrowing = result.options.filter((o) => optionNarrowsMeaningfully(o.count, N));
   if (narrowing.length < minOptionsFor(selection)) return null;
   const bestSplit = Math.max(...narrowing.map((o) => 1 - Math.abs((2 * o.count) / N - 1)));
   return { score: bestSplit * (SALIENCE[questionId] ?? 0.5), options: narrowing };
@@ -80,26 +127,32 @@ export function scoreQuestion(
 //
 // ROUND SIZE is a COUNT CAP, never a quality filter: a round asks min(availableUsefulQuestions,
 // AF_ROUND_MAX_QUESTIONS) advanced questions, minimum 1. Which questions those are is still decided
-// only by scoreQuestion() — the owner's permanent 2026-08-22 narrowing rule — so a truthful question
-// is never suppressed mid-round for being "weak". SCOPE steps (property_group / property_type) do not
+// only by scoreQuestion() — the owner's narrowing rule (2026-08-25) — so a question is never dropped
+// mid-round to hit the cap, and never asked when its options cannot move the set. SCOPE steps (property_group / property_type) do not
 // count toward it: they are the prerequisite that earns the right to ask, exactly as the
 // scope→advanced transition gate already treats them.
 export const AF_ROUND_MAX_QUESTIONS = 4;
 
-// ── THE OFFER GATE — a SEPARATE gate from scoreQuestion's ASK gate (owner 2026-08-24) ───────────
-// scoreQuestion decides whether a question may be ASKED once a round is running: `o.count < N`, i.e.
-// "would picking this change anything at all". That rule is permanent and is deliberately NOT touched
-// here — suppressing a truthful question mid-round would revert the owner's 2026-08-22 decision.
+// ── THE OFFER GATE — same rule as the ASK gate, one turn earlier (owner 2026-08-24/2026-08-25) ──
+// May we OFFER «تحديد أكثر» at all? A round costs the user taps, so it is offered only when it can
+// pay for itself: more than INTERVIEW_STOP_AT results AND some remaining option that
+// optionNarrowsMeaningfully(). At N=50 an option yielding 45 qualifies and one yielding 47 does not;
+// at N=27 an option yielding 24 qualifies. Nothing qualifying ⇒ the button is HIDDEN.
 //
-// This gate answers a different question, one turn earlier: may we OFFER «تحديد أكثر» at all? A round
-// is only worth the user's time when some remaining question has real narrowing VALUE — its best
-// option removes at least AF_OFFER_MIN_REMOVED_FRACTION of the current set, OR finishes the job by
-// landing at or under the target. At N=50 an option yielding 45 qualifies and one yielding 47 does
-// not; at N=27 an option yielding 24 qualifies. When nothing qualifies the button is HIDDEN — we
-// never ask a pointless question just to force the count down.
-export const AF_OFFER_MIN_REMOVED_FRACTION = 0.1;
+// As of the owner's 2026-08-25 decision this calls the SAME predicate scoreQuestion() uses, instead of
+// re-implementing the arithmetic. That is a hard requirement, not tidiness: while the ask gate was the
+// looser `count < N`, an offer could promise a round whose questions the round itself would then drop
+// — tap, open, close. Sharing the predicate makes offer and round agree by construction. (The
+// old explicit `o.count < total` guard is gone because it is now implied: with total > INTERVIEW_STOP_AT,
+// count === total removes 0% and fails the fraction, so a no-op option can never earn an offer.)
+//
+// CONSEQUENCE, STATED PLAINLY: on the advanced-pool path this is now a TAUTOLOGY, and that is the
+// point rather than a smell. agent.tsx probes it with rankQuestions' OWN output — options scoreQuestion
+// has already filtered through this same predicate — so it cannot say no to a question the round would
+// say yes to. "Tap, open, immediately close" stops being unlikely and becomes unrepresentable. Keep the
+// function: it is what makes the shared rule explicit at the call site, it still guards the
+// ≤INTERVIEW_STOP_AT hide, and it is the seam a future non-ranked caller would have to go through.
 export function offersMeaningfulNarrowing(total: number, options: readonly AdvancedOption[]): boolean {
   if (total <= INTERVIEW_STOP_AT) return false;
-  return options.some((o) => o.count < total
-    && (total - o.count >= total * AF_OFFER_MIN_REMOVED_FRACTION || o.count <= INTERVIEW_STOP_AT));
+  return options.some((o) => optionNarrowsMeaningfully(o.count, total));
 }

@@ -16,13 +16,13 @@ import {
   MIN_OPTIONS_SINGLE, MIN_OPTIONS_MULTI, minOptionsFor,
   INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW, MIN_REAL_OPTION_COUNT, meaningful,
   SALIENCE, ASK_FIRST_TIER, askTier, scoreQuestion as scoreQuestionPure,
-  AF_ROUND_MAX_QUESTIONS, AF_OFFER_MIN_REMOVED_FRACTION, offersMeaningfulNarrowing,
+  AF_ROUND_MAX_QUESTIONS, MEANINGFUL_NARROWING_FRACTION, optionNarrowsMeaningfully, offersMeaningfulNarrowing,
 } from '@/lib/afRanking';
 export {
   type AdvancedOption, type AdvancedQuestionResult,
   MIN_OPTIONS_SINGLE, MIN_OPTIONS_MULTI, minOptionsFor,
   INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW, MIN_REAL_OPTION_COUNT,
-  AF_ROUND_MAX_QUESTIONS, AF_OFFER_MIN_REMOVED_FRACTION, offersMeaningfulNarrowing,
+  AF_ROUND_MAX_QUESTIONS, MEANINGFUL_NARROWING_FRACTION, optionNarrowsMeaningfully, offersMeaningfulNarrowing,
 };
 
 // ── Advanced Filter engine — governed by docs/ADVANCED_FILTER_DESIGN_CONTRACT.md ─────────────────
@@ -373,8 +373,8 @@ export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
 // facets and the summary all work unchanged) but are deliberately NOT members of ADVANCED_QUESTIONS
 // and never pass through rankQuestions/scoreQuestion. A scope step is a PREREQUISITE of the pool,
 // not a ranked peer of it — and scoreQuestion's usefulness gates would delete real taxonomy
-// branches (MIN_REAL_OPTION_COUNT hides a group with 4 listings; the `o.count < N` no-op filter
-// retires a group with one populated type). The tier logic itself is pure and lives in
+// branches (MIN_REAL_OPTION_COUNT hides a group with 4 listings; the narrowing gate
+// `optionNarrowsMeaningfully()` retires a group with one populated type). The tier logic itself is pure and lives in
 // @/lib/afPlan so a barrier can execute it; only the live counts need this module's remote import.
 //
 // Options are ordered by the canonical HIERARCHY, never by count — the taxonomy is the taxonomy.
@@ -433,7 +433,7 @@ export const SCOPE_QUESTIONS: AdvancedQuestion[] = [GROUP_QUESTION, TYPE_QUESTIO
 export const scopeQuestionFor = (tier: ScopeTier): AdvancedQuestion =>
   tier === SCOPE_GROUP_ID ? GROUP_QUESTION : TYPE_QUESTION;
 
-// Contextual ranking + the narrowing gate (owner 2026-08-11; narrowing-gate rework 2026-08-22) now
+// Contextual ranking + the narrowing gate (owner 2026-08-11; reworked 2026-08-22 and 2026-08-25) now
 // live in @/lib/afRanking (SALIENCE, ASK_FIRST_TIER, askTier, scoreQuestion — imported above as
 // scoreQuestionPure). This thin wrapper is the only thing that still needs the full AdvancedQuestion
 // object (for its id/selection) so rankQuestions() below is unchanged; the pure gate itself takes

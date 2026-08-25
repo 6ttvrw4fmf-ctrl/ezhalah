@@ -278,6 +278,12 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
 
 ## Amendment 2026-08-22 (a) — the narrowing gate (owner-approved, supersedes the 8%-90% option band)
 
+> **Partly superseded on 2026-08-25** — see «Amendment 2026-08-25» at the end of this file. The
+> ORDERING half below stands. The ELIGIBILITY half's `count < N` was replaced by
+> `optionNarrowsMeaningfully(count, N)` (≥10% removed, or landing at/under the target): the
+> small-slice protection this amendment won is permanent, the lopsided-majority half was an
+> over-correction and the owner reversed it. Kept in full because this gate has now moved twice.
+
 **Bug report that triggered this:** owner selected Villa + 6 Riyadh districts (~5,154 matches),
 answered/skipped through the interview, and it stopped after ~2 questions at ~1,874 remaining —
 while several more source-certified Villa questions (street width, direction, amenities…) existed
@@ -337,7 +343,8 @@ gate alone left large, which is a tax on their attention, not a niche shortlist.
   path).
 - **"Useful" already has one definition — `scoreQuestion()`, unchanged by this rule.** Per Amendment
   (a) above, a question is useful when the scope clears `MIN_TOTAL_TO_SHOW` and has at least
-  `minOptionsFor(selection)` options that would actually narrow the current set (`count < N`).
+  `minOptionsFor(selection)` options that would actually narrow the current set
+  (`count < N` when this was written; `optionNarrowsMeaningfully(count, N)` since 2026-08-25).
   `rankQuestions()` already computes exactly this set (`ranked`); this gate counts `ranked.length`
   at the OPENING decision only — it does not re-derive "useful" a second, potentially-disagreeing
   way, and automatically picks up whatever "useful" means as Amendment (a)'s definition evolves.
@@ -490,8 +497,9 @@ get it back.
 - `src/data/advancedFilters.ts` — `SCOPE_QUESTIONS` / `scopeQuestionFor()`. Deliberately **not**
   members of `ADVANCED_QUESTIONS` and never ranked by `rankQuestions`/`scoreQuestion`: a scope step is
   a prerequisite of that pool, not a ranked peer, and `scoreQuestion`'s usefulness gates would delete
-  real taxonomy branches (`MIN_REAL_OPTION_COUNT` hides a 4-listing group; the `o.count < N` no-op
-  filter retires a group with one populated type).
+  real taxonomy branches (`MIN_REAL_OPTION_COUNT` hides a 4-listing group; the narrowing gate —
+  `o.count < N` when this was written, `optionNarrowsMeaningfully()` since 2026-08-25, which is
+  stricter still — retires a group with one populated type).
 - `src/app/agent.tsx` — the scope prefix inside `presentGuided`, the moved gate, the plan
   invalidation on a scope commit, and the scope-aware `revalidateStepsAfter`.
 - `scripts/verify-af-scope-hierarchy.ts` — the barrier, wired into `npm test`. It EXECUTES the real
@@ -506,3 +514,55 @@ none: inventing rows for them would pollute the registry with non-fields. The bo
 teeth where it matters, in `scripts/verify-ui-controls-have-predicates.ts`: the interview may ask
 exactly the two authorized scope ids and nothing else from Normal-Filter territory, and `bedrooms`
 must remain `'normal'` tier and appear in no interview question.
+
+## Amendment 2026-08-25 — the ASK gate uses the narrowing rule too (owner-approved, supersedes the eligibility half of Amendment 2026-08-22 (a))
+
+**The owner's brief.** «You have 100 properties. If the next AF question is "Do you want a gym?" but
+100/100 properties have a gym, then asking that is pointless. The answer cannot narrow anything. So do
+not show that question. Same if 98/100 have it, or every option gives basically the same result.»
+«Certified question = allowed to ask. Useful backend split = worth asking now. We need BOTH.» «Do not
+invent questions and do not force questions just to reach the 25-listing target. If there are 50 or
+100 results left but no meaningful truthful question remains, Advanced Filter is done.»
+
+**The rule.** ONE predicate, `optionNarrowsMeaningfully(count, total)` in `src/lib/afRanking.ts`:
+
+```
+qualifies  ==  (total - count >= total * MEANINGFUL_NARROWING_FRACTION)  ||  (count <= INTERVIEW_STOP_AT)
+```
+
+`MEANINGFUL_NARROWING_FRACTION = 0.10`, `INTERVIEW_STOP_AT = 25` (unchanged). The removal form is
+written so that EXACTLY 10% qualifies (N=100 k=90 and N=30 k=27 both ask; N=100 k=91 does not). The
+second clause exists so the LAST step to the target is never blocked by a percentage: at N=26 an
+option yielding 25 removes 3.8% and still qualifies, because it lands AT the target.
+
+**Two uses, one predicate — required, not tidiness.**
+- **ASK gate** — `scoreQuestion()` filters the OPTIONS by it, REPLACING the 2026-08-22 `o.count < N`.
+  `minOptionsFor(selection)` then decides whether the question survives (single ≥2, multi ≥1).
+  Owner's worked case, bathrooms at N=100 with rungs 100/98/60/20: «1+»=100 (0% cut) and «2+»=98 (2%
+  cut) are DROPPED, «3+»=60 (40%) and «4+»=20 (80%) are KEPT — a real choice of two, and the user
+  never sees a chip that does nothing. Gym at 100/100 loses its only option, so that question dies.
+- **OFFER gate** — `offersMeaningfulNarrowing()` calls the SAME predicate instead of its own copy of
+  the arithmetic. Two copies would drift into «تحديد أكثر» opening a round that immediately closes —
+  the bug shape PR #1094 had to fix for a different cause. Sharing it makes that unrepresentable.
+
+**ONE-SIDED, deliberately — the small-slice protection of 2026-08-22 is permanent.** The 2026-08-11
+band rejected BOTH extremes; only the lopsided end is the gym problem. An option matching 8 of 100
+removes 92% and is an excellent question; `street_width` «30m+» at 60 of 1,874 (a 3.2% share, a 96.8%
+cut) is exactly the question the owner fought to get back and is never rejected. What this amendment
+reverses is the over-correction at the other end: `amenities` «parking» at 1,820 of 1,874 costs a tap
+and moves 54 listings. Nothing is invented and nothing is forced to reach ≤25 — when no meaningful
+truthful option is left, the Advanced Filter is DONE at 50 or 100 results and only «عرض المزيد»
+remains.
+
+**Amendment 2026-08-22 (a) as amended.** Its *ordering* half stands untouched (selectivity orders,
+never includes). Its *eligibility* half now reads `optionNarrowsMeaningfully(count, N)` instead of
+`count < N`, so its regression bullet (b) — "a 97%-share-only option is included" — is superseded and
+now asserts the opposite; bullet (a) (the small-slice question) stands unchanged and permanent.
+Unchanged around it: `MIN_TOTAL_TO_SHOW`, the absolute per-option floor `MIN_REAL_OPTION_COUNT = 5`
+and `meaningful()`, `MIN_USEFUL_QUESTIONS_TO_SHOW = 1`, the adaptive round size, the manual tap,
+Skip = no predicate, and Summary == committed state.
+
+Regression: `scripts/verify-af-narrowing-gate.ts` (§2/§2b/§5 inverted in place with the dated reason,
+§1 and §6 keep the small-slice half permanent) and `scripts/verify-af-offer-gate.ts` (§3 and §4
+inverted from "the gates are separate" to "the gates share ONE predicate and neither re-implements the
+arithmetic"). Both EXECUTE the real pure predicate; neither was deleted or unwired.

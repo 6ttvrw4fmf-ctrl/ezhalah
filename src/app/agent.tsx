@@ -1619,8 +1619,8 @@ export default function Agent() {
     // ── ROUND CAP (owner 2026-08-24) ────────────────────────────────────────────────────────────
     // A round asks min(availableUsefulQuestions, AF_ROUND_MAX_QUESTIONS) ADVANCED questions — small
     // and conversational, never a 10-question interrogation. This is a COUNT cap only: it never
-    // decides WHICH questions get asked (scoreQuestion still owns that, per the owner's permanent
-    // 2026-08-22 rule), and the "min" needs no code — the existing empty-plan terminator below
+    // decides WHICH questions get asked (scoreQuestion still owns that, per the owner's narrowing
+    // rule — 2026-08-22, amended 2026-08-25), and the "min" needs no code: the empty-plan terminator
     // already stops a round that has fewer than the cap available. SCOPE steps do not count, the
     // same way the scope→advanced transition gate counts advanced questions only. The round ENDS
     // through the SAME terminator every other exit uses (finishGuided); continuing is a manual tap
