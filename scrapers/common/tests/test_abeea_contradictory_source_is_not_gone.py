@@ -164,9 +164,21 @@ def test_an_available_page_is_live():
         assert not any(g in status for g in abeea.GONE_STATUS), good
 
 
+def _oracle_src() -> str:
+    """The oracle's WHOLE decision path.
+
+    The verdict logic was extracted into the pure `_liveness_verdict()` on 2026-08-25 (identity
+    supersession fix), so reading only `_verify_gone`'s body would now miss the half that actually
+    decides — and this assertion would silently pass on an oracle that had lost its status check.
+    The window follows the code; the assertions below are unchanged in strength and one is added.
+    """
+    verdict = RUN_PY[RUN_PY.index("def _liveness_verdict"):RUN_PY.index("def _pin_sold_inactive")]
+    gone = RUN_PY[RUN_PY.index("def _verify_gone"):]
+    return verdict + gone[:gone.index("pruned = 0")]
+
+
 def test_oracle_reads_the_status_field_and_holds_when_unreadable():
-    src = RUN_PY[RUN_PY.index("def _verify_gone"):]
-    src = src[:src.index("pruned = 0")]
+    src = _oracle_src()
     assert "_detail_items" in src and "GONE_STATUS" in src, (
         "abeea's verify_gone must decide on «Property Status» (the field the platform actually "
         "flips), using the same parser and token list as map_listing so the two cannot disagree"
@@ -175,3 +187,32 @@ def test_oracle_reads_the_status_field_and_holds_when_unreadable():
         "a page that renders without a readable status cell must be UNKNOWN — never 'live', which "
         "would resurrect a sold listing, and never 'gone', which would kill a live one"
     )
+
+
+def test_oracle_checks_identity_before_status():
+    """A page publishing a DIFFERENT «Property ID» is not evidence the probed ad is alive.
+
+    abeea edits a live post's Property ID in place (ABREA166 → ABRE166). Identity is keyed on that
+    field, so the next crawl inserts a second row while the old row keeps the same listing_url.
+    Before 2026-08-25 the oracle loaded that shared page, saw 200 + a non-Sold status, answered
+    'live', and prune SELF-HEALED the retired row — resurrecting it on every cycle, so both rows
+    stayed production_ready for months and the user saw two cards for one property.
+    """
+    assert "_ad_number_from_pid" in _oracle_src(), (
+        "the oracle must compare the page's own published Property ID against the ad_number it is "
+        "probing, using the same derivation as map_listing"
+    )
+    v = abeea._liveness_verdict
+    # the two real production cases
+    assert v(200, 5000, "ABRE166", "For Rent", "ABREA166") == "gone"
+    assert v(200, 5000, "ABRE334", "For Rent", "ABRE3334") == "gone"
+    # and the cases that must NOT change
+    assert v(200, 5000, "ABRE166", "For Rent", "ABRE166") == "live"
+    assert v(200, 5000, "ABRE166", "Rented", "ABRE166") == "gone"
+    assert v(200, 5000, None, "For Rent", "ABdeadbeef") == "live", (
+        "ads whose page publishes no Property ID key on md5(slug) — for them the URL IS the "
+        "identity and there is nothing to compare, so behaviour must be unchanged"
+    )
+    assert v(200, 5000, "ABRE166", None, "ABRE166") == "unknown"
+    assert v(404, 0, None, None, "ABRE166") == "gone"
+    assert v(403, 10, None, None, "ABRE166") == "retry", "blocked is never proof of death"
