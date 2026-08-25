@@ -157,7 +157,7 @@ check('exit (b) is present and is the ONLY count threshold allowed beside it: th
   'deleting the cap restores the 8-10 question interrogation the owner replaced with conversational rounds');
 check('no THIRD count threshold gates the continuation loop — plan.length is never compared against a numeric literal',
   !/plan\.length\s*[<>]=?\s*\d/.test(presentGuidedBody),
-  'a "strength floor" like `plan.length < 2` would suppress a truthful question mid-round, reverting the owner\'s permanent 2026-08-22 narrowing rule');
+  'a "strength floor" like `plan.length < 2` would suppress a truthful question mid-round, reverting the owner\'s narrowing rule (2026-08-22, amended 2026-08-25) — which decides WHICH questions are asked in scoreQuestion(), never here by count');
 
 // ── SKIP vs CONFIRM-WITH-EMPTY parity (brief's named suspicion — traced, found NOT diverging).
 // Since the «رجوع» rebuild (owner 2026-08-22) this is no longer a parity that has to be checked
