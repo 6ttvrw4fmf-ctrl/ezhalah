@@ -16,11 +16,13 @@ import {
   MIN_OPTIONS_SINGLE, MIN_OPTIONS_MULTI, minOptionsFor,
   INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW, MIN_REAL_OPTION_COUNT, meaningful,
   SALIENCE, ASK_FIRST_TIER, askTier, scoreQuestion as scoreQuestionPure,
+  AF_ROUND_MAX_QUESTIONS, AF_OFFER_MIN_REMOVED_FRACTION, offersMeaningfulNarrowing,
 } from '@/lib/afRanking';
 export {
   type AdvancedOption, type AdvancedQuestionResult,
   MIN_OPTIONS_SINGLE, MIN_OPTIONS_MULTI, minOptionsFor,
   INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW, MIN_REAL_OPTION_COUNT,
+  AF_ROUND_MAX_QUESTIONS, AF_OFFER_MIN_REMOVED_FRACTION, offersMeaningfulNarrowing,
 };
 
 // ── Advanced Filter engine — governed by docs/ADVANCED_FILTER_DESIGN_CONTRACT.md ─────────────────

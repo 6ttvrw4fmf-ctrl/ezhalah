@@ -40,20 +40,46 @@ const fnMatch = remoteSrc.match(
 check('fetchPropertyAgeOptionCounts() is still defined in src/data/remote.ts', fnMatch !== null);
 const fnBody = fnMatch ? fnMatch[0] : '';
 
+// 2026-08-25: this call site made the SAME move fetchApartmentGuidedCounts() made on 2026-08-23 (see
+// the sibling block below) — its hand-copied param list is now the ONE shared definition,
+// rpcAdvancedFilterParams(), spread through `ageAgnostic()`. That wrapper deletes ONLY the three age
+// params this RPC is itself pricing (passing them collapses every non-selected bucket to 0), so every
+// advanced predicate this barrier is about still rides along. The ASSERTION is unchanged in strength —
+// "an already-answered advanced filter reaches the age-bucket counts" — but it must accept either
+// shape, and shape-alone must not be enough: the spread only counts when the shared helper's own body
+// really carries the param, so an emptied helper still fails. The wrapper's exact deletion list is
+// pinned below, so it can never quietly grow into the drift vector the hand-copy was.
+const helperBody = remoteSrc.match(/export function rpcAdvancedFilterParams\(q: SearchQuery\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+const viaSharedHelperAge = /\.\.\.(?:ageAgnostic\()?rpcAdvancedFilterParams\(q\)\)?/.test(fnBody);
+const ageForwards = (literal: RegExp, param: string) =>
+  literal.test(fnBody) || (viaSharedHelperAge && helperBody.includes(param));
 check(
   "fetchPropertyAgeOptionCounts() forwards an already-answered amenities filter (q.amenities -> p_amenities)",
-  /\.\.\.\(q\.amenities\?\.length \? \{ p_amenities: q\.amenities \} : \{\}\)/.test(fnBody),
+  ageForwards(/\.\.\.\(q\.amenities\?\.length \? \{ p_amenities: q\.amenities \} : \{\}\)/, 'p_amenities'),
 );
 check(
   'fetchPropertyAgeOptionCounts() forwards an already-answered min-bathrooms filter (q.bathMin -> p_bath_min)',
-  /\.\.\.\(q\.bathMin != null \? \{ p_bath_min: q\.bathMin \} : \{\}\)/.test(fnBody),
+  ageForwards(/\.\.\.\(q\.bathMin != null \? \{ p_bath_min: q\.bathMin \} : \{\}\)/, 'p_bath_min'),
 );
-// Both new params are spread INTO the same supabase.rpc('property_age_option_counts_ar', {...}) call,
-// not appended after it as an unrelated object — anchor on the RPC call containing both.
+// Both params are spread INTO the same supabase.rpc('property_age_option_counts_ar', {...}) call, not
+// appended after it as an unrelated object — anchor on the RPC call containing them (either shape).
 check(
   "both new params are part of the property_age_option_counts_ar RPC call itself (not dead code elsewhere)",
-  /supabase\.rpc\('property_age_option_counts_ar', \{[\s\S]{0,1200}p_amenities: q\.amenities[\s\S]{0,300}p_bath_min: q\.bathMin/.test(fnBody),
+  /supabase\.rpc\('property_age_option_counts_ar', \{[\s\S]{0,1200}p_amenities: q\.amenities[\s\S]{0,300}p_bath_min: q\.bathMin/.test(fnBody)
+  || (viaSharedHelperAge
+      && /supabase\.rpc\('property_age_option_counts_ar', \{[\s\S]{0,1600}\.\.\.ageAgnostic\(rpcAdvancedFilterParams\(q\)\)/.test(fnBody)),
 );
+// The wrapper may strip ONLY the dimension this RPC prices. Stripping anything else re-opens the very
+// bug this file exists for — an answered advanced filter silently missing from the age-bucket counts.
+{
+  const wrapper = remoteSrc.match(/function ageAgnostic<[\s\S]*?\n\}/)?.[0] ?? '';
+  const stripped = [...wrapper.matchAll(/\bp_[a-z_]+/g)].map((m) => m[0]).sort();
+  check(
+    'ageAgnostic() strips exactly the three age params it prices — nothing else',
+    !viaSharedHelperAge
+    || JSON.stringify(stripped) === JSON.stringify(['p_age_max', 'p_age_min', 'p_is_new_construction']),
+  );
+}
 
 // Sibling parity check: fetchApartmentGuidedCounts() must still pass both too (the pattern this fix
 // was modeled on) — catches an accidental regression to THAT call site instead.
@@ -70,7 +96,6 @@ if (guidedMatch) {
   // the shared spread WITH the param present in the shared helper's own body. (Shape-only agreement
   // would let an emptied helper pass.) verify-guided-counts-carry-monthly-af.ts owns the full set.
   const guidedSrc = guidedMatch[0];
-  const helperBody = remoteSrc.match(/export function rpcAdvancedFilterParams\(q: SearchQuery\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
   const viaSharedHelper = guidedSrc.includes('...rpcAdvancedFilterParams(q)');
   const forwards = (literal: RegExp, param: string) =>
     literal.test(guidedSrc) || (viaSharedHelper && helperBody.includes(param));

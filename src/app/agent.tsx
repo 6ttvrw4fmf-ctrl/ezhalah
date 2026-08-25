@@ -56,7 +56,7 @@ import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard } from '@/components/AdvancedQuestionCard';
 import MiningTransition from '@/components/MiningTransition';
-import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
@@ -110,6 +110,11 @@ const MODE_EASE = IS_WEB ? ({ transitionProperty: 'opacity, height, transform', 
 // A «more precise» refine prompt attached to an agent message: ONE clarifying dimension with clickable
 // answer chips (never typed). Tapping a chip merges that one field into the SAME filter and re-searches.
 type RefinePrompt = { dim: string; baseQ: SearchQuery; options: { label: string; value: string }[] };
+
+// One committed Advanced Filter answer: which question, which option keys, and the labels shown for
+// them. Skips never produce one (they write no predicate), which is what makes the summary EQUAL the
+// committed state by construction.
+type GuidedFacet = { id: string; keys: string[]; labels: string[] };
 
 type ChatMsg =
   | { id: string; role: 'user'; text: string; typing?: boolean }
@@ -794,6 +799,18 @@ export default function Agent() {
   // time instead of a whole grid landing at once. (user request.) revealCount[id] = how many cards
   // are visible so far; absent = show all (used for replayed/history turns that don't type out).
   const REVEAL_STEP_MS = 130; // snappy one-by-one cascade (25 cards ≈ 3s), smooth not distracting
+  // LANDING A COMPLETED ADVANCED FILTER ROUND (owner 2026-08-24): "smoothly scroll the user down so
+  // they land around the new result title / selection summary… NOT a harsh jump to the bottom."
+  //
+  // Why several passes and not one scroll. Easing down brings the PREVIOUS turn's lower cards into
+  // view; their images then load, each one growing the content above the new turn, and the browser's
+  // scroll anchoring holds the view still — so the target slides back out of the viewport. Measured
+  // live 2026-08-24: ~715px of such growth, which left the new count line just under the fold every
+  // time, at any single delay. Each pass re-measures and converges as fewer images remain; a pass that
+  // has nothing left to correct scrolls to where the thread already is and is invisible. The first
+  // delay also clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s), so the
+  // first move already reads the settled height of the thing being landed on.
+  const LAND_PASSES_MS = [1400, 3200];
   const FIRST_PAGE = 10; // show the first 10; «عرض المزيد» pages the rest of the matched set. (owner 2026-07-08.)
   // Page 0 fetches up to data/remote.ts QUERY_LIMIT (1500) MATCHING candidates (RPC filters before the cap).
   // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
@@ -801,6 +818,7 @@ export default function Agent() {
   // IS the exact match count. (owner 2026-07-08: never hide a valid match behind the display limit.)
   const [revealCount, setRevealCount] = useState<Record<string, number>>({});
   const pendingRefineRef = useRef<{ q: SearchQuery; dim: string } | null>(null); // a >25 "refine" question awaiting the user's one-line answer
+  const refineMsgIdRef = useRef<string | null>(null); // the results turn the latest runRefine is building
   // Advanced-question overlay (عمر العقار, apartment-only for now) — a transient card shown ON TOP of
   // the current results when «خلّنا نحدد الطلب أكثر» is tapped in an apartment scope. Answering hands
   // off to the SAME runRefine mechanism used by the pre-existing chip flow (echoes a user bubble,
@@ -849,6 +867,26 @@ export default function Agent() {
   // step that is dropped or changed simply stops contributing to the rebuild, and an amenity list
   // (which appends) can never accumulate twice from re-answering the same question.
   const ageFlowStepsRef = useRef<GuidedStep[]>([]);
+  // ── PROGRESSIVE ROUNDS (owner 2026-08-24) ──────────────────────────────────────────────────────
+  // What an EARLIER round already committed, carried into the one the user is opening now. Seeded
+  // from the results turn whose «تحديد أكثر» was tapped, so a round always continues the narrowed
+  // cohort instead of restarting from the original search:
+  //   originQ — the TRUE pre-AF query, so the cumulative pills stay removable back to the beginning.
+  //   facets  — every answer committed so far, so round 1's pills survive round 2.
+  //   asked   — every question answered OR SKIPPED so far. A skip leaves no facet, so this list is
+  //             the ONLY record of it; without carrying it, a skipped question would be re-asked in
+  //             the next round. (Not a second source of truth: it is unioned into the derived
+  //             ageFlowAskedRef in syncGuidedFromSteps, never mutated in place.)
+  // Written on every tap before startAgeFlow, so a stale value can never be read.
+  const afCarryRef = useRef<{ msgId: string; originQ: SearchQuery; facets: GuidedFacet[]; asked: string[] } | null>(null);
+  // Results turns that have already spawned a COMPLETED round: msgId → that round's committed
+  // summary. The turn trades its action buttons for a read-only receipt — it is history now, and only
+  // the newest result turn carries live actions.
+  const [afReceipt, setAfReceipt] = useState<Record<string, string>>({});
+  // Whether a results turn still has a question worth asking — resolved by a REAL probe (below),
+  // never guessed. Absent = not yet known ⇒ the button stays hidden rather than promising a round
+  // that would have nothing truthful to ask.
+  const [afCanNarrow, setAfCanNarrow] = useState<Record<string, boolean>>({});
 
   // Rebuild query/asked/labels/facets from steps[0 .. upTo-1]. `upTo` is the CURSOR: the step being
   // asked is deliberately NOT applied, so its option counts and live count read against the scope
@@ -856,7 +894,9 @@ export default function Agent() {
   const syncGuidedFromSteps = (upTo: number) => {
     const d = deriveGuided(ageFlowBaseQRef.current, ageFlowStepsRef.current, upTo);
     ageFlowQueryRef.current = d.query;
-    ageFlowAskedRef.current = new Set(d.askedIds);
+    // DERIVED, never mutated: the questions this round has asked, unioned with everything an
+    // earlier round already answered or skipped — a carried question is never asked twice.
+    ageFlowAskedRef.current = new Set([...(afCarryRef.current?.asked ?? []), ...d.askedIds]);
     ageFlowLabelsRef.current = d.labels;
     ageFlowFacetsRef.current = d.facets;
     ageFlowChangedRef.current = d.facets.length > 0;
@@ -880,6 +920,9 @@ export default function Agent() {
   // TOP of a results message (so the Ezhalah response stays visible and cards appear below) instead of
   // yanking to the very bottom of the chat. (user request: don't drag the whole screen down.)
   const msgYRef = useRef<Record<string, number>>({});
+  // The host node of each results turn, so easeToMsgTop can measure its CURRENT position instead of a
+  // y captured once at mount (see easeToMsgTop).
+  const msgNodeRef = useRef<Record<string, any>>({});
   // After the reply text + sort line finish, reveal the property cards ONE BY ONE with a gentle
   // stagger — and do NOT force-scroll to the bottom. We scroll once to bring the TOP of the response
   // near the top of the viewport (keeping the message context visible), then let the cards fill in
@@ -919,6 +962,30 @@ export default function Agent() {
   // Begin the one-by-one card cascade for a results message. Does NOT touch doneTyping — the intro
   // text keeps typing above while cards fill in below; the more-message + feedback row still wait
   // for the text (their own doneTyping gates).
+  // Ease a message's TOP to ~80px below the top of the thread — the one "land here" move (user
+  // 2026-07-09: don't drag the whole screen down), now shared so a completed Advanced Filter round can
+  // reuse it. Plain setTimeout, never an animation callback (src/lib/afterAnimation.ts).
+  //
+  // MEASURED AT SCROLL TIME, not read from `msgYRef`. Instrumented live 2026-08-24: msgYRef held ONE
+  // entry for the whole thread — the first results turn — so every later turn's ease was a silent
+  // no-op (a completed round left the new count line ~300px under the fold). onLayout fires on the
+  // message's own RESIZE; a turn merely pushed down by late-loading images above it never re-reports,
+  // and a turn whose y was never captured has nothing to scroll to at all. Reading the message's
+  // position against the scroller answers "where is it RIGHT NOW", which is the only number a scroll
+  // may act on. msgYRef stays as the fallback for any surface without DOM nodes (native).
+  const easeToMsgTop = (id: string, delay: number) => {
+    setTimeout(() => {
+      const go = (y: number) => scrollRef.current?.scrollTo({ y: Math.max(0, y - 80), animated: true });
+      const node = msgNodeRef.current[id];
+      const scNode = (scrollRef.current as any)?.getScrollableNode?.();
+      if (node?.getBoundingClientRect && scNode?.getBoundingClientRect) {
+        go(node.getBoundingClientRect().top - scNode.getBoundingClientRect().top + scNode.scrollTop);
+        return;
+      }
+      const y = msgYRef.current[id];   // native fallback: the last y onLayout reported
+      if (typeof y === 'number') go(y);
+    }, delay);
+  };
   const beginCardDrip = (id: string, n: number) => {
     if (dripStartedRef.current[id]) return;
     dripStartedRef.current[id] = true;
@@ -928,10 +995,7 @@ export default function Agent() {
     setRevealCount((c) => ({ ...c, [id]: 0 }));
     // Gentle one-time scroll: bring the response's top ~80px from the top of the viewport. Keeps the
     // slogan + summary + intro in view with the first cards just below — never the far bottom.
-    const y = msgYRef.current[id];
-    if (typeof y === 'number') {
-      setTimeout(() => scrollRef.current?.scrollTo({ y: Math.max(0, y - 80), animated: true }), 60);
-    }
+    easeToMsgTop(id, 60);
     dripRange(id, 0, n, REVEAL_STEP_MS);
   };
   const startReveal = (id: string, n: number) => {
@@ -1314,9 +1378,67 @@ export default function Agent() {
   // What the guided interview committed, attached to its results turn so the summary line +
   // removable pills can render there (owner 2026-08-16). One at a time — a newer guided search
   // (including a pill removal, which re-runs through the same path) replaces it.
+  // `asked` (owner 2026-08-24) rides along so the NEXT round can resume without re-asking anything —
+  // including the SKIPPED questions, which leave no facet behind and would otherwise come back.
   const [guidedPills, setGuidedPills] = useState<{
-    msgId: string; baseQ: SearchQuery; facets: Array<{ id: string; keys: string[]; labels: string[] }>; total: number | null;
+    msgId: string; baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[]; total: number | null;
   } | null>(null);
+
+  // The NEWEST results turn. Only it carries live actions (owner 2026-08-24): «تحديد أكثر» and «عرض
+  // المزيد» belong to the conversation's current state, and an older turn offering to narrow a set
+  // the user has already moved past would re-open a round from stale ground. Older turns keep their
+  // cards and their text — they are history, not controls.
+  const lastResultsMsg = useMemo(() => {
+    for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'results') return msgs[i] as Extract<ChatMsg, { role: 'results' }>;
+    return null;
+  }, [msgs]);
+
+  // ── THE OFFER PROBE (owner 2026-08-24) ─────────────────────────────────────────────────────────
+  // «تحديد أكثر» is offered only when a round would have something truthful to ask: more than
+  // INTERVIEW_STOP_AT results AND at least one remaining certified question with real narrowing value
+  // (offersMeaningfulNarrowing). Per R5 (verify-af-group-cohort-coverage.ts) exhaustion is the COMMON
+  // case, not the edge — five of eight shipped groups have ZERO cohort-gated questions on several
+  // deal/period combinations — so a button that always shows would usually promise a round that has
+  // nothing to ask.
+  //
+  // It probes with the SAME rankQuestions call and the SAME carried asked-set the round itself will
+  // use, so the offer and the round can never disagree. This is PASSIVE: it renders a button and
+  // nothing else — it never opens the overlay. The interview stays a manual tap (owner 2026-08-19).
+  const afProbedRef = useRef<Record<string, true>>({});
+  useEffect(() => {
+    const m = lastResultsMsg;
+    if (!m) return;
+    const q = m.result.query;
+    const total = m.result.matchTotal ?? m.result.listings.length;
+    if (!q || total <= INTERVIEW_STOP_AT || !anyGuidedEligible(q)) return;   // the button is hidden anyway
+    const asked = guidedPills?.msgId === m.id ? guidedPills.asked : [];
+    const probeKey = `${m.id}|${[...asked].sort().join(',')}`;               // a later carry re-probes
+    if (afProbedRef.current[probeKey]) return;
+    afProbedRef.current[probeKey] = true;
+    // An unresolved CATEGORY→GROUP→TYPE tier is itself a real narrowing step, and it is what unlocks
+    // the advanced pool at all (afPlan.ts) — ranking that pool now would score it against a scope the
+    // user has not picked yet and come back empty by construction. ASK THE SAME QUESTION THE WALK
+    // ASKS (review 2026-08-25): nextScopeTier, not `unresolvedScopeTiers(q).length`. A tier the user
+    // SKIPPED stays unresolved forever while being permanently un-re-askable, so the raw-length test
+    // promised a round whose scope walk falls straight through — a button that opened and closed.
+    if (nextScopeTier(q, new Set(asked))) { setAfCanNarrow((c) => ({ ...c, [m.id]: true })); return; }
+    // UNKNOWN MUST NOT HARDEN INTO NO (permanent fleet rule). A count RPC that times out resolves to
+    // an EMPTY option set (remote.ts withTimeout → null → `{ options: [], total: 0 }`), which
+    // scoreQuestion then drops — so a 4s blip is indistinguishable from an honest "nothing narrows",
+    // and caching that verdict hid «تحديد أكثر» on this turn for the rest of the chat. An empty rank
+    // while questions REMAIN eligible is therefore treated as unknown and re-probed exactly once
+    // (bounded: never a poll). An empty POOL is certain — no RPC was even issued — and settles first
+    // pass, which is the common "nothing left to ask" case, so this costs nothing there.
+    const poolLeft = eligibleQuestions(q).filter((qq) => !asked.includes(qq.id)).length;
+    const probe = (attempt: number) => void rankQuestions(q, new Set(asked))
+      .then((ranked) => {
+        const ok = ranked.some((r) => offersMeaningfulNarrowing(r.total, r.options));
+        if (!ok && !ranked.length && poolLeft && attempt === 0) { setTimeout(() => probe(1), 2500); return; }
+        setAfCanNarrow((c) => ({ ...c, [m.id]: ok }));
+      })
+      .catch(() => { if (attempt === 0) setTimeout(() => probe(1), 2500); });   // stays unknown ⇒ hidden
+    probe(0);
+  }, [lastResultsMsg, guidedPills]);
 
   // Run a refine answer (tapped chip OR typed reply): echo `label` as the user's bubble, merge the one
   // asked dimension into the SAME filter, and re-search. (user 2026-06-27.)
@@ -1324,7 +1446,7 @@ export default function Agent() {
   // `opts.guided` attaches the interview's facets to the results turn for the removable pills.
   const runRefine = async (
     baseQ: SearchQuery, dim: string, value: string, label: string,
-    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: Array<{ id: string; keys: string[]; labels: string[] }> } },
+    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] } },
   ) => {
     pendingRefineRef.current = null;
     finalizeReveal();
@@ -1333,6 +1455,10 @@ export default function Agent() {
     const refined = applyRefinement(baseQ, dim, value);
     const run = makeRun(); runRef.current = run;
     const statusId = uid();
+    // The turn this refine is creating, so a finished Advanced Filter round can ease down onto it once
+    // its closing beat is over (finishGuided). A ref, not an onFetched argument: the honest-total
+    // callback has exactly one job and one barrier pinned to its shape (verify-mining-total-honesty).
+    refineMsgIdRef.current = statusId;
     // Guaranteed search → the searching loader (roster + wave) starts IMMEDIATELY, no thinking beat.
     searchingAtRef.current[statusId] = Date.now();
     setMsgs((m) => [...m, { id: uid(), role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined }]);
@@ -1344,11 +1470,17 @@ export default function Agent() {
     // while the results headline behind it stated the real match total. ONE total for both.
     const honestTotal = quotableTotal(result);
     opts?.onFetched?.(honestTotal);
-    if (opts?.guided) setGuidedPills({ msgId: statusId, baseQ: opts.guided.baseQ, facets: opts.guided.facets, total: honestTotal });
+    if (opts?.guided) setGuidedPills({ msgId: statusId, baseQ: opts.guided.baseQ, facets: opts.guided.facets, asked: opts.guided.asked, total: honestTotal });
     await playListings(run, statusId, buildScrapeIntro(result.query ?? refined), result, label);
     if (run.cancelled) return;
     void promptSignupSoon(run);
-    setBusy(false); runRef.current = null; toBottom();
+    // NO toBottom() here (owner 2026-08-24). It fired while the new turn's cards were still
+    // revealing, so "the end" was mid-list — and by the time the rest mounted the user had been
+    // dropped ~900px BELOW the new result's title, past the very summary the round just produced.
+    // beginCardDrip already eases the new turn's TOP to ~80px under the viewport top (the 2026-07-09
+    // "don't drag the whole screen down" rule), which is exactly where the owner wants a completed
+    // round to land: the selection receipt, then the new count, then the new cards.
+    setBusy(false); runRef.current = null;
   };
 
   // Remove one interview facet from the results pills (owner 2026-08-16: «The user can remove any
@@ -1369,9 +1501,17 @@ export default function Agent() {
       if (question) q = question.apply(q, f.keys);
     }
     const label = t('Without: {label}', { label: removed.labels.join('، ') });
+    // The guided record is passed even when the LAST pill is removed (owner 2026-08-24): the pills
+    // row is gated on facets.length so nothing renders, but the carried asked-set survives — dropping
+    // it here would resurrect every question an earlier round already asked or skipped.
+    //
+    // …MINUS the removed question itself (review 2026-08-25). The carry exists to stop RE-asking what
+    // the user already RESOLVED; a facet the user just deleted is by definition unresolved again, and
+    // keeping its id in `asked` burned that dimension for the rest of the chat — remove «عمر ٣-٥
+    // سنوات» to pick a different bucket and property_age could never be offered again, and once the
+    // pool was spent that way «تحديد أكثر» disappeared entirely with no way back but a new search.
     void runRefine(q, '__guided__', '', label,
-      remaining.length ? { guided: { baseQ: guidedPills.baseQ, facets: remaining } } : undefined);
-    if (!remaining.length) setGuidedPills(null);
+      { guided: { baseQ: guidedPills.baseQ, facets: remaining, asked: guidedPills.asked.filter((id) => id !== removed.id) } });
   };
 
   // Present the step at `stepIndex`. A step the user has already seen (walked Back to, or one
@@ -1449,11 +1589,29 @@ export default function Agent() {
       });
       return;
     }
+    // ── ROUND CAP (owner 2026-08-24) ────────────────────────────────────────────────────────────
+    // A round asks min(availableUsefulQuestions, AF_ROUND_MAX_QUESTIONS) ADVANCED questions — small
+    // and conversational, never a 10-question interrogation. This is a COUNT cap only: it never
+    // decides WHICH questions get asked (scoreQuestion still owns that, per the owner's permanent
+    // 2026-08-22 rule), and the "min" needs no code — the existing empty-plan terminator below
+    // already stops a round that has fewer than the cap available. SCOPE steps do not count, the
+    // same way the scope→advanced transition gate counts advanced questions only. The round ENDS
+    // through the SAME terminator every other exit uses (finishGuided); continuing is a manual tap
+    // on «تحديد أكثر», which resumes from the narrowed cohort with these questions already carried
+    // in the asked-set — never an auto-reopen (owner 2026-08-19).
+    const askedThisRound = steps.filter((st) => st.keys != null && !isScopeQuestionId(st.question.id)).length;
+    if (askedThisRound >= AF_ROUND_MAX_QUESTIONS) { finishGuided(token); return; }
     // CONTEXTUAL re-ranking (owner 2026-08-11): after any answer the remaining pool is re-probed and
     // re-scored against the NARROWED set, so the next question is always the most useful one for the
     // listings the user actually has left — and the flow stops by itself the moment the set drops to
     // ≤ INTERVIEW_STOP_AT (rankQuestions returns nothing below the floor).
-    if (stepIndex > 0) {
+    // `|| !plan.length` (review 2026-08-25): at cursor 0 the plan is normally the one startAgeFlow
+    // already ranked — EXCEPT on the unresolved-scope bypass, which hands off without ranking. When a
+    // carried asked-set has already consumed every unresolved tier (the user skipped one in an
+    // earlier round — a skipped tier is never re-asked, nextScopeTier), the walk above ends
+    // immediately and nothing has ranked the advanced pool: the round would finish on an empty plan
+    // and the tap would read as a dead button. Ranking here is the same call the loop already makes.
+    if (stepIndex > 0 || !ageFlowPlanRef.current.length) {
       const q = ageFlowQueryRef.current;
       if (!q || ageFlowTokenRef.current !== token) return;
       const ranked = await rankQuestions(q, ageFlowAskedRef.current);
@@ -1481,7 +1639,12 @@ export default function Agent() {
     ageFlowTotalRef.current = total; // the narrowed set the user is answering against, always real
     setAgeFlow({
       phase: 'asking', stepIndex, question, options, unknownCount, initialKeys: [],
-      progressCur: stepIndex + 1, progressTotal: stepIndex + plan.length,
+      // Bounded by what is LEFT IN THIS ROUND (review 2026-08-25), not by the whole remaining pool:
+      // with 7 useful questions left the bar used to fill to 4/7 and the round then ended at ~57%,
+      // reading as "the interview quit early". Still a bar only — the numeric «N of M» caption stays
+      // banned (design contract §4).
+      progressCur: stepIndex + 1,
+      progressTotal: stepIndex + Math.min(plan.length, AF_ROUND_MAX_QUESTIONS - askedThisRound),
     });
   };
 
@@ -1537,16 +1700,43 @@ export default function Agent() {
     const timers = miningTimersRef.current;
     const stillMining = () => ageFlowTokenRef.current === token;
     timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, 15000));
+    // CUMULATIVE, ANCHORED TO THE TRUE PRE-AF ORIGIN (owner 2026-08-24). `ageFlowBaseQRef` stays the
+    // ROUND's own start — deriveGuided rebuilds this round's query from it, and anchoring it to the
+    // origin instead would silently drop the earlier rounds' predicates. The PILLS anchor one level
+    // deeper: baseQ = the query before the FIRST round, facets = every round's answers in order, so
+    // an answer given in round 1 is still visible and removable after round 2 and removing it rebuilds
+    // from the origin through everything that survived.
+    const carry = afCarryRef.current;
     const guided = ageFlowBaseQRef.current
-      ? { baseQ: ageFlowBaseQRef.current, facets: [...ageFlowFacetsRef.current] }
+      ? {
+          baseQ: carry?.originQ ?? ageFlowBaseQRef.current,
+          facets: [...(carry?.facets ?? []), ...ageFlowFacetsRef.current],
+          asked: [...ageFlowAskedRef.current],   // already unioned with the carry by syncGuidedFromSteps
+        }
       : undefined;
+    // The turn the user opened this round FROM becomes history: it trades its action buttons for a
+    // read-only receipt of what THIS round committed. buildAfSummary reads the committed facets only,
+    // so a skipped question can never appear in it (summary == committed state, permanent rule).
+    if (carry) setAfReceipt((r) => ({ ...r, [carry.msgId]: buildAfSummary(ageFlowFacetsRef.current) }));
     void runRefine(q, '__guided__', '', ageFlowLabelsRef.current.join('، '), {
       guided,
       onFetched: (total) => {
+        const msgId = refineMsgIdRef.current;
         if (!stillMining()) return;
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
         timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
-        timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, wait + 1100));
+        timers.push(setTimeout(() => {
+          if (!stillMining()) return;
+          setAgeFlow((f) => (f?.phase === 'mining' ? null : f));
+          // LAND ON THE NEW TURN (owner 2026-08-24): the old cards stay exactly where they are, and the
+          // thread eases down so the user reads their selection receipt → the new count → the new
+          // cards. Never a jump to the bottom.
+          // The delay clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s).
+          // Measured live 2026-08-24: easing sooner read a `msgYRef` that predated the cascade — the
+          // ref only refreshes when the message RESIZES, which is exactly what each revealed card
+          // does — and landed ~300px short, with the new count line still under the fold.
+          if (msgId) for (const d of LAND_PASSES_MS) easeToMsgTop(msgId, d);
+        }, wait + 1100));
       },
     }).catch(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); });
   };
@@ -1574,7 +1764,13 @@ export default function Agent() {
     // question. The plan resolves in the background while the intro is on screen, so «يلا نبدأ»
     // feels instant. A manual «خلّنا نحدد الطلب أكثر» tap skips the intro (the user already opted in).
     setAgeFlow(opts?.auto ? { phase: 'intro', total: opts?.total ?? null } : { phase: 'loading' });
-    ageFlowAskedRef.current = new Set();
+    // SEEDED FROM THE CARRY (owner 2026-08-24), not emptied. The opening rank happens BEFORE the
+    // first syncGuidedFromSteps, so starting from an empty set here made round 2 rank — and then ask
+    // — a question round 1 had already answered. Found live: round 2 re-opened on «كم عمر العقار؟»
+    // with «جديد» sitting at 100% of the set, an option that could not move anything because the
+    // answer was already applied. Skips ride in this set too: they leave no facet, so it is the only
+    // record that the user was already asked.
+    ageFlowAskedRef.current = new Set(afCarryRef.current?.asked ?? []);
     // SCOPE PREFIX SHORT-CIRCUIT (owner 2026-08-23): when CATEGORY→GROUP→TYPE is not yet resolved,
     // the interview opens on the hierarchy and there is nothing to rank yet — ranking the advanced
     // pool here would probe the whole pool against a scope the user has not chosen (and, for a
@@ -2391,6 +2587,7 @@ export default function Agent() {
                 // full-width regardless. (user request: Arabic assistant reply on the right, not left.)
                 <View
                   key={m.id}
+                  ref={(n: any) => { msgNodeRef.current[m.id] = n; }}
                   onLayout={(e) => { msgYRef.current[m.id] = e.nativeEvent.layout.y; }}
                   style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%' }}
                 >
@@ -2524,7 +2721,11 @@ export default function Agent() {
                         const rawTotal = m.result.matchTotal ?? fetched;
                         const trueTotal = clientNarrowed ? BROWSE_CAP : rawTotal;
                         const rc = resultCounts({ trueTotal, shown, fetched, serverMore });
-                        const hasMore = rc.hasMore;
+                        // ONLY THE NEWEST results turn carries live actions (owner 2026-08-24). The
+                        // cap logic itself is untouched — rc still states the honest totals for every
+                        // turn; this only decides whether the buttons are still THIS turn's to offer.
+                        const isLatestResults = m.id === lastResultsMsg?.id;
+                        const hasMore = rc.hasMore && isLatestResults;
                         // Quote an exact match total ONLY when it is trustworthy (whole filter ran server-side)
                         // AND more than the cap actually matched — that is the only case with two honest numbers.
                         const quoteTotal = !clientNarrowed && rc.endKind === 'capped';
@@ -2536,7 +2737,10 @@ export default function Agent() {
                         // gets ONLY the normal lightweight actions (Load more if genuinely more exists,
                         // FeedbackRow below) — never a "narrow further" prompt when there is nothing
                         // useful left to narrow.
-                        const canNarrowFurther = rawTotal > INTERVIEW_STOP_AT;
+                        // …AND (owner 2026-08-24) only when a round would actually have something
+                        // truthful to ask: afCanNarrow[m.id] is the offer probe's verdict (above).
+                        // Absent = not yet resolved ⇒ hidden, never a button that cannot deliver.
+                        const canNarrowFurther = rawTotal > INTERVIEW_STOP_AT && isLatestResults && afCanNarrow[m.id] === true;
                         // fetching = THIS message's page fetch; cascading = THIS message's card drip.
                         // Only the owning message's button shows the dots (review fix: a global flag
                         // was falsely lighting every visible «عرض المزيد»).
@@ -2590,13 +2794,14 @@ export default function Agent() {
                                   absolute overlay, so without this gate the two buttons stayed rendered
                                   (and reachable) underneath it. */}
                               {showActionsRow ? (
-                                <View style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
+                                <View testID="results-actions" style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
                                   {hasMore ? (
                                     // Active state = calm pulsing dots (owner 2026-07-09: the button must
                                     // visibly work, not sit static) — while THIS message's page fetches or
                                     // its new cards cascade in. Fixed min-size → zero layout shift on swap.
                                     // Disabled during any reveal or a live turn (never two drips at once).
                                     <Pressable
+                                      testID="results-load-more"
                                       style={({ hovered, pressed }: any) => [s.mBtnPrimary, (hovered || pressed) && !fetching && !revealing && s.mBtnPrimaryHover]}
                                       disabled={fetching || revealing || busy}
                                       onPress={() => loadMore(m)}
@@ -2606,17 +2811,51 @@ export default function Agent() {
                                         : <Text style={s.mBtnPrimaryTx}>{t('Load more')}</Text>}
                                     </Pressable>
                                   ) : null}
+                                  {/* SEED THE CARRY (owner 2026-08-24) before the round opens: this
+                                      turn's guided record supplies the true pre-AF origin, the facets
+                                      committed so far, and every question already answered OR SKIPPED —
+                                      so the next round continues the narrowed cohort and re-asks
+                                      nothing. A plain search turn carries nothing: round 1 starts
+                                      clean. Writing it on EVERY tap means a stale carry can never be
+                                      read, and two fast taps write the same value. */}
                                   {canNarrowFurther ? (
                                     <Pressable
-                                      style={s.mBtnAlt}
+                                      testID="results-narrow"
                                       onPress={() => {
                                         const q = m.result.query;
+                                        const carried = guidedPills?.msgId === m.id ? guidedPills : null;
+                                        afCarryRef.current = q
+                                          ? { msgId: m.id, originQ: carried?.baseQ ?? q, facets: carried?.facets ?? [], asked: carried?.asked ?? [] }
+                                          : null;
                                         if (q && anyGuidedEligible(q)) void startAgeFlow(q);
                                         else startRefine(q);
                                       }}
+                                      style={s.mBtnAlt}
+                                      disabled={busy}
                                     >
                                       <Text style={s.mBtnAltTx}>{t('Let’s narrow it down')}</Text>
                                     </Pressable>
+                                  ) : null}
+                                </View>
+                              ) : afReceipt[m.id] ? (
+                                /* COMPLETED-ROUND RECEIPT (owner 2026-08-24). This turn's actions are
+                                   spent: the user opened Advanced Filter from here, committed answers,
+                                   and the narrowed result is rendering BELOW. What replaces the buttons
+                                   is a RECORD, not another control — no press handlers, nothing to tap.
+                                   The cards above stay exactly where they are; the conversation simply
+                                   keeps flowing downward. buildAfSummary() is the same summary builder
+                                   the pills use, so skipped answers can never appear here. */
+                                <View style={s.afReceipt} testID="af-round-receipt">
+                                  <Text style={[s.afReceiptHead, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
+                                    {`✓ ${t('Continued with the advanced filter')}`}
+                                  </Text>
+                                  {afReceipt[m.id] ? (
+                                    <Text
+                                      testID="af-round-receipt-choices"
+                                      style={[s.afReceiptTx, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}
+                                    >
+                                      {t('Your choices: {summary}', { summary: afReceipt[m.id] })}
+                                    </Text>
                                   ) : null}
                                 </View>
                               ) : null}
@@ -2902,6 +3141,11 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
   },
   guidedPillTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
+  // Completed-round receipt (owner 2026-08-24): a quiet record where the buttons used to be — same
+  // tinted surface as the pills, no border emphasis, nothing that reads as pressable.
+  afReceipt: { gap: 3, marginTop: 4, alignSelf: 'stretch', backgroundColor: colors.tint, borderRadius: radius.chip, paddingHorizontal: 12, paddingVertical: 9 },
+  afReceiptHead: { fontSize: 12.5, fontWeight: '700', color: colors.primary },
+  afReceiptTx: { fontSize: 12.5, fontWeight: '500', color: colors.muted },
   // ChatGPT-style feedback toast: centered pill just below the header, floating over the chat.
   fbToastWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 200 },
   fbToast: {
