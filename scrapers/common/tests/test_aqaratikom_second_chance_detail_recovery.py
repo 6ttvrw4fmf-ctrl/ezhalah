@@ -147,8 +147,7 @@ def test_a_successful_fetch_does_not_rotate(monkeypatch):
 def test_second_chance_recovers_ads_that_resolve_after_the_burst(monkeypatch):
     """The exact production shape: the tail fails during the burst and resolves once it is over."""
     missed = [{"id": f"uuid-{i}"} for i in range(39)]  # the 2026-08-25 tail, to the ad
-    monkeypatch.setattr(aq, "fetch_detail", lambda _id: ("ok", _good()["data"] if False
-                                                         else _good()._payload["data"]))
+    monkeypatch.setattr(aq, "fetch_detail", lambda _id: ("ok", _good()._payload["data"]))
 
     out = aq.second_chance_details(missed)
 
