@@ -129,7 +129,9 @@ check('the drag gate is the executable canReorder, fed by editing AND the LIVE s
     /translateY\(\$\{dy\}px\) scale\(1\.02\)/.test(engine) && !/translateX/.test(engine));
 }
 check('the drop hand-off runs on a TIMER, never an animation callback (hidden-tab rule)',
-  /setTimeout\(\(\) => \{[\s\S]{0,400}reorderHistory\(id, prevId, nextId\);/.test(sidebar));
+  // window widened 400→900: the drag-to-Favorites branch (owner 2026-08-25) commits first inside
+  // the SAME timer callback; the in-bucket reorder path below it is unchanged.
+  /setTimeout\(\(\) => \{[\s\S]{0,900}reorderHistory\(id, prevId, nextId\);/.test(sidebar));
 check('the drop announces «تم تغيير ترتيب المحادثة» to screen readers',
   /setDropAnnounce\(t\('Conversation order changed'\)\)/.test(sidebar));
 check('the store reorder is applyMove + the same synchronous persist as toggleStar',

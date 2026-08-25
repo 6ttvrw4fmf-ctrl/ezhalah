@@ -20,7 +20,7 @@ import { useApp, type HistoryItem } from '@/store';
 import { sanitizeArabicSearch, isSearchableQuery, filterChats } from '@/lib/chatSearch';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { queryLabel } from '@/data/search';
-import { HOLD_MS, canReorder, dragTargetIndex, neighboursAt, preActivate, sortByOrder } from '@/lib/sidebarReorder';
+import { HOLD_MS, canReorder, dragTargetIndex, dragCrossIntent, neighboursAt, preActivate, sortByOrder, type CrossIntent } from '@/lib/sidebarReorder';
 import { displayTitle } from '@/lib/chatTitle';
 import { sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { useI18n } from '@/i18n';
@@ -216,10 +216,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // Gesture contract (owner): a quick tap OPENS (armOpenRow, unchanged) · double-click RENAMES
   // (unchanged) · a 380ms motionless hold LIFTS the row for vertical reorder. Movement past
   // HOLD_SLOP before the hold lands means scroll/click — the timer cancels and nothing lifts.
-  const { reorderHistory } = useApp();
-  const [drag, setDrag] = useState<{ id: string; bucket: string; from: number; to: number } | null>(null);
+  const { reorderHistory, starHistory } = useApp();
+  const [drag, setDrag] = useState<{ id: string; bucket: string; from: number; to: number; cross: CrossIntent } | null>(null);
   const dragRef = useRef<{
-    id: string; bucket: string; from: number; to: number; count: number;
+    id: string; bucket: string; from: number; to: number; count: number; cross: CrossIntent;
     node: any; startY: number; lastY: number; scrollStart: number; rowH: number;
     active: boolean; timer: ReturnType<typeof setTimeout> | null;
     ids: string[]; // the bucket's visible order at grab time, WITHOUT the dragged id
@@ -240,12 +240,23 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     const d = dragRef.current;
     if (!d?.active || !d.node?.style) return;
     const raw = d.lastY - d.startY + (histScrollY.current - d.scrollStart);
-    // Physical bounds: the row cannot be carried past its bucket (crossing buckets would change
-    // its Starred state, which reorder must never do). Vertical only — X is never touched.
-    const dy = Math.max((0 - d.from) * d.rowH - 6, Math.min((d.count - 1 - d.from) * d.rowH + 6, raw));
+    // Bounds (owner 2026-08-25, drag-to-Favorites): the row may now overshoot its bucket edge
+    // TOWARD the other bucket — up-and-out of Recent stars, down-and-out of Starred unstars
+    // (dragCrossIntent owns that threshold). The opposite directions stay hard-clamped: there is
+    // nothing above المفضلة or below Recent to drop into. Vertical only — X is never touched.
+    const crossRoom = 1.4 * d.rowH; // enough travel to read as "into the other section", not a slot
+    const min = (0 - d.from) * d.rowH - (d.bucket === 'Recent' ? crossRoom : 6);
+    const max = (d.count - 1 - d.from) * d.rowH + (d.bucket === 'Starred' ? crossRoom : 6);
+    const dy = Math.max(min, Math.min(max, raw));
     d.node.style.transform = `translateY(${dy}px) scale(1.02)`;
-    const to = dragTargetIndex(d.from, dy, d.rowH, d.count);
-    if (to !== d.to) { d.to = to; setDrag((cur) => (cur && cur.id === d.id ? { ...cur, to } : cur)); }
+    const cross = d.bucket === 'Starred' || d.bucket === 'Recent'
+      ? dragCrossIntent(d.bucket, d.from, dy, d.rowH, d.count)
+      : null;
+    const to = cross ? d.to : dragTargetIndex(d.from, dy, d.rowH, d.count);
+    if (to !== d.to || cross !== d.cross) {
+      d.to = to; d.cross = cross;
+      setDrag((cur) => (cur && cur.id === d.id ? { ...cur, to, cross } : cur));
+    }
   };
 
   const stopAutoScroll = () => {
@@ -289,14 +300,21 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       node.style.transform = `translateY(${finalDy}px) scale(1)`;
       node.style.boxShadow = 'none';
     }
-    const { id, to, ids } = d;
+    const { id, to, ids, cross } = d;
     // dragRef stays SET (active) through the settle window on purpose: RN-web dispatches the row's
     // onPress asynchronously after pointerup, so nulling here let a finished drag arm an open and
     // NAVIGATE (reproduced: the drag landed on /agent). armOpenRow's `.active` guard needs the ref
     // alive until the commit below; a new drag is blocked for the same ~190ms, which is fine.
     // Hand-off on a TIMER, never an animation callback (repo rule: rAF freezes in hidden tabs).
     setTimeout(() => {
-      if (commit) {
+      if (commit && cross) {
+        // Crossed into the other section: this drop MEANS star/unstar (owner 2026-08-25), and the
+        // row lands at the top of its new bucket — position math against the old bucket's
+        // neighbours would be meaningless here.
+        starHistory(id, cross === 'star');
+        setDropAnnounce(cross === 'star' ? t('Added to favorites') : t('Removed from favorites'));
+        setTimeout(() => setDropAnnounce(''), 1600);
+      } else if (commit) {
         const { prevId, nextId } = neighboursAt(ids, to);
         reorderHistory(id, prevId, nextId);
         setDropAnnounce(t('Conversation order changed'));
@@ -350,7 +368,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       try { (document.body as any).style.userSelect = ''; } catch {}
     };
     dragRef.current = {
-      id: c.id, bucket, from: index, to: index, count, node,
+      id: c.id, bucket, from: index, to: index, count, node, cross: null,
       startY: e.clientY, lastY: e.clientY, scrollStart: histScrollY.current,
       rowH: rowHRef.current, active: false, timer: null, ids,
       scrollTick: null, scrollDir: 0, cleanup,
@@ -377,7 +395,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         // After the lift lands, drop the transition so the row is glued to the pointer.
         setTimeout(() => { const dd = dragRef.current; if (dd?.active && dd.node?.style) dd.node.style.transition = REDUCED_MOTION ? 'none' : `box-shadow 120ms ${EASE_CALM}`; }, 130);
       }
-      setDrag({ id: c.id, bucket, from: index, to: index });
+      setDrag({ id: c.id, bucket, from: index, to: index, cross: null });
     };
     dragRef.current.timer = setTimeout(activateDrag, HOLD_MS);
   };
@@ -525,15 +543,14 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     // (audit item 2, 2026-07-27.)
     setQuery(() => sanitizeForFilterRestore(c.query));
     setActiveChat(c.id); // highlight this row as the current chat
-    // Search-based chats replay their filter; chat-only entries (empty query) just open the agent
-    // fresh — chat messages aren't stored, so there's nothing to replay. (user request.)
-    const isSearchChat = !!(c.query?.deal || c.query?.location || c.query?.category || c.query?.type || c.query?.detail || c.query?.priceBand || c.query?.priceInput);
+    // EVERY chat opens through the same replay path now (owner 2026-08-25, full-conversation
+    // persistence): the agent restores the entry's stored transcript — search chats AND chat-only
+    // entries alike. Fallbacks live in the agent's openSaved(): a search chat with no transcript
+    // renders its snapshot/replay view; a transcript-less chat-only entry opens as the greeting
+    // screen (its conversation predates transcripts — nothing to replay).
     animateOut(() => {
       onClose();
-      // hid rides along so the agent can pick up this entry's saved result snapshot and render the
-      // chat instantly (no re-search); entries without a snapshot fall back to the live replay.
-      if (isSearchChat) router.replace({ pathname: '/agent', params: { filter: JSON.stringify(c.query), replay: '0', hid: c.id } });
-      else router.replace({ pathname: '/agent', params: { fresh: String(Date.now()) } });
+      router.replace({ pathname: '/agent', params: { filter: JSON.stringify(c.query), replay: '0', hid: c.id } });
     });
   };
 
@@ -543,9 +560,15 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const searchMatches = searchActive
     ? filterChats(history, (c) => `${displayTitle(c, locale)} ${c.label ?? ''} ${queryLabel(c.query)}`, searchText)
     : null;
-  const groups = searchMatches
+  const baseGroups = searchMatches
     ? (searchMatches.length ? [{ key: 'Results', items: searchMatches }] : [])
     : groupHistory(history);
+  // DRAG-TO-FAVORITES DROP TARGET (owner 2026-08-25): while a Recent row is being dragged, المفضلة
+  // must exist on screen to drop into — so an empty Starred bucket renders its header for the
+  // duration of the drag. Outside a drag the empty section stays hidden, exactly as before.
+  const groups = drag && drag.bucket === 'Recent' && !searchMatches && !baseGroups.some((g) => g.key === 'Starred')
+    ? [{ key: 'Starred', items: [] as HistoryItem[] }, ...baseGroups]
+    : baseGroups;
   const NavLinks = (
     <View style={s.nav}>
       <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && s.navLinkHover]} onPress={() => (user ? go('/settings') : openSignIn())}>
@@ -664,7 +687,11 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                 groups.map((g) => (
                   <View key={g.key} style={s.group}>
                     {g.key !== 'Results' && (
-                      <View style={s.groupHead}>
+                      <View style={[s.groupHead,
+                        // Live affordance while the dragged row is past the edge: the section it
+                        // would land in glows softly, so the star/unstar meaning is visible BEFORE
+                        // the drop commits.
+                        ((drag?.cross === 'star' && g.key === 'Starred') || (drag?.cross === 'unstar' && g.key === 'Recent')) && s.groupHeadTarget]}>
                         {g.key === 'Starred' && <Ionicons name="star" size={11} color={GOLD} />}
                         <Text style={s.groupTitle}>{t(g.key)}</Text>
                       </View>
@@ -890,6 +917,8 @@ const s = StyleSheet.create({
   empty: { fontSize: 13, color: colors.muted, paddingVertical: 12, paddingHorizontal: 6 },
   group: { marginBottom: 14 },
   groupHead: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 6, paddingBottom: 6 },
+  // Drag-to-Favorites target glow (drop-would-star/unstar here) — calm, matches the gold star.
+  groupHeadTarget: { backgroundColor: 'rgba(227, 160, 8, 0.14)', borderRadius: 6 },
   groupTitle: { fontSize: 11, fontWeight: '700', color: '#9aa6a0', textTransform: 'uppercase', letterSpacing: 0.5 },
   histRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 10 },
   // Interaction color for rows (owner 2026-08-24): dark-green fill with white label on hover/press.

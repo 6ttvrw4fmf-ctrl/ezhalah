@@ -132,8 +132,12 @@ check('agent.tsx never calls setQuery with a bare value (the 2026-08-15 outage s
 //    must never fork a second copy. Both live in store.tsx and are asserted there.
 const store = readFileSync(new URL('../src/store.tsx', import.meta.url), 'utf8');
 check('history is written at SEARCH time, not at refresh time', /recordHistory\(/.test(store));
-check('history de-dupes by QUERY, so a repeated search cannot create a second saved conversation',
-  /const prior = h\.find\(\(it\) => sameQuery\(it\.query, q\)\)/.test(store));
+// SUPERSEDED nuance (owner 2026-08-25, ChatGPT-grade conversations): a continuation turn updates
+// its OWN chat by id, and query-dedupe now applies only to entries holding no conversation — a
+// repeat of a plain saved search still updates in place, but a chat with a transcript is never
+// overwritten by a lookalike query (that would destroy the conversation persistence exists for).
+check('history de-dupes by QUERY only onto transcript-less entries; continuation turns update their own chat',
+  /it\.id === chatId/.test(store) && /!it\.transcript && sameQuery\(it\.query, q\)/.test(store));
 check('history is bucketed per account, so a signed-in user sees their own chats after a refresh',
   /const historyKey = \(sub: string\) =>/.test(store));
 // The rule this has always guarded is "a refresh cannot load the WRONG bucket". It used to be

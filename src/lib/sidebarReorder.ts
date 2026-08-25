@@ -112,13 +112,49 @@ export function preActivate(pointerType: string, dx: number, dy: number): PreAct
 
 /**
  * Which slot the dragged row currently occupies, from its vertical travel. Pure math so the
- * "dragging C up one row makes it land above B" contract is unit-testable. Clamped to the bucket —
- * a drag can never leave its section (that would change starred state, which reorder must not).
+ * "dragging C up one row makes it land above B" contract is unit-testable. Clamped to the bucket
+ * for POSITION purposes — crossing INTO the other bucket is a separate, deliberate gesture with
+ * its own meaning (dragCrossIntent below), never an accidental by-product of slot math.
  */
 export function dragTargetIndex(fromIndex: number, dy: number, rowH: number, count: number): number {
   if (!(rowH > 0) || !(count > 0)) return fromIndex;
   const raw = fromIndex + Math.round(dy / rowH);
   return Math.max(0, Math.min(count - 1, raw));
+}
+
+// ── DRAG-TO-FAVORITES (owner 2026-08-25: «I tried adding a normal chat to Favorites, including
+// trying to drag it there, and I couldn't. Fix Favorites so chats can be saved there intuitively»).
+// This SUPERSEDES the 2026-08-24 "a drag can never change Starred state" rule for the one gesture
+// where crossing is exactly what the user means: carrying a Recent row UP past the top of its
+// bucket into المفضلة stars it; carrying a Starred row DOWN past the bottom of its bucket into
+// Recent unstars it. Everything else about reorder is unchanged — an in-bucket drop is still
+// position-only, and the crossing must overshoot the bucket edge by a deliberate margin so a drop
+// AT the edge keeps meaning "first/last position", never a surprise star flip.
+export const CROSS_EDGE_ROWS = 0.65;
+export type CrossIntent = 'star' | 'unstar' | null;
+export function dragCrossIntent(
+  bucket: 'Starred' | 'Recent', fromIndex: number, dy: number, rowH: number, count: number,
+): CrossIntent {
+  if (!(rowH > 0) || !(count > 0)) return null;
+  const rows = dy / rowH;
+  // Starred sits ABOVE Recent: only up-and-out of Recent (→ star) and down-and-out of Starred
+  // (→ unstar) cross into the other bucket. The opposite directions leave the list entirely.
+  if (bucket === 'Recent' && rows < (0 - fromIndex) - CROSS_EDGE_ROWS) return 'star';
+  if (bucket === 'Starred' && rows > (count - 1 - fromIndex) + CROSS_EDGE_ROWS) return 'unstar';
+  return null;
+}
+
+/**
+ * Land a cross-bucket drop: set `starred` and place the row at the TOP of its new bucket (the
+ * natural "just added" slot). Same structural guarantees as applyMove — same ids, same length,
+ * every other field carried through untouched; unknown id or no-op state change returns items.
+ */
+export function applyStarMove(items: HistoryItem[], id: string, starred: boolean): HistoryItem[] {
+  const moved = items.find((it) => it.id === id);
+  if (!moved || !!moved.starred === starred) return items;
+  const bucketTop = Math.max(0, ...items.filter((it) => !!it.starred === starred).map(orderOf));
+  const order = Math.max(Date.now(), bucketTop + ORDER_GAP);
+  return items.map((it) => (it.id === id ? { ...it, starred, order } : it));
 }
 
 /**

@@ -103,13 +103,16 @@ check('fetchListingsForQuery threads the SAME signal into both the main RPC call
   /opts\?\.signal/.test(remote) && /fetchRawByIds\(q, tbl, ids, signal\)/.test(remote)
   && /supabase\.rpc\('location_search_candidates_ar'[\s\S]{0,400}\), RPC_TIMEOUT_MS, signal\)/.test(remote));
 check('runQuery accepts a signal and passes it all the way down',
-  /runQuery: \(q: SearchQuery, record\?: boolean, signal\?: AbortSignal\)/.test(store)
+  // signature gained a trailing chatId (conversation identity, owner 2026-08-25) — signal position unchanged.
+  /runQuery: \(q: SearchQuery, record\?: boolean, signal\?: AbortSignal, chatId\?: string \| null\)/.test(store)
   && /fetchListingsForQuery\(q, \{ signal \}\)/.test(store));
 check('recordHistory/setSearchCount are gated on !signal?.aborted — a cancelled run can NEVER write, even on a late-resolving race',
   /if \(record && !signal\?\.aborted\) \{[\s\S]{0,600}?setSearchCount/.test(store)
   && /if \(record && !signal\?\.aborted\) \{[\s\S]{0,600}?recordHistory/.test(store));
 check('every live search-triggering runQuery() call in agent.tsx passes run.ac.signal (chat turns get real cancellation too)',
-  (agent.match(/runQuery\([^)]*run\.ac\.signal\)/g) ?? []).length === 4);
+  // each live call now also names its conversation (ensureChatId — owner 2026-08-25); the signal
+  // still rides every one of the 4, which is what this check exists to hold.
+  (agent.match(/runQuery\([^)]*run\.ac\.signal, ensureChatId\(\)\)/g) ?? []).length === 4);
 check('the ONE runQuery call that must NOT pass a signal (history replay — no new run exists) still passes record=false',
   /runQuery\(q, false\); \/\/ viewing a saved chat/.test(agent));
 

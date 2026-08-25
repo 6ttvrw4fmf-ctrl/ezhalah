@@ -47,6 +47,10 @@ const SANCTIONED = new Set([
 const NON_LISTING_DELETES = new Set([
   'scrapers/common/tests/test_cleanup.py',   // fake client asserting the engine's own behaviour
   'scrapers/common/tests/test_verify_deletions.py',
+  // user_chats = the signed-in user's OWN saved conversations (owner 2026-08-25, ChatGPT-grade
+  // persistence), never a listing row. Deletes here are the user deleting/clearing their own chats,
+  // RLS-scoped to auth.uid() — the server cannot even see another user's rows to delete.
+  'src/lib/chatSync.ts',
 ]);
 
 // A COMMENT CANNOT DELETE ANYTHING. This guard's own barrier-14 migration explains the failure it
