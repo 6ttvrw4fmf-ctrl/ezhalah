@@ -65,15 +65,20 @@ check('installments is ask-first via a TIER applied in the sort, never by bypass
   /ASK_FIRST_TIER/.test(advSrc)
   && /askTier\(b\.question\.id\) - askTier\(a\.question\.id\) \|\| b\.score - a\.score/.test(advSrc)
   && !/ASK_FIRST_TIER|askTier/.test(advSrc.slice(advSrc.indexOf('export function scoreQuestion'), advSrc.indexOf('export type RankedQuestion'))));
-// NARROWING GATE (owner 2026-08-22, supersedes the 2026-08-11 8%-90% option band — see the design
-// contract's "Amendment 2026-08-22"): a question is asked whenever it has a real option that would
-// actually change the result (count < N) — selectivity orders the ask sequence, it no longer decides
-// inclusion. scripts/verify-af-narrowing-gate.ts mutation-proves this by calling scoreQuestion() with
-// synthetic scopes (now pure, in afRanking.ts); this check only pins that the OLD selectivity-as-
-// inclusion gate is gone from BOTH the pure implementation and advancedFilters.ts's thin wrapper.
-check('scoreQuestion gates on scope size and genuine narrowing, not selectivity',
+// NARROWING GATE — UPDATED 2026-08-25 (owner decision of that date; it supersedes the 2026-08-22
+// `count < N` wording this check used to pin, which had itself superseded the 2026-08-11 8%-90%
+// band). The gate now includes an option only when answering it can actually move the set —
+// `optionNarrowsMeaningfully(count, N)`: removes ≥10% of the scope, or lands at/under the target.
+// The owner's case: at N=100 an option matching 100 or 98 listings is not worth a tap. It is
+// ONE-SIDED — a SMALL slice (8 of 100) is still an excellent question and is never dropped, which is
+// what the 2026-08-22 rule was protecting. scripts/verify-af-narrowing-gate.ts mutation-proves the
+// behaviour by calling scoreQuestion() with synthetic scopes (pure, in afRanking.ts); this check
+// pins the SHAPE: the one shared predicate is what decides inclusion, and neither the old
+// selectivity-as-inclusion band nor a second hand-rolled copy of the fraction has come back — in the
+// pure implementation OR in advancedFilters.ts's thin wrapper.
+check('scoreQuestion gates on scope size and the shared narrowing predicate, not selectivity',
   /if \(N < MIN_TOTAL_TO_SHOW\) return null;/.test(rankingSrc)
-  && /const narrowing = result\.options\.filter\(\(o\) => o\.count < N\);/.test(rankingSrc)
+  && /const narrowing = result\.options\.filter\(\(o\) => optionNarrowsMeaningfully\(o\.count, N\)\);/.test(rankingSrc)
   && /if \(narrowing\.length < minOptionsFor\(selection\)\) return null;/.test(rankingSrc)
   && !/Math\.max\(15, Math\.ceil\(0\.08 \* N\)\)/.test(rankingSrc)
   && !/o\.count <= 0\.9 \* N/.test(rankingSrc)

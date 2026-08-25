@@ -25,8 +25,8 @@
 // A scope question is a PREREQUISITE, not a ranked peer: the advanced pool's own eligibility depends
 // on its answer, and `rankQuestions()` probes that whole pool in one Promise.all. Routing scope
 // questions through `scoreQuestion()` would also let its four usefulness gates delete a taxonomy
-// branch — `MIN_REAL_OPTION_COUNT` (5) hides a real group with 4 listings, the no-op filter
-// (`o.count < N`) retires a group with one populated type, and the 26-result floor retires the type
+// branch — `MIN_REAL_OPTION_COUNT` (5) hides a real group with 4 listings, the narrowing gate
+// (`optionNarrowsMeaningfully()`, owner 2026-08-25) retires a group with one populated type, and the 26-result floor retires the type
 // step exactly where a narrow scope still needs it. A scope step must show what the taxonomy
 // actually contains, so it deliberately bypasses that ranker.
 //
