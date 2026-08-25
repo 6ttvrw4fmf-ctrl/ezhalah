@@ -41,36 +41,37 @@ export type VoiceHandlers = {
   onFailure: (kind: 'denied' | 'unavailable' | 'blocked' | 'error', detail?: string) => void;
 };
 
-export function isVoiceInputSupported(): boolean {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
-  const w = window as any;
-  return !!(w.SpeechRecognition || w.webkitSpeechRecognition) && !!navigator.mediaDevices?.getUserMedia;
-}
-
 // Genuine iOS Safari specifically (iPhone/iPad's OWN browser — iPadOS 13+ reports as "Macintosh" in
-// its User-Agent but is touch-capable, unlike any real Mac). Documented, real-world failure mode
-// (owner report, 2026-08-24): the OS permission prompt is granted, then the recognizer STILL fails
-// immediately — iOS Safari's audio-session model is stricter than desktop browsers' about a page
-// holding two independent audio captures at once (our own getUserMedia-driven AnalyserNode for the
-// waveform, PLUS SpeechRecognition's own internal capture). On genuine Safari we skip our own
-// getUserMedia/AnalyserNode entirely and let the recognizer own the ONE capture session outright —
-// support itself is unaffected (isVoiceInputSupported() above is untouched, so the mic still shows
-// exactly where it already correctly does); only how we ACQUIRE the stream changes.
-//
-// NARROWED to Safari alone (owner report, 2026-08-24, SAME iPhone): Chrome for iOS is WebKit under
-// the hood too, but real-device evidence shows it does NOT share this contention — recognition works
-// there even with our own capture active elsewhere in the session, so forcing the same waveform-less
-// fallback onto it was an unnecessary regression (the owner explicitly noticed the missing waveform
-// on Chrome and called it out as "feels odd"). Every third-party iOS browser self-identifies with its
-// own UA token specifically so it CAN be told apart from Apple's own Safari despite the shared
-// rendering engine — Chrome uses 'CriOS', Firefox 'FxiOS', Edge 'EdgiOS', Opera 'OPiOS'. Only a UA
-// with NONE of those tokens is actually Safari.
+// its User-Agent but is touch-capable, unlike any real Mac, which never is). Every third-party iOS
+// browser self-identifies with its own UA token specifically so it CAN be told apart from Apple's own
+// Safari despite the shared WebKit rendering engine — Chrome uses 'CriOS', Firefox 'FxiOS', Edge
+// 'EdgiOS', Opera 'OPiOS'. Only an iOS-family UA with NONE of those tokens is actually Safari.
 function isIOSSafariEngine(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent || '';
   const isIOSFamily = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && (navigator as any).maxTouchPoints > 1);
   if (!isIOSFamily) return false;
   return !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
+}
+
+export function isVoiceInputSupported(): boolean {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
+  // Genuine iOS Safari is deliberately EXCLUDED — an OWNER PRODUCT DECISION (2026-08-24), not an API
+  // capability inference. The full evidence trail, on the owner's real iPhone, same day: Safari
+  // exposes webkitSpeechRecognition (the capability check below passes), the OS mic-permission
+  // prompt was granted cleanly, Dictation was then enabled in iOS Settings — and Apple's on-device
+  // speech service STILL refused every single recognition attempt with 'service-not-allowed'.
+  // Three successive code-level fixes (error reclassification, dropping our own concurrent capture,
+  // actionable settings guidance) were each production-verified and none resolved it, matching
+  // widespread public reports of iOS Safari's Web Speech being unreliable across iOS versions.
+  // There is no free/native alternative recognition path (paid STT is permanently banned), so on
+  // this one browser a visible mic can only ever fail — worse than no mic. The owner chose
+  // (explicitly, from their own A/B framing): hide it here rather than present a control that fails.
+  // Chrome/Firefox/Edge on the SAME iPhone keep the full feature — recognition is proven working
+  // there on the owner's own device — and macOS Safari keeps it too (proven live, 2026-08-24).
+  if (isIOSSafariEngine()) return false;
+  const w = window as any;
+  return !!(w.SpeechRecognition || w.webkitSpeechRecognition) && !!navigator.mediaDevices?.getUserMedia;
 }
 
 const AR_LANG = 'ar-SA';
@@ -127,60 +128,72 @@ export async function startVoiceInput(handlers: VoiceHandlers): Promise<boolean>
   finalText = '';
   interimText = '';
 
-  // 1/2. Everywhere EXCEPT genuine iOS Safari: our own mic stream first — it owns the permission
-  //    prompt, and its rejection is the ONE reliable cross-browser denial signal — then real level
-  //    sampling for the waveform (RMS of the time-domain signal, normalized to ~0..1) hangs off that
-  //    same stream. On genuine iOS Safari specifically (Chrome/Firefox/Edge-for-iOS are exempt — see
-  //    isIOSSafariEngine's own comment), skip BOTH: the recognizer below acquires and owns the mic
-  //    entirely on its own (it negotiates its own permission prompt independently of getUserMedia),
-  //    and the waveform stays flat — the same honest "no level available" state an analyser failure
-  //    already degrades to below, just chosen proactively rather than discovered by a live failure.
-  if (!isIOSSafariEngine()) {
-    let mediaStream: MediaStream;
-    try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (err: any) {
-      if (gen !== generation) return false; // cancelled while the prompt was up — nothing to clean
-      const name = String(err?.name ?? '') || 'unknown';
-      handlers.onFailure(name === 'NotAllowedError' || name === 'SecurityError' ? 'denied' : 'unavailable', name);
-      return false;
-    }
-    if (gen !== generation) {
-      // X was tapped while the permission prompt was resolving — the grant arrived for a session
-      // that no longer exists. Stop the tracks NOW; no hidden mic survives (owner brief §17).
-      for (const track of mediaStream.getTracks()) { try { track.stop(); } catch {} }
-      return false;
-    }
-    stream = mediaStream;
+  // 1. Our own mic stream first — it owns the permission prompt, and its rejection is the ONE
+  //    reliable cross-browser denial signal. ONE unified path for every supported platform: the old
+  //    genuine-iOS-Safari skip-branch died with the owner's 2026-08-24 decision to exclude that
+  //    browser at the support gate itself (see isVoiceInputSupported) — nothing reaches here on it.
+  let mediaStream: MediaStream;
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err: any) {
+    if (gen !== generation) return false; // cancelled while the prompt was up — nothing to clean
+    const name = String(err?.name ?? '') || 'unknown';
+    handlers.onFailure(name === 'NotAllowedError' || name === 'SecurityError' ? 'denied' : 'unavailable', name);
+    return false;
+  }
+  if (gen !== generation) {
+    // X was tapped while the permission prompt was resolving — the grant arrived for a session
+    // that no longer exists. Stop the tracks NOW; no hidden mic survives (owner brief §17).
+    for (const track of mediaStream.getTracks()) { try { track.stop(); } catch {} }
+    return false;
+  }
+  stream = mediaStream;
 
-    try {
-      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
-      audioCtx = new Ctx();
-      // Autoplay policy: a context can be born 'suspended'; the mic tap is a real user gesture, so
-      // an explicit resume always brings it up. AWAITED, not fire-and-forget: letting this fully
-      // settle before touching the recognizer avoids racing two audio-session operations — a
-      // documented source of spurious recognizer failures on stricter audio-session platforms.
-      // Never throws (rejection is swallowed), so a stuck/blocked context degrades to a flat
-      // waveform — it can never block starting the recognizer.
-      await audioCtx!.resume?.().catch(() => {});
-      if (gen !== generation) return false; // cancelled while the context was resuming
-      const source = audioCtx!.createMediaStreamSource(mediaStream);
-      const analyser = audioCtx!.createAnalyser();
-      analyser.fftSize = 512;
-      source.connect(analyser);
-      const buf = new Uint8Array(analyser.fftSize);
-      levelTimer = setInterval(() => {
-        analyser.getByteTimeDomainData(buf);
-        let sum = 0;
-        for (let i = 0; i < buf.length; i++) { const d = (buf[i] - 128) / 128; sum += d * d; }
-        const rms = Math.sqrt(sum / buf.length);
-        levelHistory.push(Math.min(1, rms * 3.2));
-        if (levelHistory.length > LEVEL_HISTORY_CAP) levelHistory.shift();
-      }, LEVEL_SAMPLE_MS);
-    } catch {
-      // Analyser failure is non-fatal: transcription still works; the waveform just stays near-flat
-      // (an honest "no level available", never a fabricated animation).
-    }
+  // 2. Real level sampling for the waveform: RMS of the time-domain signal, normalized to ~0..1.
+  try {
+    const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+    audioCtx = new Ctx();
+    // Autoplay policy: a context can be born 'suspended'; the mic tap is a real user gesture, so
+    // an explicit resume always brings it up. AWAITED, not fire-and-forget: letting this fully
+    // settle before touching the recognizer avoids racing two audio-session operations — a
+    // documented source of spurious recognizer failures on stricter audio-session platforms.
+    // Never throws (rejection is swallowed), so a stuck/blocked context degrades to a flat
+    // waveform — it can never block starting the recognizer.
+    await audioCtx!.resume?.().catch(() => {});
+    if (gen !== generation) return false; // cancelled while the context was resuming
+    // iOS can yank a running context back to 'suspended'/'interrupted' mid-session (Siri, a phone
+    // call, an audio-route change). Re-resume on every state change so the levels come back instead
+    // of freezing for the rest of the recording. Harmless elsewhere (state simply stays 'running').
+    try { (audioCtx as any).onstatechange = () => { if (audioCtx && (audioCtx as any).state !== 'running') void audioCtx.resume?.().catch(() => {}); }; } catch {}
+    const source = audioCtx!.createMediaStreamSource(mediaStream);
+    const analyser = audioCtx!.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    // WEBKIT GRAPH PULL (owner report, 2026-08-24 — iPhone Chrome: recording/transcription worked,
+    // but the waveform stayed frozen flat no matter how loudly they spoke): WebKit only PROCESSES an
+    // audio graph that reaches the destination. An analyser hanging off a MediaStreamSource with no
+    // path to output never receives data there, so getByteTimeDomainData reads 128-flat "silence"
+    // forever — on every iOS browser (all WebKit) and Safari generally. Blink/Gecko happen to pump
+    // sourceless-sink graphs anyway, which is why desktop Chrome never showed this. The fix is the
+    // standard one: tap the analyser into the destination through a ZERO-GAIN node — the graph now
+    // runs everywhere, and gain 0 guarantees nothing audible ever comes out (no echo/feedback).
+    // This is real plumbing for real amplitude — never a fabricated animation (owner brief §4).
+    const sink = audioCtx!.createGain();
+    sink.gain.value = 0;
+    analyser.connect(sink);
+    sink.connect(audioCtx!.destination);
+    const buf = new Uint8Array(analyser.fftSize);
+    levelTimer = setInterval(() => {
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) { const d = (buf[i] - 128) / 128; sum += d * d; }
+      const rms = Math.sqrt(sum / buf.length);
+      levelHistory.push(Math.min(1, rms * 3.2));
+      if (levelHistory.length > LEVEL_HISTORY_CAP) levelHistory.shift();
+    }, LEVEL_SAMPLE_MS);
+  } catch {
+    // Analyser failure is non-fatal: transcription still works; the waveform just stays near-flat
+    // (an honest "no level available", never a fabricated animation).
   }
 
   // 3. The recognizer — Arabic only, continuous, with interim results so Send-mid-speech can

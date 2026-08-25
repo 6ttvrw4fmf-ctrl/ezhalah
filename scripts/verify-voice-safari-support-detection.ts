@@ -1,12 +1,19 @@
-// Safari/WebKit voice-input support-detection barrier (owner report, 2026-08-24 — "Safari microphone
-// is not showing"). The owner tested real Safari and saw no mic button; investigation (a genuine
-// diagnostic page loaded in this machine's actual Safari, corroborated by independent WebKit release
-// notes) found macOS Safari has shipped `webkitSpeechRecognition` since Safari 14.1 — the module's
-// OLD assumption ("WebKit has never implemented SpeechRecognition") was WRONG for macOS Safari; it
-// is only iOS/iPadOS WebKit that genuinely lacks a working implementation. This barrier pins that
-// `isVoiceInputSupported()` is a LIVE runtime capability check, not a browser-name assumption, and
-// that it never confuses "API present" with "permission granted" (owner rule: support ≠ permission —
-// a `prompt`/undecided permission state must never hide a control the runtime can genuinely use).
+// Safari/WebKit voice-input support-detection barrier (owner reports, 2026-08-24). Two rulings pinned:
+//
+// 1. `isVoiceInputSupported()` is a LIVE runtime capability check, not a browser-name assumption
+//    (macOS Safari has shipped webkitSpeechRecognition since 14.1 and correctly shows the mic), and
+//    it never confuses "API present" with "permission granted" (support ≠ permission — a `prompt`/
+//    undecided permission state must never hide a control the runtime can genuinely use).
+//
+// 2. ONE deliberate product exclusion sits on top of the capability check: genuine iOS Safari —
+//    an OWNER DECISION (2026-08-24, from their own explicit A/B framing), not a capability
+//    inference. The evidence, all on the owner's real iPhone the same day: the API is present, mic
+//    permission was granted cleanly, Dictation was enabled in iOS Settings — and Apple's on-device
+//    service still refused every recognition attempt ('service-not-allowed') across THREE successive
+//    production-verified code fixes. No free/native alternative exists (paid STT permanently
+//    banned), so on this one browser a visible mic can only ever fail. Option B was chosen: hide it.
+//    Chrome/Firefox/Edge on the SAME iPhone keep the mic — recognition is proven working there on
+//    the owner's own device (their screenshots show it transcribing) — and macOS Safari keeps it.
 //
 //   node --experimental-strip-types scripts/verify-voice-safari-support-detection.ts   (wired into `npm test`)
 
@@ -37,6 +44,10 @@ check(
   'native (Platform.OS !== \'web\') and no-window both fail closed to false — a graceful, not a crashing, gap',
   /if \(Platform\.OS !== 'web' \|\| typeof window === 'undefined'\) return false;/.test(fnBody),
 );
+check(
+  'the genuine-iOS-Safari product exclusion is present, BEFORE the capability check (owner decision 2026-08-24 — a mic that can only fail is worse than no mic on that one browser)',
+  /if \(isIOSSafariEngine\(\)\) return false;\s*\n\s*const w = window as any;/.test(fnBody),
+);
 
 // ── SUPPORT ≠ PERMISSION: the detector must never read permission state at all ─────────────────────
 check(
@@ -65,9 +76,16 @@ function isVoiceInputSupportedReplica(mock: {
   hasWebkitSpeechRecognition?: boolean;
   hasGetUserMedia?: boolean;
   windowDefined?: boolean;
+  userAgent?: string;
+  navPlatform?: string;
+  maxTouchPoints?: number;
 }): boolean {
   const windowDefined = mock.windowDefined !== false;
   if (mock.platformOS !== 'web' || !windowDefined) return false;
+  // isIOSSafariEngine replica — same formula as the production helper.
+  const ua = mock.userAgent ?? '';
+  const isIOSFamily = /iPad|iPhone|iPod/.test(ua) || (mock.navPlatform === 'MacIntel' && (mock.maxTouchPoints ?? 0) > 1);
+  if (isIOSFamily && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua)) return false;
   const w = { SpeechRecognition: mock.hasSpeechRecognition, webkitSpeechRecognition: mock.hasWebkitSpeechRecognition };
   const mediaDevices = { getUserMedia: mock.hasGetUserMedia };
   return !!(w.SpeechRecognition || w.webkitSpeechRecognition) && !!mediaDevices?.getUserMedia;
@@ -78,15 +96,27 @@ check(
   isVoiceInputSupportedReplica({ platformOS: 'web', hasSpeechRecognition: true, hasWebkitSpeechRecognition: false, hasGetUserMedia: true }) === true,
 );
 check(
-  '2. ONLY webkitSpeechRecognition present (real macOS Safari\'s exact shape — confirmed live, Safari 26.5) + getUserMedia → mic SHOWN',
-  isVoiceInputSupportedReplica({ platformOS: 'web', hasSpeechRecognition: false, hasWebkitSpeechRecognition: true, hasGetUserMedia: true }) === true,
+  '2. ONLY webkitSpeechRecognition present (real macOS Safari\'s exact shape — confirmed live, Safari 26.5, zero touch points) + getUserMedia → mic SHOWN',
+  isVoiceInputSupportedReplica({ platformOS: 'web', hasSpeechRecognition: false, hasWebkitSpeechRecognition: true, hasGetUserMedia: true, userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Safari/605.1.15', navPlatform: 'MacIntel', maxTouchPoints: 0 }) === true,
+);
+check(
+  '2b. genuine iPhone Safari, API present, getUserMedia present → mic HIDDEN — the owner\'s 2026-08-24 product exclusion: capability was never the question there; the service refusing every attempt on a real, fully-configured device was',
+  isVoiceInputSupportedReplica({ platformOS: 'web', hasWebkitSpeechRecognition: true, hasGetUserMedia: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' }) === false,
+);
+check(
+  '2c. Chrome on the SAME iPhone (CriOS token), API present → mic SHOWN — recognition is proven working there on the owner\'s own device; the exclusion is Safari-alone, never iOS-wide',
+  isVoiceInputSupportedReplica({ platformOS: 'web', hasWebkitSpeechRecognition: true, hasGetUserMedia: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/128.0.6613.113 Mobile/15E148 Safari/604.1' }) === true,
+);
+check(
+  '2d. iPad Safari masquerading as a Mac (UA says Macintosh, multi-touch) → mic HIDDEN — the masquerade cannot smuggle iPad Safari past the exclusion',
+  isVoiceInputSupportedReplica({ platformOS: 'web', hasWebkitSpeechRecognition: true, hasGetUserMedia: true, userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15', navPlatform: 'MacIntel', maxTouchPoints: 5 }) === false,
 );
 check(
   '3. recognition present but mic permission still "prompt" (undecided, not yet granted) → mic SHOWN — the detector does not read permission state at all, so this is identical to case 2 by construction',
   isVoiceInputSupportedReplica({ platformOS: 'web', hasWebkitSpeechRecognition: true, hasGetUserMedia: true }) === true,
 );
 check(
-  '4. neither SpeechRecognition nor webkitSpeechRecognition present (genuinely unsupported engine, e.g. iOS/iPadOS WebKit) → mic HIDDEN',
+  '4. neither SpeechRecognition nor webkitSpeechRecognition present (genuinely unsupported engine) → mic HIDDEN',
   isVoiceInputSupportedReplica({ platformOS: 'web', hasSpeechRecognition: false, hasWebkitSpeechRecognition: false, hasGetUserMedia: true }) === false,
 );
 check(
