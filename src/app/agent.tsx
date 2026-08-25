@@ -1417,13 +1417,27 @@ export default function Agent() {
     afProbedRef.current[probeKey] = true;
     // An unresolved CATEGORY→GROUP→TYPE tier is itself a real narrowing step, and it is what unlocks
     // the advanced pool at all (afPlan.ts) — ranking that pool now would score it against a scope the
-    // user has not picked yet and come back empty by construction.
-    if (unresolvedScopeTiers(q).length) { setAfCanNarrow((c) => ({ ...c, [m.id]: true })); return; }
-    void rankQuestions(q, new Set(asked))
-      .then((ranked) => setAfCanNarrow((c) => ({
-        ...c, [m.id]: ranked.some((r) => offersMeaningfulNarrowing(r.total, r.options)),
-      })))
-      .catch(() => { /* a failed probe leaves the offer hidden — never a button that cannot deliver */ });
+    // user has not picked yet and come back empty by construction. ASK THE SAME QUESTION THE WALK
+    // ASKS (review 2026-08-25): nextScopeTier, not `unresolvedScopeTiers(q).length`. A tier the user
+    // SKIPPED stays unresolved forever while being permanently un-re-askable, so the raw-length test
+    // promised a round whose scope walk falls straight through — a button that opened and closed.
+    if (nextScopeTier(q, new Set(asked))) { setAfCanNarrow((c) => ({ ...c, [m.id]: true })); return; }
+    // UNKNOWN MUST NOT HARDEN INTO NO (permanent fleet rule). A count RPC that times out resolves to
+    // an EMPTY option set (remote.ts withTimeout → null → `{ options: [], total: 0 }`), which
+    // scoreQuestion then drops — so a 4s blip is indistinguishable from an honest "nothing narrows",
+    // and caching that verdict hid «تحديد أكثر» on this turn for the rest of the chat. An empty rank
+    // while questions REMAIN eligible is therefore treated as unknown and re-probed exactly once
+    // (bounded: never a poll). An empty POOL is certain — no RPC was even issued — and settles first
+    // pass, which is the common "nothing left to ask" case, so this costs nothing there.
+    const poolLeft = eligibleQuestions(q).filter((qq) => !asked.includes(qq.id)).length;
+    const probe = (attempt: number) => void rankQuestions(q, new Set(asked))
+      .then((ranked) => {
+        const ok = ranked.some((r) => offersMeaningfulNarrowing(r.total, r.options));
+        if (!ok && !ranked.length && poolLeft && attempt === 0) { setTimeout(() => probe(1), 2500); return; }
+        setAfCanNarrow((c) => ({ ...c, [m.id]: ok }));
+      })
+      .catch(() => { if (attempt === 0) setTimeout(() => probe(1), 2500); });   // stays unknown ⇒ hidden
+    probe(0);
   }, [lastResultsMsg, guidedPills]);
 
   // Run a refine answer (tapped chip OR typed reply): echo `label` as the user's bubble, merge the one
@@ -1490,8 +1504,14 @@ export default function Agent() {
     // The guided record is passed even when the LAST pill is removed (owner 2026-08-24): the pills
     // row is gated on facets.length so nothing renders, but the carried asked-set survives — dropping
     // it here would resurrect every question an earlier round already asked or skipped.
+    //
+    // …MINUS the removed question itself (review 2026-08-25). The carry exists to stop RE-asking what
+    // the user already RESOLVED; a facet the user just deleted is by definition unresolved again, and
+    // keeping its id in `asked` burned that dimension for the rest of the chat — remove «عمر ٣-٥
+    // سنوات» to pick a different bucket and property_age could never be offered again, and once the
+    // pool was spent that way «تحديد أكثر» disappeared entirely with no way back but a new search.
     void runRefine(q, '__guided__', '', label,
-      { guided: { baseQ: guidedPills.baseQ, facets: remaining, asked: guidedPills.asked } });
+      { guided: { baseQ: guidedPills.baseQ, facets: remaining, asked: guidedPills.asked.filter((id) => id !== removed.id) } });
   };
 
   // Present the step at `stepIndex`. A step the user has already seen (walked Back to, or one
@@ -1585,7 +1605,13 @@ export default function Agent() {
     // re-scored against the NARROWED set, so the next question is always the most useful one for the
     // listings the user actually has left — and the flow stops by itself the moment the set drops to
     // ≤ INTERVIEW_STOP_AT (rankQuestions returns nothing below the floor).
-    if (stepIndex > 0) {
+    // `|| !plan.length` (review 2026-08-25): at cursor 0 the plan is normally the one startAgeFlow
+    // already ranked — EXCEPT on the unresolved-scope bypass, which hands off without ranking. When a
+    // carried asked-set has already consumed every unresolved tier (the user skipped one in an
+    // earlier round — a skipped tier is never re-asked, nextScopeTier), the walk above ends
+    // immediately and nothing has ranked the advanced pool: the round would finish on an empty plan
+    // and the tap would read as a dead button. Ranking here is the same call the loop already makes.
+    if (stepIndex > 0 || !ageFlowPlanRef.current.length) {
       const q = ageFlowQueryRef.current;
       if (!q || ageFlowTokenRef.current !== token) return;
       const ranked = await rankQuestions(q, ageFlowAskedRef.current);
@@ -1613,7 +1639,12 @@ export default function Agent() {
     ageFlowTotalRef.current = total; // the narrowed set the user is answering against, always real
     setAgeFlow({
       phase: 'asking', stepIndex, question, options, unknownCount, initialKeys: [],
-      progressCur: stepIndex + 1, progressTotal: stepIndex + plan.length,
+      // Bounded by what is LEFT IN THIS ROUND (review 2026-08-25), not by the whole remaining pool:
+      // with 7 useful questions left the bar used to fill to 4/7 and the round then ended at ~57%,
+      // reading as "the interview quit early". Still a bar only — the numeric «N of M» caption stays
+      // banned (design contract §4).
+      progressCur: stepIndex + 1,
+      progressTotal: stepIndex + Math.min(plan.length, AF_ROUND_MAX_QUESTIONS - askedThisRound),
     });
   };
 

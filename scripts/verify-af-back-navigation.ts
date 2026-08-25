@@ -181,9 +181,29 @@ const backTokenOk = (src: string) => {
 };
 check('Back bumps the supersession token first and walks back under the BUMPED one (an abandoned in-flight probe cannot re-show the step just left)',
   backTokenOk(agentSrc), backWalk(agentSrc).trim());
-check('Back from the FIRST question leaves AF (which is what restores the pre-AF controls)',
-  /if \(stepIndex <= 0\) \{[\s\S]{0,220}?setAgeFlow\(null\);/.test(agentSrc)
-  && /\(hasMore \|\| canNarrowFurther\) && !ageFlow/.test(agentSrc));
+// EXTENDED for progressive rounds (owner 2026-08-24). The two original conditions are unchanged and
+// still required — but their MEANING moved under them, so on their own they had gone blind:
+// "the FIRST question" is now the first question of the CURRENT ROUND, and "the pre-AF controls" is
+// the result turn that round was opened FROM — which, from round 2 onwards, already holds every
+// earlier round's committed answers. "Leaves AF" is therefore no longer sufficient: an exit that
+// quietly FINISHED the round (committing what is on screen and re-searching, the «عرض النتائج» shape)
+// would satisfy both original regexes while landing the user on a different result set than the one
+// they pressed Back to get out of. The exit must CANCEL: drop this round's record, re-derive at cursor
+// 0, and neither commit nor search. Round-crossing itself is pinned in verify-af-round-back-boundary.ts.
+const cancelBranch = (src: string) => {
+  const b = backBody(src);
+  const i = b.indexOf('if (stepIndex <= 0) {');
+  const end = b.indexOf('\n    }', i);              // the 4-space brace closing the if, not a nested one
+  return i < 0 ? '' : b.slice(i, end < 0 ? undefined : end);
+};
+const backToStartCancels = (src: string) =>
+  /if \(stepIndex <= 0\) \{[\s\S]{0,220}?setAgeFlow\(null\);/.test(src)
+  && /\(hasMore \|\| canNarrowFurther\) && !ageFlow/.test(src)
+  && /ageFlowStepsRef\.current = \[\];/.test(cancelBranch(src))
+  && /syncGuidedFromSteps\(0\);/.test(cancelBranch(src))
+  && !/runRefine|finishGuided|commitGuidedStep/.test(cancelBranch(src));
+check('Back from the FIRST question of a ROUND CANCELS it — leaves AF (restoring that turn\'s controls), drops only this round\'s record, and neither commits nor searches',
+  backToStartCancels(agentSrc), cancelBranch(agentSrc).replace(/\s+/g, ' ').trim());
 check('the recorded answer is handed back to the card on Back',
   /initialKeys: st\.keys \?\? \[\]/.test(agentSrc) && /initialKeys=\{ageFlow\.initialKeys\}/.test(agentSrc));
 check('a CHANGED earlier answer triggers re-validation of everything after it',
@@ -206,9 +226,21 @@ check('«عرض النتائج» commits the visible selection instead of discar
   /onPress=\{\(\) => onSkipAll\(sel\)\}/.test(cardSrc)
   && /const onAgeSkipAll = \(keys: string\[\]\) => \{ void commitGuidedStep\(keys, true\); \}/.test(agentSrc)
   && !/const onAgeSkipAll = \(\) => finishGuided/.test(agentSrc));
-check('the query is REBUILT from the record, never mutated in place by a handler',
-  /deriveGuided\(ageFlowBaseQRef\.current, ageFlowStepsRef\.current, upTo\)/.test(agentSrc)
-  && !/ageFlowQueryRef\.current = question\.apply\(/.test(agentSrc));
+// EXTENDED for progressive rounds (owner 2026-08-24). `ageFlowBaseQRef` used to have one possible
+// meaning — the pre-AF query — so pinning the rebuild call was the whole invariant. Under rounds it
+// means THIS ROUND's start, and a second, tempting anchor now exists beside it: the carry's `originQ`,
+// the true pre-AF query kept so the cumulative pills stay removable back to the beginning. Re-anchoring
+// the rebuild to that origin looks correct in round 1 and silently drops rounds 1..N-1 from round 2 on
+// — with the original regex still matching, because the call spelling never changes. Both halves are
+// pinned now: the rebuild reads the round's own base, and that base is only ever assigned the query the
+// round opened on.
+const rebuiltFromRoundStart = (src: string) =>
+  /deriveGuided\(ageFlowBaseQRef\.current, ageFlowStepsRef\.current, upTo\)/.test(src)
+  && !/ageFlowQueryRef\.current = question\.apply\(/.test(src)
+  && /ageFlowBaseQRef\.current = q;/.test(src)
+  && !/ageFlowBaseQRef\.current\s*=[^;]*(afCarryRef|originQ)/.test(src);
+check('the query is REBUILT from the record against THIS ROUND\'s start — never mutated in place, never re-anchored to the carried pre-AF origin',
+  rebuiltFromRoundStart(agentSrc));
 
 // ── 11. reentrancy guard (bug-hunt 2026-08-23) ──────────────────────────────────────────────────
 // presentGuided's re-rank is a real network round trip before the next question replaces the
@@ -286,11 +318,24 @@ mustCatch('the supersession bump being dropped from the walk-back (a stale probe
 mustCatch('the walk-back capturing the PRE-bump token (postfix ++ hands presentGuided an already-superseded token)',
   !backTokenOk(mut(agentSrc, 'const back = ++ageFlowTokenRef.current;', 'const back = ageFlowTokenRef.current++;')));
 mustCatch('Back-to-start no longer restoring the pre-AF controls',
-  !/if \(stepIndex <= 0\) \{[\s\S]{0,220}?setAgeFlow\(null\);/.test(
-    mut(agentSrc, /if \(stepIndex <= 0\) \{/, 'if (false) {')));
+  !backToStartCancels(mut(agentSrc, /if \(stepIndex <= 0\) \{/, 'if (false) {')));
 mustCatch('the pre-AF CTA row losing its !ageFlow gate',
-  !/\(hasMore \|\| canNarrowFurther\) && !ageFlow/.test(
-    mut(agentSrc, '(hasMore || canNarrowFurther) && !ageFlow', '(hasMore || canNarrowFurther)')));
+  !backToStartCancels(mut(agentSrc, '(hasMore || canNarrowFurther) && !ageFlow', '(hasMore || canNarrowFurther)')));
+// The round-era defects the original two conditions could not see. `syncGuidedFromSteps(0);` is the
+// one line unique to this branch — anchoring on `ageFlowStepsRef.current = [];` or `setAgeFlow(null);`
+// would land the mutation in startAgeFlow and prove nothing about onAgeBack.
+mustCatch('Back-to-start quietly FINISHING the round instead of cancelling it (a search the user backed out of)',
+  !backToStartCancels(mut(agentSrc, 'syncGuidedFromSteps(0);', 'finishGuided(ageFlowTokenRef.current);')));
+mustCatch('Back-to-start committing the on-screen answer on its way out (the «عرض النتائج» shape borrowed by «رجوع»)',
+  !backToStartCancels(mut(agentSrc, 'syncGuidedFromSteps(0);', 'void commitGuidedStep([], true);')));
+mustCatch('this round\'s record surviving the cancel (a re-opened round would resume mid-flight)',
+  !backToStartCancels(mut(agentSrc, /ageFlowStepsRef\.current = \[\];\n(\s*)syncGuidedFromSteps\(0\);/, '$1syncGuidedFromSteps(0);')));
+mustCatch('the cancel skipping the re-derive (ageFlowQueryRef left holding the abandoned round\'s narrowing)',
+  !backToStartCancels(mut(agentSrc, 'syncGuidedFromSteps(0);', '')));
+mustCatch('the round rebuild re-anchored to the carried pre-AF origin (rounds 1..N-1 silently dropped)',
+  !rebuiltFromRoundStart(mut(agentSrc, 'ageFlowBaseQRef.current = q;', 'ageFlowBaseQRef.current = afCarryRef.current?.originQ ?? q;')));
+mustCatch('the round losing its own base entirely',
+  !rebuiltFromRoundStart(mut(agentSrc, 'ageFlowBaseQRef.current = q;', '')));
 mustCatch('a changed earlier answer no longer re-validating later ones',
   !/if \(changedAnswer\) await revalidateStepsAfter\(stepIndex, token\)/.test(
     mut(agentSrc, 'if (changedAnswer) await revalidateStepsAfter(stepIndex, token)', '')));
@@ -298,7 +343,7 @@ mustCatch('re-validation starting to drop skips',
   !/if \(!st\.keys\.length\) \{ kept\.push\(st\); continue; \}/.test(
     mut(agentSrc, 'if (!st.keys.length) { kept.push(st); continue; }', 'if (!st.keys.length) continue;')));
 mustCatch('a handler mutating the query in place again',
-  /ageFlowQueryRef\.current = question\.apply\(/.test(
+  !rebuiltFromRoundStart(
     mut(agentSrc, 'ageFlowQueryRef.current = d.query;', 'ageFlowQueryRef.current = question.apply(q, keys);')));
 mustCatch('a re-presented step showing stale per-option counts',
   !/fresh = await st\.question\.resolveOptions\(q0\)/.test(

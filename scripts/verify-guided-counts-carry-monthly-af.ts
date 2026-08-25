@@ -82,7 +82,16 @@ for (const fn of ['apartment_guided_counts_ar', 'property_age_option_counts_ar']
   if (!args) continue;
   // Spreading the shared helper carries the whole set; naming each param carries it too. Anything
   // else is the hand-copied list that drifted.
-  const viaHelper = args.includes('...rpcAdvancedFilterParams(q)');
+  //
+  // 2026-08-25: property_age_option_counts_ar spreads the same helper through `ageAgnostic()`, which
+  // deletes ONLY the three age params that RPC is itself pricing (passing them collapses every
+  // non-selected bucket to 0 — verified live). Every ADVANCED_PARAM below still rides along, which is
+  // the property this file is about, so the wrapped spread counts as the spread. The failure detail
+  // this barrier printed on that shape already told the reader to "spread ...rpcAdvancedFilterParams(q)
+  // instead" — which the code now does; only the recogniser was behind.
+  // verify-property-age-counts-amenities-param.ts pins the wrapper's exact deletion list, so it can
+  // never widen into the drift this check exists to catch.
+  const viaHelper = /\.\.\.(?:ageAgnostic\()?rpcAdvancedFilterParams\(q\)\)?/.test(args);
   const effective = viaHelper ? args + helperBody : args;
   for (const p of ADVANCED_PARAMS) {
     check(`    ${fn} carries ${p}`, effective.includes(p),
