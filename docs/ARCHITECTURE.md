@@ -277,10 +277,42 @@ language / units / currency / theme toggle (Arabic-only, SAR-only).
 ### 7.4 Sidebar (`src/components/Sidebar.tsx`)
 
 Docked column (web ≥ 900px) or slide-in drawer (mobile), pinned LTR in both languages. Signed-in: brand,
-**New Chat** (→ Filter Home, `fresh` param), **search/chat history** grouped **Starred** (forever) +
-**Recent** (60 days) with per-row Star/Delete and active-chat highlight, then Settings / Support / About
-/ profile row. Guest: brand + Sign up / Log in + nav links. History rows replay a past search's filter
-into `/agent`.
+**New Chat** (→ Filter Home, `fresh` param), **search/chat history** grouped **المفضلة/Favorites**
+(starred, forever) + **Recent** (60 days) with per-row Star/Delete and active-chat highlight, then
+Settings / Support / About / profile row. Guest: brand + Sign up / Log in + nav links. Every history
+row opens through the transcript-restore path (§7.4b).
+
+**Drag-to-Favorites (owner 2026-08-25).** Carrying a Recent row up past the top of its bucket (>0.65
+rows beyond the edge — `dragCrossIntent`/`applyStarMove` in `src/lib/sidebarReorder.ts`) stars it;
+carrying a Starred row down past its bucket bottom unstars. At-the-edge drops stay position-only
+reorders; an empty Favorites section renders its header as a drop target during a drag and the target
+section glows while crossing. This deliberately supersedes the 2026-08-24 "drag never changes Starred"
+rule for this one gesture; the ⋯-menu Star stays the tap path. Barrier:
+`scripts/verify-sidebar-drag-star.ts` (pure rules executed + wiring pinned).
+
+### 7.4b Full-conversation persistence (owner 2026-08-25, PERMANENT — «like ChatGPT»)
+
+**A chat is the CONVERSATION, not the query.** Returning to a saved chat renders EXACTLY the
+conversation the user left — every bubble, every results turn with the cards they had revealed
+(«عرض المزيد» pages included), every Advanced Filter round's receipt and the cumulative pills — and it
+survives refresh, browser close, and logging back in on any device. Not a reconstruction: the
+transcript IS the rendered `msgs` state, captured after each settled turn (`serializeChat`,
+`src/lib/chatTranscript.ts`) and restored verbatim (`openSaved` in `agent.tsx`); live actions keep
+operating on the restored turns' own embedded queries and paging state.
+
+- **Conversation identity:** `agent.tsx` owns `chatIdRef`; every recorded turn passes it and
+  `recordHistory(q, result, chatId)` updates that one entry. Query-dedupe applies only to
+  transcript-less legacy entries — a chat holding a conversation is never overwritten by a lookalike
+  search (a repeat starts its own new chat, exactly like ChatGPT). Before this, each AF round's
+  narrowed query minted a separate sidebar entry and the conversation was scattered/lost.
+- **Storage tiers:** memory (all chats, in-session) → localStorage (transcripts on the
+  `LOCAL_TRANSCRIPT_ENTRIES` most recently active chats, pruned only at the serialization boundary) →
+  **`public.user_chats`** (all chats: `meta` jsonb + `transcript` jsonb, RLS `auth.uid()`, FK
+  `auth.users ON DELETE CASCADE` so account deletion wipes conversations — PDPL). Pull merges metas
+  after sign-in (newer per-entry stamp wins); push is debounced write-through; transcripts hydrate
+  lazily on open (`hydrateTranscript`). Guests stay session-only (owner 2026-08-20, unchanged).
+- Barrier: `scripts/verify-chat-persistence.ts` (pure contract executed + identity + sync + RLS
+  pins, mutation-proven). Live proof: `scripts/verify-chat-persistence-live.mjs`.
 
 ### 7.5 In-app browser (`src/app/browser.tsx`)
 
