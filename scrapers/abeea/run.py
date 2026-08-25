@@ -685,6 +685,70 @@ def map_listing(body: str, url: str,
     return row, category, gone
 
 
+def _ad_number_from_pid(pid: str) -> str:
+    """The ONE place a published «Property ID» becomes an ad_number. map_listing() and the liveness
+    oracle must agree byte-for-byte, or the oracle compares identities that were never comparable."""
+    clean = re.sub(r"[^A-Za-z0-9]", "", (pid or "").strip())
+    return clean if clean.upper().startswith("AB") else f"AB{clean}"
+
+
+def _liveness_verdict(http_status: int, body_len: int, page_pid: Optional[str],
+                      status_text: Optional[str], probed_ad: str) -> str:
+    """PURE verdict for ONE liveness probe: does `probed_ad` still exist at its own stored URL?
+
+    Returns 'gone' | 'live' | 'unknown' | 'retry' ('retry' = the caller should try again; only the
+    other three are verdicts prune_unseen() may act on).
+
+    WHY THE IDENTITY CHECK EXISTS (2026-08-25). This oracle used to resolve a row's URL by
+    ad_number and then judge liveness purely from that page's «Property Status» — but a URL is NOT
+    unique to an ad_number. Abeea edits a live post's «Property ID» in place (ABREA166 → ABRE166,
+    ABRE3334 → ABRE334). The next crawl reads the NEW id, and because identity is keyed on
+    Property ID it INSERTS a second row while the old row keeps the same listing_url. From then on:
+
+        prune_unseen() strikes the old row 3× (it is never seen again)
+          → _verify_gone(old_id) loads the SHARED url
+          → the page is 200 and its status is not Sold/Rented   (it belongs to the NEW id)
+          → verdict 'live'  → prune SELF-HEALS: missing_count = 0, last_seen_at = now()
+
+    so the retired identity is resurrected every cycle and BOTH rows stay production_ready
+    forever. That is not a transient window: row 659716 (ABREA166) survived that way from
+    2026-06-23 to 2026-08-25, showing users two cards for one property, and the same for 7673907
+    (ABRE3334). Verified against the source the same day: abeea's complete catalogue is 247 posts /
+    243 distinct Property IDs, and ABREA166 and ABRE3334 appear in NONE of them, while ABRE166 and
+    ABRE334 each appear at exactly one URL.
+
+    So: a page that publishes a DIFFERENT Property ID is not evidence that the probed ad is alive —
+    it is evidence that the source has retired that identity at that URL. It is only ever reached
+    after prune's own precondition (missing from `grace` consecutive full-catalogue crawls), so
+    catalogue-absence is already established before this function is consulted; the page's own
+    published id is the second, independent confirmation.
+
+    A page with NO readable Property ID keeps the previous behaviour exactly: those rows take their
+    ad_number from md5(slug) (see map_listing), so for them the URL *is* the identity and there is
+    nothing to compare. Unreadable status stays UNKNOWN — never 'live', never 'gone'.
+
+    NOT AFFECTED — the same-id-at-two-URLs case. Abeea also publishes one property under two posts
+    carrying the SAME Property ID (measured 2026-08-25: 4 such ids, e.g. ABRE056, ABRE277, ABRE300).
+    Those collapse onto one row whose stored URL publishes its own id, so the comparison below
+    matches and the verdict is unchanged. `_pin_sold_inactive`'s contradictory-source rule still
+    governs that case and is untouched here.
+    """
+    if http_status == 404:
+        return "gone"                      # post deleted outright
+    if not (http_status == 200 and body_len > 2000):
+        return "retry"
+    if page_pid:
+        # Identity FIRST: a page belonging to another ad can say nothing about this one's status.
+        if _ad_number_from_pid(page_pid).upper() != (probed_ad or "").upper():
+            return "gone"
+    status = (status_text or "").lower()
+    if not status:
+        # The page rendered but carried no status cell — we cannot read the field that decides
+        # this. Unreadable is UNKNOWN, never "live" and never "gone".
+        return "unknown"
+    return "gone" if any(g in status for g in GONE_STATUS) else "live"
+
+
 def _pin_sold_inactive(table: str, ad_numbers: list[str],
                        live_ad_numbers: Optional[set[str]] = None) -> None:
     """Make source-confirmed SOLD/RENTED rows inactive NOW and survivors of the nightly
@@ -861,15 +925,12 @@ def main() -> int:
                 except Exception:
                     time.sleep(1.2 * (attempt + 1))
                     continue
-                if r.status_code == 404:
-                    return "gone"          # post deleted outright
-                if r.status_code == 200 and len(r.text) > 2000:
-                    status = (_detail_items(r.text).get("Property Status") or "").lower()
-                    if not status:
-                        # The page rendered but carried no status cell — we cannot read the field
-                        # that decides this. Unreadable is UNKNOWN, never "live" and never "gone".
-                        return "unknown"
-                    return "gone" if any(g in status for g in GONE_STATUS) else "live"
+                items = _detail_items(r.text) if r.status_code == 200 else {}
+                verdict = _liveness_verdict(
+                    r.status_code, len(r.text),
+                    items.get("Property ID"), items.get("Property Status"), ad_number)
+                if verdict != "retry":
+                    return verdict
                 time.sleep(1.0 * (attempt + 1))
             return "unknown"   # unreachable/blocked is never proof of death
 
