@@ -28,8 +28,9 @@
 //   3. the classification math, mutation-proven against the exact Postgres expression, including the
 //      boundary where int-rounding decides (16/31 upstream vs 15/31 fetched);
 //   4. the cost containment: the discriminator query runs on the RAISE path only, never in the
-//      per-segment × per-field scan — the twice-hourly sweep already runs near its statement_timeout
-//      and an aborted sweep rolls back every alert it had raised.
+//      per-segment × per-field scan. This detector is NOT in the mon_run_all_detectors() roster — it
+//      is reached by its own daily pg_cron job 69 ('52 6 * * *') under a 600s statement_timeout, and
+//      that budget is the ceiling to stay inside.
 //
 //   node --experimental-strip-types scripts/verify-af-capture-state-discriminator.ts
 

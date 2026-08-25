@@ -150,9 +150,19 @@ permanent rule of 2026-08-13 — *"a missing captured field is NOT evidence that
 a failed fetch looks identical"* — moved from prose an engineer must remember into the alert itself.
 
 **Cost containment.** The discriminator query runs on the **raise path only** (2 executions in today's
-entire sweep), never in the per-segment × per-field scan. Deliberate: the twice-hourly sweep already
-runs near its `statement_timeout` (open `detector_sweep_budget` alert), and an aborted sweep rolls
-back every alert it had raised.
+entire run), never in the per-segment × per-field scan.
+
+> **Correction, made within this run.** The first migration justified that containment by claiming
+> this detector runs inside the twice-hourly `mon_run_all_detectors()` sweep. It does not, and a
+> future engineer would have inherited the mistake. `mon_af_new_listing_readiness()` is deliberately
+> outside that roster and is reached by its own daily pg_cron **job 69** (`52 6 * * *`, 06:52 UTC)
+> under a 600s `statement_timeout` — which is why today's alerts are stamped 06:52 rather than on a
+> `:29`/`:59` boundary, and `mon_detect_orphaned_detectors()` already knows this. Migration
+> `20260825122918` re-applies the function with the corrected note (body byte-identical apart from
+> that comment) rather than editing the applied file in place, so repo and
+> `schema_migrations.statements` agree on both versions and the record of what was first applied
+> stays intact. The decision itself is unchanged — per-raise is still the right shape, and job 69's
+> 600s budget is a real ceiling.
 
 **Production verification.** Ran live: both segments now classify as `upstream_fetch_incomplete` with
 `31 of 31` and `37 of 37` fresh rows never detail-fetched, carrying the correct routing text.
