@@ -677,6 +677,20 @@ function withTimeout<T>(p: PromiseLike<T>, ms: number): Promise<T | { timedOut: 
 // with identical `q` onto one shared promise cuts redundant round trips with zero behavior change —
 // a later call (different q, or once this one settles) always gets a fresh fetch; nothing is cached
 // past settlement.
+// This RPC prices the age buckets THEMSELVES, so it must not apply the user's own age answer: the
+// server applies p_age_min/p_age_max/p_is_new_construction to the same scope it then buckets, so
+// passing them collapses every other bucket to 0. Verified live 2026-08-25 on Riyadh/Rent-Monthly:
+// no age params -> new 133 / 1_2 34 / 3_5 46 / 6_9 26 / 10p 42; with p_age_min=3,p_age_max=5 ->
+// 3_5 46 and every other bucket 0. meaningful() then drops the sub-5 options and the question is
+// left with a single choice equal to the answer already given — i.e. a re-ask could never change it.
+// AGE_QUESTION.apply is REPLACING, not monotone (advancedFilters.ts: case 'new' nulls ageMin/ageMax),
+// so the un-narrowed buckets are the correct thing to price: the pick replaces the old answer.
+// Same contract as apartment_guided_counts_ar, whose per-option counts also ignore their own dimension.
+function ageAgnostic<T extends Record<string, unknown>>(params: T) {
+  const { p_age_min: _min, p_age_max: _max, p_is_new_construction: _new, ...rest } = params;
+  return rest;
+}
+
 const inFlightAgeCounts = new Map<string, Promise<AgeOptionCounts | null>>();
 
 export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeOptionCounts | null> {
@@ -696,17 +710,15 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
         // Carry forward any earlier-answered guided-flow question (e.g. RNPL) — found live 2026-07-24:
         // without this, the age-bucket badges shown here silently ignored an already-selected amenities
         // filter, showing counts far larger than what Search (and apartment_guided_counts_ar, which
-        // already receives these) actually returns for the same combination. Same pattern as
-        // fetchApartmentGuidedCounts() below; the RPC's own p_amenities/p_bath_min default to NULL
-        // (no-op) so an unanswered question never affects a call that omits them.
-        ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
-        ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
-        ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
-        ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
-        ...(q.directions?.length ? { p_directions: q.directions } : {}),
-        ...(q.ratingMin != null ? { p_rating_min: q.ratingMin } : {}),
-        ...(q.reviewsMin != null ? { p_reviews_min: q.reviewsMin } : {}),
-        ...(q.unitSubtypes?.length ? { p_unit_subtypes: q.unitSubtypes } : {}),
+        // already receives these) actually returns for the same combination.
+        //
+        // Spread the ONE shared builder rather than re-listing its keys (2026-08-25). This call used
+        // to hand-copy 8 of rpcAdvancedFilterParams()' keys; a hand-copy silently stops carrying any
+        // advanced question added later, which is the exact 8x-overstatement class the builder's own
+        // comment documents twice. The RPC declares every key it produces (verified live against
+        // pg_proc, all 11 present), and each is omitted when unanswered, so an unanswered question
+        // never affects the call.
+        ...ageAgnostic(rpcAdvancedFilterParams(q)),
       }),
       AGE_COUNT_TIMEOUT_MS,
     );

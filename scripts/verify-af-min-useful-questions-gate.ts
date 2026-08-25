@@ -9,6 +9,18 @@
 // only: once open, the interview still keeps asking down to the very last useful question (unchanged
 // continuation loop, proved absent from this gate below).
 //
+// AMENDED 2026-08-24 (progressive rounds) — LABEL CORRECTION, NOT A WEAKENING. The last assertion in
+// this file used to read "presentGuided still finishes only when its own re-ranked plan is truly
+// empty, NOT on any count threshold". That was true the day it was written and became FALSE the
+// moment the owner-authorised ROUND CAP shipped (a round asks at most AF_ROUND_MAX_QUESTIONS advanced
+// questions, then finishes) — while its regex stayed green, because the regex only ever proved the
+// empty-plan terminator still EXISTS. A green check certifying a sentence that is no longer true is
+// worse than no check: the next reader trusts it. So the label is reworded to the real, now two-part
+// invariant, the check itself is untouched, and TWO positive assertions are added — the round cap must
+// be present, and no THIRD count threshold may gate the continuation loop. Net effect: strictly more
+// is pinned than before. The round cap's own rules (value, scope-steps-are-free, count-not-quality,
+// placement) live in scripts/verify-af-round-size.ts.
+//
 // EXECUTION NOTE: advancedFilters.ts (scoreQuestion's home) is not standalone-importable by a plain
 // Node runner — like every other AF barrier in this repo that touches it (verify-advanced-filter-
 // contract.ts, verify-advanced-filter-count-honesty.ts, verify-ui-controls-have-predicates.ts), it
@@ -130,8 +142,22 @@ check('the transition gate counts ADVANCED questions only — it reads plan.leng
 check('at the transition the interview STOPS CLEANLY (finishGuided) and never bounces to startRefine',
   !!transitionGate && !/startRefine/.test(transitionGate[0]),
   'by this point the user has answered real scope questions — their narrowing must be honoured, not discarded for the legacy chips');
-check('presentGuided still finishes (finishGuided) only when its own re-ranked plan is truly empty, not on any count threshold',
+// ── THE ADVANCED PHASE HAS EXACTLY TWO AUTHORISED EXITS (label corrected 2026-08-24, see header) ──
+// (a) the re-ranked plan is truly empty — the ONLY exit MIN_USEFUL_QUESTIONS_TO_SHOW may influence,
+//     and the one that makes a round ask min(available, cap): fewer useful questions than the cap and
+//     the round simply runs out here;
+// (b) the owner-authorised ROUND CAP — the round has already asked AF_ROUND_MAX_QUESTIONS advanced
+//     questions, so it hands the user results and waits for a manual «تحديد أكثر».
+// Both must exist. Nothing else may end the continuation loop on a count: MIN_USEFUL_QUESTIONS_TO_SHOW
+// still never throttles it (owner §2/§6), and no new literal threshold may appear beside it.
+check('exit (a) survives: presentGuided still finishes when its own re-ranked plan is truly EMPTY — the empty-plan terminator is what gives a round "min(available, AF_ROUND_MAX_QUESTIONS)" for free',
   /if \(!plan\.length\) \{ finishGuided\(token\); return; \}/.test(presentGuidedBody));
+check('exit (b) is present and is the ONLY count threshold allowed beside it: the round cap `if (askedThisRound >= AF_ROUND_MAX_QUESTIONS) { finishGuided(token); return; }` (owner 2026-08-24; full rules in scripts/verify-af-round-size.ts)',
+  /if \(askedThisRound >= AF_ROUND_MAX_QUESTIONS\) \{ finishGuided\(token\); return; \}/.test(presentGuidedBody),
+  'deleting the cap restores the 8-10 question interrogation the owner replaced with conversational rounds');
+check('no THIRD count threshold gates the continuation loop — plan.length is never compared against a numeric literal',
+  !/plan\.length\s*[<>]=?\s*\d/.test(presentGuidedBody),
+  'a "strength floor" like `plan.length < 2` would suppress a truthful question mid-round, reverting the owner\'s permanent 2026-08-22 narrowing rule');
 
 // ── SKIP vs CONFIRM-WITH-EMPTY parity (brief's named suspicion — traced, found NOT diverging).
 // Since the «رجوع» rebuild (owner 2026-08-22) this is no longer a parity that has to be checked

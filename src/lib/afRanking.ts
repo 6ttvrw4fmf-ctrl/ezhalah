@@ -73,3 +73,33 @@ export function scoreQuestion(
   const bestSplit = Math.max(...narrowing.map((o) => 1 - Math.abs((2 * o.count) / N - 1)));
   return { score: bestSplit * (SALIENCE[questionId] ?? 0.5), options: narrowing };
 }
+
+// ── PROGRESSIVE ROUNDS (owner 2026-08-24) ───────────────────────────────────────────────────────
+// The interview is no longer one long questionnaire: it narrows in SMALL CONVERSATIONAL ROUNDS, each
+// a manual tap on «تحديد أكثر», each computed from the ALREADY-NARROWED cohort of the round before.
+//
+// ROUND SIZE is a COUNT CAP, never a quality filter: a round asks min(availableUsefulQuestions,
+// AF_ROUND_MAX_QUESTIONS) advanced questions, minimum 1. Which questions those are is still decided
+// only by scoreQuestion() — the owner's permanent 2026-08-22 narrowing rule — so a truthful question
+// is never suppressed mid-round for being "weak". SCOPE steps (property_group / property_type) do not
+// count toward it: they are the prerequisite that earns the right to ask, exactly as the
+// scope→advanced transition gate already treats them.
+export const AF_ROUND_MAX_QUESTIONS = 4;
+
+// ── THE OFFER GATE — a SEPARATE gate from scoreQuestion's ASK gate (owner 2026-08-24) ───────────
+// scoreQuestion decides whether a question may be ASKED once a round is running: `o.count < N`, i.e.
+// "would picking this change anything at all". That rule is permanent and is deliberately NOT touched
+// here — suppressing a truthful question mid-round would revert the owner's 2026-08-22 decision.
+//
+// This gate answers a different question, one turn earlier: may we OFFER «تحديد أكثر» at all? A round
+// is only worth the user's time when some remaining question has real narrowing VALUE — its best
+// option removes at least AF_OFFER_MIN_REMOVED_FRACTION of the current set, OR finishes the job by
+// landing at or under the target. At N=50 an option yielding 45 qualifies and one yielding 47 does
+// not; at N=27 an option yielding 24 qualifies. When nothing qualifies the button is HIDDEN — we
+// never ask a pointless question just to force the count down.
+export const AF_OFFER_MIN_REMOVED_FRACTION = 0.1;
+export function offersMeaningfulNarrowing(total: number, options: readonly AdvancedOption[]): boolean {
+  if (total <= INTERVIEW_STOP_AT) return false;
+  return options.some((o) => o.count < total
+    && (total - o.count >= total * AF_OFFER_MIN_REMOVED_FRACTION || o.count <= INTERVIEW_STOP_AT));
+}

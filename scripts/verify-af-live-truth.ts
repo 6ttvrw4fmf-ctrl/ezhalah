@@ -199,8 +199,14 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // Poll rather than a single evaluate: a slow CI runner can still be laying out the results
     // page (and the CTA row under it) when this check runs — the SAME class of race fixed above
     // for city/group/type. Persistent absence after the poll is the real "not eligible" case.
+    //
+    // WIDENED 2026-08-25 (progressive rounds): the launcher is no longer rendered the moment a turn
+    // has >25 results. It now waits on the OFFER PROBE — a real rankQuestions round trip whose count
+    // RPCs carry their own 4s timeout — so on a large base scope under production load the button can
+    // legitimately arrive several seconds after the cards do. 6s of polling raced that; 16s does not,
+    // and a launcher that never appears in 16s is still the honest "nothing truthful left to ask".
     let btn = null;
-    for (let i = 0; i < 20 && !btn; i++) { btn = await page.evaluate(CLICK_LEAF, 'خلّنا نحدد الطلب أكثر'); if (!btn) await page.waitForTimeout(300); }
+    for (let i = 0; i < 40 && !btn; i++) { btn = await page.evaluate(CLICK_LEAF, 'خلّنا نحدد الطلب أكثر'); if (!btn) await page.waitForTimeout(400); }
     if (!btn) { check(`${name}: AF launcher present`, false, 'not eligible on this scope — cannot test AF here'); await ctx.close(); return; }
     await page.mouse.click(btn.x, btn.y);
     await page.waitForTimeout(4000);
