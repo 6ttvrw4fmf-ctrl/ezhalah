@@ -159,7 +159,9 @@ check('B3. logged-out: any pre-existing anonymous bucket is purged, not adopted'
 
 // Logged-in save + refresh survival.
 check('B4. logged-in: history is persisted under the per-account key',
-  /localStorage\.setItem\(historyKey\(user\.sub\), JSON\.stringify\(/.test(stripped));
+  // serializeHistoryForDisk = JSON.stringify + transcript pruning to the recent-N cache (owner
+  // 2026-08-25 full-conversation persistence) — still the per-account key, still synchronous.
+  /localStorage\.setItem\(historyKey\(user\.sub\), serializeHistoryForDisk\(/.test(stripped));
 check('B5. logged-in: star/delete write-through is also signed-in only',
   (stripped.match(/if \(user\) try \{/g) || []).length >= 2);
 check('B6. refresh re-reads the account bucket on launch (history survives reload)',

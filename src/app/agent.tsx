@@ -51,6 +51,7 @@ import { migrateGroups } from '@/lib/searchDefaults';
 import { BROWSE_CAP, resultCounts } from '@/data/resultCount';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
+import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
@@ -527,7 +528,7 @@ export default function Agent() {
     fresh?: string;
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth } = useApp();
+  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, saveTranscript, hydrateTranscript } = useApp();
   // Per-message "Load More" in flight, so a double-tap can't double-fetch the same page.
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -879,6 +880,13 @@ export default function Agent() {
   //             ageFlowAskedRef in syncGuidedFromSteps, never mutated in place.)
   // Written on every tap before startAgeFlow, so a stale value can never be read.
   const afCarryRef = useRef<{ msgId: string; originQ: SearchQuery; facets: GuidedFacet[]; asked: string[] } | null>(null);
+  // CONVERSATION IDENTITY (owner 2026-08-25 — «treat Ezhalah's chat like ChatGPT»). This screen owns
+  // which sidebar chat the on-screen conversation belongs to. Every recorded turn passes it, so an
+  // AF round / refine / follow-up UPDATES that one entry instead of minting a new one per narrowed
+  // query — the fragmentation that used to scatter one conversation across sidebar rows. Cleared on
+  // a fresh chat (a new id is minted on the first recorded turn), set to the entry's id on restore.
+  const chatIdRef = useRef<string | null>(null);
+  const ensureChatId = () => (chatIdRef.current ??= 'h' + Date.now() + Math.round(Math.random() * 1e4));
   // Results turns that have already spawned a COMPLETED round: msgId → that round's committed
   // summary. The turn trades its action buttons for a read-only receipt — it is history now, and only
   // the newest result turn carries live actions.
@@ -1393,6 +1401,25 @@ export default function Agent() {
     return null;
   }, [msgs]);
 
+  // FULL-CONVERSATION CAPTURE (owner 2026-08-25 — ChatGPT-grade persistence). After every settled
+  // change to the conversation (a landed turn, a revealed page, a round receipt, a pill removal),
+  // serialize the EXACT on-screen state and hand it to the store, which persists it locally and
+  // syncs it to the server. Debounced so a drip-reveal writes once, not per card; skipped while a
+  // turn is in flight (busy) so a half-rendered turn is never what a return restores; content-keyed
+  // (lastCapturedRef) so re-renders and restores never rewrite an unchanged transcript.
+  const lastCapturedRef = useRef('');
+  useEffect(() => {
+    if (busy) return;
+    const id = chatIdRef.current;
+    if (!id) return;
+    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills });
+    if (!t) return;
+    const j = JSON.stringify(t);
+    if (j === lastCapturedRef.current) return;
+    const timer = setTimeout(() => { lastCapturedRef.current = j; saveTranscript(id, t); }, 600);
+    return () => clearTimeout(timer);
+  }, [busy, msgs, revealCount, afReceipt, guidedPills]);
+
   // ── THE OFFER PROBE (owner 2026-08-24) ─────────────────────────────────────────────────────────
   // «تحديد أكثر» is offered only when a round would have something truthful to ask: more than
   // INTERVIEW_STOP_AT results AND at least one remaining certified question with real narrowing value
@@ -1463,7 +1490,7 @@ export default function Agent() {
     searchingAtRef.current[statusId] = Date.now();
     setMsgs((m) => [...m, { id: uid(), role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined }]);
     toBottom();
-    const result = await runQuery(refined, true, run.ac.signal);
+    const result = await runQuery(refined, true, run.ac.signal, ensureChatId());
     if (run.cancelled) return;
     // quotableTotal, never `result.total` — that is this page's buffer length (≤ the 1500-row
     // QUERY_LIMIT), so the mining overlay quoted «لقينا 1,500 عقار» on every set larger than a page
@@ -1933,7 +1960,7 @@ export default function Agent() {
     // Sidebar Recent entry: title = the user's exact message. First send in a new chat creates the
     // entry; subsequent sends update the title to the latest user message. Signed-in users only —
     // for guests this is a no-op (their chats stay session-local). (user request.)
-    recordChatTurn(v);
+    { const rid = recordChatTurn(v); if (rid) chatIdRef.current = rid; } // keep this screen's conversation id aligned with the store's entry
     const run = makeRun();
     runRef.current = run;
     // Switch the whole app to the language of THIS message — on Send, not per keystroke. An English
@@ -2044,7 +2071,7 @@ export default function Agent() {
         askCountRef.current = 0;
         saidRef.current = [];
         beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
-        const result = await runQuery(turn.query, true, run.ac.signal);
+        const result = await runQuery(turn.query, true, run.ac.signal, ensureChatId());
         const reply = forcedBroad
           ? `${getLocale() !== 'en'
               ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
@@ -2082,7 +2109,7 @@ export default function Agent() {
           askCountRef.current = 0;
           saidRef.current = [];
           beginSearching(statusId, combined); // loader + min-beat overlap the fetch (like filter/refine)
-          const result = await runQuery(combined, true, run.ac.signal);
+          const result = await runQuery(combined, true, run.ac.signal, ensureChatId());
           await playListings(run, statusId, buildScrapeIntro(result.query ?? combined), result, v);
           if (run.cancelled) return;
           void promptSignupSoon(run);
@@ -2161,7 +2188,7 @@ export default function Agent() {
       // layer) left the «إزهله يبحث» loader spinning forever with no recovery. Wrapped in try/catch/
       // finally (mirrors loadMore) so the loader ALWAYS clears and a thrown turn shows an inline retry.
       try {
-        const result = await runQuery(pending.q, true, run.ac.signal);
+        const result = await runQuery(pending.q, true, run.ac.signal, ensureChatId());
         if (run.cancelled) return;
         await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
         if (run.cancelled) return;
@@ -2182,6 +2209,37 @@ export default function Agent() {
   // Reopening a past search from the sidebar (replay='0') just SHOWS the saved conversation — the
   // request bubble and the results render in their final state with no typewriter replay, no
   // "thinking/searching" beats. It's a history view, not a fresh run. (user request.)
+  // FULL-CONVERSATION RESTORE (owner 2026-08-25). Reopening a chat renders EXACTLY the conversation
+  // the user left — every bubble, every results turn with the cards they had revealed, every AF
+  // round's receipt and the cumulative pills — in final state (no typewriter, no re-search; the
+  // ChatGPT contract). The transcript comes from the entry in memory, or is hydrated from the
+  // server when this device no longer holds it (pruned cache / new browser / re-login). A chat
+  // with no transcript anywhere (legacy entry) falls back to the snapshot/replay view unchanged.
+  const openSaved = async (entryId: string | undefined, q: SearchQuery, override?: { bubble: string; sub: string }) => {
+    chatIdRef.current = entryId ?? null;
+    const entry = entryId ? history.find((h) => h.id === entryId) : undefined;
+    let t: PersistedChat | null = entry?.transcript ?? null;
+    if (!t && entryId) t = await hydrateTranscript(entryId).catch(() => null);
+    const restored = t ? restoreChat(t) : null;
+    if (restored) {
+      setMsgs(restored.msgs as unknown as ChatMsg[]);
+      setDoneTyping(restored.doneTyping);
+      setRevealCount(restored.revealCount);
+      setAfReceipt(restored.afReceipt);
+      setGuidedPills(restored.guidedPills as any);
+      lastCapturedRef.current = JSON.stringify(t); // what's on screen IS what's stored — no echo write
+      pinModeRef.current = 'top';
+      toTop();
+      return;
+    }
+    // No transcript anywhere. A search chat falls back to the legacy snapshot/replay view; a
+    // chat-only entry (empty query — its conversation predates transcripts) has nothing to replay,
+    // so it opens as the greeting screen, exactly as it always did.
+    const hasSearch = !!(q?.deal || q?.location || q?.category || q?.type || q?.detail || (q as any)?.priceBand || (q as any)?.priceInput);
+    if (!hasSearch) { greetedRef.current = true; sendGreeting(); return; }
+    openStatic(q, override, entry?.snapshot);
+  };
+
   const openStatic = async (q: SearchQuery, override?: { bubble: string; sub: string }, snapshot?: SearchResult) => {
     const { bubble, sub } = override ?? filterToChat(q);
     const userId = uid();
@@ -2282,6 +2340,7 @@ export default function Agent() {
       setStopped(false);
       setBusy(false);
       setMsgs([]);                                         // new search = a clean chat view
+      chatIdRef.current = null;                            // new conversation → new sidebar chat (a restore re-sets it)
     };
     // THE GATE (owner 2026-08-16). Params that were in the URL when the DOCUMENT loaded — a refresh,
     // a restored tab, a pasted link — are not a user action, so they must not execute anything. Drop
@@ -2323,7 +2382,7 @@ export default function Agent() {
         setQuery(() => q);
         const override = chatBubble && chatSub ? { bubble: chatBubble, sub: chatSub } : undefined;
         startFresh();
-        if (replay === '0') openStatic(q, override, hid ? history.find((h) => h.id === hid)?.snapshot : undefined);
+        if (replay === '0') void openSaved(hid, q, override);
         else sendFilter(q, override);
         // Intent consumed — including for a sidebar replay, so refreshing a REOPENED chat also lands
         // on a new blank chat rather than reopening it again (owner requirement 6).
@@ -2375,6 +2434,7 @@ export default function Agent() {
         setBusy(false);
         setMsgs([]);
         pendingScopeRef.current = null; // New Chat inherits nothing — not even a half-answered question
+        chatIdRef.current = null;       // …and not the previous conversation's sidebar identity
         // Forget the last-handled filter/seed so a re-search AFTER New Chat re-runs even if it's
         // identical to a previous one (otherwise the change-detection would skip it and leave just
         // the greeting).

@@ -24,10 +24,10 @@ const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`
 check('HistoryItem carries snapshot?: SearchResult', /export type HistoryItem = \{[^}]*snapshot\?: SearchResult[^}]*\}/.test(store));
 
 // 2. recordHistory receives the result and truncates with gap-free paging flags.
-check('recordHistory takes the result', /recordHistory = \(q: SearchQuery, result\?: SearchResult\)/.test(store));
+check('recordHistory takes the result', /recordHistory = \(q: SearchQuery, result\?: SearchResult, chatId\?: string \| null\)/.test(store));
 check('truncated snapshot restarts paging (pageOffset 0 + hasMore) for gap-free live continuation',
   /listings: result\.listings\.slice\(0, SNAPSHOT_CAP\), pageOffset: 0, hasMore: true/.test(store));
-check('runQuery records the result alongside the query', /recordHistory\(q, result\)/.test(store));
+check('runQuery records the result alongside the query', /recordHistory\(q, result, chatId\)/.test(store));
 check('older entries shed snapshots (storage bound)', /SNAPSHOT_ENTRIES/.test(store) && /snapshot: undefined/.test(store));
 
 // 3. Sidebar passes the entry id so the agent can find the snapshot.
@@ -40,7 +40,7 @@ const snapBranch = openStatic.indexOf('if (snapshot)');
 const runQueryCall = openStatic.indexOf('await runQuery');
 check('snapshot branch exists and precedes the live runQuery fallback', snapBranch !== -1 && runQueryCall !== -1 && snapBranch < runQueryCall);
 check('snapshot branch returns without searching', /if \(snapshot\) \{[\s\S]*?return;\s*\}/.test(openStatic) && !/if \(snapshot\) \{[\s\S]*?runQuery[\s\S]*?return;\s*\}/.test(openStatic));
-check('agent looks the snapshot up by hid', /history\.find\(\(h\) => h\.id === hid\)\?\.snapshot/.test(agent));
+check('agent looks the snapshot up by hid (openSaved fallback — transcript restore is primary, owner 2026-08-25)', /openStatic\(q, override, entry\?\.snapshot\)/.test(agent));
 
 console.log(failed === 0
   ? '\n✓ saved chats render their saved results instantly — the re-search flow cannot silently return'

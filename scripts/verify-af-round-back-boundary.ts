@@ -169,8 +169,13 @@ check('Back — at ANY step — writes no receipt, no pills and no probe verdict
   backBody.length > 0 && !/setAfReceipt|setGuidedPills|setAfCanNarrow|afProbedRef/.test(backBody));
 // One writer, one meaning: a receipt exists iff a round actually finished.
 const finishBody = fnBody(agentSrc, 'const finishGuided = (token: number) => {', 'const startAgeFlow');
-check('the completed-round receipt is written ONLY by finishGuided',
-  (agentSrc.match(/setAfReceipt\(/g) ?? []).length === 1 && /setAfReceipt\(/.test(finishBody));
+// Full-conversation restore (owner 2026-08-25) reinstates PREVIOUSLY-WRITTEN receipts verbatim when
+// a saved chat reopens — that is replay of finishGuided's own output, not a second author of
+// meaning. So: exactly one LIVE writer (in finishGuided) plus exactly one RESTORE write (in
+// openSaved, sourced only from the stored transcript).
+check('the completed-round receipt is written ONLY by finishGuided (plus the transcript restore replaying it)',
+  (agentSrc.match(/setAfReceipt\(/g) ?? []).length === 2 && /setAfReceipt\(/.test(finishBody)
+  && /setAfReceipt\(restored\.afReceipt\)/.test(agentSrc));
 // The receipt takes the actions row's place, so its gate decides whether the buttons come back. It
 // must read the receipt map and nothing else — gating it on e.g. `guidedPills?.msgId === m.id` would
 // survive a cancel and permanently silence a turn the user only backed out of.

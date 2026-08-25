@@ -1065,20 +1065,22 @@ const AR: Record<string, string> = {
   'Sign up free to save your searches and favorites, and pick up right where you left off.':
     'سجّل مجاناً لحفظ عمليات بحثك ومفضّلاتك، وتابع من حيث توقفت.',
   'Not now': 'ليس الآن',
-  'Starred': 'المميّزة بنجمة',
+  'Starred': 'المفضلة',
   'Recent': 'الأخيرة',
   'Today': 'اليوم',
   'Yesterday': 'أمس',
   'Last 7 Days': 'آخر 7 أيام',
   'Last 30 Days': 'آخر 30 يوماً',
-  'Star': 'تمييز بنجمة',
-  'Unstar': 'إزالة النجمة',
+  'Star': 'أضف إلى المفضلة',
+  'Unstar': 'أزل من المفضلة',
   'Delete': 'حذف',
   'Rename': 'إعادة تسمية',
   // Press-hold-drag reorder (owner 2026-08-24) — accessibility strings, Arabic-first.
   'Hold to reorder the conversation': 'اضغط مطولًا لإعادة ترتيب المحادثة',
   'Move conversation': 'نقل المحادثة',
   'Conversation order changed': 'تم تغيير ترتيب المحادثة',
+  'Added to favorites': 'أُضيفت إلى المفضلة',
+  'Removed from favorites': 'أُزيلت من المفضلة',
 
   // Settings (account)
   'Display Name': 'الاسم المعروض',
