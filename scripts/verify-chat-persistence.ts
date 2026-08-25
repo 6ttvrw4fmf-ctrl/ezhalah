@@ -96,7 +96,7 @@ check('chatSync: upsert leaves the server transcript untouched when the caller h
   /if \(transcript !== undefined\) row\.transcript = transcript;/.test(sync));
 check('chatSync: metas load excludes the transcript column (sidebar load stays small)',
   /\.select\('id, meta, updated_at'\)/.test(sync));
-const migration = readFileSync(new URL('../supabase/migrations/20260825190000_user_chats_full_conversation_persistence.sql', import.meta.url), 'utf8');
+const migration = readFileSync(new URL('../supabase/migrations/20260825180647_user_chats_full_conversation_persistence.sql', import.meta.url), 'utf8');
 check('migration: user_chats is RLS-locked to auth.uid() with server-side identity default',
   /user_id uuid not null default auth\.uid\(\)/.test(migration)
   && /enable row level security/.test(migration)
