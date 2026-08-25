@@ -32,14 +32,14 @@ BUGS FIXED: 1
 BUGS REMAINING: 0
 BARRIERS ADDED/STRENGTHENED: 2 (detector payload + new offline verifier in `npm test`)
 MUTATION-PROVEN: YES
-MERGED: pending CI (PR opened)
+MERGED: NO — PR #1089 green, but the mandated merge gate cannot run here (§4)
 DEPLOYED: NO — no `src/` change required one
 PRODUCTION VERIFIED: YES
 ```
 
 **ALL GOOD: YES.** Every AF, Trending and count behaviour tested was exact against an independent DB
 oracle. The one defect found was in a *barrier*, not in the product, and it is fixed, mutation-proven
-and live. Two items are recorded as owner questions, not defects (§5).
+and live. Two items are recorded as owner questions, not defects (§3), and the PR is left open because the mandated merge gate is refused in this environment (§4).
 
 ---
 
@@ -206,7 +206,32 @@ this routine's authority, so it is escalated rather than touched.
 
 ---
 
-## 4. Adjacent state noted, not acted on
+## 4. The PR is green but NOT merged — the mandated merge gate cannot run in this session
+
+PR #1089 is left **open on green CI**, deliberately, and this is the one thing the run could not
+finish itself.
+
+`AGENTS.md` makes `scripts/safe-pr-merge.ts` the only sanctioned way to merge in this repo. That tool
+reads the PR's current state with `gh pr view --json mergeable,mergeStateStatus,statusCheckRollup,
+files,headRefOid`, which goes through GitHub's **GraphQL** API. This session's egress policy refuses
+it:
+
+```
+HTTP 403: This GraphQL query is not enabled for this session — only the pinned set of
+PR-review operations is served. Use REST via `gh api repos/{owner}/{repo}/...` instead.
+```
+
+That is a policy denial, not a missing tool: installing the `gh` binary (done, v2.63.2) does not help,
+because the refusal is at the gateway. The gate's checks *could* be reproduced by hand over REST, and
+they pass — but hand-reproducing a P0 merge gate is routing around it, which the authority grant
+explicitly forbids ("autonomy is walking through the safety gates yourself — never removing or routing
+around them"). So the run stops here and says so.
+
+**What this leaves open:** the two migrations are applied and verified in production, but their git
+files land only when #1089 merges. Until then the 15-minute `migration_drift` guard will count them
+among its missing-in-git set. Merging #1089 clears them; nothing else about the change is pending.
+
+## 5. Adjacent state noted, not acted on
 
 - `migration_drift` is **red** (P1, 7 migrations applied to prod today with no git file: detector
   timing, loc_rel ×3, aqarcity index, card_link_identity). None of them are this routine's — they
@@ -217,7 +242,7 @@ this routine's authority, so it is escalated rather than touched.
 - No DB saturation observed at this routine's 11:00 UTC start (1 active query), so no restagger is
   needed against the junior scraper sharing the slot.
 
-## 5. Coverage ledger
+## 6. Coverage ledger
 
 24 rows written this run under the `af_*` / `trending_*` dimensions (`ops_qa_coverage_ledger`),
 including the two observations above marked `observed` rather than `pass` so they stay visible.
