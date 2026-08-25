@@ -357,16 +357,32 @@ def second_chance_details(missed: list[dict]) -> list[tuple[dict, dict]]:
     """
     cap_n = int(os.environ.get("AQARATIKOM_SECOND_CHANCE_MAX", "80"))
     gap = float(os.environ.get("AQARATIKOM_SECOND_CHANCE_GAP", "1.0"))
+    # The ad cap alone does NOT bound the time. A source that HANGS rather than refuses costs the
+    # full 30s socket timeout x3 attempts per ad, so 80 ads is ~2.2h — past the 90-minute CI job
+    # budget, and a killed run keeps its rows but skips prune/liveness (the exact shape the
+    # standing aqar_runtime_budget alert exists to warn about). Bound the wall clock too.
+    budget_s = float(os.environ.get("AQARATIKOM_SECOND_CHANCE_BUDGET_S", "600"))
+    deadline = time.monotonic() + budget_s
     retry_ads = missed[:cap_n]
     print(f"  second chance: re-fetching {len(retry_ads)} missed detail record(s) serially"
           f"{f' (capped from {len(missed)})' if len(missed) > len(retry_ads) else ''}", flush=True)
     out: list[tuple[dict, dict]] = []
+    attempted = 0
     for ad in retry_ads:
+        if time.monotonic() >= deadline:
+            # NO SILENT CAPS: say exactly what was dropped, or a truncated pass reads as
+            # "we tried everything and the source is broken".
+            print(f"  ⚠ second chance: {budget_s:.0f}s budget spent after {attempted}/"
+                  f"{len(retry_ads)} ads — abandoning the rest. The {len(retry_ads) - attempted} "
+                  f"un-retried ad(s) stay counted as missing, so the loss guard still sees them.",
+                  flush=True)
+            break
+        attempted += 1
         time.sleep(gap)
         status, det = fetch_detail(ad.get("id"))
         if status == "ok" and isinstance(det, dict):
             out.append((ad, det))
-    print(f"  second chance: recovered {len(out)}/{len(retry_ads)}", flush=True)
+    print(f"  second chance: recovered {len(out)}/{attempted} attempted", flush=True)
     return out
 
 

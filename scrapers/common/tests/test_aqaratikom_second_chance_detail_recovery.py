@@ -92,6 +92,7 @@ def _no_sleep_no_throttle(monkeypatch):
     monkeypatch.setattr(aq, "_throttle", lambda: None)
     monkeypatch.delenv("AQARATIKOM_SECOND_CHANCE_MAX", raising=False)
     monkeypatch.delenv("AQARATIKOM_SECOND_CHANCE_GAP", raising=False)
+    monkeypatch.delenv("AQARATIKOM_SECOND_CHANCE_BUDGET_S", raising=False)
 
 
 # ── 1. a retry must not reuse the connection that just failed ───────────────────────────────────
@@ -237,6 +238,39 @@ def test_second_chance_is_bounded_so_a_dead_source_cannot_blow_the_ci_budget(mon
     aq.second_chance_details([{"id": f"uuid-{i}"} for i in range(200)])
 
     assert len(seen) == 5, f"cap not honoured — {len(seen)} fetches issued"
+
+
+def test_second_chance_is_bounded_in_WALL_CLOCK_not_just_ad_count(monkeypatch):
+    """The ad cap alone does not bound time — a HANGING source costs 30s x3 attempts per ad.
+
+    80 ads x ~98s worst case is ~2.2h, past the 90-minute CI job budget; a killed run keeps its
+    rows but skips prune/liveness. The pass must stop on a wall clock, and must SAY what it
+    dropped rather than let a truncated pass read as a complete one.
+    """
+    monkeypatch.setenv("AQARATIKOM_SECOND_CHANCE_BUDGET_S", "10")
+    clock = {"t": 0.0}
+    monkeypatch.setattr(aq.time, "monotonic", lambda: clock["t"])
+
+    seen: list[str] = []
+
+    def _slow(i):
+        seen.append(i)
+        clock["t"] += 4.0  # each ad burns 4s of the 10s budget
+        return "missing", None
+
+    monkeypatch.setattr(aq, "fetch_detail", _slow)
+    out = aq.second_chance_details([{"id": f"uuid-{i}"} for i in range(50)])
+
+    assert out == []
+    # t=0 ok, t=4 ok, t=8 ok, t=12 >= 10 -> stop. Three attempted, not fifty.
+    assert len(seen) == 3, f"budget not honoured — {len(seen)} ads attempted"
+
+
+def test_budget_does_not_truncate_a_pass_that_fits(monkeypatch):
+    """The bound must not cost anything on the normal path it exists to protect."""
+    monkeypatch.setenv("AQARATIKOM_SECOND_CHANCE_BUDGET_S", "600")
+    monkeypatch.setattr(aq, "fetch_detail", lambda _i: ("ok", _good()._payload["data"]))
+    assert len(aq.second_chance_details([{"id": f"uuid-{i}"} for i in range(39)])) == 39
 
 
 def test_second_chance_on_an_empty_list_does_nothing(monkeypatch):
