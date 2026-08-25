@@ -551,6 +551,28 @@ appears broken.
     behaviour. Substring-matching the suggestion picks a huge outer container and silently fails to
     commit, which then looks like «بحث» doing nothing — assert `input_value()` actually contains the
     city before searching, and treat a miss as a harness error.
+14. **An RPC harness must send `p_category`, and must FILTER `p_types2` — omitting either invents
+    matching defects that production does not have** (hit 2026-08-25). A layer-B harness that built
+    its request from `ops_qa_cohort` alone produced three `COUNT_MISMATCH` verdicts on «عمارة سكنية»
+    (1390/1388, 541/540, 887/882), each looking exactly like the RPC padding results with Commercial
+    rows. Production was right on BOTH of its independent layers, and the harness was wrong on two
+    counts:
+    - **`p_types2` is not the cohort's type list.** The residential-misfile overlay carries
+      `RESIDENTIAL_TYPE_AR_COM`, which deliberately **excludes «عمارة»** — in a COMMERCIAL table
+      «عمارة» means Commercial Building, so including it leaks Commercial Buildings into Residential
+      results (`src/data/remote.ts:1100`, and `COMMERCIAL_TYPE_AR_RES` mirrors it in reverse).
+    - **`p_category` is always sent** (`p_category: impliedCategory(q)`, `src/data/remote.ts:630`) —
+      the RPC-layer category-purity enforcement of the owner's permanent 2026-07-16 rule. Omitting it
+      disables a gate the real client never runs without.
+    Proof both ways, worth repeating rather than re-deriving: with the client's real `p_types2` the
+    three searches return 1388/540/882 = the oracle exactly; and with the raw cohort list but
+    `p_category` restored they ALSO return 1388/540/882. Two independent mechanisms, one answer. Note
+    `ops_qa_diff` reaches that answer by a THIRD route — it passes the full `c.types_ar` as `p_types2`
+    and relies on its own `p_cat` purity clause — so the oracle agreeing with the client is not
+    circular. Rule: build the request from the app's real serialization, and when a mismatch appears
+    only on a cohort with a `scope2` overlay, suspect the harness first. Re-running all 223 searches
+    with the corrected shape changed **exactly 3 of 223** results — `p_category` is a no-op for every
+    cohort whose `p_types` is already macro-pure, which is why the other 220 verdicts stood.
 
 ## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
 
