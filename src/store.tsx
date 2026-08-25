@@ -4,7 +4,7 @@ import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } fro
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
 import { HOME_DEFAULT_QUERY } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
-import { applyMove } from '@/lib/sidebarReorder';
+import { applyMove, applyStarMove } from '@/lib/sidebarReorder';
 import { autoTitleForQuery, autoTitleForPrompt, canAutoRetitle, type TitleSource } from '@/lib/chatTitle';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
@@ -12,6 +12,8 @@ import { resolveLocation, ensureLocationIndex } from '@/data/locations';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
 import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
+import { restoreChat, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib/chatTranscript';
+import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, type ChatMeta } from '@/lib/chatSync';
 import { buildSyncedName } from '@/lib/nameSync';
 
 type DataSource = 'local' | 'supabase';
@@ -41,6 +43,13 @@ export type AuthUser = {
 export type HistoryItem = {
   id: string; label: string; query: SearchQuery; ts: number; starred?: boolean; snapshot?: SearchResult;
   title?: string; titleSource?: TitleSource; titleUpdatedAt?: number;
+  // FULL CONVERSATION (owner 2026-08-25, ChatGPT-grade persistence): the exact conversation this
+  // chat last showed — every bubble, results turn, AF round receipt, revealed page — serialized by
+  // src/lib/chatTranscript.ts. Reopening the chat renders THIS, not a 2-message reconstruction.
+  // `tRev` stamps the transcript's last change so server sync pushes only real transcript updates
+  // (deliberately separate from `ts`: revealing more cards must not resort the sidebar).
+  transcript?: PersistedChat;
+  tRev?: number;
   // MANUAL SIDEBAR POSITION (owner 2026-08-24, press-hold-drag reorder). Display rank is
   // `order ?? ts` descending — absent on legacy items (timestamp order, unchanged), stamped by a
   // drag (midpoint between neighbours), and DROPPED again when the chat has new activity so the
@@ -58,7 +67,17 @@ type AppState = {
   newChat: () => void;
   // `signal` (owner 2026-08-18, Stop button): when the caller's turn is cancelled, the underlying
   // network calls abort AND the history/searchCount writes are skipped — see the guard at the call site.
-  runQuery: (q: SearchQuery, record?: boolean, signal?: AbortSignal) => Promise<SearchResult>;
+  // `chatId` (owner 2026-08-25, conversation identity): a turn that CONTINUES an existing chat —
+  // an AF round, a refine chip, Show More context, a follow-up message — passes the chat's id so
+  // the record updates THAT entry. Without it, every narrowed query minted a brand-new sidebar
+  // entry (savedSearchIdentity treats any AF answer as a different search), which is exactly how a
+  // conversation's rounds were scattered across rows and «returning to the chat» lost them.
+  runQuery: (q: SearchQuery, record?: boolean, signal?: AbortSignal, chatId?: string | null) => Promise<SearchResult>;
+  // Persist the serialized conversation for a chat (agent.tsx captures it after each settled turn).
+  saveTranscript: (id: string, transcript: PersistedChat) => void;
+  // Fetch a transcript this device no longer holds locally (pruned cache / fresh sign-in) from the
+  // server, validate it, and attach it to the entry. Resolves to the transcript or null.
+  hydrateTranscript: (id: string) => Promise<PersistedChat | null>;
   loadMoreListings: (q: SearchQuery, offset: number) => Promise<{ listings: Listing[]; nextOffset: number; hasMore: boolean }>;
   dataSource: DataSource;
   // Auth. SEARCH IS FREE, ALWAYS (owner rule 2026-08-15, retiring the PRD §9 gate): a guest can run
@@ -100,6 +119,9 @@ type AppState = {
   // the pure contract (no duplicate, no loss, no field but `order` touched) lives in
   // src/lib/sidebarReorder.ts and is executed by scripts/verify-sidebar-reorder.ts.
   reorderHistory: (id: string, prevId: string | null, nextId: string | null) => void;
+  // Drag-to-Favorites (owner 2026-08-25): set starred AND land the row at the top of its new
+  // bucket in one write — the ⋯ menu's toggleStar stays the tap path, this is the drag path.
+  starHistory: (id: string, starred: boolean) => void;
   deleteHistory: (id: string) => void;
   // Record a free-text user message as the active chat's sidebar entry. First message → creates a
   // new chat in Recent with the user's text as the title; subsequent messages → update the same
@@ -141,6 +163,26 @@ const INTRO_DEMO_MODE = false;
 // account's chats isolated, so a fresh login starts clean and a deleted account stays deleted.
 const historyKey = (sub: string) => 'history:' + sub;
 
+// What of `history` goes to LOCAL disk. Transcripts are the heavyweight part (revealed cards ×
+// turns), so localStorage keeps them only on the LOCAL_TRANSCRIPT_ENTRIES most recently active
+// chats — the same bounded-cache pattern as snapshots. The server keeps every transcript;
+// hydrateTranscript() refetches a pruned one when its chat is opened. Pruning happens ONLY at the
+// serialization boundary — in-memory state keeps every transcript, so switching between chats in
+// one session never loses anything regardless of age.
+const serializeHistoryForDisk = (items: HistoryItem[]): string => {
+  const byActivity = items.slice().sort((a, b) => (b.tRev ?? b.ts) - (a.tRev ?? a.ts));
+  const keep = new Set(byActivity.filter((it) => it.transcript).slice(0, LOCAL_TRANSCRIPT_ENTRIES).map((it) => it.id));
+  return JSON.stringify(items.map((it) => (it.transcript && !keep.has(it.id) ? { ...it, transcript: undefined } : it)));
+};
+
+// The sidebar-list envelope pushed to the server (`user_chats.meta`): the HistoryItem minus its two
+// heavyweight local-cache fields. The transcript has its own column; snapshots are strictly a local
+// instant-open cache and would only bloat every metas load.
+const chatMetaOf = (it: HistoryItem): ChatMeta => {
+  const { snapshot: _s, transcript: _t, ...meta } = it;
+  return meta as ChatMeta;
+};
+
 // Erase storage keys SYNCHRONOUSLY on web. AsyncStorage's own removal resolves a tick later, and
 // both sign-out and delete-account are followed by a navigation ~1.2s later (settings.tsx) — a
 // reload landing in that gap used to re-hydrate history the user had just deleted. This mirrors the
@@ -172,6 +214,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // waiting for the user to edit. Runs at most once per distinct name. (see lib/nameSync.)
   const nameSyncRef = useRef('');
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  // Mirror for async readers (hydrateTranscript, the sync push) — setState closures go stale.
+  const historyRef = useRef<HistoryItem[]>([]);
+  useEffect(() => { historyRef.current = history; }, [history]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [modal, setModal] = useState<'support' | 'about' | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
@@ -293,11 +338,76 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!historyLoadedRef.current) return;
     if (!user) return;                       // guests: session-only, nothing on disk
     const key = historyKey(user.sub);
-    const json = JSON.stringify(history);
+    const json = serializeHistoryForDisk(history);
     try {
       if (typeof localStorage !== 'undefined') localStorage.setItem(key, json);
     } catch {}
     AsyncStorage.setItem(key, json).catch(() => {});
+  }, [history, user]);
+
+  // ── SERVER SYNC (owner 2026-08-25 — conversations survive a new browser and logging back in) ──
+  // Pull: after the local restore for a signed-in account, fetch the server's chat metas and merge
+  // by id — the newer side (per-entry activity stamp) wins; server-only chats appear, local-only
+  // chats stay and get pushed. Transcripts are NOT pulled here (metas stay small) — hydrateTranscript
+  // fetches one lazily when its chat is opened.
+  const serverMergedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!authChecked || !user || !supabase) return;
+    const key = historyKey(user.sub);
+    if (serverMergedRef.current === key) return;
+    serverMergedRef.current = key;
+    loadChatMetas().then((rows) => {
+      if (!rows || serverMergedRef.current !== key) return;
+      setHistory((h) => {
+        const byId = new Map(h.map((it) => [it.id, it] as const));
+        for (const r of rows) {
+          const meta = { ...r.meta, id: r.id } as unknown as HistoryItem;
+          if (typeof meta.ts !== 'number' || !meta.query) continue; // malformed row: ignore, never crash the list
+          const local = byId.get(r.id);
+          const localStamp = local ? Math.max(local.ts, local.tRev ?? 0) : -1;
+          const serverStamp = Math.max(meta.ts, (meta as HistoryItem).tRev ?? 0);
+          if (!local) byId.set(r.id, meta);
+          else if (serverStamp > localStamp) byId.set(r.id, { ...meta, snapshot: local.snapshot, transcript: local.transcript });
+          // local newer → keep local; the push effect below writes it up.
+        }
+        return [...byId.values()].sort((a, b) => (b.order ?? b.ts) - (a.order ?? a.ts)).slice(0, 50);
+      });
+      // Baseline AFTER the merge lands so the first push diff is against what the server now holds.
+      syncBaselineRef.current = new Map(rows.map((r) => {
+        const m = r.meta as unknown as HistoryItem;
+        return [r.id, Math.max(m.ts ?? 0, m.tRev ?? 0)];
+      }));
+      syncReadyRef.current = key;
+    }).catch(() => { /* offline → local-only session; next sign-in retries */ });
+  }, [authChecked, user]);
+
+  // Push: debounced write-through. Diffs against the last known server state (per-entry activity
+  // stamp) and upserts only changed chats — meta always, transcript only when this device holds one
+  // whose tRev moved (never nulling a server transcript a pruned local cache no longer has).
+  // Deletions propagate ONLY for ids the server was known to hold (the baseline), so a not-yet-
+  // merged local list can never mass-delete the account's server history. Fire-and-forget with the
+  // baseline updated per row on success; a failed write simply retries on the next change.
+  const syncBaselineRef = useRef<Map<string, number>>(new Map());
+  const syncReadyRef = useRef<string | null>(null);
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!user || !supabase) return;
+    if (syncReadyRef.current !== historyKey(user.sub)) return; // push only after the pull merged
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      const items = historyRef.current;
+      const base = syncBaselineRef.current;
+      const seen = new Set<string>();
+      for (const it of items) {
+        seen.add(it.id);
+        const stamp = Math.max(it.ts, it.tRev ?? 0);
+        if ((base.get(it.id) ?? -1) >= stamp) continue;
+        void upsertChat(it.id, chatMetaOf(it), it.transcript).then((ok) => { if (ok) base.set(it.id, stamp); });
+      }
+      const gone = [...base.keys()].filter((id) => !seen.has(id));
+      if (gone.length) void deleteChats(gone).then((ok) => { if (ok) for (const id of gone) base.delete(id); });
+    }, 1200);
+    return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
   }, [history, user]);
 
   // Read the one-time "already saw the intro" flag on launch. In demo mode we ignore any stored flag
@@ -340,7 +450,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // replay path, unchanged.
   const SNAPSHOT_CAP = 20;
   const SNAPSHOT_ENTRIES = 15;
-  const recordHistory = (q: SearchQuery, result?: SearchResult) => {
+  const recordHistory = (q: SearchQuery, result?: SearchResult, chatId?: string | null) => {
     const label = queryLabel(q);
     // Truncated snapshot restarts paging at 0 with hasMore — loadMore de-dups against the held
     // cards, so the continuation is gap-free; an untruncated one keeps its exact paging state.
@@ -350,8 +460,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         : result
       : undefined;
     setHistory((h) => {
-      const prior = h.find((it) => sameQuery(it.query, q));
-      const id = prior?.id ?? 'h' + Date.now();
+      // CONVERSATION IDENTITY (owner 2026-08-25 — «treat Ezhalah's chat like ChatGPT»). A chat is
+      // the CONVERSATION, not the query. A continuation turn (AF round, refine chip, follow-up)
+      // names its chat and updates that one entry — its query becomes the latest narrowed state,
+      // its transcript keeps every earlier round. Only with no chatId do we consider dedupe, and
+      // then ONLY onto an entry with no held conversation: overwriting a chat that has a
+      // transcript would destroy the very history this feature exists to keep, so a repeated
+      // search starts its own new chat exactly like ChatGPT does.
+      const prior = (chatId ? h.find((it) => it.id === chatId) : undefined)
+        ?? (!chatId ? h.find((it) => !it.transcript && sameQuery(it.query, q)) : undefined);
+      const id = prior?.id ?? chatId ?? 'h' + Date.now();
       const starred = prior?.starred ?? false;
       // TITLE (owner 2026-08-21). Auto-generate a concise summary, but a user-named row keeps its
       // name: canAutoRetitle() is the single place that rule lives, so re-running a renamed search
@@ -364,6 +482,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         title, titleSource,
         ...(keepTitle && prior!.titleUpdatedAt ? { titleUpdatedAt: prior!.titleUpdatedAt } : {}),
         ...(snapshot ? { snapshot } : {}),
+        // The conversation itself rides along on a continuation — agent.tsx re-captures it right
+        // after the turn settles, but the entry must never lose what it already holds in between.
+        ...(prior?.transcript ? { transcript: prior.transcript, tRev: prior.tRev } : {}),
       };
       setActiveChatId(id);
       const rest = h.filter((it) => it.id !== id);
@@ -500,7 +621,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // `record` defaults to true: a genuine new search adds a history chat. Reopening a saved chat
       // passes record=false so just VIEWING it never spawns a fresh entry — a new chat is only made
       // by a new filter search / chat message (or New Chat), keeping the list clean. (user request.)
-      runQuery: async (q, record = true, signal) => {
+      runQuery: async (q, record = true, signal, chatId) => {
         // A Room is always exactly 1 bedroom — normalize here so every path (filter or AI agent)
         // shows "1 bedroom" and uses the room price ladder, no matter what detail came in. (user request.)
         if (q.type === 'Room') q = { ...q, detail: '1' };
@@ -562,9 +683,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // Record the chat in memory (it shows in the current session). Persistence only happens for
           // signed-in users — a guest's chats are never written to storage, so they vanish on leave.
           // The result rides along so reopening this chat renders instantly (no re-search).
-          recordHistory(q, result);
+          recordHistory(q, result, chatId);
         }
         return result;
+      },
+      // FULL-CONVERSATION CAPTURE (owner 2026-08-25). agent.tsx serializes the settled conversation
+      // and hands it here; the entry keeps it (memory for every chat, disk for the most recent
+      // LOCAL_TRANSCRIPT_ENTRIES, server for all — see the persistence + sync effects). `ts` is
+      // deliberately NOT bumped: revealing more cards or a receipt landing is not a new search, and
+      // resorting the sidebar on it would surprise; `tRev` alone tells sync the transcript moved.
+      saveTranscript: (id, transcript) =>
+        setHistory((h) => {
+          const idx = h.findIndex((it) => it.id === id);
+          if (idx < 0) return h;
+          const next = h.slice();
+          next[idx] = { ...h[idx], transcript, tRev: Date.now() };
+          if (user) try {
+            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));
+          } catch {}
+          return next;
+        }),
+      // Transcript pruned locally (older than LOCAL_TRANSCRIPT_ENTRIES) or absent on this device —
+      // pull the server's copy, validate it, attach it. Returns null when the server has none
+      // either (legacy chat) so the caller can fall back to the snapshot/replay path.
+      hydrateTranscript: async (id) => {
+        const held = historyRef.current.find((it) => it.id === id)?.transcript;
+        if (held) return held;
+        if (!user) return null;
+        const fetched = await fetchChatTranscript(id);
+        const valid = fetched ? restoreChat(fetched) : null;
+        if (!valid) return null;
+        const t: PersistedChat = { v: 1, msgs: valid.msgs, revealCount: valid.revealCount, afReceipt: valid.afReceipt, guidedPills: valid.guidedPills };
+        setHistory((h) => h.map((it) => (it.id === id ? { ...it, transcript: t } : it)));
+        return t;
       },
       // Load More (owner 2026-07-08): fetch the NEXT real page of matching listings beyond `offset`
       // (filter-first, recency order) so broad searches page through the FULL set. Returns the ranked
@@ -596,7 +747,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // Signed-in only, same rule as the persistence effect: a guest has nothing on disk to keep
           // in step, and writing here would re-create the anonymous bucket the owner retired.
           if (user) try {
-            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), JSON.stringify(next));
+            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));
           } catch {}
           return next;
         }),
@@ -616,7 +767,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               : { ...it, title: autoTitleForQuery(it.query, getLocale()), titleSource: 'auto' as TitleSource, titleUpdatedAt: Date.now() };
           });
           if (user) try {
-            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), JSON.stringify(next));
+            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));
           } catch {}
           return next;
         }),
@@ -629,7 +780,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const next = applyMove(h, id, prevId, nextId);
           if (next === h) return h;
           if (user) try {
-            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), JSON.stringify(next));
+            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));
+          } catch {}
+          return next;
+        }),
+      // Cross-bucket drop (drag-to-Favorites). applyStarMove is position+star ONLY by construction —
+      // same ids, same length, every other field untouched. Same synchronous disk write as the
+      // other row mutations so a refresh right after the drop keeps it.
+      starHistory: (id, starred) =>
+        setHistory((h) => {
+          const next = applyStarMove(h, id, starred);
+          if (next === h) return h;
+          if (user) try {
+            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));
           } catch {}
           return next;
         }),
@@ -637,7 +800,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setHistory((h) => {
           const next = h.filter((it) => it.id !== id);
           if (user) try {
-            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), JSON.stringify(next));
+            if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));
           } catch {}
           return next;
         }),
@@ -676,7 +839,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
           try {
             const k = historyKey(user.sub);
-            if (typeof localStorage !== 'undefined') localStorage.setItem(k, JSON.stringify(next));
+            if (typeof localStorage !== 'undefined') localStorage.setItem(k, serializeHistoryForDisk(next));
           } catch {}
           return next;
         });
