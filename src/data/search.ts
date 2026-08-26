@@ -6,6 +6,9 @@ import { cityHasListings, nearbyCityWithListings, cityDisplay } from './location
 import { detailFor, priceBandRange } from './taxonomy';
 import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
 import { supports } from './platforms';
+// The app's single Arabic folding helper — it documents itself as mirroring the RPC's normalize_ar,
+// so district matching on the client and in the RPC stay one definition. (listingInDistricts)
+import { normalizeArabic } from '../lib/chatSearch';
 import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { combinedBudgetParts } from '@/lib/combinedBudget';
@@ -1085,14 +1088,35 @@ function sortListings(list: Listing[], sort: SortKey): Listing[] {
 // True if a stored listing district matches one of the wanted district names. Both sides are stripped
 // of the "حي " prefix and lowercased on the Latin side, then matched with bidirectional substring so
 // "حي الملقا" matches "الملقا" and vice versa, and "Al Olaya" matches "Olaya" too.
+//
+// ARABIC ORTHOGRAPHY MUST BE FOLDED FIRST (2026-08-26). This is a client-side safety net over a set
+// the RPC has ALREADY matched correctly — and it was throwing correct rows away. The RPC matches a
+// حي on norm_district_tok (= normalize_ar, which folds أإآٱ→ا, ة→ه, ى→ي and drops tatweel); this
+// function compared the raw strings, so a pure spelling variant between the label the District
+// PICKER offers and the label the listing carries failed both substring directions and the row was
+// dropped after the RPC had correctly returned it.
+//
+// The user-visible result was the worst kind: pick «حي بقعاء القديمه» from the picker, and the app
+// answers «ما لقيت نتائج في الحي المحدد» while two matching listings sit in the index (the RPC
+// returned both). Measured across the live index: 20 (city, حي) pairs, 736 production-ready
+// listings, 14 cities — الدمام «حي الأمانة»/«حي الامانة» (109), الرياض «حي احد»/«حي أحد» (100),
+// المزاحمية «حي نواره»/«نوارة» (86), جدة «حي المنتزة»/«حي المنتزه» (82), بريدة, الطائف, أبها …
+// Every one is أ/ا, ة/ه or ى/ي — never a different place.
+//
+// Folded with the app's OWN normalizeArabic (src/lib/chatSearch.ts), which already documents itself
+// as mirroring normalize_ar — reused rather than reimplemented so the client and the RPC cannot
+// drift apart again. Fold FIRST, then strip the prefix, so «حى » (alef maqsura) also strips. The
+// leading «ال» that norm_district_tok additionally removes is deliberately NOT stripped here: none
+// of the 20 proven cases needs it, and dropping it would widen matching beyond this defect.
 function listingInDistricts(stored: string, wanted: string[]): boolean {
-  const s = stored.replace(/^حي\s+/, '').trim();
+  const fold = (x: string) => normalizeArabic(x ?? '').replace(/^حي\s+/, '').trim();
+  const s = fold(stored);
   const sLc = s.toLowerCase();
   // The stored neighborhood is Arabic ("حي العليا"); a kept district label is usually English ("Al
   // Olaya"). Transliterate the Arabic side so the two can match across scripts. (audit: district leak.)
   const sTr = translitPlace(stored).toLowerCase();
   return wanted.some((w) => {
-    const wn = w.replace(/^حي\s+/, '').trim();
+    const wn = fold(w);
     const wLc = wn.toLowerCase();
     return s.includes(wn) || wn.includes(s) || sLc.includes(wLc) || wLc.includes(sLc)
       || (!!sTr && (sTr.includes(wLc) || wLc.includes(sTr)));
