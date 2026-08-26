@@ -249,14 +249,25 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 
 ### 5.4 Question-level survival (single vs multi)
 
-- **R5.4.1** — `MIN_OPTIONS_SINGLE = 2`: a single-select question must offer at least two real
-  narrowing options (a real yes/no OR two rungs).
+- **R5.4.1** — `MIN_OPTIONS_SINGLE = 1` **(owner correction 2026-08-26; was `2`)**: a single-select
+  question survives with even ONE real narrowing option. ~~"`MIN_OPTIONS_SINGLE = 2`: a single-select
+  question must offer at least two real narrowing options (a real yes/no OR two rungs)."~~ The owner
+  reversed this the day after this document was drafted: «if filtering removes the useless/lopsided
+  option but leaves one genuinely useful option, do not throw away the whole question just because
+  one option remains». `minOptionsFor()` is now UNIFORM across both arities.
 - **R5.4.2** — `MIN_OPTIONS_MULTI = 1`: a multi-select question survives with even ONE meaningful
-  chip — "yes / (implicit no)" is a valid narrow.
-- **R5.4.3** — **Named side effect (not a bug):** a single-select where 92% and 6% are the only
+  chip — "yes / (implicit no)" is a valid narrow. **Unchanged** — and it is what R5.4.1 was
+  reconciled to, since the identical option set was already asked as a multi.
+- **R5.4.3** — ~~**Named side effect (not a bug):** a single-select where 92% and 6% are the only
   splits will drop the 92% chip (no-op) leaving just 6%, then fail `MIN_OPTIONS_SINGLE`, so the
-  whole question dies. A 94%-cut option can disappear with its partner. This is the owner's
-  chosen design and it is documented in the source comment on `scoreQuestion`.
+  whole question dies. A 94%-cut option can disappear with its partner. This is the owner's chosen
+  design and it is documented in the source comment on `scoreQuestion`.~~ **REVERSED 2026-08-26.**
+  That question is now ASKED, carrying its 6% chip alone, as a yes/no against Skip — which is legal
+  precisely because Skip is unconditional and applies ZERO predicate. What has NOT changed: ZERO
+  surviving options still kills the question (R5.1 is now the only gate), and the per-option floor
+  R5.3.1 still applies. Measured on production before shipping:
+  `docs/ops/af-single-option-yes-no-2026-08-26.md` — 23 questions gained at cohort entry, 262
+  mid-interview across 161 cohorts, none with a cut below 10%.
 
 ### 5.5 Ladder questions (bathrooms, street_width, rating)
 
@@ -510,7 +521,7 @@ here changes the entire product; no other file may hard-code the number.
 | `INTERVIEW_STOP_AT` | 25 | `src/lib/afRanking.ts` | Result-count floor; AF hides at/below. |
 | `MIN_TOTAL_TO_SHOW` | 26 | `src/lib/afRanking.ts` | = INTERVIEW_STOP_AT + 1. |
 | `MIN_REAL_OPTION_COUNT` | 5 | `src/lib/afRanking.ts` | Absolute per-option floor. |
-| `MIN_OPTIONS_SINGLE` | 2 | `src/lib/afRanking.ts` | Single-select must have ≥2 real options. |
+| `MIN_OPTIONS_SINGLE` | ~~2~~ **1** | `src/lib/afRanking.ts` | Single-select survives with ≥1 real option (owner 2026-08-26; was 2). |
 | `MIN_OPTIONS_MULTI` | 1 | `src/lib/afRanking.ts` | Multi-select survives with ≥1. |
 | `MEANINGFUL_NARROWING_FRACTION` | 0.10 | `src/lib/afRanking.ts` | The 10% narrowing rule. |
 | `AF_ROUND_MAX_QUESTIONS` | 4 | `src/lib/afRanking.ts` | Round size cap. |

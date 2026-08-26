@@ -300,7 +300,8 @@ lower, REMOVED from the pool — even though picking them would still have genui
 **The fix — separate ELIGIBILITY from ORDERING, permanently:**
 - **Eligibility** (may this question be asked at all): the scope must clear `MIN_TOTAL_TO_SHOW`
   (unchanged), and the question must have at least `minOptionsFor(selection)` options where
-  `count < N` — i.e. an option that would actually change the result if picked. Every option here
+  `count < N` (`minOptionsFor` was single ≥2 / multi ≥1 when this was written; ≥1 for both since
+  «Amendment 2026-08-26») — i.e. an option that would actually change the result if picked. Every option here
   already cleared the absolute per-option floor (`meaningful()`, `MIN_REAL_OPTION_COUNT = 5`)
   upstream, so this is never a fabricated or thin option — only genuinely small or genuinely
   lopsided ones are now included instead of hidden. An option where `count === N` (100% of the
@@ -556,7 +557,9 @@ option yielding 25 removes 3.8% and still qualifies, because it lands AT the tar
 
 **Two uses, one predicate — required, not tidiness.**
 - **ASK gate** — `scoreQuestion()` filters the OPTIONS by it, REPLACING the 2026-08-22 `o.count < N`.
-  `minOptionsFor(selection)` then decides whether the question survives (single ≥2, multi ≥1).
+  `minOptionsFor(selection)` then decides whether the question survives — ~~(single ≥2, multi ≥1)~~
+  **(≥1 for BOTH arities since the owner's correction of 2026-08-26; see «Amendment 2026-08-26» at
+  the end of this file)**.
   Owner's worked case, bathrooms at N=100 with rungs 100/98/60/20: «1+»=100 (0% cut) and «2+»=98 (2%
   cut) are DROPPED, «3+»=60 (40%) and «4+»=20 (80%) are KEPT — a real choice of two, and the user
   never sees a chip that does nothing. Gym at 100/100 loses its only option, so that question dies.
@@ -586,7 +589,7 @@ Regression: `scripts/verify-af-narrowing-gate.ts` (§2/§2b/§5 inverted in plac
 inverted from "the gates are separate" to "the gates share ONE predicate and neither re-implements the
 arithmetic"). Both EXECUTE the real pure predicate; neither was deleted or unwired.
 
-## Amendment 2026-08-26 — UNKNOWN IS NOT NO (owner-approved)
+## Amendment 2026-08-26 (a) — UNKNOWN IS NOT NO (owner-approved)
 
 > **Known useless → hide AF. Couldn't determine because the backend failed → keep AF available.**
 
@@ -641,3 +644,70 @@ often. Measured cost on a real 6-district Villa/Buy scope: **920 ms** for one co
 for the five certified questions, server-side on a quiet database, against a 338 ms/search baseline
 and a concurrency knee of 3 (`docs/ops/SEARCH_MATCH_QA_ENGINEER.md` §40.1) — so the cap is reachable
 under ordinary load and always will be.
+
+## Amendment 2026-08-26 (b) — a LONE surviving meaningful option is a valid yes/no (owner-approved; reverses the arity half of Amendment 2026-08-25)
+
+**The owner's instruction, verbatim.** «Yes, fix the two-option issue. If filtering removes the
+useless/lopsided option but leaves one genuinely useful option, do not throw away the whole question
+just because one option remains. Treat that remaining option as a valid yes/no narrowing question
+when it meaningfully reduces the results under our existing rule. Example: if 1,000 listings become
+60 by selecting «مفروشة», that is clearly useful and Advanced Filter should be allowed to ask it.»
+«Do not change any of the existing thresholds: meaningful reduction 10%, stop target 25, minimum
+useful questions 1, option floor 5.»
+
+**The change, in full.** `MIN_OPTIONS_SINGLE` in `src/lib/afRanking.ts` moved **2 → 1**. Nothing
+else. `minOptionsFor()` is now uniform (`single === multi === 1`); every other constant is untouched:
+
+| constant | value | status |
+|---|---|---|
+| `MEANINGFUL_NARROWING_FRACTION` | `0.1` | **frozen, unchanged** |
+| `INTERVIEW_STOP_AT` | `25` | **frozen, unchanged** |
+| `MIN_USEFUL_QUESTIONS_TO_SHOW` | `1` | **frozen, unchanged** |
+| `MIN_REAL_OPTION_COUNT` | `5` | **frozen, unchanged** (now pinned by a barrier — it was not before) |
+| `AF_ROUND_MAX_QUESTIONS` | `4` | **frozen, unchanged** |
+| `MIN_OPTIONS_MULTI` | `1` | unchanged |
+| `MIN_OPTIONS_SINGLE` | ~~`2`~~ → `1` | **THIS amendment** |
+
+**What was reversed, kept visible.** The 2026-08-25 rule shipped with `src/lib/afRanking.ts` §(e)
+recording this as deliberate design: ~~"a question can die at the QUESTION level even though the
+gate is one-sided at the OPTION level: a single-select split 92%/6% loses its 92% chip, is left with
+one survivor, and fails `MIN_OPTIONS_SINGLE` — so a 94%-cut option can disappear with its partner.
+That is the owner's specified design (filter the options, then let `minOptionsFor` decide), not an
+accident."~~ `scripts/verify-af-two-option-survival.ts` was written the same day to PIN that reading
+and to go red the moment anyone flipped the constant. It did its job: the reversal turned it red, the
+owner made the call, and the file was inverted in place with the dated reason rather than deleted.
+
+**Why one option is not a forced answer.** The objection `≥2` was written for is that a single-select
+with one choice gives the user nothing to decide. That is false on this card, and it was verified in
+source before the change shipped:
+
+- **«تخطي» is rendered UNCONDITIONALLY.** `src/components/AdvancedQuestionCard.tsx` renders the skip
+  `Pressable` (testID `af-skip`) in the pinned footer row with no branch on arity, on option count,
+  or on question id — the shared-card rule (§1) already forbids such a branch.
+- **Skip applies ZERO predicate.** `agent.tsx`'s `onAgeSkip` is `commitGuidedStep([])`: no facet, no
+  `false` written, unknowns stay eligible, and the step is recorded as answered-as-open.
+
+So the user genuinely chooses between «مفروشة» → 60 and skip → keep 1,000. That is a real yes/no —
+which is precisely why `MIN_OPTIONS_MULTI = 1` already allowed the identical option set as a
+multi-select. The asymmetry had no defensible basis once the survivor had to clear
+`optionNarrowsMeaningfully` anyway.
+
+**What did NOT change, and must not.** ZERO surviving options still kills the question — the owner's
+gym rule (2026-08-25) is untouched and is now the ONLY gate, which is why the barrier's new §3 pins
+it explicitly at a scale the `≤ INTERVIEW_STOP_AT` escape cannot rescue. The small-slice protection
+of 2026-08-22 stays permanent (8 of 100 asks). Ask order, salience, cohort gating, the round cap, the
+offer gate, Skip semantics and «Summary == committed state» are all untouched. Nothing is invented
+and nothing is forced to reach ≤25: a question with no meaningful truthful option is still DONE.
+
+**Measured on production BEFORE shipping** (owner requirement) — `docs/ops/af-single-option-yes-no-2026-08-26.md`.
+
+**The card, unchanged.** A single-select rendering ONE option is the same component, the same
+`selection: 'single'` radio row, the same «متابعة · N نتيجة» primary that COMMITS-AND-ADVANCES, the
+same «رجوع / تخطي / عرض النتائج» row. Single tap selects, a second tap on the SAME option within
+`DOUBLE_TAP_MS` advances one question, auto-advance stays BANNED (2026-08-22).
+
+Regression: `scripts/verify-af-two-option-survival.ts` (inverted in place, §0 fixture scale preserved
+and extended to pin `MIN_REAL_OPTION_COUNT`, new §3 pins the zero-survivor kill) and
+`scripts/verify-af-narrowing-gate.ts` (§3's single-select arity assertion inverted in place with the
+dated reason; every other assertion untouched). Both EXECUTE the real pure gate; neither was deleted
+or unwired.

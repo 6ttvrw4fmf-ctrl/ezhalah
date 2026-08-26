@@ -92,10 +92,17 @@ check('a question where every option ties at N (a genuine no-op) is still EXCLUD
   scoreQuestion('furnished', 'single',
     result([{ key: 'yes', count: N }])) === null,
   'a no-op option must never be offered as if it were a real choice');
-check('single-select still needs a real CHOICE (≥2 narrowing options) — one alone is not a choice',
+// INVERTED BY THE OWNER ON 2026-08-26 (MIN_OPTIONS_SINGLE 2 → 1). This assertion used to read
+// ~~"single-select still needs a real CHOICE (≥2 narrowing options) — one alone is not a choice",
+// detail "MIN_OPTIONS_SINGLE=2 must still apply — a lone option is not a decision"~~. The owner
+// reversed it: «do not throw away the whole question just because one option remains». Skip is
+// unconditional and applies zero predicate, so the lone option is a genuine yes/no — which is why
+// multi (the line below, unchanged since it was written) already worked this way. What must NOT
+// change is the line above this one: ZERO narrowing options still kills the question.
+check('single-select accepts a single real narrowing option too — a lone meaningful choice is a valid yes/no (owner 2026-08-26)',
   scoreQuestion('bathrooms', 'single',
-    result([{ key: '3', count: 900 }])) === null,
-  'MIN_OPTIONS_SINGLE=2 must still apply — a lone option is not a decision');
+    result([{ key: '3', count: 900 }])) !== null,
+  'MIN_OPTIONS_SINGLE moved to 1; see scripts/verify-af-two-option-survival.ts for the full pin');
 check('multi-select still accepts a single real narrowing chip (a yes/no is a valid choice)',
   scoreQuestion('rnpl', 'multi',
     result([{ key: 'rnpl', count: 900 }])) !== null);
@@ -109,9 +116,11 @@ check(`below MIN_TOTAL_TO_SHOW (${MIN_TOTAL_TO_SHOW}), no question is ever offer
 // Both fixtures clear the 2026-08-25 gate (1,500 of 1,874 removes 20%, 300 removes 84%), so the only
 // thing separating them is the score. UPDATED 2026-08-25: this pair used to be 937/937 vs 60/1,814,
 // and the second assertion used to read "the lopsided one is still INCLUDED" — under the owner's new
-// rule the 1,814 chip (3.2% cut) is dropped, which leaves that single-select with one option, and
-// MIN_OPTIONS_SINGLE=2 then correctly says one option is not a choice. That is the new rule working,
-// not selectivity creeping back into inclusion: the 60 chip itself survives (see §1).
+// rule the 1,814 chip (3.2% cut) is dropped, which left that single-select with one option, and
+// MIN_OPTIONS_SINGLE=2 then said one option is not a choice. (That last step no longer holds since
+// the owner's 2026-08-26 reversal — MIN_OPTIONS_SINGLE = 1, so a lone survivor IS asked — but the
+// fixture below was already replaced in 2026-08-25 and is unaffected either way.) That is the new
+// rule working, not selectivity creeping back into inclusion: the 60 chip itself survives (see §1).
 const balanced = scoreQuestion('property_age', 'single',
   result([{ key: 'new', count: 937 }, { key: 'old', count: 937 }]));
 const lopsided = scoreQuestion('property_age', 'single',
