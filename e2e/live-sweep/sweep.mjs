@@ -258,9 +258,29 @@ async function pickCity(page, city) {
   await page.mouse.click(hit.x, hit.y); await sleep(1300);
   return true;
 }
+// ── WHEN HAS A SEARCH SETTLED? ───────────────────────────────────────────────────────────────────
+// Every terminal state the results screen can reach, as ONE predicate shared by every journey.
+// It is a "the search has finished" signal, NOT an assertion — assertChain still runs all six
+// layers afterwards, so widening it can never turn a failure into a pass.
+//
+// 2026-08-26: it previously listed only the «لقينا», «ما لقينا» and «ما فيه» openings, and therefore
+// did not recognise the «ما لقيت …» family. Production answers an honest zero INSIDE a selected حي with
+// «ما لقيت نتائج في الحي المحدد — لكن فيه خيارات في أحياء ثانية بنفس المدينة. تبيني أوسّع المنطقة؟»
+// — correct behaviour (it OFFERS to widen, it never widens silently, §13). The harness simply could
+// not see it: «ما لقيت», not «ما لقينا». Every district-scoped journey that lands on an honest zero
+// therefore hung for the full 70 s and died, which is what killed the trending-district journey on
+// بقعاء and failed the whole run on a missed coverage floor while production was perfectly healthy
+// (proven separately: سكني/بيع/بقعاء returns «لقينا 87 إعلان»). Another §40.7 harness-failure-wearing-
+// a-product-failure's-clothes, and a coverage floor is exactly what it took out.
+//
+// The alternation is derived from the user-facing strings in src/i18n.tsx and PINNED against them by
+// scripts/verify-live-sweep-coverage-contract.ts, so a new zero-state phrasing cannot silently
+// reintroduce the hang. «ما لقينا» needs no branch of its own — it contains «لقينا».
+export const SETTLED_RE = /لقينا|ما لقيت|ما فيه/;
 const runSearch = async (page) => {
   await page.getByText('بحث', { exact: true }).first().click();
-  await page.waitForFunction(() => /لقينا|ما لقينا|ما فيه/.test(document.body.innerText), null, { timeout: 70000 });
+  await page.waitForFunction((src) => new RegExp(src).test(document.body.innerText),
+    SETTLED_RE.source, { timeout: 70000 });
   await sleep(2600);
 };
 

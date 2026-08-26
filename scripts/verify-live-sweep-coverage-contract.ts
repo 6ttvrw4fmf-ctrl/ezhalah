@@ -91,6 +91,48 @@ check('DB truth comes from PostgREST filter operators, not the app\'s own SQL',
 check('the RPC layer replays the app\'s OWN captured request body',
   /rpcTotal = async \(body\)/.test(sweep) && /requests\.filter\(\(r\) => \(r\.p_limit \?\? 0\) > 1\)/.test(sweep));
 
+// ── 4b. the sweep must RECOGNISE every terminal state production can render ─────────────────────
+// A journey that cannot see the screen it landed on hangs until its timeout and dies, and a dead
+// journey takes a COVERAGE FLOOR with it — the run fails while production is perfectly healthy.
+//
+// That is not hypothetical. Until 2026-08-26 the settle predicate was /لقينا|ما لقينا|ما فيه/,
+// which does not match «ما لقيت …». Production answers an honest zero inside a selected حي with
+// «ما لقيت نتائج في الحي المحدد — …تبيني أوسّع المنطقة؟» (correct: it OFFERS to widen, never widens
+// silently), so every district-scoped journey landing on an honest zero hung for 70 s. It killed the
+// trending-district journey on بقعاء and failed the whole sweep on a missed floor, while that city
+// searched perfectly (سكني/بيع/بقعاء → «لقينا 87 إعلان»).
+//
+// So the predicate is PINNED against the product's own user-facing strings: every «لقينا …» result
+// headline and every zero/widening-offer message in src/i18n.tsx must be recognised. A new phrasing
+// shipping tomorrow fails HERE, in npm test, instead of silently costing a floor months later.
+// Widening this predicate can never mask a defect — it only decides when to STOP waiting; the
+// six-layer assertChain still judges what was found.
+const i18n = read('src/i18n.tsx');
+const arabicTerminalPhrases = [...i18n.matchAll(/'((?:لقينا|ما لقيت|ما لقينا|ما فيه)[^']*)'/g)]
+  .map((m) => m[1])
+  .filter((s) => !/محادثة/.test(s));   // «ما لقينا محادثة بهذا الاسم» is sidebar chat search, not a results state
+check('the sweep declares ONE shared settle predicate (not a copy per journey)',
+  /export const SETTLED_RE/.test(sweep)
+  && !/\/لقينا\|ما لقينا\|ما فيه\//.test(sweep + journeys),
+  'two hand-maintained copies is how one of them silently rots');
+check('every journey waits on that shared predicate',
+  (sweep.match(/SETTLED_RE\.source/g) ?? []).length + (journeys.match(/SETTLED_RE\.source/g) ?? []).length >= 2);
+check('the product actually publishes terminal phrasings to check against',
+  arabicTerminalPhrases.length >= 6, `found ${arabicTerminalPhrases.length} in src/i18n.tsx`);
+{
+  const m = sweep.match(/export const SETTLED_RE = (\/[^\n]*?\/);/);
+  const re = m ? new RegExp(m[1].slice(1, -1)) : null;
+  const unseen = re ? arabicTerminalPhrases.filter((p) => !re.test(p)) : arabicTerminalPhrases;
+  check('the settle predicate recognises EVERY result/zero state src/i18n.tsx can render',
+    re != null && unseen.length === 0,
+    unseen.length ? `unrecognised → the sweep would hang on:\n      ${unseen.slice(0, 4).join('\n      ')}` : 'could not parse SETTLED_RE');
+  // MUTATION — the pre-2026-08-26 predicate must FAIL this check.
+  const old = /لقينا|ما لقينا|ما فيه/;
+  check('MUTATION: the old predicate is rejected (it could not see «ما لقيت …»)',
+    arabicTerminalPhrases.some((p) => !old.test(p)),
+    'if nothing fails the old regex this check has stopped proving anything');
+}
+
 // ── 5. the schedule ─────────────────────────────────────────────────────────────────────────────
 check('the sweep runs on a schedule', /^\s*schedule:/m.test(wf) && /cron:/.test(wf));
 check('the scheduled target is production', /ezhalah-app\.vercel\.app/.test(wf));

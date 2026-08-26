@@ -2,7 +2,7 @@
 // six-layer comparison (see sweep.mjs) — clicking the control is never the assertion.
 import {
   BASE, dbCount, assertChain, withPage, setDeal, setPeriod, pickCity, runSearch,
-  visibleState, defect, note, num, lastCount, sleep,
+  visibleState, defect, note, num, lastCount, sleep, SETTLED_RE,
 } from './sweep.mjs';
 
 const enc = encodeURIComponent;
@@ -274,8 +274,8 @@ export async function typedDistrict(plan) {
     // silently discarded, so the app can hold the search and prompt instead. That is the PASS state
     // for this watch, not a timeout — wait softly and judge on what the user is left looking at.
     await page.getByText('بحث', { exact: true }).first().click().catch(() => {});
-    await page.waitForFunction(() => /لقينا|ما لقينا|ما فيه/.test(document.body.innerText), null, { timeout: 25000 })
-      .catch(() => {});
+    await page.waitForFunction((src) => new RegExp(src).test(document.body.innerText),
+      SETTLED_RE.source, { timeout: 25000 }).catch(() => {});
     await sleep(2500);
     const ui = await visibleState(page);
     const stillShown = await d.inputValue().catch(() => '');
@@ -283,7 +283,10 @@ export async function typedDistrict(plan) {
     const searchedDistrict = !!(req?.p_districts?.length) || !!ui.district;
     const body = await page.evaluate(() => document.body.innerText);
     const warned = /اختر|حدّد|حدد الحي|لم يتم|اختر الحي/.test(body);
-    const searchRan = /لقينا|ما لقينا|ما فيه/.test(body);
+    // Same shared predicate: a search that honestly returned zero («ما لقيت …») HAS run. Reading it
+    // as "no search" would silently suppress this watch's defect — a false negative, the worse way
+    // for a barrier to be wrong.
+    const searchRan = SETTLED_RE.test(body);
     // Holding the search while the district is uncommitted is a correct outcome too.
     if (stillShown && !searchedDistrict && !warned && searchRan) {
       defect(name, 'UI→REQUEST', `field still shows «${stillShown}» but the search ran city-wide with no warning (typed-district-not-dropped)`);
