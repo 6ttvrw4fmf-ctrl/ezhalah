@@ -574,6 +574,32 @@ appears broken.
     with the corrected shape changed **exactly 3 of 223** results — `p_category` is a no-op for every
     cohort whose `p_types` is already macro-pure, which is why the other 220 verdicts stood.
 
+15. **The حي label the REQUEST carries is not always the حي label the INDEX SERVES — and the sweep's
+    own layer-5 oracle accused production over it** (hit 2026-08-26). The district picker is fed by
+    `district_options_ar` (loc_catalog's canonical name, «حي المهدية»); `search_listings_ar` stores
+    its own canonical rendering of the same حي («المهدية», 8,079 rows in الرياض). The RPC matches on
+    `norm_district_tok`, so both are one place to it and the search was exactly right — but the
+    oracle compares the SERVED label literally, filtered on `district_ar=in.("حي المهدية")`, matched
+    0 rows, and reported **«RPC 2470 vs independent DB 0»**: a confident, total, false matching
+    failure. Measured over every (city, served label) pair the picker can reach: **1,874 agree
+    exactly, 176 differ ONLY by the leading «حي », 32 differ otherwise**; 29% of the index's 3,685
+    (city, district) pairs carry no «حي » prefix at all.
+    What production actually served, and why it was right: 2,470 = 2,467 Residential-macro rows
+    **+ 3 macro-`both` «عمارة» rows in residential tables** (in a residential table «عمارة» is an
+    apartment building — the §41.14 distinction), with the 3 Commercial-macro «أرض تجارية» rows in
+    those same residential tables **correctly excluded** by `p_category`. Category purity was intact;
+    all three were verified absent from the RPC's own 2,470 returned IDs.
+    Fixed in `e2e/live-sweep/sweep.mjs` by doing BOTH halves — a fix that only silenced the layer
+    would be worse than the bug: **resolve** the label (probe the candidate spellings via PostgREST
+    and use the one actually served, which recovers the 176) and **refuse** when none matches
+    (`dbSkipped`, never a mismatch — which keeps the 32 residual cases from becoming false defects).
+    Pinned, with a mutation proof that the old exact-label-only behaviour fails, by
+    `scripts/verify-live-sweep-db-oracle-scope.ts` §5b in `npm test`.
+    The general rule this is an instance of: **when the oracle and the product disagree by the
+    WHOLE result set, suspect the oracle's ability to name the thing before you suspect the
+    product's ability to find it.** A `db: 0` against a healthy non-zero RPC is nearly always the
+    oracle failing to express the scope, not the product losing every row.
+
 ## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
 
 > **What the user sees must match the actual listing/search truth exactly, in clean Arabic, with no

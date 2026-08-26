@@ -18,17 +18,29 @@ const RIYADH = 'الرياض';
 // ── the pools rotation draws from ────────────────────────────────────────────────────────────────
 // Cities are discovered LIVE from the index (never a hardcoded list that can go stale), then ordered
 // by ledger staleness. Region is carried so the report can show regional spread.
+// Also records WHICH deal/period each city actually has inventory for. The city field's pool is
+// deal+category scoped by design, so a city with only بيع listings is correctly NOT offered on an
+// إيجار search — pairing a city with a deal it does not stock loses the journey to a legitimate
+// refusal and takes a COVERAGE FLOOR with it. That is what happened on 2026-08-26: الدليمية (22
+// listings, ALL بيع, zero إيجار/سنوي) drew «إيجار/سنوي», production rightly did not offer it, and
+// the run failed on «non-Riyadh cities: 2 < 3» with production perfectly healthy. Availability is
+// read from the live index, never hardcoded (§1).
 async function livePool() {
   const r = await fetch(
     `${process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co'}`
-    + `/rest/v1/search_listings_ar?select=city_ar,region_ar&production_ready=is.true&limit=4000`,
+    + `/rest/v1/search_listings_ar?select=city_ar,region_ar,deal_ar,rent_period_ar&production_ready=is.true&limit=4000`,
     { headers: { apikey: KEY(), Authorization: `Bearer ${KEY()}` } }).catch(() => null);
   const rows = r ? await r.json().catch(() => []) : [];
   const byCity = new Map();
   for (const row of rows) {
     if (!row.city_ar) continue;
-    const e = byCity.get(row.city_ar) ?? { city: row.city_ar, region: row.region_ar, n: 0 };
-    e.n++; byCity.set(row.city_ar, e);
+    const e = byCity.get(row.city_ar) ?? { city: row.city_ar, region: row.region_ar, n: 0, deals: new Set() };
+    e.n++;
+    // The same keys DEALS is indexed by. «both» needs no branch: any inventory satisfies Buy+Rent.
+    if (row.deal_ar === 'بيع') e.deals.add('بيع/-');
+    else if (row.deal_ar === 'إيجار' && row.rent_period_ar) e.deals.add(`إيجار/${row.rent_period_ar}`);
+    e.deals.add('both/-');
+    byCity.set(row.city_ar, e);
   }
   return [...byCity.values()].filter((c) => c.n >= 5).sort((a, b) => b.n - a.n);
 }
@@ -65,6 +77,7 @@ async function main() {
   const cityOrder = await stalestFirst('city', nonRiyadh.map((c) => c.city));
   const pickCities = cityOrder.slice(0, Math.max(FLOORS.nonRiyadhCities, 3));
   const regionOf = new Map(pool.map((c) => [c.city, c.region]));
+  const dealsOf = new Map(pool.map((c) => [c.city, c.deals]));
   const dealOrder = await stalestFirst('deal_period', DEALS.map((d) => `${d.deal}/${d.period ?? '-'}`));
   const deals = dealOrder.map((k) => DEALS.find((d) => `${d.deal}/${d.period ?? '-'}` === k)).filter(Boolean);
   const typeOrder = await stalestFirst('type', TYPES.map((t) => t.label ?? t.group));
@@ -85,37 +98,70 @@ async function main() {
   // ── 1. NORMAL FILTER across the rotated cities × deal/period ───────────────────────────────────
   for (let i = 0; i < pickCities.length; i++) {
     const city = pickCities[i];
-    const d = deals[i % deals.length];
+    // Stalest-first, but only among the deals this city actually stocks — see livePool(). Falls back
+    // to the plain rotation when availability is unknown, so a pool read that came back thin can
+    // never silently stop the rotation.
+    const have = dealsOf.get(city);
+    const d = (have && deals.find((x) => have.has(`${x.deal}/${x.period ?? '-'}`))) ?? deals[i % deals.length];
     const t = types[i % types.length];
     const mobile = i === 0;                                   // floor: at least one mobile journey
-    await run(`normal ${city} ${d.deal}${d.period ? '/' + d.period : ''} ${t.label ?? t.group}${mobile ? ' [mobile]' : ''}`,
+    const ran = await run(`normal ${city} ${d.deal}${d.period ? '/' + d.period : ''} ${t.label ?? t.group}${mobile ? ' [mobile]' : ''}`,
       () => normalFilter({ city, deal: d.deal, period: d.period, group: t.group, typeLabel: t.label, mobile }),
       () => { done.normal++; citiesTested.add(city); regionsTested.add(regionOf.get(city) ?? '?');
               typesTested.add(t.label ?? t.group);
               if (mobile) done.mobile++;
               if (d.deal === 'both') done.buyRent++;
               if (d.period === 'شهري') done.monthly++; });
-    await ledgerRecord('city', city, 'pass', 'live browser sweep');
-    await ledgerRecord('deal_period', `${d.deal}/${d.period ?? '-'}`, 'pass', 'live browser sweep');
-    await ledgerRecord('type', t.label ?? t.group, 'pass', 'live browser sweep');
+    // Only a journey that actually RAN is coverage. Recording a skip as 'pass' marks the city fresh
+    // and pushes it to the back of the stalest-first rotation, so a city the sweep keeps failing to
+    // reach would look permanently well-covered — the exact way a rotation system rots quietly.
+    if (ran) {
+      await ledgerRecord('city', city, 'pass', 'live browser sweep');
+      await ledgerRecord('deal_period', `${d.deal}/${d.period ?? '-'}`, 'pass', 'live browser sweep');
+      await ledgerRecord('type', t.label ?? t.group, 'pass', 'live browser sweep');
+    }
   }
 
-  // Make sure the deal/period floors are met even if rotation did not land on them.
+  // ── FLOOR BACKSTOPS ────────────────────────────────────────────────────────────────────────────
+  // A floor must not hinge on ONE rotated city being offerable. The city field's pool is
+  // deal+category+cohort scoped, so any given city can legitimately not be offered for the shape the
+  // rotation drew — and when that city was pickCities[0], the journey pinned to it was lost and took
+  // its floor with it. Both floor misses on 2026-08-26 were this: «الدليمية» (بيع-only, drew rent)
+  // cost the non-Riyadh floor, then «النعيرية» cost the MOBILE floor because mobile was pinned to
+  // index 0. Production was healthy in both runs.
+  //
+  // So a backstop runs on a city already PROVEN reachable this run, falling back to الرياض, which is
+  // always offered. This does not weaken any floor — each still requires a real journey against
+  // production; it only stops one unlucky rotation draw from silently deleting one. الرياض never
+  // counts toward the non-Riyadh floor, which is computed from citiesTested minus الرياض.
+  const reachable = () => [...citiesTested][0] ?? pickCities[0] ?? RIYADH;
   if (!done.buyRent) {
-    const city = pickCities[0];
+    const city = reachable();
     await run(`normal ${city} Buy+Rent [floor]`, () => normalFilter({ city, deal: 'both', period: null }),
       () => { done.normal++; done.buyRent++; citiesTested.add(city); });
   }
   if (!done.monthly) {
-    const city = pickCities[0];
+    const city = reachable();
     await run(`normal ${city} monthly [floor]`, () => normalFilter({ city, deal: 'إيجار', period: 'شهري' }),
       () => { done.normal++; done.monthly++; citiesTested.add(city); });
+  }
+  // MOBILE had no backstop at all — it rode on `mobile = i === 0` and vanished with that journey.
+  if (!done.mobile) {
+    const city = reachable();
+    await run(`normal ${city} [mobile floor]`,
+      () => normalFilter({ city, deal: 'بيع', period: null, mobile: true }),
+      () => { done.normal++; done.mobile++; citiesTested.add(city); });
+    if (!done.mobile) {
+      await run(`normal ${RIYADH} [mobile floor · last resort]`,
+        () => normalFilter({ city: RIYADH, deal: 'بيع', period: null, mobile: true }),
+        () => { done.normal++; done.mobile++; citiesTested.add(RIYADH); });
+    }
   }
 
   // ── 2. TRENDING city + district ────────────────────────────────────────────────────────────────
   await run('trending city', () => trendingCity({ deal: 'بيع', period: null }), () => { done.tCity++; });
   await run('trending district (narrowed)',
-    () => trendingDistrict({ city: pickCities[0], deal: 'بيع', period: null, priceMax: 900000 }),
+    () => trendingDistrict({ city: reachable(), deal: 'بيع', period: null, priceMax: 900000 }),
     () => { done.tDistrict++; citiesTested.add(pickCities[0]); });
   await ledgerRecord('trending_city', 'live-sweep', 'pass', 'live browser sweep');
   await ledgerRecord('trending_district', pickCities[0], 'pass', 'live browser sweep');
