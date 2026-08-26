@@ -11,6 +11,7 @@
 //      a chat that holds a conversation (that was the fragmentation/loss bug).
 //   3. The WIRING — agent capture/restore, store persistence + server sync, sidebar routing.
 import { readFileSync } from 'node:fs';
+import { mergeOne, withFreshTranscript } from '../src/lib/chatMerge.ts';
 import { serializeChat, restoreChat, sameTranscript, TRANSCRIPT_LISTING_CAP, TRANSCRIPT_FIRST_PAGE, LOCAL_TRANSCRIPT_ENTRIES } from '../src/lib/chatTranscript.ts';
 
 let failed = 0;
@@ -72,8 +73,21 @@ check('query-dedupe applies ONLY to entries with no held conversation (a transcr
   /\?\? \(!chatId \? h\.find\(\(it\) => !it\.transcript && sameQuery\(it\.query, q\)\) : undefined\)/.test(store));
 check('a continuation carries the entry’s existing transcript through the update (never dropped between turns)',
   /\.\.\.\(prior\?\.transcript \? \{ transcript: prior\.transcript, tRev: prior\.tRev \} : \{\}\)/.test(store));
+// Re-anchored 2026-08-25: the literal object spread moved into withFreshTranscript() when transcript
+// PRECEDENCE was centralised in src/lib/chatMerge.ts. The invariant is unchanged and is now proved by
+// EXECUTING the helper rather than matching its old spelling — `ts` must not move, `tRev` must.
 check('saveTranscript stamps tRev, not ts (revealing more cards must not resort the sidebar)',
-  /next\[idx\] = \{ \.\.\.h\[idx\], transcript, tRev: Date\.now\(\) \};/.test(store));
+  // one tRev minted up front, shared by the direct disk write and the state update (flush-on-exit),
+  // and routed through withFreshTranscript so a fresh capture also clears txStale.
+  /const tRev = Date\.now\(\);/.test(store) && /withFreshTranscript\(h\[idx\] as never, transcript, tRev\)/.test(store));
+{
+  const before = { id: 'c', ts: 111, tRev: 1, transcript: { old: true }, txStale: true } as never;
+  const after = withFreshTranscript(before, { fresh: true }, 999) as { ts: number; tRev: number; txStale?: boolean; transcript: unknown };
+  check('…proved by execution: tRev moves', after.tRev === 999);
+  check('…proved by execution: ts is untouched (the sidebar does not resort)', after.ts === 111);
+  check('…proved by execution: the fresh transcript replaces the old one', JSON.stringify(after.transcript) === '{"fresh":true}');
+  check('…proved by execution: a stale flag is cleared once a fresh transcript lands', after.txStale === undefined);
+}
 
 // ── 3a. Local persistence bounds ────────────────────────────────────────────────────────────────
 check('every disk write routes through serializeHistoryForDisk (transcripts pruned to the recent-N cache)',
@@ -84,7 +98,22 @@ check('pruning happens ONLY at the serialization boundary — in-memory state ke
   && /slice\(0, LOCAL_TRANSCRIPT_ENTRIES\)/.test(store));
 
 // ── 3b. Server sync (survives new browser / re-login) ───────────────────────────────────────────
-check('pull: server metas merge after sign-in, newer side wins per entry', /loadChatMetas\(\)\.then\(\(rows\)/.test(store) && /serverStamp > localStamp/.test(store));
+// Re-anchored 2026-08-25: the inline stamp comparison moved into chatMerge.mergeOne() so the pull
+// merge and hydrateTranscript cannot disagree about which copy is newer (they did — see
+// scripts/verify-transcript-integrity.ts for the loss that caused). Executed, not matched.
+check('pull: server metas merge after sign-in, via the single shared precedence rule',
+  /loadChatMetas\(\)\.then\(\(rows\)/.test(store) && /mergeOne\(/.test(store)
+  && !/serverStamp\s*>\s*localStamp/.test(store));
+{
+  const localOld = { id: 'c', ts: 10, tRev: 10, transcript: { n: 1 } } as never;
+  const localNew = { id: 'c', ts: 99, tRev: 99, transcript: { n: 9 } } as never;
+  check('…proved by execution: a NEWER SERVER entry wins the meta',
+    (mergeOne(localOld, { id: 'c', ts: 50, tRev: 50 }) as { ts: number }).ts === 50);
+  check('…proved by execution: a NEWER LOCAL entry is kept whole',
+    (mergeOne(localNew, { id: 'c', ts: 50, tRev: 50 }) as { ts: number }).ts === 99);
+  check('…proved by execution: a server-only chat appears',
+    (mergeOne(undefined, { id: 'z', ts: 5 }) as { id: string }).id === 'z');
+}
 check('push: debounced write-through diffs per-entry activity stamps', /const stamp = Math\.max\(it\.ts, it\.tRev \?\? 0\);/.test(store));
 check('push: gated on the pull having merged (a not-yet-merged list can never mass-delete server history)',
   /if \(syncReadyRef\.current !== historyKey\(user\.sub\)\) return; \/\/ push only after the pull merged/.test(store));
@@ -128,6 +157,15 @@ check('agent: restore adopts the chat id so continuing the conversation updates 
 check('agent: restore falls back to the server copy when the local cache was pruned',
   /if \(!t && entryId\) t = await hydrateTranscript\(entryId\)\.catch\(\(\) => null\);/.test(agent));
 check('agent: restore never echo-writes what it just rendered', /lastCapturedRef\.current = JSON\.stringify\(t\);/.test(agent));
+// FLUSH-ON-EXIT (owner 2026-08-26: «leaving the chat must never lose later messages»). The 600ms
+// debounce alone had a real loss window: switching chats while the newest turn's cards were still
+// cascading cleared the pending timer and the reopened chat showed an OLDER conversation. Every
+// abandonment path must flush the pending capture first, and an unload flush must land on disk
+// without depending on React state processing.
+check('agent: the pending capture is tracked, and flushed by ONE function', /const pendingCaptureRef = useRef<\{ id: string; t: PersistedChat; j: string \} \| null>\(null\);/.test(agent) && /const flushPendingCapture = \(\) => \{/.test(agent));
+check('agent: EVERY conversation-abandonment path flushes first (startFresh, openSaved, New Chat wipe)', (agent.match(/flushPendingCapture\(\);/g) ?? []).length >= 4);
+check('agent: a web unload flushes too (pagehide covers refresh, close and bfcache)', /window\.addEventListener\('pagehide', flush\);/.test(agent));
+check('store: saveTranscript writes disk DIRECTLY before setState — an unload-time flush cannot depend on React processing an update', /const direct = cur\.slice\(\);/.test(store) && /localStorage\.setItem\(historyKey\(user\.sub\), serializeHistoryForDisk\(direct\)\);/.test(store));
 check('agent: the sidebar replay path routes through openSaved (transcript first, snapshot fallback)',
   /if \(replay === '0'\) void openSaved\(hid, q, override\);/.test(agent));
 
