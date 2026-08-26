@@ -701,19 +701,18 @@ export default function Agent() {
         // 'blocked' (service/hardware failure, not permission) gets its own honest message —
         // never the "check your settings" text, which is only correct for a true 'denied'.
         // 'service-not-allowed' specifically is Apple's own on-device speech-recognition service
-        // refusing the request — confirmed real on an actual iPhone, 2026-08-24 (mic permission had
-        // already been granted cleanly; this fired anyway). Enabling Dictation ALONE did not resolve
-        // it on the owner's real device the same day. The strongest documented cause (owner
-        // follow-up, 2026-08-25): iOS Lockdown Mode disables the Web Speech Recognition API
-        // specifically — Dictation and Siri keep working fine at the OS level, since neither is
-        // accessible to websites, which is exactly why enabling Dictation alone did nothing. iOS
-        // Screen Time's "Speech Recognition & Dictation" content restriction can independently block
-        // the same path. Both are iOS Settings states this code cannot force — but the generic "try
-        // again" names neither, so this exact code gets a message pointing at both real candidates.
+        // refusing the request. Real-device evidence, 2026-08-24/25 (owner's iPhone): mic permission
+        // was granted cleanly, Lockdown Mode was off, Screen Time's "Speech Recognition & Dictation"
+        // restriction was allowed, and Siri was enabled — EVERY checkable iOS setting was already
+        // correct, and it still failed, only in Safari (every other iPhone browser on the same
+        // device works). With no configurable cause left standing, this is treated as Safari's own
+        // on-device speech service being unavailable here — the SAME plain "not supported" message
+        // used when the capability check itself fails, since practically that's what it is on this
+        // device: reusing the existing key rather than inventing a near-duplicate string.
         const msg = kind === 'denied'
           ? t('Microphone access is needed for voice input. Enable it in your browser settings.')
           : detail === 'service-not-allowed'
-          ? t('Speech recognition may be blocked by Lockdown Mode or a Screen Time restriction on your iPhone. Check those, and also that Siri and Dictation are enabled, then try again.')
+          ? t('Voice input is not supported on this browser')
           : kind === 'blocked'
           ? t("The microphone couldn't be reached. Please try again.")
           : t('Voice input is not available right now.');

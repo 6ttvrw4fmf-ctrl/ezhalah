@@ -626,7 +626,6 @@ const AR: Record<string, string> = {
   'Microphone access is needed for voice input. Enable it in your browser settings.': 'نحتاج إذن المايكروفون للإدخال الصوتي. فعّله من إعدادات المتصفح.',
   'Voice input is not available right now.': 'الإدخال الصوتي غير متاح حالياً.',
   "The microphone couldn't be reached. Please try again.": 'تعذّر الوصول للمايكروفون. حاول مرة ثانية.',
-  'Speech recognition may be blocked by Lockdown Mode or a Screen Time restriction on your iPhone. Check those, and also that Siri and Dictation are enabled, then try again.': 'قد يكون التعرف على الصوت محظوراً بسبب تفعيل «وضع القفل» أو تقييد ضمن «وقت الشاشة» على آيفونك. تحقق من ذلك، وتأكد أيضاً من تفعيل «سيري» و«الإملاء»، ثم حاول مرة ثانية.',
   'Ranked by most recent': 'مرتبة حسب الأحدث',
   'Ranked by closest match.': 'مرتبة حسب الأقرب لطلبك.',
   'Show more': 'عرض المزيد',
