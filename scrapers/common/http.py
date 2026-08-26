@@ -96,7 +96,7 @@ def session() -> cc.Session:
 def _rotate_session() -> cc.Session:
     """Force a fresh TCP connection for this thread by discarding the cached session and
     building a new one. 2026-08-21 incident fix: the OLD code reused ONE session/connection
-    across every retry attempt of get(), so through the shared Webshare Saudi-residential proxy
+    across every retry attempt of get(), so through the shared DataImpulse Saudi-residential proxy
     (see session()'s wasalt.sa note) a retry after a failed attempt was guaranteed to hang on the
     exact same bad route again. Called between retries so a fresh attempt gets a real chance at a
     different route (mirrors the same fix in scrapers/wasalt/run.py's RotatingSession)."""
@@ -114,6 +114,13 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25) -> Optional[cc.Res
     # pass proxies=None and use the cloud IP directly.
     proxies = None
     if "wasalt.sa" in url or "wasalt.com" in url:
+        # PROVIDER OF RECORD: DataImpulse (gw.dataimpulse.com), a METERED Saudi-residential pool,
+        # in place since 2026-07-09 15:38 (see migration 20260727154828, which attributes the
+        # first 10 GB quota overrun to it). The repo previously said "Webshare" in nine places
+        # because the provider was swapped by editing the GitHub secret alone, with no code or
+        # doc change -- corrected 2026-08-26. Three separate investigations into the wasalt
+        # failure rate reasoned about the wrong vendor's behaviour because of that drift.
+        # The VALUE lives only in the WASALT_PROXY_URL secret and must never be written here.
         purl = os.environ.get("WASALT_PROXY_URL", "").strip()
         if purl:
             proxies = {"http": purl, "https": purl}
