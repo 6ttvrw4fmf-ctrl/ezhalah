@@ -259,6 +259,88 @@ def population_probe(n: int, interval: float) -> dict[str, Any]:
     return out
 
 
+RETRY_DELAYS_S = [5, 15, 45, 120]
+
+
+def retry_probe(n: int, interval: float) -> dict[str, Any]:
+    """Is a shell response PERMANENT for an id, or does the same id render on a later attempt?
+
+    WHY THIS IS THE DECIDING QUESTION (2026-08-26, fourth iteration). --population held the runner
+    fixed and varied the client across all five clients, including the system curl binary:
+
+        A-prod-exact 78.3% | B-no-imp 78.3% | C-imp-no-hdrs 78.3% | D-imp-alt 78.3% | E-curl 83.3%
+        the SAME curl binary on the SAME 60 ids OFF-runner: 11.7%
+
+    so the client is exonerated and the egress is implicated. But the four curl_cffi variants
+    failed on EXACTLY 47 of 60 each -- identical counts, not a spread -- which says the failure is
+    DETERMINISTIC PER ID rather than a random per-request block. A per-id deterministic shell that
+    depends on which network you come from is the signature of an SSR/edge render that is COLD for
+    that id at that PoP, not of an anti-bot decision about who we are.
+
+    That distinction decides who owns the fix:
+      * recovers on a later attempt  -> a cold render. The fix is production's retry schedule
+                                        (currently 3 attempts, ~0.8s + ~1.6s apart -- likely far
+                                        too fast to outlast a cold render), which is a pure
+                                        scraper change and needs nobody's approval.
+      * never recovers, at any delay -> the shell is the real answer from this egress. Changing
+                                        egress is an owner provider decision, and this file will
+                                        say so rather than route around it.
+
+    Method: walk n ids with the production client, keep the ones that came back shell, then
+    re-request THOSE SAME ids after each delay in RETRY_DELAYS_S, reporting cumulative recovery.
+    A control group of ids that succeeded first time is re-probed at the end, so "everything works
+    later" cannot be mistaken for recovery when the site simply got healthier.
+    """
+    sess = build("A-prod-exact")
+    ids = sitemap_ids(sess, n)
+    if not ids:
+        return {"error": "could not read any ad ids from the sitemap"}
+
+    shells: list[str] = []
+    good: list[str] = []
+    for adid in ids:
+        (good if probe(sess, adid).get("schema_found") else shells).append(adid)
+        time.sleep(interval)
+
+    rounds: list[dict[str, Any]] = []
+    recovered: set[str] = set()
+    for delay in RETRY_DELAYS_S:
+        pending = [i for i in shells if i not in recovered]
+        if not pending:
+            break
+        time.sleep(delay)
+        for adid in pending:
+            if probe(sess, adid).get("schema_found"):
+                recovered.add(adid)
+            time.sleep(interval)
+        rounds.append({
+            "after_delay_s": delay,
+            "retried": len(pending),
+            "recovered_this_round": len(recovered) - (rounds[-1]["recovered_cumulative"] if rounds else 0),
+            "recovered_cumulative": len(recovered),
+        })
+
+    # Control: ids that worked first time must still work, or "recovery" is just the site healing.
+    ctl = good[:10]
+    ctl_ok = sum(1 for adid in ctl if probe(sess, adid).get("schema_found"))
+
+    return {
+        "ids_probed": len(ids),
+        "shell_first_pass": len(shells),
+        "schema_first_pass": len(good),
+        "rounds": rounds,
+        "recovered_total": len(recovered),
+        "recovered_pct_of_shells": round(100.0 * len(recovered) / len(shells), 1) if shells else None,
+        "control_first_pass_ok": f"{ctl_ok}/{len(ctl)}",
+        "reading": "Recovery on a later attempt means the shell is a COLD RENDER and the fix is "
+                   "production's retry schedule -- a scraper change, nobody's approval needed. "
+                   "Near-zero recovery at every delay means the shell is this egress's real "
+                   "answer, and changing egress is an OWNER provider decision. The control must "
+                   "stay near 10/10; if it collapses too, the site itself changed and the whole "
+                   "run is uninterpretable.",
+    }
+
+
 def volume_probe(n: int, interval: float) -> dict[str, Any]:
     """Walk N sitemap-published ids with the PRODUCTION client and report the shell rate by decile.
 
@@ -317,6 +399,14 @@ def main() -> int:
         interval = float(os.environ.get("PROBE_INTERVAL_S", "0.3"))
         print("=== DEAL APP POPULATION x CLIENT PROBE ===")
         print(json.dumps(population_probe(n, interval), indent=2, ensure_ascii=False))
+        return 0
+
+    if "--retry" in sys.argv:
+        i = sys.argv.index("--retry")
+        n = int(sys.argv[i + 1]) if len(sys.argv) > i + 1 else 60
+        interval = float(os.environ.get("PROBE_INTERVAL_S", "0.3"))
+        print("=== DEAL APP SHELL-PERMANENCE (RETRY) PROBE ===")
+        print(json.dumps(retry_probe(n, interval), indent=2, ensure_ascii=False))
         return 0
 
     if "--volume" in sys.argv:

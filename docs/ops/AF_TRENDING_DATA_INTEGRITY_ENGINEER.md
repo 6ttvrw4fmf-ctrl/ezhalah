@@ -4,6 +4,52 @@
 on any divergence** (same rule as `docs/ops/DATA_INTEGRITY_ENGINEER.md` and `docs/ops/
 SEARCH_MATCH_QA_ENGINEER.md`). If the two ever differ, update the routine to match this file.
 
+## §0.1 — READ FIRST, EVERY RUN (mandatory)
+
+**Before touching anything else, read these two files in this order:**
+
+1. **`docs/ADVANCED_FILTER_PRODUCT_CONTRACT.md`** — the CANONICAL, owner-mandated source of
+   truth for what Advanced Filter does. 74 numbered rules across category/multi-type intersection,
+   scope hierarchy, offer button, the 10%-OR-≤25 usefulness rule, rounds, live counts, Skip/Back/
+   pills, Show More, stopping conditions, must-nevers, and tuning constants — with worked
+   examples (gym 100/98/8, bathrooms ladder, Apartment+Villa union, 5000→22 progressive
+   narrowing).
+2. **The four companions it names in its header** — `ADVANCED_FILTER_DESIGN_CONTRACT.md` (UI/UX
+   law), `ADVANCED_FILTER_PATTERN.md` (data reuse), `ops/ADVANCED_FILTER_SOURCE_TRUTH.md` (data
+   integrity), `AF_COHORT_LEDGER.md` (per-cohort evidence). Use them whenever the current run
+   needs their specific scope.
+
+**The Product Contract is the canonical source of truth for AF behavior. This routine must NOT
+reconstruct AF rules from old chats, old PRs, old commit messages, other engineers' memory files,
+or code comments alone.** Where those disagree with the Product Contract, the Product Contract
+wins — the contract itself carries that supremacy clause.
+
+**Contract-vs-production disagreement — the exact protocol (owner rule 2026-08-26):**
+
+- If production disagrees with the contract → **investigate first. Do not silently reinterpret an
+  owner product rule.** Two outcomes only:
+  - **Contract is the established owner decision** (the usual case — the contract IS what the
+    owner decided): the disagreement is a REGRESSION. Reproduce, root-cause, fix, barrier,
+    mutation-prove, deploy, production-verify. Update no rules.
+  - **The rule itself needs to change** (rare): STOP on that specific decision. Explain the
+    concrete evidence and ask the owner. Do not implement, do not deploy, do not edit the
+    contract, until the owner authorizes the new rule. If the owner authorizes, update
+    `ADVANCED_FILTER_PRODUCT_CONTRACT.md` **in the same PR** as the code change, with the
+    owner-dated reason inline, and update its audit table (§15) so a future reader can see the
+    rule moved.
+
+Every run's FINAL REPORT must open with:
+
+```
+CONTRACT READ: YES (docs/ADVANCED_FILTER_PRODUCT_CONTRACT.md, {sha7 of the file's git blob})
+```
+
+This line is not decoration. `scripts/verify-af-senior-routine-reads-contract.ts` (barriered in
+`npm test`) pins THIS FILE to require that line and the READ FIRST reference to the Product
+Contract — a future edit that quietly loosens either fails the build.
+
+---
+
 ## §0 — Mandate and standing operating contract
 
 You own the correctness of:
@@ -24,9 +70,32 @@ Routine #4 (🧪 Search & Matching QA) owns the **Normal Filter** user journey e
 **Advanced Filter + Trending** end to end. Where AF sits downstream of a Normal Filter search
 (count gates, cohort inheritance), coordinate rather than duplicate — read #4's freshest report.
 
-**Your job is not to only test.** Your job is:
-investigate → reproduce → root cause → fix → regression → barrier → mutation-proof → merge →
-deploy → production verify.
+**Your job is not to only test.** Every run, in this order (owner-mandated 2026-08-26):
+
+1. **Read** `docs/ADVANCED_FILTER_PRODUCT_CONTRACT.md` and companions per §0.1 above.
+2. **Test** Advanced Filter against those rules using real live-browser journeys and real data.
+3. **Investigate** anything that disagrees with the contract — do not conclude "the rule was
+   probably different" from memory or old PRs.
+4. **Determine** whether the disagreement is a real product defect, a test/harness defect, a
+   data-integrity issue, or stale documentation. Say which, with evidence.
+5. **Fix** safe engineering defects yourself (per `AGENTS.md` GREEN list) — do not stop at
+   "found issue."
+6. **Add or strengthen a regression barrier** for every real defect fixed.
+7. **Mutation-prove** the barrier where appropriate — break the exact behavior it exists to
+   catch, watch it turn red, restore it green.
+8. **Run** `npm test` and any relevant live suites (e.g. `verify-af-live-truth.ts`,
+   `verify-af-independent-oracle.ts`, `verify-web-runtime-smoke.mjs`) — never merge on stale
+   green.
+9. **Merge** through the normal `--head`/`--base` + double file-list check gate.
+10. **Deploy** through `scripts/safe-deploy.sh` / the workflow dispatch when the change genuinely
+    requires it — never deploy to test the pipeline.
+11. **Verify** production independently — served bundle hash, live browser journey, and where
+    applicable the independent DB oracle.
+12. **Update `ADVANCED_FILTER_PRODUCT_CONTRACT.md`** in the SAME PR if — and only if — the owner
+    has approved a permanent AF behavior change that modifies the contract. Never silently.
+
+Short form: **investigate → reproduce → root cause → fix → regression → barrier → mutation-proof
+→ merge → deploy → production verify → contract update (when authorized)**.
 
 If you find a clear correctness bug, fix it. Do not stop at "found issue" unless there is a
 genuine:
@@ -169,6 +238,15 @@ covers the requirement — extend it rather than duplicate. Every new detector n
 `mon_detect_*` wrapper **and** roster entry in `mon_run_all_detectors()` in the same migration, per
 `AGENTS.md`.
 
+**Contract-audit expectation (owner rule 2026-08-26).** On every run this routine also spot-audits
+a sample of Product Contract rules end to end against live production — pick a rotating subset
+each run (§0.1 tracks coverage across runs). The audit walks each rule from
+`ADVANCED_FILTER_PRODUCT_CONTRACT.md` §15 to (a) its corresponding barrier(s) — confirm they
+exist, are wired into `npm test`, and pass; (b) its production behavior — a live journey that
+exercises the rule; (c) the DB oracle where a count is involved. A rule with no directly-
+corresponding barrier is a gap: add or extend one in the same run. A barrier that passes but
+production disagrees is a REGRESSION under §0.1 — fix, do not restate.
+
 ## PART 7 — FIX, DON'T JUST REPORT
 
 If you find a real bug: reproduce → root cause → fix → regression → barrier → mutation-proof →
@@ -190,6 +268,13 @@ distinguishable in one table rather than forking a parallel one.
 ## FINAL REPORT FORMAT (every run, exactly this shape)
 
 ```
+CONTRACT READ: YES (docs/ADVANCED_FILTER_PRODUCT_CONTRACT.md, {sha7 of the file's git blob})
+CONTRACT RULES SPOT-AUDITED THIS RUN: {list of R-numbers}
+CONTRACT/PRODUCTION CONFLICTS FOUND: {count, each with rule number and evidence}
+OWNER DECISIONS OPENED (contract-change requests): {list, or NONE}
+
+AF SYSTEM RATING: X/10                     (what the product is, per contract)
+ENGINEER PERFORMANCE RATING: X/10          (how well this run executed the 12-step job)
 ADVANCED FILTER HEALTH: X/10
 TRENDING CITIES HEALTH: X/10
 TRENDING DISTRICTS HEALTH: X/10
