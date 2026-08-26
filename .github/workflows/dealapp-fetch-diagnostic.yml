@@ -14,13 +14,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "variants (client-vs-network) | volume (sustained-load shell rate)"
+        description: "variants (4 fixed ids) | volume (shell rate by decile) | population (every client vs the SAME sitemap ids)"
         required: false
         default: "variants"
         type: choice
-        options: ["variants", "volume"]
+        options: ["variants", "volume", "population"]
       volume_ids:
-        description: "how many sitemap-published ids to walk in volume mode"
+        description: "how many sitemap-published ids to walk in volume/population mode"
         required: false
         default: "150"
       interval_s:
@@ -46,8 +46,8 @@ jobs:
         env:
           PROBE_INTERVAL_S: ${{ inputs.interval_s || '0.3' }}
         run: |
-          if [ "${{ inputs.mode || 'variants' }}" = "volume" ]; then
-            exec python -m scrapers.dealapp.diagnose_fetch --volume "${{ inputs.volume_ids || '150' }}"
-          else
-            exec python -m scrapers.dealapp.diagnose_fetch
-          fi
+          case "${{ inputs.mode || 'variants' }}" in
+            volume)     exec python -m scrapers.dealapp.diagnose_fetch --volume     "${{ inputs.volume_ids || '150' }}" ;;
+            population) exec python -m scrapers.dealapp.diagnose_fetch --population "${{ inputs.volume_ids || '150' }}" ;;
+            *)          exec python -m scrapers.dealapp.diagnose_fetch ;;
+          esac
