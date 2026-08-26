@@ -90,11 +90,50 @@ console.log('\n4) every workflow-scheduled live check can obtain an endpoint wit
   const referenced = new Set<string>();
   for (const f of readdirSync(wfDir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))) {
     const body = readFileSync(new URL(f, wfDir), 'utf8');
-    for (const m of body.matchAll(/scripts\/([A-Za-z0-9._-]*live[A-Za-z0-9._-]*\.ts)/g)) referenced.add(m[1]);
+    // `live` must be a HYPHEN/DOT-DELIMITED TOKEN, not a bare substring (2026-08-26).
+    // The old pattern was `[A-Za-z0-9._-]*live[A-Za-z0-9._-]*\.ts`, which matches "de-LIVE-ry":
+    // scripts/verify-alert-delivery-coverage.ts is a pure offline check with no Supabase call in
+    // it, and was flagged as a live check that must use resolvePublicSupabase(). Left alone this
+    // forces any future *delivery*/*deliverable* script to either take a misleading name or add
+    // dead network code to satisfy a barrier it has nothing to do with.
+    // Boundary chosen so every real live check still matches: verify-af-live-truth.ts,
+    // verify-count-rpc-parity-live.ts, verify-district-suggestion-parity-live.ts,
+    // verify-platform-diversity-live.ts, verify-recency-fallback-live.ts (all `-live`), and a
+    // future verify-live-*.ts (start of name). §4a below pins both directions.
+    for (const m of body.matchAll(/scripts\/((?:[A-Za-z0-9._-]*[.-])?live[A-Za-z0-9._-]*\.ts)/g)) referenced.add(m[1]);
   }
 
   if (referenced.size === 0) bad('live-check scripts discovered from workflows', 'found none — the discovery regex has drifted from the workflows');
   else ok(`discovered ${referenced.size} workflow-scheduled live check(s): ${[...referenced].join(', ')}`);
+
+  // §4a — pin the token boundary in BOTH directions (2026-08-26). A regex that quietly stops
+  // matching real live checks is the same failure this whole file exists to prevent, so widening
+  // it back to a bare substring and narrowing it past the real names must both be caught here.
+  {
+    const DISCOVER = /scripts\/((?:[A-Za-z0-9._-]*[.-])?live[A-Za-z0-9._-]*\.ts)/g;
+    const hit = (s: string) => { DISCOVER.lastIndex = 0; return DISCOVER.test(`scripts/${s}`); };
+    const MUST_MATCH = [
+      'verify-af-live-truth.ts',
+      'verify-count-rpc-parity-live.ts',
+      'verify-district-suggestion-parity-live.ts',
+      'verify-platform-diversity-live.ts',
+      'verify-recency-fallback-live.ts',
+      'live-check.ts',
+    ];
+    const MUST_NOT_MATCH = [
+      'verify-alert-delivery-coverage.ts', // "de-LIVE-ry": the 2026-08-26 false positive
+      'verify-deliverable-report.ts',
+      'verify-oblivest.ts',
+    ];
+    for (const n of MUST_MATCH) {
+      if (hit(n)) ok(`§4a discovery still matches real live check ${n}`);
+      else bad(`§4a discovery no longer matches ${n}`, 'the regex was narrowed too far — a real live check would go unchecked');
+    }
+    for (const n of MUST_NOT_MATCH) {
+      if (!hit(n)) ok(`§4a discovery correctly ignores ${n}`);
+      else bad(`§4a discovery falsely matches ${n}`, '"live" is being matched as a bare substring again, not as a name token');
+    }
+  }
 
   for (const script of [...referenced].sort()) {
     let src: string;
