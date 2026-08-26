@@ -692,17 +692,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // LOCAL_TRANSCRIPT_ENTRIES, server for all — see the persistence + sync effects). `ts` is
       // deliberately NOT bumped: revealing more cards or a receipt landing is not a new search, and
       // resorting the sidebar on it would surprise; `tRev` alone tells sync the transcript moved.
-      saveTranscript: (id, transcript) =>
+      saveTranscript: (id, transcript) => {
+        // DIRECT disk write FIRST, from the ref — setState updaters are not guaranteed to run
+        // during a page unload, and the flush-on-exit path (agent.tsx pagehide) depends on this
+        // landing synchronously. The setHistory below is the same write into React state; both are
+        // idempotent, and the in-state updater's own disk write simply repeats this one.
+        const tRev = Date.now();
+        if (user) try {
+          const cur = historyRef.current;
+          const idx0 = cur.findIndex((it) => it.id === id);
+          if (idx0 >= 0 && typeof localStorage !== 'undefined') {
+            const direct = cur.slice();
+            direct[idx0] = { ...cur[idx0], transcript, tRev };
+            localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(direct));
+          }
+        } catch {}
         setHistory((h) => {
           const idx = h.findIndex((it) => it.id === id);
           if (idx < 0) return h;
           const next = h.slice();
-          next[idx] = { ...h[idx], transcript, tRev: Date.now() };
+          next[idx] = { ...h[idx], transcript, tRev };
           if (user) try {
             if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));
           } catch {}
           return next;
-        }),
+        });
+      },
       // Transcript pruned locally (older than LOCAL_TRANSCRIPT_ENTRIES) or absent on this device —
       // pull the server's copy, validate it, attach it. Returns null when the server has none
       // either (legacy chat) so the caller can fall back to the snapshot/replay path.

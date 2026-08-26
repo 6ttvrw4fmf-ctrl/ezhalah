@@ -73,7 +73,7 @@ const tap = async (txt, wait = 900) => {
   return false;
 };
 const body = () => page.innerText('body');
-const counts = async () => (await body()).match(/لقينا [\d,٬،]+ إعلان/g) ?? [];
+const counts = async () => (await body()).match(/لقينا [\d,٬،]+ إعلان يطابق طلبك\./g) ?? [];
 const waitFor = async (fn, ms = 45000) => { const u = Date.now() + ms; while (Date.now() < u) { if (await fn()) return true; await page.waitForTimeout(400); } return false; };
 
 let failed = 0;
@@ -101,11 +101,49 @@ const narrow = page.locator('[data-testid="results-narrow"]');
 check('narrow CTA renders on the newest turn', await waitFor(async () => (await narrow.count()) > 0 && await narrow.first().isVisible(), 20000));
 await narrow.first().click(); await page.waitForTimeout(2500);
 const afCard = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-testid="af-card"]')).some((e) => e.offsetParent !== null));
+// Answer the currently-visible AF question FOR REAL: the card animates in, so a click fired too
+// early lands nowhere and the confirm becomes a silent skip (found live — a whole round became
+// skips and the "narrowed" turn kept the same count). Click the first option, PROVE the selection
+// registered (the confirm label's live count reacts to a real selection), retry once, then confirm.
+const answerVisibleAfQuestion = async () => {
+  await page.waitForTimeout(1200); // let the card fully land before measuring anything
+  // Raw coordinate clicks (the CLICK_LEAF pattern) — Playwright's locator.click() actionability
+  // dance raced the card's entrance animation and sometimes landed nowhere, turning the whole
+  // round into silent skips. Coordinates measured at click time cannot go stale the same way.
+  const centerOf = async (sel) => await page.evaluate((q) => {
+    const el = Array.from(document.querySelectorAll(q)).find((e) => e.offsetParent !== null);
+    if (!el) return null;
+    el.scrollIntoView({ block: 'center' });
+    const r = el.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }, sel);
+  const optBox = await centerOf('[data-testid^="af-option-"]');
+  if (!optBox) return false;
+  const confirmText = async () => await page.evaluate(() => {
+    const el = Array.from(document.querySelectorAll('[data-testid="af-confirm"]')).find((e) => e.offsetParent !== null);
+    return (el?.textContent ?? '').trim();
+  });
+  // The card animates in: an empty→anything transition must NOT count as "the selection
+  // registered" (that exact race made every answer a silent skip). Wait for a REAL, stable
+  // confirm label first, then demand a change away from that non-empty value.
+  await waitFor(async () => /·/.test(await confirmText()), 8000);
+  for (let tries = 0; tries < 2; tries++) {
+    const before = await confirmText();
+    await page.mouse.click(optBox.x, optBox.y);
+    const changed = await waitFor(async () => { const t = await confirmText(); return t !== before && /·/.test(t); }, 5000);
+    if (changed) break;
+  }
+  const cBox = await centerOf('[data-testid="af-confirm"]');
+  if (cBox) await page.mouse.click(cBox.x, cBox.y);
+  await page.waitForTimeout(2500);
+  return true;
+};
+// If a round is somehow still open after the answer loop, «عرض النتائج» commits what is selected
+// and finishes the round — the journey must always land a turn rather than hang on an open card.
+const closeRoundIfOpen = async () => { if (await afCard()) { await tap('عرض النتائج', 1500); } };
 check('AF opens', await waitFor(afCard, 15000));
 // answer the first visible option then confirm
-const opt = page.locator('[data-testid^="af-option-"]:visible').first();
-await opt.click(); await page.waitForTimeout(400);
-await page.locator('[data-testid="af-confirm"]:visible').first().click(); await page.waitForTimeout(3000);
+await answerVisibleAfQuestion();
 check('AF round lands a second (narrowed) count', await waitFor(async () => (await counts()).length >= 2));
 const bothCounts = await counts();
 console.log('  counts on screen:', JSON.stringify(bothCounts));
@@ -122,7 +160,7 @@ check('new chat is blank (no counts)', (await counts()).length === 0);
 // («مصانع للإيجار في الرياض · شارع 15م+» once street-width committed). Target that exact row.
 const clickFirstChat = async () => await page.evaluate(() => {
   const leaves = Array.from(document.querySelectorAll('div,span'))
-    .filter((e) => e.children.length === 0 && /شارع 15م\+/.test((e.innerText || '').trim()));
+    .filter((e) => e.children.length === 0 && /شارع \d+م\+/.test((e.innerText || '').trim()));
   const vis = leaves.find((e) => e.getBoundingClientRect().width > 0);
   if (!vis) return null;
   const r = vis.getBoundingClientRect();
@@ -179,6 +217,149 @@ const inFavorites = await page.evaluate(() => {
 check('drag-to-Favorites: المفضلة section now exists (row starred by drag)', inFavorites);
 await page.reload({ waitUntil: 'domcontentloaded' }); await page.waitForTimeout(4000);
 check('star survives a refresh', (await body()).includes('المفضلة'));
+
+// ═══ PART 2 (owner 2026-08-26): EVERYTHING inside one chat stays in ONE transcript, in order ═══
+// Show More, multiple AF rounds, change-answer (pill removal), receipts, later turns — then the
+// flush proof (leave the chat the INSTANT a turn lands) and delete-chat server deletion.
+const restHeaders = { apikey: 'sb_publishable_vXzwxdpfrzmbwtbR5aXcKA_cMUO8hVB', Authorization: `Bearer ${SESSION.access_token}` };
+const serverChatIds = async () => {
+  const r = await fetch('https://aannarbkwcymrotzwdbo.supabase.co/rest/v1/user_chats?select=id', { headers: restHeaders });
+  return (await r.json()).map((x) => x.id);
+};
+
+await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(4000);
+// Rich cohort (multiple certified AF questions): Apartment / Annual Rent / Riyadh.
+await tap('إيجار'); await tap('شراء');
+await page.locator('[data-testid="city-input"]').click(); await page.keyboard.type('الرياض', { delay: 40 }); await page.waitForTimeout(2000);
+await tap('الرياض');
+await tap('الشقق والسكن المشترك'); await page.waitForTimeout(300);
+await tap('شقة'); await page.waitForTimeout(300);
+await tap('بحث');
+check('P2: rich search lands', await waitFor(async () => (await counts()).length >= 1));
+const cardCount = async () => await page.evaluate(() => document.body.innerText.match(/مستضاف على/g)?.length ?? 0);
+await waitFor(async () => (await cardCount()) >= 10, 20000);
+
+// SHOW MORE — reveal a second page; the transcript must keep it.
+const before = await cardCount();
+await page.locator('[data-testid="results-load-more"]:visible').first().click();
+check('P2: Show More reveals more cards', await waitFor(async () => (await cardCount()) > before, 30000));
+const afterMore = await cardCount();
+await page.waitForTimeout(2500);
+
+// AF ROUND 1 — answer every question the round asks (cap 4), through to the narrowed turn.
+await page.locator('[data-testid="results-narrow"]:visible').first().click();
+check('P2: AF round 1 opens', await waitFor(afCard, 15000));
+for (let i = 0; i < 5 && (await afCard()); i++) {
+  if (!(await answerVisibleAfQuestion())) break;
+}
+await closeRoundIfOpen();
+check('P2: round 1 lands a narrowed turn + receipt', await waitFor(async () => (await counts()).length >= 2 && (await page.locator('[data-testid="af-round-receipt"]').count()) >= 1, 60000));
+const countsAfterR1 = await counts();
+
+// CHANGE-ANSWER — remove the first committed pill; a NEW turn must land BELOW (never rewrite above).
+const pill = page.locator('[data-testid^="af-pill-"]:visible').first();
+check('P2: committed answers render as removable pills', await waitFor(async () => (await pill.count()) > 0, 30000));
+if ((await pill.count()) > 0) {
+  await pill.click();
+  check('P2: change-answer lands a NEW turn below (transcript grows, order preserved)',
+    await waitFor(async () => (await counts()).length >= countsAfterR1.length + 1, 45000));
+}
+await page.waitForTimeout(2500);
+
+// AF ROUND 2 — if the offer gate still finds narrowing value, run a second round.
+let round2 = false;
+if (await page.locator('[data-testid="results-narrow"]:visible').count()) {
+  await page.locator('[data-testid="results-narrow"]:visible').first().click();
+  if (await waitFor(afCard, 12000)) {
+    round2 = true;
+    for (let i = 0; i < 5 && (await afCard()); i++) {
+      if (!(await answerVisibleAfQuestion())) break;
+    }
+    await closeRoundIfOpen();
+    await waitFor(async () => !(await afCard()), 20000);
+  }
+}
+console.log('  round 2 ran:', round2);
+await page.waitForTimeout(4000); // let the final capture + sync land normally before the snapshot
+const fullCounts = await counts();
+const fullReceipts = await page.locator('[data-testid="af-round-receipt"]').count();
+console.log('  final turn count sequence:', JSON.stringify(fullCounts), '| receipts:', fullReceipts);
+
+// FLUSH PROOF — do ONE more mutating action and leave the chat IMMEDIATELY (inside the 600ms
+// debounce): Show More again, then New Chat the moment the cards start growing.
+const preFlush = await cardCount();
+if (await page.locator('[data-testid="results-load-more"]:visible').count()) {
+  await page.locator('[data-testid="results-load-more"]:visible').first().click();
+  await waitFor(async () => (await cardCount()) > preFlush, 30000);
+  await tap('محادثة جديدة', 300); // ← leave within the debounce window
+}
+await page.waitForTimeout(2000);
+
+// RETURN — everything, in order.
+const openRich = async () => {
+  const b = await page.evaluate(() => {
+    const leaves = Array.from(document.querySelectorAll('div,span'))
+      .filter((e) => e.children.length === 0 && /شقق للإيجار في الرياض/.test((e.innerText || '').trim()));
+    const vis = leaves.find((e) => e.getBoundingClientRect().width > 0);
+    if (!vis) return null;
+    const r = vis.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  if (b) { await page.mouse.click(b.x, b.y); await page.waitForTimeout(3500); }
+  return !!b;
+};
+check('P2: sidebar shows the rich chat (ONE entry despite Show More + rounds + change-answer)', await openRich());
+const assertFull = async (tag) => {
+  const cs = await counts();
+  if (cs.length !== fullCounts.length) console.log(`  [${tag}] restored sequence:`, JSON.stringify(cs));
+  check(`P2 [${tag}] every turn present IN ORDER (${fullCounts.length} counts)`, cs.length === fullCounts.length && cs.every((c, i) => c === fullCounts[i]));
+  check(`P2 [${tag}] all round receipts present (${fullReceipts})`, (await page.locator('[data-testid="af-round-receipt"]').count()) === fullReceipts);
+  check(`P2 [${tag}] Show More pages survived (cards >= ${Math.min(afterMore, 60)})`, (await cardCount()) >= Math.min(afterMore, 20));
+};
+await assertFull('return');
+await page.reload({ waitUntil: 'domcontentloaded' }); await page.waitForTimeout(5000);
+check('P2: after refresh sidebar still lists the chat', await openRich());
+await assertFull('refresh');
+await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('history:')) localStorage.removeItem(k); });
+await page.reload({ waitUntil: 'domcontentloaded' }); await page.waitForTimeout(6000);
+check('P2: after local wipe the chat returns from the server', await openRich());
+await assertFull('server');
+
+// DELETE-CHAT — the SERVER row (meta AND transcript) must go, not just the sidebar entry.
+const idsBefore = await serverChatIds();
+check('P2: server holds the chats before deletion', idsBefore.length >= 1);
+// hover the row to expose ⋯, open the menu, hit Delete (حذف)
+const rowPos = await page.evaluate(() => {
+  const leaves = Array.from(document.querySelectorAll('div,span'))
+    .filter((e) => e.children.length === 0 && /شقق للإيجار في الرياض/.test((e.innerText || '').trim()));
+  const vis = leaves.find((e) => e.getBoundingClientRect().width > 0);
+  if (!vis) return null;
+  const r = vis.getBoundingClientRect();
+  return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+});
+let deleted = false;
+if (rowPos) {
+  await page.mouse.move(rowPos.x, rowPos.y); await page.waitForTimeout(400);
+  const dots = await page.evaluate(([x, y]) => {
+    const els = Array.from(document.querySelectorAll('div,span')).filter((e) => {
+      const r = e.getBoundingClientRect();
+      return Math.abs(r.y + r.height / 2 - y) < 16 && r.x > x && r.width > 0 && r.width < 40;
+    });
+    const last = els[els.length - 1];
+    if (!last) return null;
+    const r = last.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }, [rowPos.x, rowPos.y]);
+  if (dots) {
+    await page.mouse.click(dots.x, dots.y); await page.waitForTimeout(600);
+    deleted = await tap('حذف', 600);
+  }
+}
+check('P2: delete control reached', deleted);
+await page.waitForTimeout(4000); // debounce (1.2s) + network
+const idsAfter = await serverChatIds();
+check('P2: deleting the chat removed its SERVER row (full transcript gone, not just the sidebar entry)', idsAfter.length === idsBefore.length - 1);
+console.log('  server ids before/after:', idsBefore.length, '→', idsAfter.length);
 
 console.log(failed ? `\n✗ ${failed} FAILED` : '\n✓ ALL E2E CHECKS PASSED');
 await browser.close();
