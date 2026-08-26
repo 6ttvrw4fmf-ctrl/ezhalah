@@ -766,7 +766,7 @@ def prune_unseen(
     min_coverage: Optional[float] = None,
     shards: int = 1,
     shard: int = 0,
-    verify_gone: Optional[Callable[[str], str]] = None,
+    verify_gone: Optional[Callable[[str], Any]] = None,
 ) -> int:
     """Age out active rows whose ad_number wasn't seen this crawl — CONSERVATIVELY.
 
@@ -828,6 +828,14 @@ def prune_unseen(
     A caller that passes no `verify_gone` keeps the previous behaviour byte-for-byte, so this is
     opt-in per platform and only for platforms with a control-validated oracle.
 
+    THE ORACLE MAY ALSO STATE ITS REASON (2026-08-26). `verify_gone` may return either a bare
+    verdict string or a `(verdict, reason)` pair; the reason is persisted to
+    `ops_stale_inactivation_probe.note`. Recording only the verdict makes a kill unfalsifiable from
+    the record: on 2026-08-26 the aqarcity oracle was found mapping "real id but unparseable page"
+    to 'gone', and deciding whether 254 same-day deactivations were correct needed a by-hand
+    re-probe of the live source, because nothing stored said WHICH condition had fired. Every
+    probed row now leaves an evidence row — UNKNOWN/held included, which previously wrote none.
+
     Returns the number of rows actually DEACTIVATED this run (0 when misses were only counted),
     or -1 when a circuit breaker tripped and nothing was changed, so the caller can flag the
     run degraded.
@@ -871,12 +879,23 @@ def prune_unseen(
             # Only rows about to be deactivated are probed — a strike that is merely ticking up
             # costs nothing and needs no network call.
             confirmed_gone, still_live = [], []
+            why: dict[str, str] = {}   # ad_number → the oracle's stated REASON, recorded as evidence
             for ad in ads:
                 try:
-                    verdict = (verify_gone(ad) or "unknown").lower()
+                    got = verify_gone(ad)
+                    # An oracle may return "gone" or ("gone", "why"). The reason is what makes a
+                    # kill auditable after the fact: on 2026-08-26 the evidence rows recorded only
+                    # WHICH verdict was reached, never WHY, so establishing whether a deactivation
+                    # was correct required re-probing the live source by hand.
+                    if isinstance(got, (tuple, list)):
+                        verdict = (got[0] or "unknown").lower()
+                        note = str(got[1]) if len(got) > 1 and got[1] else ""
+                    else:
+                        verdict, note = (got or "unknown").lower(), ""
                 except Exception as e:  # an oracle that throws is UNKNOWN, never "gone"
                     print(f"{table}: verify_gone({ad}) raised {type(e).__name__}: {e} → unknown")
-                    verdict = "unknown"
+                    verdict, note = "unknown", f"oracle raised {type(e).__name__}: {e}"
+                why[ad] = note
                 if verdict == "gone":
                     confirmed_gone.append(ad)
                 elif verdict == "live":
@@ -902,11 +921,20 @@ def prune_unseen(
             # this: a deactivation on an oracle-required platform with no matching GONE row is a P1.
             # Monitoring must never fail the prune itself — the rows are written either way.
             try:
+                decided = set(confirmed_gone) | set(still_live)
                 evidence = (
                     [{"source_table": table, "ad_number": a, "verdict": "GONE",
-                      "oracle": "prune_unseen.verify_gone", "listing_url": ""} for a in confirmed_gone]
+                      "oracle": "prune_unseen.verify_gone", "listing_url": "",
+                      "note": why.get(a) or ""} for a in confirmed_gone]
                     + [{"source_table": table, "ad_number": a, "verdict": "LIVE",
-                        "oracle": "prune_unseen.verify_gone", "listing_url": ""} for a in still_live]
+                        "oracle": "prune_unseen.verify_gone", "listing_url": "",
+                        "note": why.get(a) or ""} for a in still_live]
+                    # UNKNOWN rows were previously written nowhere at all, so "the oracle could not
+                    # decide" left no trace and was indistinguishable from "the probe never ran".
+                    # A held strike is the outcome §26 most wants to be able to audit.
+                    + [{"source_table": table, "ad_number": a, "verdict": "UNKNOWN",
+                        "oracle": "prune_unseen.verify_gone", "listing_url": "",
+                        "note": why.get(a) or ""} for a in ads if a not in decided]
                 )
                 for i in range(0, len(evidence), 200):
                     _execute(c.table("ops_stale_inactivation_probe").insert(evidence[i:i + 200]),
