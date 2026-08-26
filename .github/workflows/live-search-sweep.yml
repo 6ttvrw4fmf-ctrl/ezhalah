@@ -1,0 +1,73 @@
+# LIVE SEARCH & MATCHING SWEEP — drives PRODUCTION like a real user, on a schedule.
+#
+# WHY THIS IS SEPARATE FROM `npm test`. The 16 static barriers added by the 2026-08-23 hardening pass
+# read source and query the database. They are blind in exactly the place users live: they cannot see
+# what a browser RENDERS. Every defect in the 2026-08-22 hunt — a city silently re-scoped to a
+# neighbourhood, an Advanced-Filter chip promising 8,914 and landing on 2,364, the RPC page cap quoted
+# as a match total, a district visible in the field but never searched — passed `npm test` and was
+# obvious within seconds of driving the real site. So the browser sweep is a PERMANENT second layer of
+# the Senior Search & Matching routine (docs/ops/SEARCH_MATCH_QA_ENGINEER.md §40), not a one-off hunt.
+#
+# WHAT A RUN PROVES. Per journey it captures all six layers and fails on any mismatch between
+# adjacent ones: intent → visible UI → actual request → RPC result → INDEPENDENT DB truth → rendered
+# results. Coverage rotates from ops_qa_coverage_ledger (stalest first) so runs never pile up on
+# Riyadh, and the owner's minimum floors are ASSERTED — a run that quietly covers less than the floor
+# fails, because silent shrinkage is how a rotation system rots.
+#
+# READ-ONLY against the app and the anon key only (repo rule: verify via the anon key, never the
+# service role). The only writes are QA bookkeeping via ops_qa_record_coverage.
+#
+# WHEN THIS JOB IS RED: the sweep found a real, user-visible defect. Treat it as the routine does —
+# reproduce → root cause → fix → regression → barrier → mutation-proof → merge → deploy → re-test.
+# Never close it by loosening the sweep.
+
+name: Live Search & Matching sweep (production)
+
+on:
+  schedule:
+    - cron: '23 2 * * *'   # daily, offset off the hour and away from the cleanup/sweep crons
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Target to sweep (defaults to production)'
+        required: false
+        default: 'https://ezhalah-app.vercel.app'
+      only:
+        description: 'Optional single journey kind (debugging)'
+        required: false
+        default: ''
+
+concurrency:
+  group: live-search-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Drive production like a real user
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url || 'https://ezhalah-app.vercel.app' }}
+          SWEEP_ONLY: ${{ github.event.inputs.only }}
+          SWEEP_OUT: ${{ runner.temp }}/live-sweep
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node e2e/live-sweep/run.mjs
+      - name: Upload the journey journal
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-sweep-journal
+          path: ${{ runner.temp }}/live-sweep
+          if-no-files-found: ignore
+          retention-days: 14

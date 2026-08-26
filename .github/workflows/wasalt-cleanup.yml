@@ -1,10 +1,35 @@
-# Wasalt cleanup — weekly hard-delete of rows inactive for >30 days. Same script as Aqar,
-# parameterised by table. No proxy needed (DB-only operation).
-
+# Weekly Wasalt retention cleanup via the unified engine (scrapers/common/cleanup.py).
+#
+# MIGRATED 2026-08-22 (owner-directed safety audit) from the legacy scrapers/aqar/cleanup.py (shared
+# with aqar), which hard-deleted on missing_count>=3 + 30-day age ALONE — no final live re-check
+# before deleting, no anomaly/spike circuit breaker, no fraction-of-platform guard, no per-row audit
+# trail. Same filename, same pg_cron schedule (gh-wasalt-cleanup, Sun 02:30 UTC), same 30-day/
+# 3-strike thresholds — this only adds the safety layers the legacy script never had. wasalt has been
+# registered in the unified engine with a working dead-marker check since 2026-07-27; this migration
+# just turns it on (platform_retention_policy.enabled, see the paired migration).
+#
+# Honors the wasalt platform_retention_policy row. Deletes a listing ONLY after re-fetching its real
+# wasalt URL (through the same proxy the liveness sweep uses) and confirming a dead marker
+# (404/410/"ad removed" text) — a live 200 is never deleted, it is reactivated (self-heal). A run
+# whose eligible population spikes past the anomaly or fraction-of-platform threshold ABORTS and
+# deletes nothing, raising a P1 (mon_detect_deletion_spike). This is the SAME circuit breaker that
+# would catch a wasalt proxy-block event before it could delete anything — see cleanup.py's
+# eligible_total > anomaly threshold gate.
+#
+# REQUIRED FIRST RUN: dispatch manually with dry_run=true and review the report BEFORE letting the
+# next scheduled Sunday run go live. Do not skip this — see the PR this workflow shipped in.
 name: Wasalt cleanup
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true = probe + classify + report, delete NOTHING (use this before any first real run)"
+        required: false
+        # MUST default to "false": the weekly pg_cron trigger (gh-wasalt-cleanup) dispatches with NO
+        # inputs, so the default is what the scheduled job gets. Defaulting to "true" here would
+        # silently turn the real weekly cleanup into a no-op.
+        default: "false"
 
 concurrency:
   group: wasalt-cleanup
@@ -12,15 +37,8 @@ concurrency:
 
 jobs:
   cleanup:
-    name: Cleanup ${{ matrix.table }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        table:
-          - wasalt_residential_listings
-          - wasalt_commercial_listings
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,8 +48,11 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
-      - name: Run cleanup (${{ matrix.table }})
+      - name: Run wasalt cleanup
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: exec python -m scrapers.aqar.cleanup --table ${{ matrix.table }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+        run: |
+          exec python -m scrapers.common.cleanup --platform wasalt \
+            ${{ inputs.dry_run == 'true' && '--dry-run' || '' }}

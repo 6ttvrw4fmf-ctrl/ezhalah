@@ -277,10 +277,42 @@ language / units / currency / theme toggle (Arabic-only, SAR-only).
 ### 7.4 Sidebar (`src/components/Sidebar.tsx`)
 
 Docked column (web ≥ 900px) or slide-in drawer (mobile), pinned LTR in both languages. Signed-in: brand,
-**New Chat** (→ Filter Home, `fresh` param), **search/chat history** grouped **Starred** (forever) +
-**Recent** (60 days) with per-row Star/Delete and active-chat highlight, then Settings / Support / About
-/ profile row. Guest: brand + Sign up / Log in + nav links. History rows replay a past search's filter
-into `/agent`.
+**New Chat** (→ Filter Home, `fresh` param), **search/chat history** grouped **المفضلة/Favorites**
+(starred, forever) + **Recent** (60 days) with per-row Star/Delete and active-chat highlight, then
+Settings / Support / About / profile row. Guest: brand + Sign up / Log in + nav links. Every history
+row opens through the transcript-restore path (§7.4b).
+
+**Drag-to-Favorites (owner 2026-08-25).** Carrying a Recent row up past the top of its bucket (>0.65
+rows beyond the edge — `dragCrossIntent`/`applyStarMove` in `src/lib/sidebarReorder.ts`) stars it;
+carrying a Starred row down past its bucket bottom unstars. At-the-edge drops stay position-only
+reorders; an empty Favorites section renders its header as a drop target during a drag and the target
+section glows while crossing. This deliberately supersedes the 2026-08-24 "drag never changes Starred"
+rule for this one gesture; the ⋯-menu Star stays the tap path. Barrier:
+`scripts/verify-sidebar-drag-star.ts` (pure rules executed + wiring pinned).
+
+### 7.4b Full-conversation persistence (owner 2026-08-25, PERMANENT — «like ChatGPT»)
+
+**A chat is the CONVERSATION, not the query.** Returning to a saved chat renders EXACTLY the
+conversation the user left — every bubble, every results turn with the cards they had revealed
+(«عرض المزيد» pages included), every Advanced Filter round's receipt and the cumulative pills — and it
+survives refresh, browser close, and logging back in on any device. Not a reconstruction: the
+transcript IS the rendered `msgs` state, captured after each settled turn (`serializeChat`,
+`src/lib/chatTranscript.ts`) and restored verbatim (`openSaved` in `agent.tsx`); live actions keep
+operating on the restored turns' own embedded queries and paging state.
+
+- **Conversation identity:** `agent.tsx` owns `chatIdRef`; every recorded turn passes it and
+  `recordHistory(q, result, chatId)` updates that one entry. Query-dedupe applies only to
+  transcript-less legacy entries — a chat holding a conversation is never overwritten by a lookalike
+  search (a repeat starts its own new chat, exactly like ChatGPT). Before this, each AF round's
+  narrowed query minted a separate sidebar entry and the conversation was scattered/lost.
+- **Storage tiers:** memory (all chats, in-session) → localStorage (transcripts on the
+  `LOCAL_TRANSCRIPT_ENTRIES` most recently active chats, pruned only at the serialization boundary) →
+  **`public.user_chats`** (all chats: `meta` jsonb + `transcript` jsonb, RLS `auth.uid()`, FK
+  `auth.users ON DELETE CASCADE` so account deletion wipes conversations — PDPL). Pull merges metas
+  after sign-in (newer per-entry stamp wins); push is debounced write-through; transcripts hydrate
+  lazily on open (`hydrateTranscript`). Guests stay session-only (owner 2026-08-20, unchanged).
+- Barrier: `scripts/verify-chat-persistence.ts` (pure contract executed + identity + sync + RLS
+  pins, mutation-proven). Live proof: `scripts/verify-chat-persistence-live.mjs`.
 
 ### 7.5 In-app browser (`src/app/browser.tsx`)
 
@@ -647,6 +679,81 @@ used to end on.
   Gathern's pre-annualized price is a tracked open item, §21.)
 - **Room = 1 bedroom** strict (see §4.4).
 
+### 17a. Buy+Rent combined multi-select (owner feature, 2026-08-20)
+
+**PERMANENT PRODUCT RULE, in the owner's own words: "When شراء + إيجار are selected together, the
+user accepts either Buy or Rent; the Rent side accepts both Annual and Monthly. Match every other
+requirement first, then diversify only within the valid combined set."** This is the exact same
+"preference boundary, never a ranking/balancing target" principle §17's mixed-period rule already
+established, extended one more dimension (Deal ∪ Period, not just Period). Read that rule first —
+everything below is its Deal-axis mirror, not a new philosophy.
+
+- `query.deal: Deal` stays `'Buy'|'Rent'` — **never** widened to a 3rd value. The Filter UI shows only
+  two independent toggle buttons (no third "both" button, mirroring سنوي+شهري exactly); selecting
+  BOTH sets the orthogonal `query.dealCombined?: boolean` flag instead. `deal` itself keeps the last
+  concrete button pressed (used only as a tie-break/fallback for UI text) — every search/count/
+  Advanced-Filter/Trending call site must check `dealCombined` **first**, before branching on `deal`.
+  Frontend derives a single `effDeal = dealCombined ? null : deal` (src/app/index.tsx) and threads
+  it through every Trending/pool call instead of `deal` directly (`src/data/locations.ts`'s ten pool
+  functions all accept `Deal | null`).
+- **NOT the same field as `bothDeals`** (an AI-chat-ONLY fallback for when the agent can't tell
+  Buy from Rent from free text — client-side post-filter only, one flat unshared price cap, no
+  Advanced Filter/Trending integration, and deliberately excluded from Filter-history restoration —
+  see `sanitizeForFilterRestore`'s `bothDeals` comment, §7). `dealCombined` is the opposite: a
+  first-class Filter-UI field with full backend wiring that **is** restored from Filter history.
+- **Meaning: eligible set = Buy ∪ Annual Rent ∪ Monthly Rent.** Backend: `p_deal=null` AND
+  `p_rent_period=null` together — `af_eligibility_clause()`'s existing `(p_deal IS NULL OR
+  s.deal_ar = p_deal)` and period-OR predicates already produced this union with **zero changes**
+  (verified live: combined=29,354 = buy(10,584)+rent-any-period(18,844) exactly, PR#817). The
+  combined-mode Rent side has **no period selector** — the UI hides سنوي/شهري entirely under
+  `dealCombined` and the RPC gets no period filter at all (broader than `'كلاهما'`: it also admits
+  unpublished-period rent rows, matching how Buy has always worked).
+- **Two INDEPENDENT price ranges, never one shared/naive range** (owner decision, asked and
+  answered via the price-semantics fork §17's own "stop and ask" clause anticipates). `priceMin`/
+  `priceMax` stay the Buy budget (`price_total`) — byte-identical meaning to every existing
+  single-deal call shape, zero regression. New `priceMinRent`/`priceMaxRent` are the Rent budget
+  (`price_annual`, annual basis — reusing the already-shipped `rentPeriod==='both'` precedent
+  verbatim) and map to new RPC params `p_price_min_rent`/`p_price_max_rent`, sent only when
+  `dealCombined` is true; every single-deal RPC call shape is unchanged (these two params default
+  NULL and are ignored whenever `p_deal` is not null). Toggling Buy/Rent clears `priceMin`/
+  `priceMax` exactly when a press flips WHICH deal that pair prices (Buy-only↔Rent-only, or
+  Rent-only↔Both) — never when the meaning stays the same (Buy-only↔Both keeps meaning Buy budget) —
+  same "clear + explain" precedent as the period toggle, upgraded to be meaning-aware rather than an
+  unconditional clear-on-every-press.
+- **Advanced Filter: 3-way intersection, never union** — `cohortAllowsCombined()` in
+  `src/data/advancedFilters.ts` requires a question id to be independently certified in ALL THREE of
+  a cohort's `Buy`, `RentAnnual`, AND `RentMonthly` lists (the exact `COHORT_QUESTIONS` ledger §17's
+  mixed-period fix already uses, extended one leg — zero new data-profiling work). This mechanically
+  excludes Buy-only questions (fail the Rent legs), Rent-only questions like `rnpl` (never in any
+  cohort's Buy list), and Monthly-only signals like Gathern `rating`/`unit_subtype` (never in Buy or
+  RentAnnual). A type with no certified Monthly cohort (most commercial/rural types) mechanically
+  offers zero combined-mode questions. `property_age` (`AGE_QUESTION`) has its own separate gate
+  (`isAgeFilterScope` in `src/lib/ageFilterTypes.ts`, never profiled against Monthly for any type)
+  that also excludes `dealCombined` unconditionally — fixing `cohortAllows` alone would have left
+  this exact leak open a second time, same as the mixed-period fix needed. Barrier:
+  `scripts/verify-buy-rent-combined-af-gating.ts` (npm test, 10 checks).
+- **Trending mirrors the same combined scope.** `top_cities_by_deal_ar`/`district_options_ar` under
+  `p_deal=null` return the Buy∪Rent(any period) eligible set — `top_cities_by_deal_ar` needed a
+  null-safety fix first (it had a hard `s.deal_ar = p_deal` equality that NULL can never satisfy,
+  which would have silently returned ZERO combined-mode trending cities; `district_options_ar` was
+  already null-safe). Live-verified: combined trending rows = 380 (was 0 before the fix).
+- **Barriers (mutation-proven live, PR#817):** `mon_detect_buy_rent_combined_exactness()` — samples
+  the 8 (city, category) pairs with the most inventory right now and asserts
+  `af_eligible_count(p_deal:=null) = af_eligible_count('بيع') + af_eligible_count('إيجار')` exactly;
+  `mon_detect_trending_combined_null_safety()` — asserts `top_cities_by_deal_ar(p_deal:=null)`
+  returns rows whenever both single-deal calls do. Both wired into `mon_run_all_detectors`.
+- **Result diversification is unchanged** — the existing platform/type diversity ordering applies to
+  whatever the RPC returns (now mixed Buy+Rent rows) with no new deal-mixing dimension added; per
+  the owner's rule this is "normal platform/result diversification only — never artificial Buy/Rent
+  balancing, never forced 50/50." Live-verified: a real الرياض/شقة combined search's first 10 cards
+  spanned 9 distinct platforms and all four deal/period shapes (Buy, Annual Rent, Monthly Rent,
+  RNPL) with no visible skew toward either deal.
+- Full state-transition matrix (Buy↔Rent↔Both both directions, city/type/category change while Both
+  is active, refresh, back/forward) is the same class of test §17's mixed-period rule already
+  requires — see `docs/ops/SEARCH_MATCH_QA_ENGINEER.md` §40 for the certification standard, which
+  now explicitly names Buy-only/Rent-only/Buy+Rent as required coverage for any major re-certification
+  of Filter/search/matching.
+
 ---
 
 ## 18. Database rules & invariants
@@ -755,6 +862,39 @@ migration-drift-guard rule in `AGENTS.md`).
     changes the title and nothing else** — never the messages, query, Advanced Filter answers, result
     snapshot, identity/de-duplication or `ts` — and a manual title is never overwritten by a later
     auto-title. §8 carries the full model. (owner, 2026-08-20 / 2026-08-21)
+13. **Buy+Rent combined multi-select is a preference boundary, never a ranking/balancing target.**
+    "When شراء + إيجار are selected together, the user accepts either Buy or Rent; the Rent side
+    accepts both Annual and Monthly. Match every other requirement first, then diversify only within
+    the valid combined set." Never widen `Deal` to a 3rd value; never reuse `bothDeals`; never mix
+    Buy/Rent prices into one shared range; Advanced Filter offers only the 3-way (Buy ∩ RentAnnual ∩
+    RentMonthly) intersection. §17a carries the full model. (owner, 2026-08-20)
+14. **The Saudi residential proxy is ONE shared, capacity-limited resource — treat it as such.**
+    (owner-approved 2026-08-23, PR #827.) Every consumer authenticates with the same
+    `WASALT_PROXY_URL` secret and competes for one pool of concurrent sessions. Exceeding it does
+    **not** fail cleanly: requests plateau at a ~204s connect timeout while other jobs in the same
+    batch succeed in seconds, which reads as a random per-slug source block and is not one. That
+    misreading cost five days on 2026-08-17 (wasalt: failure 0.1% → 66.7%, daily rows ~100k → ~3k).
+    - **Both wasalt sweep matrices stay capped, and are tuned together.** `wasalt-residential-sweep`
+      (20 jobs, `40 */8`) and `wasalt-commercial-sweep` (14 jobs, `45 */8`) fire five minutes apart
+      into **separate** concurrency groups, so they overlap by design. Capping only one leaves the
+      peak unbounded — 6+6 bounds it at 12 instead of 34. `mon_detect_proxy_contention()` watches
+      the realised peak and fires if the cap is raised, bypassed, or a new consumer appears.
+    - **Adding a proxy consumer means re-checking the clock, not just the cap.** The current
+      consumers and their windows: wasalt sweeps 00:40/00:45, 08:40/08:45, 16:40/16:45; wasalt
+      cleanup + enum-liveness 03:15–03:19 and 21:01; wasalt enrich 05:00; enrich-ar `15 */4`
+      (short, ≤8.3 min); souq24 ~04:38.
+    - **souq24's failure is NOT proxy contention** — measured 2026-08-23, recorded so it is not
+      re-guessed: souq24 has no proxy neighbour in its window. Its signature is a 16-minute
+      `harvest_ids` followed by a ~2h stall in the 8-worker fetch loop, ending in a SIGINT kill with
+      zero rows. Still open; do not fold it into a proxy fix.
+15. **Deletion is frozen whenever the evidence behind it is inconclusive.** (2026-08-23.)
+    `cleanup.py`'s `verdict()` has always refused to delete an individual row on 403/429/5xx/network
+    error. It now also aborts the **entire run** — discarding deletions it had already judged
+    "dead" — once the inconclusive rate clears 30% over a ≥20-probe sample, because a source or
+    proxy degrading mid-run makes every verdict in that run suspect. **Reactivations are always
+    kept**: a `live` verdict needs HTTP 200 plus no dead-marker, and restoring a wrongly-inactive
+    listing is the fail-safe direction. Never widen the freeze to reactivations, and never key its
+    rate on `stats["skipped"]` (that counter also holds rows with no URL, which never reach a probe).
 
 ---
 

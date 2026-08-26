@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -39,6 +40,66 @@ BASE = "https://wasalt.sa"
 NEXT_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.4"))
 PAGE_SIZE = 32
+
+# STARTUP JITTER (2026-08-23, production degradation investigation). wasalt-residential-sweep.yml
+# (20 jobs) and wasalt-commercial-sweep.yml (14 jobs) dispatch fully parallel with no `max-parallel`,
+# all sharing ONE WASALT_PROXY_URL secret (Webshare Saudi-residential proxy). PR#824 (merged
+# 2026-08-21) proved every failing attempt hung the full 30s timeout and added session rotation on
+# retry — verified NOT to have fixed the regression: the platform's daily scrape_runs failure rate
+# was 65.7% the day #824 merged and is still 60-69% three days later (re-measured 2026-08-23), because
+# rotating a session changes WHICH connection a retry uses, not HOW MANY of our own jobs open a
+# connection through the shared pool in the same instant. PR#824's own evidence: 34 jobs' first
+# requests landed inside a ~4s window. A `max-parallel` cap (PR#827) is the other half of the fix but
+# needs owner tuning against the account's real concurrency ceiling, which no session here can see,
+# so it stays a proposed workflow-YAML change pending that decision.
+# This jitter is the scraper-side half that needs no such tuning: spreading the SAME 34 jobs' first
+# connection attempts across up to a minute (instead of a 4s burst) can only lower peak simultaneous
+# demand on the shared proxy, regardless of what its true ceiling turns out to be — it is a strict
+# improvement, not a guess at a number. Scoped to GITHUB_ACTIONS (set by every Actions job
+# automatically, no workflow-YAML change required to enable it) so a local/manual single-slug run
+# never waits — only the cloud matrix, where the contention actually happens, jitters.
+def _jitter_max_s() -> float:
+    raw = os.environ.get(
+        "WASALT_STARTUP_JITTER_MAX_S",
+        "60" if os.environ.get("GITHUB_ACTIONS", "").strip().lower() == "true" else "0",
+    )
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0  # a bad env value degrades to "no jitter", never a crash
+
+
+# Search-page retry ladder (retuned 2026-08-23, after PR #827's concurrency cap).
+#
+# Capping the sweeps cut the failure rate hard but did not eliminate it: a residual slice of runs
+# still fails at a near-constant 204.2-204.7s. That constant is OURS, not the proxy's — it is
+# exactly 2 x (3 attempts x 30s + 2+4+6s backoff), because every failing attempt hangs the FULL
+# timeout. A route that accepts the connection and never answers is DEAD; waiting 30s on it buys
+# nothing, and spending three 30s waits buys only three draws from the exit-IP pool.
+#
+# So spend the same kind of budget on MORE DRAWS instead of longer waits: 5 attempts at 15s each
+# gives five chances to land on a working route where the old ladder gave three, and still costs
+# less wall-clock (5x15 + 1+2+3+4 = 85s vs 102s). 15s is ~2-4x the observed healthy page latency
+# (successful slices average ~20s for the probe plus up to 3 pages plus detail fetches), so this
+# cannot abort a merely-slow-but-working request.
+#
+# This does NOT touch wasalt.sa's anti-bot protection. It changes only how long we wait on our own
+# dead proxy routes before trying a different one.
+_FETCH_ATTEMPTS = 5
+_FETCH_TIMEOUT_S = 15
+_FETCH_BACKOFF_S = 1
+
+
+def startup_jitter() -> float:
+    """Sleep a random [0, cap) seconds before the first request, cap = _jitter_max_s(). Returns the
+    delay actually slept (0 when jitter is disabled/misconfigured), so callers/tests can observe it
+    without re-reading the env var."""
+    cap = _jitter_max_s()
+    if cap <= 0:
+        return 0.0
+    delay = random.uniform(0, cap)
+    time.sleep(delay)
+    return delay
 
 # Detail-page fetch is EXPENSIVE: one extra ~400KB HTML request PER listing. Through the Saudi
 # residential PROXY (cloud sweeps) that would burn the metered proxy bandwidth fast, so it's OFF by
@@ -132,21 +193,21 @@ def fetch_page(s: RotatingSession, deal: str, cat: str, slug: str, page: int) ->
     url = (f"{BASE}/en/{seg}/search?propertyFor={deal}&countryId=1&type={cat}"
            f"&propertyTypeData={slug}&page={page}")
     _throttle()
-    for attempt in range(3):
+    for attempt in range(_FETCH_ATTEMPTS):
         try:
-            r = s.get(url, timeout=30)
+            r = s.get(url, timeout=_FETCH_TIMEOUT_S)
         except Exception as e:
-            print(f"   ⚠ wasalt fetch attempt {attempt + 1}/3 ({slug}/{deal} p{page}) raised "
-                  f"{type(e).__name__}: {str(e)[:160]}")
-            if attempt < 2:
+            print(f"   ⚠ wasalt fetch attempt {attempt + 1}/{_FETCH_ATTEMPTS} ({slug}/{deal} "
+                  f"p{page}) raised {type(e).__name__}: {str(e)[:160]}")
+            if attempt < _FETCH_ATTEMPTS - 1:
                 s.rotate()  # fresh TCP/proxy route on the next attempt
-            time.sleep(2 * (attempt + 1)); continue
+            time.sleep(_FETCH_BACKOFF_S * (attempt + 1)); continue
         if r.status_code != 200:
-            print(f"   ⚠ wasalt fetch attempt {attempt + 1}/3 ({slug}/{deal} p{page}) got "
-                  f"HTTP {r.status_code}")
-            if attempt < 2:
+            print(f"   ⚠ wasalt fetch attempt {attempt + 1}/{_FETCH_ATTEMPTS} ({slug}/{deal} "
+                  f"p{page}) got HTTP {r.status_code}")
+            if attempt < _FETCH_ATTEMPTS - 1:
                 s.rotate()
-            time.sleep(2 * (attempt + 1)); continue
+            time.sleep(_FETCH_BACKOFF_S * (attempt + 1)); continue
         m = NEXT_RE.search(r.text)
         if not m:
             return 0, 0, [], False
@@ -269,6 +330,19 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
     bedrooms = _i(_attr(prop, "noOfBedrooms"))
     bathrooms = _i(_attr(prop, "noOfBathrooms"))
     halls_or_majlis = _i(_attr(prop, "noOfLivingRooms") or _attr(prop, "livingRooms") or _attr(prop, "noOfHalls"))
+    # ⚠ UNVERIFIED FALLBACK (flagged 2026-08-22, not yet fixed — do not "clean this up" blindly).
+    # `conversionPrice` is used here as a SAR sale total, but nothing in this repo documents what
+    # wasalt means by it, and it appears nowhere else. Suspected in the standing P1
+    # field_integrity_phone_price:wasalt_residential_listings: 8 ACTIVE, searchable rows carry a
+    # sale price ~100x too high, and dividing by 100 yields a consistent, realistic band —
+    #   560000000/700m²→8,000  561700000/561→10,012  594000000/900→6,600
+    #   585000000/900→6,500    562140000/810→6,940   (SAR/m², ids 446386/448556/456656/457706/4002193)
+    # Random values would scatter; a tight realistic band after ÷100 points at a minor-unit
+    # (halala) or converted-currency figure reaching this line, NOT a phone-as-price artifact.
+    # NOT repriced and NOT changed: that needs the source, and wasalt is unreachable from CI/agent
+    # containers (Cloudflare challenges a plain fetch; curl_cffi impersonation is reset by the
+    # egress proxy). Confirm what conversionPrice is against a live payload BEFORE touching either
+    # this line or those rows — a source-published price stays searchable at any magnitude.
     sale_price = info.get("salePrice") or info.get("conversionPrice")
     rent_price = info.get("expectedRent")
     # Rent-period truth (2026-07-27 audit): Wasalt publishes per-frequency pricing in
@@ -482,6 +556,18 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[
     count, total_pages, _, page1_valid = fetch_page(s, deal, cat, slug, 1)
     pages = min(max_pages, total_pages or max_pages)
     print(f"\n── WASALT {slug.upper():<16} {deal.upper():<4} {cat.upper():<11} count={count} pages≤{pages}")
+    if not page1_valid:
+        # The probe above already spent the WHOLE retry ladder on this route and never got a
+        # parseable answer. The loop below would then re-fetch page 1 and spend the ENTIRE ladder
+        # again on the same dead route — which is exactly the 204.2-204.7s plateau seen on every
+        # failing wasalt run since 2026-08-17 (2 x 102s: 3 attempts x 30s plus 2+4+6s backoff).
+        # A second identical fetch cannot succeed where the first exhausted every retry, so bail:
+        # it halves the cost of a failure and stops us hammering a bad exit route twice over.
+        # valid=False still propagates, so the fail-visibly guard reports a block, never an empty
+        # category.
+        print(f"   ✗ page 1 unanswerable after the full retry ladder — abandoning {slug}/{deal} "
+              f"rather than re-running the same ladder on the same route")
+        return 0, count, False
     is_commercial = cat == "commercial"
     upserter = db.upsert_wasalt_commercial_batch if is_commercial else db.upsert_wasalt_residential_batch
     upserted = 0
@@ -517,6 +603,12 @@ def main() -> int:
     p.add_argument("--pages", type=int, default=3)
     p.add_argument("--all", action="store_true", help="sweep every type × sale+rent")
     args = p.parse_args()
+
+    # Spread this job's first proxy connection out over the cloud matrix's burst window (see the
+    # module-level note on WASALT_STARTUP_JITTER_MAX_S) — a no-op locally/manually.
+    jittered = startup_jitter()
+    if jittered:
+        print(f"   (startup jitter: waited {jittered:.1f}s to spread cloud-matrix load on the shared proxy)")
 
     s = session()
     run_id = db.begin_run("wasalt")

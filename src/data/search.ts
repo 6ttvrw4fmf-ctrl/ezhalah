@@ -8,6 +8,7 @@ import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
 import { supports } from './platforms';
 import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
+import { combinedBudgetParts } from '@/lib/combinedBudget';
 import { rediversifyByPlatform } from '@/lib/platformDiversity';
 import { bedroomTokensPure } from '@/lib/roomBedrooms';
 import { translitPlace } from '@/lib/translitPlace';
@@ -42,6 +43,27 @@ export type SearchQuery = {
   // published a period is neither, and is excluded rather than guessed at (SOURCE IS TRUTH). A typed price
   // under 'both' is read on the ANNUAL basis — the only unit that can span both periods (see priceFilter).
   rentPeriod?: 'monthly' | 'annual' | 'both';
+  // Buy + Rent combined multi-select (owner feature 2026-08-20) — mirrors the شهري+سنوي pattern
+  // above (togglePeriodButton/rentPeriod): the Filter UI shows only two independent buttons, شراء
+  // and إيجار, and selecting BOTH sets this flag rather than a third button. NOT the same field as
+  // bothDeals (an AI-chat-ONLY fallback for when the agent can't tell Buy from Rent from free text —
+  // client-side post-filter only, one flat unshared price cap, no Advanced Filter/Trending
+  // integration, and deliberately excluded from Filter-history restoration). dealCombined is a
+  // first-class Filter-UI field with full backend wiring (p_deal=null, independent dual price
+  // ranges, null-safe Trending) and IS restored from Filter history — see sanitizeForFilterRestore.
+  // Meaning when true: eligible set = Buy ∪ Annual Rent ∪ Monthly Rent (docs/ARCHITECTURE.md §22).
+  // `deal` itself keeps its last concrete value (whichever button was pressed most recently) so
+  // toggling either button back off restores exactly that one; every search/count/Advanced
+  // Filter/Trending call must check dealCombined FIRST, before branching on `deal`.
+  dealCombined?: boolean;
+  // The Rent-side budget when dealCombined is true — owner decision (asked and answered): TWO
+  // independent price ranges shown together, never one naive shared range. priceMin/priceMax stay
+  // the Buy budget (byte-identical meaning to every existing single-deal call). Same raw-digit-
+  // string convention as priceMin/priceMax. Read on the ANNUAL basis — combined-mode Rent has no
+  // period selector (accepts both شهري+سنوي, and unknown-period rows too — no period filter is
+  // applied at all), mirroring the already-shipped rentPeriod==='both' annual-basis precedent.
+  priceMinRent?: string | null;
+  priceMaxRent?: string | null;
   // What the filter's AI-assisted location resolver understood from a free-typed location (district /
   // city / area nickname / landmark / geography). Drives the Search Summary's location lines so the
   // user sees exactly what Ezhalah matched. Absent on the agent path (Gemini resolves there). (user request.)
@@ -163,6 +185,11 @@ const numOrNull = (s: string | null | undefined): number | null => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
+// The five already-translated words @/lib/combinedBudget needs (it is deliberately dependency-free).
+// The two LABELS are the SAME i18n keys as the two Filter budget boxes the user typed the figures
+// into («ميزانية الشراء» / «ميزانية الإيجار (سنوياً)»), so the restatement echoes the form verbatim.
+const budgetWords = () => ({ buy: t('Buy budget'), rent: t('Rent budget (yearly basis)'), from: t('From'), to: t('To'), sar: t('SAR') });
+
 // The objective sort keys the agent/UI may request. NEVER a quality/popularity ordering.
 export type SortKey =
   | 'newest' | 'oldest'
@@ -188,7 +215,7 @@ const placeText = (q: SearchQuery) => {
   return dist ? t('{district}, {city}', { district: arabicOrUnresolved(tPlace(dist)), city: cityText }) : cityText;
 };
 const verbText = (q: SearchQuery) => {
-  if (q.bothDeals) return t('to rent or buy');
+  if (q.bothDeals || q.dealCombined) return t('to rent or buy');
   if (q.deal === 'Rent') {
     // Reflect the Monthly / Yearly the user selected in the filter's rent-period toggle. Absent
     // (agent free-text path never sets it) → plain "to rent". (owner UI request 2026-07-18.)
@@ -300,7 +327,13 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
   let tooLow = false;
   let tooLowAmount = '';
   const pLo = numOrNull(q.priceMin), pHi = numOrNull(q.priceMax);
-  if (pLo != null || pHi != null) {
+  if (q.dealCombined) {
+    // COMBINED شراء+إيجار = TWO independent caps (Buy priceMin/Max, Rent priceMinRent/MaxRent). State
+    // BOTH, each named for the box it came from — the shared unlabelled phrase below can only ever
+    // state one of them, so it hid the rent cap and mislabelled the buy cap. See @/lib/combinedBudget.
+    const both = combinedBudgetParts(q, ' ', budgetWords());
+    if (both.length) pricePhrase = t(' with {a}', { a: both.join(t(' and ')) });
+  } else if (pLo != null || pHi != null) {
     // Filter من/إلى price range (HARD filter) — show verbatim, no monthly/per-m² math.
     const rng = pLo != null && pHi != null ? `${t('From')} ${grouped(pLo)} ${t('To')} ${grouped(pHi)}`
       : pLo != null ? `${t('From')} ${grouped(pLo)}` : `${t('To')} ${grouped(pHi!)}`;
@@ -369,6 +402,9 @@ function budgetLines(q: SearchQuery): string[] {
   // If the user gave a foreign currency, lead with their original figure so both are visible:
   // "Your budget: USD 100,000" then the SAR line(s) used for the actual search. (user request.)
   const orig = q.priceOriginal ? [`${t('Your budget')}: ${q.priceOriginal}`] : [];
+  // COMBINED شراء+إيجار → one labelled bullet per budget half the user filled, never a single
+  // unlabelled `Budget` read off the Buy boxes alone. See @/lib/combinedBudget.
+  if (q.dealCombined) return [...orig, ...combinedBudgetParts(q, ': ', budgetWords())];
   const pLo = numOrNull(q.priceMin), pHi = numOrNull(q.priceMax);
   if (pLo != null || pHi != null) {
     const r = pLo != null && pHi != null ? `${t('From')} ${grouped(pLo)} ${t('To')} ${grouped(pHi)}`
@@ -545,9 +581,10 @@ export function searchSummary(q: SearchQuery): string {
   else if (effectiveGroups(q).length) lines.push(`• ${t('Property Type')}: ${effectiveGroups(q).map((g) => arabicOrTypeUnresolved(t(g))).join('، ')}`);
   else if (q.category) lines.push(`• ${t('Property Type')}: ${arabicOrTypeUnresolved(t(q.category))}`);
   // For Rent, append the Monthly / Yearly period the user picked so the summary reflects the toggle. (owner UI request 2026-07-18.)
-  const period = q.deal === 'Rent' && q.rentPeriod
+  // dealCombined's Rent side has no period selector (accepts both) so no period suffix applies there.
+  const period = q.deal === 'Rent' && !q.dealCombined && q.rentPeriod
     ? ` (${t(q.rentPeriod === 'monthly' ? 'Monthly' : q.rentPeriod === 'both' ? 'Both' : 'Yearly')})` : '';
-  lines.push(`• ${t('Transaction Type')}: ${q.bothDeals ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}${period}`);
+  lines.push(`• ${t('Transaction Type')}: ${(q.bothDeals || q.dealCombined) ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}${period}`);
   // Platform filter line — when the user restricted to specific platforms ("Aqar only"), show which,
   // so the filter is visibly confirmed. (user: "when I type alkhaas it must be al khaas, not aqar".)
   if (q.sources && q.sources.length) {
@@ -581,6 +618,9 @@ export function searchSummary(q: SearchQuery): string {
   }
   return `${t('Search Summary')}\n${lines.join('\n')}`;
 }
+
+// AF emoji summary — pure function lives in @/lib/afSummary (zero deps, testable standalone).
+export { buildAfSummary } from '@/lib/afSummary';
 
 // A compact, dot-separated one-liner of what the user asked for — shown right before scraping as a
 // "Looking for: Villa · Rent · Riyadh · SAR 5,000 · 3 beds" confirmation. Empty fields are skipped so
@@ -683,10 +723,11 @@ function pickPool(q: SearchQuery, pools: Pools): Listing[] {
     if (t.includes('apartment') || t === 'floor') return pools.apartment;
     if (t.includes('land') || t.includes('plot') || t === 'warehouse' || t === 'factory') return pools.land;
   }
-  // "Rent or Buy" (deal unknown) with no specific type → draw from BOTH the rent and buy mixes so the
-  // results can actually contain each (runSearch then keeps both). Otherwise the rent-only mix would
-  // never surface a Buy listing for a "Both" search. (bothDeals correctness.)
-  if (q.bothDeals) return [...pools.mixRent, ...pools.mixBuy];
+  // "Rent or Buy" (deal unknown, OR the Filter's شراء+إيجار both selected) with no specific type →
+  // draw from BOTH the rent and buy mixes so the results can actually contain each (runSearch then
+  // keeps both). Otherwise the rent-only mix would never surface a Buy listing. (bothDeals/
+  // dealCombined correctness.)
+  if (q.bothDeals || q.dealCombined) return [...pools.mixRent, ...pools.mixBuy];
   if (q.deal === 'Buy') {
     const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10);
     if (amount > 50_000 && amount <= 700_000) return pools.budget;
@@ -797,6 +838,29 @@ export function hasClientOnlyNarrowing(q: SearchQuery): boolean {
     if (digits && parseInt(digits, 10) >= 100) return true;
   }
   return false;
+}
+
+// THE ONE TOTAL THAT MAY BE QUOTED to the user for a finished search — the results headline
+// («لقينا N إعلان يطابق طلبك») and the guided interview's closing beat («لقينا N عقار أقرب لطلبك»)
+// must state the SAME number, because they describe the SAME search.
+//
+// It is `matchTotal` — the RPC's count(*) over() across the WHOLE filtered set — and NEVER
+// `SearchResult.total`, which is `listings.length`: this page's buffer, hard-capped by the 1500-row
+// QUERY_LIMIT and the SHOW_ALL_MAX slice. Quoting `total` renders the PAGE LIMIT as if it were the
+// match count on every broad search (live 2026-08-23: the mining overlay claimed «لقينا 1,500 عقار
+// أقرب لطلبك» for a 3,897-row set, while the chat line right behind it correctly said 3,897).
+// A display/page cap and the true total are two different numbers — see src/data/resultCount.ts.
+//
+// null = there is NO honest number to quote, so the caller says nothing rather than a wrong count:
+//   • nothing matched — the caller has its own no-results copy;
+//   • client-only narrowing, or an agent-annualized budget (priceIsAnnual nulls the RPC price bound
+//     in remote.ts) — the RPC never applied that filter, so its count OVERSTATES the set the user
+//     can actually reach. This is the same gate the results headline has used since 2026-07-30.
+export function quotableTotal(r: SearchResult): number | null {
+  const total = r.matchTotal ?? r.listings.length;
+  if (!(total > 0)) return null;
+  if (r.query && (r.query.priceIsAnnual || hasClientOnlyNarrowing(r.query))) return null;
+  return total;
 }
 
 // Parse a detail value into an area range in m² — or null when it's a bedroom count (not a size).
@@ -1181,9 +1245,13 @@ function rankResults(listings: Listing[], q: SearchQuery, cap: number | null): L
 
 export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean; visitOffset?: number }): SearchResult {
   let eligible = pickPool(q, pools)
-    // bothDeals (agent searched without knowing rent/buy) → show BOTH; otherwise filter to the deal.
-    .filter((l) => q.bothDeals || l.deal === q.deal)
-    .filter((l) => supports(l.source, q.deal))
+    // bothDeals (agent searched without knowing rent/buy) or dealCombined (Filter شراء+إيجار both
+    // selected) → show BOTH; otherwise filter to the single selected deal. supports() checks the
+    // ROW'S OWN deal (not q.deal) so it stays correct in both modes without a separate branch —
+    // Gathern (rent-only) still can never pass a Buy row, combined or not. (owner rule: deal
+    // flexibility must never weaken any other filter.)
+    .filter((l) => q.bothDeals || q.dealCombined || l.deal === q.deal)
+    .filter((l) => supports(l.source, l.deal))
     // Clean-type match — exact for a kept type, group-member for a subcategory, macro for category. (audit.)
     .filter((l) => matchesType(l, q))
     .sort((a, b) => (RECENCY[a.listed] ?? 99) - (RECENCY[b.listed] ?? 99));

@@ -17,18 +17,38 @@ class _Res:
 
 
 class _Table:
+    """NOTE (2026-08-22 safety audit): eq/gte/lt used to be no-ops that returned every row
+    regardless of the filter — meaning min_inactive_days and min_missing_count were enforced ONLY
+    by the real Postgres query in production, with ZERO test coverage proving that predicate is
+    correct. They now actually filter, so a mutation that weakens either predicate in cleanup.py
+    (e.g. dropping the .lt(last_seen_at) clause, or flipping .gte to .gt) fails a test here
+    instead of only being caught by the real query in production, if at all."""
     def __init__(self, client, name):
         self.c, self.name, self._op, self._ids = client, name, None, None
+        self._filters = []
     def select(self, *a, **k): return self
-    def eq(self, *a, **k): return self
-    def gte(self, *a, **k): return self
-    def lt(self, *a, **k): return self
+    def eq(self, col, val): self._filters.append(("eq", col, val)); return self
+    def gte(self, col, val): self._filters.append(("gte", col, val)); return self
+    def lt(self, col, val): self._filters.append(("lt", col, val)); return self
+    def is_(self, col, val): self._filters.append(("is", col, val)); return self
     def order(self, *a, **k): return self
     def limit(self, *a, **k): return self
     def update(self, payload): self._op = ("update", payload); return self
     def insert(self, payload): self._op = ("insert", payload); return self
     def delete(self): self._op = ("delete", None); return self
-    def in_(self, col, ids): self._ids = list(ids); return self
+    def in_(self, col, ids):
+        self._ids = list(ids)                              # used by delete/update targeting
+        self._filters.append(("in", col, list(ids)))        # also usable as a select filter
+        return self
+    def _matches(self, row):
+        for op, col, val in self._filters:
+            v = row.get(col)
+            if op == "eq" and v != val: return False
+            if op == "gte" and not (v is not None and v >= val): return False
+            if op == "lt" and not (v is not None and v < val): return False
+            if op == "is" and val == "null" and v is not None: return False
+            if op == "in" and v not in val: return False
+        return True
     def execute(self):
         if self._op and self._op[0] == "delete":
             self.c.deleted.setdefault(self.name, []).extend(self._ids); return _Res([])
@@ -36,7 +56,7 @@ class _Table:
             self.c.updated.setdefault(self.name, []).append((self._ids, self._op[1])); return _Res([])
         if self._op and self._op[0] == "insert":
             self.c.inserted.setdefault(self.name, []).append(self._op[1]); return _Res([])
-        rows = self.c.rows.get(self.name, [])
+        rows = [r for r in self.c.rows.get(self.name, []) if self._matches(r)]
         return _Res(rows, count=len(rows))
 
 
@@ -47,7 +67,10 @@ class _Client:
 
 def _install(monkey_rows, policy, probe, platform="testp", tables=("testp_listings",), dead_marker=(lambda b: b == "DEAD")):
     rows = dict(monkey_rows)
-    rows["platform_retention_policy"] = [policy]
+    # "platform" must be present for _load_policy's real .eq("platform", platform) filter to match
+    # now that _Table actually filters (see _Table docstring) — a bare dict without it would make
+    # every test silently fall through to DEFAULT_POLICY instead of the POL(...) the test asked for.
+    rows["platform_retention_policy"] = [{**policy, "platform": platform}]
     rows.setdefault("cleanup_runs", [])
     client = _Client(rows)
     C.sb = lambda: client
@@ -61,7 +84,7 @@ def _install(monkey_rows, policy, probe, platform="testp", tables=("testp_listin
 
 POL = lambda **k: {"min_inactive_days": 30, "min_missing_count": 3, "require_source_recheck": True,
                    "max_delete_per_run": 500, "anomaly_floor": 300, "anomaly_factor": 4, "enabled": True, **k}
-def _cand(i): return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": "2026-01-01T00:00:00+00:00"}
+def _cand(i): return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": "2026-01-01T00:00:00+00:00", "active": False}
 
 
 def test_live_row_is_reactivated_never_deleted():
@@ -131,7 +154,7 @@ def test_anomaly_abort_stays_quiet_when_the_fraction_gate_would_pass():
 
 
 def _cand_ts(i, ts):
-    return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": ts}
+    return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": ts, "active": False}
 
 
 def test_bounded_cap_never_exceeds_what_unbounded_gates_would_allow():
@@ -251,6 +274,94 @@ def test_aqarcity_expired_marker_deletes_clean_200_self_heals():
     assert s2["deleted"] == 1 and c2.deleted["aqarcity_residential_listings"] == [2]
 
 
+def test_below_missing_count_threshold_never_becomes_a_candidate():
+    """Barrier 6 (repeated dead confirmations): a row with FEWER strikes than policy requires must
+    never even be FETCHED as a candidate, no matter how old it is. Mutation-proof: if cleanup.py's
+    .gte("missing_count", ...) filter were ever dropped or weakened, this row (dead_marker always
+    fires 404) would get force-deleted and this test would catch it — it did not have coverage
+    before 2026-08-22 because the old test fake ignored every filter."""
+    old_but_unstruck = {**_cand(1), "missing_count": 2}   # only 2 of the required 3 strikes
+    c = _install({"testp_listings": [old_but_unstruck]}, POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["eligible_total"] == 0 and s["deleted"] == 0 and c.deleted == {}
+
+
+def test_below_min_age_never_becomes_a_candidate():
+    """Barrier 5 (minimum inactive age): a row with enough strikes but still INSIDE the grace
+    window (last_seen_at recent) must never be fetched as a candidate. Mutation-proof: if
+    cleanup.py's .lt("last_seen_at", cutoff) filter were ever dropped, this row would get
+    force-deleted 5 days after going inactive instead of waiting the full 30."""
+    import datetime
+    recent = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=5)).isoformat()
+    struck_but_young = {**_cand(1), "last_seen_at": recent}
+    c = _install({"testp_listings": [struck_but_young]}, POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["eligible_total"] == 0 and s["deleted"] == 0 and c.deleted == {}
+
+
+def test_at_exactly_the_thresholds_is_eligible():
+    """The converse of the two tests above: a row that exactly meets both floors (missing_count ==
+    min, well past the age cutoff) IS eligible — proves the predicates aren't silently off-by-one
+    in the safe direction either, which would shrink the real eligible population without anyone
+    noticing (the two tests above already prove the unsafe direction is blocked)."""
+    c = _install({"testp_listings": [_cand(1)]}, POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["eligible_total"] == 1 and s["deleted"] == 1
+
+
+def test_degraded_platform_health_freezes_deletion_before_measuring_candidates():
+    """Barrier 2 (platform health precondition): an open scraper_failure_step_change (or
+    silent_scraper_death) alert for THIS platform must abort the run BEFORE any candidate is even
+    fetched — proactive, not the reactive anomaly gate. Mirrors the real wasalt alert 686
+    (standing since 2026-08-18)."""
+    c = _install({"testp_listings": [_cand(1)],
+                  "alert_event": [{"id": 686, "kind": "scraper_failure_step_change",
+                                    "platform": "testp", "severity": "P1", "resolved_at": None}]},
+                 POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is True and s["deleted"] == 0 and c.deleted == {}
+    assert s["eligible_total"] == 0            # never even measured — the precondition ran first
+    assert "platform health degraded" in s["abort_reason"]
+    assert "686" in s["abort_reason"]
+
+
+def test_health_gate_ignores_other_platforms_and_resolved_alerts():
+    """The gate must be platform-scoped (an open alert on a DIFFERENT platform must not freeze
+    this one) and status-scoped (a RESOLVED alert on this platform must not freeze it either)."""
+    c = _install({"testp_listings": [_cand(1)],
+                  "alert_event": [
+                      {"id": 1, "kind": "scraper_failure_step_change", "platform": "otherplatform",
+                       "severity": "P1", "resolved_at": None},
+                      {"id": 2, "kind": "scraper_failure_step_change", "platform": "testp",
+                       "severity": "P1", "resolved_at": "2026-08-20T00:00:00+00:00"},
+                  ]}, POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is False and s["deleted"] == 1
+
+
+def test_health_gate_ignores_unrelated_alert_kinds():
+    """A data-fidelity alert unrelated to capture health (e.g. field_integrity) must NOT freeze
+    deletion — the gate is deliberately narrow to alert kinds that speak to whether the CRAWL
+    itself is currently trustworthy, not general platform noise."""
+    c = _install({"testp_listings": [_cand(1)],
+                  "alert_event": [{"id": 3, "kind": "field_integrity", "platform": "testp",
+                                    "severity": "P1", "resolved_at": None}]},
+                 POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is False and s["deleted"] == 1
+
+
+def test_health_gate_is_not_bypassed_by_force():
+    """force overrides policy.enabled=false only. A degraded-platform freeze is a live safety
+    signal, not a policy toggle, and must survive --force."""
+    c = _install({"testp_listings": [_cand(1)],
+                  "alert_event": [{"id": 4, "kind": "silent_scraper_death", "platform": "testp",
+                                    "severity": "P1", "resolved_at": None}]},
+                 POL(enabled=False), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is True and "platform health degraded" in s["abort_reason"]
+
+
 def test_verdict_status_mapping():
     dm = lambda b: b == "DEAD"
     assert C.verdict(404, "", dm) == "dead"
@@ -260,3 +371,106 @@ def test_verdict_status_mapping():
     assert C.verdict(403, "", dm) == "unknown"
     assert C.verdict(500, "", dm) == "unknown"
     assert C.verdict(None, "", dm) == "unknown"
+
+
+# ── Run-level inconclusive-evidence freeze (2026-08-23) ──────────────────────────────────────
+# verdict() already refuses to delete any INDIVIDUAL row whose recheck was inconclusive. These
+# prove the RUN-level guard: when a source/proxy degrades mid-run, the rows that came back "dead"
+# are suspect too, so the whole run's deletions are discarded rather than applied.
+
+def _probe_seq(seq):
+    """Scripted probe: returns seq[i] for the i-th call, then a clean 404 (dead) forever after."""
+    state = {"i": 0}
+    def p(url):
+        i = state["i"]
+        state["i"] += 1
+        return seq[i] if i < len(seq) else (404, "")
+    return p
+
+
+def _cand_nourl(i):
+    r = _cand(i)
+    r["listing_url"] = ""        # skipped before _probe() is ever reached
+    return r
+
+
+def test_inconclusive_source_health_freezes_deletion_for_the_whole_run():
+    """THE GUARD. 20 of 40 rechecks (50%) come back 503; the other 20 look cleanly dead. Without
+    the freeze those 20 would be permanently deleted on evidence gathered while the source was
+    demonstrably unwell."""
+    c = _install({"testp_listings": [_cand(i) for i in range(40)]}, POL(),
+                 probe=_probe_seq([(503, "")] * 20))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is True
+    assert s["deleted"] == 0
+    assert c.deleted == {}, "a degraded source must not delete even the rows judged 'dead'"
+    assert "inconclusive source health" in s["abort_reason"]
+    assert "DELETION FROZEN" in s["abort_reason"]
+    # and the audit log must not claim deletions that never happened
+    assert not c.inserted.get("cleanup_deletion_log")
+
+
+def test_healthy_run_is_never_frozen():
+    """Both directions matter: a clean run must still delete. Production healthy runs measure ~0%
+    inconclusive, so this is the normal case and the guard must be invisible to it."""
+    c = _install({"testp_listings": [_cand(i) for i in range(40)]}, POL(), probe=_probe_seq([]))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is False
+    assert s["deleted"] == 40 and len(c.deleted["testp_listings"]) == 40
+
+
+def test_freeze_threshold_is_actually_the_boundary_not_just_any_failure():
+    """Mutation proof on the ceiling itself. 11/40 = 27.5% must pass; 13/40 = 32.5% must freeze.
+    A guard that fired on ANY inconclusive probe would fail the first half; one that never fired
+    would fail the second."""
+    c = _install({"testp_listings": [_cand(i) for i in range(40)]}, POL(),
+                 probe=_probe_seq([(503, "")] * 11))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is False, "27.5% is under the ceiling — must not freeze"
+    assert s["deleted"] == 29
+
+    c2 = _install({"testp_listings": [_cand(i) for i in range(40)]}, POL(),
+                  probe=_probe_seq([(503, "")] * 13))
+    s2 = C.run("testp", force=True)
+    assert s2["aborted"] is True, "32.5% is over the ceiling — must freeze"
+    assert c2.deleted == {}
+
+
+def test_small_sample_is_not_frozen_because_the_per_row_rule_already_protects_it():
+    """Below _FREEZE_MIN_SAMPLE the rate is noise. Nothing is deleted anyway — not because the
+    run aborted, but because verdict() refused every single row. Proving BOTH facts is the point:
+    the freeze must not fire, and no row may be lost."""
+    c = _install({"testp_listings": [_cand(i) for i in range(10)]}, POL(),
+                 probe=_probe_seq([(None, "")] * 10))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is False, "a 10-row run must not abort on one bad patch"
+    assert s["deleted"] == 0 and c.deleted == {}
+    assert s["skipped"] == 10
+
+
+def test_freeze_discards_deletions_but_KEEPS_reactivations():
+    """The fail-safe direction. During the same degraded run, a row the source positively proved
+    LIVE (HTTP 200, no dead-marker) must still be restored — freezing those too would turn a
+    source wobble into lost inventory, which is the harm this guard exists to prevent."""
+    seq = [(503, "")] * 20 + [(200, "still for sale")] * 5
+    c = _install({"testp_listings": [_cand(i) for i in range(40)]}, POL(), probe=_probe_seq(seq))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is True and s["deleted"] == 0 and c.deleted == {}
+    assert s["reactivated"] == 5, "live rows must be restored even in a frozen run"
+    assert c.updated.get("testp_listings"), "the reactivation write must actually be applied"
+
+
+def test_rows_without_a_url_cannot_trigger_the_freeze():
+    """Mutation proof on the COUNTER. stats['skipped'] is also incremented for rows with no
+    listing_url, which never reach _probe(). Keying the freeze on 'skipped' instead of the
+    dedicated inconclusive counter would compute 30/10 = 300% here and freeze a run whose every
+    actual probe came back clean."""
+    # The recheck count MUST clear _FREEZE_MIN_SAMPLE (20), or the min-sample gate short-circuits
+    # before the rate is ever computed and this test proves nothing. 25 real probes, all clean;
+    # 30 no-URL rows alongside them. Correct code: 0/25 = 0%. Keyed on 'skipped': 30/25 = 120%.
+    rows = [_cand_nourl(i) for i in range(30)] + [_cand(100 + i) for i in range(25)]
+    c = _install({"testp_listings": rows}, POL(), probe=_probe_seq([]))
+    s = C.run("testp", force=True)
+    assert s["rechecked"] == 25 and s["skipped"] == 30      # sample clears the min-sample gate
+    assert s["aborted"] is False, "no-URL rows must not be mistaken for inconclusive evidence"
+    assert s["deleted"] == 25 and len(c.deleted["testp_listings"]) == 25

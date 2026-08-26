@@ -17,7 +17,7 @@ import signal
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from dotenv import load_dotenv
 from supabase import Client, create_client
@@ -490,6 +490,38 @@ _CONTROL_COLS = frozenset({
 })
 
 
+class _AuthoritativeNull:
+    """The source AFFIRMATIVELY states this field has NO value. Not "we could not read it".
+
+    Owner decision 2026-08-22, after aqar ad 6686450 was served at 500,000 SAR while the source
+    rendered «طلب تسويق». The no-clobber guard below could not tell three different
+    situations apart and treated all of them as "unknown", so the source's own statement that a
+    listing has no price could never take effect once a price had ever been stored:
+
+        1. AUTHORITATIVE ABSENCE — the payload says so (aqar `published:false`, or a `price` key
+           that is present and not a number). Only THIS may overwrite a known value with NULL.
+        2. READ FAILURE — the fetch failed, was blocked, or the field could not be parsed.
+        3. INCONCLUSIVE — the payload was unreadable or lacks the key entirely.
+
+    2 and 3 stay exactly as they were: the key is dropped and the stored value survives. There is no
+    way to construct this sentinel by accident — a missing dict key, a None, a failed parse and an
+    exception all produce None, never this object. A writer has to name it deliberately, and it is
+    only ever named where the source itself settled the question.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:            # pragma: no cover - debugging aid only
+        return "AUTHORITATIVE_NULL"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+#: Sentinel a scraper assigns INSTEAD of None when the source states there is no value.
+AUTHORITATIVE_NULL = _AuthoritativeNull()
+
+
 def _unknown_must_not_overwrite_known(r: dict[str, Any]) -> None:
     """SOURCE IS TRUTH — a field this fetch could not read must not erase what a previous fetch did.
 
@@ -511,11 +543,19 @@ def _unknown_must_not_overwrite_known(r: dict[str, Any]) -> None:
     prune/reactivate/kill paths break.
 
     The cost is deliberate and was chosen with eyes open: a value the source has genuinely RETRACTED
-    lingers until a later crawl reads a new one. Retracting on the strength of one silent fetch is
-    the more dangerous error, and retirement is a job for corroborated evidence across fetches.
+    lingers until a later crawl reads a new one — UNLESS the source itself states the value is gone,
+    which is what `AUTHORITATIVE_NULL` is for (owner decision 2026-08-22). A writer that passes the
+    sentinel is saying "the source settled this", and only then is NULL written. Everything that
+    merely FAILED still produces None, and None is still dropped.
     """
-    for col in [c for c, v in r.items() if v is None and c not in _CONTROL_COLS]:
-        del r[col]
+    for col, v in list(r.items()):
+        if isinstance(v, _AuthoritativeNull):
+            # The source spoke. Write the NULL — even over a previously known value. Control columns
+            # take this path too: they were always writable, so nothing changes for them.
+            r[col] = None
+        elif v is None and col not in _CONTROL_COLS:
+            # Could not read it / not in the payload. Drop the key so the stored value survives.
+            del r[col]
 
 
 def _ensure_capture(r: dict[str, Any]) -> None:
@@ -662,7 +702,23 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         _ensure_capture(r)
         _reject_placeholder_location(r, table=table)
         seen[r["ad_number"]] = r
-    _execute(sb().table(table).upsert(list(seen.values()), on_conflict="ad_number"), what=table)
+    # SOURCE IS TRUTH across a BATCH, not just a row (owner rule 2026-08-09, see
+    # `_unknown_must_not_overwrite_known`). That guard drops a None/unread key from each row so a
+    # fetch that couldn't read a field can't NULL a stored value. But a Supabase bulk upsert sends
+    # the UNION of every row's keys, and PostgREST writes each column for EVERY row in the payload —
+    # NULL for a row that lacks it. So one summary-only row (its detail fetch failed → no amenity
+    # keys) sharing a batch with full rows still had its stored elevator/kitchen/driver_room erased
+    # to NULL, defeating the guard. Proven on aqaratikom (2026-08-24): detail-miss rows whose
+    # source-faithful FALSE amenities were nulled, which the af_null_to_false barrier then read as a
+    # fabrication and daily "self-resolved" by propagating the loss into search. Upsert each distinct
+    # key-set on its own so PostgREST only ever writes the columns a row actually carries; ON CONFLICT
+    # DO UPDATE then touches only those columns and a value a row didn't observe survives. A
+    # homogeneous batch (the common case) stays exactly one request.
+    groups: dict[frozenset, list[dict[str, Any]]] = defaultdict(list)
+    for r in seen.values():
+        groups[frozenset(r.keys())].append(r)
+    for grp in groups.values():
+        _execute(sb().table(table).upsert(grp, on_conflict="ad_number"), what=table)
 
 
 def upsert_wasalt_residential_batch(rows: list[dict[str, Any]]) -> None:
@@ -710,6 +766,7 @@ def prune_unseen(
     min_coverage: Optional[float] = None,
     shards: int = 1,
     shard: int = 0,
+    verify_gone: Optional[Callable[[str], Any]] = None,
 ) -> int:
     """Age out active rows whose ad_number wasn't seen this crawl — CONSERVATIVELY.
 
@@ -748,6 +805,37 @@ def prune_unseen(
         through still declines to prune rather than ageing out the rows it never reached.
     `shards == 1` (the default) is byte-for-byte the previous behaviour for every other caller.
 
+    SOURCE RE-PROBE BEFORE THE KILL (`verify_gone`, added 2026-08-24 after a measured incident).
+    Every guard above protects against a BROKEN CRAWL. None of them protects against a crawl that
+    worked perfectly against an INCOMPLETE DISCOVERY INDEX — and that is a different failure with an
+    identical signature. Aqar City's sitemap.xml publishes a ~1,799-entry window while the site keeps
+    serving listings outside it, so a live listing misses three consecutive crawls not because it is
+    gone but because it is un-enumerable. Coverage read ~99.6% (far above the 0.80 floor), the
+    collapse guard never came near 30%, the 3-strike counter did exactly what it was told — and 252
+    aqarcity + 9 abeea listings were deactivated over 30 days while every one of them was still being
+    served by the source. All 261 were re-probed and restored on 2026-08-24; evidence per row is in
+    `ops_stale_inactivation_probe`.
+
+    So: absence from the crawl is EVIDENCE OF ABSENCE FROM THE INDEX, never evidence the listing is
+    dead (DATA_INTEGRITY_ENGINEER.md §4 — "missing from one crawl ≠ inactive", which does not become
+    true by repeating it three times). When `verify_gone` is supplied it is called for each ad_number
+    that is about to cross the grace threshold, and ONLY its verdict may deactivate:
+      • 'gone'    → deactivate (the source itself confirms removal)
+      • 'live'    → SELF-HEAL: missing_count back to 0 and last_seen_at refreshed. The listing was
+                    never missing from the platform, only from its index.
+      • 'unknown' → hold: the strike is recorded, but nothing is deactivated. An unreachable source
+                    is not evidence (§4: timeout/403/429/5xx ≠ inactive).
+    A caller that passes no `verify_gone` keeps the previous behaviour byte-for-byte, so this is
+    opt-in per platform and only for platforms with a control-validated oracle.
+
+    THE ORACLE MAY ALSO STATE ITS REASON (2026-08-26). `verify_gone` may return either a bare
+    verdict string or a `(verdict, reason)` pair; the reason is persisted to
+    `ops_stale_inactivation_probe.note`. Recording only the verdict makes a kill unfalsifiable from
+    the record: on 2026-08-26 the aqarcity oracle was found mapping "real id but unparseable page"
+    to 'gone', and deciding whether 254 same-day deactivations were correct needed a by-hand
+    re-probe of the live source, because nothing stored said WHICH condition had fired. Every
+    probed row now leaves an evidence row — UNKNOWN/held included, which previously wrote none.
+
     Returns the number of rows actually DEACTIVATED this run (0 when misses were only counted),
     or -1 when a circuit breaker tripped and nothing was changed, so the caller can flag the
     run degraded.
@@ -784,12 +872,82 @@ def prune_unseen(
     for m, ads in by_count.items():
         new_missing = m + 1
         payload: dict[str, Any] = {"missing_count": new_missing}
-        if new_missing >= grace:
+        doomed = new_missing >= grace
+        if doomed:
             payload["active"] = False
+        if doomed and verify_gone is not None:
+            # Only rows about to be deactivated are probed — a strike that is merely ticking up
+            # costs nothing and needs no network call.
+            confirmed_gone, still_live = [], []
+            why: dict[str, str] = {}   # ad_number → the oracle's stated REASON, recorded as evidence
+            for ad in ads:
+                try:
+                    got = verify_gone(ad)
+                    # An oracle may return "gone" or ("gone", "why"). The reason is what makes a
+                    # kill auditable after the fact: on 2026-08-26 the evidence rows recorded only
+                    # WHICH verdict was reached, never WHY, so establishing whether a deactivation
+                    # was correct required re-probing the live source by hand.
+                    if isinstance(got, (tuple, list)):
+                        verdict = (got[0] or "unknown").lower()
+                        note = str(got[1]) if len(got) > 1 and got[1] else ""
+                    else:
+                        verdict, note = (got or "unknown").lower(), ""
+                except Exception as e:  # an oracle that throws is UNKNOWN, never "gone"
+                    print(f"{table}: verify_gone({ad}) raised {type(e).__name__}: {e} → unknown")
+                    verdict, note = "unknown", f"oracle raised {type(e).__name__}: {e}"
+                why[ad] = note
+                if verdict == "gone":
+                    confirmed_gone.append(ad)
+                elif verdict == "live":
+                    still_live.append(ad)
+            held = len(ads) - len(confirmed_gone) - len(still_live)
+            if still_live:
+                # Self-heal: the source serves it, so it was never missing — only un-indexed.
+                for i in range(0, len(still_live), 200):
+                    _execute(c.table(table).update({"missing_count": 0, "last_seen_at": datetime.now(timezone.utc).isoformat()})
+                             .in_("ad_number", still_live[i:i + 200]),
+                             what=table + ".prune_selfheal")
+            if held:
+                # Record the strike but do NOT deactivate on an unreachable source.
+                pending = [a for a in ads if a not in set(confirmed_gone) | set(still_live)]
+                for i in range(0, len(pending), 200):
+                    _execute(c.table(table).update({"missing_count": new_missing})
+                             .in_("ad_number", pending[i:i + 200]),
+                             what=table + ".prune_update")
+            print(f"{table}: verify_gone on {len(ads)} at-grace row(s) → "
+                  f"{len(confirmed_gone)} gone, {len(still_live)} live (self-healed), {held} unknown (held)")
+            # Durable per-row evidence, so "the probe ran and the SOURCE said gone" is provable in
+            # SQL rather than only in a CI log. mon_detect_prune_kill_without_source_verdict() reads
+            # this: a deactivation on an oracle-required platform with no matching GONE row is a P1.
+            # Monitoring must never fail the prune itself — the rows are written either way.
+            try:
+                decided = set(confirmed_gone) | set(still_live)
+                evidence = (
+                    [{"source_table": table, "ad_number": a, "verdict": "GONE",
+                      "oracle": "prune_unseen.verify_gone", "listing_url": "",
+                      "note": why.get(a) or ""} for a in confirmed_gone]
+                    + [{"source_table": table, "ad_number": a, "verdict": "LIVE",
+                        "oracle": "prune_unseen.verify_gone", "listing_url": "",
+                        "note": why.get(a) or ""} for a in still_live]
+                    # UNKNOWN rows were previously written nowhere at all, so "the oracle could not
+                    # decide" left no trace and was indistinguishable from "the probe never ran".
+                    # A held strike is the outcome §26 most wants to be able to audit.
+                    + [{"source_table": table, "ad_number": a, "verdict": "UNKNOWN",
+                        "oracle": "prune_unseen.verify_gone", "listing_url": "",
+                        "note": why.get(a) or ""} for a in ads if a not in decided]
+                )
+                for i in range(0, len(evidence), 200):
+                    _execute(c.table("ops_stale_inactivation_probe").insert(evidence[i:i + 200]),
+                             what="ops_stale_inactivation_probe.insert")
+            except Exception as e:
+                print(f"{table}: could not record prune probe evidence ({type(e).__name__}: {e})")
+            ads, payload = confirmed_gone, {"missing_count": new_missing, "active": False}
+            if not ads:
+                continue
         for i in range(0, len(ads), 200):
             _execute(c.table(table).update(payload).in_("ad_number", ads[i:i + 200]),
                      what=table + ".prune_update")
-        if new_missing >= grace:
+        if doomed:
             killed += len(ads)
     return killed
 

@@ -87,8 +87,49 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
   // Commercial + rural + land cohorts (2026-08-16 overnight profiling, fresh-band designed).
   // AC is fresh-DEAD on commercial (aqar form change) and is deliberately enabled NOWHERE here
   // despite passing all-time gates. Bedrooms stay Normal-tier everywhere (owner permanent rule).
-  // NOT-VIABLE (Normal-Filter-only, evidence in the ledger): Chalet, Camp, Factory, Staff Housing,
-  // Service Facilities, Hotel/rent, Farm/rent, CommLand/rent, IndLand/rent, AgriPlot/rent, Duplex.
+  // NOT-VIABLE (Normal-Filter-only, evidence in the ledger): Chalet, Camp, Staff Housing,
+  // Service Facilities, Hotel/rent, Farm/rent, CommLand/rent, IndLand/rent, AgriPlot/rent.
+  //
+  // ── Re-audit 2026-08-23 (owner order) of the six types that were leaving whole GROUPS with no
+  // Advanced Filter. Each was measured against TODAY's production inventory and then adjudicated
+  // against the LIVE source page, never against plausibility. Two earned a cohort; four did not.
+  //
+  //   Duplex/Buy      CERTIFIED below — n=117, 9 platforms, top platform 40.2% (genuinely diverse),
+  //                   5 fresh/7d. ONE field survives: bathrooms, 76/117 known (65%), four narrowing
+  //                   rungs (>=1:76, >=2:76, >=3:75, >=4:69). Source-adjudicated 6/6 exact against
+  //                   hajerhouses' own «دورات المياه» field. Nothing else clears: age 12/117,
+  //                   street width 14/117, direction 9/117, kitchen 7, parking 6, furnished 1,
+  //                   rnpl 0 — all far below any usable floor. NOT padded with Villa's questions.
+  //   Factory ×2      CERTIFIED below — rent n=72 (7 fresh/7d), buy n=34 (2 fresh/7d); aqar-commercial
+  //                   monoculture (94%), flagged like Shop/IndLand before it. street_width verified
+  //                   10/10 EXACT against aqar's own structured `street_width` payload key, with one
+  //                   correct UNKNOWN where the source is silent. property_age is ALSO source-verified
+  //                   (10/10) but is deliberately NOT listed: AGE_FILTER_TYPES has no Factory entry and
+  //                   that gate's floor is 150 rows, so the question could never be offered — listing
+  //                   it would be availability for a question this type can never be asked.
+  //   Chalet          NOT certified. It passes every DB-side gate (rent-annual n=61: age 53, bath 54,
+  //                   street width 56) — but of 24 rows adjudicated against source, HALF (12) now have
+  //                   both structured keys null on the live page. Counts built on values the source no
+  //                   longer publishes are stale by construction. Needs a fresher sample, not a cohort.
+  //   Camp            NOT certified — 4 rows rent-annual, 28 monthly with 0 fresh in 7d.
+  //   Staff Housing   NOT certified — 3 rows rent-annual, 1 monthly.
+  //   Service Facs.   NOT certified — 40 rows TOTAL spread across six unrelated raw types
+  //                   (bank 11 / parking 10 / telecom tower 9 / school 6 / health centre 4); the
+  //                   largest is 11. One shared question across banks and telecom towers is not a
+  //                   question, whatever the row count says.
+  //
+  // NOTE, measured the same day: certifying these does NOT open Advanced Filter for any group. Every
+  // group's ceiling is set by the intersection of its ALREADY-CERTIFIED members — «Industrial &
+  // Logistics» is capped at 1 by Warehouse ∩ Workshop no matter what Factory carries, and «Villas &
+  // Houses» needs a SECOND supported Duplex field it does not have. See
+  // scripts/verify-af-group-cohort-coverage.ts for the pinned per-group matrix.
+  Duplex: {
+    Buy: ['bathrooms'],
+  },
+  Factory: {
+    RentAnnual: ['street_width'],
+    Buy: ['street_width'],
+  },
   Office: {
     RentAnnual: ['property_age', 'furnished', 'amenities', 'street_width'],
     Buy: ['property_age', 'street_width'],
@@ -193,10 +234,27 @@ export function scopeCleanTypes(q: SearchQuery): string[] {
 // shared SQL predicates are strict-NULL-excluding, offering it would amputate that type's rows the
 // moment it is answered — the user asks for شقة+غرفة and gets zero غرفة back.
 //
-// BOTH DIMENSIONS INTERSECT AT ONCE: `.every` intersects across the selected TYPES, and the period
-// branches inside it intersect across PERIODS, so a 'both'-period × 2-type scope must clear all four
-// lists before a question is offered. An empty scope returns false explicitly — [].every() is `true`,
-// which would otherwise turn "nothing selected" into "everything allowed".
+// BUY+RENT COMBINED (q.dealCombined, owner feature 2026-08-20) — a THIRD dimension that intersects
+// at once with type and period, exactly like the other two: INTERSECTION across all three legs of a
+// cohort — Buy, RentAnnual, AND RentMonthly (combined mode's Rent side has no period selector, so it
+// spans both periods too). Same principle the mixed-period branch above already established, reusing
+// the SAME already-profiled COHORT_QUESTIONS table with zero new data work: a question must be
+// independently certified for Buy AND Annual Rent AND Monthly Rent before it can narrow a
+// Buy∪Rent(any period) eligible set without risking a silent amputation of whichever leg it was
+// never validated against. Mechanically excludes Buy-only questions (fail the Rent legs), Rent-only
+// questions like rnpl (never in any cohort's Buy list), and Monthly-only signals like Gathern rating
+// (never in Buy or RentAnnual); a type with no certified Monthly cohort (most commercial/rural types)
+// correctly offers ZERO combined-mode questions — the same conservative "no evidence, don't ask"
+// behavior 'both' already applies.
+function cohortAllowsCombined(cfg: NonNullable<(typeof COHORT_QUESTIONS)[string]>, id: string): boolean {
+  return (cfg.Buy ?? []).includes(id) && (cfg.RentAnnual ?? []).includes(id) && (cfg.RentMonthly ?? []).includes(id);
+}
+
+// BOTH DIMENSIONS INTERSECT AT ONCE: `.every` intersects across the selected TYPES, and the period/
+// deal branches inside it intersect across PERIODS and DEAL, so a 'both'-period × 2-type scope (or a
+// dealCombined × 2-type scope) must clear every relevant list before a question is offered. An empty
+// scope returns false explicitly — [].every() is `true`, which would otherwise turn "nothing
+// selected" into "everything allowed".
 export function cohortAllows(q: SearchQuery, id: string): boolean {
   const types = scopeCleanTypes(q);
   if (!types.length) return false;
@@ -207,6 +265,7 @@ export function cohortAllows(q: SearchQuery, id: string): boolean {
     if (q.category !== (CLEAN_MACRO[type] ?? 'Residential')) return false;
     const cfg = COHORT_QUESTIONS[type];
     if (!cfg) return false;                 // uncertified type = EMPTY cohort, never "no constraint"
+    if (q.dealCombined) return cohortAllowsCombined(cfg, id);
     if (q.deal === 'Buy') return (cfg.Buy ?? []).includes(id);
     if (q.deal !== 'Rent') return false;
     if (q.rentPeriod === 'monthly') return (cfg.RentMonthly ?? []).includes(id);

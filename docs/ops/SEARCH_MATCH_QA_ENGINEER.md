@@ -97,6 +97,16 @@ FAILS. Match-first-then-diversity applies to every batch.
 Every live sorting choice. Sorting may change ORDER only, never the eligible set (450 qualify
 before sorting → every sort operates over the same 450). Then «عرض المزيد» while sorting is active.
 
+**Where the sorts actually live (verified 2026-08-23).** The Normal Filter results screen exposes
+**no sort control** — don't hunt the DOM for «الترتيب» and don't report its absence as a defect.
+`p_sort_by` is driven by the الوكيل الذكي path, and the six live keys are
+`oldest · price_asc · price_desc · area_asc · area_desc · beds_desc`
+(`RPC_SORT_KEYS`, `src/data/remote.ts`) plus the default relevance order when the param is omitted.
+Test the substantive invariant at the RPC level: re-issue one search per key and assert the
+returned ID **set** is identical (missing = extra = duplicates = 0) while the ORDER changes. Pick a
+cohort under `p_limit` so the whole set is comparable — 2026-08-23 used شقة/إيجار/سنوي/الرياض/
+حي النرجس (1,058 rows): 6/6 sorts set-identical, order changed on every one.
+
 ## 12. Verify the FULL PATH
 For sample searches prove the chain agrees end to end:
 user clicks → filter state → RPC/network parameters → shared eligibility backend → database
@@ -220,10 +230,30 @@ new-listing findability · Arabic UI · Supabase health · barrier execution. Li
 **المشكلة → السبب → الإصلاح → الحاجز → تحقق الإنتاج**.
 
 ## 29. Refresh, back, and state persistence
-تصفية → بحث → النتائج → بطاقة عقار → رجوع: selections preserved where intended. Refresh on
-results. المدينة doesn't change · الحي doesn't disappear · multiple أحياء stay selected · السعر,
-المساحة, غرف النوم stay · فئة/نوع stay correct · «سنوي» never becomes «شهري» · «إيجار» never
-becomes «شراء» · «عرض المزيد» doesn't corrupt state. Ezhalah-side resets → fix + regression barrier.
+
+> ⚠️ **The REFRESH half of this section was REVERSED by the owner on 2026-08-16 — do not "fix"
+> production back to the old rule.** Until then §29 required a refresh on the results screen to
+> restore the search, and that is what an earlier version of this file said. The owner ruled it
+> out in full: *"A browser refresh must never accidentally count as a new user search. There
+> should be no duplicate AI request, duplicate property-search RPC, duplicate conversation
+> message, duplicate analytics event, or duplicate saved conversation caused simply by
+> refreshing."* The canonical statement and its regression guard live in
+> `scripts/verify-refresh-restores-filter-search.ts` (in `npm test`); that file wins on any
+> divergence.
+
+**Refresh, THE RULE NOW (owner 2026-08-16), for guests and signed-in users alike:** a refresh
+inside a chat/search lands on the **FILTER HOME screen** and performs **ZERO AI calls, ZERO
+property RPCs, ZERO history writes**. A signed-in user's conversation is already saved in the
+sidebar (written at SEARCH time, de-duped by query) and reopens only when clicked; a guest has
+no visible history to restore. A refresh that re-runs or reconstructs the search is the DEFECT.
+Verified in production 2026-08-23: refresh → `/` filter home, 0 cards, **0 RPCs fired**, on both
+desktop and the 390 px mobile viewport.
+
+**Everything else in this section still stands.** تصفية → بحث → النتائج → بطاقة عقار → رجوع:
+selections preserved where intended · المدينة doesn't change · الحي doesn't disappear · multiple
+أحياء stay selected · السعر, المساحة, غرف النوم stay · فئة/نوع stay correct · «سنوي» never becomes
+«شهري» · «إيجار» never becomes «شراء» · «عرض المزيد» doesn't corrupt state (all filters stay
+active across every batch). Ezhalah-side resets in THOSE paths → fix + regression barrier.
 
 ## 30. Duplicates
 Inspect first batch, post-«عرض المزيد» batches, cross-platform syndication, duplicate source IDs,
@@ -347,10 +377,16 @@ layer C, not in more HTTP searches.
 
 ### 40.2 Layer A — ~200 real browser journeys
 Drive the real site at `https://ezhalah-app.vercel.app`. Cover, across the run: **desktop AND
-mobile viewports** · Residential + Commercial · every property group · every property type · «شراء»
-· «إيجار» «سنوي» · «إيجار» «شهري» · «كلاهما» where supported · cities · districts · multi-district ·
-السعر · المساحة · غرف النوم · **Advanced Filter** · «عرض المزيد» · cards · click-through ·
-refresh/back state (§29) · new listings (§16).
+mobile viewports** · Residential + Commercial · every property group · every property type · **deal
+state: «شراء» alone · «إيجار» alone · «شراء»+«إيجار» combined (owner feature 2026-08-20, §17a) — a
+major certification of Filter/search/matching/Advanced-Filter/Trending/pagination/cards is
+INCOMPLETE without covering all three, never just the two single-deal states** · «إيجار» «سنوي» ·
+«إيجار» «شهري» · «كلاهما» where supported (combined mode has no period selector — its Rent side
+always spans both) · cities · districts · multi-district · السعر (independent Buy/Rent budgets under
+combined mode) · المساحة · غرف النوم · **Advanced Filter** (assert the 3-way Buy∩RentAnnual∩RentMonthly
+intersection under combined mode — no Buy-only/Rent-only/Monthly-only question ever appears) ·
+«عرض المزيد» · cards · click-through · refresh/back state (§29) · new listings (§16) · the full
+deal-transition matrix (Buy↔Rent, Buy↔Both, Rent↔Both, both directions).
 
 Budget: at ~16 s per param-fidelity journey and ~26 s per full journey (measured), ~200 journeys is
 roughly **1–1.5 hours** of browser time. Harvest the **request template** for every
@@ -361,7 +397,10 @@ Coverage-driven, never random or repetitive. A planner must track cell coverage 
 fill under-tested dimensions. Spread across: all live property types · all 13 regions · populated
 cities · populated districts · type × deal × period · price ranges · area ranges · bedroom values ·
 multi-filter combinations · zero-result cases · very small cohorts · large cohorts ·
-Annual/Monthly/Both isolation · **all enabled Advanced Filter cohorts, questions and options**.
+Annual/Monthly/Both isolation · **Buy-only / Rent-only / Buy+Rent-combined isolation, each
+independently — a cell grid that only varies type×region×period and holds deal fixed at one value
+under-covers the search space** · **all enabled Advanced Filter cohorts, questions and options**
+(under combined mode: only the 3-way-certified intersection).
 
 ### 40.4 What every search must prove
 1. **intended state = UI state = serialized/request state.** Read UI state from the app's OWN
@@ -482,9 +521,168 @@ appears broken.
    collide across genuinely distinct listings from the same agent/building — one run showed 150 false
    "duplicates" in 210 مكتب cards. Identity is the click-through URL: 110 cards produced 110 distinct
    destinations. §30 (similarity ≠ evidence) applies to the harness too.
+10. **The UI label is not the serialized value — «شراء» goes out as `p_deal: 'بيع'`.** Feeding the
+    oracle the Arabic control label instead of the captured request value makes every Buy search
+    read 0 and look like a total matching failure (hit 2026-08-23 on دور and عمارة سكنية). §40.4
+    already says to read state from the app's own «ملخص البحث» and its real request: pass
+    `ops_qa_diff` the **captured** `p_deal`/`p_rent_period`, never what you clicked.
+11. **`p_cities` and `p_region_ids` must be a CONSISTENT pair.** The RPC ANDs them, so a mismatched
+    pair correctly returns 0 — it is not an inventory finding. الدمام is region **5** (المنطقة
+    الشرقية), not 4 (القصيم); guessing that cost a false "major city has no apartments" scare on
+    2026-08-23. The real UI derives the region from the chosen city and can never send a
+    contradictory pair, so neither should the harness: read the id from `loc_catalog_region`.
+12. **The agent image's Chromium is PINNED and will not match the driver.** `/opt/pw-browsers` ships
+    one build (1194 on 2026-08-24); the repo's Playwright wants whatever build ITS version pins
+    (1234), and `chromium.launch()` with no `executablePath` looks for the latter and finds nothing.
+    Every journey then dies with *"Executable doesn't exist at …chromium_headless_shell-1234…"*, the
+    sweep reports 0 journeys and `SEARCH & MATCHING HEALTH: 1/10`, and it reads exactly like a total
+    production outage. It is trap §40.7 in its purest form — a harness failure wearing a product
+    failure's clothes. `e2e/live-sweep/sweep.mjs` now takes both fixes from the environment, so CI
+    (which runs `playwright install`) is unaffected and the agent container just sets them:
+    `PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium npm run sweep:live` — and `HTTPS_PROXY`, when set,
+    additionally supplies the proxy plus `--ssl-version-max=tls1.2` from trap 1. Do NOT "fix" this by
+    running `playwright install`; the image deliberately pre-installs the browser.
+    Corollary, also learned the hard way: **never read the sweep's exit code through a pipe.**
+    `npm run sweep:live | tail` reports `tail`'s status, so a run that correctly exited 1 on nine
+    missed coverage floors looks like a pass. Redirect to a file and read `$?`.
+13. **An unconfirmed المدينة is a REFUSAL, not a broken search.** If the city is typed but no
+    dropdown option is committed, production deliberately declines to search and says
+    «الرجاء اختيار مدينة من القائمة.» / «لا توجد مدينة مطابقة — اختر من القائمة». That is correct
+    behaviour. Substring-matching the suggestion picks a huge outer container and silently fails to
+    commit, which then looks like «بحث» doing nothing — assert `input_value()` actually contains the
+    city before searching, and treat a miss as a harness error.
+14. **An RPC harness must send `p_category`, and must FILTER `p_types2` — omitting either invents
+    matching defects that production does not have** (hit 2026-08-25). A layer-B harness that built
+    its request from `ops_qa_cohort` alone produced three `COUNT_MISMATCH` verdicts on «عمارة سكنية»
+    (1390/1388, 541/540, 887/882), each looking exactly like the RPC padding results with Commercial
+    rows. Production was right on BOTH of its independent layers, and the harness was wrong on two
+    counts:
+    - **`p_types2` is not the cohort's type list.** The residential-misfile overlay carries
+      `RESIDENTIAL_TYPE_AR_COM`, which deliberately **excludes «عمارة»** — in a COMMERCIAL table
+      «عمارة» means Commercial Building, so including it leaks Commercial Buildings into Residential
+      results (`src/data/remote.ts:1100`, and `COMMERCIAL_TYPE_AR_RES` mirrors it in reverse).
+    - **`p_category` is always sent** (`p_category: impliedCategory(q)`, `src/data/remote.ts:630`) —
+      the RPC-layer category-purity enforcement of the owner's permanent 2026-07-16 rule. Omitting it
+      disables a gate the real client never runs without.
+    Proof both ways, worth repeating rather than re-deriving: with the client's real `p_types2` the
+    three searches return 1388/540/882 = the oracle exactly; and with the raw cohort list but
+    `p_category` restored they ALSO return 1388/540/882. Two independent mechanisms, one answer. Note
+    `ops_qa_diff` reaches that answer by a THIRD route — it passes the full `c.types_ar` as `p_types2`
+    and relies on its own `p_cat` purity clause — so the oracle agreeing with the client is not
+    circular. Rule: build the request from the app's real serialization, and when a mismatch appears
+    only on a cohort with a `scope2` overlay, suspect the harness first. Re-running all 223 searches
+    with the corrected shape changed **exactly 3 of 223** results — `p_category` is a no-op for every
+    cohort whose `p_types` is already macro-pure, which is why the other 220 verdicts stood.
+
+## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
+
+> **What the user sees must match the actual listing/search truth exactly, in clean Arabic, with no
+> English leaks, no admin-region junk, no stale labels, no mismatched city/district text.**
+
+This is a rule about the *rendered card*, not only about matching. A search can select exactly the
+right rows and still break this contract by mislabelling them.
+
+**42.1 Location labels.** The search index carries the ARABIC-CANONICAL location, not the raw source
+string — `src/data/remote.ts` has always claimed this; since 2026-08-22 the data enforces it:
+- `city_ar` is the canonical `loc_catalog_city` name of the row's own `city_id`. The visible city
+  must equal `city_id`'s name — always, with no orthographic drift.
+- `district_ar` is one canonical rendering per `(city_id, normalised district)`, so a single result
+  list can never show «حي النرجس» and «النرجس» as if they were two places.
+- Written at source by `loc_display_city_ar()` / `loc_display_district_ar()` inside
+  `sync_search_listings_ar()`; `backfill_location_display_labels()` repairs stored rows.
+- **Never guess.** An unresolved city stays unresolved: `loc_display_city_ar()` returns NULL rather
+  than show «امارة منطقة الرياض - الجبيله» as if it were a city name.
+- **Source truth is untouched.** Only the index's DISPLAY columns are canonicalised; the raw labels
+  remain in `listing_native_location_v2` and the per-platform source tables.
+
+**42.2 Relabelling must never move the eligible set.** The RPC's city arm is
+`normalize_ar(city_ar) ∈ tokens OR city_id ∈ ids OR match_city_ids && ids`, so `city_ar` IS a match
+arm. A label rewrite is only safe when the new label is the row's own `city_id`'s name (arm 2
+already matched it) and no row's OLD label resolved to a city that identity does not cover — measure
+that BEFORE writing, and re-run the differential after. District rewrites must be
+`norm_district_tok`-preserving. (2026-08-22: 1,439 rows changed, rows that would narrow = 0,
+114 EXACT_SET_MATCH / 40 COUNT_MATCH_PAGE_CAPPED unchanged across the fix.)
+
+**42.3 English in an Arabic card.** Zero English in any *label* Ezhalah renders (city, district,
+region, type, deal, period, rooms, baths, area, price). But an advertiser's own description is
+SOURCE CONTENT — a landlord who wrote their ad in English stays as published. Never "fix" a
+description to chase a leak count; check labels, not free text.
+
+**42.4 Match first, then diversify.** Ranking and diversification operate strictly INSIDE the
+eligible set: they may reorder, never introduce a listing that fails the user's filters, never
+duplicate one, never change the count shown. The proof is a key-set md5 of what the RPC actually
+returned against `ops_qa_diff` — equal hashes prove all four at once. Repeated identical searches
+must return the identical set.
+
+**42.5 The barriers.** `mon_detect_card_label_contract()` (English leakage · city text ≠ city_id ·
+admin-region label as city · guessed unknown location · district non-canonical · district rendered
+two ways) and `mon_detect_ranking_diversity_contract()` (daily-gated; drives the real RPC). Both are
+in the `mon_run_all_detectors()` roster. All six label conditions and the ranking comparison are
+mutation-proven — each shown to read 0 on clean data and 1 on a deliberately broken row.
 
 ## Final principle
 **MATCH → SOURCE TRUTH → DIVERSITY → USER JOURNEY → PERFORMANCE**, in that order. The engineer owns
 the entire journey: اختيار التصفية → بحث → النتائج → عرض المزيد → بطاقة العقار → المصدر الصحيح.
 Any proven Ezhalah-side failure anywhere in it: find → prove → fix root cause → barrier →
 regression test → deploy safely → production retest → report once.
+
+---
+
+## 40. THE LIVE BROWSER SWEEP — permanent, scheduled, and part of this routine
+
+**Owner, 2026-08-23: «Make the real live-browser hunt permanent. I do not want these 16 barriers to
+be the only protection. The routine must actually drive the production site like a real user every
+run.»**
+
+`npm test`'s barriers read SOURCE and query the DATABASE. They are blind in exactly the place users
+live: they cannot see what a browser RENDERS. Every defect in the 2026-08-22 hunt — a city silently
+re-scoped to a neighbourhood, an AF chip promising 8,914 and landing on 2,364, the RPC page cap
+quoted as a match total, a district visible in the field but never searched — **passed `npm test`**
+and was obvious within seconds of driving the real site.
+
+So the browser sweep is a SECOND, PERMANENT layer:
+
+| | |
+|---|---|
+| what | `e2e/live-sweep/` (`run.mjs` · `journeys.mjs` · `sweep.mjs`) |
+| when | daily, `.github/workflows/live-search-sweep.yml` (`23 2 * * *`) + `workflow_dispatch` |
+| locally | `npm run sweep:live` (add `BASE_URL=…` to point it at a local build) |
+| shape guarded by | `scripts/verify-live-sweep-coverage-contract.ts`, inside `npm test` |
+
+### The six layers — clicking a control is never the assertion
+Every journey captures the whole chain, and **any mismatch between adjacent layers is a defect**:
+
+`INTENT → visible UI → actual request → RPC result → INDEPENDENT DB truth → rendered results`
+
+Layer 5 is built from **PostgREST's own filter operators** — a different implementation from the
+app's SQL — so agreement is evidence rather than self-confirmation. It is derived from the app's OWN
+captured request body, and when a scope cannot be expressed faithfully the sweep **skips that layer
+and says so**. It never guesses: on its first run an imprecise oracle "found" three defects that were
+purely its own missing predicates, and an oracle that accuses the product for its own imprecision is
+worse than no oracle.
+
+### Rotation — never Riyadh-heavy
+Coverage is drawn from `ops_qa_coverage_ledger` **stalest-first** (`ops_qa_sweep_plan`), and what was
+covered is written back (`ops_qa_record_coverage`). Cities are discovered LIVE from the index, never
+a hardcoded list that can rot. Rotated dimensions: city · region · property type · deal/period ·
+AF cohort.
+
+### Minimum coverage per run — ASSERTED, not hoped for
+≥3 non-Riyadh cities · ≥1 mobile · ≥1 Advanced Filter · ≥1 Trending city · ≥1 Trending district ·
+≥1 Buy+Rent · ≥1 monthly-rent · ≥1 honest-zero · ≥1 card → external site → Back.
+
+**A run that covers less than the floor FAILS.** Silent shrinkage is exactly how a rotation system
+rots, so the floors are enforced by exit code and pinned by the barrier above.
+
+### Permanent watches (one per defect fixed 2026-08-23)
+`exact-city-never-rescoped` · `monthly-af-counts-update` · `true-total-never-page-cap` ·
+`buyrent-summary-both-budgets` · `unknown-period-stays-unknown` · `no-html-entities-rendered` ·
+`typed-district-not-dropped` · `clarification-answer-commits` · `tab-switch-no-junk-history`
+
+Deleting a watch fails the barrier. `exact-city-never-rescoped` and `true-total-never-page-cap` are
+asserted on **every** journey, not by one probe.
+
+### When the sweep is RED
+It found a real, user-visible defect. Handle it the way §25 and §26 already require:
+**reproduce → root cause → fix → regression → barrier → mutation-proof → merge → deploy → re-test.**
+Never close it by loosening the sweep.

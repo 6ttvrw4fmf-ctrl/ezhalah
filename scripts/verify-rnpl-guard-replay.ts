@@ -64,6 +64,21 @@ console.log('\nRNPL/Monthly guard — asserted against the REPLAYED final state 
 // confirmed not to touch the RNPL/Monthly predicates. Remove an entry the moment its migration is
 // superseded by an explicit definition.
 const AUDITED_UNINTERPRETABLE = new Map<string, string>([
+  ['20260822141945_top_cities_by_deal_ar_understands_advanced_filter.sql',
+   'audited 2026-08-22 (mine, read line by line): makes the trending CITY chip RPC advanced-filter ' +
+   'aware. ZERO literal occurrences of payment_monthly and ZERO of rent_now_pay_later/rnpl/RNPL in ' +
+   'the file (verified by grep), and ZERO redefinitions of location_search_candidates_ar or any ' +
+   'other tracked RPC. Its ONLY DDL is `drop function ... top_cities_by_deal_ar(text,text,text,' +
+   'text[])` followed by `create function public.top_cities_by_deal_ar(...)` — one function, not on ' +
+   'the replayed list. It is uninterpretable to the replayer for the same reason several entries ' +
+   'below are: the body is BUILT AT APPLY TIME rather than written literally, here by concatenating ' +
+   'af_eligibility_clause() with the CTE block read out of af_eligible_count via ' +
+   'pg_get_functiondef(). Both of those are READ, never redefined. That construction is the whole ' +
+   'point — it is what makes the chip count and the results RPC agree byte-for-byte instead of by ' +
+   'hand-copy — so landing an explicit CREATE OR REPLACE here would inline a fourth copy of the ' +
+   'predicate and reintroduce exactly the drift this guard exists to catch. The RNPL/Monthly ' +
+   'predicates therefore reach the new function ONLY through that canonical clause, unchanged, and ' +
+   'mon_detect_af_count_surfaces_carry_af asserts the byte-identity live every sweep.'],
   ['20260810201309_wire_filter_audit_barriers_into_daily_detector_roster.sql',
    'audited 2026-08-10 (mine): wires five Filter-audit detectors into mon_run_all_detectors(). ' +
    'ZERO occurrences of payment_monthly and ZERO of rent_now_pay_later/rnpl/RNPL. Every function it ' +

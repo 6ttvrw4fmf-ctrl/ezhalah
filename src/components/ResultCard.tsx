@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Animated, Easing, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
@@ -7,6 +7,9 @@ import type { Listing } from '@/data/listings';
 import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText } from '@/lib/arabicText';
+import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { sourceName } from '@/lib/listingDisplay';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -121,6 +124,15 @@ export function ResultCard({
     if (!raw) return '';
     const m = raw.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
     if (m) return m[1];
+    // ISO-8601 — «2025-09-21T20:33:43+03:00» — is what aqarcity, eaqartabuk and eastabha publish.
+    // This function only knew DD/MM/YYYY, so an ISO stamp (25 chars) fell through the `length <= 12`
+    // tail and returned '' — the «أضيف» chip silently vanished on 2,544 live listings that DO carry
+    // a source-published date (audit 2026-08-23: 76 of 595 audited cards, every one ISO).
+    // Read TEXTUALLY, never via `new Date()`: these stamps are +03:00 Saudi local, and re-reading the
+    // day in the viewer's timezone would shift the date the SOURCE published by a day. The digits are
+    // reordered into the card's one date format — same fact, nothing derived.
+    const iso = raw.match(/^\s*(\d{4})-(\d{2})-(\d{2})(?!\d)/);
+    if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
     if (/^\s*recently\s*$|مؤخر/.test(raw)) return t('recently');
     return raw.length <= 12 ? raw : '';
   };
@@ -133,8 +145,11 @@ export function ResultCard({
     locale,
     TYPE_UNRESOLVED_AR,
   );
-  const { width } = useWindowDimensions();
-  const horizontal = IS_WEB && width >= 820; // desktop 3-column layout
+  // desktop 3-column layout. Goes through useAtLeast so the FIRST client render reproduces the
+  // server's answer (no window ⇒ compact); comparing the width inline here was the second half of
+  // the React #418 P0 of 2026-08-21 — it differs only in style attributes, but React compares those
+  // during hydration too, which is why the live page logged two errors and not one.
+  const horizontal = useAtLeast(CARD_WIDE_BREAKPOINT);
   const [expanded, setExpanded] = useState(false);
   const txtAlign = isRTL ? ('right' as const) : ('left' as const);
   const wDir = isRTL ? ('rtl' as const) : ('ltr' as const);
@@ -529,45 +544,9 @@ function SourceBadge({ source }: { source: string }) {
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
-// Pretty-print and hostname helpers for the "Hosted on X" labels. Mirrors SourceBadge's matching.
-function sourceName(source: string): string {
-  const s = source.toLowerCase();
-  if (s.includes('wasalt')) return 'Wasalt';
-  if (s.includes('aldarim')) return 'Aldarim Real Estate';
-  if (s.includes('aqargate')) return 'Aqar Gate';
-  if (s.includes('alhoshan')) return 'Al Hoshan';
-  if (s.includes('hajer')) return 'Hajer Houses Real Estate';
-  if (s.includes('sanadak')) return 'Sanadak';
-  if (s.includes('eastabha')) return 'East Abha Real Estate';
-  if (s.includes('aqarcity')) return 'Aqar City';
-  if (s.includes('raghdan')) return 'Raghdan Real Estate';
-  if (s.includes('eaqartabuk')) return 'Eqar Tabuk';
-  if (s.includes('satel')) return 'Satel';
-  if (s.includes('sadin')) return 'Sadin for Real Estate';
-  if (s.includes('toor')) return 'TOOR';
-  if (s.includes('mustqr')) return 'Mustaqarr Real Estate';
-  if (s.includes('ramzalqasim')) return 'Ramz Al Qassim Real Estate Investment';
-  if (s.includes('fursaghyr')) return 'Fursa Ghyr Real Estate';
-  if (s.includes('jazwtn')) return 'Jazan Watan';
-  if (s.includes('mizlaj')) return 'Mizlaj Real Estate';
-  if (s.includes('muktamel')) return 'Muktamel';
-  if (s.includes('aqaratikom')) return 'Nawait';
-  if (s.includes('awal')) return 'Awal United for Real Estate';
-  // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
-  // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
-  // logo, found live 2026-07-25). Also match the no-space form in case that ever appears.
-  if (s.includes('al khaas') || s.includes('alkhaas')) return 'Al Khaas';
-  if (s.includes('abeea')) return 'Abeea Real Estate';
-  if (s.includes('jurash')) return 'Jurash Real Estate';
-  if (s.includes('alnokhba')) return 'Al Nokhba';
-  if (s.includes('gathern')) return 'Gathern';
-  if (s.includes('deal')) return 'Deal App';
-  if (s.includes('souq')) return '24 Souq';
-  if (s.includes('pulse')) return 'Era Pulse';
-  if (s.includes('nowaisiry')) return 'Al Nowaisiry Real Estate';
-  if (s.includes('october')) return '1 October Real Estate';
-  return 'AQAR';
-}
+// Hostname helper for the "Hosted on X" labels. Mirrors SourceBadge's matching. (`sourceName` moved
+// to src/lib/listingDisplay.ts, owner 2026-08-22, so Read Aloud shares the exact same platform-name
+// mapping instead of a second copy that could drift.)
 function sourceHost(source: string): string {
   const s = source.toLowerCase();
   if (s.includes('wasalt')) return 'wasalt.sa';

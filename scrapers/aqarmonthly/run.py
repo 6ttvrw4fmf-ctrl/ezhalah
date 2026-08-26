@@ -196,6 +196,8 @@ def map_listing(g: dict, price: dict) -> dict | None:
         return None
     if monthly <= 0:
         return None
+    price_annual_val = round(monthly * 12)
+    area_m2_val = N.to_int(g.get("area"))
 
     imgs = ["https://images.aqar.fm/" + k for k in (g.get("imgs") or []) if k][:30]
 
@@ -222,8 +224,19 @@ def map_listing(g: dict, price: dict) -> dict | None:
         "transaction_type": "Rent",
         "rent_period":      "monthly",
         "source":           "Aqar Monthly",
-        "price_annual":     round(monthly * 12),  # app shows price_annual / 12 = the monthly figure
-        "area_m2":          N.to_int(g.get("area")),
+        "price_annual":     price_annual_val,  # app shows price_annual / 12 = the monthly figure
+        # PRICE = SOURCE evidence (owner invariant 2026-08-04, alert_event 523). Previously every
+        # aqarmonthly row was written with NO price_evidence at all — the sibling scrapers
+        # (dealapp, wasalt) already record this; aqarmonthly was the one gap.
+        "price_evidence":   N.price_evidence(
+            field="DailyRenting.getCalculatedBookingPriceWithDiscount.discounted_price",
+            raw=price.get("discounted_price") or price.get("total_price"),
+            stored=price_annual_val,
+            kind="monthly",
+            unit="total",
+            origin="api",
+        ),
+        "area_m2":          area_m2_val,
         # "beds" is a furnished/short-stay field (this is a daily-rental vertical) — conventionally
         # physical sleeping-bed count (sofa-beds, bunk beds, extra beds for guest capacity), not
         # bedroom-ROOM count; these routinely diverge for furnished units. A sibling "rooms" field

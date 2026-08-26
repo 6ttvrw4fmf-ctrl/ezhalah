@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { Listing } from './listings';
+import { listingPriceString, type Listing } from './listings';
 import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
@@ -9,6 +9,7 @@ import { effectiveTypes, effectiveGroups, bedroomTokens } from './search';
 import { scoreListingProximity } from './proximity';
 import { cityDisplay } from './locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
+import { decodeEntities } from '@/lib/htmlEntities';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import saLocations from './sa-locations.json';
@@ -330,7 +331,7 @@ const pnum = (s: unknown): number | null => { const n = parseInt(String(s ?? '')
 function agentPriceCapAnnual(q: SearchQuery): number | null {
   const amount = parseInt((q.priceInput || '').replace(/[^\d]/g, ''), 10);
   if (!Number.isFinite(amount) || amount < 100) return null;
-  if (q.bothDeals) return null;                     // one cap over buy+rent — leave to the client
+  if (q.bothDeals || q.dealCombined) return null;    // one cap over buy+rent — leave to the client (Filter path sends priceMin/Max(Rent) explicitly instead)
   if (q.deal === 'Rent') {
     if (q.priceIsAnnual) return amount;             // agent already annualized a daily/weekly/monthly rent
     if (q.rentPeriod === 'annual') return amount;
@@ -382,6 +383,11 @@ function rpcFilterParams(q: SearchQuery) {
     // deliberate); sortListings() in search.ts still re-sorts the fetched page for those two, same as
     // before this fix.
     ...(RPC_SORT_KEYS.has(q.sort as string) ? { p_sort_by: q.sort } : {}),
+    // Buy+Rent combined multi-select (owner feature 2026-08-20, PR#817 backend): the Rent-side budget
+    // is its OWN independent price pair — p_price_min/max above stay the Buy budget unchanged. Only
+    // sent when dealCombined is true; every single-deal call shape stays byte-identical (these two
+    // params default to NULL server-side and are ignored whenever p_deal is not null — verified live).
+    ...(q.dealCombined ? { p_price_min_rent: pnum(q.priceMinRent), p_price_max_rent: pnum(q.priceMaxRent) } : {}),
   };
 }
 
@@ -393,7 +399,80 @@ function rpcCountFilterParams(q: SearchQuery) {
   const { p_sort_by: _drop, ...rest } = rpcFilterParams(q) as ReturnType<typeof rpcFilterParams> & { p_sort_by?: string };
   return rest;
 }
+
+// EVERY answered Advanced-Filter question, as RPC params. rpcFilterParams() deliberately carries only
+// the NORMAL-filter narrowing (types/beds/price/area), so any count surface that needs to reflect the
+// user's advanced answers must add these on top — and the ones that forget silently overstate.
+//
+// This has now been the same bug twice. 2026-07-24: the age-bucket badges ignored an already-selected
+// amenity filter and showed counts "far larger than what Search actually returns". 2026-08-20 (AF
+// major certification): `fetchDistrictEligibleCounts` — the helper written specifically so that
+// "count and outcome cannot disagree" — re-ran the results RPC WITHOUT the advanced answers. Measured
+// live on Riyadh / Rent-Annual / شقة with amenities=[elevator] + bathMin=3: the top 8 districts
+// advertised 4,141 listings and returned 511 on click, an 8.1x overstatement, every row wrong.
+//
+// Keep this as the ONE definition. A new advanced question adds its param here and every count
+// surface that spreads it stays correct by construction; verify-af-count-params-carry-advanced.ts
+// fails if the district-count path stops spreading it.
+export function rpcAdvancedFilterParams(q: SearchQuery) {
+  return {
+    ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
+    ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
+    ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
+    ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
+    ...(q.directions?.length ? { p_directions: q.directions } : {}),
+    ...(q.ratingMin != null ? { p_rating_min: q.ratingMin } : {}),
+    ...(q.reviewsMin != null ? { p_reviews_min: q.reviewsMin } : {}),
+    ...(q.unitSubtypes?.length ? { p_unit_subtypes: q.unitSubtypes } : {}),
+    ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
+    ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
+    ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
+  };
+}
 const RPC_SORT_KEYS = new Set(['oldest', 'price_asc', 'price_desc', 'area_asc', 'area_desc', 'beds_desc']);
+
+// EVERY predicate the user's current state implies — the NORMAL narrowing (bedrooms, price, area,
+// combined-mode rent budget) AND the answered Advanced-Filter questions — in ONE object.
+//
+// WHY THIS EXISTS (owner-reported live defect, 2026-08-22). Trending is not a generic location
+// suggestion: it is the LOCATION BREAKDOWN OF THE USER'S EXACT CURRENT ELIGIBLE SET. It was only
+// ever handed rpcAdvancedFilterParams(), i.e. the ADVANCED half, so bedrooms / price / area were
+// silently dropped from every city and district count. Measured live on
+// Apartment + Rent + Annual + 3 beds + 120-180 m² + 70k-100k:
+//     الرياض  trending said 10,618  · truth   705   (15x)
+//     جدة     trending said  5,937  · truth    76   (78x)
+//     مكة     trending said    708  · truth     1   (708x)
+// The user picked a city from those numbers and landed on a completely different result count.
+//
+// The split into two builders is what made the bug structural — a count surface had to REMEMBER to
+// spread both halves, and this one remembered only one. This is the single definition that means
+// "everything the user has chosen", so a surface that spreads it cannot forget a predicate, and a
+// future filter is carried by every such surface for free.
+//
+// p_types and p_sort_by are deliberately NOT included: every caller already passes its own cohort
+// type array, and count surfaces have no ordering (leaking p_sort_by into a count RPC is what made
+// both count calls 404 with PGRST202 in the 2026-07-30 bug-hunt).
+export function rpcAllNarrowingParams(q: SearchQuery) {
+  const { p_types: _types, p_sort_by: _sort, ...normal } =
+    rpcFilterParams(q) as ReturnType<typeof rpcFilterParams> & { p_sort_by?: string };
+  // ONLY the predicates the user actually SET. rpcFilterParams always returns its keys (the search
+  // RPC wants the explicit nulls), but here an unset key must be OMITTED, for two reasons:
+  //   • CORRECTNESS OF THE "is the user narrowed?" TEST — the trending pool decides whether a
+  //     widening fallback is allowed by asking whether this object is empty. Always-present null
+  //     keys would make every search look narrowed.
+  //   • PERFORMANCE, measured: sending p_beds_*/p_price_*/p_area_* as explicit NULLs made
+  //     top_cities_by_deal_ar hit the statement timeout on an unfiltered call, while omitting them
+  //     returned immediately — the CI web-runtime smoke test caught exactly this (the city
+  //     suggestion list came back empty, so «الرياض» could not be picked).
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries({ ...normal, ...rpcAdvancedFilterParams(q) })) {
+    if (v === null || v === undefined) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 
 export type SearchScope = {
   p_deal: string | null;
@@ -531,7 +610,10 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
       : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
 
   return {
-    p_deal: q.bothDeals ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
+    // dealCombined (owner feature 2026-08-20, Filter شراء+إيجار both selected) → null, same as
+    // bothDeals: af_eligibility_clause() treats p_deal IS NULL as Buy ∪ Rent(any period) — verified
+    // live exact (PR#817). Unlike bothDeals it also carries independent dual price ranges above.
+    p_deal: (q.bothDeals || q.dealCombined) ? null : (q.deal === 'Buy' ? 'بيع' : 'إيجار'),
     p_rent_period: rentPeriodParam(q),
     p_cities: cities && cities.length ? cities : null,
     p_districts: q.districts && q.districts.length ? q.districts : null,
@@ -595,6 +677,20 @@ function withTimeout<T>(p: PromiseLike<T>, ms: number): Promise<T | { timedOut: 
 // with identical `q` onto one shared promise cuts redundant round trips with zero behavior change —
 // a later call (different q, or once this one settles) always gets a fresh fetch; nothing is cached
 // past settlement.
+// This RPC prices the age buckets THEMSELVES, so it must not apply the user's own age answer: the
+// server applies p_age_min/p_age_max/p_is_new_construction to the same scope it then buckets, so
+// passing them collapses every other bucket to 0. Verified live 2026-08-25 on Riyadh/Rent-Monthly:
+// no age params -> new 133 / 1_2 34 / 3_5 46 / 6_9 26 / 10p 42; with p_age_min=3,p_age_max=5 ->
+// 3_5 46 and every other bucket 0. meaningful() then drops the sub-5 options and the question is
+// left with a single choice equal to the answer already given — i.e. a re-ask could never change it.
+// AGE_QUESTION.apply is REPLACING, not monotone (advancedFilters.ts: case 'new' nulls ageMin/ageMax),
+// so the un-narrowed buckets are the correct thing to price: the pick replaces the old answer.
+// Same contract as apartment_guided_counts_ar, whose per-option counts also ignore their own dimension.
+function ageAgnostic<T extends Record<string, unknown>>(params: T) {
+  const { p_age_min: _min, p_age_max: _max, p_is_new_construction: _new, ...rest } = params;
+  return rest;
+}
+
 const inFlightAgeCounts = new Map<string, Promise<AgeOptionCounts | null>>();
 
 export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeOptionCounts | null> {
@@ -614,17 +710,15 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
         // Carry forward any earlier-answered guided-flow question (e.g. RNPL) — found live 2026-07-24:
         // without this, the age-bucket badges shown here silently ignored an already-selected amenities
         // filter, showing counts far larger than what Search (and apartment_guided_counts_ar, which
-        // already receives these) actually returns for the same combination. Same pattern as
-        // fetchApartmentGuidedCounts() below; the RPC's own p_amenities/p_bath_min default to NULL
-        // (no-op) so an unanswered question never affects a call that omits them.
-        ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
-        ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
-        ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
-        ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
-        ...(q.directions?.length ? { p_directions: q.directions } : {}),
-        ...(q.ratingMin != null ? { p_rating_min: q.ratingMin } : {}),
-        ...(q.reviewsMin != null ? { p_reviews_min: q.reviewsMin } : {}),
-        ...(q.unitSubtypes?.length ? { p_unit_subtypes: q.unitSubtypes } : {}),
+        // already receives these) actually returns for the same combination.
+        //
+        // Spread the ONE shared builder rather than re-listing its keys (2026-08-25). This call used
+        // to hand-copy 8 of rpcAdvancedFilterParams()' keys; a hand-copy silently stops carrying any
+        // advanced question added later, which is the exact 8x-overstatement class the builder's own
+        // comment documents twice. The RPC declares every key it produces (verified live against
+        // pg_proc, all 11 present), and each is omitted when unanswered, so an unanswered question
+        // never affects the call.
+        ...ageAgnostic(rpcAdvancedFilterParams(q)),
       }),
       AGE_COUNT_TIMEOUT_MS,
     );
@@ -692,14 +786,17 @@ export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<Guided
         ...scopeParams,
         ...rpcCountFilterParams(q),
         ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
-        ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
-        ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
-        ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
-        ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
-        ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
-        ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
-        ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
-        ...(q.directions?.length ? { p_directions: q.directions } : {}),
+        // THE SHARED DEFINITION, not a hand-copied list (2026-08-23 fix). This call site used to
+        // spread the eight advanced params it knew about one by one, and the three Monthly ones
+        // added on 2026-08-18 (p_rating_min / p_reviews_min / p_unit_subtypes) were never added
+        // here — so every surface this function feeds (the «عرض N نتيجة» footer + header pill via
+        // cnt_selected, and EVERY later question's option counts via cnt_sub_*/cnt_bath*/…) was
+        // computed over a scope that ignored the rating and unit-subtype answers. Measured live on
+        // Riyadh / Rent-Monthly / شقة: after answering «9.5+» the card still promised 8,873 (truth
+        // 4,946) and offered «استديو / 3,719» (truth 2,361); the search itself applied both and
+        // landed the user on 2,361. rpcAdvancedFilterParams() carries exactly this same set plus
+        // those three, so a future advanced question is carried here for free.
+        ...rpcAdvancedFilterParams(q),
       }),
       AGE_COUNT_TIMEOUT_MS,
     );
@@ -733,6 +830,50 @@ export async function fetchGuidedLiveCount(q: SearchQuery, amenities: string[], 
 // narrowing filter beyond district_options_ar's scope is active; the base scope needs no calls
 // because scope-count = results there (pinned by mon_trending_district_barrier, 40/40 exact).
 // Each option's own match_values OVERRIDE any districts already in q (spread order is load-bearing).
+// Per-option counts for the Advanced Filter's SCOPE steps — «أي مجموعة عقارات؟» / «أي نوع عقار؟»
+// (owner 2026-08-23). The number beside «فيلا» must equal what picking فيلا actually returns.
+//
+// Unlike every other option-count helper, a scope candidate changes the SCOPE ITSELF, so one shared
+// base is not enough: picking a group or type re-derives p_types (via cohortTypesAr) AND p_types2 /
+// p_tables / p_tables2 / p_category (via resolveSearchScope, whose isBroadCommercial branch flips on
+// exactly this selection). Each candidate therefore resolves its own scope from its own candidate
+// query — a hand-rolled p_types override on a shared base would silently keep the OLD table set and
+// overstate every option. The rest of the user's state (location, price, area, bedrooms, and any AF
+// answers already committed) rides along unchanged, which is what makes the count "exact result
+// count if that option were applied ON TOP OF the current committed state" rather than a bare
+// type total.
+export async function fetchScopeOptionCounts(
+  candidates: { key: string; query: SearchQuery }[],
+): Promise<Record<string, number> | null> {
+  if (!supabase || !candidates.length) return null;
+  const out: Record<string, number> = {};
+  await Promise.all(candidates.map(async ({ key, query }) => {
+    const scope = await resolveSearchScope(query);
+    if (!scope) return;                            // unresolvable scope → absent key, never a fake 0
+    const { isBroadCommercial, ...scopeParams } = scope;
+    const result = await withTimeout(
+      supabase!.rpc('location_search_candidates_ar', {
+        ...scopeParams,
+        ...rpcCountFilterParams(query),
+        ...rpcAdvancedFilterParams(query),
+        // p_types is deliberately excluded from rpcCountFilterParams (every caller passes its own
+        // cohort array); for a scope candidate that array IS the answer being priced.
+        p_types: isBroadCommercial ? COMMERCIAL_TYPE_AR_RES : cohortTypesAr(query),
+        p_limit: 1,
+        p_offset: 0,
+      }),
+      AGE_COUNT_TIMEOUT_MS,
+    );
+    if ('timedOut' in result) return;              // absent key → the option is dropped, never shown as 0
+    const { data, error } = result;
+    if (error) return;
+    out[key] = data && (data as { total_count: number }[]).length
+      ? Number((data as { total_count: number }[])[0].total_count) || 0
+      : 0;                                         // empty result set = an honest zero
+  }));
+  return out;
+}
+
 export async function fetchDistrictEligibleCounts(
   q: SearchQuery,
   options: { districtAr: string; matchValues: string[] }[],
@@ -744,6 +885,11 @@ export async function fetchDistrictEligibleCounts(
   const base = {
     ...scopeParams,
     ...rpcCountFilterParams(q),
+    // The user's answered ADVANCED questions belong here too: this helper's whole promise is that the
+    // number beside a district equals what selecting it returns, and the results RPC applies the
+    // advanced predicates whether or not this count call sends them. Omitting them made every district
+    // overstate by up to 8x (AF major certification 2026-08-20).
+    ...rpcAdvancedFilterParams(q),
     ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
     p_limit: 1,
     p_offset: 0,
@@ -849,7 +995,11 @@ function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; la
     // normalised, so no row starts or stops being shown because of this fix.
     const rows = raw
       .filter((r: any) => r && r.label && r.value)
-      .map((r: any) => ({ key: String(r.key ?? r.label), label: String(r.label), value: String(r.value) }));
+      .map((r: any) => ({ key: String(r.key ?? r.label), label: String(r.label), value: String(r.value) }))
+      // …then decode the source's HTML escapes, exactly as the object branch below does. Kept as a
+      // separate step so the `value: String(r.value)` coercion contract stays literal for
+      // scripts/verify-card-attr-value-coercion.ts.
+      .map((r) => ({ ...r, value: decodeEntities(r.value) }));
     return rows.length ? rows : null;
   }
   if (typeof raw !== 'object') return null;
@@ -878,6 +1028,9 @@ function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; la
     else if (typeof v === 'object') continue;
     else v = String(v).trim();
     if (!v || v === '0') continue;
+    // Source free text → decode HTML escapes before it is shown (Gathern's house_rules stores
+    // `&amp;#34;`). No-op for every value without an entity. See src/lib/htmlEntities.ts.
+    v = decodeEntities(v);
     if (v.length > 120) v = v.slice(0, 117) + '…';
     seen.add(label);
     out.push({ key, label, value: v });
@@ -902,8 +1055,10 @@ function resTables(q: SearchQuery): string[] {
   // Gathern + Aqar Monthly on any search whose period scope INCLUDES monthly (see [[gathern-source]]).
   // 'both' must list them too — they are the two monthly-only sources, so omitting them would let a
   // "monthly AND annual" search silently return an annual-only pool. (owner feature 2026-08-14.)
-  const wantsMonthly = q.rentPeriod === 'monthly' || q.rentPeriod === 'both';
-  return (q.deal === 'Rent' && wantsMonthly)
+  // dealCombined (2026-08-20) ALWAYS wants monthly — combined mode's Rent side has no period selector
+  // and accepts Monthly unconditionally, so these two monthly-only sources must always be reachable.
+  const wantsMonthly = q.dealCombined || q.rentPeriod === 'monthly' || q.rentPeriod === 'both';
+  return ((q.deal === 'Rent' || q.dealCombined) && wantsMonthly)
     ? [...RES_TABLES, 'gathern_residential_listings', 'aqarmonthly_residential_listings']
     : RES_TABLES;
 }
@@ -913,7 +1068,9 @@ function resTables(q: SearchQuery): string[] {
 // filter (and Buy stays untouched). Keeps the candidate budget filled with the correct period so monthly
 // results aren't crowded out by annual. (owner rent-period rule 2026-07-06.)
 function rentPeriodParam(q: SearchQuery): string | null {
-  if (q.bothDeals || q.deal !== 'Rent') return null;
+  // dealCombined's Rent side has no period selector — it accepts both known periods AND
+  // unpublished-period rows (no period filter at all), same as Buy/bothDeals. (owner 2026-08-20.)
+  if (q.bothDeals || q.dealCombined || q.deal !== 'Rent') return null;
   if (q.rentPeriod === 'monthly') return 'شهري';
   if (q.rentPeriod === 'annual') return 'سنوي';
   // 'كلاهما' is NOT the same as null. null = "apply no period filter", which also sweeps in the rent rows
@@ -1055,7 +1212,7 @@ export type FetchListingsResult = { listings: Listing[] | null; pageCandidates: 
 function keptFiltersReq(q: SearchQuery, table?: string) {
   const tbl = table ?? tableFor(q);
   let req = supabase!.from(tbl).select(LIST_SELECT).eq('active', true);
-  if (!q.bothDeals) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
+  if (!q.bothDeals && !q.dealCombined) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
   const types = dbTypesFor(q);
   if (types && types.length) req = req.in('property_type', types);
   // Rent-period filter only when the deal is actually Rent — NOT for a "rent or buy" (bothDeals) search,
@@ -1068,11 +1225,13 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   //  • BOTH: the union of the two KNOWN periods — mixed platforms must carry an explicit monthly OR
   //    annual rent_period (a null one is still neither, and never guessed); monthly-only platforms pass
   //    wholesale exactly as they do on a monthly search. (owner feature 2026-08-14.)
-  if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
+  // dealCombined (2026-08-20): same as bothDeals — Rent rows in combined mode have no period filter
+  // at all (accepts both known periods AND unpublished-period rows), so none of these branches apply.
+  if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
     if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.eq('rent_period', 'monthly');
-  } else if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'annual') {
+  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'annual') {
     req = req.eq('rent_period', 'annual');
-  } else if (!q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'both') {
+  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'both') {
     if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.in('rent_period', ['monthly', 'annual']);
   }
   return req;
@@ -1527,15 +1686,9 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // `cleanType`; `type` keeps the raw value for the engine + debugging. (clean-type filter, step 2.)
     const norm = normalizeType(r.property_type, kind);
     // A genuinely MONTHLY rental → show its monthly figure (price_annual was stored as monthly×12, so
-    // dividing back gives the exact monthly rent). Annual rentals keep the yearly figure. (user request.)
-    const isMonthlyRent = deal === 'Rent' && r.rent_period === 'monthly' && typeof r.price_annual === 'number';
-    const amount = deal === 'Rent'
-      ? (isMonthlyRent ? Math.round(r.price_annual / 12) : r.price_annual)
-      : r.price_total;
-    const priceStr =
-      typeof amount === 'number'
-        ? `SAR ${amount.toLocaleString('en-US')}${deal === 'Rent' ? (isMonthlyRent ? '/mo' : '/yr') : ''}`
-        : 'Price on request';
+    // dividing back gives the exact monthly rent). Annual rentals keep the yearly figure. A rent row
+    // whose source published NO period gets the bare figure with no suffix — see listingPriceString().
+    const priceStr = listingPriceString(deal, r.rent_period, r.price_annual, r.price_total);
     // Aqar (both residential & commercial) scrapes its own "no photo" placeholder graphic
     // (villa-default.png, at one of a couple CDN sizes, sometimes with a corrupted trailing
     // backslash) as a literal photo_urls entry - filter it out so a listing with only this
@@ -1571,7 +1724,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // A genuine, unmapped city name still passes through untouched.
       city: isJunkLocationToken(r.city) ? '' : (r.city ?? ''),
       district: r.neighborhood ?? '',
-      road: r.street_name ?? '',
+      road: decodeEntities(r.street_name ?? ''),
       price: priceStr,
       // Passed through VERBATIM — no rounding, no unit conversion, no derivation. The decision of
       // whether to SHOW it (and the «سعر المتر 1» placeholder rule) lives in ResultCard, so this
@@ -1582,7 +1735,8 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // CRITICAL: source comes from the DB row, never hardcoded — the card's logo, "Hosted on X",
       // and click-through hostname all derive from it. Wasalt rows have source='Wasalt'.
       source: r.source ?? 'Aqar',
-      rentPeriod: deal === 'Rent' ? (r.rent_period ?? 'annual') : null,
+      // Same rule as priceStr above: an unpublished period stays NULL, it never becomes 'annual'.
+      rentPeriod: deal === 'Rent' ? (r.rent_period ?? null) : null,
       listed: r.date_added ?? 'recently',
       photo,
       source_url: r.listing_url,
@@ -1593,12 +1747,17 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       halls: r.halls ?? 0,
       reception_rooms_majlis: r.reception_rooms_majlis ?? 0,
       property_age: r.property_age ?? null,
-      direction: r.direction ?? null,
-      street_name: r.street_name ?? null,
-      title: r.title ?? null,
-      description: r.description ?? null,
-      residence_type: r.residence_type ?? null,
-      project_name: r.project_name ?? null,
+      direction: decodeEntities(r.direction ?? null),
+      street_name: decodeEntities(r.street_name ?? null),
+      // SOURCE FREE TEXT — decoded, never rewritten. The scraped markup keeps the platform's HTML
+      // escapes (`&amp;bull;`, `&amp;quot;`, `&amp;lrm;`), and RN <Text> has no HTML parser, so the
+      // escape sequence itself used to be what the user read on the card. 5,652 active rows across
+      // 8 platforms carry one. decodeEntities() is a byte-identical no-op for everything else and
+      // never touches a digit — see src/lib/htmlEntities.ts for the full defect note.
+      title: decodeEntities(r.title ?? null),
+      description: decodeEntities(r.description ?? null),
+      residence_type: decodeEntities(r.residence_type ?? null),
+      project_name: decodeEntities(r.project_name ?? null),
       driver_room: !!r.driver_room,
       rega_location_verified: !!r.rega_location_verified,
       rating,

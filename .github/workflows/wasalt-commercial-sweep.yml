@@ -17,6 +17,12 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
+      # OWNER-APPROVED 2026-08-23 (proposed 08-21 as PR #827). Same shared-proxy capacity
+      # rationale as wasalt-residential-sweep.yml — see the full note there. This sweep fires
+      # five minutes after the residential one into a SEPARATE concurrency group, so the two
+      # overlap by design; capping BOTH at 6 is what actually bounds the peak (12, not 34).
+      # Changing this value without changing the residential cap leaves the peak unbounded.
+      max-parallel: 6
       matrix:
         slug: [shop, office, warehouse, commercial-land, showroom, building, land]
         deal: [sale, rent]

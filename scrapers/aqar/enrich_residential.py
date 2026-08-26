@@ -13,6 +13,7 @@ from urllib.parse import urlparse, unquote
 
 from scrapers.common.http import get
 from scrapers.common import normalize as N
+from scrapers.common.db import AUTHORITATIVE_NULL
 
 
 # PDPL: never store broker/advertiser contact. Strip Saudi mobile numbers from any free text we keep.
@@ -93,6 +94,23 @@ _STRUCTURED_AMENITY_KEYS: dict[str, str] = {
     "ac": "air_conditioner",
     "car_entrance": "car_entrance",
     "furnished": "furnished",
+    # Maid + driver room (2026-08-23). aqar publishes BOTH as native 0/1/null flat keys, exactly
+    # like `lift`/`ketchen`/`ac` above — this parser simply never looked, so both columns fell
+    # through to the prose fallback at the bottom of _structured_amenities(), which can only ever
+    # emit True-or-UNKNOWN. That is the SAME mistake the `parking` comment below documents, made
+    # again on two more columns, and it is user-visible: both drive live Advanced Filter chips
+    # («غرفة خادمة» / «غرفة سائق»).
+    #
+    # Measured 2026-08-23 over 36 live pages (0 fetch failures) against aqar_residential_listings:
+    #   • driver: aqar published a value on 13 rows — only 2 agreed. 9 rows stored UNKNOWN where
+    #     aqar published 0 (an explicit NO, discarded); 1 stored UNKNOWN where aqar published 1
+    #     (a real driver room the user can never filter to); 1 stored TRUE where aqar published 0.
+    #   • maid: aqar published a value on 15 rows — 2 stored UNKNOWN where aqar published 0, and
+    #     ad 6738742 stored TRUE where aqar published 0 (a fabricated attribute).
+    # The discarded negatives are why the columns carry 15,987/6,982 trues and literally ZERO
+    # falses across 117,734 rows, which is what `af_field_stuck_no_variance` has been reporting.
+    "maid": "maid_room",
+    "driver": "driver_room",
     # Utility availability: aqar publishes all three as native booleans and they carry real
     # negatives (2026-08-09, 24 live pages: water 21T/1F, electrical 21T/1F, drainage 18T/4F).
     # They were previously matched from «توفر الماء» / «كهرباء» / «صرف صحي», which cannot say "no".
@@ -606,6 +624,13 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # and "no price" becomes NULL rather than an excuse to go hunting through prose.
     s_price, s_authoritative = _structured_price(obj)
 
+    # aqar SETTLED the question and the answer is "no price" — `published:false` (the price slot
+    # renders «طلب تسويق») or a `price` key that is present and not a number. That is a source FACT,
+    # not a failed read, and it is the one case allowed to overwrite a previously stored price with
+    # NULL (owner decision 2026-08-22; db.AUTHORITATIVE_NULL carries it through the upsert guard).
+    # A payload we could not read at all leaves s_authoritative False and nothing is retracted.
+    authoritative_no_price = bool(s_authoritative and s_price is None)
+
     if s_authoritative:
         if transaction_type == "Rent":
             price_annual = s_price
@@ -806,9 +831,14 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         "street_width_m":          street_width_m,
         "residence_type":          residence_type,
         "project_name":            project_name,
-        # pricing
-        "price_annual":            price_annual,
-        "price_total":             price_total,
+        # pricing. AUTHORITATIVE_NULL (not None) when aqar itself says there is no price, so the
+        # upsert guard writes the NULL instead of preserving a stale figure; None everywhere else,
+        # which the guard still drops. price_per_meter is untouched by this: «سعر المتر» is its own
+        # published field and aqar's non-publication of a TOTAL says nothing about it.
+        "price_annual":            (AUTHORITATIVE_NULL if authoritative_no_price and transaction_type == "Rent"
+                                    else price_annual),
+        "price_total":             (AUTHORITATIVE_NULL if authoritative_no_price and transaction_type != "Rent"
+                                    else price_total),
         "price_per_meter":         price_per_meter,
         "rent_period":             rent_period,
         # PRICE = SOURCE evidence (owner invariant 2026-08-04). aqar publishes no structured price
@@ -824,6 +854,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
             kind="total" if price_total is not None else "annual",
             unit="total",
             origin="spec_table",
+            authoritative_absent=authoritative_no_price,
         ),
         "rent_now_pay_later":         rent_now_pay_later,
         "rent_now_pay_later_monthly": rent_now_pay_later_monthly,

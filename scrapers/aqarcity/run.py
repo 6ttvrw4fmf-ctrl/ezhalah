@@ -296,7 +296,20 @@ def sitemap_urls(s: cc.Session) -> list[str]:
 # ids probed (hard cap). When the sitemap is fresh the walk starts at the true frontier and ends in
 # ~max_miss cheap requests finding nothing, so it is safe to run every crawl.
 def _probe_id(s: cc.Session, url: str) -> str:
-    """Classify one /property/<id> url: 'live' | 'exists' | 'notfound' | 'error' (≤2 GETs)."""
+    """Classify one /property/<id> url: 'live' | 'expired' | 'exists' | 'notfound' | 'error' (≤2 GETs).
+
+    'expired' and 'exists' were ONE value until 2026-08-26, and collapsing them put a
+    non-evidence condition on a kill path. They mean opposite things to `_verify_gone`:
+      • 'expired' — the page carries «هذا الإعلان منتهي», the source's OWN end-of-ad banner.
+        That is the platform's documented soft-expire and it is authoritative death.
+      • 'exists'  — a real id whose page we could not PARSE (no JSON-LD). A Cloudflare
+        interstitial, a partial render or a template change all land here, at HTTP 200, on a
+        listing that is perfectly alive. "I could not read the page" is not "the source deleted
+        it" (DATA_INTEGRITY_ENGINEER.md §4/§26: unverifiable is its own verdict, and it means
+        DO NOTHING).
+    The id-frontier walk in sequential_id_urls() treats both as a HIT exactly as before, so
+    discovery behaviour is unchanged; only the deactivation path learns to tell them apart.
+    """
     last = "error"
     for _ in range(2):
         try:
@@ -307,8 +320,10 @@ def _probe_id(s: cc.Session, url: str) -> str:
         if "/property/" not in str(r.url) or "Page Not Found" in r.text:
             last = "notfound"
             continue  # a fresh session can 302→/notfound before the cookie lands — retry once
-        if "هذا الإعلان منتهي" in r.text or "application/ld+json" not in r.text:
-            return "exists"  # real id but expired/unparseable → keeps the walk alive, contributes no url
+        if "هذا الإعلان منتهي" in r.text:
+            return "expired"  # the source's own expired banner → authoritative death
+        if "application/ld+json" not in r.text:
+            return "exists"   # real id, unparseable shell → keeps the walk alive, NEVER proof of death
         return "live"
     return last
 
@@ -327,8 +342,8 @@ def sequential_id_urls(s: cc.Session, start_id: int) -> list[str]:
     pid = start_id + 1
     while probed < max_gap and miss < max_miss:
         status = _probe_id(s, f"{BASE}/property/{pid}")
-        if status in ("live", "exists"):
-            miss = 0
+        if status in ("live", "exists", "expired"):
+            miss = 0            # any real page (live, expired shell, or unparseable) is a HIT
             if status == "live":
                 out.append(f"{BASE}/property/{pid}")
         elif status == "notfound":
@@ -730,10 +745,47 @@ def main() -> int:
             return 0
 
         # Full run: prune listings that were active before but weren't seen this crawl.
+        #
+        # SITEMAP ABSENCE IS NOT DEATH (2026-08-24 data-integrity incident). Aqar City's sitemap is a
+        # ~1,799-entry WINDOW, not the full live catalogue: 252 residential + 16 commercial listings
+        # were deactivated over 30 days for missing three crawls in a row, and a direct fetch found
+        # 252/252 and 16/16 of them STILL SERVED — most with ids inside the sitemap's own id range.
+        # Every prune guard behaved correctly (coverage ~99.6%, collapse never near 30%); they guard
+        # against a broken crawl, and this was a perfect crawl of an incomplete index. So the kill now
+        # requires the source's own verdict, via the same oracle platform_retention_policy already
+        # documents for aqarcity ("soft-expire: 200 + expired banner = dead; clean 200 = live").
+        # _probe_id() maps straight onto it: notfound/exists → gone, live → live, error → unknown.
+        prune_session = session()
+        try:
+            prune_session.get(f"{BASE}/", timeout=30, allow_redirects=True)  # warm the CF cookie once
+        except Exception:
+            pass
+
+        def _verify_gone(ad_number: str) -> tuple[str, str]:
+            pid = re.sub(r"\D", "", ad_number or "")
+            if not pid:
+                return "unknown", "no numeric id in ad_number"
+            status = _probe_id(prune_session, f"{BASE}/property/{pid}")
+            time.sleep(float(os.environ.get("AQARCITY_PROBE_DELAY", "0.25")))
+            # ONLY the two authoritative shapes may kill. 'exists' (a real id we could not parse)
+            # used to be mapped to "gone" here — that made an unreadable page indistinguishable
+            # from a deleted one, so a Cloudflare shell served at 200 could deactivate a live
+            # listing with no source evidence of death whatsoever. It is now held, not killed.
+            if status == "notfound":
+                return "gone", "redirected to /notfoundproperty (control-validated hard 404)"
+            if status == "expired":
+                return "gone", "source published «هذا الإعلان منتهي» (own expired banner)"
+            if status == "live":
+                return "live", "listing page served with JSON-LD and no expired banner"
+            if status == "exists":
+                return "unknown", "real id but page unparseable (no JSON-LD, no expired banner)"
+            return "unknown", "probe error — transient/blocked is never proof of death"
+
         pruned = 0
         for tbl, rows_seen in (("aqarcity_residential_listings", res),
                                ("aqarcity_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Aqarcity")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Aqarcity",
+                                verify_gone=_verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

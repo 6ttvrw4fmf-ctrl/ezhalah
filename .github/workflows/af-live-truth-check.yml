@@ -1,0 +1,57 @@
+# Advanced Filter backend-truth live check (2026-08-24 owner audit).
+#
+# For 9 real production AF journeys (Residential/Commercial, Buy/Rent-Annual/Rent-Monthly, a
+# non-Riyadh city, mobile, an honest zero-result case, Skip, and Back/change-answer) this drives
+# the ACTUAL browser UI against https://ezhalah-app.vercel.app, captures the ACTUAL request bodies
+# the app sends to apartment_guided_counts_ar and location_search_candidates_ar, reads the
+# UI-DISPLAYED count, and cross-checks the full chain — UI count == count RPC == result RPC ==
+# an INDEPENDENT oracle (PostgREST's own filter operators on search_listings_ar directly, never our
+# RPC's SQL) — down to the exact (source_table, listing_id) set: missing / extra / duplicate must
+# all be zero. See scripts/verify-af-live-truth.ts for the full methodology and
+# scripts/verify-af-oracle-filter-translator.ts for the hermetic mutation-proof of the oracle logic.
+#
+# The 2026-08-24 audit ran all 9 journeys clean — every anomaly found while building this traced to
+# the TEST harness (timing races, a wrong deal/period toggle sequence, an unhandled dual-scope
+# union), never the app. This workflow is what keeps that true.
+#
+# Kept OUT of `npm test` (that suite is hermetic and runs in seconds) — same precedent as
+# count-rpc-parity-live-check.yml and web-runtime-smoke.yml.
+
+name: AF backend-truth live check
+
+on:
+  schedule:
+    - cron: '23 */6 * * *' # every 6 hours, offset from the sibling live-check jobs
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Deploy frontend (production)']
+    types: [completed]
+
+concurrency:
+  group: af-live-truth-check
+  cancel-in-progress: false
+
+jobs:
+  af-truth:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: AF UI count = count RPC = result RPC = independent DB truth
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Drive 9 real AF journeys against production and diff exact backend IDs
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-live-truth.ts

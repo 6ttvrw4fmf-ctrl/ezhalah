@@ -131,8 +131,11 @@ const AR: Record<string, string> = {
   // claim about contract length (the old «من شهر إلى 11 شهر» wording is banned; a guard pins it out).
   'Monthly: the displayed price is the monthly price.': 'الأسعار معروضة بالشهر',
   'Yearly: the displayed price is the yearly price.': 'سنوي: السعر المعروض سنوي.',
-  'Both: monthly and yearly listings together — each card shows its own price basis.':
-    'كلاهما: نعرض الشهري والسنوي معاً — كل إعلان يوضّح أساس سعره.',
+  // Owner feedback (2026-08-22): trimmed — the old wording ("Both: we show monthly and yearly
+  // together") re-explained what selecting both buttons already makes obvious. Kept only the one
+  // fact worth surfacing: mixed results carry mixed price units.
+  'Each listing shows its own price basis (monthly or yearly).':
+    'كل إعلان يوضّح أساس سعره (شهري أو سنوي).',
   // Monthly Advanced Filter (2026-08-18)
   'What rating would you prefer?': 'كم التقييم اللي تفضله؟',
   '9.5+': '9.5+',
@@ -164,6 +167,12 @@ const AR: Record<string, string> = {
   'Commercial Buildings & Facilities': 'المباني والمرافق',
   'Commercial & Industrial Plots': 'الأراضي التجارية والصناعية',
   'Price': 'السعر',
+  // Buy+Rent combined multi-select (owner feature 2026-08-20): the two independent price ranges
+  // shown together when شراء+إيجار are both selected — never one shared/naive range.
+  'Buy budget': 'ميزانية الشراء',
+  'When you choose Buy and Rent together, each one has its own budget.':
+    'سيتم عرض عقارات البيع والإيجار معًا، ولكل منهما ميزانية مستقلة.',
+  'Rent budget (yearly basis)': 'ميزانية الإيجار (سنوياً)',
   ' /yr': ' / سنوياً',
   'Max price': 'السعر الأقصى',
   'Search': 'بحث',
@@ -292,6 +301,9 @@ const AR: Record<string, string> = {
   // number would silently mean something else — cleared + explained instead.
   'Price limits were cleared because the price unit changed (monthly ↔ yearly) — please re-enter them.':
     'تم مسح حدود السعر لأن وحدة السعر تغيّرت (شهري ↔ سنوي) — الرجاء إدخالها من جديد.',
+  // Same clear+explain precedent for the شراء/إيجار toggle (owner feature 2026-08-20).
+  'Price limits were cleared because Buy/Rent changed which budget they meant — please re-enter them.':
+    'تم مسح حدود السعر لأن التبديل بين الشراء والإيجار غيّر المقصود بالميزانية — الرجاء إدخالها من جديد.',
   "What's your max budget?": 'ما هو حدّك الأقصى للميزانية؟',
   "What's your rent budget?": 'ما هي ميزانية الإيجار لديك؟',
   'Skip — show me more options': 'تخطَّ — أرني المزيد من الخيارات',
@@ -384,6 +396,11 @@ const AR: Record<string, string> = {
   'Sewage connection': 'صرف صحي',
   'Water supply': 'توفر الماء',
   // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
+  // The Advanced Filter's SCOPE steps (owner 2026-08-23) — asked before any certified question when
+  // the user has chosen only a category (or only a group). The option LABELS reuse the group/type
+  // keys the Filter home already ships, so the two surfaces can never drift apart.
+  'Which kind of property are you looking for?': 'أي نوع من العقارات تبحث عنه؟',
+  'Which property type?': 'أي نوع عقار تحديدًا؟',
   'How many bathrooms?': 'كم دورة مياه تفضل؟',
   'Any number': 'أي عدد',
   '1+': '+١',
@@ -534,6 +551,17 @@ const AR: Record<string, string> = {
   // Read Aloud (owner P0, 2026-08-18) — native/OS TTS only, $0, never a paid API.
   'Read aloud': 'استماع للرد',
   'Stop reading': 'إيقاف الاستماع',
+  // Graceful failure (owner root-cause fix, 2026-08-22): shown ONLY when the device/browser has no
+  // Arabic voice at all — never silently read Arabic text with a non-Arabic (usually English) voice.
+  'Listening isn\'t available on this device': 'الاستماع غير متاح على هذا الجهاز',
+  // Floating playback controller (owner 2026-08-22, ChatGPT-style pill — Arabic-branded, own layout).
+  // Every accessibility label on the controller must be Arabic, no English leak ('Close' reuses the
+  // existing app-wide key just below — same word, same meaning, one definition).
+  'Pause reading': 'إيقاف مؤقت',
+  'Resume reading': 'متابعة',
+  'Back 15 seconds': 'رجوع ١٥ ثانية',
+  'Forward 15 seconds': 'تقديم ١٥ ثانية',
+  'Playback speed': 'سرعة القراءة',
   'Here is what I found:': 'هذا ما وجدته:',
   'Here is what matches what you want': 'هذا اللي يناسب طلبك',
   'I found a few properties based on your search.': 'وجدت بعض العقارات بناءً على طلبك.',
@@ -589,6 +617,16 @@ const AR: Record<string, string> = {
   '{n} beds': '{n} غرف',
   '{n} m²': '{n} م²',
   'Stop': 'إيقاف',
+  // Voice-input composer (owner brief 2026-08-23) — Arabic accessibility labels + graceful errors.
+  'Voice input': 'الإدخال الصوتي',
+  'Cancel recording': 'إلغاء التسجيل',
+  'Stop recording': 'إيقاف التسجيل',
+  'Send': 'إرسال',
+  'Voice input is not supported on this browser': 'الإدخال الصوتي غير مدعوم على هذا المتصفح',
+  'Microphone access is needed for voice input. Enable it in your browser settings.': 'نحتاج إذن المايكروفون للإدخال الصوتي. فعّله من إعدادات المتصفح.',
+  'Voice input is not available right now.': 'الإدخال الصوتي غير متاح حالياً.',
+  "The microphone couldn't be reached. Please try again.": 'تعذّر الوصول للمايكروفون. حاول مرة ثانية.',
+  'Speech recognition is turned off on your device. Make sure Siri and Dictation are both enabled in your iPhone Settings, then try again.': 'التعرف على الصوت غير مفعّل على جهازك. تأكد إن «سيري» و«الإملاء» مفعّلتين من إعدادات آيفون، ثم حاول مرة ثانية.',
   'Ranked by most recent': 'مرتبة حسب الأحدث',
   'Ranked by closest match.': 'مرتبة حسب الأقرب لطلبك.',
   'Show more': 'عرض المزيد',
@@ -611,11 +649,24 @@ const AR: Record<string, string> = {
   'We found {total} listings matching your search, and showed you {shown}.': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها.',
   'I can show you 100 listings at a time.': 'أقدر أعرض لك 100 إعلان في كل مرة.',
   'Let’s narrow it down': 'خلّنا نحدد الطلب أكثر',
+  // COMPLETED-ROUND RECEIPT (owner 2026-08-24) — replaces the action buttons on the results turn a
+  // finished Advanced Filter round was opened from. A record of what happened, never a control.
+  'Continued with the advanced filter': 'تابع المستخدم باستخدام التصفية المتقدمة',
+  'Your choices: {summary}': 'اختياراتك: {summary}',
+  // Read Aloud closing note (owner request, 2026-08-23 — "read the note... and say the button
+  // also"): spoken ONLY when the matching buttons are actually on screen (agent.tsx gates this the
+  // same way), naming the exact same button label(s) so it can never mention an action that isn't
+  // there to tap.
+  'You can tap {a} or {b}.': 'تقدر تضغط على {a} أو {b}.',
+  'You can tap {a}.': 'تقدر تضغط على {a}.',
   'Help me find more precise results': 'ساعدني ألقى نتائج أدق',
   'I can get you something more precise.': 'أقدر أجيب لك نتائج أدق.',
   // Composer placeholder (owner wording 2026-08-16) — names the domain and the country, in the
   // conversational register the rest of the agent speaks.
   "Type the property you're looking for in Saudi Arabia...": 'اكتب العقار اللي تبحث عنه في السعودية...',
+  // Stable composer accessibility label (owner brief 2026-08-23 §11) — the ONE sentence a screen
+  // reader hears for the AI input; the rotating examples are aria-hidden decoration.
+  'Describe the property you are looking for': 'اكتب وصف العقار اللي تبحث عنه',
   'Want more accurate results?': 'تريد نتائج أدق؟',
   'I can ask you a few questions to find your perfect match.': 'يمكنني طرح بعض الأسئلة لإيجاد ما يناسبك تماماً.',
   'Ezhalah displays listings sourced from third party platforms. We do not recommend, verify or own any listing. The choice is yours.':
@@ -713,6 +764,11 @@ const AR: Record<string, string> = {
     'لم أجد شيئاً بسعر {amount}، لكن إليك بعض الخيارات المشابهة لما تبحث عنه:',
   '{a}/month': '{a}/شهرياً',
   ' for {a}': ' بسعر {a}',
+  // COMBINED شراء+إيجار states TWO labelled budgets (Buy side + Rent side) instead of one bare price,
+  // so the bubble needs a "with …" carrier and an "and" that joins them. AR 'و' attaches with no
+  // trailing space, so the joiner is ' و' and the carrier ' ب' + the label. (2026-08-23 combined-budget fix.)
+  ' with {a}': ' ب{a}',
+  ' and ': ' و',
   ' for {a}/month': ' بسعر {a}/شهرياً',
   "You entered {a}/month × 12 = {b}/year, so I'm searching up to {b}. ": 'أدخلت {a}/شهرياً × 12 = {b}/سنوياً، لذا أبحث حتى {b}. ',
   ' for up to {a}/year': ' بسعر حتى {a}/سنوياً',
@@ -994,6 +1050,13 @@ const AR: Record<string, string> = {
 
   // Drawer / sidebar
   'New Chat': 'محادثة جديدة',
+  // Sidebar chat search (owner 2026-08-24): ChatGPT-style in-sidebar search, Arabic-first. The
+  // empty state + hint are deliberately calm Saudi copy — never an English "No results".
+  'Search chats': 'البحث في المحادثات',
+  'Search your chats…': 'ابحث في محادثاتك…',
+  'Close search': 'إغلاق البحث',
+  'Type in Arabic to search your chats': 'اكتب بالعربي للبحث في محادثاتك',
+  'No chat with that name': 'ما لقينا محادثة بهذا الاسم',
   'About Us': 'من نحن',
   'Sign up / Log in': 'إنشاء حساب / تسجيل الدخول',
   'Get more. Sign up free.': 'احصل على المزيد. سجل مجاناً.',
@@ -1002,15 +1065,22 @@ const AR: Record<string, string> = {
   'Sign up free to save your searches and favorites, and pick up right where you left off.':
     'سجّل مجاناً لحفظ عمليات بحثك ومفضّلاتك، وتابع من حيث توقفت.',
   'Not now': 'ليس الآن',
-  'Starred': 'المميّزة بنجمة',
+  'Starred': 'المفضلة',
   'Recent': 'الأخيرة',
   'Today': 'اليوم',
   'Yesterday': 'أمس',
   'Last 7 Days': 'آخر 7 أيام',
   'Last 30 Days': 'آخر 30 يوماً',
-  'Star': 'تمييز بنجمة',
-  'Unstar': 'إزالة النجمة',
+  'Star': 'أضف إلى المفضلة',
+  'Unstar': 'أزل من المفضلة',
   'Delete': 'حذف',
+  'Rename': 'إعادة تسمية',
+  // Press-hold-drag reorder (owner 2026-08-24) — accessibility strings, Arabic-first.
+  'Hold to reorder the conversation': 'اضغط مطولًا لإعادة ترتيب المحادثة',
+  'Move conversation': 'نقل المحادثة',
+  'Conversation order changed': 'تم تغيير ترتيب المحادثة',
+  'Added to favorites': 'أُضيفت إلى المفضلة',
+  'Removed from favorites': 'أُزيلت من المفضلة',
 
   // Settings (account)
   'Display Name': 'الاسم المعروض',
@@ -1053,7 +1123,9 @@ const AR: Record<string, string> = {
   "Note: to change your {provider} account, you'll need to delete this account and sign up again with the new one.":
     'ملاحظة: لتغيير حساب {provider}، عليك حذف هذا الحساب وإنشاء حساب جديد بالحساب الآخر.',
 
-  // About Us — «من نحن» copy is the OWNER'S EXACT wording (2026-07-09); never rewrite or shorten it.
+  // About Us — the long-form «من نحن» copy below is the OWNER'S EXACT wording (2026-07-09); never
+  // rewrite or shorten it (still referenced by src/app/about.tsx). The modal now uses the compact
+  // 2026-08-23 redesign strings further down, approved by the owner's premium-redesign brief.
   'Close': 'إغلاق',
   'A Saudi property-search tool, powered by AI.': 'أداة بحث عقارية سعودية، مدعومة بالذكاء الاصطناعي.',
   'Ezhalah is your first destination for property search in Saudi Arabia, fully powered by AI.':
@@ -1081,6 +1153,31 @@ const AR: Record<string, string> = {
   'All listings are sourced directly from third-party platforms. Ezhalah does not own or verify any listing. Always confirm details directly with the original platform before making any decision.':
     'جميع الإعلانات مصدرها منصات خارجية مباشرة. لا تملك إزهله أي إعلان ولا تتحقق منه. تأكّد دائماً من التفاصيل مباشرة مع المنصة الأصلية قبل اتخاذ أي قرار.',
   'Data & privacy': 'البيانات والخصوصية',
+
+  // «من نحن» premium single-screen redesign (owner 2026-08-23): compact verb-led copy approved by
+  // the owner's brief; the four legal facts survive verbatim-compact; NO Arabic dashes («—») in any
+  // of these strings; the only number shown is derived from PLATFORM_META.length at compile time.
+  'Smarter property search, bringing the Saudi market together in one place.':
+    'بحث عقاري أذكى، يجمع السوق السعودي في مكان واحد.',
+  'We gather': 'نجمع',
+  'Property listings from the licensed platforms in the Kingdom, in one place.':
+    'إعلانات العقارات من المنصات المرخّصة في المملكة، في مكان واحد.',
+  '+{n} platforms': '+{n} منصة',
+  'We organize': 'نرتب',
+  'One organized screen that makes comparing fast and easy.':
+    'شاشة واحدة منظّمة تسهّل عليك المقارنة بسرعة.',
+  'We help': 'نساعد',
+  'AI-powered search instead of browsing dozens of sites.':
+    'بحث مدعوم بالذكاء الاصطناعي بدل التنقّل بين عشرات المواقع.',
+  'We point you to the source': 'نوجّهك للمصدر',
+  'We take you to the listing so you contact its original platform directly.':
+    'نوصلك إلى الإعلان لتتواصل مباشرة مع منصته الأصلية.',
+  'Ezhalah is a search platform only. We do not own, list, sell, or rent properties, and we run no transactions and take no commission.':
+    'إزهله منصة بحث فقط. لا نملك العقارات ولا ندرجها ولا نبيعها ولا نؤجّرها، ولا نجري معاملات ولا نتقاضى عمولة.',
+  'Every listing is published by its source platform and remains subject to its licensing. Ezhalah does not issue or own listings.':
+    'كل إعلان منشور من منصته المصدر ويظل خاضعاً لترخيصها. إزهله لا تُصدر الإعلانات ولا تملكها.',
+  'Listings come from external platforms and we do not verify them. Confirm the details with the original platform before any decision.':
+    'الإعلانات من منصات خارجية ولا نتحقق منها. تأكّد من التفاصيل مع المنصة الأصلية قبل أي قرار.',
 
   // Support
   'Questions about your account, searches, or technical issues.':
@@ -1150,6 +1247,16 @@ export const ARABIC_ONLY_MSG = 'هذا التطبيق يدعم اللغة الع
 // the ONLY way to explain why the button didn't proceed. Direct constant, not routed through t(),
 // same reasoning as ARABIC_ONLY_MSG above (this field has no English mode at all).
 export const CITY_REQUIRED_MSG = 'الرجاء اختيار مدينة من القائمة.';
+
+// District field, same rule as CITY_REQUIRED_MSG above but for an OPTIONAL field: the district text
+// box is a search box over the catalog — only a TAPPED suggestion (a chip) is ever searched. Typed
+// text that was never confirmed used to be dropped in silence: the field kept showing «النرجس»
+// while the search ran over the whole city and said nothing about it (live 2026-08-23: dropdown
+// advertised «حي النرجس · 1,699 إعلان», «بحث» landed on 36,908 city-wide, zero chips, zero warning).
+// Visible UI state must equal the committed request state, so Search now stops and says which of the
+// two honest outcomes the user has to choose: confirm the district, or clear the text and search the
+// whole city. Direct constant, not routed through t(), same reasoning as ARABIC_ONLY_MSG above.
+export const DISTRICT_UNCONFIRMED_MSG = 'الرجاء اختيار الحي من القائمة، أو مسح النص للبحث في المدينة كاملة.';
 
 // Neutral, honest label for a listing whose city/district could not be resolved to a real place —
 // NEVER invent a location, and NEVER show a raw scraper junk sentinel (e.g. the literal word

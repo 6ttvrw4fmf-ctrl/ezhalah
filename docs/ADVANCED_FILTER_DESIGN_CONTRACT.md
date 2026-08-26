@@ -208,12 +208,31 @@ free.
   **Skip = no preference**: nothing is filtered, no false is written, unknowns stay eligible.
 - `FURNISHED_QUESTION` (single, Rent-only) is true tri-state via `q.furnishedPref` → `p_furnished`;
   «غير مفروشة» counts EXPLICIT unfurnished only (`cnt_unfurnished` = furnished IS FALSE).
-- Single-select auto-advances ~260 ms after the tap (plain `setTimeout`, never an animation
-  callback). Multi stays select-then-confirm.
+- **Single tap = select ONLY; double tap = select + confirm + advance one** (owner 2026-08-22,
+  SUPERSEDES the 2026-08-11 ~260 ms auto-advance, which is now banned). The user must be able to see
+  the picked row and the recomputed count before committing. Both taps run through the SAME single
+  `onPress` path — there is deliberately no second double-click/long-press handler, so a double tap
+  can never fire "select" and "advance" as competing handlers and skip two questions; and a single
+  tap is never delayed waiting to see whether another follows. Multi is select-then-«متابعة» only.
+- **«رجوع» on every question** (owner 2026-08-22). It steps back exactly one question and restores
+  that question's recorded answer — including restoring a skip AS a skip (open, no predicate).
+  From the FIRST question it leaves the interview and hands the pre-AF controls back
+  («خلّنا نحدد الطلب أكثر» + «عرض المزيد»), which is automatic: that row is gated on `!ageFlow`.
+- **The interview is ONE ordered step record** (`ageFlowStepsRef`), and query/asked/labels/facets are
+  DERIVED from it by `syncGuidedFromSteps(cursor)` — the query is rebuilt from `baseQ` by re-applying
+  the steps *before* the cursor, never un-applied by a per-question inverse. This is what makes "no
+  stale hidden predicate" structural: a changed or dropped answer simply stops contributing to the
+  rebuild, and an appending answer (amenities) cannot accumulate twice from being re-answered.
+- **Changing an earlier answer re-validates every later one** (`revalidateStepsAfter`): a later
+  answer is KEPT if its question is still eligible for the new scope and its keys still select
+  something (live count > 0), and DROPPED only if it has become incompatible. A skip is always kept —
+  it carries no predicate.
 - No numeric «Question N of M» caption — the denominator legitimately changes as the set narrows;
   the thin bar and the shrinking live count are the only progress signals.
-- Normal-Filter territory (location, deal, period, category/type, price, size, **bedrooms**) is
-  never asked by the interview — enforced as data via `af_field_registry.filter_tier`.
+- Normal-Filter territory (location, deal, period, price, size, **bedrooms**) is never asked by the
+  interview — enforced as data via `af_field_registry.filter_tier`. **AMENDED 2026-08-23: property
+  GROUP and property TYPE are carved out — see «Amendment 2026-08-23» below. Everything else in this
+  list is unchanged, and bedrooms in particular remains permanently off-limits.**
 
 
 ## Amendment 2026-08-16 — the conversational refresh (owner-approved)
@@ -228,15 +247,25 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
   rendered behind). ≤ 25, or an ineligible scope, keeps pure results-first. A manual «خلّنا نحدد
   الطلب أكثر» tap skips the intro (the user already opted in).
 - **The narrowing is always visible.** A live «N نتيجة» chip sits in the card bar and follows every
-  tentative selection; multi-select commits via «متابعة · N نتيجة» with the same live number. All
+  tentative selection; the primary commits via «متابعة · N نتيجة» with the same live number. All
   numbers come from the production count RPCs — never placeholders, never unknown-as-no.
 - **The escape is always one tap.** «عرض النتائج» replaces the question-count skip-all arithmetic.
+- **The primary ADVANCES; «عرض النتائج» TERMINATES** (owner 2026-08-23, corrects a shipped defect).
+  The primary reads «متابعة · N نتيجة» on single AND multi, because `onConfirm` is
+  `commitGuidedStep(keys)` in both cases: it records the answer and presents the next question.
+  Until this correction the label branched on ARITY and a single-select read «عرض N نتيجة» — a
+  button that promised results and delivered the next question instead. Arity was never a proxy for
+  terminality, and neither is ordinality: the pool is re-ranked after every answer, so the card
+  cannot know whether another question is coming. The one terminal control is the «عرض النتائج»
+  link (`af-skip-all` → `commitGuidedStep(keys, true)` → `finishGuided`). Pinned by
+  `scripts/verify-af-primary-advances-not-shows.ts`.
 - **Availability is explained naturally.** One tiny line — «الخيارات تعتمد على المعلومات المتوفرة
   للإعلانات الحالية» — replaces the technical unknown-count phrasing. No coverage/NULL/backend
   language anywhere user-facing.
 - **Micro-motion, reduced-motion-safe.** Press compression, check fade/scale, count settle, question
-  fade-rise. Decoration only: every hand-off (auto-advance, mining dismissal) is a plain
-  `setTimeout`, never an animation callback (`src/lib/afterAnimation.ts`).
+  fade-rise. Decoration only: every hand-off (mining dismissal, and the double-tap threshold, which
+  is a timestamp comparison rather than a timer) never rides an animation callback
+  (`src/lib/afterAnimation.ts`).
 - **The mining transition.** After the interview commits ≥1 answer, the «digging through the market»
   beat plays over the final search: fragments drift inward, copy uses REAL numbers («نراجع N عقار
   ونطلع لك الأنسب» → «لقينا N عقار أقرب لطلبك»), minimum ~1.4 s, dismissed by setTimeout latches
@@ -245,3 +274,295 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
   committed answer as a removable pill. Removal is PURE recomputation: rebuild from the interview's
   baseQ by re-applying the remaining facets through each question's own `apply()` — never a
   hand-written inverse — then re-search immediately (no mining beat on removal).
+
+
+## Amendment 2026-08-22 (a) — the narrowing gate (owner-approved, supersedes the 8%-90% option band)
+
+> **Partly superseded on 2026-08-25** — see «Amendment 2026-08-25» at the end of this file. The
+> ORDERING half below stands. The ELIGIBILITY half's `count < N` was replaced by
+> `optionNarrowsMeaningfully(count, N)` (≥10% removed, or landing at/under the target): the
+> small-slice protection this amendment won is permanent, the lopsided-majority half was an
+> over-correction and the owner reversed it. Kept in full because this gate has now moved twice.
+
+**Bug report that triggered this:** owner selected Villa + 6 Riyadh districts (~5,154 matches),
+answered/skipped through the interview, and it stopped after ~2 questions at ~1,874 remaining —
+while several more source-certified Villa questions (street width, direction, amenities…) existed
+and had genuinely never been asked. **"We still have thousands of listings" must never end in "but
+we ran out of questions to ask" while a valid, source-backed one exists.**
+
+**Root cause.** `scoreQuestion()`'s pre-2026-08-22 gate required every candidate question to have an
+option between 8% and 90% of the current scope, AND at least one option ≤ 75% — a *selectivity*
+requirement, not a *validity* one. Once 1-2 answers had already skimmed the cleanest splits off a
+large scope, the remaining unasked questions' real, source-backed options frequently fell outside
+that band (too small a minority, or too large a majority) and were entirely dropped — not ranked
+lower, REMOVED from the pool — even though picking them would still have genuinely narrowed the set.
+
+**The fix — separate ELIGIBILITY from ORDERING, permanently:**
+- **Eligibility** (may this question be asked at all): the scope must clear `MIN_TOTAL_TO_SHOW`
+  (unchanged), and the question must have at least `minOptionsFor(selection)` options where
+  `count < N` — i.e. an option that would actually change the result if picked. Every option here
+  already cleared the absolute per-option floor (`meaningful()`, `MIN_REAL_OPTION_COUNT = 5`)
+  upstream, so this is never a fabricated or thin option — only genuinely small or genuinely
+  lopsided ones are now included instead of hidden. An option where `count === N` (100% of the
+  current scope already has it) is correctly excluded — not for being unpopular, but because
+  selecting it is a no-op.
+- **Ordering** (which eligible question is asked first): unchanged — `score = bestSplit × salience`,
+  where `bestSplit` still peaks at a 50/50 split. A well-balanced question is still asked before a
+  lopsided one; a lopsided-but-real one is now asked LATER instead of never.
+- **Never affected:** the ≤ 25 stop rule (`INTERVIEW_STOP_AT`/`MIN_TOTAL_TO_SHOW`, unchanged — the
+  interview still closes once the remaining scope is small), the ask-first RNPL tier (still applied
+  only among questions that clear the gate above), cohort availability (`COHORT_QUESTIONS` —
+  unchanged; this amendment only touches whether an *available* question is *live-useful right now*),
+  and Skip semantics (still "no preference" — never a predicate, never false, unknowns stay eligible).
+- **This is not "ask every question no matter what."** A question with ZERO real narrowing option
+  (every value ties at `N`, or nothing clears the per-option floor) is still excluded — the gate
+  distinguishes "genuinely nothing to ask" from "asked in the wrong order for the current scope."
+  Reaching the end of a cohort's certified list with every remaining question honestly exhausted is
+  a correct stop, not a bug — the fix is that this must be the REAL reason, not a selectivity
+  side-effect.
+
+Regression: `scripts/verify-af-narrowing-gate.ts` calls `scoreQuestion()` directly (pure function,
+mutation-provable) with synthetic scopes proving (a) a 2%-share option that used to be dropped is now
+included, (b) a 97%-share-only option is included but scores below a balanced one, (c) a question
+where every option ties at `N` is still excluded, (d) ordering still favors the more balanced split.
+
+## Amendment 2026-08-22 (b) — 2+ useful questions to open (owner-approved)
+
+The owner's brief: «Advanced Filter should only appear when there are multiple useful questions
+available that can actually help narrow the result set» — opening the interview on exactly one
+useful question means the user answers or skips it and still closes on whatever the result-count
+gate alone left large, which is a tax on their attention, not a niche shortlist. Pinned by
+`scripts/verify-af-min-useful-questions-gate.ts`.
+
+- **A SECOND, independent gate, composed with the existing result-count gate, never replacing it.**
+  Advanced Filter may open only when BOTH hold: the scope's true total is
+  `> INTERVIEW_STOP_AT (25)` **and** the scope has `>= MIN_USEFUL_QUESTIONS_TO_SHOW (2)` useful
+  questions. 0 or 1 useful question ⇒ AF does not open, even if the result-count gate alone would
+  allow it — the manual "narrow it down" tap falls through to the pre-existing plain refine-chip
+  flow (the SAME fallback an empty plan already used; this is a threshold widening, not a new code
+  path).
+- **"Useful" already has one definition — `scoreQuestion()`, unchanged by this rule.** Per Amendment
+  (a) above, a question is useful when the scope clears `MIN_TOTAL_TO_SHOW` and has at least
+  `minOptionsFor(selection)` options that would actually narrow the current set
+  (`count < N` when this was written; `optionNarrowsMeaningfully(count, N)` since 2026-08-25).
+  `rankQuestions()` already computes exactly this set (`ranked`); this gate counts `ranked.length`
+  at the OPENING decision only — it does not re-derive "useful" a second, potentially-disagreeing
+  way, and automatically picks up whatever "useful" means as Amendment (a)'s definition evolves.
+- **Computed AFTER every other narrowing the eligibility layer already applies** — combined-period
+  (سنوي+شهري) cohort intersection (`cohortAllows`'s `RentAnnual ∩ RentMonthly`), the Buy+Rent
+  3-way intersection, and multi-type intersection all run inside `eligibleQuestions()` /
+  `cohortAllows()`, which `rankQuestions()` calls before scoring — so a question valid for only one
+  leg of a combined search can never count toward the 2-question threshold on that search.
+  Recomputing the gate from a second, independent implementation was deliberately avoided.
+- **Governs the OPENING decision only.** Once the interview is open, the existing continuation loop
+  (`presentGuided`'s re-rank after every answer/skip) is unchanged: it keeps offering the next
+  useful question for as long as at least one remains, and stops only when the re-ranked plan is
+  genuinely empty (`plan.length === 0`) — an already-open interview is never retroactively closed
+  for dropping to exactly one remaining useful question. This is the owner's dynamic-loop rule
+  (§2/§6 of the brief): narrow while anything useful remains; stop at niche or at "nothing left to
+  ask," never earlier.
+- **Skip is unchanged and was already correct.** `onConfirm([])` (a confirm with nothing selected)
+  and `onSkip()` were traced end to end and found structurally identical: both mark the question
+  asked and advance to the next plan index; neither calls a question's `apply()`, sets the
+  query-changed flag, or records a facet. Skip therefore already applies no predicate, does not
+  reduce the eligible set, and does not treat an unknown value as "no" — this amendment did not
+  need to touch that path, and the barrier locks the two handlers' shapes so a future edit can't
+  quietly split them.
+
+---
+
+## Amendment 2026-08-23 — the footer is PINNED, only the question body scrolls
+
+§2's diagram already put the footer at the bottom of the card, but the implementation rendered it as
+the last child *inside* the card's body `ScrollView`. On a short question that was invisible; on a
+tall one it was the whole exit. Measured on production at 390×664 (iPhone 13): the bathrooms question
+kept «عرض النتائج» at y=541..558, and the very next question (amenities, 7 options) put the entire
+secondary row at y=656..682 against `innerHeight=664` — about 8px of glyph left. The card's inner
+scroller was `clientHeight=601 / scrollHeight=639`: 38px of scroll room, no scrollbar, no fade cue.
+«رجوع», «تخطي» and «عرض النتائج» all lived down there, so the only visible way out of the interview
+was the ✕.
+
+**The rule, for every question:** the action row — primary `Show {N}` / `Continue · {N}` plus the
+`Back / Skip / Show results` row — is a **flex sibling of the body scroller**, never a descendant of
+it. Only the title, description, brand strip, option list and availability note scroll. The scroller
+carries the explicit `flexShrink`, so it is the element that gives up height when the card hits
+`maxHeight: '100%'`; the footer keeps its own. The overlay reserves vertical padding, so the card's
+bottom edge is never the viewport's bottom edge and the pinned row cannot land under a phone's home
+indicator or the browser's bottom chrome.
+
+Post-fix on the same device the row sits at y=604..630, fully visible, and «عرض النتائج» commits with
+no scrolling at all. Pinned by `scripts/verify-af-footer-onscreen.ts` (wired into `npm test`), which
+fails if any of the four footer controls, or the `s.foot` container, moves back inside the scroller —
+including via an `position: 'absolute'` substitute that would overlap the last option instead.
+
+
+## Amendment 2026-08-23 — the SCOPE PREFIX: CATEGORY → GROUP → TYPE (owner-approved)
+
+**This amendment carves property GROUP and property TYPE out of the "Normal-Filter territory is never
+asked" boundary rule above. Nothing else moves. Bedrooms in particular stays permanently off-limits.**
+
+### The defect
+
+«سكني» / «تجاري» is only the CATEGORY. It was never enough information to ask about bathrooms, age or
+amenities — and, measured, it was not enough to ask *anything*:
+
+- `cohortAllows()` intersects across every clean type in scope (`afCohorts.ts:220`) and treats an
+  uncertified type as an **empty** cohort, never as "no constraint" (`afCohorts.ts:226`).
+- So ONE uncertified sibling zeroed a whole group. Riyadh / Rent / annual, measured 2026-08-23:
+  `Villa` alone certifies **7** questions over **4,140** listings; `Duplex` has **3** listings and
+  certifies none; the «Villas & Houses» group therefore certified **zero**.
+- **5 of the 8 shipped groups could not open Advanced Filter on Buy, and 5 of 8 could not on Rent.**
+  A category-only scope could *never* open it (`cohortAllows` short-circuits on an empty type list,
+  `afCohorts.ts:219`).
+- The tap then fell through to `startRefine()`'s legacy hardcoded 4-chip type question
+  (شقة/فيلا/دور/أرض) — not the canonical taxonomy, no group tier, scalar `q.type` only. That legacy
+  flow is what users actually saw, which is why the feature read as *present but wrong* rather than
+  *blocked*. **It has been deleted**; property type is now asked in exactly one place.
+
+### The rule
+
+The interview resolves the property hierarchy before asking any certified question:
+
+```
+CATEGORY → PROPERTY GROUP → PROPERTY TYPE → certified ADVANCED questions
+```
+
+- **Category** is never asked. It is chosen in the Filter home and is a precondition.
+- **Group** is asked only when neither a group nor a type is selected. Options are
+  `groupsFor(category)` — never hardcoded, never another category's groups.
+- **Type** is asked whenever no type is selected. Options are the member types of the selected
+  group(s); if the group step was skipped, every type in the category.
+- An explicit **type** pick resolves *both* tiers — a user who already chose فيلا is asked neither.
+- Several groups **OR**; several types **OR**. Every other dimension stays AND.
+- The advanced questions offered for a multi-type scope remain the **safe semantic INTERSECTION**
+  across the selected types. `cohortAllows` is deliberately **unchanged**: the hierarchy makes the
+  intersection non-empty by NARROWING the scope, never by loosening the gate. A `.some()`/union there
+  would offer a question uncertified for a scoped type, and because the shared SQL predicates are
+  strict-NULL-excluding, answering it would silently amputate that type's rows — ask for شقة+غرفة,
+  get zero غرفة back.
+
+### Skip
+
+Every scope step supports «تخطي». Skip means **"I do not care / I am open"** — permanently, and
+identically to every other interview question:
+
+- it applies **zero** predicate and returns the query byte-identically ⇒ **count delta is exactly 0**;
+- it is never a "no", never `false`, and never silently selects an option;
+- a skipped tier counts as **resolved** (the walk moves down, it never re-asks);
+- skip GROUP ⇒ the TYPE step offers every type in the category;
+- skip BOTH ⇒ only questions safely shared across the whole effective type set may be asked, and if
+  that is below the useful floor the interview **stops cleanly and shows results**. It never invents a
+  type to keep going.
+
+### A tier with nothing to choose between
+
+If a tier resolves to exactly **one** option it is not a question: it is auto-committed and never
+rendered. The result set cannot move (every other branch of that tier is empty here), while the
+cohort scope becomes a certified single type — which is what lets a one-member group like
+«Residential Plots» → `Residential Land` reach the advanced questions at all. Zero options records an
+open skip. Neither case invents a predicate the user did not ask for.
+
+### Where the ≥2-useful gate now runs
+
+`MIN_USEFUL_QUESTIONS_TO_SHOW` is **still 2**, and still governs only the OPENING decision — but it is
+evaluated at the **scope→advanced transition**, not at `startAgeFlow`. With an unresolved hierarchy
+the ranked plan is empty *by construction*, so the old placement closed the interview before the first
+scope question could render. It counts **advanced** questions only: the hierarchy steps are what
+earned the right to ask, never two of the two. At the transition, 0 or 1 useful advanced question ends
+the interview **cleanly** on the results the scope answers already narrowed to — it never bounces to
+the refine chips, because by then the user has answered real questions we must honour.
+
+### Counts
+
+Each scope option shows the **exact** result count that picking it would return, on top of the
+current committed state (location, price, area, bedrooms and any AF answers already given). A scope
+candidate changes five RPC params (`p_types`, `p_types2`, `p_tables`, `p_tables2`, `p_category`), so
+each candidate resolves its **own** scope via `resolveSearchScope(candidateQ)` —
+`fetchScopeOptionCounts` in `src/data/remote.ts`. Options are ordered by the canonical HIERARCHY,
+never by count. A **zero-count** option is dropped (it promises results it cannot deliver); **no other
+usefulness floor applies**, so a genuinely small branch — 4 listings — is still offered. Hiding it
+would be the silent amputation of a real part of the taxonomy.
+
+### Pills
+
+Scope answers render as **non-removable** chips in the results row. Every other advanced answer only
+ever narrows, so removing its pill returns to a scope the user already had; removing a TYPE pill would
+instead broaden the search past anything they ever asked for, with no re-interview and no control to
+get it back.
+
+### Where this lives
+
+- `src/lib/afPlan.ts` — the tier logic, **pure** (no `./remote`, no `@/i18n`) so a barrier executes it
+  rather than grepping for it.
+- `src/data/advancedFilters.ts` — `SCOPE_QUESTIONS` / `scopeQuestionFor()`. Deliberately **not**
+  members of `ADVANCED_QUESTIONS` and never ranked by `rankQuestions`/`scoreQuestion`: a scope step is
+  a prerequisite of that pool, not a ranked peer, and `scoreQuestion`'s usefulness gates would delete
+  real taxonomy branches (`MIN_REAL_OPTION_COUNT` hides a 4-listing group; the narrowing gate —
+  `o.count < N` when this was written, `optionNarrowsMeaningfully()` since 2026-08-25, which is
+  stricter still — retires a group with one populated type).
+- `src/app/agent.tsx` — the scope prefix inside `presentGuided`, the moved gate, the plan
+  invalidation on a scope commit, and the scope-aware `revalidateStepsAfter`.
+- `scripts/verify-af-scope-hierarchy.ts` — the barrier, wired into `npm test`. It EXECUTES the real
+  tier logic, the real cohort gate and the real step-rebuild, and carries a mutation proof that a
+  `.some()`/union "fix" to `cohortAllows` is detected.
+
+### Registry note
+
+`af_field_registry` is a registry of listing **attribute** fields (bathrooms, furnished, kitchen…).
+Scope dimensions — location, deal, category, type — have never had rows in it, so this amendment adds
+none: inventing rows for them would pollute the registry with non-fields. The boundary rule keeps its
+teeth where it matters, in `scripts/verify-ui-controls-have-predicates.ts`: the interview may ask
+exactly the two authorized scope ids and nothing else from Normal-Filter territory, and `bedrooms`
+must remain `'normal'` tier and appear in no interview question.
+
+## Amendment 2026-08-25 — the ASK gate uses the narrowing rule too (owner-approved, supersedes the eligibility half of Amendment 2026-08-22 (a))
+
+**The owner's brief.** «You have 100 properties. If the next AF question is "Do you want a gym?" but
+100/100 properties have a gym, then asking that is pointless. The answer cannot narrow anything. So do
+not show that question. Same if 98/100 have it, or every option gives basically the same result.»
+«Certified question = allowed to ask. Useful backend split = worth asking now. We need BOTH.» «Do not
+invent questions and do not force questions just to reach the 25-listing target. If there are 50 or
+100 results left but no meaningful truthful question remains, Advanced Filter is done.»
+
+**The rule.** ONE predicate, `optionNarrowsMeaningfully(count, total)` in `src/lib/afRanking.ts`:
+
+```
+qualifies  ==  (total - count >= total * MEANINGFUL_NARROWING_FRACTION)  ||  (count <= INTERVIEW_STOP_AT)
+```
+
+`MEANINGFUL_NARROWING_FRACTION = 0.10`, `INTERVIEW_STOP_AT = 25` (unchanged). The removal form is
+written so that EXACTLY 10% qualifies (N=100 k=90 and N=30 k=27 both ask; N=100 k=91 does not). The
+second clause exists so the LAST step to the target is never blocked by a percentage: at N=26 an
+option yielding 25 removes 3.8% and still qualifies, because it lands AT the target.
+
+**Two uses, one predicate — required, not tidiness.**
+- **ASK gate** — `scoreQuestion()` filters the OPTIONS by it, REPLACING the 2026-08-22 `o.count < N`.
+  `minOptionsFor(selection)` then decides whether the question survives (single ≥2, multi ≥1).
+  Owner's worked case, bathrooms at N=100 with rungs 100/98/60/20: «1+»=100 (0% cut) and «2+»=98 (2%
+  cut) are DROPPED, «3+»=60 (40%) and «4+»=20 (80%) are KEPT — a real choice of two, and the user
+  never sees a chip that does nothing. Gym at 100/100 loses its only option, so that question dies.
+- **OFFER gate** — `offersMeaningfulNarrowing()` calls the SAME predicate instead of its own copy of
+  the arithmetic. Two copies would drift into «تحديد أكثر» opening a round that immediately closes —
+  the bug shape PR #1094 had to fix for a different cause. Sharing it makes that unrepresentable.
+
+**ONE-SIDED, deliberately — the small-slice protection of 2026-08-22 is permanent.** The 2026-08-11
+band rejected BOTH extremes; only the lopsided end is the gym problem. An option matching 8 of 100
+removes 92% and is an excellent question; `street_width` «30m+» at 60 of 1,874 (a 3.2% share, a 96.8%
+cut) is exactly the question the owner fought to get back and is never rejected. What this amendment
+reverses is the over-correction at the other end: `amenities` «parking» at 1,820 of 1,874 costs a tap
+and moves 54 listings. Nothing is invented and nothing is forced to reach ≤25 — when no meaningful
+truthful option is left, the Advanced Filter is DONE at 50 or 100 results and only «عرض المزيد»
+remains.
+
+**Amendment 2026-08-22 (a) as amended.** Its *ordering* half stands untouched (selectivity orders,
+never includes). Its *eligibility* half now reads `optionNarrowsMeaningfully(count, N)` instead of
+`count < N`, so its regression bullet (b) — "a 97%-share-only option is included" — is superseded and
+now asserts the opposite; bullet (a) (the small-slice question) stands unchanged and permanent.
+Unchanged around it: `MIN_TOTAL_TO_SHOW`, the absolute per-option floor `MIN_REAL_OPTION_COUNT = 5`
+and `meaningful()`, `MIN_USEFUL_QUESTIONS_TO_SHOW = 1`, the adaptive round size, the manual tap,
+Skip = no predicate, and Summary == committed state.
+
+Regression: `scripts/verify-af-narrowing-gate.ts` (§2/§2b/§5 inverted in place with the dated reason,
+§1 and §6 keep the small-slice half permanent) and `scripts/verify-af-offer-gate.ts` (§3 and §4
+inverted from "the gates are separate" to "the gates share ONE predicate and neither re-implements the
+arithmetic"). Both EXECUTE the real pure predicate; neither was deleted or unwired.

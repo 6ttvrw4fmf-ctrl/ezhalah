@@ -7,6 +7,7 @@
 // unchanged; this file is simply where the one definition now lives.
 
 import type { SearchQuery } from '@/data/search';
+import type { Deal } from '@/data/taxonomy';
 import { groupsMembers, pruneTypesToGroups } from '../data/propertyTypes.ts';
 
 // Defaults are Rent + Residential so a bare Search (nothing else chosen) returns residential
@@ -159,6 +160,14 @@ export function sanitizeForFilterRestore(raw: SearchQuery): SearchQuery {
     priceMin: q.priceMin,                         // visible: price من/إلى
     priceMax: q.priceMax,
     rentPeriod: validRentPeriod(q.rentPeriod) ?? base.rentPeriod,  // visible: شهري/سنوي
+    // Buy+Rent combined multi-select (owner 2026-08-20): visible: شراء/إيجار BOTH-selected state.
+    // Unlike bothDeals (deliberately excluded above), dealCombined IS a Filter-UI field the toggle
+    // buttons visibly represent, so — unlike bothDeals — it belongs in this allowlist. priceMinRent/
+    // priceMaxRent are the Rent-side budget box that only renders (and only means anything) when
+    // dealCombined is true; restoring them harmlessly no-ops otherwise.
+    dealCombined: !!q.dealCombined,
+    priceMinRent: q.priceMinRent,
+    priceMaxRent: q.priceMaxRent,
   };
 }
 
@@ -199,11 +208,52 @@ export function togglePeriodButton(
   return 'both';                                    // شهري was off (سنوي-only) — turn it on
 }
 
+// Deal toggle logic (owner feature 2026-08-20): mirrors togglePeriodButton exactly, but Deal has no
+// spare "both" string value the way rentPeriod does — every existing consumer of q.deal (dozens,
+// across search.ts/remote.ts/locations.ts/index.tsx) expects a concrete 'Buy'|'Rent', so combined
+// state is carried on the ORTHOGONAL dealCombined flag instead of widening Deal itself. current/next
+// are expressed as the same 3-token shape ('Buy'|'Rent'|'Both') the period toggle uses, purely for
+// this function's own input/output — dealSelectionFromQuery/ToQuery below convert to and from the
+// two real SearchQuery fields it actually populates.
+//
+// INVARIANT: at least one button always stays selected — tapping the only currently-active one is a
+// no-op (same "can't reach zero" rule togglePeriodButton enforces).
+export type DealSelection = 'Buy' | 'Rent' | 'Both';
+
+export function toggleDealButton(current: DealSelection, which: 'Buy' | 'Rent'): DealSelection {
+  const buyOn = current === 'Buy' || current === 'Both';
+  const rentOn = current === 'Rent' || current === 'Both';
+  if (which === 'Buy') {
+    if (buyOn && rentOn) return 'Rent';   // turn شراء off — إيجار stays
+    if (buyOn) return current;            // شراء is the only one on — no-op, can't reach zero
+    return 'Both';                        // شراء was off (إيجار-only) — turn it on
+  }
+  if (rentOn && buyOn) return 'Buy';      // turn إيجار off — شراء stays
+  if (rentOn) return current;             // إيجار is the only one on — no-op
+  return 'Both';                          // إيجار was off (شراء-only) — turn it on
+}
+
+// current selection → the two SearchQuery fields. `deal` stays a concrete Buy/Rent (never 'Both')
+// for every existing consumer; dealCombined is the new orthogonal modifier those consumers must
+// check FIRST. `keepDeal` (the query's current concrete deal) is the tie-break when selection is
+// 'Both' — so toggling one button back OFF restores exactly the button that was still on, not a
+// fixed default.
+export function dealSelectionToQuery(sel: DealSelection, keepDeal: Deal): { deal: Deal; dealCombined: boolean } {
+  return sel === 'Both' ? { deal: keepDeal, dealCombined: true } : { deal: sel, dealCombined: false };
+}
+
+export function dealSelectionFromQuery(q: { deal: Deal; dealCombined?: boolean }): DealSelection {
+  return q.dealCombined ? 'Both' : q.deal;
+}
+
 export function hasActiveFilters(q: SearchQuery): boolean {
   const d = HOME_DEFAULT_QUERY();
   return (
     q.location.trim() !== d.location ||
     q.deal !== d.deal ||
+    !!q.dealCombined ||
+    !!q.priceMinRent ||
+    !!q.priceMaxRent ||
     q.category !== d.category ||
     !!(q.typeGroups && q.typeGroups.length) ||
     q.type !== d.type ||

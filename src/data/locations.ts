@@ -8,15 +8,17 @@
 import raw from './sa-locations.json';
 import { supabase } from '@/lib/supabase';
 import { CITY_AR_DISPLAY, CITY_TOKENS, cityTokensReverseLookup } from '@/lib/cityDisplay';
-import { arabicOrPlaceholder } from '@/lib/arabicText';
+import { arabicOrPlaceholder, cutPlaceName } from '@/lib/arabicText';
 import { LOCATION_UNRESOLVED_AR } from '@/i18n';
 import type { Category, Deal } from './taxonomy';
 
 // 'Buy'/'Rent' → the Arabic deal_ar value stored on search_listings_ar (same mapping remote.ts
 // uses inline for the main search RPC) — the single conversion point for the Top-6 city/district
-// scoping below.
-function dealAr(deal: Deal): string {
-  return deal === 'Buy' ? 'بيع' : 'إيجار';
+// scoping below. null (Filter شراء+إيجار both selected, owner feature 2026-08-20) → null: the
+// backend's top_cities_by_deal_ar/district_options_ar treat p_deal=null as Buy ∪ Rent(any period),
+// the exact combined-mode eligible set (verified live, PR#817) — never a fake third deal_ar string.
+function dealAr(deal: Deal | null): string | null {
+  return deal === null ? null : deal === 'Buy' ? 'بيع' : 'إيجار';
 }
 
 export type PlaceKind = 'country' | 'region' | 'city' | 'district';
@@ -237,7 +239,14 @@ for (const [cityId, regionId, en, ar] of DATA.districts) {
 // misspelling ("riydah" → "Riyadh", "jedah" → "Jeddah") still surfaces the place.
 function editDistance(a: string, b: string): number {
   const m = a.length, n = b.length;
-  if (Math.abs(m - n) > 2) return 3; // we only care about distances ≤ 2
+  // Length-gap short-circuit. It MUST return a value bigger than any caller's budget: here the true
+  // distance is already ≥ |m − n| ≥ 3, and Math.max(m, n) is a truthful upper bound on it. Returning
+  // the literal 3 made this sentinel a LIE — nearbyCityWithListings() allows maxD = 3 for long
+  // queries, so EVERY live city sharing the query's first folded letter scored exactly 3, passed the
+  // gate, and the `n` tie-break then offered the biggest one. That is how the invented city
+  // «مدينة زقنبوطية الشمالية» was answered with «هل تقصد مكة المكرمة؟» (2026-08-23). A distance this
+  // function reports must never be smaller than the truth. (rule: never invent a location.)
+  if (Math.abs(m - n) > 2) return Math.max(m, n);
   const dp = Array.from({ length: m + 1 }, (_, i) => i);
   for (let j = 1; j <= n; j++) {
     let prev = dp[0];
@@ -429,6 +438,10 @@ export type LocationResolution = {
 
 // Letters/digits only (drops spaces, punctuation, Arabic diacritics) — for phrase `includes` tests.
 const flatLoc = (s: string) => s.toLowerCase().replace(/[ً-ْ]/g, '').replace(/[^a-z0-9ء-ي]/gu, '');
+// flatLoc keeps أ/إ/آ, ة and ى distinct — fine for an `includes` test, wrong when SUBTRACTING one
+// place name from another, because `norm` (which built the search keys that matched the city in the
+// first place) folds them. cutPlaceName does that subtraction fold-blind; it lives in @/lib/arabicText
+// so its behavior is executable by a test. (defect abha-city-rescope, 2026-08-23.)
 // Whole words — for single-keyword tests (geography/lifestyle) so "بحره" (a town) never trips "بحر".
 const wordsOf = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 
@@ -687,7 +700,19 @@ const pmKey = (periodTok: string | null) => periodTok ?? '';
 // the Top-6 ranking, every listing_count, and the new total_in_cohort denominator all describe the
 // same cohort the user will actually search. Price is deliberately NOT part of this key.
 const typesKey = (types: string[] | null) => (types && types.length ? [...types].slice().sort().join('|') : '');
-const cityPoolKey = (deal: Deal, periodTok: string | null, category: Category | null, types: string[] | null = null) => `${deal}:${pmKey(periodTok)}:${category ?? ''}:${typesKey(types)}`;
+// Advanced-filter answers scope the city pool exactly as hard as نوع/سعر/مساحة do, so they belong
+// in the CACHE KEY as well as in the request (owner rule 2026-08-22: the city count shown must equal
+// what clicking that city returns, under the full current AF state). Without the key, answering or
+// changing an advanced question would serve the previously-cached pre-AF pool and the chip would go
+// back to overstating — the stale-cache half of the same defect PR #822 fixed for districts.
+// Stable by construction: entries sorted, so {elevator,bath} and {bath,elevator} share one key.
+export type AfParams = Record<string, unknown>;
+const afKey = (af: AfParams | null) => {
+  if (!af) return '';
+  const ks = Object.keys(af).sort();
+  return ks.length ? ks.map((k) => `${k}=${JSON.stringify((af as any)[k])}`).join('&') : '';
+};
+const cityPoolKey = (deal: Deal | null, periodTok: string | null, category: Category | null, types: string[] | null = null, af: AfParams | null = null) => `${deal}:${pmKey(periodTok)}:${category ?? ''}:${typesKey(types)}:${afKey(af)}`;
 const CITY_FIELD_POOLS = new Map<string, CityOption[]>();
 const _cityFieldPromises = new Map<string, Promise<CityOption[]>>();
 
@@ -700,11 +725,11 @@ const _cityFieldPromises = new Map<string, Promise<CityOption[]>>();
 export type PoolStatus = 'loading' | 'error' | 'ready';
 const _cityPoolStatus = new Map<string, PoolStatus>();
 const _districtPoolStatus = new Map<string, PoolStatus>();
-export function cityPoolStatus(deal: Deal, periodTok: string | null, category: Category | null, types: string[] | null = null): PoolStatus {
-  const key = cityPoolKey(deal, periodTok, category, types);
+export function cityPoolStatus(deal: Deal | null, periodTok: string | null, category: Category | null, types: string[] | null, af: AfParams | null): PoolStatus {
+  const key = cityPoolKey(deal, periodTok, category, types, af);
   return CITY_FIELD_POOLS.has(key) ? 'ready' : _cityPoolStatus.get(key) ?? 'loading';
 }
-export function districtPoolStatus(cityId: number, deal: Deal, category: Category | null, periodTok: string | null, types: string[] | null = null): PoolStatus {
+export function districtPoolStatus(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, types: string[] | null = null): PoolStatus {
   const key = districtCacheKey(cityId, deal, category, periodTok, types);
   return _districtCache.has(key) ? 'ready' : _districtPoolStatus.get(key) ?? 'loading';
 }
@@ -713,8 +738,8 @@ export function districtPoolStatus(cityId: number, deal: Deal, category: Categor
 // most — small enough to fetch in one shot and search entirely client-side, same shape as
 // ensureLocationIndex above). Already sorted by listing_count desc so topCitiesByListings() below
 // is just a slice.
-export async function ensureCityFieldIndex(deal: Deal, periodTok: string | null = null, category: Category | null = null, types: string[] | null = null): Promise<CityOption[]> {
-  const key = cityPoolKey(deal, periodTok, category, types);
+export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string | null = null, category: Category | null = null, types: string[] | null = null, af: AfParams | null = null): Promise<CityOption[]> {
+  const key = cityPoolKey(deal, periodTok, category, types, af);
   const cached = CITY_FIELD_POOLS.get(key);
   if (cached) return cached;
   const inflight = _cityFieldPromises.get(key);
@@ -743,20 +768,35 @@ export async function ensureCityFieldIndex(deal: Deal, periodTok: string | null 
         if (periodTok !== null) args.p_rent_period = periodTok;
         if (category !== null) args.p_category = category;
         if (types && types.length) args.p_types = types;
+        // EVERY narrowing the user has chosen — advanced answers AND the normal filters (bedrooms,
+        // price, area, combined-mode rent budget). `af` is rpcAllNarrowingParams(query): one object,
+        // so a future filter reaches Trending automatically instead of waiting to be remembered here.
+        // (Owner rule 2026-08-22: Trending IS the location breakdown of the user's eligible set.)
+        Object.assign(args, af ?? {});
+        // "Is the user narrowed at all?" — gates every widening fallback below. Named for what it
+        // now means; it covers bedrooms/price/area since 2026-08-22, not just advanced answers.
+        const hasNarrowing = Object.keys(af ?? {}).length > 0;
         let res = await supabase.rpc('top_cities_by_deal_ar', args).abortSignal(_ac.signal);
-        if (res.error && types && types.length) {
+        // EVERY fallback below WIDENS the scope, so each is gated on the user not being narrowed:
+        // a widened count under an active filter is exactly the overstatement this fix removes, and
+        // it fails silently because a fallback looks like a success. Narrowed + error ⇒ no count.
+        if (res.error && !hasNarrowing && types && types.length) {
           // pre-p_types signature: drop the cohort types (counts widen to the category scope)
           const { p_types: _droppedTypes, ...noTypes } = args;
           res = await supabase.rpc('top_cities_by_deal_ar', noTypes).abortSignal(_ac.signal);
         }
-        if (res.error && category !== null) {
+        if (res.error && !hasNarrowing && category !== null) {
           // TODO(pending migration 2026-08-14): top_cities_by_deal_ar is gaining `p_category text
           // default null` — until that migration is applied everywhere, an older signature rejects
           // the arg; drop it (counts fall back to the pre-category scope) rather than going blank.
           const { p_category: _dropped, ...noCat } = args;
           res = await supabase.rpc('top_cities_by_deal_ar', noCat).abortSignal(_ac.signal);
         }
-        if (res.error && periodTok !== null) {
+        // LAST-RESORT FALLBACK, same gate. The deal-only call drops every narrowing, so under an
+        // active filter it would hand back exactly the overstated numbers this fix exists to remove.
+        // No count is strictly better than a wrong one (owner): the field goes empty and
+        // cityPoolStatus reports 'error' instead of showing a fabricated chip.
+        if (res.error && periodTok !== null && !hasNarrowing) {
           res = await supabase.rpc('top_cities_by_deal_ar', { p_deal: dealAr(deal) }).abortSignal(_ac.signal);
         }
         data = res.data;
@@ -801,8 +841,8 @@ export async function ensureCityFieldIndex(deal: Deal, periodTok: string | null 
 // this category" count (e.g. 9,358) instead of the exact selected type's count (e.g. 28, or 0). Every
 // call site must now pass its cohortTypesAr(query) explicitly; TypeScript refuses to compile a caller
 // that forgets it, so this class of drift can never silently reappear. [[cohortTypesAr]]
-export function topCitiesByListings(deal: Deal, periodTok: string | null, category: Category | null, k: number, types: string[] | null): CityOption[] {
-  return (CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types)) ?? []).filter((c) => c.listingCount > 0).slice(0, k);
+export function topCitiesByListings(deal: Deal | null, periodTok: string | null, category: Category | null, k: number, types: string[] | null, af: AfParams | null): CityOption[] {
+  return (CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af)) ?? []).filter((c) => c.listingCount > 0).slice(0, k);
 }
 
 // ── District field (city_id-scoped) — mirrors the City field. ────────────────────────────────────
@@ -832,11 +872,11 @@ export type DistrictOption = {
 // unaffected; only the popularity ranking / listing_count used for the Top-6 slice changes.
 const _districtCache = new Map<string, DistrictOption[]>();
 const _districtPromises = new Map<string, Promise<DistrictOption[]>>();
-const districtCacheKey = (cityId: number, deal: Deal, category: Category | null, periodTok: string | null, types: string[] | null = null) => `${cityId}:${deal}:${category ?? ''}:${pmKey(periodTok)}:${typesKey(types)}`;
+const districtCacheKey = (cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, types: string[] | null = null) => `${cityId}:${deal}:${category ?? ''}:${pmKey(periodTok)}:${typesKey(types)}`;
 
 // Load (once, cached per city+deal+category) the full district catalog for a city_id. Never falls
 // back to another city.
-export async function ensureDistrictOptions(cityId: number, deal: Deal, category: Category | null, periodTok: string | null = null, types: string[] | null = null): Promise<DistrictOption[]> {
+export async function ensureDistrictOptions(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null = null, types: string[] | null = null): Promise<DistrictOption[]> {
   const key = districtCacheKey(cityId, deal, category, periodTok, types);
   const cached = _districtCache.get(key);
   if (cached) return cached;
@@ -904,14 +944,14 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal, category
 // already returns rows ordered by listing_count desc, so this is a filter + slice).
 // `types` (and every param before it) is REQUIRED — same compile-time barrier as topCitiesByListings
 // above, guarding the district pool's read-back cache key. [[cohortTypesAr]]
-export function topDistrictsForCityId(cityId: number, deal: Deal, category: Category | null, periodTok: string | null, k: number, types: string[] | null): DistrictOption[] {
+export function topDistrictsForCityId(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, k: number, types: string[] | null): DistrictOption[] {
   return (_districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types)) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
 }
 
 // Typing: search the COMPLETE canonical catalog for THIS city (incl. zero-listing districts) by Arabic
 // substring, using the SAME norm() folding as the city field. Empty query → the Top-6 suggestions.
 // `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
-export function matchDistrictsByCityId(cityId: number, deal: Deal, category: Category | null, periodTok: string | null, query: string, types: string[] | null): DistrictOption[] {
+export function matchDistrictsByCityId(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, query: string, types: string[] | null): DistrictOption[] {
   const all = _districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types)) ?? [];
   const q = norm(query);
   if (!q) return all.filter((d) => d.listingCount > 0).slice(0, 6);
@@ -931,11 +971,11 @@ export function matchDistrictsByCityId(cityId: number, deal: Deal, category: Cat
 // normalize_ar() applies — so "الري" matches "الرياض" exactly like a DB-side search would. Ranks
 // exact-prefix matches before substring matches, then by listing count (bigger cities first).
 // `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
-export function matchCitiesByText(deal: Deal, periodTok: string | null, category: Category | null, query: string, types: string[] | null): CityOption[] {
+export function matchCitiesByText(deal: Deal | null, periodTok: string | null, category: Category | null, query: string, types: string[] | null, af: AfParams | null): CityOption[] {
   const q = norm(query);
   if (!q) return [];
   const scored: { opt: CityOption; rank: number }[] = [];
-  for (const opt of CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types)) ?? []) {
+  for (const opt of CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af)) ?? []) {
     const n = norm(opt.cityAr);
     if (n.startsWith(q)) scored.push({ opt, rank: 0 });
     else if (n.includes(q)) scored.push({ opt, rank: 1 });
@@ -1166,8 +1206,15 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
       probe = probe.replace(ci.key, '').replace(flatLoc(ci.city), '');
     }
   }
-  if (cityKey) probe = probe.replace(cityKey, '');
-  if (cityKeyAr) probe = probe.replace(cityKeyAr, '');
+  // EXACT LOCATION ONLY — an exact city must stay that exact city. These two subtractions are the
+  // whole basis of the "input is just a city" guard below, so they MUST be blind to Arabic
+  // alef/ta-marbuta/ya spelling variants (cutPlaceName, never String.replace): the catalog spells
+  // Abha «ابها» while users and the AI agent write «أبها», so a plain replace() subtracted nothing,
+  // the entire city name survived as a "district probe", word-matched the live district «روابي أبها»
+  // — and the CITY of Abha was silently re-scoped to one neighbourhood (0 results where 15 exist,
+  // 22 where 770 exist). 27 city spellings Kingdom-wide resolved to a district the same way.
+  // (defect abha-city-rescope, 2026-08-23; barrier verify-city-never-rescoped-to-district.ts.)
+  probe = cutPlaceName(cutPlaceName(probe, cityKey), cityKeyAr);
   if (probe.length < 2) return []; // input is just a city (or nothing district-specific)
   // Add the OTHER-script equivalents of the probe so a Latin query reaches Arabic-tagged districts and
   // vice-versa (the catalog provides the en↔ar pairing). (user: Al Olaya missed its Arabic listings.)
@@ -1175,8 +1222,8 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   const probeF = fuzzyFold(probe);
   // Fuzzy-match the probe against the WORDS of a district name (not just the glued whole), so a typo'd
   // or partial district token still hits — "Rakk" ≈ the "Rakah" in "Al Rakah Al Shamaliyah". Shared
-  // first letter + a small edit distance keeps it tight. CAP at 2: editDistance() returns 3 as its
-  // "too different" sentinel (length diff > 2), so a budget of 3 would let unrelated tokens through.
+  // first letter + a small edit distance keeps it tight. CAP at 2: a 3-edit gap on a short district
+  // token is a different word, not a typo (the ±1 length guard below already rules most of them out).
   const tokenMaxD = probeF.length <= 3 ? 1 : 2;
   const fuzzyTokenHit = (district: string): boolean => {
     if (probeF.length < 4) return false;

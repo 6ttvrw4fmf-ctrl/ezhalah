@@ -30,3 +30,54 @@ export function listingLocationAr(listing: Listing): string {
 export function listingPriceAr(listing: Listing): string {
   return tPrice(listing.price, 'ar');
 }
+
+// Platform display name from the raw scraped `source` slug — MOVED here from ResultCard.tsx
+// (owner request, 2026-08-22: speak the platform after each card) so Read Aloud and the visible
+// "مستضاف على X" badge share this ONE mapping instead of two copies drifting apart. ResultCard.tsx
+// imports this back for its own badge/host-name text. Exhaustive per-platform matching preserved
+// verbatim, including the Al Khaas space/no-space fix (found live 2026-07-25).
+export function sourceName(source: string): string {
+  const s = source.toLowerCase();
+  if (s.includes('wasalt')) return 'Wasalt';
+  if (s.includes('aldarim')) return 'Aldarim Real Estate';
+  if (s.includes('aqargate')) return 'Aqar Gate';
+  if (s.includes('alhoshan')) return 'Al Hoshan';
+  if (s.includes('hajer')) return 'Hajer Houses Real Estate';
+  if (s.includes('sanadak')) return 'Sanadak';
+  if (s.includes('eastabha')) return 'East Abha Real Estate';
+  if (s.includes('aqarcity')) return 'Aqar City';
+  if (s.includes('raghdan')) return 'Raghdan Real Estate';
+  if (s.includes('eaqartabuk')) return 'Eqar Tabuk';
+  if (s.includes('satel')) return 'Satel';
+  if (s.includes('sadin')) return 'Sadin for Real Estate';
+  if (s.includes('toor')) return 'TOOR';
+  if (s.includes('mustqr')) return 'Mustaqarr Real Estate';
+  if (s.includes('ramzalqasim')) return 'Ramz Al Qassim Real Estate Investment';
+  if (s.includes('fursaghyr')) return 'Fursa Ghyr Real Estate';
+  if (s.includes('jazwtn')) return 'Jazan Watan';
+  if (s.includes('mizlaj')) return 'Mizlaj Real Estate';
+  if (s.includes('muktamel')) return 'Muktamel';
+  if (s.includes('aqaratikom')) return 'Nawait';
+  if (s.includes('awal')) return 'Awal United for Real Estate';
+  // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
+  // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
+  // logo, found live 2026-07-25). Also match the no-space form in case that ever appears.
+  if (s.includes('al khaas') || s.includes('alkhaas')) return 'Al Khaas';
+  if (s.includes('abeea')) return 'Abeea Real Estate';
+  if (s.includes('jurash')) return 'Jurash Real Estate';
+  if (s.includes('alnokhba')) return 'Al Nokhba';
+  if (s.includes('gathern')) return 'Gathern';
+  if (s.includes('deal')) return 'Deal App';
+  if (s.includes('souq')) return '24 Souq';
+  if (s.includes('pulse')) return 'Era Pulse';
+  if (s.includes('nowaisiry')) return 'Al Nowaisiry Real Estate';
+  if (s.includes('october')) return '1 October Real Estate';
+  return 'AQAR';
+}
+
+// The exact "مستضاف على X" phrase Read Aloud speaks after each card (owner 2026-08-22) — reuses the
+// SAME 'Hosted on {name}' i18n key the visible card badge renders (ResultCard.tsx), so the spoken
+// platform name can never drift from what's shown.
+export function listingPlatformAr(listing: Listing): string {
+  return translate('ar', 'Hosted on {name}', { name: translate('ar', sourceName(listing.source)) });
+}

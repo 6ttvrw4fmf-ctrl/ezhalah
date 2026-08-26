@@ -101,6 +101,22 @@ export const pruneTypesToGroups = (
 export const isCleanType = (s: string): boolean => s in CLEAN_MACRO;
 export const isGroup = (s: string): boolean => groupMembers(s).length > 0;
 
+// The REVERSE of groupMembers: which shipped group owns this clean type. Needed because the Advanced
+// Filter's scope interview lets the user land on a TYPE without ever naming its group (they skipped
+// the group step, or the agent path set a bare `type`), and the Filter home gates the whole type row
+// on there being a selected group — a type with no group would be an ACTIVE filter with no visible
+// control to remove it, the exact orphan pruneTypesToGroups() exists to prevent. Returns null for the
+// 5 service-facility types, which are real clean types but deliberately live in NO HIERARCHY group.
+export const groupOf = (type: string): string | null => {
+  for (const macro of ['Residential', 'Commercial'] as Macro[])
+    for (const g of HIERARCHY[macro]) if (g.types.includes(type)) return g.group;
+  return null;
+};
+
+// The groups implied by a set of clean types, deduped, in HIERARCHY order. The twin of groupsMembers().
+export const groupsOf = (types: string[]): string[] =>
+  [...new Set(types.map((t) => groupOf(t)).filter((g): g is string => g != null))];
+
 // ── raw → clean mapping ─────────────────────────────────────────────────────────────────────
 // Exact raw strings that map to a clean type regardless of source table. Order doesn't matter;
 // the Building / kind-dependent cases are handled in normalizeType() before this table.

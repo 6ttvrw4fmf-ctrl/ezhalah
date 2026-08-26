@@ -145,16 +145,53 @@ def _throttle() -> None:
         _last = time.monotonic()
 
 
+def _build_session() -> cc.Session:
+    s = cc.Session(impersonate="chrome124")
+    s.headers.update({
+        "Accept": "application/json",
+        "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
+        "Content-Type": "application/json",
+    })
+    return s
+
+
 def _session() -> cc.Session:
     s = getattr(_local, "s", None)
     if s is None:
-        s = cc.Session(impersonate="chrome124")
-        s.headers.update({
-            "Accept": "application/json",
-            "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
-            "Content-Type": "application/json",
-        })
+        s = _build_session()
         _local.s = s
+    return s
+
+
+def _rotate_session() -> cc.Session:
+    """Force a fresh TCP connection for this thread by discarding the cached session.
+
+    Mirrors `scrapers/common/http.py::_rotate_session` (2026-08-21 incident fix) and wasalt's
+    RotatingSession. The thread-local Session keeps an HTTP/2 connection alive across the ~25
+    sequential ads one worker handles; when the source starts throttling a burst, the symptom
+    lands on that established connection, so every retry issued over the SAME session fails
+    identically — which is why aqaratikom's 3 in-loop attempts never recovered a single ad
+    (senior run #60, 2026-08-25).
+
+    Drops the cached session and re-enters `_session()` rather than calling `_build_session()`
+    directly, so `_session` stays the ONE seam that decides what a connection is — a caller (or a
+    test) that substitutes it keeps control of the retry path too."""
+    _local.s = None
+    return _session()
+
+
+_ATTEMPTS = 3  # detail-fetch attempts before an ad is counted "missing"
+
+
+def _backoff(s: cc.Session, attempt: int) -> cc.Session:
+    """Wait before the next detail-fetch attempt, on a connection that has not already failed.
+
+    Returns the session the NEXT attempt should use. Guarded like `scrapers/common/http.py::get`:
+    the last attempt has no successor, so rotating there would only build a session nobody uses.
+    """
+    if attempt < _ATTEMPTS - 1:
+        s = _rotate_session()
+    time.sleep(1.2 * (attempt + 1))
     return s
 
 
@@ -265,27 +302,88 @@ def fetch_detail(ad_id: str) -> tuple[str, Optional[dict]]:
     """
     s = _session()
     url = f"{BASE}/ad/{ad_id}"
-    for attempt in range(3):
+    for attempt in range(_ATTEMPTS):
         _throttle()  # inside the loop: retries must respect the rate limit too, or a soft block
                      # turns into a retry storm against the source.
         try:
             r = s.get(url, timeout=30)
         except Exception:
-            time.sleep(1.2 * (attempt + 1)); continue
+            s = _backoff(s, attempt); continue
         if r.status_code == 404:
             return "gone", None  # terminal — the ad no longer exists; not a capture failure.
         if r.status_code != 200:
-            time.sleep(1.2 * (attempt + 1)); continue
+            s = _backoff(s, attempt); continue
         try:
             j = r.json()
         except Exception:
-            time.sleep(1.2 * (attempt + 1)); continue  # was: return None (no retry)
+            s = _backoff(s, attempt); continue  # was: return None (no retry)
         d = j.get("data") if isinstance(j, dict) else None
         if isinstance(d, dict):
             return "ok", d
-        time.sleep(1.2 * (attempt + 1))  # 200 with an unexpected shape — a block/interstitial
-                                         # signature, not proof the ad has no detail record.
+        s = _backoff(s, attempt)  # 200 with an unexpected shape — a block/interstitial
+                                  # signature, not proof the ad has no detail record.
     return "missing", None
+
+
+def second_chance_details(missed: list[dict]) -> list[tuple[dict, dict]]:
+    """Re-fetch, SERIALLY and after the burst, the ads whose detail call failed concurrently.
+
+    Senior run #60 (2026-08-25). The concurrent pass loses a stable TAIL of ads, not a random
+    sample: `detail_ok` sat at 113±1 for twelve consecutive days while the catalogue grew
+    138 → 152, so every ad added past ~113 was never captured at all. Probing all 152 ids from an
+    ordinary datacenter IP returned 152/152 HTTP 200 with a full record and ZERO 404s — the source
+    publishes every one of them. The probe also showed WHY: replaying the production request
+    pattern (6 workers, 0.3s global interval), per-request latency holds at ~1.06s through request
+    ~110 and then degrades ~4x (4.17s at #120, 4.72s at #140). The source throttles a burst; it
+    does not refuse the ad. The in-loop retries all fall inside that same throttled window — and,
+    before `_rotate_session`, on the same poisoned connection — so they could never recover it.
+
+    This is not a cosmetic loss. The detail call is the ONLY source of bathrooms, halls, street
+    width, façade, lift and kitchen — and of `subtype`, the rent period. Measured against the live
+    source on 2026-08-25: 18 listings whose published bathrooms were NULL here, 18 halls, 26 street
+    width, 16 lift, 16 kitchen, 18 driver room, and 9 Rent listings whose source says «سنوي» while
+    rent_period was NULL — a NULL period makes a rental unreachable under BOTH period chips.
+
+    Since 2026-08-09 `db._unknown_must_not_overwrite_known` correctly DROPS an unread field instead
+    of NULLing it, so a miss no longer destroys a stored value. That fixed the damage but not the
+    gap: it also means a field that was never captured is never repaired by a later run either.
+    Capturing it is now the only way the data ever arrives.
+
+    Serial, with a real gap, and one ad at a time is the POINT — this pass must not recreate the
+    burst that caused the loss. Volume is small by construction (it is the tail) and bounded by
+    AQARATIKOM_SECOND_CHANCE_MAX so a genuinely dead source cannot stretch the CI job budget.
+    Returns (ad, detail) only for ads that actually resolved; a still-failing ad is simply left
+    out and stays counted as missing, so the RC-B loss guard still measures real capture loss.
+    """
+    cap_n = int(os.environ.get("AQARATIKOM_SECOND_CHANCE_MAX", "80"))
+    gap = float(os.environ.get("AQARATIKOM_SECOND_CHANCE_GAP", "1.0"))
+    # The ad cap alone does NOT bound the time. A source that HANGS rather than refuses costs the
+    # full 30s socket timeout x3 attempts per ad, so 80 ads is ~2.2h — past the 90-minute CI job
+    # budget, and a killed run keeps its rows but skips prune/liveness (the exact shape the
+    # standing aqar_runtime_budget alert exists to warn about). Bound the wall clock too.
+    budget_s = float(os.environ.get("AQARATIKOM_SECOND_CHANCE_BUDGET_S", "600"))
+    deadline = time.monotonic() + budget_s
+    retry_ads = missed[:cap_n]
+    print(f"  second chance: re-fetching {len(retry_ads)} missed detail record(s) serially"
+          f"{f' (capped from {len(missed)})' if len(missed) > len(retry_ads) else ''}", flush=True)
+    out: list[tuple[dict, dict]] = []
+    attempted = 0
+    for ad in retry_ads:
+        if time.monotonic() >= deadline:
+            # NO SILENT CAPS: say exactly what was dropped, or a truncated pass reads as
+            # "we tried everything and the source is broken".
+            print(f"  ⚠ second chance: {budget_s:.0f}s budget spent after {attempted}/"
+                  f"{len(retry_ads)} ads — abandoning the rest. The {len(retry_ads) - attempted} "
+                  f"un-retried ad(s) stay counted as missing, so the loss guard still sees them.",
+                  flush=True)
+            break
+        attempted += 1
+        time.sleep(gap)
+        status, det = fetch_detail(ad.get("id"))
+        if status == "ok" and isinstance(det, dict):
+            out.append((ad, det))
+    print(f"  second chance: recovered {len(out)}/{attempted} attempted", flush=True)
+    return out
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -639,10 +737,14 @@ def main() -> int:
         detail_stats = {"ok": 0, "gone": 0, "missing": 0}
         detail_lock = threading.Lock()
 
+        missed: list[dict] = []  # ads whose detail fetch failed in the concurrent pass
+
         def work(ad: dict) -> tuple[Optional[dict], str, bool]:
             status, det = fetch_detail(ad.get("id"))
             with detail_lock:
                 detail_stats[status] += 1
+                if status == "missing":
+                    missed.append(ad)
             return map_listing(ad, det)
 
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
@@ -663,6 +765,52 @@ def main() -> int:
                     flush()
                     print(f"  …{seen} upserted", flush=True)
         flush()
+
+        # ── Second-chance detail pass (senior run #60, 2026-08-25) ───────────────────────────────
+        # The concurrent pass loses a stable TAIL of ads, not a random sample: `detail_ok` sat at
+        # 113±1 for twelve consecutive days while the catalogue grew 138 → 152, so every ad added
+        # past ~113 was never captured at all. Probing all 152 ids from an ordinary datacenter IP
+        # on 2026-08-25 returned 152/152 HTTP 200 with a full record and ZERO 404s — the source
+        # publishes every one of them. What the probe also showed is WHY: replaying the production
+        # request pattern (6 workers, 0.3s global interval), per-request latency holds at ~1.06s
+        # through request ~110 and then degrades ~4x (4.17s at #120, 4.72s at #140). The source
+        # throttles a burst; it does not refuse the ad. The in-loop retries all fall inside that
+        # same throttled window (and, before this change, on the same poisoned connection), so
+        # they could never recover it.
+        #
+        # This is not a cosmetic loss. The detail call is the ONLY source of bathrooms, halls,
+        # street width, façade, lift and kitchen — and of `subtype`, the rent period. Measured
+        # against the live source on 2026-08-25: 18 listings whose published bathrooms were NULL
+        # here, 18 halls, 26 street width, 16 lift, 16 kitchen, 18 driver room, and 9 Rent
+        # listings whose source says «سنوي» while rent_period was NULL — a NULL period makes a
+        # rental unreachable under BOTH period chips.
+        #
+        # Since 2026-08-09 `_unknown_must_not_overwrite_known` correctly DROPS an unread field
+        # instead of NULLing it, so a miss no longer destroys a stored value. That fixed the
+        # damage but not the gap: it also means a field that was never captured is never repaired
+        # by a later run either. Capturing it is now the only way the data ever arrives.
+        #
+        # So: retry the missed ads AFTER the burst, serially, with a real gap. Serial + a fresh
+        # connection per ad is the point — this pass must not recreate the burst that caused the
+        # loss. The volume is small by construction (it is the tail, ~39 ads) and bounded by
+        # AQARATIKOM_SECOND_CHANCE_MAX so a genuinely dead source can't stretch the job budget.
+        if missed and not args.limit:
+            for ad, det in second_chance_details(missed):
+                result = map_listing(ad, det)
+                if not result or not result[0]:
+                    continue
+                row, cat, sold = result
+                if args.type != "all" and cat != args.type:
+                    continue
+                (com_buf if cat == "commercial" else res_buf).append(row)
+                if sold:
+                    (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
+                detail_stats["missing"] -= 1
+                detail_stats["ok"] += 1
+                if len(res_buf) + len(com_buf) >= 40:
+                    flush()
+            flush()
+
         # Pin sold rows immediately after the upserts (which reset their missing_count to 0), so
         # the 05:20 auto-recover job can never flip them back to active. See _pin_sold_inactive.
         if sold_res:

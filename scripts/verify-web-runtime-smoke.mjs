@@ -121,12 +121,34 @@ const tap = async (txt) => {
   await page.mouse.click(box.x, box.y);
   await page.waitForTimeout(1200);
 };
+// For ASYNC-rendered suggestion rows only (run 32681927077: «حي النرجس» rendered after the fixed
+// 2200ms wait on a loaded runner and the strict tap threw). Polls for the row, then taps. Static
+// controls keep the strict tap — a missing static control is a real defect, not a render race.
+const tapWhenRendered = async (txt, timeoutMs = 8000) => {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    if (await page.evaluate(CLICK_LEAF, txt)) return tap(txt);
+    await page.waitForTimeout(300);
+  }
+  throw new Error(`control never rendered: ${txt}`);
+};
+// VERIFIED select (2026-08-24): type → tap the suggestion → CONFIRM the app registered it, retrying
+// the whole gesture when it did not. On a loaded CI runner the suggestion row can render after the
+// tap fires; the tap then hits nothing, the city stays unresolved, and «بحث» rightly refuses with
+// «الرجاء اختيار مدينة من القائمة» — which surfaced as journey [H] "count=null" three runs straight
+// while the app itself was fine (run 32679574637's page dump). `selected-city-visual` renders iff
+// `citySelected` (src/app/index.tsx), so it is the app's OWN confirmation, not a DOM guess.
 const pickCity = async (name) => {
-  await page.click('input >> nth=0');
-  await page.fill('input >> nth=0', '');
-  await page.type('input >> nth=0', name, { delay: 60 });
-  await page.waitForTimeout(2200);
-  await tap(name);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await page.click('input >> nth=0');
+    await page.fill('input >> nth=0', '');
+    await page.type('input >> nth=0', name, { delay: 60 });
+    await tapWhenRendered(name).catch(() => {}); // confirmation below decides; a miss just retries
+
+    const took = await page.waitForSelector('[data-testid="selected-city-visual"]', { timeout: 4000 }).catch(() => null);
+    if (took) return;
+  }
+  throw new Error(`pickCity(${name}): the app never confirmed the selection after 3 attempts`);
 };
 const body = () => page.innerText('body');
 // Poll instead of sleeping a fixed budget: this journey ends on a TYPEWRITER, whose duration varies
@@ -155,7 +177,12 @@ try {
   await page.waitForTimeout(5000);
   check('home renders', (await body()).includes('تصفية'));
 
+  // Buy+Rent combined multi-select (owner 2026-08-20): شراء/إيجار are now two independent toggles,
+  // mirroring سنوي/شهري exactly — a single tap on the OFF button ADDS it (→ both), it never swaps.
+  // Home starts on شراء (HOME_DEFAULT_QUERY), so reaching إيجار-ONLY needs the same two-tap sequence
+  // reaching a single period already requires: tap إيجار (→ both), tap شراء (turns Buy off → Rent-only).
   await tap('إيجار');
+  await tap('شراء');
   await tap('سنوي');
   await pickCity('الرياض');
   await tap('الشقق والسكن المشترك');
@@ -185,9 +212,33 @@ try {
 
   // Count real search traffic, not renders: the property-search RPC and the agent function.
   let searchCalls = 0;
+  // The last MAIN property-search RPC body seen. This is the Stop/resubmit oracle (2026-08-23, see
+  // the [E] comment below): identical QUERY, not identical live count.
+  //
+  // MAIN means the body carries p_per_platform — sent by exactly ONE call site in the app, the
+  // results fetch in src/data/remote.ts fetchListings (always present, always null). Without that
+  // gate the listener records ANY search-RPC body, and the district-marking count calls
+  // (fetchDistrictEligibleCounts: p_limit:1, per-district p_districts override, no p_per_platform)
+  // that fire around the results screen can land AFTER the main request and poison the capture:
+  // CI run 32730714706 (2026-08-24) recorded a p_limit:1 marking probe for حي العقيق — a district
+  // the user never picked, straight from the trending list — as the [E] baseline, failing all
+  // three E/F/H signature checks at once while the app behaved perfectly.
+  let lastSearchBody = null;
   const countSearch = (u) => /\/rest\/v1\/rpc\/(location_search_candidates_ar|search_listings)/.test(u)
     || /\/functions\/v1\/agent/.test(u);
-  page.on('request', (r) => { if (countSearch(r.url())) searchCalls++; });
+  const isSearchRpc = (u) => /\/rest\/v1\/rpc\/(location_search_candidates_ar|search_listings)/.test(u);
+  page.on('request', (r) => {
+    if (countSearch(r.url())) searchCalls++;
+    if (isSearchRpc(r.url()) && r.method() === 'POST'
+      && (r.postData() ?? '').includes('"p_per_platform"')) lastSearchBody = r.postData();
+  });
+  // Key-order-insensitive signature of a search request body, so an incidental serializer reorder
+  // can never masquerade as a query change. A body that does not parse is compared verbatim.
+  const reqSig = (body) => {
+    if (body == null) return null;
+    try { const o = JSON.parse(body); return JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]])); }
+    catch { return body; }
+  };
 
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(12000);
@@ -256,15 +307,51 @@ try {
     const m = [...(await body()).matchAll(/لقينا ([\d,٬،]+) إعلان/g)];
     return m.length ? parseInt(m[m.length - 1][1].replace(/[^\d]/g, ''), 10) : null;
   };
+  // Poll for the count directly instead of `waitForBody(RESULT_COUNT,...)` + an immediate
+  // `landedCount()` read. The result intro line types itself out character-by-character, so the
+  // loose RESULT_COUNT text ("لقينا") can be on screen for a beat before its own trailing number
+  // finishes typing — reading the strict count the instant the loose text appears is a race
+  // (CI's slower main-thread scheduling loses it far more often than a fast local run does, which is
+  // why this passed locally every time yet failed once in CI: bug-hunt 2026-08-21, [E] baseline
+  // count=null while every Stop-then-resubmit check — reading the SAME text later — got 320). Poll
+  // for the digit-bearing pattern itself so "landed" and "readable" are the same instant.
+  const waitForCount = async (timeoutMs) => {
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) {
+      const c = await landedCount();
+      if (c !== null) return c;
+      await page.waitForTimeout(500);
+    }
+    return null;
+  };
+  // Submit that CONFIRMS a search request left the app, re-tapping when one did not (2026-08-24).
+  // Four CI runs failed [H mobile] with a tap that fired nothing while the same build+script+backend
+  // passed locally end to end: after Stop's restore the form REHYDRATES citySelected in an effect
+  // (src/app/index.tsx ~426), and on a loaded runner a fast follow-up tap lands inside that gap —
+  // the app correctly refuses to search with an unresolved city, exactly once. A real user's second
+  // tap succeeds; so does this one. A genuinely wedged app fires nothing in 3 attempts and still
+  // fails — and every capture window starts null, so the sig oracle only ever sees THIS submit.
+  const submitSearch = async () => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      lastSearchBody = null;
+      await tap('بحث');
+      const until = Date.now() + 5000;
+      while (Date.now() < until) {
+        if (lastSearchBody != null) return;
+        await page.waitForTimeout(250);
+      }
+    }
+    // leave lastSearchBody null — the request-sig check fails and says exactly why
+  };
   const fillOwnerExample = async () => {
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(5000);
-    await tap('إيجار'); await tap('سنوي');
+    // Same two-tap deal sequence as journey A above (Buy+Rent combined multi-select, 2026-08-20).
+    await tap('إيجار'); await tap('شراء'); await tap('سنوي');
     await pickCity('الرياض');
     await page.click('input >> nth=1');
     await page.type('input >> nth=1', 'النرجس', { delay: 60 });
-    await page.waitForTimeout(2200);
-    await tap('حي النرجس');
+    await tapWhenRendered('حي النرجس');
     await tap('الشقق والسكن المشترك'); await tap('شقة');
     await tap('3');
     await page.fill('input >> nth=2', '80');
@@ -275,10 +362,11 @@ try {
   await page.setViewportSize({ width: 1440, height: 900 });
   await fillOwnerExample();
   const preStopInputs = await visibleInputs();
-  await tap('بحث');
-  const baselineOk = await waitForBody(RESULT_COUNT, 45000);
-  const baselineCount = await landedCount();
-  check('[E] baseline (uninterrupted) owner-example search lands with a real count', baselineOk && Number.isFinite(baselineCount), `count=${baselineCount}`);
+  await submitSearch(); // each capture window starts empty — a check must never read a leftover body
+  const baselineCount = await waitForCount(45000);
+  check('[E] baseline (uninterrupted) owner-example search lands with a real count', Number.isFinite(baselineCount), `count=${baselineCount}`);
+  const baselineReq = lastSearchBody;
+  check('[E] baseline search request was captured (the oracle below depends on it)', baselineReq != null);
 
   // ---- E: rapid Stop — pressed the instant the search starts. ----
   await fillOwnerExample();
@@ -291,11 +379,20 @@ try {
   const postRapidInputs = await visibleInputs();
   check('[E] rapid-Stop restores city/district/area EXACTLY', JSON.stringify(postRapidInputs) === JSON.stringify(preStopInputs),
     `pre=${JSON.stringify(preStopInputs)} post=${JSON.stringify(postRapidInputs)}`);
-  await tap('بحث');
-  const rapidResubmitOk = await waitForBody(RESULT_COUNT, 45000);
-  const rapidResubmitCount = await landedCount();
-  check('[E] resubmitting untouched after rapid-Stop returns the EXACT SAME count as the uninterrupted baseline',
-    rapidResubmitOk && rapidResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${rapidResubmitCount}`);
+  await submitSearch(); // the sig below must be THIS resubmit's request, never [E]-baseline leftovers
+  const rapidResubmitCount = await waitForCount(90000);
+  // ORACLE CHANGE (2026-08-23). This used to assert resubmitCount === baselineCount — but both are
+  // LIVE production reads taken minutes apart, and this suite runs against real prod on a schedule.
+  // Any run straddling a data-refresh tick (MV refresh at :00, sync_search_listings_ar at :14) sees
+  // the inventory legitimately move and fails with a huge honest delta (observed 2026-08-23:
+  // baseline=347 resubmit=1940 — on main itself, commit 6146bc0, alongside two innocent PR heads).
+  // What Stop must actually guarantee is that the QUERY survived intact — so the oracle is the
+  // serialized search request, compared key-order-insensitively. The count stays only as a
+  // liveness check: the resubmit must land real results, whatever today's inventory is.
+  check('[E] resubmitting untouched after rapid-Stop fires the EXACT SAME serialized search request as the uninterrupted baseline',
+    reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
+    `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  check('[E] the rapid-Stop resubmit still lands a real result count', Number.isFinite(rapidResubmitCount), `count=${rapidResubmitCount}`);
 
   // ---- F: Stop pressed mid-flight (network artificially slowed), and the late response — which
   // resolves AFTER the user is already back on Filter — must never repopulate results or write history.
@@ -322,11 +419,12 @@ try {
   check('[F] still on the Filter home after the late response lands (no surprise navigation into results)',
     page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
   await page.unroute('**/rest/v1/rpc/location_search_candidates_ar', delayRoute);
-  await tap('بحث');
-  const midResubmitOk = await waitForBody(RESULT_COUNT, 45000);
-  const midResubmitCount = await landedCount();
-  check('[F] resubmitting untouched after a mid-flight Stop still returns the EXACT SAME count',
-    midResubmitOk && midResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${midResubmitCount}`);
+  await submitSearch();
+  const midResubmitCount = await waitForCount(90000);
+  check('[F] resubmitting untouched after a mid-flight Stop still fires the EXACT SAME serialized search request',
+    reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
+    `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  check('[F] the mid-flight-Stop resubmit still lands a real result count', Number.isFinite(midResubmitCount), `count=${midResubmitCount}`);
 
   // ---- G: a CHAT-originated Stop must NOT navigate home — origin-tracking must not over-apply. ----
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -359,11 +457,234 @@ try {
   const postMobileInputs = await visibleInputs();
   check('[H mobile] rapid-Stop restores city/district/area EXACTLY',
     JSON.stringify(postMobileInputs) === JSON.stringify(preStopInputsMobile));
+  await submitSearch(); // never inherit [F]/[G] traffic — this window proves the MOBILE resubmit
+  const mobResubmitCount = await waitForCount(90000);
+  check('[H mobile] resubmitting untouched after rapid-Stop fires the EXACT SAME serialized search request as baseline',
+    reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
+    `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  // Failed twice in CI (2026-08-24) while the request fired+matched, [E] desktop landed, a direct
+  // prod repro rendered in 5s, and [I] read a fresh count seconds later — so on a null read, dump
+  // the page state: the next failure must explain itself instead of costing another guessing round.
+  check('[H mobile] the mobile resubmit still lands a real result count', Number.isFinite(mobResubmitCount),
+    `count=${mobResubmitCount} url=${page.url()} body=${(await body()).slice(0, 400).replace(/\n/g, ' | ')}`);
+
+  // ---- Journey I: Advanced Filter reentrancy — a rapid double-tap on «متابعة»/confirm must never
+  // downgrade or lose an already-recorded answer (bug-hunt 2026-08-23, fixed in commitGuidedStep's
+  // ageFlowCommittingRef guard). presentGuided's re-rank is a real network round trip before the next
+  // question replaces the current one on screen; a second tap landing in that gap used to be
+  // processed as a second answer to the SAME step, and a single-select re-click reads as "clear the
+  // selection" — silently downgrading a real answer to unanswered and re-showing the same question.
+  // This journey deliberately fires that double-tap on several questions and asserts none of it ever
+  // happened: no question is ever re-presented, the live count never goes back UP after an answer,
+  // and the interview lands on a genuinely narrowed set — never back at the unfiltered start count.
+  // Expo Router's Stack keeps a replaced screen's prior instance mounted-but-hidden rather than
+  // fully unmounting it (the SAME pre-existing behaviour `visibleInputs` above already works
+  // around) — a stale af-card can briefly linger alongside the fresh one. `document.querySelector`
+  // returns the FIRST match in document order, which is not guaranteed to be the visible one.
+  // Scope every AF read to `offsetParent !== null`, exactly like `visibleInputs`.
+  const afPresent = () => page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid="af-card"]')).some((e) => e.offsetParent !== null));
+  const afSnapshot = () => page.evaluate(() => {
+    const visible = (sel) => Array.from(document.querySelectorAll(sel)).find((e) => e.offsetParent !== null);
+    const title = visible('[data-testid="af-question-title"]')?.innerText?.trim() ?? null;
+    const options = Array.from(document.querySelectorAll('[data-testid^="af-option-"]')).filter((e) => e.offsetParent !== null).map((e) => e.getAttribute('data-testid'));
+    const countChip = visible('[data-testid="af-count-chip"]')?.innerText?.trim() ?? null;
+    return { title, options, count: countChip ? parseInt(countChip.replace(/[^\d]/g, ''), 10) : null };
+  });
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(4000);
+  await tap('إيجار'); await tap('شراء'); await tap('سنوي');
+  await pickCity('الرياض');
+  for (const name of ['النرجس', 'الملقا', 'الياسمين', 'الربيع', 'القيروان', 'العارض']) {
+    await page.click('input >> nth=1');
+    await page.type('input >> nth=1', name, { delay: 40 });
+    await page.waitForTimeout(1600);
+    await tap(`حي ${name}`);
+    await page.waitForTimeout(300);
+  }
+  await tap('الفلل والبيوت'); await tap('فيلا');
   await tap('بحث');
-  const mobResubmitOk = await waitForBody(RESULT_COUNT, 45000);
-  const mobResubmitCount = await landedCount();
-  check('[H mobile] resubmitting untouched after rapid-Stop returns the EXACT SAME count as baseline',
-    mobResubmitOk && mobResubmitCount === baselineCount, `baseline=${baselineCount} resubmit=${mobResubmitCount}`);
+  const reentrancyStart = await waitForCount(45000);
+  check('[I] reentrancy-journey scope lands with a real start count', Number.isFinite(reentrancyStart), `start=${reentrancyStart}`);
+
+  let afOpened = false;
+  for (let i = 0; i < 6 && !afOpened; i++) {
+    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+    await page.waitForTimeout(1200);
+    afOpened = await afPresent();
+  }
+  check('[I] Advanced Filter opens on this large multi-district scope', afOpened);
+
+  const seenTitles = [];
+  let doubleProcessed = 0, countIncreased = 0, prevCount = reentrancyStart;
+  let guard = 0;
+  while (afOpened && guard < 10) {
+    guard++;
+    let snap = await afSnapshot();
+    for (let r = 0; r < 10 && !snap.title; r++) { await page.waitForTimeout(800); snap = await afSnapshot(); }
+    if (!snap.title || !snap.options.length) break;
+    if (seenTitles.includes(snap.title)) doubleProcessed++;
+    seenTitles.push(snap.title);
+    if (snap.count !== null && snap.count > prevCount) countIncreased++;
+    await page.waitForTimeout(1200); // let the just-rendered row finish mounting before targeting it
+    // Pick the option covering the LARGEST slice (a real, meaningfully-narrowing answer).
+    const opt = snap.options[0];
+    const askedTitle = snap.title;
+    await page.locator(`[data-testid="${opt}"]:visible`).first().click({ timeout: 10000 });
+    await page.waitForTimeout(300);
+    // THE double-tap: fire the confirm click TWICE back-to-back, no wait in between — exactly the
+    // race window commitGuidedStep's reentrancy guard exists to close.
+    const confirmSel = page.locator('[data-testid="af-confirm"]:visible').first();
+    await Promise.allSettled([confirmSel.click({ timeout: 8000 }), confirmSel.click({ timeout: 8000 })]);
+    // af-card stays MOUNTED continuously between questions (only unmounts once the mining
+    // transition starts) — so "is af-card present" is a no-op wait condition mid-interview. Poll for
+    // the actual signal: either the QUESTION TITLE changing (the next card really replaced this one)
+    // or the card disappearing (interview finished) or the real results text landing. Racing this
+    // read against the still-in-flight rankQuestions() call is the same class of bug PR#842 fixed
+    // for Stop/resubmit reads — wait for the real signal, not a fixed delay.
+    let waited = 0;
+    // NOTE: RESULT_COUNT (`لقينا|ما لقينا`) is NOT a valid exit signal here — the results screen
+    // stays mounted (dimmed) BEHIND this overlay the whole time, so that text is on the page from
+    // the very first check regardless of whether the interview has actually advanced or finished.
+    while (waited < 45000) {
+      await page.waitForTimeout(500); waited += 500;
+      const stillThere = await afPresent();
+      if (!stillThere) break; // interview genuinely finished (mining phase unmounts af-card)
+      const nowTitle = (await afSnapshot()).title;
+      if (nowTitle && nowTitle !== askedTitle) break; // the next question really replaced this one
+    }
+    afOpened = await afPresent();
+    if (afOpened) {
+      const s2 = await afSnapshot();
+      if (s2.count !== null) { if (s2.count > prevCount) countIncreased++; prevCount = s2.count; }
+    }
+  }
+  const reentrancyFinalOpen = await afPresent();
+  // af-card disappearing does NOT mean the new search has landed — finishGuided's mining transition
+  // has its own guaranteed minimum beat (>=1.4s hold + 1.1s fade, src/app/agent.tsx finishGuided)
+  // during which the OLD (pre-AF) results are still what's on screen underneath. Reading the count
+  // the instant af-card vanishes catches that stale text — the same class of race PR#842 fixed for
+  // Stop/resubmit. Give the mining beat's own floor time to elapse, then require the count to be
+  // STABLE across two reads a second apart before trusting it.
+  let reentrancyFinal = null;
+  if (!reentrancyFinalOpen) {
+    await page.waitForTimeout(3000);
+    let stableSince = null;
+    const until = Date.now() + 45000;
+    while (Date.now() < until) {
+      const c = await landedCount();
+      if (c !== null) {
+        if (stableSince !== null && stableSince.value === c && Date.now() - stableSince.at >= 1000) { reentrancyFinal = c; break; }
+        if (stableSince === null || stableSince.value !== c) stableSince = { value: c, at: Date.now() };
+      }
+      await page.waitForTimeout(500);
+    }
+  }
+  check('[I] double-tap NEVER re-presents an already-answered question', doubleProcessed === 0, `repeats=${doubleProcessed} sequence=${JSON.stringify(seenTitles)}`);
+  check('[I] the live count NEVER goes back up after an answer (no silent downgrade-to-unanswered)', countIncreased === 0, `count-increases=${countIncreased}`);
+  check('[I] the interview lands on a genuinely narrowed set, never back at the unfiltered start',
+    !reentrancyFinalOpen && Number.isFinite(reentrancyFinal) && reentrancyFinal < reentrancyStart && reentrancyFinal !== reentrancyStart,
+    `start=${reentrancyStart} final=${reentrancyFinal}`);
+
+  // ---- Journey J: MIN_USEFUL_QUESTIONS_TO_SHOW's 1-question case (owner 2026-08-24 — supersedes
+  // the original ">=2" brief: 0 useful questions closes cleanly, 1+ opens and asks every one of them,
+  // down to the last — a lone genuinely useful question is still a real, honest narrowing step, not a
+  // "tax on attention" to withhold). src/data/advancedFilters.ts pins the threshold value and
+  // scripts/verify-af-min-useful-questions-gate.ts pins the source shape, but neither ever drives the
+  // real interview against real data — this does. Factory + Annual Rent + الرياض is a REAL, currently
+  // live cohort with EXACTLY one certified question (src/lib/afCohorts.ts: `Factory: { RentAnnual:
+  // ['street_width'] }`, evidence n=72 nationwide, 10/10 exact against aqar's own structured field) —
+  // chosen because a same-type, same-city scope with Buy ADDED (dealCombined) has ZERO certified
+  // questions (street_width is Buy+RentAnnual certified but not RentMonthly, so the 3-way combined
+  // intersection is empty), giving both boundary cases (0 and 1) real, live coverage in one journey
+  // without inventing synthetic data.
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(4000);
+  await tap('تجاري');
+  await tap('الصناعة واللوجستيات'); await page.waitForTimeout(300);
+  await tap('مصنع'); await page.waitForTimeout(300);
+  await tap('إيجار'); await page.waitForTimeout(300); // add Rent (Buy is on by default)
+  await tap('شراء'); await page.waitForTimeout(300);  // then drop Buy — Rent-only, never combined
+  await pickCity('الرياض');
+  await tap('بحث');
+  const jStart = await waitForCount(45000);
+  check('[J] 1-question scope (Factory/RentAnnual/الرياض) lands with a real start count', Number.isFinite(jStart), `start=${jStart}`);
+
+  let jOpened = false;
+  for (let i = 0; i < 6 && !jOpened; i++) {
+    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+    await page.waitForTimeout(1200);
+    jOpened = await afPresent();
+  }
+  check('[J] Advanced Filter OPENS for a cohort with exactly ONE useful question (the 1-question fix)', jOpened);
+
+  let jTitles = [];
+  if (jOpened) {
+    // Same render race Journey I already guards against: af-card can mount a beat before its
+    // question TITLE/options actually paint (real network round trip via rankQuestions), and CI's
+    // slower main thread loses this far more often than a fast local run does — poll instead of a
+    // single immediate read.
+    let snap = await afSnapshot();
+    for (let r = 0; r < 10 && !snap.title; r++) { await page.waitForTimeout(800); snap = await afSnapshot(); }
+    if (snap.title) jTitles.push(snap.title);
+    check('[J] exactly one question is shown (street_width)', jTitles.length === 1, JSON.stringify(jTitles));
+    if (snap.options.length) {
+      await page.locator(`[data-testid="${snap.options[0]}"]:visible`).first().click({ timeout: 8000 });
+      await page.waitForTimeout(300);
+      await page.locator('[data-testid="af-confirm"]:visible').first().click({ timeout: 8000 });
+    }
+    let waited = 0;
+    while (waited < 45000) {
+      await page.waitForTimeout(500); waited += 500;
+      if (!(await afPresent())) break;
+    }
+  }
+  const jFinalOpen = await afPresent();
+  check('[J] after answering the single question, the interview closes CLEANLY (no second question)', !jFinalOpen);
+  // Same staleness trap Journey I already documents: af-card unmounting is NOT "the new count
+  // landed" — finishGuided's mining transition holds the OLD pre-AF results on screen underneath for
+  // a guaranteed minimum beat first. Give that floor time, then require two reads a second apart to
+  // agree before trusting the number (else this reads back the stale pre-answer count, e.g. 43 when
+  // the true narrowed count is 39 — a HARNESS race, not a product defect).
+  let jFinal = null;
+  if (!jFinalOpen) {
+    await page.waitForTimeout(3000);
+    let stableSince = null;
+    const until = Date.now() + 45000;
+    while (Date.now() < until) {
+      const c = await landedCount();
+      if (c !== null) {
+        if (stableSince !== null && stableSince.value === c && Date.now() - stableSince.at >= 1000) { jFinal = c; break; }
+        if (stableSince === null || stableSince.value !== c) stableSince = { value: c, at: Date.now() };
+      }
+      await page.waitForTimeout(500);
+    }
+  }
+  check('[J] the closed interview lands on a genuinely narrowed, non-null result',
+    !jFinalOpen && Number.isFinite(jFinal) && jFinal < jStart, `start=${jStart} final=${jFinal}`);
+
+  // Boundary case: the SAME type+city with Buy ALSO selected (dealCombined) has ZERO certified
+  // questions (street_width is Buy+RentAnnual certified but not RentMonthly, so the 3-way
+  // Buy∩RentAnnual∩RentMonthly intersection cohortAllowsCombined requires is empty) — the interview
+  // must never open at all; the button falls through to plain refine chips. Fresh page load rather
+  // than mutating the just-finished journey's state — a clean, independently reproducible scope.
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(4000);
+  await tap('تجاري');
+  await tap('الصناعة واللوجستيات'); await page.waitForTimeout(300);
+  await tap('مصنع'); await page.waitForTimeout(300);
+  await tap('إيجار'); await page.waitForTimeout(300); // Buy is on by default; add Rent → combined
+  await pickCity('الرياض');
+  await tap('بحث');
+  const jZeroStart = await waitForCount(45000);
+  check('[J0] 0-question scope (Factory/Buy+Rent-combined/الرياض) lands with a real start count', Number.isFinite(jZeroStart), `start=${jZeroStart}`);
+  let jZeroOpened = false;
+  for (let i = 0; i < 4 && !jZeroOpened; i++) {
+    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+    await page.waitForTimeout(1200);
+    jZeroOpened = await afPresent();
+  }
+  check('[J0] 0-question cohort (same type+city, Buy+Rent combined) never opens Advanced Filter', !jZeroOpened);
 
   check('no uncaught runtime error across the whole run', crashes.length === 0, crashes.join(' | '));
 } catch (e) {

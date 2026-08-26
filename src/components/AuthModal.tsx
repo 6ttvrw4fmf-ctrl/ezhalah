@@ -528,7 +528,13 @@ const s = StyleSheet.create({
   cc: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 52, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1, borderColor: '#d9e0da', backgroundColor: '#fff' },
   ccFlag: { fontSize: 18 },
   ccText: { fontSize: 14.5, fontWeight: '600', color: colors.ink },
-  phoneInput: { flex: 1, height: 52, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, borderColor: '#dfe3e0', fontSize: 15, color: colors.ink, backgroundColor: '#fff', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  // fontSize >= 16 on web: under 16px mobile Safari zooms on focus and never zooms back (barrier:
+  // scripts/verify-input-font-no-ios-zoom.ts). Height is fixed at 52 so the box does not reflow.
+  // minWidth: 0 travels WITH the 16px bump: WebKit gives an <input> `min-width: auto` (its
+  // intrinsic min-content width), so a larger font in a flex row overflows the row instead of
+  // shrinking — measured 7.8px past the sheet before this was added. Same pairing as index.tsx's
+  // sizeInput/rangeInput, which already carry the note.
+  phoneInput: { flex: 1, minWidth: 0, height: 52, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, borderColor: '#dfe3e0', fontSize: Platform.OS === 'web' ? 16 : 15, color: colors.ink, backgroundColor: '#fff', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
 
   scrim: { position: 'absolute', top: -1000, left: -1000, right: -1000, bottom: -1000 },
   ccList: { marginTop: 6, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.line, borderRadius: 13, padding: 6, ...cardShadow },
@@ -597,7 +603,9 @@ const s = StyleSheet.create({
   otpBox: { width: 44, height: 54, borderRadius: 12, borderWidth: 1.5, borderColor: '#dfe3e0', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
   otpBoxActive: { borderColor: colors.primary },
   otpDigit: { fontSize: 22, fontWeight: '700', color: colors.ink },
-  otpHidden: { position: 'absolute', opacity: 0, width: 1, height: 1 },
+  // Invisible, but iOS still zooms to the FOCUSED element's font-size — and this one autoFocuses, so
+  // without an explicit 16 it inherits react-native-web's 14px default and zooms the OTP screen.
+  otpHidden: { position: 'absolute', opacity: 0, width: 1, height: 1, fontSize: 16 },
   verify: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 18 },
   verifyText: { fontSize: 13, color: '#5d6f64' },
   resend: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 22 },

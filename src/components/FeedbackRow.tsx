@@ -35,6 +35,11 @@ export default function FeedbackRow({
   // row back to idle automatically (single-speaker, no local queue to get out of sync).
   const [speaking, setSpeaking] = useState(false);
   const speakingRef = useRef(false); // mirrors `speaking` for the unmount-only cleanup below
+  // Shown briefly when speakReadAloud() refuses to speak — genuinely no Arabic voice on this
+  // device/browser (root-cause fix, 2026-08-22: never hand Arabic text to a non-Arabic voice; this
+  // is the graceful Arabic message the owner asked for instead). Auto-hides, same pattern as `copied`
+  // below.
+  const [unavailable, setUnavailable] = useState(false);
   useEffect(() => subscribeReadAloud((id) => {
     const mine = id === feedbackKey;
     speakingRef.current = mine;
@@ -47,7 +52,12 @@ export default function FeedbackRow({
   useEffect(() => () => { if (speakingRef.current) stopReadAloud(); }, []);
   const onReadAloud = () => {
     if (speaking) { stopReadAloud(); return; }
-    if (readAloudSegments?.length) speakReadAloud(feedbackKey, readAloudSegments);
+    if (!readAloudSegments?.length) return;
+    const started = speakReadAloud(feedbackKey, readAloudSegments);
+    if (!started) {
+      setUnavailable(true);
+      setTimeout(() => setUnavailable(false), 3200);
+    }
   };
 
   // Only one of up/down active; clicking the active one clears it (ChatGPT feel). The thanks toast
@@ -92,6 +102,7 @@ export default function FeedbackRow({
           />
         ) : null}
       </View>
+      {unavailable ? <Text style={fb.unavailable}>{t('Listening isn\'t available on this device')}</Text> : null}
     </View>
   );
 }
@@ -118,4 +129,7 @@ const fb = StyleSheet.create({
   btn: { padding: 7, borderRadius: 9, ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
   btnHover: { backgroundColor: '#f1f4f1' },
   btnActive: { backgroundColor: colors.tint },
+  // Graceful "no Arabic voice on this device" note (root-cause fix, 2026-08-22) — never a wrong-
+  // language voice instead, per owner requirement.
+  unavailable: { fontSize: 12, color: colors.muted, marginTop: 2 },
 });

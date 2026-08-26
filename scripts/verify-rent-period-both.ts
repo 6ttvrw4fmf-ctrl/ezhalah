@@ -119,13 +119,18 @@ check("the old boolean-scoped 'both → null' Trending gap is gone",
   'this shape sent a broader, wrong-scope pool to Trending for a combined search — the exact gap this fix closes');
 
 // The owner's copy rule: state the price BASIS, never assert a lease length no source publishes.
+// 'both' wording trimmed 2026-08-22 (owner feedback): dropped the "this means you want both, so
+// you get both" framing — selecting both buttons is already self-explanatory. Kept only the one
+// genuinely non-obvious fact: mixed results carry mixed price units.
 for (const [label, key] of [
   ['monthly', 'Monthly: the displayed price is the monthly price.'],
   ['yearly', 'Yearly: the displayed price is the yearly price.'],
-  ['both', 'Both: monthly and yearly listings together — each card shows its own price basis.'],
+  ['both', 'Each listing shows its own price basis (monthly or yearly).'],
 ] as const) {
   check(`${label} period hint has an Arabic translation (no English key leak)`, i18n.includes(`'${key}'`));
 }
+check("the 'both' hint no longer re-explains what selecting both buttons already means (owner feedback 2026-08-22)",
+  !index.includes('Both: monthly and yearly listings together'));
 // Comment-stripped: a NEGATIVE check must not be tripped by prose that merely QUOTES the banned copy
 // (the comment above these keys explains what was removed and why — that is documentation, not a claim).
 check("period hints never assert a contract/lease length (owner 2026-08-14)",

@@ -1,9 +1,29 @@
 import type { SearchQuery } from './search';
 import { effectiveTypes, hasClientOnlyNarrowing } from './search';
-import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, type AgeOptionCounts, type GuidedCounts } from './remote';
+import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, fetchScopeOptionCounts, type AgeOptionCounts, type GuidedCounts } from './remote';
+import {
+  SCOPE_GROUP_ID, SCOPE_TYPE_ID, scopeCandidates, applyScopeAnswer, unresolvedScopeTiers, type ScopeTier,
+} from '@/lib/afPlan';
 import { isAgeFilterScope as isAgeFilterScopeFor } from '@/lib/ageFilterTypes';
 import { CLEAN_MACRO } from './propertyTypes';
 import { t } from '@/i18n';
+// Pure ranking/gating engine (2026-08-22 extraction — see src/lib/afRanking.ts header): re-exported
+// verbatim so every existing importer of this file is unaffected; scoreQuestion's OWN mutation-proof
+// barrier (scripts/verify-af-narrowing-gate.ts) imports afRanking.ts directly instead of this file,
+// the same way scripts/verify-mixed-period-af-gating.ts imports afCohorts.ts directly.
+import {
+  type AdvancedOption, type AdvancedQuestionResult,
+  MIN_OPTIONS_SINGLE, MIN_OPTIONS_MULTI, minOptionsFor,
+  INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW, MIN_REAL_OPTION_COUNT, meaningful,
+  SALIENCE, ASK_FIRST_TIER, askTier, scoreQuestion as scoreQuestionPure,
+  AF_ROUND_MAX_QUESTIONS, MEANINGFUL_NARROWING_FRACTION, optionNarrowsMeaningfully, offersMeaningfulNarrowing,
+} from '@/lib/afRanking';
+export {
+  type AdvancedOption, type AdvancedQuestionResult,
+  MIN_OPTIONS_SINGLE, MIN_OPTIONS_MULTI, minOptionsFor,
+  INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW, MIN_REAL_OPTION_COUNT,
+  AF_ROUND_MAX_QUESTIONS, MEANINGFUL_NARROWING_FRACTION, optionNarrowsMeaningfully, offersMeaningfulNarrowing,
+};
 
 // ── Advanced Filter engine — governed by docs/ADVANCED_FILTER_DESIGN_CONTRACT.md ─────────────────
 // A question is PURE DATA + RULES. It supplies ONLY the seven fields of AdvancedQuestion below; it
@@ -13,19 +33,8 @@ import { t } from '@/i18n';
 // (Floor Number, Street Width, …) = adding ONE AdvancedQuestion object here. If a change needs the
 // card, it changes the contract for ALL questions, on purpose.
 
-// One selectable option in a question, with its LIVE count for the user's full current scope
-// (deal/category/type/region/city/district/price/area/bedrooms + any earlier-answered question).
-export type AdvancedOption = {
-  key: string;
-  label: string;   // already i18n-resolved
-  count: number;   // combined cross-platform total — exactly what Search returns if picked
-};
-
-export type AdvancedQuestionResult = {
-  options: AdvancedOption[]; // pre-filtered to the meaningful-option floor; callers render exactly this
-  unknownCount: number;      // disclosed as a caption when > 0; never a selectable option
-  total: number;             // the scope total these options were computed over (0 when below floor)
-};
+// AdvancedOption/AdvancedQuestionResult (one selectable option + a resolved question's live options,
+// pre-filtered to the meaningful-option floor) now live in @/lib/afRanking — imported/re-exported above.
 
 // THE CONTRACT BOUNDARY — a question supplies exactly these eight fields, nothing else.
 export type AdvancedQuestion = {
@@ -40,30 +49,21 @@ export type AdvancedQuestion = {
   apply: (q: SearchQuery, keys: string[]) => SearchQuery;              // merge the answer into the query
 };
 
-// A question shows only when it clears the scope-size floor AND has at least this many options for its
-// arity (single needs a real choice of ≥2; a single meaningful multi chip is a valid yes/no). This is
-// the ONLY single-vs-multi threshold difference; the per-OPTION floor below is shared by both.
-export const MIN_OPTIONS_SINGLE = 2;
-export const MIN_OPTIONS_MULTI = 1;
-export function minOptionsFor(selection: 'single' | 'multi'): number {
-  return selection === 'multi' ? MIN_OPTIONS_MULTI : MIN_OPTIONS_SINGLE;
-}
+// minOptionsFor / INTERVIEW_STOP_AT / MIN_TOTAL_TO_SHOW / MIN_REAL_OPTION_COUNT / meaningful() now
+// live in @/lib/afRanking (imported/re-exported above) — unchanged in value or behavior, just pure.
 
-// Scope-size floor: don't ask a question unless the current scope has MORE results than the
-// interview's stop line. Owner 2026-08-11 (contextual-interview rework): the Advanced interview is
-// available when the user's own search has > 25 results and stops asking the moment ≤ 25 remain —
-// so 26 is the floor, and the ≤25 auto-stop falls out of the same constant everywhere.
-export const INTERVIEW_STOP_AT = 25;
-export const MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT + 1;
-
-// Per-OPTION floor — one value for EVERY question (contract §9; the old >0-chips vs >=5-buckets split
-// is banned). An option backed by fewer than this many listings is not a meaningful choice and is hidden.
-export const MIN_REAL_OPTION_COUNT = 5;
-
-// Filter a resolved option list to the shared per-option floor.
-function meaningful(options: AdvancedOption[]): AdvancedOption[] {
-  return options.filter((o) => o.count >= MIN_REAL_OPTION_COUNT);
-}
+// Minimum USEFUL questions to open the interview at all (owner 2026-08-22; REVISED owner 2026-08-24
+// — supersedes the original ">=2" brief). "Useful" = passes scoreQuestion() above — real narrowing
+// power over the CURRENT eligible set, not merely structurally eligible (cohortAllows/
+// isAgeFilterScope). The rule is now: 0 useful questions closes cleanly (nothing worth asking); 1
+// or more useful questions opens and asks every one of them, down to the last. A single genuinely
+// useful question is still a real, honest narrowing step for the user — it is not "a tax on their
+// attention" to ask the one question that actually moves their result set; withholding it was the
+// defect. This SECOND, independent condition composes with INTERVIEW_STOP_AT/MIN_TOTAL_TO_SHOW (the
+// result-count gate) — both must hold before Advanced Filter may open; this constant governs the
+// OPENING decision only, never the continuation loop (rankQuestions/presentGuided keep asking down
+// to the last useful question, however many remain — unchanged by this revision).
+export const MIN_USEFUL_QUESTIONS_TO_SHOW = 1;
 
 // Engine-level LIVE result count for a query — the footer «Show {N}» on every card. Generic: the count
 // RPC applies whatever the query carries (types/scope/amenities/bath/age), so this works for every
@@ -110,7 +110,9 @@ const AGE_QUESTION: AdvancedQuestion = {
 
 // Cohort gating lives in @/lib/afCohorts (moved 2026-08-20): that module is PURE, so barriers can
 // EXECUTE cohortAllows() against real queries instead of regexing this file, which is what makes the
-// multi-type intersection mutation-provable. The cohort DATA moved with it, unchanged.
+// multi-type intersection mutation-provable. The cohort DATA moved with it, unchanged. Buy+Rent
+// combined gating (q.dealCombined — owner feature 2026-08-20) lives there too, intersecting with
+// the multi-type/multi-period dimensions rather than being bolted on separately — see afCohorts.ts.
 import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips } from '@/lib/afCohorts';
 // Merge picked strict amenity tokens (kitchen/parking/elevator/furnished/rnpl) into q.amenities.
 function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
@@ -366,46 +368,80 @@ export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
   STREET_WIDTH_QUESTION, DIRECTION_QUESTION, RATING_QUESTION, UNIT_SUBTYPE_QUESTION,
 ];
 
-// ── Contextual ranking (owner 2026-08-11) ────────────────────────────────────────────────────────
-// score = split × salience, computed from the CURRENT candidate set's counts. `split` peaks when an
-// option covers half the set (1 − |2k/N − 1|); an option that matches nearly everyone (> 90% of N)
-// or too few (< max(15, 8% of N)) is not worth asking about and is dropped for ranking purposes —
-// the same "don't ask a question that barely changes the result set" rule the owner set, applied
-// with numbers. Unknown ≠ no throughout: options only ever count KNOWN matches.
-const SALIENCE: Record<string, number> = {
-  property_age: 1.0, furnished: 1.0, rating: 1.0, unit_subtype: 0.95, bathrooms: 0.9, street_width: 0.9,
-  amenities: 0.8, direction: 0.7, rnpl: 0.6,
+// ── THE SCOPE PREFIX: CATEGORY → GROUP → TYPE → the pool above (owner 2026-08-23) ────────────────
+// These satisfy the same AdvancedQuestion contract (so the card, the step record, Back, skip, the
+// facets and the summary all work unchanged) but are deliberately NOT members of ADVANCED_QUESTIONS
+// and never pass through rankQuestions/scoreQuestion. A scope step is a PREREQUISITE of the pool,
+// not a ranked peer of it — and scoreQuestion's usefulness gates would delete real taxonomy
+// branches (MIN_REAL_OPTION_COUNT hides a group with 4 listings; the narrowing gate
+// `optionNarrowsMeaningfully()` retires a group with one populated type). The tier logic itself is pure and lives in
+// @/lib/afPlan so a barrier can execute it; only the live counts need this module's remote import.
+//
+// Options are ordered by the canonical HIERARCHY, never by count — the taxonomy is the taxonomy.
+// A zero-count option is dropped: it is a dead end that would promise results it cannot deliver.
+// NO other usefulness floor is applied, so a genuinely small branch (4 listings) is still offered —
+// hiding it would be the silent amputation of a real part of the tree.
+const SCOPE_TOTAL_KEY = '__scope_total__';
+
+async function scopeQuestionOptions(tier: ScopeTier, q: SearchQuery): Promise<AdvancedQuestionResult> {
+  const keys = scopeCandidates(tier, q);
+  // The UNCHANGED query rides along as an extra candidate so `total` is the REAL scope the user is
+  // answering from, measured the same way as every option, rather than the sum of the options.
+  const counts = await fetchScopeOptionCounts([
+    { key: SCOPE_TOTAL_KEY, query: q },
+    ...keys.map((key) => ({ key, query: applyScopeAnswer(tier, q, [key]) })),
+  ]);
+  const options = keys
+    .filter((key) => (counts?.[key] ?? 0) > 0)
+    .map((key) => ({ key, label: t(key), count: counts![key] }));
+  const offered = options.reduce((n, o) => n + o.count, 0);
+  const total = counts?.[SCOPE_TOTAL_KEY] ?? offered;
+  // THE OPTIONS DO NOT ALWAYS SUM TO THE SCOPE, and that gap is honest rather than a rounding error:
+  // a listing whose source type is «غير معروف» is real, searchable, and counted in the scope, but it
+  // belongs to no taxonomy group — filing it under one would be inventing a type it does not have
+  // (SOURCE IS TRUTH). Measured live 2026-08-23: Riyadh / Rent / annual / سكني = 21,681 with 21,679
+  // across the four groups; the 2 are literally typed «غير معروف». Skipping the step keeps every one
+  // of them, which is precisely what "I'm open" has to mean.
+  //
+  // The remainder is reported as `unknownCount` because that is what the field MEANS. Note the shared
+  // card currently ignores it (`unknownCount: _unknownCount` — the per-question caption was replaced
+  // by one generic line), so this renders nothing today; it is carried as correct data, not as a
+  // promise of UI. Re-introducing a caption would change the card for EVERY question and is a
+  // design-contract §1 decision, not a change to make from inside one question.
+  return { options, unknownCount: Math.max(0, total - offered), total };
+}
+
+const GROUP_QUESTION: AdvancedQuestion = {
+  id: SCOPE_GROUP_ID,
+  titleKey: 'Which kind of property are you looking for?',
+  selection: 'multi',                              // several groups OR together
+  eligibility: (q) => unresolvedScopeTiers(q).includes(SCOPE_GROUP_ID),
+  resolveOptions: (q) => scopeQuestionOptions(SCOPE_GROUP_ID, q),
+  apply: (q, keys) => applyScopeAnswer(SCOPE_GROUP_ID, q, keys),
 };
 
-// ASK-FIRST TIER (owner 2026-08-15). Installments (رايز/إيجاري) is the PREFERRED opening question
-// for Annual Rent → Apartment: paying the year in instalments instead of one upfront sum is the
-// single most consequential thing about a rental, so when it is a genuinely useful question it
-// should be asked first.
-//
-// "Preferred" — NOT mandatory. A tier only reorders questions that ALREADY PASSED scoreQuestion()'s
-// usefulness gates (scope > 25, option within [max(15, 8%N), 90%N], at least one answer cutting to
-// ≤ 75%N). A scope with too little confirmed installment coverage fails those gates, scoreQuestion
-// returns null, the question never enters the ranking at all, and the contextual engine picks the
-// next genuinely useful question. That is the owner's rule exactly: first when it earns it, skipped
-// when it does not — never a question that wastes the user's time.
-//
-// Implemented as an explicit tier rather than an inflated salience so the intent is legible and the
-// SALIENCE numbers keep meaning "how much does this attribute matter", uncorrupted by ask-order.
-const ASK_FIRST_TIER: Record<string, number> = { rnpl: 1 };
-function askTier(id: string): number { return ASK_FIRST_TIER[id] ?? 0; }
+const TYPE_QUESTION: AdvancedQuestion = {
+  id: SCOPE_TYPE_ID,
+  titleKey: 'Which property type?',
+  selection: 'multi',                              // several types OR together
+  eligibility: (q) => unresolvedScopeTiers(q).includes(SCOPE_TYPE_ID),
+  resolveOptions: (q) => scopeQuestionOptions(SCOPE_TYPE_ID, q),
+  apply: (q, keys) => applyScopeAnswer(SCOPE_TYPE_ID, q, keys),
+};
 
+export const SCOPE_QUESTIONS: AdvancedQuestion[] = [GROUP_QUESTION, TYPE_QUESTION];
+export const scopeQuestionFor = (tier: ScopeTier): AdvancedQuestion =>
+  tier === SCOPE_GROUP_ID ? GROUP_QUESTION : TYPE_QUESTION;
+
+// Contextual ranking + the narrowing gate (owner 2026-08-11; reworked 2026-08-22 and 2026-08-25) now
+// live in @/lib/afRanking (SALIENCE, ASK_FIRST_TIER, askTier, scoreQuestion — imported above as
+// scoreQuestionPure). This thin wrapper is the only thing that still needs the full AdvancedQuestion
+// object (for its id/selection) so rankQuestions() below is unchanged; the pure gate itself takes
+// just the id/selection/result, which is what makes it directly testable.
 export function scoreQuestion(
   question: AdvancedQuestion, result: AdvancedQuestionResult,
 ): { score: number; options: AdvancedOption[] } | null {
-  const N = result.total;
-  if (N < MIN_TOTAL_TO_SHOW) return null;
-  const floor = Math.max(15, Math.ceil(0.08 * N));
-  const useful = result.options.filter((o) => o.count >= floor && o.count <= 0.9 * N);
-  if (useful.length < minOptionsFor(question.selection)) return null;
-  // at least one answer must genuinely narrow (≤ 75% of the current set)
-  if (!useful.some((o) => o.count <= 0.75 * N)) return null;
-  const bestSplit = Math.max(...useful.map((o) => 1 - Math.abs((2 * o.count) / N - 1)));
-  return { score: bestSplit * (SALIENCE[question.id] ?? 0.5), options: useful };
+  return scoreQuestionPure(question.id, question.selection, result);
 }
 
 export type RankedQuestion = {
