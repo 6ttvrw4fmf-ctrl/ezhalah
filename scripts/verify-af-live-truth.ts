@@ -284,10 +284,21 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
 
     if (backAndChange) {
       await page.click('[data-testid="af-back"]');
-      const restored = await readCardUntil((s) => s.hasCard && s.q === st.q && s.chip != null);
+      // 25s for the same reason Skip needs it: Back re-shows an EARLIER question, so its chip has to
+      // be refilled with that step's number rather than arriving with a fresh narrowing, and on a
+      // 10,957-row base scope that outran the 9s default — which then returned a no-card sample
+      // (q=null), and the empty option list below turned into a click on [data-testid="undefined"].
+      const restored = await readCardUntil((s) => s.hasCard && s.q === st.q && s.chip != null, 25_000);
       check(`${name}: Back restores the previous question`, restored.q === st.q, `expected=${st.q} got=${restored.q}`);
       check(`${name}: Back restores the previous count`, restored.chip != null && restored.chip === afterSelect.chip, `expected=${afterSelect.chip} got=${restored.chip}`);
       const opts2 = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')));
+      // NEVER build a locator out of an undefined id. When the restore above times out, this list is
+      // empty and `opts2[otherIdx]` is undefined — which used to click `[data-testid="undefined"]`
+      // and spend 30s timing out on a selector that cannot exist, burying the real failure (the card
+      // never came back) under a harness stack trace. Fail here, naming the actual cause.
+      check(`${name}: Back re-offers the earlier question's options`, opts2.length > 0,
+        `no af-option-* found after Back — the restored card never rendered (restored.q=${restored.q})`);
+      if (!opts2.length) { await ctx.close(); return; }
       const otherIdx = opts2.length > 1 ? 1 : 0;
       await page.click(`[data-testid="${opts2[otherIdx]}"]`);
       const changed = await readCardUntil((s) => s.chip != null && s.chip !== afterSelect.chip);
