@@ -16,8 +16,15 @@
 
 import { chromium } from 'playwright';
 import { judgeAfCta, type AfCtaObservation } from './lib/afOfferAgreement.ts';
+import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
+// Self-sufficient endpoint (verify-live-checks-self-sufficient.ts §4b): the committed public
+// constants are the fallback, so this check runs on a schedule whether or not a repo secret is set.
+// Both of this workflow's runs on 2026-08-26 in fact had EXPO_PUBLIC_SUPABASE_* EMPTY in the job
+// env — precisely the "it only runs if a secret happens to be set" failure that rule exists for.
+const { url: REST_URL } = resolvePublicSupabase(process.env);
+const RPC_ORIGIN = new URL(REST_URL).origin;
 
 // Journeys are ARABIC free text plus the answers the agent's disambiguation needs — exactly what a
 // real user types. A city that is also a region needs «مدينة …»; «تقصد المدينة كاملة…» needs
@@ -73,6 +80,14 @@ const run = async () => {
     const ctx = await browser.newContext(
       j.mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : {});
     const page = await ctx.newPage();
+    // A question that renders without the app ever asking the backend for its option counts would be
+    // a FAKE question — the one failure mode "a card appeared" cannot distinguish on its own. Record
+    // every AF count RPC that actually left the page, against the resolved project origin.
+    const afRpcs: string[] = [];
+    page.on('request', (r) => {
+      const u = r.url();
+      if (u.startsWith(RPC_ORIGIN) && u.includes('/rest/v1/rpc/')) afRpcs.push(u.split('/rpc/')[1].split('?')[0]);
+    });
     try {
       await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 90_000 });
       await page.waitForTimeout(2500);
@@ -104,6 +119,12 @@ const run = async () => {
       } else {
         failures.push(verdict.diagnosis);
         report.push(`FAIL  ${j.name} — ${verdict.reason}`);
+      }
+      // A rendered card must be backed by a real count RPC to the expected project.
+      if (cardEverAppeared && !afRpcs.length) {
+        failures.push(`${j.name}: an AF card rendered but the page issued NO count RPC to ${RPC_ORIGIN} — `
+          + 'the question was not backed by live option counts.');
+        report.push(`FAIL  ${j.name} — card without a backing count RPC`);
       }
     } catch (e) {
       // A harness failure is reported as a failure, never swallowed into a pass.
