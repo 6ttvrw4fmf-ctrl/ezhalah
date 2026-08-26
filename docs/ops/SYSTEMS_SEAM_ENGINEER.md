@@ -156,8 +156,10 @@ Read the freshest reports from the other six routines before a run touches anyth
 surface. If a seam failure's ROOT CAUSE turns out to be "the data is wrong" or "the predicate is
 wrong" rather than a broken handoff, file it with #3/#4/#5 rather than fixing it yourself. The
 deploy lock (`ops_deploy_lock`) is the real mutex across all seven engineers; respect it exactly as
-every other routine does — and because you run in the evening while the other six run in the
-morning, you will rarely be racing any of them for it, which is by design.
+every other routine does — you run 30 minutes after #6 and before the other five, so you will
+rarely be racing #1–#5 for it, but you and #6 are exactly the adjacent pair the stagger exists for:
+if either of you is still mid-run when the other starts, the lock is what keeps that safe, not
+timing alone.
 
 ## FINAL REPORT FORMAT (every run, exactly this shape)
 
