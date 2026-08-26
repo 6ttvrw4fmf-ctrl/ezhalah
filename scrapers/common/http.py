@@ -29,6 +29,28 @@ _last_hit: dict[str, float] = {}
 _throttle_lock = threading.Lock()
 
 
+# Statuses that mean "the server had a moment", not "this page is gone". Retrying these is the
+# whole point of get(); anything else 4xx/5xx is permanent and bails immediately.
+#
+# THE CLOUDFLARE 52x FAMILY WAS MISSING UNTIL 2026-08-26, and it cost a full day of a platform.
+# ramzalqasim.com sits behind Cloudflare and its origin flaps: probing /maps from two unrelated
+# networks returned 200,200 / 200,522 / 200,200. On 2026-08-26 the daily run drew a 522 on page 1
+# of the walk and gave up on the spot — no scrape_runs row, no listings refreshed, the whole
+# platform skipped for the day. A re-dispatch reproduced it exactly (Actions run 32940436435:
+# "page 1 HTTP 522" -> exit 1, 48 seconds).
+#
+# These are Cloudflare edge-to-origin errors — the edge is fine, it just could not reach or wait
+# for the origin — which is exactly the transient shape 502/503/504 already covered:
+#   520 unknown origin error   521 origin down          522 origin connection timed out
+#   523 origin unreachable     524 origin timed out      530 origin DNS failure (paired w/ 1016)
+#
+# 530 is included deliberately even though a LONG 530 outage (erapulse, down since 2026-08-25)
+# will still fail after the retries — retrying costs seconds and cannot manufacture a false
+# success, and a brief DNS blip is as recoverable as any other. A genuine outage still ends in
+# None, so the caller's fail-safe behaviour is unchanged.
+TRANSIENT_STATUSES = frozenset({429, 502, 503, 504, 520, 521, 522, 523, 524, 530})
+
+
 def _throttle(url: str) -> None:
     host = urlsplit(url).netloc
     # Reserve the next time-slot under a lock so concurrent threads never collide on the same host.
@@ -109,7 +131,7 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25) -> Optional[cc.Res
             continue
         if r.status_code == 200:
             return r
-        if r.status_code in (429, 502, 503, 504):
+        if r.status_code in TRANSIENT_STATUSES:
             # Server-side temporary hiccup — back off, rotate the connection, and retry.
             print(f"   ⚠ http.get attempt {attempt + 1}/{max_retries} for {host} got "
                   f"HTTP {r.status_code}")

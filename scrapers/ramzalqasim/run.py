@@ -48,6 +48,9 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+# ONE definition of "transient" for the whole fleet — a second local copy here is how the two
+# drift and a newly-seen Cloudflare status silently stops being retried on one platform only.
+from scrapers.common.http import TRANSIENT_STATUSES
 
 BASE = "https://ramzalqasim.com"
 MAPS = f"{BASE}/maps"
@@ -171,19 +174,51 @@ def _int(s: Any) -> Optional[int]:
     return int(v) if v is not None else None
 
 
+MARKER_FETCH_ATTEMPTS = 4
+
+
+def _fetch_page(s: cc.Session, page: int, attempts: int = MARKER_FETCH_ATTEMPTS):
+    """GET one /maps page, retrying the transient statuses. None once it is genuinely unavailable.
+
+    WHY THIS EXISTS (2026-08-26). This walk used to be a single unretried GET that `break`s on any
+    non-200. ramzalqasim.com sits behind Cloudflare and its origin flaps — probing /maps from two
+    unrelated networks gave 200,200 / 200,522 / 200,200. On 2026-08-26 the scheduled run drew a
+    522 on PAGE 1, printed "site may have changed", and exited before begin_run(): no scrape_runs
+    row at all, so the platform simply vanished from the day's data with nothing recording why.
+    A re-dispatch reproduced it exactly (Actions run 32940436435, 48s, "page 1 HTTP 522").
+
+    One transient edge error must not cost a whole platform for a day. Retries are bounded and
+    backed off, and a genuine outage still ends in None — the caller's fail-safe (no run row, no
+    prune, no inactivation) is deliberately unchanged.
+    """
+    for attempt in range(1, attempts + 1):
+        _throttle()
+        try:
+            r = s.get(f"{MAPS}?page={page}", timeout=30)
+        except Exception as e:
+            print(f"  page {page} fetch error (attempt {attempt}/{attempts}): {e}")
+            if attempt == attempts:
+                return None
+            time.sleep(2 * attempt)
+            continue
+        if r.status_code == 200:
+            return r
+        if r.status_code in TRANSIENT_STATUSES and attempt < attempts:
+            print(f"  page {page} HTTP {r.status_code} (attempt {attempt}/{attempts}) — retrying")
+            time.sleep(2 * attempt)
+            continue
+        print(f"  page {page} HTTP {r.status_code}")
+        return None
+    return None
+
+
 def fetch_markers(s: cc.Session, max_pages: int = 12) -> list[dict]:
     """Walk /maps?page=1..N, decode each page's updateMapMarkers JSON. Stop at first empty page."""
     out: list[dict] = []
     seen: set[int] = set()
     for page in range(1, max_pages + 1):
-        _throttle()
-        try:
-            r = s.get(f"{MAPS}?page={page}", timeout=30)
-        except Exception as e:
-            print(f"  page {page} fetch error: {e}")
-            break
-        if r.status_code != 200:
-            print(f"  page {page} HTTP {r.status_code}")
+        r = _fetch_page(s, page)
+        if r is None:
             break
         decoded = ihtml.unescape(r.text)
         m = re.search(r'updateMapMarkers","params":\[\[(.*?)\]\]', decoded, re.S)
