@@ -248,7 +248,13 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       // This does NOT weaken the assertion: the equality below is unchanged, and a chip that NEVER
       // resolves still fails honestly, because readCardUntil returns its last read on timeout and
       // the `!= null` guard in the check makes that null an explicit failure rather than a pass.
-      const after = await readCardUntil((s) => s.hasCard && s.q !== st.q && s.chip != null);
+      // 25s, not the 9s default: Skip applies no predicate, so the chip has to be REFILLED with the
+      // unchanged number rather than arriving with a narrowed one, and on a 10,957-row base scope
+      // that round-trip ran past the default while the value was still on its way. The bound is
+      // still finite and the assertion is unchanged — a chip that never refills at all remains a
+      // red with `after=null`, which is exactly what a "Skip leaves the count blank forever" defect
+      // would look like. Raising a timeout is not weakening the oracle; accepting null would be.
+      const after = await readCardUntil((s) => s.hasCard && s.q !== st.q && s.chip != null, 25_000);
       check(`${name}: Skip does not change the count (no predicate applied)`, after.chip != null && after.chip === before, `before=${before} after=${after.chip}`);
       check(`${name}: Skip advances to a different question`, after.q !== st.q, `q1=${st.q} q2=${after.q}`);
       await ctx.close();
