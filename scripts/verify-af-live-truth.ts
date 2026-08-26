@@ -239,8 +239,17 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     if (skipFirst) {
       const before = st.chip;
       await page.click('[data-testid="af-skip"]');
-      const after = await readCardUntil((s) => s.hasCard && s.q !== st.q);
-      check(`${name}: Skip does not change the count (no predicate applied)`, after.chip === before, `before=${before} after=${after.chip}`);
+      // WAIT FOR A RESOLVED COUNT, NOT MERELY A NEW QUESTION (fix 2026-08-26). #1061 made the
+      // pending window blank the chip deliberately — "the pending window must not show the previous
+      // answer's count either" — so a predicate that stops at `q !== st.q` samples the intentional
+      // blank and reads chip=null. That is what turned this check red on production while Skip was
+      // working correctly (its sibling "advances to a different question" passed in the same run).
+      // Requiring `chip != null` compares Skip's count against a number instead of a transient null.
+      // This does NOT weaken the assertion: the equality below is unchanged, and a chip that NEVER
+      // resolves still fails honestly, because readCardUntil returns its last read on timeout and
+      // the `!= null` guard in the check makes that null an explicit failure rather than a pass.
+      const after = await readCardUntil((s) => s.hasCard && s.q !== st.q && s.chip != null);
+      check(`${name}: Skip does not change the count (no predicate applied)`, after.chip != null && after.chip === before, `before=${before} after=${after.chip}`);
       check(`${name}: Skip advances to a different question`, after.q !== st.q, `q1=${st.q} q2=${after.q}`);
       await ctx.close();
       return;
@@ -258,20 +267,24 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       const opts = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')));
       await page.click(`[data-testid="${opts[0]}"]`); // first option — deterministic, whatever the question is
     }
-    const afterSelect = await readCardUntil((s) => s.chip !== baselineChip);
-    check(`${name}: count changed after selecting an answer`, afterSelect.chip !== baselineChip, `base=${baselineChip} afterSelect=${afterSelect.chip}`);
+    // `s.chip !== baselineChip` alone is satisfied BY the pending window's null (fix 2026-08-26), so
+    // this captured a blank as "the answer's count" — which both passed this check for the wrong
+    // reason and then poisoned the Back comparison below with `expected=null`. Demand a resolved
+    // number; the assertion itself is unchanged and now cannot pass on a chip that never resolves.
+    const afterSelect = await readCardUntil((s) => s.chip != null && s.chip !== baselineChip);
+    check(`${name}: count changed after selecting an answer`, afterSelect.chip != null && afterSelect.chip !== baselineChip, `base=${baselineChip} afterSelect=${afterSelect.chip}`);
     await page.click('[data-testid="af-confirm"]');
     await page.waitForTimeout(1200);
 
     if (backAndChange) {
       await page.click('[data-testid="af-back"]');
-      const restored = await readCardUntil((s) => s.hasCard && s.q === st.q);
+      const restored = await readCardUntil((s) => s.hasCard && s.q === st.q && s.chip != null);
       check(`${name}: Back restores the previous question`, restored.q === st.q, `expected=${st.q} got=${restored.q}`);
-      check(`${name}: Back restores the previous count`, restored.chip === afterSelect.chip, `expected=${afterSelect.chip} got=${restored.chip}`);
+      check(`${name}: Back restores the previous count`, restored.chip != null && restored.chip === afterSelect.chip, `expected=${afterSelect.chip} got=${restored.chip}`);
       const opts2 = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')));
       const otherIdx = opts2.length > 1 ? 1 : 0;
       await page.click(`[data-testid="${opts2[otherIdx]}"]`);
-      const changed = await readCardUntil((s) => s.chip !== afterSelect.chip);
+      const changed = await readCardUntil((s) => s.chip != null && s.chip !== afterSelect.chip);
       check(`${name}: changing the answer recomputes the count`, changed.chip !== afterSelect.chip || opts2.length === 1, `after1st=${afterSelect.chip} afterChange=${changed.chip}`);
       await page.click('[data-testid="af-confirm"]');
       await page.waitForTimeout(1200);

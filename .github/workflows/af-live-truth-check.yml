@@ -55,3 +55,16 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-live-truth.ts
+
+      # THE AGENT FLOW, WHICH THE JOURNEYS ABOVE DO NOT COVER (added 2026-08-26). Every journey in
+      # verify-af-live-truth.ts reaches Advanced Filter through the FILTER flow. On 2026-08-26 the
+      # identical cohort (Rent-Annual/Apartment/Riyadh, chip 10,670) opened AF from the Filter flow
+      # and rendered NOTHING from the AI-agent flow on the same deployed bundle — so this workflow
+      # was green while the feature was unreachable for anyone arriving through the chat. Runs even
+      # if the step above fails, so one red journey never hides the other half of the surface.
+      - name: The agent flow must never offer «نحدد الطلب أكثر» and then render nothing
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-agent-cta-live.ts
