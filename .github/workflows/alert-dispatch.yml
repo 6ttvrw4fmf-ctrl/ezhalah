@@ -7,8 +7,23 @@
 #
 # This workflow is the delivery channel, built ONLY from credentials the repo already holds
 # (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY as Actions secrets, plus the built-in GITHUB_TOKEN):
-# every undispatched unresolved P1/P2 alert becomes ONE GitHub issue per dedup_key, and the issue
-# auto-closes when the alert resolves in the database. No new secrets, no paid service.
+# every undispatched unresolved P0/P1/P2 alert becomes ONE GitHub issue per dedup_key, and the
+# issue auto-closes when the alert resolves in the database. No new secrets, no paid service.
+#
+# P0 WAS MISSING FROM THAT FILTER UNTIL 2026-08-26, and it cost 41 days of silence.
+# The filter read `severity=in.(P1,P2)`. P0 is more severe than P1, not less -- but it was not in
+# the list, so it was never selected. Measured when this was found: 53 P0 alerts raised since
+# 2026-07-16, every one of kind silent_scraper_death ("a scraper has stopped capturing"),
+# dispatched = 0. Not one reached a human through this channel; the ones that got looked at were
+# hand-filed by a daily-engineer run that happened to read the table. The only P0-adjacent thing
+# this workflow ever filed was the P2 meta-alert `unresolvable_alert_kind:silent_scraper_death` --
+# the alert ABOUT the alert was delivered while the P0 itself was not.
+#
+# The severity set now lives canonically in scripts/lib/alertDelivery.ts (DELIVERED_SEVERITIES)
+# and is mirrored by public.mon_detect_alert_delivery(); scripts/verify-alert-delivery-coverage.ts
+# (in `npm test`) fails if this filter, that file and that detector ever disagree again.
+# P3 stays excluded deliberately -- it is informational -- and the detector excludes it in step,
+# so undelivered P3 rows do not raise.
 #
 # Semantics (mirrors mon_dispatch_alerts' fail-closed design):
 #   - dispatched_at is stamped per-row ONLY after the gh call succeeds, so a mid-loop failure
@@ -22,7 +37,7 @@
 #
 # Schedule: :09/:39 — 10 minutes after the :29/:59 detector sweep, off the :00/:15/:20 hot slots
 # (cron-discipline rule from the 2026-08-10 outage; GitHub-side, kept consistent deliberately).
-name: Alert dispatch (P1/P2 -> GitHub issues)
+name: Alert dispatch (P0/P1/P2 -> GitHub issues)
 
 on:
   schedule:
@@ -50,16 +65,21 @@ jobs:
       - name: Ensure labels exist (idempotent)
         run: |
           gh label create ezhalah-alert --repo "$REPO" --force --color D93F0B --description "Auto-filed from alert_event by alert-dispatch.yml" >/dev/null
+          # P0 must exist or `gh issue create --label P0` fails and the row is never stamped.
+          gh label create P0 --repo "$REPO" --force --color 5319E7 --description "Highest-severity production alert" >/dev/null
           gh label create P1 --repo "$REPO" --force --color B60205 --description "Critical production alert" >/dev/null
           gh label create P2 --repo "$REPO" --force --color FBCA04 --description "Important production alert" >/dev/null
 
       - name: File issues for undispatched alerts
         run: |
           set -euo pipefail
-          rows=$(curl -sf "$SUPABASE_URL/rest/v1/alert_event?select=id,severity,kind,platform,dedup_key,detail,created_at&resolved_at=is.null&dispatched_at=is.null&severity=in.%28P1,P2%29&order=created_at.asc&limit=100" \
+          # Severity set is canonical in scripts/lib/alertDelivery.ts DELIVERED_SEVERITIES and is
+          # pinned against this line by scripts/verify-alert-delivery-coverage.ts. %28/%29 are the
+          # URL-encoded parens PostgREST's in.() filter needs inside this interpolated URL.
+          rows=$(curl -sf "$SUPABASE_URL/rest/v1/alert_event?select=id,severity,kind,platform,dedup_key,detail,created_at&resolved_at=is.null&dispatched_at=is.null&severity=in.%28P0,P1,P2%29&order=severity.asc,created_at.asc&limit=100" \
             -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
           n=$(jq length <<<"$rows")
-          echo "undispatched P1/P2 alerts: $n"
+          echo "undispatched P0/P1/P2 alerts: $n"
           [ "$n" -eq 0 ] && exit 0
 
           gh issue list --repo "$REPO" --label ezhalah-alert --state open --limit 200 --json number,title > open_issues.json
