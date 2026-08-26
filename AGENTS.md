@@ -104,6 +104,19 @@ check's conclusion is exactly `SUCCESS` (cancelled/failure/timed_out/skipped/neu
 all block, including a stale success sitting next to a fresh cancellation for the same context), the
 branch is not BEHIND, `mergeable` is `MERGEABLE`, `mergeStateStatus` is clean, and — when
 `--expect-files` is passed — the file list has not moved since it was first verified. Logic is pure
+**It runs in EVERY session type, including cloud agents (2026-08-26).** It used to shell out to the
+`gh` CLI, which cloud sessions do not have — so the one mandated merge path could not execute there
+at all, and merges happened by hand with the conditions re-checked from memory while every barrier
+stayed green. It now uses the REST API via `scripts/lib/githubApi.ts` (same single path, same single
+decision), reads the required-check contract from the non-admin `branches/{base}` endpoint, re-execs
+itself with `NODE_USE_ENV_PROXY=1` so a proxied session is not silently 401, and pins the verified
+head SHA on the merge call so GitHub itself rejects a merge if the head moved. Two things now fail
+CLOSED that previously failed OPEN: an unreadable required-check contract REFUSES instead of
+degrading to "nothing is required", and ANY reported check that is not SUCCESS blocks, required or
+not. `scripts/verify-merge-gate-transport.ts` (in `npm test`) pins reachability, fail-closed
+behaviour, SHA pinning, and that no second merge path exists anywhere in the tree.
+
+Logic is pure
 and mutation-proven in `scripts/lib/mergeGate.ts` / `scripts/verify-merge-gate.ts` (wired into
 `npm test`). This supersedes the old "verify the file list right after creation and again right
 before merge" prose rule by enforcing the "again" half automatically — pass the file list from your

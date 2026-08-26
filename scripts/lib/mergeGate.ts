@@ -20,6 +20,12 @@ export type CheckRun = { context: string; conclusion: CheckConclusion };
 
 export type MergeGateInput = {
   requiredContexts: string[];       // from branch protection — the contract, not a guess
+  // Whether that contract was actually READ. Added 2026-08-26: the old transport swallowed a 403 on
+  // the protection endpoint and returned [], which silently disabled the required-check half of the
+  // gate — a merge could then pass while nothing verified the required checks at all. Anything other
+  // than an explicit `true` now blocks, so "I could not read the contract" fails CLOSED. An
+  // explicitly-read EMPTY list (a branch that genuinely requires nothing) is still `true`.
+  requiredContextsKnown?: boolean;
   checks: CheckRun[];               // the PR's current statusCheckRollup, for the HEAD sha being merged
   mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
   mergeStateStatus: string;         // GitHub's own composite: CLEAN / BEHIND / BLOCKED / DIRTY / UNSTABLE / ...
@@ -38,6 +44,23 @@ export function normaliseConclusion(c: string | null | undefined): CheckConclusi
 
 export function decideMerge(input: MergeGateInput): MergeGateResult {
   const reasons: string[] = [];
+
+  // 0. The required-check CONTRACT must have been read. Not knowing what is required is not the
+  // same as nothing being required, and only one of those is safe to merge on.
+  if (input.requiredContextsKnown !== true) {
+    reasons.push('required-status-check contract could not be read — refusing rather than merging unverified');
+  }
+
+  // 0b. No reported check may be non-SUCCESS, whether or not it is REQUIRED. GitHub already calls
+  // this state UNSTABLE and the gate already blocks UNSTABLE below; stating it directly means a
+  // failing optional check still blocks even when mergeStateStatus is unavailable or stale, and it
+  // means a branch with NO protection configured (requiredContexts legitimately []) is still not a
+  // free pass. Strictly stricter than the required-only rule — never a substitute for it.
+  for (const c of input.checks) {
+    if (normaliseConclusion(c.conclusion) !== 'SUCCESS') {
+      reasons.push(`check "${c.context}" is ${normaliseConclusion(c.conclusion) ?? 'PENDING'}, not SUCCESS`);
+    }
+  }
 
   // 1. EVERY required context must exist in the check list AND be exactly SUCCESS. A required
   // context that is simply ABSENT from the rollup (never ran, or ran against a stale SHA the
