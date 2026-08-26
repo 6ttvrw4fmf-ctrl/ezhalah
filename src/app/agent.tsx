@@ -1408,6 +1408,20 @@ export default function Agent() {
   // turn is in flight (busy) so a half-rendered turn is never what a return restores; content-keyed
   // (lastCapturedRef) so re-renders and restores never rewrite an unchanged transcript.
   const lastCapturedRef = useRef('');
+  // The debounced capture that has not fired yet. WITHOUT this, the effect cleanup's clearTimeout
+  // silently dropped the newest settled state whenever the user left the chat inside the 600ms
+  // window (tapping another chat while the new turn's cards were still cascading was enough) — and
+  // the reopened chat then showed an OLDER version of the conversation, the exact class the owner
+  // ruled out on 2026-08-25 («never reconstruct an older version or lose later messages»). Every
+  // path that abandons this conversation view flushes it first; a web unload flushes via pagehide.
+  const pendingCaptureRef = useRef<{ id: string; t: PersistedChat; j: string } | null>(null);
+  const flushPendingCapture = () => {
+    const p = pendingCaptureRef.current;
+    if (!p) return;
+    pendingCaptureRef.current = null;
+    lastCapturedRef.current = p.j;
+    saveTranscript(p.id, p.t);
+  };
   useEffect(() => {
     if (busy) return;
     const id = chatIdRef.current;
@@ -1416,9 +1430,20 @@ export default function Agent() {
     if (!t) return;
     const j = JSON.stringify(t);
     if (j === lastCapturedRef.current) return;
-    const timer = setTimeout(() => { lastCapturedRef.current = j; saveTranscript(id, t); }, 600);
+    pendingCaptureRef.current = { id, t, j };
+    const timer = setTimeout(() => { pendingCaptureRef.current = null; lastCapturedRef.current = j; saveTranscript(id, t); }, 600);
     return () => clearTimeout(timer);
   }, [busy, msgs, revealCount, afReceipt, guidedPills]);
+  // A refresh/close inside the debounce window must not lose the last settled state either.
+  // saveTranscript writes localStorage synchronously up front (store.tsx), so this flush lands on
+  // disk even during unload. pagehide, not beforeunload: it also covers bfcache navigations.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const flush = () => flushPendingCapture();
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── THE OFFER PROBE (owner 2026-08-24) ─────────────────────────────────────────────────────────
   // «تحديد أكثر» is offered only when a round would have something truthful to ask: more than
@@ -2249,6 +2274,7 @@ export default function Agent() {
   // server when this device no longer holds it (pruned cache / new browser / re-login). A chat
   // with no transcript anywhere (legacy entry) falls back to the snapshot/replay view unchanged.
   const openSaved = async (entryId: string | undefined, q: SearchQuery, override?: { bubble: string; sub: string }) => {
+    flushPendingCapture(); // leaving the previous chat mid-debounce must not drop its newest turn
     chatIdRef.current = entryId ?? null;
     const entry = entryId ? history.find((h) => h.id === entryId) : undefined;
     let t: PersistedChat | null = entry?.transcript ?? null;
@@ -2368,6 +2394,7 @@ export default function Agent() {
     // so a one-shot guard silently swallowed every search after the first. A new filter/seed search
     // starts a fresh chat (prior chats stay in the sidebar). (bug fix: "keep searching → nothing pops up".)
     const startFresh = () => {
+      flushPendingCapture(); // the OLD conversation's last settled state must land before we leave it
       if (runRef.current) runRef.current.cancelled = true; // stop any in-flight previous search
       finalizeReveal();                                    // stop the prior search's drip-reveal/typing
       setStopped(false);
@@ -2454,6 +2481,7 @@ export default function Agent() {
   useEffect(() => {
     if (freshMountRef.current) { freshMountRef.current = false; return; }
     if (fresh === undefined) return;
+    flushPendingCapture(); // New Chat abandons this view — its last settled state lands first
     if (runRef.current) runRef.current.cancelled = true;
     if (greetTimerRef.current) clearTimeout(greetTimerRef.current);
     // New Chat kills any live mic capture instantly (owner brief §16) — and inherits nothing from
@@ -2738,7 +2766,7 @@ export default function Agent() {
                               <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
                             </View>
                           ) : (
-                            <Pressable key={`${f.id}-${i}`} style={s.guidedPill} onPress={() => removeGuidedFacet(i)} disabled={busy}>
+                            <Pressable key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill} onPress={() => removeGuidedFacet(i)} disabled={busy}>
                               <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
                               <Ionicons name="close" size={13} color={colors.primary} />
                             </Pressable>
