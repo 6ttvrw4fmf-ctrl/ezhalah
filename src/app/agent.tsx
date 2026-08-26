@@ -1448,23 +1448,56 @@ export default function Agent() {
     // ASKS (review 2026-08-25): nextScopeTier, not `unresolvedScopeTiers(q).length`. A tier the user
     // SKIPPED stays unresolved forever while being permanently un-re-askable, so the raw-length test
     // promised a round whose scope walk falls straight through — a button that opened and closed.
-    if (nextScopeTier(q, new Set(asked))) { setAfCanNarrow((c) => ({ ...c, [m.id]: true })); return; }
-    // UNKNOWN MUST NOT HARDEN INTO NO (permanent fleet rule). A count RPC that times out resolves to
-    // an EMPTY option set (remote.ts withTimeout → null → `{ options: [], total: 0 }`), which
-    // scoreQuestion then drops — so a 4s blip is indistinguishable from an honest "nothing narrows",
-    // and caching that verdict hid «تحديد أكثر» on this turn for the rest of the chat. An empty rank
-    // while questions REMAIN eligible is therefore treated as unknown and re-probed exactly once
-    // (bounded: never a poll). An empty POOL is certain — no RPC was even issued — and settles first
-    // pass, which is the common "nothing left to ask" case, so this costs nothing there.
-    const poolLeft = eligibleQuestions(q).filter((qq) => !asked.includes(qq.id)).length;
-    const probe = (attempt: number) => void rankQuestions(q, new Set(asked))
-      .then((ranked) => {
-        const ok = ranked.some((r) => offersMeaningfulNarrowing(r.total, r.options));
-        if (!ok && !ranked.length && poolLeft && attempt === 0) { setTimeout(() => probe(1), 2500); return; }
-        setAfCanNarrow((c) => ({ ...c, [m.id]: ok }));
-      })
-      .catch(() => { if (attempt === 0) setTimeout(() => probe(1), 2500); });   // stays unknown ⇒ hidden
-    probe(0);
+    // …AND WALK THAT TIER, DON'T ASSUME IT (fix 2026-08-25). `nextScopeTier` returning a tier used to
+    // short-circuit straight to `true`, which is not the same question the walk asks: presentGuided
+    // AUTO-COMMITS a tier that resolves to ≤1 option (one option is not a choice — it is the scope the
+    // user already has) and moves DOWN, so a tier existing proves nothing about a round following it.
+    // REPRODUCED live 2026-08-25 — الطائف / إيجار / شهري / «الاستراحات والريف», 43 matches: the group's
+    // five member types have exactly ONE populated here (شاليه), the type tier auto-committed it, and
+    // Chalet certifies no monthly cohort, so the round asked ZERO questions and closed. The user tapped
+    // «خلّنا نحدد الطلب أكثر», was never asked anything, and got a duplicate 43-result turn plus a
+    // receipt reading «اختياراتك: شاليه» — a choice they never made.
+    //
+    // So the probe now walks the tiers exactly as presentGuided does — resolve, auto-commit a ≤1-option
+    // tier onto a LOCAL copy of the query, move on — and only offers when it finds a tier that is a real
+    // question, or when the RESOLVED scope's advanced pool has something to ask. Cost is bounded and is
+    // the same work the tap itself would do a moment later: at most two tier resolutions per turn, and
+    // the common case (a tier with a real choice) exits after the first one. Still ONE probe per turn,
+    // still passive — it renders a button and never opens the overlay (owner 2026-08-19).
+    void (async () => {
+      const offer = (ok: boolean) => setAfCanNarrow((c) => ({ ...c, [m.id]: ok }));
+      let scoped = q;
+      const seen = new Set<string>(asked);
+      for (let tier = nextScopeTier(scoped, seen); tier; tier = nextScopeTier(scoped, seen)) {
+        let res: AdvancedQuestionResult | null = null;
+        try { res = await scopeQuestionFor(tier).resolveOptions(scoped); } catch { res = null; }
+        // UNKNOWN MUST NOT HARDEN INTO NO. A turn showing more than INTERVIEW_STOP_AT matches cannot
+        // truthfully have an empty scope, so `total === 0` here is a failed/timed-out count RPC, not a
+        // fact — keep offering, exactly as this line did before the fix. Only a MEASURED tier may hide
+        // the button.
+        if (!res || res.total === 0) { offer(true); return; }
+        if (res.options.length > 1) { offer(true); return; }   // a real scope question follows the tap
+        seen.add(tier);                                        // resolved (auto-commit or open skip) —
+        if (res.options.length === 1)                          // never re-asked, same as the walk
+          scoped = scopeQuestionFor(tier).apply(scoped, [res.options[0].key]);
+      }
+      // UNKNOWN MUST NOT HARDEN INTO NO (permanent fleet rule). A count RPC that times out resolves to
+      // an EMPTY option set (remote.ts withTimeout → null → `{ options: [], total: 0 }`), which
+      // scoreQuestion then drops — so a 4s blip is indistinguishable from an honest "nothing narrows",
+      // and caching that verdict hid «تحديد أكثر» on this turn for the rest of the chat. An empty rank
+      // while questions REMAIN eligible is therefore treated as unknown and re-probed exactly once
+      // (bounded: never a poll). An empty POOL is certain — no RPC was even issued — and settles first
+      // pass, which is the common "nothing left to ask" case, so this costs nothing there.
+      const poolLeft = eligibleQuestions(scoped).filter((qq) => !seen.has(qq.id)).length;
+      const probe = (attempt: number) => void rankQuestions(scoped, seen)
+        .then((ranked) => {
+          const ok = ranked.some((r) => offersMeaningfulNarrowing(r.total, r.options));
+          if (!ok && !ranked.length && poolLeft && attempt === 0) { setTimeout(() => probe(1), 2500); return; }
+          offer(ok);
+        })
+        .catch(() => { if (attempt === 0) setTimeout(() => probe(1), 2500); });   // stays unknown ⇒ hidden
+      probe(0);
+    })();
   }, [lastResultsMsg, guidedPills]);
 
   // Run a refine answer (tapped chip OR typed reply): echo `label` as the user's bubble, merge the one
