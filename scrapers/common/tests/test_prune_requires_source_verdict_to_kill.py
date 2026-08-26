@@ -203,3 +203,70 @@ def test_aqarcity_and_abeea_pass_verify_gone_to_prune_unseen():
         assert 'return "unknown"' in src, (
             f"{platform}'s oracle must return 'unknown' on an unreachable source, never 'gone'"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# 2026-08-26: "I could not read the page" is not "the source deleted it"
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# The 2026-08-24 fix above made the SOURCE's verdict the only thing that may deactivate. It did not
+# check what the oracle counts AS that verdict. aqarcity's `_probe_id()` returned one value,
+# 'exists', for two conditions that mean opposite things:
+#
+#     if "هذا الإعلان منتهي" in r.text or "application/ld+json" not in r.text:
+#         return "exists"
+#
+# and `_verify_gone()` mapped 'exists' → "gone". The first limb is the source's OWN expired banner
+# (authoritative death). The second is "this page has no JSON-LD" — a PARSE condition. A Cloudflare
+# interstitial, a partial render or a template change all serve HTTP 200 with neither banner nor
+# JSON-LD, on a listing that is perfectly alive, and the row was deactivated for it.
+#
+# Measured that day: 254 aqarcity deactivations, 55/55 sampled carried the expired banner, so the
+# live cohort was decided by the CORRECT limb and nothing was falsely killed. The defect was latent,
+# not yet realised — which is exactly when it is cheapest to remove. §4/§26: unverifiable is its own
+# verdict, and it means DO NOTHING.
+
+def test_oracle_may_state_a_reason_and_it_is_recorded(wired):
+    """A (verdict, reason) pair must be accepted, and the reason persisted as evidence."""
+    killed = db.prune_unseen("aqarcity_residential_listings", SEEN,
+                             verify_gone=lambda ad: ("gone", "source published «هذا الإعلان منتهي»"))
+    assert killed == 3, "a (verdict, reason) tuple must decide exactly as the bare string does"
+    assert sorted(_kills(wired)) == ["AC1", "AC2", "AC3"]
+
+
+def test_bare_string_oracle_still_supported(wired):
+    """Backward compatibility: abeea returns plain strings and must keep working untouched."""
+    assert db.prune_unseen("aqarcity_residential_listings", SEEN,
+                           verify_gone=lambda ad: "gone") == 3
+
+
+def test_aqarcity_unparseable_page_is_unknown_never_gone():
+    """THE REGRESSION. Drive the real aqarcity oracle mapping, not a stand-in.
+
+    Fails on the pre-fix code, where 'exists' (no JSON-LD) mapped straight to "gone".
+    """
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[3]
+    src = (repo / "scrapers" / "aqarcity" / "run.py").read_text(encoding="utf-8")
+
+    probe = src[src.index("def _probe_id"):src.index("def sequential_id_urls")]
+    assert '"expired"' in probe, (
+        "_probe_id must give the source's own «هذا الإعلان منتهي» banner its OWN return value. "
+        "While the expired banner and 'page has no JSON-LD' share one value, the kill path cannot "
+        "tell authoritative death from a page it merely failed to parse."
+    )
+    # The two conditions must no longer be OR-ed into a single return.
+    assert 'or "application/ld+json" not in r.text' not in probe, (
+        "the expired-banner check and the JSON-LD check are OR-ed back together — that is the "
+        "2026-08-26 defect exactly: an unreadable page becomes indistinguishable from a dead one."
+    )
+
+    gone = src[src.index("def _verify_gone"):]
+    gone = gone[:gone.index("pruned = 0")]
+    assert '"exists"' in gone and "unknown" in gone.split('"exists"')[1][:200], (
+        "aqarcity's _verify_gone must map 'exists' (real id, unparseable page) to UNKNOWN so the "
+        "strike is held and nothing is deactivated. Mapping it to 'gone' deactivates live "
+        "listings on a Cloudflare shell (§4: blocked ≠ inactive; §26: unverifiable means DO NOTHING)."
+    )
+    assert '("notfound", "exists")' not in gone, (
+        "'exists' is back on the kill path alongside 'notfound' — the exact pre-fix mapping."
+    )
