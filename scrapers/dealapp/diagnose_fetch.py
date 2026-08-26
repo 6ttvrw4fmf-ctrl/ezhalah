@@ -32,10 +32,24 @@ The flat decile shape is the volume probe's own decision rule for EXONERATING vo
 does not climb with the request index, so sustained load is not the cause either. What is left is
 the 88-vs-10 gap, which moves TWO variables at once (client AND network).
 
-WHY --population EXISTS. It runs every client variant plus a plain system-curl control against
-the SAME sitemap ids from the SAME runner, holding the network fixed so only the client varies.
-A spread between clients ⇒ our client is the cause and the fix is a scraper change. Every client
-alike at ~88% ⇒ the runner's egress identity is the cause, which is an owner provider decision.
+  RUN 3 (--population 60, Actions run 33000533871): every client, same runner, same ids —
+    A 78.3% | B 78.3% | C 78.3% | D 78.3% | E-system-curl 83.3%, while the SAME curl binary on
+    the SAME 60 ids OFF-runner gets 11.7%. The client is exonerated, egress is implicated.
+  RUN 4 (--retry 60, Actions run 33001226104): 49 shells re-requested at 5s/15s/45s/120s —
+    0 recovered in EVERY round, control 10/10. Off-runner the same shells recover 7/7 at once.
+
+VERDICT (2026-08-26). dealapp serves a data-bearing page to ordinary networks and a PERMANENTLY
+listing-less page to GitHub Actions egress, for the same ids at the same moment. Not the parser,
+not the classifier, not the TLS profile, not headers, not the HTTP library, not the curl binary,
+not volume, not concurrency, not time of day, not the URL form, not a cold render. The only
+surviving variable is the runner's network egress identity.
+
+CONSEQUENCE: last_seen_at is NOT a dealapp liveness signal — ~75% of "not seen at source" is a
+false negative manufactured by where the job runs. No removal/deactivation policy can be built on
+it, and none exists. There is also NO scraper-side fix: run 4 shows retries cannot recover a
+permanent response, and fetch_one already makes 3 attempts. Changing egress is an owner
+provider/compliance decision and is NOT to be folded into the (frozen, separate) Wasalt proxy
+question. Full write-up: docs/ops/DEALAPP_FETCH_EGRESS_FINDING.md.
 
 NEVER DIAGNOSE THIS ON A HAND-PICKED SAMPLE AGAIN. A sample drawn from ids already known to be
 alive cannot fail, so it cannot discriminate anything. PROBE_IDS below are kept only as the
