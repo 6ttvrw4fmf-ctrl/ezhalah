@@ -589,7 +589,63 @@ Regression: `scripts/verify-af-narrowing-gate.ts` (§2/§2b/§5 inverted in plac
 inverted from "the gates are separate" to "the gates share ONE predicate and neither re-implements the
 arithmetic"). Both EXECUTE the real pure predicate; neither was deleted or unwired.
 
-## Amendment 2026-08-26 — a LONE surviving meaningful option is a valid yes/no (owner-approved; reverses the arity half of Amendment 2026-08-25)
+## Amendment 2026-08-26 (a) — UNKNOWN IS NOT NO (owner-approved)
+
+> **Known useless → hide AF. Couldn't determine because the backend failed → keep AF available.**
+
+Every Advanced Filter question earns its place by one live count RPC, capped at
+`AGE_COUNT_TIMEOUT_MS` (4 s). Until this amendment a probe that never completed produced the
+**byte-identical** value to a source that answered *"nothing here"*, at every hop:
+
+| hop | timed-out probe | genuinely empty scope |
+|---|---|---|
+| `withTimeout` | `{ timedOut: true }` | — |
+| the count fetcher | `null` | `null` |
+| `guidedOptions` | `{ options: [], total: 0 }` | `{ options: [], total: 0 }` |
+| `scoreQuestion` | `null` → dropped | `null` → dropped |
+| `startAgeFlow` | empty plan → `setAgeFlow(null)` + `startRefine(q)` | same |
+
+So a transient network blip was rendered to the user as a settled verdict about their search —
+*"there is nothing more worth asking about this"* — and quietly demoted them to the legacy
+district/budget/beds chips. The user could not tell the difference, and by the third hop neither
+could the code: the information that anything had gone wrong no longer existed.
+
+This is the same rule the repo already enforces on the data side, where a failed fetch may never be
+written down as a negative fact — *"403/429/timeout/5xx/blocked/unknown → NOT proof"*
+(`docs/ops/DATA_INTEGRITY_ENGINEER.md`). Advanced Filter now obeys it too.
+
+**The rule, binding on every path that decides whether to ask:**
+
+1. A probe that times out or errors is **UNKNOWN**. An empty *result set* is a real answer and stays
+   `null` — the distinction is between *"the source said nothing"* and *"we never heard back"*.
+2. When nothing useful survives, **retry the batch exactly once**. A bounded retry absorbs the
+   transient case; it is never retried on a verdict the sources actually gave.
+3. If it is still undetermined, **assert nothing**: leave «تحديد أكثر» exactly where it was so the
+   user can try again.
+4. **Never open an empty AF card** — on either verdict.
+5. **Never invent counts** to fill the gap.
+6. **Never fall back to the refine chips on UNKNOWN**, because offering them *in place of* AF is
+   itself the claim that there is nothing left to narrow.
+7. This binds the **mid-interview re-rank as well as the opening decision**. Ending an interview
+   says *"there is nothing left worth asking"* — also a claim about the data — so a failed probe may
+   not silently shorten an interview that is already open.
+
+Owner decision 2026-08-26: *"UNKNOWN must never become NO."*
+
+**Where it lives:** `src/lib/afProbe.ts` (pure: `probeVerdict` / `mayOpenInterview` /
+`mayAssertNothingToNarrow` / `shouldRetryProbes`), so both decision points read ONE rule and cannot
+drift. **Barrier:** `scripts/verify-af-probe-failure-not-a-verdict.ts` in `npm test` — executes the
+verdicts, pins the wiring, and is mutation-proven against the real source (6/6 deliberate breaks
+turn CI red).
+
+**Why it is not just a bigger timeout:** raising `AGE_COUNT_TIMEOUT_MS` lowers the frequency and
+keeps the wrong semantics — the outage would still be recorded as the user's verdict, just less
+often. Measured cost on a real 6-district Villa/Buy scope: **920 ms** for one count and **3,433 ms**
+for the five certified questions, server-side on a quiet database, against a 338 ms/search baseline
+and a concurrency knee of 3 (`docs/ops/SEARCH_MATCH_QA_ENGINEER.md` §40.1) — so the cap is reachable
+under ordinary load and always will be.
+
+## Amendment 2026-08-26 (b) — a LONE surviving meaningful option is a valid yes/no (owner-approved; reverses the arity half of Amendment 2026-08-25)
 
 **The owner's instruction, verbatim.** «Yes, fix the two-option issue. If filtering removes the
 useless/lopsided option but leaves one genuinely useful option, do not throw away the whole question

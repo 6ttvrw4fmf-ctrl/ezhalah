@@ -35,7 +35,11 @@ const check = (label: string, ok: boolean) => {
 const remoteSrc = readFileSync(new URL('../src/data/remote.ts', import.meta.url), 'utf8');
 
 const fnMatch = remoteSrc.match(
-  /export async function fetchPropertyAgeOptionCounts\(q: SearchQuery\): Promise<AgeOptionCounts \| null> \{[\s\S]*?\n\}/,
+  // 2026-08-26: the return type gained `| ProbeFailed` (UNKNOWN IS NOT NO — a timed-out probe must
+  // not return the same value as a source that answered "nothing"). This locator only needs to find
+  // the function, so it matches the name and opening paren and stops caring about the return type,
+  // which is pinned by scripts/verify-af-probe-failure-not-a-verdict.ts instead.
+  /export async function fetchPropertyAgeOptionCounts\(q: SearchQuery\): Promise<[^>]*> \{[\s\S]*?\n\}/,
 );
 check('fetchPropertyAgeOptionCounts() is still defined in src/data/remote.ts', fnMatch !== null);
 const fnBody = fnMatch ? fnMatch[0] : '';
@@ -84,7 +88,7 @@ check(
 // Sibling parity check: fetchApartmentGuidedCounts() must still pass both too (the pattern this fix
 // was modeled on) — catches an accidental regression to THAT call site instead.
 const guidedMatch = remoteSrc.match(
-  /export async function fetchApartmentGuidedCounts\(q: SearchQuery\): Promise<GuidedCounts \| null> \{[\s\S]*?\n\}/,
+  /export async function fetchApartmentGuidedCounts\(q: SearchQuery\): Promise<[^>]*> \{[\s\S]*?\n\}/,
 );
 check('fetchApartmentGuidedCounts() is still defined (the sibling pattern this fix mirrors)', guidedMatch !== null);
 if (guidedMatch) {
