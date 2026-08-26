@@ -243,7 +243,7 @@ check('…and it earns an OFFER too — offer and ask agree on it',
   //    behavioural fixture is impossible here (agent.tsx cannot be rendered by a barrier), so each
   //    one is a precise read of the shipped shape and each was mutation-proven against this file.
   check('the probe no longer SHORT-CIRCUITS on a tier merely existing — that shape is banned',
-    !/if \(nextScopeTier\([^)]*\)\) \{ setAfCanNarrow/.test(probe),
+    !/if \(nextScopeTier\(.*\)\) \{ setAfCanNarrow/.test(probe),
     'src/app/agent.tsx offer probe — a tier that resolves to ≤1 option is AUTO-COMMITTED and walked '
     + 'past, so its existence never proves a round follows (الطائف/شهري/الاستراحات والريف, 43 matches)');
   check('…it RESOLVES each tier instead, against a scope it carries forward itself',
