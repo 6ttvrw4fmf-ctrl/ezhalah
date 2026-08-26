@@ -43,7 +43,7 @@ PAGE_SIZE = 32
 
 # STARTUP JITTER (2026-08-23, production degradation investigation). wasalt-residential-sweep.yml
 # (20 jobs) and wasalt-commercial-sweep.yml (14 jobs) dispatch fully parallel with no `max-parallel`,
-# all sharing ONE WASALT_PROXY_URL secret (Webshare Saudi-residential proxy). PR#824 (merged
+# all sharing ONE WASALT_PROXY_URL secret (DataImpulse Saudi-residential proxy). PR#824 (merged
 # 2026-08-21) proved every failing attempt hung the full 30s timeout and added session rotation on
 # retry — verified NOT to have fixed the regression: the platform's daily scrape_runs failure rate
 # was 65.7% the day #824 merged and is still 60-69% three days later (re-measured 2026-08-23), because
@@ -159,7 +159,7 @@ class RotatingSession:
 
     2026-08-21 incident fix: the OLD code created ONE curl_cffi session per process and
     reused it (and its underlying connection pool / proxy tunnel) across all 3 retry attempts
-    of every fetch_page() call. Through the shared Webshare Saudi-residential proxy, once an
+    of every fetch_page() call. Through the shared DataImpulse Saudi-residential proxy, once an
     attempt landed on a bad/overloaded exit route, all 3 retries stayed pinned to that exact
     same route and were guaranteed to hang the full 30s timeout again — 59/103 wasalt runs/24h
     failed this way (204.2-204.7s each), while runs in the SAME dispatch batch that happened to

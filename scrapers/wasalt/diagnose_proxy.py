@@ -3,7 +3,7 @@
 Diagnosis ONLY — makes exactly ONE request per stage against ONE real listing URL. Never writes
 to the database, never touches scrape_runs/listings, never prints the proxy credentials (only the
 proxy's hostname + a short one-way hash of the full URL, so the owner can compare it against the
-Webshare dashboard without this script ever revealing the secret).
+DataImpulse dashboard without this script ever revealing the secret).
 
 Context: wasalt scrape_runs' failure rate stepped from 0-1% to 57-68% on 2026-08-17 and has stayed
 there through a concurrency-cap fix (#827, #1020) and a claimed proxy rotation (2026-08-24), both
@@ -41,7 +41,7 @@ CONNECT_TIMEOUT = 15
 
 def redact_proxy_url(purl: str) -> dict:
     """Never returns the secret. Only the host/port + a short fingerprint hash, so the owner can
-    compare this run's proxy identity against the Webshare dashboard without this script ever
+    compare this run's proxy identity against the DataImpulse dashboard without this script ever
     printing (or this log ever storing) the actual credentials."""
     u = urlsplit(purl)
     return {

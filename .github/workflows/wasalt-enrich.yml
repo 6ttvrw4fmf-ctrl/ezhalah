@@ -1,7 +1,7 @@
 # Wasalt deep enricher (new-only) — fetches detail-page fields (Plan/Land number, Street, Ad
 # source, …) for rows that don't have them yet, CAPPED per run so the Saudi proxy bandwidth stays
 # tiny. After the one-time local Mac backfill marks every current row enriched, this only ever
-# processes the daily trickle of NEW listings (a few hundred), so the metered Webshare plan is safe.
+# processes the daily trickle of NEW listings (a few hundred), so the metered DataImpulse plan is safe.
 
 name: Wasalt enrich
 

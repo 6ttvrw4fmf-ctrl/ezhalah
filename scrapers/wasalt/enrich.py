@@ -4,7 +4,7 @@ source, Facade, Building No., utilities…) for rows that don't have them yet (d
 Capped per run, so cloud proxy bandwidth stays small. After the one-time local Mac backfill marks
 all current rows enriched, this only ever processes the daily TRICKLE of brand-new listings — a few
 hundred a day, not 57k. That makes deep-enrichment viable on the cloud (through the Saudi proxy)
-without blowing the metered Webshare plan.
+without blowing the metered DataImpulse plan.
 
 Run:
   python -m scrapers.wasalt.enrich --table wasalt_residential_listings --limit 800 --workers 6
