@@ -1,5 +1,5 @@
 # Wasalt residential sweep — runs every 4h in the cloud through a Saudi residential proxy
-# (Webshare). Mirrors Aqar's residential sweep: light 3-page pass over every type-slug ×
+# (DataImpulse). Mirrors Aqar's residential sweep: light 3-page pass over every type-slug ×
 # sale+rent, one parallel matrix job per slice. The proxy makes wasalt.sa think the request
 # is coming from a Saudi home IP, which is the only way the cloud reaches it.
 
@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       # OWNER-APPROVED 2026-08-23 (proposed 08-21 as PR #827). All 20 jobs here share ONE
-      # WASALT_PROXY_URL (Webshare Saudi-residential proxy) secret and previously dispatched
+      # WASALT_PROXY_URL (DataImpulse Saudi-residential proxy) secret and previously dispatched
       # fully parallel with no cap. Worse, this sweep (jobid 4, `40 */8`) and the 14-job
       # commercial sweep (jobid 5, `45 */8`) fire FIVE MINUTES apart into SEPARATE concurrency
       # groups, so up to 34 concurrent sessions hit one proxy. That is wasalt's own
@@ -31,7 +31,7 @@ jobs:
       # unrelated slugs — the signature of a shared resource, not a per-content block.
       #
       # 6 here + 6 in the commercial sweep caps the realistic peak at 12 instead of 34. It is a
-      # deliberately conservative starting value: this repo has no visibility into the Webshare
+      # deliberately conservative starting value: this repo has no visibility into the DataImpulse
       # plan's actual concurrent-session limit, so tune it up if the sweep cadence suffers, or
       # down if failures persist. mon_detect_proxy_contention() now watches that directly.
       #
