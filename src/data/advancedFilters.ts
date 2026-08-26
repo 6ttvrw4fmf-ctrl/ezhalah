@@ -1,5 +1,6 @@
 import type { SearchQuery } from './search';
 import { effectiveTypes, hasClientOnlyNarrowing } from './search';
+import { isProbeFailure } from '@/lib/afProbe';
 import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, fetchScopeOptionCounts, type AgeOptionCounts, type GuidedCounts } from './remote';
 import {
   SCOPE_GROUP_ID, SCOPE_TYPE_ID, scopeCandidates, applyScopeAnswer, unresolvedScopeTiers, type ScopeTier,
@@ -70,7 +71,11 @@ export const MIN_USEFUL_QUESTIONS_TO_SHOW = 1;
 // question and type. null on error → the card holds the last good number rather than flashing.
 export async function liveResultCount(q: SearchQuery): Promise<number | null> {
   const c = await fetchApartmentGuidedCounts(q);
-  return c ? c.cnt_selected : null;
+  // A failed probe is null HERE too, but for a different and already-correct reason: this is the
+  // live footer number, and null means "no fresh number, keep showing the last good one". It makes
+  // no claim about the scope, so it needs no verdict — unlike the ranking path.
+  if (isProbeFailure(c) || !c) return null;
+  return c.cnt_selected;
 }
 
 // ── Questions ────────────────────────────────────────────────────────────────────────────────────
@@ -92,6 +97,7 @@ const AGE_QUESTION: AdvancedQuestion = {
   eligibility: (q) => isAgeFilterScopeFor(q, effectiveTypes(q)),
   async resolveOptions(q) {
     const counts = await fetchPropertyAgeOptionCounts(q);
+    if (isProbeFailure(counts)) return { options: [], unknownCount: 0, total: 0, probeFailed: true };
     if (!counts || counts.cnt_total < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: 0, total: counts?.cnt_total ?? 0 };
     const options = meaningful(AGE_BUCKETS.map((b) => ({ key: b.key, label: t(b.labelKey), count: b.count(counts) })));
     return { options, unknownCount: counts.cnt_unknown, total: counts.cnt_total };
@@ -121,9 +127,13 @@ function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
 
 // Build a chip/tier question's options from the guided counts, applying the scope-size + per-option floors.
 function guidedOptions(
-  counts: GuidedCounts | null,
+  counts: GuidedCounts | null | { __probeFailed: true },
   defs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }>,
 ): AdvancedQuestionResult {
+  // A probe that never completed is UNKNOWN and says nothing about the scope. It must not return the
+  // same shape as "the source answered: nothing" — that equivalence is what silently demoted users to
+  // the legacy chips under load (owner 2026-08-26; src/lib/afProbe.ts).
+  if (isProbeFailure(counts)) return { options: [], unknownCount: 0, total: 0, probeFailed: true };
   if (!counts || counts.cnt_total_base < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: 0, total: counts?.cnt_total_base ?? 0 };
   return { options: meaningful(defs.map((d) => ({ key: d.key, label: t(d.labelKey), count: d.count(counts) }))), unknownCount: 0, total: counts.cnt_total_base };
 }
@@ -451,9 +461,15 @@ export type RankedQuestion = {
 // Probe every still-unasked eligible question against the CURRENT query, score, and rank. The
 // orchestrator calls this at entry AND after every answer — that re-anchoring on the shrinking set
 // is the whole architecture (350 → answer → analyze 140 → answer → analyze 48 → …).
-export async function rankQuestions(q: SearchQuery, askedIds: ReadonlySet<string>): Promise<RankedQuestion[]> {
+/** The ranked pool PLUS whether any probe in the batch failed to complete. */
+export type RankedQuestions = RankedQuestion[] & { readonly probeFailed: boolean };
+export async function rankQuestions(q: SearchQuery, askedIds: ReadonlySet<string>): Promise<RankedQuestions> {
   const pool = eligibleQuestions(q).filter((question) => !askedIds.has(question.id));
   const probes = await Promise.all(pool.map((question) => question.resolveOptions(q)));
+  // A probe that never completed taught us NOTHING about its question. Recorded here so the callers
+  // can tell "the sources say there is nothing useful left" from "we could not find out" — the two
+  // used to be the same empty array (owner 2026-08-26; src/lib/afProbe.ts).
+  const anyProbeFailed = probes.some((p) => p.probeFailed === true);
   const ranked: RankedQuestion[] = [];
   pool.forEach((question, i) => {
     const scored = scoreQuestion(question, probes[i]);
@@ -462,8 +478,13 @@ export async function rankQuestions(q: SearchQuery, askedIds: ReadonlySet<string
   // Ask-first tier wins ONLY among questions that already cleared the usefulness gates above
   // (scoreQuestion returned non-null); within a tier, the contextual score decides. So installments
   // opens the interview whenever it is genuinely useful, and silently steps aside when it is not.
-  return ranked.sort((a, b) =>
+  const sorted = ranked.sort((a, b) =>
     askTier(b.question.id) - askTier(a.question.id) || b.score - a.score);
+  // The array is still the array (every existing consumer keeps working); `probeFailed` rides along
+  // as a non-enumerable property so the batch's provenance cannot be silently dropped by a .map()
+  // or a spread on the way to the decision that depends on it.
+  Object.defineProperty(sorted, 'probeFailed', { value: anyProbeFailed, enumerable: false });
+  return sorted as RankedQuestions;
 }
 
 // THE engine gate — every caller asks HERE which questions may run, so no call site re-derives it.

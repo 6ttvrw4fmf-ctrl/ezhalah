@@ -81,9 +81,18 @@ const ag = codeOnly(read('src/app/agent.tsx'));
 check('agent.tsx imports MIN_USEFUL_QUESTIONS_TO_SHOW from @/data/advancedFilters',
   /import\s*\{[^}]*\bMIN_USEFUL_QUESTIONS_TO_SHOW\b[^}]*\}\s*from\s*'@\/data\/advancedFilters'/.test(ag));
 
+// Re-anchored 2026-08-26 (UNKNOWN IS NOT NO). The guard body gained a verdict: the card still
+// closes on BOTH outcomes (never an empty AF card), but the refine chips may only REPLACE it when
+// the probes actually answered "nothing useful". The threshold half — that this reads the named
+// constant and not an empty-plan literal — is what this check has always been about and is
+// unchanged; the fallback half is now asserted as conditional rather than unconditional.
 check("startAgeFlow's opening guard reads `ageFlowPlanRef.current.length < MIN_USEFUL_QUESTIONS_TO_SHOW` (not just an empty-plan check)",
-  /if\s*\(ageFlowPlanRef\.current\.length\s*<\s*MIN_USEFUL_QUESTIONS_TO_SHOW\)\s*\{\s*setAgeFlow\(null\);\s*if\s*\(fallbackToRefine\)\s*startRefine\(q\);\s*return;\s*\}/.test(ag),
-  'this exact shape is the fix: 0 useful questions must take the silent-close/fallback-to-refine path an empty plan already used');
+  /if\s*\(ageFlowPlanRef\.current\.length\s*<\s*MIN_USEFUL_QUESTIONS_TO_SHOW\)\s*\{[\s\S]{0,400}?setAgeFlow\(null\);[\s\S]{0,400}?startRefine\(q\);[\s\S]{0,80}?return;\s*\}/.test(ag),
+  'this exact shape is the fix: 0 useful questions must take the silent-close path an empty plan already used');
+check('…and the close is UNCONDITIONAL while the refine-chip fallback is gated on a probe-backed verdict',
+  /setAgeFlow\(null\);\s*\/\/ never open an empty card/.test(ag)
+  && /if \(fallbackToRefine && mayAssertNothingToNarrow\(verdict\)\) startRefine\(q\);/.test(ag),
+  'an UNDETERMINED batch must close the card but must NOT offer the chips in its place');
 
 check('the guard reads the NAMED constant, not a magic `!ageFlowPlanRef.current.length` literal — one source of truth for the threshold, even though `< 1` and `!length` are numerically identical today',
   !/if\s*\(!ageFlowPlanRef\.current\.length\)/.test(ag));
