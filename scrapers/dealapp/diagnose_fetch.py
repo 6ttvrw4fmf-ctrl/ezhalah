@@ -15,19 +15,31 @@ From an ordinary network the same URLs return the full schema WITH a price (veri
 live id 558414 price 550160.38, stale-but-alive id 382843 price 260325, bogus id 999999999 no
 real-estate-listing key at all). So the parser and the classifier are correct.
 
-RESULT OF THE FIRST RUN (Actions run 32998202697, 2026-08-26) — IT DISPROVED THE PREMISE THIS
-FILE WAS WRITTEN ON. All FOUR variants, including A-prod-exact (the byte-exact production client),
-got the full schema from a GitHub Actions runner: 558414 -> 550160.38 InStock, 382843 -> 260325
-InStock, 548176 -> 750000 InStock, and the bogus control correctly carried no listing schema.
-The client is exonerated AND so is the runner's egress. "Actions gets shells" was wrong.
+RUN 1 (Actions run 32998202697) — all FOUR variants, including A-prod-exact, got the full schema
+from a GitHub Actions runner: 558414 -> 550160.38 InStock, 382843 -> 260325 InStock, 548176 ->
+750000 InStock, bogus control correctly no listing schema. Read at the time as "client and egress
+both exonerated".
 
-WHAT REMAINS, and why --volume exists. The discriminator makes 4 gentle requests per variant; a
-real shard walks ~1,200 unique ids through 6 workers. The per-request timings hint at it: the
-first request costs ~200-240 ms and the rest ~10-12 ms, which is an edge cache being hit — and a
-long walk of unique ids blows straight past it. `--volume N` walks N ids taken from dealapp's OWN
-sitemap (so every id is published-live and a shell is a false negative by definition) and reports
-the shell rate by decile. Flat ~0% exonerates volume; a rate climbing with the request index
-localises the cause and makes throttle/backoff the fix.
+THAT VERDICT WAS WRONG, AND THE SAMPLE IS WHY. Those four ids return a data-bearing page from
+every client on every network — they were picked BECAUSE they had already been confirmed alive,
+so they could only ever produce a pass. Run against a real population the picture inverts:
+
+  RUN 2 (--volume 600, Actions run 32999375439): 88.0% shell over 600 sitemap-published ids,
+    FLAT across all ten deciles (81.7/80.0/96.7/80.0/95.0/83.3/91.7/91.7/85.0/95.0).
+  Same ordered ids, ordinary network, system curl: 10.0% shell (54 of 60 carried the schema).
+
+The flat decile shape is the volume probe's own decision rule for EXONERATING volume — the rate
+does not climb with the request index, so sustained load is not the cause either. What is left is
+the 88-vs-10 gap, which moves TWO variables at once (client AND network).
+
+WHY --population EXISTS. It runs every client variant plus a plain system-curl control against
+the SAME sitemap ids from the SAME runner, holding the network fixed so only the client varies.
+A spread between clients ⇒ our client is the cause and the fix is a scraper change. Every client
+alike at ~88% ⇒ the runner's egress identity is the cause, which is an owner provider decision.
+
+NEVER DIAGNOSE THIS ON A HAND-PICKED SAMPLE AGAIN. A sample drawn from ids already known to be
+alive cannot fail, so it cannot discriminate anything. PROBE_IDS below are kept only as the
+fixed controls they are good for (notably the bogus id), never as the population.
 
 WHAT THIS SEPARATES. Four client variants against the SAME ids from the SAME runner:
 
@@ -48,6 +60,7 @@ from __future__ import annotations
 import json
 import re
 import os
+import subprocess
 import sys
 import time
 from typing import Any, Optional
@@ -166,6 +179,86 @@ def sitemap_ids(sess: cc.Session, want: int) -> list[str]:
     return out
 
 
+def curl_probe(adid: str) -> dict[str, Any]:
+    """A fifth client that shares NO code with the others: the system `curl` binary.
+
+    It is here because it is the one client observed to succeed on this population. Plain curl on
+    an ordinary network returned the full schema for 54 of 60 sitemap ids (10% shell) while the
+    production client on a runner returned 88% shell over the SAME ordered ids. That is two
+    variables at once -- client AND network -- so this control runs curl from the SAME runner as
+    the curl_cffi variants, holding the network fixed.
+    """
+    url = f"{BASE}/ar/ad-details/{adid}"
+    t0 = time.monotonic()
+    try:
+        out = subprocess.run(
+            ["curl", "-sS", "--max-time", "40",
+             "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+             "-H", "Accept-Language: ar,en-US;q=0.7", url],
+            capture_output=True, text=True, timeout=60)
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:160]}",
+                "ms": round((time.monotonic() - t0) * 1000)}
+    schema, why = listing_schema(out.stdout)
+    return {"ok": True, "bytes": len(out.stdout), "schema_found": schema is not None,
+            "reason": why, "ms": round((time.monotonic() - t0) * 1000)}
+
+
+def population_probe(n: int, interval: float) -> dict[str, Any]:
+    """Every client variant against the SAME sitemap ids, from the SAME runner.
+
+    WHY THIS EXISTS (2026-08-26, third iteration). The four-variant discriminator ran all four
+    clients against FOUR HAND-PICKED ids and reported the client and the egress both exonerated.
+    That verdict was an artefact of the sample: those four ids return a data-bearing page from
+    every client on every network. Run against a real population the picture inverts --
+
+        Actions runner, curl_cffi impersonate=chrome124 : 88.0% shell (600 sitemap ids)
+        ordinary network, system curl                   : 10.0% shell (60 of the same ids)
+
+    -- and the flat-across-deciles shape of that 88% rules out sustained volume as well (the
+    volume probe's own decision rule: flat exonerates volume). So the cause is client or network
+    after all, and the cherry-picked sample is what hid it.
+
+    Holding the runner fixed and varying only the client is what separates the two. If a variant
+    (or the plain-curl control) succeeds where A-prod-exact fails, the cause is OUR CLIENT and the
+    fix is a scraper change. If every client fails at ~88% from the runner while plain curl off
+    the runner succeeds, the client is genuinely exonerated and the cause is the runner's egress
+    identity -- an owner provider decision, not something to route around here.
+    """
+    seed = build("A-prod-exact")
+    ids = sitemap_ids(seed, n)
+    if not ids:
+        return {"error": "could not read any ad ids from the sitemap"}
+
+    out: dict[str, Any] = {"ids_probed": len(ids), "interval_s": interval, "by_client": {}}
+    for name in VARIANTS + ["E-system-curl"]:
+        if name == "E-system-curl":
+            results = []
+            for adid in ids:
+                results.append(bool(curl_probe(adid).get("schema_found")))
+                time.sleep(interval)
+        else:
+            sess = build(name)
+            results = []
+            for adid in ids:
+                results.append(bool(probe(sess, adid).get("schema_found")))
+                time.sleep(interval)
+        shell = sum(1 for x in results if not x)
+        out["by_client"][name] = {
+            "schema": len(results) - shell,
+            "shell": shell,
+            "shell_pct": round(100.0 * shell / len(results), 1),
+        }
+    out["reading"] = (
+        "Same ids, same runner, only the client varies. A spread between clients means OUR CLIENT "
+        "is the cause and the fix is a scraper change. All clients alike at ~88% -- while plain "
+        "curl off-runner gets 10% on the same ids -- means the runner's EGRESS is the cause, "
+        "which is an owner provider decision, not something to route around here."
+    )
+    return out
+
+
 def volume_probe(n: int, interval: float) -> dict[str, Any]:
     """Walk N sitemap-published ids with the PRODUCTION client and report the shell rate by decile.
 
@@ -218,6 +311,14 @@ def volume_probe(n: int, interval: float) -> dict[str, Any]:
 
 
 def main() -> int:
+    if "--population" in sys.argv:
+        i = sys.argv.index("--population")
+        n = int(sys.argv[i + 1]) if len(sys.argv) > i + 1 else 60
+        interval = float(os.environ.get("PROBE_INTERVAL_S", "0.3"))
+        print("=== DEAL APP POPULATION x CLIENT PROBE ===")
+        print(json.dumps(population_probe(n, interval), indent=2, ensure_ascii=False))
+        return 0
+
     if "--volume" in sys.argv:
         i = sys.argv.index("--volume")
         n = int(sys.argv[i + 1]) if len(sys.argv) > i + 1 else 150
