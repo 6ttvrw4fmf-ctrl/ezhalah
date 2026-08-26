@@ -115,6 +115,61 @@ async function dbCount(filters) {
   return null;
 }
 
+// ── الحي: the REQUEST's label is not always the SERVED label ─────────────────────────────────────
+// The RPC matches a حي on a NORMALISED token (norm_district_tok), so «حي المهدية» and «المهدية» are
+// one place to it. This oracle deliberately does not reimplement that normaliser (doing so would
+// make agreement self-confirmation), and instead compares the SERVED label exactly — which is only
+// valid while the label the request carries IS a served label.
+//
+// It frequently is not. The district picker is fed by district_options_ar (the loc_catalog canonical
+// name, e.g. «حي المهدية»), while search_listings_ar stores its own canonical rendering of the same
+// حي (e.g. «المهدية», 8,079 rows in الرياض). Measured 2026-08-26 over every (city, served label)
+// pair the picker can reach: 1,874 agree exactly, 176 differ ONLY by the leading «حي », and 32
+// differ otherwise. Before this, all 208 produced `district_ar=in.("حي المهدية")` → 0 rows → a
+// confident «RPC 2470 vs independent DB 0» DEFECT against a product that was exactly right (the
+// 2,470 it served = 2,467 Residential-macro rows + 3 macro-'both' «عمارة» rows in residential
+// tables, with the 3 Commercial «أرض تجارية» rows correctly excluded). That is §40.7's cardinal
+// sin — an oracle accusing the product for its own imprecision — and it fires on 29% of the index's
+// (city, district) pairs, which carry no «حي » prefix at all.
+//
+// So the label is RESOLVED against what is actually served, using PostgREST's own operators:
+// probe each candidate spelling inside the request's own city scope and keep the ones that exist.
+// Nothing matches ⇒ the oracle cannot express this حي faithfully ⇒ it REFUSES and says so, rather
+// than reporting its own blindness as a matching failure. The refusal is the honest half: it keeps
+// the 32 residual cases from becoming false defects WITHOUT silencing the layer for the 2,050 it
+// can express, and a resolved label makes a later db≠rpc a real finding again.
+const stripHayy = (s) => String(s ?? '').replace(/^\s*ح[يى]\s+/, '').trim();
+/** Candidate spellings of one حي, most specific first. PURE — the unit test pins this. */
+export function districtLabelVariants(label) {
+  const bare = stripHayy(label);
+  return [...new Set([String(label ?? '').trim(), bare, `حي ${bare}`].filter(Boolean))];
+}
+/** Does this exact served label exist inside the request's own city scope? */
+async function servedLabelExists(label, cityScopeFilter) {
+  const q = `${SUPA}/rest/v1/search_listings_ar?select=listing_id&production_ready=is.true`
+    + `&district_ar=eq.${encodeURIComponent(label)}${cityScopeFilter}`;
+  try {
+    const r = await fetch(q, { headers: { ...H, Prefer: 'count=exact', Range: '0-0' }, signal: AbortSignal.timeout(30000) });
+    const cr = r.headers.get('content-range');
+    return cr && cr.includes('/') ? Number(cr.split('/')[1]) > 0 : null;
+  } catch { return null; }
+}
+/**
+ * Resolve every requested حي to the label(s) actually served in that city.
+ * → { labels } when all resolved · { unresolved } when any could not be, so the caller can refuse.
+ */
+async function resolveDistrictLabels(districts, cityScopeFilter) {
+  const labels = [], unresolved = [];
+  for (const d of districts) {
+    const hits = [];
+    for (const v of districtLabelVariants(d)) {
+      if (await servedLabelExists(v, cityScopeFilter)) hits.push(v);
+    }
+    if (hits.length) labels.push(...hits); else unresolved.push(d);
+  }
+  return unresolved.length ? { unresolved } : { labels: [...new Set(labels)] };
+}
+
 // ── the published taxonomy, fetched as DATA (never a hardcoded list — §1) ────────────────────────
 // known_type_ar maps a نوع to its macro category. The oracle needs it to express p_category the way
 // the PRODUCT defines it ("this type belongs to سكني"), which is a taxonomy fact, not RPC code. Two
@@ -453,7 +508,24 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
   if (j.rpc == null) { note('RPC replay unavailable — skipping 4/5 for this journey'); journeys.push(j); return j; }
 
   // 4→5 RPC vs INDEPENDENT DB TRUTH — derived from the app's OWN request, or skipped honestly.
-  const dbf = dbFilterFromRequest(req, await taxonomy());
+  // الحي first: the request's label may not be the SERVED label (see resolveDistrictLabels). Resolve
+  // it against what is actually served, and REFUSE the layer when it cannot be — never accuse.
+  let dbReq = req;
+  if (req.p_districts?.length) {
+    const enc = encodeURIComponent;
+    let scope = '';
+    if (req.p_cities?.length) scope += `&city_ar=in.(${enc(req.p_cities.map((c) => `"${c}"`).join(','))})`;
+    if (req.p_region_ids?.length) scope += `&region_id=in.(${req.p_region_ids.map((n) => Number(n)).join(',')})`;
+    const r = await resolveDistrictLabels(req.p_districts, scope);
+    if (r.unresolved) {
+      dbReq = null;
+      j.dbSkipped = `الحي «${r.unresolved.join('», «')}» matches no served label in this city — `
+        + 'the index renders it differently and this oracle will not guess (§40.7)';
+    } else {
+      dbReq = { ...req, p_districts: r.labels };
+    }
+  }
+  const dbf = dbReq ? dbFilterFromRequest(dbReq, await taxonomy()) : { comparable: false, reason: j.dbSkipped };
   if (dbf.comparable) {
     j.db = await dbCount(dbf.filter);
     if (j.db != null && j.db !== j.rpc) { defect(name, 'RPC→DB', `RPC ${j.rpc} vs independent DB ${j.db}`); j.ok = false; }

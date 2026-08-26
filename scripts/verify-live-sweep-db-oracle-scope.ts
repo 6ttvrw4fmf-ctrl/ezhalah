@@ -27,7 +27,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { dbFilterFromRequest } from '../e2e/live-sweep/sweep.mjs';
+import { dbFilterFromRequest, districtLabelVariants } from '../e2e/live-sweep/sweep.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -207,6 +207,56 @@ check('a set larger than one page is recorded as skipped, not as a pass',
   sweep.includes('idSetSkipped'));
 check('duplicates are detected from an ARRAY, so repeats cannot be silently de-duped',
   sweep.includes('rIds.length - rSet.size'));
+
+// ── 5b. الحي: the REQUEST's label is not always the SERVED label ────────────────────────────────
+// 2026-08-26. The picker is fed by district_options_ar (loc_catalog's canonical name, «حي المهدية»);
+// search_listings_ar stores its OWN canonical rendering of the same حي («المهدية», 8,079 rows in
+// الرياض). The RPC matches on norm_district_tok so both are one place to it — but the oracle
+// compares the SERVED label exactly, so it filtered on a spelling that matches zero rows and
+// reported «RPC 2470 vs independent DB 0»: a confident, total, and entirely false matching failure
+// against a product that was exactly right. Measured over every (city, served label) pair the picker
+// can reach: 1,874 agree exactly, 176 differ ONLY by the leading «حي », 32 differ otherwise.
+//
+// The fix must do BOTH halves, and this pins both — a fix that only silenced the layer would be
+// worse than the bug (§40.7 / "never silence a barrier to make it green: make it distinguish"):
+//   • RESOLVE the 176 — probe the candidate spellings and use the one actually served;
+//   • REFUSE the 32 — say so and skip, never emit a filter known to match nothing.
+check('the oracle resolves a حي label to the spelling actually served',
+  /export function districtLabelVariants/.test(sweep) && sweep.includes('resolveDistrictLabels'),
+  'the picker\'s label and the index\'s rendering differ on 208 of 2,082 reachable pairs');
+check('«حي X» and «X» are treated as candidate spellings of one حي',
+  (() => {
+    const v = districtLabelVariants('حي المهدية');
+    const w = districtLabelVariants('المهدية');
+    return v.includes('حي المهدية') && v.includes('المهدية')
+        && w.includes('المهدية') && w.includes('حي المهدية');
+  })(),
+  'without both spellings the 176 prefix-only pairs filter on a label that matches zero rows');
+check('the «حي» prefix is stripped in either orthography (ي and ى)',
+  districtLabelVariants('حى الملقا').includes('الملقا'));
+check('a حي label is never mangled beyond the prefix',
+  (() => {
+    const v = districtLabelVariants('حي النرجس');
+    return v.every((x) => x === 'حي النرجس' || x === 'النرجس');
+  })(),
+  'over-normalising would make the oracle match a DIFFERENT حي — a false pass, the worse failure');
+check('an unresolvable حي makes the oracle REFUSE the layer, not report a mismatch',
+  sweep.includes('matches no served label in this city') && /dbReq\s*=\s*null/.test(sweep),
+  'emitting a filter known to match nothing turns the oracle\'s blindness into a product accusation');
+check('a RESOLVED حي still flows into the district filter, so the layer keeps comparing',
+  (() => {
+    const f = dbFilterFromRequest(
+      { p_districts: ['المهدية'], p_cities: ['الرياض'], p_deal: 'بيع' }, [{ type_ar: 'شقة', macro: 'Residential' }]);
+    return f.comparable === true && decodeURIComponent(f.filter).includes('"المهدية"');
+  })(),
+  'refusing everything would silence the layer instead of fixing it');
+// MUTATION PROOF — the pre-fix behaviour must FAIL this file.
+check('MUTATION: exact-label-only resolution is rejected',
+  !((): boolean => {
+    const only = districtLabelVariants('حي المهدية');
+    return only.length === 1 && only[0] === 'حي المهدية';   // the old behaviour
+  })(),
+  'variants() returning the request label alone reproduces the 2026-08-26 false defect exactly');
 
 // ── 6. a skipped layer can never read as a pass ─────────────────────────────────────────────────
 const runner = read('e2e/live-sweep/run.mjs');
