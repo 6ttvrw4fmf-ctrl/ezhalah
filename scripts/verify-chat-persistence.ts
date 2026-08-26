@@ -11,6 +11,7 @@
 //      a chat that holds a conversation (that was the fragmentation/loss bug).
 //   3. The WIRING — agent capture/restore, store persistence + server sync, sidebar routing.
 import { readFileSync } from 'node:fs';
+import { mergeOne, withFreshTranscript } from '../src/lib/chatMerge.ts';
 import { serializeChat, restoreChat, sameTranscript, TRANSCRIPT_LISTING_CAP, TRANSCRIPT_FIRST_PAGE, LOCAL_TRANSCRIPT_ENTRIES } from '../src/lib/chatTranscript.ts';
 
 let failed = 0;
@@ -72,9 +73,21 @@ check('query-dedupe applies ONLY to entries with no held conversation (a transcr
   /\?\? \(!chatId \? h\.find\(\(it\) => !it\.transcript && sameQuery\(it\.query, q\)\) : undefined\)/.test(store));
 check('a continuation carries the entry’s existing transcript through the update (never dropped between turns)',
   /\.\.\.\(prior\?\.transcript \? \{ transcript: prior\.transcript, tRev: prior\.tRev \} : \{\}\)/.test(store));
+// Re-anchored 2026-08-25: the literal object spread moved into withFreshTranscript() when transcript
+// PRECEDENCE was centralised in src/lib/chatMerge.ts. The invariant is unchanged and is now proved by
+// EXECUTING the helper rather than matching its old spelling — `ts` must not move, `tRev` must.
 check('saveTranscript stamps tRev, not ts (revealing more cards must not resort the sidebar)',
-  // one tRev minted up front, shared by the direct disk write and the state update (flush-on-exit).
-  /const tRev = Date\.now\(\);/.test(store) && /next\[idx\] = \{ \.\.\.h\[idx\], transcript, tRev \};/.test(store));
+  // one tRev minted up front, shared by the direct disk write and the state update (flush-on-exit),
+  // and routed through withFreshTranscript so a fresh capture also clears txStale.
+  /const tRev = Date\.now\(\);/.test(store) && /withFreshTranscript\(h\[idx\] as never, transcript, tRev\)/.test(store));
+{
+  const before = { id: 'c', ts: 111, tRev: 1, transcript: { old: true }, txStale: true } as never;
+  const after = withFreshTranscript(before, { fresh: true }, 999) as { ts: number; tRev: number; txStale?: boolean; transcript: unknown };
+  check('…proved by execution: tRev moves', after.tRev === 999);
+  check('…proved by execution: ts is untouched (the sidebar does not resort)', after.ts === 111);
+  check('…proved by execution: the fresh transcript replaces the old one', JSON.stringify(after.transcript) === '{"fresh":true}');
+  check('…proved by execution: a stale flag is cleared once a fresh transcript lands', after.txStale === undefined);
+}
 
 // ── 3a. Local persistence bounds ────────────────────────────────────────────────────────────────
 check('every disk write routes through serializeHistoryForDisk (transcripts pruned to the recent-N cache)',
@@ -85,7 +98,22 @@ check('pruning happens ONLY at the serialization boundary — in-memory state ke
   && /slice\(0, LOCAL_TRANSCRIPT_ENTRIES\)/.test(store));
 
 // ── 3b. Server sync (survives new browser / re-login) ───────────────────────────────────────────
-check('pull: server metas merge after sign-in, newer side wins per entry', /loadChatMetas\(\)\.then\(\(rows\)/.test(store) && /serverStamp > localStamp/.test(store));
+// Re-anchored 2026-08-25: the inline stamp comparison moved into chatMerge.mergeOne() so the pull
+// merge and hydrateTranscript cannot disagree about which copy is newer (they did — see
+// scripts/verify-transcript-integrity.ts for the loss that caused). Executed, not matched.
+check('pull: server metas merge after sign-in, via the single shared precedence rule',
+  /loadChatMetas\(\)\.then\(\(rows\)/.test(store) && /mergeOne\(/.test(store)
+  && !/serverStamp\s*>\s*localStamp/.test(store));
+{
+  const localOld = { id: 'c', ts: 10, tRev: 10, transcript: { n: 1 } } as never;
+  const localNew = { id: 'c', ts: 99, tRev: 99, transcript: { n: 9 } } as never;
+  check('…proved by execution: a NEWER SERVER entry wins the meta',
+    (mergeOne(localOld, { id: 'c', ts: 50, tRev: 50 }) as { ts: number }).ts === 50);
+  check('…proved by execution: a NEWER LOCAL entry is kept whole',
+    (mergeOne(localNew, { id: 'c', ts: 50, tRev: 50 }) as { ts: number }).ts === 99);
+  check('…proved by execution: a server-only chat appears',
+    (mergeOne(undefined, { id: 'z', ts: 5 }) as { id: string }).id === 'z');
+}
 check('push: debounced write-through diffs per-entry activity stamps', /const stamp = Math\.max\(it\.ts, it\.tRev \?\? 0\);/.test(store));
 check('push: gated on the pull having merged (a not-yet-merged list can never mass-delete server history)',
   /if \(syncReadyRef\.current !== historyKey\(user\.sub\)\) return; \/\/ push only after the pull merged/.test(store));
