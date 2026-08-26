@@ -255,9 +255,15 @@ check('the guided record is never dropped wholesale (no setGuidedPills(null))',
   !has(/setGuidedPills\(null\)/),
   'src/app/agent.tsx — clearing the record throws away the asked-set with it. If a future flow '
   + 'genuinely must clear it, re-home `asked` first and update this check with the reason.');
+// UPDATED 2026-08-25 (dead-tap fix). The literal moved, the RULE did not. The probe used to rank
+// `rankQuestions(q, new Set(asked))`; it now walks the scope tiers first, so it ranks the RESOLVED
+// query against a `seen` set SEEDED from the same carried asked-set and grown by the tiers the walk
+// resolves on the way down. Both halves are still pinned — the carry is read, and the rank is fed
+// from it — because probing with an empty set still offers a round whose only question is a repeat.
 check('the offer probe asks with the SAME carried asked-set the round will use',
   has(/const asked = guidedPills\?\.msgId === m\.id \? guidedPills\.asked : \[\];/)
-  && has(/rankQuestions\(q, new Set\(asked\)\)/),
+  && has(/const seen = new Set<string>\(asked\);/)
+  && has(/rankQuestions\(scoped, seen\)/),
   'src/app/agent.tsx — probing with an empty set offers a round whose only question is a repeat');
 check('the round\'s own plan is ranked against the carried set, not a fresh one',
   (agentSrc.match(/rankQuestions\(q, ageFlowAskedRef\.current\)/g) ?? []).length === 2,
@@ -357,8 +363,11 @@ mustCatch('setGuidedPills(null) coming back (the asked-set goes with it)',
   /setGuidedPills\(null\)/.test(mut(agentSrc, 'if (!guidedPills || busy) return;',
     'if (!guidedPills || busy) { setGuidedPills(null); return; }')));
 mustCatch('the offer probe going back to an empty asked-set',
-  !/rankQuestions\(q, new Set\(asked\)\)/.test(
-    mut(agentSrc, 'rankQuestions(q, new Set(asked))', 'rankQuestions(q, new Set())')));
+  !/const seen = new Set<string>\(asked\);/.test(
+    mut(agentSrc, 'const seen = new Set<string>(asked);', 'const seen = new Set<string>();')));
+mustCatch('the offer probe ranking something other than the walked set',
+  !/rankQuestions\(scoped, seen\)/.test(
+    mut(agentSrc, 'rankQuestions(scoped, seen)', 'rankQuestions(scoped, new Set())')));
 mustCatch('a round ranking its plan against a fresh set instead of the carried one',
   (mut(agentSrc, 'const ranked = await rankQuestions(q, ageFlowAskedRef.current);',
     'const ranked = await rankQuestions(q, new Set());')

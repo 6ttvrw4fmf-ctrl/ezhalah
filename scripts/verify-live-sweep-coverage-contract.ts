@@ -91,6 +91,92 @@ check('DB truth comes from PostgREST filter operators, not the app\'s own SQL',
 check('the RPC layer replays the app\'s OWN captured request body',
   /rpcTotal = async \(body\)/.test(sweep) && /requests\.filter\(\(r\) => \(r\.p_limit \?\? 0\) > 1\)/.test(sweep));
 
+// ── 4b. the sweep must RECOGNISE every terminal state production can render ─────────────────────
+// A journey that cannot see the screen it landed on hangs until its timeout and dies, and a dead
+// journey takes a COVERAGE FLOOR with it — the run fails while production is perfectly healthy.
+//
+// That is not hypothetical. Until 2026-08-26 the settle predicate was /لقينا|ما لقينا|ما فيه/,
+// which does not match «ما لقيت …». Production answers an honest zero inside a selected حي with
+// «ما لقيت نتائج في الحي المحدد — …تبيني أوسّع المنطقة؟» (correct: it OFFERS to widen, never widens
+// silently), so every district-scoped journey landing on an honest zero hung for 70 s. It killed the
+// trending-district journey on بقعاء and failed the whole sweep on a missed floor, while that city
+// searched perfectly (سكني/بيع/بقعاء → «لقينا 87 إعلان»).
+//
+// So the predicate is PINNED against the product's own user-facing strings: every «لقينا …» result
+// headline and every zero/widening-offer message in src/i18n.tsx must be recognised. A new phrasing
+// shipping tomorrow fails HERE, in npm test, instead of silently costing a floor months later.
+// Widening this predicate can never mask a defect — it only decides when to STOP waiting; the
+// six-layer assertChain still judges what was found.
+const i18n = read('src/i18n.tsx');
+const arabicTerminalPhrases = [...i18n.matchAll(/'((?:لقينا|ما لقيت|ما لقينا|ما فيه)[^']*)'/g)]
+  .map((m) => m[1])
+  .filter((s) => !/محادثة/.test(s));   // «ما لقينا محادثة بهذا الاسم» is sidebar chat search, not a results state
+check('the sweep declares ONE shared settle predicate (not a copy per journey)',
+  /export const SETTLED_RE/.test(sweep)
+  && !/\/لقينا\|ما لقينا\|ما فيه\//.test(sweep + journeys),
+  'two hand-maintained copies is how one of them silently rots');
+check('every journey waits on that shared predicate',
+  (sweep.match(/SETTLED_RE\.source/g) ?? []).length + (journeys.match(/SETTLED_RE\.source/g) ?? []).length >= 2);
+check('the product actually publishes terminal phrasings to check against',
+  arabicTerminalPhrases.length >= 6, `found ${arabicTerminalPhrases.length} in src/i18n.tsx`);
+{
+  const m = sweep.match(/export const SETTLED_RE = (\/[^\n]*?\/);/);
+  const re = m ? new RegExp(m[1].slice(1, -1)) : null;
+  const unseen = re ? arabicTerminalPhrases.filter((p) => !re.test(p)) : arabicTerminalPhrases;
+  check('the settle predicate recognises EVERY result/zero state src/i18n.tsx can render',
+    re != null && unseen.length === 0,
+    unseen.length ? `unrecognised → the sweep would hang on:\n      ${unseen.slice(0, 4).join('\n      ')}` : 'could not parse SETTLED_RE');
+  // MUTATION — the pre-2026-08-26 predicate must FAIL this check.
+  const old = /لقينا|ما لقينا|ما فيه/;
+  check('MUTATION: the old predicate is rejected (it could not see «ما لقيت …»)',
+    arabicTerminalPhrases.some((p) => !old.test(p)),
+    'if nothing fails the old regex this check has stopped proving anything');
+}
+
+// ── 4c. the rotation must not lose a journey (and a FLOOR) to a legitimate refusal ──────────────
+// The city field's pool is deal+category scoped BY DESIGN, so a city stocking only بيع is correctly
+// not offered on an إيجار search. Pairing a city with a deal it does not stock therefore loses the
+// journey to correct product behaviour — and takes a coverage floor with it. 2026-08-26: الدليمية
+// (22 listings, ALL بيع, zero إيجار/سنوي) drew «إيجار/سنوي», was rightly not offered, and the run
+// failed on «non-Riyadh cities: 2 < 3» while production was healthy. The floor is not the problem
+// and must NOT be lowered — the pairing is.
+check('the rotation pairs a city only with a deal it actually stocks',
+  /deal_ar,rent_period_ar/.test(runner) && /dealsOf/.test(runner),
+  'blind city×deal pairing loses journeys to correct refusals and fails the run on a missed floor');
+check('deal availability is read from the live index, never hardcoded',
+  /search_listings_ar\?select=city_ar,region_ar,deal_ar,rent_period_ar/.test(runner));
+check('the floors themselves were NOT lowered to make the run pass',
+  /nonRiyadhCities:\s*3/.test(sweep) && /trendingDistrictJourneys:\s*1/.test(sweep)
+  && /mobileJourneys:\s*1/.test(sweep) && /cardClickBackJourneys:\s*1/.test(sweep),
+  'lowering a floor is the forbidden way to turn this run green');
+
+// A SKIPPED journey is not coverage. Recording it as 'pass' refreshes the city in the stalest-first
+// ledger, so a city the sweep never manages to reach reads as permanently well-covered.
+check('only a journey that actually RAN is written to the coverage ledger',
+  /if \(ran\) \{/.test(runner) && /const ran = await run\(/.test(runner),
+  'recording a skip as pass is how a rotation system rots quietly');
+
+// A floor must not hinge on ONE rotated city being offerable. Backstops must target a city already
+// PROVEN reachable this run, not the same pickCities[0] whose refusal cost the floor in the first
+// place — and the mobile floor, which rode on `mobile = i === 0`, needs a backstop like the others.
+check('floor backstops target a city proven reachable this run',
+  /const reachable = \(\) =>/.test(runner) && /citiesTested\]\[0\]/.test(runner),
+  'a backstop pinned to pickCities[0] fails for exactly the reason the floor was missed');
+check('the MOBILE floor has a backstop of its own',
+  /done\.mobile\)/.test(runner) && /mobile floor/.test(runner),
+  'mobile rode on `i === 0` and vanished whenever that one city was not offered');
+check('the trending-district journey also uses a reachable city',
+  /trendingDistrict\(\{ city: reachable\(\)/.test(runner));
+
+// «not offered» must mean the PRODUCT refused, never "the list had not rendered yet". A flat sleep
+// turned بريدة — a top-10 city with 4,850 listings — into a skipped journey and a missed floor.
+check('the city option is POLLED for, not sampled once after a flat sleep',
+  /waitForFunction\(/.test(sweep) && /CITY_OPTION_TIMEOUT_MS/.test(sweep),
+  'a slow suggestion fetch must not read as a product refusal');
+check('a city pick is confirmed by the field having COMMITTED, not by the click',
+  /const committed = await input\.inputValue\(\)/.test(sweep),
+  'a click that missed leaves the field empty and the later search is refused (§41.13)');
+
 // ── 5. the schedule ─────────────────────────────────────────────────────────────────────────────
 check('the sweep runs on a schedule', /^\s*schedule:/m.test(wf) && /cron:/.test(wf));
 check('the scheduled target is production', /ezhalah-app\.vercel\.app/.test(wf));

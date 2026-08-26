@@ -29,74 +29,94 @@ const CLEAN = { mergeable: 'MERGEABLE' as const, mergeStateStatus: 'CLEAN' };
 
 // ── the baseline: everything green must actually allow ───────────────────────────────────────────
 check('all required checks SUCCESS + clean state → ALLOWED',
-  decideMerge({ requiredContexts: REQ, checks: allGreen, ...CLEAN }).allow);
+  decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, ...CLEAN }).allow);
 
 // ── every non-success conclusion, individually, blocks — this IS the incident ────────────────────
 const BAD_CONCLUSIONS = ['CANCELLED', 'FAILURE', 'TIMED_OUT', 'SKIPPED', 'NEUTRAL', 'ACTION_REQUIRED', 'STALE', 'STARTUP_FAILURE'] as const;
 for (const bad of BAD_CONCLUSIONS) {
   const checks = allGreen.map((c, i) => (i === 0 ? { ...c, conclusion: bad } : c));
-  const v = decideMerge({ requiredContexts: REQ, checks, ...CLEAN });
+  const v = decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks, ...CLEAN });
   check(`a required check reporting ${bad} → BLOCKED`, !v.allow, JSON.stringify(v.reasons));
 }
 // null conclusion (still queued/in_progress, no terminal state yet) — the exact shape `gh pr checks
 // --watch` returning does NOT rule out if it raced a fresh push.
 {
   const checks = allGreen.map((c, i) => (i === 0 ? { ...c, conclusion: null } : c));
-  const v = decideMerge({ requiredContexts: REQ, checks, ...CLEAN });
+  const v = decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks, ...CLEAN });
   check('a required check still PENDING (null conclusion) → BLOCKED', !v.allow);
 }
 // the context never appears in the rollup at all (e.g. reported against a stale SHA the PR no
 // longer shows) — absence must be exactly as blocking as an explicit failure.
 {
   const checks = allGreen.filter((c) => c.context !== REQ[0]);
-  const v = decideMerge({ requiredContexts: REQ, checks, ...CLEAN });
+  const v = decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks, ...CLEAN });
   check('a required context with NO reported result at all → BLOCKED', !v.allow);
 }
 // a stale SUCCESS sitting next to a fresh CANCELLED for the SAME context (a re-run scenario) — the
 // bad one must still block; "it passed once" is not the same as "it currently passes."
 {
   const checks: CheckRun[] = [...allGreen, { context: REQ[0], conclusion: 'CANCELLED' }];
-  const v = decideMerge({ requiredContexts: REQ, checks, ...CLEAN });
+  const v = decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks, ...CLEAN });
   check('a stale SUCCESS next to a fresh CANCELLED for the same context → BLOCKED', !v.allow);
 }
 
 // ── branch freshness / mergeable state ────────────────────────────────────────────────────────────
 check('BEHIND base → BLOCKED even with all checks green',
-  !decideMerge({ requiredContexts: REQ, checks: allGreen, mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND' }).allow);
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND' }).allow);
 check('CONFLICTING mergeable state → BLOCKED',
-  !decideMerge({ requiredContexts: REQ, checks: allGreen, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }).allow);
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }).allow);
 check('UNKNOWN mergeable state → BLOCKED',
-  !decideMerge({ requiredContexts: REQ, checks: allGreen, mergeable: 'UNKNOWN', mergeStateStatus: 'UNSTABLE' }).allow);
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, mergeable: 'UNKNOWN', mergeStateStatus: 'UNSTABLE' }).allow);
 check('BLOCKED mergeStateStatus → BLOCKED',
-  !decideMerge({ requiredContexts: REQ, checks: allGreen, mergeable: 'MERGEABLE', mergeStateStatus: 'BLOCKED' }).allow);
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, mergeable: 'MERGEABLE', mergeStateStatus: 'BLOCKED' }).allow);
 check('CLEAN + MERGEABLE with all green → ALLOWED (the only fully-green path)',
-  decideMerge({ requiredContexts: REQ, checks: allGreen, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' }).allow);
+  decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' }).allow);
 
 // ── file-list drift (shared-worktree mix-up class of bug) ────────────────────────────────────────
 check('file list unchanged since recorded → ALLOWED',
-  decideMerge({ requiredContexts: REQ, checks: allGreen, ...CLEAN, expectedFiles: ['a.ts', 'b.ts'], actualFiles: ['a.ts', 'b.ts'] }).allow);
+  decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, ...CLEAN, expectedFiles: ['a.ts', 'b.ts'], actualFiles: ['a.ts', 'b.ts'] }).allow);
 check('file list unchanged, different ORDER → still ALLOWED (order-insensitive)',
-  decideMerge({ requiredContexts: REQ, checks: allGreen, ...CLEAN, expectedFiles: ['a.ts', 'b.ts'], actualFiles: ['b.ts', 'a.ts'] }).allow);
+  decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, ...CLEAN, expectedFiles: ['a.ts', 'b.ts'], actualFiles: ['b.ts', 'a.ts'] }).allow);
 check('an EXTRA file appeared since it was recorded → BLOCKED',
-  !decideMerge({ requiredContexts: REQ, checks: allGreen, ...CLEAN, expectedFiles: ['a.ts'], actualFiles: ['a.ts', 'c.ts'] }).allow);
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, ...CLEAN, expectedFiles: ['a.ts'], actualFiles: ['a.ts', 'c.ts'] }).allow);
 check('a file DISAPPEARED since it was recorded → BLOCKED',
-  !decideMerge({ requiredContexts: REQ, checks: allGreen, ...CLEAN, expectedFiles: ['a.ts', 'b.ts'], actualFiles: ['a.ts'] }).allow);
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, ...CLEAN, expectedFiles: ['a.ts', 'b.ts'], actualFiles: ['a.ts'] }).allow);
 check('no expectation recorded → file-list check is skipped, not a false block',
-  decideMerge({ requiredContexts: REQ, checks: allGreen, ...CLEAN }).allow);
+  decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, ...CLEAN }).allow);
 
 // ── case normalisation (REST lowercase vs GraphQL uppercase) ─────────────────────────────────────
 check('lowercase "success" (REST API shape) normalises to SUCCESS', normaliseConclusion('success') === 'SUCCESS');
 check('lowercase "cancelled" normalises and still blocks',
-  !decideMerge({ requiredContexts: REQ, checks: allGreen.map((c, i) => (i === 0 ? { ...c, conclusion: 'cancelled' as any } : c)), ...CLEAN }).allow);
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen.map((c, i) => (i === 0 ? { ...c, conclusion: 'cancelled' as any } : c)), ...CLEAN }).allow);
 
 // ── an empty required-context list (branch protection unreadable) never FALSELY allows on its own —
 // mergeable/mergeStateStatus still gate, matching the CLI's documented fallback behaviour.
 check('empty required-context list still enforces mergeable/mergeStateStatus',
-  !decideMerge({ requiredContexts: [], checks: [], mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }).allow);
+  !decideMerge({ requiredContexts: [], requiredContextsKnown: true, checks: [], mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }).allow);
 check('empty required-context list + clean mergeable state → ALLOWED (nothing left to check)',
-  decideMerge({ requiredContexts: [], checks: [], ...CLEAN }).allow);
+  decideMerge({ requiredContexts: [], requiredContextsKnown: true, checks: [], ...CLEAN }).allow);
 
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
+
+// ── 2026-08-26: the cloud-transport fix must not have opened a hole ──────────────────────────────
+// The old transport swallowed a 403 on the branch-protection endpoint and returned an EMPTY required
+// list, so a merge could pass while NOTHING verified the required checks. Not knowing what is
+// required is not the same as nothing being required, and only one of those is safe to merge on.
+check('required contract UNREADABLE → BLOCKED even when everything else is green',
+  !decideMerge({ requiredContexts: [], requiredContextsKnown: false, checks: allGreen, ...CLEAN }).allow);
+check('required contract field ABSENT entirely → BLOCKED (fails closed by default)',
+  !decideMerge({ requiredContexts: REQ, checks: allGreen, ...CLEAN } as any).allow);
+check('required contract read and legitimately EMPTY → still ALLOWED (known ≠ unreadable)',
+  decideMerge({ requiredContexts: [], requiredContextsKnown: true, checks: [], ...CLEAN }).allow);
+
+// A failing check that is not on the REQUIRED list must still block: GitHub calls that UNSTABLE and
+// the gate already refuses UNSTABLE, so stating it directly costs nothing and holds even when
+// mergeStateStatus is stale or unavailable.
+check('a NON-required check that FAILED still blocks the merge',
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: [...allGreen, { context: 'optional-lint', conclusion: 'FAILURE' }], ...CLEAN }).allow);
+check('a NON-required check still PENDING still blocks the merge',
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: [...allGreen, { context: 'optional-lint', conclusion: null }], ...CLEAN }).allow);
+
 console.log('\n  mutation proof — each guard must FAIL on its own defect\n');
 let mutFail = 0;
 const mustCatch = (label: string, caught: boolean) => {
@@ -112,18 +132,28 @@ mustCatch('a gate that accepts ANY non-null conclusion (not specifically SUCCESS
   (() => {
     const buggyAllowsAnyTerminal = (concl: string | null) => concl != null; // the exact regression shape
     return !buggyAllowsAnyTerminal(null) // sanity: null (pending) is correctly excluded even by the buggy version
-      && decideMerge({ requiredContexts: REQ, checks: allGreen.map((c, i) => (i === 0 ? { ...c, conclusion: 'CANCELLED' } : c)), ...CLEAN }).allow === false;
+      && decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen.map((c, i) => (i === 0 ? { ...c, conclusion: 'CANCELLED' } : c)), ...CLEAN }).allow === false;
   })());
 mustCatch('a gate that ignores mergeStateStatus entirely would wrongly allow BEHIND',
-  !decideMerge({ requiredContexts: REQ, checks: allGreen, mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND' }).allow);
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND' }).allow);
 mustCatch('a gate that treats an ABSENT required context as "not my problem" would wrongly allow it',
-  !decideMerge({ requiredContexts: REQ, checks: allGreen.filter((c) => c.context !== REQ[1]), ...CLEAN }).allow);
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen.filter((c) => c.context !== REQ[1]), ...CLEAN }).allow);
 mustCatch('a gate that lets a stale SUCCESS mask a fresh CANCELLED for the same context',
-  !decideMerge({ requiredContexts: REQ, checks: [...allGreen, { context: REQ[0], conclusion: 'CANCELLED' }], ...CLEAN }).allow);
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: [...allGreen, { context: REQ[0], conclusion: 'CANCELLED' }], ...CLEAN }).allow);
 mustCatch('a gate that skips the file-list check even when an expectation WAS recorded',
-  !decideMerge({ requiredContexts: REQ, checks: allGreen, ...CLEAN, expectedFiles: ['a.ts'], actualFiles: ['a.ts', 'sneaky.ts'] }).allow);
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, ...CLEAN, expectedFiles: ['a.ts'], actualFiles: ['a.ts', 'sneaky.ts'] }).allow);
 mustCatch('a gate that fails case-sensitively on REST-shaped lowercase conclusions',
   normaliseConclusion('cancelled') === 'CANCELLED');
+
+mustCatch('a gate that treats an UNREADABLE required-check contract as "nothing required" would wrongly allow',
+  (() => {
+    // the exact old-transport regression: `catch { return [] }` on the protection endpoint
+    const buggyContexts = (): string[] => [];
+    return buggyContexts().length === 0
+      && decideMerge({ requiredContexts: buggyContexts(), requiredContextsKnown: false, checks: allGreen, ...CLEAN }).allow === false;
+  })());
+mustCatch('a gate that inspects ONLY required contexts would wrongly allow a FAILING optional check',
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: [...allGreen, { context: 'not-required', conclusion: 'FAILURE' }], ...CLEAN }).allow);
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }

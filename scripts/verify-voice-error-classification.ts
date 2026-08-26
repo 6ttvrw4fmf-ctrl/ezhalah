@@ -82,7 +82,7 @@ check(
 );
 check(
   "'service-not-allowed' gets its own actionable message ahead of the generic 'blocked' text — Apple's on-device speech service refusing (Dictation off / no on-device Arabic model) is real, distinct, and fixable by the USER via one iOS setting, unlike a generic service hiccup (owner report, 2026-08-24: this exact code fired on a real iPhone after mic permission was already granted)",
-  /: detail === 'service-not-allowed'\s*\n\s*\? t\('Speech recognition is turned off on your device\. Make sure Siri and Dictation are both enabled in your iPhone Settings, then try again\.'\)\s*\n\s*: kind === 'blocked'/.test(onFailureBody),
+  /: detail === 'service-not-allowed'\s*\n\s*\? t\('Speech recognition may be blocked by Lockdown Mode or a Screen Time restriction on your iPhone\. Check those, and also that Siri and Dictation are enabled, then try again\.'\)\s*\n\s*: kind === 'blocked'/.test(onFailureBody),
 );
 
 // ── i18n: both new Arabic strings exist, are non-empty, and carry no Latin leak ──────────────────
@@ -95,7 +95,7 @@ check(
   'that Arabic entry contains no Latin-letter leak',
   arEntry.length > 0 && !/[a-zA-Z]/.test(arEntry),
 );
-const serviceArEntry = i18n.match(/'Speech recognition is turned off on your device\. Make sure Siri and Dictation are both enabled in your iPhone Settings, then try again\.': '([^']+)'/)?.[1] ?? '';
+const serviceArEntry = i18n.match(/'Speech recognition may be blocked by Lockdown Mode or a Screen Time restriction on your iPhone\. Check those, and also that Siri and Dictation are enabled, then try again\.': '([^']+)'/)?.[1] ?? '';
 check(
   "the 'service-not-allowed' message has a real Arabic dictionary entry",
   serviceArEntry.length > 0,

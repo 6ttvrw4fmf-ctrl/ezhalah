@@ -41,35 +41,15 @@ export type VoiceHandlers = {
   onFailure: (kind: 'denied' | 'unavailable' | 'blocked' | 'error', detail?: string) => void;
 };
 
-// Genuine iOS Safari specifically (iPhone/iPad's OWN browser — iPadOS 13+ reports as "Macintosh" in
-// its User-Agent but is touch-capable, unlike any real Mac, which never is). Every third-party iOS
-// browser self-identifies with its own UA token specifically so it CAN be told apart from Apple's own
-// Safari despite the shared WebKit rendering engine — Chrome uses 'CriOS', Firefox 'FxiOS', Edge
-// 'EdgiOS', Opera 'OPiOS'. Only an iOS-family UA with NONE of those tokens is actually Safari.
-function isIOSSafariEngine(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  const ua = navigator.userAgent || '';
-  const isIOSFamily = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && (navigator as any).maxTouchPoints > 1);
-  if (!isIOSFamily) return false;
-  return !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
-}
-
+// CAPABILITY-BASED ONLY — no browser-name/UA exclusion of any kind (owner ruling, 2026-08-25,
+// reversing the 2026-08-24 "hide iOS Safari" decision). The support gate judges purely on whether
+// the runtime exposes the two APIs this module needs; it must never special-case a browser by name.
+// A browser that exposes the API and still can't complete a recognition (e.g. iOS Safari with
+// Lockdown Mode or a Screen Time "Speech Recognition & Dictation" restriction on — see
+// `startVoiceInput`'s own comment for the full evidence trail on 'service-not-allowed') fails at
+// RUNTIME with an honest, actionable message — it is never hidden ahead of time on a guess.
 export function isVoiceInputSupported(): boolean {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
-  // Genuine iOS Safari is deliberately EXCLUDED — an OWNER PRODUCT DECISION (2026-08-24), not an API
-  // capability inference. The full evidence trail, on the owner's real iPhone, same day: Safari
-  // exposes webkitSpeechRecognition (the capability check below passes), the OS mic-permission
-  // prompt was granted cleanly, Dictation was then enabled in iOS Settings — and Apple's on-device
-  // speech service STILL refused every single recognition attempt with 'service-not-allowed'.
-  // Three successive code-level fixes (error reclassification, dropping our own concurrent capture,
-  // actionable settings guidance) were each production-verified and none resolved it, matching
-  // widespread public reports of iOS Safari's Web Speech being unreliable across iOS versions.
-  // There is no free/native alternative recognition path (paid STT is permanently banned), so on
-  // this one browser a visible mic can only ever fail — worse than no mic. The owner chose
-  // (explicitly, from their own A/B framing): hide it here rather than present a control that fails.
-  // Chrome/Firefox/Edge on the SAME iPhone keep the full feature — recognition is proven working
-  // there on the owner's own device — and macOS Safari keeps it too (proven live, 2026-08-24).
-  if (isIOSSafariEngine()) return false;
   const w = window as any;
   return !!(w.SpeechRecognition || w.webkitSpeechRecognition) && !!navigator.mediaDevices?.getUserMedia;
 }
@@ -121,6 +101,20 @@ function teardown() {
 // Starts one capture session. Resolves true once the mic is live and the recognizer running; false
 // when it could not start (onFailure already fired with the reason). Starting while a session is
 // active supersedes it (the old one is discarded) — "another recording beginning" is a stop cause.
+//
+// 'service-not-allowed' EVIDENCE TRAIL (real iPhone Safari, 2026-08-24/25 — capability-based
+// detection, not a UA exclusion, is what CLASSIFIES this): the API is present, getUserMedia's own
+// permission prompt was granted cleanly, Dictation was enabled in iOS Settings — and Apple's
+// on-device recognizer still refused every attempt. The strongest documented explanation: **iOS
+// Lockdown Mode disables the Web Speech Recognition API specifically**, while leaving Dictation and
+// Siri fully working at the OS level, since neither is exposed to websites — which is exactly why
+// enabling Dictation alone changed nothing. iOS Screen Time's "Speech Recognition & Dictation"
+// content restriction can independently block the same path. Both are runtime states this module
+// cannot detect or force from JavaScript (no API exposes either toggle to a web page), so the
+// correct behavior is: show the mic wherever the capability genuinely exists (this is what
+// isVoiceInputSupported() does — pure API presence, no browser-name guess), and let a real failure
+// surface its own honest, specific, actionable message via onFailure's `detail` — never a permanent
+// guess made ahead of time.
 export async function startVoiceInput(handlers: VoiceHandlers): Promise<boolean> {
   teardown();
   if (!isVoiceInputSupported()) { handlers.onFailure('unavailable', 'unsupported'); return false; }
@@ -129,9 +123,8 @@ export async function startVoiceInput(handlers: VoiceHandlers): Promise<boolean>
   interimText = '';
 
   // 1. Our own mic stream first — it owns the permission prompt, and its rejection is the ONE
-  //    reliable cross-browser denial signal. ONE unified path for every supported platform: the old
-  //    genuine-iOS-Safari skip-branch died with the owner's 2026-08-24 decision to exclude that
-  //    browser at the support gate itself (see isVoiceInputSupported) — nothing reaches here on it.
+  //    reliable cross-browser denial signal. ONE unified path for every supported platform — no
+  //    browser-name branch of any kind (see isVoiceInputSupported's own comment for why).
   let mediaStream: MediaStream;
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });

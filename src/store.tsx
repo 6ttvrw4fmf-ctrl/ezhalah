@@ -14,6 +14,7 @@ import { supabase } from '@/lib/supabase';
 import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
 import { restoreChat, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib/chatTranscript';
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, type ChatMeta } from '@/lib/chatSync';
+import { mergeOne, pickTranscript, withFreshTranscript } from '@/lib/chatMerge';
 import { buildSyncedName } from '@/lib/nameSync';
 
 type DataSource = 'local' | 'supabase';
@@ -179,7 +180,10 @@ const serializeHistoryForDisk = (items: HistoryItem[]): string => {
 // heavyweight local-cache fields. The transcript has its own column; snapshots are strictly a local
 // instant-open cache and would only bloat every metas load.
 const chatMetaOf = (it: HistoryItem): ChatMeta => {
-  const { snapshot: _s, transcript: _t, ...meta } = it;
+  // `txStale` is a DEVICE-LOCAL verdict ("my cached transcript is older than the server's activity")
+  // and must never travel: pushed up and merged back down it would mark a perfectly fresh transcript
+  // stale on every device, forcing endless refetches and, worse, outliving the condition it records.
+  const { snapshot: _s, transcript: _t, txStale: _x, ...meta } = it as HistoryItem & { txStale?: boolean };
   return meta as ChatMeta;
 };
 
@@ -363,12 +367,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         for (const r of rows) {
           const meta = { ...r.meta, id: r.id } as unknown as HistoryItem;
           if (typeof meta.ts !== 'number' || !meta.query) continue; // malformed row: ignore, never crash the list
-          const local = byId.get(r.id);
-          const localStamp = local ? Math.max(local.ts, local.tRev ?? 0) : -1;
-          const serverStamp = Math.max(meta.ts, (meta as HistoryItem).tRev ?? 0);
-          if (!local) byId.set(r.id, meta);
-          else if (serverStamp > localStamp) byId.set(r.id, { ...meta, snapshot: local.snapshot, transcript: local.transcript });
-          // local newer → keep local; the push effect below writes it up.
+          // Precedence lives in src/lib/chatMerge.ts so this and hydrateTranscript cannot drift.
+          // When the server reports newer activity the local transcript is carried over but MARKED
+          // STALE — rendering it would show a shorter conversation and the capture effect would then
+          // push that truncated view over the server's newer copy (silent, permanent history loss).
+          byId.set(r.id, mergeOne(byId.get(r.id) as never, meta as never) as unknown as HistoryItem);
+          // local newer → mergeOne keeps local whole; the push effect below writes it up.
         }
         return [...byId.values()].sort((a, b) => (b.order ?? b.ts) - (a.order ?? a.ts)).slice(0, 50);
       });
@@ -692,29 +696,58 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // LOCAL_TRANSCRIPT_ENTRIES, server for all — see the persistence + sync effects). `ts` is
       // deliberately NOT bumped: revealing more cards or a receipt landing is not a new search, and
       // resorting the sidebar on it would surprise; `tRev` alone tells sync the transcript moved.
-      saveTranscript: (id, transcript) =>
+      saveTranscript: (id, transcript) => {
+        // DIRECT disk write FIRST, from the ref — setState updaters are not guaranteed to run
+        // during a page unload, and the flush-on-exit path (agent.tsx pagehide) depends on this
+        // landing synchronously. The setHistory below is the same write into React state; both are
+        // idempotent, and the in-state updater's own disk write simply repeats this one.
+        const tRev = Date.now();
+        if (user) try {
+          const cur = historyRef.current;
+          const idx0 = cur.findIndex((it) => it.id === id);
+          if (idx0 >= 0 && typeof localStorage !== 'undefined') {
+            const direct = cur.slice();
+            direct[idx0] = { ...cur[idx0], transcript, tRev };
+            localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(direct));
+          }
+        } catch {}
         setHistory((h) => {
           const idx = h.findIndex((it) => it.id === id);
           if (idx < 0) return h;
           const next = h.slice();
-          next[idx] = { ...h[idx], transcript, tRev: Date.now() };
+          // UNION of two concurrent changes: upstream's single pre-minted `tRev` (shared by the
+          // flush-on-exit disk write and this state update, so both stamp the SAME revision) and
+          // withFreshTranscript, which additionally CLEARS txStale — a freshly captured transcript
+          // is by definition not the stale copy the server-merge warned about.
+          next[idx] = withFreshTranscript(h[idx] as never, transcript, tRev) as unknown as HistoryItem;
           if (user) try {
             if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));
           } catch {}
           return next;
-        }),
+        });
+      },
       // Transcript pruned locally (older than LOCAL_TRANSCRIPT_ENTRIES) or absent on this device —
       // pull the server's copy, validate it, attach it. Returns null when the server has none
       // either (legacy chat) so the caller can fall back to the snapshot/replay path.
       hydrateTranscript: async (id) => {
-        const held = historyRef.current.find((it) => it.id === id)?.transcript;
-        if (held) return held;
-        if (!user) return null;
-        const fetched = await fetchChatTranscript(id);
-        const valid = fetched ? restoreChat(fetched) : null;
-        if (!valid) return null;
-        const t: PersistedChat = { v: 1, msgs: valid.msgs, revealCount: valid.revealCount, afReceipt: valid.afReceipt, guidedPills: valid.guidedPills };
-        setHistory((h) => h.map((it) => (it.id === id ? { ...it, transcript: t } : it)));
+        const entry = historyRef.current.find((it) => it.id === id);
+        // A trusted local copy renders instantly. A copy the merge marked STALE must lose to the
+        // server's newer one — but if the server has none (legacy chat / offline), the local copy is
+        // still the user's conversation and is kept rather than showing them a blank chat.
+        const t = await pickTranscript<PersistedChat>(
+          entry?.transcript,
+          !!(entry as { txStale?: boolean } | undefined)?.txStale,
+          async () => {
+            if (!user) return null;
+            const fetched = await fetchChatTranscript(id);
+            const valid = fetched ? restoreChat(fetched) : null;
+            if (!valid) return null;
+            return { v: 1, msgs: valid.msgs, revealCount: valid.revealCount, afReceipt: valid.afReceipt, guidedPills: valid.guidedPills };
+          },
+        );
+        if (!t) return null;
+        if (t !== entry?.transcript || (entry as { txStale?: boolean } | undefined)?.txStale)
+          setHistory((h) => h.map((it) => (it.id === id ? withFreshTranscript(it as never, t, it.tRev ?? Date.now()) as unknown as HistoryItem : it)));
         return t;
       },
       // Load More (owner 2026-07-08): fetch the NEXT real page of matching listings beyond `offset`
