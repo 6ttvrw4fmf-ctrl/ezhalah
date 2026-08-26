@@ -13,8 +13,21 @@ days, including a fresh mid-afternoon dispatch — it has never once classified 
 
 From an ordinary network the same URLs return the full schema WITH a price (verified 2026-08-26:
 live id 558414 price 550160.38, stale-but-alive id 382843 price 260325, bogus id 999999999 no
-real-estate-listing key at all). So the parser and the classifier are correct; only the fetch
-inside GitHub Actions is not getting data-bearing pages.
+real-estate-listing key at all). So the parser and the classifier are correct.
+
+RESULT OF THE FIRST RUN (Actions run 32998202697, 2026-08-26) — IT DISPROVED THE PREMISE THIS
+FILE WAS WRITTEN ON. All FOUR variants, including A-prod-exact (the byte-exact production client),
+got the full schema from a GitHub Actions runner: 558414 -> 550160.38 InStock, 382843 -> 260325
+InStock, 548176 -> 750000 InStock, and the bogus control correctly carried no listing schema.
+The client is exonerated AND so is the runner's egress. "Actions gets shells" was wrong.
+
+WHAT REMAINS, and why --volume exists. The discriminator makes 4 gentle requests per variant; a
+real shard walks ~1,200 unique ids through 6 workers. The per-request timings hint at it: the
+first request costs ~200-240 ms and the rest ~10-12 ms, which is an edge cache being hit — and a
+long walk of unique ids blows straight past it. `--volume N` walks N ids taken from dealapp's OWN
+sitemap (so every id is published-live and a shell is a false negative by definition) and reports
+the shell rate by decile. Flat ~0% exonerates volume; a rate climbing with the request index
+localises the cause and makes throttle/backoff the fix.
 
 WHAT THIS SEPARATES. Four client variants against the SAME ids from the SAME runner:
 
@@ -34,6 +47,7 @@ from __future__ import annotations
 
 import json
 import re
+import os
 import sys
 import time
 from typing import Any, Optional
@@ -123,7 +137,95 @@ def probe(sess: cc.Session, adid: str) -> dict[str, Any]:
     }
 
 
+def sitemap_ids(sess: cc.Session, want: int) -> list[str]:
+    """Ad ids straight from dealapp's OWN sitemap — ids the source itself publishes as live.
+
+    This matters for the volume probe: a shell response on a sitemap id is a false negative BY
+    DEFINITION, so the probe needs no database and cannot be accused of sampling dead listings.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    try:
+        idx = sess.get(f"{BASE}/sitemap.xml", timeout=40).text
+    except Exception:
+        return out
+    for child in re.findall(r"<loc>([^<]+)</loc>", idx):
+        if len(out) >= want:
+            break
+        try:
+            body = sess.get(child, timeout=60).text
+        except Exception:
+            continue
+        for u in re.findall(r"<loc>([^<]+)</loc>", body):
+            m = re.search(r"/ad-details/(\d+)", u)
+            if m and m.group(1) not in seen:
+                seen.add(m.group(1))
+                out.append(m.group(1))
+                if len(out) >= want:
+                    break
+    return out
+
+
+def volume_probe(n: int, interval: float) -> dict[str, Any]:
+    """Walk N sitemap-published ids with the PRODUCTION client and report the shell rate by decile.
+
+    THE QUESTION THIS ANSWERS (2026-08-26). The four-variant discriminator proved the production
+    client on a production runner fetches known ids perfectly — so neither the client nor the
+    egress explains production's ~78-82% status_200_no_listing_schema rate. The remaining
+    difference is SUSTAINED VOLUME: the discriminator made 4 requests per variant; a real shard
+    walks ~1,200 ids through 6 workers. If dealapp/CloudFront degrades to the app shell after some
+    number of unique-id requests, the failure rate will climb with the request index instead of
+    staying flat — and every one of these ids is published-live, so a shell IS a false negative.
+    """
+    sess = build("A-prod-exact")
+    ids = sitemap_ids(sess, n)
+    if not ids:
+        return {"error": "could not read any ad ids from the sitemap"}
+
+    results: list[bool] = []          # True = data-bearing
+    first_shell_at: Optional[int] = None
+    for i, adid in enumerate(ids, 1):
+        r = probe(sess, adid)
+        good = bool(r.get("schema_found"))
+        results.append(good)
+        if not good and first_shell_at is None:
+            first_shell_at = i
+        time.sleep(interval)
+
+    size = max(1, len(results) // 10)
+    deciles = []
+    for d in range(0, len(results), size):
+        chunk = results[d:d + size]
+        if not chunk:
+            continue
+        deciles.append({
+            "requests": f"{d + 1}-{d + len(chunk)}",
+            "shell_pct": round(100.0 * sum(1 for x in chunk if not x) / len(chunk), 1),
+        })
+    shell_total = sum(1 for x in results if not x)
+    return {
+        "ids_probed": len(results),
+        "interval_s": interval,
+        "shell_count": shell_total,
+        "shell_pct_overall": round(100.0 * shell_total / len(results), 1),
+        "first_shell_at_request": first_shell_at,
+        "by_decile": deciles,
+        "reading": "every id here is published live in dealapp's own sitemap, so any shell is a "
+                   "FALSE NEGATIVE. A flat ~0% across deciles exonerates volume; a rate that "
+                   "climbs with the request index localises the cause to sustained volume and "
+                   "makes throttle/backoff the fix.",
+    }
+
+
 def main() -> int:
+    if "--volume" in sys.argv:
+        i = sys.argv.index("--volume")
+        n = int(sys.argv[i + 1]) if len(sys.argv) > i + 1 else 150
+        interval = float(os.environ.get("PROBE_INTERVAL_S", "0.3"))
+        print("=== DEAL APP VOLUME PROBE ===")
+        print(json.dumps(volume_probe(n, interval), indent=2, ensure_ascii=False))
+        return 0
+
     report: dict[str, Any] = {"base": BASE, "variants": {}}
     for variant in VARIANTS:
         try:
