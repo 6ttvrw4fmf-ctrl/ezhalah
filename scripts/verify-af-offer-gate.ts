@@ -228,14 +228,51 @@ check('…and it earns an OFFER too — offer and ask agree on it',
   // ── AN OFFER MUST BE DELIVERABLE (review 2026-08-25) ──────────────────────────────────────────
   // Two ways the button could render and then do nothing, both found by review, both fixed here.
   //
-  // 1. SCOPE. The probe short-circuits to "yes" when the CATEGORY→GROUP→TYPE walk still has a step —
-  //    but the walk itself asks `nextScopeTier(q, asked)`, and a tier the user SKIPPED in an earlier
-  //    round stays UNRESOLVED forever while never being re-asked. `unresolvedScopeTiers(q).length`
-  //    therefore said yes to a walk that falls straight through: tap, open, close.
-  check('the probe asks the SAME scope question the walk asks (nextScopeTier, not a raw unresolved count)',
-    /if \(nextScopeTier\(q, new Set\(asked\)\)\) \{ setAfCanNarrow/.test(probe),
-    'src/app/agent.tsx offer probe — `unresolvedScopeTiers(q).length` offers a round on a tier that '
-    + 'is unresolved but already asked (a skip), whose walk ends immediately with nothing to ask');
+  // 1. SCOPE. The probe short-circuits to "yes" when the CATEGORY→GROUP→TYPE walk still has a step.
+  //    First fix (2026-08-25 review): ask `nextScopeTier(q, asked)` rather than
+  //    `unresolvedScopeTiers(q).length`, because a tier the user SKIPPED stays UNRESOLVED forever
+  //    while never being re-asked. That was necessary and not sufficient — REPRODUCED LIVE the same
+  //    day on الطائف / إيجار / شهري / «الاستراحات والريف» (43 matches): a tier EXISTING still proves
+  //    nothing, because presentGuided AUTO-COMMITS a tier that resolves to ≤1 option and walks on.
+  //    Of that group's five member types only شاليه is populated there, so the type tier committed
+  //    itself, Chalet certifies no monthly cohort, and the round asked ZERO questions — the user
+  //    tapped, was never asked anything, and got a duplicate 43-result turn plus a receipt reading
+  //    «اختياراتك: شاليه», a choice they never made.
+  //
+  //    So the probe must WALK the tiers the way the round does. The checks below pin that walk; a
+  //    behavioural fixture is impossible here (agent.tsx cannot be rendered by a barrier), so each
+  //    one is a precise read of the shipped shape and each was mutation-proven against this file.
+  check('the probe no longer SHORT-CIRCUITS on a tier merely existing — that shape is banned',
+    !/if \(nextScopeTier\(.*\)\) \{ setAfCanNarrow/.test(probe),
+    'src/app/agent.tsx offer probe — a tier that resolves to ≤1 option is AUTO-COMMITTED and walked '
+    + 'past, so its existence never proves a round follows (الطائف/شهري/الاستراحات والريف, 43 matches)');
+  check('…it RESOLVES each tier instead, against a scope it carries forward itself',
+    /nextScopeTier\(scoped, seen\)/.test(probe)
+    && /scopeQuestionFor\(tier\)\.resolveOptions\(scoped\)/.test(probe),
+    'src/app/agent.tsx offer probe — resolving is the only way to know whether a tier is a real '
+    + 'question or a scope the user already has');
+  check('a tier with a REAL choice (more than one option) is what earns the offer',
+    /res\.options\.length > 1\) \{ offer\(true\); return; \}/.test(probe),
+    'src/app/agent.tsx offer probe — `>= 1` would re-admit the auto-commit case this fix removed');
+  check('a ≤1-option tier is AUTO-COMMITTED onto the local scope and the walk continues, exactly as presentGuided does',
+    /seen\.add\(tier\)/.test(probe)
+    && /scopeQuestionFor\(tier\)\.apply\(scoped, \[res\.options\[0\]\.key\]\)/.test(probe),
+    'src/app/agent.tsx offer probe — without the commit the probe ranks the advanced pool against an '
+    + 'unresolved scope, which is empty BY CONSTRUCTION, and hides a button that would have worked');
+  check('UNKNOWN still never hardens into NO: an UNMEASURABLE tier keeps offering, only a MEASURED one may hide',
+    /if \(!res \|\| res\.total === 0\) \{ offer\(true\); return; \}/.test(probe),
+    'src/app/agent.tsx offer probe — a turn showing >INTERVIEW_STOP_AT matches cannot truthfully have '
+    + 'an empty scope, so total===0 is a failed count RPC, not a fact (permanent fleet rule)');
+  check('the advanced-pool rank runs against the RESOLVED scope and the walked asked-set',
+    /rankQuestions\(scoped, seen\)/.test(probe)
+    && /eligibleQuestions\(scoped\)\.filter\(\(qq\) => !seen\.has\(qq\.id\)\)/.test(probe),
+    'src/app/agent.tsx offer probe — ranking the RAW query would score every question against a scope '
+    + 'the user has not picked yet and come back empty by construction');
+  // COST: the walk costs real count RPCs, so it must stay ONE probe per turn and must never poll.
+  check('still ONE probe per turn — the (msgId, asked) key guard is intact and nothing polls',
+    /afProbedRef\.current\[probeKey\]/.test(probe) && !/setInterval/.test(probe),
+    'src/app/agent.tsx offer probe — the walk is at most two tier resolutions and one rank; a probe '
+    + 'per transcript turn, or any polling, is the regression this guards');
 
   // 2. PLAN. startAgeFlow's unresolved-scope bypass hands off to presentGuided WITHOUT ranking. When
   //    the walk then ends at cursor 0 (case 1's scope, now legitimately reached), nothing has ranked
