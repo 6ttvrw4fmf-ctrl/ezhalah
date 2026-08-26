@@ -12,8 +12,27 @@ export type AdvancedOption = { key: string; label: string; count: number };
 export type AdvancedQuestionResult = { options: AdvancedOption[]; unknownCount: number; total: number };
 
 // A question shows only when it clears the scope-size floor AND has at least this many options for
-// its arity (single needs a real choice of ≥2; a single meaningful multi chip is a valid yes/no).
-export const MIN_OPTIONS_SINGLE = 2;
+// its arity.
+//
+// OWNER CORRECTION 2026-08-26 — MIN_OPTIONS_SINGLE moved 2 → 1, so the two arities are now UNIFORM.
+// It used to read "single needs a real choice of ≥2; a single meaningful multi chip is a valid
+// yes/no", and §(e) below recorded the cost of that asymmetry as deliberate design. The owner
+// reversed it: «if filtering removes the useless/lopsided option but leaves one genuinely useful
+// option, do not throw away the whole question just because one option remains».
+//
+// WHY IT IS NOT A FORCED ANSWER. The objection ≥2 was written for is that one choice gives the user
+// nothing to decide. That is false on this card: «تخطي» is rendered UNCONDITIONALLY
+// (AdvancedQuestionCard.tsx — testID af-skip, never branched on arity or option count) and applies
+// ZERO predicate (agent.tsx onAgeSkip → commitGuidedStep([]), no facet, no false written). So the
+// user really is choosing between «مفروشة» → 60 and skip → keep 1,000. That is a genuine yes/no —
+// which is exactly why MIN_OPTIONS_MULTI already allowed it, and the asymmetry had no defensible
+// basis once the survivor had to clear optionNarrowsMeaningfully anyway.
+//
+// The gate that keeps this honest is unchanged and upstream: the survivor still had to clear the
+// absolute floor (MIN_REAL_OPTION_COUNT) AND optionNarrowsMeaningfully. ZERO survivors still kills
+// the question — a lopsided-only question stays unasked, which is the whole 2026-08-25 rule.
+// Measured on production before shipping: docs/ops/af-single-option-yes-no-2026-08-26.md.
+export const MIN_OPTIONS_SINGLE = 1;
 export const MIN_OPTIONS_MULTI = 1;
 export function minOptionsFor(selection: 'single' | 'multi'): number {
   return selection === 'multi' ? MIN_OPTIONS_MULTI : MIN_OPTIONS_SINGLE;
@@ -98,18 +117,24 @@ export function optionNarrowsMeaningfully(count: number, total: number): boolean
 //
 // (d) UNCHANGED AROUND IT. Every option here already cleared the ABSOLUTE per-option floor
 // (`meaningful()`, MIN_REAL_OPTION_COUNT = 5) upstream; minOptionsFor() still decides whether what
-// survives is a real choice (single ≥2, multi ≥1); and selectivity (bestSplit) still decides ASK
+// survives is a real choice (≥1 for BOTH arities since the owner's 2026-08-26 correction — it read
+// "single ≥2, multi ≥1" until then); and selectivity (bestSplit) still decides ASK
 // ORDER only, never inclusion. See docs/ADVANCED_FILTER_DESIGN_CONTRACT.md "Amendment 2026-08-25".
 //
-// (e) TWO KNOCK-ON EFFECTS, NAMED SO THEY ARE NOT MISTAKEN FOR BUGS. First, ASK ORDER can shift:
-// bestSplit is a max over the SURVIVING options, so a question whose most balanced option was a
-// near-no-op now scores lower and may be asked later. That is the ranking telling the truth about
-// what the question can still do. Second, a question can die at the QUESTION level even though the
-// gate is one-sided at the OPTION level: a single-select split 92%/6% loses its 92% chip, is left
-// with one survivor, and fails MIN_OPTIONS_SINGLE — so a 94%-cut option can disappear with its
-// partner. That is the owner's specified design (filter the options, then let minOptionsFor decide),
-// not an accident; it is written down here because it is the one way this rule can cost a GOOD
-// question, and a future reader deserves to find it stated rather than discover it.
+// (e) ONE KNOCK-ON EFFECT, NAMED SO IT IS NOT MISTAKEN FOR A BUG: ASK ORDER can shift. bestSplit is
+// a max over the SURVIVING options, so a question whose most balanced option was a near-no-op now
+// scores lower and may be asked later. That is the ranking telling the truth about what the question
+// can still do.
+//
+// ~~A SECOND effect used to be listed here (2026-08-25, SUPERSEDED 2026-08-26): "a question can die
+// at the QUESTION level even though the gate is one-sided at the OPTION level: a single-select split
+// 92%/6% loses its 92% chip, is left with one survivor, and fails MIN_OPTIONS_SINGLE — so a 94%-cut
+// option can disappear with its partner. That is the owner's specified design (filter the options,
+// then let minOptionsFor decide), not an accident."~~ The owner REVERSED that on 2026-08-26: a lone
+// surviving meaningful option is now ASKED, as a yes/no against Skip. See MIN_OPTIONS_SINGLE above
+// for the reasoning and scripts/verify-af-two-option-survival.ts for the (inverted) barrier. The old
+// wording is kept struck-through, not deleted, because this rule has now moved and a future reader
+// must be able to see both positions rather than trust whichever paragraph they read first.
 export function scoreQuestion(
   questionId: string, selection: 'single' | 'multi', result: AdvancedQuestionResult,
 ): { score: number; options: AdvancedOption[] } | null {
