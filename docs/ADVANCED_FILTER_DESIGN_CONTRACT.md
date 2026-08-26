@@ -326,21 +326,38 @@ mutation-provable) with synthetic scopes proving (a) a 2%-share option that used
 included, (b) a 97%-share-only option is included but scores below a balanced one, (c) a question
 where every option ties at `N` is still excluded, (d) ordering still favors the more balanced split.
 
-## Amendment 2026-08-22 (b) — 2+ useful questions to open (owner-approved)
+## Amendment 2026-08-22 (b) — a useful question is required to open (owner-approved)
+### CORRECTED 2026-08-24 by the owner: the threshold is **1**, not 2 (PR #1045)
 
-The owner's brief: «Advanced Filter should only appear when there are multiple useful questions
-available that can actually help narrow the result set» — opening the interview on exactly one
-useful question means the user answers or skips it and still closes on whatever the result-count
-gate alone left large, which is a tax on their attention, not a niche shortlist. Pinned by
-`scripts/verify-af-min-useful-questions-gate.ts`.
+**`MIN_USEFUL_QUESTIONS_TO_SHOW = 1`.** This section shipped on 2026-08-22 with the value 2 and the
+owner corrected it two days later in PR #1045; the original reasoning is kept below, struck through
+in place, because this constant has now MOVED and a future reader must be able to see both positions
+rather than trust whichever paragraph they happen to read first.
+
+**The correction (owner, 2026-08-24):** a lone useful question is a REAL NARROWING STEP, not a tax on
+the user's attention. The 2026-08-22 brief assumed answering one question and closing leaves the user
+where they started — but that one question routinely takes a scope from hundreds to tens, which is
+exactly what the Advanced Filter is for. Refusing to open on it withheld a genuine narrowing step and
+sent the user to the refine chips, which promise no numbers at all. So: **0 useful questions ⇒ AF does
+not open; 1 or more ⇒ it does.** Everything else in this amendment — that it is a SECOND gate composed
+with the result-count gate, that "useful" means `scoreQuestion()` and is never re-derived, that it is
+computed after the eligibility layer, that it governs the OPENING decision only, and that Skip applies
+no predicate — stands exactly as written.
+
+~~The owner's brief (2026-08-22, SUPERSEDED): «Advanced Filter should only appear when there are
+multiple useful questions available that can actually help narrow the result set» — opening the
+interview on exactly one useful question means the user answers or skips it and still closes on
+whatever the result-count gate alone left large, which is a tax on their attention, not a niche
+shortlist.~~ Pinned by `scripts/verify-af-min-useful-questions-gate.ts`, which asserts the value is
+exactly 1 and fails on 2 in both directions.
 
 - **A SECOND, independent gate, composed with the existing result-count gate, never replacing it.**
   Advanced Filter may open only when BOTH hold: the scope's true total is
-  `> INTERVIEW_STOP_AT (25)` **and** the scope has `>= MIN_USEFUL_QUESTIONS_TO_SHOW (2)` useful
-  questions. 0 or 1 useful question ⇒ AF does not open, even if the result-count gate alone would
-  allow it — the manual "narrow it down" tap falls through to the pre-existing plain refine-chip
-  flow (the SAME fallback an empty plan already used; this is a threshold widening, not a new code
-  path).
+  `> INTERVIEW_STOP_AT (25)` **and** the scope has `>= MIN_USEFUL_QUESTIONS_TO_SHOW (1)` useful
+  questions (2026-08-22 shipped this as 2; owner-corrected to 1 on 2026-08-24, PR #1045). 0 useful
+  questions ⇒ AF does not open, even if the result-count gate alone would allow it — the manual
+  "narrow it down" tap falls through to the pre-existing plain refine-chip flow (the SAME fallback
+  an empty plan already used; this is a threshold widening, not a new code path).
 - **"Useful" already has one definition — `scoreQuestion()`, unchanged by this rule.** Per Amendment
   (a) above, a question is useful when the scope clears `MIN_TOTAL_TO_SHOW` and has at least
   `minOptionsFor(selection)` options that would actually narrow the current set
@@ -352,7 +369,7 @@ gate alone left large, which is a tax on their attention, not a niche shortlist.
   (سنوي+شهري) cohort intersection (`cohortAllows`'s `RentAnnual ∩ RentMonthly`), the Buy+Rent
   3-way intersection, and multi-type intersection all run inside `eligibleQuestions()` /
   `cohortAllows()`, which `rankQuestions()` calls before scoring — so a question valid for only one
-  leg of a combined search can never count toward the 2-question threshold on that search.
+  leg of a combined search can never count toward the useful-question threshold on that search.
   Recomputing the gate from a second, independent implementation was deliberately avoided.
 - **Governs the OPENING decision only.** Once the interview is open, the existing continuation loop
   (`presentGuided`'s re-rank after every answer/skip) is unchanged: it keeps offering the next
@@ -462,15 +479,17 @@ cohort scope becomes a certified single type — which is what lets a one-member
 «Residential Plots» → `Residential Land` reach the advanced questions at all. Zero options records an
 open skip. Neither case invents a predicate the user did not ask for.
 
-### Where the ≥2-useful gate now runs
+### Where the useful-question gate now runs
 
-`MIN_USEFUL_QUESTIONS_TO_SHOW` is **still 2**, and still governs only the OPENING decision — but it is
-evaluated at the **scope→advanced transition**, not at `startAgeFlow`. With an unresolved hierarchy
-the ranked plan is empty *by construction*, so the old placement closed the interview before the first
-scope question could render. It counts **advanced** questions only: the hierarchy steps are what
-earned the right to ask, never two of the two. At the transition, 0 or 1 useful advanced question ends
-the interview **cleanly** on the results the scope answers already narrowed to — it never bounces to
-the refine chips, because by then the user has answered real questions we must honour.
+`MIN_USEFUL_QUESTIONS_TO_SHOW` is **1** (owner correction 2026-08-24, PR #1045 — this paragraph said
+"still 2" until 2026-08-25 and was stale, not a second opinion), and still governs only the OPENING
+decision — but it is evaluated at the **scope→advanced transition**, not at `startAgeFlow`. With an
+unresolved hierarchy the ranked plan is empty *by construction*, so the old placement closed the
+interview before the first scope question could render. It counts **advanced** questions only: the
+hierarchy steps are what earned the right to ask, never part of the quota. At the transition, 0 useful
+advanced questions ends the interview **cleanly** on the results the scope answers already narrowed to
+— it never bounces to the refine chips, because by then the user has answered real questions we must
+honour.
 
 ### Counts
 
