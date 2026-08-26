@@ -702,16 +702,18 @@ export default function Agent() {
         // never the "check your settings" text, which is only correct for a true 'denied'.
         // 'service-not-allowed' specifically is Apple's own on-device speech-recognition service
         // refusing the request — confirmed real on an actual iPhone, 2026-08-24 (mic permission had
-        // already been granted cleanly; this fired anyway). That's an iOS Settings state, not
-        // anything this code can force — but the generic "try again" is actively unhelpful, so this
-        // exact code gets its own actionable message. Enabling Dictation ALONE did not resolve it on
-        // the owner's real device (confirmed the same day), so the message names Siri too — Apple's
-        // own docs note Safari's on-device recognizer needs Siri enabled to be available at all — but
-        // this is still our best evidence-backed guidance, not a confirmed single fix.
+        // already been granted cleanly; this fired anyway). Enabling Dictation ALONE did not resolve
+        // it on the owner's real device the same day. The strongest documented cause (owner
+        // follow-up, 2026-08-25): iOS Lockdown Mode disables the Web Speech Recognition API
+        // specifically — Dictation and Siri keep working fine at the OS level, since neither is
+        // accessible to websites, which is exactly why enabling Dictation alone did nothing. iOS
+        // Screen Time's "Speech Recognition & Dictation" content restriction can independently block
+        // the same path. Both are iOS Settings states this code cannot force — but the generic "try
+        // again" names neither, so this exact code gets a message pointing at both real candidates.
         const msg = kind === 'denied'
           ? t('Microphone access is needed for voice input. Enable it in your browser settings.')
           : detail === 'service-not-allowed'
-          ? t('Speech recognition is turned off on your device. Make sure Siri and Dictation are both enabled in your iPhone Settings, then try again.')
+          ? t('Speech recognition may be blocked by Lockdown Mode or a Screen Time restriction on your iPhone. Check those, and also that Siri and Dictation are enabled, then try again.')
           : kind === 'blocked'
           ? t("The microphone couldn't be reached. Please try again.")
           : t('Voice input is not available right now.');
@@ -1408,6 +1410,20 @@ export default function Agent() {
   // turn is in flight (busy) so a half-rendered turn is never what a return restores; content-keyed
   // (lastCapturedRef) so re-renders and restores never rewrite an unchanged transcript.
   const lastCapturedRef = useRef('');
+  // The debounced capture that has not fired yet. WITHOUT this, the effect cleanup's clearTimeout
+  // silently dropped the newest settled state whenever the user left the chat inside the 600ms
+  // window (tapping another chat while the new turn's cards were still cascading was enough) — and
+  // the reopened chat then showed an OLDER version of the conversation, the exact class the owner
+  // ruled out on 2026-08-25 («never reconstruct an older version or lose later messages»). Every
+  // path that abandons this conversation view flushes it first; a web unload flushes via pagehide.
+  const pendingCaptureRef = useRef<{ id: string; t: PersistedChat; j: string } | null>(null);
+  const flushPendingCapture = () => {
+    const p = pendingCaptureRef.current;
+    if (!p) return;
+    pendingCaptureRef.current = null;
+    lastCapturedRef.current = p.j;
+    saveTranscript(p.id, p.t);
+  };
   useEffect(() => {
     if (busy) return;
     const id = chatIdRef.current;
@@ -1416,9 +1432,20 @@ export default function Agent() {
     if (!t) return;
     const j = JSON.stringify(t);
     if (j === lastCapturedRef.current) return;
-    const timer = setTimeout(() => { lastCapturedRef.current = j; saveTranscript(id, t); }, 600);
+    pendingCaptureRef.current = { id, t, j };
+    const timer = setTimeout(() => { pendingCaptureRef.current = null; lastCapturedRef.current = j; saveTranscript(id, t); }, 600);
     return () => clearTimeout(timer);
   }, [busy, msgs, revealCount, afReceipt, guidedPills]);
+  // A refresh/close inside the debounce window must not lose the last settled state either.
+  // saveTranscript writes localStorage synchronously up front (store.tsx), so this flush lands on
+  // disk even during unload. pagehide, not beforeunload: it also covers bfcache navigations.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const flush = () => flushPendingCapture();
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── THE OFFER PROBE (owner 2026-08-24) ─────────────────────────────────────────────────────────
   // «تحديد أكثر» is offered only when a round would have something truthful to ask: more than
@@ -2216,6 +2243,7 @@ export default function Agent() {
   // server when this device no longer holds it (pruned cache / new browser / re-login). A chat
   // with no transcript anywhere (legacy entry) falls back to the snapshot/replay view unchanged.
   const openSaved = async (entryId: string | undefined, q: SearchQuery, override?: { bubble: string; sub: string }) => {
+    flushPendingCapture(); // leaving the previous chat mid-debounce must not drop its newest turn
     chatIdRef.current = entryId ?? null;
     const entry = entryId ? history.find((h) => h.id === entryId) : undefined;
     let t: PersistedChat | null = entry?.transcript ?? null;
@@ -2335,6 +2363,7 @@ export default function Agent() {
     // so a one-shot guard silently swallowed every search after the first. A new filter/seed search
     // starts a fresh chat (prior chats stay in the sidebar). (bug fix: "keep searching → nothing pops up".)
     const startFresh = () => {
+      flushPendingCapture(); // the OLD conversation's last settled state must land before we leave it
       if (runRef.current) runRef.current.cancelled = true; // stop any in-flight previous search
       finalizeReveal();                                    // stop the prior search's drip-reveal/typing
       setStopped(false);
@@ -2421,6 +2450,7 @@ export default function Agent() {
   useEffect(() => {
     if (freshMountRef.current) { freshMountRef.current = false; return; }
     if (fresh === undefined) return;
+    flushPendingCapture(); // New Chat abandons this view — its last settled state lands first
     if (runRef.current) runRef.current.cancelled = true;
     if (greetTimerRef.current) clearTimeout(greetTimerRef.current);
     // New Chat kills any live mic capture instantly (owner brief §16) — and inherits nothing from
@@ -2705,7 +2735,7 @@ export default function Agent() {
                               <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
                             </View>
                           ) : (
-                            <Pressable key={`${f.id}-${i}`} style={s.guidedPill} onPress={() => removeGuidedFacet(i)} disabled={busy}>
+                            <Pressable key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill} onPress={() => removeGuidedFacet(i)} disabled={busy}>
                               <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
                               <Ionicons name="close" size={13} color={colors.primary} />
                             </Pressable>
@@ -3028,14 +3058,14 @@ export default function Agent() {
                 <>
                   {/* Mic — enters recording mode (owner brief §2): immediate press feedback, then the
                       composer itself morphs. Sits immediately left of Send, same 34px control family.
-                      Hidden entirely where isVoiceInputSupported() is false — a LIVE runtime check
-                      (macOS Safari correctly shows it; engines with no SpeechRecognition hide it),
-                      plus ONE deliberate product exclusion: genuine iOS Safari (owner decision
-                      2026-08-24 — Apple's on-device service refused every attempt on a real, fully-
-                      configured iPhone across three production-verified fixes; the full evidence
-                      trail lives in isVoiceInputSupported's own comment). Chrome/Firefox/Edge on
-                      the same iPhone keep the mic — recognition is proven working there. Showing
-                      a mic that can only ever flash a failure toast and revert reads as broken. */}
+                      Hidden ONLY where isVoiceInputSupported() is false — a LIVE, capability-only
+                      runtime check with NO browser-name exclusion of any kind (owner ruling,
+                      2026-08-25: capability-based detection, never a UA guess — iOS Safari shows the
+                      mic like every other capable browser; a runtime failure there gets its own
+                      honest, specific message instead — see voiceInput.ts's own comment for the full
+                      evidence trail). Showing a mic that can only ever flash a failure toast and
+                      revert reads as broken — but hiding a mic the runtime genuinely supports, on a
+                      guess about the browser's name, is the same mistake in the other direction. */}
                   {isVoiceInputSupported() ? (
                   <Pressable
                     testID="voice-mic"

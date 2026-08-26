@@ -4,187 +4,160 @@ Routine #5 (🎯 Senior Advanced Filter + Trending Data Integrity Engineer). Spe
 `docs/ops/AF_TRENDING_DATA_INTEGRITY_ENGINEER.md`.
 
 ```
-ADVANCED FILTER HEALTH:        9.5/10 (95%) → 8.6/10 (86%)
-TRENDING CITIES HEALTH:       10.0/10 (100%) → 10.0/10 (100%)
-TRENDING DISTRICTS HEALTH:     9.7/10 (97%) → 9.7/10 (97%)
-AF DATA INTEGRITY:             9.6/10 (96%) → 9.8/10 (98%)
-OVERALL AF + TRENDING HEALTH:  9.7/10 (97%) → 9.4/10 (94%)
-
-REAL BROWSER JOURNEYS: 14 driven here + 9 in the dispatched official check = 23
-AF JOURNEYS: 6 driven here (5 agent-flow + 1 mobile) + 5 AF journeys in the official check
-TRENDING CITY JOURNEYS: 4
-TRENDING DISTRICT JOURNEYS: 2
-CITIES TESTED: 8 driven/verified (الرياض جدة الدمام الخبر الجبيل عنيزة بريدة الخرج)
-REGIONS TESTED: 4 (الرياض · مكة المكرمة · الشرقية · القصيم)
-AF FIELDS TESTED: bathrooms · furnished · rnpl · property_age · amenities · street_width (6)
-INTENT→UI MISMATCHES: 0
-UI→REQUEST MISMATCHES: 0
-REQUEST→RPC MISMATCHES: 0
-RPC→DB MISMATCHES: 0
-COUNT MISMATCHES: 0
-STALE COUNTS: 0
-INELIGIBLE RESULTS: 0
-DUPLICATES: 0
-UNKNOWN/FALSE VIOLATIONS: 0
-BUGS FOUND: 3 (1 barrier defect · 1 agent-flow AF entry defect · 1 ambiguous count pair)
-BUGS FIXED: 1 (the barrier defect)
-BUGS REMAINING: 2 (both escalated, neither safely fixable without an owner call)
-BARRIERS ADDED/STRENGTHENED: 1 (verify-af-group-cohort-coverage.ts, two independent fixes)
-MUTATION-PROVEN: YES
-MERGED: NO — PR #1127 open, CI green
-DEPLOYED: NO — no `src/` change required one
-PRODUCTION VERIFIED: YES (Trending exact against DB; AF state characterised live)
+AI AGENT → AF CTA:            PASS   (4/4 live journeys, twice, from CI)
+ROOT CAUSE:                   no product defect — the 6/6 failure reproduced in the
+                              routine's own container did NOT reproduce from a GitHub
+                              runner against the same production bundle. Environment.
+FILTER FLOW AF:               PASS
+SKIP:                         PASS   (test fix; product was correct)
+BACK:                         PASS   (test fix; product was correct)
+LIVE CHECK GREEN:             YES
+BUGS FOUND:                   3  (1 barrier defect · 2 stale-oracle defects)
+BUGS FIXED:                   3
+BARRIER ADDED:                YES  (agent-flow live check + pure rule)
+MUTATION-PROVEN:              YES  (4 mutations on the new rule, 3 on the reachability pin)
+MERGED:                       NO   (merge gate refused in this environment — §5)
+DEPLOYED:                     NO   (no src/ change; none required one)
+PRODUCTION VERIFIED:          YES
 ```
 
-**ALL GOOD: NO.** Trending Cities and Trending Districts are exact on every leg of the chain, and
-the aqar tri-state repair is confirmed propagating. Two AF items are left open, deliberately: an
-agent-flow entry defect whose root cause is **not** proven, and a count pair that is genuinely
-ambiguous against a deliberate owner change. Neither was guessed at.
+**ALL GOOD: YES**, with one honest correction recorded below and one unrelated item flagged.
 
 ---
 
-## 1. A correction, stated first
+## 1. The correction that matters most
 
-An interim alert during this run said *"Advanced Filter is unreachable in production"*. **That was
-too broad and is withdrawn.** Dispatching the repo's own `AF backend-truth live check` against live
-production opened real AF question cards in three journeys —
+An earlier alert in this run said Advanced Filter was **broken in production** from the AI-agent
+flow. **That was wrong, and it was my error.** It is withdrawn.
 
-| journey | evidence |
-|---|---|
-| MOBILE Residential/Rent-Annual/Apartment/Riyadh | `hasCard:true`, «تفضل تدفع الإيجار على دفعات؟», chip 10,670 |
-| Residential/Buy/Apartment/Riyadh (Skip) | `hasCard:true`, «كم دورة مياه تفضل؟», chip 10,957 |
-| Residential/Buy/Apartment/Riyadh (Back) | `hasCard:true`, chip 10,957 |
+What I had: 6/6 reproductions from this routine's container — five cohorts plus a 65-second poll,
+desktop and mobile, and a timing trace showing the actions row hiding at t=5.0s and returning at
+t=8.2s (which is uniquely the `plan.length < MIN_USEFUL_QUESTIONS_TO_SHOW` path).
 
-That check reaches AF through the **Filter («تصفية») flow**, and that path works. The finding below
-is real but narrower than first reported.
+What settled it: I built the missing agent-flow barrier and ran it against **the same production
+bundle from a GitHub runner**. All four agent journeys passed, twice, in independent runs:
 
-## 2. Advanced Filter does not open from the AGENT-flow CTA (open, root cause unproven)
+```
+PASS  agent · Riyadh · Rent-Annual · apartments — offered-and-opened
+PASS  agent · Riyadh · Buy · villas — offered-and-opened
+PASS  agent · Jeddah · Buy · apartments (non-Riyadh) — offered-and-opened
+PASS  agent · Riyadh · Rent-Annual · apartments (MOBILE) — offered-and-opened
+```
 
-**What a user experiences.** In the «الوكيل الذكي» chat flow, after results render, tapping the
-documented entry «خلّنا نحدد الطلب أكثر» (`testID=results-narrow`) never presents an Advanced Filter
-question. The button either stays put or silently consumes itself and appends more listing cards.
+Same bundle, same cohorts, opposite result ⇒ the variable is the environment I was driving from,
+not production. This container reaches the app through an egress proxy that forces TLS 1.2 and
+resets or blocks assorted subresources (`ERR_TUNNEL_CONNECTION_FAILED` throughout every session);
+the repo's own live checks cannot run here at all for the same reason.
 
-**Reproduced 5/5**, on the currently-deployed bundle (`22a2936`):
+Two supporting facts, gathered before the CI result, point the same way — the data and the rules
+were never at fault:
 
-| cohort | viewport | CTA shown | AF card |
-|---|---|---|---|
-| Riyadh · Buy · villas group | desktop | yes | none |
-| Riyadh · Buy · villas group · 4 beds | desktop | yes | none |
-| Riyadh · Rent-Annual · apartments group | desktop | yes | none |
-| Riyadh · Buy · residential land group | desktop | yes | none |
-| Riyadh · Rent-Annual · apartments group | mobile 390×844 | yes | none |
-| Jeddah · Buy · apartments group | desktop | **correctly hidden** | n/a |
+- I captured the **tap's exact RPC request and response** in production (`apartment_guided_counts_ar`,
+  `cnt_total_base` 10,670, bath 4129/2950/1709/250, furnished 1046/2706, rnpl 3848) and ran the
+  **real** `scoreQuestion`/`meaningful`/`minOptionsFor` over it offline: **plan = 4**
+  (bathrooms 0.697, amenities 0.647, furnished 0.507, rnpl 0.433). The counts and the ranking rules
+  would have opened AF.
+- Driving a **local dev build of the identical source** (`git diff 22a2936..cf8bfc0 -- src/` is
+  empty) reproduced a full healthy interview end to end against real data — plan of 5, counts
+  narrowing 611 → 289 → 107, Skip leaving the count unchanged.
 
-**What was ruled out, with evidence:**
-- Not a dead click — the tap fires `property_age_option_counts_ar` and `apartment_guided_counts_ar`.
-- Not thin data — those RPCs return a 10,670-row base with heavy narrowing power (age buckets
-  4,531/1,589/1,760/1,217/1,195; furnished 1,046 vs unfurnished 2,706).
-- Not a crash — zero console errors, zero `pageerror`, zero `unhandledrejection`.
-- Not the ranking rules — running the pure gates offline against these exact query shapes shows
-  scope tiers already **resolved**, exactly one cohort-allowed question (`bathrooms` for the villas
-  group, `furnished` for apartments), and options that comfortably clear `scoreQuestion`.
-- Not `hasClientOnlyNarrowing` — that would return an empty pool and issue **no** RPCs at all.
+**Lesson recorded:** one environment is not production. A reproduction from this container is a
+hypothesis until it is confirmed from a faithful runner, and I should have qualified the first
+report that way instead of escalating it as a user-facing regression.
 
-So the failure is in `agent.tsx` orchestration, not in cohorts, counts or thresholds.
+## 2. The barrier that was missing (kept, and worth keeping)
 
-**Suspected window, NOT proven:** #1094 (conversational rounds), #1097 (conversation persistence),
-#1098 (only-questions-that-narrow) — merged and deployed the evening of 2026-08-25, *after* the
-08-25 run verified AF working end to end. A bundle-level bisect was **not possible here**: Vercel
-preview hosts return `ERR_TUNNEL_CONNECTION_FAILED` (egress policy allows only
-`ezhalah-app.vercel.app`).
+Even with no product defect, the investigation surfaced a real gap: **every journey in
+`verify-af-live-truth.ts` reaches Advanced Filter through the FILTER flow.** The agent flow — the
+entry path the harness notes actually document — had **zero** live coverage.
 
-**Why this run did not fix it.** No root cause is proven, and the area was deliberately rewritten by
-an owner product decision one day earlier. Shipping a guessed fix would violate "evidence before the
-write, proof after it". Escalated instead.
+- `scripts/lib/afOfferAgreement.ts` — the rule, pure. Either «خلّنا نحدد الطلب أكثر» is NOT offered,
+  or a question actually renders. Offered-then-nothing fails, deliberately **cause-agnostic**, so it
+  survives the next rewrite of the orchestration.
+- `scripts/verify-af-agent-cta-live.ts` — four live agent journeys (Riyadh rent apartments, Riyadh
+  buy villas, Jeddah, mobile 390×844), wired into `af-live-truth-check.yml` as its own step under
+  `if: !cancelled()` so neither half of the surface can hide the other.
+- `scripts/verify-af-offer-agreement.ts` — hermetic, in `npm test`, pins the truth table, keeps the
+  two diagnoses distinguishable, and carries a **SOFTENER GUARD** proving no combination of signals
+  can pass without a rendered question.
 
-## 3. Two production checks are red, and the direction is genuinely ambiguous
+**Mutation-proven**, each reverted: a `loading` flash counted as opened → 🔴; offered-but-never-opened
+downgraded to a pass → 🔴; the workflow no longer invoking the live check → 🔴; the live check
+silently switched to the Filter flow → 🔴; restored → 🟢.
 
-The dispatched official check finished `failure` with two red checks, both sharing one signature —
-the AF header chip reads **null** where a number is expected:
+## 3. Skip and Back — the product was right, the oracle was stale
 
-| check | observed |
-|---|---|
-| SKIP: "Skip does not change the count (no predicate applied)" | `before=10957 after=null` |
-| BACK: "Back restores the previous count" | `expected=null got=2482` |
+The permanent check had been red with `before=10957 after=null` (Skip) and `expected=null got=2482`
+(Back). Adjudicated as asked: **the product is correct.** #1061 deliberately blanks the count during
+the pending window, and the wait predicates were *satisfied by* that null, so they sampled the blank:
 
-**Not adjudicated, on purpose.** #1061 — *"the pending window must not show the previous answer's
-count either"* — deliberately BLANKS the count during the pending window. These may therefore be
-**stale barrier expectations** rather than a product defect. Deciding which side is wrong changes
-either a barrier or owner-specified UI behaviour, so it needs an owner call. Everything else in that
-run passed exactly, including `UI = RPC = oracle` and `missing = extra = duplicates = 0` on Jeddah
-4,186 and Riyadh 3,848 / 2,330.
+| | predicate before | why it sampled a blank |
+|---|---|---|
+| Skip | `s.hasCard && s.q !== st.q` | never required a resolved count |
+| Back | `s.chip !== baselineChip` | `null !== baseline` is **true**, so `afterSelect` captured the blank — which also made "count changed after selecting" pass for the wrong reason |
 
-## 4. The bug that was fixed: AF reachability measured at a threshold production stopped using
+Fixes, none of which weaken the oracle — the equality assertions are untouched and a chip that never
+resolves still fails explicitly:
 
-**PR #1127, CI green, barrier-only.**
+1. the predicates require `chip != null`, and the assertions assert it;
+2. Skip's and Back's waits get an explicit **25s**, because both go through the *refill* path (the
+   chip must be repainted with the SAME number rather than arriving with a fresh narrowing) which
+   outran the 9s default on a 10,957-row scope. CI then proved the refill is real: **`before=10957
+   after=10957`**;
+3. an empty option list after Back is now a named failure instead of a click on
+   `[data-testid="undefined"]`, which used to spend 30s timing out on an impossible selector and
+   bury the real cause.
 
-`scripts/verify-af-group-cohort-coverage.ts` rolled up *"which shipped groups can open Advanced
-Filter"* with a hardcoded `>= 2`, while `MIN_USEFUL_QUESTIONS_TO_SHOW` moved to **1** on 2026-08-24
-(#1045). The file's own comments already said the threshold was 1 — only the arithmetic never
-followed. At the real threshold **six** of eight shipped groups can open AF, not two; the four it
-could not see are exactly those with ceiling 1 (Apartments & Co-living, Villas & Houses, Retail &
-Workspace, Industrial & Logistics).
+## 4. Also fixed this run: AF reachability measured at a dead threshold
 
-It failed its own header promise twice: it measured the wrong threshold, **and** it only asserted
-`reachable.length > 0` — with two plot groups permanently clearing the bar, every other group could
-regress to zero while the check stayed green.
+`scripts/verify-af-group-cohort-coverage.ts` rolled up "which groups can open AF" with a hardcoded
+`>= 2` while `MIN_USEFUL_QUESTIONS_TO_SHOW` moved to **1** on 2026-08-24. At the real threshold
+**six** of eight shipped groups can open AF, not two; the four it could not see are exactly those
+with ceiling 1 (Apartments & Co-living, Villas & Houses, Retail & Workspace, Industrial & Logistics).
+It also only asserted `reachable.length > 0`, so with two plot groups permanently clearing the bar
+every other group could regress to zero while it stayed green. The threshold is now **read** from
+`advancedFilters.ts` (anchored regex — a rename fails loudly) and the reachable **set** is pinned by
+name. Mutation-proven three ways.
 
-Fixed at the class level: the threshold is now **read** from `src/data/advancedFilters.ts` (anchored
-regex, so a rename fails loudly) rather than retyped, and the reachable **set** is pinned by name so
-a flip in either direction is a named diff. The ceiling failure message, which hardcoded the same
-stale 2, now quotes the live constant.
+## 5. Trending — exact, unchanged
 
-**Mutation proof** (each reverted): threshold `1→2` → 🔴 fails naming all four groups as
-`NO LONGER REACHABLE` (it now reports precisely the blind spot it had); constant renamed → 🔴 fails
-with the read error, never a silent pass; restored → 🟢 passes reporting 6 groups.
+Cities: request carried the complete filter state; **UI = RPC = independent DB truth on all 6 rows**
+(الرياض 1,415 · الدمام 220 · جدة 181 · الخبر 178 · الجبيل 79 · عنيزة 77), and the distribution moves
+with the filter, so trending is recomputed rather than stale. Districts: 6 live
+`location_search_candidates_ar` calls replace the scope counts, all six exact (المهدية 333 ·
+النرجس 149 · العارض 127 · الرمال 85 · الجنادرية 61 · طويق 21).
 
-## 5. Trending — exact on every leg
+## 6. Not merged, and why
 
-**Cities.** Riyadh cohort Buy + `[فيلا, تاون هاوس, بيت, دوبلكس]` + `p_beds_exact:[4]`. The request
-carried the complete filter state, and **UI = RPC = independent DB truth on all 6 rows**:
+PR #1127 is green and clean, and stays open. `AGENTS.md` makes `scripts/safe-pr-merge.ts` the only
+sanctioned merge path; it reads PR state over GitHub **GraphQL**, which this session's gateway
+refuses — verified directly: `POST https://api.github.com/graphql -> 403`. `gh` is not installed
+here either, but installing it would not help: the refusal is at the gateway. Hand-reproducing a P0
+merge gate over REST is routing around it, which the authority grant forbids.
 
-| الرياض | الدمام | جدة | الخبر | الجبيل | عنيزة |
-|---|---|---|---|---|---|
-| 1,415 | 220 | 181 | 178 | 79 | 77 |
+## 7. Flagged, not touched
 
-Trending is recomputed, not stale: the distribution and ordering both move with the filter (Dammam
-rises to 2nd; الجبيل/عنيزة/بريدة/الخرج enter). Bare and rent-only states carried correct params
-(`p_rent_period: سنوي` after deselecting «شراء», per harness note 2).
+One unrelated check went red on a single journey in one run — `Residential/Buy/Apartment/Riyadh —
+bathrooms: final search request was captured -> null` — and passed on the same journey in the next
+run. It is a capture race in a check outside this routine's two assigned items; recorded here rather
+than fixed, so it is not lost.
 
-**Districts.** Under narrowing, `district_options_ar` returns scope counts (3800/703/686/502/479/412)
-and the UI then fires **one real `location_search_candidates_ar` per row** — 6 calls for 6 rows, no
-row left on a scope count. All six equal independent DB truth: المهدية 333 · النرجس 149 · العارض 127
-· الرمال 85 · الجنادرية 61 · طويق 21.
+## 8. Harness notes for the next run
 
-## 6. AF data integrity — the aqar tri-state repair is confirmed propagating
-
-The 2026-08-23 item left OPEN ("0 of 117,734 rows re-captured") is now **closed as PASS**. PR #987's
-corrected parser is reaching data: 27,040 of 118,766 rows re-captured since the merge (newest
-capture 08-26 08:15 UTC). Real FALSE values have landed where there were none — `maid_room`
-0 → **2,773** false, `driver_room` 0 → **3,611** false — and the over-reported trues fell as
-expected (maid 15,987 → 9,474). The column is now genuinely three-valued. ~91k rows still carry
-pre-fix values; at the observed ~9k/day that completes in ~10–13 days. **Nothing was hand-edited.**
-
-`alert_event` 781 (`af_field_stuck_no_variance`) is **correctly still open**: the detector returns 0
-only because `mon_raise` dedups against the open key. Evaluating its own stuck query directly shows
-4 pairs still firing (satel `air_conditioner` 39/0 and `kitchen` 39/0, sanadak `maid_room` 35/0,
-wasalt `driver_room` 0/74). Its resolve path is present and correct. This is exactly the AGENTS.md
-"an all-zero sweep can sit on top of open alerts" shape — read `open_alerts`, never the count.
-Adjudicating those 4 pairs against live source is next run's work; none was repaired on plausibility.
-
-## 7. Harness note for the next run (extends note 4)
-
-District oracles must normalize the «حي» prefix, not just expand `match_values`: the RPC label is
-`حي المهدية` while `search_listings_ar.district_ar` stores `المهدية`. An oracle keyed on the display
-label reports a **false zero** — it did here, on a row whose count was in fact exact (333).
-
-Also: in the agent chat flow the disambiguation options are **plain text, not buttons** — a real user
-answers by typing. And the composer is disabled while the agent thinks, so a bare `fill`+Enter
-silently no-ops; wait for the message to echo into the transcript before sending the next one.
-
-## 8. Adjacent state noted, not acted on
-
-- `migration_drift` is **red** (other sessions' migrations; this run applied none, so it adds none).
-- `silent_scraper_death` P0 and `zero_new_stall` P1 are open — the scraping routine's.
-- No DB saturation observed at this routine's 11:00 UTC start, so no restagger is needed against the
-  junior scraper sharing the slot.
+1. **This container cannot faithfully drive the app.** Its proxy forces TLS 1.2 and resets/blocks
+   subresources; the repo's live checks fail here with `ERR_CONNECTION_RESET` before any journey
+   runs. Confirm anything that looks like a production defect from CI (`workflow_dispatch` on
+   `af-live-truth-check.yml`) before reporting it. This cost this run most of its time.
+2. **District oracles must normalize the «حي» prefix**, not just expand `match_values`: the RPC label
+   is `حي المهدية` while `search_listings_ar.district_ar` stores `المهدية`. An oracle keyed on the
+   display label reports a false zero — it did here, on a row whose count was exactly right (333).
+3. **The agent's disambiguation options are plain text, not buttons** — a real user answers by
+   typing. The composer is disabled while the agent works, so a bare `fill`+Enter silently no-ops:
+   wait for the message to echo into the transcript first.
+4. **`playwright` in this image is build 1194 while the repo pins 1234.** Bridge it with symlinks
+   under `/opt/pw-browsers` (the headless-shell layout differs: `chrome-linux/headless_shell` vs
+   `chrome-headless-shell-linux64/chrome-headless-shell`). Never run `playwright install`.
+5. **The local dev server is a usable oracle for orchestration questions** (`npx expo start --web`
+   plus an `.env` carrying the public anon key): it runs the identical source against real
+   production data, and `console.log` instrumentation there answers "which branch ran" in minutes.
+   Its *agent parse* is not faithful, so use it for the interview mechanics, not for query shapes.
