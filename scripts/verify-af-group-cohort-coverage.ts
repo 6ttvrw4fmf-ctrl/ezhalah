@@ -43,10 +43,34 @@
 //
 //   node --experimental-strip-types scripts/verify-af-group-cohort-coverage.ts   (wired into `npm test`)
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { groupsFor, groupMembers } from '../src/data/propertyTypes.ts';
 import { cohortAllows, COHORT_QUESTIONS } from '../src/lib/afCohorts.ts';
 
 const MACROS = ['Residential', 'Commercial'] as const;
+
+// THE OPENING THRESHOLD IS READ, NEVER RETYPED (fix 2026-08-26). This barrier used to hardcode
+// `>= 2` for the reachability roll-up while advancedFilters.ts had already moved to 1 (owner
+// 2026-08-24), so it measured a threshold production no longer used: the four groups whose ceiling
+// is exactly 1 — «Apartments & Co-living», «Villas & Houses», «Retail & Workspace», «Industrial &
+// Logistics» — open Advanced Filter live and were invisible to the pin. A regression zeroing any of
+// them would have kept `reachable` at the same two plot groups and stayed green, which is the exact
+// blind spot this file's own header promises to close. advancedFilters.ts is not standalone-
+// importable under --experimental-strip-types (see verify-af-min-useful-questions-gate.ts's
+// EXECUTION NOTE), so the constant is read from source the same way that barrier reads it; the
+// regex is anchored to the export so a rename fails loudly instead of silently defaulting.
+const MIN_USEFUL_SRC = readFileSync(
+  join(import.meta.dirname, '..', 'src/data/advancedFilters.ts'), 'utf8');
+const MIN_USEFUL_MATCH = /export const MIN_USEFUL_QUESTIONS_TO_SHOW = (\d+);/.exec(MIN_USEFUL_SRC);
+if (!MIN_USEFUL_MATCH) {
+  console.error('✗ verify-af-group-cohort-coverage FAILED\n\n   • MIN_USEFUL_QUESTIONS_TO_SHOW is no '
+    + 'longer declared as `export const MIN_USEFUL_QUESTIONS_TO_SHOW = <n>;` in\n'
+    + '     src/data/advancedFilters.ts — this barrier cannot measure reachability against a\n'
+    + '     threshold it cannot read. Update the regex here in the same change that renames it.\n');
+  process.exit(1);
+}
+const MIN_USEFUL = Number(MIN_USEFUL_MATCH[1]);
 
 // Every question id the AF pool can offer whose scope gate is cohortAllows(). `property_age` is
 // deliberately absent: its eligibility is isAgeFilterScopeFor(), not a cohort, so counting it here
@@ -191,8 +215,9 @@ for (const { group, types } of shippedGroups) {
     if (ceil !== expected[label]) {
       fail(
         `"${group}" / ${label}: best-case ceiling is ${ceil}, pinned ${expected[label]}. A ceiling\n` +
-        `      below 2 means NO amount of certifying that group's remaining types can ever open\n` +
-        `      Advanced Filter for it — only a change to the intersection rule could.`,
+        `      below MIN_USEFUL_QUESTIONS_TO_SHOW (${MIN_USEFUL}) means NO amount of certifying that\n` +
+        `      group's remaining types can ever open Advanced Filter for it — only a change to the\n` +
+        `      intersection rule could.`,
       );
     }
   }
@@ -207,15 +232,32 @@ if (Object.keys(COHORT_QUESTIONS).length < 10) {
 const reachable = shippedGroups.filter(({ macro, types }) =>
   SHAPES.some(({ extra }) =>
     COHORT_GATED_IDS.filter((id) =>
-      cohortAllows({ category: macro, types, cities: ['الرياض'], ...extra } as never, id)).length >= 2));
-// As of 2026-08-23 exactly TWO of the eight shipped groups clear the 2-question floor in any shape
-// («Residential Plots» and «Commercial & Industrial Plots»), so a run that finds zero has broken the
-// gate itself rather than drifted a pin.
-if (!reachable.length) {
+      cohortAllows({ category: macro, types, cities: ['الرياض'], ...extra } as never, id)).length >= MIN_USEFUL));
+// THE SET, NOT JUST ITS SIZE (fix 2026-08-26). The old check only asserted `reachable.length > 0`,
+// which this file's header already promised to beat: "any edit that flips a shipped group between
+// 'Advanced Filter can open' and 'cannot' is loud on the PR that causes it". A non-emptiness test
+// cannot do that — with two plot groups permanently clearing the bar, every other group could
+// regress to zero and the check would still pass. Pinning the NAMES makes each flip, in either
+// direction, a named diff. Measured live 2026-08-26 at MIN_USEFUL_QUESTIONS_TO_SHOW = 1.
+const REACHABLE_AT_MIN_USEFUL = [
+  'Apartments & Co-living',        // Rent/Annual = 1
+  'Commercial & Industrial Plots', // Buy = 2
+  'Industrial & Logistics',        // Buy = 1, Rent/Annual = 1
+  'Residential Plots',             // Buy = 2, Rent/Annual = 2
+  'Retail & Workspace',            // Buy = 1, Rent/Annual = 1
+  'Villas & Houses',               // Buy = 1
+];
+const reachableNames = reachable.map((g) => g.group).sort();
+if (JSON.stringify(reachableNames) !== JSON.stringify(REACHABLE_AT_MIN_USEFUL)) {
+  const gained = reachableNames.filter((g) => !REACHABLE_AT_MIN_USEFUL.includes(g));
+  const lost = REACHABLE_AT_MIN_USEFUL.filter((g) => !reachableNames.includes(g));
   fail(
-    'NO shipped group can open Advanced Filter in ANY deal/period shape. The pinned baseline expects\n' +
-    '      two that can; a result of zero means cohortAllows() or the group data is broken, not that\n' +
-    '      the pins drifted.',
+    `Advanced-Filter reachability moved at MIN_USEFUL_QUESTIONS_TO_SHOW = ${MIN_USEFUL}.\n` +
+    (lost.length ? `      NO LONGER REACHABLE: ${lost.join(', ')} — a group that could open the\n` +
+                   `      interview no longer can. This is a user-visible loss of the feature.\n` : '') +
+    (gained.length ? `      NEWLY REACHABLE: ${gained.join(', ')} — if intended, add to the pin.\n` : '') +
+    `      Pinned: [${REACHABLE_AT_MIN_USEFUL.join(', ')}]\n` +
+    `      Actual: [${reachableNames.join(', ')}]`,
   );
 }
 
