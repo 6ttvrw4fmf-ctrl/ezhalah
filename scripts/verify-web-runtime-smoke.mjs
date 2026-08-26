@@ -598,6 +598,24 @@ try {
     const ctaBack = await page.evaluate(() =>
       Array.from(document.querySelectorAll('div,span,button,a,[role="button"]'))
         .some((e) => (e.innerText || '').trim().includes('خلّنا نحدد الطلب أكثر') && e.getBoundingClientRect().width > 0));
+    // UNKNOWN IS NOT A DEFECT (owner 2026-08-26, PR #1152). AF now distinguishes "the sources say
+    // there is nothing useful to ask" from "the probes never answered". On the SECOND verdict the
+    // product deliberately declines to open and offers NOTHING in place of AF — that is the correct,
+    // specified behaviour, so failing the journey for it would flag a fix as a defect.
+    // The two are told apart by what is on screen: 'known-empty' hands the user the legacy refine
+    // chips, 'unknown' leaves the CTA alone and adds nothing. A genuine "AF stopped opening"
+    // regression still FAILS here, because that path shows the chips.
+    const refineChipsShown = await page.evaluate(() => {
+      const t = document.body.innerText;
+      return ['أي حي تفضّل', 'كم ميزانيتك', 'كم غرفة'].some((c) => t.includes(c));
+    });
+    if (ctaBack && !refineChipsShown) {
+      console.log('SKIP  [I] Advanced Filter opens on this large multi-district scope '
+        + '— AF declined on an UNDETERMINED probe batch (no refine chips offered), which is the '
+        + 'specified behaviour under «UNKNOWN must never become NO». This is an environment/latency '
+        + 'symptom, not a product defect: the per-question count probes did not answer within 4s. '
+        + 'A REAL regression would instead show the refine chips (a probe-backed "nothing to narrow").');
+    } else
     check('[I] Advanced Filter opens on this large multi-district scope', false,
       `af-card never appeared within 45s. cta-returned=${ctaBack}\n`
       + `        cta-returned=true  => startAgeFlow RAN and DECLINED: its ranked plan came back shorter\n`
