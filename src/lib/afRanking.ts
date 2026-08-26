@@ -9,7 +9,11 @@
 // directly except that re-export and this module's own barrier.
 
 export type AdvancedOption = { key: string; label: string; count: number };
-export type AdvancedQuestionResult = { options: AdvancedOption[]; unknownCount: number; total: number };
+export type AdvancedQuestionResult = { options: AdvancedOption[]; unknownCount: number; total: number;
+  /** TRUE when this question's probe never completed: UNKNOWN, never "nothing useful here".
+   *  Without it a 4s timeout returned the byte-identical value to an empty scope and AF silently
+   *  declined to open — see src/lib/afProbe.ts for the full chain. */
+  probeFailed?: boolean };
 
 // A question shows only when it clears the scope-size floor AND has at least this many options for
 // its arity (single needs a real choice of ≥2; a single meaningful multi chip is a valid yes/no).

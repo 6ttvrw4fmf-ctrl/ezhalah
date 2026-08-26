@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { PROBE_FAILED, isProbeFailure, type ProbeFailed } from '@/lib/afProbe';
 import { listingPriceString, type Listing } from './listings';
 import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
@@ -693,7 +694,7 @@ function ageAgnostic<T extends Record<string, unknown>>(params: T) {
 
 const inFlightAgeCounts = new Map<string, Promise<AgeOptionCounts | null>>();
 
-export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeOptionCounts | null> {
+export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeOptionCounts | null | ProbeFailed> {
   if (!supabase) return null;
   const scope = await resolveSearchScope(q);
   if (!scope) {
@@ -722,9 +723,12 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
       }),
       AGE_COUNT_TIMEOUT_MS,
     );
-    if ('timedOut' in result) return null;
+    // UNKNOWN IS NOT NO (owner 2026-08-26): a probe that never completed must not return the
+    // same value as a source that answered 'nothing' — see src/lib/afProbe.ts.
+    if ('timedOut' in result) return PROBE_FAILED;
     const { data, error } = result;
-    if (error || !data || !(data as AgeOptionCounts[]).length) return null;
+    if (error) return PROBE_FAILED;               // transport/DB error = never learned the answer
+    if (!data || !(data as AgeOptionCounts[]).length) return null;   // the source answered: nothing
     return (data as AgeOptionCounts[])[0];
   });
 }
@@ -774,7 +778,7 @@ export type GuidedCounts = {
 // bathrooms/furnished all call with identical params in the same Promise.all batch.
 const inFlightGuidedCounts = new Map<string, Promise<GuidedCounts | null>>();
 
-export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<GuidedCounts | null> {
+export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<GuidedCounts | null | ProbeFailed> {
   if (!supabase) return null;
   const scope = await resolveSearchScope(q);
   if (!scope) return null;
@@ -800,9 +804,12 @@ export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<Guided
       }),
       AGE_COUNT_TIMEOUT_MS,
     );
-    if ('timedOut' in result) return null;
+    // UNKNOWN IS NOT NO (owner 2026-08-26): a probe that never completed must not return the
+    // same value as a source that answered 'nothing' — see src/lib/afProbe.ts.
+    if ('timedOut' in result) return PROBE_FAILED;
     const { data, error } = result;
-    if (error || !data || !(data as GuidedCounts[]).length) return null;
+    if (error) return PROBE_FAILED;               // transport/DB error = never learned the answer
+    if (!data || !(data as GuidedCounts[]).length) return null;      // the source answered: nothing
     return (data as GuidedCounts[])[0];
   });
 }
@@ -812,7 +819,10 @@ export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<Guided
 // previous number rather than flashing a wrong one.
 export async function fetchGuidedLiveCount(q: SearchQuery, amenities: string[], bathMin: number | null): Promise<number | null> {
   const counts = await fetchApartmentGuidedCounts({ ...q, amenities: amenities.length ? amenities : null, bathMin });
-  return counts ? counts.cnt_selected : null;
+  // Same as liveResultCount: null here means "no fresh number, hold the previous one" — a display
+  // decision, not a verdict about the scope, so a failed probe collapses to null legitimately.
+  if (isProbeFailure(counts) || !counts) return null;
+  return counts.cnt_selected;
 }
 
 // DISTRICT MARKING MUST USE THE USER'S CURRENT FILTER STATE (owner rule, 2026-08-13):
