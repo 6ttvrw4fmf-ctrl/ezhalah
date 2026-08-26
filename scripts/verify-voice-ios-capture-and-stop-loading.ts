@@ -4,18 +4,14 @@
 // follow-up request: the composer should show a brief loading beat after Stop, like ChatGPT, before
 // the transcript lands, instead of an instant cut).
 //
-// PART A — capture path + real waveform amplitude. The architecture settled on 2026-08-24 after a
-// full day of real-iPhone evidence, in three movements:
-//   1. Genuine iOS Safari is excluded at the SUPPORT GATE itself (isVoiceInputSupported → false
-//      there; owner decision, option B of their own framing — Apple's on-device service refused
-//      every attempt on a real, fully-configured iPhone across three production-verified fixes, and
-//      no free alternative exists). So NOTHING voice-related runs on iOS Safari, and startVoiceInput
-//      now has ONE unified capture path for every platform that can actually reach it — the old
-//      Safari-only skip-branch is deliberately gone (dead code once the gate excludes Safari).
-//   2. Chrome/Firefox/Edge-for-iOS keep the FULL feature — recognition is proven working there on
-//      the owner's own iPhone. Third-party iOS browsers carry their own UA tokens (CriOS/FxiOS/
-//      EdgiOS/OPiOS) precisely so they can be told apart from Safari despite sharing WebKit.
-//   3. THE FROZEN-WAVEFORM FIX (owner report: iPhone Chrome transcribed fine but the waveform never
+// PART A — capture path + real waveform amplitude. FINAL architecture (2026-08-25, after a
+// same-week reversal — see verify-voice-safari-support-detection.ts for the full history):
+//   1. NO browser-name exclusion of any kind. capture uses ONE unified path for every platform the
+//      capability gate lets through — getUserMedia runs unconditionally; there is no Safari-only (or
+//      any other browser-only) skip-branch. A genuine iOS Safari failure ('service-not-allowed') is
+//      handled at RUNTIME with its own honest message, never prevented by hiding the mic ahead of
+//      time on a UA guess.
+//   2. THE FROZEN-WAVEFORM FIX (owner report: iPhone Chrome transcribed fine but the waveform never
 //      moved): WebKit only PROCESSES an audio graph that reaches the destination — an analyser with
 //      no path to output never receives data, so RMS reads flat silence forever. The standard fix is
 //      a ZERO-GAIN tap into the destination: the graph runs, and gain 0 guarantees nothing audible
@@ -40,19 +36,12 @@ const check = (label: string, ok: boolean, detail = '') => {
 const voice = readFileSync(new URL('../src/lib/voiceInput.ts', import.meta.url).pathname, 'utf8');
 const agent = readFileSync(new URL('../src/app/agent.tsx', import.meta.url).pathname, 'utf8');
 
-console.log('\nVoice-input iOS capture path + stop-loading barrier (owner report 2026-08-24)\n');
+console.log('\nVoice-input capture path + stop-loading barrier (owner reports 2026-08-24/25)\n');
 
-// ═══ PART A — iOS capture path ═════════════════════════════════════════════════════════════════
+// ═══ PART A — capture path ═════════════════════════════════════════════════════════════════════
 check(
-  'isIOSSafariEngine() detects iPhone/iPad/iPod via UA (AND the iPad-masquerading-as-Mac case via MacIntel+multi-touch), then EXCLUDES third-party iOS browser UA tokens',
-  /function isIOSSafariEngine\(\): boolean \{/.test(voice) &&
-    /\/iPad\|iPhone\|iPod\/\.test\(ua\) \|\| \(navigator\.platform === 'MacIntel' && \(navigator as any\)\.maxTouchPoints > 1\)/.test(voice) &&
-    /return !\/CriOS\|FxiOS\|EdgiOS\|OPiOS\/\.test\(ua\);/.test(voice),
-);
-check(
-  'genuine iOS Safari is excluded at the SUPPORT GATE (owner decision 2026-08-24) — and startVoiceInput therefore has ONE unified capture path: getUserMedia runs unconditionally, no Safari skip-branch survives',
-  /if \(isIOSSafariEngine\(\)\) return false;/.test(voice) &&
-    !/if \(!isIOSSafariEngine\(\)\) \{/.test(voice) &&
+  'startVoiceInput has ONE unified capture path with NO browser-name branch of any kind — getUserMedia runs unconditionally for every platform the capability gate admits',
+  !/isIOSSafariEngine|userAgent|CriOS|FxiOS|EdgiOS|OPiOS/.test(voice) &&
     /let mediaStream: MediaStream;\s*\n\s*try \{\s*\n\s*mediaStream = await navigator\.mediaDevices\.getUserMedia\(\{ audio: true \}\);/.test(voice),
 );
 check(
@@ -71,42 +60,6 @@ check(
   'the RMS sampling itself is untouched real math over getByteTimeDomainData — no Math.random, no fabricated animation anywhere in the level path',
   /analyser\.getByteTimeDomainData\(buf\);/.test(voice) && !/Math\.random/.test(voice),
 );
-
-// EXECUTED: a faithful replica of isIOSSafariEngine(), against real device/browser UA strings —
-// including the exact Chrome-for-iOS case the owner's real device disproved the OLD blanket rule on.
-function isIOSSafariEngineReplica(nav: { userAgent: string; platform?: string; maxTouchPoints?: number }): boolean {
-  const ua = nav.userAgent || '';
-  const isIOSFamily = /iPad|iPhone|iPod/.test(ua) || (nav.platform === 'MacIntel' && (nav.maxTouchPoints ?? 0) > 1);
-  if (!isIOSFamily) return false;
-  return !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
-}
-const UA_IPHONE_SAFARI = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
-const UA_IPHONE_CHROME = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/128.0.6613.113 Mobile/15E148 Safari/604.1';
-const UA_IPHONE_FIREFOX = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/130.0 Mobile/15E148 Safari/605.1.15';
-const UA_IPAD_MODERN_SAFARI = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
-const UA_MAC_SAFARI = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Safari/605.1.15';
-const UA_ANDROID_CHROME = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36';
-const UA_DESKTOP_CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
-
-check('iPhone Safari UA → genuine Safari (true) — the one browser the owner excluded at the support gate', isIOSSafariEngineReplica({ userAgent: UA_IPHONE_SAFARI }) === true);
-check(
-  "iPhone Chrome UA (CriOS) → NOT genuine Safari (false) — the exact owner-reported regression: Chrome-for-iOS must keep its real getUserMedia/waveform path, it doesn't share Safari's contention",
-  isIOSSafariEngineReplica({ userAgent: UA_IPHONE_CHROME }) === false,
-);
-check(
-  'iPhone Firefox UA (FxiOS) → NOT genuine Safari (false) — same exemption for every third-party iOS browser, not just Chrome',
-  isIOSSafariEngineReplica({ userAgent: UA_IPHONE_FIREFOX }) === false,
-);
-check(
-  'iPad running a modern iPadOS Safari (UA claims "Macintosh", but touch-capable, no CriOS/FxiOS token) → genuine Safari (true) — the exact masquerade trap, still correctly caught',
-  isIOSSafariEngineReplica({ userAgent: UA_IPAD_MODERN_SAFARI, platform: 'MacIntel', maxTouchPoints: 5 }) === true,
-);
-check(
-  'real macOS Safari (UA also says "Macintosh", but zero touch points — no real Mac has a touchscreen) → NOT genuine Safari for this purpose (false) — must never misclassify the machine this fix was proven safe on',
-  isIOSSafariEngineReplica({ userAgent: UA_MAC_SAFARI, platform: 'MacIntel', maxTouchPoints: 0 }) === false,
-);
-check('Android Chrome UA → false (not iOS at all)', isIOSSafariEngineReplica({ userAgent: UA_ANDROID_CHROME, platform: 'Linux armv81' }) === false);
-check('desktop Chrome UA on a real Mac (platform MacIntel, 0 touch points) → false', isIOSSafariEngineReplica({ userAgent: UA_DESKTOP_CHROME, platform: 'MacIntel', maxTouchPoints: 0 }) === false);
 
 // ═══ PART B — stop-loading beat ════════════════════════════════════════════════════════════════
 check(

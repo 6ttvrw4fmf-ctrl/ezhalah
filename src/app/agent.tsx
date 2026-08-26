@@ -702,16 +702,18 @@ export default function Agent() {
         // never the "check your settings" text, which is only correct for a true 'denied'.
         // 'service-not-allowed' specifically is Apple's own on-device speech-recognition service
         // refusing the request — confirmed real on an actual iPhone, 2026-08-24 (mic permission had
-        // already been granted cleanly; this fired anyway). That's an iOS Settings state, not
-        // anything this code can force — but the generic "try again" is actively unhelpful, so this
-        // exact code gets its own actionable message. Enabling Dictation ALONE did not resolve it on
-        // the owner's real device (confirmed the same day), so the message names Siri too — Apple's
-        // own docs note Safari's on-device recognizer needs Siri enabled to be available at all — but
-        // this is still our best evidence-backed guidance, not a confirmed single fix.
+        // already been granted cleanly; this fired anyway). Enabling Dictation ALONE did not resolve
+        // it on the owner's real device the same day. The strongest documented cause (owner
+        // follow-up, 2026-08-25): iOS Lockdown Mode disables the Web Speech Recognition API
+        // specifically — Dictation and Siri keep working fine at the OS level, since neither is
+        // accessible to websites, which is exactly why enabling Dictation alone did nothing. iOS
+        // Screen Time's "Speech Recognition & Dictation" content restriction can independently block
+        // the same path. Both are iOS Settings states this code cannot force — but the generic "try
+        // again" names neither, so this exact code gets a message pointing at both real candidates.
         const msg = kind === 'denied'
           ? t('Microphone access is needed for voice input. Enable it in your browser settings.')
           : detail === 'service-not-allowed'
-          ? t('Speech recognition is turned off on your device. Make sure Siri and Dictation are both enabled in your iPhone Settings, then try again.')
+          ? t('Speech recognition may be blocked by Lockdown Mode or a Screen Time restriction on your iPhone. Check those, and also that Siri and Dictation are enabled, then try again.')
           : kind === 'blocked'
           ? t("The microphone couldn't be reached. Please try again.")
           : t('Voice input is not available right now.');
@@ -3089,14 +3091,14 @@ export default function Agent() {
                 <>
                   {/* Mic — enters recording mode (owner brief §2): immediate press feedback, then the
                       composer itself morphs. Sits immediately left of Send, same 34px control family.
-                      Hidden entirely where isVoiceInputSupported() is false — a LIVE runtime check
-                      (macOS Safari correctly shows it; engines with no SpeechRecognition hide it),
-                      plus ONE deliberate product exclusion: genuine iOS Safari (owner decision
-                      2026-08-24 — Apple's on-device service refused every attempt on a real, fully-
-                      configured iPhone across three production-verified fixes; the full evidence
-                      trail lives in isVoiceInputSupported's own comment). Chrome/Firefox/Edge on
-                      the same iPhone keep the mic — recognition is proven working there. Showing
-                      a mic that can only ever flash a failure toast and revert reads as broken. */}
+                      Hidden ONLY where isVoiceInputSupported() is false — a LIVE, capability-only
+                      runtime check with NO browser-name exclusion of any kind (owner ruling,
+                      2026-08-25: capability-based detection, never a UA guess — iOS Safari shows the
+                      mic like every other capable browser; a runtime failure there gets its own
+                      honest, specific message instead — see voiceInput.ts's own comment for the full
+                      evidence trail). Showing a mic that can only ever flash a failure toast and
+                      revert reads as broken — but hiding a mic the runtime genuinely supports, on a
+                      guess about the browser's name, is the same mistake in the other direction. */}
                   {isVoiceInputSupported() ? (
                   <Pressable
                     testID="voice-mic"
