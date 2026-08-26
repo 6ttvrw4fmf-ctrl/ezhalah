@@ -11,7 +11,22 @@
 name: Deal App fetch diagnostic
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "variants (client-vs-network) | volume (sustained-load shell rate)"
+        required: false
+        default: "variants"
+        type: choice
+        options: ["variants", "volume"]
+      volume_ids:
+        description: "how many sitemap-published ids to walk in volume mode"
+        required: false
+        default: "150"
+      interval_s:
+        description: "seconds between requests in volume mode (production uses ~0.0 across 6 workers)"
+        required: false
+        default: "0.3"
 
 jobs:
   diagnose:
@@ -28,4 +43,11 @@ jobs:
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
       - name: Run the fetch discriminator
-        run: exec python -m scrapers.dealapp.diagnose_fetch
+        env:
+          PROBE_INTERVAL_S: ${{ inputs.interval_s || '0.3' }}
+        run: |
+          if [ "${{ inputs.mode || 'variants' }}" = "volume" ]; then
+            exec python -m scrapers.dealapp.diagnose_fetch --volume "${{ inputs.volume_ids || '150' }}"
+          else
+            exec python -m scrapers.dealapp.diagnose_fetch
+          fi
