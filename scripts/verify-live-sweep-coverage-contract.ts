@@ -133,6 +133,50 @@ check('the product actually publishes terminal phrasings to check against',
     'if nothing fails the old regex this check has stopped proving anything');
 }
 
+// ── 4c. the rotation must not lose a journey (and a FLOOR) to a legitimate refusal ──────────────
+// The city field's pool is deal+category scoped BY DESIGN, so a city stocking only بيع is correctly
+// not offered on an إيجار search. Pairing a city with a deal it does not stock therefore loses the
+// journey to correct product behaviour — and takes a coverage floor with it. 2026-08-26: الدليمية
+// (22 listings, ALL بيع, zero إيجار/سنوي) drew «إيجار/سنوي», was rightly not offered, and the run
+// failed on «non-Riyadh cities: 2 < 3» while production was healthy. The floor is not the problem
+// and must NOT be lowered — the pairing is.
+check('the rotation pairs a city only with a deal it actually stocks',
+  /deal_ar,rent_period_ar/.test(runner) && /dealsOf/.test(runner),
+  'blind city×deal pairing loses journeys to correct refusals and fails the run on a missed floor');
+check('deal availability is read from the live index, never hardcoded',
+  /search_listings_ar\?select=city_ar,region_ar,deal_ar,rent_period_ar/.test(runner));
+check('the floors themselves were NOT lowered to make the run pass',
+  /nonRiyadhCities:\s*3/.test(sweep) && /trendingDistrictJourneys:\s*1/.test(sweep)
+  && /mobileJourneys:\s*1/.test(sweep) && /cardClickBackJourneys:\s*1/.test(sweep),
+  'lowering a floor is the forbidden way to turn this run green');
+
+// A SKIPPED journey is not coverage. Recording it as 'pass' refreshes the city in the stalest-first
+// ledger, so a city the sweep never manages to reach reads as permanently well-covered.
+check('only a journey that actually RAN is written to the coverage ledger',
+  /if \(ran\) \{/.test(runner) && /const ran = await run\(/.test(runner),
+  'recording a skip as pass is how a rotation system rots quietly');
+
+// A floor must not hinge on ONE rotated city being offerable. Backstops must target a city already
+// PROVEN reachable this run, not the same pickCities[0] whose refusal cost the floor in the first
+// place — and the mobile floor, which rode on `mobile = i === 0`, needs a backstop like the others.
+check('floor backstops target a city proven reachable this run',
+  /const reachable = \(\) =>/.test(runner) && /citiesTested\]\[0\]/.test(runner),
+  'a backstop pinned to pickCities[0] fails for exactly the reason the floor was missed');
+check('the MOBILE floor has a backstop of its own',
+  /done\.mobile\)/.test(runner) && /mobile floor/.test(runner),
+  'mobile rode on `i === 0` and vanished whenever that one city was not offered');
+check('the trending-district journey also uses a reachable city',
+  /trendingDistrict\(\{ city: reachable\(\)/.test(runner));
+
+// «not offered» must mean the PRODUCT refused, never "the list had not rendered yet". A flat sleep
+// turned بريدة — a top-10 city with 4,850 listings — into a skipped journey and a missed floor.
+check('the city option is POLLED for, not sampled once after a flat sleep',
+  /waitForFunction\(/.test(sweep) && /CITY_OPTION_TIMEOUT_MS/.test(sweep),
+  'a slow suggestion fetch must not read as a product refusal');
+check('a city pick is confirmed by the field having COMMITTED, not by the click',
+  /const committed = await input\.inputValue\(\)/.test(sweep),
+  'a click that missed leaves the field empty and the later search is refused (§41.13)');
+
 // ── 5. the schedule ─────────────────────────────────────────────────────────────────────────────
 check('the sweep runs on a schedule', /^\s*schedule:/m.test(wf) && /cron:/.test(wf));
 check('the scheduled target is production', /ezhalah-app\.vercel\.app/.test(wf));

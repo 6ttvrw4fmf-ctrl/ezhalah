@@ -242,10 +242,20 @@ async function setPeriod(page, period) {
   await page.getByText('شهري', { exact: true }).first().click(); await sleep(500);
   await page.getByText('سنوي', { exact: true }).first().click(); await sleep(900);
 }
+// «not offered» must mean the PRODUCT did not offer it — never "the list had not rendered yet".
+// This waited a flat 2,400 ms with no retry, so a slow suggestion fetch (this harness reaches
+// production through an egress proxy) turned a perfectly offered city into a skipped journey — and a
+// skipped journey costs a COVERAGE FLOOR. Seen 2026-08-26 on بريدة, a top-10 city with 4,850
+// listings that the very same run had already searched successfully at the RPC layer.
+//
+// The predicate is unchanged — same option shape, same match — it is only POLLED until the options
+// render instead of being sampled once. A city the product genuinely does not offer still returns
+// false at the timeout, so this cannot mask a real product refusal (§41.13).
+const CITY_OPTION_TIMEOUT_MS = 12000;
 async function pickCity(page, city) {
   const input = page.locator('[data-testid="city-input"]');
-  await input.click(); await input.fill(city); await sleep(2400);
-  const hit = await page.evaluate((c) => {
+  await input.click(); await input.fill(city);
+  const optionAt = (c) => {
     const el = [...document.querySelectorAll('div')].filter((e) => {
       const t = (e.innerText || '').trim();
       return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
@@ -253,10 +263,23 @@ async function pickCity(page, city) {
     if (!el) return null;
     const r = el.getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-  }, city);
+  };
+  const appeared = await page.waitForFunction(
+    (c) => {
+      const el = [...document.querySelectorAll('div')].filter((e) => {
+        const t = (e.innerText || '').trim();
+        return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
+      }).pop();
+      return !!el;
+    }, city, { timeout: CITY_OPTION_TIMEOUT_MS }).then(() => true).catch(() => false);
+  if (!appeared) return false;
+  const hit = await page.evaluate(optionAt, city);
   if (!hit) return false;
   await page.mouse.click(hit.x, hit.y); await sleep(1300);
-  return true;
+  // The commit is the assertion, not the click (§41.13): a click that missed leaves the field empty
+  // and the search would later be REFUSED, which reads as a broken product instead of a harness miss.
+  const committed = await input.inputValue().catch(() => '');
+  return !!committed && (committed.includes(city) || city.includes(committed));
 }
 // ── WHEN HAS A SEARCH SETTLED? ───────────────────────────────────────────────────────────────────
 // Every terminal state the results screen can reach, as ONE predicate shared by every journey.
