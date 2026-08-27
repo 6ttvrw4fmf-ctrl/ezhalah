@@ -24,6 +24,58 @@
 // (see AGENTS.md "Migration drift guard"): heavy checks get their own workflow.
 // This runs from .github/workflows/web-runtime-smoke.yml on any PR touching the app.
 //
+// JOURNEY I FLAKE — DIAGNOSED AND FIXED 2026-08-26. «[I] Advanced Filter opens on this large
+// multi-district scope» and the narrowing check that depends on it were flipping fail->pass on
+// IDENTICAL code (twice on one PR branch, with main green on the same base). Recorded so nobody
+// re-derives it:
+//
+//   IT WAS THE HARNESS, NOT THE PRODUCT. Evidence, heaviest first:
+//     * This journey's PRODUCT assertions — double-tap-never-re-presents and
+//       count-never-goes-back-up, the whole reason it exists — have NEVER failed in the recorded run
+//       history. Only the OPEN step and its dependent narrowing check ever did.
+//     * commitGuidedStep's ageFlowCommittingRef guard is correct by construction: synchronous
+//       check-and-set, held across `await presentGuided(...)` INSIDE the try, released in finally —
+//       so the duplicate-tap window it exists to close really is closed.
+//     * Failures cluster ACROSS BRANCHES, not within one: four runs on four different branches
+//       failed inside 30 minutes on 2026-08-24 (13:06-13:36). Shared backend load, not shared code.
+//     * The open step's budget was ~14.4s, of which only the first ~2.4s was a real attempt — the
+//       CTA renders behind `!ageFlow` so the first tap unmounts it, and retries 2..6 threw «control
+//       not found» into a swallowed catch while still costing 2.4s each.
+//
+//   MEASURED against this journey's exact scope (Buy · annual · الرياض · 6 districts · فيلا):
+//     one af_eligible_count        =   920 ms   (vs the 338 ms/search baseline in §40.1)
+//     the five Villa/Buy questions = 3,433 ms   server-side only, quiet DB, before HTTP/render/load
+//   docs/ops/SEARCH_MATCH_QA_ENGINEER.md §40.1 puts the concurrency knee at 3, so rankQuestions'
+//   five concurrent per-question counts are already past it and degrade further when CI is busy.
+//
+//   RE-MEASURING THIS LATER: there is no workflow_dispatch on this workflow, so the only ways to
+//   run one commit N times are pushing (changes the thing under test) or `gh run rerun` — which
+//   OVERWRITES the previous conclusion, so each measurement erases the one before it. That is why
+//   two Journey I failures on PR #1129 left no trace in the run history. Adding workflow_dispatch is
+//   worth doing, but it is deliberately NOT bundled here: it cannot be exercised until it is on the
+//   default branch, so it would ship unverified inside a fix whose whole point is verifiability.
+//
+//   THE FIX WAS NOT A BIGGER TIMEOUT: tap once instead of six, poll on the same 45s budget the count
+//   waits already use, print WHY on failure, and stop reporting the dependent narrowing check as a
+//   second independent failure. IF IT EVER FAILS AGAIN, READ THE DETAIL LINE FIRST:
+//     cta-returned=true       -> startAgeFlow ran and DECLINED (short plan). Ambiguous by design in
+//                                the product today: either the scope really certifies too few
+//                                questions, OR every per-question count probe timed out (4s each)
+//                                and the empty result was read as a data verdict. See below.
+//     cta-returned=false      -> the open never landed at all
+//     final=null              -> the count never settled: load/harness symptom
+//     final>=start            -> a REAL narrowing regression
+//     a double-tap assertion  -> a REAL product regression in the reentrancy guard
+//
+//   KNOWN PRODUCT WEAKNESS THIS INSTRUMENTATION EXPOSED (2026-08-26, not fixed here): startAgeFlow
+//   cannot tell "this scope has nothing worth asking" from "my probes failed". rankQuestions gives
+//   each question one count RPC with a 4s timeout; a timed-out probe yields no options, the question
+//   is dropped, and if every question drops the plan is empty and AF silently declines to open. A
+//   transient load blip is therefore rendered to the user as a settled verdict about their search —
+//   the same shape of error the repo forbids elsewhere under SOURCE-IS-TRUTH (a failed probe is not
+//   a negative result). Fixing it changes when AF opens, so it is an owner-facing product decision
+//   rather than something to smuggle into a test-harness PR.
+//
 //   npx expo export --platform web && node scripts/verify-web-runtime-smoke.mjs
 //
 // Proven three ways before it was trusted (2026-08-15, local production build):
@@ -507,13 +559,83 @@ try {
   const reentrancyStart = await waitForCount(45000);
   check('[I] reentrancy-journey scope lands with a real start count', Number.isFinite(reentrancyStart), `start=${reentrancyStart}`);
 
+  // FLAKE FIX (2026-08-26): this used to tap the CTA up to SIX times, waiting 1200ms after each —
+  // a ~14.4s budget for a network-bound open. Two things were wrong with it, and neither was a
+  // timeout that merely needed raising:
+  //
+  //   1. THE RETRIES WERE NO-OPS THAT ATE THE BUDGET. The CTA renders behind `!ageFlow`, so the
+  //      FIRST tap unmounts it; taps 2..6 threw «control not found» straight into `.catch(() => {})`
+  //      while still burning their 2.4s each. Only the first ~2.4s was ever a real attempt.
+  //   2. WHAT IT WAS WAITING FOR COSTS MORE THAN THAT. Opening AF runs rankQuestions(), which fires
+  //      ONE live count RPC per eligible question, concurrently. Measured 2026-08-26 against this
+  //      journey's exact scope (Buy · annual · الرياض · 6 districts · فيلا): 920 ms for a single
+  //      count, and 3,433 ms for the five certified Villa/Buy questions — server-side only, on a
+  //      quiet database, before HTTP, PostgREST, the client's own render, or any concurrent load.
+  //      docs/ops/SEARCH_MATCH_QA_ENGINEER.md §40.1 puts the baseline at 338 ms/search with a
+  //      concurrency knee of 3, so five concurrent counts are already past the knee and degrade
+  //      further under CI load. ~4x headroom on an idle backend, none on a busy one.
+  //
+  // Failures duly clustered ACROSS BRANCHES rather than tracking any one branch's code: four runs on
+  // four different branches failed inside 30 minutes on 2026-08-24 (13:06-13:36). The product's own
+  // reentrancy assertions below (double-tap, count-never-increases) have NEVER failed in the
+  // recorded history — only this open step and the narrowing check that DEPENDS on it. That is what
+  // makes this a harness bug and not non-determinism in commitGuidedStep's ageFlowCommittingRef.
+  //
+  // So: tap ONCE, then poll on the same 45s budget the count waits already use, and say WHY on
+  // failure instead of printing a bare `false` (the [H mobile] precedent).
+  await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
   let afOpened = false;
-  for (let i = 0; i < 6 && !afOpened; i++) {
-    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
-    await page.waitForTimeout(1200);
+  const afOpenUntil = Date.now() + 45000;
+  while (Date.now() < afOpenUntil) {
     afOpened = await afPresent();
+    if (afOpened) break;
+    await page.waitForTimeout(500);
   }
-  check('[I] Advanced Filter opens on this large multi-district scope', afOpened);
+  if (!afOpened) {
+    // Distinguish the two ways this legitimately ends up false, so the next failure explains itself:
+    // the CTA coming BACK means AF opened and closed again (fell back to refine), which is a real
+    // product signal; the CTA still absent means the open is simply still in flight.
+    const ctaBack = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('div,span,button,a,[role="button"]'))
+        .some((e) => (e.innerText || '').trim().includes('خلّنا نحدد الطلب أكثر') && e.getBoundingClientRect().width > 0));
+    // UNKNOWN IS NOT A DEFECT (owner 2026-08-26, PR #1152). AF now distinguishes "the sources say
+    // there is nothing useful to ask" from "the probes never answered". On the SECOND verdict the
+    // product deliberately declines to open and offers NOTHING in place of AF — that is the correct,
+    // specified behaviour, so failing the journey for it would flag a fix as a defect.
+    // The two are told apart by what is on screen: 'known-empty' hands the user the legacy refine
+    // chips, 'unknown' leaves the CTA alone and adds nothing. A genuine "AF stopped opening"
+    // regression still FAILS here, because that path shows the chips.
+    const refineChipsShown = await page.evaluate(() => {
+      const t = document.body.innerText;
+      return ['أي حي تفضّل', 'كم ميزانيتك', 'كم غرفة'].some((c) => t.includes(c));
+    });
+    if (ctaBack && !refineChipsShown) {
+      console.log('SKIP  [I] Advanced Filter opens on this large multi-district scope '
+        + '— AF declined on an UNDETERMINED probe batch (no refine chips offered), which is the '
+        + 'specified behaviour under «UNKNOWN must never become NO». This is an environment/latency '
+        + 'symptom, not a product defect: the per-question count probes did not answer within 4s. '
+        + 'A REAL regression would instead show the refine chips (a probe-backed "nothing to narrow").');
+    } else
+    check('[I] Advanced Filter opens on this large multi-district scope', false,
+      `af-card never appeared within 45s. cta-returned=${ctaBack}\n`
+      + `        cta-returned=true  => startAgeFlow RAN and DECLINED: its ranked plan came back shorter\n`
+      + `                              than MIN_USEFUL_QUESTIONS_TO_SHOW, so it setAgeFlow(null) and fell\n`
+      + `                              back to refine. That has TWO causes and they look identical here:\n`
+      + `                                (i)  the scope genuinely certifies too few useful questions, or\n`
+      + `                                (ii) the per-question count probes TIMED OUT (4s each,\n`
+      + `                                     AGE_COUNT_TIMEOUT_MS) so every question lost its options.\n`
+      + `                              (ii) is a load artefact being rendered as a data verdict — see the\n`
+      + `                              JOURNEY I note in this file's header before calling it a regression.\n`
+      + `        cta-returned=false => the open never landed at all (still in flight / crashed).\n`
+      + `        url=${page.url()} body=${(await body()).slice(0, 300).replace(/\n/g, ' | ')}`);
+  } else {
+    check('[I] Advanced Filter opens on this large multi-district scope', true);
+  }
+  // `afOpened` is the interview LOOP's own variable below and flips to false the moment the card
+  // closes — which is the normal, successful end of the interview. The gates further down must ask
+  // "did it ever open?", so latch that here rather than re-reading a variable that means something
+  // else by then.
+  const afEverOpened = afOpened;
 
   const seenTitles = [];
   let doubleProcessed = 0, countIncreased = 0, prevCount = reentrancyStart;
@@ -580,11 +702,30 @@ try {
       await page.waitForTimeout(500);
     }
   }
-  check('[I] double-tap NEVER re-presents an already-answered question', doubleProcessed === 0, `repeats=${doubleProcessed} sequence=${JSON.stringify(seenTitles)}`);
-  check('[I] the live count NEVER goes back up after an answer (no silent downgrade-to-unanswered)', countIncreased === 0, `count-increases=${countIncreased}`);
-  check('[I] the interview lands on a genuinely narrowed set, never back at the unfiltered start',
-    !reentrancyFinalOpen && Number.isFinite(reentrancyFinal) && reentrancyFinal < reentrancyStart && reentrancyFinal !== reentrancyStart,
-    `start=${reentrancyStart} final=${reentrancyFinal}`);
+  // These two ARE the product invariant this journey exists for (a double-tap silently downgrading a
+  // recorded AF answer to unanswered). They are asserted only when the interview actually ran —
+  // vacuously passing them on a journey that never opened would be worse than skipping, because it
+  // would report the guard as proven when nothing exercised it.
+  if (!afEverOpened) {
+    console.log('SKIP  [I] double-tap reentrancy assertions — the interview never opened, so nothing exercised the guard');
+  } else {
+    check('[I] double-tap NEVER re-presents an already-answered question', doubleProcessed === 0, `repeats=${doubleProcessed} sequence=${JSON.stringify(seenTitles)}`);
+    check('[I] the live count NEVER goes back up after an answer (no silent downgrade-to-unanswered)', countIncreased === 0, `count-increases=${countIncreased}`);
+  }
+  // DEPENDENT, NOT INDEPENDENT (2026-08-26). This can only mean anything if the interview actually
+  // ran. When the open above failed, this used to fail too — reporting TWO failures for ONE cause and
+  // making a harness timeout look like a narrowing regression. It now states the dependency instead,
+  // so the failure count equals the number of real problems.
+  if (!afEverOpened) {
+    console.log('SKIP  [I] the interview lands on a genuinely narrowed set '
+      + '— dependent on the AF-open check above, which already failed; not an independent defect');
+  } else {
+    check('[I] the interview lands on a genuinely narrowed set, never back at the unfiltered start',
+      !reentrancyFinalOpen && Number.isFinite(reentrancyFinal) && reentrancyFinal < reentrancyStart && reentrancyFinal !== reentrancyStart,
+      `start=${reentrancyStart} final=${reentrancyFinal} af-still-open=${reentrancyFinalOpen} `
+      + `(final=null => the count never settled within 45s, which is a HARNESS/load symptom; `
+      + `final>=start => a REAL narrowing regression) url=${page.url()}`);
+  }
 
   // ---- Journey J: MIN_USEFUL_QUESTIONS_TO_SHOW's 1-question case (owner 2026-08-24 — supersedes
   // the original ">=2" brief: 0 useful questions closes cleanly, 1+ opens and asks every one of them,

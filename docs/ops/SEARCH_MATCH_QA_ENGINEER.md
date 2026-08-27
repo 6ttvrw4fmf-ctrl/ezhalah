@@ -494,8 +494,14 @@ appears broken.
    button appears dead. Get the element, `scroll_into_view_if_needed()`, then `click()`. This trap
    alone made a healthy «عرض المزيد» look like a total pagination failure across 8 journeys.
 3. **«عرض المزيد» is not the only element with that text.** Card descriptions carry their own
-   «عرض المزيد» expander (5+ per screen). Filter to the pressable by height (≥25 px) or the harness
-   clicks a card's description instead of the pager.
+   «عرض المزيد» expander (5+ per screen). Filter to the pressable by height or the harness clicks a
+   card's description instead of the pager.
+   **The ≥25 px threshold no longer separates them (re-measured 2026-08-27).** On a 10-card الرياض
+   screen the description expanders render at **27 px** (w 211) and the real pager at **38 px**
+   (w 118), so a `>= 25` filter returns an EXPANDER as its first hit and the pager reads as ABSENT —
+   «21,868 نتيجة» with no «عرض المزيد» anywhere, which looks exactly like a dead pager on a huge
+   cohort. Use **two** discriminators: height **≥ 30 px** AND take the **last (bottom-most)** match,
+   since the pager always sits below every card. `e2e/live-sweep/showmore.mjs` does both.
 4. **Cards drip in; the pager is disabled while they do.** A search reveals 10, and each
    «عرض المزيد» reveals **100 more** with an animation. Wait until the `#N` card count STOPS growing
    before clicking again — and never treat a stable count of **0** as "settled": the app types an
@@ -600,6 +606,35 @@ appears broken.
     product's ability to find it.** A `db: 0` against a healthy non-zero RPC is nearly always the
     oracle failing to express the scope, not the product losing every row.
 
+16. **A city NAME does not identify a city — 290 of them are ambiguous across regions** (hit
+    2026-08-27). A harness that builds its city→region map as `{city_ar: region_id}` silently keeps
+    whichever row it read last. «الهفوف» is BOTH `city_id 12` (region 5, المنطقة الشرقية, the real
+    inventory) and `city_id 501` (region 1, الرياض); the naive map picked region 1, the RPC correctly
+    ANDed the contradictory pair, and a healthy 228-listing city read as a **flat zero** — filed under
+    "small city has no apartments" if nobody checks. Proof it was the harness: `('الهفوف', region 5)`
+    → 228, `('الهفوف', region-free)` → 228 with the IDENTICAL hash, `('الهفوف', region 1)` → 0.
+    This is §41.11 one level deeper: that trap says the pair must be CONSISTENT, this one says the
+    name alone cannot tell you what consistent IS. Resolve the region through the row's own `city_id`
+    (or take the region from the same catalog row you took the name from), never through a
+    name-keyed dict. `select city_ar from loc_catalog_city group by city_ar having
+    count(distinct region_id) > 1` returns **290** — this is not a rare edge.
+
+17. **Buy+Rent COMBINED is a THIRD way into the monthly pool, and `period` does not reveal it**
+    (hit 2026-08-27). Combined mode serialises as `p_deal: null` **and** `p_rent_period: null`, so a
+    harness that attaches `gathern`/`aqarmonthly` on `period in ('شهري','كلاهما')` — the natural
+    reading of §41.6 — sends 31 tables where the real client sends 33. The searches then under-count
+    by the whole monthly-only inventory and read as the RPC LOSING rows: 9 of 275 searches came back
+    `COUNT_MISMATCH` with the oracle HIGHER every time (شقة/الرياض 21,862 vs 30,632; غرفة/جدة 358 vs
+    497). Production was right on both of its independent layers. The client's rule is explicit —
+    `resTables()`, `src/data/remote.ts`: `wantsMonthly = q.dealCombined || rentPeriod==='monthly' ||
+    rentPeriod==='both'`, gated by `(q.deal === 'Rent' || q.dealCombined)` — combined mode has no
+    period selector, so its Rent side accepts Monthly unconditionally. Rebuilding the 9 requests with
+    the 33-table scope reproduced the oracle EXACTLY, 9/9.
+    Both halves of that rule are now pinned, mutation-proven in each direction, by
+    `scripts/verify-rent-period-both.ts` §2 (in `npm test`) — until this run only the
+    `'monthly'`/`'both'` half was guarded, so deleting either `dealCombined` clause collapsed every
+    combined search to an annual-only pool with the suite fully green.
+
 ## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
 
 > **What the user sees must match the actual listing/search truth exactly, in clean Arabic, with no
@@ -695,10 +730,27 @@ AF cohort.
 
 ### Minimum coverage per run — ASSERTED, not hoped for
 ≥3 non-Riyadh cities · ≥1 mobile · ≥1 Advanced Filter · ≥1 Trending city · ≥1 Trending district ·
-≥1 Buy+Rent · ≥1 monthly-rent · ≥1 honest-zero · ≥1 card → external site → Back.
+≥1 Buy+Rent · ≥1 monthly-rent · ≥1 honest-zero · ≥1 card → external site → Back ·
+**≥1 «عرض المزيد»** (`showMoreJourneys`, added 2026-08-27).
 
 **A run that covers less than the floor FAILS.** Silent shrinkage is exactly how a rotation system
 rots, so the floors are enforced by exit code and pinned by the barrier above.
+
+**Why «عرض المزيد» became a floor (2026-08-27).** §10 requires the pager to be actually clicked in
+production every day, and it is the one daily requirement the static barriers cannot stand in for —
+they read source and query the database, and neither can see whether a second batch keeps the user's
+filters. The sweep's ten journeys covered normal-filter, trending, AF, honest-zero, card→back and
+clear-all; nothing clicked the pager. `e2e/live-sweep/showmore.mjs` now does, asserting per batch:
+cards actually grow · the headline total never moves · المدينة/الحي/نوع العملية/نوع العقار/الميزانية
+all survive · no HTML entities or `undefined` appear in later batches · the request's predicate does
+not drift (same `p_deal`/`p_rent_period`/`p_cities`/`p_districts`/`p_category`/`p_types`, later
+offset only) · no duplicate `source_table:listing_id` in the served set (§30 identity, never card
+text). **A healthy run is 10 → 100 cards and exactly ONE pager click** — production caps one search's
+browse at `BROWSE_CAP` 100 and then offers «خلّنا نحدد الطلب أكثر» instead of paging on, so the
+pager's absence at 100 is the contract, not a defect. What the journey asserts there is that the
+closing line still states the TRUE total — «لقينا 21,868 إعلان يطابق طلبك، وعرضنا لك 100 منها» —
+never the cap. Verified live 2026-08-27 on الرياض/إيجار/سنوي, جدة/بيع and الدمام/إيجار/شهري:
+3 journeys, 0 defects.
 
 ### Permanent watches (one per defect fixed 2026-08-23)
 `exact-city-never-rescoped` · `monthly-af-counts-update` · `true-total-never-page-cap` ·

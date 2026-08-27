@@ -271,9 +271,16 @@ check('agent builds a plan, presents via one confirm handler, and enters via any
 // `opts?.auto` PARAMETER is deliberately left in place (harmless, unused surface) rather than
 // stripped, since manual invocation still flows through the same function. Pinned in both
 // directions so neither the manual path nor the auto-open's return can regress silently.
+// Re-anchored 2026-08-26 (UNKNOWN IS NOT NO): the guard gained a SECOND condition — the chips may
+// now only replace AF when the probes actually answered "nothing useful", never when they merely
+// failed. `fallbackToRefine` is still necessary, so this still pins what it always pinned; it just
+// no longer demands that the flag be SUFFICIENT. Both halves are asserted so neither can be lost.
 check('startAgeFlow takes a fallbackToRefine flag and only pops refine chips when it is set',
   /const startAgeFlow = async \(q: SearchQuery, fallbackToRefine = true/.test(agentSrc)
-  && /if \(fallbackToRefine\) startRefine\(q\)/.test(agentSrc));
+  && /if \(fallbackToRefine && mayAssertNothingToNarrow\(verdict\)\) startRefine\(q\)/.test(agentSrc));
+check('…and the chips can never replace AF on an UNDETERMINED probe batch (owner 2026-08-26)',
+  /mayAssertNothingToNarrow\(verdict\)/.test(agentSrc)
+  && !/if \(fallbackToRefine\) startRefine\(q\);/.test(agentSrc));
 check('the auto-open trigger call site (>25 results -> startAgeFlow(..., { auto: true })) stays REMOVED',
   !/startAgeFlow\(q2, false, \{ auto: true/.test(agentSrc));
 // The check above pins the EXACT call shape #768 deleted. Widened 2026-08-19 so a re-introduction

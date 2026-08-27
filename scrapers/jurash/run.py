@@ -440,16 +440,24 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
+
+    # begin_run() BEFORE the first source call — see scrapers/common/tests/
+    # test_source_death_is_recorded.py. A source that goes dark must leave a scrape_runs row, or
+    # "the source stopped answering" is indistinguishable from "the job never ran".
+    run_id = None if args.limit else db.begin_run("jurash")
+
     urls = index_urls(s)
     if not urls:
-        print("✗ Jurash: listings index returned no URLs")
+        msg = "listings index returned no URLs (source unreachable, blocking, or schema change)"
+        print(f"✗ Jurash: {msg}")
+        if run_id:
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=msg[:300])
         return 1
     if args.limit:
         urls = urls[: max(args.limit * 2, 20)]
     print(f"Jurash: {len(urls)} candidate listings ({WORKERS} workers)"
           f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
 
-    run_id = None if args.limit else db.begin_run("jurash")
     res: list[dict] = []
     com: list[dict] = []
     sold_res: list[str] = []

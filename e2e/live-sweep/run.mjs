@@ -11,6 +11,7 @@
 import { FLOORS, WATCHES, findings, journeys, ledgerPlan, ledgerRecord, note, dbCount, sleep } from './sweep.mjs';
 import { normalFilter, trendingCity, trendingDistrict, advancedFilter, zeroResult,
          cardClickBack, tabHistory, typedDistrict, clearAll } from './journeys.mjs';
+import { showMoreJourney } from './showmore.mjs';
 
 const enc = encodeURIComponent;
 const RIYADH = 'الرياض';
@@ -87,7 +88,7 @@ async function main() {
   console.error(`ROTATION → deals:  ${deals.map((d) => d.deal + (d.period ? '/' + d.period : '')).join(', ')}`);
   console.error(`ROTATION → types:  ${types.map((t) => t.label ?? t.group).join(', ')}\n`);
 
-  const done = { normal: 0, af: 0, tCity: 0, tDistrict: 0, mobile: 0, buyRent: 0, monthly: 0, zero: 0, cardBack: 0 };
+  const done = { normal: 0, af: 0, tCity: 0, tDistrict: 0, mobile: 0, buyRent: 0, monthly: 0, zero: 0, cardBack: 0, showMore: 0 };
   const citiesTested = new Set(); const regionsTested = new Set(); const typesTested = new Set();
   const run = async (label, fn, tally) => {
     console.error(`▶ ${label}`);
@@ -176,6 +177,14 @@ async function main() {
   // ── 4. honest zero · card→external→Back · Clear All ───────────────────────────────────────────
   await run('honest zero', () => zeroResult({ city: pickCities[0] }), () => { done.zero++; });
   await run('card → source → back', () => cardClickBack({ city: pickCities[0] }), () => { done.cardBack++; });
+
+  // §10 requires «عرض المزيد» to be actually clicked in production EVERY run. Riyadh, not a rotated
+  // city: the journey needs a cohort big enough to reach the browse cap, and a small city that
+  // returns fewer than 10 results would silently skip — which is exactly how this floor would rot.
+  await run('«عرض المزيد» → batches keep every filter',
+    () => showMoreJourney({ city: RIYADH, deal: 'إيجار', period: 'سنوي', batches: 3 }),
+    () => { done.showMore++; citiesTested.add(RIYADH); });
+
   await run('clear all', () => clearAll({ city: pickCities[0] }));
 
   // ── 5. THE PERMANENT WATCHES for the 2026-08-23 fixes ─────────────────────────────────────────
@@ -199,6 +208,7 @@ async function main() {
   floor('monthly journeys', done.monthly, FLOORS.monthlyJourneys);
   floor('honest-zero journeys', done.zero, FLOORS.zeroResultJourneys);
   floor('card→back journeys', done.cardBack, FLOORS.cardClickBackJourneys);
+  floor('«عرض المزيد» journeys', done.showMore, FLOORS.showMoreJourneys);
 
   // ── the recurring report ───────────────────────────────────────────────────────────────────────
   const byPair = (p) => findings.filter((f) => f.layerPair === p).length;

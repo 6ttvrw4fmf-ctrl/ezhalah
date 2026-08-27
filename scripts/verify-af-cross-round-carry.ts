@@ -265,9 +265,22 @@ check('the offer probe asks with the SAME carried asked-set the round will use',
   && has(/const seen = new Set<string>\(asked\);/)
   && has(/rankQuestions\(scoped, seen\)/),
   'src/app/agent.tsx — probing with an empty set offers a round whose only question is a repeat');
-check('the round\'s own plan is ranked against the carried set, not a fresh one',
-  (agentSrc.match(/rankQuestions\(q, ageFlowAskedRef\.current\)/g) ?? []).length === 2,
-  'src/app/agent.tsx — both the opening rank and the per-answer re-rank must pass the carried set');
+// Re-anchored 2026-08-26 (UNKNOWN IS NOT NO added bounded retry call sites). Counting occurrences
+// made a legitimate NEW ranking call look like a regression. The invariant was never "there are
+// exactly two calls" — it is "EVERY interview ranking call passes the carried set", which is what is
+// asserted now. Strictly stronger: it also covers call sites that did not exist when this was
+// written. `rankQuestions(scoped, seen)` is the trending-probe path (its own carried set, by design)
+// and is excluded by name.
+{
+  const calls = [...agentSrc.matchAll(/rankQuestions\(([^)]*)\)/g)].map((m) => m[1].trim());
+  const interviewCalls = calls.filter((a) => a !== 'scoped, seen');
+  check('the round\'s own plan is ranked against the carried set, not a fresh one',
+    interviewCalls.length >= 2 && interviewCalls.every((a) => a.endsWith('ageFlowAskedRef.current')),
+    `src/app/agent.tsx — every interview ranking call must pass the carried set; got ${JSON.stringify(interviewCalls)}`);
+  check('…and no interview ranking call quietly starts from an EMPTY asked-set',
+    !interviewCalls.some((a) => /new Set\(\)/.test(a)),
+    'starting fresh would re-ask questions the user already answered in an earlier round');
+}
 
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
 // Every check above is re-run against a deliberately broken variant of its own subject and must go
@@ -368,10 +381,17 @@ mustCatch('the offer probe going back to an empty asked-set',
 mustCatch('the offer probe ranking something other than the walked set',
   !/rankQuestions\(scoped, seen\)/.test(
     mut(agentSrc, 'rankQuestions(scoped, seen)', 'rankQuestions(scoped, new Set())')));
-mustCatch('a round ranking its plan against a fresh set instead of the carried one',
-  (mut(agentSrc, 'const ranked = await rankQuestions(q, ageFlowAskedRef.current);',
-    'const ranked = await rankQuestions(q, new Set());')
-    .match(/rankQuestions\(q, ageFlowAskedRef\.current\)/g) ?? []).length !== 2);
+// Re-anchored 2026-08-26 alongside the check it proves: the check no longer counts occurrences (a
+// legitimate new ranking call is not a regression), so its mutation proof must not either. It now
+// applies the SAME mutation and asserts the SAME predicate the live check uses — if that predicate
+// ever stops discriminating, this goes red.
+mustCatch('a round ranking its plan against a fresh set instead of the carried one', (() => {
+  const mutated = mut(agentSrc, 'const ranked = await rankQuestions(q, ageFlowAskedRef.current);',
+    'const ranked = await rankQuestions(q, new Set());');
+  const calls = [...mutated.matchAll(/rankQuestions\(([^)]*)\)/g)].map((m) => m[1].trim())
+    .filter((a) => a !== 'scoped, seen');
+  return !calls.every((a) => a.endsWith('ageFlowAskedRef.current'));
+})());
 // (n) the lifts themselves must notice when their subject disappears
 mustCatch('a rename that would leave the union expression unverified',
   writersOf(mut(agentSrc, /ageFlowAskedRef\.current = new Set\(\[\.\.\.\(afCarryRef/g, 'askedSet = new Set([...(afCarryRef'))

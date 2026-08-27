@@ -80,6 +80,23 @@ check("candidate-level period filter has an explicit 'both' branch",
   /rentPeriod\s*===\s*'both'\s*\)\s*\{[\s\S]{0,220}?\.in\(\s*'rent_period',\s*\[\s*'monthly',\s*'annual'\s*\]/.test(remote),
   "mixed platforms must still require a PUBLISHED monthly|annual period — a null one is neither");
 
+// Buy+Rent COMBINED (owner feature 2026-08-20) is the THIRD way into the monthly pool, and until
+// 2026-08-27 nothing pinned it — the two checks above only cover 'monthly'/'both', so deleting the
+// dealCombined half of either clause left `npm test` fully green while every combined-mode search
+// silently collapsed to an annual-only pool. Measured live that day against the production RPC:
+// شقة/الرياض combined 30,632 → 21,862 (−8,770, −29%), شقة/جدة 25,242 → 20,063, غرفة/الخبر 53 → 40.
+// Combined mode has NO period selector, so its Rent side accepts Monthly unconditionally and the
+// two monthly-only sources must always be reachable — there is no user action that can re-add them.
+check("resTables treats Buy+Rent COMBINED as wanting monthly (no period selector to ask with)",
+  /wantsMonthly\s*=\s*q\.dealCombined\s*\|\|/.test(remote),
+  'dropping dealCombined here returns an annual-only pool for every combined search: ~29% of the '
+  + 'matching inventory vanishes with no error, no empty state, and a green test suite');
+
+check("resTables' deal gate admits dealCombined, not only a single-deal Rent search",
+  /\(\s*q\.deal\s*===\s*'Rent'\s*\|\|\s*q\.dealCombined\s*\)\s*&&\s*wantsMonthly/.test(remote),
+  'combined mode sends deal=null, so a gate testing only deal===Rent skips the monthly sources '
+  + 'even while wantsMonthly is true — the same silent annual-only collapse by the other clause');
+
 // ── 3. one price basis ───────────────────────────────────────────────────────────────────────────
 check("priceFilter reads a 'both' budget on the annual basis (no ×12 heuristic fallthrough)",
   /explicitBoth\s*=\s*q\.rentPeriod\s*===\s*'both'/.test(search)

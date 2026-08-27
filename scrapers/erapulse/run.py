@@ -448,9 +448,26 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
+
+    # begin_run() BEFORE the first source call, deliberately (senior run 2026-08-27). Era Pulse
+    # was dead for 3 days and the database could not tell: begin_run() used to run AFTER the whole
+    # catalog was fetched, so when fetch_page() exhausted its 5-attempt ladder main() returned 1
+    # having written NO scrape_runs row at all. "The source stopped answering" and "the job was
+    # never scheduled" were then the SAME observation, and every count/ok-based barrier was blind
+    # to the difference. mon_detect_silent_scraper_death caught it only 48h late, and reported
+    # last_attempt == last_healthy == the last GOOD run — i.e. it stated that runs were still
+    # being attempted while having no evidence any attempt had happened.
+    # Same reasoning the jazwtn leg already carries in small-sources-sync.yml: record the row
+    # BEFORE the fetch so a re-block fails LOUD, not silently.
+    run_id = None if args.limit else db.begin_run("erapulse")
+
     first, pag = fetch_page(s, 1)
     if not first:
-        print("✗ Era Pulse: list endpoint returned no properties")
+        msg = ("list endpoint returned no properties after 5 attempts "
+               "(api.erapulse.sa unreachable, blocking, or schema change)")
+        print(f"✗ Era Pulse: {msg}")
+        if run_id:
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=msg[:300])
         return 1
     total = pag.get("total")
     pages = pag.get("totalPages") or 1
@@ -470,7 +487,6 @@ def main() -> int:
 
     hood_city = build_hood_city_index(catalog)
 
-    run_id = None if args.limit else db.begin_run("erapulse")
     res: list[dict] = []
     com: list[dict] = []
     seen = 0

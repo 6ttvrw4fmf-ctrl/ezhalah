@@ -57,6 +57,7 @@ import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard } from '@/components/AdvancedQuestionCard';
 import MiningTransition from '@/components/MiningTransition';
+import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 
@@ -701,19 +702,18 @@ export default function Agent() {
         // 'blocked' (service/hardware failure, not permission) gets its own honest message —
         // never the "check your settings" text, which is only correct for a true 'denied'.
         // 'service-not-allowed' specifically is Apple's own on-device speech-recognition service
-        // refusing the request — confirmed real on an actual iPhone, 2026-08-24 (mic permission had
-        // already been granted cleanly; this fired anyway). Enabling Dictation ALONE did not resolve
-        // it on the owner's real device the same day. The strongest documented cause (owner
-        // follow-up, 2026-08-25): iOS Lockdown Mode disables the Web Speech Recognition API
-        // specifically — Dictation and Siri keep working fine at the OS level, since neither is
-        // accessible to websites, which is exactly why enabling Dictation alone did nothing. iOS
-        // Screen Time's "Speech Recognition & Dictation" content restriction can independently block
-        // the same path. Both are iOS Settings states this code cannot force — but the generic "try
-        // again" names neither, so this exact code gets a message pointing at both real candidates.
+        // refusing the request. Real-device evidence, 2026-08-24/25 (owner's iPhone): mic permission
+        // was granted cleanly, Lockdown Mode was off, Screen Time's "Speech Recognition & Dictation"
+        // restriction was allowed, and Siri was enabled — EVERY checkable iOS setting was already
+        // correct, and it still failed, only in Safari (every other iPhone browser on the same
+        // device works). With no configurable cause left standing, this is treated as Safari's own
+        // on-device speech service being unavailable here — the SAME plain "not supported" message
+        // used when the capability check itself fails, since practically that's what it is on this
+        // device: reusing the existing key rather than inventing a near-duplicate string.
         const msg = kind === 'denied'
           ? t('Microphone access is needed for voice input. Enable it in your browser settings.')
           : detail === 'service-not-allowed'
-          ? t('Speech recognition may be blocked by Lockdown Mode or a Screen Time restriction on your iPhone. Check those, and also that Siri and Dictation are enabled, then try again.')
+          ? t('Voice input is not supported on this browser')
           : kind === 'blocked'
           ? t("The microphone couldn't be reached. Please try again.")
           : t('Voice input is not available right now.');
@@ -1698,16 +1698,20 @@ export default function Agent() {
     // earlier round — a skipped tier is never re-asked, nextScopeTier), the walk above ends
     // immediately and nothing has ranked the advanced pool: the round would finish on an empty plan
     // and the tap would read as a dead button. Ranking here is the same call the loop already makes.
+    // `rankedForPlan` is null when this call reused an already-built plan (no fresh probes ran), so
+    // there is no batch provenance to reason about and the undetermined branch below is skipped.
+    let rankedForPlan: Awaited<ReturnType<typeof rankQuestions>> | null = null;
     if (stepIndex > 0 || !ageFlowPlanRef.current.length) {
       const q = ageFlowQueryRef.current;
       if (!q || ageFlowTokenRef.current !== token) return;
       const ranked = await rankQuestions(q, ageFlowAskedRef.current);
       if (ageFlowTokenRef.current !== token) return;
+      rankedForPlan = ranked;
       ageFlowPlanRef.current = ranked
         .map((r: RankedQuestion) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount, total: r.total }))
         .filter((pl) => pl.options.length >= minOptionsFor(pl.question.selection));
     }
-    const plan = ageFlowPlanRef.current;
+    let plan = ageFlowPlanRef.current;
     // THE >=1-USEFUL GATE, EVALUATED AT THE SCOPE→ADVANCED TRANSITION (owner 2026-08-23; REVISED
     // owner 2026-08-24 — 0 closes, 1+ asks, superseding the original ">=2" brief). It cannot run at
     // startAgeFlow any more: with an unresolved hierarchy the ranked plan is empty by construction,
@@ -1718,6 +1722,24 @@ export default function Agent() {
     // the scope answers already narrowed to; it never bounces to the legacy chips, because by this
     // point the user has answered real questions we must honour. 1+ proceeds into `plan[0]` below
     // exactly like any other useful question — the continuation loop then asks down to the last one.
+    // Same rule mid-interview (owner 2026-08-26): ending the interview says "there is nothing left
+    // worth asking", which is a claim about the DATA. If a probe merely failed we never learned that,
+    // so retry the batch once before believing it. Only a probe-backed empty plan may end the
+    // interview; an undetermined one keeps the current question on screen rather than silently
+    // shortening the interview under load.
+    if (rankedForPlan && !plan.length && shouldRetryProbes(probeVerdict(0, rankedForPlan.probeFailed), 0)) {
+      const retry = await rankQuestions(ageFlowQueryRef.current!, ageFlowAskedRef.current);
+      if (ageFlowTokenRef.current !== token) return;
+      if (retry.length) {
+        ageFlowPlanRef.current = retry
+          .map((r) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount, total: r.total }))
+          .filter((p) => p.options.length >= minOptionsFor(p.question.selection));
+        plan = ageFlowPlanRef.current;
+        rankedForPlan = retry;
+      } else if (retry.probeFailed) {
+        return;   // still undetermined — leave the interview exactly as it is, claim nothing
+      }
+    }
     if (steps.length && steps.every((st) => isScopeQuestionId(st.question.id))
         && plan.length < MIN_USEFUL_QUESTIONS_TO_SHOW) { finishGuided(token); return; }
     if (!plan.length) { finishGuided(token); return; }
@@ -1868,11 +1890,22 @@ export default function Agent() {
     // Rank the pool against the user's ACTUAL current result set (score = split × salience over the
     // live counts). Below the >25 floor rankQuestions returns [], so the interview simply never
     // opens on a small result set — the ≤25 rule and the entry gate are the same constant.
-    const ranked = await rankQuestions(q, ageFlowAskedRef.current);
+    // UNKNOWN IS NOT NO (owner 2026-08-26). Each question earns its place by one live count RPC
+    // capped at 4s; a probe that times out used to yield the same empty result as a scope that
+    // genuinely has nothing to offer, so a load blip closed the interview and demoted the user to
+    // the legacy chips as if we had CHECKED and found nothing. Retry the batch ONCE — that absorbs
+    // the transient case — and if it still cannot be determined, say so by leaving «تحديد أكثر»
+    // exactly where it was instead of asserting a verdict we never earned. src/lib/afProbe.ts.
+    let ranked = await rankQuestions(q, ageFlowAskedRef.current);
     if (ageFlowTokenRef.current !== token) return; // superseded by a newer tap/turn
-    ageFlowPlanRef.current = ranked
+    const planOf = (rk: typeof ranked) => rk
       .map((r) => ({ question: r.question, options: r.options, unknownCount: r.unknownCount, total: r.total }))
       .filter((p) => p.options.length >= minOptionsFor(p.question.selection));
+    if (shouldRetryProbes(probeVerdict(planOf(ranked).length, ranked.probeFailed), 0)) {
+      ranked = await rankQuestions(q, ageFlowAskedRef.current);
+      if (ageFlowTokenRef.current !== token) return;
+    }
+    ageFlowPlanRef.current = planOf(ranked);
     if (ageFlowTotalRef.current == null && ranked.length) ageFlowTotalRef.current = ranked[0].total;
     // MIN 1 USEFUL QUESTION TO OPEN (owner 2026-08-22; REVISED owner 2026-08-24 — 0 closes, 1+
     // asks, superseding the original ">=2" brief that withheld a lone useful question). A genuinely
@@ -1887,8 +1920,12 @@ export default function Agent() {
     // only; presentGuided's own re-rank after each answer/skip is untouched below, so an already-
     // open interview still keeps asking down to the very last useful question (owner §2/§6).
     if (ageFlowPlanRef.current.length < MIN_USEFUL_QUESTIONS_TO_SHOW) {
-      setAgeFlow(null);
-      if (fallbackToRefine) startRefine(q);
+      const verdict = probeVerdict(ageFlowPlanRef.current.length, ranked.probeFailed);
+      setAgeFlow(null);                       // never open an empty card — on BOTH verdicts
+      // …but only OFFER THE CHIPS INSTEAD when the sources actually answered. On 'unknown' the CTA
+      // simply reappears (it renders behind `!ageFlow`), so the user can try again and nothing false
+      // is asserted about their search.
+      if (fallbackToRefine && mayAssertNothingToNarrow(verdict)) startRefine(q);
       return;
     }
     if (opts?.auto && !introBeginRef.current) return; // stay on the intro until the user opts in

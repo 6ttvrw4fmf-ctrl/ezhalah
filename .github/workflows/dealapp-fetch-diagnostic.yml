@@ -1,0 +1,54 @@
+# Deal App fetch discriminator (owner-approved 2026-08-26) -- see scrapers/dealapp/diagnose_fetch.py
+# for the full context.
+#
+# Answers ONE question: production dealapp detail fetches fail ~78-82% with
+# status_200_no_listing_schema, while the SAME urls from an ordinary network return the full
+# schema with a price. Is that our CLIENT (TLS fingerprint / headers) or this runner's NETWORK?
+#
+# Four client variants x 4 known ids, one request per second, ~16 requests total. Diagnosis only:
+# no database writes, no listing state touched, no proxy added. Do NOT put this on a schedule --
+# it is dispatched manually, on demand.
+name: Deal App fetch diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "variants (4 fixed ids) | volume (shell rate by decile) | population (every client, same ids) | retry (is a shell permanent for an id?)"
+        required: false
+        default: "variants"
+        type: choice
+        options: ["variants", "volume", "population", "retry"]
+      volume_ids:
+        description: "how many sitemap-published ids to walk in volume/population mode"
+        required: false
+        default: "150"
+      interval_s:
+        description: "seconds between requests in volume mode (production uses ~0.0 across 6 workers)"
+        required: false
+        default: "0.3"
+
+jobs:
+  diagnose:
+    name: Discriminate client vs network for dealapp detail fetches
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Run the fetch discriminator
+        env:
+          PROBE_INTERVAL_S: ${{ inputs.interval_s || '0.3' }}
+        run: |
+          case "${{ inputs.mode || 'variants' }}" in
+            volume)     exec python -m scrapers.dealapp.diagnose_fetch --volume     "${{ inputs.volume_ids || '150' }}" ;;
+            population) exec python -m scrapers.dealapp.diagnose_fetch --population "${{ inputs.volume_ids || '150' }}" ;;
+            retry)      exec python -m scrapers.dealapp.diagnose_fetch --retry      "${{ inputs.volume_ids || '150' }}" ;;
+            *)          exec python -m scrapers.dealapp.diagnose_fetch ;;
+          esac

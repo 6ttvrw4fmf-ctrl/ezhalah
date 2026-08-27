@@ -1,10 +1,11 @@
-# ENGINEER ROUTINES — THE FIVE DAILY ENGINEERS (canonical, owner-locked 2026-08-11, extended 2026-08-23)
+# ENGINEER ROUTINES — THE SEVEN DAILY ENGINEERS (canonical, owner-locked 2026-08-11, extended 2026-08-23, extended 2026-08-26)
 
-> Owner rule: there are **exactly FIVE separate cloud routines, all DAILY** (the fourth added by
-> the owner 2026-08-11; the fifth added 2026-08-23). They are never merged, renamed into each
-> other, or scope-swapped. Converting one into another (which happened once on 2026-08-10 and was
-> reverted) is a violation, not a refactor. If a routine's live prompt ever diverges from what this
-> file describes, restore the routine to match this file.
+> Owner rule: there are **exactly SEVEN separate cloud routines, all DAILY** (the fourth added by
+> the owner 2026-08-11; the fifth added 2026-08-23; the sixth and seventh added 2026-08-26, moved to
+> 03:00/03:30 Arizona same-day). They are never merged, renamed into each other, or
+> scope-swapped. Converting one into another (which happened once on 2026-08-10 and was reverted)
+> is a violation, not a refactor. If a routine's live prompt ever diverges from what this file
+> describes, restore the routine to match this file.
 
 | # | Engineer | Trigger ID | Daily time (Arizona) | Daily time (UTC) | Model | Scope |
 |---|---|---|---|---|---|---|
@@ -13,12 +14,31 @@
 | 3 | 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) | `trig_01Tr6Rb6XPggFXqCf3EKG62y` | 05:00 | 12:00 | claude-opus-5 | Full scraped inventory / Normal Filter ONLY, **Advanced Filter explicitly out of scope (belongs to routine #5)** |
 | 4 | 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA | `trig_016eagxsMuB2cCbMe9DK7JJD` | 05:30 | 12:30 | claude-opus-5 | Live production Normal Filter USED AS A REAL USER: matching → diversity → «عرض المزيد» → card click-through, end to end |
 | 5 | 🎯 Senior Advanced Filter + Trending Data Integrity Engineer | `trig_01FmaKmMVJgT5VHFj8Mk9q13` | 04:00 | 11:00 | claude-opus-5 | Advanced Filter + Trending Cities/Districts + the data integrity behind every AF predicate, end to end |
+| 6 | 👣 Daily Journey & Persistence Engineer | *(pending — owner creates in routines UI)* | 03:00 | 10:00 | claude-opus-5 | Real-user journeys: state, navigation, sessions, sidebar/history/Favorites, cross-browser/device — never search matching itself |
+| 7 | 🧵 Daily Systems Seam Engineer | *(pending — owner creates in routines UI)* | 03:30 | 10:30 | claude-opus-5 | Cross-system integration integrity: cron→detector→alert, migration→mirror→prod, deploy-claim-vs-served-bundle, RLS, orphaned guarantees |
 
 **Schedule note (2026-08-23):** routine #5 runs at the SAME 04:00 Arizona slot as routine #1
 (owner's explicit instruction), not staggered 30 minutes like #1–#4 are from each other. It does
 not share #1's heavy scraping-DB phase, so this is not expected to reproduce the 2026-08-10
 stampede — but if DB saturation is ever observed at 04:00, restagger #5 to a later slot (e.g. 06:00
 Arizona) rather than silently accept degraded runs.
+
+**Schedule note (2026-08-26, revised same day — owner moved both to 3am):** routines #6 (👣) and
+#7 (🧵) run at **03:00 and 03:30 Arizona**, ahead of the entire existing block, 30 minutes apart
+from each other — the same stagger discipline every other pair in this file already follows, and
+for the same reason: two brand-new routines with unverified concurrent-load profiles (#6 drives
+real-browser journeys; #7 runs heavy SQL introspection across crons/migrations/RLS) should not be
+assumed safe to run at the identical minute just because #5 was. 03:00 Arizona is 10:00 UTC —
+comfortably clear of the 03:00–07:00 UTC heavy pipeline window described below.
+
+Two consequences of moving #6/#7 ahead of #1–#5, stated plainly rather than left as stale
+rationale: #6 no longer reads #4/#5's *same-day* reports on the way in (they haven't run yet) — it
+reads their freshest available reports, which is the previous day's, same as #1 already does for
+inputs from the day before. And #7's audit window reframes from "catch what happened during today's
+business hours" to "audit the full prior 24 hours — every cron, every deploy, every migration —
+before the day's other six routines start building on top of whatever they find." That is a
+different question, not a worse one: #7 still gets a complete day's activity to examine, it just
+examines yesterday's complete day instead of a partial today.
 
 **Times are anchored to ARIZONA, not UTC (owner decision, 2026-08-21).** Arizona does not observe
 DST, so 04:00 America/Phoenix is 11:00 UTC every day of the year — the schedule never drifts and
@@ -38,7 +58,12 @@ removing the lock discipline.
 
 Each later engineer consumes the earlier ones' freshest reports as input, so the ORDER above is
 load-bearing (the senior audit reads the junior's metrics and its `[DEEP AUDIT]` escalations);
-never reorder the four without also re-checking that dependency. Routines are managed at
+never reorder the original four without also re-checking that dependency. Routines #6 and #7 now
+run BEFORE #1–#5 each day (03:00/03:30 Arizona vs. #1's 04:00), so they read the PREVIOUS day's
+freshest reports from whichever of #1–#5 owns the surface they're about to touch, not that same
+day's — the same relationship #1 already has with the day before it. Neither #6 nor #7 sits inside
+the #1→#5 load-bearing chain, and neither routine's own output is consumed by an earlier one the
+same day. Routines are managed at
 https://claude.ai/code/routines (RemoteTrigger API); they cannot be deleted via API, only disabled,
 and **no agent session can change their times** — the trigger schedule lives in that UI, so a
 schedule change is always an owner action, with this file recording the intended state.
@@ -131,6 +156,54 @@ Boundary vs. #4: #4 owns the Normal Filter user journey; #5 owns Advanced Filter
 AF sits downstream of a Normal Filter search (the count gate, cohort inheritance), the two
 coordinate via each other's freshest report rather than duplicate coverage.
 
+## 6. 👣 Daily Journey & Persistence Engineer (new, 2026-08-26)
+
+Canonical spec: **`docs/ops/JOURNEY_PERSISTENCE_ENGINEER.md`** (file wins over the live prompt on
+any divergence). Mission: be the most demanding real user Ezhalah has — attack the live site the
+way an impatient real person actually uses it (switching tabs mid-search, refreshing at the worst
+moment, logging out and back in, rotating their phone, mashing a button twice), and own everything
+that happens *around* a search: auth/session flows and Google One Tap, the sidebar (search/rename/
+delete/star/reorder), chat persistence and New Chat's blank-state guarantee, Favorites, navigation
+and deep links, voice input, the read-aloud controller, loading/empty/error states, and dead
+controls — across desktop, mobile, and more than one browser. Explicitly never re-tests Normal
+Filter matching (#4), Advanced Filter/Trending correctness (#5), or scraped-data fidelity (#3) —
+those findings get filed to the routine that owns them, never fixed in place.
+
+Carries the same **fix, don't just report** mandate as every routine created since 2026-08-23:
+investigate → reproduce → root cause → fix → regression → barrier → mutation-proof → merge →
+deploy → production verify → report, stopping only for genuine product ambiguity, a change to
+another routine's owned matching/data surface, a destructive/irreversible fix, or a safety gate.
+Every run reserves real time for adversarial/exploratory testing — asking what assumption is
+currently making a screen look healthy when it isn't — rather than only re-running a fixed
+checklist; this is how New Chat's stale-state leak and the Google One Tap regression were actually
+found, and neither would have been caught by a checklist alone.
+
+Boundary vs. #7: this routine owns the user-visible *symptom* when a system boundary misbehaves;
+#7 owns the *mechanism* underneath it. A journey that surfaces something that smells like a
+backend/pipeline cause gets handed to #7 rather than traced further here.
+
+## 7. 🧵 Daily Systems Seam Engineer (new, 2026-08-26)
+
+Canonical spec: **`docs/ops/SYSTEMS_SEAM_ENGINEER.md`** (file wins over the live prompt on any
+divergence). Mission: trust nothing that says "done" without checking what the next layer actually
+received. Owns the **handoffs between otherwise-correct components** — the cron→detector→alert
+chain, deploy-claim-vs-actual-served-bundle reconciliation, migration→mirror→production parity in
+all four known directions, matview/sync ordering and cache staleness, auth-token→RLS enforcement
+traced on a real request, retry/timeout/partial-failure paths, and concurrent-session collisions.
+Runs a standing **orphaned-guarantee sweep** — for every data-repair migration in the last 90 days,
+confirms a detector still watches the invariant it fixed and that the invariant still holds today,
+not just at merge time. This is the exact class of bug that let a July district-suffix repair
+silently decay for a month with zero alerts, and no other routine was watching for that pattern
+across the *history* of past repairs rather than the correctness of the current one.
+
+Never owns whether the data or the matching is correct (#3/#4/#5) or the user-facing journey itself
+(#6) — a seam failure that bottoms out in "the data itself is wrong" gets filed to whichever of
+#3/#4/#5 owns it. Carries the same **fix, don't just report** mandate and the same mandatory
+adversarial-exploration budget as #6, asking what happens if the second half of a promise never
+runs (kill a retry mid-flight, expire a token mid-request, race two sessions against the same
+migration). Scheduled for 03:30 Arizona, 30 minutes after #6 and ahead of the entire #1–#5 block
+— see "Schedule note (2026-08-26, revised same day)" above for why, and what changes as a result.
+
 ## Reporting rules (permanent, owner-locked 2026-08-13)
 
 **Every engineer report MUST state the rating as `Rating Before → Rating After`, never a single
@@ -201,10 +274,14 @@ revert is reported as a revert rather than rediscovered by hand.
 - Junior detects & escalates; it never deep-audits. Senior owns AI Agent + broad infra (Advanced
   Filter moved out 2026-08-23). Data Integrity owns Normal-Filter/full-inventory fidelity and never
   touches Advanced Filter. Search & Matching QA owns the Normal Filter user journey. AF + Trending
-  Data Integrity owns Advanced Filter + Trending Cities/Districts end to end. No routine absorbs
-  another's responsibilities.
-- All five write durable state (`docs/ops/daily-metrics.jsonl` / `ops_senior_audit_run` /
-  `ops_qa_coverage_ledger`) and obey the shared gates: deploy lock, migration-commit duty, PR
-  `--head` discipline, cron minute-slot discipline (see AGENTS.md).
+  Data Integrity owns Advanced Filter + Trending Cities/Districts end to end. Journey & Persistence
+  owns real-user state/navigation/session correctness and never re-tests matching/data. Systems
+  Seam owns the handoffs BETWEEN components (cron→detector→alert, migration→mirror→prod, deploy
+  claim vs. served bundle, RLS) and never the correctness inside any one of them. No routine
+  absorbs another's responsibilities.
+- All seven write durable state (`docs/ops/daily-metrics.jsonl` / `ops_senior_audit_run` /
+  `ops_qa_coverage_ledger`, #6 and #7 under their own dimension prefixes in the same ledger table)
+  and obey the shared gates: deploy lock, migration-commit duty, PR `--head` discipline, the merge
+  gate's explicit-success requirement, cron minute-slot discipline (see AGENTS.md).
 - Changing any routine's schedule, scope, or prompt is an owner decision; record the change here in
   the same session.

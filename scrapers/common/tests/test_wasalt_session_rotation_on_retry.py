@@ -8,7 +8,7 @@ attempt hung the FULL 30s timeout with no response, six times in a row, never on
 
 The bug: `session()` created ONE curl_cffi Session (and its underlying TCP connection / proxy
 tunnel) per process, and `fetch_page()`'s retry loop reused that SAME session object across all 3
-attempts. Through the shared Webshare Saudi-residential proxy, wasalt-residential-sweep.yml and
+attempts. Through the shared DataImpulse Saudi-residential proxy, wasalt-residential-sweep.yml and
 wasalt-commercial-sweep.yml both dispatch 14-20 fully parallel jobs against ONE proxy secret with
 no `max-parallel` cap — so once an attempt landed on a bad/overloaded exit route through the proxy
 pool, every retry stayed pinned to that exact same bad route and was guaranteed to fail identically
