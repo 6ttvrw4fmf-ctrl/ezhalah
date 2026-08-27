@@ -35,3 +35,15 @@ jobs:
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-count-rpc-parity-live.ts
+
+      # Trending Cities must stay fast AND exact for a NARROWED user (2026-08-27). `if: !cancelled()`
+      # so neither half of the anon-path surface can hide the other: the parity check above proves
+      # count == search, this one proves the count arrives at all when the user has set both a size
+      # and a budget — the shape that timed out at 20,205 ms until migration 20260827113819.
+      - name: Trending Cities usable under narrowing (anon path)
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-usable-under-narrowing.ts
