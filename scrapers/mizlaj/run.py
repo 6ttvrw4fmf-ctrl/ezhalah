@@ -493,16 +493,24 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
+
+    # begin_run() BEFORE the first source call — see scrapers/common/tests/
+    # test_source_death_is_recorded.py. A source that goes dark must leave a scrape_runs row, or
+    # "the source stopped answering" is indistinguishable from "the job never ran".
+    run_id = None if args.limit else db.begin_run("mizlaj")
+
     md_rows = fetch_map_data(s)
     if not md_rows:
-        print("✗ Mizlaj: map-data returned no listings")
+        msg = "map-data returned no listings (source unreachable, blocking, or schema change)"
+        print(f"✗ Mizlaj: {msg}")
+        if run_id:
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=msg[:300])
         return 1
     if args.limit:
         md_rows = md_rows[: args.limit]
     print(f"Mizlaj: {len(md_rows)} listings from map-data"
           f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
 
-    run_id = None if args.limit else db.begin_run("mizlaj")
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
