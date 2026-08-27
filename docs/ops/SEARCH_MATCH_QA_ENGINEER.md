@@ -600,6 +600,35 @@ appears broken.
     product's ability to find it.** A `db: 0` against a healthy non-zero RPC is nearly always the
     oracle failing to express the scope, not the product losing every row.
 
+16. **A city NAME does not identify a city — 290 of them are ambiguous across regions** (hit
+    2026-08-27). A harness that builds its city→region map as `{city_ar: region_id}` silently keeps
+    whichever row it read last. «الهفوف» is BOTH `city_id 12` (region 5, المنطقة الشرقية, the real
+    inventory) and `city_id 501` (region 1, الرياض); the naive map picked region 1, the RPC correctly
+    ANDed the contradictory pair, and a healthy 228-listing city read as a **flat zero** — filed under
+    "small city has no apartments" if nobody checks. Proof it was the harness: `('الهفوف', region 5)`
+    → 228, `('الهفوف', region-free)` → 228 with the IDENTICAL hash, `('الهفوف', region 1)` → 0.
+    This is §41.11 one level deeper: that trap says the pair must be CONSISTENT, this one says the
+    name alone cannot tell you what consistent IS. Resolve the region through the row's own `city_id`
+    (or take the region from the same catalog row you took the name from), never through a
+    name-keyed dict. `select city_ar from loc_catalog_city group by city_ar having
+    count(distinct region_id) > 1` returns **290** — this is not a rare edge.
+
+17. **Buy+Rent COMBINED is a THIRD way into the monthly pool, and `period` does not reveal it**
+    (hit 2026-08-27). Combined mode serialises as `p_deal: null` **and** `p_rent_period: null`, so a
+    harness that attaches `gathern`/`aqarmonthly` on `period in ('شهري','كلاهما')` — the natural
+    reading of §41.6 — sends 31 tables where the real client sends 33. The searches then under-count
+    by the whole monthly-only inventory and read as the RPC LOSING rows: 9 of 275 searches came back
+    `COUNT_MISMATCH` with the oracle HIGHER every time (شقة/الرياض 21,862 vs 30,632; غرفة/جدة 358 vs
+    497). Production was right on both of its independent layers. The client's rule is explicit —
+    `resTables()`, `src/data/remote.ts`: `wantsMonthly = q.dealCombined || rentPeriod==='monthly' ||
+    rentPeriod==='both'`, gated by `(q.deal === 'Rent' || q.dealCombined)` — combined mode has no
+    period selector, so its Rent side accepts Monthly unconditionally. Rebuilding the 9 requests with
+    the 33-table scope reproduced the oracle EXACTLY, 9/9.
+    Both halves of that rule are now pinned, mutation-proven in each direction, by
+    `scripts/verify-rent-period-both.ts` §2 (in `npm test`) — until this run only the
+    `'monthly'`/`'both'` half was guarded, so deleting either `dealCombined` clause collapsed every
+    combined search to an annual-only pool with the suite fully green.
+
 ## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
 
 > **What the user sees must match the actual listing/search truth exactly, in clean Arabic, with no
