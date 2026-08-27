@@ -397,16 +397,25 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
+
+    # begin_run() BEFORE the first source call — see scrapers/common/tests/
+    # test_source_death_is_recorded.py. A source that goes dark must leave a scrape_runs row, or
+    # "the source stopped answering" is indistinguishable from "the job never ran".
+    run_id = None if args.limit else db.begin_run("nowaisiry")
+
     posts = fetch_lands(s)
     if not posts:
-        print("✗ Al Nowaisiry: REST /wp/v2/lands returned no listings")
+        msg = ("REST /wp/v2/lands returned no listings "
+               "(source unreachable, blocking, or schema change)")
+        print(f"✗ Al Nowaisiry: {msg}")
+        if run_id:
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=msg[:300])
         return 1
     if args.limit:
         posts = posts[: args.limit]
     print(f"Al Nowaisiry: {len(posts)} listings from WP REST (lands)"
           f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
 
-    run_id = None if args.limit else db.begin_run("nowaisiry")
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
