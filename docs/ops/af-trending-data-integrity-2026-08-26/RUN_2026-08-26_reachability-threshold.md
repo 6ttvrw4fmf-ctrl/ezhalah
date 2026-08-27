@@ -5,14 +5,21 @@ Routine #5 (🎯 Senior Advanced Filter + Trending Data Integrity Engineer). Spe
 
 ```
 AI AGENT → AF CTA:            PASS   (4/4 live journeys, twice, from CI)
-ROOT CAUSE:                   The five cohorts THIS run reported were an environment
-                              artifact — they did not reproduce from a GitHub runner
-                              against the same bundle. The dead-tap CLASS was real and
-                              was fixed the same day by a concurrent session (#1135):
-                              the offer probe short-circuited on nextScopeTier() without
-                              checking anything follows, while presentGuided auto-commits
-                              a ≤1-option tier — so a tiers>0 cohort could be offered a
-                              round with an empty advanced plan. See §1 and §1a.
+ROOT CAUSE:                   TWO real defects, both fixed the same day by concurrent
+                              sessions, plus one framing error of mine.
+                              (a) #1135 — the offer probe short-circuited on
+                                  nextScopeTier() without checking anything follows,
+                                  while presentGuided auto-commits a ≤1-option tier, so
+                                  a tiers>0 cohort could be offered an empty round.
+                              (b) #1152 — a count probe that TIMED OUT was byte-identical
+                                  to "nothing here" at every hop, so latency silently
+                                  became "nothing left to narrow". That is the mechanism
+                                  behind what this run measured and mis-labelled as
+                                  purely environmental: the proxy TRIGGERED a real
+                                  defect, it did not invent one.
+                              (c) mine — I reported a container reproduction as a
+                                  production regression before confirming from CI.
+                              See §1, §1a, §1b.
 FILTER FLOW AF:               PASS
 SKIP:                         PASS   (test fix; product was correct)
 BACK:                         PASS   (test fix; product was correct)
@@ -96,6 +103,34 @@ That is also why the barrier below is kept and is not redundant with #1135's: th
 probe's logic statically, mine drives the **agent flow end to end against production** and is
 deliberately cause-agnostic, so it catches the next member of this class from the user's side
 whatever the internal reason.
+
+### 1b. …and "environment artifact" was itself too kind to the product (#1152)
+
+**Added 2026-08-27.** A second owner decision the same day — «UNKNOWN must never become NO» (#1152) —
+names the mechanism this run observed and could not prove:
+
+> Every AF question earns its place by one live count RPC capped at `AGE_COUNT_TIMEOUT_MS` (4s). A
+> probe that never completed produced the **byte-identical** value to a source that answered
+> "nothing here", at every hop:
+> `withTimeout → {timedOut:true}` → fetcher `null` → `guidedOptions {options:[], total:0}` →
+> `scoreQuestion null` → `startAgeFlow` empty plan → `setAgeFlow(null) + startRefine(q)`.
+
+That is exactly the chain this run traced, and exactly the symptom it measured in production: the
+actions row hiding at t=5.0s and returning at t=8.2s with an empty plan, while the counts that DID
+come back were healthy (10,670 base) and scored to a plan of 4 offline.
+
+So the honest reading is stricter than §1's. This container's proxy did not *invent* the failure —
+it **triggered a real one**. A slow or flaky count probe was indistinguishable from "there is
+nothing more worth asking", and the user was silently demoted to the legacy chips. CI's fast network
+simply never tripped it. #1152 fixed that: a failed probe is now UNKNOWN and keeps AF available;
+only a *known*-useless scope hides it.
+
+**Correction to §1's lesson, not a replacement for it.** "Confirm from CI before escalating" still
+stands — reporting a container reproduction as a production regression was wrong. But the opposite
+error is now on record too: a reproduction that only appears in a degraded environment is not
+automatically noise. Here it was the visible end of a real UNKNOWN-hardens-into-NO defect, and the
+right conclusion was neither "production is broken" nor "my environment lied" but **"this fails
+under latency, and it must not"**.
 
 ## 2. The barrier that was missing (kept, and worth keeping)
 
