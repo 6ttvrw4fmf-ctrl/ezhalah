@@ -63,6 +63,7 @@ export const FLOORS = {
   monthlyJourneys: 1,
   zeroResultJourneys: 1,
   cardClickBackJourneys: 1,
+  showMoreJourneys: 1,
 };
 
 // ── THE PERMANENT WATCHES — one per defect fixed on 2026-08-23. These are not generic checks; each

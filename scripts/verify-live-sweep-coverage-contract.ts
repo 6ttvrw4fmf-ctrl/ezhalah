@@ -46,11 +46,37 @@ for (const k of KINDS) {
     'an implemented-but-uncalled journey is zero coverage');
 }
 
+// «عرض المزيد» lives in its own module, so the KINDS loop above (which reads journeys.mjs) does not
+// reach it. Without these three the floor alone guards it — and a floor only fails at RUNTIME, after
+// a full sweep; the point of this barrier is to catch the narrowing at review time instead.
+const showMore = read('e2e/live-sweep/showmore.mjs');
+check('journey «showMoreJourney» is implemented',
+  /export async function showMoreJourney\b/.test(showMore));
+check('journey «showMoreJourney» is imported by the runner',
+  /import\s*\{[^}]*\bshowMoreJourney\b[^}]*\}\s*from\s*'\.\/showmore\.mjs'/.test(runner));
+check('journey «showMoreJourney» is actually run by the runner',
+  /\bshowMoreJourney\s*\(/.test(runner),
+  'an implemented-but-uncalled journey is zero coverage — §10 needs the pager CLICKED');
+
+// The two assertions that make the journey worth running at all: filters must survive every batch,
+// and the browse-cap message must still quote the TRUE total rather than the cap.
+check('the «عرض المزيد» journey asserts filter persistence across batches',
+  /FILTER-PERSISTENCE/.test(showMore),
+  'a pager journey that does not re-check the filters proves only that a button is clickable');
+check('the «عرض المزيد» journey asserts the cap message states the true total',
+  /TRUE-TOTAL/.test(showMore) && /وعرضنا لك/.test(showMore),
+  'the browse cap is only honest while the closing line quotes trueTotal, never the cap');
+
 // ── 2. the floors, at or above the values the owner set ─────────────────────────────────────────
 const REQUIRED_FLOORS: Record<string, number> = {
   nonRiyadhCities: 3, mobileJourneys: 1, afJourneys: 1, trendingCityJourneys: 1,
   trendingDistrictJourneys: 1, buyRentJourneys: 1, monthlyJourneys: 1,
   zeroResultJourneys: 1, cardClickBackJourneys: 1,
+  // §10 — «عرض المزيد» actually clicked in production every run. Added 2026-08-27: the sweep's ten
+  // journeys covered normal-filter, trending, AF, honest-zero, card→back and clear-all, but nothing
+  // clicked the pager, so the one daily requirement the static barriers CANNOT stand in for had no
+  // browser evidence behind it. Pinned here so it cannot quietly disappear the way it never appeared.
+  showMoreJourneys: 1,
 };
 const floorBlock = sweep.slice(sweep.indexOf('export const FLOORS'), sweep.indexOf('export const WATCHES'));
 for (const [name, min] of Object.entries(REQUIRED_FLOORS)) {

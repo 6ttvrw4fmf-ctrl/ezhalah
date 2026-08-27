@@ -494,8 +494,14 @@ appears broken.
    button appears dead. Get the element, `scroll_into_view_if_needed()`, then `click()`. This trap
    alone made a healthy «عرض المزيد» look like a total pagination failure across 8 journeys.
 3. **«عرض المزيد» is not the only element with that text.** Card descriptions carry their own
-   «عرض المزيد» expander (5+ per screen). Filter to the pressable by height (≥25 px) or the harness
-   clicks a card's description instead of the pager.
+   «عرض المزيد» expander (5+ per screen). Filter to the pressable by height or the harness clicks a
+   card's description instead of the pager.
+   **The ≥25 px threshold no longer separates them (re-measured 2026-08-27).** On a 10-card الرياض
+   screen the description expanders render at **27 px** (w 211) and the real pager at **38 px**
+   (w 118), so a `>= 25` filter returns an EXPANDER as its first hit and the pager reads as ABSENT —
+   «21,868 نتيجة» with no «عرض المزيد» anywhere, which looks exactly like a dead pager on a huge
+   cohort. Use **two** discriminators: height **≥ 30 px** AND take the **last (bottom-most)** match,
+   since the pager always sits below every card. `e2e/live-sweep/showmore.mjs` does both.
 4. **Cards drip in; the pager is disabled while they do.** A search reveals 10, and each
    «عرض المزيد» reveals **100 more** with an animation. Wait until the `#N` card count STOPS growing
    before clicking again — and never treat a stable count of **0** as "settled": the app types an
@@ -724,10 +730,27 @@ AF cohort.
 
 ### Minimum coverage per run — ASSERTED, not hoped for
 ≥3 non-Riyadh cities · ≥1 mobile · ≥1 Advanced Filter · ≥1 Trending city · ≥1 Trending district ·
-≥1 Buy+Rent · ≥1 monthly-rent · ≥1 honest-zero · ≥1 card → external site → Back.
+≥1 Buy+Rent · ≥1 monthly-rent · ≥1 honest-zero · ≥1 card → external site → Back ·
+**≥1 «عرض المزيد»** (`showMoreJourneys`, added 2026-08-27).
 
 **A run that covers less than the floor FAILS.** Silent shrinkage is exactly how a rotation system
 rots, so the floors are enforced by exit code and pinned by the barrier above.
+
+**Why «عرض المزيد» became a floor (2026-08-27).** §10 requires the pager to be actually clicked in
+production every day, and it is the one daily requirement the static barriers cannot stand in for —
+they read source and query the database, and neither can see whether a second batch keeps the user's
+filters. The sweep's ten journeys covered normal-filter, trending, AF, honest-zero, card→back and
+clear-all; nothing clicked the pager. `e2e/live-sweep/showmore.mjs` now does, asserting per batch:
+cards actually grow · the headline total never moves · المدينة/الحي/نوع العملية/نوع العقار/الميزانية
+all survive · no HTML entities or `undefined` appear in later batches · the request's predicate does
+not drift (same `p_deal`/`p_rent_period`/`p_cities`/`p_districts`/`p_category`/`p_types`, later
+offset only) · no duplicate `source_table:listing_id` in the served set (§30 identity, never card
+text). **A healthy run is 10 → 100 cards and exactly ONE pager click** — production caps one search's
+browse at `BROWSE_CAP` 100 and then offers «خلّنا نحدد الطلب أكثر» instead of paging on, so the
+pager's absence at 100 is the contract, not a defect. What the journey asserts there is that the
+closing line still states the TRUE total — «لقينا 21,868 إعلان يطابق طلبك، وعرضنا لك 100 منها» —
+never the cap. Verified live 2026-08-27 on الرياض/إيجار/سنوي, جدة/بيع and الدمام/إيجار/شهري:
+3 journeys, 0 defects.
 
 ### Permanent watches (one per defect fixed 2026-08-23)
 `exact-city-never-rescoped` · `monthly-af-counts-update` · `true-total-never-page-cap` ·
