@@ -685,6 +685,11 @@ def main() -> int:
                     help="validation run: upsert only the first N parsed listings, NO prune")
     args = ap.parse_args()
 
+    # begin_run() BEFORE the first source call — see scrapers/common/tests/
+    # test_source_death_is_recorded.py. A source that goes dark must leave a scrape_runs row, or
+    # "the source stopped answering" is indistinguishable from "the job never ran".
+    run_id = None if args.limit else db.begin_run("aqaratikom")
+
     cap = max(args.limit * 2, 30) if args.limit else 0
     ads: list[dict] = []
     for deal in ("sell", "rent"):
@@ -701,14 +706,16 @@ def main() -> int:
             uniq.append(a)
     ads = uniq
     if not ads:
-        print("✗ Aqaratikom: list endpoint returned no ads")
+        msg = "list endpoint returned no ads (source unreachable, blocking, or schema change)"
+        print(f"✗ Aqaratikom: {msg}")
+        if run_id:
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=msg[:300])
         return 1
     if args.limit:
         ads = ads[: args.limit]
     print(f"Aqaratikom: {len(ads)} ads from /ad ({WORKERS} workers)"
           f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
 
-    run_id = None if args.limit else db.begin_run("aqaratikom")
     res: list[dict] = []
     com: list[dict] = []
     sold_res: list[str] = []

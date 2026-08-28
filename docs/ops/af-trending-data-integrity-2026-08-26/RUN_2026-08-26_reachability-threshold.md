@@ -5,9 +5,21 @@ Routine #5 (🎯 Senior Advanced Filter + Trending Data Integrity Engineer). Spe
 
 ```
 AI AGENT → AF CTA:            PASS   (4/4 live journeys, twice, from CI)
-ROOT CAUSE:                   no product defect — the 6/6 failure reproduced in the
-                              routine's own container did NOT reproduce from a GitHub
-                              runner against the same production bundle. Environment.
+ROOT CAUSE:                   TWO real defects, both fixed the same day by concurrent
+                              sessions, plus one framing error of mine.
+                              (a) #1135 — the offer probe short-circuited on
+                                  nextScopeTier() without checking anything follows,
+                                  while presentGuided auto-commits a ≤1-option tier, so
+                                  a tiers>0 cohort could be offered an empty round.
+                              (b) #1152 — a count probe that TIMED OUT was byte-identical
+                                  to "nothing here" at every hop, so latency silently
+                                  became "nothing left to narrow". That is the mechanism
+                                  behind what this run measured and mis-labelled as
+                                  purely environmental: the proxy TRIGGERED a real
+                                  defect, it did not invent one.
+                              (c) mine — I reported a container reproduction as a
+                                  production regression before confirming from CI.
+                              See §1, §1a, §1b.
 FILTER FLOW AF:               PASS
 SKIP:                         PASS   (test fix; product was correct)
 BACK:                         PASS   (test fix; product was correct)
@@ -16,7 +28,7 @@ BUGS FOUND:                   3  (1 barrier defect · 2 stale-oracle defects)
 BUGS FIXED:                   3
 BARRIER ADDED:                YES  (agent-flow live check + pure rule)
 MUTATION-PROVEN:              YES  (4 mutations on the new rule, 3 on the reachability pin)
-MERGED:                       NO   (merge gate refused in this environment — §5)
+MERGED:                       YES  (PR #1127, via scripts/safe-pr-merge.ts — §6)
 DEPLOYED:                     NO   (no src/ change; none required one)
 PRODUCTION VERIFIED:          YES
 ```
@@ -64,6 +76,61 @@ were never at fault:
 **Lesson recorded:** one environment is not production. A reproduction from this container is a
 hypothesis until it is confirmed from a faithful runner, and I should have qualified the first
 report that way instead of escalating it as a user-facing regression.
+
+### 1a. …but the dead tap was real — a concurrent session proved it (#1135)
+
+While this run was investigating, another session **reproduced a genuine dead tap and fixed it**:
+الطائف / إيجار / شهري / «الاستراحات والريف» = 43 matches — the CTA rendered, the tap showed no
+question, and the round left a receipt reading «اختياراتك: شاليه 🏡», a choice the user never made.
+
+Its root cause is the line this run had flagged as the suspect: **the offer probe short-circuited to
+`true` whenever `nextScopeTier()` returned a tier, without checking that anything follows it** —
+while `presentGuided` AUTO-COMMITS a tier that resolves to ≤1 option and moves down. Of «Vacation &
+Rural»'s five member types only شاليه is populated in that cohort, so the type tier committed
+itself, Chalet has no certified Rent/Monthly cohort, the advanced plan came back empty, and the
+round finished having asked nothing. #1135 fixed the probe to walk the tiers exactly as the walk
+does, and verified it with a positive control (same city/period, «الفلل والبيوت» 39, button still
+shown and a real question opens).
+
+So both statements are true, and the distinction matters:
+
+- the **bug class is real** — offered-then-nothing did happen in production, on a `tiers > 0`
+  auto-commit cohort;
+- the **five cohorts this run reported were not it** — they are `tiers = 0`, they pass from CI, and
+  the failure this container saw on them was environmental.
+
+That is also why the barrier below is kept and is not redundant with #1135's: theirs pins the offer
+probe's logic statically, mine drives the **agent flow end to end against production** and is
+deliberately cause-agnostic, so it catches the next member of this class from the user's side
+whatever the internal reason.
+
+### 1b. …and "environment artifact" was itself too kind to the product (#1152)
+
+**Added 2026-08-27.** A second owner decision the same day — «UNKNOWN must never become NO» (#1152) —
+names the mechanism this run observed and could not prove:
+
+> Every AF question earns its place by one live count RPC capped at `AGE_COUNT_TIMEOUT_MS` (4s). A
+> probe that never completed produced the **byte-identical** value to a source that answered
+> "nothing here", at every hop:
+> `withTimeout → {timedOut:true}` → fetcher `null` → `guidedOptions {options:[], total:0}` →
+> `scoreQuestion null` → `startAgeFlow` empty plan → `setAgeFlow(null) + startRefine(q)`.
+
+That is exactly the chain this run traced, and exactly the symptom it measured in production: the
+actions row hiding at t=5.0s and returning at t=8.2s with an empty plan, while the counts that DID
+come back were healthy (10,670 base) and scored to a plan of 4 offline.
+
+So the honest reading is stricter than §1's. This container's proxy did not *invent* the failure —
+it **triggered a real one**. A slow or flaky count probe was indistinguishable from "there is
+nothing more worth asking", and the user was silently demoted to the legacy chips. CI's fast network
+simply never tripped it. #1152 fixed that: a failed probe is now UNKNOWN and keeps AF available;
+only a *known*-useless scope hides it.
+
+**Correction to §1's lesson, not a replacement for it.** "Confirm from CI before escalating" still
+stands — reporting a container reproduction as a production regression was wrong. But the opposite
+error is now on record too: a reproduction that only appears in a degraded environment is not
+automatically noise. Here it was the visible end of a real UNKNOWN-hardens-into-NO defect, and the
+right conclusion was neither "production is broken" nor "my environment lied" but **"this fails
+under latency, and it must not"**.
 
 ## 2. The barrier that was missing (kept, and worth keeping)
 
@@ -127,13 +194,24 @@ with the filter, so trending is recomputed rather than stale. Districts: 6 live
 `location_search_candidates_ar` calls replace the scope counts, all six exact (المهدية 333 ·
 النرجس 149 · العارض 127 · الرمال 85 · الجنادرية 61 · طويق 21).
 
-## 6. Not merged, and why
+## 6. Merged — the gate became runnable mid-run
 
-PR #1127 is green and clean, and stays open. `AGENTS.md` makes `scripts/safe-pr-merge.ts` the only
-sanctioned merge path; it reads PR state over GitHub **GraphQL**, which this session's gateway
-refuses — verified directly: `POST https://api.github.com/graphql -> 403`. `gh` is not installed
-here either, but installing it would not help: the refusal is at the gateway. Hand-reproducing a P0
-merge gate over REST is routing around it, which the authority grant forbids.
+For most of this run PR #1127 stayed open on green CI because `scripts/safe-pr-merge.ts` reached
+GitHub over **GraphQL**, which this session's gateway refuses (verified directly:
+`POST https://api.github.com/graphql -> 403`), and hand-reproducing a P0 gate over REST is routing
+around it.
+
+A concurrent session then moved the gate's transport to REST (`scripts/lib/githubApi.ts`) for
+exactly this reason — "a safety tool that cannot run in the environment that needs it is not a
+safety tool; it is a rule people route around". After merging that in, the gate ran here and merged
+the PR itself:
+
+```
+required contexts: Production-target lock + no-bypass, Full verification suite (npm test),
+                   Taxonomy + location index (npm run verify)
+  … all success ·  mergeable=MERGEABLE  mergeStateStatus=clean  · 8 files matched --expect-files
+✓ every required check is SUCCESS, branch is clean and up to date — merging PR #1127
+```
 
 ## 7. Flagged, not touched
 
