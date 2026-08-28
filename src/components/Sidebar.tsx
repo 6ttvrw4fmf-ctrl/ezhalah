@@ -646,7 +646,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                   const on = (((state as { hovered?: boolean }).hovered ?? false) || state.pressed || ((state as { focused?: boolean }).focused ?? false));
                   return (
                     <>
-                      <Ionicons name="add" size={18} color={on ? colors.surface : dark ? '#cfe0d5' : colors.dark} />
+                      {/* Dark appearance lightens only the RESTING glyph; the light-mode contract
+                          (rest = dark green, interaction = white) is untouched and still pinned by
+                          verify-sidebar-light-green-interaction.ts. */}
+                      <Ionicons name="add" size={18} color={dark && !on ? '#cfe0d5' : on ? colors.surface : colors.dark} />
                       <Text style={[s.newChatText, dark && dks.newChatText, on && s.newChatTextOn]}>{t('New Chat')}</Text>
                     </>
                   );
