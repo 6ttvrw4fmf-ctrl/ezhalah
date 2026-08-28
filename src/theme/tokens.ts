@@ -31,6 +31,44 @@ export const colors = {
   scrim: 'rgba(8,18,12,0.45)', // modal/overlay backdrop
 } as const;
 
+// Dark appearance (owner 2026-08-28, sidebar-anchored settings menu). A REAL Ezhalah dark palette —
+// deep green-black paper and warm green-tinted neutrals derived from the brand greens above — never
+// inverted colors, never a generic gray theme. Same keys as `colors` so a themed surface can swap
+// the whole object (src/theme/theme.tsx exposes useThemeColors()).
+//
+// Coverage note: theming is opt-in per surface. Screens not yet converted keep importing the static
+// light `colors` and stay fully readable in dark mode; converted surfaces (Sidebar, account menu)
+// read useThemeColors(). Never flip a screen's background to dark without converting its inks.
+export const darkColors: Record<keyof typeof colors, string> = {
+  primary: '#3f8f5c', // brand green, lifted for legibility on dark ground
+  dark: '#245c44', // interaction fill (hover/press) on dark
+  tint: '#1b2a21', // deep green tint
+  tintFill: '#18271f',
+  userBubble: '#1f3a2c',
+  userBubbleText: '#cfe6d6',
+  tintLine: '#2a4234',
+  ink: '#e9efe9', // warm off-white
+  body: '#c2cdc5',
+  muted: '#8fa096',
+  mutedBlue: '#93a3ad',
+  line: '#243029',
+  fieldLine: '#273329',
+  pickLine: '#2c3a31',
+  chipFill: '#1b2a21',
+  chipLine: '#2a4234',
+  chipIcon: '#9fd0b2',
+  exFill: '#12281d',
+  exIcon: '#79c79c',
+  paper: '#0f1712', // deep green-black paper
+  surface: '#161f19', // raised cards / menu panel
+  segTrack: '#1d2620',
+  accentLeaf: '#2fb672',
+  amberBg: '#2b2214',
+  amberInk: '#e0b070',
+  whatsApp: '#25d366',
+  scrim: 'rgba(0,0,0,0.55)',
+};
+
 // Per-platform brand colors. Keys match Platform.name. (PRD §8.1)
 export const platformColors: Record<string, string> = {
   Aqar: '#1f7a3d',
