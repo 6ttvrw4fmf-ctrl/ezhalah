@@ -126,6 +126,38 @@ more-timid wording anywhere, including in this file.
   about itself: **if the channel is down, this alert cannot be delivered either** — which is exactly
   why `open_alerts` must be read directly and never inferred from a quiet inbox.
 
+- **THE P0 DELIVERY SLO — 5 MINUTES (owner decision, 2026-08-28).** **A P0 alert must be delivered
+  to its destination within 5 minutes of detection**, measured from `alert_event.created_at` to a
+  confirmed delivery (a 2xx recorded in `net._http_response`, or the GitHub issue existing). The
+  owner set this in response to the measurement below; it is not negotiable by an agent.
+
+  **Do NOT loosen a detector to match a slower reality.** If the delivery path cannot meet the SLO,
+  the path is what changes — investigate and fix the mechanism, then prove it end to end with a safe
+  synthetic P0. Widening a grace window, raising a threshold, or redefining "delivered" to fit the
+  current cadence is the exact move the hard safety rails forbid.
+
+  **Why the GitHub Actions *schedule* structurally cannot meet it, so nobody re-derives this.**
+  `alert-dispatch.yml` is scheduled `9,39 * * * *`. Even if GitHub honoured that perfectly, an alert
+  raised at :29 waits until :39 — **10 minutes, twice the SLO, on paper**. It does not honour it:
+  measured over the 61.6h to 2026-08-28T11:12Z it ran 30 times against 288 scheduled (11.7/day vs
+  48/day), essentially never at :09 or :39, with gaps of 11.3h / 11.1h / 9.4h. Observed cost: P0
+  alert 1011 took 2h47m to reach a human; P1 1058 took 6h14m. A hand-triggered `workflow_dispatch`
+  delivers in ~30s (alert 1070, 2026-08-28 21:49), which proves the *workflow* is fast and that the
+  *scheduler* is the defect — do not mistake a manual run for evidence the SLO is met.
+
+  **Therefore delivery must be pushed from inside the database**, where cadence is ours: `pg_cron`
+  can run every minute and `pg_net` can POST. That is what `mon_dispatch_p0_fast()` and the
+  `mon-p0-fast-dispatch` job exist for, with `mon_detect_p0_delivery_sla()` enforcing the 5 minutes
+  and `ops_p0_delivery` holding the receipts. **The receipts are a separate ledger on purpose:**
+  `alert_event.dispatched_at` has exactly one writer (`alert-dispatch.yml`) and
+  `mon_detect_alert_delivery()` BRANCH 3 raises P1 if any database function stamps it. Reading that
+  column is fine; stamping it is not.
+
+  **The destination remains an OWNER input.** `ops_alert_channel` decides who is actually woken;
+  the `alert-sink` edge function is a proof fixture with no side effects and reaches no human, so
+  `mon_detect_p0_delivery_sla()` raises if it is the only channel configured. A mechanism that meets
+  the SLO into a sink is not the SLO being met.
+
 - **Acknowledgment → detector self-clear (added 2026-08-28).** **An acknowledged or resolved alert
   must actually clear, and the detector must be able to RE-RAISE it if the condition returns.** A
   stuck-open alert silently suppresses every future raise: `mon_raise()` looks only for a row with
