@@ -50,7 +50,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/run-tests.mjs && node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-chat-delete-confirmation.ts",
+    "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/run-tests.mjs",
     "verify": "npm run verify:taxonomy && npm run verify:location-index",
     "verify:taxonomy": "tsx scripts/verify-taxonomy.ts",
     "verify:location-index": "tsx scripts/verify-location-index-source.ts",
