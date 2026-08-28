@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
+import { getLocale } from '@/i18n';
 import type { AuthUser } from '@/store';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -97,7 +98,13 @@ export async function signInWithProvider(
   if (!supabase) return {}; // preview: caller keeps the design-only chooser
   try {
     const redirectTo = Platform.OS === 'web' ? window.location.origin + '/auth' : undefined;
-    const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo } });
+    // Arabic-first (owner): Google's own consent screen defaults to the visitor's Google-account
+    // locale, then browser locale — neither is Ezhalah's own language choice. `hl` is Google's
+    // documented lever for the SCREEN's language, same mechanism GoogleOneTap.tsx uses for the
+    // One Tap prompt, so both Google entry points speak Ezhalah's current language consistently.
+    // Apple has no equivalent knob here, so it's a no-op for that provider.
+    const queryParams = provider === 'google' ? { hl: getLocale() } : undefined;
+    const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo, queryParams } });
     if (error) return { error: error.message };
     return { redirected: true };
   } catch (e: any) {
