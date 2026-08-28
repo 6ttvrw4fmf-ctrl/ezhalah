@@ -873,7 +873,11 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
 
   if (docked) {
     return (
-      <View ref={panelRef} style={[s.dockPanel, dark && dks.dockPanel, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, LTR_PIN]}>
+      // While the account menu is open the column lifts above the content stack, so the menu's
+      // full-viewport click-catcher actually sits over the page (every RNW View is z-index:0 —
+      // a sibling stacking context later in the DOM otherwise paints over it). Closed → back to
+      // z-auto ordering so the root overlays (Support/About/Auth) keep painting above the sidebar.
+      <View ref={panelRef} style={[s.dockPanel, dark && dks.dockPanel, acctOpen && ({ zIndex: 30 } as any), { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, LTR_PIN]}>
         {/* Dark appearance drops the light pencil-sketch backdrop: the deep green paper IS the
             dark surface (the sketch and its fade-to-light-paper gradient assume light ground). */}
         {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
