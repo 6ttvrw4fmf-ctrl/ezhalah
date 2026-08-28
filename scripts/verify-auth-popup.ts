@@ -26,7 +26,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 };
 
 // ── 1. AUTO-SHOW: the popup appears on BOTH screens, and for signed-out visitors only ────────────
-const SHOWN: AutoShowGate = { isWeb: true, authChecked: true, user: null, introSeen: true, dismissed: false, pathname: '/' };
+const SHOWN: AutoShowGate = { isWeb: true, authChecked: true, user: null, introBlocking: false, dismissed: false, pathname: '/' };
 
 check('SHOWS on the Filter home for a signed-out web visitor', shouldAutoShowAuthPopup(SHOWN));
 check('SHOWS on the Agent screen for a signed-out web visitor', shouldAutoShowAuthPopup({ ...SHOWN, pathname: '/agent' }));
@@ -37,8 +37,8 @@ check('LOGGED-IN users never see it (on Agent)', !shouldAutoShowAuthPopup({ ...S
 check('HIDDEN while the session is still restoring (no flash at a logged-in visitor)',
   !shouldAutoShowAuthPopup({ ...SHOWN, authChecked: false }));
 check('HIDDEN on native (web only)',             !shouldAutoShowAuthPopup({ ...SHOWN, isWeb: false }));
-check('HIDDEN while the intro flag is still being read',  !shouldAutoShowAuthPopup({ ...SHOWN, introSeen: null }));
-check('HIDDEN while the intro film is pending/playing',   !shouldAutoShowAuthPopup({ ...SHOWN, introSeen: false }));
+check('HIDDEN while the intro film could still render (never cover it)',
+  !shouldAutoShowAuthPopup({ ...SHOWN, introBlocking: true }));
 check('DISMISSAL IS RESPECTED — once closed this session, it never auto-raises again',
   !shouldAutoShowAuthPopup({ ...SHOWN, dismissed: true }));
 check('DISMISSAL holds across Filter↔Agent navigation (no re-pop nag)',
@@ -46,18 +46,18 @@ check('DISMISSAL holds across Filter↔Agent navigation (no re-pop nag)',
 check('HIDDEN on every other route', ['/settings', '/about', '/support', '/browser', '/interview', '/auth']
   .every((pathname) => !shouldAutoShowAuthPopup({ ...SHOWN, pathname })));
 
-// Full truth table: 2·2·2·3·2·3 = 144 combinations; exactly the two good-gate rows ('/', '/agent')
-// may show. Every signed-in combination is inside the other 142.
+// Full truth table: 2·2·2·2·2·3 = 96 combinations; exactly the two good-gate rows ('/', '/agent')
+// may show. Every signed-in combination is inside the other 94.
 {
   let shown = 0, shownSignedIn = 0;
   for (const isWeb of [true, false]) for (const authChecked of [true, false])
-    for (const user of [null, { id: 'u' }]) for (const introSeen of [null, false, true] as const)
+    for (const user of [null, { id: 'u' }]) for (const introBlocking of [true, false])
       for (const dismissed of [true, false]) for (const pathname of ['/', '/agent', '/settings']) {
-        const s = shouldAutoShowAuthPopup({ isWeb, authChecked, user, introSeen, dismissed, pathname });
+        const s = shouldAutoShowAuthPopup({ isWeb, authChecked, user, introBlocking, dismissed, pathname });
         if (s) shown++;
         if (s && user) shownSignedIn++;
       }
-  check('exactly TWO of the 144 gate combinations show it (Filter home + Agent)', shown === 2, `got ${shown}`);
+  check('exactly TWO of the 96 gate combinations show it (Filter home + Agent)', shown === 2, `got ${shown}`);
   check('ZERO of the signed-in combinations show it', shownSignedIn === 0, `got ${shownSignedIn}`);
 }
 
@@ -125,7 +125,9 @@ check('Agent screen has no side auth card render path',  !agent.includes('<SignI
 
 // ── 5. WIRING — the components must DELEGATE to the executed rules above ─────────────────────────
 check('WIRING the layout auto-show effect calls shouldAutoShowAuthPopup (no inline copy)',
-  layout.includes('shouldAutoShowAuthPopup({ isWeb: true, authChecked, user, introSeen, dismissed, pathname })'));
+  layout.includes('shouldAutoShowAuthPopup({ isWeb: true, authChecked, user, introBlocking, dismissed, pathname })'));
+check('WIRING introBlocking derives from INTRO_ENABLED — a disabled intro never dams the popup',
+  layout.includes('const introBlocking = INTRO_ENABLED && introSeen !== true;'));
 check('WIRING the ONE AuthModal is mounted at the app root, pathname-agnostic (available on Filter AND Agent)',
   layout.includes('<AuthModal />'));
 check('WIRING AuthModal gates drag through canDragAuthPopup',

@@ -19,9 +19,12 @@ export type AutoShowGate = {
    *  GoogleOneTap and the old dock both document at their gates. */
   authChecked: boolean;
   user: unknown | null;
-  /** store.introSeen: null = flag still being read, false = intro pending/playing, true = done.
-   *  Only `true` may show — the popup (zIndex 200) must never cover the intro film (zIndex 100). */
-  introSeen: boolean | null;
+  /** True while the first-run intro film could still render (enabled AND not yet seen — see
+   *  Shell's computation from IntroVideo.INTRO_ENABLED + store.introSeen). The popup (zIndex 200)
+   *  must never cover the film (zIndex 100) — but when the intro is disabled (INTRO_SOURCE null,
+   *  today's production state) it must never block the popup either: a brand-new visitor whose
+   *  intro will simply never play IS the visitor this popup exists for. */
+  introBlocking: boolean;
   /** Closed once this session (sessionStorage). Dismissal is respected until a fresh session. */
   dismissed: boolean;
   pathname: string;
@@ -31,7 +34,7 @@ export function shouldAutoShowAuthPopup(g: AutoShowGate): boolean {
   if (!g.isWeb) return false;        // native has its own auth entry points
   if (!g.authChecked) return false;  // session still restoring — say nothing yet
   if (g.user) return false;          // signed in: never
-  if (g.introSeen !== true) return false;  // intro undecided or playing — it goes first
+  if (g.introBlocking) return false; // the intro film goes first — never cover it
   if (g.dismissed) return false;     // closed once this session — respected
   return g.pathname === '/' || g.pathname === '/agent';  // Filter home and Agent only
 }

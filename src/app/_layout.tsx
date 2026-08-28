@@ -15,7 +15,7 @@ import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
 import GoogleOneTap from '@/components/GoogleOneTap';
-import IntroVideo from '@/components/IntroVideo';
+import IntroVideo, { INTRO_ENABLED } from '@/components/IntroVideo';
 
 // RC-A (hardening 2026-07-13): last-resort net. Nothing in the app caught unhandled promise
 // rejections or uncaught errors, so an async turn that escaped its handler failed silently. Log every
@@ -57,12 +57,16 @@ function Shell() {
   // so Filter↔Agent navigation never re-pops it — while every login/signup control everywhere
   // still reopens it through the same openAuth(). Signed-in users never see it.
   const { user, authChecked, introSeen, authOpen, openAuth } = useApp();
+  // "Blocking" = the film can still render: it exists (INTRO_ENABLED — IntroVideo no-ops while its
+  // asset is unplugged) and this visitor hasn't finished it (introSeen null = flag still being
+  // read, false = pending/playing). A disabled intro must never dam the popup forever.
+  const introBlocking = INTRO_ENABLED && introSeen !== true;
   useEffect(() => {
     if (Platform.OS !== 'web' || authOpen) return;
     let dismissed = false;
     try { dismissed = sessionStorage.getItem(AUTH_POPUP_DISMISSED_KEY) === '1'; } catch { dismissed = false; }
-    if (shouldAutoShowAuthPopup({ isWeb: true, authChecked, user, introSeen, dismissed, pathname })) openAuth();
-  }, [authOpen, authChecked, user, introSeen, pathname, openAuth]);
+    if (shouldAutoShowAuthPopup({ isWeb: true, authChecked, user, introBlocking, dismissed, pathname })) openAuth();
+  }, [authOpen, authChecked, user, introBlocking, pathname, openAuth]);
   // On the web, a hard refresh reloads whatever deep route the user was on (e.g. /agent, /settings) —
   // and for screens whose flow state lives in memory only, that screen would come back empty, so the
   // refresh is sent back to Home instead. Runs once on mount; client-side navigation afterwards is
