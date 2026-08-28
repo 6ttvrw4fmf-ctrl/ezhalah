@@ -136,7 +136,9 @@ export type AdvancedQuestionCardProps = {
   brandImage?: string;            // asset token resolved via the card's own BRAND_IMAGES registry
   selection: 'single' | 'multi';
   options: AdvancedOption[];      // already pre-filtered to the meaningful-option floor by the config
-  unknownCount: number;
+  /** Listings in scope whose SOURCE did not state this field, or `null` when the question has no
+   *  truthful single unknown count. `null` renders NOTHING — never "0 did not mention". */
+  unknownCount: number | null;
   progressCur: number;           // 1-based ordinal among the questions that will actually show
   progressTotal: number;         // count of ELIGIBLE questions for this scope (not the static array)
   liveCount: (keys: string[]) => Promise<number | null>; // live count for a tentative selection
@@ -212,7 +214,7 @@ function OptionRow({ option, selected, selection, first, onPress }: {
 }
 
 export default function AdvancedQuestionCard({
-  titleKey, descriptionKey, brandImage, selection, options, unknownCount: _unknownCount, progressCur, progressTotal,
+  titleKey, descriptionKey, brandImage, selection, options, unknownCount, progressCur, progressTotal,
   liveCount, initialKeys, onConfirm, onSkip, onBack, onSkipAll, onClose,
 }: AdvancedQuestionCardProps) {
   const { t } = useI18n();
@@ -335,6 +337,17 @@ export default function AdvancedQuestionCard({
         <Reanimated.View style={enterA}>
           <Text style={s.qt} testID="af-question-title">{t(titleKey)}</Text>
           {descriptionKey ? <Text style={s.desc}>{t(descriptionKey)}</Text> : null}
+          {/* R7.1.3 — the unknown-count caption. UNKNOWN STAYS VISIBLE: these listings are still
+              fully eligible (no option's count includes them, and Skip keeps them all), so the user
+              is told they exist rather than being left to infer that every listing stated the fact.
+              Rendered ONLY for a truthful count: `null` means the question has no honest single
+              unknown number and prints nothing, and 0 prints nothing because there is no one to
+              mention. Never a fabricated "0 did not mention" (owner rule 2026-08-28). */}
+          {unknownCount != null && unknownCount > 0 ? (
+            <Text style={s.unknownNote} testID="af-unknown-count">
+              {t('{n} listings did not mention this', { n: unknownCount.toLocaleString('en-US') })}
+            </Text>
+          ) : null}
           {brandImage && BRAND_IMAGES[brandImage] ? (
             <View style={s.brandStrip}>
               <Image source={BRAND_IMAGES[brandImage]} style={s.brandImg} contentFit="contain" />
@@ -429,6 +442,7 @@ const s = StyleSheet.create({
   body: { paddingHorizontal: space.card, paddingTop: space.base, paddingBottom: 16 },
   qt: { fontFamily: font.family.bold, fontSize: 19, color: colors.ink, lineHeight: 27, paddingHorizontal: 2, paddingTop: 8 },
   desc: { fontFamily: font.family.regular, fontSize: 12.5, color: colors.muted, paddingHorizontal: 2, paddingTop: 5 },
+  unknownNote: { fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, opacity: 0.85, paddingHorizontal: 2, paddingTop: 3 },
 
   // Shared brand-image slot — one fixed position (under the subtitle, above the options) and one
   // style for ANY question that names a brandImage token. The PNG carries its own branding; the

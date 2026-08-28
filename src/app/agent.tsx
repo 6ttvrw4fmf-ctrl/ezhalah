@@ -832,7 +832,7 @@ export default function Agent() {
     // overlay opens on this calm invitation — the count, «خلّنا نحدد طلبك أكثر», one soft line —
     // never a question. Begin is opt-in; «عرض النتائج» closes it (the results are already behind).
     | { phase: 'intro'; total: number | null }
-    | { phase: 'asking'; stepIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number; initialKeys: string[]; progressCur: number; progressTotal: number }
+    | { phase: 'asking'; stepIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; initialKeys: string[]; progressCur: number; progressTotal: number }
     // The «digging through the market» beat (owner 2026-08-16): shown once after the interview
     // finishes while the final search runs behind it. Dismissal is driven by plain setTimeout
     // latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts rule).
@@ -847,7 +847,7 @@ export default function Agent() {
   const ageFlowTokenRef = useRef(0);
   const ageFlowChangedRef = useRef(false);
   const ageFlowLabelsRef = useRef<string[]>([]);
-  const ageFlowPlanRef = useRef<Array<{ question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number; total: number }>>([]);
+  const ageFlowPlanRef = useRef<Array<{ question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; total: number }>>([]);
   // Questions already answered OR skipped this session — never re-asked (owner 2026-08-11). The
   // plan is RE-RANKED against the narrowed set after every answer, so ask-order is contextual.
   const ageFlowAskedRef = useRef<Set<string>>(new Set());
@@ -1657,7 +1657,7 @@ export default function Agent() {
         // Plots». Zero options records an open skip. Either way the walk moves DOWN a tier instead of
         // stalling, and neither case invents a predicate the user did not ask for.
         const auto = opts.length === 1 ? [opts[0].key] : [];
-        ageFlowStepsRef.current = [...steps, { question, options: opts, unknownCount: 0, total: res?.total ?? 0, keys: auto }];
+        ageFlowStepsRef.current = [...steps, { question, options: opts, unknownCount: null, total: res?.total ?? 0, keys: auto }];
         // ADVANCE PAST the step we just recorded. Re-entering on the SAME cursor would find the step
         // now present in the record and take the REPLAY branch above — rendering the very question
         // that had nothing to choose between. Moving to stepIndex + 1 both skips it and makes

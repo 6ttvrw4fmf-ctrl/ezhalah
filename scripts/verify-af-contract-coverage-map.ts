@@ -116,14 +116,21 @@ check('weights actually weight: one w3 N among w1 Ls must score below the unweig
     { rule: 'b', dim: 'af', weight: 1, grade: 'L', barrier: [], evidence: 'synthetic probe row' },
   ]) < 5);
 
-// ── 4. THE UNCONTRACTED-RULE REGISTER MUST NOT BE EMPTIED SILENTLY ───────────────────────────────
-// X1 (a timed-out probe is not a "nothing here" verdict) is a live owner rule with code and a
-// barrier and NO R-number. Recording it is how the gap stays visible until the owner rules on it.
-check('the uncontracted-owner-rule register is non-empty while a known gap stands',
-  UNCONTRACTED.length > 0 && UNCONTRACTED.some((e) => e.rule.startsWith('X1-')),
-  UNCONTRACTED.map((e) => e.rule).join(', '));
-check('X1 is not silently absorbed into the contract without an R-number appearing',
-  /afProbe|PROBE_FAILED/.test(read('src/lib/afProbe.ts')));
+// ── 4. THE PROBE-FAILURE RULE IS EITHER CONTRACTED, OR REGISTERED AS A GAP ───────────────────────
+// X1 ("a failed/timed-out probe is UNKNOWN, never a verdict") was an owner rule with code and a
+// barrier but no R-number, carried in UNCONTRACTED so the gap stayed visible. The owner made it
+// canonical on 2026-08-28 as R2.5.4, so the register is now legitimately empty.
+//
+// This check therefore proves the CLOSURE rather than the gap, and it is deliberately an either/or:
+// emptying the register is only allowed when the contract genuinely carries the rule. Deleting the
+// row to tidy up, without the rule landing in the contract, fails here — which is the only reason
+// the register was ever worth having.
+const probeRuleContracted = /R2\.5\.4/.test(contract) && /FAILED, TIMED-OUT OR ERRORED PROBE/i.test(contract);
+check('the probe-failure rule is canonical (R2.5.4) OR still registered as an uncontracted gap',
+  probeRuleContracted || UNCONTRACTED.some((e) => e.rule.startsWith('X1-')),
+  probeRuleContracted ? 'canonical as R2.5.4' : `registered: ${UNCONTRACTED.map((e) => e.rule).join(', ')}`);
+check('the rule the contract now states is the one the code actually implements',
+  /PROBE_FAILED/.test(read('src/lib/afProbe.ts')) && /never invent or estimate a count/i.test(contract));
 
 // ── REPORT ───────────────────────────────────────────────────────────────────────────────────────
 const t = tally(CONTRACT_RULES);
