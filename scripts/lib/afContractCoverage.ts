@@ -90,9 +90,10 @@ const S2: Entry[] = [
   { rule: 'R2.3.2', dim: 'af', weight: 1, grade: 'P', barrier: [], evidence: 'rationale for R2.3.1' },
   { rule: 'R2.4.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-buy-rent-combined-af-gating'], evidence: 'cohortAllowsCombined() executed' },
   { rule: 'R2.4.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-buy-rent-combined-af-gating'], evidence: 'buy-only/rent-only/monthly-only correctly excluded' },
-  { rule: 'R2.5.1', dim: 'integrity', weight: 3, grade: 'P', barrier: ['verify-af-independent-oracle'], evidence: 'SPLIT RULE: "never rolled into a no chip" holds and is live-proved; "shown as a caption" is NOT implemented (see R7.1.3)' },
+  { rule: 'R2.5.1', dim: 'integrity', weight: 3, grade: 'B', barrier: ['verify-af-independent-oracle', 'verify-af-unknown-count-truthful'], evidence: 'both halves now hold: unknown is never rolled into a chip (live-proved), and the caption ships where a truthful count exists (2026-08-28). L after production verification.' },
   { rule: 'R2.5.2', dim: 'integrity', weight: 3, grade: 'L', barrier: ['verify-rpc-clause-invariants', 'verify-af-multiselect-combining-semantics'], evidence: '108 live option counts = search RPC across 3 cohorts; clause predicates pinned NULL-strict' },
   { rule: 'R2.5.3', dim: 'integrity', weight: 1, grade: 'P', barrier: [], evidence: 'cross-reference to ops/ADVANCED_FILTER_SOURCE_TRUTH.md' },
+  { rule: 'R2.5.4', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-probe-failure-not-a-verdict'], evidence: 'was X1 (uncontracted); made canonical by the owner 2026-08-28. probeVerdict() executed: failed probe -> unknown, retry once, never known-empty' },
 ];
 
 // ── §3 SCOPE HIERARCHY ───────────────────────────────────────────────────────────────────────────
@@ -155,7 +156,7 @@ const S6: Entry[] = [
 const S7: Entry[] = [
   { rule: 'R7.1.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-independent-oracle'], evidence: '108 live option counts = search RPC, 3 cohorts, 0 mismatches (2026-08-28)' },
   { rule: 'R7.1.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-count-belongs-to-selection'], evidence: 'CI: Continue count = result-RPC total on all 9 journeys' },
-  { rule: 'R7.1.3', dim: 'af', weight: 2, grade: 'N', barrier: [], evidence: 'CONTRACT/PRODUCTION CONFLICT: the unknown-count caption is NOT rendered. AdvancedQuestionCard.tsx:215 destructures `unknownCount: _unknownCount` and drops it; advancedFilters.ts:417 records that the per-question caption "was replaced by one generic line". Owner decision (design contract §1), not a bug this routine may fix.' },
+  { rule: 'R7.1.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-unknown-count-truthful'], evidence: 'RESOLVED 2026-08-28 (owner approved): caption restored, rendered only for a truthful count. Derivations checked against DB truth — furnished 7,434/2,191 and direction 9,521/345 exact on 2 cohorts. Awaiting production verification to become L.' },
   { rule: 'R7.2.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-multiselect-combining-semantics'], evidence: 'each chip reads its own cnt_*; live marginals kitchen/parking/elevator exact' },
   { rule: 'R7.2.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-multiselect-combining-semantics'], evidence: 'AND ac+elevator=1,619; OR شمال+جنوب=813=488+325. Contract WORDING incomplete (names only the union shape) — owner question open.' },
   { rule: 'R7.3.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-count-belongs-to-selection'], evidence: 'pending window blanks rather than showing a stale value' },
@@ -228,6 +229,7 @@ const S13: Entry[] = [
   { rule: 'R13.7', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'never re-ask an answered/skipped question' },
   { rule: 'R13.8', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-continuous-chat-history'], evidence: 'never fork the sidebar' },
   { rule: 'R13.9', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'never permanently burn an un-answered question' },
+  { rule: 'R13.11', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-probe-failure-not-a-verdict'], evidence: 'never turn our own outage into a statement about the data — mayAssertNothingToNarrow() only on a decided verdict' },
   { rule: 'R13.10', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-offer-agreement'], evidence: 'CI agent-CTA 4/4: never offer a round that would have nothing to ask' },
 ];
 
@@ -236,27 +238,22 @@ const S13: Entry[] = [
 // the product obeys them; they are also reported as a CONTRACT GAP, because the canonical document
 // does not carry them and a future reader rebuilding AF from the contract alone would lose them.
 export const UNCONTRACTED: Entry[] = [
-  { rule: 'X1-probe-failure-is-not-a-verdict', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-probe-failure-not-a-verdict'], evidence: 'owner 2026-08-26; src/lib/afProbe.ts PROBE_FAILED. A timed-out count probe must not read as "the source said nothing" / "not useful". NO R-number in the Product Contract.' },
+  // EMPTY BY RESOLUTION, not by neglect. X1 ("a failed/timed-out probe is UNKNOWN, never a verdict")
+  // was carried here from 2026-08-28 because it had code and a barrier but no R-number. The owner
+  // made it canonical the same day as R2.5.4 + R13.11, so the gap is closed and the entry retired.
+  // verify-af-contract-coverage-map.ts now proves the closure instead of the gap: it requires the
+  // contract to actually carry R2.5.4, so this list cannot be emptied by simply deleting the row.
 ];
 
 // ── TRENDING — sourced from this routine's spec, NOT from the Product Contract ───────────────────
 // Structural finding: the "canonical Product Contract" covers Advanced Filter only. Trending Cities
 // and Trending Districts have no R-numbers anywhere. They are graded here against Parts 2 and 3 of
 // docs/ops/AF_TRENDING_DATA_INTEGRITY_ENGINEER.md so the routine's own health lines mean something.
-export const TRENDING: Entry[] = [
-  { rule: 'T1-city-respects-complete-filter-state', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-trending-carries-full-filter-state'], evidence: '2026-08-28: 6 AF states × top-4 cities, 24/24 advertised = click-through' },
-  { rule: 'T2-city-count-eq-rpc-eq-click-eq-db', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-af-city-counts-carry-advanced'], evidence: '24/24 exact; browser desktop+mobile UI = REQUEST = RPC (الرياض 37,492 · جدة 22,365 …)' },
-  { rule: 'T3-no-stale-city-counts', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-trending-carries-full-filter-state'], evidence: 'counts recomputed per parameter set; not adversarially re-tested live this run' },
-  { rule: 'T4-district-inherits-complete-filter-state', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-af-count-params-carry-advanced'], evidence: '2026-08-28: جدة/الدمام/الخبر under AF answers, 24/24 rows exact' },
-  { rule: 'T5-district-advertised-eq-click-through', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-district-counts-honest'], evidence: 'scope vs narrowed differ up to 116× (696→6); the narrowed number is the one shown' },
-  { rule: 'T6-honest-zero-over-false-fallback', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-district-counts-honest'], evidence: 'widening fallbacks gated on "is the user narrowed"; live-proved 2026-08-23, not re-proved live this run' },
-  { rule: 'T7-rows-beyond-first-N-get-true-counts', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-district-counts-honest'], evidence: 'per-row live count fired for every row, not only the first 12' },
-  { rule: 'T8-new-filter-reaches-trending', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-af-count-params-carry-advanced', 'verify-af-city-counts-carry-advanced'], evidence: 'rpcAllNarrowingParams is the single definition every count surface spreads' },
-  { rule: 'T9-trending-usable-under-narrowing', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-trending-usable-under-narrowing'], evidence: 'live CI every 6h since the 2026-08-27 statement-timeout fix; answered <5s in this run\'s own probes (302–651ms)' },
-  { rule: 'T10-buy-rent-budget-carried', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-buy-rent-combined-af-gating'], evidence: 'live-proved 2026-08-27; not re-exercised live this run' },
-  { rule: 'T11-typed-districts-and-chips', dim: 'trending', weight: 2, grade: 'B', barrier: ['verify-district-typed-not-dropped'], evidence: 'typed district survives into the request' },
-  { rule: 'T12-match-values-merge-counted-whole', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-district-orthography-match'], evidence: '2026-08-28: جدة حي الصفا mv=2 counted across the whole match_values set (42), matching the UI' },
-];
+// Retired 2026-08-28: T1-T12 were this routine's own reconstruction, used while Trending had no
+// R-numbers. The owner made Trending canonical as §14, so those rules now live in S14 above and are
+// graded as contract rules like everything else. Kept empty rather than deleted so the structural
+// history stays readable.
+export const TRENDING: Entry[] = [];
 
 // ── DATA-INTEGRITY rules beyond the contract's own ───────────────────────────────────────────────
 export const INTEGRITY_EXTRA: Entry[] = [
@@ -267,8 +264,24 @@ export const INTEGRITY_EXTRA: Entry[] = [
   { rule: 'D5-af-field-stuck-alert-adjudicated', dim: 'integrity', weight: 2, grade: 'P', barrier: [], evidence: 'alert af_field_stuck_no_variance still OPEN: the "source publishes no negative value" claim needs a live satel probe and satel.sa is unreachable from CI/agent containers' },
 ];
 
+
+// ── §14 TRENDING (contracted 2026-08-28; was this routine's own T1-T12) ─────────────────────────
+const S14: Entry[] = [
+  { rule: 'R14.1.1', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-trending-carries-full-filter-state'], evidence: '2026-08-28: breakdown of the eligible set, not a cached popularity list — 6 AF states each produced a different city list' },
+  { rule: 'R14.1.2', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-af-city-counts-carry-advanced'], evidence: '24/24 advertised = click-through across elevator, elevator+parking, bath>=3, furnished and a 3-way stack' },
+  { rule: 'R14.1.3', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-af-count-params-carry-advanced'], evidence: 'جدة/الدمام/الخبر district rows under AF answers, 24/24 exact' },
+  { rule: 'R14.2.1', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-district-counts-honest'], evidence: 'browser desktop+mobile UI = REQUEST = RPC (الرياض 37,492 · جدة 22,365 · الدمام 6,988 · الخبر 5,715)' },
+  { rule: 'R14.2.2', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-trending-carries-full-filter-state'], evidence: 'counts recomputed per parameter set; not adversarially re-tested live this run' },
+  { rule: 'R14.2.3', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-district-counts-honest'], evidence: 'a live per-row count fires for every row, not only the first 12' },
+  { rule: 'R14.2.4', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-district-orthography-match'], evidence: '2026-08-28: جدة حي الصفا match_values=2 counted whole (42), matching the UI' },
+  { rule: 'R14.3.1', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-district-counts-honest'], evidence: 'every widening fallback gated on "is the user narrowed"; live-proved 2026-08-23' },
+  { rule: 'R14.3.2', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-district-counts-honest'], evidence: 'no count beats a false count; scope vs narrowed differ up to 116x (696 -> 6)' },
+  { rule: 'R14.4.1', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-af-count-params-carry-advanced', 'verify-af-city-counts-carry-advanced'], evidence: 'rpcAllNarrowingParams is the single definition every count surface spreads' },
+  { rule: 'R14.4.2', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-trending-usable-under-narrowing'], evidence: 'live CI every 6h since the 2026-08-27 statement-timeout fix; this run measured 302-651ms' },
+];
+
 export const CONTRACT_RULES: Entry[] = [
-  ...S1, ...S2, ...S3, ...S4, ...S5, ...S6, ...S7, ...S8, ...S9, ...S10, ...S11, ...S12, ...S13,
+  ...S1, ...S2, ...S3, ...S4, ...S5, ...S6, ...S7, ...S8, ...S9, ...S10, ...S11, ...S12, ...S13, ...S14,
 ];
 
 export const ALL_ENTRIES: Entry[] = [...CONTRACT_RULES, ...UNCONTRACTED, ...TRENDING, ...INTEGRITY_EXTRA];

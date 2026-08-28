@@ -421,6 +421,7 @@ const AR: Record<string, string> = {
   // Conversational interview refresh (owner 2026-08-16): opening state, live count chip, multi
   // continue CTA, availability line, mining transition, and the results summary + removable pills.
   '{count} results': '{count} نتيجة',
+  '{n} listings did not mention this': '{n} إعلان لم يذكر هذه المعلومة',
   'We found {count} properties': 'لقينا {count} عقار',
   'Let’s pin down what you’re looking for': 'خلّنا نحدد طلبك أكثر',
   'We’ll use what we know about these listings to get you closer to the right one': 'بنستخدم المعلومات المتوفرة عندنا عن هالعقارات عشان نقرّب لك الأنسب',

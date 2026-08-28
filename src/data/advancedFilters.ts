@@ -97,8 +97,8 @@ const AGE_QUESTION: AdvancedQuestion = {
   eligibility: (q) => isAgeFilterScopeFor(q, effectiveTypes(q)),
   async resolveOptions(q) {
     const counts = await fetchPropertyAgeOptionCounts(q);
-    if (isProbeFailure(counts)) return { options: [], unknownCount: 0, total: 0, probeFailed: true };
-    if (!counts || counts.cnt_total < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: 0, total: counts?.cnt_total ?? 0 };
+    if (isProbeFailure(counts)) return { options: [], unknownCount: null, total: 0, probeFailed: true };
+    if (!counts || counts.cnt_total < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: null, total: counts?.cnt_total ?? 0 };
     const options = meaningful(AGE_BUCKETS.map((b) => ({ key: b.key, label: t(b.labelKey), count: b.count(counts) })));
     return { options, unknownCount: counts.cnt_unknown, total: counts.cnt_total };
   },
@@ -125,17 +125,52 @@ function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
   return keys.length ? { ...q, amenities: [...new Set([...(q.amenities ?? []), ...keys])] } : q;
 }
 
-// Build a chip/tier question's options from the guided counts, applying the scope-size + per-option floors.
+// THE UNKNOWN COUNT IS NEVER GUESSED (owner rule 2026-08-28, R7.1.3).
+//
+// `unknownCount` is `number | null`, and `null` means "this question has no truthful single unknown
+// count" — the card then shows NO caption. It used to be a hardcoded `0` here, which is a FABRICATED
+// FACT: it asserts "every listing stated this" for questions where nothing of the sort is known. The
+// owner's rule when approving the caption was exact: *never display a fake unknown count; if a
+// question does not have a truthful, source-grounded unknown count, do not show 0 and do not guess.*
+//
+// A question may only claim an unknown count when one is DERIVABLE from real count columns:
+//
+//   • FURNISHED   total − cnt_furnished − cnt_unfurnished. Sound by construction: `furnished` is a
+//     tri-state boolean, so true + false + null partitions the scope. Verified live 2026-08-28 on
+//     الرياض/إيجار/سنوي/شقة — 11,153 − 1,048 − 2,671 = 7,434, exactly the DB's `furnished IS NULL`.
+//   • DIRECTION   total − Σ(the 8 direction counts). Sound only because norm_direction_ar's range IS
+//     exactly those 8 buckets — verified across the whole production index (0 rows normalise to a
+//     9th value). verify-af-unknown-count-truthful.ts pins that domain: a 9th bucket would silently
+//     inflate "did not mention", so it must turn the barrier red.
+//   • PROPERTY AGE has a real `cnt_unknown` column and needs no derivation.
+//
+// Everything else stays null, and each for a stated reason:
+//   • AMENITIES — there is NO single unknown. Each chip is its own boolean column, so "didn't say"
+//     differs per amenity; one number could only be a lie about the rest.
+//   • BATHROOMS / STREET_WIDTH / RATING — threshold ladders. total − (≥1) conflates NULL with the
+//     rows that genuinely have zero/below-threshold, so no honest subtraction exists.
+//   • UNIT_SUBTYPE — total − Σ(3) is only right while the value domain has exactly 3 members. That
+//     is true today but is a data fact, not an invariant, so it is not safe to publish as truth.
+//   • RNPL — a lone boolean chip: false and null are inseparable from cnt_rnpl alone.
 function guidedOptions(
   counts: GuidedCounts | null | { __probeFailed: true },
   defs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }>,
+  // Supply ONLY when the count is provably the number of listings whose source did not state the
+  // field. Omit it and the question honestly reports "I don't know how many didn't say".
+  unknownOf?: (c: GuidedCounts) => number,
 ): AdvancedQuestionResult {
   // A probe that never completed is UNKNOWN and says nothing about the scope. It must not return the
   // same shape as "the source answered: nothing" — that equivalence is what silently demoted users to
   // the legacy chips under load (owner 2026-08-26; src/lib/afProbe.ts).
-  if (isProbeFailure(counts)) return { options: [], unknownCount: 0, total: 0, probeFailed: true };
-  if (!counts || counts.cnt_total_base < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: 0, total: counts?.cnt_total_base ?? 0 };
-  return { options: meaningful(defs.map((d) => ({ key: d.key, label: t(d.labelKey), count: d.count(counts) }))), unknownCount: 0, total: counts.cnt_total_base };
+  if (isProbeFailure(counts)) return { options: [], unknownCount: null, total: 0, probeFailed: true };
+  if (!counts || counts.cnt_total_base < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: null, total: counts?.cnt_total_base ?? 0 };
+  return {
+    options: meaningful(defs.map((d) => ({ key: d.key, label: t(d.labelKey), count: d.count(counts) }))),
+    // Clamp at 0: a negative would mean the arithmetic no longer partitions the scope, and printing
+    // a negative "did not mention" is worse than printing nothing.
+    unknownCount: unknownOf ? Math.max(0, unknownOf(counts)) : null,
+    total: counts.cnt_total_base,
+  };
 }
 
 // Installments (RNPL) — one strict chip. NEUTRAL metadata filter only (no payment calc/estimate/
@@ -260,7 +295,7 @@ const FURNISHED_QUESTION: AdvancedQuestion = {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
       { key: 'yes', labelKey: 'Furnished',   count: (c) => c.cnt_furnished },
       { key: 'no',  labelKey: 'Unfurnished', count: (c) => c.cnt_unfurnished },
-    ]);
+    ], (c) => c.cnt_total_base - c.cnt_furnished - c.cnt_unfurnished);
   },
   apply: (q, keys) =>
     keys[0] === 'yes' ? { ...q, furnishedPref: true }
@@ -316,7 +351,11 @@ const DIRECTION_QUESTION: AdvancedQuestion = {
   selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'direction'),
   async resolveOptions(q) {
-    return guidedOptions(await fetchApartmentGuidedCounts(q), DIRECTION_DEFS);
+    return guidedOptions(await fetchApartmentGuidedCounts(q), DIRECTION_DEFS,
+      // Sound ONLY because norm_direction_ar's range is exactly these 8 buckets (verified across the
+      // whole production index). Summing DIRECTION_DEFS rather than re-listing the columns means the
+      // derivation cannot drift from the offered chips.
+      (c) => c.cnt_total_base - DIRECTION_DEFS.reduce((a, d) => a + d.count(c), 0));
   },
   apply: (q, keys) => (keys.length ? { ...q, directions: [...new Set([...(q.directions ?? []), ...keys])] } : q),
 };
@@ -455,7 +494,7 @@ export function scoreQuestion(
 }
 
 export type RankedQuestion = {
-  question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number; total: number; score: number;
+  question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; total: number; score: number;
 };
 
 // Probe every still-unasked eligible question against the CURRENT query, score, and rank. The

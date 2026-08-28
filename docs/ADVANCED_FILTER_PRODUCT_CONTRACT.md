@@ -147,6 +147,15 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 - **R2.5.2** — A predicate like `bathrooms >= 3` is strict-NULL-excluding on the DB side. AF may
   only offer such a predicate when the cohort is certified for that field on that scope.
 - **R2.5.3** — See `ops/ADVANCED_FILTER_SOURCE_TRUTH.md` for the full data-integrity contract.
+- **R2.5.4** — **A FAILED, TIMED-OUT OR ERRORED PROBE IS `UNKNOWN` — never "not useful" and never
+  "nothing left to narrow"** (owner rule 2026-08-26, made canonical 2026-08-28). A count probe that
+  did not complete must not produce the same result as a source that answered "nothing here". Where
+  no useful question survives AND any probe failed, AF's availability is UNDECIDED: retry once
+  (bounded), then leave the offer exactly where it was so the user can simply try again. AF may
+  never assert there is nothing left to narrow on the strength of a probe that never answered, may
+  never invent or estimate a count to fill the gap, and may never relax the usefulness gate to
+  compensate. Implemented in `src/lib/afProbe.ts` (`PROBE_FAILED` is a distinct value from `null`);
+  enforced by `verify-af-probe-failure-not-a-verdict.ts`.
 
 ---
 
@@ -358,8 +367,18 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 - **R7.2.1** — In a multi-select question, each chip's count is the count for that chip alone
   (marginal), not the combined effect of everything currently ticked. The FOOTER count is the
   combined effect.
-- **R7.2.2** — The combined count reflects the union of the ticked chips within the question's
-  domain.
+- **R7.2.2** — The FOOTER count is the combined effect of everything currently ticked, and there are
+  **two shapes**. Which one applies is decided by the DATA, not by the question — so neither is a
+  special case, and production implements both (owner decision 2026-08-28):
+  - **Several values of ONE field UNION.** Directions, unit subtypes, exact bathroom counts and
+    property types all live in a single column, and a listing holds exactly one value, so each extra
+    tick admits MORE listings and the count RISES. Measured live: شمال 488 + جنوب 325 = **813**.
+  - **Several DIFFERENT amenities INTERSECT.** Each amenity is its own boolean column, so each tick
+    is another requirement and the count FALLS. Measured live: تكييف 2,831 ∩ مصعد 1,803 = **1,619**.
+  - **Multi-amenity must never be an OR.** A user asking for AC *and* a lift must never be shown a
+    listing with only one of them. Enforced by `verify-af-multiselect-combining-semantics.ts`, which
+    fails in BOTH directions (an amenity chain turned disjunctive, or a value domain turned
+    conjunctive).
 
 ### 7.3 No stale counts
 
@@ -508,10 +527,53 @@ AF-specific consequences:
 - **R13.8** — Never fork a conversation into a new sidebar entry between rounds.
 - **R13.9** — Never permanently burn a question the user un-answered (removed the pill for).
 - **R13.10** — Never offer a round that would immediately have nothing to ask.
+- **R13.11** — Never turn our own outage into a statement about the data. A timeout, error or
+  blocked request is something WE failed to learn, never something the source said.
 
 ---
 
-## 14. Numeric constants — the whole product's tuning surface
+## 14. Trending Cities and Trending Districts
+
+Added 2026-08-28 (owner decision). Trending was governed only by the engineer routine's own spec,
+so the "single source of truth" did not actually cover it and a future engineer rebuilding it from
+this document would have had nothing to read. **This section formalises behaviour that already
+ships; it changes nothing in production.**
+
+### 14.1 What Trending IS
+
+- **R14.1.1** — Trending is the **location breakdown of the user's exact current eligible set** —
+  never a generic popularity list, never a cached "top cities" table.
+- **R14.1.2** — City Trending respects the COMPLETE filter state: category, group, property type,
+  Buy/Rent, Annual/Monthly/both, bedrooms, area, price (including the independent Buy and Rent
+  budgets of §1.4), and every committed Advanced Filter answer.
+- **R14.1.3** — District Trending, once a city is chosen, inherits that same complete state.
+
+### 14.2 Every visible number is DB truth
+
+- **R14.2.1** — For every visible row: **displayed count = Trending RPC = the count the user gets
+  after clicking it = independent DB truth.** The same chain §7.5 requires of AF counts.
+- **R14.2.2** — Counts must not go stale across a filter change; a count belongs to the state that
+  produced it.
+- **R14.2.3** — Every visible row gets a truthful narrowed count, not only the first N rows.
+- **R14.2.4** — Where a district's name merges orthographic variants, the count covers the WHOLE
+  merged set, matching what clicking it returns.
+
+### 14.3 Honest zero over false fallback
+
+- **R14.3.1** — A count must NEVER be a widened or unfiltered fallback presented as filtered truth.
+  Every widening fallback is gated on the user not being narrowed.
+- **R14.3.2** — **If a live narrowed count is unavailable, show NO count rather than a false one.**
+  An empty field is honest; an overstated one is not.
+
+### 14.4 Trending must not be left behind
+
+- **R14.4.1** — A filter added to the main search must reach Trending. A count surface that silently
+  drops a predicate is a defect, not a limitation — the single `rpcAllNarrowingParams()` definition
+  exists so a new filter arrives everywhere by construction.
+- **R14.4.2** — Trending must remain usable under narrowing. A narrowed state that makes the call
+  time out is a P1 defect: the field goes empty and the user loses the surface entirely.
+
+## 15. Numeric constants — the whole product's tuning surface
 
 All constants live in **one file per concept** and are imported everywhere else. Changing them
 here changes the entire product; no other file may hard-code the number.
@@ -529,7 +591,7 @@ here changes the entire product; no other file may hard-code the number.
 
 ---
 
-## 15. AUDIT — every rule vs current production code + barriers
+## 16. AUDIT — every rule vs current production code + barriers
 
 Performed 2026-08-26 against `main@11cfd2f`.
 
@@ -590,7 +652,7 @@ oracle in `verify-af-emoji-summary.ts` and the round-cap regex in `verify-af-rou
 
 ---
 
-## 16. New barrier added: category single-select
+## 17. New barrier added: category single-select
 
 R1.1 (single-select category) was implemented but not directly barriered. Added
 `scripts/verify-af-category-single-select.ts` in the same change as this contract — executes
@@ -600,7 +662,7 @@ contextSize); a cross-category scope offers zero AF questions via `cohortAllows(
 
 ---
 
-## 17. Reading order for a new engineer
+## 18. Reading order for a new engineer
 
 1. This file (**§0 core philosophy** in one minute).
 2. `ARCHITECTURE.md §6` (Frontend — the AI agent) for the surrounding architecture.

@@ -20,7 +20,7 @@ import type { AdvancedOption, AdvancedQuestion } from '@/data/advancedFilters';
 export type GuidedStep = {
   question: AdvancedQuestion;
   options: AdvancedOption[];
-  unknownCount: number;
+  unknownCount: number | null;
   total: number;
   keys: string[] | null;
 };
