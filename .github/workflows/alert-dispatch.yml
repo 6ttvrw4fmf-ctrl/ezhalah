@@ -203,6 +203,27 @@ jobs:
             fi
           done
 
+      - name: Heartbeat — tell the database this channel is alive
+        if: always()
+        run: |
+          set -euo pipefail
+          # THE CHANNEL REPORTS ITS OWN LIVENESS. mon_detect_alert_delivery can only see undelivered
+          # ALERT ROWS, so if this workflow stops running during a quiet spell it reads green while
+          # nothing is being delivered -- the 41-day-blackout shape moved one layer out.
+          # mon_detect_alert_dispatch_silent() watches this row and raises P1 after 24h of silence.
+          #
+          # if: always() is load-bearing. A run that files some issues and then fails still proves the
+          # channel is alive; skipping the stamp on failure would report "dead" for a channel that is
+          # merely erroring, and send whoever reads it hunting the wrong problem.
+          #
+          # Do not stamp this by hand to clear an alert -- the whole point is that only a real run
+          # writes it.
+          curl -sf -X POST "$SUPABASE_URL/rest/v1/ops_alert_dispatch_heartbeat" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates,return=minimal" \
+            -d "{\"id\":true,\"last_run_at\":\"$(date -u +%FT%TZ)\",\"run_url\":\"${GITHUB_SERVER_URL}/${REPO}/actions/runs/${GITHUB_RUN_ID}\"}"
+
       - name: Acknowledge alerts whose issue has an assignee
         run: |
           set -euo pipefail
