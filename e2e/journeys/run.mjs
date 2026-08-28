@@ -274,6 +274,72 @@ JOURNEYS['voice-control'] = async (mobile) => withPage({ mobile }, async (page, 
   }
 });
 
+/** J9–J11 — THE ADVERSARIAL SET (PART 4). A fixed checklist only ever catches bugs someone already
+ *  imagined, so these do the things the UI assumes nobody does: repeat an action it treats as
+ *  once-only, interrupt a flow halfway, and leave the tab alone long enough for the browser to
+ *  suspend it. All three were clean on 2026-08-28; they stay because the next regression in this
+ *  class will not announce itself in the checklist journeys either. */
+
+/** J9 — the same saved chat opened twice in quick succession must open it, never fork a copy. */
+JOURNEYS['adv-double-open'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
+  const name = `adv-double-open:${mobile ? 'mobile375' : 'desktop1440'}`;
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'mobile sidebar drawer would not open'); return; }
+  const before = await storedHistory(page);
+  const row = page.getByText('فلل جدة', { exact: true }).first();
+  if (!(await row.count())) { skip(name, 'saved chat row not found'); return; }
+  await row.click().catch(() => {});
+  await sleep(400);
+  await page.getByText('فلل جدة', { exact: true }).first().click().catch(() => {});
+  await sleep(5000);
+  const after = await storedHistory(page);
+  if ((after || []).length !== (before || []).length) {
+    defect(name, 'repeat open forked the chat', `${(before || []).length} → ${(after || []).length} rows`);
+  } else {
+    pass(name, `repeat open created no duplicate (${(after || []).length} rows)`);
+  }
+  if (bag.pageErrors.length) defect(name, 'page error on repeat open', bag.pageErrors.join(' | '));
+});
+
+/** J10 — New Chat pressed WHILE a restore is still landing must produce a genuinely blank chat,
+ *  not a half-restored one. This is PART 5 shape 1 attacked at its race rather than its happy path. */
+JOURNEYS['adv-newchat-mid-restore'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
+  const name = `adv-newchat-mid-restore:${mobile ? 'mobile375' : 'desktop1440'}`;
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'mobile sidebar drawer would not open'); return; }
+  if (!(await clickText(page, 'فلل جدة'))) { skip(name, 'saved chat row not found'); return; }
+  await sleep(700);                                   // interrupt mid-restore, deliberately
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'sidebar closed after open'); return; }
+  if (!(await clickText(page, 'محادثة جديدة'))) { skip(name, 'New Chat not found'); return; }
+  await sleep(5000);
+  const t = await bodyText(page);
+  const ta = page.locator('textarea').first();
+  const composer = (await ta.count()) ? await ta.inputValue() : '';
+  const leaked = t.includes('أبحث عن') && ['جدة', 'الرياض', 'الخبر'].some((c) => t.includes(c));
+  if (leaked) defect(name, 'interrupted restore leaked into the new chat', 'a restored search bubble is on the blank chat');
+  else if (composer.trim()) defect(name, 'New Chat inherited composer text', `holds «${composer}»`);
+  else pass(name, 'New Chat is blank even when it interrupts a restore');
+  if (bag.pageErrors.length) defect(name, 'page error on interrupted restore', bag.pageErrors.join(' | '));
+});
+
+/** J11 — a backgrounded tab suspends rAF. React Native Web drives Animated off rAF, so anything
+ *  gated on an animation callback simply never completes — the exact shape of the real production
+ *  bug in PR #341 (pressing «بحث» did nothing with rAF frozen). Background it for real, come back,
+ *  and require a working screen. PART 9.2 (3): this is a product risk, not only a harness artifact. */
+JOURNEYS['adv-background-tab'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag, ctx) => {
+  const name = `adv-background-tab:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const other = await ctx.newPage();
+  await other.goto('about:blank');
+  await other.bringToFront();
+  await sleep(45_000);
+  await page.bringToFront();
+  await sleep(3500);
+  const t = await bodyText(page);
+  if (t.length < 200) defect(name, 'backgrounded tab came back blank', `body is ${t.length} chars`);
+  else if (!t.includes('بحث')) defect(name, 'controls missing after backgrounding', 'no «بحث» on return');
+  else pass(name, `survived 45s backgrounded (${t.length} chars, controls present)`);
+  if (bag.pageErrors.length) defect(name, 'page error after backgrounding', bag.pageErrors.join(' | '));
+  await other.close().catch(() => {});
+});
+
 // ═══ RUNNER ═════════════════════════════════════════════════════════════════════════════════════
 const t0 = Date.now();
 console.log(`JOURNEY SWEEP — ${new Date().toISOString()}`);
