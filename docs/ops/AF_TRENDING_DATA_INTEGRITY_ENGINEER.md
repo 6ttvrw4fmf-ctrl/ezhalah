@@ -312,6 +312,29 @@ Per the standing reporting rule shared by all engineers (`docs/ops/ENGINEER_ROUT
 as the run FOUND it, then the state as the run LEAVES it, counting only changes actually verified
 in production.
 
+**Every health number is DERIVED, never estimated (owner rule 2026-08-28).** Read
+`docs/ops/AF_RATING_METHODOLOGY.md`, grade this run's work in
+`scripts/lib/afContractCoverage.ts`, and take the numbers from what
+`scripts/verify-af-contract-coverage-map.ts` prints. **Do not type a health number the tool did not
+print, do not carry one forward from a previous run, and do not "calibrate" against last run's
+figure** — that is exactly what produced the inflated 9.5/10 the owner rejected on 2026-08-28 (the
+same production state measured 8.4 once every contract rule was actually in the denominator). The
+barrier is in `npm test` and fails if any of the contract's rules is missing from the map, if a
+grade cites a barrier that does not exist or never executes, or if the grade ordering is loosened.
+
+Two rating lines are NOT coverage scores and must be stated as judgements, not measurements:
+`AF SYSTEM RATING` (how close the product AS SPECIFIED is to §0's philosophy) and
+`ENGINEER PERFORMANCE RATING` (how well the run executed the 12 steps).
+
+The report must also carry, straight from the tool:
+
+```
+NEW PRODUCT CONTRACT USED FOR RATING: YES/NO
+RULES LIVE-TESTED THIS RUN: X/Y          (grade L)
+RULES BARRIER-PROTECTED: X/Y             (grade B)
+RULES WITH INSUFFICIENT COVERAGE: X/Y    (grades P + N)
+```
+
 For every bug found, include: what the user experienced; root cause; exact fix; barrier added;
 mutation proof; production verification.
 
