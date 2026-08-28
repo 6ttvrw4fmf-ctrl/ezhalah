@@ -1076,6 +1076,11 @@ const AR: Record<string, string> = {
   'Star': 'أضف إلى المفضلة',
   'Unstar': 'أزل من المفضلة',
   'Delete': 'حذف',
+  // Sidebar delete-confirmation (owner 2026-08-28) — the owner's exact Arabic copy, split into
+  // title + body for the dialog layout; together they read as his one message verbatim.
+  'Delete this conversation?': 'هل أنت متأكد من حذف هذه المحادثة؟',
+  'It will be permanently deleted and cannot be recovered.': 'سيتم حذفها نهائيًا ولا يمكن استرجاعها.',
+  'Delete permanently': 'حذف نهائي',
   'Rename': 'إعادة تسمية',
   // Press-hold-drag reorder (owner 2026-08-24) — accessibility strings, Arabic-first.
   'Hold to reorder the conversation': 'اضغط مطولًا لإعادة ترتيب المحادثة',

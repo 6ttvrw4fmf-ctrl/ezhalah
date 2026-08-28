@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Image as RNImage, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { OPEN_DELAY_MS, armOpen, cancelOpen, openShouldFire, type ArmedOpen } from '@/lib/rowClick';
 import Animated, {
   Easing,
@@ -118,6 +118,14 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   });
   const [menu, setMenu] = useState<{ id: string; top: number; openUp: boolean; panelH: number } | null>(null);
   const menuItem = menu ? history.find((c) => c.id === menu.id) ?? null : null;
+  // DELETE CONFIRMATION (owner 2026-08-28): حذف never deletes on the first tap — it opens this
+  // dialog, and only «حذف نهائي» inside it actually deletes. Escape / backdrop / إلغاء all cancel.
+  // `deleteFiredRef` is the double-fire guard: Pressable onPress can land twice before React state
+  // flushes (a fast double-tap), and while deleteHistory(id) is idempotent for one id, the rule is
+  // that ONE confirmation fires ONE delete — the ref is set synchronously, so the second tap of a
+  // double-tap reads it and returns before touching history.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const deleteFiredRef = useRef(false);
 
   // INLINE RENAME (owner 2026-08-21): double-click the title → it becomes an input; Enter saves,
   // blur saves, Escape cancels and restores. `editingId` is which row is in edit mode; `draft` is
@@ -856,13 +864,45 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           <Ionicons name={menuItem.starred ? 'star' : 'star-outline'} size={15} color={menuItem.starred ? GOLD : TC.ink} />
           <Text style={[s.rowMenuText, dark && dks.rowMenuText]} numberOfLines={1}>{menuItem.starred ? t('Unstar') : t('Star')}</Text>
         </Pressable>
-        <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && (dark ? dks.rowMenuItemHover : s.rowMenuItemHover)]} onPress={() => { deleteHistory(menu.id); setMenu(null); }}>
+        <Pressable testID="chat-delete-open-confirm" style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && (dark ? dks.rowMenuItemHover : s.rowMenuItemHover)]} onPress={() => { deleteFiredRef.current = false; setConfirmDeleteId(menu.id); setMenu(null); }}>
           <Ionicons name="trash-outline" size={15} color="#c0392b" />
           <Text style={[s.rowMenuText, { color: '#c0392b' }]} numberOfLines={1}>{t('Delete')}</Text>
         </Pressable>
       </View>
     </>
   ) : null;
+
+  // Delete-confirmation dialog (owner 2026-08-28). Same visual convention as the account-delete
+  // confirm in settings.tsx (scrim + centered card + red destructive button + quiet cancel), via
+  // the SAME RN <Modal> primitive — never a browser confirm(). The safest action is إلغاء: Escape
+  // (react-native-web routes it to onRequestClose), a tap on the backdrop, and the إلغاء button all
+  // cancel; only an explicit tap on «حذف نهائي» deletes, exactly once (deleteFiredRef).
+  const confirmDeleteItem = confirmDeleteId ? history.find((c) => c.id === confirmDeleteId) ?? null : null;
+  const onConfirmDelete = () => {
+    if (deleteFiredRef.current) return;
+    deleteFiredRef.current = true;
+    const id = confirmDeleteId;
+    setConfirmDeleteId(null);
+    if (id) deleteHistory(id);
+  };
+  const deleteConfirmOverlay = (
+    <Modal visible={!!confirmDeleteItem} transparent animationType="fade" onRequestClose={() => setConfirmDeleteId(null)}>
+      <View style={s.dcRoot}>
+        <Pressable testID="chat-delete-cancel-backdrop" style={s.dcBack} onPress={() => setConfirmDeleteId(null)} />
+        <View style={s.dcCard} testID="chat-delete-confirm-dialog">
+          <View style={s.dcIc}><Ionicons name="trash-outline" size={22} color="#c0392b" /></View>
+          <Text style={s.dcT}>{t('Delete this conversation?')}</Text>
+          <Text style={s.dcS}>{t('It will be permanently deleted and cannot be recovered.')}</Text>
+          <Pressable testID="chat-delete-confirm" style={s.dcConfirm} onPress={onConfirmDelete}>
+            <Text style={s.dcConfirmText}>{t('Delete permanently')}</Text>
+          </Pressable>
+          <Pressable testID="chat-delete-cancel" style={s.dcCancel} onPress={() => setConfirmDeleteId(null)}>
+            <Text style={s.dcCancelText}>{t('Cancel')}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
 
   // Website: render as a fixed, always-visible column (no backdrop, no slide) at the leading edge.
   // Pin the WHOLE sidebar structure to LTR — icons, stars, ⋯ menus, sections, profile row all stay
@@ -886,6 +926,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
         ) : null}
         {menuOverlay}
+        {deleteConfirmOverlay}
         <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} />
       </View>
     );
@@ -899,6 +940,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
         {body}
         {menuOverlay}
+        {deleteConfirmOverlay}
         {dropAnnounce ? (
           <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
         ) : null}
@@ -1016,6 +1058,17 @@ const s = StyleSheet.create({
   userSub: { fontSize: 11.5, color: colors.muted, textAlign: 'left', marginTop: 2 },
 
   // Visually hidden, still announced: the post-drop «تم تغيير ترتيب المحادثة» confirmation.
+  // Delete-confirmation dialog — same geometry as settings.tsx's account-delete confirm.
+  dcRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, ...(Platform.OS === 'web' ? ({ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 } as any) : null) },
+  dcBack: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.5)' },
+  dcCard: { width: '100%', maxWidth: 320, backgroundColor: '#fff', borderRadius: 22, padding: 24, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 12 },
+  dcIc: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#fbeaea', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  dcT: { fontSize: 18, fontWeight: '700', color: colors.ink, textAlign: 'center' },
+  dcS: { fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 8, lineHeight: 19 },
+  dcConfirm: { width: '100%', backgroundColor: '#c0392b', borderRadius: 13, paddingVertical: 13, alignItems: 'center', marginTop: 18 },
+  dcConfirmText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  dcCancel: { width: '100%', paddingVertical: 12, alignItems: 'center', marginTop: 4 },
+  dcCancelText: { fontSize: 14, fontWeight: '500', color: colors.muted },
   srOnly: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 },
   cta: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 13 },
   ctaTitle: { fontSize: 13, fontWeight: '700', color: '#fff' },
