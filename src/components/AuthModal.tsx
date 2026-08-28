@@ -122,6 +122,7 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
     } catch { /* private mode / blocked storage — centered is always fine */ }
 
     let raf = 0;
+    let safety: ReturnType<typeof setTimeout> | undefined;
     let dragging = false, moved = false, id = -1;
     let grabX = 0, grabY = 0;
     let hist: Array<{ x: number; y: number; t: number }> = [];
@@ -132,6 +133,7 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
       dragging = true; moved = false; id = e.pointerId;
       grip.setPointerCapture(id);
       cancelAnimationFrame(raf);
+      clearTimeout(safety);
       grabX = e.clientX - off.x; grabY = e.clientY - off.y;   // respect WHERE they grabbed
       hist = [{ x: e.clientX, y: e.clientY, t: performance.now() }];
       grip.style.cursor = 'grabbing';
@@ -165,6 +167,11 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
       const target = clamp({ x: off.x + project(vx), y: off.y + project(vy) });
       try { sessionStorage.setItem(AUTH_POPUP_POS_KEY, JSON.stringify(target)); } catch { /* non-fatal */ }
       if (reduced) { off = target; paint(); return; }
+      // SAFETY NET: rAF is fully suspended in a hidden/occluded tab, which would strand the card
+      // at its rubber-banded release position — possibly past the bounds — until the next grab.
+      // Timers still fire there, so if the spring hasn't settled shortly, snap to the clamped
+      // target. In a visible window the spring settles first and this clears without ever firing.
+      safety = setTimeout(() => { cancelAnimationFrame(raf); off = target; paint(); }, 1200);
       // Critically damped spring (damping 1.0, response 0.4), seeded with the release velocity so
       // there is no seam between the pointer and the animation.
       const k = (2 * Math.PI / 0.4) ** 2, c2 = 2 * (2 * Math.PI / 0.4);
@@ -175,7 +182,7 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
         vY += (-k * (py - target.y) - c2 * vY) * h; py += vY * h;
         off = { x: px, y: py }; paint();
         if (Math.hypot(px - target.x, py - target.y) < 0.5 && Math.hypot(vX, vY) < 12) {
-          off = target; paint(); return;
+          off = target; paint(); clearTimeout(safety); return;
         }
         raf = requestAnimationFrame(step);
       };
@@ -192,6 +199,7 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
     addEventListener('resize', onResize);
     return () => {
       cancelAnimationFrame(raf);
+      clearTimeout(safety);
       grip.removeEventListener('pointerdown', onDown);
       grip.removeEventListener('pointermove', onMove);
       grip.removeEventListener('pointerup', onUp);
