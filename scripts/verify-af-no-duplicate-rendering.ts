@@ -42,6 +42,14 @@ import { buildAfSummary } from '../src/lib/afSummary.ts';
 import { HIERARCHY } from '../src/data/propertyTypes.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 import type { AdvancedQuestion } from '../src/data/advancedFilters.ts';
+import { join as __join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
+
+// "Is this guard actually wired in?" — asked of the test registry, which is what `npm test`
+// resolves its run set from (scripts/lib/testRegistry.ts). String-matching package.json used to
+// answer it; since the 201-command chain became one runner invocation, that match would read
+// "not wired" for every barrier in the suite.
+const REPO_ROOT = __join(import.meta.dirname, '..');
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -254,7 +262,7 @@ check(
 // ── Wiring ───────────────────────────────────────────────────────────────────────────────────────
 check(
   'this barrier is wired into `npm test`',
-  /verify-af-no-duplicate-rendering\.ts/.test(readFileSync(new URL('../package.json', import.meta.url), 'utf8')),
+  npmTestRuns(REPO_ROOT, 'verify-af-no-duplicate-rendering'),
 );
 
 console.log('');

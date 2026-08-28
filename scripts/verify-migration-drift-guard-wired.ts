@@ -26,6 +26,8 @@
 // every scheduled run and every push.
 //
 // Run: node --experimental-strip-types scripts/verify-migration-drift-guard-wired.ts
+import { join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
 import { readFileSync, existsSync } from 'node:fs';
 import { buildRepoMigrationVersions } from './build-repo-migration-versions.cjs';
 
@@ -34,6 +36,7 @@ const SHARED_PARSER = 'scripts/build-repo-migration-versions.cjs';
 const WORKFLOW = '.github/workflows/migration-drift-guard.yml';
 const SAFE_DEPLOY = 'scripts/safe-deploy.sh';
 const PACKAGE_JSON = 'package.json';
+const ROOT = join(import.meta.dirname, '..');
 const DRIFT_MODULE = 'scripts/lib/migrationDrift.ts';
 const PURE_TEST = 'scripts/verify-migration-mirror-integrity.ts';
 
@@ -52,13 +55,16 @@ for (const f of [CHECK_SCRIPT, SHARED_PARSER, WORKFLOW]) {
 //    for why: `npm test` is a required status check for every PR, and migration drift is common
 //    enough here that wiring the live check in would block unrelated PRs for someone else's miss).
 //    This pins BOTH halves of that decision, not just one, so neither can silently drift back.
-const pkg = readFileSync(PACKAGE_JSON, 'utf8');
-const testScript: string = JSON.parse(pkg).scripts?.test ?? '';
-check(testScript.includes('verify-migration-drift-guard-wired.ts'),
+// `npm test` no longer lists its checks inline — it discovers them (scripts/lib/testRegistry.ts,
+// owner-approved 2026-08-28 to kill the one-line merge-conflict hotspot). Asking the registry is the
+// same question this always asked; string-matching the "test" script would now answer "no" for every
+// check in the suite.
+const testScript: string = JSON.parse(readFileSync(PACKAGE_JSON, 'utf8')).scripts?.test ?? '';
+check(npmTestRuns(ROOT, 'verify-migration-drift-guard-wired'),
   'npm test runs THIS structural check',
   `package.json's "test" script no longer runs verify-migration-drift-guard-wired.ts — a broken ` +
   `wiring below would go unnoticed until someone happens to run it manually`);
-check(!testScript.includes(CHECK_SCRIPT),
+check(!npmTestRuns(ROOT, CHECK_SCRIPT.replace(/\.ts$/, '')) && !testScript.includes(CHECK_SCRIPT),
   'npm test deliberately does NOT run the live production check',
   `package.json's "test" script now runs ${CHECK_SCRIPT} directly — this makes the REQUIRED ` +
   `full-verification-ci.yml check fail for ANY unrelated PR whenever drift exists anywhere in ` +
@@ -146,7 +152,7 @@ check(checkScript.includes('listMigrationFiles'),
   `${CHECK_SCRIPT} must get its file list from ${SHARED_PARSER}'s listMigrationFiles, not a re-inlined scan`);
 // The pure test runs in `npm test` (unlike the live check) — it is offline and deterministic, so it
 // pins the detection logic on every PR without the collateral-blocking problem the live check has.
-check(testScript.includes(PURE_TEST),
+check(npmTestRuns(ROOT, PURE_TEST.replace(/\.ts$/, '')),
   'npm test runs the offline mirror-integrity test',
   `package.json's "test" script no longer runs ${PURE_TEST} — the four-condition detection logic ` +
   `(and its mutation proof) would go unchecked on PRs`);

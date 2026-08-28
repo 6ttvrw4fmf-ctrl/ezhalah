@@ -26,6 +26,14 @@
 //
 // Run: node --experimental-strip-types scripts/verify-detector-roster-edits-are-guarded.ts
 import { readFileSync, readdirSync } from 'node:fs';
+import { join as __join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
+
+// "Is this guard actually wired in?" — asked of the test registry, which is what `npm test`
+// resolves its run set from (scripts/lib/testRegistry.ts). String-matching package.json used to
+// answer it; since the 201-command chain became one runner invocation, that match would read
+// "not wired" for every barrier in the suite.
+const REPO_ROOT = __join(import.meta.dirname, '..');
 
 const MIGRATIONS_DIR = 'supabase/migrations';
 const REPAIR = '20260810222259_restore_roster_detectors_dropped_by_stale_rebuild.sql';
@@ -158,10 +166,9 @@ check(repair.includes('open_alerts'),
   `while alerts sit open (mon_raise returns 0 for an already-open dedup key)`);
 
 // 4. This guard is worthless if nothing runs it.
-const pkg = readFileSync('package.json', 'utf8');
-check(pkg.includes('verify-detector-roster-edits-are-guarded'),
+check(npmTestRuns(REPO_ROOT, 'verify-detector-roster-edits-are-guarded'),
   'npm test runs this guard',
-  'package.json no longer runs verify-detector-roster-edits-are-guarded.ts — the guard is inert');
+  '`npm test` no longer runs verify-detector-roster-edits-are-guarded.ts (see scripts/test-exclusions.txt) — the guard is inert');
 
 console.log('detector-roster-edits-are-guarded: the barrier list must survive the next migration\n');
 for (const o of ok) console.log(`  ✓ ${o}`);
