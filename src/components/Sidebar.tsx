@@ -17,7 +17,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import HeroBackground from '@/components/HeroBackground';
 import { useApp, type HistoryItem } from '@/store';
-import { sanitizeArabicSearch, isSearchableQuery, filterChats } from '@/lib/chatSearch';
+import { sanitizeArabicSearch, isSearchableQuery, filterChats, arabicHintAfterInput } from '@/lib/chatSearch';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { queryLabel } from '@/data/search';
 import { HOLD_MS, canReorder, dragTargetIndex, dragCrossIntent, neighboursAt, preActivate, sortByOrder, type CrossIntent } from '@/lib/sidebarReorder';
@@ -150,10 +150,14 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   };
   const closeSearch = () => { setSearching(false); setSearchText(''); setHadLatin(false); };
   const onSearchChange = (raw: string) => {
-    const { text, hadLatin: stripped } = sanitizeArabicSearch(raw);
-    setSearchText(text);
-    if (stripped) setHadLatin(true);
-    else if (!text) setHadLatin(false);
+    const sanitized = sanitizeArabicSearch(raw);
+    setSearchText(sanitized.text);
+    // The hint's lifecycle is one rule, executed in chatSearch.ts (arabicHintAfterInput) rather
+    // than spelled out here, so the barrier runs the real decision instead of grepping for its
+    // shape. It clears as soon as a real Arabic query is filtering — the old "clear only when the
+    // field is empty" latch left the nudge on screen for the whole session, because stripping
+    // Latin already empties the field and the user's Arabic never passes through empty.
+    setHadLatin((shown) => arabicHintAfterInput(shown, sanitized));
   };
 
   // OWNER BUG FIX: a single click OPENS, but the native dblclick below ALSO ran openHistory() on each
