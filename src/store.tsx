@@ -6,6 +6,7 @@ import { HOME_DEFAULT_QUERY, migrateGroups } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
 import { applyMove, applyStarMove } from '@/lib/sidebarReorder';
 import { autoTitleForQuery, autoTitleForPrompt, canAutoRetitle, type TitleSource } from '@/lib/chatTitle';
+import { AUTH_POPUP_DISMISSED_KEY } from '@/lib/authPopupBehavior';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
 import { resolveLocation, ensureLocationIndex } from '@/data/locations';
@@ -150,6 +151,10 @@ type AppState = {
   authOpen: boolean;
   openAuth: () => void;
   closeAuth: () => void;
+  // Read-only exposure for the popup's auto-show gate (shouldAutoShowAuthPopup, owner 2026-08-28):
+  // null = the hasSeenIntro flag is still being read, false = the intro is pending/playing, true =
+  // done. The popup may only auto-raise on `true`, so it never covers the intro film.
+  introSeen: boolean | null;
   // First-run cinematic intro (the eagle clip). Shows ONCE, only for a brand-new logged-out
   // visitor; persisted via a `hasSeenIntro` flag so it never replays. `showIntro` waits until both
   // the saved flag is read AND the auth session is resolved, so it never flashes for a returning
@@ -905,7 +910,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       closeModal: () => setModal(null),
       authOpen,
       openAuth: () => setAuthOpen(true),
-      closeAuth: () => setAuthOpen(false),
+      closeAuth: () => {
+        setAuthOpen(false);
+        // Dismissal is respected for the rest of the SESSION (owner 2026-08-28): once the popup is
+        // closed — by the X, the ground, or a completed sign-in — it never auto-raises again until
+        // a fresh session. Only an explicit login/signup control (openAuth) brings it back.
+        // sessionStorage is web-only and can be blocked (private mode); then the gate may simply
+        // fire again, which is safe — this stamp is a courtesy, not session logic.
+        try {
+          if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(AUTH_POPUP_DISMISSED_KEY, '1');
+        } catch { /* non-fatal */ }
+      },
+      introSeen,
       showIntro: introSeen === false && authChecked && !user,
       dismissIntro: () => {
         setIntroSeen(true); // session-only hide so it doesn't re-loop after the dissolve

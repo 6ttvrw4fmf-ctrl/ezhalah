@@ -794,18 +794,20 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               <Text ref={noTranslateRef} style={s.word}>{t('EZHALAH')}</Text>
             </View>
 
-            <Pressable style={[s.cta, { marginTop: 22 }]} onPress={openSignIn}>
-              <Ionicons name="person-outline" size={18} color="#fff" />
-              <View>
-                <Text style={s.ctaTitle}>{t('Sign up / Log in')}</Text>
-                <Text style={s.ctaSub}>{t('Get more. Sign up free.')}</Text>
-              </View>
-            </Pressable>
-
+            {/* The upper guest CTA card that used to sit here was the OLD auth prompt (removed
+                with the SignInDock, owner 2026-08-28): the large AuthModal now raises itself for
+                signed-out visitors. ONE minimal affordance remains below — in the same bottom slot
+                as the signed-in profile row — so login/signup is always one click away and reopens
+                that same popup. */}
             <View style={{ flex: 1, minHeight: 30 }} />
             <View style={s.divider} />
             {NavLinks}
-            <Pressable style={s.cta} onPress={openSignIn}>
+            <Pressable
+              style={s.cta}
+              onPress={openSignIn}
+              // @ts-expect-error web-only DOM props on the RNW host node
+              dataSet={{ testid: 'sidebar-signin-cta' }}
+            >
               <Ionicons name="person-outline" size={18} color="#fff" />
               <View>
                 <Text style={s.ctaTitle}>{t('Sign up / Log in')}</Text>

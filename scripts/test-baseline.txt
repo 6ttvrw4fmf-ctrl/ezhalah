@@ -177,7 +177,6 @@ verify-sidebar-drag-star.ts
 verify-sidebar-light-green-interaction.ts
 verify-sidebar-rename-isolation.ts
 verify-sidebar-reorder.ts
-verify-signin-dock.ts
 verify-source-text-entities-decoded.ts
 verify-sql-mirrors-not-stale.ts
 verify-ssr-hydration-parity.ts
