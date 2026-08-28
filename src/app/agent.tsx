@@ -46,7 +46,7 @@ import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { regionOrCityChoice, scopedLocation, scopeNamedForTwin } from '@/lib/regionOrCityAnswer';
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
-import { deriveGuided, sameKeys, type GuidedStep } from '@/lib/afSteps';
+import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups } from '@/lib/searchDefaults';
 import { BROWSE_CAP, resultCounts } from '@/data/resultCount';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
@@ -1819,7 +1819,10 @@ export default function Agent() {
     const guided = ageFlowBaseQRef.current
       ? {
           baseQ: carry?.originQ ?? ageFlowBaseQRef.current,
-          facets: [...(carry?.facets ?? []), ...ageFlowFacetsRef.current],
+          // Deduped across rounds (owner audit, 2026-08-27), not a raw concatenation — a carried
+          // round's facet and this round's facet can never both be kept if they resolve to the same
+          // displayed label, whatever question id produced either one.
+          facets: dedupeFacetsByLabel([...(carry?.facets ?? []), ...ageFlowFacetsRef.current]),
           asked: [...ageFlowAskedRef.current],   // already unioned with the carry by syncGuidedFromSteps
         }
       : undefined;
@@ -2324,7 +2327,12 @@ export default function Agent() {
       setDoneTyping(restored.doneTyping);
       setRevealCount(restored.revealCount);
       setAfReceipt(restored.afReceipt);
-      setGuidedPills(restored.guidedPills as any);
+      // Dedup on restore too (owner audit, 2026-08-27): a chat saved before this fix shipped could
+      // have a stray duplicate pill baked into its serialized transcript — restoring it verbatim
+      // would resurrect exactly the bug this fix closes everywhere else. Deduping HERE (not just at
+      // render) keeps the array index-consistent for removeGuidedFacet's index-based removal.
+      const rgp = restored.guidedPills as { facets?: GuidedFacet[] } | null | undefined;
+      setGuidedPills((rgp && rgp.facets ? { ...rgp, facets: dedupeFacetsByLabel(rgp.facets) } : rgp) as any);
       lastCapturedRef.current = JSON.stringify(t); // what's on screen IS what's stored — no echo write
       pinModeRef.current = 'top';
       toTop();
