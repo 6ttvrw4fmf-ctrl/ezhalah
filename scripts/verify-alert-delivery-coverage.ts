@@ -120,7 +120,14 @@ import { readdirSync } from 'node:fs';
 
 const detectorFiles = readdirSync(MIGRATIONS)
   .filter((f) => f.endsWith('.sql'))
-  .filter((f) => readFileSync(join(MIGRATIONS, f), 'utf8').includes('function public.mon_detect_alert_delivery'))
+  // CASE-INSENSITIVE, and that is a bug fix rather than a nicety (2026-08-28). This read
+  // `.includes('function public.mon_detect_alert_delivery')` -- lowercase only. A migration written
+  // as `CREATE OR REPLACE FUNCTION public.mon_detect_alert_delivery()` (which is exactly what
+  // pg_get_functiondef() emits, so any needle-edited migration) was invisible to this filter, and
+  // the barrier then happily checked an OLDER definition and reported green about a function
+  // production is no longer running. Silently validating the wrong object is the same failure shape
+  // as the blackout this whole file exists to prevent.
+  .filter((f) => /function\s+public\.mon_detect_alert_delivery/i.test(readFileSync(join(MIGRATIONS, f), 'utf8')))
   .sort();
 
 check(
