@@ -13,6 +13,7 @@ import { markAppSessionStarted } from '@/lib/appSession';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
+import SignInDock from '@/components/SignInDock';
 import GoogleOneTap from '@/components/GoogleOneTap';
 import IntroVideo from '@/components/IntroVideo';
 
@@ -78,6 +79,10 @@ function Shell() {
       {docked && pathname !== '/auth' && <Sidebar docked onClose={() => {}} />}
       {/* One-click Google sign-in prompt (web, signed-out only) — renders its own corner UI. */}
       <GoogleOneTap />
+      {/* Desktop-only floating sign-in prompt for signed-out visitors on the filter home. Gated on
+          existing state only (useDocked + authChecked/user + activeChatId + route); it removes
+          itself the moment a search lands and returns on a fresh «محادثة جديدة». */}
+      <SignInDock />
       <View style={{ flex: 1 }}>
         <Stack
           screenOptions={{
