@@ -17,11 +17,42 @@
 
 export type RpcBody = Record<string, unknown>;
 
-const AMENITY_COLS = new Set([
-  'kitchen', 'parking', 'elevator', 'private_entrance', 'car_entrance', 'sanitation', 'electricity',
-  'water_supply', 'balcony', 'laundry_room', 'pool', 'gym', 'garden', 'separate_electricity_meter',
-  'separate_water_meter', 'air_conditioner', 'maid_room', 'driver_room', 'optical_fibers',
-]);
+// TOKEN → COLUMN, mirroring the production `af_eligibility_clause()` vocabulary guard exactly.
+//
+// This is a MAP, not a set of column names, because the token the RPC receives is not always the
+// column it filters: the clause reads «'ac' → s.air_conditioner» and «'rnpl'/'rent_now_pay_later'
+// → s.rent_now_pay_later». The previous version listed COLUMN names as if they were tokens, so the
+// two most common real chips were invisible to the oracle:
+//
+//   • 'ac' (Air conditioning) — 2,831 of the 11,153 Riyadh/Rent-Annual/شقة cohort, the single
+//     biggest amenity chip in production — resolved to `unhandled`, and
+//   • 'furnished' (the amenity-question chip, distinct from the p_furnished question)
+//
+// so `verify-af-live-truth.ts` reported "independent oracle covers every predicate in this
+// request" = FAIL for any journey that ticked either one. It fails CLOSED (loud), which is why no
+// wrong number ever shipped — but the oracle could never certify those journeys, and the corpus
+// simply never ticked them. The reverse drift was live too: the set carried nine tokens the clause
+// REJECTS fail-closed (balcony, laundry_room, pool, gym, garden, separate_*_meter, optical_fibers),
+// for which the oracle would have happily filtered a column while the RPC returned zero rows.
+//
+// `verify-af-multiselect-combining-semantics.ts` now derives the clause's vocabulary from the
+// replayed migrations and fails if this map drifts from it in either direction.
+const AMENITY_TOKEN_COL: Record<string, string> = {
+  elevator: 'elevator',
+  parking: 'parking',
+  kitchen: 'kitchen',
+  ac: 'air_conditioner',
+  maid_room: 'maid_room',
+  driver_room: 'driver_room',
+  private_entrance: 'private_entrance',
+  car_entrance: 'car_entrance',
+  sanitation: 'sanitation',
+  electricity: 'electricity',
+  water_supply: 'water_supply',
+  furnished: 'furnished',
+  rnpl: 'rent_now_pay_later',
+  rent_now_pay_later: 'rent_now_pay_later',
+};
 
 export function buildOracleQS(reqBody: RpcBody): { qs: string; unhandled: string[] } {
   const parts = ['production_ready=is.true'];
@@ -70,11 +101,15 @@ export function buildOracleQS(reqBody: RpcBody): { qs: string; unhandled: string
       case 'p_rating_min': parts.push(`rating=gte.${v}`); break;
       case 'p_reviews_min': parts.push(`reviews_count=gte.${v}`); break;
       case 'p_unit_subtypes': parts.push(`unit_subtype_ar=in.${inList(v as string[])}`); break;
+      // MULTI-AMENITY IS AND (R7.2.2). Each ticked chip is its own boolean column, so every token
+      // appends its OWN conjunctive part — PostgREST joins top-level filters with AND, matching the
+      // clause's `and (not ('tok' = any(p_amenities)) or s.col)` chain. Collapsing these into one
+      // `or.(...)` would silently turn every multi-amenity answer into a union.
       case 'p_amenities':
         for (const tok of v as string[]) {
-          if (tok === 'rnpl') { parts.push(`rent_now_pay_later=is.true`); continue; }
-          if (!AMENITY_COLS.has(tok)) { unhandled.push(`p_amenities:${tok}`); continue; }
-          parts.push(`${tok}=is.true`);
+          const col = AMENITY_TOKEN_COL[tok];
+          if (!col) { unhandled.push(`p_amenities:${tok}`); continue; }
+          parts.push(`${col}=is.true`);
         }
         break;
       // genuinely irrelevant to the WHERE clause (paging/sorting/informational), always safe:
