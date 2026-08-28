@@ -216,6 +216,11 @@ it cannot be fixed safely, and what evidence/decision is missing. Otherwise: fix
 ## 28. Final report — only after fix + deploy + retest
 > For a **major** certification the report block in **§40.9** is REQUIRED in addition to this
 > section's content. §28 governs the daily heartbeat; §40.9 governs major runs.
+>
+> **Every run also reports the six §43.4 numbers SEPARATELY** — browser journeys · production API
+> searches · exact-set SQL differentials · unique cohorts covered · stale cohorts revisited ·
+> never-tested cohorts remaining. They are never merged into one "searches" figure (owner,
+> 2026-08-28): a request count is not a coverage claim.
 
 Order: full testing → fixes → barriers → regression suite → safe deployment → live production
 retest → final report. Header: `🧪 مهندس اختبار البحث والتطابق اليومي — Before: X/10 → After: X/10`.
@@ -680,6 +685,83 @@ admin-region label as city · guessed unknown location · district non-canonical
 two ways) and `mon_detect_ranking_diversity_contract()` (daily-gated; drives the real RPC). Both are
 in the `mon_run_all_detectors()` roster. All six label conditions and the ranking comparison are
 mutation-proven — each shown to read 0 on clean data and 1 on a deliberately broken row.
+
+## 43. THE TWO-TIER MODEL — coverage, not request volume (owner rule, 2026-08-28, permanent)
+
+> «Do not increase production traffic merely to make the search count larger. The objective is
+> coverage and defect detection, not request volume.» — owner, 2026-08-28
+
+Testing this product has exactly **two tiers**, and they are never conflated.
+
+| | **Daily heartbeat** | **Major certification** |
+|---|---|---|
+| purpose | catch regressions cheaply and continuously | prove a change did not alter what users can find |
+| when | every run (§20) | ONLY for a meaningful change to Filter, matching, location, pagination, cards, or anything else able to alter search eligibility or results (§40) |
+| browser journeys | ~10–25 | ~200 |
+| production API searches | a **bounded budget** (`DAILY_BUDGET`, `e2e/qa-coverage/plan.mjs`) | ~5,000 |
+| SQL differential | a stratified exact-set sample | the FULL searchable inventory |
+
+**A daily heartbeat is never reported as a major certification.** Naming it one inflates the
+evidence behind every claim in the report.
+
+### 43.1 The daily budget is a CEILING, not a target
+Spending less of it is a perfectly good run. Spending it on cells that were tested yesterday is not.
+Production is 2 vCPU and the search RPC is already 64.4% of all database time (§40.1) — the budget
+exists because real users share that machine, not because a number looks good in a report.
+
+**Never pad a run to reach a count.** Once the meaningful combinations are covered, thousands of
+extra near-identical calls add production load without adding confidence: they re-test one predicate
+shape with different numeric literals. Confidence about *data* belongs to the SQL differential
+(§40.5), which validates every matching row at once and costs 5.5× less than a single RPC search.
+
+### 43.2 Stale-first and risk-first, never population-first
+Coverage is drawn **stalest-first** from `ops_qa_coverage_ledger`, weighted by **risk**, across
+نوع العقار × المدينة/الحي × العملية/الفترة × filter shape. A cohort nothing has ever tested outranks
+every previously-tested one; among tested cohorts, the stalest wins. Population NEVER buys a slot.
+
+This rule is written from a real failure: **the 2026-08-28 daily run fired 446 RPC searches ordered
+by population** — biggest populated cell first — so it re-tested الرياض apartments while «سكن عمال»,
+«مخيم» and dozens of small cities stayed untouched for weeks. The browser sweep, which has rotated
+stalest-first since 2026-08-23, was the only layer whose coverage actually moved. The search count
+looked impressive; the coverage did not improve, and nothing in the suite could tell the difference.
+
+Machinery (do not rebuild it): `e2e/qa-coverage/plan.mjs` (`planCells` · `score` · `RISK` ·
+`DAILY_BUDGET`), `e2e/qa-coverage/request.mjs` (the app's serialization, §41-hardened),
+`e2e/qa-coverage/run.mjs` (fires, validates, writes coverage back), and
+`ops_qa_cohort_catalog()` (the harvested cohort/table truth, anon-readable). The whole contract —
+stale-first ordering, the budget ceiling, the per-نوع spread, every §41 serialization rule, and a
+**mutation proof that a population-first planner fails it** — is pinned by
+`scripts/verify-qa-coverage-planner.ts` in `npm test`.
+
+### 43.3 What each layer is EVIDENCE for
+Neither layer substitutes for the other; they answer different questions.
+
+- **Browser journeys** prove the actual user path, end to end:
+  `UI intent → request → RPC → DB oracle → rendered result`. Nothing else can see what a browser
+  renders (§40, THE LIVE BROWSER SWEEP).
+- **The independent SQL differential** is the stronger evidence for exact data correctness: it
+  compares the whole result SET (`missing = extra = duplicates = count mismatch = 0`) rather than
+  asking whether a count looks plausible. Prefer it over more HTTP searches, always.
+- **Production API searches** sit between them: broad predicate coverage at a cost the instance can
+  absorb.
+
+### 43.4 Report the numbers SEPARATELY
+Every run reports these as distinct figures, never summed into one "searches" number:
+
+```
+BROWSER JOURNEYS:            PRODUCTION API SEARCHES:      EXACT-SET SQL DIFFERENTIALS:
+UNIQUE COHORTS COVERED:      STALE COHORTS REVISITED:      NEVER-TESTED COHORTS REMAINING:
+```
+
+`NEVER-TESTED COHORTS REMAINING` is the honest one: it is the size of the blind spot, and it may
+only shrink over time. A run that leaves it unchanged covered nothing new, whatever its search count.
+
+### 43.5 Load is a stop condition, not a budget to spend
+**If production load approaches the measured safe limit, reduce testing rather than impact users.**
+The envelope (§40.6) is concurrency ≤ 2 sustained (bursts ≤ 3, never > 6) and ≤ 1.5 searches/second,
+avoiding `sync-search-listings-ar` at :14 and the 01:00–06:00 UTC scraper window. Watch latency
+throughout; degrading Supabase to finish a run is a FAILED run, and an abandoned run that protected
+users is a successful one. `QA_BUDGET=<n>` exists precisely so a run can be made smaller on the day.
 
 ## Final principle
 **MATCH → SOURCE TRUTH → DIVERSITY → USER JOURNEY → PERFORMANCE**, in that order. The engineer owns
