@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } from '@/i18n';
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
-import { HOME_DEFAULT_QUERY } from '@/lib/searchDefaults';
+import { HOME_DEFAULT_QUERY, migrateGroups } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
 import { applyMove, applyStarMove } from '@/lib/sidebarReorder';
 import { autoTitleForQuery, autoTitleForPrompt, canAutoRetitle, type TitleSource } from '@/lib/chatTitle';
@@ -132,6 +132,11 @@ type AppState = {
   recordChatTurn: (text: string) => string | null;
   // Which history chat is currently open, so the sidebar can highlight it (light green) and the user
   // always knows which conversation they're in. `null` on Home / New Chat (no chat selected).
+  // TRUE once the initial Supabase session restore has settled. Anything that renders for
+  // SIGNED-OUT users must gate on this as well as `user`: during restore `user` is null, so a
+  // `!user` test alone briefly reads a logged-in visitor as logged out (the flash GoogleOneTap
+  // documents at its own gate). Already in this provider's memo deps — only the surface is new.
+  authChecked: boolean;
   activeChatId: string | null;
   setActiveChat: (id: string | null) => void;
   // Support / About Us are shown as in-app popups (centered dialog over a dimmed page) rather than
@@ -327,7 +332,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (historyLoadedRef.current !== key) return;
         try {
           const saved = JSON.parse(v);
-          if (Array.isArray(saved)) setHistory(saved as HistoryItem[]);
+          // Normalize every entry's query at this ONE hydration boundary: an entry written by an
+          // older build may lack fields added since (a missing priceInput crashed filterToChat when
+          // the chat was reopened from the sidebar — 2026-08-23) or carry the legacy typeGroup
+          // scalar. migrateGroups fills only the required strings whose absence crashes — it never
+          // invents a value that would change what the replayed search does.
+          if (Array.isArray(saved)) {
+            setHistory((saved as HistoryItem[]).map((h) => ({ ...h, query: migrateGroups({ ...h.query }) })));
+          }
         } catch {}
       })
       .catch(() => {});
@@ -885,6 +897,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (activeChatId !== id) setActiveChatId(id);
         return id;
       },
+      authChecked,
       activeChatId,
       setActiveChat: (id) => setActiveChatId(id),
       modal,

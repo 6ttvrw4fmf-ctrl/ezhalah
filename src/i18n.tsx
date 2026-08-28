@@ -1059,6 +1059,8 @@ const AR: Record<string, string> = {
   'No chat with that name': 'ما لقينا محادثة بهذا الاسم',
   'About Us': 'من نحن',
   'Sign up / Log in': 'إنشاء حساب / تسجيل الدخول',
+  // Desktop sign-in dock subtitle (owner 2026-08-26) — why an account is worth it, in one line.
+  'Save your searches and come back to them anytime.': 'احفظ بحثك وارجع له في أي وقت.',
   'Get more. Sign up free.': 'احصل على المزيد. سجل مجاناً.',
   'Sign up to keep searching': 'سجّل للاستمرار في البحث',
   'Get more with a free account': 'احصل على المزيد بحساب مجاني',

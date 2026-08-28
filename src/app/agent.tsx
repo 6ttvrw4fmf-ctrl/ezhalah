@@ -2708,7 +2708,7 @@ export default function Agent() {
                 const rtl = msgRTL(txt);
                 return (
                   <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: '88%' }}>
-                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]}>
+                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row' }]}>
                       <View style={s.replyIcon}>
                         <Ionicons name="sparkles" size={14} color={colors.primary} />
                       </View>
