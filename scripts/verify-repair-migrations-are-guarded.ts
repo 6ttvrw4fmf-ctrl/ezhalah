@@ -46,6 +46,21 @@ const WAIVED: Record<string, string> = {
   '20260824114314_defabricate_probed_aqar_non_villa_maid_driver.sql':
     'watched by its companion 20260824115704_defabrication_reruns_its_watching_detector.sql, which '
     + 're-asserts the same UPDATE and re-runs mon_detect_fabricated_unpublished_amenity()',
+
+  // Same shape, same remedy: this file un-gated 13 rows whose price was proven equal to the
+  // source's own archived value, and shipped no watcher. The guard caught it on PR #1198 and was
+  // right. The fix is the companion, not a mute: 20260828230419 creates
+  // mon_detect_price_source_evidence_stale() (wired to the mon_run_all_detectors roster in that
+  // same migration), re-asserts this exact UPDATE idempotently, and runs the detector. What that
+  // detector watches is the claim this repair actually made -- an ops_price_source_verified row
+  // says "stored price == the source's own published figure", and that can decay on its own when
+  // the source re-prices and the next enrich moves price_total while the old evidence keeps
+  // exempting the row from the price/size gate. Open the companion to check this reason rather
+  // than taking it on trust.
+  '20260828225740_ungate_the_archive_proven_extreme_price_rows.sql':
+    'watched by its companion 20260828230419_price_source_evidence_must_keep_holding_and_reassert_'
+    + 'the_ungate.sql, which re-asserts the same UPDATE and runs '
+    + 'mon_detect_price_source_evidence_stale()',
 };
 
 // Enforcement starts here — the day this rule landed.
