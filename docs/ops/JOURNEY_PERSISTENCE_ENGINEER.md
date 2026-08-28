@@ -462,6 +462,9 @@ Four rules that come from real failures on this exact surface:
 | Five Villa/Buy AF questions, server-side only, quiet DB | **3,433 ms** | PR #1146 |
 | One param-fidelity browser journey | ~16 s | §40.2 |
 | One full browser journey | ~26 s | §40.2 |
+| **One #6 journey, this routine's own mix** | **~14.4 s** | measured 2026-08-28: `e2e/journeys/run.mjs`, 32 journeys in 460 s against production, Chromium, strictly serial, a fresh browser + context per journey (so launch/teardown is INSIDE the figure, not additional) |
+| Engines installed in the agent image | **Chromium only** | measured 2026-08-28: `/opt/pw-browsers` holds `chromium-1194`, its headless shell and `ffmpeg-1011` — no `webkit-*`, no `firefox-*` |
+| One «بحث» press → search RPCs | **6** `location_search_candidates_ar` calls | measured 2026-08-28: single click → 6, double click → 6 (identical). A double-click oracle must compare against a measured single-click baseline, never against 1 |
 
 **The consequence you must actually apply:** `rankQuestions` fires one `af_eligible_count` **per
 eligible question, concurrently** — so a five-question cohort is already past the concurrency knee
@@ -473,14 +476,31 @@ load.
 
 **NOT ESTABLISHED — do not cite a number for these until one is measured:**
 
-- Per-journey cost for #6's *own* mix (auth/One Tap, sidebar rename/delete/star/reorder, favorites,
-  chat restore, voice, read-aloud). §40.2's 16 s / 26 s are *search* journeys and are the closest
-  available proxy, not a measurement of yours.
-- WebKit and Firefox timings. Every figure above was measured on Chromium.
-- Browser launch/teardown cost in this container, and how many parallel contexts it tolerates.
+- WebKit and Firefox timings. Every figure above was measured on Chromium, and neither engine is
+  installed in the agent image (see the table), so this cannot be measured here at all today.
+- How many parallel contexts this container tolerates. The ~14.4 s figure above is strictly
+  SERIAL; nothing about concurrent journeys has been measured, and PART 11.3's concurrency knee of
+  3 is a constraint on the shared production instance regardless.
 - A total journey count for a #6 run. **#6 has no §40-style mandated scale and this part does not
   invent one** — PART 3's coverage requirements plus the ledger's oldest-first rotation define the
   run, and the report states the count actually achieved.
+
+### 11.5 What this container CANNOT reach (measured 2026-08-28, re-check every run)
+
+Stated here so no run scores a surface it never touched, and so the gaps are visible as
+infrastructure asks rather than rediscovered each time:
+
+- **WebKit and Firefox are not installed** and PART 11.1 forbids `playwright install`. Every run in
+  this image is Chromium-only, which bounds PART 3 item 6's rotation and PART 5 item 10 outright.
+  This is a COVERAGE LIMIT to report, never a surface to score. `engineAvailable()` in
+  `e2e/journeys/harness.mjs` detects it and the runner prints the limit.
+- **Google One Tap cannot be exercised**: the egress proxy denies CONNECT to `www.google.com` and
+  `android.clients.google.com` (observed as ~600 rejected connections during the 2026-08-28 sweep),
+  so GIS never loads. One Tap's *code* contract stays covered by the static barriers
+  (`verify-google-onetap.ts`, `verify-google-one-tap.ts`); its *behaviour* is unreachable here.
+- **Real Google sign-in is unavailable**, so signed-in journeys seed the session client-side (see
+  the harness header). That is the real client code path for sidebar/persistence — which is
+  purely client-side — but it is NOT evidence about server sync, RLS, or a real token.
 
 When you do measure one of these, land it in this table with its date and method, exactly as §40.1
 did — and delete it from this list in the same change.
