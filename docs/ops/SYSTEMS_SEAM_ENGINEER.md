@@ -48,12 +48,51 @@ more-timid wording anywhere, including in this file.
   the last 24h (the literal execution log, not "the function exists")? Did `mon_run_all_detectors()`
   run on schedule with every count genuinely current, not sitting on top of an already-open alert?
   Is anything on the orphaned-detector list?
-- **Orphaned guarantees.** For every data-repair migration in the last 90 days, confirm a detector
-  is still watching the invariant it fixed, and that the invariant still holds *today* — not just
-  at merge time. This is the exact class that let a July district-suffix repair silently decay for
-  a month with zero alerts. Maintain the registry of "repair → detector that watches it" as your
-  core standing asset; every repair anyone lands (including your own and the other six routines')
-  gets added to it.
+- **Orphaned guarantees — the registry, with a durable home and NO time window (rewritten
+  2026-08-28).** For **every** important repair ever landed, confirm a detector is still watching the
+  invariant it fixed, and that the invariant still holds *today* — not just at merge time. This is
+  the exact class that let a July district-suffix repair silently decay for a month with zero
+  alerts.
+
+  **The registry lives in `public.ops_repair_guarantee_registry`.** It is a real table, not something
+  re-derived each run: a registry that is rebuilt from scratch every morning has no memory of what
+  was checked when, which is precisely the property the rotation below depends on. One row per
+  registered repair, carrying the repair's migration version and name, the invariant **in plain
+  words**, the detector that watches it, when it was last verified, and the outcome of that
+  verification.
+
+  **Coverage is PERMANENT — there is no 90-day window, and none may be re-introduced.** The window
+  this replaces was the exact opposite of the point: a four-month-old decayed invariant fell out of
+  scope entirely, and a repair aged out of the sweep on the very schedule that made it likely to
+  have rotted. **Nothing ages out of this registry.** Instead:
+
+  **OLDEST-FIRST ROTATION.** Each run re-verifies the **least-recently-verified** entries first
+  (`order by last_verified_at nulls first, repair_version`), as many as the run's budget allows, and
+  writes back what it found. Coverage therefore rotates across the whole history rather than
+  clustering on whatever is new, and "which guarantee has gone longest unchecked" is a query rather
+  than a guess. Every entry gets checked eventually; none is ever dropped for age. State in the
+  report how many entries were re-verified this run and the age of the oldest unverified one.
+
+  **What counts as an "important repair" — the test, so this is actionable rather than a judgment
+  call.** A migration is a repair, and **must** be registered, when it **executed a data change at
+  migration time that restored or established an invariant**: an `UPDATE`/`DELETE`/backfilling
+  `INSERT` run in the migration body against real rows, or a `REFRESH MATERIALIZED VIEW` /
+  `sync_search_listings_ar()` call made to propagate one. It is **not** a repair when it is purely
+  additive or DDL: `CREATE TABLE`/`INDEX`/`POLICY`, `ALTER ... ADD COLUMN`, a `CREATE OR REPLACE
+  FUNCTION` that only changes future behaviour, or a seed into a new empty config table. **The
+  discriminator in one question: did rows that already existed change meaning, and would it be wrong
+  if they drifted back?** If yes, it is a repair. This is deliberately the same line
+  `scripts/verify-repair-migrations-are-guarded.ts` already draws ("an UPDATE executed at migration
+  time, as opposed to one merely defined inside a function body") — that script is the *merge-time*
+  half (a repair must ship a detector); this registry is the *standing* half (the detector must
+  still exist, and the invariant must still hold). Keep the two consistent; if you change the
+  definition, change both.
+
+  **Every repair anyone lands gets registered — including the other six routines' and your own.**
+  A repair that never enters the registry is invisible to the rotation forever, which is the
+  orphaned-guarantee bug wearing a registry as a disguise. When another routine lands a repair and
+  does not register it, register it yourself on the next run rather than filing a request; the
+  routine that keeps the registry honest is this one.
 - **Deploy-claim vs. served-bundle reconciliation.** A workflow run marked `success` or `failure` is
   a claim, not a fact — verify what `ezhalah-app.vercel.app` is actually serving independently of
   what CI says about itself.
@@ -148,9 +187,12 @@ failed," that finding belongs to whichever of #3/#4/#5 owns it — file it there
 2. `mon_run_all_detectors()`: `failed` is empty, every count reflects genuinely NEW/escalated
    activity (read `open_alerts` in the same return — an all-zero sweep can sit on top of open
    alerts), and nothing appears on the orphaned-detector list.
-3. **Orphaned-guarantee sweep**: walk repair migrations from the last 90 days; for each, confirm
-   its detector still exists, is on the roster, and its invariant holds against production right
-   now — not a re-read of the migration's own comment.
+3. **Orphaned-guarantee sweep**: read `ops_repair_guarantee_registry` **oldest-verified first**
+   (no time window — PART 1) and, for each entry you take, confirm its detector still exists, is on
+   the roster, and its invariant holds against production right now — not a re-read of the
+   migration's own comment — then write the outcome and `last_verified_at` back. Before you finish,
+   scan `supabase_migrations.schema_migrations` for repairs that are not in the registry yet and
+   add them; an unregistered repair is one the rotation can never reach.
 4. Migration drift in all four directions, run directly rather than trusted from the last CI pass.
 5. Pick one recent "deploy succeeded" claim and one "deploy failed" claim; verify each against the
    actual served bundle.
@@ -172,8 +214,8 @@ A fixed checklist only ever catches the seam someone already imagined failing. S
 every run asking: **what assumption is currently making this system look healthy when it actually
 isn't?**
 
-Concretely: pick the seam nobody has deliberately poked this month (the orphaned-guarantee registry
-tells you which repairs are oldest and least-recently re-verified). Ask what happens if the second
+Concretely: pick the seam nobody has deliberately poked this month (`ops_repair_guarantee_registry`, read oldest-verified
+first, tells you which repairs are oldest and least-recently re-verified). Ask what happens if the second
 half of a promise never runs — kill a retry mid-flight, expire a token mid-request, race two
 sessions against the same migration or the same repair, let a matview refresh be skipped once and
 see whether anything notices. This is exactly how the district-suffix decay and the deploy-status
@@ -188,7 +230,9 @@ minimum, cover:
 
 1. A cron job silently missing its scheduled run
 2. A detector that stopped running, or fell off the roster
-3. A repair migration with no detector watching its invariant (the orphaned-guarantee class itself)
+3. A repair migration with no detector watching its invariant, or one registered in
+   `ops_repair_guarantee_registry` that has gone too long without re-verification (the
+   orphaned-guarantee class itself, in both its shapes)
 4. A repair that reverted because it skipped raw → matview → sync ordering
 5. Migration drift in any of the four known shapes
 6. A deploy workflow's self-reported status disagreeing with the actual served bundle
@@ -238,6 +282,8 @@ timing alone.
 CRON HEALTH (fired on schedule / total): X/X
 DETECTOR HEALTH (mon_run_all_detectors failed / open_alerts): X / X
 ORPHANED GUARANTEES FOUND: X (before) → X (after)
+REGISTRY ENTRIES RE-VERIFIED THIS RUN: X of X — oldest unverified: X days
+REPAIRS NEWLY REGISTERED (incl. other routines'): X
 MIGRATION DRIFT (4 conditions): X → X
 DEPLOY-CLAIM VS SERVED-BUNDLE MISMATCHES: X
 RLS/AUTH TRACE RESULT: PASS/FAIL
