@@ -53,17 +53,40 @@ console.log('\nThe 5-minute P0 delivery SLO is owner-set and cannot be quietly w
 // Find the migration that ships the SLO, by content rather than by a hardcoded filename: the
 // server mints migration versions, so pinning a name here would break the moment it is re-applied.
 const files = readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'));
+// A detector gets redefined over time (this one was, when GitHub Issues became the canonical P0
+// destination). What matters is the LAST definition — the one production actually holds — so sort
+// by migration version and read the newest. Asserting "exactly one" would have been wrong the
+// moment the second migration landed, and would have failed for a reason that isn't a defect.
 const owning = files
   .map((f) => ({ f, sql: readFileSync(join(MIGRATIONS, f), 'utf8') }))
-  .filter((x) => x.sql.includes(`function public.${DETECTOR}`));
+  .filter((x) => new RegExp(`function\\s+public\\.${DETECTOR}\\b`, 'i').test(x.sql))
+  .sort((a, b) => a.f.localeCompare(b.f));
 
 check(
-  `exactly one migration defines ${DETECTOR}()`,
-  owning.length === 1,
-  `found ${owning.length}. Two definitions means one silently wins and the other is a lie.`,
+  `at least one migration defines ${DETECTOR}()`,
+  owning.length >= 1,
+  'the detector has no migration at all',
 );
-if (owning.length !== 1) { process.exit(1); }
-const sql = owning[0].sql;
+if (owning.length === 0) { process.exit(1); }
+const newest = owning[owning.length - 1];
+const sql = newest.sql;
+
+// TWO SCOPES, deliberately, because they answer different questions.
+//
+// `code` (newest detector definition) is for anything about CURRENT BEHAVIOUR — the SLO number, what
+// counts as delivered. Checking those against the whole corpus would let a superseded migration
+// satisfy a check while the definition production actually holds is wrong.
+//
+// `corpus` (every migration in this mechanism) is for "does this exist at all" — the cron job and
+// the roster wiring shipped in the first migration and are not repeated by later ones. Demanding
+// they reappear in every redefinition would force pointless duplication, and a barrier that
+// pressures you into noise is a barrier people start working around.
+const RELATED = /mon_dispatch_p0_fast|mon_detect_p0_delivery_sla/;
+const corpus = files
+  .map((f) => ({ f, sql: readFileSync(join(MIGRATIONS, f), 'utf8') }))
+  .filter((x) => RELATED.test(x.sql))
+  .map((x) => x.sql.split('\n').filter((l) => !/^\s*--/.test(l)).join('\n'))
+  .join('\n');
 
 // Strip comments before matching: this file's own migration explains the SLO at length and quotes
 // the numbers, and a check a comment can satisfy is not a check. (That exact trap turned up twice
@@ -82,13 +105,35 @@ check(
 // --- the fast lane exists, runs every minute, and is bounded -------------------------------------
 check(
   `${DISPATCHER}() is defined`,
-  new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${DISPATCHER}\\b`, 'i').test(code),
+  new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${DISPATCHER}\\b`, 'i').test(corpus),
+);
+// THE FAST LANE MUST BE CHAINED TO THE SWEEP, NOT POLLING ON ITS OWN MINUTE SLOT.
+//
+// The first version of this scheduled `mon-p0-fast-dispatch` as '* * * * *'. That was wrong, and
+// mon_detect_cron_minute_collision() said so on the very next sweep — a job in every minute slot
+// collides with every other job, including the :00 slot reserved for the matview refresh, and cron
+// stampede is what wedged the database on 2026-08-10. Measured afterwards: exactly TWO minute-slots
+// in the hour are free (24 and 42), so NO polling schedule can satisfy both the 5-minute SLO and the
+// slot discipline. Polling was the wrong shape.
+//
+// Every P0 is born inside the sweep (all five P0-raising detectors are on its roster; none has its
+// own cron), so the dispatcher runs chained to that sweep instead — zero new slots, no collision.
+check(
+  'the every-minute polling job is gone',
+  new RegExp(`cron\\.unschedule\\(\\s*'${CRON_JOB}'`).test(corpus)
+    && !new RegExp(`cron\\.schedule\\(\\s*'${CRON_JOB}'`).test(corpus.slice(corpus.lastIndexOf('cron.unschedule'))),
+  'a job in every minute slot collides with every other job and trips '
+    + 'mon_detect_cron_minute_collision — the 2026-08-10 stampede discipline',
 );
 check(
-  `the ${CRON_JOB} cron job is scheduled every minute`,
-  new RegExp(`cron\\.schedule\\(\\s*'${CRON_JOB}'\\s*,\\s*'\\*\\s+\\*\\s+\\*\\s+\\*\\s+\\*'`).test(code),
-  'anything slower than every minute cannot guarantee a 5-minute delivery once the POST round trip '
-    + 'and reconciliation are counted',
+  `${DISPATCHER}() is chained onto the detector sweep that raises every P0`,
+  /mon_dispatch_alerts\(\);[\s\S]{0,80}mon_dispatch_p0_fast\(\)/.test(corpus),
+  'if it is reachable from no cron job at all, nothing ever delivers and the SLO is decorative',
+);
+check(
+  'the chain does NOT change the sweep schedule (owner-only)',
+  /v_sched <> '29,59 \* \* \* \*'/.test(corpus),
+  'appending to the command is in scope; changing when it runs is an owner decision',
 );
 check(
   'the dispatcher caps retries',
@@ -134,13 +179,13 @@ check(
 // --- roster wiring, done the safe way ------------------------------------------------------------
 check(
   'the detector is wired into mon_run_all_detectors() in the SAME migration',
-  code.includes('mon_run_all_detectors') && code.includes(DETECTOR),
+  corpus.includes('mon_run_all_detectors') && corpus.includes(DETECTOR),
 );
 // Scope this to the WIRING block specifically. Caught by mutation: the first version matched
 // `pg_get_functiondef` anywhere in the file, and the separate $verify$ block also contains it — so
 // replacing the wiring's own read with a hardcoded body left the check GREEN. A barrier satisfied
 // by a token in a different block is not checking what it claims to.
-const wireBlock = code.match(/do \$wire\$[\s\S]*?end \$wire\$/)?.[0] ?? '';
+const wireBlock = corpus.match(/do \$wire\$[\s\S]*?end \$wire\$/)?.[0] ?? '';
 check(
   'the roster wiring block exists',
   wireBlock.length > 0,
@@ -153,7 +198,47 @@ check(
 );
 check(
   'the roster edit verifies that it actually took',
-  /roster edit did not take/.test(code),
+  /roster edit did not take/.test(corpus),
+);
+
+// --- GitHub Issues is the canonical destination, via the EXISTING architecture -------------------
+// Owner, 2026-08-28: reuse the existing routing/ownership system; do not build a second parallel
+// one. These checks pin that the fast lane TRIGGERS alert-dispatch.yml rather than growing its own
+// issue-filing and routing.
+check(
+  'the canonical channel triggers the EXISTING alert-dispatch.yml workflow',
+  /actions\/workflows\/alert-dispatch\.yml\/dispatches/.test(code),
+  'the P0 destination must be the existing workflow — a second issue-filer would be the parallel '
+    + 'ownership system the owner forbade',
+);
+check(
+  'the GitHub PAT is read from Vault at send time, never stored in ops_alert_channel',
+  /vault\.decrypted_secrets/.test(code) && !/ghp_[A-Za-z0-9]/.test(code),
+  'a PAT written into a plain ops table is a worse secret posture than the Vault one already in use',
+);
+
+// THE CENTRAL CORRECTNESS PROPERTY. A workflow dispatch returns 204 the instant GitHub accepts it.
+// Counting that as delivery would mark P0s delivered with no issue filed — the enqueue-vs-delivered
+// mistake that caused the 41-day blackout, moved one layer up.
+// The detector filters trigger receipts in TWO places — the counting query and the sample query —
+// and they must agree. Requiring only one occurrence was a real hole: mutation showed that changing
+// the COUNTING query alone (the one that decides whether to raise) left this green because the
+// sample query still matched. Count them.
+const kindExclusions = (code.match(/c\.kind\s*<>\s*'github_workflow'/g) ?? []).length;
+check(
+  'a github_workflow trigger receipt is NOT counted as delivery (both queries)',
+  kindExclusions >= 2,
+  `found ${kindExclusions} exclusion(s), expected the counting query AND the sample query. Only `
+    + 'alert_event.dispatched_at (stamped after `gh issue create` succeeds) proves an issue exists.',
+);
+// Checking the identifier merely EXISTS is not enough — mutation renamed the declaration and this
+// stayed green off the use site alone. Assert the throttle is actually applied in the skip test.
+check(
+  'workflow re-triggering is throttled',
+  /c_retrigger_after\s+interval\s*:=/.test(code)
+    && /last_tried\s*>\s*now\(\)\s*-\s*c_retrigger_after/.test(code),
+  'without a throttle the every-minute job would re-dispatch the workflow while a run is still in '
+    + 'flight, racing its own concurrency group',
 );
 
 // --- the owner decision is recorded in the repo, not just in a migration -------------------------
