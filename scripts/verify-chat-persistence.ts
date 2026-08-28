@@ -151,7 +151,11 @@ check('agent: restore reinstates ALL FIVE state slices (msgs, doneTyping, reveal
   && /setDoneTyping\(restored\.doneTyping\);/.test(agent)
   && /setRevealCount\(restored\.revealCount\);/.test(agent)
   && /setAfReceipt\(restored\.afReceipt\);/.test(agent)
-  && /setGuidedPills\(restored\.guidedPills as any\);/.test(agent));
+  // guidedPills is also deduped-by-label on restore (owner audit, 2026-08-27) — a chat saved before
+  // that fix shipped could carry a stray duplicate pill baked into its serialized facets, and restore
+  // must not resurrect it verbatim. Still reinstates the same `restored.guidedPills`, just through
+  // dedupeFacetsByLabel first.
+  && /setGuidedPills\(\(rgp && rgp\.facets \? \{ \.\.\.rgp, facets: dedupeFacetsByLabel\(rgp\.facets\) \} : rgp\) as any\);/.test(agent));
 check('agent: restore adopts the chat id so continuing the conversation updates the SAME entry',
   /chatIdRef\.current = entryId \?\? null;/.test(agent));
 check('agent: restore falls back to the server copy when the local cache was pruned',

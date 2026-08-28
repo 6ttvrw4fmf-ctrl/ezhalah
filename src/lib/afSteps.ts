@@ -30,19 +30,36 @@ export type GuidedStep = {
 export const sameKeys = (a: string[], b: string[]) =>
   a.length === b.length && [...a].sort().join('|') === [...b].sort().join('|');
 
+export type GuidedFacet = { id: string; keys: string[]; labels: string[] };
+
 export type DerivedGuided = {
   query: SearchQuery | null;
   askedIds: string[];
   labels: string[];
-  facets: Array<{ id: string; keys: string[]; labels: string[] }>;
+  facets: GuidedFacet[];
 };
+
+// Collapse facets that resolve to the SAME displayed text, wherever a facets array is assembled —
+// dedup by what the user SEES, not by which question id produced it (owner audit, 2026-08-27: "the
+// same thing must never appear twice, even via different data paths/ids"). Today every concept maps
+// to exactly one question id, so this is a no-op in practice — but that's an editorial convention
+// nowhere enforced structurally, and both `deriveGuided` (within one round) and the caller combining
+// a carried round with a new one (across rounds) do plain array concatenation with zero dedup. A
+// future question whose label happens to collide with an existing one (or the amenities-style double-
+// push landmine fixed the same day in advancedFilters.ts) would otherwise render as two identical
+// pills, permanently, with nothing to catch it. Keeps the LAST occurrence — a later answer for the
+// same concept is what should survive, consistent with how removal-then-recompute already works here.
+export function dedupeFacetsByLabel(facets: readonly GuidedFacet[]): GuidedFacet[] {
+  const byLabel = new Map<string, GuidedFacet>();
+  for (const f of facets) byLabel.set(f.labels.join('، '), f);
+  return [...byLabel.values()];
+}
 
 // Rebuild everything from steps[0 .. upTo-1]. `upTo` is the CURSOR: the step being asked is
 // deliberately NOT applied, so its option counts and live count read against the scope the user is
 // answering FROM — re-answering a question never stacks on top of its own previous answer.
 export function deriveGuided(base: SearchQuery | null, steps: readonly GuidedStep[], upTo: number): DerivedGuided {
   let query = base;
-  const labels: string[] = [];
   const facets: DerivedGuided['facets'] = [];
   const askedIds: string[] = [];
   for (const st of steps.slice(0, Math.max(0, upTo))) {
@@ -51,8 +68,10 @@ export function deriveGuided(base: SearchQuery | null, steps: readonly GuidedSte
     if (!st.keys.length) continue;             // SKIPPED: asked, but contributes no predicate at all
     if (query) query = st.question.apply(query, st.keys);
     const ls = st.keys.map((k) => st.options.find((o) => o.key === k)?.label).filter(Boolean) as string[];
-    labels.push(...ls);
     facets.push({ id: st.question.id, keys: st.keys, labels: ls });
   }
-  return { query, askedIds, labels, facets };
+  // `labels` is DERIVED from the deduped facets, never built alongside them, so the flat summary
+  // sentence ("gym، north، …") can never carry a stray duplicate the pill list itself doesn't have.
+  const dedupedFacets = dedupeFacetsByLabel(facets);
+  return { query, askedIds, labels: dedupedFacets.flatMap((f) => f.labels), facets: dedupedFacets };
 }
