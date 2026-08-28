@@ -280,8 +280,12 @@ for (const [needle, why] of [
    'the core claim: an engine is not a device'],
   ['Never report a real-device surface as verified on the strength of headless coverage',
    'the reporting prohibition itself'],
+  ['Every iOS/Safari-specific finding carries an explicit caveat in the report',
+   'the requirement that produces the caveat (the bare phrase also appears in the report block, ' +
+   'so pinning only the phrase let a targeted deletion of this sentence through — found by ' +
+   'mutation M24)'],
   ['not verified on a physical device',
-   'the explicit caveat every iOS/Safari finding must carry'],
+   'the caveat wording itself'],
   ['state it as a KNOWN COVERAGE LIMIT and do not score it',
    'the rule for surfaces only truthfully checkable on real hardware'],
   ['Reporting an unreachable surface as healthy is a reporting defect, not a rounding choice',
@@ -433,9 +437,26 @@ check(/Journey & Persistence Engineer/i.test(routines) && /Systems Seam Engineer
   `Engineer (#7) — the roster and these contracts have drifted apart`);
 
 check(has(routines, 'ops_repair_guarantee_registry') && has(routines, 'least-recently-verified'),
-  'ENGINEER_ROUTINES.md #7 entry agrees with the spec: named registry, no window, oldest-first',
-  `${ROUTINES}'s #7 entry no longer matches the spec's registry rules — the roster summary is ` +
-  `what a reader meets first, so a stale summary re-teaches the 90-day window it replaced`);
+  'ENGINEER_ROUTINES.md #7 entry agrees with the spec: named registry, oldest-first rotation',
+  `${ROUTINES}'s #7 entry no longer names ops_repair_guarantee_registry and its ` +
+  `least-recently-verified rotation — the roster summary is what a reader meets first`);
+
+// The absence half again, scoped to the roster's own #7 paragraph. Mutation M47 proved this was a
+// real gap: the summary could be regressed to "the last 90 days" while still naming the registry
+// and the rotation, and every other check stayed green.
+{
+  const seg = region(routines, 'Runs a standing orphaned-guarantee sweep', 'Never owns whether the data');
+  check(seg.length > 0,
+    'ENGINEER_ROUTINES.md: the #7 orphaned-guarantee paragraph is still locatable',
+    `${ROUTINES}: could not locate the #7 orphaned-guarantee paragraph — the no-time-window check ` +
+    `below cannot run and would pass vacuously`);
+  const hit = seg.match(WINDOW_RE);
+  check(seg.length > 0 && hit === null,
+    'ENGINEER_ROUTINES.md: the #7 summary scopes to NO rolling time window either',
+    `${ROUTINES}: the #7 orphaned-guarantee summary has re-introduced a rolling time window ` +
+    `("${hit?.[0]?.trim()}"). The roster summary is what a reader meets first, so a stale summary ` +
+    `re-teaches the exact window the 2026-08-28 rewrite removed.`);
+}
 
 // ── 10. The load-bearing links — a contract only governs while something routes agents to it ──
 for (const spec of [JOURNEY, SEAM]) {
