@@ -106,7 +106,13 @@ test('Filter mode — Apartment type filter returns results', async ({ page }) =
 test('AI mode — free-text query classifies correctly, replies in Arabic', async ({ page }) => {
   await home(page);
   await page.getByText('الوكيل الذكي', { exact: true }).click(); // switch to AI mode
-  const composer = page.getByPlaceholder('اكتب العقار اللي تبحث عنه في السعودية...');
+  // The composer's `placeholder` attribute is intentionally EMPTY on the clean intro-landing screen
+  // (PR#1008, 2026-08-24): rotating example queries occupy that slot instead, and the static
+  // placeholder only returns after the user interacts. getByPlaceholder(...) therefore matches ZERO
+  // elements here and every AI-mode test failed from that commit onward (2026-08-24 through
+  // 2026-08-28, unnoticed). The accessibilityLabel is stable across BOTH states by design (owner
+  // brief §11: "a screen reader always hears this one sentence for the field") — use that instead.
+  const composer = page.getByLabel('اكتب وصف العقار اللي تبحث عنه');
   await expect(composer).toBeVisible();
   // District-qualified so the agent resolves directly to a search (a bare city that is ALSO a region
   // — e.g. الرياض — correctly triggers a city-vs-region clarification instead; see the clarification
@@ -127,7 +133,8 @@ test('AI mode — free-text query classifies correctly, replies in Arabic', asyn
 test('AI mode — a city that is also a region asks to disambiguate (no wrong guess)', async ({ page }) => {
   await home(page);
   await page.getByText('الوكيل الذكي', { exact: true }).click();
-  const composer = page.getByPlaceholder('اكتب العقار اللي تبحث عنه في السعودية...');
+  // Stable accessibilityLabel, not the transient placeholder — see the comment on the test above.
+  const composer = page.getByLabel('اكتب وصف العقار اللي تبحث عنه');
   await composer.fill('شقة للإيجار في الرياض');
   await composer.press('Enter');
   // «الرياض» is both a city and a region → the agent must ASK, not silently pick one (anti-guess).
