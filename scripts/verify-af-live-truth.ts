@@ -46,8 +46,20 @@ const check = (label, ok, detail = '') => {
 
 const browser = await chromium.launch({ args: ['--no-sandbox', '--ignore-certificate-errors'] });
 
+// CATEGORY PURITY NEEDS THE SAME REFERENCE TABLE PRODUCTION USES (2026-08-28). p_category is a real
+// predicate — a `both`-macro type is eligible only from the table matching the requested category —
+// so the oracle now REFUSES a request carrying p_category without this map rather than silently
+// ignoring it. Read from known_type_ar itself, which is what af_eligibility_clause() joins against,
+// so the oracle stays genuinely independent of our own SQL rather than of our own constants.
+const TYPE_MACROS = await (async () => {
+  const r = await fetch(`${REST_URL}/rest/v1/known_type_ar?select=type_ar,macro`, { headers: H });
+  if (!r.ok) throw new Error(`known_type_ar unreadable (${r.status}) — the oracle cannot apply category purity`);
+  return Object.fromEntries((await r.json()).map((x) => [x.type_ar, x.macro]));
+})();
+const ORACLE_OPTS = { typeMacros: TYPE_MACROS };
+
 async function oracleCount(reqBody) {
-  const { qs, unhandled } = buildOracleQS(reqBody);
+  const { qs, unhandled } = buildOracleQS(reqBody, ORACLE_OPTS);
   if (unhandled.length) return { count: null, unhandled };
   const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=listing_id&${qs}`,
     { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } });
@@ -56,12 +68,19 @@ async function oracleCount(reqBody) {
 }
 
 async function oracleIds(reqBody, cap = 30000) {
-  const { qs, unhandled } = buildOracleQS(reqBody);
+  const { qs, unhandled } = buildOracleQS(reqBody, ORACLE_OPTS);
   if (unhandled.length) return { ids: null, unhandled };
   const ids = new Set();
   const PAGE = 1000;
   for (let off = 0; off < cap; off += PAGE) {
-    const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=listing_id,source_table&${qs}`,
+    // A Range-paged PostgREST query MUST carry an explicit total order (fix 2026-08-28). Without
+    // `order=`, Postgres is free to return rows in a different sequence per page request, so paging
+    // silently drops or repeats rows across page boundaries. Measured on جدة / Villa+Duplex / Buy:
+    // unordered paging returned 3,866 of 3,867 on three consecutive passes — a phantom "1 MISSING
+    // eligible ID" against a set the RPC had exactly right. That is a false alarm on the very check
+    // that certifies AF returns the correct listings, and the same instability could just as easily
+    // have hidden a real missing row. (source_table, listing_id) is unique, so it is a total order.
+    const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=listing_id,source_table&${qs}&order=source_table.asc,listing_id.asc`,
       { headers: { ...H, Range: `${off}-${off + PAGE - 1}` } });
     const rows = await r.json();
     if (!Array.isArray(rows) || !rows.length) break;

@@ -104,9 +104,39 @@ const BASE = { p_deal: 'بيع', p_tables: ['aqar_residential_listings'], p_type
 }
 
 // ── genuinely irrelevant params never produce noise ───────────────────────────────────────────
+// p_category was REMOVED from this list on 2026-08-28. It was never informational: the clause's
+// category-purity predicate makes a `both`-macro type eligible only from the table matching the
+// requested category. Treating it as paging metadata produced a live false differential (المدينة
+// المنورة / Residential Building / Buy: oracle 708 vs RPC 707, the row being a `both`-macro «عمارة»
+// in a commercial table) AND left the oracle unable to catch a category-purity leak at all.
 {
-  check('paging/sorting/informational params never appear in the WHERE clause and never trip unhandled',
-    buildOracleQS({ ...BASE, p_limit: 100, p_offset: 0, p_sort_by: 'recent', p_category: 'Residential' }).unhandled.length === 0);
+  check('paging/sorting params never appear in the WHERE clause and never trip unhandled',
+    buildOracleQS({ ...BASE, p_limit: 100, p_offset: 0, p_sort_by: 'recent' }).unhandled.length === 0);
+}
+
+// ── category purity is a PREDICATE, and a missing macro map fails LOUD ─────────────────────────
+{
+  const noMap = buildOracleQS({ ...BASE, p_category: 'Residential' });
+  check('p_category without a macro map is UNHANDLED, never silently dropped',
+    noMap.unhandled.some((u) => u.includes('p_category')), JSON.stringify(noMap.unhandled));
+
+  const macros = { 'شقة': 'Residential', 'عمارة': 'both', 'محل': 'Commercial' };
+  const withMap = buildOracleQS({ ...BASE, p_category: 'Residential' }, { typeMacros: macros });
+  check('p_category WITH a macro map is fully handled', withMap.unhandled.length === 0, JSON.stringify(withMap.unhandled));
+
+  // scope A keeps `both`; scope B (the other category's tables) must drop it
+  const body = {
+    ...BASE, p_category: 'Residential',
+    p_tables: ['aqar_residential_listings'], p_types: ['شقة', 'عمارة'],
+    p_tables2: ['aqar_commercial_listings'], p_types2: ['شقة', 'عمارة'],
+  };
+  const q = decodeURIComponent(buildOracleQS(body, { typeMacros: macros }).qs);
+  const arms = q.match(/and\(source_table\.in\.\([^)]*\),type_ar\.in\.\([^)]*\)\)/g) ?? [];
+  check('scope A keeps a `both`-macro type (its tables match the category)',
+    arms.some((x) => x.includes('residential_listings') && x.includes('عمارة')), arms.join(' | '));
+  check('scope B DROPS a `both`-macro type (its tables do not match the category)',
+    arms.some((x) => x.includes('commercial_listings') && !x.includes('عمارة')), arms.join(' | '));
+  check('a Commercial-only type is dropped from a Residential scope entirely', !q.includes('محل'));
 }
 
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
