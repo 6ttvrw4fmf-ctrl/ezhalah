@@ -736,6 +736,65 @@ Three rules this pins:
   `sync_search_listings_ar` (:14) before a user can reach it, and `last_seen_at` must be refreshed
   or the next crawl re-kills it in three days. Verify through the anon RPC, not the table.
 
+## 25. The wasalt "×1000 land prices" — settled 2026-08-28 by an archive we already had. Do not re-open.
+
+**Verdict: NOT an Ezhalah bug. wasalt publishes these figures itself. Never reprice them.** This
+class has now been half-investigated at least three times (the 2026-08-22 code comment, the standing
+P1 `field_integrity_phone_price:wasalt_residential_listings`, and this run) and each time the trigger
+was the same seductive arithmetic. Read this before starting a fourth.
+
+**The false signal.** 115 active wasalt Buy rows have `price_total / area_m2 > 200,000 SAR/m²`
+(110 visible to users, 5 gated). Dividing them by 1000 lands on *exact, round, entirely plausible*
+Riyadh land rates — 3,147,200,000 → 5,000 · 4,387,500,000 → 6,500 · 3,300,000,000 → 6,000 ·
+7,312,500,000 → 16,250 SAR/m². Five for five, clean integers. It is very hard to look at that and not
+conclude a unit bug. **It is a coincidence of the ÷1000 arithmetic, not evidence.**
+
+**The oracle that settles it, and it is already in our database.**
+`wasalt_residential_listings.ar_data` archives wasalt's own detail payload (`propertyInfo`) per row.
+Nobody had queried it — the 2026-08-22 comment blocked on "wasalt is unreachable from CI/agent
+containers", which is true of a *live* fetch and irrelevant to an *archived* one. Measured:
+
+- **115/115** stored `price_total` == wasalt's own `propertyInfo.salePrice`. Zero differ.
+- **115/115** `conversionPrice` == `salePrice`, and `currencyType` == `conversionUnit` (both «ر.س»).
+  Across **all 53,942 active rows**: `conversionPrice` differs from `salePrice` on **0** rows, and the
+  two currency units differ on **0** rows. So the `salePrice or conversionPrice` fallback in
+  `run.py` cannot introduce a magnitude error, and conversionPrice is not halalas and not FX.
+- **114/114** rows carrying `averageSalePricePerSqm` — *wasalt's own computed per-m² figure* — are
+  internally consistent with wasalt's own `salePrice ÷ wasalt's own area`, at the SAME magnitude
+  (e.g. 16,250,000 SAR/m² on the 450 m² العليا plot). **0** rows show a source per-m² ~1000× smaller,
+  which is exactly what would exist if our total were inflated ×1000.
+- **102/115** have wasalt's own description prose quoting our exact digits, e.g. «سعرها 7312500000 ر.س».
+
+The 38 rows whose source per-m² does not match *our* ratio are explained entirely by our integer
+truncation of wasalt's fractional areas (153.9→153, 372.18→372, 66.61→66); the price is identical in
+every one. **Repairing area precision is a separate, non-urgent question — it never touches price.**
+
+**Precedent that should have short-circuited all of this:** 26 wasalt rows were already adjudicated
+into `ops_price_source_verified` on 2026-08-11 with the evidence line *"salePrice=conversionPrice=
+3150000000, prose «سعرها 3150000000 ر.س» verbatim. Source-published."* — the identical standard.
+
+**The gate is evidence-gated by design, and that is the correct lever.**
+`enforce_price_size_sanity()` hides a `price_size_impossible()` row **only if it is absent from
+`ops_price_source_verified`**. That is why 34 rows trip the predicate while only 16 are withheld: the
+other 18 are registered as proven-source and stay searchable. **The gate is not malfunctioning and
+must not be widened, narrowed, or bypassed to make this cohort go away.** Registering a proven row is
+the sanctioned way to un-hide it — and each entry needs a real `evidence` string, so it cannot be done
+in bulk on a hunch.
+
+**Two things that remain genuinely UNKNOWN — do not "resolve" them by arithmetic:**
+1. **9 rows where stored = source × exactly 1000, in the OPPOSITE direction** (ids incl. 520292,
+   525615; all area 734, stored 579,000, `ar_data.salePrice` = 579, no source per-m², description only
+   «سنة اتحاد الملاك»). wasalt's English search payload and its Arabic detail payload disagree, and
+   *our* value is the plausible one. Neither is provable from what we hold. Left untouched.
+2. **2 aqarmonthly gated rows** (1143359, 1661535) whose capture is
+   `price_evidence.reason = adapter_emitted_no_evidence`. No archived figure exists to check against.
+   (The other 2 reconcile exactly: source monthly × 12 = stored `price_annual`.)
+
+**The rule this pins:** before concluding any wasalt price is ours, query `ar_data`. More generally —
+*an archived source payload we already store IS source truth, and "unreachable live" is not the same
+claim as "unverifiable".* A divide-by-N that lands on pretty numbers is never evidence; the source's
+own per-unit field and its own prose are.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve

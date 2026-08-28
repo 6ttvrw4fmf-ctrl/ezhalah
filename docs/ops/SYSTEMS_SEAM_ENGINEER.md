@@ -48,12 +48,51 @@ more-timid wording anywhere, including in this file.
   the last 24h (the literal execution log, not "the function exists")? Did `mon_run_all_detectors()`
   run on schedule with every count genuinely current, not sitting on top of an already-open alert?
   Is anything on the orphaned-detector list?
-- **Orphaned guarantees.** For every data-repair migration in the last 90 days, confirm a detector
-  is still watching the invariant it fixed, and that the invariant still holds *today* — not just
-  at merge time. This is the exact class that let a July district-suffix repair silently decay for
-  a month with zero alerts. Maintain the registry of "repair → detector that watches it" as your
-  core standing asset; every repair anyone lands (including your own and the other six routines')
-  gets added to it.
+- **Orphaned guarantees — the registry, with a durable home and NO time window (rewritten
+  2026-08-28).** For **every** important repair ever landed, confirm a detector is still watching the
+  invariant it fixed, and that the invariant still holds *today* — not just at merge time. This is
+  the exact class that let a July district-suffix repair silently decay for a month with zero
+  alerts.
+
+  **The registry lives in `public.ops_repair_guarantee_registry`.** It is a real table, not something
+  re-derived each run: a registry that is rebuilt from scratch every morning has no memory of what
+  was checked when, which is precisely the property the rotation below depends on. One row per
+  registered repair, carrying the repair's migration version and name, the invariant **in plain
+  words**, the detector that watches it, when it was last verified, and the outcome of that
+  verification.
+
+  **Coverage is PERMANENT — there is no 90-day window, and none may be re-introduced.** The window
+  this replaces was the exact opposite of the point: a four-month-old decayed invariant fell out of
+  scope entirely, and a repair aged out of the sweep on the very schedule that made it likely to
+  have rotted. **Nothing ages out of this registry.** Instead:
+
+  **OLDEST-FIRST ROTATION.** Each run re-verifies the **least-recently-verified** entries first
+  (`order by last_verified_at nulls first, repair_version`), as many as the run's budget allows, and
+  writes back what it found. Coverage therefore rotates across the whole history rather than
+  clustering on whatever is new, and "which guarantee has gone longest unchecked" is a query rather
+  than a guess. Every entry gets checked eventually; none is ever dropped for age. State in the
+  report how many entries were re-verified this run and the age of the oldest unverified one.
+
+  **What counts as an "important repair" — the test, so this is actionable rather than a judgment
+  call.** A migration is a repair, and **must** be registered, when it **executed a data change at
+  migration time that restored or established an invariant**: an `UPDATE`/`DELETE`/backfilling
+  `INSERT` run in the migration body against real rows, or a `REFRESH MATERIALIZED VIEW` /
+  `sync_search_listings_ar()` call made to propagate one. It is **not** a repair when it is purely
+  additive or DDL: `CREATE TABLE`/`INDEX`/`POLICY`, `ALTER ... ADD COLUMN`, a `CREATE OR REPLACE
+  FUNCTION` that only changes future behaviour, or a seed into a new empty config table. **The
+  discriminator in one question: did rows that already existed change meaning, and would it be wrong
+  if they drifted back?** If yes, it is a repair. This is deliberately the same line
+  `scripts/verify-repair-migrations-are-guarded.ts` already draws ("an UPDATE executed at migration
+  time, as opposed to one merely defined inside a function body") — that script is the *merge-time*
+  half (a repair must ship a detector); this registry is the *standing* half (the detector must
+  still exist, and the invariant must still hold). Keep the two consistent; if you change the
+  definition, change both.
+
+  **Every repair anyone lands gets registered — including the other six routines' and your own.**
+  A repair that never enters the registry is invisible to the rotation forever, which is the
+  orphaned-guarantee bug wearing a registry as a disguise. When another routine lands a repair and
+  does not register it, register it yourself on the next run rather than filing a request; the
+  routine that keeps the registry honest is this one.
 - **Deploy-claim vs. served-bundle reconciliation.** A workflow run marked `success` or `failure` is
   a claim, not a fact — verify what `ezhalah-app.vercel.app` is actually serving independently of
   what CI says about itself.
@@ -66,6 +105,71 @@ more-timid wording anywhere, including in this file.
   reload that never happened after a function signature changed.
 - **Auth token → RLS enforcement.** Not "the policy exists" — trace one real authenticated request
   and confirm a signed-in user genuinely cannot read another user's row.
+- **`alert_event` → notification delivery (added 2026-08-28).** **An alert row existing is not a
+  human being told.** For at least one genuinely raised alert per run, prove the notification
+  actually reached its destination — the GitHub issue exists and carries the alert's `dedup_key`, or
+  the webhook POST actually returned a 2xx. `dispatched_at` is **not** that proof: `mon_dispatch_alerts()`
+  stamps it once *any* destination "received" the batch, but the send is `net.http_post`, which is
+  asynchronous — it returns on **enqueue**, not on response. The real outcome lands in
+  `net._http_response`; read it. Three verified failure shapes to check for, in order:
+  (1) **nothing is configured** — right now (2026-08-28) there are **0 enabled `ops_alert_channel`
+  rows**; delivery rests entirely on `mon_config.alert_webhook_url` and `github_issue_delivery`;
+  (2) **configured but not delivering** — the 41-day blackout of 2026-08-26, recorded in
+  `mon_detect_alert_delivery`'s own BRANCH 2 payload: `alert-dispatch.yml` filtered
+  `severity=in.(P1,P2)`, so **all 53 P0 `silent_scraper_death` alerts raised since 2026-07-16 were
+  dropped on the floor** while the detector read green *because a destination existed*. **Configured
+  is not delivered;**
+  (3) **the contract drifting apart across its three copies** — the severity list lives in the
+  detector, in `scripts/lib/alertDelivery.ts`, and in the workflow's own filter, reconciled by
+  `scripts/verify-alert-delivery-coverage.ts`; check it is still in `npm test` and still green.
+  Never hand-stamp `dispatched_at` to clear this. And note the recursive trap the detector states
+  about itself: **if the channel is down, this alert cannot be delivered either** — which is exactly
+  why `open_alerts` must be read directly and never inferred from a quiet inbox.
+
+- **Acknowledgment → detector self-clear (added 2026-08-28).** **An acknowledged or resolved alert
+  must actually clear, and the detector must be able to RE-RAISE it if the condition returns.** A
+  stuck-open alert silently suppresses every future raise: `mon_raise()` looks only for a row with
+  the same `dedup_key` and `resolved_at is null`, and returns **0** when it finds one unless the
+  severity escalated (verified against the live function). Two consequences, the second worse than
+  the first — a cleared condition reads as a standing P1 forever, *and* a genuine re-occurrence
+  raises nothing, dispatches nothing, and leaves the roster count at 0. That is how **nine dark
+  detectors read as a clean bill of health on 2026-08-10** (AGENTS.md). Note precisely: only
+  `resolved_at` releases the dedup key — `acknowledged_at` does **not**, so an acknowledged-but-open
+  alert is still suppressing its own class.
+  `mon_detect_unresolvable_detector()` already covers the *static* half (a `mon_detect_*` whose
+  source contains `mon_raise` and no resolve path at all). **Your half is behavioural, and it is the
+  half nothing else watches:** a detector that *has* a resolve call can still never reach it — an
+  early return before the evaluated path, a `dedup_key` that differs between the raise and the
+  resolve, a resolve on a branch that did not actually evaluate the condition. So prove it end to
+  end on a real key: confirm the underlying condition is gone → confirm the detector actually
+  resolved that exact key → confirm a re-occurrence would raise again (`mon_raise` returns 1 on a
+  resolved key). Resolve only on a path that genuinely evaluated the condition; resolving from an
+  early return is a worse bug than not resolving at all.
+
+- **Environment / config → actual runtime (added 2026-08-28).** **A value set in Vercel or Supabase
+  config is not a value the running app received.** Prove the runtime actually has it — for the
+  frontend, by grepping the **served bundle** for the marker the value would inline (Arabic appears
+  `\uXXXX`-escaped; the project ref and `supabase.co` are the reliable anchors), never by reading
+  the config page or a green build status. The 2026-07-10 P0 is the shape: a clean-`main`
+  `safe-deploy.sh` build had **no `.env`** (gitignored by design) and the Vercel project had **zero
+  env vars**, so `EXPO_PUBLIC_SUPABASE_URL`/`_KEY` were undefined, `src/lib/supabase.ts` built the
+  client as `null`, and `fetchListingsForQuery` returned before making any network call — **every
+  search app-wide dead, on a completely green build.** The diagnostic that settled it is the one to
+  reuse: the app made **zero** RPC requests (a null client makes no call — that distinguishes it
+  from an RPC erroring), an in-page `fetch` to the same RPC returned 200 with real data, and the
+  served bundle contained **zero** occurrences of the project ref.
+  Prevention exists (PR #47) but **is only half-closed, and the open half is yours**:
+  `safe-deploy.sh` **refuses** to deploy when a `REQUIRED_ENV` var is missing from the Vercel
+  production env — but its post-deploy served-bundle assertion is deliberately **WARNING-ONLY and
+  never fails the deploy or triggers a rollback** (it polls ~90 s for CDN propagation and false-
+  alarmed on healthy deploys before that). So a deploy can ship, warn, and be reported successful
+  with a null client. **Independently re-grep the served bundle yourself; do not treat that warning
+  line's absence as proof.** The same rule generalises beyond the frontend: for a Supabase-side
+  setting, prove the *running* behaviour changed (a `mon_config` value the function actually reads,
+  a cron `command` the scheduler actually holds), never that the row exists. And per the standing
+  rule, any new `EXPO_PUBLIC_*` the app reads must be added to the Vercel project env **and** to
+  `REQUIRED_ENV`, or clean-`main` deploys silently ship a broken app.
+
 - **Retry, timeout, and partial-failure paths.** A stuck deploy/named lock, a hung cron, a retry
   that never terminates, two concurrent sessions racing the same migration or the same repair.
 
@@ -83,9 +187,12 @@ failed," that finding belongs to whichever of #3/#4/#5 owns it — file it there
 2. `mon_run_all_detectors()`: `failed` is empty, every count reflects genuinely NEW/escalated
    activity (read `open_alerts` in the same return — an all-zero sweep can sit on top of open
    alerts), and nothing appears on the orphaned-detector list.
-3. **Orphaned-guarantee sweep**: walk repair migrations from the last 90 days; for each, confirm
-   its detector still exists, is on the roster, and its invariant holds against production right
-   now — not a re-read of the migration's own comment.
+3. **Orphaned-guarantee sweep**: read `ops_repair_guarantee_registry` **oldest-verified first**
+   (no time window — PART 1) and, for each entry you take, confirm its detector still exists, is on
+   the roster, and its invariant holds against production right now — not a re-read of the
+   migration's own comment — then write the outcome and `last_verified_at` back. Before you finish,
+   scan `supabase_migrations.schema_migrations` for repairs that are not in the registry yet and
+   add them; an unregistered repair is one the rotation can never reach.
 4. Migration drift in all four directions, run directly rather than trusted from the last CI pass.
 5. Pick one recent "deploy succeeded" claim and one "deploy failed" claim; verify each against the
    actual served bundle.
@@ -94,6 +201,12 @@ failed," that finding belongs to whichever of #3/#4/#5 owns it — file it there
 7. Any named lock (`ops_deploy_lock` and others) checked for a holder well past its TTL, and any
    cron job with a run duration trending upward toward its own schedule interval (the concurrency
    stampede shape from the 2026-08-10 outage).
+8. **The three PART 1 handoffs added 2026-08-28, each proved rather than assumed:** one raised
+   alert traced to a destination that genuinely received it (`net._http_response`, or the GitHub
+   issue itself — never `dispatched_at` alone); one alert whose condition has cleared traced through
+   resolve and back to a provable re-raise; and one config value traced into the served bundle or
+   the running function. Each is a *promise kept* check, so each needs downstream evidence, not an
+   upstream row.
 
 ## PART 4 — ADVERSARIAL / EXPLORATORY (mandatory, every run)
 
@@ -101,8 +214,8 @@ A fixed checklist only ever catches the seam someone already imagined failing. S
 every run asking: **what assumption is currently making this system look healthy when it actually
 isn't?**
 
-Concretely: pick the seam nobody has deliberately poked this month (the orphaned-guarantee registry
-tells you which repairs are oldest and least-recently re-verified). Ask what happens if the second
+Concretely: pick the seam nobody has deliberately poked this month (`ops_repair_guarantee_registry`, read oldest-verified
+first, tells you which repairs are oldest and least-recently re-verified). Ask what happens if the second
 half of a promise never runs — kill a retry mid-flight, expire a token mid-request, race two
 sessions against the same migration or the same repair, let a matview refresh be skipped once and
 see whether anything notices. This is exactly how the district-suffix decay and the deploy-status
@@ -117,7 +230,9 @@ minimum, cover:
 
 1. A cron job silently missing its scheduled run
 2. A detector that stopped running, or fell off the roster
-3. A repair migration with no detector watching its invariant (the orphaned-guarantee class itself)
+3. A repair migration with no detector watching its invariant, or one registered in
+   `ops_repair_guarantee_registry` that has gone too long without re-verification (the
+   orphaned-guarantee class itself, in both its shapes)
 4. A repair that reverted because it skipped raw → matview → sync ordering
 5. Migration drift in any of the four known shapes
 6. A deploy workflow's self-reported status disagreeing with the actual served bundle
@@ -167,6 +282,8 @@ timing alone.
 CRON HEALTH (fired on schedule / total): X/X
 DETECTOR HEALTH (mon_run_all_detectors failed / open_alerts): X / X
 ORPHANED GUARANTEES FOUND: X (before) → X (after)
+REGISTRY ENTRIES RE-VERIFIED THIS RUN: X of X — oldest unverified: X days
+REPAIRS NEWLY REGISTERED (incl. other routines'): X
 MIGRATION DRIFT (4 conditions): X → X
 DEPLOY-CLAIM VS SERVED-BUNDLE MISMATCHES: X
 RLS/AUTH TRACE RESULT: PASS/FAIL

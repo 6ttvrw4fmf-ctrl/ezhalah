@@ -190,9 +190,12 @@ received. Owns the **handoffs between otherwise-correct components** — the cro
 chain, deploy-claim-vs-actual-served-bundle reconciliation, migration→mirror→production parity in
 all four known directions, matview/sync ordering and cache staleness, auth-token→RLS enforcement
 traced on a real request, retry/timeout/partial-failure paths, and concurrent-session collisions.
-Runs a standing **orphaned-guarantee sweep** — for every data-repair migration in the last 90 days,
-confirms a detector still watches the invariant it fixed and that the invariant still holds today,
-not just at merge time. This is the exact class of bug that let a July district-suffix repair
+Runs a standing **orphaned-guarantee sweep** — for **every** important repair ever landed (no time
+window, per the spec's PART 1 rewrite of 2026-08-28), confirms a detector still watches the
+invariant it fixed and that the invariant still holds today, not just at merge time. The registry
+has a durable home in `public.ops_repair_guarantee_registry`, and each run re-verifies the
+**least-recently-verified** entries first, so coverage rotates across the whole history and nothing
+ages out. This is the exact class of bug that let a July district-suffix repair
 silently decay for a month with zero alerts, and no other routine was watching for that pattern
 across the *history* of past repairs rather than the correctness of the current one.
 
