@@ -16,6 +16,7 @@ import { restoreChat, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, type ChatMeta } from '@/lib/chatSync';
 import { mergeOne, pickTranscript, withFreshTranscript } from '@/lib/chatMerge';
 import { buildSyncedName } from '@/lib/nameSync';
+import { identifyUser } from '@/lib/observability';
 
 type DataSource = 'local' | 'supabase';
 
@@ -212,6 +213,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // fetchListingsForQuery). dataSource is constant 'supabase' (kept for any UI that reads it).
   const dataSource: DataSource = 'supabase';
   const [user, setUser] = useState<AuthUser | null>(null);
+  // OBSERVABILITY (owner 2026-08-26): give every crash report the pseudonymous `sub` so a wave of
+  // errors from one user groups correctly for triage. `sub` is the email/e164 identifier the app
+  // already uses everywhere internally — never phone/email/name (observability.ts's scrubEvent
+  // enforces the field allowlist independently, so a future field addition here can not leak PII).
+  useEffect(() => { identifyUser(user?.sub ?? null); }, [user]);
   const [searchCount, setSearchCount] = useState(0);
   // Keep the user's name bilingual: when we only know one script (e.g. Google gives a Latin name),
   // generate the other once in the background so the Arabic UI can show the Arabic spelling without
