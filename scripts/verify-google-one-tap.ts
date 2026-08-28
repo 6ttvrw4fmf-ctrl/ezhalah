@@ -96,8 +96,17 @@ check('the legacy path is reached exactly twice: no-FedCM browsers, and the time
   runFalse === 2, `found ${runFalse} run(false) call sites — expected exactly 2`);
 check('browsers without FedCM go straight to the legacy path',
   /IdentityCredential' in window/.test(code) && /!fedcmSupported/.test(code));
-check('the timer retry is skipped when a moment already arrived or GIS UI is present',
-  /momentSeen/.test(code) && /credential_picker/.test(code));
+// UPGRADED 2026-08-28 (owner report: "it popped up then went away, didn't sign me in"): the timer
+// retry no longer guards on a DOM query for the legacy iframe (`credential_picker`) — that query can
+// only ever see the LEGACY prompt, never FedCM's browser-native UI, which is drawn entirely outside
+// the page DOM. It protected against nothing in the one case that mattered, and a real visitor slower
+// than the timer to notice the corner bubble had it interrupted. The retry is now gated on the REAL
+// underlying navigator.credentials.get() call's actual settlement instead — see
+// scripts/verify-google-one-tap-fedcm-race.ts for the full mechanism and its mutation-proven tests.
+check('the timer retry is skipped when a moment already arrived, OR the real FedCM signal has not settled yet',
+  /momentSeen/.test(code) && /realGet/.test(code) && /fallbackStarted/.test(code)
+  && !/credential_picker/.test(code),
+  'the fallback must react to the REAL underlying call, not a DOM query that cannot see FedCM\'s browser-native UI');
 
 // cancel() is a USER dismissal to Google → exponential cooldown. Legitimate exactly once: after sign-in.
 const cancels = (code.match(/accounts\??\.id\??\.cancel\(\)/g) ?? []).length;

@@ -24,6 +24,23 @@
 // session — so a SIGNED-IN visitor briefly looked logged out and got One Tap initialized + prompted.
 // The logged-out state is now resolved authoritatively via getSession() first.
 //
+// ── ROOT CAUSE #2 (measured live 2026-08-28: "it popped up then went away, didn't sign me in") ───
+// The BUG 1 fix above (a bounded timer retries once with FedCM off) had its own defect: the timer
+// fired unconditionally after FEDCM_FALLBACK_MS, with no way to tell whether the browser's NATIVE
+// FedCM bubble was still legitimately showing and awaiting the visitor's click — that UI is drawn by
+// the browser chrome itself, entirely outside the page DOM, so the existing "is a prompt already up"
+// guard (a DOM query for the legacy iframe) could never see it. Any real visitor slower than the
+// timer to notice a small corner bubble had it interrupted: re-initializing GIS for the legacy retry
+// superseded the still-outstanding FedCM request — reproduced live via Google's own console warning
+// ("initialize() called multiple times... only the last initialized instance will be used") and the
+// browser's own "Only one navigator.credentials.get request may be outstanding at one time" error,
+// on every run, not a guess. Fixed by observing the REAL underlying navigator.credentials.get() call
+// GIS makes internally and gating the fallback on that call's actual settlement (with an empty/falsy
+// result or a rejection) rather than elapsed time — a still-visible, still-awaited prompt is never
+// interrupted, and a genuine successful resolution is explicitly excluded from ever triggering the
+// fallback (racing it in on the success path would just move this exact bug, not fix it). The old
+// timer survives only as an absolute ceiling for the case GIS never touches credentials.get at all.
+//
 // ── WHAT GOOGLE CONTROLS (we cannot override, and must not pretend to) ───────────────────────────
 //   - No Google session in the browser → no prompt. Fresh/incognito profiles almost never show it.
 //   - Exponential cooldown after dismissals: 2h → 1d → 7d → 30d.
@@ -158,16 +175,78 @@ export default function GoogleOneTap() {
       // No FedCM in this browser → the legacy path is the only one that can work; spending the single
       // attempt on FedCM there would guarantee no prompt.
       if (!fedcmSupported) { run(false); return; }
-      run(true);
-      // Bounded single retry. Reaching it does not prove FedCM was rejected — if it simply had no
-      // account to offer, the legacy attempt is equally harmless (Google suppresses it the same way).
-      fallbackTimer = setTimeout(() => {
-        if (cancelled || momentSeen) return;
-        if (document.querySelector('[id*="credential_picker"], iframe[src*="gsi/iframe"]')) return;
+
+      // ── FIX (owner report, 2026-08-28: "it popped up then went away, didn't sign me in") ─────────
+      // The OLD fallback fired on a blind timer, unconditionally, after FEDCM_FALLBACK_MS — with no
+      // way to know whether the browser's NATIVE FedCM bubble was still legitimately showing and
+      // awaiting the visitor's click, because that UI is drawn by the browser chrome itself, outside
+      // the page DOM entirely. The `document.querySelector('[id*="credential_picker"]...')` guard can
+      // only ever see the LEGACY iframe prompt, never FedCM's — so it protected against nothing in
+      // the one case that mattered. Any real visitor slower than 4s to notice a small corner bubble
+      // had it killed out from under them: re-initializing GIS for the legacy retry supersedes the
+      // still-outstanding FedCM identity request (Google's own console warning — "initialize() called
+      // multiple times... only the last initialized instance will be used" — and the browser's own
+      // "Only one navigator.credentials.get request may be outstanding at one time" error both
+      // reproduced live, every run, confirming this mechanically rather than by guesswork).
+      //
+      // FIX: observe the REAL underlying navigator.credentials.get() call GIS makes internally under
+      // FedCM, and gate the fallback on that call actually SETTLING (resolved — the visitor chose an
+      // account — or rejected — nothing to offer / dismissed), never on elapsed time. A still-visible,
+      // still-awaited prompt is now never interrupted, because we only act once the real API call
+      // Chrome is using has genuinely finished. FEDCM_FALLBACK_MS becomes a ceiling for the case GIS
+      // never calls credentials.get() at all (e.g. an unexpected internal short-circuit) — not the
+      // everyday trigger — so it can stay generous without making a normal "nothing to offer" case
+      // feel slow.
+      // Guards the legacy retry from firing more than once, regardless of which trigger path reaches
+      // it first (real settlement, or the absolute ceiling below).
+      let fallbackStarted = false;
+      const fireFallback = (reason: string) => {
+        if (cancelled || momentSeen || fallbackStarted) return;
+        fallbackStarted = true;
+        if (fallbackTimer) clearTimeout(fallbackTimer);
         diag.fallbackFired = true;
-        log('no FedCM prompt within', FEDCM_FALLBACK_MS, 'ms — retrying without FedCM');
+        log(reason, '— retrying without FedCM');
         run(false);
-      }, FEDCM_FALLBACK_MS);
+      };
+
+      const nav = navigator as any;
+      const realGet: ((...a: unknown[]) => Promise<unknown>) | undefined = nav.credentials?.get?.bind(nav.credentials);
+      if (realGet) {
+        nav.credentials.get = (...args: unknown[]) => {
+          nav.credentials.get = realGet; // one-shot: restore immediately, before the call even settles,
+          // so nothing else on the page can ever observe or be affected by the patched version.
+          const p = realGet(...args);
+          // Settlement is the real, event-driven trigger — not a guess. A quick "nothing to offer"
+          // rejection now falls back immediately instead of waiting out the old flat delay, AND a
+          // still-visible prompt the visitor hasn't acted on yet is never interrupted, because
+          // nothing fires until Chrome itself reports this exact call is actually done.
+          //
+          // A genuine RESOLUTION with a real credential must NEVER trigger the fallback: this handler
+          // is attached to the same promise GIS itself awaits, and attaches BEFORE GIS's own internal
+          // handler does (this code runs first, then returns `p` to GIS, which only then chains onto
+          // it) — so on success, this fires first. Racing run(false) in right here, ahead of GIS
+          // processing the credential through our onFailure callback, would re-initialize the client
+          // and would be the EXACT interrupted-mid-flow bug this fix exists to remove, just moved to
+          // the success path instead of the pending one. On success we instead DISARM the ceiling
+          // timer outright — caught by this file's own barrier test: without this, a fast successful
+          // sign-in would still eat a spurious run(false) once the ceiling later elapsed, because
+          // nothing else cancels that timer. Only an empty/falsy resolution (no account actually
+          // offered) or an outright rejection means there is genuinely nothing left to wait for.
+          p.then((cred) => {
+            if (cred) { if (fallbackTimer) clearTimeout(fallbackTimer); } // success: disarm the ceiling too, permanently — not just "not now"
+            else fireFallback('FedCM resolved with no credential');
+          }, () => fireFallback('FedCM request rejected/dismissed'));
+          return p;
+        };
+      }
+
+      run(true);
+      // Absolute worst-case ceiling only — covers GIS never touching credentials.get at all (some
+      // unforeseen internal short-circuit). The everyday trigger is the real settlement above.
+      fallbackTimer = setTimeout(
+        () => fireFallback(realGet ? 'hit the absolute fallback ceiling with no FedCM signal' : `no FedCM prompt within ${FEDCM_FALLBACK_MS}ms`),
+        realGet ? Math.max(FEDCM_FALLBACK_MS, 12000) : FEDCM_FALLBACK_MS,
+      );
     };
 
     const existing = document.querySelector(`script[src="${GIS_SRC}"]`) as HTMLScriptElement | null;
