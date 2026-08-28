@@ -159,10 +159,17 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
       grip.style.cursor = 'grab';
       try { grip.releasePointerCapture(id); } catch { /* already released */ }
       if (!moved) return;   // a press that never moved is nothing — the strip is not a button
-      // Velocity from the recent history, project the throw, settle INSIDE the bounds.
-      const a = hist[0], b = hist[hist.length - 1];
-      const dt = Math.max(1, b.t - a.t);
-      const vx = ((b.x - a.x) / dt) * 1000, vy = ((b.y - a.y) / dt) * 1000;
+      // Velocity from the RECENT history only (last ~120ms), project the throw, settle INSIDE the
+      // bounds. The recency window matters: drag → pause → release must drop the card in place
+      // (velocity 0), while a live flick still throws it — old samples must not fake momentum.
+      const now = performance.now();
+      const recent = hist.filter((p2) => now - p2.t < 120);
+      let vx = 0, vy = 0;
+      if (recent.length >= 2) {
+        const a = recent[0], b = recent[recent.length - 1];
+        const dt = Math.max(1, b.t - a.t);
+        vx = ((b.x - a.x) / dt) * 1000; vy = ((b.y - a.y) / dt) * 1000;
+      }
       const project = (v: number, rate = 0.998) => (v / 1000) * rate / (1 - rate);
       const target = clamp({ x: off.x + project(vx), y: off.y + project(vy) });
       try { sessionStorage.setItem(AUTH_POPUP_POS_KEY, JSON.stringify(target)); } catch { /* non-fatal */ }
