@@ -132,6 +132,11 @@ type AppState = {
   recordChatTurn: (text: string) => string | null;
   // Which history chat is currently open, so the sidebar can highlight it (light green) and the user
   // always knows which conversation they're in. `null` on Home / New Chat (no chat selected).
+  // TRUE once the initial Supabase session restore has settled. Anything that renders for
+  // SIGNED-OUT users must gate on this as well as `user`: during restore `user` is null, so a
+  // `!user` test alone briefly reads a logged-in visitor as logged out (the flash GoogleOneTap
+  // documents at its own gate). Already in this provider's memo deps — only the surface is new.
+  authChecked: boolean;
   activeChatId: string | null;
   setActiveChat: (id: string | null) => void;
   // Support / About Us are shown as in-app popups (centered dialog over a dimmed page) rather than
@@ -885,6 +890,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (activeChatId !== id) setActiveChatId(id);
         return id;
       },
+      authChecked,
       activeChatId,
       setActiveChat: (id) => setActiveChatId(id),
       modal,
