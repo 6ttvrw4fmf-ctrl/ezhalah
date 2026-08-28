@@ -806,3 +806,18 @@ not wait for the owner to say continue.
 **Philosophy: Source decides truth. Barriers protect truth. Engineer fixes normal bugs
 automatically. Production verification decides whether the fix is actually done. The owner gets
 one report at the end, not 20 requests for approval.**
+
+## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
+
+On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
+whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
+cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
+a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
+contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
+RUN: N` in your FINAL REPORT.
+
+If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
+owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
+Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
+doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
