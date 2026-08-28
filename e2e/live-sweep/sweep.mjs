@@ -31,6 +31,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 import { chromium, devices } from '@playwright/test';
 import { appendFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { parseVisibleState } from './visibleState.mjs';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
 const SUPA = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';
@@ -314,29 +315,11 @@ const runSearch = async (page) => {
  * of its own — reading them off the whole page made the sweep accuse the app of re-scoping a city
  * when it had only read a card's prose (first run, 2026-08-23). An oracle that cannot tell the
  * app's own summary from a source's ad text is not allowed to accuse it. */
-const visibleState = (page) => page.evaluate(() => {
-  const all = document.body.innerText;
-  // The summary sits between «ملخص البحث» and the first listing card; fall back to the head of the
-  // document (before any card) so a layout change degrades to "read less", never "read a card".
-  const cardAt = all.indexOf('الضغط على هذا الإعلان');
-  const sumAt = all.indexOf('ملخص البحث');
-  const head = all.slice(0, cardAt > 0 ? cardAt : all.length);
-  const summary = sumAt >= 0 ? head.slice(sumAt) : head;
-  // Summary rows are short bulleted «• label: value» lines — cap the value so a run-on paragraph can
-  // never masquerade as a field.
-  const line = (label) => {
-    const m = summary.match(new RegExp(`[•·]\\s*${label}:\\s*([^\\n]{1,60})`));
-    return m ? m[1].trim() : null;
-  };
-  return {
-    city: line('المدينة'), district: line('الحي'), region: line('الإقليم'),
-    deal: line('نوع العملية'), type: line('نوع العقار'), budget: line('الميزانية'),
-    headline: ([...all.matchAll(/لقينا\s+([\d,٬]+)\s+إعلان/g)].pop() || [])[1] ?? null,
-    zero: /ما لقينا|ما فيه نتائج/.test(all),
-    entities: (all.match(/&(?:bull|quot|amp|ndash|mdash|nbsp|lt|gt|#\d+);/g) || []).slice(0, 5),
-    latinInCards: (all.match(/\b(?:undefined|NaN|\[object)\b/g) || []).slice(0, 5),
-  };
-});
+// The parse is a PURE function in its own module so it can be unit-tested and mutation-proven
+// offline (`scripts/verify-live-sweep-visible-state-scope.ts`, in `npm test`) — the browser's only
+// job here is to hand over the rendered text. See visibleState.mjs for why the old in-page slice
+// read advertiser ad copy as if it were the app's own «ملخص البحث».
+const visibleState = async (page) => parseVisibleState(await page.evaluate(() => document.body.innerText));
 
 /**
  * LAYER 5's filter, derived from the app's OWN captured request so the two sides compare the SAME
