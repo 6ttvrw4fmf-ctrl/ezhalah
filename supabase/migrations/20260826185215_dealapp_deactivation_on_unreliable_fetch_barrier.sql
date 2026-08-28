@@ -27,16 +27,6 @@
 --
 -- Self-clearing via mon_resolve_key on its own dedup key, so it cannot ratchet
 -- (mon_detect_unresolvable_alert_kinds stays green for this kind).
---
--- ---------------------------------------------------------------------------------------------
--- RECOVERED INTO GIT 2026-08-28 by the Data Integrity routine. This migration was applied to
--- production on 2026-08-26 via MCP apply_migration but never committed, which is what kept the
--- P1 `migration_drift` alert (raised 2026-08-26 19:19) standing with missing_in_git_count=1.
--- The SQL below is recovered verbatim from supabase_migrations.schema_migrations.statements for
--- version 20260826185215; nothing here was re-derived or re-authored. Per AGENTS.md the session
--- that applies a migration owns mirroring it in the same change -- this is a late repair of that,
--- not a new change, and it is not re-applied (the objects are already live).
--- ---------------------------------------------------------------------------------------------
 
 create or replace function public.mon_detect_dealapp_deactivation_on_unreliable_fetch()
 returns integer
