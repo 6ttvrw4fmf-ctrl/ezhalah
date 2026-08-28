@@ -274,6 +274,84 @@ JOURNEYS['voice-control'] = async (mobile) => withPage({ mobile }, async (page, 
   }
 });
 
+/** Open a sidebar row's ⋯ menu (rename / add-to-favourites / delete).
+ *  The affordance carries no testID, so it is located from the ROW's own rect — hover the row,
+ *  then click just inside its trailing edge, in CSS pixel space (PART 9.2 (4)). */
+const openRowMenu = async (page, title) => {
+  const row = page.getByText(title, { exact: true }).first();
+  if (!(await row.count())) return false;
+  await row.hover().catch(() => {});
+  await sleep(700);
+  const box = await row.boundingBox();
+  if (!box) return false;
+  // The sidebar panel's trailing edge sits ~20px right of the title's own box in this layout.
+  await page.mouse.click(box.x + box.width + 20, box.y + box.height / 2).catch(() => {});
+  await sleep(1200);
+  return (await page.getByText('حذف', { exact: true }).count()) > 0;
+};
+
+/** J12 — SIDEBAR ROW ACTIONS: favourite and delete, each asserted on the app's OWN persisted
+ *  history and each re-checked after a reload (PART 5 shapes 3 and 8). A sidebar action that looks
+ *  right on screen and does not survive a refresh is the bug this exists to catch — store.tsx
+ *  writes localStorage SYNCHRONOUSLY for exactly that reason, so the reload is the real assertion. */
+JOURNEYS['sidebar-row-actions'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
+  const name = `sidebar-row-actions:${mobile ? 'mobile375' : 'desktop1440'}`;
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'mobile sidebar drawer would not open'); return; }
+  const ids = (h) => (h || []).map((x) => x.id).join(',');
+
+  // ── favourite ────────────────────────────────────────────────────────────────────────────────
+  if (!(await openRowMenu(page, 'فلل جدة'))) { skip(name, 'row ⋯ menu would not open'); return; }
+  if (!(await clickText(page, 'أضف إلى المفضلة'))) { skip(name, 'favourite action not in the menu'); return; }
+  await sleep(1800);
+  const favd = await storedHistory(page);
+  const flagged = (favd || []).filter((x) => x.starred || x.favorite || x.pinned).map((x) => x.id);
+  if (flagged.length !== 1 || flagged[0] !== 'h2') {
+    defect(name, 'favourite did not land on exactly the chosen chat', `flagged=[${flagged.join(',')}], expected [h2]`);
+  } else if (ids(favd) !== 'h1,h2,h3' && (favd || []).length !== 3) {
+    defect(name, 'favourite changed the chat set', `ids now [${ids(favd)}]`);
+  } else {
+    pass(name, 'favourite applied to exactly one chat, none lost');
+  }
+
+  // ── it must survive a reload ──────────────────────────────────────────────────────────────────
+  await page.reload({ waitUntil: 'load' });
+  await settle(page);
+  const afterReload = await storedHistory(page);
+  const stillFlagged = (afterReload || []).filter((x) => x.starred || x.favorite || x.pinned).map((x) => x.id);
+  if (stillFlagged.join(',') !== flagged.join(',')) {
+    defect(name, 'favourite did not survive a refresh', `[${flagged.join(',')}] → [${stillFlagged.join(',')}]`);
+  } else if (flagged.length) {
+    pass(name, 'favourite survived a refresh');
+  }
+
+  // ── delete ────────────────────────────────────────────────────────────────────────────────────
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'sidebar closed after reload'); return; }
+  if (!(await openRowMenu(page, 'شقق الخبر'))) { skip(name, 'row ⋯ menu would not reopen'); return; }
+  if (!(await clickText(page, 'حذف'))) { skip(name, 'delete action not in the menu'); return; }
+  await sleep(2000);
+  // A confirm step is legitimate; take it if it is offered.
+  await clickText(page, 'حذف').catch(() => {});
+  await sleep(2000);
+  const deleted = await storedHistory(page);
+  if ((deleted || []).some((x) => x.id === 'h3')) {
+    defect(name, 'delete did not remove the chat', `ids still [${ids(deleted)}]`);
+  } else if (!(deleted || []).some((x) => x.id === 'h1') || !(deleted || []).some((x) => x.id === 'h2')) {
+    defect(name, 'delete removed the WRONG chats', `ids now [${ids(deleted)}], expected h1 and h2 to remain`);
+  } else {
+    pass(name, `delete removed exactly the chosen chat (ids now [${ids(deleted)}])`);
+  }
+
+  await page.reload({ waitUntil: 'load' });
+  await settle(page);
+  const afterDeleteReload = await storedHistory(page);
+  if ((afterDeleteReload || []).some((x) => x.id === 'h3')) {
+    defect(name, 'deleted chat came back after a refresh', `ids [${ids(afterDeleteReload)}]`);
+  } else {
+    pass(name, 'delete survived a refresh');
+  }
+  if (bag.pageErrors.length) defect(name, 'page error during row actions', bag.pageErrors.join(' | '));
+});
+
 /** J9–J11 — THE ADVERSARIAL SET (PART 4). A fixed checklist only ever catches bugs someone already
  *  imagined, so these do the things the UI assumes nobody does: repeat an action it treats as
  *  once-only, interrupt a flow halfway, and leave the tab alone long enough for the browser to
