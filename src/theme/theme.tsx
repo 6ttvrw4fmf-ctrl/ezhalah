@@ -21,26 +21,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Appearance, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors, darkColors } from '@/theme/tokens';
+import type { darkColors } from '@/theme/tokens';
+import { THEME_KEY, isThemeMode, resolveTheme, themeColors, type ResolvedTheme, type ThemeMode } from '@/theme/themeMode';
 
-export type ThemeMode = 'system' | 'light' | 'dark';
-export type ResolvedTheme = 'light' | 'dark';
-export const THEME_KEY = 'appearance';
-
-export const THEME_MODES: readonly ThemeMode[] = ['system', 'light', 'dark'] as const;
-
-export const isThemeMode = (v: unknown): v is ThemeMode =>
-  v === 'system' || v === 'light' || v === 'dark';
-
-// The one decision: what the user's choice + the OS state resolve to. Pure, so the barrier runs it.
-export function resolveTheme(mode: ThemeMode, systemDark: boolean): ResolvedTheme {
-  if (mode === 'system') return systemDark ? 'dark' : 'light';
-  return mode;
-}
-
-export function themeColors(resolved: ResolvedTheme): typeof darkColors {
-  return resolved === 'dark' ? darkColors : (colors as unknown as typeof darkColors);
-}
+// The pure decisions (resolveTheme, themeColors, mode validation) live in themeMode.ts so the
+// barrier can execute them under node strip-types (no JSX there). Re-exported for convenience.
+export { THEME_KEY, THEME_MODES, isThemeMode, resolveTheme, themeColors } from '@/theme/themeMode';
+export type { ResolvedTheme, ThemeMode } from '@/theme/themeMode';
 
 type ThemeValue = {
   mode: ThemeMode;
