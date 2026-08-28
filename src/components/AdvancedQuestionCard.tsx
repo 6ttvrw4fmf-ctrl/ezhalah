@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, withSpring, Easing } from 'react-native-reanimated';
 import { Image } from 'expo-image';
@@ -221,6 +221,17 @@ export default function AdvancedQuestionCard({
   const [sel, setSel] = useState<string[]>(initialKeys ?? []);
   const [count, setCount] = useState<number | null>(null);
   const reduced = useReducedMotion();
+  // Belt-and-suspenders (owner audit, 2026-08-27): the SAME concept must never render as two chips in
+  // one question, even if two upstream option builders (a future data path, or a translation
+  // collision) resolve to the same displayed label under different keys. This is the ONE render
+  // gateway every question funnels through (see the file header) — the whole class is closed HERE,
+  // not in afRanking.ts's meaningful(), which the scope questions bypass entirely. First occurrence
+  // wins; an eligibility/scoring bug upstream should never silently double-render instead of failing
+  // loudly elsewhere.
+  const dedupedOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return options.filter((o) => (seen.has(o.label) ? false : (seen.add(o.label), true)));
+  }, [options]);
 
   // Question-transition: the body fades/rises in whenever the QUESTION changes (keyed on titleKey) —
   // no hard cuts between steps. Decoration only; reduced motion renders instantly.
@@ -354,7 +365,7 @@ export default function AdvancedQuestionCard({
             </View>
           ) : null}
           <View style={s.list}>
-            {options.map((o, i) => (
+            {dedupedOptions.map((o, i) => (
               <OptionRow key={o.key} option={o} selected={sel.includes(o.key)} selection={selection}
                 first={i === 0} onPress={() => pick(o.key)} />
             ))}

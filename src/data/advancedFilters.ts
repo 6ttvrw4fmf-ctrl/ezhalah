@@ -235,7 +235,14 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
     // [] = the types disagree, so offer none rather than one side's chip.
     const chipAllow = intersectChips(scope);
     if (chipAllow) {
-      defs.push({ key: 'sanitation',   labelKey: 'Sewage connection', count: (c) => c.cnt_sanitation });
+      // Guarded (2026-08-27): the Villa branch above can ALSO push 'sanitation' — today those two
+      // branches never both fire for the same scope (chipAllow is null for a pure-Villa scope, since
+      // COHORT_CHIPS has no Villa entry), but that's a data fact, not a structural guarantee. A
+      // future COHORT_CHIPS entry for Villa would silently double-push the identical chip with
+      // nothing to catch it — guard at the source rather than relying on chips staying disjoint.
+      if (!defs.some((d) => d.key === 'sanitation')) {
+        defs.push({ key: 'sanitation', labelKey: 'Sewage connection', count: (c) => c.cnt_sanitation });
+      }
       defs.push({ key: 'electricity',  labelKey: 'Electricity',       count: (c) => c.cnt_electricity });
       defs.push({ key: 'water_supply', labelKey: 'Water supply',      count: (c) => c.cnt_water_supply });
       const chosen = defs.filter((d) => chipAllow.includes(d.key));
