@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppProvider } from '@/store';
+import { initObservability, reportError } from '@/lib/observability';
 import { LocaleProvider, useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
@@ -19,15 +20,21 @@ import IntroVideo from '@/components/IntroVideo';
 // rejections or uncaught errors, so an async turn that escaped its handler failed silently. Log every
 // one once, so a silent wedge becomes a visible, debuggable signal (and a future Batch-0 telemetry
 // sink can forward it). Web-only registration (the primary surface); harmless no-op elsewhere.
+// Observability: initialize BEFORE the global handlers register so the very first thrown error
+// during module evaluation still goes to Sentry. Safe-by-default — a build with no DSN is a
+// no-op, so this line is harmless in every dev/preview/PR environment (owner 2026-08-26).
+initObservability();
 if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis as any).__ezhalahGlobalHandlers) {
   (globalThis as any).__ezhalahGlobalHandlers = true;
   globalThis.addEventListener?.('unhandledrejection', (ev: any) => {
     // eslint-disable-next-line no-console
     console.error('[ezhalah] unhandled promise rejection:', ev?.reason);
+    reportError(ev?.reason ?? new Error('unhandledrejection'), { source: 'unhandledrejection' });
   });
   globalThis.addEventListener?.('error', (ev: any) => {
     // eslint-disable-next-line no-console
     console.error('[ezhalah] uncaught error:', ev?.error || ev?.message);
+    reportError(ev?.error ?? new Error(String(ev?.message ?? 'uncaught')), { source: 'window.error' });
   });
 }
 
