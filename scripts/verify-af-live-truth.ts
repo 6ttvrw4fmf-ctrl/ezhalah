@@ -279,6 +279,15 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // number; the assertion itself is unchanged and now cannot pass on a chip that never resolves.
     const afterSelect = await readCardUntil((s) => s.chip != null && s.chip !== baselineChip);
     check(`${name}: count changed after selecting an answer`, afterSelect.chip != null && afterSelect.chip !== baselineChip, `base=${baselineChip} afterSelect=${afterSelect.chip}`);
+    // ARM THE CAPTURE **BEFORE** THE COMMITTING CLICK, never after it (fix 2026-08-28). Confirming
+    // the last useful question can end the round on its own and fire the final search inside the
+    // 1200 ms below; the reset used to sit after this block, so that search was captured and then
+    // thrown away, and the 25s poll that followed had nothing left to find. That is a false FAIL
+    // with no product defect behind it — `MOBILE …/furnished: final search request was captured =
+    // null` in run 33168150595, while the byte-identical desktop journey passed in the same run
+    // purely because its round still had a question left. Arming here cannot weaken the assertion:
+    // a final search that never fires still leaves lastSearchBody null and still fails.
+    lastSearchBody = null; lastSearchResp = null;
     await page.click('[data-testid="af-confirm"]');
     await page.waitForTimeout(1200);
 
@@ -296,21 +305,30 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       // empty and `opts2[otherIdx]` is undefined — which used to click `[data-testid="undefined"]`
       // and spend 30s timing out on a selector that cannot exist, burying the real failure (the card
       // never came back) under a harness stack trace. Fail here, naming the actual cause.
+      // The detail string is printed on PASS as well as FAIL, so it must READ TRUE IN BOTH STATES.
+      // It used to be the failure sentence unconditionally, which produced the genuinely misleading
+      // «PASS … no af-option-* found after Back — the restored card never rendered» in run
+      // 33168150595 — a green check whose own evidence line says the card never rendered. A reader
+      // triaging that log is being told the opposite of what happened.
       check(`${name}: Back re-offers the earlier question's options`, opts2.length > 0,
-        `no af-option-* found after Back — the restored card never rendered (restored.q=${restored.q})`);
+        opts2.length
+          ? `${opts2.length} option(s) restored (restored.q=${restored.q})`
+          : `no af-option-* found after Back — the restored card never rendered (restored.q=${restored.q})`);
       if (!opts2.length) { await ctx.close(); return; }
       const otherIdx = opts2.length > 1 ? 1 : 0;
       await page.click(`[data-testid="${opts2[otherIdx]}"]`);
       const changed = await readCardUntil((s) => s.chip != null && s.chip !== afterSelect.chip);
       check(`${name}: changing the answer recomputes the count`, changed.chip !== afterSelect.chip || opts2.length === 1, `after1st=${afterSelect.chip} afterChange=${changed.chip}`);
+      lastSearchBody = null; lastSearchResp = null;   // re-arm: this confirm is now the committing one
       await page.click('[data-testid="af-confirm"]');
       await page.waitForTimeout(1200);
     }
 
     // Finish now — «عرض النتائج» (af-skip-all) commits accumulated answers + searches. Confirming
     // the LAST useful question can already have ended the flow (mining → results) on its own, so
-    // only click af-skip-all if the card is still actually there to click.
-    lastSearchBody = null; lastSearchResp = null;
+    // only click af-skip-all if the card is still actually there to click. The capture was armed
+    // before that confirm (above), so a search it already fired is still held here rather than
+    // discarded.
     const stillOpen = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
     if (stillOpen) {
       const btn2 = await page.evaluate(() => !!document.querySelector('[data-testid="af-skip-all"]'));
