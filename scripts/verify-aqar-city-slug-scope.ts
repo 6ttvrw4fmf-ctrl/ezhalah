@@ -23,6 +23,14 @@
 // Run: node --experimental-strip-types scripts/verify-aqar-city-slug-scope.ts
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { join as __join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
+
+// "Is this guard actually wired in?" — asked of the test registry, which is what `npm test`
+// resolves its run set from (scripts/lib/testRegistry.ts). String-matching package.json used to
+// answer it; since the 201-command chain became one runner invocation, that match would read
+// "not wired" for every barrier in the suite.
+const REPO_ROOT = __join(import.meta.dirname, '..');
 
 const problems: string[] = [];
 const ok: string[] = [];
@@ -146,10 +154,9 @@ check(/city_filter_ignored=/.test(run) && /city_filter_ignored\b/.test(run),
   'scrapers/aqar/run_residential.py no longer records city_filter_ignored in its notes — ' +
   'mon_detect_aqar_city_slug_broken() reads those notes, so the barrier would go blind');
 
-const pkg = readFileSync('package.json', 'utf8');
-check(pkg.includes('verify-aqar-city-slug-scope'),
+check(npmTestRuns(REPO_ROOT, 'verify-aqar-city-slug-scope'),
   'npm test runs this guard',
-  'package.json no longer runs verify-aqar-city-slug-scope.ts — the guard is inert');
+  '`npm test` no longer runs verify-aqar-city-slug-scope.ts (see scripts/test-exclusions.txt) — the guard is inert');
 
 console.log('aqar-city-slug-scope: a city slice must actually be that city\n');
 for (const o of ok) console.log(`  ✓ ${o}`);

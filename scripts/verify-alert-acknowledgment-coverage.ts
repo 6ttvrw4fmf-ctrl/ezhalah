@@ -30,6 +30,13 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
+
+// "Is this guard actually wired in?" — asked of the test registry, which is what `npm test`
+// resolves its run set from (scripts/lib/testRegistry.ts). String-matching package.json used to
+// answer it; since the 201-command chain became one runner invocation, that match would read
+// "not wired" for every barrier in the suite.
+const REPO_ROOT = join(import.meta.dirname, '..');
 
 const ROOT = join(import.meta.dirname, '..');
 const WORKFLOW_PATH = join(ROOT, '.github/workflows/alert-dispatch.yml');
@@ -155,11 +162,10 @@ check(
 // ---------------------------------------------------------------------------
 // §4 -- this guard is worthless if nothing runs it.
 // ---------------------------------------------------------------------------
-const pkg = readFileSync(join(ROOT, 'package.json'), 'utf8');
 check(
   '§4 npm test runs this file',
-  pkg.includes('verify-alert-acknowledgment-coverage'),
-  'package.json does not invoke verify-alert-acknowledgment-coverage.ts -- this guard is inert',
+  npmTestRuns(REPO_ROOT, 'verify-alert-acknowledgment-coverage'),
+  '`npm test` no longer runs verify-alert-acknowledgment-coverage.ts (see scripts/test-exclusions.txt) -- this guard is inert',
 );
 
 if (failures > 0) {

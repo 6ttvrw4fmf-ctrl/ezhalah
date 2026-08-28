@@ -30,6 +30,7 @@
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
 import {
   CONTRACT_RULES, ALL_ENTRIES, UNCONTRACTED, GRADE_SCORE, score, tally, byDim,
 } from './lib/afContractCoverage.ts';
@@ -79,10 +80,12 @@ check('every barrier named anywhere in the map is a real file',
 
 // "Executes somewhere" = npm test, or invoked by a scheduled/dispatchable workflow. A live check is
 // not in npm test BY DESIGN (it needs production), so requiring npm test alone would be wrong.
-const pkgTest = JSON.parse(read('package.json')).scripts.test as string;
+// `npm test` discovers its checks rather than listing them inline (scripts/lib/testRegistry.ts,
+// 2026-08-28). Ask the registry the same question the old string-match asked; matching against the
+// "test" script would now answer "no" for every barrier in the suite and fail every L/B grade.
 const workflows = readdirSync(join(root, '.github', 'workflows'))
   .map((f) => read(join('.github', 'workflows', f))).join('\n');
-const runsSomewhere = (b: string) => pkgTest.includes(`scripts/${b}.ts`) || workflows.includes(b);
+const runsSomewhere = (b: string) => npmTestRuns(root, b) || workflows.includes(b);
 
 const inert = ALL_ENTRIES
   .filter((e) => e.grade === 'B' || e.grade === 'L')
