@@ -40,6 +40,14 @@ export const UNDELIVERED_GRACE_MINUTES = 60;
 export const ALERT_DELIVERY_DEDUP_KEYS = [
   'alert_delivery_unconfigured',
   'alert_delivery_undelivered',
+  // 2026-08-28. dispatched_at means "a GitHub issue exists for this alert" and alert-dispatch.yml
+  // is its only writer. mon_dispatch_alerts() used to stamp it too -- for the whole batch, as soon
+  // as one webhook POST was ENQUEUED (net.http_post returns on enqueue, so a 500 counted) -- which
+  // made a single INSERT into ops_alert_channel enough to mark every open alert delivered with no
+  // issue filed anywhere, while `alert_delivery_undelivered` above went on reading green off the
+  // same column. Inert only because that table has been empty since launch. The stamp is gone; this
+  // key is the guard against it coming back by any route.
+  'alert_delivery_second_writer',
 ] as const;
 
 /**

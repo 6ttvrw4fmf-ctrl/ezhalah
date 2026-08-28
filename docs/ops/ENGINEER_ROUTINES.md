@@ -288,6 +288,14 @@ revert is reported as a revert rather than rediscovered by hand.
   gate's explicit-success requirement, cron minute-slot discipline (see AGENTS.md).
 - Changing any routine's schedule, scope, or prompt is an owner decision; record the change here in
   the same session.
+- **Your production-alert queue is addressable by label (2026-08-28).** Every open `[alert]` GitHub
+  issue now carries the `routine-N-…` label of the routine that owns it, per
+  `docs/ops/ALERT_ROUTING.md` — `gh issue list --label ezhalah-alert --label routine-3-data-integrity
+  --state open`. Same seven owners as the Sentry table below, keyed on the alert `kind` instead of a
+  stack frame, and total: an unrouted kind goes to #2 for triage, never to nobody. Before this,
+  delivery worked and ownership did not — 53 open alert issues with no owner named on any of them.
+  This is a pointer to your existing alert duties, **not** a new mandatory step: adding one is an
+  owner decision, and is deliberately left open.
 
 ## §S — SENTRY (mandatory every run, owner rule 2026-08-28) — applies to ALL SEVEN routines
 On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
