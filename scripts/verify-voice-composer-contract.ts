@@ -7,6 +7,14 @@
 //   node --experimental-strip-types scripts/verify-voice-composer-contract.ts   (wired into `npm test`)
 
 import { readFileSync } from 'node:fs';
+import { join as __join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
+
+// "Is this guard actually wired in?" — asked of the test registry, which is what `npm test`
+// resolves its run set from (scripts/lib/testRegistry.ts). String-matching package.json used to
+// answer it; since the 201-command chain became one runner invocation, that match would read
+// "not wired" for every barrier in the suite.
+const REPO_ROOT = __join(import.meta.dirname, '..');
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -19,7 +27,6 @@ const voice = readFileSync(new URL('../src/lib/voiceInput.ts', import.meta.url),
 const wave = readFileSync(new URL('../src/components/VoiceWaveform.tsx', import.meta.url), 'utf8');
 const i18n = readFileSync(new URL('../src/i18n.tsx', import.meta.url), 'utf8');
 const readAloud = readFileSync(new URL('../src/lib/readAloud.ts', import.meta.url), 'utf8');
-const pkg = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
 
 console.log('\nVoice-input composer contract (owner brief 2026-08-23)\n');
 
@@ -216,7 +223,7 @@ check(
 // ── Wiring: this barrier itself must be in npm test, or it is decoration ────────────────────────
 check(
   'W. verify-voice-composer-contract.ts is wired into `npm test`',
-  /verify-voice-composer-contract\.ts/.test(pkg),
+  npmTestRuns(REPO_ROOT, 'verify-voice-composer-contract'),
 );
 
 console.log('');
