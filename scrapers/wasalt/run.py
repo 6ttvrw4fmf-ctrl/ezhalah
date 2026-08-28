@@ -330,19 +330,35 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
     bedrooms = _i(_attr(prop, "noOfBedrooms"))
     bathrooms = _i(_attr(prop, "noOfBathrooms"))
     halls_or_majlis = _i(_attr(prop, "noOfLivingRooms") or _attr(prop, "livingRooms") or _attr(prop, "noOfHalls"))
-    # ⚠ UNVERIFIED FALLBACK (flagged 2026-08-22, not yet fixed — do not "clean this up" blindly).
-    # `conversionPrice` is used here as a SAR sale total, but nothing in this repo documents what
-    # wasalt means by it, and it appears nowhere else. Suspected in the standing P1
-    # field_integrity_phone_price:wasalt_residential_listings: 8 ACTIVE, searchable rows carry a
-    # sale price ~100x too high, and dividing by 100 yields a consistent, realistic band —
-    #   560000000/700m²→8,000  561700000/561→10,012  594000000/900→6,600
-    #   585000000/900→6,500    562140000/810→6,940   (SAR/m², ids 446386/448556/456656/457706/4002193)
-    # Random values would scatter; a tight realistic band after ÷100 points at a minor-unit
-    # (halala) or converted-currency figure reaching this line, NOT a phone-as-price artifact.
-    # NOT repriced and NOT changed: that needs the source, and wasalt is unreachable from CI/agent
-    # containers (Cloudflare challenges a plain fetch; curl_cffi impersonation is reset by the
-    # egress proxy). Confirm what conversionPrice is against a live payload BEFORE touching either
-    # this line or those rows — a source-published price stays searchable at any magnitude.
+    # RESOLVED 2026-08-28 — the 2026-08-22 suspicion below was WRONG, and the evidence needed to
+    # refute it was already in our own database the whole time. Do not re-open it from arithmetic.
+    #
+    # The old comment read: "`conversionPrice` is used here as a SAR sale total, but nothing in this
+    # repo documents what wasalt means by it... 8 ACTIVE rows carry a sale price ~100x too high, and
+    # dividing by 100 yields a consistent, realistic band... Confirm against a live payload BEFORE
+    # touching either this line or those rows." It then blocked on "wasalt is unreachable from
+    # CI/agent containers" (still true — Cloudflare 403s a plain fetch from here).
+    #
+    # It never needed a live fetch. `wasalt_residential_listings.ar_data` ARCHIVES wasalt's own
+    # detail payload (propertyInfo) per row. Measured across all 53,942 active rows (53,934 with
+    # ar_data):
+    #   * conversionPrice differs from salePrice on **0** rows — ever.
+    #   * currencyType differs from conversionUnit on **0** rows (both «ر.س» throughout).
+    # So conversionPrice is NOT a minor-unit (halala) or foreign-currency figure. It is the same SAR
+    # number as salePrice, and this `or` fallback cannot introduce a magnitude error.
+    #
+    # The five ids the old comment cited were checked individually: 446386, 448556, 456656, 457706,
+    # 4002193 all have stored price_total == salePrice == conversionPrice, currency «ر.س», AND
+    # wasalt's own averageSalePricePerSqm computed at the SAME magnitude (800,000 / 1,001,248 /
+    # 660,000 / 650,000 / 694,000 SAR/m²), with 4 of 5 quoting the price verbatim in wasalt's own
+    # description prose. They are source-published, not artifacts. The "tight realistic band after
+    # ÷100" was a coincidence of Riyadh land rates — exactly the trap AGENTS.md §19 warns about, and
+    # the same shape as the 26 wasalt rows already adjudicated into ops_price_source_verified on
+    # 2026-08-11 ("salePrice=conversionPrice=..., prose «سعرها ... ر.س» verbatim. Source-published.").
+    #
+    # Generalisation worth keeping: an ARCHIVED source payload we already store is source truth. A
+    # divide-by-N that lands on plausible numbers is NOT evidence — wasalt's own per-sqm field and
+    # its own prose are. Check ar_data before ever concluding a wasalt price is ours.
     sale_price = info.get("salePrice") or info.get("conversionPrice")
     rent_price = info.get("expectedRent")
     # Rent-period truth (2026-07-27 audit): Wasalt publishes per-frequency pricing in
