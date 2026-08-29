@@ -15,6 +15,7 @@ import {
   shouldAutoShowAuthPopup,
   canDragAuthPopup,
   clampAuthPopupOffset,
+  dismissalOutlivesTransition,
   AUTH_POPUP_EDGE,
   type AutoShowGate,
 } from '../src/lib/authPopupBehavior.ts';
@@ -147,6 +148,94 @@ check('WIRING testIDs for the journey engineer: auth-popup / drag-handle / close
   && authModal.includes("testid: 'auth-popup-close'"));
 check('WIRING desktop sizing exists and mobile cap is untouched (400 stays; 470 is desktop-only)',
   authModal.includes('maxWidth: 400') && authModal.includes('popWrapWide: { maxWidth: 470 }'));
+
+
+// ═══ THE AUTH EPOCH + CANONICAL LOGGED-OUT STATE (owner 2026-08-29) ═══════════════════════════════
+// «Deleting an account must end in the exact same logged-out UI state as any normal logged-out
+// visitor.» Reproduced on production before the fix: sign in through the popup (its close stamps
+// the session dismissal) → delete the account → the STALE flag suppressed the popup for the new
+// logged-out visitor, and the dark theme survived into the guest state. These execute the real
+// rules over the owner's ten journeys.
+
+check('EPOCH a sign-IN transition voids the dismissal',  !dismissalOutlivesTransition(false, true));
+check('EPOCH a sign-OUT / deletion transition voids it', !dismissalOutlivesTransition(true, false));
+check('EPOCH no transition keeps it (refresh mid-epoch, Filter↔Agent nav)',
+  dismissalOutlivesTransition(false, false) && dismissalOutlivesTransition(true, true));
+
+// A tiny model of the app: the ONLY state the journeys need — signed-in flag + the session flag —
+// with transitions driven through the SAME pure rule the store's one writer uses.
+{
+  type World = { signedIn: boolean; dismissed: boolean };
+  const transition = (w: World, nowSignedIn: boolean): World => ({
+    signedIn: nowSignedIn,
+    dismissed: dismissalOutlivesTransition(w.signedIn, nowSignedIn) ? w.dismissed : false,
+  });
+  const popupOn = (w: World, pathname = '/') => shouldAutoShowAuthPopup({
+    isWeb: true, authChecked: true, user: w.signedIn ? { id: 'u' } : null,
+    introBlocking: false, dismissed: w.dismissed, pathname,
+  });
+  // The sidebar CTA is the guest branch: exactly !signedIn. Asserted at the model level so the pair
+  // (popup eligible + CTA present) is what every logged-out journey below means by "canonical".
+  const ctaOn = (w: World) => !w.signedIn;
+
+  let w: World = { signedIn: false, dismissed: false };
+  check('J1 fresh visitor: popup + sidebar CTA', popupOn(w) && ctaOn(w));
+  w = transition(w, true); w = { ...w, dismissed: true };   // sign-in; the popup's own close stamps the flag
+  check('J2 signed in: popup hidden, CTA hidden', !popupOn(w) && !ctaOn(w));
+  const out = transition(w, false);
+  check('J3 sign-out: popup RETURNS + CTA returns', popupOn(out) && ctaOn(out),
+    'the stale dismissal must not survive the transition');
+  check('J4 sign-out cancel: still signed in, popup stays hidden', !popupOn(w) && !ctaOn(w));
+  const deleted = transition(w, false);
+  check('J5 deletion: popup RETURNS + CTA returns', popupOn(deleted) && ctaOn(deleted));
+  check('J6 delete cancel: unchanged signed-in state', !popupOn(w) && !ctaOn(w));
+  // sessionStorage survives a refresh, so canonical only because the flag cleared AT the transition
+  check('J7 refresh after deletion is still canonical', popupOn(deleted) && deleted.dismissed === false);
+  check('J8 post-deletion popup eligible on Filter AND Agent', popupOn(deleted, '/') && popupOn(deleted, '/agent'));
+  const closedAgain = { ...deleted, dismissed: true };
+  check('J8b …and closing it in THIS epoch still holds across Filter↔Agent (no re-pop nag)',
+    !popupOn(closedAgain, '/') && !popupOn(closedAgain, '/agent'));
+  check('J9 session death lands in the canonical logged-out state', popupOn(transition(w, false)));
+  check('J10 no duplicate auth surfaces: dock stays deleted, exactly one sidebar CTA',
+    !existsSync(join(root, 'src/components/SignInDock.tsx'))
+    && (readFileSync(join(root, 'src/components/Sidebar.tsx'), 'utf8').match(/sidebar-signin-cta/g) ?? []).length === 1);
+}
+
+// ── WIRING — the epoch rule is inert unless the store's one writer calls it ──────────────────────
+{
+  const store = readFileSync(join(root, 'src/store.tsx'), 'utf8');
+  check('WIRING the store clears the dismissal through the pure rule (one writer)',
+    /dismissalOutlivesTransition\(prev, now\)/.test(store)
+    && /sessionStorage\.removeItem\(AUTH_POPUP_DISMISSED_KEY\)/.test(store));
+  check('WIRING the writer skips the mount pass (a refresh mid-epoch keeps a real dismissal)',
+    /prev === null \|\| dismissalOutlivesTransition/.test(store));
+  check('WIRING it watches the user value itself, so a session dying in onAuthStateChange is covered',
+    /\}, \[user\]\);/.test(store.slice(store.indexOf('prevSignedInRef'), store.indexOf('prevSignedInRef') + 900)));
+  // Comment-stripped: a mutation test proved the raw regex also matched a commented-out
+  // `// setMode('light')`, i.e. the check was blind to exactly the deletion it guards against.
+  const menu = readFileSync(join(root, 'src/components/AccountMenu.tsx'), 'utf8')
+    .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  check('WIRING deletion returns the app to Light (owner rule) before leaving the screen',
+    /const ok = await deleteAccount\(\);[\s\S]{0,700}?setMode\('light'\);[\s\S]{0,120}?router\.replace/.test(menu));
+  check('WIRING …but a FAILED deletion changes nothing (no reset before the server confirms)',
+    /if \(!ok\) \{[\s\S]{0,260}?return;[\s\S]{0,12}?\}[\s\S]{0,700}?setMode\('light'\)/.test(menu));
+  const themeSrc = readFileSync(join(root, 'src/theme/theme.tsx'), 'utf8');
+  check('WIRING sign-out still keeps the theme (only DELETION resets — the comment now says so)',
+    /NOT wiped by SIGN-OUT/.test(themeSrc) && /DELETION resets it to 'light'/.test(themeSrc));
+}
+
+// ── MUTATION PROOFS for the epoch ────────────────────────────────────────────────────────────────
+{
+  const inverted = (a: boolean, b: boolean) => a !== b;      // keeps the flag exactly when it must clear
+  check('MUT-E1 an inverted epoch rule is DETECTED',
+    inverted(true, false) !== dismissalOutlivesTransition(true, false));
+  const sticky = (_a: boolean, _b: boolean) => true;          // the pre-fix behaviour: flag never clears
+  check('MUT-E2 the pre-fix behaviour (dismissal survives deletion) is DETECTED',
+    sticky(true, false) !== dismissalOutlivesTransition(true, false));
+  const trigger = (_a: boolean, _b: boolean) => false;        // clears on every pass → dismissal dead
+  check('MUT-E3 clearing without a transition (kills the no-nag rule) is DETECTED',
+    trigger(false, false) !== dismissalOutlivesTransition(false, false));
+}
 
 if (failed) {
   console.error(`\n❌ verify-auth-popup: ${failed} check(s) failed`);

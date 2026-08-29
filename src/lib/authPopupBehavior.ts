@@ -48,6 +48,29 @@ export function canDragAuthPopup(g: { isWeb: boolean; docked: boolean }): boolea
 /** Margin the card keeps from every viewport edge while dragged. */
 export const AUTH_POPUP_EDGE = 16;
 
+// ── THE AUTH EPOCH (owner 2026-08-29) ───────────────────────────────────────────────────────────
+// «NOT AUTHENTICATED = the popup must be ELIGIBLE to appear. Do not key it off whether the user
+// previously had an account, deleted one, dismissed the popup before, or was previously signed in.»
+//
+// A dismissal is scoped to ONE CONTINUOUS LOGGED-OUT EPOCH — the stretch where this visitor stays
+// signed out. Closing the popup is still respected inside that stretch (no re-pop nag on
+// Filter↔Agent navigation), but ANY auth transition ends the epoch and voids the dismissal:
+//   sign-IN   the close that follows a successful login stamped the flag while SIGNED IN; it says
+//             nothing about the logged-out visitor this browser may hold later.
+//   sign-OUT / account DELETION / session death
+//             the person now in front of the app is a NEW logged-out visitor and must land in the
+//             exact same state as any fresh guest — popup eligible, sidebar CTA present.
+// THE BUG THIS ENCODES (reproduced on production 2026-08-29): sign in through the popup (close →
+// dismissed=1) → delete the account → the stale flag suppressed the popup for the now-logged-out
+// visitor, and nothing on screen offered auth except the small bottom-of-sidebar CTA. Deleting an
+// account must end in the canonical logged-out state; it ended in a dead one.
+//
+// Store.tsx owns the ONE writer: an effect on the signed-in boolean calls this on every change and
+// clears AUTH_POPUP_DISMISSED_KEY when it returns false. Pure so the barrier executes it.
+export function dismissalOutlivesTransition(prevSignedIn: boolean, nowSignedIn: boolean): boolean {
+  return prevSignedIn === nowSignedIn;   // no transition → same epoch → the dismissal stands
+}
+
 /** sessionStorage keys: the session's memory of a dismissal and of a moved position. */
 export const AUTH_POPUP_DISMISSED_KEY = 'ezhalah.authPopup.dismissed';
 export const AUTH_POPUP_POS_KEY = 'ezhalah.authPopup.pos';

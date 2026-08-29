@@ -5,7 +5,9 @@
 //     product), the RN Appearance API on native — and tracks changes without a reload.
 //   • The choice persists across sessions for EVERYONE (device preference, not account data):
 //     synchronous localStorage on web — the same sync-first pattern the store uses for history —
-//     plus AsyncStorage for native. Deliberately NOT wiped by sign-out/delete-account: the theme
+//     plus AsyncStorage for native. Deliberately NOT wiped by SIGN-OUT (a device preference
+//     survives switching accounts) — but account DELETION resets it to 'light' (owner rule
+//     2026-08-29, applied in AccountMenu.onDeleteAccount): the theme
 //     belongs to the device, like 'hasSeenIntro'.
 //   • SSR/hydration safety (React #418, the 2026-08-21 P0 class): the FIRST client render must
 //     match the server, so both `mode` and `systemDark` start at their server values ('system',
