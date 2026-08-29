@@ -149,3 +149,90 @@ export function toWesternDigits(t: string): string {
     .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
     .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
 }
+
+/**
+ * An Arabic amount written in WORDS rather than digits, with its position in the text.
+ * `index`/`length` let the caller apply the same size-unit and currency lookarounds it uses for
+ * digit matches, and keep candidates in text order.
+ */
+export type WordAmount = { index: number; length: number; value: number };
+
+// Alef/hamza forms are written inconsistently by real users (ألف vs الف, آلاف vs الاف). Fold them
+// for MATCHING only — every replacement is 1 char for 1 char, so match indices stay valid against
+// the original string.
+function foldAlef(t: string): string {
+  return t.replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه");
+}
+
+// Multiplier words, and their DUAL forms — Arabic marks "two of X" with a suffix rather than a
+// separate word, so «مليونين» IS 2,000,000 and there is no numeral anywhere in it.
+const AR_UNITS: Array<[string, number, number]> = [
+  // [folded spelling, unit value, implicit count]
+  ["مليارين", 1_000_000_000, 2],
+  ["مليارات", 1_000_000_000, 1],
+  ["مليار", 1_000_000_000, 1],
+  ["مليونين", 1_000_000, 2],
+  ["ملايين", 1_000_000, 1],
+  ["مليون", 1_000_000, 1],
+  ["الفين", 1_000, 2],
+  ["الاف", 1_000, 1],
+  ["الف", 1_000, 1],
+];
+
+const AR_COUNT: Record<string, number> = {
+  "واحد": 1, "اثنين": 2, "اثنان": 2, "ثنتين": 2,
+  "ثلاث": 3, "ثلاثه": 3, "تلات": 3, "تلاته": 3,
+  "اربع": 4, "اربعه": 4, "خمس": 5, "خمسه": 5, "ست": 6, "سته": 6,
+  "سبع": 7, "سبعه": 7, "ثمان": 8, "ثمانيه": 8, "تسع": 9, "تسعه": 9,
+  "عشر": 10, "عشره": 10,
+};
+const AR_FRACTION: Record<string, number> = { "نص": 0.5, "نصف": 0.5, "ربع": 0.25 };
+
+const COUNT_ALT = Object.keys(AR_COUNT).sort((a, b) => b.length - a.length).join("|");
+const FRAC_ALT = Object.keys(AR_FRACTION).sort((a, b) => b.length - a.length).join("|");
+const UNIT_ALT = AR_UNITS.map(([w]) => w).join("|");
+
+// [count|fraction]? UNIT [ونص|وربع]?   e.g. «مليون ونص», «نص مليون», «ثلاثة ملايين», «مليونين»
+const AR_AMOUNT_RE = new RegExp(
+  String.raw`(?:(${COUNT_ALT}|${FRAC_ALT})\s+)?(${UNIT_ALT})(?:\s*و\s*(${FRAC_ALT}))?`,
+  "g",
+);
+
+/**
+ * Amounts written in Arabic WORDS — «مليون ونص», «نص مليون», «مليونين», «ثلاثة ملايين».
+ *
+ * WHY (found live 2026-08-29, production-verified as a real defect):
+ *   «دور للبيع في الرياض من ٨٠٠ الف الى مليون ونص»
+ *   extractPrice's NUM_RE requires a LEADING ASCII DIGIT. «٨٠٠ الف» matched (800 x الف), but
+ *   «مليون ونص» carries no numeral at all, so it produced NO candidate. With only one candidate the
+ *   range-MAX rule could not fire, and the user's 1,500,000 ceiling silently became 800,000 — a
+ *   budget nearly halved without the user ever being told.
+ *
+ * DELIBERATELY CONSERVATIVE. A candidate is produced ONLY when a real multiplier word is present,
+ * so a bare «نص» (which also means "text" in MSA) can never invent a price. A unit already preceded
+ * by digits is SKIPPED — «٨٠٠ الف» belongs to NUM_RE, and double-counting it would be worse than
+ * missing it.
+ */
+export function arabicWordAmounts(text: string): WordAmount[] {
+  const src = String(text ?? "");
+  const folded = foldAlef(src);
+  const out: WordAmount[] = [];
+  AR_AMOUNT_RE.lastIndex = 0;
+  for (const m of folded.matchAll(AR_AMOUNT_RE)) {
+    const [whole, pre, unitWord, tailFrac] = m;
+    const start = m.index ?? 0;
+    // A digit immediately before the unit means NUM_RE already owns this figure («٨٠٠ الف»).
+    const before = folded.slice(Math.max(0, start - 12), start);
+    if (/\d[\s,.]*$/.test(before)) continue;
+    const unit = AR_UNITS.find(([w]) => w === unitWord);
+    if (!unit) continue;
+    const [, unitValue, implicitCount] = unit;
+    let n: number;
+    if (pre && pre in AR_FRACTION) n = AR_FRACTION[pre] * unitValue;      // «نص مليون»
+    else if (pre && pre in AR_COUNT) n = AR_COUNT[pre] * unitValue;        // «ثلاثة ملايين»
+    else n = implicitCount * unitValue;                                    // «مليون», «مليونين»
+    if (tailFrac) n += AR_FRACTION[tailFrac] * unitValue;                  // «… ونص»
+    out.push({ index: start, length: whole.length, value: Math.round(n) });
+  }
+  return out;
+}
