@@ -6,7 +6,7 @@ import { HOME_DEFAULT_QUERY, migrateGroups } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
 import { applyMove, applyStarMove } from '@/lib/sidebarReorder';
 import { autoTitleForQuery, autoTitleForPrompt, canAutoRetitle, type TitleSource } from '@/lib/chatTitle';
-import { AUTH_POPUP_DISMISSED_KEY } from '@/lib/authPopupBehavior';
+import { AUTH_POPUP_DISMISSED_KEY, dismissalOutlivesTransition } from '@/lib/authPopupBehavior';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
 import { resolveLocation, ensureLocationIndex } from '@/data/locations';
@@ -246,6 +246,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // True once we know the auth state (session restored or confirmed absent), so the intro decision
   // doesn't race the Supabase session lookup and flash for a returning signed-in user.
   const [authChecked, setAuthChecked] = useState(false);
+
+  // AUTH EPOCH (owner 2026-08-29): a popup dismissal lives exactly as long as one continuous
+  // signed-in-or-out stretch. This effect is the ONE writer that ends an epoch: on every change of
+  // the signed-in boolean — sign-in, sign-out, account deletion, or a session dying in
+  // onAuthStateChange — the stale dismissal is cleared, so the next logged-out state is the
+  // canonical one (popup eligible) instead of inheriting a flag stamped in a previous auth life.
+  // `null` start skips the mount pass: a refresh mid-epoch must NOT void a real dismissal.
+  const prevSignedInRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    const now = !!user;
+    const prev = prevSignedInRef.current;
+    prevSignedInRef.current = now;
+    if (prev === null || dismissalOutlivesTransition(prev, now)) return;
+    try {
+      if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(AUTH_POPUP_DISMISSED_KEY);
+    } catch { /* blocked storage — the flag could never have been stamped either */ }
+  }, [user]);
 
   // Backfill the missing-script spelling of the user's name (once per name) so both stay synced.
   useEffect(() => {
