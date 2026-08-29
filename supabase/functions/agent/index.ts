@@ -41,6 +41,10 @@ const DEEPSEEK_API_KEY = Deno.env.get("DEEPSEEK_API_KEY") ?? "";
 const DEEPSEEK_MODEL = Deno.env.get("DEEPSEEK_MODEL") ?? "deepseek-chat";
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
+// Deterministic post-model rules (owner ruling 2026-08-29). Pure functions, unit-tested and
+// mutation-proven by scripts/verify-agent-postmodel-rules.ts. The model proposes; these decide.
+import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation } from "./postModel.ts";
+
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
 // function. We read the active rows at runtime and append them to the system prompt. Cached ~60s so
@@ -702,11 +706,15 @@ Deno.serve(async (req: Request) => {
       // message — and it must keep its currency conversion. So if THIS message has no figure, scan the
       // user's previous turns (newest → oldest) and re-extract the most recent one (extractPrice does
       // the BHD/USD/… → SAR math). (user-reported: foreign-currency budget dropped across turns.)
+      // RULE 1 (owner 2026-08-29) needs to know WHICH turn stated a carried budget, because a
+      // budget keeps the period it was stated with — see effectiveBasis() in ./postModel.ts.
+      const priceCameFromCurrentTurn = !!detPrice;
+      let carriedFromText = "";
       if (!detPrice) {
         for (let i = history.length - 1; i >= 0; i--) {
           if (history[i]?.role === "model") continue; // only the user states a budget
           const p = extractPrice(String(history[i]?.text ?? ""));
-          if (p) { detPrice = p; break; }
+          if (p) { detPrice = p; carriedFromText = String(history[i]?.text ?? ""); break; }
         }
       }
       let modelPrice = String(out.price ?? "").replace(/[^\d]/g, "");
@@ -744,9 +752,25 @@ Deno.serve(async (req: Request) => {
       // weekly ×52, monthly ×12, quarterly ×4) so the client filters on an annual budget.
       let price = detPrice || modelPrice;
       let priceIsAnnual = false;
-      if (deal === "Rent" && price && basis in rentMult) {
+      // RULE 1 — "change only the rental period, change only the rental period."
+      // A budget carried from an earlier turn keeps the period it was STATED with; a message that
+      // only flips the period must never re-scale it. Live C2 (2026-08-29): «٧٠ الف» stated as
+      // ANNUAL in turn 1, then «لا خلها شهري» in turn 2, produced price 840,000 — a 12× inflation
+      // the user never asked for. effectiveBasis() is the deterministic decision; see ./postModel.ts.
+      const budgetBasis = effectiveBasis({
+        currentText: text,
+        priceCameFromCurrentTurn,
+        carriedFromText,
+        modelBasis: basis,
+      });
+      if (deal === "Rent" && price && budgetBasis in rentMult) {
         const n = parseInt(price, 10);
-        if (isFinite(n)) { price = String(n * rentMult[basis]); priceIsAnnual = true; }
+        if (isFinite(n)) { price = String(n * rentMult[budgetBasis]); priceIsAnnual = true; }
+      } else if (deal === "Rent" && price && !priceCameFromCurrentTurn && basis in rentMult) {
+        // The carried budget was NOT re-scaled. It was stated as an annual figure (or with no period
+        // at all), and `price` is the annual-equivalent field, so mark it annual rather than leaving
+        // the client to apply its own default to a number that already means "per year".
+        priceIsAnnual = true;
       }
       // The user's ORIGINAL foreign-currency budget (e.g. "USD 100,000") — current message first, else
       // the most recent prior user turn that carried it — so the client can show both it and the SAR.
@@ -781,6 +805,11 @@ Deno.serve(async (req: Request) => {
         const cls = await locClassify(location);
         const ck = String(cls?.kind ?? "");
         const nm = String(cls?.name ?? location);
+        // RULE 3 (owner 2026-08-29) — no English location leak in an Arabic conversation.
+        // Live F2 returned "Jeddah" while every sibling turn returned «جدة». Swap in the catalog's
+        // OWN canonical Arabic label — never a transliteration, never a guess. No Arabic canonical
+        // available ⇒ the original passes through untouched, so unknown places are still searched.
+        location = arabicCanonicalLocation({ location, canonicalArabic: nm, locale });
         const lastModel = [...history].reverse().find((h) => h?.role === "model")?.text ?? "";
         // markers of a clarification WE generated on the previous turn → this turn answers it
         const alreadyAsked = /أكثر من منطقة|أكثر من مدينة|اسم مدينة واسم منطقة|ولا منطقة/.test(String(lastModel));
@@ -859,7 +888,10 @@ Deno.serve(async (req: Request) => {
           detail: typeof out.detail === "string" && out.detail ? out.detail : null,
           price,
           priceOriginal: priceOriginal || undefined,
-          sort: typeof out.sort === "string" && out.sort && out.sort !== "none" ? out.sort : undefined,
+          // RULE 2 (owner 2026-08-29) — the reply must not promise an ordering the query does not
+          // apply. Live N1 replied «أرخص القصور» with sort unset. Fills an ABSENT sort only; an
+          // explicit model sort is never overridden. See ./postModel.ts.
+          sort: enforceSortMatchesReply(replyOut, typeof out.sort === "string" ? out.sort : undefined),
           count: (() => {
             const n = parseInt(String(out.count ?? "").replace(/[^\d]/g, ""), 10);
             return isFinite(n) && n >= 1 ? Math.min(n, 15) : undefined;
