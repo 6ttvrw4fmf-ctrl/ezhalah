@@ -100,7 +100,11 @@ check("no physical-left text anywhere in the menu (RTL-first hierarchy)", !/text
 check('renames write through to auth user_metadata (refresh-proof — owner 2026-08-29)',
   /persistDisplayName[\s\S]{0,300}auth\.updateUser\(\{ data: \{ full_name: v, name: v \} \}\)/.test(read('src/lib/auth.ts')));
 check('persistName routes the rename through persistDisplayName', /const persistName[\s\S]{0,500}persistDisplayName\(v\)/.test(menu));
-check('the close × mirrors to the LEFT in RTL', /centerClose: \{ position: 'absolute', top: 12, left: 12/.test(menu));
+// Same intent, direction-aware form (reconciled 2026-08-29, mobile-UX pass): under Arabic's forced
+// RTL the physical top-right is spelled `left:` — the conditional keeps that AND stays correct for
+// a future LTR locale, which the bare literal did not.
+check('the close × lands physical top-right under RTL (direction-aware)',
+  /centerClose: \{ position: 'absolute', top: 12, \.\.\.\(I18nManager\.isRTL \? \{ left: 12 \} : \{ right: 12 \}\)/.test(menu));
 
 // ── 7. the Agent/chat screen is WHITE BY DESIGN (owner 2026-08-29) ──────────────────────────────
 // EXECUTED: the real buildThemeCss() must emit the [data-ez-light] subtree block that re-resolves
