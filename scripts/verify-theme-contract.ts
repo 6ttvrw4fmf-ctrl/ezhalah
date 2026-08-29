@@ -10,7 +10,8 @@
 //   • sites that PARSE colors (reanimated interpolateColor, RN Animated interpolation,
 //     expo-linear-gradient) use resolved-palette LITERALS (useThemePalette), never var() tokens;
 //   • the hero sketch swaps to a pre-rendered chalk-on-night asset — no CSS filter hacks;
-//   • the account menu's header carries the eagle-night artwork, melted into the panel surface.
+//   • the account menu is CLEAN (owner reversal 2026-08-29: no banner artwork) and fully RTL;
+//   • the Agent/chat screen is pinned to the LIGHT design via ForceLightTheme + [data-ez-light].
 //
 // Interaction/menu behavior itself is pinned by scripts/verify-account-menu-contract.ts (PR#1206);
 // this file owns the RENDERING architecture. Mutation-proven:
@@ -85,10 +86,40 @@ for (const file of ['src/components/HeroBackground.tsx', 'src/components/InfoMod
 }
 check('HeroBackground swaps to the pre-rendered dark art (no CSS filter hack)', read('src/components/HeroBackground.tsx').includes("theme === 'dark' ? HERO_DARK : HERO"));
 
-// ── 6. the eagle artwork header (owner: «add the image, blend it in») ───────────────────────────
+// ── 6. the menu top is CLEAN + the whole surface is RTL (owner 2026-08-29 revision) ─────────────
+// The eagle banner was REMOVED on owner instruction — the top of the profile menu is avatar/name/
+// email only. These checks pin the reversal so the artwork can never quietly return.
 const menu = read('src/components/AccountMenu.tsx');
-check('the menu header carries the eagle-night artwork', menu.includes('eagle-night.jpg') && menu.includes('s.art'));
-check('the artwork melts into the panel surface (literal gradient, alpha0)', menu.includes('alpha0(C.surface)'));
+check('NO banner artwork in the account menu (owner removed it)', !menu.includes('eagle-night') && !menu.includes('LinearGradient'));
+check('profile row opens the display-name editor', /account-menu-profile[\s\S]{0,200}setEditing\(true\); go\('account', 1\)/.test(menu));
+check("Manage-account row opens in READ mode (no stale edit ride-along)", menu.includes("setEditing(false); go('account', 1)"));
+check('anchored panel pins direction rtl (escapes the sidebar LTR pin)', /panel: \{[\s\S]{0,220}direction: 'rtl'/.test(menu));
+check('both centered popups pin direction rtl', /centerCard: \{ direction: 'rtl'/.test(menu) && /centerCardWide: \{ direction: 'rtl'/.test(menu));
+check('phone dialog pins direction rtl', /phCard: \{ direction: 'rtl'/.test(menu));
+check("no physical-left text anywhere in the menu (RTL-first hierarchy)", !/textAlign: 'left'(?!' as const, writingDirection: 'ltr')/.test(menu.replace("textAlign: 'left' as const, writingDirection: 'ltr'", '')));
+check('renames write through to auth user_metadata (refresh-proof — owner 2026-08-29)',
+  /persistDisplayName[\s\S]{0,300}auth\.updateUser\(\{ data: \{ full_name: v, name: v \} \}\)/.test(read('src/lib/auth.ts')));
+check('persistName routes the rename through persistDisplayName', /const persistName[\s\S]{0,500}persistDisplayName\(v\)/.test(menu));
+check('the close × mirrors to the LEFT in RTL', /centerClose: \{ position: 'absolute', top: 12, left: 12/.test(menu));
+
+// ── 7. the Agent/chat screen is WHITE BY DESIGN (owner 2026-08-29) ──────────────────────────────
+// EXECUTED: the real buildThemeCss() must emit the [data-ez-light] subtree block that re-resolves
+// every token to light inside a pinned surface — in BOTH dark paths (explicit and OS-preference).
+const css2 = buildThemeCss();
+const lightBlock = css2.split('[data-ez-light]')[1] ?? '';
+check('buildThemeCss emits the [data-ez-light] light-pin block', css2.includes('[data-ez-light]'));
+check('the pin re-declares the light paper + color-scheme', lightBlock.includes(`--ez-paper:${lightColors.paper}`) && lightBlock.includes('color-scheme:light'));
+check('the pin block comes AFTER both dark blocks (subtree wins by inheritance, stated order stays sane)',
+  css2.indexOf('[data-ez-light]') > css2.indexOf('prefers-color-scheme: dark'));
+const themeSrc = read('src/theme/theme.tsx');
+check('ForceLightTheme overrides resolved to light with light literals', /ForceLightTheme[\s\S]{0,600}resolved: 'light', colors: themeColors\('light'\)/.test(themeSrc));
+check('ForceLightTheme renders the data-ez-light attribute container', themeSrc.includes("dataSet: { ezLight: '1' }"));
+check('ForceLightTheme passes mode/setMode through (controls inside still change the real preference)', /ForceLightTheme[\s\S]{0,700}\.\.\.parent/.test(themeSrc));
+const agentSrc = read('src/app/agent.tsx');
+check('agent screen wraps its main return in ForceLightTheme', agentSrc.includes('<ForceLightTheme>') && agentSrc.includes('</ForceLightTheme>'));
+check('the docked sidebar joins the light pin on /agent (and only there)',
+  /pathname === '\/agent'\s*\?\s*<ForceLightTheme container="bare"><Sidebar docked/.test(read('src/app/_layout.tsx')));
+check('agent pre-session placeholder is pinned light too', /isAppSessionStarted\(\)\) \{\s*return <ForceLightTheme>/.test(agentSrc));
 
 console.log(failed === 0 ? '\n✅ full-app theme contract holds.' : `\n❌ ${failed} check(s) failed.`);
 process.exit(failed === 0 ? 0 : 1);

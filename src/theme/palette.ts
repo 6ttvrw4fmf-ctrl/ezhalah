@@ -115,5 +115,9 @@ export function buildThemeCss(): string {
     `:root{${decl(lightColors)}color-scheme:light;}`,
     `:root[data-theme="dark"]{${decl(darkColors)}color-scheme:dark;}`,
     `@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){${decl(darkColors)}color-scheme:dark;}}`,
+    // A LIGHT-PINNED subtree (owner 2026-08-29: the Agent/chat screen keeps the white design even
+    // when the rest of the app is dark). Custom properties inherit, so redefining them on the
+    // subtree root beats every :root block above for everything inside it — both dark paths.
+    `[data-ez-light]{${decl(lightColors)}color-scheme:light;}`,
   ].join('\n');
 }
