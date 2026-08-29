@@ -1,13 +1,19 @@
 // ──────────────────────────────────────────────────────────────────────────────
-// agent — Ezhalah real AI Agent (PRD §7, §13) — Google Gemini
+// agent — Ezhalah real AI Agent (PRD §7, §13) — DeepSeek
 //
 // Turns a free-text message (Arabic-first) into a structured classification the
 // chat client already understands: { kind, reply, query }. The heavy lifting is
-// done by a real Gemini model, held to Ezhalah's hard product rule: it is
-// strictly NON-ADVISORY. It never recommends a property, never ranks, never says
+// done by a real LLM, held to Ezhalah's hard product rule: it is strictly
+// NON-ADVISORY. It never recommends a property, never ranks, never says
 // "best/better/good deal/worth it", and never gives financial, investment,
 // mortgage or legal advice. It only understands the request, extracts neutral
 // search parameters, and presents listings — the user decides.
+//
+// PROVIDER (owner 2026-08-28): DeepSeek. Gemini was removed in this same change
+// as an owner-ordered clean cutover — no coexistence layer, no fallback, no env
+// switch. The old GEMINI_* / AGENT_PROVIDER / GEMINI_MODEL / GEMINI_FALLBACK_MODEL
+// secrets, and the Google API key itself, should now be deleted from the
+// Supabase edge-function config; nothing in the app reads them any more.
 //
 // The API key lives ONLY here (a Supabase secret), never in the app bundle. The
 // client calls this function and falls back to its bundled heuristic if the
@@ -17,15 +23,11 @@
 // public project key; this endpoint does no privileged work and writes nothing.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
-// Default to the mid 2.5 tier (strong instruction-following + Saudi Arabic);
-// override with GEMINI_MODEL (e.g. gemini-2.5-flash-lite to cut cost, or -pro).
-const MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
-// When the primary model is rate-limited (503 "high demand"), fall back to the
-// lighter tier rather than dropping the user to the bundled client heuristic.
-const FALLBACK_MODEL = Deno.env.get("GEMINI_FALLBACK_MODEL") ?? "gemini-2.5-flash-lite";
-const urlFor = (m: string) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
+const DEEPSEEK_API_KEY = Deno.env.get("DEEPSEEK_API_KEY") ?? "";
+// "flash" = DeepSeek's fast/non-reasoning tier, the fit for a short classification task; override
+// with DEEPSEEK_MODEL. (deepseek-reasoner is chain-of-thought — slower and overkill here.)
+const DEEPSEEK_MODEL = Deno.env.get("DEEPSEEK_MODEL") ?? "deepseek-v4-flash";
+const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
@@ -488,31 +490,12 @@ function stripFiller(s: string): string {
   return out || String(s ?? "").trim();
 }
 
-// Gemini structured-output schema (OpenAPI subset; uppercase types).
-const SCHEMA = {
-  type: "OBJECT",
-  properties: {
-    kind: { type: "STRING", enum: ["listings", "message", "interview"] },
-    reply: { type: "STRING" },
-    deal: { type: "STRING", enum: ["Rent", "Buy", "Both"] },
-    location: { type: "STRING" },
-    type: { type: "STRING" },
-    detail: { type: "STRING" },
-    price: { type: "STRING" },
-    pricing_basis: {
-      type: "STRING",
-      enum: ["daily_rent", "weekly_rent", "monthly_rent", "quarterly_rent", "annual_rent", "full_price", "price_per_sqm", "none"],
-    },
-    rent_period: { type: "STRING", enum: ["none", "monthly", "annual"] },
-    sort: {
-      type: "STRING",
-      enum: ["none", "newest", "oldest", "price_asc", "price_desc", "area_asc", "area_desc", "ppm_asc", "ppm_desc", "beds_desc"],
-    },
-    count: { type: "STRING" },
-    platforms: { type: "ARRAY", items: { type: "STRING" } },
-  },
-  required: ["kind", "reply", "deal", "location", "type", "detail", "price", "pricing_basis", "rent_period", "sort", "count", "platforms"],
-};
+// DeepSeek's response_format:{type:"json_object"} guarantees the reply parses as JSON but does NOT
+// constrain WHICH keys/values appear (there is no responseSchema analogue on the OpenAI-compatible
+// endpoint). Appended to the SYSTEM message as a belt-and-braces restatement of the shape and enum
+// values the SYSTEM prompt above already documents in prose — same list, machine-readable form, so
+// the model gets the contract from two directions.
+const JSON_SHAPE_HINT = `\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none).`;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -525,7 +508,7 @@ Deno.serve(async (req: Request) => {
     return json({ error: "unauthorized" }, 401);
   }
 
-  if (!GEMINI_API_KEY) {
+  if (!DEEPSEEK_API_KEY) {
     // Tell the client to fall back to its bundled heuristic.
     return json({ error: "model not configured" }, 503);
   }
@@ -581,10 +564,6 @@ Deno.serve(async (req: Request) => {
   locale = replyLang ?? appLocale;
 
   try {
-    const headers = {
-      "x-goog-api-key": GEMINI_API_KEY, // key in header, never the URL
-      "content-type": "application/json",
-    };
     // Deterministic question-budget enforcement (confidence-based policy): the user may ask up to TWO
     // clarifying questions before the first search (high conf 0, medium 1, low 2). The model tends to
     // keep asking past that, so we count prior model questions ("?") and only once it has already asked
@@ -593,10 +572,11 @@ Deno.serve(async (req: Request) => {
     const budgetDirective = priorQuestions >= 2
       ? ` IMPORTANT: you have ALREADY asked TWO clarifying questions in this chat — do NOT ask a third. IF the user's latest message is continuing a PROPERTY SEARCH (an answer to your question, or more search detail), then SEARCH NOW (kind="listings") with whatever you have: infer the city from any landmark/geography/lifestyle clue, else leave location "" (all of Saudi Arabia), and deal="Both" if rent vs buy is unknown. BUT if the latest message is NOT a property search — a utility/explanation/currency-or-unit-conversion/brand/support/general-Ezhalah question, or small talk — just ANSWER it directly (kind="message"); do NOT force a search.`
       : "";
-    // Build a multi-turn conversation: prior turns (memory) + the current wrapped message. We
-    // sanitize so Gemini's rules hold — contents must START with a user turn and not repeat a role.
-    // The client already recognized any landmark from the full catalog — feed it in as a known-place
-    // signal so the model infers the CITY and searches it, never asking "which city?" for a landmark.
+    // Build a multi-turn conversation: prior turns (memory) + the current wrapped message. Contents
+    // must START with a user turn and not repeat a role — a rule DeepSeek shares with any chat API
+    // (an assistant-first messages[] rejects with 400). The client already recognized any landmark
+    // from the full catalog — feed it in as a known-place signal so the model infers the CITY and
+    // searches it, never asking "which city?" for a landmark.
     const lmLine = lmHint
       ? ` RECOGNIZED LANDMARKS (from Ezhalah's landmark database — treat each as a KNOWN place, infer its CITY and search that city; NEVER ask which city when a landmark is recognized): ${lmHint}.`
       : "";
@@ -613,40 +593,43 @@ Deno.serve(async (req: Request) => {
       else contents.push({ role: tn.role, parts: [{ text: tn.text }] });
     }
 
-    const genConfig = {
-      temperature: 0.3,
-      // Gemini 2.5 Flash is a "thinking" model — reasoning tokens count against maxOutputTokens. We
-      // don't need chain-of-thought for classification, so we disable thinking and give JSON headroom.
-      thinkingConfig: { thinkingBudget: 0 },
-      maxOutputTokens: 800,
-      responseMimeType: "application/json",
-      responseSchema: SCHEMA,
-    };
-    const models = [MODEL, FALLBACK_MODEL].filter((m, i, a) => a.indexOf(m) === i);
-    // Call Gemini with the given contents and return the parsed JSON object, or { __err } with a ready
-    // Response on failure. Flash can return 503 during spikes — retry once, then fall back to lite.
+    // Call DeepSeek with the given contents and return the parsed JSON object, or { __err } with a
+    // ready Response on failure. `contents` keeps the internal shape the code above already builds
+    // (role "user"/"model", parts[{text}]); we translate to OpenAI's messages[] here — role "model"
+    // becomes "assistant" (OpenAI has no "model" role), parts are joined with newlines.
+    // Retry once per 429/5xx (parity with the prior Gemini retry).
     const runModel = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
-      const payload = JSON.stringify({ system_instruction: { parts: [{ text: SYSTEM + sysExtra }] }, contents: cts, generationConfig: genConfig });
+      const headers = { Authorization: `Bearer ${DEEPSEEK_API_KEY}`, "content-type": "application/json" };
+      const messages = [
+        { role: "system", content: SYSTEM + sysExtra + JSON_SHAPE_HINT },
+        ...cts.map((c) => ({ role: c.role === "model" ? "assistant" : "user", content: c.parts.map((p) => p.text).join("\n") })),
+      ];
+      const payload = JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages,
+        temperature: 0.3,
+        max_tokens: 800,
+        // Guarantees the reply parses as JSON; does NOT constrain keys/values (see JSON_SHAPE_HINT).
+        response_format: { type: "json_object" },
+      });
       let res: Response | null = null;
-      outer: for (const m of models) {
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const r = await fetch(urlFor(m), { method: "POST", headers, body: payload });
-          if (r.ok) { res = r; break outer; }
-          res = r;
-          if (![429, 500, 502, 503].includes(r.status)) break outer;
-          await r.body?.cancel().catch(() => {});
-          if (attempt === 0) await new Promise((rs) => setTimeout(rs, 500));
-        }
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const r = await fetch(DEEPSEEK_URL, { method: "POST", headers, body: payload });
+        if (r.ok) { res = r; break; }
+        res = r;
+        if (![429, 500, 502, 503].includes(r.status)) break;
+        await r.body?.cancel().catch(() => {});
+        if (attempt === 0) await new Promise((rs) => setTimeout(rs, 500));
       }
-      if (!res || !res.ok) { const detail = res ? await res.text() : "no response"; return { __err: json({ error: `gemini ${res?.status ?? 0}`, detail }, 502) }; }
+      if (!res || !res.ok) { const detail = res ? await res.text() : "no response"; return { __err: json({ error: `deepseek ${res?.status ?? 0}`, detail }, 502) }; }
       const data = await res.json();
-      const raw = (data?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p?.text ?? "").join("").trim();
+      const raw = String(data?.choices?.[0]?.message?.content ?? "").trim();
       if (!raw) return { __err: json({ error: "empty model output" }, 502) };
       try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw }, 502) }; }
     };
 
-    // Force the reply language via system_instruction (Gemini weights it far more than a turn line) —
-    // the model otherwise slips to Arabic when an English message contains one Arabic word (a city).
+    // Force the reply language via the system message (weighted far higher than a turn line) — the
+    // model otherwise slips to Arabic when an English message contains one Arabic word (a city).
     const langName = locale === "en" ? "English" : "Arabic";
     const langLine = `\n\nREPLY LANGUAGE FOR THIS TURN: ${langName} ONLY. The "reply" field MUST be written 100% in ${langName} — every single word, no exceptions, even if the user's message contains a word in the other language.`;
     // DB-driven behavior notes (editable in the agent_notes table, no redeploy) — appended last so
@@ -750,7 +733,7 @@ Deno.serve(async (req: Request) => {
       }
       // Bug-fix #7 (audit `agent-no-postmodel-catalog-guard`): defensive post-model location guard.
       // Pass through the model's location verbatim — the client resolver validates against the full
-      // catalog (4,581 cities). NEVER force into a CITIES-list member; if Gemini outputs Arabic
+      // catalog (4,581 cities). NEVER force into a CITIES-list member; if the model outputs Arabic
       // (e.g. "ذبحة" for the unknown Eastern-Province city), let it through unchanged so the client
       // can match it exactly. Just normalize whitespace and reject objects/arrays sneaking through.
       const rawLoc = typeof out.location === "string" ? out.location : "";
