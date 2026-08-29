@@ -56,7 +56,7 @@ This section describes the shape; read the file for the table.
 | 4 🧪 Search & Matching QA | 8 | `searchability_collapse`, `card_link_identity` |
 | 5 🎯 AF + Trending | 6 | `af_null_to_false_conversion`, `trending_district` |
 | 6 👣 Journey & Persistence | 2 | `transcript_shrank`, `filter_state_lost_after_refresh` |
-| 7 🧵 Systems Seam | 22 | `alert_delivery`, `migration_drift`, `cron_health` |
+| 7 🧵 Systems Seam | 23 | `alert_delivery`, `migration_drift`, `cron_health`, `ai_cost_health` |
 
 **One kind falling back is the healthy number, not a gap.** If that column grows, #2 is silently
 inheriting everyone's backlog and the patterns need extending — that is the drift to watch for.
