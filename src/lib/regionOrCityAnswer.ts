@@ -196,3 +196,54 @@ export function isGenericWholeAreaAnswer(text: string | undefined | null): boole
   // of filler («في من») is not an answer to anything.
   return WHOLE_AREA_TOKEN.test(s) || SAYS_CITY.test(s) || /(?<![\p{L}\p{N}])المدينة(?![\p{L}\p{N}])/u.test(s);
 }
+
+// ── «الرياض كاملة» means the CITY, not the region (OWNER DECISION, 2026-08-29) ───────────────────
+//
+// THE RULE, in the owner's words: «الرياض كاملة» must mean Riyadh CITY, not Riyadh Region. The
+// administrative region requires EXPLICIT region wording — «منطقة الرياض». Generic «كاملة» is never
+// permission to widen a twin-name city into its whole region. It applies to all five twins:
+// الرياض · جازان · تبوك · حائل · نجران.
+//
+// WHY (owner's reasoning, recorded so a future reader does not "simplify" it away):
+//   «الرياض»        usually means the city
+//   «مدينة الرياض»  definitely means the city
+//   «الرياض كاملة»  naturally reads as "all of Riyadh [city]"
+//   «منطقة الرياض»  is the explicit region phrase
+//
+// WHAT IT REPLACED: agent.tsx's WHOLE_AREA rule ("the user asked for the whole area — honour it,
+// don't ask to narrow") short-circuits the twin question entirely, and the location it then searched
+// was whatever the parser produced — for a twin that is the REGION. Measured on production
+// 2026-08-29: «أبغى شقة للإيجار السنوي في الرياض كاملة» searched all 20 cities of منطقة الرياض,
+// 23,628 listings, with no question asked. The user said "Riyadh" and got Al-Kharj, Afif and
+// Hawtat Bani Tamim.
+//
+// This rule only ever NARROWS (region → city) and only on a twin name, so it cannot widen anyone's
+// scope. Explicit region intent — «منطقة X», or a standalone «منطقة»/«المنطقة» — always wins.
+
+// Region intent in the user's own words. Deliberately LOOSER than SAYS_REGION above: this one also
+// accepts «المنطقة» with the fused «ال», because «المنطقة كلها» is a real way to ask for the region
+// and the strict form (built to keep «المنطقة الشرقية» out of a SCOPE CHOICE) would miss it. Here a
+// false positive is safe — it just leaves the region scope alone — while a false negative would
+// silently narrow someone who did ask for the region.
+const SAYS_REGION_LOOSE = /(?<![\p{L}\p{N}])(?:ال)?منطقة(?![\p{L}\p{N}])/u;
+
+/**
+ * True when a whole-area phrase on the twin `twin` must be read as that twin's CITY.
+ *
+ * Returns false — leaving the scope untouched — when the user expressed explicit region intent, or
+ * when there is no whole-area phrase at all (this rule has nothing to say about «الرياض» on its own,
+ * which still earns the twin question).
+ */
+export function twinWholeAreaIsCity(text: string | undefined | null, twin: string | undefined | null): boolean {
+  const s = (text ?? '').trim();
+  if (!s || !twin) return false;
+  if (!WHOLE_AREA_TOKEN.test(s)) return false;  // no «كاملة/كلها/…» → rule does not apply
+  // Any explicit region wording wins: «منطقة الرياض», «منطقة الرياض كاملة», «المنطقة كلها».
+  // ONE guard, not two: SAYS_REGION_LOOSE is strictly broader than scopeNamedForTwin's region form
+  // (that one needs a standalone «منطقة» followed by the twin; this one needs a standalone
+  // «منطقة»/«المنطقة» anywhere), so a second `scopeNamedForTwin(...) === 'region'` check here was
+  // unreachable — no input could satisfy it without satisfying this. It was written, found
+  // mutation-proof-blind, and removed rather than left as a branch no test can fail.
+  if (SAYS_REGION_LOOSE.test(s)) return false;
+  return true;
+}

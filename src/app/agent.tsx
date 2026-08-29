@@ -44,7 +44,7 @@ import { parseQuery, respond } from '@/data/agent';
 import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
-import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor } from '@/lib/regionOrCityAnswer';
+import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
@@ -2169,6 +2169,17 @@ export default function Agent() {
       // is false the moment one survives), so the only correct location is the city we asked about.
       // Whatever the model parsed out of «المدينة كاملة» is, by construction, not a place the user named.
       else if (genericWholeArea) turn = { ...turn, query: { ...turn.query, location: askedCity! } };
+      // «الرياض كاملة» is the CITY (owner, 2026-08-29). Without this the WHOLE_AREA rule below
+      // short-circuits the twin question and searches whatever the parser produced — for a twin
+      // that is the whole REGION, so «الرياض كاملة» returned all 20 cities of منطقة الرياض. Only
+      // ever narrows region→city, and explicit «منطقة X» wins (see twinWholeAreaIsCity).
+      else if (twin && twinWholeAreaIsCity(v, twin)) {
+        turn = { ...turn, query: { ...turn.query, location: scopedLocation(twin, 'city') } };
+      }
+    } else if (askedTwin && twinWholeAreaIsCity(v, askedTwin) && turn.kind === 'message') {
+      // Same rule when «كاملة» arrives as the ANSWER to our twin question and the model drifted off
+      // the thread — the user still chose, and their choice is the city.
+      turn = { kind: 'listings', reply: '', query: { ...parseQuery(saidRef.current.join(' ')), location: scopedLocation(askedTwin, 'city') } };
     } else if (genericWholeArea && turn.kind === 'message') {
       // Same recovery as the twin branch below: the model drifted off the thread, but the user did
       // answer a question WE asked, so run their search from this attempt scoped to that city.
