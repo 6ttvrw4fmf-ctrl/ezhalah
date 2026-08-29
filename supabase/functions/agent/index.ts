@@ -153,6 +153,34 @@ function recordHealth(outcome: string, latencyMs: number, detail: Record<string,
   } catch { /* telemetry must never throw into the request path */ }
 }
 
+// ── AI COST TELEMETRY (public.ai_usage) ───────────────────────────────────────
+// Owner 2026-08-29: the DeepSeek balance was dropping far faster than the earlier ~$1/1,000-message
+// estimate, and NOTHING recorded usage — data.usage was read only on the error path and thrown away
+// on every success. So the cost of a real turn was unknowable and the estimate could not be checked.
+//
+// Separate from recordHealth above on purpose: that one answers "is the agent alive", this one
+// answers "what did the turn cost". Same fire-and-forget discipline — never awaited, never throws
+// into the turn, and an outage degrades to "no row written", never to a failed user turn.
+// PRIVACY: counts only — no prompt, no user message, no reply, no user id. (PDPL; and the owner's
+// standing "no unnecessary raw chat transcripts" rule.) Pricing lives in public.ai_usage_costed,
+// NOT here, so a DeepSeek rate change never needs a redeploy of this 93KB function.
+function logUsage(row: Record<string, unknown>): void {
+  if (!SUPABASE_URL || !SERVICE_KEY) return;
+  try {
+    void fetch(`${SUPABASE_URL}/rest/v1/ai_usage`, {
+      method: "POST",
+      headers: {
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+        "content-type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify(row),
+    })
+      .then((r) => r.body?.cancel().catch(() => {}))
+      .catch(() => {});
+  } catch { /* telemetry must never break a turn */ }
+
 // ── DETERMINISTIC CATALOG CLASSIFIER (loc_classify RPC) ───────────────────────
 // The SQL function loc_classify(token) maps a location token to the official Arabic
 // catalog, inventory-aware. It tells us, with certainty the LLM cannot, whether a
@@ -729,7 +757,8 @@ Deno.serve(async (req: Request) => {
     // (role "user"/"model", parts[{text}]); we translate to OpenAI's messages[] here — role "model"
     // becomes "assistant" (OpenAI has no "model" role), parts are joined with newlines.
     // Retry once per 429/5xx (parity with the prior Gemini retry).
-    const runModel = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
+    const runModel = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = "", seq = 1): Promise<any> => {
+      const t0 = Date.now();
       const headers = { Authorization: `Bearer ${DEEPSEEK_API_KEY}`, "content-type": "application/json" };
       const messages = [
         { role: "system", content: SYSTEM + sysExtra + JSON_SHAPE_HINT },
@@ -789,6 +818,27 @@ Deno.serve(async (req: Request) => {
         finish_reason: choice?.finish_reason ?? null,
         model: data?.model ?? null,
       }));
+      // The console line above is readable in the edge logs but Postgres cannot query it, so it
+      // cannot answer "what did last week cost" or drive a dashboard. This writes the same usage —
+      // plus the requested-vs-billed model, which decides the tier and therefore the whole bill —
+      // to public.ai_usage, where it is costed by public.ai_usage_costed.
+      const u = data?.usage ?? {};
+      logUsage({
+        requested_model: DEEPSEEK_MODEL,
+        model: data?.model ?? null,
+        kind: /"kind"\s*:\s*"(listings|message|interview)"/.exec(raw)?.[1] ?? null,
+        locale,
+        call_seq: seq,
+        prompt_tokens: u.prompt_tokens ?? null,
+        completion_tokens: u.completion_tokens ?? null,
+        reasoning_tokens: u.completion_tokens_details?.reasoning_tokens ?? null,
+        cache_hit_tokens: u.prompt_cache_hit_tokens ?? null,
+        cache_miss_tokens: u.prompt_cache_miss_tokens ?? null,
+        total_tokens: u.total_tokens ?? null,
+        finish_reason: choice?.finish_reason ?? null,
+        history_turns: history.length,
+        latency_ms: Date.now() - t0,
+      });
       if (!raw) {
         recordHealth("empty_output", Date.now() - t0, why);
         return { __err: json({ error: "empty model output", ...why }, 502) };
@@ -828,7 +878,7 @@ Deno.serve(async (req: Request) => {
       // notesBlock — so whenever the language guard fired, the reply actually shown to the user was
       // generated WITHOUT the live behaviour notes the code itself labels "authoritative — override
       // anything above on conflict". The retry must carry exactly the same authority as the first call.
-      const retry: any = await runModel(contents, langLine + notesBlock + ` The previous attempt WRONGLY replied in ${wrong === "ar" ? "Arabic" : "English"} — do not repeat that mistake; output the reply ONLY in ${langName}.`);
+      const retry: any = await runModel(contents, langLine + notesBlock + ` The previous attempt WRONGLY replied in ${wrong === "ar" ? "Arabic" : "English"} — do not repeat that mistake; output the reply ONLY in ${langName}.`, 2);
       if (retry && !retry.__err && retry.kind && detectLang(String(retry.reply ?? "")) !== wrong) out = retry;
     }
 
