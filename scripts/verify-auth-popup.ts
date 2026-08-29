@@ -1,23 +1,32 @@
-// THE MOVABLE SIGN-IN POPUP'S CONTRACT (owner 2026-08-28)
+// THE SIGN-IN SURFACES' CONTRACT (owner 2026-08-29 revision)
 //
 //   node --experimental-strip-types scripts/verify-auth-popup.ts        (discovered by `npm test`)
 //
-// The old side login UI (the SignInDock card, the duplicated sidebar guest CTA) is REMOVED, and in
-// its place the ONE existing AuthModal auto-raises for signed-out web visitors on the Filter home
-// and the Agent screen — larger on desktop, draggable there by its header, never draggable
-// off-screen, never shown to a signed-in user, and a plain centered modal on mobile. Every rule
-// lives in a pure function (src/lib/authPopupBehavior.ts) and this barrier EXECUTES those
-// functions over their full input space rather than grepping for conditionals. The wiring section
-// then pins that the components actually delegate to them — a rule nobody calls verifies nothing.
+// The 2026-08-28 large AUTO-SHOWING popup is RETIRED by the owner's next-day revision: «i dont
+// want this popup to show, i want it small where the user can drag and move around in the filter
+// and ai agent, it goes away once the user sends something, put it in the side.» What holds now:
+//
+//   • SignInCard — the small draggable side card — is the UNPROMPTED invitation for signed-out
+//     desktop-web visitors on '/' and '/agent'. Full compact login inside it (AuthModal's shared
+//     AuthForm). It dismisses the moment the user SENDS something (Filter search submit, Agent
+//     message — voice funnels into the same send()) or closes it; the dismissal is IN-MEMORY, so
+//     a refresh brings the card back; an auth transition clears it (#1214 epoch).
+//   • AuthModal — the centered popup — opens ONLY via explicit sign-in controls (openAuth). It
+//     NEVER auto-raises. Its owner-loved drag, clamp and mobile behaviour are unchanged.
+//
+// Every rule is a pure function (src/lib/authPopupBehavior.ts) EXECUTED here over its input
+// space; the wiring section then pins that components actually delegate to them.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  shouldAutoShowAuthPopup,
+  shouldShowSignInCard,
   canDragAuthPopup,
   clampAuthPopupOffset,
   dismissalOutlivesTransition,
+  signInCardDefaultPos,
   AUTH_POPUP_EDGE,
-  type AutoShowGate,
+  SIGNIN_CARD_W,
+  type SignInCardGate,
 } from '../src/lib/authPopupBehavior.ts';
 
 let failed = 0;
@@ -26,219 +35,256 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${!ok && detail ? `\n        ${detail}` : ''}`);
 };
 
-// ── 1. AUTO-SHOW: the popup appears on BOTH screens, and for signed-out visitors only ────────────
-const SHOWN: AutoShowGate = { isWeb: true, authChecked: true, user: null, introBlocking: false, dismissed: false, pathname: '/' };
+// ── 1. WHEN THE SMALL CARD EXISTS — signed-out desktop web on Filter/Agent, until dismissed ──────
+const SHOWN: SignInCardGate = { isWeb: true, docked: true, authChecked: true, user: null, dismissed: false, modalOpen: false, pathname: '/' };
 
-check('SHOWS on the Filter home for a signed-out web visitor', shouldAutoShowAuthPopup(SHOWN));
-check('SHOWS on the Agent screen for a signed-out web visitor', shouldAutoShowAuthPopup({ ...SHOWN, pathname: '/agent' }));
-
-// Each gate, flipped alone — every one must be sufficient to keep it closed.
-check('LOGGED-IN users never see it',            !shouldAutoShowAuthPopup({ ...SHOWN, user: { id: 'u1' } }));
-check('LOGGED-IN users never see it (on Agent)', !shouldAutoShowAuthPopup({ ...SHOWN, user: { id: 'u1' }, pathname: '/agent' }));
+check('card SHOWS on the Filter home for a signed-out desktop visitor', shouldShowSignInCard(SHOWN));
+check('card SHOWS on the Agent screen too', shouldShowSignInCard({ ...SHOWN, pathname: '/agent' }));
+check('LOGGED-IN users never see it',            !shouldShowSignInCard({ ...SHOWN, user: { id: 'u1' } }));
+check('LOGGED-IN users never see it (on Agent)', !shouldShowSignInCard({ ...SHOWN, user: { id: 'u1' }, pathname: '/agent' }));
 check('HIDDEN while the session is still restoring (no flash at a logged-in visitor)',
-  !shouldAutoShowAuthPopup({ ...SHOWN, authChecked: false }));
-check('HIDDEN on native (web only)',             !shouldAutoShowAuthPopup({ ...SHOWN, isWeb: false }));
-check('HIDDEN while the intro film could still render (never cover it)',
-  !shouldAutoShowAuthPopup({ ...SHOWN, introBlocking: true }));
-check('DISMISSAL IS RESPECTED — once closed this session, it never auto-raises again',
-  !shouldAutoShowAuthPopup({ ...SHOWN, dismissed: true }));
-check('DISMISSAL holds across Filter↔Agent navigation (no re-pop nag)',
-  !shouldAutoShowAuthPopup({ ...SHOWN, dismissed: true, pathname: '/agent' }));
-check('HIDDEN on every other route', ['/settings', '/about', '/support', '/browser', '/interview', '/auth']
-  .every((pathname) => !shouldAutoShowAuthPopup({ ...SHOWN, pathname })));
+  !shouldShowSignInCard({ ...SHOWN, authChecked: false }));
+check('HIDDEN on native (web only)',   !shouldShowSignInCard({ ...SHOWN, isWeb: false }));
+check('HIDDEN below the dock breakpoint — mobile keeps the pill + on-demand modal',
+  !shouldShowSignInCard({ ...SHOWN, docked: false }));
+check('DISMISS-ON-SEND / close is respected — gone for the rest of this load',
+  !shouldShowSignInCard({ ...SHOWN, dismissed: true }));
+check('…and holds across Filter↔Agent navigation (no re-appear nag)',
+  !shouldShowSignInCard({ ...SHOWN, dismissed: true, pathname: '/agent' }));
+check('HIDDEN on every other route', ['/about', '/support', '/browser', '/interview', '/auth']
+  .every((pathname) => !shouldShowSignInCard({ ...SHOWN, pathname })));
 
-// Full truth table: 2·2·2·2·2·3 = 96 combinations; exactly the two good-gate rows ('/', '/agent')
-// may show. Every signed-in combination is inside the other 94.
+// THE OWNER'S LOCKED SHOW-MATRIX, row by row. "Fresh", "signed-out", "post-delete" and
+// "expired/revoked session" all reduce to the same state the store lands in: user=null,
+// authChecked=true, dismissed cleared by the epoch writer — asserted as such, per row:
+for (const who of ['fresh visitor', 'signed-out user', 'post-delete user', 'expired/revoked session']) {
+  check(`LOCKED matrix: ${who} → card on Filter AND Agent`,
+    shouldShowSignInCard({ ...SHOWN, pathname: '/' }) && shouldShowSignInCard({ ...SHOWN, pathname: '/agent' }));
+}
+check('LOCKED matrix: logged-in → never (any route)',
+  ['/', '/agent', '/about'].every((pathname) => !shouldShowSignInCard({ ...SHOWN, user: { id: 'u' }, pathname })));
+
+// MUTUAL EXCLUSION (locked): the open modal suppresses the card; closing it (no login) returns
+// the card — because suppression is a separate input, dismissed is untouched by the round-trip.
+check('LOCKED modal open ⇒ card suppressed', !shouldShowSignInCard({ ...SHOWN, modalOpen: true }));
+check('LOCKED modal closed without login ⇒ card returns', shouldShowSignInCard({ ...SHOWN, modalOpen: false }));
+check('LOCKED …but a send-dismissal persists through a modal round-trip',
+  !shouldShowSignInCard({ ...SHOWN, dismissed: true, modalOpen: false }));
+check('LOCKED successful login ⇒ BOTH gone (user set closes the card; done() closes the modal)',
+  !shouldShowSignInCard({ ...SHOWN, user: { id: 'u' }, modalOpen: false }));
+
+// Full truth table: 2^6 × 3 pathnames = 192 combinations; exactly the two good-gate rows show.
 {
-  let shown = 0, shownSignedIn = 0;
-  for (const isWeb of [true, false]) for (const authChecked of [true, false])
-    for (const user of [null, { id: 'u' }]) for (const introBlocking of [true, false])
-      for (const dismissed of [true, false]) for (const pathname of ['/', '/agent', '/settings']) {
-        const s = shouldAutoShowAuthPopup({ isWeb, authChecked, user, introBlocking, dismissed, pathname });
-        if (s) shown++;
-        if (s && user) shownSignedIn++;
-      }
-  check('exactly TWO of the 96 gate combinations show it (Filter home + Agent)', shown === 2, `got ${shown}`);
+  let shown = 0, shownSignedIn = 0, shownWithModal = 0;
+  for (const isWeb of [true, false]) for (const docked of [true, false])
+    for (const authChecked of [true, false]) for (const user of [null, { id: 'u' }])
+      for (const dismissed of [true, false]) for (const modalOpen of [true, false])
+        for (const pathname of ['/', '/agent', '/about']) {
+          const v = shouldShowSignInCard({ isWeb, docked, authChecked, user, dismissed, modalOpen, pathname });
+          if (v) shown++;
+          if (v && user) shownSignedIn++;
+          if (v && modalOpen) shownWithModal++;
+        }
+  check('exactly TWO of the 192 gate combinations show the card (Filter home + Agent)', shown === 2, `got ${shown}`);
   check('ZERO of the signed-in combinations show it', shownSignedIn === 0, `got ${shownSignedIn}`);
+  check('ZERO combinations ever stack the card with the open modal', shownWithModal === 0, `got ${shownWithModal}`);
 }
 
-// ── 2. DRAGGING EXISTS ONLY ON DESKTOP WEB ───────────────────────────────────────────────────────
-check('drag ENABLED on desktop web',              canDragAuthPopup({ isWeb: true, docked: true }));
-check('drag DISABLED on mobile web (centered responsive modal instead)', !canDragAuthPopup({ isWeb: true, docked: false }));
-check('drag DISABLED on native',                  !canDragAuthPopup({ isWeb: false, docked: true }));
-check('drag DISABLED on native mobile',           !canDragAuthPopup({ isWeb: false, docked: false }));
+// RETURN-ON-REFRESH is structural: the dismissal is plain component state (verified in WIRING
+// below — never persisted), so a fresh load ALWAYS starts at dismissed=false:
+check('a fresh load (dismissed=false by construction) shows the card again', shouldShowSignInCard({ ...SHOWN, dismissed: false }));
 
-// ── 3. DRAG BOUNDS: the card can NEVER be dragged off-screen ─────────────────────────────────────
+// ── 2. DRAGGING EXISTS ONLY ON DESKTOP WEB (both surfaces share the gate) ────────────────────────
+check('drag ENABLED on desktop web',    canDragAuthPopup({ isWeb: true, docked: true }));
+check('drag DISABLED on mobile web',    !canDragAuthPopup({ isWeb: true, docked: false }));
+check('drag DISABLED on native',        !canDragAuthPopup({ isWeb: false, docked: true }));
+check('drag DISABLED on native mobile', !canDragAuthPopup({ isWeb: false, docked: false }));
+
+// ── 3. DRAG BOUNDS — neither surface can ever be dragged off-screen ──────────────────────────────
 {
-  // A centered 470×400 card in a 1340×720 viewport.
-  const base = { left: 435, top: 160, width: 470, height: 400 };
+  // THE SMALL CARD (absolute mode: base {0,0} + its size; the translate IS the position).
+  const card = { left: 0, top: 0, width: SIGNIN_CARD_W, height: 340 };
   const vp = { w: 1340, h: 720 };
-  const inBounds = (off: { x: number; y: number }) => {
-    const l = base.left + off.x, t = base.top + off.y;
-    return l >= AUTH_POPUP_EDGE && t >= AUTH_POPUP_EDGE
-      && l + base.width <= vp.w - AUTH_POPUP_EDGE && t + base.height <= vp.h - AUTH_POPUP_EDGE;
-  };
-  check('a violent throw right/down is clamped fully on-screen', inBounds(clampAuthPopupOffset({ x: 1e6, y: 1e6 }, base, vp)));
-  check('a violent throw left/up is clamped fully on-screen',    inBounds(clampAuthPopupOffset({ x: -1e6, y: -1e6 }, base, vp)));
-  check('NaN-free at the extremes', [1e6, -1e6, 0].every((v) => {
-    const r = clampAuthPopupOffset({ x: v, y: -v }, base, vp);
-    return Number.isFinite(r.x) && Number.isFinite(r.y);
-  }));
-  const id = clampAuthPopupOffset({ x: 40, y: -30 }, base, vp);
-  check('an in-bounds position is left exactly where the user put it', id.x === 40 && id.y === -30, `got ${id.x},${id.y}`);
-  // Sweep: every clamped offset is in bounds — the clamp is total, not just edge-case-patched.
+  const inBounds = (p: { x: number; y: number }) =>
+    p.x >= AUTH_POPUP_EDGE && p.y >= AUTH_POPUP_EDGE
+    && p.x + card.width <= vp.w - AUTH_POPUP_EDGE && p.y + card.height <= vp.h - AUTH_POPUP_EDGE;
+  check('card: a violent throw right/down clamps fully on-screen', inBounds(clampAuthPopupOffset({ x: 1e6, y: 1e6 }, card, vp)));
+  check('card: a violent throw left/up clamps fully on-screen',    inBounds(clampAuthPopupOffset({ x: -1e6, y: -1e6 }, card, vp)));
   let all = true;
   for (let x = -2000; x <= 2000; x += 137) for (let y = -2000; y <= 2000; y += 173)
-    if (!inBounds(clampAuthPopupOffset({ x, y }, base, vp))) all = false;
-  check('every offset in a ±2000px sweep clamps to fully on-screen', all);
-  // A card TALLER than the viewport: the range inverts; the TOP edge (the grab strip) must win,
-  // so the card can always be grabbed and dragged back.
+    if (!inBounds(clampAuthPopupOffset({ x, y }, card, vp))) all = false;
+  check('card: every offset in a ±2000px sweep clamps fully on-screen', all);
+  const dp = signInCardDefaultPos(vp.w, vp.h);
+  check('card: the DEFAULT position is the retired dock’s side slot (right edge, mid-height) and in bounds',
+    dp.x === vp.w - SIGNIN_CARD_W - AUTH_POPUP_EDGE && Math.abs(dp.y - Math.round(vp.h * 0.46)) <= 1
+    && inBounds(clampAuthPopupOffset(dp, card, vp)));
+  // THE CENTERED MODAL (offset mode) keeps its own bounds.
+  const modal = { left: 435, top: 160, width: 470, height: 400 };
+  const mIn = (o: { x: number; y: number }) => {
+    const l = modal.left + o.x, t2 = modal.top + o.y;
+    return l >= AUTH_POPUP_EDGE && t2 >= AUTH_POPUP_EDGE
+      && l + modal.width <= vp.w - AUTH_POPUP_EDGE && t2 + modal.height <= vp.h - AUTH_POPUP_EDGE;
+  };
+  check('modal: throws in both directions still clamp fully on-screen',
+    mIn(clampAuthPopupOffset({ x: 1e6, y: 1e6 }, modal, vp)) && mIn(clampAuthPopupOffset({ x: -1e6, y: -1e6 }, modal, vp)));
+  // Taller than the viewport: the range inverts; the TOP (grab) edge must win.
   const tall = { left: 435, top: -100, width: 470, height: 900 };
-  const short = { w: 1340, h: 700 };
-  const r = clampAuthPopupOffset({ x: 0, y: 1e6 }, tall, short);
-  check('a card taller than the viewport pins its TOP (grab strip) edge on-screen',
+  const r = clampAuthPopupOffset({ x: 0, y: 1e6 }, tall, { w: 1340, h: 700 });
+  check('a surface taller than the viewport pins its TOP (grab) edge on-screen',
     tall.top + r.y === AUTH_POPUP_EDGE, `top ended at ${tall.top + r.y}`);
 }
 
-// ── 4. THE OLD SIDE LOGIN UI IS GONE — removed render paths, not CSS-hidden ──────────────────────
+// ── 4. THE LARGE AUTO-SHOW IS GONE — removed decision, not a hidden one ──────────────────────────
 const root = join(import.meta.dirname, '..');
 const SRC = (f: string) => readFileSync(join(root, 'src', f), 'utf8');
 const layout = SRC('app/_layout.tsx');
 const authModal = SRC('components/AuthModal.tsx');
-const sidebar = SRC('components/Sidebar.tsx');
+const signInCard = SRC('components/SignInCard.tsx');
 const store = SRC('store.tsx');
 const filter = SRC('app/index.tsx');
 const agent = SRC('app/agent.tsx');
+const behavior = SRC('lib/authPopupBehavior.ts');
 
-check('SignInDock component file is DELETED', !existsSync(join(root, 'src/components/SignInDock.tsx')));
-check('signInDockVisibility lib is DELETED',  !existsSync(join(root, 'src/lib/signInDockVisibility.ts')));
-check('no screen or layout imports or mounts a SignInDock',
-  ![layout, filter, agent, sidebar].some((s2) => s2.includes("from '@/components/SignInDock'") || s2.includes('<SignInDock')));
-check('Filter screen has no side auth card render path', !filter.includes('SignInDock') || !filter.includes('<SignInDock'));
-check('Agent screen has no side auth card render path',  !agent.includes('<SignInDock'));
-// The sidebar keeps exactly ONE guest sign-in affordance (the bottom slot where the signed-in
-// profile row lives); the old duplicated upper CTA card must not return.
+check('shouldAutoShowAuthPopup no longer EXISTS (the auto-show decision is deleted, not bypassed)',
+  !behavior.includes('shouldAutoShowAuthPopup') && !layout.includes('shouldAutoShowAuthPopup'));
+// Comment-stripped (provenance comments citing openAuth are welcome; a CODE call is the breach —
+// same convention as verify-single-auth-invitation.ts).
+const stripComments = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+check('the layout never CALLS openAuth — nothing raises the centered modal unprompted',
+  !stripComments(layout).includes('openAuth'));
+check('closeAuth is a plain state close again (no sessionStorage dismissal stamp)',
+  store.includes('closeAuth: () => setAuthOpen(false)') && !store.includes('AUTH_POPUP_DISMISSED_KEY'));
+check('AuthModal renders nothing unless explicitly opened', authModal.includes('if (!authOpen) return null;'));
+
+// ── 5. ONE AUTH UI, TWO PRESENTATIONS — the card renders the SAME AuthForm, no duplicate system ──
+check('AuthModal exports AuthForm and its Sheet renders it', authModal.includes('export function AuthForm(')
+  && authModal.includes('<AuthForm onRequestClose={close} onSignedIn={onSignedIn}'));
+check('SignInCard renders the SAME AuthForm compact — full login inside the card',
+  signInCard.includes("import { AuthForm } from '@/components/AuthModal'")
+  && signInCard.includes('<AuthForm compact onRequestClose={dismissSignInCard} onSignedIn={signIn} />'));
+check('SignInCard hosts NO auth logic of its own (providers/OTP live only in the shared form)',
+  !signInCard.includes('signInWithProvider') && !signInCard.includes('verifyPhoneOtp') && !signInCard.includes('sendPhoneOtp'));
+
+// ── 6. CARD WIRING ───────────────────────────────────────────────────────────────────────────────
+check('WIRING SignInCard delegates its visibility to the pure gate',
+  signInCard.includes('shouldShowSignInCard({'));
+check('WIRING the card is mounted exactly once, AFTER the Stack (its phone <input> must never become the page’s first input)',
+  (layout.match(/<SignInCard \/>/g) ?? []).length === 1
+  && layout.indexOf('<SignInCard />') > layout.indexOf('</Stack>'));
+check('WIRING the card drags via the shared machinery with its own position memory',
+  signInCard.includes('attachCardDrag(node, grip, {') && signInCard.includes('SIGNIN_CARD_POS_KEY')
+  && signInCard.includes('signInCardDefaultPos(innerWidth, innerHeight)'));
+check('WIRING the modal drags via the SAME shared machinery (owner-loved, kept)',
+  authModal.includes('attachCardDrag(node, grip, {') && authModal.includes('AUTH_POPUP_POS_KEY'));
+check('WIRING card clamps through clampAuthPopupOffset (absolute mode)',
+  signInCard.includes('clampAuthPopupOffset('));
+check('WIRING testIDs: signin-card / signin-card-drag-handle; the close X is the shared auth-popup-close',
+  signInCard.includes("testid: 'signin-card'") && signInCard.includes("testid: 'signin-card-drag-handle'")
+  && authModal.includes("testid: 'auth-popup-close'"));
+check('WIRING themed from birth: the card paints with var(--ez-*) token roles, no hardcoded surface hexes',
+  signInCard.includes('colors.surface') && signInCard.includes('colors.fieldLine')
+  && !/backgroundColor:\s*'#/.test(signInCard));
+
+// ── 7. DISMISS-ON-SEND — both send sites, and NOTHING persists the flag ──────────────────────────
+check('WIRING Filter search submit dismisses the card (successful path only)',
+  /dismissSignInCard\(\);\s*\n\s*router\.push\(\{ pathname: '\/agent'/.test(filter));
+check('WIRING Agent send() dismisses the card after its guard (voice funnels into the same send)',
+  /if \(!v \|\| busy\) return;[\s\S]{0,400}?dismissSignInCard\(\);/.test(agent)
+  && agent.includes('void send(merged)'));
+check('WIRING the dismissal is IN-MEMORY state — a refresh MUST bring the card back',
+  store.includes('const [signInCardDismissed, setSignInCardDismissed] = useState(false);')
+  && store.includes('dismissSignInCard: () => setSignInCardDismissed(true)')
+  && !/(sessionStorage|localStorage|AsyncStorage)[\s\S]{0,80}?signInCardDismiss/i.test(store));
+check('WIRING position memory is the ONLY persistence (sessionStorage key for pos, none for dismissal)',
+  behavior.includes("SIGNIN_CARD_POS_KEY = 'ezhalah.signInCard.pos'") && !/DISMISSED_KEY/.test(behavior));
+
+// THE THREE-AND-ONLY-THREE DISMISSAL TRIGGERS (locked): Filter search submit, Agent message send,
+// the card's own X. Counted across the whole src tree — a fourth caller (a typing handler, a
+// filter chip, a property option) is exactly the regression the owner enumerated as forbidden.
 {
-  const ctaRenders = (sidebar.match(/style=\{\s*\[?s\.cta[,\s\]}]/g) ?? []).length;
-  check('sidebar renders exactly ONE guest sign-in CTA (the duplicate card stays gone)', ctaRenders === 1, `found ${ctaRenders}`);
-  check('the remaining sidebar CTA is the tagged minimal affordance', sidebar.includes("testid: 'sidebar-signin-cta'"));
+  const { readdirSync, statSync } = await import('node:fs');
+  const walk = (dir: string): string[] => readdirSync(dir).flatMap((n) => {
+    const q = join(dir, n);
+    return statSync(q).isDirectory() ? walk(q) : /\.(ts|tsx)$/.test(n) ? [q] : [];
+  });
+  const callers: string[] = [];
+  for (const f of walk(join(root, 'src'))) {
+    const t2 = readFileSync(f, 'utf8');
+    const n = (t2.match(/dismissSignInCard\(\)/g) ?? []).length;
+    for (let i = 0; i < n; i++) callers.push(f.slice(root.length + 1));
+  }
+  const expected = ['src/app/agent.tsx', 'src/app/index.tsx', 'src/components/SignInCard.tsx'];
+  check('LOCKED exactly THREE dismissal call sites: Filter send, Agent send, the card X',
+    callers.length === 3 && expected.every((e) => callers.includes(e)), `callers: ${callers.join(', ')}`);
+  // The X: SignInCard passes dismissSignInCard as onRequestClose (a reference, not a call) — count
+  // that as the third writer explicitly:
+  check('LOCKED the card X is the third writer (onRequestClose={dismissSignInCard})',
+    signInCard.includes('onRequestClose={dismissSignInCard}'));
+  // NON-TRIGGERS (locked, each enumerated by the owner): typing, clicking filters, selecting
+  // property options. Structural form: no onChangeText / onChange handler anywhere calls the
+  // dismissal, and neither Filter nor Agent references it outside its ONE send site.
+  check('LOCKED typing never dismisses (no text-change handler touches dismissSignInCard)',
+    !/onChangeText=[^\n]*dismissSignInCard/.test(filter) && !/onChangeText=[^\n]*dismissSignInCard/.test(agent));
+  check('LOCKED Filter has exactly ONE dismissal call (the search submit) — chips/options cannot hide it',
+    (filter.match(/dismissSignInCard\(\)/g) ?? []).length === 1);
+  check('LOCKED Agent has exactly ONE dismissal call (send) — typing/focus cannot hide it',
+    (agent.match(/dismissSignInCard\(\)/g) ?? []).length === 1);
 }
 
-// ── 5. WIRING — the components must DELEGATE to the executed rules above ─────────────────────────
-check('WIRING the layout auto-show effect calls shouldAutoShowAuthPopup (no inline copy)',
-  layout.includes('shouldAutoShowAuthPopup({ isWeb: true, authChecked, user, introBlocking, dismissed, pathname })'));
-check('WIRING introBlocking derives from INTRO_ENABLED — a disabled intro never dams the popup',
-  layout.includes('const introBlocking = INTRO_ENABLED && introSeen !== true;'));
-check('WIRING the ONE AuthModal is mounted at the app root, pathname-agnostic (available on Filter AND Agent)',
-  layout.includes('<AuthModal />'));
-check('WIRING AuthModal gates drag through canDragAuthPopup',
-  authModal.includes("canDragAuthPopup({ isWeb: Platform.OS === 'web', docked })")
-  && authModal.includes('if (!drag) return;'));
-check('WIRING AuthModal clamps every drag through clampAuthPopupOffset',
-  authModal.includes('clampAuthPopupOffset(p, baseRect(), vp())'));
-check('WIRING the drag machinery renders only when drag is enabled (mobile keeps the plain modal)',
-  authModal.includes('{drag && (') && authModal.includes('drag && s.popWrapWide'));
-check('WIRING AuthModal renders nothing unless opened (authOpen)',
-  authModal.includes('if (!authOpen) return null;'));
-check('WIRING closeAuth stamps the session dismissal (closing is respected, reopening stays manual)',
-  store.includes('AUTH_POPUP_DISMISSED_KEY') && store.includes('introSeen,'));
-check('WIRING testIDs for the journey engineer: auth-popup / drag-handle / close',
-  authModal.includes("testid: 'auth-popup'")
-  && authModal.includes("testid: 'auth-popup-drag-handle'")
-  && authModal.includes("testid: 'auth-popup-close'"));
-check('WIRING desktop sizing exists and mobile cap is untouched (400 stays; 470 is desktop-only)',
-  authModal.includes('maxWidth: 400') && authModal.includes('popWrapWide: { maxWidth: 470 }'));
+// ── 8. MODAL PRESERVED — mobile responsive cap, desktop wide, on-demand only ─────────────────────
+check('modal keeps the mobile 400 cap and the desktop 470 width', authModal.includes('maxWidth: 400')
+  && authModal.includes('popWrapWide: { maxWidth: 470 }'));
+check('modal drag still gated by canDragAuthPopup', authModal.includes("canDragAuthPopup({ isWeb: Platform.OS === 'web', docked })"));
 
-
-// ═══ THE AUTH EPOCH + CANONICAL LOGGED-OUT STATE (owner 2026-08-29) ═══════════════════════════════
-// «Deleting an account must end in the exact same logged-out UI state as any normal logged-out
-// visitor.» Reproduced on production before the fix: sign in through the popup (its close stamps
-// the session dismissal) → delete the account → the STALE flag suppressed the popup for the new
-// logged-out visitor, and the dark theme survived into the guest state. These execute the real
-// rules over the owner's ten journeys.
-
+// ═══ THE AUTH EPOCH (#1214) — retargeted to the card's in-memory flag ════════════════════════════
 check('EPOCH a sign-IN transition voids the dismissal',  !dismissalOutlivesTransition(false, true));
 check('EPOCH a sign-OUT / deletion transition voids it', !dismissalOutlivesTransition(true, false));
-check('EPOCH no transition keeps it (refresh mid-epoch, Filter↔Agent nav)',
+check('EPOCH no transition keeps it (Filter↔Agent nav within one epoch)',
   dismissalOutlivesTransition(false, false) && dismissalOutlivesTransition(true, true));
-
-// A tiny model of the app: the ONLY state the journeys need — signed-in flag + the session flag —
-// with transitions driven through the SAME pure rule the store's one writer uses.
 {
   type World = { signedIn: boolean; dismissed: boolean };
   const transition = (w: World, nowSignedIn: boolean): World => ({
     signedIn: nowSignedIn,
     dismissed: dismissalOutlivesTransition(w.signedIn, nowSignedIn) ? w.dismissed : false,
   });
-  const popupOn = (w: World, pathname = '/') => shouldAutoShowAuthPopup({
-    isWeb: true, authChecked: true, user: w.signedIn ? { id: 'u' } : null,
-    introBlocking: false, dismissed: w.dismissed, pathname,
+  const cardOn = (w: World, pathname = '/') => shouldShowSignInCard({
+    isWeb: true, docked: true, authChecked: true, user: w.signedIn ? { id: 'u' } : null,
+    dismissed: w.dismissed, modalOpen: false, pathname,
   });
-  // The sidebar CTA is the guest branch: exactly !signedIn. Asserted at the model level so the pair
-  // (popup eligible + CTA present) is what every logged-out journey below means by "canonical".
-  const ctaOn = (w: World) => !w.signedIn;
-
   let w: World = { signedIn: false, dismissed: false };
-  check('J1 fresh visitor: popup + sidebar CTA', popupOn(w) && ctaOn(w));
-  w = transition(w, true); w = { ...w, dismissed: true };   // sign-in; the popup's own close stamps the flag
-  check('J2 signed in: popup hidden, CTA hidden', !popupOn(w) && !ctaOn(w));
-  const out = transition(w, false);
-  check('J3 sign-out: popup RETURNS + CTA returns', popupOn(out) && ctaOn(out),
-    'the stale dismissal must not survive the transition');
-  check('J4 sign-out cancel: still signed in, popup stays hidden', !popupOn(w) && !ctaOn(w));
-  const deleted = transition(w, false);
-  check('J5 deletion: popup RETURNS + CTA returns', popupOn(deleted) && ctaOn(deleted));
-  check('J6 delete cancel: unchanged signed-in state', !popupOn(w) && !ctaOn(w));
-  // sessionStorage survives a refresh, so canonical only because the flag cleared AT the transition
-  check('J7 refresh after deletion is still canonical', popupOn(deleted) && deleted.dismissed === false);
-  check('J8 post-deletion popup eligible on Filter AND Agent', popupOn(deleted, '/') && popupOn(deleted, '/agent'));
-  const closedAgain = { ...deleted, dismissed: true };
-  check('J8b …and closing it in THIS epoch still holds across Filter↔Agent (no re-pop nag)',
-    !popupOn(closedAgain, '/') && !popupOn(closedAgain, '/agent'));
-  check('J9 session death lands in the canonical logged-out state', popupOn(transition(w, false)));
-  check('J10 no duplicate auth surfaces: dock stays deleted, exactly one sidebar CTA',
-    !existsSync(join(root, 'src/components/SignInDock.tsx'))
-    && (readFileSync(join(root, 'src/components/Sidebar.tsx'), 'utf8').match(/sidebar-signin-cta/g) ?? []).length === 1);
+  check('J1 fresh visitor: card shows', cardOn(w));
+  w = { ...w, dismissed: true };                       // sends a search
+  check('J2 after sending: card gone, stays gone across nav', !cardOn(w) && !cardOn(w, '/agent'));
+  w = transition(w, true);                             // signs in via the sidebar CTA → modal
+  check('J3 signed in: never', !cardOn(w));
+  const out = transition(w, false);                    // signs out / deletes the account
+  check('J4 sign-out lands in the canonical logged-out state: card RETURNS', cardOn(out) && cardOn(out, '/agent'),
+    'a stale dismissal must not survive the transition');
+  check('J5 refresh (fresh state) after anything: card returns', cardOn({ signedIn: false, dismissed: false }));
+}
+{
+  const s2 = store.slice(store.indexOf('prevSignedInRef'), store.indexOf('prevSignedInRef') + 900);
+  check('WIRING the store clears the card dismissal through the pure epoch rule (one writer)',
+    /dismissalOutlivesTransition\(prev, now\)/.test(store) && /setSignInCardDismissed\(false\)/.test(s2));
+  check('WIRING the writer skips the mount pass', /prev === null \|\| dismissalOutlivesTransition/.test(store));
+  check('WIRING it watches the user value itself (covers onAuthStateChange deaths)', /\}, \[user\]\);/.test(s2));
 }
 
-// ── WIRING — the epoch rule is inert unless the store's one writer calls it ──────────────────────
+// ── in-file MUTATION DEMONSTRATIONS (the real proofs are run against the tree) ───────────────────
 {
-  const store = readFileSync(join(root, 'src/store.tsx'), 'utf8');
-  check('WIRING the store clears the dismissal through the pure rule (one writer)',
-    /dismissalOutlivesTransition\(prev, now\)/.test(store)
-    && /sessionStorage\.removeItem\(AUTH_POPUP_DISMISSED_KEY\)/.test(store));
-  check('WIRING the writer skips the mount pass (a refresh mid-epoch keeps a real dismissal)',
-    /prev === null \|\| dismissalOutlivesTransition/.test(store));
-  check('WIRING it watches the user value itself, so a session dying in onAuthStateChange is covered',
-    /\}, \[user\]\);/.test(store.slice(store.indexOf('prevSignedInRef'), store.indexOf('prevSignedInRef') + 900)));
-  // Comment-stripped: a mutation test proved the raw regex also matched a commented-out
-  // `// setMode('light')`, i.e. the check was blind to exactly the deletion it guards against.
-  const menu = readFileSync(join(root, 'src/components/AccountMenu.tsx'), 'utf8')
-    .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  check('WIRING deletion returns the app to Light (owner rule) before leaving the screen',
-    /const ok = await deleteAccount\(\);[\s\S]{0,700}?setMode\('light'\);[\s\S]{0,120}?router\.replace/.test(menu));
-  check('WIRING …but a FAILED deletion changes nothing (no reset before the server confirms)',
-    /if \(!ok\) \{[\s\S]{0,260}?return;[\s\S]{0,12}?\}[\s\S]{0,700}?setMode\('light'\)/.test(menu));
-  const themeSrc = readFileSync(join(root, 'src/theme/theme.tsx'), 'utf8');
-  check('WIRING sign-out still keeps the theme (only DELETION resets — the comment now says so)',
-    /NOT wiped by SIGN-OUT/.test(themeSrc) && /DELETION resets it to 'light'/.test(themeSrc));
-}
-
-// ── MUTATION PROOFS for the epoch ────────────────────────────────────────────────────────────────
-{
-  const inverted = (a: boolean, b: boolean) => a !== b;      // keeps the flag exactly when it must clear
-  check('MUT-E1 an inverted epoch rule is DETECTED',
-    inverted(true, false) !== dismissalOutlivesTransition(true, false));
-  const sticky = (_a: boolean, _b: boolean) => true;          // the pre-fix behaviour: flag never clears
-  check('MUT-E2 the pre-fix behaviour (dismissal survives deletion) is DETECTED',
-    sticky(true, false) !== dismissalOutlivesTransition(true, false));
-  const trigger = (_a: boolean, _b: boolean) => false;        // clears on every pass → dismissal dead
-  check('MUT-E3 clearing without a transition (kills the no-nag rule) is DETECTED',
-    trigger(false, false) !== dismissalOutlivesTransition(false, false));
+  const noUserGate = (g: SignInCardGate) => shouldShowSignInCard({ ...g, user: null });  // "forgot" the user gate
+  check('MUT a card shown to a signed-in user would be caught',
+    noUserGate({ ...SHOWN, user: { id: 'u' } }) !== shouldShowSignInCard({ ...SHOWN, user: { id: 'u' } }));
+  const noDismiss = (g: SignInCardGate) => shouldShowSignInCard({ ...g, dismissed: false }); // "forgot" dismissal
+  check('MUT a card ignoring dismissal (send does nothing) would be caught',
+    noDismiss({ ...SHOWN, dismissed: true }) !== shouldShowSignInCard({ ...SHOWN, dismissed: true }));
+  const rawClamp = (p: { x: number; y: number }) => p;                                    // clamp removed
+  check('MUT an unclamped drag would be caught',
+    rawClamp({ x: 1e6, y: 1e6 }).x !== clampAuthPopupOffset({ x: 1e6, y: 1e6 }, { left: 0, top: 0, width: SIGNIN_CARD_W, height: 340 }, { w: 1340, h: 720 }).x);
 }
 
 if (failed) {
   console.error(`\n❌ verify-auth-popup: ${failed} check(s) failed`);
   process.exit(1);
 }
-console.log('\n✅ verify-auth-popup: the movable sign-in popup contract holds');
+console.log('\n✅ verify-auth-popup: the sign-in surfaces contract holds');

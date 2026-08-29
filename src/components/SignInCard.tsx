@@ -43,7 +43,7 @@ import {
 
 export default function SignInCard() {
   const docked = useAtLeast(DOCK_BREAKPOINT);
-  const { user, authChecked, signInCardDismissed, dismissSignInCard, signIn } = useApp();
+  const { user, authChecked, authOpen, signInCardDismissed, dismissSignInCard, signIn } = useApp();
   const pathname = usePathname();
   const hostRef = useRef<View | null>(null);
   const gripRef = useRef<View | null>(null);
@@ -54,6 +54,7 @@ export default function SignInCard() {
     authChecked,
     user,
     dismissed: signInCardDismissed,
+    modalOpen: authOpen,
     pathname,
   });
 

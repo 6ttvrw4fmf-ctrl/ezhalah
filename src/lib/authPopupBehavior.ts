@@ -33,6 +33,11 @@ export type SignInCardGate = {
    *  A page refresh resets it by construction — exactly the owner's return rule («when the user
    *  refresh» the card comes back). An auth transition also clears it (#1214 epoch, below). */
   dismissed: boolean;
+  /** MUTUAL EXCLUSION (owner, locked spec): while the centered AuthModal is open (an explicit
+   *  login click), the card is SUPPRESSED — never both on top of each other. Closing the modal
+   *  without logging in brings the card back, because this is a separate gate input, not a write
+   *  to `dismissed`: the card's own dismissal state persists through modal open/close. */
+  modalOpen: boolean;
   pathname: string;
 };
 
@@ -41,6 +46,7 @@ export function shouldShowSignInCard(g: SignInCardGate): boolean {
   if (!g.docked) return false;       // mobile / narrow desktop: never (pill + on-demand modal)
   if (!g.authChecked) return false;  // session still restoring — say nothing yet
   if (g.user) return false;          // signed in: never
+  if (g.modalOpen) return false;     // the full modal is up — suppressed, never stacked
   if (g.dismissed) return false;     // sent something or closed it — gone until a refresh
   return g.pathname === '/' || g.pathname === '/agent';  // Filter home and Agent only
 }

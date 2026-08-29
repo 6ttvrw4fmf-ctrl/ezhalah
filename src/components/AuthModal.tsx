@@ -593,7 +593,9 @@ const c = StyleSheet.create({
   oauthText: { fontSize: 12.5 },
   orRow: { marginVertical: 7 },
   cc: { height: 44, paddingHorizontal: 9, borderRadius: 11, gap: 4 },
-  phoneInput: { height: 44, paddingHorizontal: 10, borderRadius: 11 },
+  // fontSize restated (same web-16 rule as the base style) so the iOS-zoom barrier's parser sees
+  // it on every referenced style of this input — the compact card never shrinks it below 16.
+  phoneInput: { height: 44, paddingHorizontal: 10, borderRadius: 11, fontSize: Platform.OS === 'web' ? 16 : 15 },
   continueBtn: { height: 44, borderRadius: 11, marginTop: 8 },
   continueText: { fontSize: 13.5 },
   otpBoxes: { gap: 4, marginTop: 14 },

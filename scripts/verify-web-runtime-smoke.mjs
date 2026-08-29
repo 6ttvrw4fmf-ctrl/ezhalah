@@ -173,21 +173,22 @@ const tap = async (txt) => {
   await page.mouse.click(box.x, box.y);
   await page.waitForTimeout(1200);
 };
-// The signed-out sign-in popup (owner 2026-08-28) auto-raises over the filter home on a fresh
-// session — exactly what a real guest sees, so the journey must do what a real guest does: close
-// it, then search. Closing stamps sessionStorage, and every journey here shares one context, so a
-// single dismissal keeps it closed for the whole run (a fresh context would see it again). Without
-// this, the popup's ground swallows the journey's first tap and journey A dies on «سنوي» —
-// run 33221180711.
+// The signed-out SIGN-IN CARD (owner 2026-08-29) floats at the side of the filter home for a
+// fresh logged-out load. It never blocks the journeys (no scrim, side slot, and it retires on the
+// journey's own first send) — but its phone form contains a «متابعة» button and its X shares the
+// auth-popup-close testid, so the journey closes it up front the way a real guest might, keeping
+// text-targeted taps unambiguous. The dismissal is in-memory: it survives client-side navigation
+// but a RELOAD brings the card back (by design) — safe here, because after any reload the next
+// journey's own send re-dismisses it before any «متابعة» tap happens.
 const dismissAuthPopup = async (windowMs = 4000) => {
   const until = Date.now() + windowMs;
   while (Date.now() < until && !(await page.$('[data-testid="auth-popup-close"]'))) {
     await page.waitForTimeout(250);
   }
   const close = await page.$('[data-testid="auth-popup-close"]');
-  if (!close) return; // already dismissed this session (or signed in) — nothing to do
+  if (!close) return; // no card (dismissed already, signed in, or narrow viewport) — nothing to do
   await close.click();
-  await page.waitForFunction(() => !document.querySelector('[data-testid="auth-popup"]'), { timeout: 5000 }).catch(() => {});
+  await page.waitForFunction(() => !document.querySelector('[data-testid="signin-card"]'), { timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(250);
 };
 // For ASYNC-rendered suggestion rows only (run 32681927077: «حي النرجس» rendered after the fixed
