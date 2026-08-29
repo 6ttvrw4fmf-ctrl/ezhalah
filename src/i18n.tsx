@@ -1127,6 +1127,17 @@ const AR: Record<string, string> = {
   'Firefox': 'فايرفوكس',
   'Edge': 'إيدج',
   'Opera': 'أوبرا',
+  // Devices list (owner Phase 2, 2026-08-29): the REAL session registry. Relative-time labels
+  // live in src/lib/devices.ts (pure Arabic buckets, barrier-executed) — not here.
+  'Devices signed in': 'الأجهزة المسجّل عليها الدخول',
+  'Active now': 'نشط الآن',
+  'Unknown device': 'جهاز غير معروف',
+  'Log out from all other devices': 'تسجيل الخروج من جميع الأجهزة الأخرى',
+  'Signs out within an hour at most': 'سيتم تسجيل الخروج خلال ساعة على الأكثر',
+  'Confirm sign out': 'تأكيد الخروج',
+  "Couldn't sign out this device. Try again.": 'تعذّر تسجيل الخروج من هذا الجهاز. حاول مرة أخرى.',
+  "Couldn't load the other devices.": 'تعذّر تحميل باقي الأجهزة.',
+  'Retry': 'إعادة المحاولة',
   'Saved': 'تم الحفظ',
   'Name saved': 'تم حفظ الاسم',
   'Log out?': 'تسجيل الخروج؟',

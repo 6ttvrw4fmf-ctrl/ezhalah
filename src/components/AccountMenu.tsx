@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, I18nManager, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors as lightColors, radius } from '@/theme/tokens';
@@ -12,7 +12,11 @@ import { detectDevice, readDeviceEnv } from '@/lib/deviceInfo';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { pickName, buildSyncedName, scriptOf, initialsOf } from '@/lib/nameSync';
 import { COUNTRIES, type Country } from '@/data/countries';
-import { persistDisplayName, sendPhoneOtp, verifyPhoneOtp } from '@/lib/auth';
+import { isBackendLive, persistDisplayName, sendPhoneOtp, verifyPhoneOtp } from '@/lib/auth';
+import {
+  currentSessionId, lastActiveLabel, listDeviceSessions, revokeDeviceSession,
+  signOutOtherDevices, type DeviceSession,
+} from '@/lib/devices';
 
 // ── THE SIDEBAR-ANCHORED ACCOUNT MENU (owner 2026-08-28) ─────────────────────────────────────────
 // Replaces the centered Settings modal (src/app/settings.tsx, removed the same day). A COMPACT
@@ -203,12 +207,80 @@ export default function AccountMenu({
     router.replace('/');
   };
 
+  // ── «الأجهزة المسجّل عليها الدخول» (owner Phase 2, 2026-08-29) ──────────────────────────────────
+  // The REAL session registry via the `devices` edge function — no fake devices, no fingerprinting.
+  // «هذا الجهاز» is matched by the session_id from this client's OWN JWT, never by list position.
+  // The current device always renders from LOCAL detection (it self-corrects the iPad-as-Mac case
+  // and needs no network), so a failed/empty fetch still shows the truth we already have.
+  const [devSessions, setDevSessions] = useState<DeviceSession[] | null>(null);
+  const [devLoading, setDevLoading] = useState(false);
+  const [devError, setDevError] = useState(false);
+  const [mySid, setMySid] = useState<string | null>(null);
+  const [confirmSid, setConfirmSid] = useState<string | null>(null);
+  const [revokingSid, setRevokingSid] = useState<string | null>(null);
+  const [revokeErrSid, setRevokeErrSid] = useState<string | null>(null);
+  const [othersBusy, setOthersBusy] = useState(false);
+  const [othersErr, setOthersErr] = useState(false);
+  const fetchSeq = useRef(0);
+
+  const fetchDevices = async () => {
+    if (!isBackendLive) { setDevSessions([]); setDevError(false); return; } // preview: local card only
+    const seq = ++fetchSeq.current;
+    setDevLoading(true);
+    setDevError(false);
+    const [sid, list] = await Promise.all([currentSessionId(), listDeviceSessions()]);
+    if (seq !== fetchSeq.current) return; // a newer fetch owns the state
+    setMySid(sid);
+    setDevSessions(list); // null = load failure — the section falls back to the local current card
+    setDevError(list === null);
+    setDevLoading(false);
+  };
+  useEffect(() => {
+    if (view === 'account') { setConfirmSid(null); setRevokeErrSid(null); setOthersErr(false); fetchDevices(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  // GENUINE per-device sign-out: the card is removed ONLY after the backend confirms the
+  // revocation (revoked:true — including the clean "already signed out" race). A failure keeps
+  // the card and says so; nothing is ever optimistically removed.
+  const onRevokeDevice = async (sid: string) => {
+    if (revokingSid) return;
+    setRevokingSid(sid);
+    setRevokeErrSid(null);
+    const res = await revokeDeviceSession(sid);
+    if (!res.ok) {
+      setRevokingSid(null);
+      setRevokeErrSid(sid);
+      return;
+    }
+    setDevSessions((list) => (list ? list.filter((s0) => s0.session_id !== sid) : list));
+    setRevokingSid(null);
+    setConfirmSid(null);
+  };
+
+  const onSignOutOthers = async () => {
+    if (othersBusy) return;
+    setOthersBusy(true);
+    setOthersErr(false);
+    const ok = await signOutOtherDevices();
+    if (!ok) {
+      setOthersBusy(false);
+      setOthersErr(true);
+      return;
+    }
+    await fetchDevices(); // the refetch is the confirmation — only the server's truth clears cards
+    setOthersBusy(false);
+  };
+
   if (!shown || !user) return null;
 
   // TRUTHFUL device row (owner 2026-08-29): detected from the actual browser environment — never
   // from the login provider (the old `m === 'google' ? Android : iPhone` fabrication), never an
   // exact model. Unknowns stay unknown: device falls back to «هذا الجهاز», browser line is omitted.
   const device = detectDevice(readDeviceEnv());
+  // Identity, not position: only a session whose id differs from THIS client's JWT session_id is
+  // an "other" device. The current session's server row is folded into the leading local card.
+  const otherSessions = (devSessions ?? []).filter((s0) => s0.session_id !== mySid);
   const modeLabel = mode === 'system' ? t('System') : mode === 'light' ? t('Light') : t('Dark');
   const maxH = Math.max(260, Math.min(winH - 120, 520));
 
@@ -408,22 +480,135 @@ export default function AccountMenu({
                 </View>
               )}
 
-              <View style={s.field}>
-                <View style={s.fieldHead}>
-                  <Text style={s.fieldLabel}>{t('Logged in device')}</Text>
-                  <Text style={s.deviceCurrent}>{t('This device')}</Text>
-                </View>
-                <Text style={s.fieldValue}>{device.deviceClass ? t(device.deviceClass) : t('This device')}</Text>
-              </View>
+              {/* «الأجهزة المسجّل عليها الدخول» — the real session registry, current device first.
+                  Loading = two shimmer cards; a failed fetch still shows the local current card
+                  (the section never shows less than the truth it already has). */}
+              <View style={s.devicesWrap}>
+                <Text style={s.fieldLabel}>{t('Devices signed in')}</Text>
+                <View testID="devices-list" style={s.devicesList}>
+                  {devLoading ? (
+                    <>
+                      <ShimmerDeviceCard s={s} reduced={reduced} />
+                      <ShimmerDeviceCard s={s} reduced={reduced} />
+                    </>
+                  ) : (
+                    <>
+                      <View testID="device-card-current" style={[s.deviceCard, s.deviceCardCurrent]}>
+                        <View style={[s.deviceGlyph, s.deviceGlyphCurrent]}>
+                          <Ionicons name={glyphFor(device.deviceClass)} size={17} color={C.primary} />
+                        </View>
+                        <View style={s.deviceBody}>
+                          <Text style={s.deviceTitle} numberOfLines={1}>
+                            {device.deviceClass ? t(device.deviceClass) : t('This device')}
+                          </Text>
+                          {device.browser ? (
+                            <Text style={s.deviceSub} numberOfLines={1}>{t(device.browser)}</Text>
+                          ) : null}
+                          <Text style={s.deviceActiveNow}>{t('Active now')}</Text>
+                        </View>
+                        <View style={s.deviceTrailing}>
+                          <View style={s.devicePill}><Text style={s.devicePillText}>{t('This device')}</Text></View>
+                          {/* Signing out the CURRENT device is just sign-out — the existing
+                              confirmed flow (and its theme-reset lifecycle), never the edge DELETE. */}
+                          <Pressable
+                            testID="device-signout-current"
+                            onPress={() => go('signout', 1)}
+                            hitSlop={6}
+                            style={({ hovered }: any) => [s.deviceOutBtn, hovered && s.rowHover]}
+                          >
+                            <Text style={s.deviceOutText}>{t('Log out')}</Text>
+                          </Pressable>
+                        </View>
+                      </View>
 
-              {device.browser ? (
-                <View style={s.field}>
-                  <View style={s.fieldHead}>
-                    <Text style={s.fieldLabel}>{t('Browser')}</Text>
-                  </View>
-                  <Text style={s.fieldValue}>{t(device.browser)}</Text>
+                      {otherSessions.map((s0) => (
+                        <View key={s0.session_id} testID="device-card" style={s.deviceCard}>
+                          <View style={s.deviceGlyph}>
+                            <Ionicons name={glyphFor(s0.device_class)} size={17} color={C.primary} />
+                          </View>
+                          <View style={s.deviceBody}>
+                            <Text style={s.deviceTitle} numberOfLines={1}>
+                              {s0.device_class ? t(s0.device_class) : t('Unknown device')}
+                            </Text>
+                            {s0.browser ? (
+                              <Text style={s.deviceSub} numberOfLines={1}>{t(s0.browser)}</Text>
+                            ) : null}
+                            {confirmSid === s0.session_id ? (
+                              <Text style={s.deviceNote}>{t('Signs out within an hour at most')}</Text>
+                            ) : (
+                              <Text style={s.deviceActive} numberOfLines={1}>
+                                {lastActiveLabel(s0.refreshed_at, Date.now())}
+                              </Text>
+                            )}
+                            {revokeErrSid === s0.session_id ? (
+                              <Text style={s.deviceErr}>{t("Couldn't sign out this device. Try again.")}</Text>
+                            ) : null}
+                          </View>
+                          {confirmSid === s0.session_id ? (
+                            revokingSid === s0.session_id ? (
+                              <ActivityIndicator size="small" color={C.primary} />
+                            ) : (
+                              <View style={s.deviceConfirmCol}>
+                                <Pressable
+                                  testID="device-signout-confirm"
+                                  onPress={() => onRevokeDevice(s0.session_id)}
+                                  hitSlop={4}
+                                  style={s.deviceConfirmBtn}
+                                >
+                                  <Text style={s.deviceConfirmText}>{t('Confirm sign out')}</Text>
+                                </Pressable>
+                                <Pressable
+                                  testID="device-signout-cancel"
+                                  onPress={() => { setConfirmSid(null); setRevokeErrSid(null); }}
+                                  hitSlop={6}
+                                >
+                                  <Text style={s.deviceCancelText}>{t('Cancel')}</Text>
+                                </Pressable>
+                              </View>
+                            )
+                          ) : (
+                            <Pressable
+                              testID="device-signout"
+                              onPress={() => { setConfirmSid(s0.session_id); setRevokeErrSid(null); }}
+                              hitSlop={6}
+                              style={({ hovered }: any) => [s.deviceOutBtn, hovered && s.rowHover]}
+                            >
+                              <Text style={s.deviceOutText}>{t('Log out')}</Text>
+                            </Pressable>
+                          )}
+                        </View>
+                      ))}
+
+                      {devError ? (
+                        <Pressable testID="devices-retry" onPress={fetchDevices} style={s.devicesRetry} hitSlop={4}>
+                          <Text style={s.devicesRetryText}>
+                            {t("Couldn't load the other devices.")} <Text style={s.devicesRetryLink}>{t('Retry')}</Text>
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </>
+                  )}
                 </View>
-              ) : null}
+
+                {otherSessions.length > 0 ? (
+                  <Pressable
+                    testID="devices-signout-others"
+                    onPress={onSignOutOthers}
+                    disabled={othersBusy}
+                    hitSlop={4}
+                    style={({ hovered }: any) => [s.devicesOthers, hovered && s.rowHover]}
+                  >
+                    {othersBusy ? (
+                      <ActivityIndicator size="small" color={C.primary} />
+                    ) : (
+                      <Text style={s.devicesOthersText}>{t('Log out from all other devices')}</Text>
+                    )}
+                  </Pressable>
+                ) : null}
+                {othersErr ? (
+                  <Text style={s.deviceErr}>{t('Something went wrong. Please try again.')}</Text>
+                ) : null}
+              </View>
 
               <View style={s.hairline} />
               {/* Destructive action lives HERE — inside the account area, quiet, at the end. */}
@@ -502,6 +687,41 @@ export default function AccountMenu({
         />
       )}
     </>
+  );
+}
+
+// One outline glyph per truthful device class — never a model image, never a guess dressed as one.
+function glyphFor(dc: DeviceSession['device_class']): keyof typeof Ionicons.glyphMap {
+  if (dc === 'iPad') return 'tablet-portrait-outline';
+  if (dc === 'Mac' || dc === 'Windows') return 'laptop-outline';
+  if (dc === 'iPhone' || dc === 'Android') return 'phone-portrait-outline';
+  return 'hardware-chip-outline';
+}
+
+// Loading = two of these, no spinner: the card silhouette breathing quietly (a slow opacity pulse;
+// reduced motion holds it still at half strength).
+function ShimmerDeviceCard({ s, reduced }: { s: ReturnType<typeof makeStyles>; reduced: boolean }) {
+  const pulse = useSharedValue(reduced ? 0.55 : 0.35);
+  useEffect(() => {
+    if (reduced) { pulse.value = 0.55; return; }
+    pulse.value = withRepeat(
+      withSequence(
+        withTiming(0.75, { duration: 700, easing: Easing.inOut(Easing.quad) }),
+        withTiming(0.35, { duration: 700, easing: Easing.inOut(Easing.quad) }),
+      ),
+      -1,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reduced]);
+  const a = useAnimatedStyle(() => ({ opacity: pulse.value }));
+  return (
+    <Animated.View testID="device-card-shimmer" style={[s.deviceCard, a]}>
+      <View style={[s.deviceGlyph, s.shimmerBlock]} />
+      <View style={s.deviceBody}>
+        <View style={[s.shimmerLine, { width: '42%' }]} />
+        <View style={[s.shimmerLine, { width: '26%', marginTop: 8 }]} />
+      </View>
+    </Animated.View>
   );
 }
 
@@ -689,7 +909,51 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     saveBtnText: { color: '#fff', fontSize: 12.5, fontWeight: '700' },
     actText: { fontSize: 12.5, fontWeight: '600', color: C.primary },
     lockedText: { fontSize: 11, color: C.muted, fontWeight: '500' },
-    deviceCurrent: { fontSize: 11, fontWeight: '600', color: C.primary },
+
+    // ── الأجهزة المسجّل عليها الدخول — stacked truthful session cards ───────────────────────────
+    // The account popup's own language (13px card radius, 10px gaps), not the settings-table look.
+    // The current card is the one loud thing here: 1.5px primary border over the faint green wash
+    // (C.tint is that wash in BOTH palettes — deep green under the dark layer by construction).
+    devicesWrap: { paddingVertical: 9, paddingHorizontal: 10 },
+    devicesList: { marginTop: 8, gap: 10 },
+    deviceCard: {
+      flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 62,
+      borderRadius: 13, borderWidth: 1, borderColor: C.fieldLine, backgroundColor: C.surface,
+      paddingVertical: 10, paddingHorizontal: 12,
+    },
+    deviceCardCurrent: { borderWidth: 1.5, borderColor: C.primary, backgroundColor: C.tint },
+    deviceGlyph: {
+      width: 36, height: 36, borderRadius: 18, backgroundColor: C.surface2,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    deviceGlyphCurrent: { backgroundColor: C.surface },
+    deviceBody: { flex: 1, minWidth: 0 },
+    deviceTitle: { fontSize: 13.5, fontWeight: '700', color: C.ink, textAlign: 'right', writingDirection: 'auto' as any },
+    deviceSub: { fontSize: 11.5, color: C.muted, marginTop: 1, textAlign: 'right' },
+    deviceActiveNow: { fontSize: 11, fontWeight: '600', color: C.primary, marginTop: 3, textAlign: 'right' },
+    deviceActive: { fontSize: 11, color: C.muted, marginTop: 3, textAlign: 'right' },
+    // The honest revocation note — the victim's issued token can outlive the row by up to an hour.
+    deviceNote: { fontSize: 10.5, color: C.body, lineHeight: 14, marginTop: 3, textAlign: 'right' },
+    deviceErr: { fontSize: 11, color: '#d05b4c', marginTop: 4, textAlign: 'right' },
+    deviceTrailing: { alignItems: 'center', gap: 4 },
+    devicePill: { backgroundColor: C.primary, borderRadius: 999, paddingVertical: 3, paddingHorizontal: 9 },
+    devicePillText: { color: C.onFill, fontSize: 10.5, fontWeight: '700' },
+    deviceOutBtn: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: 8 },
+    deviceOutText: { fontSize: 11.5, fontWeight: '600', color: C.muted },
+    deviceConfirmCol: { alignItems: 'center', gap: 4 },
+    deviceConfirmBtn: {
+      backgroundColor: C.dangerBg, borderWidth: 1, borderColor: C.dangerLine,
+      borderRadius: 9, paddingVertical: 5, paddingHorizontal: 10,
+    },
+    deviceConfirmText: { fontSize: 11, fontWeight: '700', color: C.danger },
+    deviceCancelText: { fontSize: 11, fontWeight: '500', color: C.muted },
+    devicesOthers: { marginTop: 10, alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 4, borderRadius: 8 },
+    devicesOthersText: { fontSize: 12.5, fontWeight: '600', color: C.primary },
+    devicesRetry: { paddingVertical: 6 },
+    devicesRetryText: { fontSize: 11.5, color: C.muted, textAlign: 'right' },
+    devicesRetryLink: { color: C.primary, fontWeight: '600' },
+    shimmerBlock: { backgroundColor: C.surface2 },
+    shimmerLine: { height: 10, borderRadius: 5, backgroundColor: C.surface2 },
 
     confirm: { alignItems: 'center', paddingVertical: 14, paddingHorizontal: 12 },
     confirmIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.tint, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
