@@ -281,6 +281,39 @@ check('EPOCH no transition keeps it (Filter↔Agent nav within one epoch)',
   const rawClamp = (p: { x: number; y: number }) => p;                                    // clamp removed
   check('MUT an unclamped drag would be caught',
     rawClamp({ x: 1e6, y: 1e6 }).x !== clampAuthPopupOffset({ x: 1e6, y: 1e6 }, { left: 0, top: 0, width: SIGNIN_CARD_W, height: 340 }, { w: 1340, h: 720 }).x);
+  const storeText = readFileSync(join(root, 'src/store.tsx'), 'utf8');
+  // SUPERSEDED (owner 2026-08-28/29, appearance-auth-lifecycle): the Light reset moved from
+  // AccountMenu's screen handler into the store's OWN completed-action paths — deleteAccount()
+  // resets after the server-confirmed guard, and (new rule, superseding «sign-out keeps the
+  // theme») signOut() resets too: the appearance is an authenticated-user asset, so EVERY
+  // completed transition to signed-out lands in the canonical Light guest state with the stored
+  // keys cleared. The deep matrix lives in scripts/verify-appearance-lifecycle.ts; these pins keep
+  // THIS file's canonical-logged-out-state story true against the real wiring.
+  const delBodyStart = storeText.indexOf('deleteAccount: async () => {');
+  const delBody = storeText.slice(delBodyStart, storeText.indexOf('return true;', delBodyStart));
+  check('WIRING deletion returns the app to Light (owner rule) — reset in the store, after the guard',
+    delBody.indexOf('resetThemeForSignOut()') > delBody.indexOf('if (!serverDeleted) return false;')
+    && delBody.includes('if (!serverDeleted) return false;'));
+  check('WIRING …but a FAILED deletion changes nothing (no reset before the server confirms)',
+    delBody.indexOf('if (!serverDeleted) return false;') !== -1
+    && !delBody.slice(0, delBody.indexOf('if (!serverDeleted) return false;')).includes('resetThemeForSignOut'));
+  const signOutBody = storeText.slice(storeText.indexOf('signOut: () => {'), delBodyStart);
+  check('WIRING sign-out ALSO resets to Light (owner 2026-08-28/29 — supersedes the deletion-only rule)',
+    signOutBody.includes('resetThemeForSignOut()'));
+}
+
+// ── MUTATION PROOFS for the epoch ────────────────────────────────────────────────────────────────
+{
+  const inverted = (a: boolean, b: boolean) => a !== b;      // keeps the flag exactly when it must clear
+  check('MUT-E1 an inverted epoch rule is DETECTED',
+    inverted(true, false) !== dismissalOutlivesTransition(true, false));
+  const sticky = (_a: boolean, _b: boolean) => true;          // the pre-fix behaviour: flag never clears
+  check('MUT-E2 the pre-fix behaviour (dismissal survives deletion) is DETECTED',
+    sticky(true, false) !== dismissalOutlivesTransition(true, false));
+  const trigger = (_a: boolean, _b: boolean) => false;        // clears on every pass → dismissal dead
+  check('MUT-E3 clearing without a transition (kills the no-nag rule) is DETECTED',
+    trigger(false, false) !== dismissalOutlivesTransition(false, false));
+
 }
 
 if (failed) {

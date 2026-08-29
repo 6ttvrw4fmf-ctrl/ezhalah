@@ -21,6 +21,16 @@ export function resolveTheme(mode: ThemeMode, systemDark: boolean): ResolvedThem
   return mode;
 }
 
+// AUTH-GATED APPEARANCE (owner 2026-08-28, second directive of the day): Dark and System-following
+// belong to the AUTHENTICATED experience only. Signed out — a guest, or the instant a sign-out /
+// account deletion COMPLETES — Ezhalah is always LIGHT, regardless of the stored mode or the OS.
+// This is the leak rule executed: a previous user's stored 'dark' must never darken the logged-out
+// app. (scripts/verify-appearance-lifecycle.ts runs this matrix.)
+export function resolveAppTheme(signedIn: boolean, mode: ThemeMode, systemDark: boolean): ResolvedTheme {
+  if (!signedIn) return 'light';
+  return resolveTheme(mode, systemDark);
+}
+
 export function themeColors(resolved: ResolvedTheme): typeof darkColors {
   // LITERALS both ways — converted surfaces and parser sites need real values, never var() refs.
   return resolved === 'dark' ? darkColors : (lightColors as unknown as typeof darkColors);

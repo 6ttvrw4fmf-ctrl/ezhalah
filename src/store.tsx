@@ -13,6 +13,7 @@ import { resolveLocation, ensureLocationIndex } from '@/data/locations';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
 import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
+import { setThemeAuthState, resetThemeForSignOut } from '@/theme/theme';
 import { restoreChat, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib/chatTranscript';
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, type ChatMeta } from '@/lib/chatSync';
 import { mergeOne, pickTranscript, withFreshTranscript } from '@/lib/chatMerge';
@@ -251,6 +252,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // True once we know the auth state (session restored or confirmed absent), so the intro decision
   // doesn't race the Supabase session lookup and flash for a returning signed-in user.
   const [authChecked, setAuthChecked] = useState(false);
+  // AUTH-GATED APPEARANCE (owner 2026-08-28): mirror auth into the theme system once it is KNOWN.
+  // Adoption enables the stored preference; a COMPLETED signed-in→signed-out transition (incl.
+  // external revocation observed via onAuthStateChange) resets to Light and clears the stored
+  // preference. Boot-as-guest is NOT a transition — nothing to clear, the gate already gives Light.
+  const themeWasSignedInRef = useRef(false);
+  useEffect(() => {
+    if (!authChecked) return;
+    const is = !!user;
+    if (is) setThemeAuthState(true);
+    else if (themeWasSignedInRef.current) resetThemeForSignOut();
+    else setThemeAuthState(false);
+    themeWasSignedInRef.current = is;
+  }, [authChecked, user]);
 
   // THE SMALL SIGN-IN CARD's dismissal (owner 2026-08-29): IN-MEMORY ONLY, deliberately never
   // persisted — «it goes away once the user sends something» and comes back «when the user
@@ -623,6 +637,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // history, search count, the open chat, and any parked message. This account's OWN saved
         // history (under its per-user key) is intentionally KEPT — a later re-login restores it
         // (restore flag reset so it can reload). The legacy shared key is purged so it can't leak.
+        // Appearance resets FIRST and synchronously (same React batch as setUser) so the signed-out
+        // UI lands already-Light — never a half-dark frame (owner 2026-08-28).
+        resetThemeForSignOut();
         setUser(null);
         setHistory([]);
         setSearchCount(0);
@@ -661,6 +678,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // this function returns. (owner report 2026-08-17.)
         removeKeysSync(keys);
         AsyncStorage.multiRemove(keys).catch(() => {});
+        // Appearance: the deletion COMPLETED (server confirmed above — never on dialog-open, never
+        // on إلغاء, never on a failed delete): back to Light, stored preference cleared. (owner
+        // 2026-08-28)
+        resetThemeForSignOut();
         setUser(null);
         setHistory([]);
         setSearchCount(0);
