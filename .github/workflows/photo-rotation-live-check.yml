@@ -1,0 +1,32 @@
+name: Photo preference + rotation — live behavioral check
+
+# Executes the REAL production RPC (location_search_candidates_ar) and asserts the owner's rule
+# MATCH -> DIVERSITY -> PHOTO PREFERENCE -> CONTROLLED ROTATION (2026-08-29) on live rows:
+# deterministic ordering, a different seed genuinely varies exposure over the SAME matched set,
+# photo preference actually promotes confirmed-has-photo rows within a platform, zero duplicates
+# across a rotated multi-page walk, and an explicit objective sort always wins over rotation.
+#
+# Complements the static guards in `npm test` and verify-platform-diversity-live.ts (which this does
+# not replace - platform diversity itself is unchanged and stays covered there). Read-only (anon key,
+# RLS-respecting) - see scripts/lib/public-supabase.ts for why the key here is safely committed.
+
+on:
+  schedule:
+    - cron: '37 */6 * * *' # every 6 hours, offset from diversity-live-check's :17
+  workflow_dispatch:
+
+concurrency:
+  group: photo-rotation-live-check
+  cancel-in-progress: false
+
+jobs:
+  photo-rotation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Live photo-preference + rotation behavioral assertions
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-photo-preference-and-rotation-live.ts

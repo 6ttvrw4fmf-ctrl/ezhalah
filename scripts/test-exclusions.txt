@@ -20,6 +20,7 @@ verify-district-suggestion-parity-live.ts | .github/workflows/district-suggestio
 verify-live-hydration.mjs              | .github/workflows/deploy-frontend.yml                | post-deploy check against the served bundle
 verify-location-index-source.ts        | npm run verify:location-index                        | needs the location index source; run by the taxonomy/index suite
 verify-migration-drift-vs-production.ts| .github/workflows/migration-drift-guard.yml          | AGENTS.md pins it OUT of npm test: drift anywhere in production would fail every unrelated PR
+verify-photo-preference-and-rotation-live.ts | .github/workflows/photo-rotation-live-check.yml | live production RPC check (photo preference + controlled rotation)
 verify-platform-diversity-live.ts      | .github/workflows/diversity-live-check.yml           | live production diversity check
 verify-recency-fallback-live.ts        | .github/workflows/recency-fallback-live-check.yml    | live production check
 verify-region-scoped-city-live.ts      | .github/workflows/region-scoped-city-live-check.yml  | live production region+city check; also re-earns ops_qa_search_differential's city-resolution exemption

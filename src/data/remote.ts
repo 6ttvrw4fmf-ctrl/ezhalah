@@ -13,6 +13,7 @@ import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { decodeEntities } from '@/lib/htmlEntities';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
+import { rotationSeed } from '@/lib/rotationSeed';
 import saLocations from './sa-locations.json';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
@@ -1458,6 +1459,11 @@ export async function fetchListingsForQuery(
     p_per_platform: null,
     p_limit: pageLimit,
     p_offset: pageOffset,
+    // CONTROLLED ROTATION, tier 4 (owner PERMANENT rule 2026-08-29). Same seed on every page of one
+    // search/pagination walk (rotationSeed() is a pure function of device+week, recomputed identically
+    // on every call — nothing to thread through Load-More by hand), so the RPC's rot_key ORDER BY term
+    // stays stable for the whole walk while still varying across devices/weeks. See rotationSeed.ts.
+    p_rotation_seed: rotationSeed(),
   }), RPC_TIMEOUT_MS, signal);
   if (error) return { listings: null, pageCandidates, pageTotal };   // index error OR timeout (RC-A) → retry UI, not "no matches"
   pageCandidates = (cands as Cand[] | null)?.length ?? 0;   // this page's matching-candidate count → drives Load-More offset/hasMore

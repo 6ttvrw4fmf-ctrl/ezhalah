@@ -74,6 +74,52 @@ platform dominates due to an Ezhalah-side ranking bug. Diversity must NEVER intr
 that fails the user's filters. One platform with genuine matches → one-platform results are
 CORRECT. **Never manufacture diversity.**
 
+### 4.1 PHOTO PREFERENCE COMES THIRD (owner PERMANENT rule, 2026-08-29)
+After match and diversity, prefer genuinely-matched listings with a real, usable photo — but this is
+a ranking nudge, NEVER an eligibility filter. A no-photo listing stays a genuine result: it must
+remain discoverable, counted in `total_count`, and reachable through «عرض المزيد» exactly as if this
+tier didn't exist. Verify daily: a search whose matches are mostly photo-bearing does not bury the
+few no-photo listings past the visible page, but does NOT drop them from the true count either;
+`total_count` and the full matched id-set are IDENTICAL whether or not photo preference is active.
+
+**UNKNOWN must remain UNKNOWN.** `search_listings_ar.has_photo` is `NULL` for any platform
+`ops_photo_capture_trust` hasn't cleared (≥50 reachable rows, ≥70% real-photo rate — both
+re-measured on every sync run, never a hand-picked list). A `NULL` row is neither rewarded as
+"has a photo" nor punished as "confirmed no photo" — it ranks strictly between the two. Test:
+query `ops_photo_capture_trust` for the currently-untrusted platforms and confirm none of their
+rows are ever demoted below a confirmed-false row of another platform in the same tier.
+
+Live behavioral barrier: `scripts/verify-photo-preference-and-rotation-live.ts` (§ "Photo preference
++ rotation" below), scheduled via `.github/workflows/photo-rotation-live-check.yml`.
+
+### 4.2 CONTROLLED ROTATION COMES FOURTH, and LAST (owner PERMANENT rule, 2026-08-29)
+Do not confuse this with the "Rotation — never Riyadh-heavy" section further down this document —
+that section is about QA COVERAGE sampling (spreading test journeys across cities during
+certification runs); THIS section is about RESULT ORDERING (which listings a real user sees first).
+Two unrelated concepts that happen to share a name — keep them separate in conversation and in code.
+
+The rule: no cohort's top results may permanently belong to the same handful of listings for every
+user, forever — but rotation must never be `ORDER BY random()`, never reshuffle a user's own
+in-progress browse/pagination walk, and never outrank a materially better match. Test daily:
+- **Same search, same session, repeat page loads → IDENTICAL order.** Deterministic, not random.
+- **Two different devices, same cohort, same moment → the top results may legitimately differ.**
+  This is the fix for the old defect: a brand-new visitor's device gets its own rotation seed from
+  its very first search (`src/lib/rotationSeed.ts`), not a revisit counter that started at 0 for
+  everyone — the old mechanism never actually solved this, only "same device, later visit" did.
+- **A rotated multi-page `عرض المزيد` walk has ZERO duplicates and ZERO skipped rows** — concatenate
+  every batch and diff against a single unpaged fetch of the same search; they must match exactly.
+- **An explicit objective sort (price/area/beds/oldest) is BYTE-IDENTICAL with or without rotation
+  active.** Rotation must visibly step aside the instant the user picks a real sort — verify by
+  comparing the exact returned order both ways.
+- **Rotation can only reorder WITHIN a tier that match + diversity + photo preference already
+  produced** — it is structurally incapable of promoting a worse match over a better one, because it
+  is the very last ORDER BY term before the total-order id tiebreaker. If a rotated result ever looks
+  "wrong" (an obviously worse listing above a better one), that is a match/diversity/photo bug, not a
+  rotation bug — rotation cannot cause it by construction.
+
+Live behavioral barrier: `scripts/verify-photo-preference-and-rotation-live.ts`; offline contract:
+`scripts/verify-rotation-seed-contract.ts` (in `npm test`).
+
 ## 5. السعر — heavy daily testing
 No price · min only · max only · min+max · very narrow · wide · low · high · strange boundaries ·
 exact boundary values — across cities, districts, «شراء»/«إيجار», «سنوي»/«شهري», فئات and أنواع.
