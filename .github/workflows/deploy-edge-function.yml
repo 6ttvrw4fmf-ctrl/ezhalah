@@ -105,24 +105,43 @@ jobs:
         with:
           node-version: 24
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
       - name: npm ci
         run: npm ci
 
-      # Several guards in `npm test` shell out to the real scraper modules, and scrapers/*/run.py
-      # imports curl_cffi at module level — without the pinned requirements they die on import
-      # rather than on an assertion. Same install line as full-verification-ci.yml. (The first dry
-      # run of this workflow failed exactly here, on verify-abeea-identity-supersession.)
-      - name: Install scraper Python deps
-        run: pip install -r scrapers/requirements.txt
-
-      # The barriers are the gate. verify-agent-nonreasoning-model.ts in particular would have
-      # caught the config that broke production on 2026-08-28.
-      - name: npm test (barriers gate the deploy)
-        run: npm test
+      # WHY NOT `npm test` HERE.
+      # The full suite includes LIVE-DATA oracles (verify-af-independent-oracle and friends) that
+      # query production Postgres and compare live counts. Those are the right gate for a PR, and
+      # main is already protected by them — full-verification-ci.yml runs the whole suite on every
+      # PR, and the step above refuses to deploy anything that is not exactly origin/main.
+      #
+      # Re-running them at DEPLOY time adds no new signal and introduces a real hazard: a transient
+      # DB hiccup or backend load would block an urgent production fix. The second dry run of this
+      # workflow hit exactly that — verify-af-independent-oracle failed with `RPC=null` against a
+      # healthy PostgREST count, minutes after the identical suite passed green on PR #1273.
+      #
+      # So the deploy gates on the DETERMINISTIC agent barriers: pure source assertions, no network,
+      # no live data, no flake. They are the ones that catch the class of bug that actually ships
+      # broken edge functions — verify-agent-nonreasoning-model.ts would have caught the config that
+      # took the agent to a 50% failure rate on 2026-08-28.
+      #
+      # Glob-driven on purpose, matching the repo's "barriers run by existence" rule: a new
+      # scripts/verify-agent-*.ts is picked up here automatically, with no edit to this file.
+      - name: Agent barriers (deterministic gate)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          FILES=(scripts/verify-agent-*.ts scripts/verify-filter-never-calls-agent.ts)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "::error::no agent barriers found — the glob is wrong, refusing to deploy blind."
+            exit 1
+          fi
+          echo "Running ${#FILES[@]} deterministic agent barriers:"
+          printf '  %s\n' "${FILES[@]}"
+          for f in "${FILES[@]}"; do
+            echo "── $f"
+            node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON "$f"
+          done
+          echo "All ${#FILES[@]} agent barriers passed."
 
       - name: Verify Supabase credentials
         env:
