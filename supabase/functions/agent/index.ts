@@ -180,6 +180,7 @@ function logUsage(row: Record<string, unknown>): void {
       .then((r) => r.body?.cancel().catch(() => {}))
       .catch(() => {});
   } catch { /* telemetry must never break a turn */ }
+}
 
 // ── DETERMINISTIC CATALOG CLASSIFIER (loc_classify RPC) ───────────────────────
 // The SQL function loc_classify(token) maps a location token to the official Arabic
