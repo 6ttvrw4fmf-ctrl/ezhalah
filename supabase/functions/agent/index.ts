@@ -25,8 +25,20 @@
 
 const DEEPSEEK_API_KEY = Deno.env.get("DEEPSEEK_API_KEY") ?? "";
 // "flash" = DeepSeek's fast/non-reasoning tier, the fit for a short classification task; override
-// with DEEPSEEK_MODEL. (deepseek-reasoner is chain-of-thought — slower and overkill here.)
-const DEEPSEEK_MODEL = Deno.env.get("DEEPSEEK_MODEL") ?? "deepseek-v4-flash";
+// with DEEPSEEK_MODEL.
+//
+// MODEL CHOICE — "deepseek-chat", NOT "deepseek-v4-flash". THIS IS LOAD-BEARING, DO NOT "UPGRADE" IT.
+// They are the same weights; the alias selects THINKING MODE:
+//   deepseek-chat      → non-reasoning. ~96 completion tokens for a classification turn.
+//   deepseek-v4-flash  → reasoning. ~2,591 reasoning tokens for the SAME turn, and reasoning tokens
+//                        are billed and counted against max_tokens.
+// Shipping v4-flash at max_tokens 800 broke production on 2026-08-28: reasoning consumed all 800
+// tokens, content came back EMPTY, finish_reason "length" — a 50% failure rate across a live Arabic
+// eval (proved via finish_reason + usage.completion_tokens_details.reasoning_tokens).
+// This is the same trap the previous Gemini integration defused with thinkingConfig.thinkingBudget=0;
+// DeepSeek has no such switch, so the ALIAS is the switch. Classification needs no chain-of-thought.
+// Pinned by scripts/verify-agent-nonreasoning-model.ts.
+const DEEPSEEK_MODEL = Deno.env.get("DEEPSEEK_MODEL") ?? "deepseek-chat";
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
@@ -608,7 +620,11 @@ Deno.serve(async (req: Request) => {
         model: DEEPSEEK_MODEL,
         messages,
         temperature: 0.3,
-        max_tokens: 800,
+        // A non-reasoning turn spends ~100–250 tokens; 1500 is generous headroom for a long Arabic
+        // reply (Arabic tokenizes heavier than English) without inviting a truncated JSON body.
+        // A truncation here is NOT recoverable — a half-written object fails JSON.parse and the whole
+        // turn 502s, so the ceiling must never be tight. See the MODEL CHOICE note at the top.
+        max_tokens: 1500,
         // Guarantees the reply parses as JSON; does NOT constrain keys/values (see JSON_SHAPE_HINT).
         response_format: { type: "json_object" },
       });
@@ -623,9 +639,20 @@ Deno.serve(async (req: Request) => {
       }
       if (!res || !res.ok) { const detail = res ? await res.text() : "no response"; return { __err: json({ error: `deepseek ${res?.status ?? 0}`, detail }, 502) }; }
       const data = await res.json();
-      const raw = String(data?.choices?.[0]?.message?.content ?? "").trim();
-      if (!raw) return { __err: json({ error: "empty model output" }, 502) };
-      try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw }, 502) }; }
+      const choice = data?.choices?.[0];
+      const raw = String(choice?.message?.content ?? "").trim();
+      // finish_reason "length" means the ceiling was hit — the single most likely cause of both the
+      // empty and the unparseable case, and invisible without this. Carry it (plus the reasoning-token
+      // count, which is what silently ate the budget in the 2026-08-28 incident) into the error so the
+      // cause is readable straight off the response instead of needing a diagnostic deploy.
+      const why = {
+        finish_reason: choice?.finish_reason ?? null,
+        completion_tokens: data?.usage?.completion_tokens ?? null,
+        reasoning_tokens: data?.usage?.completion_tokens_details?.reasoning_tokens ?? null,
+        model: data?.model ?? null,
+      };
+      if (!raw) return { __err: json({ error: "empty model output", ...why }, 502) };
+      try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw, ...why }, 502) }; }
     };
 
     // Force the reply language via the system message (weighted far higher than a turn line) — the
