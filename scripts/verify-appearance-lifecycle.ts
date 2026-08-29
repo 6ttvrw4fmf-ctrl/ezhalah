@@ -48,8 +48,8 @@ check('reset clears the stored preference (AsyncStorage mirror)', theme.includes
 check('reset also returns the in-memory mode to its default', /if \(reset\) setModeState\('system'\);/.test(theme));
 
 const html = readFileSync('src/app/+html.tsx', 'utf8');
-check('pre-hydration boot gates dark on a Supabase auth token',
-  html.includes("indexOf('sb-')") && html.includes('-auth-token'));
+check('pre-hydration boot gates dark on a Supabase auth token (the token check must FEED the read)',
+  html.includes("indexOf('sb-')") && html.includes('-auth-token') && html.includes('var m=a?localStorage.getItem'));
 check("pre-hydration boot pins guests to 'light'", html.includes(":'light'"));
 
 // ── 3. store: reset wired to COMPLETED transitions only ─────────────────────────────────────────
