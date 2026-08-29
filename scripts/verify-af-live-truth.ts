@@ -44,7 +44,23 @@ const check = (label, ok, detail = '') => {
   if (!ok) failures++;
 };
 
-const browser = await chromium.launch({ args: ['--no-sandbox', '--ignore-certificate-errors'] });
+// Launch options are ENV-DRIVEN and default to exactly what they were, so CI (which runs
+// `playwright install` and has open egress) is byte-for-byte unaffected. They exist for the agent
+// containers the AF routine actually runs in, where this check could not launch at all:
+//   PW_EXECUTABLE_PATH — the image ships ONE pinned Chromium (/opt/pw-browsers/chromium) whose
+//                        build number is not the one this Playwright driver would download, so a
+//                        bare launch dies with "Executable doesn't exist at …chromium-<other>".
+//   HTTPS_PROXY        — behind the MITM egress proxy Chromium resets every connection under
+//                        TLS 1.3, so the proxy is passed through with --ssl-version-max=tls1.2.
+// Both are SEARCH_MATCH_QA_ENGINEER.md §41.1/§41.12, already solved this way in e2e/live-sweep.
+// Without them the routine's own §0 step 8 ("run verify-af-live-truth.ts") was impossible in the
+// container, which is how the live AF suite went unrun on the day the sweep needed it most.
+const browser = await chromium.launch({
+  ...(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {}),
+  ...(process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {}),
+  args: ['--no-sandbox', '--ignore-certificate-errors',
+         ...(process.env.HTTPS_PROXY ? ['--disable-quic', '--ssl-version-max=tls1.2'] : [])],
+});
 
 // CATEGORY PURITY NEEDS THE SAME REFERENCE TABLE PRODUCTION USES (2026-08-28). p_category is a real
 // predicate — a `both`-macro type is eligible only from the table matching the requested category —
