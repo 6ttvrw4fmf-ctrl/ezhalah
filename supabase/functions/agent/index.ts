@@ -96,6 +96,29 @@ async function liveNotes(): Promise<string> {
   return _notesCache.text;
 }
 
+// ── THE REPLY MAY NOT CLAIM WHAT THE DATABASE HAS NOT SAID (owner ruling 2026-08-29) ─────────────
+// This function writes its reply BEFORE any search runs — the client executes the query afterwards.
+// So a past-tense inventory claim here («لقيت لك خيارات», «عندي نتائج») is, by construction, a claim
+// about data nobody has fetched. The owner's rule is exact: never say «عندي خيارات» unless we
+// actually queried and confirmed there are results. A grounded statement can only come AFTER the
+// search, from the client's honest total.
+//
+// Also caught: a promise to WIDEN or relax the search («راح أوسّع البحث»). The query is built
+// strictly and never widened, so that sentence describes something the product will not do —
+// the same reply/query drift class as promising "cheapest" without a sort.
+//
+// Deterministic and conservative: we cannot safely rewrite Arabic prose, so a violating reply is
+// replaced wholesale with a truthful searching lead rather than surgically edited.
+const CLAIMS_INVENTORY =
+  /(لقيت|لقينا|وجدت|وجدنا|عندي\s+(خيارات|نتائج|عروض)|عندنا\s+(خيارات|نتائج|عروض)|توفر لدي|متوفر عندي|\bi found\b|\bwe found\b|\bi have\s+(options|results|listings)\b)/i;
+const PROMISES_WIDENING =
+  /(أوسّع|أوسع|نوسّع|نوسع|بوسّع|بوسع|توسيع البحث|أخفف الشرط|نخفف الشروط|\bwiden\b|\bbroaden\b)/i;
+function groundReply(reply: string, locale: string): string {
+  const r = String(reply ?? "");
+  if (!CLAIMS_INVENTORY.test(r) && !PROMISES_WIDENING.test(r)) return r;
+  return locale === "en" ? "Got it — searching now." : "تمام، أدوّر لك الحين.";
+}
+
 // ── AGENT HEALTH HEARTBEAT ───────────────────────────────────────────────────
 // The client falls back to its bundled offline heuristic on ANY failure (src/data/agent.ts:571),
 // so a dead agent looks completely normal to the user — that is how the 2026-08-29 outage stayed
@@ -590,7 +613,7 @@ function stripFiller(s: string): string {
 // endpoint). Appended to the SYSTEM message as a belt-and-braces restatement of the shape and enum
 // values the SYSTEM prompt above already documents in prose — same list, machine-readable form, so
 // the model gets the contract from two directions.
-const JSON_SHAPE_HINT = `\n\nCONVERSATION: when the user describes their SITUATION rather than a property («عندي عائلة من ٤ أشخاص», «أدور شي يناسبني أنا وزوجتي وطفلين», «مكان مناسب للعائلة», «مكان هادي»), that is CONTEXT, not filters. Never turn household size, lifestyle or a mood word into a bedroom count, an area, or any other value. Use kind="message" and ask the ONE next question that most narrows the search (usually property type, then Buy vs Rent, then city, then budget) — one short question per turn, never a checklist. Once you have enough to search, search and stop asking.\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "ask_about" (array of the things the user expressed VAGUELY that you must NOT turn into a number — use "size" when they said big/large/wide/spacious/small («كبير»/«واسع»/«صغير») without any area figure, and "rating" when they praised the rating («تقييم عالي»/«ممتاز») without naming a number. Leave [] when nothing is vague. NEVER invent a bedroom count, an area, or a rating from a vague word), "furnished" (one of "yes"|"no"|"none" — "yes" only if the user asks for a FURNISHED place («مفروشة»), "no" only if they ask for an UNFURNISHED one («غير مفروشة»), "none" when they do not mention furnishing at all; never infer it from anything else), "af" (object of Advanced-Filter intents the user STATED; omit any key they did not state — never infer one. Keys and their ONLY allowed values: "property_age": "new"|"1_2"|"3_5"|"6_9"|"10p"; "street_width": a number in metres they asked for (e.g. "20"); "direction": array of "شمال"|"جنوب"|"شرق"|"غرب"|"شمال شرق"|"شمال غرب"|"جنوب شرق"|"جنوب غرب"; "bathrooms": the number of bathrooms they asked for; "rating": "9.5"|"9.0"|"9.0_rc10" ONLY if they named a NUMBER on the 0-10 scale — a stated 9 or ٩ (including «٩ فما فوق») is "9.0", a stated 9.5 or ٩.٥ is "9.5", and «مع ١٠ تقييمات» or more alongside 9 is "9.0_rc10". If they only praised it («تقييم عالي», «ممتاز») with NO number, OMIT it and put "rating" in ask_about instead; "rnpl": "rnpl" if they want instalments/تقسيط; "unit_subtype": "استديو"|"شقق مخدومة"|"شقة"), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
+const JSON_SHAPE_HINT = `\n\nSTYLE: talk like a smart broker who knows the inventory, not a form. Adapt to obvious cues — if the user is brief or says «ورني»/«بس ورني»/"just show me", drop to ONE short critical question or simply search; if they are chatty, be a little more natural. Do not claim to read their emotions. NEVER say you have found or have options («لقيت لك», «عندي خيارات») — you write this reply BEFORE the search runs, so you cannot know; describe what you are about to search for instead. Never promise to widen or relax the search.\n\nCONVERSATION: when the user describes their SITUATION rather than a property («عندي عائلة من ٤ أشخاص», «أدور شي يناسبني أنا وزوجتي وطفلين», «مكان مناسب للعائلة», «مكان هادي»), that is CONTEXT, not filters. Never turn household size, lifestyle or a mood word into a bedroom count, an area, or any other value. Use kind="message" and ask the ONE next question that most narrows the search (usually property type, then Buy vs Rent, then city, then budget) — one short question per turn, never a checklist. Once you have enough to search, search and stop asking.\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "ask_about" (array of the things the user expressed VAGUELY that you must NOT turn into a number — use "size" when they said big/large/wide/spacious/small («كبير»/«واسع»/«صغير») without any area figure, and "rating" when they praised the rating («تقييم عالي»/«ممتاز») without naming a number. Leave [] when nothing is vague. NEVER invent a bedroom count, an area, or a rating from a vague word), "furnished" (one of "yes"|"no"|"none" — "yes" only if the user asks for a FURNISHED place («مفروشة»), "no" only if they ask for an UNFURNISHED one («غير مفروشة»), "none" when they do not mention furnishing at all; never infer it from anything else), "af" (object of Advanced-Filter intents the user STATED; omit any key they did not state — never infer one. Keys and their ONLY allowed values: "property_age": "new"|"1_2"|"3_5"|"6_9"|"10p"; "street_width": a number in metres they asked for (e.g. "20"); "direction": array of "شمال"|"جنوب"|"شرق"|"غرب"|"شمال شرق"|"شمال غرب"|"جنوب شرق"|"جنوب غرب"; "bathrooms": the number of bathrooms they asked for; "rating": "9.5"|"9.0"|"9.0_rc10" ONLY if they named a NUMBER on the 0-10 scale — a stated 9 or ٩ (including «٩ فما فوق») is "9.0", a stated 9.5 or ٩.٥ is "9.5", and «مع ١٠ تقييمات» or more alongside 9 is "9.0_rc10". If they only praised it («تقييم عالي», «ممتاز») with NO number, OMIT it and put "rating" in ask_about instead; "rnpl": "rnpl" if they want instalments/تقسيط; "unit_subtype": "استديو"|"شقق مخدومة"|"شقة"), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -1010,9 +1033,20 @@ Deno.serve(async (req: Request) => {
         replyOut = locale === "en" ? `${replyOut} (${detailStr} m²)` : `${replyOut} (${detailStr} م²)`;
       }
 
+      // DO NOT SEARCH TOO EARLY (owner ruling 2026-08-29). A "listings" turn that carries NOTHING
+      // searchable — no location, no type, no budget, no detail, no amenities, no AF intent — is not
+      // a search, it is a shrug rendered as one. Ask instead. A type-only or city-only query is still
+      // a useful search and is deliberately allowed through; only the genuinely empty one is blocked.
+      const nothingToSearchOn =
+        !location && !(typeof out.type === "string" && out.type) && !price &&
+        !detailStr && !(Array.isArray(out.amenities) && out.amenities.length) &&
+        !(out.af && typeof out.af === "object" && Object.keys(out.af).length);
+      if (nothingToSearchOn) {
+        return json({ kind: "message", reply: groundReply(lead(out.reply), locale) });
+      }
       return json({
         kind: "listings",
-        reply: replyOut,
+        reply: groundReply(replyOut, locale),
         query: {
           deal,
           bothDeals,
@@ -1066,7 +1100,7 @@ Deno.serve(async (req: Request) => {
         },
       });
     }
-    return json({ kind: "message", reply: lead(out.reply) });
+    return json({ kind: "message", reply: groundReply(lead(out.reply), locale) });
   } catch (e) {
     return json({ error: String(e?.message ?? e) }, 500);
   }
