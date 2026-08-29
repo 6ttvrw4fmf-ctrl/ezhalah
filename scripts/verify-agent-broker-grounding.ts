@@ -69,9 +69,13 @@ check("groundReply actually neutralises — it is not a pass-through",
 check("it neutralises rather than surgically editing Arabic prose",
   /return locale === "en" \? "Got it — searching now\." : "تمام، أدوّر لك الحين\.";/.test(edge));
 check("the LISTINGS reply is grounded", /reply: groundReply\(replyOut, locale\),/.test(edge));
-check("the MESSAGE reply is grounded", /return json\(\{ kind: "message", reply: groundReply\(lead\(out\.reply\), locale\) \}\);/.test(edge));
-const paths = (edge.match(/reply: groundReply\(|reply: groundReply\(lead/g) ?? []).length;
-check(`every reply path goes through it (${paths} found)`, paths >= 2);
+// Composed with oneQuestionOnly() since 2026-08-29 (one clarification question per turn). Still
+// grounded — groundReply runs FIRST, so the claim/widening guard applies before any truncation.
+check("the MESSAGE reply is grounded",
+  /kind: "message", reply: oneQuestionOnly\(groundReply\(lead\(out\.reply\), locale\)\) \}\);/.test(edge));
+const paths = (edge.match(/reply: groundReply\(|reply: oneQuestionOnly\(groundReply\(/g) ?? []).length;
+check(`every reply path goes through it (${paths} found)`, paths >= 3,
+  "listings + the empty-search clarification + the plain message turn");
 check("no reply path bypasses the guard",
   !/reply: replyOut,/.test(edge) && !/reply: lead\(out\.reply\) \}\)/.test(edge),
   "an ungrounded path would let the claim straight through");

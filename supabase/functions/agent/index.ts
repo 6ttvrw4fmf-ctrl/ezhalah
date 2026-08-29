@@ -113,6 +113,25 @@ const CLAIMS_INVENTORY =
   /(لقيت|لقينا|وجدت|وجدنا|عندي\s+(خيارات|نتائج|عروض)|عندنا\s+(خيارات|نتائج|عروض)|توفر لدي|متوفر عندي|\bi found\b|\bwe found\b|\bi have\s+(options|results|listings)\b)/i;
 const PROMISES_WIDENING =
   /(أوسّع|أوسع|نوسّع|نوسع|بوسّع|بوسع|توسيع البحث|أخفف الشرط|نخفف الشروط|\bwiden\b|\bbroaden\b)/i;
+/**
+ * ONE QUESTION PER TURN — deterministically, not by asking the model nicely.
+ *
+ * The owner's rule: ask only the critical question, ideally one short clarification at a time. The
+ * prompt says exactly that and the model still stacked two: «وش نوع الشقة اللي تدور عليه؟ وهل تبيها
+ * إيجار أو تمليك؟». Prompt wording is a preference; this is the floor under it.
+ *
+ * Keeps everything up to and including the FIRST question mark, so the lead-in survives and only the
+ * extra questions are dropped. Applied to CLARIFICATION turns only — a search reply that ends with a
+ * friendly «تبيني أعرضها؟» is not an interrogation.
+ */
+function oneQuestionOnly(reply: string): string {
+  const r = String(reply ?? "");
+  const marks = r.match(/[?؟]/g);
+  if (!marks || marks.length < 2) return r;
+  const first = Math.min(...["?", "؟"].map((m) => { const i = r.indexOf(m); return i < 0 ? Infinity : i; }));
+  return Number.isFinite(first) ? r.slice(0, first + 1).trim() : r;
+}
+
 function groundReply(reply: string, locale: string): string {
   const r = String(reply ?? "");
   // AN EMPTY REPLY MUST NEVER SHIP. Found live 2026-08-29: «غرفتين» — a one-word answer continuing an
@@ -1057,7 +1076,7 @@ Deno.serve(async (req: Request) => {
         !detailStr && !(Array.isArray(out.amenities) && out.amenities.length) &&
         !(out.af && typeof out.af === "object" && Object.keys(out.af).length);
       if (nothingToSearchOn) {
-        return json({ kind: "message", reply: groundReply(lead(out.reply), locale) });
+        return json({ kind: "message", reply: oneQuestionOnly(groundReply(lead(out.reply), locale)) });
       }
       return json({
         kind: "listings",
@@ -1115,7 +1134,7 @@ Deno.serve(async (req: Request) => {
         },
       });
     }
-    return json({ kind: "message", reply: groundReply(lead(out.reply), locale) });
+    return json({ kind: "message", reply: oneQuestionOnly(groundReply(lead(out.reply), locale)) });
   } catch (e) {
     return json({ error: String(e?.message ?? e) }, 500);
   }

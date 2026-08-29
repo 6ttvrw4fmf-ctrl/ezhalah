@@ -62,9 +62,17 @@ console.log("\n── deterministic floors found by this audit ──");
 check("an empty reply can never ship",
   /if \(!r\.trim\(\)\) return locale === "en" \? "Got it — searching now\." : "تمام، أدوّر لك الحين\.";/.test(edge),
   "«غرفتين» produced a turn with NO reply text — the user saw silence");
-check("exactly ONE question per turn",
-  /exactly ONE short question per turn — one question mark, never two questions stacked/.test(edge),
-  "the vague-request case asked two questions in a single reply");
+check("the model is TOLD exactly one question per turn",
+  /exactly ONE short question per turn — one question mark, never two questions stacked/.test(edge));
+// Telling it was not enough — production still stacked two («وش نوع الشقة؟ وهل تبيها إيجار أو تمليك؟»).
+// Prompt wording is a preference; this is the deterministic floor under it.
+check("a DETERMINISTIC floor enforces it", /function oneQuestionOnly\(reply: string\): string/.test(edge));
+check("it keeps the lead-in and drops only the extra questions",
+  /return Number\.isFinite\(first\) \? r\.slice\(0, first \+ 1\)\.trim\(\) : r;/.test(edge));
+check("it is applied to BOTH clarification paths",
+  (edge.match(/oneQuestionOnly\(groundReply\(/g) ?? []).length === 2,
+  "the empty-search path and the plain message path must both be floored");
+check("a single question is left untouched", /if \(!marks \|\| marks\.length < 2\) return r;/.test(edge));
 
 if (failed) {
   console.error(`\n✗ ${failed} check(s) FAILED — the agent can re-ask what it already knows`);
