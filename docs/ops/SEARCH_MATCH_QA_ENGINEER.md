@@ -46,6 +46,26 @@ must satisfy every selection according to the trusted structured backend. Verify
 No filter silently ignored. No wrong listing added to pad results. No correctly-matching listing
 lost to Ezhalah-side search logic.
 
+### 3.1 THE NARROWING INVARIANT — adding a filter may only REMOVE rows (2026-08-29)
+**Narrowing a search can never make a listing appear that the broader search did not return, and can
+never lose a listing that still satisfies every selection.** Formally: for any search S and any
+additional selection f, `results(S + f) ⊆ results(S)`, and every row of `results(S)` satisfying f is
+in `results(S + f)`. This is the cheapest matching test there is — one search, one narrowing, one
+subset check — and it catches a whole family of scope bugs that per-search validation cannot see,
+because each side is internally consistent and only the RELATIONSHIP between them is wrong.
+
+Found by exactly this, 2026-08-29: «فئة تجاري» returned a محل misfiled into a residential table;
+«فئة تجاري» + «نوع محل» dropped it. `resolveSearchScope` had carried misfile recovery in one
+direction only since 2026-07-10 — Residential rows pulled back out of `*_commercial_listings` — and
+its Commercial mirror was never built, so a *broad* Commercial search recovered those rows through
+its own `isBroadCommercial` branch while a specific-نوع search collapsed to the commercial tables
+alone. Fixed, with the class derived from the taxonomy (the six Commercial clean types whose
+`CleanQuery.kinds` is `['com']`), and pinned by `scripts/verify-commercial-misfile-recovery.ts`.
+
+The invariant applies to every narrowing, not just نوع: adding a حي, a price bound, an area bound, a
+bedroom count, or a period must behave the same way. When a broad and a narrow search disagree in
+this direction, suspect the SCOPE the narrow search sends — not the rows.
+
 ## 4. DIVERSITY COMES SECOND — match first, then diversity
 First build the exact eligible set; only then apply diversity/ranking. Where several platforms have
 valid matches: measure eligible listings per platform · inspect the first batch · inspect later
