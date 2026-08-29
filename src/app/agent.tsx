@@ -44,7 +44,7 @@ import { parseQuery, respond } from '@/data/agent';
 import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
-import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin } from '@/lib/regionOrCityAnswer';
+import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor } from '@/lib/regionOrCityAnswer';
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
@@ -227,11 +227,14 @@ export function wholeCityQuestionSubject(text: string | null | undefined): strin
 // whole-region question for the same names), so send() knows which name the user is answering about on
 // the next turn. Accepts either form the query can carry («الرياض» or «منطقة الرياض»). null when the
 // location is not one of those twins — a plain city/region/district ask is untouched.
+// The rule itself lives in src/lib/regionOrCityAnswer.ts (pure, executable by a barrier); this is
+// the thin wrapper that hands it the real resolver and the app's Arabic-label guard. Before
+// 2026-08-29 the logic lived here and only stripped «منطقة » from the INPUT, so an English catalog
+// name like «Riyadh» — which is exactly what parseQuery() emits — resolved to the REGION, reported
+// "not a twin", and silently disabled the entire region-vs-city disambiguation. See twinNameFor().
 function regionOrCityTwin(loc: string | undefined): string | null {
-  const bare = (loc ?? '').trim().replace(/^منطقة\s+/, '').trim();
-  if (!bare) return null;
-  const lm = resolveLocation(bare, 'ar');
-  return lm.regionOrCity ? arLabel(lm.label) : null;
+  const label = twinNameFor(loc, (name) => resolveLocation(name, 'ar'));
+  return label == null ? null : arLabel(label);
 }
 
 function locationClarification(q: SearchQuery, userText: string): string | null {

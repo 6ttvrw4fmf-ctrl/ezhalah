@@ -121,6 +121,68 @@ const GENERIC_SCOPE_WORDS = [
  * Returns false for anything carrying its own place information, so a user who answers with a real
  * location keeps their own words.
  */
+// ── Which twin name is this location about? ─────────────────────────────────────────────────────
+//
+// DEFECT (found live on production 2026-08-29, routine #5): the whole region-vs-city twin feature
+// was DEAD whenever the location arrived as an ENGLISH catalog name — which is exactly what the
+// deterministic parser emits. Measured by executing the real resolver:
+//
+//   resolveLocation('الرياض') → kind:'city',   label:'الرياض',       regionOrCity:TRUE   ← the twin
+//   resolveLocation('Riyadh') → kind:'region', label:'منطقة الرياض', regionOrCity:FALSE  ← not a twin
+//
+// Same place, two different verdicts. `parseQuery()` returns `location:'Riyadh'` for every Riyadh
+// phrasing («في الرياض», «مدينة الرياض», «منطقة الرياض»), so on that path the old implementation —
+// which stripped «منطقة » from the INPUT STRING only, and never from the RESOLVED LABEL — saw
+// regionOrCity:false and returned null. With no twin name:
+//
+//   · `pendingScopeRef` was never armed, so the "you answered our question" recovery could not fire;
+//   · the send() rewrite could not fire, so «مدينة الرياض» never became a committed city scope;
+//   · locationClarification's region branch RE-ASKED the identical question;
+//   · after the 2-ask cap the search widened to منطقة الرياض — all 20 cities, 23,628 listings —
+//     the exact opposite of the scope the user had named twice.
+//
+// It is not Riyadh-only. Every twin the design names resolves the same way from its English catalog
+// name: Jazan, Tabuk, Hail, Najran and Madinah all come back kind:'region', regionOrCity:false.
+// Jeddah/Dammam/Abha resolve to kind:'city' either way, which is why only twins broke.
+//
+// THE FIX, stated as a rule: a location is about twin X if EITHER the name itself is the twin, OR it
+// resolves to a region whose own label is «منطقة X» and X is the twin. The second half is what was
+// missing — the label is normalised exactly as the input string already was.
+//
+// The resolver is INJECTED rather than imported: src/data/locations.ts transitively pulls
+// react-native and cannot be loaded by a plain Node test, and this module is deliberately
+// zero-dependency (same reason as the rest of this file) so scripts/verify-agent-twin-scope.ts can
+// genuinely EXECUTE this instead of grepping it.
+
+/** The subset of resolveLocation()'s result this rule reads. */
+export type TwinResolved = { kind?: string; label?: string; regionOrCity?: boolean };
+export type TwinResolver = (name: string) => TwinResolved;
+
+/**
+ * The region-AND-city twin name `loc` is about, or null when it is not one of those twins.
+ *
+ * Accepts every form the query can carry: the bare Arabic twin («الرياض»), the explicit Arabic
+ * region («منطقة الرياض»), and — the case that was broken — any name that RESOLVES to that region,
+ * including the English catalog name («Riyadh») the deterministic parser emits.
+ *
+ * Never guesses: a name that is not a twin, or whose region label is not «منطقة X», returns null.
+ */
+export function twinNameFor(loc: string | undefined | null, resolve: TwinResolver): string | null {
+  const bare = (loc ?? '').trim().replace(/^منطقة\s+/, '').trim();
+  if (!bare) return null;
+  const direct = resolve(bare);
+  if (direct?.regionOrCity) return direct.label ?? null;
+  // Not a twin by name. It may still BE one under another spelling: if it resolved to a region,
+  // strip «منطقة » from the resolved LABEL and ask again. «Riyadh» → «منطقة الرياض» → «الرياض».
+  if (direct?.kind !== 'region') return null;
+  const viaLabel = (direct.label ?? '').trim().replace(/^منطقة\s+/, '').trim();
+  // Guard against a label that did not carry the prefix (no normalisation happened) so this can
+  // never re-ask the resolver with the same string and recurse on a shared answer.
+  if (!viaLabel || viaLabel === bare) return null;
+  const second = resolve(viaLabel);
+  return second?.regionOrCity ? second.label ?? null : null;
+}
+
 export function isGenericWholeAreaAnswer(text: string | undefined | null): boolean {
   const s = (text ?? '').trim();
   if (!s) return false;
