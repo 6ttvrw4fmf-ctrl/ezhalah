@@ -1,73 +1,30 @@
 // Design tokens — single source of truth. Ported from the handoff (README "Design Tokens"
 // + prototype css block). Never hard-code hex/sizes in components.
-
-export const colors = {
-  primary: '#2f7247', // primary green
-  dark: '#1d4a37', // dark green
-  tint: '#eef6f0', // light-green tint
-  tintFill: '#e9f4ec', // agent box fill
-  userBubble: '#d7eede', // user chat bubble — light green
-  userBubbleText: '#1d4a37', // user chat bubble text — dark green (legible on light green)
-  tintLine: '#d8ebdd', // tint border
-  ink: '#15201b', // primary text
-  body: '#34403a', // body text
-  muted: '#7b8a82', // muted text
-  mutedBlue: '#6b7a86', // hero subtitle
-  line: '#e2e8e4', // hairline
-  fieldLine: '#e7ebe8', // field/card border
-  pickLine: '#dde6e0', // pick-box border (unselected)
-  chipFill: '#eef6f0', // start-here suggestion chip fill
-  chipLine: '#d6e8db', // start-here chip border
-  chipIcon: '#16432f', // chip icon glyph
-  exFill: '#1d4a37', // ai-empty example chip fill (dark green)
-  exIcon: '#79c79c', // ai-empty example chip icon
-  paper: '#fbfbfa', // screen background
-  surface: '#ffffff', // cards / sheets
-  segTrack: '#f1f3f1', // segmented-control track
-  accentLeaf: '#2fb672', // bright "AI" accent
-  amberBg: '#fdf6ec',
-  amberInk: '#92591a',
-  whatsApp: '#25d366',
-  scrim: 'rgba(8,18,12,0.45)', // modal/overlay backdrop
-} as const;
-
-// Dark appearance (owner 2026-08-28, sidebar-anchored settings menu). A REAL Ezhalah dark palette —
-// deep green-black paper and warm green-tinted neutrals derived from the brand greens above — never
-// inverted colors, never a generic gray theme. Same keys as `colors` so a themed surface can swap
-// the whole object (src/theme/theme.tsx exposes useThemeColors()).
 //
-// Coverage note: theming is opt-in per surface. Screens not yet converted keep importing the static
-// light `colors` and stay fully readable in dark mode; converted surfaces (Sidebar, account menu)
-// read useThemeColors(). Never flip a screen's background to dark without converting its inks.
-export const darkColors: Record<keyof typeof colors, string> = {
-  primary: '#3f8f5c', // brand green, lifted for legibility on dark ground
-  dark: '#245c44', // interaction fill (hover/press) on dark
-  tint: '#1b2a21', // deep green tint
-  tintFill: '#18271f',
-  userBubble: '#1f3a2c',
-  userBubbleText: '#cfe6d6',
-  tintLine: '#2a4234',
-  ink: '#e9efe9', // warm off-white
-  body: '#c2cdc5',
-  muted: '#8fa096',
-  mutedBlue: '#93a3ad',
-  line: '#243029',
-  fieldLine: '#273329',
-  pickLine: '#2c3a31',
-  chipFill: '#1b2a21',
-  chipLine: '#2a4234',
-  chipIcon: '#9fd0b2',
-  exFill: '#12281d',
-  exIcon: '#79c79c',
-  paper: '#0f1712', // deep green-black paper
-  surface: '#161f19', // raised cards / menu panel
-  segTrack: '#1d2620',
-  accentLeaf: '#2fb672',
-  amberBg: '#2b2214',
-  amberInk: '#e0b070',
-  whatsApp: '#25d366',
-  scrim: 'rgba(0,0,0,0.55)',
-};
+// FULL-APP THEMING (owner 2026-08-28): color VALUES live in src/theme/palette.ts (lightColors +
+// darkColors — PR#1206's dark palette, extended with the sweep's semantic keys). On web, every
+// entry of `colors` is a live `var(--ez-*)` reference — +html.tsx defines both palettes as CSS
+// custom properties and a pre-hydration boot script applies the persisted appearance — so ALL
+// module-scope StyleSheets re-skin instantly on theme change with zero re-render and no
+// SSR/hydration divergence (Platform.OS === 'web' is also true during static render, so server and
+// client bake identical var() strings). Native keeps light literals (no shipped native app).
+// Converted surfaces may still read the literal palette per render via useThemeColors().
+//
+// Two rules the app-wide sweep relies on:
+//   • colors.surface is a BACKGROUND. Text/icons on solid green fills use colors.onFill.
+//   • Anything that PARSES a color (Animated interpolation, reanimated interpolateColor,
+//     expo-linear-gradient) cannot digest var() — those sites use literals via useThemePalette().
+
+import { Platform } from 'react-native';
+import { cssVar, darkColors, lightColors, type PaletteKey } from './palette';
+
+export { darkColors, lightColors };
+
+export const colors: Record<PaletteKey, string> = Platform.OS === 'web'
+  ? (Object.fromEntries(
+      (Object.keys(lightColors) as PaletteKey[]).map((k) => [k, `var(${cssVar(k)}, ${lightColors[k]})`]),
+    ) as Record<PaletteKey, string>)
+  : lightColors;
 
 // Per-platform brand colors. Keys match Platform.name. (PRD §8.1)
 export const platformColors: Record<string, string> = {

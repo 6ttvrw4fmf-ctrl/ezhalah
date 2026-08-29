@@ -497,7 +497,7 @@ const s = StyleSheet.create({
     borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.paper,
   },
   tapInner: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: 13 },
-  primaryBtn: { backgroundColor: colors.primary, borderRadius: radius.chip, alignSelf: 'stretch' },
+  primaryBtn: { backgroundColor: colors.selFill, borderRadius: radius.chip, alignSelf: 'stretch' },
   primaryTxt: { fontFamily: font.family.bold, fontSize: 14.5, color: colors.surface },
   footRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 2 },
   skipLink: { paddingVertical: 4, flexShrink: 1 },

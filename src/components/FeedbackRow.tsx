@@ -127,7 +127,7 @@ const fb = StyleSheet.create({
   row: { alignItems: 'center', gap: 2 },
   // Small icon button (~30px target). Active = light green wash + accent icon (set inline).
   btn: { padding: 7, borderRadius: 9, ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
-  btnHover: { backgroundColor: '#f1f4f1' },
+  btnHover: { backgroundColor: colors.surface2 },
   btnActive: { backgroundColor: colors.tint },
   // Graceful "no Arabic voice on this device" note (root-cause fix, 2026-08-22) — never a wrong-
   // language voice instead, per owner requirement.

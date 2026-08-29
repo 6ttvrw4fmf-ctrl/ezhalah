@@ -4,7 +4,7 @@
 
 // Relative + extensioned so a plain `node --experimental-strip-types` run (the barrier) can load
 // this module directly — same pattern as lib/searchDefaults.ts → data/propertyTypes.ts.
-import { colors, darkColors } from './tokens.ts';
+import { darkColors, lightColors } from './palette.ts';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
@@ -22,5 +22,6 @@ export function resolveTheme(mode: ThemeMode, systemDark: boolean): ResolvedThem
 }
 
 export function themeColors(resolved: ResolvedTheme): typeof darkColors {
-  return resolved === 'dark' ? darkColors : (colors as unknown as typeof darkColors);
+  // LITERALS both ways — converted surfaces and parser sites need real values, never var() refs.
+  return resolved === 'dark' ? darkColors : (lightColors as unknown as typeof darkColors);
 }
