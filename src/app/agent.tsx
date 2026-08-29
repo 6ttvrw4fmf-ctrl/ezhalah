@@ -1091,7 +1091,10 @@ export default function Agent() {
   // read-and-cleared once per turn, cleared by New Chat.
   const pendingCityRef = useRef<string | null>(null);
 
-  const toBottom = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+  // `animated: false` while a saved-chat landing is in flight (owner 2026-08-29: opening a chat must
+  // BE at the latest message, never visibly drag the page down to it). Live turns keep the glide.
+  const landInstantRef = useRef(false);
+  const toBottom = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: !landInstantRef.current }));
   const toTop = () => requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
   const onGrow = () => {
     if (pinModeRef.current === 'top') toTop();
@@ -1110,16 +1113,18 @@ export default function Agent() {
     if (!landTimersRef.current.length && pinModeRef.current !== 'bottom') return;
     landTimersRef.current.forEach(clearTimeout);
     landTimersRef.current = [];
+    landInstantRef.current = false;
     pinModeRef.current = 'none';
   };
   const landAtLatest = () => {
     cancelLanding();
+    landInstantRef.current = true; // every re-bottom in this window jumps, none glides
     pinModeRef.current = 'bottom';
     toBottom();
     for (const ms of [150, 450, 900, 1600]) {
       landTimersRef.current.push(setTimeout(toBottom, ms));
     }
-    landTimersRef.current.push(setTimeout(() => { landTimersRef.current = []; pinModeRef.current = 'none'; }, 1900));
+    landTimersRef.current.push(setTimeout(() => { landTimersRef.current = []; landInstantRef.current = false; pinModeRef.current = 'none'; }, 1900));
   };
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
