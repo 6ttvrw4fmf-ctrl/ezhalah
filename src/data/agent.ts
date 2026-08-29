@@ -12,6 +12,7 @@ import { parseProximity, proximityKeywords, type ProximityIntent } from './proxi
 import { type Category } from './taxonomy';
 import { t, getLocale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
+import { partitionRequestedAmenities } from '@/lib/afCohorts';
 import { landmarkHint, ensureLandmarks } from './landmarks';
 import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 
@@ -216,7 +217,16 @@ type BackendQuery = {
   platforms?: string[]; // platform display names the user restricted to (carried across turns by the model)
   regionPin?: string;   // region_ar the edge catalog backstop pinned for a TWIN city (القصب → منطقة الرياض)
   districtPin?: string; // «حي …» the edge pinned for a TWIN district resolved to one city (حي الروضة → جدة)
+  amenities?: string[]; // amenity tokens the model READ OUT of the user's sentence — proposals only,
+                        // certified per-cohort below before any of them can reach q.amenities
 };
+
+/**
+ * Amenity tokens the model proposed that this scope does NOT certify. Surfaced (not swallowed) so the
+ * chat can ASK rather than answer a narrower question than the user asked. Owner rule 2026-08-29:
+ * "if an amenity is not certified for that cohort, use the clarification path instead of guessing."
+ */
+export let lastRejectedAmenities: string[] = [];
 
 // AREA NICKNAMES → known district lists. The engine filters by district when these are present, so
 // "north Riyadh" actually returns listings IN northern Riyadh districts (not just any Riyadh result).
@@ -531,6 +541,28 @@ function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts
   }
   const kw = Array.from(new Set([...extractNearbyKeywords(userText), ...proximityKeywords(prox)]));
   if (kw.length) q.keywords = kw;
+
+  // ── AMENITIES: ONE SHARED CERTIFICATION GATE (owner ruling 2026-08-29) ──────────────────────────
+  // The AI chat may map amenities straight out of the user's sentence («فيها مصعد وموقف») without the
+  // user walking the Advanced Filter flow first — but only through the SAME per-cohort certification
+  // the AF chips obey. certifiedAmenityKeys() in @/lib/afCohorts is that single gate; the edge
+  // function deliberately does not validate these, because a second copy of the cohort table is
+  // exactly how the two paths drift.
+  //
+  // Placed LAST on purpose: certification depends on q.type / q.category / q.deal / q.rentPeriod, and
+  // every one of those is only final at this point (applySourceFilter can still flip rentPeriod for
+  // Gathern). Gating earlier would certify against a scope the search never runs.
+  //
+  // Uncertified ⇒ NOT applied and NOT silently dropped. Applying it would filter on semantics this
+  // cohort never certified — that is UNKNOWN quietly becoming No. It is recorded for the clarification
+  // path instead. AND semantics are the RPC's existing p_amenities behaviour: a listing must carry
+  // EVERY token, so nothing here can ever widen the result set.
+  lastRejectedAmenities = [];
+  if (Array.isArray(b.amenities) && b.amenities.length) {
+    const { certified, rejected } = partitionRequestedAmenities(q, b.amenities);
+    if (certified.length) q.amenities = [...new Set([...(q.amenities ?? []), ...certified])];
+    lastRejectedAmenities = rejected;
+  }
   return q;
 }
 

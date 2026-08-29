@@ -276,3 +276,64 @@ export function cohortAllows(q: SearchQuery, id: string): boolean {
 
 
 
+
+// ── CERTIFIED AMENITY VOCABULARY (owner ruling 2026-08-29, AI-chat one-shot understanding) ────────
+//
+// The AI chat may now map amenities stated in a user's own sentence («فيها مصعد وموقف») straight into
+// q.amenities, without the user walking the Advanced Filter flow first. That is only safe if the chat
+// is held to EXACTLY the same certification the AF chips are held to — so this is the single place
+// that answers "which amenity tokens are certified for this scope", and both paths ask it.
+//
+// It is deliberately a SUBSET-SAFE gate, not a suggestion engine:
+//   - the amenities QUESTION must itself be certified for the cohort (cohortAllows) — an uncertified
+//     type is an EMPTY cohort, never "no constraint"
+//   - a mapped commercial/rural type gets EXACTLY its COHORT_CHIPS list and none of the residential
+//     tokens; a multi-type scope gets the INTERSECTION (owner 2026-08-20), so a disagreeing scope
+//     yields nothing rather than one side's token
+//   - villa-only tokens stay villa-only
+// Anything not returned here is NOT certified for this scope and must never reach q.amenities. The
+// caller asks the user instead — guessing an uncertified attribute is how UNKNOWN silently becomes No.
+const RESIDENTIAL_AMENITY_BASE = [
+  'kitchen', 'parking', 'elevator', 'ac', 'private_entrance', 'maid_room', 'driver_room',
+] as const;
+// aqar villa ads carry مدخل سيارة / صرف صحي checkboxes the apartment forms do not (2026-08-16).
+const VILLA_ONLY_AMENITIES = ['car_entrance', 'sanitation'] as const;
+
+export function certifiedAmenityKeys(q: SearchQuery): string[] {
+  // Not certified for this cohort at all ⇒ no amenity token is applicable. Never fall through to a
+  // base list here: that would let an uncertified cohort acquire constraints the AF path refuses.
+  if (!cohortAllows(q, 'amenities')) return [];
+  // No empty-scope guard here on purpose: cohortAllows() already returns false when scopeCleanTypes
+  // is empty, so a second check is dead code — it cannot change behaviour and cannot be tested. (A
+  // mutation removing it was provably EQUIVALENT, which is what exposed it as redundant.)
+  const scope = scopeCleanTypes(q);
+  // Mapped commercial/rural types render EXACTLY their list; [] means the selected types disagree.
+  const chipAllow = intersectChips(scope);
+  if (chipAllow) return [...chipAllow];
+  const base: string[] = [...RESIDENTIAL_AMENITY_BASE];
+  if (scope.every((ty) => ty === 'Villa')) base.push(...VILLA_ONLY_AMENITIES);
+  return base;
+}
+
+/**
+ * Split requested amenity tokens into the ones this scope certifies and the ones it does not.
+ *
+ * `rejected` is NOT a soft failure to swallow — it is the clarification trigger. The owner's rule:
+ * if an amenity is not certified for that cohort, ASK the user rather than guessing. Applying it
+ * anyway would filter on a field whose semantics this cohort has never certified; silently dropping
+ * it would answer a narrower question than the user asked while the reply still claims otherwise.
+ */
+export function partitionRequestedAmenities(
+  q: SearchQuery, requested: string[],
+): { certified: string[]; rejected: string[] } {
+  const allowed = new Set(certifiedAmenityKeys(q));
+  const certified: string[] = [];
+  const rejected: string[] = [];
+  for (const raw of requested) {
+    const key = String(raw ?? '').trim().toLowerCase();
+    if (!key) continue;
+    if (certified.includes(key) || rejected.includes(key)) continue; // stable, de-duplicated
+    (allowed.has(key) ? certified : rejected).push(key);
+  }
+  return { certified, rejected };
+}

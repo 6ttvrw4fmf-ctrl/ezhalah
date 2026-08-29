@@ -590,7 +590,7 @@ function stripFiller(s: string): string {
 // endpoint). Appended to the SYSTEM message as a belt-and-braces restatement of the shape and enum
 // values the SYSTEM prompt above already documents in prose — same list, machine-readable form, so
 // the model gets the contract from two directions.
-const JSON_SHAPE_HINT = `\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none).`;
+const JSON_SHAPE_HINT = `\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply"|"furnished" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -1013,6 +1013,19 @@ Deno.serve(async (req: Request) => {
             return isFinite(n) && n >= 1 ? Math.min(n, 15) : undefined;
           })(),
           platforms: Array.isArray(out.platforms) ? out.platforms.filter((p: unknown) => typeof p === "string" && p) : [],
+          // AMENITIES (owner ruling 2026-08-29). The model PROPOSES tokens from the closed vocabulary
+          // in JSON_SHAPE_HINT; it does NOT decide whether they may be applied. Certification is
+          // per-cohort and lives in src/lib/afCohorts.ts (certifiedAmenityKeys), which the Advanced
+          // Filter chips already use — the client gates these through that SAME function so the chat
+          // can never acquire a filter the AF path would refuse. Deliberately NOT validated here:
+          // a second copy of the cohort table in the edge function is exactly how the two paths drift.
+          // Shape-only sanitising: strings, trimmed, lowercased, de-duplicated.
+          amenities: Array.isArray(out.amenities)
+            ? [...new Set(out.amenities
+                .filter((a: unknown) => typeof a === "string")
+                .map((a: string) => a.trim().toLowerCase())
+                .filter(Boolean))]
+            : [],
         },
       });
     }
