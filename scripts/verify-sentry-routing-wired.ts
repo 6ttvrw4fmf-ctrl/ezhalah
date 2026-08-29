@@ -88,7 +88,10 @@ for (const rel of ROUTINE_FILES) {
 // ── 3. Observability wrapper still exists and is safe-by-default (defensive cross-check) ────────
 const obs = readFileSync(new URL('../src/lib/observability.ts', import.meta.url).pathname, 'utf8');
 check('observability wrapper still uses EXPO_PUBLIC_SENTRY_DSN gate (no-DSN → no-op)',
-  /readEnv\('EXPO_PUBLIC_SENTRY_DSN'\)/.test(obs));
+  // Certification 2026-08-29: the dynamic-key readEnv(name) reader was the second root cause of
+  // the "SDK loaded but silent" failure — Metro can't inline dynamic env keys. This check now
+  // enforces the static identifier read directly, matching how the fix works.
+  /process\.env\.EXPO_PUBLIC_SENTRY_DSN\b/.test(obs));
 check('routing doc references the same env var as the wrapper', /EXPO_PUBLIC_SENTRY_DSN/.test(routing));
 
 console.log(failed ? `\n✗ ${failed} check(s) FAILED — Sentry routing not fully wired` : '\n✓ Sentry routing wired: all 7 routines carry the mandate, ownership is unambiguous, closing without a barrier is a contract violation');

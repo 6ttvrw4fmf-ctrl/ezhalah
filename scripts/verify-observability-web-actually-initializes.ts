@@ -47,6 +47,22 @@ check("observability.ts stashes init failure on globalThis.__EZH_SENTRY_INIT_ERR
 check("observability.ts LOGS init failure via console.error (never a silent no-op again)",
   /console\.error\(['"]?\[ezhalah\] Sentry init failed/.test(src));
 
+// SECOND ROOT CAUSE the certification found (2026-08-29): the original readEnv(name) used a dynamic
+// key (`process.env[name]`), which Metro/Expo cannot statically inline — the DSN was set in Vercel,
+// baked into the CI build's env, and still absent from the runtime bundle because the property
+// access wasn't a literal identifier. The fix is one static reader per env var. If anyone
+// reintroduces `process.env[name]` (dynamic-key) or `process.env[...]` where `...` isn't a static
+// identifier, this barrier turns red — because the runtime consequence is silent no-op again.
+check("observability.ts uses STATIC identifier env reads (Metro can inline EXPO_PUBLIC_*)",
+  /process\.env\.EXPO_PUBLIC_SENTRY_DSN\b/.test(src));
+// Strip line and block comments before scanning so a comment that DESCRIBES the anti-pattern (as
+// this file's header does) doesn't trip the check on itself.
+const srcNoComments = src
+  .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
+  .replace(/(^|[^:])\/\/[^\n]*/g, '$1'); // line comments (avoid URL scheme "://")
+check("observability.ts does NOT use dynamic-key env reads (process.env[name] silently no-ops on web)",
+  !/process\.env\[\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*\]/.test(srcNoComments));
+
 // ── 2. package.json actually depends on both SDKs — the require can't be a dead branch ────────
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 check("package.json depends on @sentry/browser (web)", typeof pkg.dependencies?.['@sentry/browser'] === 'string');

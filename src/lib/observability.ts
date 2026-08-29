@@ -121,10 +121,25 @@ let SentryImpl: SentryLike | null = null;
 let initialized = false;
 let hadDsn = false;
 
-function readEnv(name: string): string | undefined {
-  // process.env for web (Metro inlines EXPO_PUBLIC_*), globalThis for native
-  const p = typeof process !== 'undefined' && process.env ? process.env[name] : undefined;
-  return p ?? undefined;
+// STATIC env reads — Metro/Expo inline `process.env.EXPO_PUBLIC_*` ONLY when the property access
+// is a literal identifier. `process.env[name]` with a dynamic key is a runtime lookup, and on web
+// `process.env` is an empty polyfill — so a dynamic-key reader returns undefined even when the var
+// is set in Vercel. That was the SECOND root cause of the 2026-08-29 certification finding: the
+// first fix made the SDK branch to @sentry/browser, but init still returned early because the DSN
+// read was dynamic and never inlined. Each var MUST be read by literal identifier here, never via
+// a helper that takes a name string, or Metro will not inline it and web will silently degrade to
+// "no DSN → no-op".
+function readSentryDsn(): string | undefined {
+  const v = process.env.EXPO_PUBLIC_SENTRY_DSN;
+  return typeof v === 'string' && v.length ? v : undefined;
+}
+function readSentryEnv(): string | undefined {
+  const v = process.env.EXPO_PUBLIC_SENTRY_ENV;
+  return typeof v === 'string' && v.length ? v : undefined;
+}
+function readSentryRelease(): string | undefined {
+  const v = process.env.EXPO_PUBLIC_SENTRY_RELEASE;
+  return typeof v === 'string' && v.length ? v : undefined;
 }
 
 /**
@@ -134,7 +149,7 @@ function readEnv(name: string): string | undefined {
 export function initObservability(): void {
   if (initialized) return;
   initialized = true;
-  const dsn = readEnv('EXPO_PUBLIC_SENTRY_DSN');
+  const dsn = readSentryDsn();
   hadDsn = !!(dsn && dsn.trim());
   if (!hadDsn) return; // no DSN → total no-op, the whole point of "safe-by-default"
 
@@ -159,8 +174,8 @@ export function initObservability(): void {
     SentryImpl = mod as SentryLike;
     SentryImpl.init({
       dsn: dsn!.trim(),
-      environment: readEnv('EXPO_PUBLIC_SENTRY_ENV') ?? 'production',
-      release: readEnv('EXPO_PUBLIC_SENTRY_RELEASE'),
+      environment: readSentryEnv() ?? 'production',
+      release: readSentryRelease(),
       // ERRORS ONLY. Enabling any of these later is a deliberate, PDPL-reviewed change.
       tracesSampleRate: 0,
       replaysSessionSampleRate: 0,
