@@ -14,6 +14,7 @@ import { t, getLocale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
 import { partitionRequestedAmenities, cohortAllows } from '@/lib/afCohorts';
 import { applyAfIntents } from '@/lib/afIntents';
+import { mergeConversationState, rescuedFields } from '@/lib/conversationState';
 import { landmarkHint, ensureLandmarks } from './landmarks';
 import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 
@@ -621,7 +622,7 @@ export type AgentHistoryTurn = { role: 'user' | 'model'; text: string };
 
 async function callAgentBackend(
   text: string,
-  ctx: { loggedIn: boolean; order: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[] },
+  ctx: { loggedIn: boolean; order: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[]; prevQuery?: SearchQuery | null },
 ): Promise<AgentTurn | null> {
   if (!supabase) return null;
   try {
@@ -655,7 +656,12 @@ async function callAgentBackend(
       return {
         kind: 'listings',
         reply: String(d.reply ?? ''),
-        query: queryFromBackend(d.query ?? {}, text, ctx.attemptTexts ?? [text]),
+        // CLARIFICATION MUST NOT RESET THE CONVERSATION (owner-reported bug 2026-08-29).
+        // queryFromBackend builds a FRESH query from this turn's model output, so anything the model
+        // does not re-state would vanish — «شهرية» silently became RentAnnual and a 9.5 rating
+        // disappeared after one more clarifying question. The accumulated state fills the gaps; an
+        // explicit change in THIS turn always wins.
+        query: mergeConversationState(ctx.prevQuery ?? null, queryFromBackend(d.query ?? {}, text, ctx.attemptTexts ?? [text])),
       };
     }
     if (d.kind === 'message') return { kind: 'message', reply: String(d.reply ?? '') };
@@ -882,7 +888,7 @@ function maybeForcePlatformSearch(turn: AgentTurn, text: string): AgentTurn {
 // listings right away. A LOGGED-IN user gets a full conversational assistant — listings appear ONLY
 // when they give a direct search order ("I want…/show me…/أريد…"); otherwise Ezhalah just helps,
 // neutrally, like a normal assistant and invites them to say "show me" when ready.
-export async function respond(text: string, opts?: { loggedIn?: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[] }): Promise<AgentTurn> {
+export async function respond(text: string, opts?: { loggedIn?: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[]; prevQuery?: SearchQuery | null }): Promise<AgentTurn> {
   const v = text.trim();
   const loggedIn = !!opts?.loggedIn;
   if (!v) return { kind: 'message', reply: t("Tell me what you're looking for and I'll search for it.") };
@@ -903,7 +909,7 @@ export async function respond(text: string, opts?: { loggedIn?: boolean; history
   // Real LLM agent (Gemini edge function). It handles Arabic natively, applies the non-advisory
   // rules, and now also the auth-aware behavior (we pass loggedIn + order). If it's unavailable for
   // any reason, fall through to the bundled heuristic below so the app never hard-fails.
-  const backend = await callAgentBackend(v, { loggedIn, order, history: opts?.history, attemptTexts: opts?.attemptTexts });
+  const backend = await callAgentBackend(v, { loggedIn, order, history: opts?.history, attemptTexts: opts?.attemptTexts, prevQuery: opts?.prevQuery ?? null });
   if (backend) {
     // Named-platform filter safety net: if the user said "Aqar only" / "Gathern فقط" but the model
     // deflected, force the search. When we override, the reply is already final — return as-is.
