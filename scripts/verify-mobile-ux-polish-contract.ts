@@ -49,7 +49,11 @@ check('openSaved lands at the latest content (both transcript and snapshot paths
   (agent.match(/landAtLatest\(\);/g) ?? []).length >= 2);
 check('the settle window is BOUNDED and releases the pin at its end',
   /for \(const ms of \[150, 450, 900, 1600\]\)/.test(agent)
-  && /setTimeout\(\(\) => \{ landTimersRef\.current = \[\]; pinModeRef\.current = 'none'; \}, 1900\)/.test(agent));
+  && /setTimeout\(\(\) => \{ landTimersRef\.current = \[\]; landInstantRef\.current = false; pinModeRef\.current = 'none'; \}, 1900\)/.test(agent));
+check('the landing is INSTANT — no visible drag to the bottom (owner 2026-08-29 follow-up)',
+  /landInstantRef\.current = true;/.test(agent)
+  && /scrollToEnd\(\{ animated: !landInstantRef\.current \}\)/.test(agent)
+  && /landInstantRef\.current = false; pinModeRef\.current = 'none'; \}, 1900\)/.test(agent));
 check('user scroll/touch cancels the landing immediately (their intent wins, no jump loop)',
   /document\.addEventListener\('wheel', stop, \{ passive: true, capture: true \}\)/.test(agent)
   && /document\.addEventListener\('touchstart', stop, \{ passive: true, capture: true \}\)/.test(agent)
@@ -94,12 +98,15 @@ mustCatch('an animated tintColor creeping back into a selector',
       .replace('{ tintColor: interpolateColor(p.value, [0,1], [off, on]) }', 'tintColor: interpolateColor(x)')));
 mustCatch('one selector family quietly dropping the crossfade component',
   (mut(ui, '<CrossfadeTintIcon source={icon}', '<AnimatedImage source={icon}').match(/<CrossfadeTintIcon /g) ?? []).length !== 2);
+mustCatch('the landing gliding again (animated scrollToEnd during the landing window)',
+  !/scrollToEnd\(\{ animated: !landInstantRef\.current \}\)/.test(
+    mut(agent, 'scrollToEnd({ animated: !landInstantRef.current })', 'scrollToEnd({ animated: true })')));
 mustCatch('the landing losing its user-scroll cancellation',
   !/document\.addEventListener\('wheel', stop, \{ passive: true, capture: true \}\)/.test(
     mut(agent, "document.addEventListener('wheel', stop, { passive: true, capture: true });", '')));
 mustCatch('the settle window becoming unbounded (pin never released)',
-  !/setTimeout\(\(\) => \{ landTimersRef\.current = \[\]; pinModeRef\.current = 'none'; \}, 1900\)/.test(
-    mut(agent, "landTimersRef.current.push(setTimeout(() => { landTimersRef.current = []; pinModeRef.current = 'none'; }, 1900));", '')));
+  !/setTimeout\(\(\) => \{ landTimersRef\.current = \[\]; landInstantRef\.current = false; pinModeRef\.current = 'none'; \}, 1900\)/.test(
+    mut(agent, "landTimersRef.current.push(setTimeout(() => { landTimersRef.current = []; landInstantRef.current = false; pinModeRef.current = 'none'; }, 1900));", '')));
 mustCatch('the Filter home highlighting an old chat again (route gate removed)',
   !/onAgentScreen && activeChatId === c\.id &&/.test(
     mut(sidebar, 'onAgentScreen && activeChatId === c.id &&', 'activeChatId === c.id &&')));
