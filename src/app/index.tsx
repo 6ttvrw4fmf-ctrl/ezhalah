@@ -3,6 +3,7 @@ import { Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable,
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useThemePalette } from '@/lib/appearance';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
@@ -830,9 +831,12 @@ export default function Home() {
   }, [districtsSelected, districtSel, districtPop, confirmPop]);
   // Field style while/after a pick is confirmed: a scale overshoot (one-shot) + the border easing to
   // green (persistent while selected). `sel` is the 0/1 persistent value, `pop` the one-shot pulse.
+  // Literal palette: RN Animated color interpolation PARSES its output range and cannot digest the
+  // var() theme tokens — same rule as ui.tsx's interpolateColor sites.
+  const pal = useThemePalette();
   const confirmFieldStyle = (pop: RNAnimated.Value, sel: RNAnimated.Value) => ({
     transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [1, 1.02] }) }],
-    borderColor: sel.interpolate({ inputRange: [0, 1], outputRange: [colors.fieldLine, colors.primary] }),
+    borderColor: sel.interpolate({ inputRange: [0, 1], outputRange: [pal.fieldLine, pal.primary] }),
   });
   const checkStyle = (sel: RNAnimated.Value) => ({
     opacity: sel,
@@ -1187,7 +1191,7 @@ export default function Home() {
             </AnimatedPressable>
 
             {locMsg ? (
-              <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{locMsg}</Text>
+              <Text style={{ color: colors.danger, fontSize: 13, marginTop: 6, textAlign: 'right' }}>{locMsg}</Text>
             ) : null}
 
             {/* Merge note (2026-07-20): outer open/close wrapper is PR #156's DropdownReveal; inner
@@ -1388,7 +1392,7 @@ export default function Home() {
             ) : null}
 
             {districtMsg ? (
-              <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{districtMsg}</Text>
+              <Text style={{ color: colors.danger, fontSize: 13, marginTop: 6, textAlign: 'right' }}>{districtMsg}</Text>
             ) : null}
 
             {/* Merge note (2026-07-20): outer open/close wrapper is PR #156's DropdownReveal; inner
@@ -1830,7 +1834,7 @@ const s = StyleSheet.create({
   shareBtnPressed: { opacity: 0.85 },
   // Top-bar sign-in (mobile, logged-out only — owner 2026-08-19). Compact pill matching the sidebar's
   // CTA green so the action is unmistakable. On desktop the docked sidebar already shows it.
-  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.primary, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   hero: { alignItems: 'center', marginTop: 12, marginHorizontal: 4 },
@@ -1928,7 +1932,7 @@ const s = StyleSheet.create({
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   wrapCell: { flexGrow: 1, flexBasis: '30%', minWidth: 90, flex: 0 },
 
-  searchBtn: { marginTop: 11, height: 51, borderRadius: radius.field, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  searchBtn: { marginTop: 11, height: 51, borderRadius: radius.field, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   searchBtnText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
 
   startHead: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 9, marginHorizontal: 2 },

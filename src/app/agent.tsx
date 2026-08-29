@@ -3345,7 +3345,7 @@ const s = StyleSheet.create({
     elevation: 2,
   },
   shareIconPressed: { opacity: 0.85 },
-  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.primary, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },
 
@@ -3400,7 +3400,7 @@ const s = StyleSheet.create({
   // The two actions under the «more than 25» message: primary (show all) + outline (refine). (user 2026-06-27.)
   mBtnRow: { flexWrap: 'wrap', gap: 8, marginTop: 2 },
   // minWidth + centered content: the text↔dots swap never changes the button's size (no layout shift).
-  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, backgroundColor: colors.primary, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transitionProperty: 'background-color', transitionDuration: '150ms' } as any) : {}) },
+  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, backgroundColor: colors.selFill, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transitionProperty: 'background-color', transitionDuration: '150ms' } as any) : {}) },
   mBtnPrimaryHover: { backgroundColor: colors.dark },
   mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: '#fff', lineHeight: 18 },
   mBtnAlt: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
@@ -3428,7 +3428,7 @@ const s = StyleSheet.create({
   promptLogo: { width: 56, height: 56, borderRadius: 28 },
   promptTitle: { fontSize: 17, fontWeight: '800', color: colors.ink, textAlign: 'center' },
   promptBody: { fontSize: 13.5, lineHeight: 19, color: colors.muted, textAlign: 'center' },
-  promptPrimary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.primary, borderRadius: 13, paddingVertical: 13, width: '100%', marginTop: 6 },
+  promptPrimary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.selFill, borderRadius: 13, paddingVertical: 13, width: '100%', marginTop: 6 },
   promptPrimaryTx: { color: '#fff', fontSize: 14.5, fontWeight: '700' },
   promptSecondary: { paddingVertical: 8 },
   promptSecondaryTx: { color: colors.muted, fontSize: 13.5, fontWeight: '600' },
@@ -3438,8 +3438,8 @@ const s = StyleSheet.create({
   // User message bubble — deliberately STRONGER light-green so it pops against the cream paper bg,
   // like the selected recent-chat row in the sidebar. Dark green text for contrast. (user request.)
   // User message bubble — soft light green pill, normal text weight (not heavy/black). (user request.)
-  userBubble: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: '#d7eede', borderColor: '#bedfc9', borderWidth: 1, borderRadius: 16, borderBottomRightRadius: 5, paddingVertical: 10, paddingHorizontal: 14, marginTop: 10 },
-  userText: { color: '#1d4a37', fontSize: 14, lineHeight: 19, fontWeight: '500' },
+  userBubble: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: colors.userBubble, borderColor: colors.tintLine, borderWidth: 1, borderRadius: 16, borderBottomRightRadius: 5, paddingVertical: 10, paddingHorizontal: 14, marginTop: 10 },
+  userText: { color: colors.userBubbleText, fontSize: 14, lineHeight: 19, fontWeight: '500' },
 
   status: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 2 },
   statusText: { fontSize: 12.5, color: colors.muted },
@@ -3470,7 +3470,7 @@ const s = StyleSheet.create({
   refineIc: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   refineT: { fontSize: 13, fontWeight: '700', color: colors.ink },
   refineS: { fontSize: 11, color: colors.body, marginTop: 1, lineHeight: 15 },
-  refineBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.primary, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 11 },
+  refineBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 11 },
   refineBtnTx: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   composerWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
@@ -3506,7 +3506,7 @@ const s = StyleSheet.create({
   // 16px and never zoom back out — the single worst mobile-web chat bug. overflowY:'auto' gives the
   // internal scroll once the textarea reaches COMPOSER_MAX_H. (owner 2026-08-19)
   input: { width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any } : {}) },
-  sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   sendBtnHover: { backgroundColor: colors.dark },
   sendDisabled: { opacity: 0.35 },
   // ── Voice recording composer (owner brief 2026-08-23) ──

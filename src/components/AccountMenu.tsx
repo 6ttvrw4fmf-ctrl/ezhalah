@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Image as RNImage, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { alpha0 } from '@/theme/palette';
 import { colors as lightColors, radius } from '@/theme/tokens';
 import { useTheme, type ThemeMode } from '@/theme/theme';
 import { useApp } from '@/store';
+
+// The eagle over Saudi Arabia at night (owner: «add the image, blend it in») — the panel's one bold
+// element; it melts into the panel surface via the gradient so it reads as material, not a sticker.
+// A night scene, so it fuses with dark mode and reads as a framed midnight vista in light.
+const EAGLE = require('../../assets/images/eagle-night.jpg');
 import { useI18n } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { pickName, buildSyncedName, scriptOf, initialsOf } from '@/lib/nameSync';
@@ -222,6 +229,11 @@ export default function AccountMenu({
         <Animated.View style={viewAnim}>
           {view === 'root' && (
             <View>
+              {/* The artwork band — gradient colors are LITERALS (C.*), never var() tokens. */}
+              <View style={s.art}>
+                <RNImage source={EAGLE} style={s.artImg} resizeMode="cover" />
+                <LinearGradient colors={[alpha0(C.surface), C.surface]} locations={[0.4, 1]} style={StyleSheet.absoluteFill} />
+              </View>
               {/* Profile header — mirrors the row the menu grew from (spatial continuity). */}
               <View style={s.profile}>
                 <View style={s.avatar}><Text style={s.avatarText}>{initialsOf(pickName(user, locale))}</Text></View>
@@ -551,6 +563,8 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
       shadowOffset: { width: 0, height: 14 }, elevation: 18,
     },
 
+    art: { height: 78, marginTop: -6, marginHorizontal: -6, marginBottom: -20, overflow: 'hidden' },
+    artImg: { width: '100%', height: '100%' },
     profile: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10 },
     avatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
     avatarText: { color: '#fff', fontSize: 13, fontWeight: '700' },

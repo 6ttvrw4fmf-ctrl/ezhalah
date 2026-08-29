@@ -564,7 +564,7 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
                         <Text style={s.appleAcctName}>Ahmed Al-Saud</Text>
                         <Text style={s.appleAcctEmail} numberOfLines={1}>{appleEmail}</Text>
                       </View>
-                      <Ionicons name={isRTL ? 'chevron-back' : 'chevron-forward'} size={16} color="#b6beb9" />
+                      <Ionicons name={isRTL ? 'chevron-back' : 'chevron-forward'} size={16} color={colors.muted} />
                     </View>
                     <Pressable style={s.appleEmail} onPress={() => setHideEmail((h) => !h)}>
                       <View style={s.appleEmailL}>
@@ -670,7 +670,7 @@ const s = StyleSheet.create({
   // ("intentionally draggable" — the card announces the gesture instead of hiding it).
   gripPill: { marginTop: 12, width: 44, height: 5, borderRadius: 3, backgroundColor: 'rgba(29, 74, 55, 0.22)' },
   pop: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderRadius: 26,
     paddingTop: 34,
     paddingBottom: 30,
@@ -687,7 +687,7 @@ const s = StyleSheet.create({
   popClose: {
     position: 'absolute', top: 14, end: 14, zIndex: 5,
     width: 34, height: 34, borderRadius: 17,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f4f1',
+    alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface2,
   },
   // The bare dark-green eagle mark. No separate fly-in/bounce/wink — the whole card (including this)
   // fades+scales in together as ONE motion (owner 2026-08-15: "no bouncing, spinning, excessive
@@ -697,20 +697,20 @@ const s = StyleSheet.create({
   popEagleWide: { width: 104, height: 84, marginTop: 6 },
 
   formHead: { fontSize: 26, fontWeight: '800', color: colors.ink, textAlign: 'center', marginBottom: 10, lineHeight: 38, letterSpacing: -0.3 },
-  agree: { fontSize: 12.5, color: '#7c8a83', textAlign: 'center', marginBottom: 22, lineHeight: 18, paddingHorizontal: 8 },
+  agree: { fontSize: 12.5, color: colors.muted, textAlign: 'center', marginBottom: 22, lineHeight: 18, paddingHorizontal: 8 },
 
   oauth: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: 52, borderRadius: 14, marginTop: 11 },
   google: { backgroundColor: colors.dark },
-  apple: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d9e0da' },
+  apple: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine },
   oauthText: { fontSize: 15, fontWeight: '600', color: colors.ink },
-  oauthErr: { fontSize: 12, color: '#c0392b', textAlign: 'center', marginTop: 6 },
+  oauthErr: { fontSize: 12, color: colors.danger, textAlign: 'center', marginTop: 6 },
 
   orRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 10 },
   orLine: { flex: 1, height: 1, backgroundColor: colors.line },
-  orText: { fontSize: 12, color: '#9aa6a0' },
+  orText: { fontSize: 12, color: colors.muted },
 
   phoneRow: { flexDirection: 'row', gap: 8 },
-  cc: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 52, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1, borderColor: '#d9e0da', backgroundColor: '#fff' },
+  cc: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 52, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.fieldLine, backgroundColor: colors.surface },
   ccFlag: { fontSize: 18 },
   ccText: { fontSize: 14.5, fontWeight: '600', color: colors.ink },
   // fontSize >= 16 on web: under 16px mobile Safari zooms on focus and never zooms back (barrier:
@@ -719,16 +719,16 @@ const s = StyleSheet.create({
   // intrinsic min-content width), so a larger font in a flex row overflows the row instead of
   // shrinking — measured 7.8px past the sheet before this was added. Same pairing as index.tsx's
   // sizeInput/rangeInput, which already carry the note.
-  phoneInput: { flex: 1, minWidth: 0, height: 52, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, borderColor: '#dfe3e0', fontSize: Platform.OS === 'web' ? 16 : 15, color: colors.ink, backgroundColor: '#fff', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  phoneInput: { flex: 1, minWidth: 0, height: 52, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.fieldLine, fontSize: Platform.OS === 'web' ? 16 : 15, color: colors.ink, backgroundColor: colors.surface, ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
 
   scrim: { position: 'absolute', top: -1000, left: -1000, right: -1000, bottom: -1000 },
-  ccList: { marginTop: 6, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.line, borderRadius: 13, padding: 6, ...cardShadow },
+  ccList: { marginTop: 6, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, borderRadius: 13, padding: 6, ...cardShadow },
   ccItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11, paddingHorizontal: 12, borderRadius: 9 },
-  ccItemSel: { backgroundColor: '#eef6f0' },
+  ccItemSel: { backgroundColor: colors.tint },
   ccItemName: { flex: 1, fontSize: 13.5, color: colors.ink },
   ccItemCode: { fontSize: 13.5, color: colors.muted, fontWeight: '600' },
 
-  err: { fontSize: 11.5, color: '#c0392b', fontWeight: '500', marginTop: 8, marginHorizontal: 2, lineHeight: 16 },
+  err: { fontSize: 11.5, color: colors.danger, fontWeight: '500', marginTop: 8, marginHorizontal: 2, lineHeight: 16 },
   continue: { backgroundColor: colors.dark, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
   continueOff: { opacity: 0.45 },
   continueText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
@@ -785,14 +785,14 @@ const s = StyleSheet.create({
   otpTitle: { fontSize: 20, fontWeight: '700', color: colors.ink, marginTop: 16 },
   otpSub: { fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 8, lineHeight: 20 },
   otpBoxes: { flexDirection: 'row', gap: 9, marginTop: 24 },
-  otpBox: { width: 44, height: 54, borderRadius: 12, borderWidth: 1.5, borderColor: '#dfe3e0', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
+  otpBox: { width: 44, height: 54, borderRadius: 12, borderWidth: 1.5, borderColor: colors.fieldLine, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
   otpBoxActive: { borderColor: colors.primary },
   otpDigit: { fontSize: 22, fontWeight: '700', color: colors.ink },
   // Invisible, but iOS still zooms to the FOCUSED element's font-size — and this one autoFocuses, so
   // without an explicit 16 it inherits react-native-web's 14px default and zooms the OTP screen.
   otpHidden: { position: 'absolute', opacity: 0, width: 1, height: 1, fontSize: 16 },
   verify: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 18 },
-  verifyText: { fontSize: 13, color: '#5d6f64' },
+  verifyText: { fontSize: 13, color: colors.body },
   resend: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 22 },
   resendText: { fontSize: 13, fontWeight: '600', color: colors.dark },
 });

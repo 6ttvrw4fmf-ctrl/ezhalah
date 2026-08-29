@@ -176,9 +176,9 @@ export default function Browser() {
 
 const s = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.paper },
-  frameLoading: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff', gap: 12 },
+  frameLoading: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, gap: 12 },
   frameLoadingText: { fontSize: 13.5, color: colors.muted, fontWeight: '600' },
-  retryBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.primary, borderRadius: 11, paddingVertical: 10, paddingHorizontal: 16 },
+  retryBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.selFill, borderRadius: 11, paddingVertical: 10, paddingHorizontal: 16 },
   retryBtnText: { color: '#fff', fontSize: 13.5, fontWeight: '700' },
   retryBtnOutline: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint, borderRadius: 11, paddingVertical: 10, paddingHorizontal: 16 },
   retryBtnOutlineText: { color: colors.primary, fontSize: 13.5, fontWeight: '700' },

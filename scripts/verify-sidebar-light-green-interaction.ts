@@ -21,7 +21,10 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8');
 const stripComments = (src: string) =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/^\s*\/\/.*$/gm, '');
 const sidebar = stripComments(read('src/components/Sidebar.tsx'));
-const tokens = read('src/theme/tokens.ts');
+// Token VALUES live in palette.ts since full-app theming (tokens.ts serves CSS variables on web);
+// the lightColors block comes first, so the first regex match is the light literal these
+// light-mode contrast floors were written against.
+const tokens = read('src/theme/palette.ts');
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {

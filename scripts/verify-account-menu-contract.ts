@@ -27,7 +27,9 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveTheme, themeColors, isThemeMode } from '../src/theme/themeMode.ts';
-import { colors, darkColors } from '../src/theme/tokens.ts';
+// Palette literals moved to palette.ts when the full-app var() layer landed (tokens.ts now
+// imports react-native and cannot load under plain node).
+import { lightColors as colors, darkColors } from '../src/theme/palette.ts';
 
 const root = join(import.meta.dirname, '..');
 // Comments narrate history ("go('/settings') went with it") — strip them so only CODE can satisfy

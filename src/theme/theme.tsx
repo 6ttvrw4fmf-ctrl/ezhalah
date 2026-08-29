@@ -87,6 +87,19 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     AsyncStorage.setItem(THEME_KEY, m).catch(() => {});
   }, []);
 
+  // FULL-APP dark (2026-08-28, same-day extension of PR#1206): the mode also drives the <html>
+  // data-theme attribute. Every static token is a var(--ez-*) keyed on that attribute (+html.tsx),
+  // so this one write re-skins ALL 26 module-scope StyleSheets — not just the converted surfaces.
+  // 'system' REMOVES the attribute: the prefers-color-scheme media query then decides in pure CSS,
+  // including live OS changes. The pre-hydration boot script in +html.tsx applies the same rule
+  // before first paint, so there is never a flash of the wrong theme.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const d = document.documentElement;
+    if (mode === 'system') d.removeAttribute('data-theme');
+    else d.setAttribute('data-theme', mode);
+  }, [mode]);
+
   const resolved = resolveTheme(mode, systemDark);
   const value = useMemo<ThemeValue>(
     () => ({ mode, setMode, resolved, colors: themeColors(resolved) }),
