@@ -343,15 +343,20 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       await page.waitForTimeout(1200);
     }
 
-    // Finish now — «عرض النتائج» (af-skip-all) commits accumulated answers + searches. Confirming
-    // the LAST useful question can already have ended the flow (mining → results) on its own, so
-    // only click af-skip-all if the card is still actually there to click. The capture was armed
-    // before that confirm (above), so a search it already fired is still held here rather than
-    // discarded.
-    const stillOpen = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
-    if (stillOpen) {
-      const btn2 = await page.evaluate(() => !!document.querySelector('[data-testid="af-skip-all"]'));
-      if (btn2) await page.click('[data-testid="af-skip-all"]');
+    // Finish the round. The «عرض النتائج» early-exit was REMOVED by the owner (2026-08-28) — the
+    // footer is متابعة/تخطي/رجوع only, and a round ends when its questions are exhausted. So when
+    // the card is still open after the committing confirm above, walk it out by SKIPPING the
+    // remaining questions (skip = commitGuidedStep([]) — the same ONE commit path, recorded as
+    // no-preference, changing no filters). Bounded: AF_ROUND_MAX_QUESTIONS is 5, so 8 attempts can
+    // never loop forever even if a click is swallowed once or twice. The capture was armed before
+    // that confirm, so a search it already fired is still held here rather than discarded.
+    for (let hop = 0; hop < 8; hop++) {
+      const open = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
+      if (!open) break;
+      const skip = await page.evaluate(() => !!document.querySelector('[data-testid="af-skip"]'));
+      if (!skip) break; // intro/mining state — no question on screen to skip
+      await page.click('[data-testid="af-skip"]');
+      await page.waitForTimeout(900);
     }
     // Poll for the RPC first (it is the ground truth for what number the UI SHOULD settle on),
     // then poll the UI's own typed-out text for that exact number — a results turn types itself out

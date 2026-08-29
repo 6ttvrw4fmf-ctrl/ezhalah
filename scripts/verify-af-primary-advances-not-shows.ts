@@ -12,8 +12,13 @@
 // `commitGuidedStep(keys)` WITHOUT the finish flag: it records the answer and presents the next
 // question. Arity never had anything to do with terminality. Ordinality cannot stand in for it
 // either: the interview re-ranks the still-unasked pool after every answer, so the card genuinely
-// cannot know whether another question is coming. The one terminal control is the «عرض النتائج»
-// link (`af-skip-all` → `commitGuidedStep(keys, true)` → `finishGuided`).
+// cannot know whether another question is coming.
+//
+// UPDATE (owner, 2026-08-28): the «عرض النتائج» footer link (`af-skip-all`) — previously the one
+// terminal control — was REMOVED entirely; the question footer is متابعة / تخطي / رجوع and a round
+// ends only by walking its questions, by Back from question 1, or by ✕. That makes this barrier's
+// core rule even stricter: with no in-question terminal control at all, NOTHING in the question
+// footer may ever promise results. §3 below pins the removal in both directions.
 //
 // WHY A BARRIER. This is the owner's "visible UI state must equal committed request state" rule at
 // the label level: a control's words must describe what its tap does. The regression is invisible
@@ -51,7 +56,6 @@ const block = (src: string, testId: string, close: string): string => {
   return end < 0 ? '' : src.slice(at, end);
 };
 const primary = block(cardSrc, 'af-confirm', '</Tap>');
-const escape_ = block(cardSrc, 'af-skip-all', '</Pressable>');
 
 console.log('\nAdvanced Filter — the primary button advances, so it must not promise results\n');
 
@@ -83,11 +87,15 @@ check('the primary label does not branch on arity (single and multi advance iden
   primary !== '' && !/selection/.test(primary),
   'the arity branch that produced the defect is back inside the af-confirm block');
 
-// ── 3. the ONE terminal control keeps its terminal wording ──────────────────────────────────────
-check('«عرض النتائج» is the terminal control: af-skip-all, labelled Show results',
-  /onPress=\{\(\) => onSkipAll\(sel\)\}/.test(escape_) && /t\('Show results'\)/.test(escape_));
-check('onSkipAll finishes the interview (commitGuidedStep with finish = true)',
-  /const onAgeSkipAll = \(keys: string\[\]\) => \{ void commitGuidedStep\(keys, true\); \}/.test(agentSrc));
+// ── 3. the in-question early-exit stays REMOVED (owner, 2026-08-28) ─────────────────────────────
+// With af-skip-all gone there is no terminal control in the question footer at all, so no footer
+// control may carry terminal wording — and the removal itself must not silently revert.
+check('af-skip-all does not exist in the question card (the owner removed the early-exit)',
+  !/testID="af-skip-all"/.test(cardSrc) && !/onSkipAll/.test(cardSrc));
+check('agent.tsx no longer wires an onAgeSkipAll handler',
+  !/onAgeSkipAll/.test(agentSrc));
+check('the intro card KEEPS its own «عرض النتائج» decline link (a different control — only the question footer changed)',
+  /onShowResults/.test(cardSrc) && /onPress=\{onShowResults\}/.test(cardSrc));
 
 // ── 4. Arabic is the product language — both label states must be translated ────────────────────
 check('the primary label has its Arabic translations',
@@ -117,14 +125,15 @@ mustCatch('the premise silently flipping to a terminal primary',
   !/const onAgeConfirm = \(keys: string\[\]\) => \{ void commitGuidedStep\(keys\); \}/.test(
     mut(agentSrc, 'const onAgeConfirm = (keys: string[]) => { void commitGuidedStep(keys); }',
       'const onAgeConfirm = (keys: string[]) => { void commitGuidedStep(keys, true); }')));
-mustCatch('the escape link losing its terminal commit',
-  !/const onAgeSkipAll = \(keys: string\[\]\) => \{ void commitGuidedStep\(keys, true\); \}/.test(
-    mut(agentSrc, 'commitGuidedStep(keys, true)', 'commitGuidedStep(keys)')));
-mustCatch('the escape link losing its «عرض النتائج» wording',
-  !/t\('Show results'\)/.test(block(mut(cardSrc, "s.skipAllTxt}>{t('Show results')}", "s.skipAllTxt}>{t('Skip')}"), 'af-skip-all', '</Pressable>')));
+mustCatch('the removed af-skip-all early-exit creeping back into the card',
+  /testID="af-skip-all"/.test(cardSrc + '\n<Pressable testID="af-skip-all" onPress={() => onSkipAll(sel)} />'));
+mustCatch('an onAgeSkipAll handler creeping back into agent.tsx',
+  /onAgeSkipAll/.test(agentSrc + '\nconst onAgeSkipAll = (keys: string[]) => { void commitGuidedStep(keys, true); };'));
+mustCatch('the intro card losing its decline link',
+  !/onPress=\{onShowResults\}/.test(mut(cardSrc, 'onPress={onShowResults}', 'onPress={onClose}')));
 mustCatch('the block extractor going blind (a missing testID reads as an empty block)',
   block(mut(cardSrc, 'testID="af-confirm"', ''), 'af-confirm', '</Tap>') === '');
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }
-console.log('\n✓ the AF primary advances one question and says so; «عرض النتائج» remains the one terminal control\n');
+console.log('\n✓ the AF primary advances one question and says so; the in-question «عرض النتائج» early-exit stays removed\n');

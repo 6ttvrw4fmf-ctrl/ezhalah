@@ -423,10 +423,15 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 - **R8.2.3** — Back writes NO receipt, NO pill, NO probed-canNarrow verdict, ever.
 - **R8.2.4** — Enforced by `verify-af-back-navigation.ts` + `verify-af-round-back-boundary.ts`.
 
-### 8.3 Show Results («عرض النتائج»)
+### 8.3 The question footer (owner decision, 2026-08-28)
 
-- **R8.3.1** — Commits everything selected so far in the current round and ends the round early.
-- **R8.3.2** — A new results turn lands; the previous turn's buttons become the receipt (§6.3).
+- **R8.3.1** — The question footer offers exactly THREE controls — متابعة (primary), تخطي and
+  رجوع as real buttons — and NO in-question «عرض النتائج» early-exit. (Owner, 2026-08-28,
+  reversing the 2026-08-16 escape-link rule: the removed control used to commit the round early;
+  a round now ends by walking its questions, by Back from question 1, or by ✕. The intro card's
+  own «عرض النتائج» decline link is a different control and is unchanged.)
+- **R8.3.2** — When a round ends, a new results turn lands; the previous turn's buttons become
+  the receipt (§6.3).
 
 ### 8.4 Skip All («تخطي الباقي»)
 

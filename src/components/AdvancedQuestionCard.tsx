@@ -146,7 +146,8 @@ export type AdvancedQuestionCardProps = {
   onConfirm: (keys: string[]) => void; // commit the selection (empty = no preference) and advance/search
   onSkip: () => void;                   // skip THIS question
   onBack: () => void;                   // one question back — from the first question, out of AF entirely
-  onSkipAll: (keys: string[]) => void;  // commit accumulated + the VISIBLE selection, search now
+  // The skip-all prop was REMOVED (owner, 2026-08-28): the in-question «عرض النتائج» early-exit is
+  // gone — the footer is متابعة / تخطي / رجوع only. The intro card's decline link is separate.
   onClose: () => void;                  // abandon
 };
 
@@ -215,9 +216,9 @@ function OptionRow({ option, selected, selection, first, onPress }: {
 
 export default function AdvancedQuestionCard({
   titleKey, descriptionKey, brandImage, selection, options, unknownCount, progressCur, progressTotal,
-  liveCount, initialKeys, onConfirm, onSkip, onBack, onSkipAll, onClose,
+  liveCount, initialKeys, onConfirm, onSkip, onBack, onClose,
 }: AdvancedQuestionCardProps) {
-  const { t } = useI18n();
+  const { t, isRTL } = useI18n();
   const [sel, setSel] = useState<string[]>(initialKeys ?? []);
   const [count, setCount] = useState<number | null>(null);
   const reduced = useReducedMotion();
@@ -390,23 +391,44 @@ export default function AdvancedQuestionCard({
             {count != null ? t('Continue · {count} results', { count: grouped(count) }) : t('Continue')}
           </Text>
         </Tap>
+        {/* Secondary row — TWO real buttons, not footnote links (owner redesign, 2026-08-28: the
+            old text-only رجوع/تخطي/عرض النتائج row read as fine print and was easy to miss). The
+            same owner decision REMOVED the in-question «عرض النتائج» early-exit entirely — the
+            question footer offers exactly متابعة / تخطي / رجوع; a round now ends by walking its
+            questions (confirm/skip), by Back from question 1, or by ✕. The intro card's own
+            «عرض النتائج» decline link is a different control and is unchanged.
+            Both buttons share the option rows' surface+fieldLine border idiom at the primary's
+            chip radius, so the three footer controls read as one family, distinct from content.
+            States are instant Pressable style-state (press feedback on pointer-down, never a
+            timer): hover lifts to segTrack, press adds the pickLine border + a 0.98 settle,
+            keyboard focus shows a primary-color ring. Under the app's RTL direction the JSX order
+            Back→Skip lands «رجوع» on the RIGHT — the canonical Arabic back position — with the
+            chevron pointing toward where the user came from (the AuthModal's isRTL idiom). */}
         <View style={s.footRow}>
           {/* «رجوع» is on EVERY question, including the first — from the first one it leaves the
               interview entirely and hands the pre-AF controls back (owner 2026-08-22 §2). */}
-          <Pressable style={s.skipLink} testID="af-back" onPress={onBack} hitSlop={8}>
-            <Text style={s.backTxt}>{t('Back')}</Text>
+          <Pressable
+            style={({ pressed, hovered, focused }: any) => [
+              s.secondaryBtn,
+              hovered && s.secondaryBtnHover,
+              focused && s.secondaryBtnFocus,
+              pressed && s.secondaryBtnPress,
+            ]}
+            testID="af-back" onPress={onBack} hitSlop={8} accessibilityRole="button"
+          >
+            <Ionicons name={isRTL ? 'chevron-forward' : 'chevron-back'} size={16} color={colors.dark} />
+            <Text style={s.secondaryTxt}>{t('Back')}</Text>
           </Pressable>
-          <Pressable style={s.skipLink} testID="af-skip" onPress={onSkip} hitSlop={8}>
-            <Text style={s.skipTxt}>{t('Skip')}</Text>
-          </Pressable>
-          {/* «عرض النتائج» must honour what is on screen: the chip and «عرض N نتيجة» already
-              promise the count for the CURRENT selection, so leaving by this link commits that
-              selection too. Before 2026-08-22 a single tap auto-committed within 260ms and this
-              window barely existed; now that a tap only selects, exiting here would silently
-              discard a visible answer and land the user on a different number than the one they
-              were just shown. */}
-          <Pressable style={s.skipLink} testID="af-skip-all" onPress={() => onSkipAll(sel)} hitSlop={8}>
-            <Text style={s.skipAllTxt}>{t('Show results')}</Text>
+          <Pressable
+            style={({ pressed, hovered, focused }: any) => [
+              s.secondaryBtn,
+              hovered && s.secondaryBtnHover,
+              focused && s.secondaryBtnFocus,
+              pressed && s.secondaryBtnPress,
+            ]}
+            testID="af-skip" onPress={onSkip} hitSlop={8} accessibilityRole="button"
+          >
+            <Text style={s.secondaryTxt}>{t('Skip')}</Text>
           </Pressable>
         </View>
       </Reanimated.View>
@@ -499,9 +521,18 @@ const s = StyleSheet.create({
   tapInner: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: 13 },
   primaryBtn: { backgroundColor: colors.selFill, borderRadius: radius.chip, alignSelf: 'stretch' },
   primaryTxt: { fontFamily: font.family.bold, fontSize: 14.5, color: colors.surface },
-  footRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 2 },
-  skipLink: { paddingVertical: 4, flexShrink: 1 },
+  footRow: { flexDirection: 'row', alignItems: 'stretch', gap: 10 },
+  // Real secondary buttons (owner redesign 2026-08-28) — the option rows' surface+fieldLine idiom
+  // at the primary's chip radius: one control family, clearly tappable, ≥44pt targets on mobile.
+  secondaryBtn: {
+    flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 5, backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.fieldLine,
+    borderRadius: radius.chip, paddingVertical: 11, paddingHorizontal: 12,
+  },
+  secondaryBtnHover: { backgroundColor: colors.segTrack },
+  secondaryBtnPress: { backgroundColor: colors.segTrack, borderColor: colors.pickLine, transform: [{ scale: 0.98 }] },
+  secondaryBtnFocus: { borderColor: colors.primary },
+  secondaryTxt: { fontFamily: font.family.semibold, fontSize: 14, color: colors.dark },
+  // Kept for the intro card's «عرض النتائج» decline link (unchanged by the footer redesign).
   skipTxt: { fontFamily: font.family.semibold, fontSize: 13.5, color: colors.dark },
-  backTxt: { fontFamily: font.family.semibold, fontSize: 13.5, color: colors.muted },
-  skipAllTxt: { fontFamily: font.family.medium, fontSize: 12.5, color: colors.muted },
 });

@@ -249,15 +249,20 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
 - **The narrowing is always visible.** A live «N نتيجة» chip sits in the card bar and follows every
   tentative selection; the primary commits via «متابعة · N نتيجة» with the same live number. All
   numbers come from the production count RPCs — never placeholders, never unknown-as-no.
-- **The escape is always one tap.** «عرض النتائج» replaces the question-count skip-all arithmetic.
-- **The primary ADVANCES; «عرض النتائج» TERMINATES** (owner 2026-08-23, corrects a shipped defect).
-  The primary reads «متابعة · N نتيجة» on single AND multi, because `onConfirm` is
-  `commitGuidedStep(keys)` in both cases: it records the answer and presents the next question.
-  Until this correction the label branched on ARITY and a single-select read «عرض N نتيجة» — a
-  button that promised results and delivered the next question instead. Arity was never a proxy for
-  terminality, and neither is ordinality: the pool is re-ranked after every answer, so the card
-  cannot know whether another question is coming. The one terminal control is the «عرض النتائج»
-  link (`af-skip-all` → `commitGuidedStep(keys, true)` → `finishGuided`). Pinned by
+- **The footer is three real buttons** (owner redesign, 2026-08-28). «متابعة · N نتيجة» stays the
+  full-width primary; «رجوع» (with an RTL-aware back chevron) and «تخطي» are equal-width secondary
+  BUTTONS below it — the option rows' surface+fieldLine border idiom at the primary's chip radius,
+  ≥44pt targets, instant hover/press/keyboard-focus states — never footnote-sized text links. The
+  same owner decision REMOVED the in-question «عرض النتائج» early-exit (`af-skip-all`) entirely: a
+  round ends by walking its questions, by «رجوع» from question 1, or by ✕; the intro card's own
+  «عرض النتائج» decline link is unchanged. Pinned by `scripts/verify-af-footer-buttons.ts`.
+- **The primary ADVANCES** (owner 2026-08-23, corrects a shipped defect). It reads «متابعة · N
+  نتيجة» on single AND multi, because `onConfirm` is `commitGuidedStep(keys)` in both cases: it
+  records the answer and presents the next question. Until this correction the label branched on
+  ARITY and a single-select read «عرض N نتيجة» — a button that promised results and delivered the
+  next question instead. Arity was never a proxy for terminality, and neither is ordinality: the
+  pool is re-ranked after every answer, so the card cannot know whether another question is coming.
+  With the early-exit removed there is no terminal control in the question footer at all. Pinned by
   `scripts/verify-af-primary-advances-not-shows.ts`.
 - **Availability is explained naturally.** One tiny line — «الخيارات تعتمد على المعلومات المتوفرة
   للإعلانات الحالية» — replaces the technical unknown-count phrasing. No coverage/NULL/backend

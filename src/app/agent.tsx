@@ -2024,10 +2024,9 @@ export default function Agent() {
     const back = ++ageFlowTokenRef.current;
     void presentGuided(stepIndex - 1, back);
   };
-  // «عرض النتائج» leaves the interview NOW — but through the same commit path, so the answer the
-  // user can currently see selected is recorded first. Otherwise the card's own «عرض N نتيجة» chip
-  // and the results it lands on would disagree.
-  const onAgeSkipAll = (keys: string[]) => { void commitGuidedStep(keys, true); };
+  // The in-question «عرض النتائج» early-exit was REMOVED by the owner (2026-08-28) — the question
+  // footer is متابعة / تخطي / رجوع only, so a round ends by walking its questions, by Back from
+  // question 1, or by ✕. commitGuidedStep(keys, true) still runs when the question pool exhausts.
   const onAgeClose = () => { ageFlowTokenRef.current++; setAgeFlow(null); };
 
   // Tap on a refine answer chip → lock that question's chips so it can't be answered twice, then run.
@@ -3293,7 +3292,6 @@ export default function Agent() {
               onConfirm={onAgeConfirm}
               onSkip={onAgeSkip}
               onBack={onAgeBack}
-              onSkipAll={onAgeSkipAll}
               onClose={onAgeClose}
             />
           )}
