@@ -120,15 +120,71 @@ check('the destructive action lives in the account view, not the menu root',
 // `shadowOffset: { width: … }` and read layout intent out of a shadow (the vacuous-regex class).
 check('the panel is inset from both edges (left+right) — width follows the sidebar, no fixed width',
   /panel: \{\s*position: 'absolute', left: 10, right: 10,/.test(menu) && !/panel: \{[^{}]*width: \d/.test(menu));
+// CONTRACT CHANGE (owner 2026-08-28, same day): the account view now lives in the CENTERED popup,
+// so its scroll cap follows the window fraction, not the anchored panel's maxH.
 check('height is capped to the window with an internal ScrollView for the account view',
-  /Math\.min\(winH - 120, \d+\)/.test(menu) && /<ScrollView style=\{\{ maxHeight: maxH - 16 \}\}/.test(menu));
+  /Math\.min\(winH - 120, \d+\)/.test(menu) && /<ScrollView style=\{\{ maxHeight: winH \* 0\.72 \}\}/.test(menu));
+
+// ── 9) Centered full-app popups (owner revision 2026-08-28) ─────────────────────────────────────
+// «The sidebar is only the launcher.» إدارة الحساب, its delete flow, and the تسجيل الخروج
+// confirmation are NOT confined to the sidebar — they render in a real RN <Modal>, centered over
+// the whole app, on a dimmed+blurred backdrop. The quick views (root/appearance/language) stay
+// anchored; the view value alone decides the container, so one state machine drives both.
+check('the three heavy views render in the centered container, quick views stay anchored',
+  /const centered = view === 'account' \|\| view === 'signout' \|\| view === 'delete';/.test(menu)
+  && /\{!centered && \(/.test(menu) && /\{centered && \(\s*<Modal visible transparent/.test(menu));
+check('the centered root is a full-viewport fixed layer, card centered — never bottom-anchored',
+  /centerRoot: \{ flex: 1, alignItems: 'center', justifyContent: 'center'/.test(menu)
+  && !/centerCard(Wide)?: \{[^}]*bottom:/.test(menu));
+check('the backdrop dims AND blurs the app behind it (web)',
+  /centerBack: \{[^}]*backgroundColor: dark \? 'rgba/.test(menu) && /backdropFilter: 'blur\(6px\)'/.test(menu));
+check('the account popup is the LARGE surface (560) with its own × close; confirmations stay 360',
+  /centerCardWide: \{[^}]*maxWidth: 560/.test(menu) && /centerCard: \{[^}]*maxWidth: 360/.test(menu)
+  && /testID="account-popup-close"[\s\S]{0,120}?onPress=\{onClose\}/.test(menu));
+check('backdrop/Escape CANCEL the safest step: delete steps back to account, others close',
+  /onRequestClose=\{\(\) => \{ if \(view === 'delete'\) go\('account', -1\); else onClose\(\); \}\}/.test(menu)
+  && /if \(viewRef\.current === 'delete'\) \{ go\('account', -1\); return; \}/.test(menu));
+check('logout cancel closes the popup — never a hop back into the sidebar panel',
+  /testID="logout-popup-cancel"[\s\S]{0,80}?onPress=\{onClose\}/.test(menu));
 
 // ── 8) The Journey-engineer testID surface ───────────────────────────────────────────────────────
 for (const id of ['account-menu', 'account-menu-appearance', 'appearance-${mm}', 'account-menu-language',
   'account-menu-help', 'account-menu-account', 'account-menu-signout', 'account-menu-delete',
-  'account-menu-signout-confirm', 'account-menu-delete-confirm', 'account-menu-back']) {
-  check(`testID ${id.replace('${mm}', 'system|light|dark')} is present`, menu.includes(`testID={\`${id}\`}`) || menu.includes(`testID="${id}"`));
+  'account-menu-signout-confirm', 'account-menu-delete-confirm', 'account-menu-back',
+  'account-popup', 'logout-popup', 'delete-popup', 'account-popup-backdrop', 'account-popup-close',
+  'logout-popup-cancel']) {
+  // The three centered-popup ids are assigned via a view ternary, so the string literal — not a
+  // testID="…" attribute — is the honest presence signal for them.
+  check(`testID ${id.replace('${mm}', 'system|light|dark')} is present`,
+    menu.includes(`testID={\`${id}\`}`) || menu.includes(`testID="${id}"`) || menu.includes(`'${id}'`));
 }
 
+// ── MUTATION PROOF (centered-popup revision) ────────────────────────────────────────────────────
+console.log('\n  mutation proof — each new guard must FAIL on its own defect\n');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+const mut = (src: string, from: string, to: string) => {
+  if (!src.includes(from)) throw new Error(`mutation anchor missing: ${from}`);
+  return src.replace(from, to);
+};
+mustCatch('the account view being squeezed back into the anchored panel',
+  !/const centered = view === 'account' \|\| view === 'signout' \|\| view === 'delete';/.test(
+    mut(menu, "const centered = view === 'account' || view === 'signout' || view === 'delete';",
+              "const centered = view === 'signout' || view === 'delete';")));
+mustCatch('the backdrop losing its blur (plain dim only)',
+  !/backdropFilter: 'blur\(6px\)'/.test(mut(menu, "backdropFilter: 'blur(6px)'", '')));
+mustCatch('Escape during delete falling through to a full close (losing the safe step-back)',
+  !/if \(viewRef\.current === 'delete'\) \{ go\('account', -1\); return; \}/.test(
+    mut(menu, "if (viewRef.current === 'delete') { go('account', -1); return; }", '')));
+mustCatch('logout cancel hopping back into the sidebar panel again',
+  !/testID="logout-popup-cancel"[\s\S]{0,80}?onPress=\{onClose\}/.test(
+    mut(menu, 'testID="logout-popup-cancel" style={s.cancelBtn} onPress={onClose}',
+              'testID="logout-popup-cancel" style={s.cancelBtn} onPress={() => go(\'root\', -1)}')));
+
+if (mutFail) { console.error(`\n❌ ${mutFail} guard(s) are BLIND to their own defect`); process.exit(1); }
 console.log(failures === 0 ? '\n✅ account-menu contract holds.' : `\n❌ ${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
