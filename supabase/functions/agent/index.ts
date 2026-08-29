@@ -52,6 +52,10 @@ import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWes
 // to the last cached value (or nothing) — the baked-in SYSTEM prompt always still holds.
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+// Hard ceiling on the DB-driven prompt appendix. Today's 11 active rows total 19,854 chars, so this
+// is deliberately just above the current content: it is a RATCHET, not headroom to grow into. Raising
+// it is a code change that goes through a PR and the barrier — which is the entire point.
+const NOTES_CHAR_BUDGET = 21_000;
 let _notesCache: { text: string; at: number } = { text: "", at: 0 };
 async function liveNotes(): Promise<string> {
   const now = Date.now();
@@ -63,8 +67,28 @@ async function liveNotes(): Promise<string> {
     );
     if (r.ok) {
       const rows = await r.json();
-      const text = (rows as Array<{ title: string; content: string }>)
-        .map((n) => `• ${n.title}\n${n.content}`).join("\n\n");
+      // BUDGET CAP (owner ruling 2026-08-29). agent_notes is editable in the DB with no PR, no test
+      // and no review, and its content is appended to the system message labelled "authoritative".
+      // Uncapped, one long row silently raises the token cost of EVERY future chat for every user.
+      // The cost audit measured 11 active rows at 19,854 chars = 30% of every request.
+      //
+      // We drop WHOLE ROWS past the budget, lowest priority first (the query already orders by
+      // priority, so we keep the most important). We never truncate mid-row: half a behavioural rule
+      // is more dangerous than no rule — it can invert the meaning of the sentence it cuts.
+      const kept: string[] = [];
+      let used = 0, dropped = 0;
+      for (const n of rows as Array<{ title: string; content: string }>) {
+        const block = `• ${n.title}\n${n.content}`;
+        if (used + block.length > NOTES_CHAR_BUDGET) { dropped++; continue; }
+        kept.push(block);
+        used += block.length + 2; // + the "\n\n" join
+      }
+      if (dropped) {
+        // Visible in function_logs. A silently truncated authoritative rule set is exactly the kind of
+        // thing that must never be quiet.
+        console.warn(`agent_notes over budget: kept ${kept.length}, DROPPED ${dropped} row(s), ${used}/${NOTES_CHAR_BUDGET} chars`);
+      }
+      const text = kept.join("\n\n");
       _notesCache = { text, at: now };
       return text;
     }
@@ -140,6 +164,11 @@ const CORS = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
+  // Without this the browser re-preflights on its short default cache, which doubled the request
+  // count in the logs (170 OPTIONS against 355 POSTs on 2026-08-29) and made the traffic look ~2x
+  // worse than it was during the cost audit. No model cost either way — this is so the numbers are
+  // readable. 24h is the Chromium ceiling.
+  "Access-Control-Max-Age": "86400",
 };
 
 // Canonical values the client search engine works in (English). The model maps
@@ -658,6 +687,20 @@ Deno.serve(async (req: Request) => {
         reasoning_tokens: data?.usage?.completion_tokens_details?.reasoning_tokens ?? null,
         model: data?.model ?? null,
       };
+      // COST OBSERVABILITY (owner ruling 2026-08-29). DeepSeek returns the cache split on EVERY
+      // response and we were discarding it, so the cache hit rate — the single biggest lever on the
+      // bill, since a cache hit is ~10x cheaper — was unmeasurable. Every cost figure in the audit is
+      // an estimate as a direct result. One log line makes all of it measurable.
+      // Emitted for SUCCESS as well as failure; the errors above only carry `why`.
+      console.log(JSON.stringify({
+        evt: "deepseek_usage",
+        prompt_tokens: data?.usage?.prompt_tokens ?? null,
+        completion_tokens: data?.usage?.completion_tokens ?? null,
+        cache_hit_tokens: data?.usage?.prompt_cache_hit_tokens ?? null,
+        cache_miss_tokens: data?.usage?.prompt_cache_miss_tokens ?? null,
+        finish_reason: choice?.finish_reason ?? null,
+        model: data?.model ?? null,
+      }));
       if (!raw) return { __err: json({ error: "empty model output", ...why }, 502) };
       try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw, ...why }, 502) }; }
     };
@@ -680,7 +723,11 @@ Deno.serve(async (req: Request) => {
     // still came back in the WRONG language, regenerate ONCE with an even harder override. (user-reported.)
     const wrong = locale === "en" ? "ar" : "en";
     if (out.reply && detectLang(String(out.reply)) === wrong) {
-      const retry: any = await runModel(contents, langLine + ` The previous attempt WRONGLY replied in ${wrong === "ar" ? "Arabic" : "English"} — do not repeat that mistake; output the reply ONLY in ${langName}.`);
+      // CORRECTNESS (cost audit 2026-08-29): this retry used to pass `langLine` ONLY, dropping
+      // notesBlock — so whenever the language guard fired, the reply actually shown to the user was
+      // generated WITHOUT the live behaviour notes the code itself labels "authoritative — override
+      // anything above on conflict". The retry must carry exactly the same authority as the first call.
+      const retry: any = await runModel(contents, langLine + notesBlock + ` The previous attempt WRONGLY replied in ${wrong === "ar" ? "Arabic" : "English"} — do not repeat that mistake; output the reply ONLY in ${langName}.`);
       if (retry && !retry.__err && retry.kind && detectLang(String(retry.reply ?? "")) !== wrong) out = retry;
     }
 
