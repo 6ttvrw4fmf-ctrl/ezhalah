@@ -176,8 +176,8 @@ const S8: Entry[] = [
   { rule: 'R8.2.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'Back on Q1 cancels the round byte-identically' },
   { rule: 'R8.2.3', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'Back writes no receipt/pill/probe verdict' },
   { rule: 'R8.2.4', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-back-navigation'], evidence: 'cross-reference' },
-  { rule: 'R8.3.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'Show Results commits and ends the round early' },
-  { rule: 'R8.3.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'new results turn; prior buttons become the receipt' },
+  { rule: 'R8.3.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-footer-buttons'], evidence: 'footer is متابعة/تخطي/رجوع as real buttons; the early-exit stays removed everywhere incl. the intro decline link (owner 2026-08-28) — pinned in both directions' },
+  { rule: 'R8.3.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'new results turn when the round ends; prior buttons become the receipt' },
   { rule: 'R8.4.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'Skip All skips the remainder, all remembered' },
 ];
 

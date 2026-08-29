@@ -411,7 +411,6 @@ const AR: Record<string, string> = {
   'No preference': 'لا يهمني',
   // Advanced Filter Design Contract (2026-07-20): generic footer + subtitle shared by every question.
   'Show {count} results': 'عرض {count} نتيجة',
-  'Show results': 'عرض النتائج',
   'Results update as you choose': 'تُحدَّث النتائج مع كل اختيار',
   // Card redesign (owner 2026-07-21): numeric question progress + remaining-count skip link, and the
   // RNPL question's pay-monthly-not-yearly subtitle (neutral, descriptive — never advice).

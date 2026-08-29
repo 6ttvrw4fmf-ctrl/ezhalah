@@ -831,7 +831,8 @@ export default function Agent() {
     | { phase: 'loading' }
     // Opening state (owner 2026-08-16): after an eligible Filter search lands with > 25 results the
     // overlay opens on this calm invitation — the count, «خلّنا نحدد طلبك أكثر», one soft line —
-    // never a question. Begin is opt-in; «عرض النتائج» closes it (the results are already behind).
+    // never a question. Begin is opt-in; declining is the ✕ (the results are already behind) —
+    // the intro's «عرض النتائج» link was removed by the owner 2026-08-28, same day as the footer's.
     | { phase: 'intro'; total: number | null }
     | { phase: 'asking'; stepIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; initialKeys: string[]; progressCur: number; progressTotal: number }
     // The «digging through the market» beat (owner 2026-08-16): shown once after the interview
@@ -1936,8 +1937,9 @@ export default function Agent() {
     void presentGuided(0, token);
   };
 
-  // Intro handlers: «يلا نبدأ» opts in (or arms the flag if the plan is still resolving);
-  // «عرض النتائج» simply closes — the results are already rendered behind the overlay.
+  // Intro handlers: «يلا نبدأ» opts in (or arms the flag if the plan is still resolving); the ✕
+  // simply closes — the results are already rendered behind the overlay. (The intro's «عرض النتائج»
+  // link ran this same close handler until the owner removed it, 2026-08-28.)
   const onIntroBegin = () => {
     if (ageFlow?.phase !== 'intro') return;
     introBeginRef.current = true;
@@ -2024,10 +2026,9 @@ export default function Agent() {
     const back = ++ageFlowTokenRef.current;
     void presentGuided(stepIndex - 1, back);
   };
-  // «عرض النتائج» leaves the interview NOW — but through the same commit path, so the answer the
-  // user can currently see selected is recorded first. Otherwise the card's own «عرض N نتيجة» chip
-  // and the results it lands on would disagree.
-  const onAgeSkipAll = (keys: string[]) => { void commitGuidedStep(keys, true); };
+  // The in-question «عرض النتائج» early-exit was REMOVED by the owner (2026-08-28) — the question
+  // footer is متابعة / تخطي / رجوع only, so a round ends by walking its questions, by Back from
+  // question 1, or by ✕. commitGuidedStep(keys, true) still runs when the question pool exhausts.
   const onAgeClose = () => { ageFlowTokenRef.current++; setAgeFlow(null); };
 
   // Tap on a refine answer chip → lock that question's chips so it can't be answered twice, then run.
@@ -3275,7 +3276,6 @@ export default function Agent() {
             <AdvancedIntroCard
               total={ageFlow.total}
               onBegin={onIntroBegin}
-              onShowResults={onIntroShowResults}
               onClose={onIntroShowResults}
             />
           ) : ageFlow.phase === 'mining' ? (
@@ -3297,7 +3297,6 @@ export default function Agent() {
               onConfirm={onAgeConfirm}
               onSkip={onAgeSkip}
               onBack={onAgeBack}
-              onSkipAll={onAgeSkipAll}
               onClose={onAgeClose}
             />
           )}
