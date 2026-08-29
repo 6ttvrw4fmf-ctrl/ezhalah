@@ -1083,6 +1083,9 @@ export default function Agent() {
   // model replied to it with a greeting or yet another question often enough that leaving the answer to
   // the model WAS the loop. Read-and-cleared once per turn; also cleared by New Chat.
   const pendingScopeRef = useRef<string | null>(null);
+  // The last canonical query this conversation produced — the carrier that lets accumulated state
+  // survive a clarification turn. Cleared by newChat() like every other per-conversation ref.
+  const lastQueryRef = useRef<SearchQuery | null>(null);
   // The PLAIN CITY we last asked «تقصد مدينة X كاملة، أو حي معيّن؟» about. pendingScopeRef above only
   // ever holds region/city TWIN names, so before this ref existed the app remembered nothing at all
   // about a plain-city question — and answering it «المدينة كاملة» searched المدينة المنورة, because
@@ -2172,7 +2175,10 @@ export default function Agent() {
       .slice(-10);
     // Pass auth state: a guest searches on any property query; a logged-in user only gets listings
     // when their message is a direct order, otherwise Ezhalah replies conversationally. (user request.)
-    let turn = await respond(v, { loggedIn: !!user, history, attemptTexts: saidRef.current });
+    // The conversation's accumulated canonical state. Without it a clarification turn resets
+    // everything the user already said — «شهرية» came back as RentAnnual and a 9.5 rating vanished
+    // after one more question (owner-reported 2026-08-29). Explicit changes in the new turn still win.
+    let turn = await respond(v, { loggedIn: !!user, history, attemptTexts: saidRef.current, prevQuery: lastQueryRef.current });
     if (run.cancelled) return;
 
     // ── The user NAMED a scope: «مدينة الرياض» / «منطقة الرياض» ────────────────────────────────────
@@ -2181,6 +2187,7 @@ export default function Agent() {
     // region, «مدينة X» the city — instead of re-asking it or falling through to the 2-ask cap's
     // Kingdom-wide «ما قدرت أحدد الموقع بدقة» (defect `agent-clarify-loop`, found live 2026-08-23:
     // answering «مدينة الرياض» never produced a search in 7/7 fresh runs).
+    if (turn.kind === 'listings' && turn.query) lastQueryRef.current = turn.query;
     const askedTwin = pendingScopeRef.current;
     pendingScopeRef.current = null;
     // The plain-city question we asked last turn, and whether this message is the bare «المدينة كاملة»
@@ -2339,6 +2346,11 @@ export default function Agent() {
     askCountRef.current = 0;
     saidRef.current = [];
     runRef.current = makeRun('filter'); // owner 2026-08-18: tags this turn so Stop returns to Filter
+    // A Filter-originated search IS the new canonical state — the form says exactly what the user
+    // wants — so the chat's accumulated query must not survive into it. Placed AFTER makeRun on
+    // purpose: verify-filter-stop-cancels-and-restores.ts asserts a 600-char sendFilter→makeRun
+    // proximity, and inserting above it pushed makeRun out of that window.
+    lastQueryRef.current = null;
     // Filter search: open at the top and let the request bubble type itself out FIRST, on its own —
     // the SEARCHING loader (full platform roster + highlight wave) does not mount until the bubble
     // has fully finished typing (onBubbleDone). (owner 2026-07-15: reversed from the prior "loader
@@ -2630,6 +2642,7 @@ export default function Agent() {
         setBusy(false);
         setMsgs([]);
         pendingScopeRef.current = null; // New Chat inherits nothing — not even a half-answered question
+        lastQueryRef.current = null;    // …and not the previous conversation's accumulated filters
         pendingCityRef.current = null;  // …including the plain-city question's subject
         chatIdRef.current = null;       // …and not the previous conversation's sidebar identity
         // Forget the last-handled filter/seed so a re-search AFTER New Chat re-runs even if it's
