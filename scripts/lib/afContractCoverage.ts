@@ -178,7 +178,13 @@ const S8: Entry[] = [
   { rule: 'R8.2.4', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-back-navigation'], evidence: 'cross-reference' },
   { rule: 'R8.3.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-footer-buttons'], evidence: 'footer is متابعة/تخطي/رجوع as real buttons; the early-exit stays removed everywhere incl. the intro decline link (owner 2026-08-28) — pinned in both directions' },
   { rule: 'R8.3.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'new results turn when the round ends; prior buttons become the receipt' },
-  { rule: 'R8.4.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'Skip All skips the remainder, all remembered' },
+  // R8.4.1 graded 'B' on verify-af-cross-round-carry until 2026-08-29 — but that barrier never
+  // mentions Skip All, and the control itself was removed by the owner on 2026-08-28. The map was
+  // therefore awarding the product marks for a feature that does not exist, on a barrier that does
+  // not test it: the exact score inflation the owner rejected on 2026-08-28. The honest grade is
+  // still 'B', because verify-af-footer-buttons DOES execute this rule's live content — that the
+  // control stays REMOVED — in both directions.
+  { rule: 'R8.4.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-footer-buttons'], evidence: 'REMOVED from the product (owner 2026-08-28); the barrier pins its absence in both directions' },
 ];
 
 // ── §9 PILLS ─────────────────────────────────────────────────────────────────────────────────────
@@ -206,7 +212,8 @@ const S11: Entry[] = [
   { rule: 'R11.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-offer-gate'], evidence: 'INTERVIEW_STOP_AT=25: at or below 25 results the offer is hidden and a round refuses to open' },
   { rule: 'R11.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-narrowing-gate'], evidence: 'no option clearing the usefulness rule stops AF (Example F)' },
   { rule: 'R11.3', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-group-cohort-coverage'], evidence: 'empty certified intersection stops AF' },
-  { rule: 'R11.4', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-size'], evidence: 'Skip All ends the round; future rounds may still open' },
+  // R11.4: same correction as R8.4.1 — verify-af-round-size never mentions Skip All either.
+  { rule: 'R11.4', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-footer-buttons'], evidence: 'REMOVED with the control (owner 2026-08-28); Back-from-Q1 and ✕ are the live early exits' },
 ];
 
 // ── §12 PERSISTENCE (shared with the journey-persistence routine) ────────────────────────────────
