@@ -195,11 +195,10 @@ export default function AccountMenu({
       setDeleteError(t("Couldn't delete your account. Check your connection and try again."));
       return;
     }
-    // Deletion returns the app to LIGHT (owner rule 2026-08-29): the canonical logged-out state a
-    // deleted account lands in is the fresh-guest one, and a dark preference belonged to the
-    // account's owner, not to whoever holds this browser next. Sign-OUT deliberately keeps the
-    // theme (a device preference survives switching accounts); DELETION is the full reset.
-    setMode('light');
+    // Deletion lands in the canonical logged-out state — LIGHT with the stored appearance keys
+    // cleared. That reset lives in the store's deleteAccount() itself (after the
+    // server-confirmed guard; owner 2026-08-28/29) — ONE mechanism, shared with sign-out, so
+    // this handler no longer re-stamps 'light' into storage after the store just cleared it.
     router.replace('/');
   };
 

@@ -211,17 +211,24 @@ check('EPOCH no transition keeps it (refresh mid-epoch, Filter↔Agent nav)',
     /prev === null \|\| dismissalOutlivesTransition/.test(store));
   check('WIRING it watches the user value itself, so a session dying in onAuthStateChange is covered',
     /\}, \[user\]\);/.test(store.slice(store.indexOf('prevSignedInRef'), store.indexOf('prevSignedInRef') + 900)));
-  // Comment-stripped: a mutation test proved the raw regex also matched a commented-out
-  // `// setMode('light')`, i.e. the check was blind to exactly the deletion it guards against.
-  const menu = readFileSync(join(root, 'src/components/AccountMenu.tsx'), 'utf8')
-    .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  check('WIRING deletion returns the app to Light (owner rule) before leaving the screen',
-    /const ok = await deleteAccount\(\);[\s\S]{0,700}?setMode\('light'\);[\s\S]{0,120}?router\.replace/.test(menu));
+  // SUPERSEDED (owner 2026-08-28/29, appearance-auth-lifecycle): the Light reset moved from
+  // AccountMenu's screen handler into the store's OWN completed-action paths — deleteAccount()
+  // resets after the server-confirmed guard, and (new rule, superseding «sign-out keeps the
+  // theme») signOut() resets too: the appearance is an authenticated-user asset, so EVERY
+  // completed transition to signed-out lands in the canonical Light guest state with the stored
+  // keys cleared. The deep matrix lives in scripts/verify-appearance-lifecycle.ts; these pins keep
+  // THIS file's canonical-logged-out-state story true against the real wiring.
+  const delBodyStart = store.indexOf('deleteAccount: async () => {');
+  const delBody = store.slice(delBodyStart, store.indexOf('return true;', delBodyStart));
+  check('WIRING deletion returns the app to Light (owner rule) — reset in the store, after the guard',
+    delBody.indexOf('resetThemeForSignOut()') > delBody.indexOf('if (!serverDeleted) return false;')
+    && delBody.includes('if (!serverDeleted) return false;'));
   check('WIRING …but a FAILED deletion changes nothing (no reset before the server confirms)',
-    /if \(!ok\) \{[\s\S]{0,260}?return;[\s\S]{0,12}?\}[\s\S]{0,700}?setMode\('light'\)/.test(menu));
-  const themeSrc = readFileSync(join(root, 'src/theme/theme.tsx'), 'utf8');
-  check('WIRING sign-out still keeps the theme (only DELETION resets — the comment now says so)',
-    /NOT wiped by SIGN-OUT/.test(themeSrc) && /DELETION resets it to 'light'/.test(themeSrc));
+    delBody.indexOf('if (!serverDeleted) return false;') !== -1
+    && !delBody.slice(0, delBody.indexOf('if (!serverDeleted) return false;')).includes('resetThemeForSignOut'));
+  const signOutBody = store.slice(store.indexOf('signOut: () => {'), delBodyStart);
+  check('WIRING sign-out ALSO resets to Light (owner 2026-08-28/29 — supersedes the deletion-only rule)',
+    signOutBody.includes('resetThemeForSignOut()'));
 }
 
 // ── MUTATION PROOFS for the epoch ────────────────────────────────────────────────────────────────

@@ -31,10 +31,12 @@ export default function Root({ children }: PropsWithChildren) {
         <style dangerouslySetInnerHTML={{ __html: buildThemeCss() }} />
         {/* Pre-hydration boot: apply the persisted appearance BEFORE first paint (no flash of the
             wrong theme). Reads the SAME key ThemeProvider writes (src/theme/theme.tsx) — the
-            theme barrier pins the two against each other. */}
+            theme barrier pins the two against each other. AUTH-GATED (owner 2026-08-28): the
+            appearance is an authenticated-user asset, so without a Supabase auth token the page
+            pins Light — a previous user's stored dark never flashes for a logged-out visitor. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{var m=localStorage.getItem(${JSON.stringify(THEME_KEY)});if(m==='light'||m==='dark')document.documentElement.setAttribute('data-theme',m);}catch(e){}`,
+            __html: `try{var a=false;for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf('sb-')===0&&k.indexOf('-auth-token')>-1){a=true;break}}var m=a?localStorage.getItem(${JSON.stringify(THEME_KEY)}):'light';if(m==='light'||m==='dark')document.documentElement.setAttribute('data-theme',m);}catch(e){}`,
           }}
         />
         {/* Disable body scrolling on web so the root ScrollView matches native behavior. */}
