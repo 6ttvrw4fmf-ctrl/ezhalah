@@ -396,3 +396,47 @@ The runner fails closed three ways: a non-zero child fails the run; a **signal-k
 (`status === null` — timeout, OOM) is a failure, not a skip; and an **empty run set** is itself a
 failure. `npm run test:list` prints the resolved run order; `npm run test:all` runs every check
 instead of stopping at the first failure.
+
+## SINGLE-WRITER RULE — `supabase/functions/agent/index.ts`
+
+**Only one active session may MODIFY the AI agent edge function at a time.** Other sessions may
+inspect it, run tests, investigate bugs, propose patches, and work on unrelated files — they must not
+write or merge overlapping changes to it while another session owns the surface.
+
+**Why.** That file is ~113KB of production code and several automation sessions edit it. On
+2026-08-29 two *individually correct* changes collided — the health heartbeat and the usage telemetry
+each added `const t0 = Date.now();` to the same scope in `runModel()` — and the function stopped
+booting. Every barrier was green, because they all read that file as TEXT.
+
+**Parse protection catches SYNTAX collisions. It does NOT catch two logically valid changes that
+overwrite or contradict each other.** That is why ownership and a final semantic diff both exist.
+
+### Before writing the agent function
+```bash
+scripts/agent-surface.sh claim "<session-id>" "<what you are changing>"   # fail-closed
+node scripts/agent-surface-preflight.mjs before                           # who else is in here?
+```
+`claim` refuses if another session owns it (TTL-bounded, so a crashed session cannot hold it
+forever). `before` lists open PRs touching the same file and the recent commits your work will land
+on top of.
+
+### Immediately before merge/deploy
+```bash
+git fetch origin main && git merge origin/main      # rebase FIRST
+node scripts/agent-surface-preflight.mjs final      # semantic diff + parse gate, fail-closed
+```
+`final` refuses if the branch is behind main, prints the merged file's diff against `origin/main`,
+and calls out **removed** lines — that is where a silent overwrite hides. Read them. Confirm every
+one is intentional before merging.
+
+### After deploy
+```bash
+scripts/agent-surface.sh smoke      # REAL boot + request against the live endpoint
+scripts/agent-surface.sh release "<session-id>"
+```
+**A successful deploy command is not production proof.** The 2026-08-29 outage reported a successful
+deploy and then returned `BOOT_ERROR` on every request. `smoke` asks the live function a real Arabic
+question and fails on `BOOT_ERROR` or on any response without a classification.
+
+The lock reuses `acquire_deploy_lock()` under the name `agent-edge-surface`. Only `^prod` names
+canonicalize to `production`, so claiming this surface never blocks a normal deploy.
