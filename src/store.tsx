@@ -150,6 +150,13 @@ type AppState = {
   authOpen: boolean;
   openAuth: () => void;
   closeAuth: () => void;
+  // Account menu (owner redesign 2026-08-28): the sidebar-anchored settings/account panel that
+  // replaced the centered Settings modal — same in-place overlay pattern as openModal/openAuth.
+  // `anchor` is the trigger row's viewport rect (measureInWindow) so the desktop panel opens FROM it.
+  accountMenuOpen: boolean;
+  accountMenuAnchor: { x: number; y: number; w: number; h: number } | null;
+  openAccountMenu: (anchor?: { x: number; y: number; w: number; h: number }) => void;
+  closeAccountMenu: () => void;
   // First-run cinematic intro (the eagle clip). Shows ONCE, only for a brand-new logged-out
   // visitor; persisted via a `hasSeenIntro` flag so it never replays. `showIntro` waits until both
   // the saved flag is read AND the auth session is resolved, so it never flashes for a returning
@@ -235,6 +242,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [modal, setModal] = useState<'support' | 'about' | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
+  const [accountMenu, setAccountMenu] = useState<{ open: boolean; anchor: { x: number; y: number; w: number; h: number } | null }>({ open: false, anchor: null });
   const [pendingMessage, setPendingMessageState] = useState<string | null>(null);
   // `null` while the saved flag is still being read from storage; the intro stays hidden until then.
   const [introSeen, setIntroSeen] = useState<boolean | null>(null);
@@ -906,13 +914,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       authOpen,
       openAuth: () => setAuthOpen(true),
       closeAuth: () => setAuthOpen(false),
+      accountMenuOpen: accountMenu.open,
+      accountMenuAnchor: accountMenu.anchor,
+      openAccountMenu: (anchor) => setAccountMenu({ open: true, anchor: anchor ?? null }),
+      closeAccountMenu: () => setAccountMenu({ open: false, anchor: null }),
       showIntro: introSeen === false && authChecked && !user,
       dismissIntro: () => {
         setIntroSeen(true); // session-only hide so it doesn't re-loop after the dissolve
         if (!INTRO_DEMO_MODE) AsyncStorage.setItem('hasSeenIntro', '1').catch(() => {});
       },
     }),
-    [query, dataSource, user, searchCount, history, modal, authOpen, introSeen, authChecked, pendingMessage, activeChatId, setActiveChatId],
+    [query, dataSource, user, searchCount, history, modal, authOpen, accountMenu, introSeen, authChecked, pendingMessage, activeChatId, setActiveChatId],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

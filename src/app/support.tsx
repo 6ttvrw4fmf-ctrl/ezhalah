@@ -61,7 +61,7 @@ function RtRow({ text }: { text: string }) {
 
 const s = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 4 },
-  xBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#f1f3f1', alignItems: 'center', justifyContent: 'center' },
+  xBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' },
   scroll: { paddingHorizontal: 22, alignItems: 'center', paddingTop: 4 },
   col: { width: '100%', maxWidth: MAX_W },
   h: { fontSize: 24, fontWeight: '700', color: colors.ink, marginBottom: 16 },

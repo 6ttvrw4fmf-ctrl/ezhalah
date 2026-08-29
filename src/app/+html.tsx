@@ -1,5 +1,6 @@
 import { ScrollViewStyleReset } from 'expo-router/html';
 import { type PropsWithChildren } from 'react';
+import { APPEARANCE_STORAGE_KEY, buildThemeCss } from '../theme/palette';
 
 // Customizes the static root HTML for every web page during static rendering (runs in Node, where
 // `document` doesn't exist — so this is the ONLY place the initial <html> attributes are set).
@@ -22,6 +23,19 @@ export default function Root({ children }: PropsWithChildren) {
         <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
         {/* Turn off browser auto-translation app-wide — the app manages its own AR/EN. */}
         <meta name="google" content="notranslate" />
+        {/* THEME (owner feature 2026-08-28): both palettes as CSS custom properties — light on
+            :root, dark on data-theme="dark" AND on the OS preference when no explicit choice is
+            stored. Every token in src/theme/tokens.ts is a var() over these, so the whole app
+            re-skins from this one block. Values live in src/theme/palette.ts only. */}
+        <style dangerouslySetInnerHTML={{ __html: buildThemeCss() }} />
+        {/* Pre-hydration boot: apply the persisted appearance BEFORE first paint (no flash of the
+            wrong theme). Mirrors src/lib/appearance.ts getAppearance() — same key, same values;
+            scripts/verify-theme-contract.ts pins the two against each other. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var m=localStorage.getItem(${JSON.stringify(APPEARANCE_STORAGE_KEY)});if(m==='light'||m==='dark')document.documentElement.setAttribute('data-theme',m);}catch(e){}`,
+          }}
+        />
         {/* Disable body scrolling on web so the root ScrollView matches native behavior. */}
         <ScrollViewStyleReset />
         {/* Desktop UI scale — REVERTED to 1:1 (owner, 2026-08-14 23:47). A zoom layer (1.1/1.2/1.3

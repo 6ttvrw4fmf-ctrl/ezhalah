@@ -183,7 +183,7 @@ export default function SignInDock() {
       }}
     >
       <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <View style={{ width: 26, height: 26, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ width: 26, height: 26, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' }}>
           <Ionicons name="person-outline" size={14} color="#fff" />
         </View>
         <Text style={{ flex: 1, textAlign: 'right', fontSize: 13.5, fontWeight: '700', color: colors.ink, writingDirection: 'rtl' }}>
@@ -197,7 +197,7 @@ export default function SignInDock() {
         // @ts-expect-error web-only DOM props on the RNW host node
         dataSet={{ testid: 'signin-dock-cta' }}
         onPress={openAuth}
-        style={{ backgroundColor: colors.primary, borderRadius: radius.field, paddingVertical: 9, alignItems: 'center' }}
+        style={{ backgroundColor: colors.selFill, borderRadius: radius.field, paddingVertical: 9, alignItems: 'center' }}
       >
         <Text style={{ color: '#fff', fontSize: 12.5, fontWeight: '700' }}>{t('Sign in')}</Text>
       </Pressable>

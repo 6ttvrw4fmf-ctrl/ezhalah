@@ -11,6 +11,8 @@ import Animated, {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useResolvedTheme, useThemePalette } from '@/lib/appearance';
+import { alpha0 } from '@/theme/palette';
 import { colors, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { useApp } from '@/store';
@@ -192,6 +194,8 @@ function Reveal({ shown, animate, delay, fadeOnly, style, children }: {
 }
 
 function AboutBody({ t, desktop, reduced }: { t: Tr; desktop: boolean; reduced: boolean }) {
+  // Literal palette for the LinearGradients below — gradient colors are parsed, var() breaks.
+  const pal = useThemePalette();
   const animate = IS_WEB && !reduced;
   const shown = useShown(!animate);
   const rev = { shown, animate };
@@ -283,7 +287,7 @@ function AboutBody({ t, desktop, reduced }: { t: Tr; desktop: boolean; reduced: 
           kept verbatim as the mobile visual. */}
       <Reveal {...rev} delay={230} fadeOnly style={a.footerM}>
         <RNImage source={HERO} style={a.footerArtM} resizeMode="cover" />
-        <LinearGradient colors={[colors.paper, 'rgba(251,251,250,0)']} locations={[0, 0.75]} style={StyleSheet.absoluteFill} />
+        <LinearGradient colors={[pal.paper, alpha0(pal.paper)]} locations={[0, 0.75]} style={StyleSheet.absoluteFill} />
         <Text style={a.brandLineM}>{t('Ezhalah, and may your luck be good.')}</Text>
       </Reveal>
     </>
@@ -295,9 +299,13 @@ function AboutBody({ t, desktop, reduced }: { t: Tr; desktop: boolean; reduced: 
 // pin, and the hand-drawn skyline rising out of the wash at the base. Deliberately still: no
 // ambient motion, nothing interactive. Coordinates are physical (the panel is its own canvas).
 function VisualPanel({ t }: { t: Tr }) {
+  // Literal palette pairs for the wash — gradients can't digest var() theme tokens.
+  const dark = useResolvedTheme() === 'dark';
+  const wash: [string, string] = dark ? ['#141d17', '#17231c'] : ['#f6faf7', '#ecf5ef'];
+  const melt: [string, string] = dark ? ['rgba(23,35,28,1)', 'rgba(23,35,28,0)'] : ['rgba(236,245,239,1)', 'rgba(236,245,239,0)'];
   return (
     <>
-      <LinearGradient colors={['#f6faf7', '#ecf5ef']} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={wash} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={StyleSheet.absoluteFill} />
       {Array.from({ length: 6 }, (_, i) => (
         <View key={'v' + i} style={[a.gridV, { left: 20 + i * 50 }]} />
       ))}
@@ -318,7 +326,7 @@ function VisualPanel({ t }: { t: Tr }) {
         <Ionicons name="location-sharp" size={13} color="#ffffff" />
       </View>
       <RNImage source={HERO} style={a.skyline} resizeMode="cover" />
-      <LinearGradient colors={['rgba(236,245,239,1)', 'rgba(236,245,239,0)']} locations={[0, 0.7]} style={a.skylineMelt} />
+      <LinearGradient colors={melt} locations={[0, 0.7]} style={a.skylineMelt} />
       <Text style={a.brandLine}>{t('Ezhalah, and may your luck be good.')}</Text>
     </>
   );
@@ -378,7 +386,7 @@ const s = StyleSheet.create({
     shadowColor: 'rgba(20,40,30,1)', shadowOpacity: 0.14, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 3,
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
   },
-  xBtnHover: { backgroundColor: '#eef3ef', transform: [{ scale: 1.06 }] },
+  xBtnHover: { backgroundColor: colors.surface2, transform: [{ scale: 1.06 }] },
   scroll: { paddingTop: 0, paddingBottom: 0 },
   scrollFill: { flexGrow: 1 },
   bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 26, paddingBottom: 8 },
@@ -449,7 +457,7 @@ const a = StyleSheet.create({
   legalStrip: { borderTopWidth: 1, borderTopColor: colors.line, paddingHorizontal: 24, paddingTop: 14, paddingBottom: 12, flexDirection: 'row', columnGap: 20 },
   legalCol: { flex: 1 },
   legalLabel: { fontSize: 11.5, lineHeight: 16, fontWeight: '800', color: colors.dark, marginBottom: 6 },
-  legalText: { fontSize: 11.5, lineHeight: 19, fontWeight: '400', color: '#5f6d65' },
+  legalText: { fontSize: 11.5, lineHeight: 19, fontWeight: '400', color: colors.body },
 
   // ——— mobile ———
   bodyPadM: { paddingHorizontal: 22, paddingTop: TOP_CLEAR },
@@ -463,7 +471,7 @@ const a = StyleSheet.create({
   valueLabelM: { fontSize: 14, lineHeight: 20, fontWeight: '800', color: colors.ink },
   valueLineM: { fontSize: 13, lineHeight: 22, fontWeight: '400', color: colors.body, marginTop: 4 },
   legalCardM: { backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.fieldLine, paddingHorizontal: 16, paddingVertical: 14, gap: 10, marginHorizontal: 22, marginBottom: 8 },
-  legalTextM: { fontSize: 11.5, lineHeight: 19, fontWeight: '400', color: '#5f6d65' },
+  legalTextM: { fontSize: 11.5, lineHeight: 19, fontWeight: '400', color: colors.body },
   legalLeadM: { fontWeight: '800', color: colors.dark },
   footerM: { height: 96, justifyContent: 'flex-end', alignItems: 'center', overflow: 'hidden', marginTop: 8 },
   footerArtM: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', opacity: 0.35 },

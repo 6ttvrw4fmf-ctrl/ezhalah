@@ -139,8 +139,8 @@ const s = StyleSheet.create({
   card: { backgroundColor: '#f2f2f5', borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 12, paddingTop: 10 },
   grip: { width: 38, height: 5, borderRadius: 3, backgroundColor: '#c8c8cf', alignSelf: 'center', marginTop: 2, marginBottom: 12 },
 
-  preview: { flexDirection: 'row', alignItems: 'center', gap: 13, backgroundColor: '#fff', borderRadius: 16, padding: 14 },
-  logo: { width: 50, height: 50, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  preview: { flexDirection: 'row', alignItems: 'center', gap: 13, backgroundColor: colors.surface, borderRadius: 16, padding: 14 },
+  logo: { width: 50, height: 50, borderRadius: 12, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   pvT: { fontSize: 15, fontWeight: '700', color: colors.ink },
   pvS: { fontSize: 12, color: '#6b7a72', lineHeight: 16, marginTop: 2 },
   pvL: { fontSize: 11.5, color: colors.primary, fontWeight: '600', marginTop: 4 },
@@ -151,10 +151,10 @@ const s = StyleSheet.create({
   appIc: { width: 58, height: 58, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   appNm: { fontSize: 11, color: '#45524b' },
 
-  rows: { marginTop: 14, backgroundColor: '#fff', borderRadius: 14, overflow: 'hidden' },
+  rows: { marginTop: 14, backgroundColor: colors.surface, borderRadius: 14, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 15, paddingHorizontal: 16 },
   rowTx: { fontSize: 15, fontWeight: '500', color: colors.ink },
 
-  cancel: { marginTop: 10, backgroundColor: '#fff', borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
+  cancel: { marginTop: 10, backgroundColor: colors.surface, borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
   cancelText: { fontSize: 16, fontWeight: '700', color: colors.ink },
 });

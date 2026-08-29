@@ -615,8 +615,8 @@ function RnplBanner({ monthly, source, t }: { monthly?: number; source?: string;
       <View style={card.rnplRow}>
         <Image source={EJARI_LOGO} style={card.ejariLogo} contentFit="contain" />
         <View style={card.rnplChevs}>
-          <Ionicons name="chevron-forward" size={13} color="#3868c8" style={{ marginRight: -6 }} />
-          <Ionicons name="chevron-forward" size={13} color="#3868c8" />
+          <Ionicons name="chevron-forward" size={13} color={colors.rnplInk} style={{ marginRight: -6 }} />
+          <Ionicons name="chevron-forward" size={13} color={colors.rnplInk} />
         </View>
         <Text style={card.rnplCta}>{t('Rent now, pay later')}</Text>
       </View>
@@ -654,15 +654,15 @@ const card = StyleSheet.create({
   photoColWide: { width: 240, height: 200 },
   photoColMobile: { width: '100%', height: 200 },
   photo: { width: '100%', height: '100%' },
-  photoFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#eef2ec' },
+  photoFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface2 },
   photoFallbackText: { fontSize: 11, color: colors.muted, fontWeight: '600' },
   rankBadge: {
-    position: 'absolute', top: 8, left: 8, backgroundColor: colors.primary,
+    position: 'absolute', top: 8, left: 8, backgroundColor: colors.selFill,
     borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3,
   },
   rankText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   platformBadge: {
-    position: 'absolute', top: 8, right: 8, backgroundColor: '#fff',
+    position: 'absolute', top: 8, right: 8, backgroundColor: colors.surface,
     borderRadius: 14, paddingHorizontal: 8, paddingVertical: 3, flexDirection: 'row', alignItems: 'center', gap: 4,
   },
   platformText: { color: colors.primary, fontSize: 10.5, fontWeight: '700' },
@@ -705,7 +705,7 @@ const card = StyleSheet.create({
   // subtle border, generous padding. Self-aligned so it hugs content instead of stretching full
   // width. (user-visible RNPL CTA — must read as an official partnership badge.)
   rnplBanner: {
-    backgroundColor: '#e8efff', borderRadius: 10, borderWidth: 1, borderColor: '#cdd9f5',
+    backgroundColor: colors.rnplBg, borderRadius: 10, borderWidth: 1, borderColor: colors.rnplLine,
     paddingHorizontal: 10, paddingVertical: 8, alignSelf: 'flex-start', marginTop: 4, gap: 4,
   },
   rnplRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -713,10 +713,10 @@ const card = StyleSheet.create({
   // ratio and lets the parent banner's padding control the surround.
   ejariLogo: { width: 90, height: 28 },
   rnplChevs: { flexDirection: 'row', alignItems: 'center' },
-  rnplCta: { fontSize: 11.5, fontWeight: '700', color: '#3868c8' },
+  rnplCta: { fontSize: 11.5, fontWeight: '700', color: colors.rnplInk },
   // أقساط (Aqsat) variant — Al Hoshan's own RNPL brand; deeper indigo than EJARI's blue.
   // The official PNG is the wordmark + tagline stacked, so it's a bit taller than the EJARI strip.
-  aqsatBanner: { backgroundColor: '#ecedfb', borderColor: '#c9ccf2' },
+  aqsatBanner: { backgroundColor: colors.aqsatBg, borderColor: colors.aqsatLine },
   aqsatLogo: { width: 104, height: 40 },
   rnplFromLine: { fontSize: 10.5, color: colors.muted, fontWeight: '500' },
   rnplFromStrong: { color: colors.dark, fontWeight: '700' },

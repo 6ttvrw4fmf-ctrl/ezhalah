@@ -21,7 +21,10 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8');
 const stripComments = (src: string) =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/^\s*\/\/.*$/gm, '');
 const sidebar = stripComments(read('src/components/Sidebar.tsx'));
-const tokens = read('src/theme/tokens.ts');
+// Token VALUES live in palette.ts since theming (tokens.ts serves CSS variables on web); the LIGHT
+// block comes first in the file, so the first regex match is the light-theme literal — exactly the
+// palette these light-mode contrast floors were written against.
+const tokens = read('src/theme/palette.ts');
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -49,7 +52,7 @@ export function contrast(a: string, b: string): number {
 }
 
 const TINT = hex('tint'), DARK = hex('dark'), SURFACE = hex('surface'), INK = hex('ink');
-const SELECTED = '#dcefe1'; // histRowActive — the persistent current-chat highlight
+const SELECTED = hex('userBubble'); // histRowActive — the persistent current-chat highlight (themed token)
 
 console.log('\nSidebar interaction color — light at rest, dark green on interaction\n');
 
@@ -77,7 +80,7 @@ check('web hover reverts on mouseleave; touch press ALWAYS clears on pressOut (n
   && /onPressOut=\{\(\) => \{ if \(Platform\.OS !== 'web'\) setHotRowId\(\(h\) => \(h === c\.id \? null : h\)\); \}\}/.test(sidebar));
 check('the SELECTED chat never takes the hover fill (current ≠ hovered, structurally)',
   /hotRowId === c\.id && activeChatId !== c\.id/.test(sidebar)
-  && /histRowActive: \{ backgroundColor: '#dcefe1' \}/.test(sidebar));
+  && /histRowActive: \{ backgroundColor: colors\.userBubble \}/.test(sidebar));
 check('selected and hover are different colors entirely (light persistent vs dark interactive)',
   SELECTED.toLowerCase() !== DARK.toLowerCase());
 

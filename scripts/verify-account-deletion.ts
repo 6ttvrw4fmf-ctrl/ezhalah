@@ -28,7 +28,7 @@ import { dirname, join } from 'node:path';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const store = readFileSync(join(root, 'src/store.tsx'), 'utf8');
 const auth = readFileSync(join(root, 'src/lib/auth.ts'), 'utf8');
-const settings = readFileSync(join(root, 'src/app/settings.tsx'), 'utf8');
+const settings = readFileSync(join(root, 'src/components/AccountMenu.tsx'), 'utf8');
 const fnPath = join(root, 'supabase/functions/delete-account/index.ts');
 
 let failed = 0;

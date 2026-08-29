@@ -95,7 +95,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, isRTL, locale } = useI18n();
-  const { user, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat, newChat } = useApp();
+  const { user, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat, openAccountMenu, newChat } = useApp();
   // Row action menu (Star / Delete). Rendered as a panel-level overlay OUTSIDE the scrolling list so
   // it can never be clipped, and opened UP or DOWN from the click position so the full menu is always
   // on-screen near the top, middle, or bottom of the sidebar. (user request.)
@@ -509,6 +509,19 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     setTimeout(() => animateOut(() => { onClose(); setTimeout(() => router.replace({ pathname: '/', params }), 10); }), 240);
   };
 
+  // Account menu (owner redesign 2026-08-28): the gear and the profile row open the anchored panel
+  // in place — the old /settings route hop is gone from this flow. Same close-the-drawer beat as
+  // openInfo below; the measured rect anchors the desktop panel to the row that opened it.
+  const openAccount = (e?: { currentTarget?: unknown }) => {
+    const raise = (anchor?: { x: number; y: number; w: number; h: number }) => {
+      if (docked) { openAccountMenu(anchor); return; }
+      animateOut(() => { onClose(); setTimeout(() => openAccountMenu(), 10); });
+    };
+    const node = (e?.currentTarget ?? null) as null | { measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void };
+    if (node?.measureInWindow) node.measureInWindow((x, y, w, h) => raise({ x, y, w, h }));
+    else raise();
+  };
+
   const go = (path: '/settings' | '/agent' | '/') => {
     animateOut(() => {
       onClose();
@@ -575,7 +588,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     : baseGroups;
   const NavLinks = (
     <View style={s.nav}>
-      <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && s.navLinkHover]} onPress={() => (user ? go('/settings') : openSignIn())}>
+      <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && s.navLinkHover]} onPress={(e) => (user ? openAccount(e) : openSignIn())}>
         <Ionicons name="settings-outline" size={19} color={colors.ink} />
         <Text style={s.navText}>{t('Settings')}</Text>
       </Pressable>
@@ -652,14 +665,14 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               <Animated.View style={[s.searchRow, searchEnterA]}>
                 <Pressable style={s.searchClose} hitSlop={8} onPress={closeSearch}
                   accessibilityLabel={t('Close search')} testID="sidebar-search-close">
-                  <Ionicons name="close" size={16} color="#9aa6a0" />
+                  <Ionicons name="close" size={16} color={colors.muted} />
                 </Pressable>
                 <TextInput
                   style={s.searchInput}
                   value={searchText}
                   onChangeText={onSearchChange}
                   placeholder={t('Search your chats…')}
-                  placeholderTextColor="#9aa6a0"
+                  placeholderTextColor={colors.muted}
                   autoFocus={Platform.OS === 'web'}
                   returnKeyType="search"
                   maxLength={80}
@@ -667,7 +680,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                   testID="sidebar-search-input"
                   onKeyPress={(e: any) => { if (e?.nativeEvent?.key === 'Escape') closeSearch(); }}
                 />
-                <Ionicons name="search" size={15} color="#9aa6a0" />
+                <Ionicons name="search" size={15} color={colors.muted} />
               </Animated.View>
             ) : null}
             {searching && hadLatin ? (
@@ -726,7 +739,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                       >
                         {editingId === c.id ? (
                           <View style={s.histItem}>
-                            <Ionicons name="chatbubble-outline" size={15} color="#8a978f" />
+                            <Ionicons name="chatbubble-outline" size={15} color={colors.muted} />
                             <TextInput
                               style={[s.histLabel, s.histInput]}
                               value={draft}
@@ -756,13 +769,13 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                             // must never rename, and a double-click must never drag.
                             accessibilityHint={t('Hold to reorder the conversation')}
                           >
-                            <Ionicons name="chatbubble-outline" size={15} color={hot ? colors.surface : '#8a978f'} />
+                            <Ionicons name="chatbubble-outline" size={15} color={hot ? colors.onFill : colors.muted} />
                             <Text style={[s.histLabel, (hot || drag?.id === c.id) && s.histLabelHot]} numberOfLines={1}>{displayTitle(c, locale) || queryLabel(c.query)}</Text>
                             {c.starred && <Ionicons name="star" size={13} color={GOLD} />}
                           </Pressable>
                         )}
                         <Pressable style={s.dots} hitSlop={6} onPress={(e) => openMenu(c.id, e)}>
-                          <Ionicons name="ellipsis-horizontal" size={16} color={hot ? '#cfe0d5' : '#9aa6a0'} />
+                          <Ionicons name="ellipsis-horizontal" size={16} color={hot ? '#cfe0d5' : colors.muted} />
                         </Pressable>
                       </View>
                     ); })}
@@ -776,7 +789,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
             {/* Note #7 — profile row layout is IDENTICAL in both languages: avatar → name + email on
                 the right. `direction: ltr` locks it so Arabic doesn't auto-flip the avatar to the
                 opposite side. The name text itself still flows in its own language. (user request.) */}
-            <Pressable style={({ hovered, pressed }: any) => [s.userRow, WEB_SMOOTH, (hovered || pressed) && s.userRowHover, { direction: 'ltr' } as any]} onPress={() => go('/settings')}>
+            <Pressable style={({ hovered, pressed }: any) => [s.userRow, WEB_SMOOTH, (hovered || pressed) && s.userRowHover, { direction: 'ltr' } as any]} onPress={(e) => openAccount(e)}>
               <View style={s.userAv}><Text style={s.userAvText}>{initialsOf(pickName(user, locale))}</Text></View>
               <View style={{ flex: 1 }}>
                 <Text style={s.userName} numberOfLines={1}>{pickName(user, locale)}</Text>
@@ -838,8 +851,8 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           <Text style={s.rowMenuText} numberOfLines={1}>{menuItem.starred ? t('Unstar') : t('Star')}</Text>
         </Pressable>
         <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && s.rowMenuItemHover]} onPress={() => { deleteHistory(menu.id); setMenu(null); }}>
-          <Ionicons name="trash-outline" size={15} color="#c0392b" />
-          <Text style={[s.rowMenuText, { color: '#c0392b' }]} numberOfLines={1}>{t('Delete')}</Text>
+          <Ionicons name="trash-outline" size={15} color={colors.danger} />
+          <Text style={[s.rowMenuText, { color: colors.danger }]} numberOfLines={1}>{t('Delete')}</Text>
         </Pressable>
       </View>
     </>
@@ -885,7 +898,7 @@ const s = StyleSheet.create({
   // `row` lets the panel rest against the leading edge (left in EN, right in AR) — auto-mirrored
   // by RTL on both web and native, so the drawer opens from the same side as the menu button.
   overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, flexDirection: 'row' },
-  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.42)' },
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.scrim },
   // Base is `paper` (not stark white) so the sketch backdrop reads as part of the same illustration
   // behind the rest of the app — the panel blends into the image instead of sitting on a flat slab.
   // Absolutely pinned to the LEFT edge (not via flex) so the drawer opens on the left in every
@@ -911,11 +924,11 @@ const s = StyleSheet.create({
   newChatTextOn: { color: colors.surface },
   // Chat search (owner 2026-08-24). The button mirrors the nav-link language (quiet, discoverable);
   // the input row keeps the exact same footprint so the sidebar never jumps when it morphs.
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingVertical: 6, paddingHorizontal: 10, marginTop: 8, borderWidth: 1, borderColor: colors.primary, backgroundColor: '#ffffff' },
-  searchClose: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f4f2' },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingVertical: 6, paddingHorizontal: 10, marginTop: 8, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.surface },
+  searchClose: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface2 },
   // Arabic-first: the field itself presents RTL even though the panel is dir=ltr locked.
   searchInput: { flex: 1, minWidth: 0, fontSize: Platform.OS === 'web' ? 16 : 13.5, paddingVertical: 4, color: colors.ink, textAlign: 'right', ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : null) } as any,
-  searchHint: { fontSize: 11.5, color: '#9aa6a0', paddingHorizontal: 8, paddingTop: 5, textAlign: 'right' },
+  searchHint: { fontSize: 11.5, color: colors.muted, paddingHorizontal: 8, paddingTop: 5, textAlign: 'right' },
 
   hist: { flex: 1, marginTop: 14, marginBottom: 8 },
   empty: { fontSize: 13, color: colors.muted, paddingVertical: 12, paddingHorizontal: 6 },
@@ -923,7 +936,7 @@ const s = StyleSheet.create({
   groupHead: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 6, paddingBottom: 6 },
   // Drag-to-Favorites target glow (drop-would-star/unstar here) — calm, matches the gold star.
   groupHeadTarget: { backgroundColor: 'rgba(227, 160, 8, 0.14)', borderRadius: 6 },
-  groupTitle: { fontSize: 11, fontWeight: '700', color: '#9aa6a0', textTransform: 'uppercase', letterSpacing: 0.5 },
+  groupTitle: { fontSize: 11, fontWeight: '700', color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.5 },
   histRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 10 },
   // Interaction color for rows (owner 2026-08-24): dark-green fill with white label on hover/press.
   // DISTINCT from histRowActive below — the current chat keeps its persistent light-green highlight
@@ -934,9 +947,9 @@ const s = StyleSheet.create({
   // once made the hovered-white title invisible for the whole drag.)
   histRowDragging: { backgroundColor: colors.dark },
   histLabelHot: { color: colors.surface },
-  histRowOpen: { backgroundColor: '#f3f5f3' },
+  histRowOpen: { backgroundColor: colors.surface2 },
   // The chat the user is currently in — a light green wash so it's obvious which conversation is open.
-  histRowActive: { backgroundColor: '#dcefe1' },
+  histRowActive: { backgroundColor: colors.userBubble },
   histItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 8 },
   histLabel: { flex: 1, fontSize: 13.5, fontWeight: '500', color: colors.ink },
   // Editing keeps the row's metrics as close as it can so the list barely moves on rename.
@@ -944,7 +957,7 @@ const s = StyleSheet.create({
   // (scripts/verify-input-font-no-ios-zoom.ts). This is the one place where the bigger web font costs a
   // little: measured, the row goes 37px -> 40px while renaming (it already grew 35 -> 37 for the border).
   // A 3px wobble on the row you are actively editing beats an unrecoverable page zoom.
-  histInput: { fontSize: Platform.OS === 'web' ? 16 : 13.5, paddingVertical: 0, borderRadius: 6, backgroundColor: '#ffffff',
+  histInput: { fontSize: Platform.OS === 'web' ? 16 : 13.5, paddingVertical: 0, borderRadius: 6, backgroundColor: colors.surface,
     borderWidth: 1, borderColor: colors.primary, paddingHorizontal: 6, ...(Platform.OS === 'web' ? { outlineStyle: 'none' } as any : null) },
   dots: { paddingVertical: 6, paddingHorizontal: 8, borderRadius: 8 },
   // Soft dim over the sidebar while the menu is open so the history text behind it recedes and the
@@ -957,18 +970,18 @@ const s = StyleSheet.create({
   },
   // A clearly elevated solid-white card — opaque background + strong shadow so nothing shows through.
   rowMenu: {
-    position: 'absolute', zIndex: 50, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e7ebe8',
+    position: 'absolute', zIndex: 50, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine,
     borderRadius: 13, padding: 6, minWidth: 168,
     shadowColor: '#0b140f', shadowOpacity: 0.22, shadowRadius: 22, shadowOffset: { width: 0, height: 12 }, elevation: 16,
   },
   rowMenuItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 9 },
-  rowMenuItemHover: { backgroundColor: '#f3f5f3' },
+  rowMenuItemHover: { backgroundColor: colors.surface2 },
   rowMenuText: { fontSize: 13.5, fontWeight: '600', color: colors.ink },
 
   divider: { height: 1, backgroundColor: colors.fieldLine, marginHorizontal: 2, marginBottom: 16 },
   nav: { gap: 4, marginBottom: 18 },
   navLink: { flexDirection: 'row', alignItems: 'center', gap: 13, paddingVertical: 11, paddingHorizontal: 6, borderRadius: 11 },
-  navLinkHover: { backgroundColor: '#eef1ef' },
+  navLinkHover: { backgroundColor: colors.surface2 },
   navText: { fontSize: 14.5, fontWeight: '500', color: colors.ink },
 
   lang: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: colors.segTrack, borderRadius: radius.pill, padding: 4, gap: 4, marginBottom: 18 },
@@ -978,8 +991,8 @@ const s = StyleSheet.create({
   langTextOn: { color: '#fff' },
 
   // Vertically center the name/email block against the avatar; tighter gap = closer to the avatar.
-  userRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingTop: 12, paddingBottom: 8, paddingHorizontal: 8, borderRadius: 11, borderTopWidth: 1, borderTopColor: '#eef1ef' },
-  userRowHover: { backgroundColor: '#eef1ef' },
+  userRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingTop: 12, paddingBottom: 8, paddingHorizontal: 8, borderRadius: 11, borderTopWidth: 1, borderTopColor: colors.line },
+  userRowHover: { backgroundColor: colors.surface2 },
   userAv: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   userAvText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   // Name + email both ALIGN LEFT (same left edge) and use writingDirection 'auto' so the Arabic name
