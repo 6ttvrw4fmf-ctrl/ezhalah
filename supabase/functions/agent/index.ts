@@ -778,7 +778,6 @@ Deno.serve(async (req: Request) => {
     // becomes "assistant" (OpenAI has no "model" role), parts are joined with newlines.
     // Retry once per 429/5xx (parity with the prior Gemini retry).
     const runModel = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = "", seq = 1): Promise<any> => {
-      const t0 = Date.now();
       const headers = { Authorization: `Bearer ${DEEPSEEK_API_KEY}`, "content-type": "application/json" };
       const messages = [
         { role: "system", content: SYSTEM + sysExtra + JSON_SHAPE_HINT },
