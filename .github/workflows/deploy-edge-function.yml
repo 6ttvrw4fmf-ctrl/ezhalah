@@ -1,0 +1,159 @@
+# Supabase edge-function deploy — the missing half of the deploy story.
+#
+# WHY THIS EXISTS. deploy-frontend.yml ships the Vercel frontend and never touches
+# supabase/functions/. Until this file, edge functions (agent, translit, delete-account,
+# ingest-listings, alert-sink) had NO CI deploy path at all — they could only ship from a laptop
+# holding a personal access token. That gap bit on 2026-08-29: a merged P0 fix for the agent
+# (PR #1270 — the model alias was burning the whole token budget on hidden reasoning, 50% of live
+# Arabic turns failing) sat green on main while production kept serving the broken version, because
+# the only way to deploy it was a CLI command on the owner's machine.
+#
+# It is also the ONLY safe path for an agent session. The Supabase MCP deploy tool takes file
+# content as an inline string, so an agent must retype the whole function — and
+# supabase/functions/agent/index.ts is ~93KB containing invisible bidi format characters
+# (U+200E/200F/202A/202E/061C in arNorm(), a raw U+0600 in two Arabic-detection regexes). One
+# dropped invisible character silently breaks Arabic normalization on a live endpoint, and the MCP
+# has no rollback. The CLI uploads real file bytes, so this workflow removes that whole risk class.
+#
+# WHAT IT IS NOT. Not auto-deploy-on-push, and it must never become that — same reasoning as
+# deploy-frontend.yml. Dispatch-only: a human or an agent decides, on purpose, one function at a time.
+#
+# HOW IT STAYS SAFE.
+#   - deploys ONLY from main, never a feature branch or a dirty tree
+#   - refuses unless the checked-out commit == origin/main (no racing a fresh merge)
+#   - npm test must pass first — the barriers (verify-agent-nonreasoning-model,
+#     verify-agent-deepseek-only, verify-filter-never-calls-agent) gate the deploy
+#   - `confirm: DEPLOY` exact literal for a real deploy; dry_run proves credentials without shipping
+#   - --no-verify-jwt is REQUIRED: these functions do their own anon/publishable-key check, and
+#     deploying with JWT verification on returns 401 to every user
+#
+# SETUP (one time): add a Supabase personal access token as the repo secret
+# SUPABASE_ACCESS_TOKEN — https://supabase.com/dashboard/account/tokens
+
+name: Deploy edge function (production)
+
+on:
+  workflow_dispatch:
+    inputs:
+      function:
+        description: "Edge function to deploy"
+        required: true
+        type: choice
+        options:
+          - agent
+          - translit
+          - delete-account
+          - ingest-listings
+          - alert-sink
+      reason:
+        description: "Why this deploy is needed (recorded in the run log)"
+        required: true
+        type: string
+      confirm:
+        description: "Type DEPLOY to confirm shipping main to production"
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: "Verify token + function source, then STOP without deploying"
+        required: false
+        default: false
+        type: boolean
+
+# One edge deploy at a time.
+concurrency:
+  group: deploy-edge-function-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: supabase functions deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Assert we are on the tip of main
+        run: |
+          set -euo pipefail
+          git fetch origin main --quiet
+          LOCAL="$(git rev-parse HEAD)"
+          REMOTE="$(git rev-parse origin/main)"
+          echo "HEAD       $LOCAL"
+          echo "origin/main $REMOTE"
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "::error::HEAD is not origin/main. Refusing to deploy a stale checkout."
+            exit 1
+          fi
+
+      - name: Assert the function source exists
+        run: |
+          set -euo pipefail
+          SRC="supabase/functions/${{ inputs.function }}/index.ts"
+          if [ ! -f "$SRC" ]; then
+            echo "::error::$SRC not found in the repo."
+            exit 1
+          fi
+          echo "source:  $SRC"
+          echo "bytes:   $(wc -c < "$SRC")"
+          echo "md5:     $(md5sum "$SRC" | cut -d' ' -f1)"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: npm ci
+        run: npm ci
+
+      # The barriers are the gate. verify-agent-nonreasoning-model.ts in particular would have
+      # caught the config that broke production on 2026-08-28.
+      - name: npm test (barriers gate the deploy)
+        run: npm test
+
+      - name: Verify Supabase credentials
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN repo secret is not set."
+            echo "Create one at https://supabase.com/dashboard/account/tokens and add it under"
+            echo "Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "SUPABASE_ACCESS_TOKEN present."
+
+      - name: Confirmation gate
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.confirm }}" != "DEPLOY" ]; then
+            echo "::error::confirm must be exactly DEPLOY for a real deploy (got '${{ inputs.confirm }}')."
+            exit 1
+          fi
+
+      - name: Dry run — stop here
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "dry_run=true — credentials and source verified, nothing deployed."
+
+      # --no-verify-jwt is load-bearing: these functions gate on the anon/publishable key themselves.
+      - name: Deploy
+        if: ${{ !inputs.dry_run }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx --yes supabase@latest functions deploy "${{ inputs.function }}" \
+            --project-ref aannarbkwcymrotzwdbo \
+            --no-verify-jwt
+
+      - name: Report
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "Deployed ${{ inputs.function }} to aannarbkwcymrotzwdbo."
+          echo "Reason: ${{ inputs.reason }}"
+          echo "Commit: $(git rev-parse HEAD)"
