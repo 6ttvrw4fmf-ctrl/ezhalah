@@ -39,6 +39,14 @@ const DEEPSEEK_API_KEY = Deno.env.get("DEEPSEEK_API_KEY") ?? "";
 // DeepSeek has no such switch, so the ALIAS is the switch. Classification needs no chain-of-thought.
 // Pinned by scripts/verify-agent-nonreasoning-model.ts.
 const DEEPSEEK_MODEL = Deno.env.get("DEEPSEEK_MODEL") ?? "deepseek-chat";
+// Models we are willing to PAY for. The alias "deepseek-chat" currently bills as deepseek-v4-flash
+// ($0.48/1,000 messages measured); deepseek-v4-pro is 3x that on the identical call. This list is
+// the fail-closed half of the model guard: an unrecognised model is refused BEFORE the HTTP request,
+// so a config slip or an alias re-point cannot spend money once. The observability half — what
+// DeepSeek says it actually billed — is recorded per call in public.ai_usage.model and watched by
+// mon_detect_ai_cost_health(). Widening this list is an owner cost decision, not a fix for an alert.
+// Mirrors public.ai_spend_config.allowed_models; pinned by scripts/verify-ai-spend-safety.ts.
+const ALLOWED_MODELS = ["deepseek-chat", "deepseek-v4-flash"];
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
 // Deterministic post-model rules (owner ruling 2026-08-29). Pure functions, unit-tested and
@@ -199,6 +207,38 @@ function logUsage(row: Record<string, unknown>): void {
       .then((r) => r.body?.cancel().catch(() => {}))
       .catch(() => {});
   } catch { /* telemetry must never break a turn */ }
+}
+
+// ── SPEND CIRCUIT BREAKER CLIENT ──────────────────────────────────────────────
+// Calls public.ai_spend_gate(), which owns the ceilings and the breaker state. Deliberately NOT
+// cached: a cached "allow" is exactly how a runaway keeps running for another window, and this is
+// one small RPC against a 1,800ms model call.
+//
+// FAIL CLOSED. Any failure — network, timeout, RLS, malformed body — returns allow:false. An
+// unreachable ceiling is an unbounded one. The product survives a denial (deterministic search and
+// the client's offline heuristic both keep working); the balance does not survive an unbounded one.
+const GATE_TIMEOUT_MS = 4000;
+async function spendGate(source: string): Promise<{ allow: boolean; reason?: string; state?: string }> {
+  if (!SUPABASE_URL || !SERVICE_KEY) {
+    return { allow: false, reason: "spend gate unreachable: no service credentials", state: "unknown" };
+  }
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), GATE_TIMEOUT_MS);
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/ai_spend_gate`, {
+      method: "POST",
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ p_source: source }),
+      signal: ac.signal,
+    }).finally(() => clearTimeout(timer));
+    if (!r.ok) return { allow: false, reason: `spend gate http ${r.status}`, state: "unknown" };
+    const g = await r.json();
+    // An unrecognised shape is not permission.
+    if (!g || typeof g.allow !== "boolean") return { allow: false, reason: "spend gate returned no verdict", state: "unknown" };
+    return { allow: g.allow, reason: g.reason, state: g.state };
+  } catch (e) {
+    return { allow: false, reason: `spend gate error: ${String((e as Error)?.message ?? e)}`, state: "unknown" };
+  }
 }
 
 // ── DETERMINISTIC CATALOG CLASSIFIER (loc_classify RPC) ───────────────────────
@@ -691,6 +731,14 @@ Deno.serve(async (req: Request) => {
   let knownState = "";
   let lmHint = "";
   let history: Array<{ role?: string; text?: string }> = [];
+  // CALLER ATTRIBUTION. Without this a CI job and a real customer are indistinguishable in the cost
+  // data, so "is our spend real usage or a runaway test loop?" cannot be answered — and that was a
+  // live question: an audit found most agent traffic was automation, not people.
+  // Header-only and never trusted for AUTHORISATION — it is a label, not a permission — and it
+  // defaults to "user" so an unlabelled call is counted as the more important kind rather than
+  // silently excused. Only our own scripts set it.
+  const rawSource = (req.headers.get("x-ezhalah-client") ?? "").toLowerCase().trim();
+  const clientSource = ["ci", "selftest"].includes(rawSource) ? rawSource : "user";
   try {
     const body = await req.json();
     text = String(body?.text ?? "").slice(0, 1000);
@@ -778,8 +826,39 @@ Deno.serve(async (req: Request) => {
     // becomes "assistant" (OpenAI has no "model" role), parts are joined with newlines.
     // Retry once per 429/5xx (parity with the prior Gemini retry).
     const runModel = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = "", seq = 1): Promise<any> => {
+      // ── FAIL-CLOSED SPEND GUARD ───────────────────────────────────────────────────────────────
+      // Owner ruling 2026-08-29: "quality can fail soft, spending must fail closed." A bug may
+      // degrade the AI temporarily; no bug may silently drain the balance.
+      //
+      // THIS IS THE CHOKE POINT. Every paid DeepSeek request in this function goes through the
+      // fetch below, so both guards sit here and nothing can route around them.
+      //
+      // 1. MODEL ALLOWLIST — refuse BEFORE spending. DEEPSEEK_MODEL is an env-set ALIAS: a config
+      //    change (ours or the provider's) could point it at a reasoning/pro tier costing 3x, and
+      //    the first evidence would be the bill. An unrecognised model is not a call we are willing
+      //    to pay for, so we do not make it. Deterministic, no false positives.
+      if (!ALLOWED_MODELS.includes(DEEPSEEK_MODEL)) {
+        recordHealth("model_not_allowlisted", 0, { requested_model: DEEPSEEK_MODEL, allowed: ALLOWED_MODELS });
+        return { __err: json({ error: "model not allowlisted", requested_model: DEEPSEEK_MODEL }, 503) };
+      }
+
+      // 2. SPEND CIRCUIT BREAKER — authoritative, server-side, atomic. ai_spend_gate() checks the
+      //    breaker AND the rolling hourly/daily call+USD ceilings in one statement, so two
+      //    concurrent workers cannot both squeeze past a ceiling.
+      //
+      //    A gate that cannot be reached DENIES. That is deliberate: an unreachable ceiling is an
+      //    unbounded one, and the product survives it — the client falls back to its deterministic
+      //    offline heuristic, and Normal Filter, Advanced Filter, pagination and sort never call the
+      //    model at all. The AI degrades; the balance does not drain.
       const headers = { Authorization: `Bearer ${DEEPSEEK_API_KEY}`, "content-type": "application/json" };
       const messages = [
+        // CACHE PREFIX INVARIANT — do not reorder. SYSTEM must be the FIRST content in the FIRST
+        // message and byte-identical every request, because DeepSeek's prefix cache is what makes an
+        // 18k-token prompt affordable: 99% hit costs ~$0.00025/message, and losing the prefix costs
+        // $8.14 per 1,000 messages instead of $0.48 — 17x, with no visible change to the product.
+        // Anything per-request (a timestamp, a user id, a counter) placed before or inside SYSTEM
+        // breaks every cache entry. Per-turn text belongs in sysExtra, AFTER SYSTEM.
+        // Pinned by scripts/verify-ai-spend-safety.ts.
         { role: "system", content: SYSTEM + sysExtra + JSON_SHAPE_HINT },
         ...cts.map((c) => ({ role: c.role === "model" ? "assistant" : "user", content: c.parts.map((p) => p.text).join("\n") })),
       ];
@@ -798,9 +877,26 @@ Deno.serve(async (req: Request) => {
       let res: Response | null = null;
       const t0 = Date.now();
       for (let attempt = 0; attempt < 2; attempt++) {
+        // RE-CHECK PER ATTEMPT, not once per runModel. The retry below re-sends the identical ~18k
+        // prompt at full price, so it is a second paid call — and a ceiling can be crossed between
+        // attempt 0 and attempt 1 (that is exactly what a runaway looks like). Checking only at the
+        // top of runModel would let attempt 1 through after the budget was already gone.
+        const g = await spendGate(clientSource);
+        if (!g.allow) {
+          recordHealth("spend_gate_blocked", Date.now() - t0, { reason: g.reason, state: g.state, attempt });
+          return { __err: json({ error: "ai spend guard", reason: g.reason, state: g.state }, 503) };
+        }
         const r = await fetch(DEEPSEEK_URL, { method: "POST", headers, body: payload });
         if (r.ok) { res = r; break; }
         res = r;
+        // COUNT THE FAILED ATTEMPT. It was transmitted and may well have been billed; without this
+        // row ai_usage undercounts precisely when calls are failing — and the circuit breaker counts
+        // rows, so an undercount weakens the breaker at the worst possible moment.
+        logUsage({
+          source: clientSource, requested_model: DEEPSEEK_MODEL, model: null, kind: null,
+          locale, call_seq: seq, attempt: attempt + 1, http_status: r.status,
+          finish_reason: `http_${r.status}`, history_turns: history.length, latency_ms: Date.now() - t0,
+        });
         if (![429, 500, 502, 503].includes(r.status)) break;
         await r.body?.cancel().catch(() => {});
         if (attempt === 0) await new Promise((rs) => setTimeout(rs, 500));
@@ -843,6 +939,8 @@ Deno.serve(async (req: Request) => {
       // to public.ai_usage, where it is costed by public.ai_usage_costed.
       const u = data?.usage ?? {};
       logUsage({
+        source: clientSource,
+        attempt: 1,
         requested_model: DEEPSEEK_MODEL,
         model: data?.model ?? null,
         kind: /"kind"\s*:\s*"(listings|message|interview)"/.exec(raw)?.[1] ?? null,

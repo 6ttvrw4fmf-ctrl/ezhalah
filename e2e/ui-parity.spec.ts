@@ -103,7 +103,19 @@ test('Filter mode — Apartment type filter returns results', async ({ page }) =
   await expect(page.getByText(FOUND).first()).toBeVisible();
 });
 
+// PAID LIVE-MODEL TESTS (owner rule 2026-08-29: bounded, explicitly-labelled paid AI only).
+// The two tests below type into the chat composer, so each Enter is a BILLED DeepSeek call — and
+// playwright.config.ts sets `retries: 2`, so a flaky night bills each of them three times over.
+//
+// They are real live-agent verification and worth keeping, but they must be a DELIBERATE cost, not
+// an incidental one: `npx playwright test` runs the whole e2e/ directory, so without this gate any
+// future workflow that runs the suite silently starts paying. Enabled in the nightly ui-parity
+// workflow via EZHALAH_ALLOW_PAID_AI=1; skipped everywhere else.
+// Pinned by scripts/verify-ai-spend-safety.ts.
+const ALLOW_PAID_AI = process.env.EZHALAH_ALLOW_PAID_AI === '1';
+
 test('AI mode — free-text query classifies correctly, replies in Arabic', async ({ page }) => {
+  test.skip(!ALLOW_PAID_AI, 'paid live-model test — set EZHALAH_ALLOW_PAID_AI=1 to run');
   await home(page);
   await page.getByText('الوكيل الذكي', { exact: true }).click(); // switch to AI mode
   const composer = page.getByPlaceholder('اكتب العقار اللي تبحث عنه في السعودية...');
@@ -125,6 +137,7 @@ test('AI mode — free-text query classifies correctly, replies in Arabic', asyn
 });
 
 test('AI mode — a city that is also a region asks to disambiguate (no wrong guess)', async ({ page }) => {
+  test.skip(!ALLOW_PAID_AI, 'paid live-model test — set EZHALAH_ALLOW_PAID_AI=1 to run');
   await home(page);
   await page.getByText('الوكيل الذكي', { exact: true }).click();
   const composer = page.getByPlaceholder('اكتب العقار اللي تبحث عنه في السعودية...');

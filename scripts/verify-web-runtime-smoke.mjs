@@ -502,6 +502,21 @@ try {
   check('[F] the mid-flight-Stop resubmit still lands a real result count', Number.isFinite(midResubmitCount), `count=${midResubmitCount}`);
 
   // ---- G: a CHAT-originated Stop must NOT navigate home — origin-tracking must not over-apply. ----
+  // ZERO PAID AI (owner rule 2026-08-29: CI must not call paid DeepSeek unless the test genuinely
+  // requires a real model). This journey asserts CLIENT origin-tracking — that pressing Stop on a
+  // chat turn keeps you on /agent — which has nothing to do with what the model replies. It used to
+  // run a real paid classification on EVERY pull request, the single largest source of CI spend.
+  //
+  // The stub also makes the test BETTER: a deliberately slow response guarantees the Stop control is
+  // on screen, instead of racing live model latency (~1.8s) and flaking when the model is quick.
+  await page.route('**/functions/v1/agent', async (route) => {
+    await new Promise((r) => setTimeout(r, 6000));   // hold the turn open so Stop is visible
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ kind: 'message', reply: 'ابحث لك الحين.' }),
+    });
+  });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(5000);
   await tap('الوكيل الذكي');
@@ -518,6 +533,7 @@ try {
     check('[G] chat-originated Stop still shows the existing stop-in-place acknowledgement',
       /وقفت البحث/.test(await body()));
   }
+  await page.unroute('**/functions/v1/agent');
 
   // ---- H: same rapid-Stop + exact-restore proof on MOBILE. ----
   await page.setViewportSize({ width: 390, height: 844 });
