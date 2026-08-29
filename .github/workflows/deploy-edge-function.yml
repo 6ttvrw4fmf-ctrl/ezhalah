@@ -105,8 +105,19 @@ jobs:
         with:
           node-version: 24
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: npm ci
         run: npm ci
+
+      # Several guards in `npm test` shell out to the real scraper modules, and scrapers/*/run.py
+      # imports curl_cffi at module level — without the pinned requirements they die on import
+      # rather than on an assertion. Same install line as full-verification-ci.yml. (The first dry
+      # run of this workflow failed exactly here, on verify-abeea-identity-supersession.)
+      - name: Install scraper Python deps
+        run: pip install -r scrapers/requirements.txt
 
       # The barriers are the gate. verify-agent-nonreasoning-model.ts in particular would have
       # caught the config that broke production on 2026-08-28.
