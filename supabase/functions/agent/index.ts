@@ -590,7 +590,7 @@ function stripFiller(s: string): string {
 // endpoint). Appended to the SYSTEM message as a belt-and-braces restatement of the shape and enum
 // values the SYSTEM prompt above already documents in prose — same list, machine-readable form, so
 // the model gets the contract from two directions.
-const JSON_SHAPE_HINT = `\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "furnished" (one of "yes"|"no"|"none" — "yes" only if the user asks for a FURNISHED place («مفروشة»), "no" only if they ask for an UNFURNISHED one («غير مفروشة»), "none" when they do not mention furnishing at all; never infer it from anything else), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
+const JSON_SHAPE_HINT = `\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "ask_about" (array of the things the user expressed VAGUELY that you must NOT turn into a number — use "size" when they said big/large/wide/spacious/small («كبير»/«واسع»/«صغير») without any area figure, and "rating" when they praised the rating («تقييم عالي»/«ممتاز») without naming a number. Leave [] when nothing is vague. NEVER invent a bedroom count, an area, or a rating from a vague word), "furnished" (one of "yes"|"no"|"none" — "yes" only if the user asks for a FURNISHED place («مفروشة»), "no" only if they ask for an UNFURNISHED one («غير مفروشة»), "none" when they do not mention furnishing at all; never infer it from anything else), "af" (object of Advanced-Filter intents the user STATED; omit any key they did not state — never infer one. Keys and their ONLY allowed values: "property_age": "new"|"1_2"|"3_5"|"6_9"|"10p"; "street_width": a number in metres they asked for (e.g. "20"); "direction": array of "شمال"|"جنوب"|"شرق"|"غرب"|"شمال شرق"|"شمال غرب"|"جنوب شرق"|"جنوب غرب"; "bathrooms": the number of bathrooms they asked for; "rating": "9.5"|"9.0"|"9.0_rc10" ONLY if they named a number on the 0-10 scale — if they only said the rating should be high/excellent, OMIT it and ask instead; "rnpl": "rnpl" if they want instalments/تقسيط; "unit_subtype": "استديو"|"شقق مخدومة"|"شقة"), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -982,6 +982,22 @@ Deno.serve(async (req: Request) => {
       // "Size: 500 m²" in the summary while the reply sentence never said 500 at all). Same fix pattern as
       // extractPrice() above: don't trust the model to be exhaustive, backstop it deterministically. The
       // bedroom-shape regex mirrors the client's own detail-is-bedrooms-vs-size check (src/data/search.ts).
+      // ── VAGUE SIZE MUST NEVER BECOME A BEDROOM COUNT (owner ruling 2026-08-29) ──────────────────
+      // LIVE BUG: «أبي بيت كبير» returned detail "5+". The model read "big" as five-plus bedrooms —
+      // a number the user never said, on a dimension they never mentioned. "Big" is an AREA intent,
+      // not a bedroom count, and we have no product-approved threshold for it.
+      //
+      // Deterministic, not a prompt plea: if `detail` is BEDROOM-SHAPED (1-4 or 5+) while the user's
+      // own message contains no digit and no bedroom word, the model invented it. Drop it and ask.
+      // A stated «٣ غرف» carries a digit, and «خمس غرف» carries the bedroom word, so both survive.
+      const saidDigits = /[0-9٠-٩۰-۹]/.test(text);
+      const saidBedroomWord = /(غرف|غرفة|غرفه|حجرة|bed\s?room|bedroom|\brooms?\b|\bbr\b)/i.test(text);
+      const bedroomShaped = (v: string) => /^([1-4]|5\+?)$/.test(v);
+      if (typeof out.detail === "string" && bedroomShaped(out.detail.trim()) && !saidDigits && !saidBedroomWord) {
+        out.detail = "";
+        if (!Array.isArray(out.ask_about)) out.ask_about = [];
+        if (!out.ask_about.includes("size")) out.ask_about.push("size");
+      }
       const detailStr = typeof out.detail === "string" ? out.detail.trim() : "";
       const isSizeDetail = detailStr !== "" && !/^([1-4]|5\+?)$/.test(detailStr);
       let replyOut = lead(out.reply);
@@ -1028,6 +1044,14 @@ Deno.serve(async (req: Request) => {
           // known for furnished (5 of 30,544), so applying it there would turn UNKNOWN into No and
           // collapse the result set to almost nothing.
           furnished: out.furnished === "yes" ? "yes" : out.furnished === "no" ? "no" : "none",
+          // ADVANCED-FILTER INTENTS (owner 2026-08-29). Carried through RAW and unvalidated on
+          // purpose: certification is per-cohort and lives in src/lib/afIntents.ts + afCohorts.ts,
+          // which the Advanced Filter itself uses. A copy of that table in here is precisely how the
+          // two surfaces drift. The model PROPOSES; the client DECIDES.
+          af: (out.af && typeof out.af === "object" && !Array.isArray(out.af)) ? out.af : {},
+          askAbout: Array.isArray(out.ask_about)
+            ? out.ask_about.filter((a: unknown) => typeof a === "string" && a).map((a: string) => a.trim().toLowerCase())
+            : [],
           amenities: Array.isArray(out.amenities)
             ? [...new Set(out.amenities
                 .filter((a: unknown) => typeof a === "string")
