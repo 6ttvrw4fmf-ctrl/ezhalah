@@ -434,10 +434,26 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 - **R8.3.2** — When a round ends, a new results turn lands; the previous turn's buttons become
   the receipt (§6.3).
 
-### 8.4 Skip All («تخطي الباقي»)
+### 8.4 ~~Skip All («تخطي الباقي»)~~ — REMOVED FROM THE PRODUCT (owner, 2026-08-28)
 
-- **R8.4.1** — Skips every remaining question in the current round. Skipped questions are
-  remembered per R8.1.3.
+- **R8.4.1** — ~~Skips every remaining question in the current round. Skipped questions are
+  remembered per R8.1.3.~~ **THE CONTROL NO LONGER EXISTS.** The owner removed it on 2026-08-28
+  in the same decision that removed the in-question «عرض النتائج» early-exit — see R8.3.1, which
+  is the live rule. The `skipAll` prop is gone from `AdvancedQuestionCard`; the footer is
+  متابعة / تخطي / رجوع and nothing else, and a round now ends by walking its questions, by Back
+  from question 1, or by ✕.
+
+  Kept struck-through rather than deleted, per this document's own convention for a rule that has
+  moved (see R5.4.1 and R5.4.3), so a future reader can see both positions instead of trusting
+  whichever paragraph they read first.
+
+  **This paragraph was stale for one day** (2026-08-28 → 2026-08-29): the change that rewrote
+  R8.3.1 did not also retire §8.4 or R11.4, leaving the canonical contract describing a control
+  production does not have — and the coverage map scoring the product for it. Found by routine #5
+  on 2026-08-29 and confirmed live: no such control renders in any AF round on
+  `ezhalah-app.vercel.app`, desktop or mobile. `scripts/verify-af-footer-buttons.ts` now pins the
+  contract prose against the card's real controls so this cannot drift again — a retired control's
+  name must appear only inside `~~strikethrough~~`, which is what makes "retired" machine-readable.
 
 ---
 
@@ -495,8 +511,11 @@ AF stops (offer button hidden, round refuses to open) when ANY of:
   `optionNarrowsMeaningfully(count, N)`.
 - **R11.3** — The certified cohort intersection for the current scope is empty (multi-type or
   multi-period/deal with no shared cohort).
-- **R11.4** — User taps Skip All in the middle of a round (the round ends; future rounds may
-  still open if a useful question remains and R11.1/R11.2 haven't triggered).
+- **R11.4** — ~~User taps Skip All in the middle of a round (the round ends; future rounds may
+  still open if a useful question remains and R11.1/R11.2 haven't triggered).~~ **REMOVED with the
+  control itself (owner, 2026-08-28 — see §8.4).** The user-initiated ways to end a round early are
+  now Back from question 1 (R8.2.2) and ✕; both leave R11.1/R11.2 to decide whether a future round
+  may open, exactly as this rule described.
 
 **AF does NOT keep asking to hit a numeric target.** 80 listings remaining with no useful question
 is a valid, correct stop.
