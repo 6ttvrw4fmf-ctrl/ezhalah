@@ -1111,7 +1111,8 @@ const AR: Record<string, string> = {
   'Saved': 'تم الحفظ',
   'Name saved': 'تم حفظ الاسم',
   'Log out?': 'تسجيل الخروج؟',
-  'Are you sure you want to log out?': 'هل أنت متأكد أنك تريد تسجيل الخروج؟',
+  // Owner's exact logout-confirmation wording (2026-08-28) — the centered popup copy, verbatim.
+  'Are you sure you want to log out?': 'هل أنت متأكد من رغبتك في تسجيل الخروج؟',
   'Danger zone': 'منطقة الخطر',
   'Delete my account': 'حذف حسابي',
   'Log out': 'تسجيل الخروج',

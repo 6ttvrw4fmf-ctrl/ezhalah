@@ -35,10 +35,16 @@ import { sendPhoneOtp, verifyPhoneOtp } from '@/lib/auth';
 //   signout /  in-panel confirmations with the same loading beats and the same store calls the
 //   delete     old modal used (signOut(), deleteAccount() — server-first, PR #725).
 //
-// Interaction contract: opens anchored above the profile row (never centered), outside-click and
-// Escape close it, sub-views slide in the drill direction, reduced motion collapses every move to
-// a fade. Unmount hand-offs are TIMER-driven, never animation callbacks (repo rule — rAF freezes
-// in hidden tabs; see src/lib/afterAnimation.ts).
+// Interaction contract (owner revision 2026-08-28, same day): the QUICK views — root, Appearance,
+// Language — open anchored above the profile row (never centered); outside-click and Escape close
+// them. The HEAVY experiences — إدارة الحساب, its delete flow, and the تسجيل الخروج confirmation —
+// are NOT confined to the sidebar: they open as full centered popups over the whole app, on a
+// dimmed+blurred backdrop, via a real RN <Modal> (portals to the root, so they also escape the
+// sidebar's LTR structural pin and follow the app locale's own RTL). The sidebar is only the
+// LAUNCHER for them. ONE state machine drives both containers — the view value alone decides which
+// container renders, so no logic is duplicated. Sub-views slide in the drill direction, reduced
+// motion collapses every move to a fade. Unmount hand-offs are TIMER-driven, never animation
+// callbacks (repo rule — rAF freezes in hidden tabs; see src/lib/afterAnimation.ts).
 
 const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
 const ENTER_MS = 190;
@@ -96,17 +102,23 @@ export default function AccountMenu({
     ],
   }));
 
-  // Escape closes — capture phase, registered only while open, so no other surface's keys are
-  // touched when the menu is closed, and an open menu consumes exactly the one Escape it owns.
+  // Escape — capture phase, registered only while open. Anchored views close the menu; the
+  // centered popups CANCEL their own step instead (the safest action, owner rule): the delete
+  // confirmation steps back to the account popup rather than vanishing the whole surface, and the
+  // logout confirmation / account popup simply close. Never deletes, never signs out.
+  const viewRef = useRef<MenuView>('root');
+  viewRef.current = view;
   useEffect(() => {
     if (!visible || Platform.OS !== 'web' || typeof document === 'undefined') return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.stopPropagation();
+      if (viewRef.current === 'delete') { go('account', -1); return; }
       onClose();
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, onClose]);
 
   // Sub-view slide: push enters from the trailing side, pop from the leading side.
@@ -220,8 +232,12 @@ export default function AccountMenu({
     </Pressable>
   );
 
+  const centered = view === 'account' || view === 'signout' || view === 'delete';
+
   return (
     <>
+      {!centered && (
+        <>
       {/* Invisible click-catcher over the WHOLE viewport (web: position fixed) — clicking anywhere
           outside the panel closes the menu, exactly like the row ⋯ menu's scrim. */}
       <Pressable testID="account-menu-scrim" style={s.scrim} onPress={onClose} />
@@ -284,9 +300,35 @@ export default function AccountMenu({
             </View>
           )}
 
+        </Animated.View>
+      </Animated.View>
+        </>
+      )}
+
+      {/* ── Centered full-app popups (owner 2026-08-28): the sidebar only LAUNCHES these ── */}
+      {centered && (
+        <Modal visible transparent animationType="fade"
+          onRequestClose={() => { if (view === 'delete') go('account', -1); else onClose(); }}>
+          <View style={s.centerRoot}>
+            <Pressable
+              testID="account-popup-backdrop"
+              style={s.centerBack}
+              onPress={() => { if (view === 'delete') go('account', -1); else onClose(); }}
+            />
+            <Animated.View
+              testID={view === 'account' ? 'account-popup' : view === 'signout' ? 'logout-popup' : 'delete-popup'}
+              style={[view === 'account' ? s.centerCardWide : s.centerCard, viewAnim]}
+            >
+              {view === 'account' && (
+                <Pressable testID="account-popup-close" onPress={onClose} hitSlop={8} style={({ hovered }: any) => [s.centerClose, hovered && s.rowHover]}>
+                  <Ionicons name="close" size={18} color={C.muted} />
+                </Pressable>
+              )}
           {view === 'account' && (
-            <ScrollView style={{ maxHeight: maxH - 16 }} showsVerticalScrollIndicator={false}>
-              <SubHeader title={t('Manage account')} />
+            <ScrollView style={{ maxHeight: winH * 0.72 }} showsVerticalScrollIndicator={false}>
+              {/* Popup title — this is a centered dialog now, not a drill-in: no back chevron, the
+                  × in the corner (and Escape / the backdrop) closes it. */}
+              <Text style={s.centerTitle}>{t('Manage account')}</Text>
               <View style={s.hairline} />
               {/* Display name — tap to edit inline, explicit save (same contract as before). */}
               <Pressable
@@ -384,7 +426,7 @@ export default function AccountMenu({
                   <Text style={s.confirmBtnText}>{t('Log out')}</Text>
                 )}
               </Pressable>
-              <Pressable style={s.cancelBtn} onPress={() => go('root', -1)} disabled={loggingOut}>
+              <Pressable testID="logout-popup-cancel" style={s.cancelBtn} onPress={onClose} disabled={loggingOut}>
                 <Text style={s.cancelText}>{t('Cancel')}</Text>
               </Pressable>
             </View>
@@ -421,8 +463,10 @@ export default function AccountMenu({
               </Pressable>
             </View>
           )}
-        </Animated.View>
-      </Animated.View>
+            </Animated.View>
+          </View>
+        </Modal>
+      )}
 
       {phOpen && (
         <ChangePhone
@@ -572,6 +616,17 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     profileSub: { fontSize: 11, color: C.muted, marginTop: 1, textAlign: 'left' },
 
     hairline: { height: 1, backgroundColor: C.line, marginVertical: 5, marginHorizontal: 4 },
+
+    // ── Centered full-app popups (owner 2026-08-28) ─────────────────────────────────────────────
+    // The dialog composes over the WHOLE app: fixed viewport root, a dim scrim with a soft blur
+    // (web), and a centered card. Widths: the account manager breathes at 560; confirmations stay
+    // an intimate 360. Both inherit the theme surface so dark mode is the card, not just the menu.
+    centerRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, ...(Platform.OS === 'web' ? ({ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 } as any) : null) },
+    centerBack: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: dark ? 'rgba(4,8,6,0.62)' : 'rgba(8,18,12,0.5)', ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' } as any) : null) },
+    centerCard: { width: '100%', maxWidth: 360, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.fieldLine, padding: 22, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
+    centerCardWide: { width: '100%', maxWidth: 560, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.fieldLine, paddingVertical: 18, paddingHorizontal: 20, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
+    centerClose: { position: 'absolute', top: 12, right: 12, zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+    centerTitle: { fontSize: 16.5, fontWeight: '700', color: C.ink, textAlign: 'left', writingDirection: 'auto' as any, paddingVertical: 6, paddingHorizontal: 8 },
 
     row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10 },
     rowHover: { backgroundColor: dark ? '#1d2a22' : '#f2f5f2' },
