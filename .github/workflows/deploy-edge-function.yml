@@ -154,7 +154,25 @@ jobs:
             echo "Settings → Secrets and variables → Actions."
             exit 1
           fi
-          echo "SUPABASE_ACCESS_TOKEN present."
+          # FORMAT check, not just presence. The first real deploy failed with "Invalid access token
+          # format" AFTER a green dry run, because the stored value was the MASKED display text from
+          # the dashboard token list (sbp_deb3••••515e) rather than the real code — the dashboard only
+          # reveals the full token once, in the green box right after generating it. A presence-only
+          # check cannot tell those apart, which made the dry run falsely reassuring. This can.
+          # Real tokens are sbp_ followed by 40 lowercase hex characters.
+          if ! printf '%s' "$SUPABASE_ACCESS_TOKEN" | grep -Eq '^sbp_[0-9a-f]{40}$'; then
+            LEN=$(printf '%s' "$SUPABASE_ACCESS_TOKEN" | wc -c | tr -d ' ')
+            echo "::error::SUPABASE_ACCESS_TOKEN is not a valid Supabase token (length $LEN, expected sbp_ + 40 hex chars)."
+            echo ""
+            echo "Most likely you copied the MASKED value from the token list (it contains • dots),"
+            echo "or the value picked up a stray space or newline."
+            echo ""
+            echo "Fix: https://supabase.com/dashboard/account/tokens → Generate new token →"
+            echo "click the COPY button in the green success box (the full value is shown once only),"
+            echo "then update the secret at Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "SUPABASE_ACCESS_TOKEN present and correctly formatted."
 
       - name: Confirmation gate
         if: ${{ !inputs.dry_run }}
