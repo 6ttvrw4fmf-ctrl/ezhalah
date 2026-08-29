@@ -1,21 +1,33 @@
 // ──────────────────────────────────────────────────────────────────────────────
-// agent — Ezhalah real AI Agent (PRD §7, §13) — Google Gemini
+// agent — Ezhalah real AI Agent (PRD §7, §13) — Google Gemini or DeepSeek
 //
 // Turns a free-text message (Arabic-first) into a structured classification the
 // chat client already understands: { kind, reply, query }. The heavy lifting is
-// done by a real Gemini model, held to Ezhalah's hard product rule: it is
-// strictly NON-ADVISORY. It never recommends a property, never ranks, never says
+// done by a real LLM, held to Ezhalah's hard product rule: it is strictly
+// NON-ADVISORY. It never recommends a property, never ranks, never says
 // "best/better/good deal/worth it", and never gives financial, investment,
 // mortgage or legal advice. It only understands the request, extracts neutral
-// search parameters, and presents listings — the user decides.
+// search parameters, and presents listings — the user decides. This contract
+// (the SYSTEM prompt below, and every deterministic backstop after the model
+// call) is IDENTICAL regardless of which model answers it.
 //
-// The API key lives ONLY here (a Supabase secret), never in the app bundle. The
-// client calls this function and falls back to its bundled heuristic if the
-// function is unavailable, so the app never hard-fails.
+// PROVIDER SWITCH (owner 2026-08-25): AGENT_PROVIDER selects which model
+// answers — "gemini" (default) or "deepseek". Defaulting to "gemini" means
+// adding DeepSeek changes NOTHING about live production behavior until this
+// var is explicitly set — a deliberate, reversible cutover, not a rewrite.
+// Only the model-call section below (buildContents → callGemini/callDeepSeek)
+// differs per provider; everything from `out.kind` onward — price extraction,
+// the location catalog backstop, language guards — runs unchanged either way.
+//
+// The API key(s) live ONLY here (Supabase secrets), never in the app bundle.
+// The client calls this function and falls back to its bundled heuristic if
+// the function is unavailable, so the app never hard-fails.
 //
 // Auth: soft-gated (verify_jwt disabled at deploy). The client invokes with the
 // public project key; this endpoint does no privileged work and writes nothing.
 // ─────────────────────────────────────────────────────────────────────────────
+
+const AGENT_PROVIDER = (Deno.env.get("AGENT_PROVIDER") ?? "gemini").trim().toLowerCase();
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
 // Default to the mid 2.5 tier (strong instruction-following + Saudi Arabic);
@@ -26,6 +38,19 @@ const MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
 const FALLBACK_MODEL = Deno.env.get("GEMINI_FALLBACK_MODEL") ?? "gemini-2.5-flash-lite";
 const urlFor = (m: string) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
+
+// DeepSeek — OpenAI-compatible chat-completions API (POST /chat/completions, Bearer auth,
+// {model, messages:[{role,content}], response_format}). It has NO analogue of Gemini's
+// responseSchema (a hard, provider-enforced field/enum constraint) — response_format:
+// {type:"json_object"} only guarantees the reply parses as JSON, not these exact keys. The SYSTEM
+// prompt already documents every field in prose (see "OUTPUT —" below), which is why this was
+// low-risk to add; DEEPSEEK_JSON_SHAPE below is a belt-and-braces reminder appended ONLY to the
+// DeepSeek system message, so Gemini's payload (already hard-schema-enforced) is untouched.
+const DEEPSEEK_API_KEY = Deno.env.get("DEEPSEEK_API_KEY") ?? "";
+// "flash" = DeepSeek's fast/non-reasoning tier, the fit for a short classification task — the same
+// role gemini-2.5-flash plays above. Override with DEEPSEEK_MODEL.
+const DEEPSEEK_MODEL = Deno.env.get("DEEPSEEK_MODEL") ?? "deepseek-v4-flash";
+const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
@@ -525,7 +550,8 @@ Deno.serve(async (req: Request) => {
     return json({ error: "unauthorized" }, 401);
   }
 
-  if (!GEMINI_API_KEY) {
+  const activeKeyMissing = AGENT_PROVIDER === "deepseek" ? !DEEPSEEK_API_KEY : !GEMINI_API_KEY;
+  if (activeKeyMissing) {
     // Tell the client to fall back to its bundled heuristic.
     return json({ error: "model not configured" }, 503);
   }
@@ -581,10 +607,6 @@ Deno.serve(async (req: Request) => {
   locale = replyLang ?? appLocale;
 
   try {
-    const headers = {
-      "x-goog-api-key": GEMINI_API_KEY, // key in header, never the URL
-      "content-type": "application/json",
-    };
     // Deterministic question-budget enforcement (confidence-based policy): the user may ask up to TWO
     // clarifying questions before the first search (high conf 0, medium 1, low 2). The model tends to
     // keep asking past that, so we count prior model questions ("?") and only once it has already asked
@@ -613,21 +635,26 @@ Deno.serve(async (req: Request) => {
       else contents.push({ role: tn.role, parts: [{ text: tn.text }] });
     }
 
-    const genConfig = {
-      temperature: 0.3,
-      // Gemini 2.5 Flash is a "thinking" model — reasoning tokens count against maxOutputTokens. We
-      // don't need chain-of-thought for classification, so we disable thinking and give JSON headroom.
-      thinkingConfig: { thinkingBudget: 0 },
-      maxOutputTokens: 800,
-      responseMimeType: "application/json",
-      responseSchema: SCHEMA,
-    };
-    const models = [MODEL, FALLBACK_MODEL].filter((m, i, a) => a.indexOf(m) === i);
-    // Call Gemini with the given contents and return the parsed JSON object, or { __err } with a ready
-    // Response on failure. Flash can return 503 during spikes — retry once, then fall back to lite.
-    const runModel = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
+    // ── GEMINI ── unchanged from before the provider switch: same headers, same genConfig (hard
+    // responseSchema below), same two-model/two-attempt retry, same response parse.
+    const callGemini = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
+      const headers = {
+        "x-goog-api-key": GEMINI_API_KEY, // key in header, never the URL
+        "content-type": "application/json",
+      };
+      const genConfig = {
+        temperature: 0.3,
+        // Gemini 2.5 Flash is a "thinking" model — reasoning tokens count against maxOutputTokens. We
+        // don't need chain-of-thought for classification, so we disable thinking and give JSON headroom.
+        thinkingConfig: { thinkingBudget: 0 },
+        maxOutputTokens: 800,
+        responseMimeType: "application/json",
+        responseSchema: SCHEMA,
+      };
+      const models = [MODEL, FALLBACK_MODEL].filter((m, i, a) => a.indexOf(m) === i);
       const payload = JSON.stringify({ system_instruction: { parts: [{ text: SYSTEM + sysExtra }] }, contents: cts, generationConfig: genConfig });
       let res: Response | null = null;
+      // Flash can return 503 during spikes — retry once per model, then fall back to the lite tier.
       outer: for (const m of models) {
         for (let attempt = 0; attempt < 2; attempt++) {
           const r = await fetch(urlFor(m), { method: "POST", headers, body: payload });
@@ -644,6 +671,42 @@ Deno.serve(async (req: Request) => {
       if (!raw) return { __err: json({ error: "empty model output" }, 502) };
       try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw }, 502) }; }
     };
+
+    // ── DEEPSEEK ── OpenAI-shape messages: role "model" (Gemini's term, used internally in `contents`
+    // above) becomes "assistant"; the SYSTEM prompt is the first message instead of a separate field.
+    // DEEPSEEK_JSON_SHAPE is appended ONLY here — see the top-of-file note on why Gemini needs no
+    // equivalent (its own responseSchema already enforces these exact keys).
+    const DEEPSEEK_JSON_SHAPE = `\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none).`;
+    const callDeepSeek = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
+      const headers = { Authorization: `Bearer ${DEEPSEEK_API_KEY}`, "content-type": "application/json" };
+      const messages = [
+        { role: "system", content: SYSTEM + sysExtra + DEEPSEEK_JSON_SHAPE },
+        ...cts.map((c) => ({ role: c.role === "model" ? "assistant" : "user", content: c.parts.map((p) => p.text).join("\n") })),
+      ];
+      const payload = JSON.stringify({
+        model: DEEPSEEK_MODEL, messages, temperature: 0.3, max_tokens: 800,
+        response_format: { type: "json_object" },
+      });
+      let res: Response | null = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const r = await fetch(DEEPSEEK_URL, { method: "POST", headers, body: payload });
+        if (r.ok) { res = r; break; }
+        res = r;
+        if (![429, 500, 502, 503].includes(r.status)) break;
+        await r.body?.cancel().catch(() => {});
+        if (attempt === 0) await new Promise((rs) => setTimeout(rs, 500));
+      }
+      if (!res || !res.ok) { const detail = res ? await res.text() : "no response"; return { __err: json({ error: `deepseek ${res?.status ?? 0}`, detail }, 502) }; }
+      const data = await res.json();
+      const raw = String(data?.choices?.[0]?.message?.content ?? "").trim();
+      if (!raw) return { __err: json({ error: "empty model output" }, 502) };
+      try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw }, 502) }; }
+    };
+
+    // Call the ACTIVE provider and return the parsed JSON object, or { __err } with a ready Response
+    // on failure. Everything downstream (out.kind, price/location backstops, language guards) reads
+    // this same shape regardless of which function produced it.
+    const runModel = AGENT_PROVIDER === "deepseek" ? callDeepSeek : callGemini;
 
     // Force the reply language via system_instruction (Gemini weights it far more than a turn line) —
     // the model otherwise slips to Arabic when an English message contains one Arabic word (a city).

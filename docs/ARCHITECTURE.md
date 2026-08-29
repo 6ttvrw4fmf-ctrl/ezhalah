@@ -51,7 +51,7 @@ across many partner platforms and shows them in one place. **It is a search engi
 | **Backend** | **Supabase** project `aannarbkwcymrotzwdbo` — Postgres + PostgREST (RPC) + Edge Functions (Deno) + `pg_cron` + Vault. Region **Tokyo** (PDPL residency is an open question). |
 | **Scraper repo** | GitHub **`6ttvrw4fmf-ctrl/ezhalah`**. All scrapers + GitHub Actions workflows live here. |
 | **Scraper dispatch** | `pg_cron` → `trigger_gh_workflow(wf)` → GitHub `workflow_dispatch`. **Every workflow is dispatch-only; all cadence is owned by Postgres** (so it is monitorable/pausable from the DB). PAT in Vault (exp 2027-06-22). |
-| **AI agent** | Supabase Edge Function named **`agent`** (Gemini 2.5 Flash-Lite primary + Flash fallback, via `GEMINI_MODEL` secret). Runtime behavior tunable via the `agent_notes` DB table (no redeploy). |
+| **AI agent** | Supabase Edge Function named **`agent`**. `AGENT_PROVIDER` selects the model — `gemini` (default; 2.5 Flash primary + Flash-Lite fallback via `GEMINI_MODEL`/`GEMINI_FALLBACK_MODEL`) or `deepseek` (added 2026-08-25, via `DEEPSEEK_API_KEY`/`DEEPSEEK_MODEL`, default `deepseek-v4-flash`) — both run the identical SYSTEM prompt + deterministic post-model pipeline (price extraction, the location catalog backstop, language guards); only the model-call shape differs. Barrier: `scripts/verify-agent-provider-switch.ts`. Runtime behavior tunable via the `agent_notes` DB table (no redeploy), independent of provider. |
 
 **Why Expo/React Native, not native SwiftUI (owner decision 2026-06-09):** the owner first said "decide
 for me" (→ SwiftUI), then pivoted: wanted web + iPhone + Android from one codebase, live-preview while
