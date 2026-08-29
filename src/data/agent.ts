@@ -13,6 +13,7 @@ import { type Category } from './taxonomy';
 import { t, getLocale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
 import { partitionRequestedAmenities, cohortAllows } from '@/lib/afCohorts';
+import { applyAfIntents } from '@/lib/afIntents';
 import { landmarkHint, ensureLandmarks } from './landmarks';
 import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 
@@ -221,7 +222,18 @@ type BackendQuery = {
                         // certified per-cohort below before any of them can reach q.amenities
   furnished?: string;   // 'yes' | 'no' | 'none' — a PROPOSAL. NOT an amenity: it maps to the tri-state
                         // q.furnishedPref, and only where the cohort certifies the furnished question.
+  af?: Record<string, unknown>; // Advanced-Filter intents the model READ OUT of the sentence, keyed by
+                        // canonical AF question id. Proposals only — applyAfIntents() runs each through
+                        // cohortAllows() before any of them can touch the query.
+  askAbout?: string[];  // things the user expressed VAGUELY ('size', 'rating') that must be ASKED, never
+                        // turned into a number. Surfaced on lastVagueIntents for the reply layer.
 };
+
+/**
+ * Vague intents the user expressed that we refuse to quantify («كبير» with no area, «تقييم عالي» with
+ * no number). Owner rule: understanding a word is not permission to invent a value — ask instead.
+ */
+export let lastVagueIntents: string[] = [];
 
 /**
  * Amenity tokens the model proposed that this scope does NOT certify. Surfaced (not swallowed) so the
@@ -423,7 +435,7 @@ function cityFromText(text: string): string | null {
 }
 
 function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts?: string[]): SearchQuery {
-  const q = emptyQuery();
+  let q = emptyQuery();
   q.deal = b.deal === 'Buy' ? 'Buy' : 'Rent';
   if (b.bothDeals === true) q.bothDeals = true; // agent searched without knowing rent/buy → show both
   if (b.priceIsAnnual === true) q.priceIsAnnual = true; // agent annualized a daily/weekly/monthly rent
@@ -581,6 +593,24 @@ function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts
     if (cohortAllows(q, 'furnished')) q.furnishedPref = b.furnished === 'yes';
     else lastRejectedFilters.push('furnished');
   }
+
+  // ── ADVANCED FILTER, FROM THE FIRST MESSAGE (owner ruling 2026-08-29) ───────────────────────────
+  // One registry-driven loop over the canonical AF question ids — property_age, street_width,
+  // direction, bathrooms, rating, rnpl, unit_subtype — each gated by cohortAllows(q, id), the exact
+  // predicate its AF question uses. No AI-only filter system, no second vocabulary, no per-field
+  // branch to forget: verify-agent-af-intent-coverage.ts fails the build if a certified AF question
+  // has no registry entry, so the two surfaces cannot silently drift apart.
+  //
+  // Runs here, at the end, for the same reason furnished does: certification depends on
+  // type/category/deal/rentPeriod and applySourceFilter can still change rentPeriod.
+  if (b.af && typeof b.af === 'object') {
+    const res = applyAfIntents(q, b.af as Record<string, unknown>);
+    q = res.q;
+    lastRejectedFilters.push(...res.rejected);
+  }
+
+  // Vague intents are never quantified. They are carried so the reply can ask one short question.
+  lastVagueIntents = Array.isArray(b.askAbout) ? [...new Set(b.askAbout)] : [];
   return q;
 }
 
