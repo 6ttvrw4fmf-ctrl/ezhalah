@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Image as RNImage, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { I18nManager, Image as RNImage, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { OPEN_DELAY_MS, armOpen, cancelOpen, openShouldFire, type ArmedOpen } from '@/lib/rowClick';
 import Animated, {
   Easing,
@@ -12,7 +12,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, darkColors, radius, space, cardShadow } from '@/theme/tokens';
 import { useTheme } from '@/theme/theme';
@@ -96,6 +96,14 @@ function groupHistory(items: HistoryItem[]): { key: string; items: HistoryItem[]
 export default function Sidebar({ onClose, docked = false }: { onClose: () => void; docked?: boolean }) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  // ACTIVE-CHAT TRUTH (owner 2026-08-29): the green active row means «this is the conversation you
+  // are looking at RIGHT NOW». On the Filter home there is no conversation on screen, so nothing may
+  // be highlighted — activeChatId can legitimately still be set (it survives for a return to /agent),
+  // but the HIGHLIGHT is a claim about the current screen, and on '/' that claim is false. The four
+  // states are separate by design: current chat (green, /agent only), hovered row, context-menu row
+  // (dark green while its ⋯ menu is open), previously-visited chat (no visual state at all).
+  const pathname = usePathname();
+  const onAgentScreen = pathname?.startsWith('/agent') ?? false;
   const { t, isRTL, locale } = useI18n();
   const { user, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat, newChat } = useApp();
   // APPEARANCE (owner 2026-08-28): the sidebar is a THEMED surface — it re-skins in dark mode via
@@ -723,7 +731,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                     {/* Note #8 — chat row layout is IDENTICAL in both languages: icon → title → star → ⋯
                         on the right. `direction: ltr` locks the row so Arabic doesn't auto-flip it.
                         Title still flows with its own text direction inside the bubble. (user request.) */}
-                    {g.items.map((c, idx) => { const hot = hotRowId === c.id && activeChatId !== c.id && editingId !== c.id; return (
+                    {g.items.map((c, idx) => { const ctx = menu?.id === c.id; const hot = ctx || (hotRowId === c.id && !(onAgentScreen && activeChatId === c.id) && editingId !== c.id); return (
                       <View
                         key={c.id}
                         // The OUTER row hosts both gestures (dblclick rename + hold-to-drag) and is
@@ -732,7 +740,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                         // hot-row hover from main — hover paint and drag wiring share this host.)
                         ref={bindRowHost(c, g.key, idx, g.items.length, g.items.filter((x) => x.id !== c.id).map((x) => x.id)) as any}
                         onLayout={idx === 0 ? (e) => { const h = e.nativeEvent.layout.height; if (h > 20) rowHRef.current = h; } : undefined}
-                        style={[s.histRow, WEB_SMOOTH, hot && s.histRowHot, activeChatId === c.id && (dark ? dks.histRowActive : s.histRowActive), menu?.id === c.id && (dark ? dks.histRowOpen : s.histRowOpen), drag?.id === c.id && s.histRowDragging, { direction: 'ltr' } as any,
+                        style={[s.histRow, WEB_SMOOTH, hot && s.histRowHot, !hot && onAgentScreen && activeChatId === c.id && (dark ? dks.histRowActive : s.histRowActive), drag?.id === c.id && s.histRowDragging, { direction: 'ltr' } as any,
                           // Siblings glide aside (translateY only — X never moves, RTL layout untouched)
                           // while a drag from this bucket hovers over their slot. The dragged row's own
                           // transform is applied directly to its DOM node so it tracks the pointer with
@@ -892,6 +900,9 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       <View style={s.dcRoot}>
         <Pressable testID="chat-delete-cancel-backdrop" style={s.dcBack} onPress={() => setConfirmDeleteId(null)} />
         <View style={s.dcCard} testID="chat-delete-confirm-dialog">
+          <Pressable testID="chat-delete-close" onPress={() => setConfirmDeleteId(null)} hitSlop={8} style={s.dcClose}>
+            <Ionicons name="close" size={18} color="#9aa6a0" />
+          </Pressable>
           <View style={s.dcIc}><Ionicons name="trash-outline" size={22} color="#c0392b" /></View>
           <Text style={s.dcT}>{t('Delete this conversation?')}</Text>
           <Text style={s.dcS}>{t('It will be permanently deleted and cannot be recovered.')}</Text>
@@ -1064,6 +1075,7 @@ const s = StyleSheet.create({
   dcRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, ...(Platform.OS === 'web' ? ({ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 } as any) : null) },
   dcBack: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.5)' },
   dcCard: { width: '100%', maxWidth: 320, backgroundColor: '#fff', borderRadius: 22, padding: 24, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 12 },
+  dcClose: { position: 'absolute', top: 12, ...(I18nManager.isRTL ? { left: 12 } : { right: 12 }), zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   dcIc: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#fbeaea', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   dcT: { fontSize: 18, fontWeight: '700', color: colors.ink, textAlign: 'center' },
   dcS: { fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 8, lineHeight: 19 },

@@ -64,9 +64,12 @@ check('journey «showMoreJourney» is actually run by the runner',
 check('the «عرض المزيد» journey asserts filter persistence across batches',
   /FILTER-PERSISTENCE/.test(showMore),
   'a pager journey that does not re-check the filters proves only that a button is clickable');
-check('the «عرض المزيد» journey asserts the cap message states the true total',
-  /TRUE-TOTAL/.test(showMore) && /وعرضنا لك/.test(showMore),
-  'the browse cap is only honest while the closing line quotes trueTotal, never the cap');
+// CONTRACT CHANGE (owner 2026-08-29): the lifetime cap is gone — the journey now asserts BOTH that
+// a missing pager while matches remain is a defect (PAGER-MISSING) and that any total the closing
+// line quotes is the search's true total (TRUE-TOTAL). Same honesty, new continuation shape.
+check('the «عرض المزيد» journey asserts continuation (pager present while matches remain) + true totals',
+  /TRUE-TOTAL/.test(showMore) && /PAGER-MISSING/.test(showMore),
+  'the continuation is only honest while a missing pager with matches remaining is a defect');
 
 // ── 2. the floors, at or above the values the owner set ─────────────────────────────────────────
 const REQUIRED_FLOORS: Record<string, number> = {

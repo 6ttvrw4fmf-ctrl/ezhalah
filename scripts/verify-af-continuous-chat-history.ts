@@ -205,10 +205,12 @@ check('the receipt strings are translated with the owner\'s exact wording',
   const mid = resultCounts({ trueTotal: 635, shown: 10, fetched: 635, serverMore: false });
   check('635 matched / 10 shown → "load more" is still genuinely offered',
     mid.hasMore === true && mid.endKind === 'more');
-  const capped = resultCounts({ trueTotal: 635, shown: 100, fetched: 635, serverMore: false });
-  check('635 matched / 100 shown → paging stops at the browse cap, and 635 stays the stated total',
-    capped.hasMore === false && capped.endKind === 'capped' && capped.endTotal === 635 && capped.endShown === 100,
-    'the 100 is a browse cap; presenting it as the eligible total is the banned substitution');
+  // CONTRACT CHANGE (owner 2026-08-29): the lifetime browse cap is gone — paging continues to the
+  // last real match. The honesty half is what this check still owns: 635 stays the stated total.
+  const paging = resultCounts({ trueTotal: 635, shown: 100, fetched: 635, serverMore: false });
+  check('635 matched / 100 shown → paging CONTINUES (no lifetime cap), and 635 stays the stated total',
+    paging.hasMore === true && paging.endKind === 'more' && paging.endTotal === 635 && paging.endShown === 100,
+    'the batch size may never stand in for the eligible total, and the browse must reach all 635');
 }
 
 // ── 7. THE LAST CARD OF A ROUND STILL ADVANCES (the round cap must not create a terminal primary) ─
