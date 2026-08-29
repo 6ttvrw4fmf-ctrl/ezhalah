@@ -46,6 +46,22 @@ on:
           - devices
           - ingest-listings
           - alert-sink
+      action:
+        # DELETE exists so a throwaway function (e.g. the agent-diag probe used to diagnose the
+        # 2026-08-29 outage) can be removed through the SAME gated path that created it, instead of
+        # lingering in production because the only removal route was a laptop CLI.
+        description: "deploy (default) or delete"
+        required: false
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - delete
+      delete_function:
+        description: "For action=delete ONLY: exact function name to remove (free text)"
+        required: false
+        default: ""
+        type: string
       reason:
         description: "Why this deploy is needed (recorded in the run log)"
         required: true
@@ -91,6 +107,7 @@ jobs:
           fi
 
       - name: Assert the function source exists
+        if: ${{ inputs.action != 'delete' }}
         run: |
           set -euo pipefail
           SRC="supabase/functions/${{ inputs.function }}/index.ts"
@@ -102,11 +119,30 @@ jobs:
           echo "bytes:   $(wc -c < "$SRC")"
           echo "md5:     $(md5sum "$SRC" | cut -d' ' -f1)"
 
+      # A delete must never remove a function this repo still owns — that would silently orphan a
+      # live endpoint whose source is sitting right there in supabase/functions/.
+      - name: Guard the delete target
+        if: ${{ inputs.action == 'delete' }}
+        run: |
+          set -euo pipefail
+          TARGET="${{ inputs.delete_function }}"
+          if [ -z "$TARGET" ]; then
+            echo "::error::action=delete requires delete_function."
+            exit 1
+          fi
+          if [ -d "supabase/functions/$TARGET" ]; then
+            echo "::error::supabase/functions/$TARGET exists in this repo — refusing to delete a tracked function."
+            echo "Delete its source in a PR first if it is genuinely being retired."
+            exit 1
+          fi
+          echo "delete target: $TARGET (untracked in this repo — safe to remove)"
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
 
       - name: npm ci
+        if: ${{ inputs.action != 'delete' }}
         run: npm ci
 
       # WHY NOT `npm test` HERE.
@@ -128,6 +164,7 @@ jobs:
       # Glob-driven on purpose, matching the repo's "barriers run by existence" rule: a new
       # scripts/verify-agent-*.ts is picked up here automatically, with no edit to this file.
       - name: Agent barriers (deterministic gate)
+        if: ${{ inputs.action != 'delete' }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -191,7 +228,7 @@ jobs:
 
       # --no-verify-jwt is load-bearing: these functions gate on the anon/publishable key themselves.
       - name: Deploy
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && inputs.action != 'delete' }}
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
@@ -200,8 +237,17 @@ jobs:
             --project-ref aannarbkwcymrotzwdbo \
             --no-verify-jwt
 
+      - name: Delete
+        if: ${{ !inputs.dry_run && inputs.action == 'delete' }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx --yes supabase@latest functions delete "${{ inputs.delete_function }}" \
+            --project-ref aannarbkwcymrotzwdbo
+
       - name: Report
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && inputs.action != 'delete' }}
         run: |
           echo "Deployed ${{ inputs.function }} to aannarbkwcymrotzwdbo."
           echo "Reason: ${{ inputs.reason }}"

@@ -130,3 +130,22 @@ export function arabicCanonicalLocation(
   if (!canon || LATIN_RE.test(canon)) return loc; // no Arabic canonical available → untouched
   return canon;
 }
+
+/**
+ * Arabic-Indic (٠-٩ U+0660-0669) and Extended Arabic-Indic (۰-۹ U+06F0-06F9) digits → ASCII.
+ *
+ * WHY THIS EXISTS (found live 2026-08-29 while production-verifying RULE 1). JavaScript's `\d` is
+ * ASCII-only, and NOTHING in the agent normalized Arabic numerals — so extractPrice() and
+ * originalCurrency() were structurally blind to «٧٠ الف». An Arabic-first product silently ignored
+ * every budget its users typed in their own numerals; it only ever appeared to work because the
+ * model usually echoed the figure back in Western digits, making a MODEL guess stand in for a
+ * DETERMINISTIC read. That is precisely backwards from how this pipeline is supposed to work.
+ *
+ * Safe to apply before money parsing: the room/size guards run on the normalized text too, so
+ * «٣ غرف» → "3 غرف" is still skipped as a room count, and the n >= 100 floor still holds.
+ */
+export function toWesternDigits(t: string): string {
+  return String(t ?? "")
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
+}
