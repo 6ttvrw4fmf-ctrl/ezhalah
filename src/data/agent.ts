@@ -12,7 +12,7 @@ import { parseProximity, proximityKeywords, type ProximityIntent } from './proxi
 import { type Category } from './taxonomy';
 import { t, getLocale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
-import { partitionRequestedAmenities } from '@/lib/afCohorts';
+import { partitionRequestedAmenities, cohortAllows } from '@/lib/afCohorts';
 import { landmarkHint, ensureLandmarks } from './landmarks';
 import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 
@@ -219,6 +219,8 @@ type BackendQuery = {
   districtPin?: string; // «حي …» the edge pinned for a TWIN district resolved to one city (حي الروضة → جدة)
   amenities?: string[]; // amenity tokens the model READ OUT of the user's sentence — proposals only,
                         // certified per-cohort below before any of them can reach q.amenities
+  furnished?: string;   // 'yes' | 'no' | 'none' — a PROPOSAL. NOT an amenity: it maps to the tri-state
+                        // q.furnishedPref, and only where the cohort certifies the furnished question.
 };
 
 /**
@@ -226,7 +228,7 @@ type BackendQuery = {
  * chat can ASK rather than answer a narrower question than the user asked. Owner rule 2026-08-29:
  * "if an amenity is not certified for that cohort, use the clarification path instead of guessing."
  */
-export let lastRejectedAmenities: string[] = [];
+export let lastRejectedFilters: string[] = [];
 
 // AREA NICKNAMES → known district lists. The engine filters by district when these are present, so
 // "north Riyadh" actually returns listings IN northern Riyadh districts (not just any Riyadh result).
@@ -557,11 +559,27 @@ function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts
   // cohort never certified — that is UNKNOWN quietly becoming No. It is recorded for the clarification
   // path instead. AND semantics are the RPC's existing p_amenities behaviour: a listing must carry
   // EVERY token, so nothing here can ever widen the result set.
-  lastRejectedAmenities = [];
+  lastRejectedFilters = [];
   if (Array.isArray(b.amenities) && b.amenities.length) {
     const { certified, rejected } = partitionRequestedAmenities(q, b.amenities);
     if (certified.length) q.amenities = [...new Set([...(q.amenities ?? []), ...certified])];
-    lastRejectedAmenities = rejected;
+    lastRejectedFilters.push(...rejected);
+  }
+
+  // ── FURNISHED: SAME GATE, DIFFERENT FIELD (owner ruling 2026-08-29) ─────────────────────────────
+  // furnished is NOT an amenity. It maps to q.furnishedPref, which is TRI-STATE — true = confirmed
+  // furnished only, false = confirmed unfurnished only, null/undefined = no preference — and it is
+  // gated by cohortAllows(q, 'furnished'), the exact predicate the AF furnished question uses. No
+  // second certification system: this is that one.
+  //
+  // WHY THE GATE IS NOT A FORMALITY. Certification is coverage-driven. Annual-rent apartments are
+  // 46.4% known for furnished; MONTHLY-rent apartments are 0.0% (5 rows of 30,544). Applying
+  // furnishedPref there would turn UNKNOWN into No and collapse 30,544 listings to 4 — the exact
+  // failure the UNKNOWN-stays-UNKNOWN rule exists to prevent. So an uncertified cohort does not
+  // silently apply it; it goes to the clarification path with the rejected amenities.
+  if (b.furnished === 'yes' || b.furnished === 'no') {
+    if (cohortAllows(q, 'furnished')) q.furnishedPref = b.furnished === 'yes';
+    else lastRejectedFilters.push('furnished');
   }
   return q;
 }

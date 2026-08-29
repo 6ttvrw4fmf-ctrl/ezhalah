@@ -91,8 +91,10 @@ check("the client gates amenities through the SHARED afCohorts function",
   /partitionRequestedAmenities\(q, b\.amenities\)/.test(client));
 check("only CERTIFIED tokens reach q.amenities",
   /if \(certified\.length\) q\.amenities = \[\.\.\.new Set\(\[\.\.\.\(q\.amenities \?\? \[\]\), \.\.\.certified\]\)\]/.test(client));
+// Now push(), because furnished shares this one clarification list (owner: "the same
+// clarification/rejection pattern").
 check("rejected tokens are recorded for clarification, not discarded",
-  /lastRejectedAmenities = rejected;/.test(client));
+  /lastRejectedFilters\.push\(\.\.\.rejected\);/.test(client));
 // The gate reads q.type/q.category/q.deal/q.rentPeriod — all of which applySourceFilter can still
 // change. Certifying before that would certify against a scope the search never runs.
 const gateIdx = client.indexOf("partitionRequestedAmenities(q, b.amenities)");
