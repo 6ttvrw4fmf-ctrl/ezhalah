@@ -1,23 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image as RNImage, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { alpha0 } from '@/theme/palette';
 import { colors as lightColors, radius } from '@/theme/tokens';
 import { useTheme, type ThemeMode } from '@/theme/theme';
 import { useApp } from '@/store';
 
-// The eagle over Saudi Arabia at night (owner: «add the image, blend it in») — the panel's one bold
-// element; it melts into the panel surface via the gradient so it reads as material, not a sticker.
-// A night scene, so it fuses with dark mode and reads as a framed midnight vista in light.
-const EAGLE = require('../../assets/images/eagle-night.jpg');
 import { useI18n } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { pickName, buildSyncedName, scriptOf, initialsOf } from '@/lib/nameSync';
 import { COUNTRIES, type Country } from '@/data/countries';
-import { sendPhoneOtp, verifyPhoneOtp } from '@/lib/auth';
+import { persistDisplayName, sendPhoneOtp, verifyPhoneOtp } from '@/lib/auth';
 
 // ── THE SIDEBAR-ANCHORED ACCOUNT MENU (owner 2026-08-28) ─────────────────────────────────────────
 // Replaces the centered Settings modal (src/app/settings.tsx, removed the same day). A COMPACT
@@ -39,8 +33,10 @@ import { sendPhoneOtp, verifyPhoneOtp } from '@/lib/auth';
 // Language — open anchored above the profile row (never centered); outside-click and Escape close
 // them. The HEAVY experiences — إدارة الحساب, its delete flow, and the تسجيل الخروج confirmation —
 // are NOT confined to the sidebar: they open as full centered popups over the whole app, on a
-// dimmed+blurred backdrop, via a real RN <Modal> (portals to the root, so they also escape the
-// sidebar's LTR structural pin and follow the app locale's own RTL). The sidebar is only the
+// dimmed+blurred backdrop, via a real RN <Modal>. EVERY surface here pins `direction: 'rtl'`
+// explicitly (owner 2026-08-29: one coherent right-first Arabic hierarchy — title, labels, values,
+// actions all start from the right; only latin values like emails/phone digits keep internal LTR),
+// so neither the sidebar's LTR structural pin nor the document's state can half-flip it. The sidebar is only the
 // LAUNCHER for them. ONE state machine drives both containers — the view value alone decides which
 // container renders, so no logic is duplicated. Sub-views slide in the drill direction, reduced
 // motion collapses every move to a fade. Unmount hand-offs are TIMER-driven, never animation
@@ -155,6 +151,9 @@ export default function AccountMenu({
     const sc = scriptOf(v);
     const immediate = sc === 'ar' ? { name: v, nameAr: v } : { name: v, nameEn: v };
     updateUser({ ...immediate, initials: initialsOf(v) });
+    // Refresh-proof (owner 2026-08-29): the store patch above is in-memory only — the auth
+    // backend's user_metadata is what mapSupabaseUser rebuilds from on the next load.
+    persistDisplayName(v);
     buildSyncedName(v).then((synced) => updateUser({ ...synced, initials: initialsOf(v) }));
   };
   const saveName = () => {
@@ -226,13 +225,13 @@ export default function AccountMenu({
       <Text style={[s.rowLabel, danger && s.rowLabelDanger]} numberOfLines={1}>{label}</Text>
       {value ? <Text style={s.rowValue} numberOfLines={1}>{value}</Text> : null}
       {selected ? <Ionicons name="checkmark" size={16} color={C.primary} /> : null}
-      {chevron ? <Ionicons name="chevron-forward" size={14} color={C.muted} /> : null}
+      {chevron ? <Ionicons name="chevron-back" size={14} color={C.muted} /> : null}
     </Pressable>
   );
 
   const SubHeader = ({ title }: { title: string }) => (
     <Pressable testID="account-menu-back" onPress={() => go('root', -1)} style={({ hovered }: any) => [s.subHead, hovered && s.rowHover]}>
-      <Ionicons name="chevron-back" size={16} color={C.muted} />
+      <Ionicons name="chevron-forward" size={16} color={C.muted} />
       <Text style={s.subHeadText}>{title}</Text>
     </Pressable>
   );
@@ -250,24 +249,26 @@ export default function AccountMenu({
         <Animated.View style={viewAnim}>
           {view === 'root' && (
             <View>
-              {/* The artwork band — gradient colors are LITERALS (C.*), never var() tokens. */}
-              <View style={s.art}>
-                <RNImage source={EAGLE} style={s.artImg} resizeMode="cover" />
-                <LinearGradient colors={[alpha0(C.surface), C.surface]} locations={[0.4, 1]} style={StyleSheet.absoluteFill} />
-              </View>
-              {/* Profile header — mirrors the row the menu grew from (spatial continuity). */}
-              <View style={s.profile}>
+              {/* Profile header — clean and compact (owner 2026-08-29: no banner/hero image here):
+                  avatar · name · email, nothing else. Tapping it opens إدارة الحساب with the
+                  display-name editor already active — the profile IS the edit affordance. */}
+              <Pressable
+                testID="account-menu-profile"
+                onPress={() => { setEditing(true); go('account', 1); }}
+                style={({ hovered, pressed }: any) => [s.profile, (hovered || pressed) && s.rowHover]}
+              >
                 <View style={s.avatar}><Text style={s.avatarText}>{initialsOf(pickName(user, locale))}</Text></View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={s.profileName} numberOfLines={1}>{pickName(user, locale)}</Text>
                   {!!user.sub && <Text style={s.profileSub} numberOfLines={1}>{user.sub}</Text>}
                 </View>
-              </View>
+                <Ionicons name="create-outline" size={15} color={C.muted} />
+              </Pressable>
               <View style={s.hairline} />
               <Row icon="contrast-outline" label={t('Appearance')} value={modeLabel} chevron onPress={() => go('appearance', 1)} testID="account-menu-appearance" />
               <Row icon="globe-outline" label={t('Language')} value="العربية" chevron onPress={() => go('language', 1)} testID="account-menu-language" />
               <Row icon="help-circle-outline" label={t('Help')} onPress={() => { onClose(); onHelp(); }} testID="account-menu-help" />
-              <Row icon="person-outline" label={t('Manage account')} chevron onPress={() => go('account', 1)} testID="account-menu-account" />
+              <Row icon="person-outline" label={t('Manage account')} chevron onPress={() => { setEditing(false); go('account', 1); }} testID="account-menu-account" />
               <View style={s.hairline} />
               <Row icon="log-out-outline" label={t('Log out')} onPress={() => go('signout', 1)} testID="account-menu-signout" />
             </View>
@@ -606,19 +607,18 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     // Grows upward from its trigger — never centered on the screen.
     panel: {
       position: 'absolute', left: 10, right: 10, bottom: 64, zIndex: 61,
+      direction: 'rtl' as any,
       backgroundColor: C.surface, borderRadius: radius.card, borderWidth: 1, borderColor: C.fieldLine,
       paddingVertical: 6, paddingHorizontal: 6, overflow: 'hidden',
       shadowColor: '#0b140f', shadowOpacity: dark ? 0.55 : 0.22, shadowRadius: 24,
       shadowOffset: { width: 0, height: 14 }, elevation: 18,
     },
 
-    art: { height: 78, marginTop: -6, marginHorizontal: -6, marginBottom: -20, overflow: 'hidden' },
-    artImg: { width: '100%', height: '100%' },
-    profile: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10 },
+    profile: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10 },
     avatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
     avatarText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-    profileName: { fontSize: 13.5, fontWeight: '700', color: C.ink, textAlign: 'left', writingDirection: 'auto' as any },
-    profileSub: { fontSize: 11, color: C.muted, marginTop: 1, textAlign: 'left' },
+    profileName: { fontSize: 13.5, fontWeight: '700', color: C.ink, textAlign: 'right', writingDirection: 'auto' as any },
+    profileSub: { fontSize: 11, color: C.muted, marginTop: 1, textAlign: 'right', writingDirection: 'auto' as any },
 
     hairline: { height: 1, backgroundColor: C.line, marginVertical: 5, marginHorizontal: 4 },
 
@@ -628,14 +628,14 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     // an intimate 360. Both inherit the theme surface so dark mode is the card, not just the menu.
     centerRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, ...(Platform.OS === 'web' ? ({ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 } as any) : null) },
     centerBack: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: dark ? 'rgba(4,8,6,0.62)' : 'rgba(8,18,12,0.5)', ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' } as any) : null) },
-    centerCard: { width: '100%', maxWidth: 360, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.fieldLine, padding: 22, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
-    centerCardWide: { width: '100%', maxWidth: 560, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.fieldLine, paddingVertical: 18, paddingHorizontal: 20, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
-    centerClose: { position: 'absolute', top: 12, right: 12, zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-    centerTitle: { fontSize: 16.5, fontWeight: '700', color: C.ink, textAlign: 'left', writingDirection: 'auto' as any, paddingVertical: 6, paddingHorizontal: 8 },
+    centerCard: { direction: 'rtl' as any, width: '100%', maxWidth: 360, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.fieldLine, padding: 22, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
+    centerCardWide: { direction: 'rtl' as any, width: '100%', maxWidth: 560, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.fieldLine, paddingVertical: 18, paddingHorizontal: 20, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
+    centerClose: { position: 'absolute', top: 12, left: 12, zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+    centerTitle: { fontSize: 16.5, fontWeight: '700', color: C.ink, textAlign: 'right', writingDirection: 'auto' as any, paddingVertical: 6, paddingHorizontal: 8 },
 
     row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10 },
     rowHover: { backgroundColor: dark ? '#1d2a22' : '#f2f5f2' },
-    rowLabel: { flex: 1, fontSize: 13.5, fontWeight: '600', color: C.ink, textAlign: 'left', writingDirection: 'auto' as any },
+    rowLabel: { flex: 1, fontSize: 13.5, fontWeight: '600', color: C.ink, textAlign: 'right', writingDirection: 'auto' as any },
     rowLabelDanger: { color: '#d05b4c' },
     rowValue: { fontSize: 12, color: C.muted, fontWeight: '500' },
     langDisabled: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10, opacity: 0.55 },
@@ -645,14 +645,15 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
 
     field: { paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10 },
     fieldHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    fieldLabel: { flex: 1, fontSize: 11.5, color: C.muted, textAlign: 'left' },
-    fieldValue: { fontSize: 13.5, fontWeight: '600', color: C.ink, marginTop: 3, textAlign: 'left', writingDirection: 'auto' as any },
-    fieldNote: { fontSize: 11.5, color: C.muted, lineHeight: 16, marginTop: 6 },
+    fieldLabel: { flex: 1, fontSize: 11.5, color: C.muted, textAlign: 'right' },
+    fieldValue: { fontSize: 13.5, fontWeight: '600', color: C.ink, marginTop: 3, textAlign: 'right', writingDirection: 'auto' as any },
+    fieldNote: { fontSize: 11.5, color: C.muted, lineHeight: 16, marginTop: 6, textAlign: 'right' },
     savedTag: { flexDirection: 'row', alignItems: 'center', gap: 3 },
     savedText: { fontSize: 11, fontWeight: '600', color: C.primary },
     // >= 16 on web or mobile Safari zooms on focus and never restores (verify-input-font-no-ios-zoom).
     input: {
       fontSize: Platform.OS === 'web' ? 16 : 15, fontWeight: '600', color: C.ink, marginTop: 3,
+      textAlign: 'right' as const, writingDirection: 'auto' as any,
       borderBottomWidth: 1, borderBottomColor: C.primary, paddingVertical: 2,
       ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}),
     },
@@ -683,13 +684,13 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     // Change-phone dialog (small focused OTP dialog — not the retired Settings modal).
     phRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, ...(Platform.OS === 'web' ? ({ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 } as any) : null) },
     phBack: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.5)' },
-    phCard: { width: '100%', maxWidth: 320, backgroundColor: C.surface, borderRadius: 20, padding: 22, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 12 },
+    phCard: { direction: 'rtl' as any, width: '100%', maxWidth: 320, backgroundColor: C.surface, borderRadius: 20, padding: 22, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 12 },
     phField: { flexDirection: 'row', gap: 8, marginTop: 16, width: '100%' },
     phCc: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 48, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: C.pickLine, backgroundColor: C.surface },
     phCcText: { fontSize: 14, fontWeight: '600', color: C.ink },
     // Same iOS focus-zoom guard; fixed 48 height so the box does not reflow. minWidth: 0 pairs with
     // the 16px web bump — see the note on AuthModal.phoneInput.
-    phInput: { flex: 1, minWidth: 0, height: 48, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, borderColor: C.pickLine, fontSize: Platform.OS === 'web' ? 16 : 15, color: C.ink, backgroundColor: C.surface, ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+    phInput: { flex: 1, minWidth: 0, height: 48, paddingHorizontal: 14, textAlign: 'left' as const, writingDirection: 'ltr' as any, borderRadius: 12, borderWidth: 1, borderColor: C.pickLine, fontSize: Platform.OS === 'web' ? 16 : 15, color: C.ink, backgroundColor: C.surface, ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
     phErr: { fontSize: 11.5, color: '#d05b4c', marginTop: 8, alignSelf: 'flex-start' },
     waIcon: { width: 48, height: 48, borderRadius: 15, backgroundColor: lightColors.whatsApp, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
     otpBoxes: { flexDirection: 'row', gap: 8, marginTop: 16 },

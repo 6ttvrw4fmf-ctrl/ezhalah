@@ -28,6 +28,16 @@ function initialsFrom(name: string, fallback: string): string {
 }
 
 // Build an AuthUser from whatever a real Supabase session gives us.
+// Persist a renamed display name to the auth backend so it SURVIVES a refresh — mapSupabaseUser
+// below rebuilds the user from user_metadata on every load, so a rename that only patches the
+// in-memory store dies with the tab (pre-existing gap, owner-ordered fix 2026-08-29). Both
+// full_name and name are written because mapSupabaseUser reads them in that order. Fire-and-forget:
+// the local rename must never be blocked by a slow/failed network write.
+export function persistDisplayName(v: string): void {
+  if (!supabase) return;
+  supabase.auth.updateUser({ data: { full_name: v, name: v } }).catch(() => {});
+}
+
 export function mapSupabaseUser(u: any, method: AuthUser['method']): AuthUser {
   const meta = u?.user_metadata ?? {};
   const name: string = meta.full_name || meta.name || u?.email?.split('@')[0] || u?.phone || 'User';

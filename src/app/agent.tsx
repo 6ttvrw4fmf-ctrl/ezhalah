@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
+import { ForceLightTheme } from '@/theme/theme';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { isAppSessionStarted } from '@/lib/appSession';
 import { msgRTL } from '@/lib/textDirection';
@@ -2585,7 +2586,7 @@ export default function Agent() {
   // being stuck on the wrong page. (owner 2026-08-16: "still get stuck then it shows filter".)
   // In-app navigation is unaffected — the session is already started by then, so this is false.
   if (IS_WEB && !isAppSessionStarted()) {
-    return <View style={{ flex: 1, backgroundColor: colors.paper }} />;
+    return <ForceLightTheme><View style={{ flex: 1, backgroundColor: colors.paper }} /></ForceLightTheme>;
   }
 
   // Rotating examples show ONLY on the clean AI-search entry screen (owner brief §2): the chat holds
@@ -2598,6 +2599,10 @@ export default function Agent() {
     introLanding && !introInteracted && !typed && voiceState === 'idle' && !busy;
 
   return (
+    /* WHITE BY DESIGN (owner 2026-08-29): the Agent/chat experience keeps the light look
+       even when the app-wide appearance is dark — ForceLightTheme pins every token, hook and
+       hero asset inside to the light design. Dark mode continues on every other screen. */
+    <ForceLightTheme>
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
           Home) so the landmarks fill the whole frame — including the center, which used to wash out
@@ -3299,6 +3304,7 @@ export default function Agent() {
         </View>
       ) : null}
     </View>
+    </ForceLightTheme>
   );
 }
 
