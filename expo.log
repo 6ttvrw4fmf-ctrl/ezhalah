@@ -346,3 +346,14 @@ Web  ERROR  [ezhalah] uncaught error: [TransformError: SyntaxError: /private/tmp
   7 | //   • The choice persists across sessions for EVERYONE (device preference, not account data):
   8 | //     synchronous localStorage on web — the same sync-first pattern the store uses for history —
   9 | //     plus AsyncStorage for native. Deliberately NOT wiped by SIGN-OUT (a device preference]
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": true, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: google.accounts.id.initialize() is called multiple times. This could cause unexpected behavior and only the last initialized instance will be used.
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  INFO  [GoogleOneTap] no FedCM prompt within 4000 ms — retrying without FedCM
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": false, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: google.accounts.id.initialize() is called multiple times. This could cause unexpected behavior and only the last initialized instance will be used.
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NotAllowedError: Only one navigator.credentials.get request may be outstanding at one time.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NetworkError: Error retrieving a token.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
