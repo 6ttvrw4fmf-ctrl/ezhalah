@@ -196,8 +196,8 @@ export default function AccountMenu({
       return;
     }
     // Deletion lands in the canonical logged-out state — LIGHT with the stored appearance keys
-    // cleared. That reset lives in the store's deleteAccount() itself (resetThemeForSignOut, after
-    // the server-confirmed guard; owner 2026-08-28/29) — ONE mechanism, shared with sign-out, so
+    // cleared. That reset lives in the store's deleteAccount() itself (after the
+    // server-confirmed guard; owner 2026-08-28/29) — ONE mechanism, shared with sign-out, so
     // this handler no longer re-stamps 'light' into storage after the store just cleared it.
     router.replace('/');
   };
