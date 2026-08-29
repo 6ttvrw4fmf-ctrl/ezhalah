@@ -49,7 +49,7 @@ import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups } from '@/lib/searchDefaults';
-import { BROWSE_CAP, resultCounts } from '@/data/resultCount';
+import { BROWSE_BATCH, nextBatchTarget, resultCounts } from '@/data/resultCount';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
@@ -1098,6 +1098,41 @@ export default function Agent() {
     else if (pinModeRef.current === 'bottom') toBottom();
   };
 
+  // OPEN A SAVED CHAT AT ITS LATEST CONTENT (owner 2026-08-29, supersedes the open-at-top rule):
+  // tapping a sidebar conversation must land the viewport on the newest message, like every chat
+  // product. One scroll is not enough — restored result cards and images report their height late,
+  // growing the content AFTER the first scrollToEnd. So the landing holds a short SETTLE WINDOW:
+  // pinMode='bottom' (onGrow re-bottoms on every late layout) plus a few timed re-bottoms, then
+  // releases to 'none'. The window is CANCELLED THE INSTANT the user scrolls/touches/wheels — their
+  // intent always wins, and once released nothing ever yanks the view again (no jump loops).
+  const landTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const cancelLanding = () => {
+    if (!landTimersRef.current.length && pinModeRef.current !== 'bottom') return;
+    landTimersRef.current.forEach(clearTimeout);
+    landTimersRef.current = [];
+    pinModeRef.current = 'none';
+  };
+  const landAtLatest = () => {
+    cancelLanding();
+    pinModeRef.current = 'bottom';
+    toBottom();
+    for (const ms of [150, 450, 900, 1600]) {
+      landTimersRef.current.push(setTimeout(toBottom, ms));
+    }
+    landTimersRef.current.push(setTimeout(() => { landTimersRef.current = []; pinModeRef.current = 'none'; }, 1900));
+  };
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const stop = () => cancelLanding();
+    document.addEventListener('wheel', stop, { passive: true, capture: true });
+    document.addEventListener('touchstart', stop, { passive: true, capture: true });
+    return () => {
+      document.removeEventListener('wheel', stop, true);
+      document.removeEventListener('touchstart', stop, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Stop box: cancel the current turn. Drop the in-flight "thinking/searching" bubbles (anything
   // already written — the reply, earlier results — stays), unblock any waiting beat, and re-enable
   // the composer. (user request: a box the user can click to stop the search.)
@@ -1243,14 +1278,13 @@ export default function Agent() {
     beginCardDrip(statusId, Math.min(FIRST_PAGE, result.listings.length));
   };
 
-  // «عرض المزيد» (Load more) — reveal the NEXT 100 matching listings (owner 2026-07-08: "100 at a time";
-  // if fewer than 100 remain, show all remaining). Correctness rule: the RPC filters the FULL matching set
-  // BEFORE any cap, so paging always reaches every match — nothing valid is hidden behind the display limit.
-  // Each tap reveals REVEAL_STEP more from what's already fetched; when that buffer is spent and the DB still
-  // has more pages (m.result.hasMore), we fetch the next REAL page (store.loadMoreListings, gap-free via
-  // p_offset), append it de-duped, then reveal into it. So a broad search (e.g. Riyadh villas & houses =
-  // 11,438) can be walked all the way to the end. loadingMore guards a double-tap from double-fetching.
-  const REVEAL_STEP = 100;
+  // «عرض المزيد» (Load more) — CONTINUATION IS THE RULE (owner 2026-08-29, supersedes the 2026-08-20
+  // lifetime cap): each tap advances to the next clean batch boundary — first 100, then 101–200,
+  // then 201–300 — for as long as matching listings genuinely exist, all the way to the last one.
+  // Correctness rule unchanged: the RPC filters the FULL matching set BEFORE any paging, so paging
+  // reaches every match, gap-free via p_offset, appended DE-DUPED (never a duplicate card, never a
+  // skipped id). When the fetched buffer is spent and the DB still has more (m.result.hasMore), the
+  // next REAL page is fetched first. loadingMore guards a double-tap from double-fetching.
   // «عرض المزيد» cascade cadence — inside the owner's 40–80ms stagger window; each mounting card also
   // fades+rises via CardIn, so the batch flows in instead of landing at once. (owner 2026-07-09.)
   const LOAD_MORE_STEP_MS = 55;
@@ -1270,14 +1304,9 @@ export default function Agent() {
     if (runRef.current) return; // a real turn is mid-flight — never start a cascade under it (review fix)
     const fetched = m.result.listings.length;
     const cur = revealCount[mid] ?? Math.min(FIRST_PAGE, fetched);
-    // BROWSE CAP (owner 2026-08-20): a search shows at most BROWSE_CAP cards. Once the cap is on screen
-    // there is nothing more to reveal and no more pages to fetch — min(trueTotal, BROWSE_CAP) is the hard
-    // ceiling on what the user can browse, even when thousands actually match (they see the true total in
-    // the closing message, not more cards). This is the single gate that makes the cap a cap.
-    if (cur >= BROWSE_CAP) return;
-    // (A) fetched-but-unrevealed cards remain → cascade the next slice in from the buffer, up to the cap.
+    // (A) fetched-but-unrevealed cards remain → cascade to the next batch boundary from the buffer.
     if (cur < fetched) {
-      cascadeIn(mid, cur, Math.min(cur + REVEAL_STEP, fetched, BROWSE_CAP));
+      cascadeIn(mid, cur, nextBatchTarget(cur, fetched));
       return;
     }
     // (B) buffer exhausted but the DB has more → fetch the next real page, append de-duped, cascade.
@@ -1295,7 +1324,7 @@ export default function Agent() {
           return { ...mm, result: { ...mm.result, listings: [...mm.result.listings, ...add], pageOffset: nextOffset, hasMore } };
         }),
       );
-      const target = Math.min(cur + REVEAL_STEP, mergedLen, BROWSE_CAP);
+      const target = nextBatchTarget(cur, mergedLen);
       // If a new turn started while the page was fetching, reveal instantly (no cascade) — the drip
       // machinery belongs to the new turn now; cards still fade in via CardIn. (review fix.)
       if (runRef.current) setRevealCount((c) => ({ ...c, [mid]: target }));
@@ -2390,8 +2419,7 @@ export default function Agent() {
       const rgp = restored.guidedPills as { facets?: GuidedFacet[] } | null | undefined;
       setGuidedPills((rgp && rgp.facets ? { ...rgp, facets: dedupeFacetsByLabel(rgp.facets) } : rgp) as any);
       lastCapturedRef.current = JSON.stringify(t); // what's on screen IS what's stored — no echo write
-      pinModeRef.current = 'top';
-      toTop();
+      landAtLatest();
       return;
     }
     // No transcript anywhere. A search chat falls back to the legacy snapshot/replay view; a
@@ -2416,8 +2444,7 @@ export default function Agent() {
       ]);
       setDoneTyping((d) => ({ ...d, [resultsId]: true }));
       setRevealCount((c) => ({ ...c, [resultsId]: Math.min(FIRST_PAGE, snapshot.listings.length) }));
-      pinModeRef.current = 'top';
-      toTop();
+      landAtLatest();
       return;
     }
     // Render the user bubble + a brief "searching…" status immediately so the screen is never blank
@@ -2937,27 +2964,29 @@ export default function Agent() {
                         // ALSO gates FeedbackRow/Read Aloud below (merged into one block, owner 2026-08-23 — the
                         // spoken closing note must reuse this SAME computed text, never re-derive it separately).
                         if ((m.typing && !doneTyping[m.id]) || shown < Math.min(FIRST_PAGE, fetched)) return null;
-                        // RESULT-CAP RULE (owner 2026-08-20) — the browse cap, the "load more" gate and the
-                        // closing count all come from ONE pure function (src/data/resultCount.ts), so they can
-                        // never disagree and one test locks them. The user browses min(trueTotal, BROWSE_CAP)
-                        // cards; the closing message states the TRUE total, never the cap or the buffer length.
+                        // BROWSE-CONTINUATION RULE (owner 2026-08-29, supersedes the 2026-08-20 cap) — the
+                        // "load more" gate and the closing count come from ONE pure function
+                        // (src/data/resultCount.ts), so they can never disagree and one test locks them. The
+                        // user can browse EVERY match in batches of BROWSE_BATCH; the closing message states
+                        // the TRUE total, never a batch size or the buffer length.
                         const clientNarrowed = !!(m.result.query && hasClientOnlyNarrowing(m.result.query));
                         // TRUE eligible total — matchTotal FIRST (PR #608 "never the page-capped total"), NEVER
                         // `fetched`/`listings.length` (a page-buffer size). Under client-only narrowing the RPC
-                        // total OVERSTATES (it never applied the client filter), so it may neither be quoted nor
-                        // capped-against: we cap against the cap itself so paging still reaches it, and word the
-                        // message from `shown` — the same reason the intro suppresses the count. (bug-hunt 2026-07-30.)
+                        // total OVERSTATES (it never applied the client filter), so it may not be quoted; the
+                        // honest substitute is the FLOOR we can prove — what's fetched, plus-one while the
+                        // server still has pages (keeps «عرض المزيد» alive without ever quoting the fake
+                        // total; the copy branches below word these searches from `shown` only, exactly as
+                        // before — bug-hunt 2026-07-30).
                         const rawTotal = m.result.matchTotal ?? fetched;
-                        const trueTotal = clientNarrowed ? BROWSE_CAP : rawTotal;
+                        const trueTotal = clientNarrowed ? (serverMore ? fetched + 1 : fetched) : rawTotal;
                         const rc = resultCounts({ trueTotal, shown, fetched, serverMore });
                         // ONLY THE NEWEST results turn carries live actions (owner 2026-08-24). The
                         // cap logic itself is untouched — rc still states the honest totals for every
                         // turn; this only decides whether the buttons are still THIS turn's to offer.
                         const isLatestResults = m.id === lastResultsMsg?.id;
                         const hasMore = rc.hasMore && isLatestResults;
-                        // Quote an exact match total ONLY when it is trustworthy (whole filter ran server-side)
-                        // AND more than the cap actually matched — that is the only case with two honest numbers.
-                        const quoteTotal = !clientNarrowed && rc.endKind === 'capped';
+                        // Quote an exact match total ONLY when it is trustworthy (whole filter ran server-side).
+                        const quoteTotal = !clientNarrowed;
                         // ≤25 RULE (owner brief 2026-08-19, item 4): the auto-opening AF intro already
                         // correctly gated on this same threshold (agent.tsx ~1375) — this SEPARATE manual
                         // button did not, and its click path (startAgeFlow → rankQuestions, which itself
@@ -2976,19 +3005,19 @@ export default function Agent() {
                         const fetching = !!loadingMore[m.id];
                         const cascading = revealing && revealActiveRef.current?.id === m.id;
                         const moreNoteText = rc.endKind === 'more'
-                          ? (canNarrowFurther
-                              ? t('I showed you the first {n} listings. Want me to show more, or help you find more precise ones?', { n: rc.endShown.toLocaleString('en-US') })
-                              : t('I showed you the first {n} listings. Want me to show more?', { n: rc.endShown.toLocaleString('en-US') }))
-                          : quoteTotal
-                            // More than the cap matched: two honest numbers — the true total AND the {cap} shown.
-                            ? (canNarrowFurther
-                                ? t('We found {total} listings matching your search, and showed you {shown}. Want help finding more precise ones?', { total: rc.endTotal.toLocaleString('en-US'), shown: rc.endShown.toLocaleString('en-US') })
-                                : t('We found {total} listings matching your search, and showed you {shown}.', { total: rc.endTotal.toLocaleString('en-US'), shown: rc.endShown.toLocaleString('en-US') }))
-                            // Everything matching is on screen (≤ cap, or a hidden-total narrowed search):
-                            // state the real matched count — which equals what's shown.
-                            : (canNarrowFurther
-                                ? t('I showed you all {n} matching listings. Want help finding more precise ones?', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') })
-                                : t('I showed you all {n} matching listings.', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') }));
+                          ? (quoteTotal
+                              // Trusted total + more remain: BOTH honest numbers, and the door stays open.
+                              ? (canNarrowFurther
+                                  ? t('I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?', { shown: rc.endShown.toLocaleString('en-US'), total: rc.endTotal.toLocaleString('en-US') })
+                                  : t('I showed you the first {shown} of {total} matching listings. Want me to show more?', { shown: rc.endShown.toLocaleString('en-US'), total: rc.endTotal.toLocaleString('en-US') }))
+                              // Narrowed search (total not quotable): word it from what's on screen only.
+                              : (canNarrowFurther
+                                  ? t('I showed you the first {n} listings. Want me to show more, or help you find more precise ones?', { n: rc.endShown.toLocaleString('en-US') })
+                                  : t('I showed you the first {n} listings. Want me to show more?', { n: rc.endShown.toLocaleString('en-US') })))
+                          // Everything matching is on screen — state the real matched count.
+                          : (canNarrowFurther
+                              ? t('I showed you all {n} matching listings. Want help finding more precise ones?', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') })
+                              : t('I showed you all {n} matching listings.', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') }));
                         // HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21) — see the comment on the
                         // buttons row below; the SAME gate decides whether Read Aloud may mention them too.
                         const showActionsRow = (hasMore || canNarrowFurther) && !ageFlow;

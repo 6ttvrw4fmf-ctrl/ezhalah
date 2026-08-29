@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, I18nManager, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -324,11 +324,18 @@ export default function AccountMenu({
               testID={view === 'account' ? 'account-popup' : view === 'signout' ? 'logout-popup' : 'delete-popup'}
               style={[view === 'account' ? s.centerCardWide : s.centerCard, viewAnim]}
             >
-              {view === 'account' && (
-                <Pressable testID="account-popup-close" onPress={onClose} hitSlop={8} style={({ hovered }: any) => [s.centerClose, hovered && s.rowHover]}>
-                  <Ionicons name="close" size={18} color={C.muted} />
-                </Pressable>
-              )}
+              {/* EVERY centered popup carries the same physical top-right × (owner 2026-08-29:
+                  «do not make the user hunt for how to close something»). Its meaning is always the
+                  SAFE dismissal: close for account/logout, step-back-to-account for the delete
+                  confirmation — identical to what Escape and the backdrop already do. */}
+              <Pressable
+                testID={view === 'account' ? 'account-popup-close' : view === 'signout' ? 'logout-popup-close' : 'delete-popup-close'}
+                onPress={() => { if (view === 'delete') go('account', -1); else onClose(); }}
+                hitSlop={8}
+                style={({ hovered }: any) => [s.centerClose, hovered && s.rowHover]}
+              >
+                <Ionicons name="close" size={18} color={C.muted} />
+              </Pressable>
           {view === 'account' && (
             <ScrollView style={{ maxHeight: winH * 0.72 }} showsVerticalScrollIndicator={false}>
               {/* Popup title — this is a centered dialog now, not a drill-in: no back chevron, the
@@ -629,7 +636,11 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     centerBack: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: dark ? 'rgba(4,8,6,0.62)' : 'rgba(8,18,12,0.5)', ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' } as any) : null) },
     centerCard: { direction: 'rtl' as any, width: '100%', maxWidth: 360, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.fieldLine, padding: 22, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
     centerCardWide: { direction: 'rtl' as any, width: '100%', maxWidth: 560, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.fieldLine, paddingVertical: 18, paddingHorizontal: 20, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
-    centerClose: { position: 'absolute', top: 12, left: 12, zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+    // PHYSICAL top-right (owner: «X always at the visual TOP-RIGHT»). Arabic forces app-wide RTL
+    // (i18n.tsx: documentElement.dir + I18nManager.forceRTL), which makes RN flip `right:` to the
+    // physical LEFT — so under RTL the physical right is spelled `left:`. Direction-aware so a
+    // future LTR locale keeps the × on the same physical corner.
+    centerClose: { position: 'absolute', top: 12, ...(I18nManager.isRTL ? { left: 12 } : { right: 12 }), zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
     centerTitle: { fontSize: 16.5, fontWeight: '700', color: C.ink, textAlign: 'right', writingDirection: 'auto' as any, paddingVertical: 6, paddingHorizontal: 8 },
 
     row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10 },

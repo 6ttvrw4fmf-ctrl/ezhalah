@@ -235,8 +235,13 @@ check('the in-question «عرض النتائج» escape stays removed (no onSkip
 check('the primary reads Continue · {count} results with the live count, for every arity',
   /Continue · \{count\} results/.test(cardSrc));
 // §11: one tiny plain-language availability line; the technical unknown-count phrasing is gone.
+// COPY CHANGE (owner 2026-08-29): TWO quiet lines now — (1) a listing not mentioning a detail is
+// never a «no» (unknown-data protection), (2) options/counts belong to the CURRENT result set and
+// follow the narrowing. Still natural language, still no database/unknown-count phrasing, and the
+// copy is NOT an excuse for a wrong number — the count-honesty barriers keep owning that.
 check('availability is explained naturally (no database language, no unknown-count phrasing)',
-  /Options reflect the information available for the current listings/.test(cardSrc)
+  /Some listings do not mention this detail, so the options reflect what the listings actually state/.test(cardSrc)
+  && /Options and counts are based on your current search results and update as you narrow down/.test(cardSrc)
   && !/Age unknown for \{count\}/.test(cardSrc));
 // §2: the opening state is its own calm card — count, invitation, soft supporting line, opt-in
 // begin + «عرض النتائج» — and it lives in the SAME shell as the questions (one visual language).

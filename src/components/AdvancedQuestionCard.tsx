@@ -372,7 +372,12 @@ export default function AdvancedQuestionCard({
           </View>
           {/* One tiny availability line instead of database language (owner 2026-08-16): the numbers
               come from what we actually know about the current listings — say that plainly, once. */}
-          <Text style={s.note}>{t('Options reflect the information available for the current listings')}</Text>
+          {/* Owner 2026-08-29, two quiet truths: (1) an ad that doesn't mention a feature is not
+              saying "no" — the user must never read missing data as a negative answer; (2) the
+              options and counts belong to THIS search's current results and follow the narrowing.
+              Neither line excuses a wrong number — counts still come from backend truth. */}
+          <Text style={s.note}>{t('Some listings do not mention this detail, so the options reflect what the listings actually state')}</Text>
+          <Text style={s.noteSub}>{t('Options and counts are based on your current search results and update as you narrow down')}</Text>
         </Reanimated.View>
       </ScrollView>
       {/* PINNED action row — outside the ScrollView on purpose (see s.foot). */}
@@ -505,6 +510,7 @@ const s = StyleSheet.create({
   countText: { fontFamily: font.family.bold, fontSize: 12.5, color: colors.primary, fontVariant: ['tabular-nums'] },
 
   note: { marginTop: 12, marginHorizontal: 2, fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, lineHeight: 16 },
+  noteSub: { marginTop: 4, marginHorizontal: 2, fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, lineHeight: 16 },
 
   // PINNED footer (defect 2026-08-23). It used to be the last child INSIDE the body ScrollView, so a
   // question with many options pushed «متابعة / رجوع / تخطي / عرض النتائج» past the bottom of the

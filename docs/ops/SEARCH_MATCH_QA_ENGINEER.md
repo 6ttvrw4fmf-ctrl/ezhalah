@@ -847,12 +847,15 @@ cards actually grow · the headline total never moves · المدينة/الحي
 all survive · no HTML entities or `undefined` appear in later batches · the request's predicate does
 not drift (same `p_deal`/`p_rent_period`/`p_cities`/`p_districts`/`p_category`/`p_types`, later
 offset only) · no duplicate `source_table:listing_id` in the served set (§30 identity, never card
-text). **A healthy run is 10 → 100 cards and exactly ONE pager click** — production caps one search's
-browse at `BROWSE_CAP` 100 and then offers «خلّنا نحدد الطلب أكثر» instead of paging on, so the
-pager's absence at 100 is the contract, not a defect. What the journey asserts there is that the
-closing line still states the TRUE total — «لقينا 21,868 إعلان يطابق طلبك، وعرضنا لك 100 منها» —
-never the cap. Verified live 2026-08-27 on الرياض/إيجار/سنوي, جدة/بيع and الدمام/إيجار/شهري:
-3 journeys, 0 defects.
+text). **A healthy first page is 10 → 100 cards on exactly ONE pager click, and paging then
+CONTINUES in clean 100-batches (100 → 200 → 300 …) for as long as matches remain** — owner
+2026-08-29, superseding the 2026-08-20 lifetime cap this paragraph used to describe; «خلّنا نحدد
+الطلب أكثر» is offered alongside, never instead of, continued browsing. What the journey asserts is
+that every batch keeps the per-batch invariants above AND the closing line always states the TRUE
+total with the honest shown count — «عرضت لك أول 100 من أصل 21,868 إعلان مطابق» — never a batch
+size standing in for the total, and never a «عرض المزيد» offered when no matches remain
+(`scripts/verify-result-cap-honesty.ts` pins the continuation contract under its original
+filename).
 
 ### Permanent watches (one per defect fixed 2026-08-23)
 `exact-city-never-rescoped` · `monthly-af-counts-update` · `true-total-never-page-cap` ·

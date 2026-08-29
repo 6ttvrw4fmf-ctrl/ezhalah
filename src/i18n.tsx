@@ -427,7 +427,10 @@ const AR: Record<string, string> = {
   'Let’s begin': 'يلا نبدأ',
   // 'Continue' reuses the existing auth-flow key ('متابعة') — not redeclared here.
   'Continue · {count} results': 'متابعة · {count} نتيجة',
-  'Options reflect the information available for the current listings': 'الخيارات تعتمد على المعلومات المتوفرة للإعلانات الحالية',
+  // AF data-availability notes (owner 2026-08-29): unknown is never «no», and the numbers belong to
+  // the CURRENT result set. Professional, calm, never legal/technical language.
+  'Some listings do not mention this detail, so the options reflect what the listings actually state': 'بعض الإعلانات لا تذكر هذه المعلومة، لذلك تعتمد الخيارات على البيانات المتوفرة في الإعلانات.',
+  'Options and counts are based on your current search results and update as you narrow down': 'الخيارات والأعداد مبنية على نتائج بحثك الحالية وتُحدَّث مع تضييق البحث.',
   'Finding the closest match for you': 'ندور لك على الأقرب لطلبك',
   'Going through {count} properties to pull out the best fit': 'نراجع {count} عقار ونطلع لك الأنسب',
   'We found {count} properties closest to your request': 'لقينا {count} عقار أقرب لطلبك',
@@ -640,6 +643,9 @@ const AR: Record<string, string> = {
   'I showed you all {n} matching listings. Want help finding more precise ones?': 'عرضت لك كل النتائج المطابقة ({n} إعلان). تبي أساعدك نلقى نتائج أدق؟',
   // ≤25-result variants (owner 2026-08-19, item 4): no "help me find more precise ones?" invitation
   // when the result set is already small enough that Advanced Filter has nothing useful left to offer.
+  // Browse continuation (owner 2026-08-29): trusted totals state BOTH numbers while more remain.
+  'I showed you the first {shown} of {total} matching listings. Want me to show more?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أعرض لك المزيد؟',
+  'I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أعرض لك المزيد، أو أساعدك توصل لنتائج أدق؟',
   'I showed you the first {n} listings. Want me to show more?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد؟',
   'I showed you all {n} matching listings.': 'عرضت لك كل النتائج المطابقة ({n} إعلان).',
   // CAPPED variants (owner 2026-08-20): when MORE than the browse cap actually match, the truth has two
@@ -1057,6 +1063,8 @@ const AR: Record<string, string> = {
   'Type in Arabic to search your chats': 'اكتب بالعربي للبحث في محادثاتك',
   'No chat with that name': 'ما لقينا محادثة بهذا الاسم',
   'About Us': 'من نحن',
+  'Trust & transparency': 'الثقة والشفافية',
+  'Real-estate platforms, searched as one.': 'منصة عقارية تبحث فيها كأنها منصة واحدة.',
   'Sign up / Log in': 'إنشاء حساب / تسجيل الدخول',
   // Desktop sign-in dock subtitle (owner 2026-08-26) — why an account is worth it, in one line.
   'Save your searches and come back to them anytime.': 'احفظ بحثك وارجع له في أي وقت.',

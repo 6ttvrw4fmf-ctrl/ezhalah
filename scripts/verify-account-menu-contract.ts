@@ -138,9 +138,12 @@ check('the centered root is a full-viewport fixed layer, card centered — never
   && !/centerCard(Wide)?: \{[^}]*bottom:/.test(menu));
 check('the backdrop dims AND blurs the app behind it (web)',
   /centerBack: \{[^}]*backgroundColor: dark \? 'rgba/.test(menu) && /backdropFilter: 'blur\(6px\)'/.test(menu));
-check('the account popup is the LARGE surface (560) with its own × close; confirmations stay 360',
+// 2026-08-29: the × is now shared by ALL THREE centered popups (owner: consistent top-right X on
+// every dialog) — one Pressable whose testID follows the view and whose press is the SAFE dismissal.
+check('the account popup is the LARGE surface (560); confirmations stay 360; ALL carry the top-right ×',
   /centerCardWide: \{[^}]*maxWidth: 560/.test(menu) && /centerCard: \{[^}]*maxWidth: 360/.test(menu)
-  && /testID="account-popup-close"[\s\S]{0,120}?onPress=\{onClose\}/.test(menu));
+  && /'account-popup-close' : view === 'signout' \? 'logout-popup-close' : 'delete-popup-close'/.test(menu)
+  && /onPress=\{\(\) => \{ if \(view === 'delete'\) go\('account', -1\); else onClose\(\); \}\}[\s\S]{0,160}?centerClose/.test(menu));
 check('backdrop/Escape CANCEL the safest step: delete steps back to account, others close',
   /onRequestClose=\{\(\) => \{ if \(view === 'delete'\) go\('account', -1\); else onClose\(\); \}\}/.test(menu)
   && /if \(viewRef\.current === 'delete'\) \{ go\('account', -1\); return; \}/.test(menu));
