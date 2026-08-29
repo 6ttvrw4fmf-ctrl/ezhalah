@@ -380,6 +380,17 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
     fails in BOTH directions (an amenity chain turned disjunctive, or a value domain turned
     conjunctive).
 
+  **SETTLED — this rule is closed, not open (owner, 2026-08-29).** R7.2.2 was carried as an open
+  owner question in the 2026-08-27 and 2026-08-28 run reports on the grounds that the sentence
+  described only the union shape. That was already fixed by PR #1177; the owner has now confirmed
+  the two-shape wording above as the canonical decision, in these words:
+
+  > same-field value choices = UNION (North OR South) · different boolean amenities = INTERSECTION
+  > (AC AND Elevator)
+
+  **No production behaviour changes with this confirmation** — both shapes were already implemented
+  and barriered. A future run must not re-open R7.2.2 as an owner question.
+
 ### 7.3 No stale counts
 
 - **R7.3.1** — While an RPC is in flight, the count MUST NOT show a previous scope's value.
@@ -647,6 +658,7 @@ Performed 2026-08-26 against `main@11cfd2f`.
 | R6.2 Carry answered+skipped | ✅ `afCarryRef.asked` | `verify-af-cross-round-carry.ts` |
 | R6.3 Receipt on prior turn | ✅ `afReceipt[m.id]` + `buildAfSummary()` | `verify-af-round-back-boundary.ts` |
 | R7.1 Live counts = current selection | ✅ `resolveOptions` per-scope | `verify-af-count-belongs-to-selection.ts` |
+| R7.2 Marginal chips vs combined footer, both shapes | ✅ per-chip `cnt_*`; footer = `cnt_selected` recomputed | `verify-af-multiselect-combining-semantics.ts` |
 | R7.3 No stale count | ✅ blank while pending | `verify-af-count-belongs-to-selection.ts` |
 | R7.4 Headline = true total | ✅ `matchTotal` | `feedback_result-cap-min-true-100-rule.md` + `verify-result-cap-honesty.ts` |
 | R7.5 Count = DB oracle | ✅ shared `af_eligibility_clause()` | `verify-af-live-truth.ts`, `verify-af-independent-oracle.ts` |
