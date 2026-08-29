@@ -94,8 +94,8 @@ check('af-skip-all does not exist in the question card (the owner removed the ea
   !/testID="af-skip-all"/.test(cardSrc) && !/onSkipAll/.test(cardSrc));
 check('agent.tsx no longer wires an onAgeSkipAll handler',
   !/onAgeSkipAll/.test(agentSrc));
-check('the intro card KEEPS its own «عرض النتائج» decline link (a different control — only the question footer changed)',
-  /onShowResults/.test(cardSrc) && /onPress=\{onShowResults\}/.test(cardSrc));
+check('the intro card has no «عرض النتائج» decline link either (owner follow-up 2026-08-28: no such action anywhere inside the AF flow; ✕ is the decline and always ran the identical handler)',
+  !/onShowResults/.test(cardSrc));
 
 // ── 4. Arabic is the product language — both label states must be translated ────────────────────
 check('the primary label has its Arabic translations',
@@ -129,8 +129,8 @@ mustCatch('the removed af-skip-all early-exit creeping back into the card',
   /testID="af-skip-all"/.test(cardSrc + '\n<Pressable testID="af-skip-all" onPress={() => onSkipAll(sel)} />'));
 mustCatch('an onAgeSkipAll handler creeping back into agent.tsx',
   /onAgeSkipAll/.test(agentSrc + '\nconst onAgeSkipAll = (keys: string[]) => { void commitGuidedStep(keys, true); };'));
-mustCatch('the intro card losing its decline link',
-  !/onPress=\{onShowResults\}/.test(mut(cardSrc, 'onPress={onShowResults}', 'onPress={onClose}')));
+mustCatch('the intro decline link creeping back',
+  /onShowResults/.test(cardSrc + '\n<Pressable onPress={onShowResults} />'));
 mustCatch('the block extractor going blind (a missing testID reads as an empty block)',
   block(mut(cardSrc, 'testID="af-confirm"', ''), 'af-confirm', '</Tap>') === '');
 

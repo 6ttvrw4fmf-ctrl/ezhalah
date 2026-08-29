@@ -428,8 +428,9 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 - **R8.3.1** — The question footer offers exactly THREE controls — متابعة (primary), تخطي and
   رجوع as real buttons — and NO in-question «عرض النتائج» early-exit. (Owner, 2026-08-28,
   reversing the 2026-08-16 escape-link rule: the removed control used to commit the round early;
-  a round now ends by walking its questions, by Back from question 1, or by ✕. The intro card's
-  own «عرض النتائج» decline link is a different control and is unchanged.)
+  a round now ends by walking its questions, by Back from question 1, or by ✕. A same-day
+  follow-up removed the intro card's «عرض النتائج» decline link as well — ✕ declines the intro;
+  no عرض النتائج action exists anywhere inside the AF flow.)
 - **R8.3.2** — When a round ends, a new results turn lands; the previous turn's buttons become
   the receipt (§6.3).
 

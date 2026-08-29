@@ -96,10 +96,12 @@ export function AdvancedQuestionLoading({ onClose }: { onClose: () => void }) {
 // ── Opening state (owner 2026-08-16) ─────────────────────────────────────────────────────────────
 // Shown automatically after an eligible Filter search lands with > 25 results: never a question, a
 // calm invitation — «لقينا N عقار» → «خلّنا نحدد طلبك أكثر» → one soft line explaining we use the
-// information available about these listings. Begin is opt-in; «عرض النتائج» leaves immediately
-// (the results are already rendered behind the overlay). No technical language, ever.
-export function AdvancedIntroCard({ total, onBegin, onShowResults, onClose }: {
-  total: number | null; onBegin: () => void; onShowResults: () => void; onClose: () => void;
+// information available about these listings. Begin is opt-in. No technical language, ever.
+// The «عرض النتائج» decline link was REMOVED (owner follow-up, 2026-08-28: no عرض النتائج action
+// anywhere inside the AF flow). ✕ is the decline — it always ran the exact same handler, and the
+// results are already rendered behind the overlay, so nothing was lost with the link.
+export function AdvancedIntroCard({ total, onBegin, onClose }: {
+  total: number | null; onBegin: () => void; onClose: () => void;
 }) {
   const { t } = useI18n();
   return (
@@ -114,9 +116,6 @@ export function AdvancedIntroCard({ total, onBegin, onShowResults, onClose }: {
           <Tap onPress={onBegin} style={s.primaryBtn}>
             <Text style={s.primaryTxt}>{t('Let’s begin')}</Text>
           </Tap>
-          <Pressable style={s.introLink} onPress={onShowResults} hitSlop={8}>
-            <Text style={s.skipTxt}>{t('Show results')}</Text>
-          </Pressable>
         </View>
       </View>
     </Shell>
@@ -385,8 +384,9 @@ export default function AdvancedQuestionCard({
               «عرض N نتيجة»: the user tapped a button promising results, the card simply moved to the
               next question, and no results turn was ever produced. The card cannot know whether a
               question is the last one either — the pool is re-ranked after every answer — so an
-              arity- or ordinal-based «عرض» promise can never be honest here. The ONE terminal
-              control is «عرض النتائج» in the row below. */}
+              arity- or ordinal-based «عرض» promise can never be honest here. Since 2026-08-28 the
+              footer has NO terminal control at all — a round ends only by walking its questions,
+              Back from question 1, or ✕ — so nothing in this footer may ever promise results. */}
           <Text style={s.primaryTxt}>
             {count != null ? t('Continue · {count} results', { count: grouped(count) }) : t('Continue')}
           </Text>
@@ -395,8 +395,8 @@ export default function AdvancedQuestionCard({
             old text-only رجوع/تخطي/عرض النتائج row read as fine print and was easy to miss). The
             same owner decision REMOVED the in-question «عرض النتائج» early-exit entirely — the
             question footer offers exactly متابعة / تخطي / رجوع; a round now ends by walking its
-            questions (confirm/skip), by Back from question 1, or by ✕. The intro card's own
-            «عرض النتائج» decline link is a different control and is unchanged.
+            questions (confirm/skip), by Back from question 1, or by ✕. The owner's follow-up the
+            same day removed the intro card's «عرض النتائج» decline link too — ✕ is the decline.
             Both buttons share the option rows' surface+fieldLine border idiom at the primary's
             chip radius, so the three footer controls read as one family, distinct from content.
             States are instant Pressable style-state (press feedback on pointer-down, never a
@@ -466,7 +466,6 @@ const s = StyleSheet.create({
   introTitle: { fontFamily: font.family.bold, fontSize: 17, color: colors.ink, marginTop: 10, textAlign: 'center' },
   introSupport: { fontFamily: font.family.regular, fontSize: 13, color: colors.muted, lineHeight: 20, marginTop: 8, textAlign: 'center', maxWidth: 300 },
   introFoot: { marginTop: 20, alignSelf: 'stretch', gap: 12, alignItems: 'center' },
-  introLink: { paddingVertical: 4 },
 
   // The scroller must be the ONLY thing that gives up height when the card is taller than the
   // screen. RN and react-native-web disagree on the default (RNW's ScrollView already ships
@@ -533,6 +532,4 @@ const s = StyleSheet.create({
   secondaryBtnPress: { backgroundColor: colors.segTrack, borderColor: colors.pickLine, transform: [{ scale: 0.98 }] },
   secondaryBtnFocus: { borderColor: colors.primary },
   secondaryTxt: { fontFamily: font.family.semibold, fontSize: 14, color: colors.dark },
-  // Kept for the intro card's «عرض النتائج» decline link (unchanged by the footer redesign).
-  skipTxt: { fontFamily: font.family.semibold, fontSize: 13.5, color: colors.dark },
 });

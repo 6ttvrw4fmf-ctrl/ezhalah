@@ -99,8 +99,10 @@ check('design tokens only — no raw hex/rgba anywhere in the card',
 check('no af-skip-all control and no skip-all prop anywhere in the card',
   !/testID="af-skip-all"/.test(cardSrc) && !/onSkipAll/.test(cardSrc) && !/skipAllTxt/.test(cardRaw));
 check('agent.tsx wires no skip-all handler', !/onAgeSkipAll/.test(agentSrc));
-check('the intro card KEEPS its decline link (only the question footer changed)',
-  /onPress=\{onShowResults\}/.test(cardSrc));
+// Owner follow-up, 2026-08-28: NO «عرض النتائج» action anywhere inside the AF flow — the intro
+// card's decline link is gone too (✕ always ran the identical handler, so nothing was lost).
+check('the intro card has no «عرض النتائج» decline link either — ✕ is the decline',
+  !/onShowResults/.test(cardSrc) && !/t\('Show results'\)/.test(cardSrc));
 check('the footer row itself holds exactly the two secondary controls',
   (() => {
     const row = cardSrc.slice(cardSrc.indexOf('s.footRow'), cardSrc.indexOf('</Reanimated.View>', cardSrc.indexOf('s.footRow')));
@@ -135,6 +137,9 @@ mustCatch('af-skip-all creeping back into the card',
 // The chevron losing its RTL awareness.
 mustCatch('the back chevron losing RTL awareness',
   !/isRTL \? 'chevron-forward' : 'chevron-back'/.test(backBlock.replace(/isRTL \? 'chevron-forward' : 'chevron-back'/, "'chevron-back'")));
+// The intro decline link creeping back.
+mustCatch('the intro «عرض النتائج» decline link creeping back',
+  /onShowResults/.test(cardSrc + "\n<Pressable onPress={onShowResults}><Text>{t('Show results')}</Text></Pressable>"));
 // The extractor going blind.
 mustCatch('a missing testID reading as an empty block',
   blockOf(cardSrc.replace('testID="af-back"', ''), 'af-back') === '');
