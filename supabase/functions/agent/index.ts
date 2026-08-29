@@ -43,7 +43,7 @@ const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
 // Deterministic post-model rules (owner ruling 2026-08-29). Pure functions, unit-tested and
 // mutation-proven by scripts/verify-agent-postmodel-rules.ts. The model proposes; these decide.
-import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWesternDigits } from "./postModel.ts";
+import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWesternDigits, arabicWordAmounts } from "./postModel.ts";
 
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
@@ -405,7 +405,9 @@ function extractPrice(input: string): string {
   const t = toWesternDigits(input).toLowerCase();
   const NUM_RE =
     /(\d[\d,.]*)\s*(?:(k|m|mn|million|thousand|bn|billion)(?![a-z]))?\s*(sar|sr|riyal|usd|\$|dollar|aed|dirham|dhm|dhs|dh|eur|€|euro|gbp|£|pound|kwd|kd|dinar|bhd|bd|qar|qr|omr|egp)?/gi;
-  const candidates: number[] = [];
+  // Candidates carry their text position so digit-written and WORD-written amounts can be merged in
+  // reading order — the range rule below depends on "first" meaning first in the sentence.
+  const candidates: Array<{ n: number; index: number }> = [];
   for (const mm of t.matchAll(NUM_RE)) {
     const after = t.slice(mm.index! + mm[0].length, mm.index! + mm[0].length + 24);
     // A number followed by a SIZE/area unit is a SIZE, not money — skip it. We tolerate up to ~16
@@ -426,8 +428,23 @@ function extractPrice(input: string): string {
     if (cur) rate = CURRENCY_RATES[cur] ?? 0;
     if (!rate) { for (const [re, r] of AR_CURRENCY) { if (re.test(after)) { rate = r; break; } } }
     if (rate && rate !== 1) n = Math.round(n * rate);
-    if (n >= 100) candidates.push(Math.round(n));
+    if (n >= 100) candidates.push({ n: Math.round(n), index: mm.index! });
   }
+  // AMOUNTS WRITTEN IN ARABIC WORDS — «مليون ونص», «نص مليون», «مليونين», «ثلاثة ملايين».
+  // NUM_RE above requires a LEADING ASCII DIGIT, so these produced no candidate at all. Live defect
+  // 2026-08-29: «من ٨٠٠ الف الى مليون ونص» yielded only [800000], the range-MAX rule could not fire
+  // with a single candidate, and the user's 1,500,000 ceiling silently became 800,000.
+  // Same guards as the digit path: a size unit disqualifies it, a currency word converts it.
+  for (const wa of arabicWordAmounts(t)) {
+    const after = t.slice(wa.index + wa.length, wa.index + wa.length + 24);
+    if (/^[^\d]{0,16}?(bed|bedroom|br\b|sqm|sq\.?\s*m|m2|m²|meter|metre|cm|centimeters?|centimetres?|square|sqft|sq\.?\s*ft|ft2|ft²|foot|feet|sq\b|متر|م٢|م2|غرف|غرفة|غرفه)/i.test(after)) continue;
+    let n = wa.value;
+    let rate = 0;
+    for (const [re, r] of AR_CURRENCY) { if (re.test(after)) { rate = r; break; } }
+    if (rate && rate !== 1) n = Math.round(n * rate);
+    if (n >= 100) candidates.push({ n, index: wa.index });
+  }
+  candidates.sort((a, b) => a.index - b.index);
   if (!candidates.length) return "";
   // This function's single price slot has no separate minimum — it's always applied as a CEILING (see
   // the SYSTEM prompt's `price` field docs and the client's agentPriceCapAnnual()). Historically this
@@ -438,8 +455,8 @@ function extractPrice(input: string): string {
   // HIGHEST one instead. A single number (the overwhelmingly common case) is unaffected; multiple
   // numbers with no range phrasing keep the original first-match behavior (unrelated figures elsewhere
   // in the message must not silently become the budget).
-  if (candidates.length > 1 && RANGE_RE.test(input)) return String(Math.max(...candidates));
-  return String(candidates[0]);
+  if (candidates.length > 1 && RANGE_RE.test(input)) return String(Math.max(...candidates.map((c) => c.n)));
+  return String(candidates[0].n);
 }
 
 // Detect a FOREIGN-currency budget and format it for display ("USD 100,000"), so the client can show
