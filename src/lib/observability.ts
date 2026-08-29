@@ -138,11 +138,24 @@ export function initObservability(): void {
   hadDsn = !!(dsn && dsn.trim());
   if (!hadDsn) return; // no DSN → total no-op, the whole point of "safe-by-default"
 
-  // Lazy require so builds that do not have the package installed do not fail — the wrapper stays
-  // a no-op instead. Once `@sentry/react-native` is added to package.json this branch executes.
+  // Platform-branch: `@sentry/react-native` only initializes cleanly on native (iOS/Android). On
+  // Expo web, requiring it silently no-oped every event we tried to report (root cause of the
+  // 2026-08-29 certification finding — SDK-in-bundle string check passed, ingest POST never
+  // happened). Web uses `@sentry/browser` directly, which is what Sentry docs recommend for React
+  // web apps and works out of the box on Metro-web. Native falls back to `@sentry/react-native`.
+  //
+  // Failure is now LOUD: a swallowed exception in this block was how the web integration passed
+  // every check while doing nothing in production. Any init error is logged and stashed on
+  // `globalThis.__EZH_SENTRY_INIT_ERROR__` so a browser-side probe can see it.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-    const mod = require('@sentry/react-native');
+    let mod: any;
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+      mod = require('@sentry/browser');
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+      mod = require('@sentry/react-native');
+    }
     SentryImpl = mod as SentryLike;
     SentryImpl.init({
       dsn: dsn!.trim(),
@@ -161,8 +174,16 @@ export function initObservability(): void {
         return crumb;
       },
     });
-  } catch {
-    // Package not installed yet (typical during initial rollout). Stay a no-op.
+    // Runtime probe — visible from the browser DevTools + deploy-verify scripts. If this flag is
+    // missing after page load, the SDK didn't initialize (however green the code checks look).
+    try { (globalThis as any).__EZH_SENTRY_LIVE__ = true; } catch {}
+  } catch (err) {
+    // LOUD failure — never swallow silently again. Two paths: console.error so a live debugging
+    // session sees it immediately, and a globalThis stash so a scripted browser probe can prove
+    // whether init crashed vs never ran.
+    // eslint-disable-next-line no-console
+    console.error('[ezhalah] Sentry init failed:', err);
+    try { (globalThis as any).__EZH_SENTRY_INIT_ERROR__ = String((err as Error)?.stack ?? err); } catch {}
     SentryImpl = null;
   }
 }
