@@ -795,6 +795,66 @@ in bulk on a hunch.
 claim as "unverifiable".* A divide-by-N that lands on pretty numbers is never evidence; the source's
 own per-unit field and its own prose are.
 
+## 27. Three adjudications from run 2026-08-29 — do not re-derive any of them
+
+**27a. A row with a city that is not `production_ready` is served to NOBODY, and now something asks.**
+The Normal Filter admits a row through exactly two branches: `production_ready` with a location, or the
+unlocated fallback, which *requires* `city_id IS NULL`. A located row that is not `production_ready`
+satisfies neither — it sits in `search_listings_ar`, counts as present in every count-parity check, and
+no user can ever reach it. Run #68 found 15 of these on 2026-08-28 and registered 13; this run found the
+remaining 2 the same way, **by hand, eight hours later**, because nothing in the roster asked the
+question: `mon_detect_unlocated_search_contract` limb (b) checks the opposite direction
+(`production_ready` ⇒ city AND region), and `price_gate_withheld` counts withheld rows without
+distinguishing "still reachable through the fallback" from "reachable by nothing".
+`mon_detect_located_row_unreachable()` (P1, roster-wired, ~190 ms, resolves on the evaluated path per
+§23a) now closes it. Both directions proven live: raised 2 at 07:16:24, resolved both at 07:16:51,
+`insta_resolves = 0`. **A standing 0 is the healthy reading** (§24c).
+
+**27b. The two "genuinely UNKNOWN" aqarmonthly prices are answered — aqar publishes them.** §25 closed
+the wasalt ×1000 story but left `1143359` / `1661535` open as unverifiable ("no archived figure exists
+to check against"). That was true of `ar_data`; it was **not** true of the source, which is reachable
+and needs no auth. `sa.aqar.fm/graphql`
+`DailyRenting.getCalculatedBookingPriceWithDiscount(...).discounted_price` — the exact field
+`scrapers/aqarmonthly/run.py` reads — answered live on 2026-08-29: **6156982 → 32,999,967, matching the
+stored `price_annual` 395,999,604 = 32,999,967 × 12 EXACTLY**; 6188874 → 90,412,109.48, the same ~1e8
+magnitude as the stored figure (this vertical prices per 30-day window, so the exact number is
+window-dependent *by design* and a window difference is not a discrepancy). The unit is SAR, not
+halalas: the platform's own median stored monthly is **10,866 SAR over 1,739 active rows**. A third,
+independently captured listing (`1588733`, حي اشبيلية) carries the identical 395,999,604. Both rows are
+registered in `ops_price_source_verified` and are now retrievable through the anon RPC.
+*The generalisation, and it is the same one §25 pinned from the other side:* **"we hold no archived
+copy" is not "unverifiable" — check whether the source itself still answers before filing a row as
+unknowable.**
+
+**27c. aqarmonthly's 94% capture drop was the SOURCE, and mustqr's crawl absence IS a source verdict.**
+Two liveness scares, both cleared by asking the source rather than reading our own state:
+- `silent_partial_success:aqarmonthly` fired on 243 rows seen against a ~3,738/day norm (the same shape
+  as 2026-08-22, 241). All 16 shards independently discovered the *same* ~241 ids — a truncation would
+  have produced ragged slices — and a live probe returned `Search.find(availability:{eq:1}).total =
+  **244**`. The source's availability board really is that small today. Zero listings lost: shards never
+  prune (`--shard` skips it), `pruned=0` on all 16, and `prune_unseen`'s collapse guard would refuse
+  241-vs-1,724 anyway.
+- mustqr's 3-strike kills carry no per-row `GONE` verdict, which is the §26 shape — but it is **not** the
+  §26 *defect*. aqarcity's sitemap is an incomplete index; mustqr's discovery is a complete query of the
+  source's own database (`…supabase.co/rest/v1/properties?status=eq.متاح`), so absence from the crawl is
+  the source saying "no longer available". Crawls are stable and complete (1,172→1,189 rows_seen over 8
+  days, ok=true, prunes 0–9/day). Re-probed 2026-08-29: mustqr's HTML is still **md5-identical** for
+  killed, live and bogus ids (18,951-byte SPA shell), so a per-page oracle remains impossible and
+  registering mustqr in `ops_oracle_required_platform` would buy nothing. Its backend REST host is
+  blocked by the agent egress proxy, so a per-id status probe cannot run from a routine container —
+  it would have to live in the scraper. **Leave it as it is; §26's "not restored" verdict stands.**
+
+**27d. aqar has a control-validated liveness oracle and it needs no auth — use it instead of reasoning
+about the largest kill cohort.** aqar is the biggest inactivation cohort in the system (358 in 24 h,
+2,543 in 7 days) and every one of those kills rests on 3-strike crawl absence (`missing_count = 3`),
+which is the shape §26 exists to distrust. It holds up here, and the cheap way to confirm it is
+`sa.aqar.fm/graphql` → `Listing{ get(id:…){ id uri } }`, no key, no session:
+**6/6 rows deactivated on 2026-08-29 came back ABSENT with aqar's own «الإعلان غير موجود», and 3/3
+currently-active rows came back PRESENT** — so the oracle discriminates, which a bare 404 on a bogus id
+never proves on its own (§26: *an oracle needs a CONTROL before it is an oracle*). Note the bogus-id
+control returns the same «الإعلان غير موجود», so the discriminating half is the POSITIVE control, not
+the negative one. Re-run those two halves rather than re-deriving whether aqar's crawl is complete.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve
