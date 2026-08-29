@@ -596,19 +596,44 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   const isBroadResidential = q.category === 'Residential' && !q.type && !(q.types && q.types.length) && !effectiveGroups(q).length;
   const resSel = effectiveTypes(q);
   const resGroups = effectiveGroups(q);
-  const resSelectedTypeAr = resSel.length ? typeArForTypes(resSel) : (resGroups.length ? typeArForTypes(resGroups) : null);
+  // The selected clean type(s)/group(s) as type_ar labels. Used by BOTH misfile-recovery branches
+  // below, so it is not residential-specific despite where it was first needed.
+  const selectedTypeAr = resSel.length ? typeArForTypes(resSel) : (resGroups.length ? typeArForTypes(resGroups) : null);
   const resMisfileTypes = isBroadResidential
     ? RESIDENTIAL_TYPE_AR_COM
-    : (resSelectedTypeAr ? resSelectedTypeAr.filter((t) => RESIDENTIAL_TYPE_AR_COM.includes(t)) : []);
+    : (selectedTypeAr ? selectedTypeAr.filter((t) => RESIDENTIAL_TYPE_AR_COM.includes(t)) : []);
   const resScopeBTables = platformScope(COM_TABLES.filter((t) => !mainTables.includes(t)));
   const attachResScopeB = q.category === 'Residential' && !isBroadCommercial
     && resMisfileTypes.length > 0 && resScopeBTables.length > 0;
+
+  // THE COMMERCIAL MIRROR (2026-08-29). FIX A above recovers Residential-macro rows misfiled into
+  // *_commercial_listings; the same misfile happens in the other direction and, until now, only the
+  // BROAD «فئة تجاري» search recovered it. Narrowing to a نوع made a matching listing DISAPPEAR:
+  // measured live on october_residential_listings:9618987 (محل / إيجار / سنوي / مكة المكرمة /
+  // حي بطحاء قريش) — «فئة تجاري» returned 7 including it, «فئة تجاري + نوع محل» returned 2 without
+  // it, and the same narrowed request with this scope returned 3, i.e. exactly the one misfiled row
+  // and nothing else. A narrower filter must never lose a listing the broader one returns.
+  //
+  // Scoped exactly like its mirror: the residential tables the main scope does not already read
+  // (مكتب's CleanQuery.extraTables already pulls in dealapp_residential, so that stays out), the
+  // SELECTED types only, and عمارة EXCLUDED via COMMERCIAL_TYPE_AR_RES — in a residential table
+  // عمارة is a Residential Building, so including it would leak apartment blocks into a Commercial
+  // search. resTables(q) rather than the bare constant, so the set is identical to the one the broad
+  // Commercial search scans: the narrow result is then a subset of the broad one by construction.
+  const comMisfileTypes = selectedTypeAr
+    ? selectedTypeAr.filter((t) => COMMERCIAL_TYPE_AR_RES.includes(t))
+    : [];
+  const comScopeBTables = platformScope(resTables(q).filter((t) => !mainTables.includes(t)));
+  const attachComScopeB = q.category === 'Commercial' && !isBroadCommercial
+    && comMisfileTypes.length > 0 && comScopeBTables.length > 0;
 
   const scopeB = isBroadCommercial
     ? { p_tables2: tables, p_types2: COMMERCIAL_TYPE_AR_COM }
     : attachResScopeB
       ? { p_tables2: resScopeBTables, p_types2: resMisfileTypes }
-      : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
+      : attachComScopeB
+        ? { p_tables2: comScopeBTables, p_types2: comMisfileTypes }
+        : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
 
   return {
     // dealCombined (owner feature 2026-08-20, Filter شراء+إيجار both selected) → null, same as
