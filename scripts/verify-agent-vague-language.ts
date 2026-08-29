@@ -74,8 +74,11 @@ check("a BUDGET digit alone must NOT legitimise a bedroom count",
 check("«مكان مناسب للعائلة» must NOT become bedrooms", wouldDrop("أبي مكان مناسب للعائلة", "3"));
 check("the model is told household size is CONTEXT, not filters",
   /Never turn household size, lifestyle or a mood word into a bedroom count/.test(edge));
+// Wording tightened 2026-08-29 after the vague-request case asked TWO questions in one reply; the
+// canonical assertion now lives in verify-agent-knows-what-it-knows.ts. Kept here as the
+// conversational half of that rule.
 check("...and to ask ONE question per turn, not a checklist",
-  /one short question per turn, never a checklist/.test(edge));
+  /exactly ONE short question per turn/.test(edge) && /never a checklist/.test(edge));
 
 console.log("\n── a SIZE detail is never touched (only bedroom-shaped values are) ──");
 check("detail '200' (m²) is not bedroom-shaped, so the guard ignores it", !wouldDrop("ابغى بيت كبير", "200"));

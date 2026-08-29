@@ -14,7 +14,7 @@ import { t, getLocale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
 import { partitionRequestedAmenities, cohortAllows } from '@/lib/afCohorts';
 import { applyAfIntents } from '@/lib/afIntents';
-import { mergeConversationState, rescuedFields } from '@/lib/conversationState';
+import { mergeConversationState, rescuedFields, describeKnownState } from '@/lib/conversationState';
 import { landmarkHint, ensureLandmarks } from './landmarks';
 import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 
@@ -645,6 +645,12 @@ async function callAgentBackend(
           order: ctx.order,
           history: ctx.history ?? [],
           landmarkHint: lmHint || undefined,
+          // WHAT THE CONVERSATION ALREADY ESTABLISHED (owner ruling 2026-08-29). Until now the model
+          // received only raw text and history, so it had to re-derive every field from prose each
+          // turn and could not tell what it already knew — which is how it asks a question whose
+          // answer is already in the search state. A MIRROR of state, never a source: the model may
+          // not edit it, it exists so the model can stop asking.
+          knownState: describeKnownState(ctx.prevQuery) || undefined,
         },
       }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('agent-timeout')), 20000)),
