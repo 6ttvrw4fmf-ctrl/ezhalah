@@ -36,7 +36,15 @@ const check = (label: string, ok: boolean, detail = '') => {
 const stepIdx = wf.indexOf('Post-deploy boot smoke test');
 check('the deploy workflow has a post-deploy boot smoke test', stepIdx > -1);
 
-const step = stepIdx > -1 ? wf.slice(stepIdx, stepIdx + 4000) : '';
+// Bound the step at the NEXT step boundary, never a fixed character count. A fixed window silently
+// truncates as the step grows, and the checks below then pass/fail on whether they happened to land
+// inside the window rather than on what the workflow does — a barrier that reports on its own slice
+// length instead of the thing it guards.
+const stepEnd = (() => {
+  const next = wf.indexOf('\n      - name:', stepIdx + 1);
+  return next === -1 ? wf.length : next;
+})();
+const step = stepIdx > -1 ? wf.slice(stepIdx, stepEnd) : '';
 check('the boot test runs only on a REAL deploy (not dry_run, not delete)',
   /if:\s*\$\{\{\s*!inputs\.dry_run\s*&&\s*inputs\.action\s*!=\s*'delete'\s*\}\}/.test(step));
 

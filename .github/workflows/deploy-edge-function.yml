@@ -273,7 +273,13 @@ jobs:
           # Public, already shipped in the app bundle — the agent's own soft gate accepts it. Used
           # only if the anon secret is unavailable, so this gate can never be skipped for want of a
           # credential. Either way an auth rejection is a 4xx, which still PROVES the worker booted.
-          KEY="${ANON_KEY:-sb_publishable_vXzwxdpfrzmbwtbR5aXcKA_cMUO8hVB}"
+          # Try the PUBLISHABLE key first: it is what these functions' own soft gate accepts, so the
+          # probe reaches the real handler instead of stopping at auth. (First live run of this gate
+          # used the anon secret and got HTTP 401 — that still proves the worker booted, which is
+          # what this gate is for, but a 401 short-circuits before the handler and would not catch
+          # "boots fine, then 500s on every real request".) The publishable key is public by design:
+          # it is hardcoded in the function source and shipped in the app bundle.
+          KEYS=("sb_publishable_vXzwxdpfrzmbwtbR5aXcKA_cMUO8hVB" "${ANON_KEY:-}")
 
           # Each function's own minimal, side-effect-free request. An unknown function still gets
           # booted and must not return BOOT_ERROR/5xx — a 4xx from its own input validation proves
@@ -287,16 +293,27 @@ jobs:
           # Cold start + propagation: retry a few times before declaring failure, so a slow first
           # boot is not reported as a broken deploy.
           for attempt in 1 2 3 4 5; do
-            CODE=$(curl -s -o /tmp/boot.json -w '%{http_code}' --max-time 45 -X POST "$URL" \
-              -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
-              -H 'content-type: application/json' -d "$BODY" || echo 000)
-            echo "attempt $attempt → HTTP $CODE"
-            BOOT_ERR=$(grep -c 'BOOT_ERROR' /tmp/boot.json 2>/dev/null || true)
-            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 500 ] && [ "${BOOT_ERR:-0}" -eq 0 ]; then
-              break
-            fi
+            for KEY in "${KEYS[@]}"; do
+              [ -z "$KEY" ] && continue
+              CODE=$(curl -s -o /tmp/boot.json -w '%{http_code}' --max-time 45 -X POST "$URL" \
+                -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+                -H 'content-type: application/json' -d "$BODY" || echo 000)
+              echo "attempt $attempt (key ${KEY:0:12}...) → HTTP $CODE"
+              BOOT_ERR=$(grep -c 'BOOT_ERROR' /tmp/boot.json 2>/dev/null || true)
+              # A 2xx means we exercised the REAL handler end to end - stop here.
+              if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ] && [ "${BOOT_ERR:-0}" -eq 0 ]; then
+                break 2
+              fi
+            done
             sleep 10
           done
+
+          # A 4xx still proves the worker STARTED (the function itself produced that response), so it
+          # passes the gate - but say plainly that the handler was not exercised, instead of letting
+          # a green tick imply more than was tested.
+          if [ "$CODE" -ge 400 ] && [ "$CODE" -lt 500 ]; then
+            echo "::warning::$FN booted (HTTP $CODE) but the request was rejected before the handler ran - boot is proven, the handler path is NOT."
+          fi
 
           echo "--- response (first 400 bytes) ---"
           head -c 400 /tmp/boot.json || true
