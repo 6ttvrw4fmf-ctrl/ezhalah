@@ -115,6 +115,10 @@ const PROMISES_WIDENING =
   /(أوسّع|أوسع|نوسّع|نوسع|بوسّع|بوسع|توسيع البحث|أخفف الشرط|نخفف الشروط|\bwiden\b|\bbroaden\b)/i;
 function groundReply(reply: string, locale: string): string {
   const r = String(reply ?? "");
+  // AN EMPTY REPLY MUST NEVER SHIP. Found live 2026-08-29: «غرفتين» — a one-word answer continuing an
+  // established search — produced a turn with NO reply text, so the user saw silence. Why the model
+  // omitted it does not matter; silence is a product failure and this is the floor under it.
+  if (!r.trim()) return locale === "en" ? "Got it — searching now." : "تمام، أدوّر لك الحين.";
   if (!CLAIMS_INVENTORY.test(r) && !PROMISES_WIDENING.test(r)) return r;
   return locale === "en" ? "Got it — searching now." : "تمام، أدوّر لك الحين.";
 }
@@ -613,7 +617,7 @@ function stripFiller(s: string): string {
 // endpoint). Appended to the SYSTEM message as a belt-and-braces restatement of the shape and enum
 // values the SYSTEM prompt above already documents in prose — same list, machine-readable form, so
 // the model gets the contract from two directions.
-const JSON_SHAPE_HINT = `\n\nSTYLE: talk like a smart broker who knows the inventory, not a form. Adapt to obvious cues — if the user is brief or says «ورني»/«بس ورني»/"just show me", drop to ONE short critical question or simply search; if they are chatty, be a little more natural. Do not claim to read their emotions. NEVER say you have found or have options («لقيت لك», «عندي خيارات») — you write this reply BEFORE the search runs, so you cannot know; describe what you are about to search for instead. Never promise to widen or relax the search.\n\nCONVERSATION: when the user describes their SITUATION rather than a property («عندي عائلة من ٤ أشخاص», «أدور شي يناسبني أنا وزوجتي وطفلين», «مكان مناسب للعائلة», «مكان هادي»), that is CONTEXT, not filters. Never turn household size, lifestyle or a mood word into a bedroom count, an area, or any other value. Use kind="message" and ask the ONE next question that most narrows the search (usually property type, then Buy vs Rent, then city, then budget) — one short question per turn, never a checklist. Once you have enough to search, search and stop asking.\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "ask_about" (array of the things the user expressed VAGUELY that you must NOT turn into a number — use "size" when they said big/large/wide/spacious/small («كبير»/«واسع»/«صغير») without any area figure, and "rating" when they praised the rating («تقييم عالي»/«ممتاز») without naming a number. Leave [] when nothing is vague. NEVER invent a bedroom count, an area, or a rating from a vague word), "furnished" (one of "yes"|"no"|"none" — "yes" only if the user asks for a FURNISHED place («مفروشة»), "no" only if they ask for an UNFURNISHED one («غير مفروشة»), "none" when they do not mention furnishing at all; never infer it from anything else), "af" (object of Advanced-Filter intents the user STATED; omit any key they did not state — never infer one. Keys and their ONLY allowed values: "property_age": "new"|"1_2"|"3_5"|"6_9"|"10p"; "street_width": a number in metres they asked for (e.g. "20"); "direction": array of "شمال"|"جنوب"|"شرق"|"غرب"|"شمال شرق"|"شمال غرب"|"جنوب شرق"|"جنوب غرب"; "bathrooms": the number of bathrooms they asked for; "rating": "9.5"|"9.0"|"9.0_rc10" ONLY if they named a NUMBER on the 0-10 scale — a stated 9 or ٩ (including «٩ فما فوق») is "9.0", a stated 9.5 or ٩.٥ is "9.5", and «مع ١٠ تقييمات» or more alongside 9 is "9.0_rc10". If they only praised it («تقييم عالي», «ممتاز») with NO number, OMIT it and put "rating" in ask_about instead; "rnpl": "rnpl" if they want instalments/تقسيط; "unit_subtype": "استديو"|"شقق مخدومة"|"شقة"), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
+const JSON_SHAPE_HINT = `\n\nSTYLE: talk like a smart broker who knows the inventory, not a form. Adapt to obvious cues — if the user is brief or says «ورني»/«بس ورني»/"just show me", drop to ONE short critical question or simply search; if they are chatty, be a little more natural. Do not claim to read their emotions. NEVER say you have found or have options («لقيت لك», «عندي خيارات») — you write this reply BEFORE the search runs, so you cannot know; describe what you are about to search for instead. Never promise to widen or relax the search.\n\nCONVERSATION: when the user describes their SITUATION rather than a property («عندي عائلة من ٤ أشخاص», «أدور شي يناسبني أنا وزوجتي وطفلين», «مكان مناسب للعائلة», «مكان هادي»), that is CONTEXT, not filters. Never turn household size, lifestyle or a mood word into a bedroom count, an area, or any other value. Use kind="message" and ask the ONE next question that most narrows the search (usually property type, then Buy vs Rent, then city, then budget) — exactly ONE short question per turn — one question mark, never two questions stacked in a single reply, never a checklist. Once you have enough to search, search and stop asking.\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "ask_about" (array of the things the user expressed VAGUELY that you must NOT turn into a number — use "size" when they said big/large/wide/spacious/small («كبير»/«واسع»/«صغير») without any area figure, and "rating" when they praised the rating («تقييم عالي»/«ممتاز») without naming a number. Leave [] when nothing is vague. NEVER invent a bedroom count, an area, or a rating from a vague word), "furnished" (one of "yes"|"no"|"none" — "yes" only if the user asks for a FURNISHED place («مفروشة»), "no" only if they ask for an UNFURNISHED one («غير مفروشة»), "none" when they do not mention furnishing at all; never infer it from anything else), "af" (object of Advanced-Filter intents the user STATED; omit any key they did not state — never infer one. Keys and their ONLY allowed values: "property_age": "new"|"1_2"|"3_5"|"6_9"|"10p"; "street_width": a number in metres they asked for (e.g. "20"); "direction": array of "شمال"|"جنوب"|"شرق"|"غرب"|"شمال شرق"|"شمال غرب"|"جنوب شرق"|"جنوب غرب"; "bathrooms": the number of bathrooms they asked for; "rating": "9.5"|"9.0"|"9.0_rc10" ONLY if they named a NUMBER on the 0-10 scale — a stated 9 or ٩ (including «٩ فما فوق») is "9.0", a stated 9.5 or ٩.٥ is "9.5", and «مع ١٠ تقييمات» or more alongside 9 is "9.0_rc10". If they only praised it («تقييم عالي», «ممتاز») with NO number, OMIT it and put "rating" in ask_about instead; "rnpl": "rnpl" if they want instalments/تقسيط; "unit_subtype": "استديو"|"شقق مخدومة"|"شقة"), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -636,6 +640,7 @@ Deno.serve(async (req: Request) => {
   let locale = "ar";
   let loggedIn = false;
   let order = false;
+  let knownState = "";
   let lmHint = "";
   let history: Array<{ role?: string; text?: string }> = [];
   try {
@@ -648,6 +653,7 @@ Deno.serve(async (req: Request) => {
     // carries ~40 distilled anchors). Format: "Boulevard City = ... (Mall), Riyadh". We trust it
     // as a known-place signal so the model infers the city instead of asking which one.
     lmHint = String(body?.landmarkHint ?? "").slice(0, 400);
+    knownState = String(body?.knownState ?? "").slice(0, 600).trim();
     // Prior conversation turns so the model has MEMORY. The client sends recent turns; we cap here too.
     if (Array.isArray(body?.history)) history = body.history.slice(-12);
   } catch {
@@ -699,7 +705,13 @@ Deno.serve(async (req: Request) => {
     const lmLine = lmHint
       ? ` RECOGNIZED LANDMARKS (from Ezhalah's landmark database — treat each as a KNOWN place, infer its CITY and search that city; NEVER ask which city when a landmark is recognized): ${lmHint}.`
       : "";
-    const currentTurn = `REPLY LANGUAGE: ${locale === "en" ? "English" : "Arabic"} — the user's latest message is in this language, so reply 100% in it and never the other language. Auth: ${loggedIn ? "logged-in" : "guest"}. Direct search order: ${order}.${budgetDirective}${lmLine} Message: """${text}"""`;
+    // ALREADY ESTABLISHED — the single most effective way to stop the agent re-asking something the
+    // user already told it. Phrased as a hard instruction because a polite hint is not enough: the
+    // model previously had no structured view of its own accumulated state at all.
+    const knownLine = knownState
+      ? ` ALREADY ESTABLISHED IN THIS CONVERSATION (do NOT ask about any of these again — they are already set; only change one if the user's latest message explicitly changes it): ${knownState}.`
+      : "";
+    const currentTurn = `REPLY LANGUAGE: ${locale === "en" ? "English" : "Arabic"} — the user's latest message is in this language, so reply 100% in it and never the other language. Auth: ${loggedIn ? "logged-in" : "guest"}. Direct search order: ${order}.${budgetDirective}${knownLine}${lmLine} Message: """${text}"""`;
     const rawTurns = [
       ...history.map((h) => ({ role: h?.role === "model" ? "model" : "user", text: String(h?.text ?? "").slice(0, 2000).trim() })),
       { role: "user", text: currentTurn },
@@ -820,6 +832,9 @@ Deno.serve(async (req: Request) => {
       if (retry && !retry.__err && retry.kind && detectLang(String(retry.reply ?? "")) !== wrong) out = retry;
     }
 
+    // NEVER SHIP AN EMPTY REPLY. Found live 2026-08-29: «غرفتين» (a one-word answer continuing a
+    // search) produced a turn with no reply text at all — the user saw silence. A missing reply is a
+    // product failure regardless of why the model omitted it, so there is a deterministic floor.
     const lead = (s: string) => {
       let body = stripFiller(String(s ?? "").trim());
       // Belt-and-braces on the no-language-mixing rule: if we're replying in English, strip a leading

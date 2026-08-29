@@ -77,3 +77,46 @@ export function rescuedFields(prev: SearchQuery | null | undefined, next: Search
   const p = prev as unknown as Record<string, unknown>;
   return STICKY_FIELDS.filter((k) => !established(n[k]) && established(p[k]));
 }
+
+/**
+ * A compact, human-readable summary of what the conversation has ALREADY established — sent to the
+ * model each turn so it can see its own accumulated state.
+ *
+ * WHY THIS EXISTS (owner ruling 2026-08-29). The edge function received only the raw text and the
+ * chat history; it never received the canonical query. So the model had to re-derive everything from
+ * conversation prose every turn and had no reliable way to know what it already knew — which is
+ * exactly how it ends up asking a question whose answer is already in the search state. The owner's
+ * principle: "The agent must be aware of what it already knows. It should never ask a question whose
+ * answer already exists in the conversation or current search state."
+ *
+ * This is a MIRROR of state, never a source of it. The model may not edit it; it exists so the model
+ * can stop asking. Every value here was already established deterministically by the client.
+ */
+export function describeKnownState(q: SearchQuery | null | undefined): string {
+  if (!q) return '';
+  const s = q as unknown as Record<string, unknown>;
+  const bits: string[] = [];
+  const push = (label: string, v: unknown) => { if (established(v)) bits.push(`${label}=${Array.isArray(v) ? v.join('/') : String(v)}`); };
+  push('deal', s.bothDeals ? 'Buy+Rent' : s.deal);
+  push('rentPeriod', s.rentPeriod);
+  push('propertyType', s.type);
+  push('location', s.location);
+  push('region', s.regionPin);
+  push('district', s.districtPin);
+  push('bedroomsOrSize', s.detail);
+  // The budget is stored annualized for rent; say so, or the model will read 72000 as a monthly figure.
+  if (established(s.price)) bits.push(`budget=${String(s.price)}${s.priceIsAnnual ? ' (annual-equivalent)' : ''}`);
+  push('furnished', s.furnishedPref);
+  push('amenities', s.amenities);
+  push('ratingMin', s.ratingMin);
+  push('reviewsMin', s.reviewsMin);
+  push('bathroomsMin', s.bathMin);
+  push('ageMin', s.ageMin);
+  push('ageMax', s.ageMax);
+  push('newConstruction', s.isNewConstruction);
+  push('streetWidthMin', s.streetWidthMin);
+  push('direction', s.directions);
+  push('unitSubtype', s.unitSubtypes);
+  push('platforms', s.sources);
+  return bits.join(', ');
+}
