@@ -96,6 +96,36 @@ async function liveNotes(): Promise<string> {
   return _notesCache.text;
 }
 
+// ── AGENT HEALTH HEARTBEAT ───────────────────────────────────────────────────
+// The client falls back to its bundled offline heuristic on ANY failure (src/data/agent.ts:571),
+// so a dead agent looks completely normal to the user — that is how the 2026-08-29 outage stayed
+// invisible for 14.5 hours across 213 failed calls. Postgres cannot read Supabase edge logs, so the
+// detector framework was structurally blind to this function. This is the heartbeat it reads:
+// mon_detect_agent_health() over public.agent_health_event.
+//
+// FIRE AND FORGET, ALWAYS. Telemetry must never break, slow, or fail a user turn — it is not awaited
+// and every error is swallowed. A monitoring write that can take down the thing it monitors is worse
+// than no monitoring.
+const CLIENT_TIMEOUT_MS = 20_000; // must track the client's race in src/data/agent.ts:569
+function recordHealth(outcome: string, latencyMs: number, detail: Record<string, unknown> = {}): void {
+  try {
+    if (!SUPABASE_URL || !SERVICE_KEY) return;
+    // A turn slower than the client's own race already reached the user as the offline heuristic,
+    // even if the model went on to answer correctly. That still counts as an AI failure.
+    const fallbackCertain = outcome !== "ok" || latencyMs > CLIENT_TIMEOUT_MS;
+    void fetch(`${SUPABASE_URL}/rest/v1/agent_health_event`, {
+      method: "POST",
+      headers: {
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+        "content-type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({ outcome, latency_ms: Math.round(latencyMs), fallback_certain: fallbackCertain, detail }),
+    }).catch(() => {});
+  } catch { /* telemetry must never throw into the request path */ }
+}
+
 // ── DETERMINISTIC CATALOG CLASSIFIER (loc_classify RPC) ───────────────────────
 // The SQL function loc_classify(token) maps a location token to the official Arabic
 // catalog, inventory-aware. It tells us, with certainty the LLM cannot, whether a
@@ -574,6 +604,7 @@ Deno.serve(async (req: Request) => {
   }
 
   if (!DEEPSEEK_API_KEY) {
+    recordHealth("model_not_configured", 0);
     // Tell the client to fall back to its bundled heuristic.
     return json({ error: "model not configured" }, 503);
   }
@@ -682,6 +713,7 @@ Deno.serve(async (req: Request) => {
         response_format: { type: "json_object" },
       });
       let res: Response | null = null;
+      const t0 = Date.now();
       for (let attempt = 0; attempt < 2; attempt++) {
         const r = await fetch(DEEPSEEK_URL, { method: "POST", headers, body: payload });
         if (r.ok) { res = r; break; }
@@ -690,7 +722,11 @@ Deno.serve(async (req: Request) => {
         await r.body?.cancel().catch(() => {});
         if (attempt === 0) await new Promise((rs) => setTimeout(rs, 500));
       }
-      if (!res || !res.ok) { const detail = res ? await res.text() : "no response"; return { __err: json({ error: `deepseek ${res?.status ?? 0}`, detail }, 502) }; }
+      if (!res || !res.ok) {
+        const detail = res ? await res.text() : "no response";
+        recordHealth("model_http_error", Date.now() - t0, { status: res?.status ?? 0 });
+        return { __err: json({ error: `deepseek ${res?.status ?? 0}`, detail }, 502) };
+      }
       const data = await res.json();
       const choice = data?.choices?.[0];
       const raw = String(choice?.message?.content ?? "").trim();
@@ -718,8 +754,21 @@ Deno.serve(async (req: Request) => {
         finish_reason: choice?.finish_reason ?? null,
         model: data?.model ?? null,
       }));
-      if (!raw) return { __err: json({ error: "empty model output", ...why }, 502) };
-      try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw, ...why }, 502) }; }
+      if (!raw) {
+        recordHealth("empty_output", Date.now() - t0, why);
+        return { __err: json({ error: "empty model output", ...why }, 502) };
+      }
+      try {
+        const parsed = JSON.parse(raw);
+        recordHealth("ok", Date.now() - t0, {
+          cache_hit_tokens: data?.usage?.prompt_cache_hit_tokens ?? null,
+          cache_miss_tokens: data?.usage?.prompt_cache_miss_tokens ?? null,
+        });
+        return parsed;
+      } catch {
+        recordHealth("unparseable", Date.now() - t0, why);
+        return { __err: json({ error: "unparseable model output", raw, ...why }, 502) };
+      }
     };
 
     // Force the reply language via the system message (weighted far higher than a turn line) — the
@@ -734,7 +783,7 @@ Deno.serve(async (req: Request) => {
       : "";
     let out: any = await runModel(contents, langLine + notesBlock);
     if (out?.__err) return out.__err;
-    if (!out?.kind) return json({ error: "no classification" }, 502);
+    if (!out?.kind) { recordHealth("no_classification", 0); return json({ error: "no classification" }, 502); }
 
     // DETERMINISTIC LANGUAGE GUARD: detectLang already chose the correct reply language. If the reply
     // still came back in the WRONG language, regenerate ONCE with an even harder override. (user-reported.)
