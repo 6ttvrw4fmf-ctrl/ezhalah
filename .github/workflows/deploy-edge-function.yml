@@ -43,6 +43,7 @@ on:
           - agent
           - translit
           - delete-account
+          - devices
           - ingest-listings
           - alert-sink
       reason:
