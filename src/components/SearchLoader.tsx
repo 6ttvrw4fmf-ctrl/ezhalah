@@ -32,6 +32,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useResolvedTheme } from '@/lib/appearance';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
@@ -114,6 +115,10 @@ function PlatformPill({
   item: LoaderPlatform; index: number; total: number; rtl: boolean; reduced: boolean; name: string;
 }) {
   const h = useSharedValue(0);
+  // Theme-paired glow literals — interpolateColor parses colors, so no var() tokens here.
+  const darkTheme = useResolvedTheme() === 'dark';
+  const glowBg: [string, string] = darkTheme ? ['#1a241e', '#213529'] : ['#f4f9f6', '#e2f1e7'];
+  const glowLine: [string, string] = darkTheme ? ['#26312a', '#35543f'] : ['#e3ece6', '#b7dbc4'];
   useEffect(() => {
     if (reduced) { h.value = 0; return; }
     // Full sweep ≈3.5–4.5s regardless of roster size; rest keeps each pill's phase stable per loop.
@@ -131,8 +136,8 @@ function PlatformPill({
   const a = useAnimatedStyle(() => {
     const g = h.value;
     return {
-      backgroundColor: interpolateColor(g, [0, 1], ['#f4f9f6', '#e2f1e7']),
-      borderColor: interpolateColor(g, [0, 1], ['#e3ece6', '#b7dbc4']),
+      backgroundColor: interpolateColor(g, [0, 1], glowBg),
+      borderColor: interpolateColor(g, [0, 1], glowLine),
       transform: reduced ? [] : [{ scale: 1 + g * 0.02 }],
       // Soft green glow under the active pill — premium emphasis, not a flash. Same pattern as the
       // app's selection glow (ui.tsx): boxShadow string on web; shadow* + elevation on native
@@ -271,7 +276,7 @@ const s = StyleSheet.create({
   strip: { flexWrap: 'wrap', alignSelf: 'stretch', gap: 9, rowGap: 9 },
   pill: {
     alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 11, borderRadius: 14,
-    backgroundColor: '#f4f9f6', borderWidth: 1, borderColor: '#e3ece6',
+    backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine,
   },
   pillLogo: { width: 18, height: 18, borderRadius: 4, backgroundColor: colors.surface },
   pillName: { fontSize: 12.5, fontWeight: '600', color: colors.body, maxWidth: 150 },

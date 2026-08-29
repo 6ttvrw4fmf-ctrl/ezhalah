@@ -45,6 +45,14 @@
 // Run: node --experimental-strip-types scripts/verify-journey-seam-engineer-contracts.ts
 
 import { readFileSync, existsSync } from 'node:fs';
+import { join as __join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
+
+// "Is this guard actually wired in?" — asked of the test registry, which is what `npm test`
+// resolves its run set from (scripts/lib/testRegistry.ts). String-matching package.json used to
+// answer it; since the 201-command chain became one runner invocation, that match would read
+// "not wired" for every barrier in the suite.
+const REPO_ROOT = __join(import.meta.dirname, '..');
 
 const JOURNEY = 'docs/ops/JOURNEY_PERSISTENCE_ENGINEER.md';
 const SEAM = 'docs/ops/SYSTEMS_SEAM_ENGINEER.md';
@@ -471,9 +479,9 @@ check(agents.includes('docs/ops/ENGINEER_ROUTINES.md'),
   `as overriding; if it stops routing to the roster, nothing reaches these two contracts at all.`);
 
 // ── 11. Worthless if nothing runs it ──────────────────────────────────────────────────────────
-check(readFileSync('package.json', 'utf8').includes('verify-journey-seam-engineer-contracts'),
+check(npmTestRuns(REPO_ROOT, 'verify-journey-seam-engineer-contracts'),
   'npm test runs this guard',
-  'package.json no longer runs verify-journey-seam-engineer-contracts.ts — the guard is inert');
+  '`npm test` no longer runs verify-journey-seam-engineer-contracts.ts (see scripts/test-exclusions.txt) — the guard is inert');
 
 console.log(
   'journey-seam-contracts: #6 and #7 must keep granting completion, keep their limits narrow,\n' +

@@ -356,3 +356,43 @@ handed only a flattened id set, so it can't see file pairs or filename collision
 `supabase_migrations.schema_migrations.statements` (matched by `version`) into
 `supabase/migrations/`, commit, and open a PR — this itself touches `supabase/migrations/`, so per
 the daily/senior routine rules it stays OPEN for review, never self-merged by an autonomous run.
+
+# How `npm test` finds its checks (owner-approved, 2026-08-28)
+
+**To add a barrier, create `scripts/verify-my-thing.ts`. That is the whole procedure — do not edit
+`package.json`.** A check runs BECAUSE IT EXISTS on disk; `scripts/lib/testRegistry.ts` discovers
+every `scripts/verify-*.{ts,mjs}` and `scripts/run-tests.mjs` runs them in sorted order, stopping at
+the first failure.
+
+This replaced a single 201-command `&&` chain on one line of `package.json`. Every routine adding a
+barrier edited that exact line, so two sessions adding a barrier in the same window conflicted
+essentially always — PR #1196 took five conflict/rebase rounds, #1177 three. Discovery removes the
+shared line rather than shortening it, so there is nothing left to conflict over.
+
+Discovery fails in the safe direction: **a new file nobody thought about RUNS.** The failure mode is
+a loud red, never a barrier that silently never executes — the direction this repo has been burned
+by before (nine dark detectors reading as a clean bill of health, §"Read this first").
+
+Three rules keep that safe, all enforced by `scripts/verify-test-registry-complete.ts` (in the suite):
+
+1. **`scripts/test-baseline.txt` is a FLOOR, not a list.** Every check the old chain ran must still
+   be discovered and run. Removing a test therefore takes a deliberate, reviewed edit to the
+   baseline — it cannot happen as a side effect of a rename, a bad glob, or a merge resolution.
+   Adding a test needs no baseline edit at all.
+2. **Every exclusion names a reason AND a home that exists.** `scripts/test-exclusions.txt` is
+   `name | where it DOES run | why`, and the "where" must be a workflow file that exists, an npm
+   script that exists, or an explicit `manual`. Live/browser checks that need production belong
+   here; so does `verify-migration-drift-vs-production.ts`, which §"Migration drift guard" pins OUT
+   of `npm test` deliberately. The file cannot become a graveyard, and cannot retire a check by
+   naming nowhere.
+3. **Never prove your own wiring by string-matching `package.json`.** Ask
+   `npmTestRuns(root, 'verify-my-thing')` from `scripts/lib/testRegistry.ts`. Sixteen barriers used
+   `pkg.includes('verify-me')` against the mega line; that predicate is false for every check now,
+   and the naive repair (match `run-tests` instead) is worse — it would pass for every file
+   including one nothing runs, i.e. a wiring check that cannot fail. The registry guard rejects the
+   pattern outright. Reading `package.json` for a real reason (a dependency, a script name) is fine.
+
+The runner fails closed three ways: a non-zero child fails the run; a **signal-killed child**
+(`status === null` — timeout, OOM) is a failure, not a skip; and an **empty run set** is itself a
+failure. `npm run test:list` prints the resolved run order; `npm run test:all` runs every check
+instead of stopping at the first failure.

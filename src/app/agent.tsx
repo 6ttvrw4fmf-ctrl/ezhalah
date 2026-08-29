@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
+import { ForceLightTheme } from '@/theme/theme';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { isAppSessionStarted } from '@/lib/appSession';
 import { msgRTL } from '@/lib/textDirection';
@@ -529,7 +530,7 @@ export default function Agent() {
     fresh?: string;
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, saveTranscript, hydrateTranscript } = useApp();
+  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
   // Per-message "Load More" in flight, so a double-tap can't double-fetch the same page.
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -830,7 +831,8 @@ export default function Agent() {
     | { phase: 'loading' }
     // Opening state (owner 2026-08-16): after an eligible Filter search lands with > 25 results the
     // overlay opens on this calm invitation — the count, «خلّنا نحدد طلبك أكثر», one soft line —
-    // never a question. Begin is opt-in; «عرض النتائج» closes it (the results are already behind).
+    // never a question. Begin is opt-in; declining is the ✕ (the results are already behind) —
+    // the intro's «عرض النتائج» link was removed by the owner 2026-08-28, same day as the footer's.
     | { phase: 'intro'; total: number | null }
     | { phase: 'asking'; stepIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; initialKeys: string[]; progressCur: number; progressTotal: number }
     // The «digging through the market» beat (owner 2026-08-16): shown once after the interview
@@ -1935,8 +1937,9 @@ export default function Agent() {
     void presentGuided(0, token);
   };
 
-  // Intro handlers: «يلا نبدأ» opts in (or arms the flag if the plan is still resolving);
-  // «عرض النتائج» simply closes — the results are already rendered behind the overlay.
+  // Intro handlers: «يلا نبدأ» opts in (or arms the flag if the plan is still resolving); the ✕
+  // simply closes — the results are already rendered behind the overlay. (The intro's «عرض النتائج»
+  // link ran this same close handler until the owner removed it, 2026-08-28.)
   const onIntroBegin = () => {
     if (ageFlow?.phase !== 'intro') return;
     introBeginRef.current = true;
@@ -2023,10 +2026,9 @@ export default function Agent() {
     const back = ++ageFlowTokenRef.current;
     void presentGuided(stepIndex - 1, back);
   };
-  // «عرض النتائج» leaves the interview NOW — but through the same commit path, so the answer the
-  // user can currently see selected is recorded first. Otherwise the card's own «عرض N نتيجة» chip
-  // and the results it lands on would disagree.
-  const onAgeSkipAll = (keys: string[]) => { void commitGuidedStep(keys, true); };
+  // The in-question «عرض النتائج» early-exit was REMOVED by the owner (2026-08-28) — the question
+  // footer is متابعة / تخطي / رجوع only, so a round ends by walking its questions, by Back from
+  // question 1, or by ✕. commitGuidedStep(keys, true) still runs when the question pool exhausts.
   const onAgeClose = () => { ageFlowTokenRef.current++; setAgeFlow(null); };
 
   // Tap on a refine answer chip → lock that question's chips so it can't be answered twice, then run.
@@ -2039,6 +2041,10 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
+    // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
+    // card retires for the rest of this load (owner 2026-08-29). After the guard, so an empty or
+    // busy-refused submit is not a send.
+    dismissSignInCard();
     // The CHAT agent accepts English as an input convenience: it normalizes any English place to the
     // canonical ARABIC location, searches in Arabic, and shows every location/result in Arabic (never an
     // English place name). The agent_notes location rules enforce the Arabic-canonical output. The FILTER
@@ -2581,7 +2587,7 @@ export default function Agent() {
   // being stuck on the wrong page. (owner 2026-08-16: "still get stuck then it shows filter".)
   // In-app navigation is unaffected — the session is already started by then, so this is false.
   if (IS_WEB && !isAppSessionStarted()) {
-    return <View style={{ flex: 1, backgroundColor: colors.paper }} />;
+    return <ForceLightTheme><View style={{ flex: 1, backgroundColor: colors.paper }} /></ForceLightTheme>;
   }
 
   // Rotating examples show ONLY on the clean AI-search entry screen (owner brief §2): the chat holds
@@ -2594,6 +2600,10 @@ export default function Agent() {
     introLanding && !introInteracted && !typed && voiceState === 'idle' && !busy;
 
   return (
+    /* WHITE BY DESIGN (owner 2026-08-29): the Agent/chat experience keeps the light look
+       even when the app-wide appearance is dark — ForceLightTheme pins every token, hook and
+       hero asset inside to the light design. Dark mode continues on every other screen. */
+    <ForceLightTheme>
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
           Home) so the landmarks fill the whole frame — including the center, which used to wash out
@@ -3266,7 +3276,6 @@ export default function Agent() {
             <AdvancedIntroCard
               total={ageFlow.total}
               onBegin={onIntroBegin}
-              onShowResults={onIntroShowResults}
               onClose={onIntroShowResults}
             />
           ) : ageFlow.phase === 'mining' ? (
@@ -3288,13 +3297,13 @@ export default function Agent() {
               onConfirm={onAgeConfirm}
               onSkip={onAgeSkip}
               onBack={onAgeBack}
-              onSkipAll={onAgeSkipAll}
               onClose={onAgeClose}
             />
           )}
         </View>
       ) : null}
     </View>
+    </ForceLightTheme>
   );
 }
 
@@ -3345,7 +3354,7 @@ const s = StyleSheet.create({
     elevation: 2,
   },
   shareIconPressed: { opacity: 0.85 },
-  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.primary, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },
 
@@ -3400,7 +3409,7 @@ const s = StyleSheet.create({
   // The two actions under the «more than 25» message: primary (show all) + outline (refine). (user 2026-06-27.)
   mBtnRow: { flexWrap: 'wrap', gap: 8, marginTop: 2 },
   // minWidth + centered content: the text↔dots swap never changes the button's size (no layout shift).
-  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, backgroundColor: colors.primary, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transitionProperty: 'background-color', transitionDuration: '150ms' } as any) : {}) },
+  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, backgroundColor: colors.selFill, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transitionProperty: 'background-color', transitionDuration: '150ms' } as any) : {}) },
   mBtnPrimaryHover: { backgroundColor: colors.dark },
   mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: '#fff', lineHeight: 18 },
   mBtnAlt: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
@@ -3428,7 +3437,7 @@ const s = StyleSheet.create({
   promptLogo: { width: 56, height: 56, borderRadius: 28 },
   promptTitle: { fontSize: 17, fontWeight: '800', color: colors.ink, textAlign: 'center' },
   promptBody: { fontSize: 13.5, lineHeight: 19, color: colors.muted, textAlign: 'center' },
-  promptPrimary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.primary, borderRadius: 13, paddingVertical: 13, width: '100%', marginTop: 6 },
+  promptPrimary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.selFill, borderRadius: 13, paddingVertical: 13, width: '100%', marginTop: 6 },
   promptPrimaryTx: { color: '#fff', fontSize: 14.5, fontWeight: '700' },
   promptSecondary: { paddingVertical: 8 },
   promptSecondaryTx: { color: colors.muted, fontSize: 13.5, fontWeight: '600' },
@@ -3438,8 +3447,8 @@ const s = StyleSheet.create({
   // User message bubble — deliberately STRONGER light-green so it pops against the cream paper bg,
   // like the selected recent-chat row in the sidebar. Dark green text for contrast. (user request.)
   // User message bubble — soft light green pill, normal text weight (not heavy/black). (user request.)
-  userBubble: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: '#d7eede', borderColor: '#bedfc9', borderWidth: 1, borderRadius: 16, borderBottomRightRadius: 5, paddingVertical: 10, paddingHorizontal: 14, marginTop: 10 },
-  userText: { color: '#1d4a37', fontSize: 14, lineHeight: 19, fontWeight: '500' },
+  userBubble: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: colors.userBubble, borderColor: colors.tintLine, borderWidth: 1, borderRadius: 16, borderBottomRightRadius: 5, paddingVertical: 10, paddingHorizontal: 14, marginTop: 10 },
+  userText: { color: colors.userBubbleText, fontSize: 14, lineHeight: 19, fontWeight: '500' },
 
   status: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 2 },
   statusText: { fontSize: 12.5, color: colors.muted },
@@ -3470,7 +3479,7 @@ const s = StyleSheet.create({
   refineIc: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   refineT: { fontSize: 13, fontWeight: '700', color: colors.ink },
   refineS: { fontSize: 11, color: colors.body, marginTop: 1, lineHeight: 15 },
-  refineBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.primary, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 11 },
+  refineBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 11 },
   refineBtnTx: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   composerWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
@@ -3506,7 +3515,7 @@ const s = StyleSheet.create({
   // 16px and never zoom back out — the single worst mobile-web chat bug. overflowY:'auto' gives the
   // internal scroll once the textarea reaches COMPOSER_MAX_H. (owner 2026-08-19)
   input: { width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any } : {}) },
-  sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   sendBtnHover: { backgroundColor: colors.dark },
   sendDisabled: { opacity: 0.35 },
   // ── Voice recording composer (owner brief 2026-08-23) ──

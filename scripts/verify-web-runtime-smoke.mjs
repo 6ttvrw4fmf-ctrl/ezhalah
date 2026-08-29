@@ -173,6 +173,24 @@ const tap = async (txt) => {
   await page.mouse.click(box.x, box.y);
   await page.waitForTimeout(1200);
 };
+// The signed-out SIGN-IN CARD (owner 2026-08-29) floats at the side of the filter home for a
+// fresh logged-out load. It never blocks the journeys (no scrim, side slot, and it retires on the
+// journey's own first send) — but its phone form contains a «متابعة» button and its X shares the
+// auth-popup-close testid, so the journey closes it up front the way a real guest might, keeping
+// text-targeted taps unambiguous. The dismissal is in-memory: it survives client-side navigation
+// but a RELOAD brings the card back (by design) — safe here, because after any reload the next
+// journey's own send re-dismisses it before any «متابعة» tap happens.
+const dismissAuthPopup = async (windowMs = 4000) => {
+  const until = Date.now() + windowMs;
+  while (Date.now() < until && !(await page.$('[data-testid="auth-popup-close"]'))) {
+    await page.waitForTimeout(250);
+  }
+  const close = await page.$('[data-testid="auth-popup-close"]');
+  if (!close) return; // no card (dismissed already, signed in, or narrow viewport) — nothing to do
+  await close.click();
+  await page.waitForFunction(() => !document.querySelector('[data-testid="signin-card"]'), { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(250);
+};
 // For ASYNC-rendered suggestion rows only (run 32681927077: «حي النرجس» rendered after the fixed
 // 2200ms wait on a loaded runner and the strict tap threw). Polls for the row, then taps. Static
 // controls keep the strict tap — a missing static control is a real defect, not a render race.
@@ -215,19 +233,24 @@ const waitForBody = async (re, timeoutMs) => {
   return false;
 };
 const RESULT_COUNT = /لقينا|ما لقينا/;
-const inputs = () => page.evaluate(() => Array.from(document.querySelectorAll('input')).map((e) => e.value));
+// Input snapshots deliberately EXCLUDE the sign-in card's own phone field (owner 2026-08-29): the
+// card is a floating auth overlay, not filter state — and it legitimately disappears when a
+// journey's own send dismisses it, which would otherwise shift these snapshots mid-journey
+// (run 33224*: [E]/[F] "restores EXACTLY" failed on exactly that).
+const inputs = () => page.evaluate(() => Array.from(document.querySelectorAll('input')).filter((e) => !e.closest('[data-testid="signin-card"]')).map((e) => e.value));
 // Expo Router's Stack keeps a replaced screen's prior instance mounted-but-hidden rather than fully
 // unmounting it (confirmed pre-existing: the plain «تصفية» tab click — no Stop involved — produces
 // the identical doubled, half-hidden input set). Harmless and invisible to a real user; scoping to
 // `offsetParent !== null` reads exactly what the user actually sees, same as a human tester would.
 const visibleInputs = () => page.evaluate(() =>
-  Array.from(document.querySelectorAll('input')).filter((e) => e.offsetParent !== null).map((e) => e.value));
+  Array.from(document.querySelectorAll('input')).filter((e) => e.offsetParent !== null && !e.closest('[data-testid="signin-card"]')).map((e) => e.value));
 
 try {
   // ---- Journey A: the primary CTA must produce results, not a blank page. ----
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(5000);
   check('home renders', (await body()).includes('تصفية'));
+  await dismissAuthPopup(); // a real guest closes the sign-in prompt before searching
 
   // Buy+Rent combined multi-select (owner 2026-08-20): شراء/إيجار are now two independent toggles,
   // mirroring سنوي/شهري exactly — a single tap on the OFF button ADDS it (→ both), it never swaps.

@@ -71,5 +71,63 @@ assert('itp_support: true for Safari ITP',
 // 10. Component renders null (GIS renders its own UI)
 assert('Component returns null', src.includes('return null'));
 
+// ── 2026-08-28 (owner: Perplexity-style instant sign-in) ──────────────────────────────────────────
+
+// 11. Arabic-first: the prompt's OWN language (not just Ezhalah's chrome around it) must be driven
+// by `hl`, Google's documented lever — never left to the visitor's Google-account/browser locale.
+assert('GIS script URL carries a locale-driven hl param (Arabic-first prompt)',
+  /gisSrc\s*=\s*\(hl:/.test(src) && /gsi\/client\?hl=\$\{hl\}/.test(src) && src.includes('useI18n'));
+
+// 12. An EXCHANGE failure (Google's half worked, ours didn't) must fall back to the normal sign-in
+// UI, not strand the visitor having just tapped "Continue as ___" with nothing visibly happening.
+// Both failure sites (signInWithIdToken returning an error, and the call throwing) must recover.
+// Each branch is isolated to its OWN block — sliced between its opening brace and the boundary that
+// closes it (`else log(...)` for the if-branch, the callback's closing `},` for the catch) — a
+// non-greedy scan across the whole exchange region would happily credit the if-branch with the
+// catch-branch's openAuth() call two lines further down, and vice versa.
+const errorBranch = src.slice(src.indexOf('if (error) {'), src.indexOf("else log('signed in via One Tap')"));
+const catchBranch = src.slice(src.indexOf('} catch (e) {'), src.indexOf('},\n          // auto_select'));
+assert('a failed token exchange opens the normal auth sheet (openAuth) on the `error` path',
+  errorBranch.includes('openAuth();'));
+assert('a THROWN exchange also opens the normal auth sheet, not just a returned `error`',
+  catchBranch.includes('openAuth();'));
+assert('openAuth is read from the store (useApp), not invented locally',
+  /const \{ user, openAuth \} = useApp\(\)/.test(src));
+
 console.log(`\n${pass}/${pass + fail} passed`);
+
+// ── MUTATION PROOF (2026-08-28) ─────────────────────────────────────────────────────────────────
+console.log('\n  mutation proof — each new guard must FAIL on its own defect\n');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  ✓ catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  ✗ BLIND to: ${label}`);
+};
+const mut = (s: string, from: string, to: string) => {
+  if (!s.includes(from)) throw new Error(`mutation anchor missing: ${from}`);
+  return s.replace(from, to);
+};
+
+mustCatch('reverting the GIS url back to a hardcoded, non-localised endpoint',
+  !(() => {
+    const b = mut(src, 'gsi/client?hl=${hl}', 'gsi/client');
+    return /gisSrc\s*=\s*\(hl:/.test(b) && /gsi\/client\?hl=\$\{hl\}/.test(b) && b.includes('useI18n');
+  })());
+mustCatch('the exchange-error branch losing its openAuth() fallback',
+  (() => {
+    const b = mut(src, '                openAuth();\n              }\n              else', '              }\n              else');
+    const errBranch = b.slice(b.indexOf('if (error) {'), b.indexOf("else log('signed in via One Tap')"));
+    return !errBranch.includes('openAuth();');
+  })());
+mustCatch('the thrown-exception branch losing its openAuth() fallback',
+  (() => {
+    const b = mut(src,
+      "diag.exchangeError = String(e); log('token exchange threw', String(e));\n              openAuth();",
+      "diag.exchangeError = String(e); log('token exchange threw', String(e));");
+    const catchBranch = b.slice(b.indexOf('} catch (e) {'), b.indexOf('},\n          // auto_select'));
+    return !catchBranch.includes('openAuth();');
+  })());
+
+if (mutFail > 0) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (fail > 0) process.exit(1);

@@ -411,7 +411,6 @@ const AR: Record<string, string> = {
   'No preference': 'لا يهمني',
   // Advanced Filter Design Contract (2026-07-20): generic footer + subtitle shared by every question.
   'Show {count} results': 'عرض {count} نتيجة',
-  'Show results': 'عرض النتائج',
   'Results update as you choose': 'تُحدَّث النتائج مع كل اختيار',
   // Card redesign (owner 2026-07-21): numeric question progress + remaining-count skip link, and the
   // RNPL question's pay-monthly-not-yearly subtitle (neutral, descriptive — never advice).
@@ -1059,6 +1058,8 @@ const AR: Record<string, string> = {
   'No chat with that name': 'ما لقينا محادثة بهذا الاسم',
   'About Us': 'من نحن',
   'Sign up / Log in': 'إنشاء حساب / تسجيل الدخول',
+  // Desktop sign-in dock subtitle (owner 2026-08-26) — why an account is worth it, in one line.
+  'Save your searches and come back to them anytime.': 'احفظ بحثك وارجع له في أي وقت.',
   'Get more. Sign up free.': 'احصل على المزيد. سجل مجاناً.',
   'Sign up to keep searching': 'سجّل للاستمرار في البحث',
   'Get more with a free account': 'احصل على المزيد بحساب مجاني',
@@ -1074,6 +1075,11 @@ const AR: Record<string, string> = {
   'Star': 'أضف إلى المفضلة',
   'Unstar': 'أزل من المفضلة',
   'Delete': 'حذف',
+  // Sidebar delete-confirmation (owner 2026-08-28) — the owner's exact Arabic copy, split into
+  // title + body for the dialog layout; together they read as his one message verbatim.
+  'Delete this conversation?': 'هل أنت متأكد من حذف هذه المحادثة؟',
+  'It will be permanently deleted and cannot be recovered.': 'سيتم حذفها نهائيًا ولا يمكن استرجاعها.',
+  'Delete permanently': 'حذف نهائي',
   'Rename': 'إعادة تسمية',
   // Press-hold-drag reorder (owner 2026-08-24) — accessibility strings, Arabic-first.
   'Hold to reorder the conversation': 'اضغط مطولًا لإعادة ترتيب المحادثة',
@@ -1104,7 +1110,8 @@ const AR: Record<string, string> = {
   'Saved': 'تم الحفظ',
   'Name saved': 'تم حفظ الاسم',
   'Log out?': 'تسجيل الخروج؟',
-  'Are you sure you want to log out?': 'هل أنت متأكد أنك تريد تسجيل الخروج؟',
+  // Owner's exact logout-confirmation wording (2026-08-28) — the centered popup copy, verbatim.
+  'Are you sure you want to log out?': 'هل أنت متأكد من رغبتك في تسجيل الخروج؟',
   'Danger zone': 'منطقة الخطر',
   'Delete my account': 'حذف حسابي',
   'Log out': 'تسجيل الخروج',
@@ -1122,6 +1129,19 @@ const AR: Record<string, string> = {
     'يؤدي هذا إلى إزالة حسابك وعمليات بحثك المحفوظة وسجل المحادثات نهائياً. لا يمكن التراجع عن ذلك.',
   "Note: to change your {provider} account, you'll need to delete this account and sign up again with the new one.":
     'ملاحظة: لتغيير حساب {provider}، عليك حذف هذا الحساب وإنشاء حساب جديد بالحساب الآخر.',
+
+  // Sidebar-anchored account menu (owner 2026-08-28). Appearance/Language/Help/Account labels —
+  // the compact panel that replaced the centered Settings modal.
+  'Appearance': 'المظهر',
+  'System': 'النظام',
+  'Light': 'فاتح',
+  'Dark': 'داكن',
+  // ('Language' already lives in the general chrome section above.)
+  'Help': 'المساعدة',
+  'Manage account': 'إدارة الحساب',
+  'Account menu': 'قائمة الحساب',
+  // The Arabic-only contract (i18n setLocale guard): English is listed but not selectable.
+  'Not available yet': 'غير متاح بعد',
 
   // About Us — the long-form «من نحن» copy below is the OWNER'S EXACT wording (2026-07-09); never
   // rewrite or shorten it (still referenced by src/app/about.tsx). The modal now uses the compact

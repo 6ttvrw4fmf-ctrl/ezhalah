@@ -8,10 +8,12 @@
 // search panel showed «(سنوي)».
 //
 // The fix, three layers this guard pins:
-//   1. edge contract: rent_period ∈ {"", "monthly", "annual"} in prompt OUTPUT + Gemini SCHEMA
-//      (+ required), set ONLY on the user's explicit wording («الشهري»/«بالشهر»/«السنوي»/«بالسنة»).
-//      Deploy lesson (v94 outage, 2026-08-03): Gemini's structured-output validator REJECTS an
-//      empty string inside an enum — the unstated value must be "none", mirroring pricing_basis.
+//   1. edge contract: rent_period ∈ {"none", "monthly", "annual"} in prompt OUTPUT + the
+//      JSON_SHAPE_HINT sent to the model as part of the SYSTEM message (DeepSeek has no
+//      responseSchema equivalent — the shape hint is how we pin the closed value set on the wire).
+//      Set ONLY on the user's explicit wording («الشهري»/«بالشهر»/«السنوي»/«بالسنة»).
+//      Deploy lesson (v94 outage, 2026-08-03, under the prior Gemini schema): an empty string inside
+//      the enum caused a validator reject — the unstated value stays "none" for parity with pricing_basis.
 //   2. edge mapping: query.rentPeriod from out.rent_period, falling back to a monthly_rent/
 //      annual_rent BUDGET basis (a stated budget period is an explicit period); Rent-only;
 //      unstated stays undefined (client Filter-parity default).
@@ -40,10 +42,13 @@ check('prompt documents rent_period as the rental-POOL filter, separate from pri
   edge.includes('rent_period: "monthly" | "annual" | "none"') && edge.includes('SEPARATE from pricing_basis'));
 check('prompt covers the period-only no-budget case («شقق للإيجار الشهري في الرياض»)',
   edge.includes('period-only request with no budget'));
-check('SCHEMA declares rent_period with the closed enum (Gemini rejects an empty enum member — "none", never "")',
-  /rent_period:\s*\{\s*type:\s*"STRING",\s*enum:\s*\["none"\s*,\s*"monthly"\s*,\s*"annual"\]\s*\}/.test(edge));
-check('SCHEMA required includes rent_period',
-  /required:\s*\[[^\]]*"rent_period"[^\]]*\]/.test(edge));
+// Under DeepSeek there is no structured-output SCHEMA — the model's key/value contract is pinned
+// via JSON_SHAPE_HINT text appended to the SYSTEM message. Check that same closed set is declared
+// there. The unstated value stays "none" for parity with pricing_basis.
+check('JSON_SHAPE_HINT declares rent_period with the closed set {none, monthly, annual}',
+  /"rent_period"\s*\(one of\s*"none"\|"monthly"\|"annual"\)/.test(edge));
+check('JSON_SHAPE_HINT is what the model actually sees (part of the SYSTEM message)',
+  /content:\s*SYSTEM\s*\+\s*sysExtra\s*\+\s*JSON_SHAPE_HINT/.test(edge));
 
 // ── 2. edge mapping ──
 check('edge maps out.rent_period with monthly_rent/annual_rent budget-basis fallback',

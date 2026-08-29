@@ -13,6 +13,8 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { useThemePalette } from '@/lib/appearance';
+import { alpha0 } from '@/theme/palette';
 import { colors, radius } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
@@ -156,6 +158,8 @@ export function Heartbeat({
 
 // Rent / Buy segmented control. Option values stay in English; only the label is localized.
 function SegButton({ label, on, onPress, icon }: { label: string; on: boolean; onPress: () => void; icon?: any }) {
+  // Literal palette: interpolateColor PARSES colors and cannot digest the var() tokens (theming).
+  const pal = useThemePalette();
   const p = useSharedValue(on ? 1 : 0);
   const press = useSharedValue(0);
   const focus = useSharedValue(0);
@@ -173,7 +177,7 @@ function SegButton({ label, on, onPress, icon }: { label: string; on: boolean; o
     wasOn.current = on;
   }, [on, p]);
   const box = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColor(p.value, [0, 1], ['rgba(47,114,71,0)', colors.primary]),
+    backgroundColor: interpolateColor(p.value, [0, 1], [alpha0(pal.selFill), pal.selFill]),
     transform: [{ scale: 1 - press.value * 0.05 + pop.value }],
     // web keyboard-focus ring (a11y) + selection glow bloom; native uses shadow* props for the same glow
     ...(Platform.OS === 'web'
@@ -181,8 +185,8 @@ function SegButton({ label, on, onPress, icon }: { label: string; on: boolean; o
           boxShadow: `0px ${glow.value * 5}px ${glow.value * 14}px rgba(20,80,45,${glow.value * 0.28})` }
       : { shadowColor: '#14502d', shadowOpacity: glow.value * 0.28, shadowRadius: glow.value * 14, shadowOffset: { width: 0, height: glow.value * 5 }, elevation: glow.value * 5 }),
   }));
-  const txt = useAnimatedStyle(() => ({ color: interpolateColor(p.value, [0, 1], [colors.muted, '#ffffff']) }));
-  const tint = useAnimatedStyle(() => ({ tintColor: interpolateColor(p.value, [0, 1], [colors.muted, '#ffffff']) }));
+  const txt = useAnimatedStyle(() => ({ color: interpolateColor(p.value, [0, 1], [pal.muted, pal.onFill]) }));
+  const tint = useAnimatedStyle(() => ({ tintColor: interpolateColor(p.value, [0, 1], [pal.muted, pal.onFill]) }));
   return (
     <AnimatedPressable
       style={[s.segBtn, box]}
@@ -211,6 +215,8 @@ export function Segmented({ options, value, onChange, icons }: { options: string
 
 // Tappable option box (category / type / detail) — selection fades in, press dips slightly.
 export function OptionBox({ label, selected, onPress, style, img }: { label: string; selected: boolean; onPress: () => void; style?: ViewStyle; img?: any }) {
+  // Literal palette — same var()-cannot-be-interpolated reason as SegButton above.
+  const pal = useThemePalette();
   const p = useSharedValue(selected ? 1 : 0);
   const press = useSharedValue(0);
   const hover = useSharedValue(0);
@@ -229,9 +235,9 @@ export function OptionBox({ label, selected, onPress, style, img }: { label: str
     wasSel.current = selected;
   }, [selected, p]);
   const box = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColor(p.value, [0, 1], [colors.surface, colors.primary]),
+    backgroundColor: interpolateColor(p.value, [0, 1], [pal.surface, pal.selFill]),
     // hover (web pointer) tints the border toward primary while unselected — subtle "tappable" cue
-    borderColor: interpolateColor(Math.max(p.value, hover.value * (1 - p.value)), [0, 1], [colors.pickLine, colors.primary]),
+    borderColor: interpolateColor(Math.max(p.value, hover.value * (1 - p.value)), [0, 1], [pal.pickLine, pal.primary]),
     transform: [{ scale: 1 - press.value * 0.045 + pop.value }],
     // web keyboard-focus ring (a11y) + selection glow bloom; native uses shadow* props for the same glow
     ...(Platform.OS === 'web'
@@ -239,8 +245,8 @@ export function OptionBox({ label, selected, onPress, style, img }: { label: str
           boxShadow: `0px ${glow.value * 7}px ${glow.value * 16}px rgba(20,80,45,${glow.value * 0.30})` }
       : { shadowColor: '#14502d', shadowOpacity: glow.value * 0.30, shadowRadius: glow.value * 16, shadowOffset: { width: 0, height: glow.value * 7 }, elevation: glow.value * 6 }),
   }));
-  const txt = useAnimatedStyle(() => ({ color: interpolateColor(p.value, [0, 1], [colors.ink, '#ffffff']) }));
-  const tint = useAnimatedStyle(() => ({ tintColor: interpolateColor(p.value, [0, 1], [colors.ink, '#ffffff']) }));
+  const txt = useAnimatedStyle(() => ({ color: interpolateColor(p.value, [0, 1], [pal.ink, pal.onFill]) }));
+  const tint = useAnimatedStyle(() => ({ tintColor: interpolateColor(p.value, [0, 1], [pal.ink, pal.onFill]) }));
   return (
     <AnimatedPressable
       onPress={onPress}

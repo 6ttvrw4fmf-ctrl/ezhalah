@@ -18,6 +18,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const GATE = join(REPO, 'scripts/safe-pr-merge.ts');
@@ -84,9 +85,11 @@ check(`no merge path outside the sanctioned gate (found: ${offenders.join(', ') 
   offenders.length === 0);
 
 // ── 5. WIRING: both barriers must actually run ───────────────────────────────────────────────────
-const pkg = readFileSync(join(REPO, 'package.json'), 'utf8');
-check('verify-merge-gate.ts is wired into npm test', /verify-merge-gate\.ts/.test(pkg));
-check('verify-merge-gate-transport.ts is wired into npm test', /verify-merge-gate-transport\.ts/.test(pkg));
+// Asked of the test registry — `npm test` resolves its run set from the filesystem via
+// scripts/lib/testRegistry.ts, so string-matching package.json would now answer "not wired" for
+// every barrier in the suite (2026-08-28).
+check('verify-merge-gate.ts is wired into npm test', npmTestRuns(REPO, 'verify-merge-gate'));
+check('verify-merge-gate-transport.ts is wired into npm test', npmTestRuns(REPO, 'verify-merge-gate-transport'));
 
 // ── 6. MUTATION PROOF — each guard must FAIL on its own defect ───────────────────────────────────
 console.log('\n  mutation proof — each guard must FAIL on its own defect\n');
@@ -118,9 +121,11 @@ const noReexec = `const prNumber = process.argv[2];`;
 mustCatch('an entrypoint that drops the proxy re-exec (gate would 401 on every PR in a cloud session)',
   !/NODE_USE_ENV_PROXY/.test(noReexec));
 
-const unwiredPkg = `"test": "node scripts/verify-something-else.ts"`;
-mustCatch('a package.json that stops running the transport barrier',
-  !/verify-merge-gate-transport\.ts/.test(unwiredPkg));
+// The wiring check above is only worth something if it can say no. Prove it against a name the
+// registry genuinely does not run — a synthetic package.json string proved nothing once the run set
+// stopped living in package.json.
+mustCatch('a run set that stops running the transport barrier',
+  !npmTestRuns(REPO, 'verify-merge-gate-transport-that-does-not-exist'));
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }

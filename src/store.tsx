@@ -2,16 +2,18 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } from '@/i18n';
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
-import { HOME_DEFAULT_QUERY } from '@/lib/searchDefaults';
+import { HOME_DEFAULT_QUERY, migrateGroups } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
 import { applyMove, applyStarMove } from '@/lib/sidebarReorder';
 import { autoTitleForQuery, autoTitleForPrompt, canAutoRetitle, type TitleSource } from '@/lib/chatTitle';
+import { dismissalOutlivesTransition } from '@/lib/authPopupBehavior';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
 import { resolveLocation, ensureLocationIndex } from '@/data/locations';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
 import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
+import { setThemeAuthState, resetThemeForSignOut } from '@/theme/theme';
 import { restoreChat, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib/chatTranscript';
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, type ChatMeta } from '@/lib/chatSync';
 import { mergeOne, pickTranscript, withFreshTranscript } from '@/lib/chatMerge';
@@ -132,6 +134,11 @@ type AppState = {
   recordChatTurn: (text: string) => string | null;
   // Which history chat is currently open, so the sidebar can highlight it (light green) and the user
   // always knows which conversation they're in. `null` on Home / New Chat (no chat selected).
+  // TRUE once the initial Supabase session restore has settled. Anything that renders for
+  // SIGNED-OUT users must gate on this as well as `user`: during restore `user` is null, so a
+  // `!user` test alone briefly reads a logged-in visitor as logged out (the flash GoogleOneTap
+  // documents at its own gate). Already in this provider's memo deps — only the surface is new.
+  authChecked: boolean;
   activeChatId: string | null;
   setActiveChat: (id: string | null) => void;
   // Support / About Us are shown as in-app popups (centered dialog over a dimmed page) rather than
@@ -145,6 +152,15 @@ type AppState = {
   authOpen: boolean;
   openAuth: () => void;
   closeAuth: () => void;
+  // Read-only exposure for the popup's auto-show gate (shouldAutoShowAuthPopup, owner 2026-08-28):
+  // null = the hasSeenIntro flag is still being read, false = the intro is pending/playing, true =
+  // done. The popup may only auto-raise on `true`, so it never covers the intro film.
+  introSeen: boolean | null;
+  // The small sign-in card's in-memory dismissal (owner 2026-08-29): true once this load's
+  // visitor sent something (Filter search / Agent message) or closed the card. Never persisted —
+  // a refresh brings the card back; an auth transition resets it (epoch effect above).
+  signInCardDismissed: boolean;
+  dismissSignInCard: () => void;
   // First-run cinematic intro (the eagle clip). Shows ONCE, only for a brand-new logged-out
   // visitor; persisted via a `hasSeenIntro` flag so it never replays. `showIntro` waits until both
   // the saved flag is read AND the auth session is resolved, so it never flashes for a returning
@@ -236,6 +252,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // True once we know the auth state (session restored or confirmed absent), so the intro decision
   // doesn't race the Supabase session lookup and flash for a returning signed-in user.
   const [authChecked, setAuthChecked] = useState(false);
+  // AUTH-GATED APPEARANCE (owner 2026-08-28): mirror auth into the theme system once it is KNOWN.
+  // Adoption enables the stored preference; a COMPLETED signed-in→signed-out transition (incl.
+  // external revocation observed via onAuthStateChange) resets to Light and clears the stored
+  // preference. Boot-as-guest is NOT a transition — nothing to clear, the gate already gives Light.
+  const themeWasSignedInRef = useRef(false);
+  useEffect(() => {
+    if (!authChecked) return;
+    const is = !!user;
+    if (is) setThemeAuthState(true);
+    else if (themeWasSignedInRef.current) resetThemeForSignOut();
+    else setThemeAuthState(false);
+    themeWasSignedInRef.current = is;
+  }, [authChecked, user]);
+
+  // THE SMALL SIGN-IN CARD's dismissal (owner 2026-08-29): IN-MEMORY ONLY, deliberately never
+  // persisted — «it goes away once the user sends something» and comes back «when the user
+  // refresh». Set by the two send sites (Filter onSearch, Agent send — voice funnels into it) and
+  // by the card's own X; reset by construction on any fresh load.
+  const [signInCardDismissed, setSignInCardDismissed] = useState(false);
+
+  // AUTH EPOCH (owner 2026-08-29, #1214): a dismissal lives exactly as long as one continuous
+  // signed-in-or-out stretch. This effect is the ONE writer that ends an epoch: on every change of
+  // the signed-in boolean — sign-in, sign-out, account deletion, or a session dying in
+  // onAuthStateChange — the stale dismissal is cleared, so the next logged-out state is the
+  // canonical one (card eligible) instead of inheriting a flag stamped in a previous auth life.
+  // `null` start skips the mount pass: state is fresh on mount anyway.
+  const prevSignedInRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    const now = !!user;
+    const prev = prevSignedInRef.current;
+    prevSignedInRef.current = now;
+    if (prev === null || dismissalOutlivesTransition(prev, now)) return;
+    setSignInCardDismissed(false);
+  }, [user]);
 
   // Backfill the missing-script spelling of the user's name (once per name) so both stay synced.
   useEffect(() => {
@@ -327,7 +377,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (historyLoadedRef.current !== key) return;
         try {
           const saved = JSON.parse(v);
-          if (Array.isArray(saved)) setHistory(saved as HistoryItem[]);
+          // Normalize every entry's query at this ONE hydration boundary: an entry written by an
+          // older build may lack fields added since (a missing priceInput crashed filterToChat when
+          // the chat was reopened from the sidebar — 2026-08-23) or carry the legacy typeGroup
+          // scalar. migrateGroups fills only the required strings whose absence crashes — it never
+          // invents a value that would change what the replayed search does.
+          if (Array.isArray(saved)) {
+            setHistory((saved as HistoryItem[]).map((h) => ({ ...h, query: migrateGroups({ ...h.query }) })));
+          }
         } catch {}
       })
       .catch(() => {});
@@ -580,6 +637,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // history, search count, the open chat, and any parked message. This account's OWN saved
         // history (under its per-user key) is intentionally KEPT — a later re-login restores it
         // (restore flag reset so it can reload). The legacy shared key is purged so it can't leak.
+        // Appearance resets FIRST and synchronously (same React batch as setUser) so the signed-out
+        // UI lands already-Light — never a half-dark frame (owner 2026-08-28).
+        resetThemeForSignOut();
         setUser(null);
         setHistory([]);
         setSearchCount(0);
@@ -618,6 +678,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // this function returns. (owner report 2026-08-17.)
         removeKeysSync(keys);
         AsyncStorage.multiRemove(keys).catch(() => {});
+        // Appearance: the deletion COMPLETED (server confirmed above — never on dialog-open, never
+        // on إلغاء, never on a failed delete): back to Light, stored preference cleared. (owner
+        // 2026-08-28)
+        resetThemeForSignOut();
         setUser(null);
         setHistory([]);
         setSearchCount(0);
@@ -885,6 +949,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (activeChatId !== id) setActiveChatId(id);
         return id;
       },
+      authChecked,
       activeChatId,
       setActiveChat: (id) => setActiveChatId(id),
       modal,
@@ -892,14 +957,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       closeModal: () => setModal(null),
       authOpen,
       openAuth: () => setAuthOpen(true),
+      // Plain close again (2026-08-29): the centered modal no longer auto-raises, so a close
+      // needs no memory — reopening is always an explicit control away.
       closeAuth: () => setAuthOpen(false),
+      signInCardDismissed,
+      dismissSignInCard: () => setSignInCardDismissed(true),
+      introSeen,
       showIntro: introSeen === false && authChecked && !user,
       dismissIntro: () => {
         setIntroSeen(true); // session-only hide so it doesn't re-loop after the dissolve
         if (!INTRO_DEMO_MODE) AsyncStorage.setItem('hasSeenIntro', '1').catch(() => {});
       },
     }),
-    [query, dataSource, user, searchCount, history, modal, authOpen, introSeen, authChecked, pendingMessage, activeChatId, setActiveChatId],
+    [query, dataSource, user, searchCount, history, modal, authOpen, introSeen, signInCardDismissed, authChecked, pendingMessage, activeChatId, setActiveChatId],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
