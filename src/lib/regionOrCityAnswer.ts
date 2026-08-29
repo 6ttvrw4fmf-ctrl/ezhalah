@@ -72,3 +72,65 @@ export function scopeNamedForTwin(text: string | undefined | null, twin: string 
   if (city === region) return null;
   return city ? 'city' : 'region';
 }
+
+// ── The answer to the PLAIN-CITY question «تقصد مدينة X كاملة، أو حي معيّن؟» ─────────────────────
+//
+// DEFECT (found live on production 2026-08-29, routine #5): answering that question with the phrase
+// it invites — «المدينة كاملة» ("the whole city") — searched the MADINAH REGION instead of the city
+// the app had just named. Measured the same minute against ezhalah-app.vercel.app:
+//
+//   ask «أبغى شقة للإيجار السنوي في الدمام» → app asks «تقصد مدينة الدمام كاملة، أو حي معيّن؟»
+//   answer «المدينة كاملة» → p_cities = [المدينة المنورة, ينبع, العلا, أملج, بدر, الحناكية, خيبر,
+//                                        مهد الذهب]  ·  1,155 results
+//   answer «كامل الدمام»  → p_cities = [الدمام]        ·  2,600 results
+//
+// Same wrong 8-city fan-out for جدة and أبها, and for the phrasing «المدينة كلها». The generic noun
+// «المدينة» in the user's answer is re-parsed as the CITY NAME المدينة المنورة, and the city already
+// under discussion is silently discarded — so every downstream surface (results, the Advanced Filter
+// questions and their counts, Trending) is computed on a city 1,200 km from the one the user asked
+// about. It is the EXACT-LOCATION-ONLY violation the twin fix above exists to prevent, arriving
+// through the one branch that fix never covered: `pendingScopeRef` is only ever set for region/city
+// TWIN names, so for a plain city like الدمام the app remembered nothing about what it had just asked.
+//
+// The predicate below is deliberately STRICT — it fires only on an answer that carries NO place
+// information of its own. Every token must be generic scope vocabulary («المدينة», «كاملة», «كلها»,
+// «الحي», a bare yes). The moment anything else survives the strip — «كامل الدمام», «حي الشاطئ» —
+// this returns false and the model's own parse is left alone. It can therefore never overwrite a
+// city the user actually named; it only refuses to FORGET the one the app itself just asked about.
+const WHOLE_AREA_TOKEN = /كامل|كاملة|كلها|كله|بالكامل|\bwhole\b|\ball\b|\bentire\b/iu;
+// Generic scope vocabulary, affirmations and filler. Stripped in full before asking "did the user
+// name a place?". «المدينة»/«المنطقة» are here BECAUSE they are the words that collide with the real
+// place names المدينة المنورة and المنطقة الشرقية — that collision is the whole defect.
+const GENERIC_SCOPE_WORDS = [
+  'المدينة', 'مدينة', 'المنطقة', 'منطقة', 'البلد', 'الحي', 'حي', 'الأحياء', 'الاحياء',
+  'كامل', 'كاملة', 'كامله', 'بالكامل', 'كلها', 'كله', 'كل', 'الكل', 'جميع', 'كافة',
+  'نعم', 'أيوه', 'ايوه', 'ايه', 'أي', 'اي', 'تمام', 'اوك', 'أوك', 'طيب', 'زين', 'ابغى', 'أبغى',
+  'ابي', 'أبي', 'بحث', 'ابحث', 'في', 'من', 'على', 'يا',
+  'whole', 'entire', 'all', 'city', 'the', 'of', 'yes', 'please', 'ok',
+];
+
+/**
+ * True when `text` answers «تقصد مدينة X كاملة، أو حي معيّن؟» with a GENERIC whole-area affirmation
+ * that names no place of its own — «المدينة كاملة», «المدينة كلها», «كاملة», «كل المدينة», «الكل».
+ *
+ * The caller must only consult this when the app ITSELF asked that question on the previous turn
+ * (the same "because we asked" rule scopeNamedForTwin's doc comment states). On a true result the
+ * caller keeps the city it asked about; it must never derive a NEW city from this text, because by
+ * construction there is none in it.
+ *
+ * Returns false for anything carrying its own place information, so a user who answers with a real
+ * location keeps their own words.
+ */
+export function isGenericWholeAreaAnswer(text: string | undefined | null): boolean {
+  const s = (text ?? '').trim();
+  if (!s) return false;
+  // Tokenise on anything that is not a letter or digit, so punctuation and «،» never survive.
+  const tokens = s.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (!tokens.length) return false;
+  const generic = new Set(GENERIC_SCOPE_WORDS.map((w) => w.toLowerCase()));
+  // Every token must be generic vocabulary — one real word left over and this is not a bare answer.
+  if (!tokens.every((tk) => generic.has(tk.toLowerCase()))) return false;
+  // …and it must actually AFFIRM the whole area, or name the scope we offered. A message made only
+  // of filler («في من») is not an answer to anything.
+  return WHOLE_AREA_TOKEN.test(s) || SAYS_CITY.test(s) || /(?<![\p{L}\p{N}])المدينة(?![\p{L}\p{N}])/u.test(s);
+}
