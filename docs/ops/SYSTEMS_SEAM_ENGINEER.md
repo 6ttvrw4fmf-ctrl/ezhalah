@@ -145,10 +145,34 @@ more-timid wording anywhere, including in this file.
   delivers in ~30s (alert 1070, 2026-08-28 21:49), which proves the *workflow* is fast and that the
   *scheduler* is the defect — do not mistake a manual run for evidence the SLO is met.
 
-  **Therefore delivery must be pushed from inside the database**, where cadence is ours: `pg_cron`
-  can run every minute and `pg_net` can POST. That is what `mon_dispatch_p0_fast()` and the
-  `mon-p0-fast-dispatch` job exist for, with `mon_detect_p0_delivery_sla()` enforcing the 5 minutes
-  and `ops_p0_delivery` holding the receipts. **The receipts are a separate ledger on purpose:**
+  **Therefore delivery must be pushed from inside the database**, where cadence is ours: `pg_net`
+  can POST and `pg_cron` controls when. That is what `mon_dispatch_p0_fast()` exists for, with
+  `mon_detect_p0_delivery_sla()` enforcing the 5 minutes and `ops_p0_delivery` holding the receipts.
+
+  **It is NOT a per-minute job, and must not become one again (2026-08-28/29).** The original
+  `mon-p0-fast-dispatch` job was scheduled `* * * * *` and
+  `mon_detect_cron_minute_collision()` raised P1 1073 naming it in ELEVEN collisions, including the
+  `:00` slot reserved for the matview refresh; only two minute-slots in the whole hour are free (24
+  and 42), and gaps of 18/42 min cannot serve a 5-minute SLO. So `20260828231336` **unscheduled it**
+  and chained the fast lane onto the `mon-detectors-and-dispatch` command instead — sound, because
+  every P0 is born in that sweep (re-verified 2026-08-29: 51 of 56 P0s ever raised landed on an
+  exact cron boundary; the `:20`/`:50` ones only look off-slot because the sweep itself ran at
+  `:20`/`:50` before 2026-08-10). **`scripts/verify-p0-delivery-sla.ts` now asserts the per-minute
+  job is GONE** — do not re-create it.
+
+  **What that chaining COSTS, and what watches it (2026-08-29).** `alert_event.created_at` defaults
+  to `now()` = **transaction start**, so a P0's 5-minute clock starts when the *sweep* starts and the
+  sweep's whole runtime is spent before dispatch begins — sweep duration is now the dominant term in
+  delivery latency. Measured: the 04:29 sweep ran 185.3 s and its P0s were filed at 204.0 s (~19 s of
+  overhead past the sweep); the slowest sweep that day was 332.1 s → 351 s forecast, **a breach**, and
+  5 of 48 sweeps would have breached. `mon_detect_detector_sweep_budget()` LIMB 3 caught **none** of
+  them — it measures the same runtime against `statement_timeout` (900 s) and reads a comfortable
+  37 %. **LIMB 4 (`detector_sweep_vs_p0_slo`) exists to measure the sweep against the 300 s budget it
+  actually gates.** If it raises, make the SWEEP faster or ask the owner for a minute-slot — never
+  widen the SLO. And because pg_cron runs the whole command in ONE transaction, a sweep that hits
+  `statement_timeout` rolls the trailing dispatch back with it (observed 2026-08-26: the 17:29 *and*
+  17:59 sweeps both aborted — an hour with zero dispatch capability, and P0 1011 waited 2h47m), so
+  `mon_dispatch_p0_fast()` is also called **first** in that command; both calls are barrier-pinned. **The receipts are a separate ledger on purpose:**
   `alert_event.dispatched_at` has exactly one writer (`alert-dispatch.yml`) and
   `mon_detect_alert_delivery()` BRANCH 3 raises P1 if any database function stamps it. Reading that
   column is fine; stamping it is not.

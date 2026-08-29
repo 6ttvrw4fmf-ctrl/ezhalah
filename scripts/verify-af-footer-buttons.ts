@@ -144,6 +144,64 @@ mustCatch('the intro «عرض النتائج» decline link creeping back',
 mustCatch('a missing testID reading as an empty block',
   blockOf(cardSrc.replace('testID="af-back"', ''), 'af-back') === '');
 
+// ── 5. THE CONTRACT PROSE MUST NOT DESCRIBE A CONTROL THE CARD DOES NOT HAVE ────────────────────
+//
+// Added 2026-08-29 (routine #5). Decision 2 above removed «تخطي الباقي» from the card on
+// 2026-08-28 and rewrote Product Contract §8.3 — but §8.4 and R11.4 were left describing Skip All
+// as a live control, and scripts/lib/afContractCoverage.ts went on grading both 'B' on barriers
+// (verify-af-cross-round-carry, verify-af-round-size) that never mention Skip All at all. So the
+// canonical source of truth advertised a control production does not have, AND the derived health
+// score awarded marks for it — the exact score inflation the owner rejected on 2026-08-28.
+//
+// A future engineer reading §8.4 would have "restored" a control the owner deleted. The fix is not
+// to remember harder: the contract's own prose about the question footer is pinned here, against
+// the card, so the two cannot drift apart again. Struck-through history (~~…~~) is how this
+// document retires a rule, so a retired mention is read as retired, not as live.
+const contract = read('docs/ADVANCED_FILTER_PRODUCT_CONTRACT.md');
+// Every line that still presents a control as CURRENT — struck-through spans are the document's own
+// "this moved" marker and are deliberately exempt.
+const liveContractProse = contract
+  .split('\n')
+  .map((line) => line.replace(/~~[\s\S]*?~~/g, ''))
+  .join('\n');
+
+// A control named as live in the contract must exist in the card, and vice versa.
+const RETIRED_CONTROLS: Array<{ name: string; testId: string }> = [
+  { name: 'تخطي الباقي', testId: 'af-skip-all' },
+];
+for (const c of RETIRED_CONTROLS) {
+  const inCard = cardSrc.includes(`testID="${c.testId}"`);
+  const inContractAsLive = liveContractProse.includes(c.name);
+  check(`«${c.name}» is absent from the card AND not described as live in the Product Contract`,
+    !inCard && !inContractAsLive,
+    `card has testID="${c.testId}": ${inCard} · contract still presents it as live: ${inContractAsLive}\n`
+    + '      Retire it in the contract with ~~strikethrough~~ + the owner date, or restore the control.');
+}
+// The three live controls must be named in the contract's FOOTER section — the reverse drift (a
+// control ships, or is renamed, and the canonical document never learns about it) is just as
+// blinding. Scoped to §8.3 on purpose: a document-wide `includes()` passes on any stray mention
+// elsewhere, so it would report healthy for a footer section that had lost the control entirely.
+const footerSection = (/### 8\.3 The question footer[\s\S]*?(?=\n### )/.exec(liveContractProse) ?? [''])[0];
+check('the contract still has a §8.3 question-footer section to check against', footerSection.length > 0);
+for (const [name, testId] of [['متابعة', 'af-confirm'], ['تخطي', 'af-skip'], ['رجوع', 'af-back']] as const) {
+  check(`«${name}» is a real card control AND §8.3 still names it`,
+    cardSrc.includes(`testID="${testId}"`) && footerSection.includes(name),
+    `card testID="${testId}": ${cardSrc.includes(`testID="${testId}"`)} · named in §8.3: ${footerSection.includes(name)}`);
+}
+mustCatch('§8.3 losing one of the three live controls',
+  !footerSection.replace(/متابعة/g, 'PRIMARY').includes('متابعة'));
+// The in-question early-exit must be gone from BOTH sides too.
+check('«عرض النتائج» is not described as an in-AF control by the contract',
+  !/§?8\.3[\s\S]{0,400}?(?<!~~[^~]{0,400})عرض النتائج[\s\S]{0,40}(?:زر|control|button)/u.test(liveContractProse));
+
+mustCatch('the contract re-advertising the removed «تخطي الباقي» as live',
+  (() => {
+    const revived = `${liveContractProse}\n- **R8.4.1** — تخطي الباقي skips every remaining question.`;
+    return !cardSrc.includes('testID="af-skip-all"') && revived.includes('تخطي الباقي');
+  })());
+mustCatch('the strikethrough stripper going blind (a retired rule reading as live)',
+  '- **R8.4.1** — ~~تخطي الباقي~~ removed'.replace(/~~[\s\S]*?~~/g, '').includes('تخطي الباقي') === false);
+
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }
 console.log('\n✓ رجوع/تخطي are real, stateful, RTL-correct buttons with unchanged behavior; the early-exit stays removed\n');

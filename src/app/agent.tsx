@@ -44,7 +44,7 @@ import { parseQuery, respond } from '@/data/agent';
 import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
-import { regionOrCityChoice, scopedLocation, scopeNamedForTwin } from '@/lib/regionOrCityAnswer';
+import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor } from '@/lib/regionOrCityAnswer';
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
@@ -210,15 +210,31 @@ const WHOLE_AREA = /كامل|كاملة|بالكامل|كلها|كل المدي�
 // audit). Guarding every use defensively, same pattern as search.ts's locationLines().
 const arLabel = (s: string) => arabicOrPlaceholder(s, 'ar', LOCATION_UNRESOLVED_AR);
 
+// The PLAIN-CITY narrowing question, and the city it is about — one template, one parser, adjacent
+// on purpose. The caller needs the subject back so it can remember which city it asked about (see
+// pendingCityRef): the bare answer «المدينة كاملة» contains no city, and before 2026-08-29 the app
+// re-parsed that generic noun as المدينة المنورة and searched the wrong region entirely.
+// scripts/verify-agent-whole-city-answer.ts round-trips these two so the template cannot drift out
+// from under the parser.
+export const wholeCityQuestion = (cityAr: string) => `تقصد مدينة ${cityAr} كاملة، أو حي معيّن؟`;
+export function wholeCityQuestionSubject(text: string | null | undefined): string | null {
+  const m = /^تقصد مدينة (.+) كاملة، أو حي معيّن؟$/u.exec((text ?? '').trim());
+  const city = m?.[1]?.trim();
+  return city ? city : null;
+}
+
 // The region-AND-city TWIN NAME behind the «مدينة X ولا منطقة X كاملة؟» question (and behind the
 // whole-region question for the same names), so send() knows which name the user is answering about on
 // the next turn. Accepts either form the query can carry («الرياض» or «منطقة الرياض»). null when the
 // location is not one of those twins — a plain city/region/district ask is untouched.
+// The rule itself lives in src/lib/regionOrCityAnswer.ts (pure, executable by a barrier); this is
+// the thin wrapper that hands it the real resolver and the app's Arabic-label guard. Before
+// 2026-08-29 the logic lived here and only stripped «منطقة » from the INPUT, so an English catalog
+// name like «Riyadh» — which is exactly what parseQuery() emits — resolved to the REGION, reported
+// "not a twin", and silently disabled the entire region-vs-city disambiguation. See twinNameFor().
 function regionOrCityTwin(loc: string | undefined): string | null {
-  const bare = (loc ?? '').trim().replace(/^منطقة\s+/, '').trim();
-  if (!bare) return null;
-  const lm = resolveLocation(bare, 'ar');
-  return lm.regionOrCity ? arLabel(lm.label) : null;
+  const label = twinNameFor(loc, (name) => resolveLocation(name, 'ar'));
+  return label == null ? null : arLabel(label);
 }
 
 function locationClarification(q: SearchQuery, userText: string): string | null {
@@ -287,7 +303,7 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
   }
   // 3) A whole CITY with no neighbourhood → ask the WHOLE city or a specific district.
   if (lm.kind === 'city') {
-    return `تقصد مدينة ${cityDisplay(lm.city, 'ar')} كاملة، أو حي معيّن؟`;
+    return wholeCityQuestion(cityDisplay(lm.city, 'ar'));
   }
   return null;
 }
@@ -1067,6 +1083,13 @@ export default function Agent() {
   // model replied to it with a greeting or yet another question often enough that leaving the answer to
   // the model WAS the loop. Read-and-cleared once per turn; also cleared by New Chat.
   const pendingScopeRef = useRef<string | null>(null);
+  // The PLAIN CITY we last asked «تقصد مدينة X كاملة، أو حي معيّن؟» about. pendingScopeRef above only
+  // ever holds region/city TWIN names, so before this ref existed the app remembered nothing at all
+  // about a plain-city question — and answering it «المدينة كاملة» searched المدينة المنورة, because
+  // the generic noun «المدينة» re-parses as that city's name (defect found live 2026-08-29; the
+  // measured before/after is in src/lib/regionOrCityAnswer.ts). Same lifecycle as pendingScopeRef:
+  // read-and-cleared once per turn, cleared by New Chat.
+  const pendingCityRef = useRef<string | null>(null);
 
   const toBottom = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
   const toTop = () => requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
@@ -2126,6 +2149,11 @@ export default function Agent() {
     // answering «مدينة الرياض» never produced a search in 7/7 fresh runs).
     const askedTwin = pendingScopeRef.current;
     pendingScopeRef.current = null;
+    // The plain-city question we asked last turn, and whether this message is the bare «المدينة كاملة»
+    // answer to it. Read-and-cleared here for the same reason as askedTwin: one question, one answer.
+    const askedCity = pendingCityRef.current;
+    pendingCityRef.current = null;
+    const genericWholeArea = !!askedCity && isGenericWholeAreaAnswer(v);
     const scopeChoice = regionOrCityChoice(v);
     if (turn.kind === 'listings') {
       // Rewrite ONLY when the model's own location is that same twin — never override a different city
@@ -2137,6 +2165,14 @@ export default function Agent() {
       // just asked the twin question (askedTwin), a bare «مدينة» IS an answer, because we asked.
       const named = scopeNamedForTwin(v, twin) ?? (askedTwin ? scopeChoice : null);
       if (twin && named) turn = { ...turn, query: { ...turn.query, location: scopedLocation(twin, named) } };
+      // The bare answer to OUR plain-city question carries no place of its own (isGenericWholeAreaAnswer
+      // is false the moment one survives), so the only correct location is the city we asked about.
+      // Whatever the model parsed out of «المدينة كاملة» is, by construction, not a place the user named.
+      else if (genericWholeArea) turn = { ...turn, query: { ...turn.query, location: askedCity! } };
+    } else if (genericWholeArea && turn.kind === 'message') {
+      // Same recovery as the twin branch below: the model drifted off the thread, but the user did
+      // answer a question WE asked, so run their search from this attempt scoped to that city.
+      turn = { kind: 'listings', reply: '', query: { ...parseQuery(saidRef.current.join(' ')), location: askedCity! } };
     } else if (scopeChoice && askedTwin && turn.kind === 'message') {
       // The model drifted off the thread (a greeting, or another question). The user still answered a
       // question WE asked, so run their search from everything said this attempt, scoped to their pick.
@@ -2166,6 +2202,9 @@ export default function Agent() {
         // Remember WHICH twin name this question is about, so the user's next message can commit their
         // pick even if the model answers with something else entirely.
         pendingScopeRef.current = regionOrCityTwin(turn.query.location);
+        // …and, for the PLAIN-CITY question, which city — so its bare «المدينة كاملة» answer keeps that
+        // city instead of re-resolving the generic noun «المدينة» into المدينة المنورة (2026-08-29).
+        pendingCityRef.current = wholeCityQuestionSubject(clarifyQ);
         setMsgs((m) =>
           m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: clarifyQ, typing: true } : x)),
         );
@@ -2548,6 +2587,7 @@ export default function Agent() {
         setBusy(false);
         setMsgs([]);
         pendingScopeRef.current = null; // New Chat inherits nothing — not even a half-answered question
+        pendingCityRef.current = null;  // …including the plain-city question's subject
         chatIdRef.current = null;       // …and not the previous conversation's sidebar identity
         // Forget the last-handled filter/seed so a re-search AFTER New Chat re-runs even if it's
         // identical to a previous one (otherwise the change-detection would skip it and leave just

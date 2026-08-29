@@ -47,7 +47,16 @@ if (r.body) {
   // SAME named floor — fixing only one branch would leave the other with the original false-positive
   // bug under a different guard.
   const circuitBreakerGuard = /if\s+act\s*>=\s*min_population\s+and\s+stale\s*>\s*max_frac\s*\*\s*act\s+then/i;
-  const coverageGateGuard = /if\s+act\s*>=\s*min_population\s+and\s+\(\s*recent_best\s+is\s+null\s+or\s+recent_best\s*<\s*coverage_floor\s*\)\s+then/i;
+  // Deliberately NOT pinned to the coverage EXPRESSION. What this barrier protects is the FLOOR —
+  // that both fraction-based branches are gated by the same named min_population — and the
+  // expression is a separate concern that legitimately changed on 2026-08-29 (migration
+  // 20260829142111: max(rows_seen) of a single run → distinct active rows refreshed inside a
+  // cadence-derived rolling window, because the old form had no reachable green state for a
+  // scraper that crawls itself in ~24 slices). Pinning the arithmetic here made a correct fix look
+  // like a regression; the arithmetic is owned by verify-stale-coverage-gate.ts §D, which asserts
+  // it against the md5-pinned mirror. So: match the guard and the branch it guards, not the
+  // comparison in between.
+  const coverageGateGuard = /if\s+act\s*>=\s*min_population\s+and\s+[^;]*?coverage_floor[^;]*?\s+then/i;
   check('circuit-breaker branch (30% stale) gates on min_population', circuitBreakerGuard.test(b));
   check('coverage-gate branch (50% coverage) gates on min_population', coverageGateGuard.test(b));
 
