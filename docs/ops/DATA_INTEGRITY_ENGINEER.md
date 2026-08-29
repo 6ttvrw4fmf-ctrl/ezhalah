@@ -844,6 +844,17 @@ Two liveness scares, both cleared by asking the source rather than reading our o
   blocked by the agent egress proxy, so a per-id status probe cannot run from a routine container —
   it would have to live in the scraper. **Leave it as it is; §26's "not restored" verdict stands.**
 
+**27d. aqar has a control-validated liveness oracle and it needs no auth — use it instead of reasoning
+about the largest kill cohort.** aqar is the biggest inactivation cohort in the system (358 in 24 h,
+2,543 in 7 days) and every one of those kills rests on 3-strike crawl absence (`missing_count = 3`),
+which is the shape §26 exists to distrust. It holds up here, and the cheap way to confirm it is
+`sa.aqar.fm/graphql` → `Listing{ get(id:…){ id uri } }`, no key, no session:
+**6/6 rows deactivated on 2026-08-29 came back ABSENT with aqar's own «الإعلان غير موجود», and 3/3
+currently-active rows came back PRESENT** — so the oracle discriminates, which a bare 404 on a bogus id
+never proves on its own (§26: *an oracle needs a CONTROL before it is an oracle*). Note the bogus-id
+control returns the same «الإعلان غير موجود», so the discriminating half is the POSITIVE control, not
+the negative one. Re-run those two halves rather than re-deriving whether aqar's crawl is complete.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve
