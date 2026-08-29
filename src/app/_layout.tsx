@@ -9,7 +9,7 @@ import { shouldAutoShowAuthPopup, AUTH_POPUP_DISMISSED_KEY } from '@/lib/authPop
 import { initObservability, reportError } from '@/lib/observability';
 import { LocaleProvider, useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
-import { ThemeProvider, useTheme } from '@/theme/theme';
+import { ForceLightTheme, ThemeProvider, useTheme } from '@/theme/theme';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
 import { markAppSessionStarted } from '@/lib/appSession';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -99,8 +99,14 @@ function Shell() {
   return (
     <View style={{ flex: 1, flexDirection: isRTL ? 'row-reverse' : 'row' }}>
       <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
-      {/* /auth is a focused full-screen moment — no docked sidebar there. */}
-      {docked && pathname !== '/auth' && <Sidebar docked onClose={() => {}} />}
+      {/* /auth is a focused full-screen moment — no docked sidebar there. On /agent the docked
+          sidebar joins the screen's light pin (owner 2026-08-29: the whole Agent experience —
+          sidebar included — keeps the white design even when the app appearance is dark). */}
+      {docked && pathname !== '/auth' && (
+        pathname === '/agent'
+          ? <ForceLightTheme container="bare"><Sidebar docked onClose={() => {}} /></ForceLightTheme>
+          : <Sidebar docked onClose={() => {}} />
+      )}
       {/* One-click Google sign-in prompt (web, signed-out only) — renders its own corner UI. */}
       <GoogleOneTap />
       <View style={{ flex: 1 }}>

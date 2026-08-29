@@ -21,7 +21,7 @@
 // change; unconverted screens keep the static light `colors` import and remain readable.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Appearance, Platform } from 'react-native';
+import { Appearance, Platform, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { darkColors } from '@/theme/tokens';
 import { THEME_KEY, isThemeMode, resolveTheme, themeColors, type ResolvedTheme, type ThemeMode } from '@/theme/themeMode';
@@ -118,4 +118,28 @@ export function useTheme(): ThemeValue {
 
 export function useThemeColors(): typeof darkColors {
   return useTheme().colors;
+}
+
+// A subtree pinned to the LIGHT design regardless of the user's appearance (owner 2026-08-29: the
+// Agent/chat screen is white/light by design — dark mode continues elsewhere). Two halves, one
+// wrapper: the data-ez-light attribute re-resolves every var() token to light (palette.ts), and the
+// overridden context makes the resolved-theme consumers inside (useTheme/useThemeColors and the
+// parser-site hooks in lib/appearance.ts — hero asset, gradients, interpolations, the sidebar's
+// dark overrides) agree with what the CSS is painting. mode/setMode pass through untouched, so the
+// appearance CONTROLS inside the subtree still read and change the real app-wide preference.
+export function ForceLightTheme({ children, container }: { children: ReactNode; container?: 'fill' | 'bare' }) {
+  const parent = useTheme();
+  const value = useMemo<ThemeValue>(
+    () => ({ ...parent, resolved: 'light', colors: themeColors('light') }),
+    [parent],
+  );
+  // 'fill' (default) stretches — for wrapping a whole screen. 'bare' imposes no layout of its own —
+  // for wrapping a fixed-width child like the docked sidebar inside the root row.
+  return (
+    <Ctx.Provider value={value}>
+      <View style={container === 'bare' ? null : { flex: 1 }} {...(Platform.OS === 'web' ? { dataSet: { ezLight: '1' } } : null)}>
+        {children}
+      </View>
+    </Ctx.Provider>
+  );
 }
