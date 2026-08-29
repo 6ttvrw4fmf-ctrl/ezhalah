@@ -72,6 +72,20 @@ The 11:00–12:30 UTC block also sits clear of the heavy daily pipeline window (
 scrapers 04:22/04:40, aqarmonthly 06:00, `sync-rich-attrs-wasalt` 06:47, the AF barriers 06:52), so
 each engineer audits settled data with that morning's detectors already run.
 
+## §S — SENTRY (mandatory every run, owner rule 2026-08-28) — applies to ALL SEVEN routines
+On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
+whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
+cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
+a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
+contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
+RUN: N` in your FINAL REPORT.
+
+If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
+owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
+Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
+doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
+
 ## 1. ⚡ Daily JUNIOR SCRAPING Engineer (original, unmodified)
 
 Original owner prompt (9,971 chars), untouched since creation. Runs on branch `ops/daily-engineer`,
@@ -296,17 +310,3 @@ revert is reported as a revert rather than rediscovered by hand.
   delivery worked and ownership did not — 53 open alert issues with no owner named on any of them.
   This is a pointer to your existing alert duties, **not** a new mandatory step: adding one is an
   owner decision, and is deliberately left open.
-
-## §S — SENTRY (mandatory every run, owner rule 2026-08-28) — applies to ALL SEVEN routines
-On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
-whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
-cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
-sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
-a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
-contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
-RUN: N` in your FINAL REPORT.
-
-If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
-owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
-Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
-doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
