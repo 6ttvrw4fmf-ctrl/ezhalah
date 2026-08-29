@@ -45,7 +45,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { twinNameFor, scopeNamedForTwin, regionOrCityChoice, scopedLocation } from '../src/lib/regionOrCityAnswer.ts';
+import { twinNameFor, scopeNamedForTwin, regionOrCityChoice, scopedLocation, twinWholeAreaIsCity } from '../src/lib/regionOrCityAnswer.ts';
 
 const root = join(import.meta.dirname, '..');
 const agentSrc = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8')
@@ -163,7 +163,71 @@ for (const city of ['Jeddah', 'Dammam', 'Abha'] as const) {
   check(`${city} has no twin, so its scope is never rewritten`, twinNameFor(city, resolve) === null);
 }
 
-// ── 5. THE WIRING ───────────────────────────────────────────────────────────────────────────────
+// ── 5. «X كاملة» ON A TWIN MEANS THE CITY (OWNER DECISION, 2026-08-29) ──────────────────────────
+//
+// Owner, verbatim: «الرياض كاملة» must mean Riyadh CITY, not Riyadh Region. The administrative
+// region must require explicit region wording such as «منطقة الرياض». Generic «كاملة» is never
+// permission to widen a twin-name city into its entire region. Applies to all five twins.
+//
+// WHAT IT REPLACED, measured on production 2026-08-29 BEFORE this rule shipped — the agent's
+// WHOLE_AREA rule short-circuited the twin question and searched the parser's location, which for a
+// twin is the REGION:
+//
+//   «أبغى شقة للإيجار السنوي في الرياض كاملة» → 20 cities of منطقة الرياض · 11,721 نتيجة
+//   «أبغى شقة للإيجار السنوي في جازان كاملة»  →  6 cities of منطقة جازان  ·    278 نتيجة
+//   «أبغى شقة للإيجار السنوي في تبوك كاملة»   →  4 cities of منطقة تبوك   ·    212 نتيجة
+//
+// The user said "Riyadh" and got Al-Kharj, Afif and Hawtat Bani Tamim.
+const TWINS = ['الرياض', 'جازان', 'تبوك', 'حائل', 'نجران'] as const;
+
+// Every twin, its own «كاملة» → the CITY.
+for (const twin of TWINS) {
+  for (const phrase of ['كاملة', 'كلها', 'بالكامل'] as const) {
+    check(`«${twin} ${phrase}» means the CITY «${twin}»`,
+      twinWholeAreaIsCity(`أبغى شقة في ${twin} ${phrase}`, twin) === true
+      && scopedLocation(twin, 'city') === twin);
+  }
+}
+
+// EXPLICIT region wording still wins — that is the other half of the owner's rule.
+for (const twin of TWINS) {
+  check(`«منطقة ${twin}» stays the REGION`,
+    scopeNamedForTwin(`أبغى شقة في منطقة ${twin}`, twin) === 'region'
+    && scopedLocation(twin, 'region') === `منطقة ${twin}`);
+  check(`«منطقة ${twin} كاملة» stays the REGION (explicit beats generic)`,
+    twinWholeAreaIsCity(`أبغى شقة في منطقة ${twin} كاملة`, twin) === false);
+}
+// A standalone «منطقة»/«المنطقة» is region intent too, even without the twin name beside it.
+for (const phrase of ['المنطقة كلها', 'المنطقة كاملة', 'منطقة كاملة'] as const) {
+  check(`«${phrase}» is region intent, never narrowed to the city`,
+    twinWholeAreaIsCity(`${phrase} بالرياض`, 'الرياض') === false);
+}
+
+// The rule must NOT fire where it has nothing to say.
+check('«الرياض» alone does not trigger the كاملة rule (it still earns the twin question)',
+  twinWholeAreaIsCity('أبغى شقة في الرياض', 'الرياض') === false);
+check('«مدينة الرياض» is handled by the scope parser, not this rule',
+  scopeNamedForTwin('مدينة الرياض', 'الرياض') === 'city');
+check('a district ask does not trigger the كاملة rule',
+  twinWholeAreaIsCity('أبغى شقة في حي النرجس بالرياض', 'الرياض') === false);
+check('no twin → the rule is inert', twinWholeAreaIsCity('جدة كاملة', null) === false);
+// CONTROLS: the non-twin cities must be completely untouched by this rule — they have no twin, so
+// «جدة كاملة» keeps meaning exactly what it meant before.
+for (const city of ['Jeddah', 'Dammam', 'Abha'] as const) {
+  check(`${city} has no twin, so «كاملة» changes nothing for it`,
+    twinNameFor(city, resolve) === null
+    && twinWholeAreaIsCity(`${city} كاملة`, twinNameFor(city, resolve)) === false);
+}
+
+// The rule may only ever NARROW. Proven as a property: whenever it fires, the committed scope is the
+// city — never the region — so no input can be widened by it.
+for (const twin of TWINS) {
+  const fires = twinWholeAreaIsCity(`${twin} كاملة`, twin);
+  check(`«${twin} كاملة» can only narrow (city, never region)`,
+    fires && scopedLocation(twin, 'city') === twin && scopedLocation(twin, 'city') !== `منطقة ${twin}`);
+}
+
+// ── 6. THE WIRING ───────────────────────────────────────────────────────────────────────────────
 check('agent.tsx imports twinNameFor',
   /import \{[^}]*twinNameFor[^}]*\} from '@\/lib\/regionOrCityAnswer'/.test(agentSrc));
 check('regionOrCityTwin routes through twinNameFor with the real resolver',
@@ -172,6 +236,14 @@ check('regionOrCityTwin routes through twinNameFor with the real resolver',
 check('the old input-only «منطقة » strip is gone from agent.tsx',
   !/const bare = \(loc \?\? ''\)\.trim\(\)\.replace\(\/\^منطقة/.test(agentSrc),
   'the resolved LABEL must be normalised too, not just the input string');
+check('agent.tsx imports twinWholeAreaIsCity',
+  /import \{[^}]*twinWholeAreaIsCity[^}]*\} from '@\/lib\/regionOrCityAnswer'/.test(agentSrc));
+check('the كاملة rule commits the CITY scope on a listings turn',
+  /twin && twinWholeAreaIsCity\(v, twin\)\)[\s\S]{0,140}?scopedLocation\(twin, 'city'\)/.test(agentSrc),
+  'without this the WHOLE_AREA short-circuit searches the parser location, which is the REGION');
+check('the كاملة rule also commits when the model drifts off the thread',
+  /askedTwin && twinWholeAreaIsCity\(v, askedTwin\) && turn\.kind === 'message'[\s\S]{0,220}?scopedLocation\(askedTwin, 'city'\)/.test(agentSrc),
+  'the answer must not be lost just because the model replied with prose');
 
 console.log(failures === 0
   ? '\n✅ verify-agent-twin-scope: all checks passed.\n'
