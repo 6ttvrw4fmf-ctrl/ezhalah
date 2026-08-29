@@ -7,6 +7,9 @@ import { Spinner } from '@/components/ui';
 import { useApp, type AuthUser } from '@/store';
 import { useI18n, t } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { DOCK_BREAKPOINT } from '@/lib/responsive';
+import { canDragAuthPopup, clampAuthPopupOffset, AUTH_POPUP_POS_KEY } from '@/lib/authPopupBehavior';
 import {
   isBackendLive,
   sendPhoneOtp,
@@ -69,6 +72,148 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
   const { isRTL } = useI18n();
   const reducedMotion = useReducedMotion();
   const closingRef = useRef(false);
+
+  // DESKTOP DRAG (owner 2026-08-28): on desktop web the popup can be picked up by its header and
+  // moved anywhere on-screen — replacing the old SignInDock side card, whose motion this inherits.
+  // The gate is the pure canDragAuthPopup (barrier-executed): mobile web and native never get any
+  // of this — they keep the plain centered modal below.
+  //
+  // MOTION (Apple, WWDC 2018 «Designing Fluid Interfaces»): the drag tracks the pointer 1:1 from
+  // the grab offset via Pointer Events with capture, keeps a short velocity history, rubber-bands
+  // past the clamp bounds instead of hard-stopping, and on release projects the throw and settles
+  // on a spring seeded with the release velocity (damping 1.0 / response 0.4 — Apple's own
+  // "move/reposition" pair). The translate is painted straight onto the WRAPPER node (popWrap), a
+  // different element from the reanimated card, so the entrance fade+scale and the drag never
+  // fight over one transform. Drag lives ONLY on the header grab strip so every button and input
+  // in the card body stays plainly clickable; the close X floats ABOVE the strip (zIndex) and is
+  // not the strip's child, so pressing it never starts a drag.
+  const docked = useAtLeast(DOCK_BREAKPOINT);
+  const drag = canDragAuthPopup({ isWeb: Platform.OS === 'web', docked });
+  const popRef = useRef<View | null>(null);
+  const gripRef = useRef<View | null>(null);
+
+  useEffect(() => {
+    if (!drag) return;
+    const node = popRef.current as unknown as HTMLElement | null;
+    const grip = gripRef.current as unknown as HTMLElement | null;
+    if (!node || !grip) return;
+
+    const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let off = { x: 0, y: 0 };
+    const paint = () => { node.style.transform = `translate3d(${off.x}px, ${off.y}px, 0)`; };
+    // The card's UNTRANSLATED rect — where flex centering put it — is the live rect minus the
+    // offset currently painted. Recomputed on demand so viewport resizes and content growth
+    // (error rows, the country list) are always measured fresh, never cached stale.
+    const baseRect = () => {
+      const r = node.getBoundingClientRect();
+      return { left: r.left - off.x, top: r.top - off.y, width: r.width, height: r.height };
+    };
+    const vp = () => ({ w: innerWidth, h: innerHeight });
+    const clamp = (p: { x: number; y: number }) => clampAuthPopupOffset(p, baseRect(), vp());
+
+    // Restore this session's moved position (owner: "preserve if safe/easy"), re-clamped so a
+    // narrower window since then can never restore the card off-screen.
+    try {
+      const saved = sessionStorage.getItem(AUTH_POPUP_POS_KEY);
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (typeof p?.x === 'number' && typeof p?.y === 'number') { off = clamp(p); paint(); }
+      }
+    } catch { /* private mode / blocked storage — centered is always fine */ }
+
+    let raf = 0;
+    let safety: ReturnType<typeof setTimeout> | undefined;
+    let dragging = false, moved = false, id = -1;
+    let grabX = 0, grabY = 0;
+    let hist: Array<{ x: number; y: number; t: number }> = [];
+    const THRESHOLD = 6; // px before a press on the strip commits to a drag
+
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      dragging = true; moved = false; id = e.pointerId;
+      grip.setPointerCapture(id);
+      cancelAnimationFrame(raf);
+      clearTimeout(safety);
+      grabX = e.clientX - off.x; grabY = e.clientY - off.y;   // respect WHERE they grabbed
+      hist = [{ x: e.clientX, y: e.clientY, t: performance.now() }];
+      grip.style.cursor = 'grabbing';
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (!dragging) return;
+      const nx = e.clientX - grabX, ny = e.clientY - grabY;
+      if (!moved && Math.hypot(nx - off.x, ny - off.y) > THRESHOLD) moved = true;
+      if (!moved) return;
+      // Rubber-band past the bounds: resistance, never a hard stop — and never fully off-screen.
+      const c = clamp({ x: nx, y: ny });
+      const band = (v: number, cl: number) => cl + (v - cl) * 0.35;
+      off = { x: band(nx, c.x), y: band(ny, c.y) };
+      paint();
+      hist.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+      if (hist.length > 6) hist.shift();
+    };
+
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      grip.style.cursor = 'grab';
+      try { grip.releasePointerCapture(id); } catch { /* already released */ }
+      if (!moved) return;   // a press that never moved is nothing — the strip is not a button
+      // Velocity from the RECENT history only (last ~120ms), project the throw, settle INSIDE the
+      // bounds. The recency window matters: drag → pause → release must drop the card in place
+      // (velocity 0), while a live flick still throws it — old samples must not fake momentum.
+      const now = performance.now();
+      const recent = hist.filter((p2) => now - p2.t < 120);
+      let vx = 0, vy = 0;
+      if (recent.length >= 2) {
+        const a = recent[0], b = recent[recent.length - 1];
+        const dt = Math.max(1, b.t - a.t);
+        vx = ((b.x - a.x) / dt) * 1000; vy = ((b.y - a.y) / dt) * 1000;
+      }
+      const project = (v: number, rate = 0.998) => (v / 1000) * rate / (1 - rate);
+      const target = clamp({ x: off.x + project(vx), y: off.y + project(vy) });
+      try { sessionStorage.setItem(AUTH_POPUP_POS_KEY, JSON.stringify(target)); } catch { /* non-fatal */ }
+      if (reduced) { off = target; paint(); return; }
+      // SAFETY NET: rAF is fully suspended in a hidden/occluded tab, which would strand the card
+      // at its rubber-banded release position — possibly past the bounds — until the next grab.
+      // Timers still fire there, so if the spring hasn't settled shortly, snap to the clamped
+      // target. In a visible window the spring settles first and this clears without ever firing.
+      safety = setTimeout(() => { cancelAnimationFrame(raf); off = target; paint(); }, 1200);
+      // Critically damped spring (damping 1.0, response 0.4), seeded with the release velocity so
+      // there is no seam between the pointer and the animation.
+      const k = (2 * Math.PI / 0.4) ** 2, c2 = 2 * (2 * Math.PI / 0.4);
+      let px = off.x, py = off.y, vX = vx, vY = vy, last = performance.now();
+      const step = (now: number) => {
+        const h = Math.min(0.032, (now - last) / 1000); last = now;
+        vX += (-k * (px - target.x) - c2 * vX) * h; px += vX * h;
+        vY += (-k * (py - target.y) - c2 * vY) * h; py += vY * h;
+        off = { x: px, y: py }; paint();
+        if (Math.hypot(px - target.x, py - target.y) < 0.5 && Math.hypot(vX, vY) < 12) {
+          off = target; paint(); clearTimeout(safety); return;
+        }
+        raf = requestAnimationFrame(step);
+      };
+      raf = requestAnimationFrame(step);
+    };
+
+    // A resized window re-clamps: the card never ends up stranded outside the new viewport.
+    const onResize = () => { off = clamp(off); paint(); };
+
+    grip.addEventListener('pointerdown', onDown);
+    grip.addEventListener('pointermove', onMove);
+    grip.addEventListener('pointerup', onUp);
+    grip.addEventListener('pointercancel', onUp);
+    addEventListener('resize', onResize);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(safety);
+      grip.removeEventListener('pointerdown', onDown);
+      grip.removeEventListener('pointermove', onMove);
+      grip.removeEventListener('pointerup', onUp);
+      grip.removeEventListener('pointercancel', onUp);
+      removeEventListener('resize', onResize);
+    };
+  }, [drag]);
 
   const progress = useSharedValue(0);
   useEffect(() => {
@@ -242,16 +387,43 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
         {/* The outer Pressable fills the viewport — a press on the empty ground closes the popup. The
             inner Pressable swallows presses so touching the card itself never dismisses it. */}
         <Pressable style={s.center} onPress={back}>
-          <Pressable style={s.popWrap} onPress={() => {}}>
-            <Animated.View style={[s.pop, cardStyle]}>
-              <Pressable onPress={back} style={s.popClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Close')}>
+          <Pressable
+            ref={popRef as never}
+            // @ts-expect-error web-only DOM props on the RNW host node
+            dataSet={{ testid: 'auth-popup' }}
+            style={[s.popWrap, drag && s.popWrapWide]}
+            onPress={() => {}}
+          >
+            <Animated.View style={[s.pop, drag && s.popWide, cardStyle]}>
+              {/* Desktop grab strip — a designated header region that picks the whole card up. It
+                  overlays the grabber pill + eagle area only (never the form), and the close X sits
+                  ABOVE it in the stack so closing never begins a drag. Mobile/native: not rendered. */}
+              {drag && (
+                <View
+                  ref={gripRef}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ testid: 'auth-popup-drag-handle' }}
+                  style={[s.grip, { cursor: 'grab', touchAction: 'none', userSelect: 'none' } as never]}
+                >
+                  <View style={s.gripPill} />
+                </View>
+              )}
+              <Pressable
+                onPress={back}
+                style={s.popClose}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={t('Close')}
+                // @ts-expect-error web-only DOM props on the RNW host node
+                dataSet={{ testid: 'auth-popup-close' }}
+              >
                 <Ionicons
                   name={step === 'main' && !ccOpen ? 'close' : isRTL ? 'chevron-forward' : 'chevron-back'}
                   size={20}
                   color={colors.ink}
                 />
               </Pressable>
-              <RNImage source={LOGO} style={s.popEagle} resizeMode="contain" />
+              <RNImage source={LOGO} style={[s.popEagle, drag && s.popEagleWide]} resizeMode="contain" />
               {/* ── main ───────────────────────────────────────────────── */}
               {step === 'main' && (
                 <>
@@ -486,6 +658,17 @@ const s = StyleSheet.create({
   // second breakpoint.
   center: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
   popWrap: { width: '100%', maxWidth: 400 },
+  // LARGER on desktop (owner 2026-08-28: "larger and more prominent") — the card grows to 470 with
+  // a touch more breathing room and a deeper resting shadow. Mobile keeps the owner-approved 400
+  // cap and styling exactly as specified 2026-08-15.
+  popWrapWide: { maxWidth: 470 },
+  popWide: { paddingTop: 40, paddingBottom: 34, paddingHorizontal: 32, shadowOpacity: 0.26, shadowRadius: 44 },
+  // The grab strip: an invisible header region (grabber pill + eagle area) that drags the card.
+  // zIndex 4 keeps it UNDER the close X (zIndex 5) where the two overlap.
+  grip: { position: 'absolute', top: 0, left: 0, right: 0, height: 96, zIndex: 4, alignItems: 'center' },
+  // The visible affordance: an iOS-sheet grabber pill in the brand's dark green, quiet but legible
+  // ("intentionally draggable" — the card announces the gesture instead of hiding it).
+  gripPill: { marginTop: 12, width: 44, height: 5, borderRadius: 3, backgroundColor: 'rgba(29, 74, 55, 0.22)' },
   pop: {
     backgroundColor: '#fff',
     borderRadius: 26,
@@ -510,6 +693,8 @@ const s = StyleSheet.create({
   // fades+scales in together as ONE motion (owner 2026-08-15: "no bouncing, spinning, excessive
   // movement, or flashy animation" — a back-eased overshoot + blink sequence doesn't qualify).
   popEagle: { alignSelf: 'center', width: 92, height: 74, marginBottom: 12 },
+  // Desktop: the mark grows with the card so the larger popup reads as designed, not stretched.
+  popEagleWide: { width: 104, height: 84, marginTop: 6 },
 
   formHead: { fontSize: 26, fontWeight: '800', color: colors.ink, textAlign: 'center', marginBottom: 10, lineHeight: 38, letterSpacing: -0.3 },
   agree: { fontSize: 12.5, color: '#7c8a83', textAlign: 'center', marginBottom: 22, lineHeight: 18, paddingHorizontal: 8 },

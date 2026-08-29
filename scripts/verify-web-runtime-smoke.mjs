@@ -173,6 +173,23 @@ const tap = async (txt) => {
   await page.mouse.click(box.x, box.y);
   await page.waitForTimeout(1200);
 };
+// The signed-out sign-in popup (owner 2026-08-28) auto-raises over the filter home on a fresh
+// session — exactly what a real guest sees, so the journey must do what a real guest does: close
+// it, then search. Closing stamps sessionStorage, and every journey here shares one context, so a
+// single dismissal keeps it closed for the whole run (a fresh context would see it again). Without
+// this, the popup's ground swallows the journey's first tap and journey A dies on «سنوي» —
+// run 33221180711.
+const dismissAuthPopup = async (windowMs = 4000) => {
+  const until = Date.now() + windowMs;
+  while (Date.now() < until && !(await page.$('[data-testid="auth-popup-close"]'))) {
+    await page.waitForTimeout(250);
+  }
+  const close = await page.$('[data-testid="auth-popup-close"]');
+  if (!close) return; // already dismissed this session (or signed in) — nothing to do
+  await close.click();
+  await page.waitForFunction(() => !document.querySelector('[data-testid="auth-popup"]'), { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(250);
+};
 // For ASYNC-rendered suggestion rows only (run 32681927077: «حي النرجس» rendered after the fixed
 // 2200ms wait on a loaded runner and the strict tap threw). Polls for the row, then taps. Static
 // controls keep the strict tap — a missing static control is a real defect, not a render race.
@@ -228,6 +245,7 @@ try {
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(5000);
   check('home renders', (await body()).includes('تصفية'));
+  await dismissAuthPopup(); // a real guest closes the sign-in prompt before searching
 
   // Buy+Rent combined multi-select (owner 2026-08-20): شراء/إيجار are now two independent toggles,
   // mirroring سنوي/شهري exactly — a single tap on the OFF button ADDS it (→ both), it never swaps.

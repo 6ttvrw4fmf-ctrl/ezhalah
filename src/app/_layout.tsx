@@ -4,7 +4,8 @@ import { Stack, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { AppProvider } from '@/store';
+import { AppProvider, useApp } from '@/store';
+import { shouldAutoShowAuthPopup, AUTH_POPUP_DISMISSED_KEY } from '@/lib/authPopupBehavior';
 import { initObservability, reportError } from '@/lib/observability';
 import { LocaleProvider, useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
@@ -14,9 +15,8 @@ import { markAppSessionStarted } from '@/lib/appSession';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
-import SignInDock from '@/components/SignInDock';
 import GoogleOneTap from '@/components/GoogleOneTap';
-import IntroVideo from '@/components/IntroVideo';
+import IntroVideo, { INTRO_ENABLED } from '@/components/IntroVideo';
 
 // RC-A (hardening 2026-07-13): last-resort net. Nothing in the app caught unhandled promise
 // rejections or uncaught errors, so an async turn that escaped its handler failed silently. Log every
@@ -54,6 +54,24 @@ function Shell() {
   const { resolved } = useTheme();
   const pathname = usePathname();
   const router = useRouter();
+  // AUTO-SHOW SIGN-IN POPUP (owner 2026-08-28) — replaces the retired SignInDock side card: the
+  // one existing AuthModal raises ITSELF for signed-out web visitors on the Filter home and the
+  // Agent screen. The gates live in shouldAutoShowAuthPopup (pure, barrier-executed): web only,
+  // session restored (no flash at a logged-in visitor mid-restore), signed out, intro film
+  // finished, not dismissed this session. Dismissal is respected: closeAuth stamps sessionStorage,
+  // so Filter↔Agent navigation never re-pops it — while every login/signup control everywhere
+  // still reopens it through the same openAuth(). Signed-in users never see it.
+  const { user, authChecked, introSeen, authOpen, openAuth } = useApp();
+  // "Blocking" = the film can still render: it exists (INTRO_ENABLED — IntroVideo no-ops while its
+  // asset is unplugged) and this visitor hasn't finished it (introSeen null = flag still being
+  // read, false = pending/playing). A disabled intro must never dam the popup forever.
+  const introBlocking = INTRO_ENABLED && introSeen !== true;
+  useEffect(() => {
+    if (Platform.OS !== 'web' || authOpen) return;
+    let dismissed = false;
+    try { dismissed = sessionStorage.getItem(AUTH_POPUP_DISMISSED_KEY) === '1'; } catch { dismissed = false; }
+    if (shouldAutoShowAuthPopup({ isWeb: true, authChecked, user, introBlocking, dismissed, pathname })) openAuth();
+  }, [authOpen, authChecked, user, introBlocking, pathname, openAuth]);
   // On the web, a hard refresh reloads whatever deep route the user was on (e.g. /agent, /settings) —
   // and for screens whose flow state lives in memory only, that screen would come back empty, so the
   // refresh is sent back to Home instead. Runs once on mount; client-side navigation afterwards is
@@ -85,10 +103,6 @@ function Shell() {
       {docked && pathname !== '/auth' && <Sidebar docked onClose={() => {}} />}
       {/* One-click Google sign-in prompt (web, signed-out only) — renders its own corner UI. */}
       <GoogleOneTap />
-      {/* Desktop-only floating sign-in prompt for signed-out visitors on the filter home. Gated on
-          existing state only (useDocked + authChecked/user + activeChatId + route); it removes
-          itself the moment a search lands and returns on a fresh «محادثة جديدة». */}
-      <SignInDock />
       <View style={{ flex: 1 }}>
         <Stack
           screenOptions={{
