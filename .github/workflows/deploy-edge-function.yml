@@ -168,7 +168,12 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          FILES=(scripts/verify-agent-*.ts scripts/verify-filter-never-calls-agent.ts)
+          # verify-edge-functions-parse.ts is listed explicitly (it is outside the verify-agent-*
+          # glob): it parses every edge function AND rejects boot-fatal duplicate declarations. It
+          # is the pre-deploy half of the post-deploy boot test below — on 2026-08-29 a missing
+          # brace and then a duplicate `const t0` both reached main and the second one shipped a
+          # function that bundled cleanly and then refused to boot.
+          FILES=(scripts/verify-agent-*.ts scripts/verify-filter-never-calls-agent.ts scripts/verify-edge-functions-parse.ts)
           if [ ${#FILES[@]} -eq 0 ]; then
             echo "::error::no agent barriers found — the glob is wrong, refusing to deploy blind."
             exit 1
@@ -236,6 +241,100 @@ jobs:
           npx --yes supabase@latest functions deploy "${{ inputs.function }}" \
             --project-ref aannarbkwcymrotzwdbo \
             --no-verify-jwt
+
+      # ── POST-DEPLOY BOOT SMOKE TEST (blocking) ──────────────────────────────────────────────────
+      # A SUCCESSFUL DEPLOY IS NOT A WORKING FUNCTION. Added 2026-08-29 after this exact sequence:
+      # `supabase functions deploy` bundled cleanly and this workflow reported SUCCESS, while every
+      # request to the deployed agent returned
+      #   {"code":"BOOT_ERROR","message":"Function failed to start (please check logs)"}
+      # because the module had two `const t0` in one scope. The bundler accepts it; the Deno worker
+      # refuses to boot. The deploy was green and production was down.
+      #
+      # It stayed invisible on top of that: src/data/agent.ts falls back to its bundled offline
+      # heuristic on ANY agent failure, so users see a working product with a dead AI. Nothing else
+      # in this pipeline calls the deployed function, so nothing else can catch this class.
+      #
+      # This step makes the deployment verification depend on the function ACTUALLY RUNNING:
+      # a real HTTP request, asserting a 2xx and a parseable JSON body. It fails the job on
+      # BOOT_ERROR, on any 5xx, and on a body that is not the contract — so a broken deploy is a RED
+      # run, not a green one. Pinned by scripts/verify-edge-deploy-boot-test.ts.
+      - name: Post-deploy boot smoke test (blocking)
+        if: ${{ !inputs.dry_run && inputs.action != 'delete' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          # EXPO_PUBLIC_SUPABASE_ANON_KEY is the key that actually EXISTS in this repo's Actions
+          # secrets. (SUPABASE_PUBLISHABLE_KEY is referenced elsewhere in .github/workflows but is
+          # NOT configured — it resolves to an empty string. Do not use it here.)
+          ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+        run: |
+          set -uo pipefail
+          FN="${{ inputs.function }}"
+          URL="${SUPABASE_URL%/}/functions/v1/${FN}"
+          # Public, already shipped in the app bundle — the agent's own soft gate accepts it. Used
+          # only if the anon secret is unavailable, so this gate can never be skipped for want of a
+          # credential. Either way an auth rejection is a 4xx, which still PROVES the worker booted.
+          KEY="${ANON_KEY:-sb_publishable_vXzwxdpfrzmbwtbR5aXcKA_cMUO8hVB}"
+
+          # Each function's own minimal, side-effect-free request. An unknown function still gets
+          # booted and must not return BOOT_ERROR/5xx — a 4xx from its own input validation proves
+          # the worker started, which is what this gate is about.
+          case "$FN" in
+            agent)    BODY='{"text":"شقة للايجار في الرياض","locale":"ar","loggedIn":false,"order":true,"history":[]}' ;;
+            translit) BODY='{"text":"Riyadh"}' ;;
+            *)        BODY='{}' ;;
+          esac
+
+          # Cold start + propagation: retry a few times before declaring failure, so a slow first
+          # boot is not reported as a broken deploy.
+          for attempt in 1 2 3 4 5; do
+            CODE=$(curl -s -o /tmp/boot.json -w '%{http_code}' --max-time 45 -X POST "$URL" \
+              -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+              -H 'content-type: application/json' -d "$BODY" || echo 000)
+            echo "attempt $attempt → HTTP $CODE"
+            BOOT_ERR=$(grep -c 'BOOT_ERROR' /tmp/boot.json 2>/dev/null || true)
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 500 ] && [ "${BOOT_ERR:-0}" -eq 0 ]; then
+              break
+            fi
+            sleep 10
+          done
+
+          echo "--- response (first 400 bytes) ---"
+          head -c 400 /tmp/boot.json || true
+          echo
+
+          FAIL=""
+          if grep -q 'BOOT_ERROR' /tmp/boot.json 2>/dev/null; then
+            FAIL="the worker could not START (BOOT_ERROR) — the bundle deployed but the module does not initialize"
+          elif [ "$CODE" = "000" ]; then
+            FAIL="no HTTP response (timeout / DNS / TLS)"
+          elif [ "$CODE" -ge 500 ]; then
+            FAIL="HTTP $CODE — the function is failing on every request"
+          elif ! python3 -c 'import json,sys; json.load(open("/tmp/boot.json"))' 2>/dev/null; then
+            FAIL="the response body is not JSON — the function is not answering its contract"
+          fi
+
+          if [ -n "$FAIL" ]; then
+            {
+              echo "### 🚨 POST-DEPLOY BOOT TEST FAILED — the deployed function does not run"
+              echo ""
+              echo "**\`$FN\` was deployed, and it is NOT working in production.**"
+              echo ""
+              echo "- $FAIL"
+              echo "- Users will NOT see an error: the client falls back to its bundled offline heuristic, so the product looks healthy while the AI is dead."
+              echo ""
+              echo "Check the Supabase function logs for \`worker boot error\`. A duplicate declaration or a"
+              echo "module-scope throw bundles fine and still refuses to boot."
+              echo "Roll back by redeploying the previous good commit of \`supabase/functions/$FN\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Post-deploy boot test FAILED for $FN — $FAIL"
+            exit 1
+          fi
+
+          echo "✓ $FN booted and answered (HTTP $CODE, JSON body)"
+          {
+            echo "### ✅ Post-deploy boot test passed"
+            echo "\`$FN\` answered a real request with HTTP $CODE and a JSON body — the worker is running."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Delete
         if: ${{ !inputs.dry_run && inputs.action == 'delete' }}

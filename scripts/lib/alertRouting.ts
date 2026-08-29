@@ -62,6 +62,11 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 7, test: /^(detector_|orphaned_detector|unresolvable_|monitoring_watchdog)/ },
   { routine: 7, test: /^(registry_orphans|repair_guarantee|loc_rel_|rls_)/ },
   { routine: 7, test: /^(stale_no_remediation_path|frontend_runtime_gate_missing)$/ },
+  // ai_cost_health — the DeepSeek spend/cache/model-tier monitors (2026-08-29). Seam work: it is
+  // the integration with an external paid provider, and every one of its findings is answered in
+  // the same places this routine already owns (edge function, deploy path, detector plumbing).
+  // Explicitly routed rather than left to the #2 fallback, so a cost alert arrives with an owner.
+  { routine: 7, test: /^ai_cost_health$/ },
   { routine: 7, test: /^search_index_diverges_from_sync_source$/ },
 
   // 5 🎯 Advanced Filter + Trending — before #3/#4, whose patterns overlap AF field names.
