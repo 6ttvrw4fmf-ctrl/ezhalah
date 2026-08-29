@@ -1,0 +1,348 @@
+env: load .env
+env: export EXPO_PUBLIC_SUPABASE_KEY EXPO_PUBLIC_SUPABASE_URL
+Starting project at /private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt
+Using src/app as the root directory for Expo Router.
+React Compiler enabled
+Starting Metro Bundler
+
+Waiting on http://localhost:8098
+Logs for your project will appear below.
+λ Bundled 1581ms node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js (2076 modules)
+λ  WARN  "shadow*" style props are deprecated. Use "boxShadow". 
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+λ  WARN  Image: style.tintColor is deprecated. Please use props.tintColor. 
+λ  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode. 
+Web Bundled 2143ms node_modules/expo-router/entry.js (2090 modules)
+λ Bundled 73ms node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js (1 module)
+λ  WARN  "shadow*" style props are deprecated. Use "boxShadow". 
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+λ  WARN  Image: style.tintColor is deprecated. Please use props.tintColor. 
+λ  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode. 
+Web Bundled 468ms node_modules/expo-router/entry.js (1 module)
+Web Bundled 470ms node_modules/expo-router/entry.js (2094 modules)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web  WARN  "shadow*" style props are deprecated. Use "boxShadow".
+Web  WARN  props.pointerEvents is deprecated. Use style.pointerEvents
+Web  WARN  Image: style.tintColor is deprecated. Please use props.tintColor.
+Web  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode.
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": true, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NetworkError: Error retrieving a token.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+λ Bundled 42ms node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js (1 module)
+λ  WARN  "shadow*" style props are deprecated. Use "boxShadow". 
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+λ  WARN  Image: style.tintColor is deprecated. Please use props.tintColor. 
+λ  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode. 
+Web Bundled 414ms node_modules/expo-router/entry.js (1 module)
+Web Bundled 49ms node_modules/expo-router/entry.js (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web  WARN  "shadow*" style props are deprecated. Use "boxShadow".
+Web  WARN  props.pointerEvents is deprecated. Use style.pointerEvents
+Web  WARN  Image: style.tintColor is deprecated. Please use props.tintColor.
+Web  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode.
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": true, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  INFO  [GoogleOneTap] no FedCM prompt within 4000 ms — retrying without FedCM
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": false, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: google.accounts.id.initialize() is called multiple times. This could cause unexpected behavior and only the last initialized instance will be used.
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NotAllowedError: Only one navigator.credentials.get request may be outstanding at one time.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NetworkError: Error retrieving a token.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+λ Bundled 47ms node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js (1 module)
+λ  WARN  "shadow*" style props are deprecated. Use "boxShadow". 
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+λ  WARN  Image: style.tintColor is deprecated. Please use props.tintColor. 
+λ  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode. 
+Web Bundled 457ms node_modules/expo-router/entry.js (1 module)
+Web Bundled 50ms node_modules/expo-router/entry.js (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web  WARN  "shadow*" style props are deprecated. Use "boxShadow".
+Web  WARN  props.pointerEvents is deprecated. Use style.pointerEvents
+Web  WARN  Image: style.tintColor is deprecated. Please use props.tintColor.
+Web  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode.
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": true, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  INFO  [GoogleOneTap] no FedCM prompt within 4000 ms — retrying without FedCM
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": false, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: google.accounts.id.initialize() is called multiple times. This could cause unexpected behavior and only the last initialized instance will be used.
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NotAllowedError: Only one navigator.credentials.get request may be outstanding at one time.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NetworkError: Error retrieving a token.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+λ Bundled 52ms node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js (1 module)
+λ  WARN  "shadow*" style props are deprecated. Use "boxShadow". 
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+λ  WARN  Image: style.tintColor is deprecated. Please use props.tintColor. 
+λ  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode. 
+Web Bundled 430ms node_modules/expo-router/entry.js (1 module)
+Web Bundled 44ms node_modules/expo-router/entry.js (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web  WARN  "shadow*" style props are deprecated. Use "boxShadow".
+Web  WARN  props.pointerEvents is deprecated. Use style.pointerEvents
+Web  WARN  Image: style.tintColor is deprecated. Please use props.tintColor.
+Web  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode.
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": true, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  INFO  [GoogleOneTap] no FedCM prompt within 4000 ms — retrying without FedCM
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": false, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: google.accounts.id.initialize() is called multiple times. This could cause unexpected behavior and only the last initialized instance will be used.
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NotAllowedError: Only one navigator.credentials.get request may be outstanding at one time.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NetworkError: Error retrieving a token.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+λ Bundled 55ms node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js (1 module)
+λ  WARN  "shadow*" style props are deprecated. Use "boxShadow". 
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+λ  WARN  Image: style.tintColor is deprecated. Please use props.tintColor. 
+λ  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode. 
+Web Bundled 452ms node_modules/expo-router/entry.js (1 module)
+Web Bundled 47ms node_modules/expo-router/entry.js (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web  WARN  "shadow*" style props are deprecated. Use "boxShadow".
+Web  WARN  props.pointerEvents is deprecated. Use style.pointerEvents
+Web  WARN  Image: style.tintColor is deprecated. Please use props.tintColor.
+Web  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode.
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": true, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  INFO  [GoogleOneTap] no FedCM prompt within 4000 ms — retrying without FedCM
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": false, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: google.accounts.id.initialize() is called multiple times. This could cause unexpected behavior and only the last initialized instance will be used.
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NotAllowedError: Only one navigator.credentials.get request may be outstanding at one time.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+Web  WARN  Animated: `useNativeDriver` is not supported because the native animated module is missing. Falling back to JS-based animation. To resolve this, add `RCTAnimation` module to this app, or remove `useNativeDriver`. Make sure to run `bundle exec pod install` first. Read more about autolinking: https://github.com/react-native-community/cli/blob/master/docs/autolinking.md
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NetworkError: Error retrieving a token.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+λ Bundled 47ms node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js (1 module)
+λ  WARN  "shadow*" style props are deprecated. Use "boxShadow". 
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+λ  WARN  Image: style.tintColor is deprecated. Please use props.tintColor. 
+λ  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode. 
+Web Bundled 456ms node_modules/expo-router/entry.js (1 module)
+Web Bundled 54ms node_modules/expo-router/entry.js (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web  WARN  "shadow*" style props are deprecated. Use "boxShadow".
+Web  WARN  props.pointerEvents is deprecated. Use style.pointerEvents
+Web  WARN  Image: style.tintColor is deprecated. Please use props.tintColor.
+Web  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode.
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": true, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  INFO  [GoogleOneTap] no FedCM prompt within 4000 ms — retrying without FedCM
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": false, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: google.accounts.id.initialize() is called multiple times. This could cause unexpected behavior and only the last initialized instance will be used.
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NotAllowedError: Only one navigator.credentials.get request may be outstanding at one time.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NetworkError: Error retrieving a token.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+λ Bundled 43ms node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js (1 module)
+λ  WARN  "shadow*" style props are deprecated. Use "boxShadow". 
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+λ  WARN  Image: style.tintColor is deprecated. Please use props.tintColor. 
+λ  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode. 
+Web Bundled 442ms node_modules/expo-router/entry.js (1 module)
+Web Bundled 53ms node_modules/expo-router/entry.js (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web  WARN  "shadow*" style props are deprecated. Use "boxShadow".
+Web  WARN  props.pointerEvents is deprecated. Use style.pointerEvents
+Web  WARN  Image: style.tintColor is deprecated. Please use props.tintColor.
+Web  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode.
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": true, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NetworkError: Error retrieving a token.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+λ Bundled 46ms node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js (1 module)
+λ  WARN  "shadow*" style props are deprecated. Use "boxShadow". 
+λ  WARN  props.pointerEvents is deprecated. Use style.pointerEvents 
+λ  WARN  Image: style.tintColor is deprecated. Please use props.tintColor. 
+λ  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode. 
+Web Bundled 398ms node_modules/expo-router/entry.js (1 module)
+Web Bundled 46ms node_modules/expo-router/entry.js (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web  WARN  "shadow*" style props are deprecated. Use "boxShadow".
+Web  WARN  props.pointerEvents is deprecated. Use style.pointerEvents
+Web  WARN  Image: style.tintColor is deprecated. Please use props.tintColor.
+Web  WARN  Image: style.resizeMode is deprecated. Please use props.resizeMode.
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": true, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  INFO  [GoogleOneTap] no FedCM prompt within 4000 ms — retrying without FedCM
+Web  INFO  [GoogleOneTap] initialize + prompt {"fedcm": false, "fedcmSupported": true}
+Web  WARN  [GSI_LOGGER]: google.accounts.id.initialize() is called multiple times. This could cause unexpected behavior and only the last initialized instance will be used.
+Web  WARN  [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NotAllowedError: Only one navigator.credentials.get request may be outstanding at one time.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+Web  ERROR  [GSI_LOGGER]: FedCM get() rejects with NetworkError: Error retrieving a token.
+Web  INFO  [GoogleOneTap] moment {"dismissed": null, "displayed": null, "moment": "skipped", "notDisplayed": null, "skipped": "unknown_reason"}
+ ERROR  SyntaxError: /private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/src/theme/theme.tsx: Unexpected token (6:1)
+
+  4 | //   • 'system' follows the OS live — matchMedia('prefers-color-scheme') on web (the shipped
+  5 | //     product), the RN Appearance API on native — and tracks changes without a reload.
+> 6 | <<<<<<< HEAD
+    |  ^
+  7 | //   • The choice persists across sessions for EVERYONE (device preference, not account data):
+  8 | //     synchronous localStorage on web — the same sync-first pattern the store uses for history —
+  9 | //     plus AsyncStorage for native. Deliberately NOT wiped by SIGN-OUT (a device preference
+    at constructor (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:365:19)
+    at TypeScriptParserMixin.raise (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:6616:19)
+    at TypeScriptParserMixin.unexpected (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:6636:16)
+    at TypeScriptParserMixin.jsxParseIdentifier (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4581:12)
+    at TypeScriptParserMixin.jsxParseNamespacedName (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4588:23)
+    at TypeScriptParserMixin.jsxParseElementName (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4597:21)
+    at TypeScriptParserMixin.jsxParseOpeningElementAt (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4673:22)
+    at TypeScriptParserMixin.jsxParseElementAt (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4698:33)
+    at TypeScriptParserMixin.jsxParseElement (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4761:17)
+    at TypeScriptParserMixin.parseExprAtom (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4771:19)
+    at TypeScriptParserMixin.parseExprSubscripts (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:11098:23)
+    at TypeScriptParserMixin.parseUpdate (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:11083:21)
+    at TypeScriptParserMixin.parseMaybeUnary (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:11063:23)
+    at TypeScriptParserMixin.parseMaybeUnary (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:9854:18)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10916:61)
+    at TypeScriptParserMixin.parseExprOps (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10921:23)
+    at TypeScriptParserMixin.parseMaybeConditional (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10898:23)
+    at TypeScriptParserMixin.parseMaybeAssign (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10848:21)
+    at /private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:9792:39
+    at TypeScriptParserMixin.tryParse (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:6924:20)
+    at TypeScriptParserMixin.parseMaybeAssign (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:9792:18)
+    at TypeScriptParserMixin.parseExpressionBase (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10801:23)
+    at /private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10797:39
+    at TypeScriptParserMixin.allowInAnd (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:12438:16)
+    at TypeScriptParserMixin.parseExpression (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10797:17)
+    at TypeScriptParserMixin.parseStatementContent (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:12912:23)
+    at TypeScriptParserMixin.parseStatementContent (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:9525:18)
+    at TypeScriptParserMixin.parseStatementLike (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:12784:17)
+    at TypeScriptParserMixin.parseModuleItem (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:12761:17)
+    at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:13333:36)
+    at TypeScriptParserMixin.parseBlockBody (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:13326:10)
+    at TypeScriptParserMixin.parseProgram (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:12639:10)
+    at TypeScriptParserMixin.parseTopLevel (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:12629:25)
+    at TypeScriptParserMixin.parse (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:14505:25)
+    at TypeScriptParserMixin.parse (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10143:18)
+    at parse (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:14518:26)
+    at parser (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/core/lib/parser/index.js:41:34)
+    at parser.next (<anonymous>)
+    at normalizeFile (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/core/lib/transformation/normalize-file.js:51:37)
+    at normalizeFile.next (<anonymous>)
+    at run (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/core/lib/transformation/index.js:22:50)
+    at run.next (<anonymous>)
+    at transform (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/core/lib/transform.js:22:33)
+    at transform.next (<anonymous>)
+    at evaluateSync (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/gensync/index.js:251:28)
+    at sync (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/gensync/index.js:89:14)
+    at stopHiding - secret - don't use this - v1 (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/core/lib/errors/rewrite-stack-trace.js:47:12)
+    at Object.transformSync (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/core/lib/transform.js:40:76)
+    at parseWithBabel (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@expo/metro-config/build/transformSync.js:75:18)
+    at transformSync (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@expo/metro-config/build/transformSync.js:54:16)
+Web  ERROR  [ezhalah] uncaught error: [TransformError: SyntaxError: /private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/src/theme/theme.tsx: Unexpected token (6:1)
+
+  4 | //   • 'system' follows the OS live — matchMedia('prefers-color-scheme') on web (the shipped
+  5 | //     product), the RN Appearance API on native — and tracks changes without a reload.
+> 6 | <<<<<<< HEAD
+    |  ^
+  7 | //   • The choice persists across sessions for EVERYONE (device preference, not account data):
+  8 | //     synchronous localStorage on web — the same sync-first pattern the store uses for history —
+  9 | //     plus AsyncStorage for native. Deliberately NOT wiped by SIGN-OUT (a device preference]
+ ERROR  SyntaxError: /private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/src/theme/theme.tsx: Unexpected token (6:1)
+
+  4 | //   • 'system' follows the OS live — matchMedia('prefers-color-scheme') on web (the shipped
+  5 | //     product), the RN Appearance API on native — and tracks changes without a reload.
+> 6 | <<<<<<< HEAD
+    |  ^
+  7 | //   • The choice persists across sessions for EVERYONE (device preference, not account data):
+  8 | //     synchronous localStorage on web — the same sync-first pattern the store uses for history —
+  9 | //     plus AsyncStorage for native. Deliberately NOT wiped by SIGN-OUT (a device preference
+    at constructor (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:365:19)
+    at TypeScriptParserMixin.raise (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:6616:19)
+    at TypeScriptParserMixin.unexpected (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:6636:16)
+    at TypeScriptParserMixin.jsxParseIdentifier (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4581:12)
+    at TypeScriptParserMixin.jsxParseNamespacedName (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4588:23)
+    at TypeScriptParserMixin.jsxParseElementName (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4597:21)
+    at TypeScriptParserMixin.jsxParseOpeningElementAt (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4673:22)
+    at TypeScriptParserMixin.jsxParseElementAt (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4698:33)
+    at TypeScriptParserMixin.jsxParseElement (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4761:17)
+    at TypeScriptParserMixin.parseExprAtom (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:4771:19)
+    at TypeScriptParserMixin.parseExprSubscripts (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:11098:23)
+    at TypeScriptParserMixin.parseUpdate (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:11083:21)
+    at TypeScriptParserMixin.parseMaybeUnary (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:11063:23)
+    at TypeScriptParserMixin.parseMaybeUnary (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:9854:18)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10916:61)
+    at TypeScriptParserMixin.parseExprOps (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10921:23)
+    at TypeScriptParserMixin.parseMaybeConditional (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10898:23)
+    at TypeScriptParserMixin.parseMaybeAssign (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10848:21)
+    at /private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:9792:39
+    at TypeScriptParserMixin.tryParse (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:6924:20)
+    at TypeScriptParserMixin.parseMaybeAssign (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:9792:18)
+    at TypeScriptParserMixin.parseExpressionBase (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10801:23)
+    at /private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10797:39
+    at TypeScriptParserMixin.allowInAnd (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:12438:16)
+    at TypeScriptParserMixin.parseExpression (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10797:17)
+    at TypeScriptParserMixin.parseStatementContent (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:12912:23)
+    at TypeScriptParserMixin.parseStatementContent (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:9525:18)
+    at TypeScriptParserMixin.parseStatementLike (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:12784:17)
+    at TypeScriptParserMixin.parseModuleItem (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:12761:17)
+    at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:13333:36)
+    at TypeScriptParserMixin.parseBlockBody (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:13326:10)
+    at TypeScriptParserMixin.parseProgram (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:12639:10)
+    at TypeScriptParserMixin.parseTopLevel (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:12629:25)
+    at TypeScriptParserMixin.parse (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:14505:25)
+    at TypeScriptParserMixin.parse (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:10143:18)
+    at parse (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/parser/lib/index.js:14518:26)
+    at parser (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/core/lib/parser/index.js:41:34)
+    at parser.next (<anonymous>)
+    at normalizeFile (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/core/lib/transformation/normalize-file.js:51:37)
+    at normalizeFile.next (<anonymous>)
+    at run (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/core/lib/transformation/index.js:22:50)
+    at run.next (<anonymous>)
+    at transform (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/core/lib/transform.js:22:33)
+    at transform.next (<anonymous>)
+    at evaluateSync (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/gensync/index.js:251:28)
+    at sync (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/gensync/index.js:89:14)
+    at stopHiding - secret - don't use this - v1 (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/core/lib/errors/rewrite-stack-trace.js:47:12)
+    at Object.transformSync (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@babel/core/lib/transform.js:40:76)
+    at parseWithBabel (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@expo/metro-config/build/transformSync.js:75:18)
+    at transformSync (/private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/node_modules/@expo/metro-config/build/transformSync.js:54:16)
+Web  ERROR  [ezhalah] uncaught error: [TransformError: SyntaxError: /private/tmp/claude-501/-Users-yusufalnashwan-Downloads-design-handoff-ezhalah/312a59d2-4a67-4106-a62d-e588dd41f6c2/scratchpad/theme-pass-wt/src/theme/theme.tsx: Unexpected token (6:1)
+
+  4 | //   • 'system' follows the OS live — matchMedia('prefers-color-scheme') on web (the shipped
+  5 | //     product), the RN Appearance API on native — and tracks changes without a reload.
+> 6 | <<<<<<< HEAD
+    |  ^
+  7 | //   • The choice persists across sessions for EVERYONE (device preference, not account data):
+  8 | //     synchronous localStorage on web — the same sync-first pattern the store uses for history —
+  9 | //     plus AsyncStorage for native. Deliberately NOT wiped by SIGN-OUT (a device preference]

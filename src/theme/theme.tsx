@@ -3,12 +3,11 @@
 // One provider owns the appearance preference: 'system' | 'light' | 'dark'.
 //   • 'system' follows the OS live — matchMedia('prefers-color-scheme') on web (the shipped
 //     product), the RN Appearance API on native — and tracks changes without a reload.
-//   • The choice persists across sessions for EVERYONE (device preference, not account data):
-//     synchronous localStorage on web — the same sync-first pattern the store uses for history —
-//     plus AsyncStorage for native. Deliberately NOT wiped by SIGN-OUT (a device preference
-//     survives switching accounts) — but account DELETION resets it to 'light' (owner rule
-//     2026-08-29, applied in AccountMenu.onDeleteAccount): the theme
-//     belongs to the device, like 'hasSeenIntro'.
+//   • The choice persists across sessions — but it is an AUTHENTICATED-user asset (owner
+//     2026-08-28/29, superseding both the original device-preference rule and the deletion-only
+//     reset PR#1214 carried): signed out the app is always LIGHT, and a COMPLETED sign-out or
+//     server-confirmed account deletion clears the stored keys entirely (resetThemeForSignOut
+//     below). Merely OPENING a confirmation popup — or cancelling it — never touches the theme.
 //   • SSR/hydration safety (React #418, the 2026-08-21 P0 class): the FIRST client render must
 //     match the server, so both `mode` and `systemDark` start at their server values ('system',
 //     false) and the real stored/OS values are applied in effects after mount — exactly the
@@ -24,11 +23,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { Appearance, Platform, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { darkColors } from '@/theme/tokens';
-import { THEME_KEY, isThemeMode, resolveTheme, themeColors, type ResolvedTheme, type ThemeMode } from '@/theme/themeMode';
+import { THEME_KEY, isThemeMode, resolveAppTheme, resolveTheme, themeColors, type ResolvedTheme, type ThemeMode } from '@/theme/themeMode';
 
 // The pure decisions (resolveTheme, themeColors, mode validation) live in themeMode.ts so the
 // barrier can execute them under node strip-types (no JSX there). Re-exported for convenience.
-export { THEME_KEY, THEME_MODES, isThemeMode, resolveTheme, themeColors } from '@/theme/themeMode';
+export { THEME_KEY, THEME_MODES, isThemeMode, resolveAppTheme, resolveTheme, themeColors } from '@/theme/themeMode';
 export type { ResolvedTheme, ThemeMode } from '@/theme/themeMode';
 
 type ThemeValue = {
@@ -40,10 +39,47 @@ type ThemeValue = {
 
 const Ctx = createContext<ThemeValue | null>(null);
 
+// ── AUTH-GATED APPEARANCE (owner 2026-08-28) ────────────────────────────────────────────────────
+// The store (single owner of auth state) drives this module-level signal:
+//   • setThemeAuthState(signedIn) once auth is KNOWN (getSession settled / user state changed) —
+//     until then the provider leaves the pre-hydration boot attribute alone, so a signed-in dark
+//     user never sees a light stomp between hydration and session adoption.
+//   • resetThemeForSignOut() on a COMPLETED transition to signed-out (successful sign-out,
+//     server-confirmed deletion, or an externally revoked session): clears the stored keys and
+//     returns the app to Light. NEVER wired to a dialog opening — إلغاء keeps Dark.
+type ThemeAuth = { signedIn: boolean; known: boolean };
+let themeAuth: ThemeAuth = { signedIn: false, known: false };
+const authListeners = new Set<(a: ThemeAuth, reset: boolean) => void>();
+
+export function setThemeAuthState(signedIn: boolean) {
+  themeAuth = { signedIn, known: true };
+  authListeners.forEach((l) => l(themeAuth, false));
+}
+
+export function resetThemeForSignOut() {
+  themeAuth = { signedIn: false, known: true };
+  // The stored preference must not leak into the logged-out experience or the next account.
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try { window.localStorage?.removeItem(THEME_KEY); } catch {}
+  }
+  AsyncStorage.removeItem(THEME_KEY).catch(() => {});
+  authListeners.forEach((l) => l(themeAuth, true));
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
   // Server-parity initial values; hydrated in the effects below (never during render).
   const [mode, setModeState] = useState<ThemeMode>('system');
   const [systemDark, setSystemDark] = useState(false);
+  // Server-parity: first render is signed-out-unknown (light); the store raises the signal
+  // post-mount (the same effect-after-mount pattern as mode/systemDark above).
+  const [auth, setAuth] = useState<ThemeAuth>({ signedIn: false, known: false });
+
+  useEffect(() => {
+    setAuth(themeAuth);
+    const l = (a: ThemeAuth, reset: boolean) => { setAuth(a); if (reset) setModeState('system'); };
+    authListeners.add(l);
+    return () => { authListeners.delete(l); };
+  }, []);
 
   // Load the saved preference once, after mount. Sync localStorage first on web (same value the
   // AsyncStorage mirror holds) so the flip happens on the earliest post-hydration frame.
@@ -97,12 +133,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // before first paint, so there is never a flash of the wrong theme.
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    // Until auth is known, the pre-hydration boot attribute (+html.tsx, same rule) stays in charge.
+    if (!auth.known) return;
     const d = document.documentElement;
+    // Guests are ALWAYS Light (owner 2026-08-28) — pinned, so the prefers-color-scheme media query
+    // cannot darken a logged-out app.
+    if (!auth.signedIn) { d.setAttribute('data-theme', 'light'); return; }
     if (mode === 'system') d.removeAttribute('data-theme');
     else d.setAttribute('data-theme', mode);
-  }, [mode]);
+  }, [mode, auth]);
 
-  const resolved = resolveTheme(mode, systemDark);
+  const resolved = resolveAppTheme(auth.signedIn, mode, systemDark);
   const value = useMemo<ThemeValue>(
     () => ({ mode, setMode, resolved, colors: themeColors(resolved) }),
     [mode, setMode, resolved],
