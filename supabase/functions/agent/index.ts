@@ -590,7 +590,7 @@ function stripFiller(s: string): string {
 // endpoint). Appended to the SYSTEM message as a belt-and-braces restatement of the shape and enum
 // values the SYSTEM prompt above already documents in prose — same list, machine-readable form, so
 // the model gets the contract from two directions.
-const JSON_SHAPE_HINT = `\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply"|"furnished" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
+const JSON_SHAPE_HINT = `\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "furnished" (one of "yes"|"no"|"none" — "yes" only if the user asks for a FURNISHED place («مفروشة»), "no" only if they ask for an UNFURNISHED one («غير مفروشة»), "none" when they do not mention furnishing at all; never infer it from anything else), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -1020,6 +1020,14 @@ Deno.serve(async (req: Request) => {
           // can never acquire a filter the AF path would refuse. Deliberately NOT validated here:
           // a second copy of the cohort table in the edge function is exactly how the two paths drift.
           // Shape-only sanitising: strings, trimmed, lowercased, de-duplicated.
+          // FURNISHED (owner ruling 2026-08-29). NOT an amenity token — it maps to q.furnishedPref,
+          // which is TRI-STATE: true = confirmed furnished only, false = confirmed unfurnished only,
+          // null/undefined = no preference. Carried through raw; the CLIENT decides whether the
+          // cohort is certified to apply it, via the same cohortAllows(q,'furnished') the AF question
+          // uses. Certification is coverage-driven and it matters: monthly-rent apartments are 0.0%
+          // known for furnished (5 of 30,544), so applying it there would turn UNKNOWN into No and
+          // collapse the result set to almost nothing.
+          furnished: out.furnished === "yes" ? "yes" : out.furnished === "no" ? "no" : "none",
           amenities: Array.isArray(out.amenities)
             ? [...new Set(out.amenities
                 .filter((a: unknown) => typeof a === "string")
