@@ -43,7 +43,7 @@ const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
 // Deterministic post-model rules (owner ruling 2026-08-29). Pure functions, unit-tested and
 // mutation-proven by scripts/verify-agent-postmodel-rules.ts. The model proposes; these decide.
-import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation } from "./postModel.ts";
+import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWesternDigits } from "./postModel.ts";
 
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
@@ -371,7 +371,9 @@ const AR_CURRENCY: Array<[RegExp, number]> = [
 const RANGE_RE = /(?<![\p{L}\p{N}])من(?![\p{L}\p{N}])[\s\S]{0,40}?(?<![\p{L}\p{N}])(?:الى|إلى)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])بين(?![\p{L}\p{N}])[\s\S]{0,60}?(?<![\p{L}\p{N}])و(?![\p{L}\p{N}])|\bfrom\b[\s\S]{0,40}?\bto\b|\bbetween\b[\s\S]{0,60}?\band\b|\d\s*-\s*\d/imu;
 
 function extractPrice(input: string): string {
-  const t = input.toLowerCase();
+  // Arabic numerals FIRST — JS \d is ASCII-only, so «٧٠ الف» was invisible here until 2026-08-29.
+  // See toWesternDigits() in ./postModel.ts for why this was a silent Arabic-first product bug.
+  const t = toWesternDigits(input).toLowerCase();
   const NUM_RE =
     /(\d[\d,.]*)\s*(?:(k|m|mn|million|thousand|bn|billion)(?![a-z]))?\s*(sar|sr|riyal|usd|\$|dollar|aed|dirham|dhm|dhs|dh|eur|€|euro|gbp|£|pound|kwd|kd|dinar|bhd|bd|qar|qr|omr|egp)?/gi;
   const candidates: number[] = [];
@@ -437,7 +439,8 @@ const AR_CUR_LABEL: Array<[RegExp, string]> = [
   [/جنيه/, "EGP"],
 ];
 function originalCurrency(input: string): string {
-  const t = input.toLowerCase();
+  // Same ASCII-only \d blindness as extractPrice — «١٠٠٠٠٠ دولار» must parse too.
+  const t = toWesternDigits(input).toLowerCase();
   const RE = /(\d[\d,.]*)\s*(k|m|mn|million|thousand|bn|billion)?\s*(usd|dollars?|aed|dirham|dhm|dhs|dh|eur|euro|gbp|pound|kwd|kd|dinar|bhd|bd|qar|qr|omr|egp)\b/i;
   const m = RE.exec(t);
   if (m) {

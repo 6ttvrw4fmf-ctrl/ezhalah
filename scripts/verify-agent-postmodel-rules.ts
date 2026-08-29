@@ -21,6 +21,7 @@ import {
   isPeriodOnlyChange,
   periodFromText,
   hasDigits,
+  toWesternDigits,
 } from "../supabase/functions/agent/postModel.ts";
 
 let failed = 0;
@@ -42,6 +43,19 @@ eq("periodFromText: سنوي → annual", periodFromText("للايجار الس�
 eq("periodFromText: بالشهر → monthly", periodFromText("٥ آلاف بالشهر"), "monthly");
 eq("periodFromText: none → null", periodFromText("شقق في الرياض"), null);
 eq("periodFromText: BOTH periods → null (not a clean signal)", periodFromText("شهري او سنوي"), null);
+
+// ── Arabic numerals ──────────────────────────────────────────────────────────
+// Found live 2026-08-29 while production-verifying RULE 1: nothing in the agent normalized
+// Arabic-Indic digits, and JS \d is ASCII-only, so extractPrice() could not see «٧٠ الف» at all.
+// An Arabic-first product was ignoring every budget typed in its users' own numerals.
+console.log("\n── Arabic-Indic digit normalization (money parsing depends on it) ──");
+eq("Arabic-Indic ٧٠ → 70", toWesternDigits("٧٠"), "70");
+eq("Extended Arabic-Indic ۷۰ → 70", toWesternDigits("۷۰"), "70");
+eq("REPRO: «بميزانية ٧٠ الف» becomes parseable", toWesternDigits("بميزانية ٧٠ الف"), "بميزانية 70 الف");
+eq("all ten Arabic-Indic digits", toWesternDigits("٠١٢٣٤٥٦٧٨٩"), "0123456789");
+eq("Western digits untouched", toWesternDigits("70000 ريال"), "70000 ريال");
+eq("pure Arabic text untouched", toWesternDigits("شقق للايجار"), "شقق للايجار");
+eq("mixed «٣ غرف ... ٨٠ الف»", toWesternDigits("٣ غرف بميزانية ٨٠ الف"), "3 غرف بميزانية 80 الف");
 
 // ── RULE 1 ───────────────────────────────────────────────────────────────────
 console.log("\n── RULE 1: period-only change must not re-scale a carried budget ──");
@@ -145,6 +159,10 @@ check("RULE 2 wired: sort goes through enforceSortMatchesReply against the FINAL
   /sort:\s*enforceSortMatchesReply\(replyOut,/.test(edge));
 check("RULE 3 wired: location goes through arabicCanonicalLocation with the catalog's name",
   /location = arabicCanonicalLocation\(\{ location, canonicalArabic: nm, locale \}\)/.test(edge));
+check("extractPrice normalizes Arabic numerals BEFORE parsing (else Arabic budgets are invisible)",
+  /function extractPrice[\s\S]{0,400}?const t = toWesternDigits\(input\)\.toLowerCase\(\)/.test(edge));
+check("originalCurrency normalizes Arabic numerals too (same ASCII-only flaw)",
+  /function originalCurrency[\s\S]{0,400}?const t = toWesternDigits\(input\)\.toLowerCase\(\)/.test(edge));
 
 if (failed) {
   console.error(`\n✗ ${failed} check(s) FAILED — a post-model rule the owner ruled on is not holding`);
