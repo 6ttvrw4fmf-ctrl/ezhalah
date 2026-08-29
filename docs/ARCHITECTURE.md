@@ -934,6 +934,25 @@ migration-drift-guard rule in `AGENTS.md`).
       §40 of `docs/ops/SEARCH_MATCH_QA_ENGINEER.md` carries the full worked model as "Result
       Rotation" — do not confuse it with that file's pre-existing, unrelated "Coverage Rotation"
       section (QA-journey sampling, not result ordering).
+17. **«الأجهزة المسجّل عليها الدخول» shows ONLY the real session registry, under a locked privacy
+    contract.** (Owner Phase 2, 2026-08-29.) GoTrue's `auth.sessions` is the one truth (one row =
+    one device-login); there are NO fake/derived devices, NO fingerprinting, and NO parallel
+    device-tracking table (a per-session hints table — "Phase 3" — is explicitly forbidden). The
+    only bridge is the `devices` edge function (JWT → `auth.getUser` → act on that `user_id`,
+    delete-account's identity pattern): GET returns per session ONLY `{session_id, device_class,
+    browser|null, created_at, refreshed_at}` — the raw user-agent and IP NEVER leave the server;
+    the UA collapses server-side through the ONE truthful detector (`src/lib/deviceInfo.ts`,
+    byte-pinned copy in the function). DELETE revokes only caller-owned rows (`id AND user_id` in
+    the SQL). The client badges «هذا الجهاز» from its OWN JWT `session_id` claim (identity, never
+    list position) and removes a card ONLY after the backend confirms revocation. Honesty rules:
+    last-active = `COALESCE(refreshed_at, created_at)` (refreshed_at is written on ~hourly token
+    rotation — proven live), buckets never claim finer precision («نشط خلال الساعة الأخيرة» is the
+    freshest claim for another device), and revocation copy says sign-out completes within an hour
+    at most (issued access tokens live ≤1h). Known accepted limit: a stored UA cannot carry
+    maxTouchPoints, so ANOTHER device that is an iPad in desktop mode truthfully reads ماك; the
+    current device self-corrects locally. **Barrier:** `scripts/verify-devices-contract.ts`
+    (executes the mapper/JWT-reader/time-buckets; pins ownership SQL, endpoint shape, the client
+    confirmation gate — all anti-vacuous, mutation-proven ×5).
 
 ---
 
