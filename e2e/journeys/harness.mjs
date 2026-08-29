@@ -201,13 +201,44 @@ export const storedHistory = (page) => page.evaluate((sub) => {
   try { return JSON.parse(localStorage.getItem('history:' + sub) || '[]'); } catch { return null; }
 }, SUB);
 
-/** Click by visible text through React's real event path — never a bare viewport coordinate. */
-export async function clickText(page, text, { exact = true, nth = 0 } = {}) {
+/**
+ * Click by visible text through React's real event path — never a bare viewport coordinate.
+ *
+ * A CLICK THAT NEVER LANDED RETURNS FALSE. The first version of this ended `.click().catch(() =>
+ * {})` and returned `true` unconditionally, so an intercepted click — the commonest failure on a
+ * 375px viewport, where an open drawer covers the whole screen — was reported to the caller as a
+ * success. The caller then carried on and blamed whatever was missing downstream: `new-chat-blank`
+ * skipped «composer not found» on mobile for two consecutive runs (2026-08-28 and 2026-08-29)
+ * while the real event was that the agent tab was never opened, because the drawer ate the tap.
+ * That is PART 11.2 rule 2 and PR #1146's swallowed `.catch(() => {})` in a different costume: a
+ * failure absorbed into silence points the next reader at the wrong screen, and — worse — the
+ * flagship New Chat guarantee (PART 5 shape 1) reported a tidy `skip` on mobile rather than the
+ * missing coverage it actually was.
+ *
+ * `clickReason()` carries WHY the last click did not land, so a skip/defect message can name the
+ * real event ("intercepted") instead of its downstream symptom.
+ */
+let lastClickReason = '';
+export const clickReason = () => lastClickReason;
+
+export async function clickText(page, text, { exact = true, nth = 0, timeout = 15_000 } = {}) {
   const loc = page.getByText(text, { exact }).nth(nth);
-  if (!(await loc.count())) return false;
+  if (!(await loc.count())) { lastClickReason = `«${text}» is not present`; return false; }
   await loc.scrollIntoViewIfNeeded().catch(() => {});
-  await loc.click({ timeout: 15_000 }).catch(() => {});
-  return true;
+  try {
+    await loc.click({ timeout });
+    lastClickReason = '';
+    return true;
+  } catch (e) {
+    // Playwright's own log names the interceptor ("… subtree intercepts pointer events"), which is
+    // exactly the discriminator PART 9.1 asks a finding to state. Keep it; do not swallow it.
+    const first = String(e).split('\n').find((l) => /intercepts pointer events/.test(l));
+    lastClickReason = first
+      ? `«${text}» was intercepted by ${first.trim().slice(0, 120)}`
+      : `«${text}» click failed: ${String(e).split('\n')[0].slice(0, 140)}`;
+    console.log(`  click   DID NOT LAND — ${lastClickReason}`);
+    return false;
+  }
 }
 
 // ── ledger (PART 3 item 7) ──────────────────────────────────────────────────────────────────────
