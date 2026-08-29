@@ -895,6 +895,45 @@ migration-drift-guard rule in `AGENTS.md`).
     kept**: a `live` verdict needs HTTP 200 plus no dead-marker, and restoring a wrongly-inactive
     listing is the fail-safe direction. Never widen the freeze to reactivations, and never key its
     rate on `stats["skipped"]` (that counter also holds rows with no URL, which never reach a probe).
+16. **Ranking hierarchy: MATCH → PLATFORM DIVERSITY → PHOTO PREFERENCE → CONTROLLED ROTATION.**
+    (owner PERMANENT rule, 2026-08-29.) "Never sacrifice correctness or eligibility for diversity,
+    photos, or rotation." All four tiers live in ONE place — `location_search_candidates_ar`'s
+    ORDER BY — and never change `matched` (eligibility) or `total_count`; a no-photo or unknown-photo
+    listing is exactly as reachable/counted as any other genuine match.
+    - **Tier 1, MATCH, is absolute.** Price/location/type/deal/period/bedrooms/AF predicates stay
+      exact; nothing below this tier can pull in an ineligible row.
+    - **Tier 2, PLATFORM DIVERSITY**, is unchanged from the 2026-08-05 `div_rank` mechanism (rule
+      #2's PR #331) — each platform's own eligible rows numbered 1..n, ordered by that number first.
+    - **Tier 3, PHOTO PREFERENCE**, is folded INTO `div_rank`'s own per-platform ordering (photo
+      status first, recency second) rather than sitting after it — computing `div_rank` on recency
+      alone let a platform's most-recent-but-no-photo listing outrank that SAME platform's
+      older-but-real-photo listing, exactly the "photo-less occupying the first 10" failure the
+      owner named; caught and fixed live, same session, before this rule was written down.
+      `search_listings_ar.has_photo` is the source of truth: `NULL` (unknown/unaudited platform, per
+      `ops_photo_capture_trust`) is NEVER treated as "has a photo" and NEVER demoted as "confirmed
+      no photo" — it ranks strictly between the two. **UNKNOWN must remain UNKNOWN** (mirrors the AF
+      probe rule, `afProbe.ts`, 2026-08-25). A platform only gets `has_photo` written once its
+      capture rate clears `ops_photo_capture_trust`'s bar (≥50 reachable rows, ≥70% real-photo rate,
+      both re-derived on every sync run — never a hand-picked, rot-prone allowlist).
+    - **Tier 4, CONTROLLED ROTATION**, is the LAST tie-break, strictly before the pre-existing
+      unconditional `(source_table, listing_id)` total-order tiebreaker — so total-order pagination
+      (no duplicate/skip across `عرض المزيد` batches, PR #1267) holds regardless of rotation.
+      `hashtext(source_table, listing_id, p_rotation_seed)` — a deterministic Postgres builtin,
+      **never `ORDER BY random()`**. `p_rotation_seed` is minted client-side, once per device (not
+      per visit — `src/lib/rotationSeed.ts`), combined with a coarse ISO-week bucket so a long-lived
+      device's exposure still drifts over time. REPLACED the old `ezh_rot` per-filter localStorage
+      revisit counter (2026-06-27): that counter started at 0 for every brand-new device, so two
+      different first-time visitors of the same cohort saw an identical top 10 — it never solved the
+      cross-user problem, only the same-device-returns-later one.
+    - **Tiers 3 and 4 are both NULL (inert) under every objective sort** (price/area/beds/oldest) —
+      an explicit user sort is a promise about literal order and always wins; verified byte-identical
+      live, with and without a rotation seed.
+    - **Barriers:** `scripts/verify-photo-preference-and-rotation-live.ts` (live production RPC
+      behavior — determinism, seed variation, count-honesty, zero-dup pagination, photo ordering,
+      sort immunity), `scripts/verify-rotation-seed-contract.ts` (pure module + wiring, `npm test`).
+      §40 of `docs/ops/SEARCH_MATCH_QA_ENGINEER.md` carries the full worked model as "Result
+      Rotation" — do not confuse it with that file's pre-existing, unrelated "Coverage Rotation"
+      section (QA-journey sampling, not result ordering).
 
 ---
 

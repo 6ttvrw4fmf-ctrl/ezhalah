@@ -727,20 +727,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // timed out at 21k+ rows. null = backend error (flag it so the UI shows retry, not "no matches").
         // pageCandidates/pageTotal come back straight off this call's own result (no shared module state
         // that a concurrent fetchListingsForQuery() call could clobber before we read it — 2026-08-03 fix).
+        // CONTROLLED ROTATION (owner PERMANENT rule, 2026-08-29): rotation now happens entirely
+        // server-side, inside fetchListingsForQuery's own RPC call (p_rotation_seed, src/lib/
+        // rotationSeed.ts) — REPLACES the old per-filter localStorage revisit counter that used to
+        // be threaded in here and rotated a client-side window in runSearch(). That mechanism was
+        // degenerate for a brand-new device (offset 0 on every first-ever visit → identical top 10
+        // for every first-time user of the same cohort) and couldn't stay correct once pagination
+        // became unbounded (PR #1267): windowing an in-memory array can't survive a real "next 100"
+        // server page. The new seed varies per device from its very first search and is stable
+        // across an entire browse/pagination walk by construction (same seed → same server ORDER BY).
         const { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal });
-        // Repeat-visit rotation offset: a per-filter counter persisted in localStorage so returning to the
-        // SAME filter (deal + location/districts) later surfaces a DIFFERENT high-quality first 25, never the
-        // exact same set — while staying strictly inside the filters. Device-local (guests included);
-        // best-effort (no localStorage → offset 0, no rotation). (user 2026-06-27.)
-        let visitOffset = 0;
-        try {
-          const sig = `ezh_rot:${q.deal}|${q.regionPin ?? ''}|${(q.districts ?? []).join(',')}|${(q.location ?? '').trim()}`;
-          const ls = (globalThis as { localStorage?: { getItem(k: string): string | null; setItem(k: string, v: string): void } }).localStorage;
-          const prev = parseInt(ls?.getItem(sig) ?? '0', 10);
-          visitOffset = Number.isFinite(prev) ? prev : 0;
-          ls?.setItem(sig, String(visitOffset + 1));
-        } catch { /* no localStorage (SSR/native) → no rotation, fine */ }
-        const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null, visitOffset });
+        const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null });
         // Attach the RESOLVED query so the caller renders the Search Summary from what actually ran
         // (the corrected city/region), not the raw pre-resolution text. (one-engine summary parity.)
         const result: SearchResult = { ...r, query: q, pageOffset: pageCand, hasMore: pageCand >= 1500, matchTotal: pageTotal };
