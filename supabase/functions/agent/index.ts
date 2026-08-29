@@ -797,7 +797,6 @@ Deno.serve(async (req: Request) => {
         response_format: { type: "json_object" },
       });
       let res: Response | null = null;
-      const t0 = Date.now();
       for (let attempt = 0; attempt < 2; attempt++) {
         const r = await fetch(DEEPSEEK_URL, { method: "POST", headers, body: payload });
         if (r.ok) { res = r; break; }

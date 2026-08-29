@@ -1,71 +1,55 @@
-// Every Supabase edge function must actually PARSE.
+// EVERY EDGE FUNCTION MUST PARSE (production outage 2026-08-29).
+// Auto-discovered barrier + edge-deploy gate.
 //
-// WHY THIS EXISTS (2026-08-29). PR #1302 merged with all 237 barriers green onto a
-// supabase/functions/agent/index.ts that was missing one closing brace — logUsage() never closed.
-// The whole suite passed because every barrier that reads this file reads it as TEXT and matches
-// regexes against it. A regex is happy with a file that no compiler would accept. The break only
-// surfaced at `supabase functions deploy`:
+// THE OUTAGE. The agent function returned BOOT_ERROR — "Function failed to start" — on every
+// request. Cause: `const t0 = Date.now();` declared TWICE in the same scope inside runModel(), one
+// from the health heartbeat (PR#1290) and one from the usage telemetry (PR#1302), merged
+// independently. Deno refuses to boot a module with a duplicate declaration.
 //
-//   Error: Expected '}', got '<eof>' at .../supabase/functions/agent/index.ts:1179:1
-//   failed to bundle function: exit 1
+// WHY NOTHING CAUGHT IT. `npm test` never parsed the edge sources, and `tsc --noEmit` runs against
+// the app's tsconfig, which does not include supabase/functions. So main could contain a file that
+// cannot even be parsed and every check stayed green — PR#1304's own title says exactly that:
+// "close logUsage() — main did not parse, and no barrier could see it". That PR fixed its instance
+// without adding a gate, and the very next merge reproduced the class.
 //
-// The deploy failed closed, so production was never harmed — but the defect reached main, and the
-// agent is the one function with no CI that ever compiles it (Deno is not installed on the runner
-// and `tsc` does not include supabase/functions in the app's tsconfig).
-//
-// This is the owner's standing rule applied to a new surface: a barrier that matches a STRING is
-// not evidence about CODE. See feedback_a-comment-is-not-a-code-path. The fix is to stop asserting
-// about the text and make something actually parse it.
-//
-// Deliberately a PARSE check, not a typecheck: these files import from Deno/esm URLs that Node
-// cannot resolve, so type resolution is not available here — but a syntax error is exactly the
-// class that got through, and parsing catches it with zero external dependencies.
-import { readdirSync, readFileSync, statSync } from "node:fs";
+// This is that gate. It is deliberately a PARSE check, not a type check: the edge runs under Deno
+// with globals (Deno.env) the app's TypeScript config does not know, so type errors here would be
+// noise. A file that cannot parse is unambiguous and is what actually takes production down.
+import { readdirSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import ts from "typescript";
 
-const ROOT = "supabase/functions";
-let failures = 0;
-let checked = 0;
+let failed = 0;
+const check = (label: string, ok: boolean, detail = "") => {
+  if (!ok) failed++;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${label}${!ok && detail ? `\n      ${detail}` : ""}`);
+};
 
-function walk(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const p = join(dir, entry);
-    if (statSync(p).isDirectory()) out.push(...walk(p));
-    else if (/\.tsx?$/.test(entry)) out.push(p);
+const root = new URL("..", import.meta.url).pathname;
+const fnDir = join(root, "supabase/functions");
+const fns = readdirSync(fnDir, { withFileTypes: true })
+  .filter((d) => d.isDirectory() && existsSync(join(fnDir, d.name, "index.ts")))
+  .map((d) => d.name);
+
+check(`found edge functions to check (${fns.length}: ${fns.join(", ")})`, fns.length > 0,
+  "if this ever finds zero, the glob is wrong and the gate is silently off");
+
+for (const name of fns) {
+  const entry = join(fnDir, name, "index.ts");
+  try {
+    // esbuild parses TypeScript exactly as a bundler/runtime would, and reports duplicate
+    // declarations, unbalanced braces and unterminated literals — the failures that cause BOOT_ERROR.
+    execFileSync("npx", ["--yes", "esbuild@0.24.0", entry, "--outfile=/dev/null"],
+      { stdio: ["ignore", "ignore", "pipe"], cwd: root, timeout: 120_000 });
+    check(`${name}/index.ts parses`, true);
+  } catch (e) {
+    const err = (e as { stderr?: Buffer }).stderr?.toString() ?? String(e);
+    check(`${name}/index.ts parses`, false, err.split("\n").slice(0, 8).join("\n      "));
   }
-  return out;
 }
 
-for (const file of walk(ROOT)) {
-  checked++;
-  const src = readFileSync(file, "utf8");
-  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
-  // parseDiagnostics is not on the public type but is populated by createSourceFile and is the
-  // only way to see syntax errors without a full Program (which cannot resolve Deno imports).
-  const diags = ((sf as unknown as { parseDiagnostics?: ts.Diagnostic[] }).parseDiagnostics) ?? [];
-  if (diags.length === 0) {
-    console.log(`PASS  parses: ${file}`);
-    continue;
-  }
-  failures++;
-  for (const d of diags.slice(0, 5)) {
-    const { line, character } = sf.getLineAndCharacterOfPosition(d.start ?? 0);
-    const msg = ts.flattenDiagnosticMessageText(d.messageText, " ");
-    console.log(`FAIL  ${file}:${line + 1}:${character + 1} — ${msg}`);
-  }
-  if (diags.length > 5) console.log(`      …and ${diags.length - 5} more`);
+if (failed) {
+  console.error(`\n✗ ${failed} check(s) FAILED — an edge function cannot parse and would BOOT_ERROR in production`);
+  process.exit(1);
 }
-
-if (checked === 0) {
-  console.log(`FAIL  no edge functions found under ${ROOT}/ — this barrier would pass vacuously`);
-  failures++;
-}
-
-console.log(
-  failures === 0
-    ? `\n✓ all ${checked} edge-function source files parse`
-    : `\n✗ ${failures} edge-function file(s) do not parse — \`supabase functions deploy\` would fail`,
-);
-process.exit(failures === 0 ? 0 : 1);
+console.log("\nOK — every edge function parses");
