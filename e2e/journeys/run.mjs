@@ -8,7 +8,7 @@
 // EXIT CODE: non-zero when any journey found a DEFECT. Never read it through a pipe (§41.12
 // corollary: `… | tail` reports tail's status) — redirect to a file and read $?.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
-import { withPage, settle, bodyText, storedHistory, clickText, sleep, defect, note, pass,
+import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
          findings, skips, skip, ledgerRecord, engineAvailable, openMobileSidebar,
          THREE_CHATS, SUB, BASE } from './harness.mjs';
 
@@ -151,8 +151,12 @@ JOURNEYS['open-saved-chat'] = async (mobile) => withPage({ mobile, signedIn: tru
  *  hit «محادثة جديدة»: no inherited text may survive into the fresh chat. */
 JOURNEYS['new-chat-blank'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
   const name = `new-chat-blank:${mobile ? 'mobile375' : 'desktop1440'}`;
-  if (!(await ensureSidebar(page, mobile))) { skip(name, 'mobile sidebar drawer would not open'); return; }
-  if (!(await clickText(page, 'الوكيل الذكي'))) { skip(name, 'agent tab not found'); return; }
+  // ORDER MATTERS ON MOBILE. This used to open the drawer FIRST, and at 375px the open drawer
+  // covers the whole screen — so the tap on «الوكيل الذكي» was intercepted and the agent screen
+  // never opened. With the old swallow-the-failure clickText that read as a success, and the
+  // journey skipped two runs running on the downstream symptom («composer not found»). The
+  // sidebar is not needed until «محادثة جديدة», so it is opened THERE, not here.
+  if (!(await clickText(page, 'الوكيل الذكي'))) { skip(name, `agent tab: ${clickReason()}`); return; }
   await sleep(3500);
   const composer = page.locator('textarea').first();
   if (!(await composer.count())) { skip(name, 'composer not found'); return; }
@@ -161,7 +165,8 @@ JOURNEYS['new-chat-blank'] = async (mobile) => withPage({ mobile, signedIn: true
   const typed = await composer.inputValue();
   if (!typed.includes('شقة')) { skip(name, 'composer did not accept text'); return; }
 
-  if (!(await clickText(page, 'محادثة جديدة'))) { skip(name, 'New Chat not found'); return; }
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'mobile sidebar drawer would not open'); return; }
+  if (!(await clickText(page, 'محادثة جديدة'))) { skip(name, `New Chat: ${clickReason()}`); return; }
   await sleep(3000);
   const after = page.locator('textarea').first();
   const leftOver = (await after.count()) ? await after.inputValue() : '';
@@ -327,10 +332,52 @@ JOURNEYS['sidebar-row-actions'] = async (mobile) => withPage({ mobile, signedIn:
   // ── delete ────────────────────────────────────────────────────────────────────────────────────
   if (!(await ensureSidebar(page, mobile))) { skip(name, 'sidebar closed after reload'); return; }
   if (!(await openRowMenu(page, 'شقق الخبر'))) { skip(name, 'row ⋯ menu would not reopen'); return; }
-  if (!(await clickText(page, 'حذف'))) { skip(name, 'delete action not in the menu'); return; }
+  if (!(await clickText(page, 'حذف'))) { skip(name, `delete action: ${clickReason()}`); return; }
   await sleep(2000);
-  // A confirm step is legitimate; take it if it is offered.
-  await clickText(page, 'حذف').catch(() => {});
+
+  // ── THE CONFIRMATION GATE IS PART OF THE GUARANTEE, NOT AN OBSTACLE TO IT ─────────────────────
+  // «حذف» opens a dialog (PR #1200, deployed 2026-08-28 23:42 UTC) and only «حذف نهائي» inside it
+  // deletes. This step used to be a best-effort second exact-«حذف» click with the comment "a
+  // confirm step is legitimate; take it if it is offered" — which matched the ROW MENU's label,
+  // not the dialog's «حذف نهائي», so once the gate shipped the journey stopped completing any
+  // deletion and reported «delete did not remove the chat» 4/4 (desktop and mobile, 2026-08-29).
+  // The product was right and the oracle was stale: the same journey passed 0/2 against the
+  // 22:41 bundle one hour before the gate landed, and a single «حذف» provably deletes nothing
+  // while «حذف نهائي» is on screen (2/2, fresh contexts).
+  //
+  // That is the PART 9 harm in its most expensive form: a red journey accusing a SAFETY GATE of
+  // being a bug, pressuring the next author to delete the confirmation to get the suite green.
+  // So the gate is now asserted rather than tolerated — the dialog must appear, the chat must
+  // still be there while it is open, and إلغاء must leave it there too.
+  const dialog = page.locator('[data-testid="chat-delete-confirm-dialog"]');
+  if (!(await dialog.count())) {
+    defect(name, 'delete fired with no confirmation dialog', 'a destructive action must be gated by «حذف نهائي» (PR #1200)');
+    return;
+  }
+  const midDialog = await storedHistory(page);
+  if (!(midDialog || []).some((x) => x.id === 'h3')) {
+    defect(name, 'the chat was deleted merely by OPENING the confirmation', `ids already [${ids(midDialog)}] with the dialog still open`);
+    return;
+  }
+  // إلغاء must be a real escape hatch, not a differently-worded delete.
+  const cancel = page.locator('[data-testid="chat-delete-cancel"]');
+  if (await cancel.count()) {
+    await cancel.first().click({ timeout: 15_000 }).catch(() => {});
+    await sleep(1500);
+    const afterCancel = await storedHistory(page);
+    if (!(afterCancel || []).some((x) => x.id === 'h3')) {
+      defect(name, 'إلغاء deleted the chat', `ids [${ids(afterCancel)}] after cancelling the delete dialog`);
+      return;
+    }
+    pass(name, 'إلغاء left the chat intact');
+    // reopen the dialog to carry out the real deletion
+    if (!(await openRowMenu(page, 'شقق الخبر'))) { skip(name, 'row ⋯ menu would not reopen after cancel'); return; }
+    if (!(await clickText(page, 'حذف'))) { skip(name, `delete action after cancel: ${clickReason()}`); return; }
+    await sleep(1800);
+  }
+  const confirm = page.locator('[data-testid="chat-delete-confirm"]');
+  if (!(await confirm.count())) { skip(name, '«حذف نهائي» not present in the confirmation dialog'); return; }
+  await confirm.first().click({ timeout: 15_000 }).catch(() => {});
   await sleep(2000);
   const deleted = await storedHistory(page);
   if ((deleted || []).some((x) => x.id === 'h3')) {
@@ -416,6 +463,109 @@ JOURNEYS['adv-background-tab'] = async (mobile) => withPage({ mobile, signedIn: 
   else pass(name, `survived 45s backgrounded (${t.length} chars, controls present)`);
   if (bag.pageErrors.length) defect(name, 'page error after backgrounding', bag.pageErrors.join(' | '));
   await other.close().catch(() => {});
+});
+
+// ── appearance: the auth gate, in a REAL browser ────────────────────────────────────────────────
+// scripts/verify-appearance-lifecycle.ts already owns this rule, but it executes the pure resolver
+// and STRING-PINS the provider/boot wiring. PART 5 is explicit that a barrier for a journey bug is
+// a real-browser barrier, "never a unit test standing in for the click" — and the two layers that
+// actually decide what a returning visitor SEES (the pre-hydration boot script in +html.tsx and
+// the post-mount provider effect in theme.tsx) are precisely the halves a string-pin cannot run.
+// These two journeys close that gap against production.
+const THEME_KEY = 'appearance';
+const themeState = (page) => page.evaluate((k) => ({
+  attr: document.documentElement.getAttribute('data-theme'),
+  stored: (() => { try { return localStorage.getItem(k); } catch { return 'ERR'; } })(),
+}), THEME_KEY);
+
+/** J14 — THE LEAK RULE, EXECUTED. A guest carrying a stored `appearance: 'dark'` — a user who chose
+ *  Dark before the 2026-08-28 auth-gating landed and never signed in, or any other route to a stale
+ *  key — must see a LIGHT app (owner 2026-08-28: appearance is an authenticated-user asset).
+ *
+ *  Both layers are asserted, because either one alone can be wrong in a way the other hides: the
+ *  boot script decides the FIRST paint (a wrong answer here is a visible dark flash even if the
+ *  provider corrects it), and the provider's effect decides every frame after auth settles (a wrong
+ *  answer here is a permanently dark logged-out app). The key is seeded and the page RELOADED, so
+ *  the boot script sees it exactly as it would for a returning visitor. */
+JOURNEYS['appearance-guest-light'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `appearance-guest-light:${mobile ? 'mobile375' : 'desktop1440'}`;
+  await page.evaluate((k) => localStorage.setItem(k, 'dark'), THEME_KEY);
+  await page.reload({ waitUntil: 'load' });
+  const boot = await themeState(page);              // first paint, before the provider can correct
+  await settle(page);
+  await sleep(2500);                                // let auth settle and the provider effect run
+  const after = await themeState(page);
+  if (boot.attr !== 'light') {
+    defect(name, 'a guest gets a DARK first paint', `boot data-theme=${boot.attr} with stored «${boot.stored}» — the +html.tsx boot script should pin light for a visitor with no sb-*-auth-token`);
+  } else if (after.attr !== 'light') {
+    defect(name, 'the provider darkens a logged-out app', `data-theme went ${boot.attr} → ${after.attr} after auth settled`);
+  } else {
+    pass(name, `guest stayed light at both layers with stored «${after.stored}»`);
+  }
+  if (bag.pageErrors.length) defect(name, 'page error on the guest appearance path', bag.pageErrors.join(' | '));
+});
+
+/** J15 — إلغاء MUST NOT TOUCH THE THEME. The owner rule (theme.tsx, 2026-08-28) is that only a
+ *  COMPLETED sign-out or a server-confirmed deletion resets appearance — "merely OPENING a
+ *  confirmation popup — or cancelling it — never touches the theme."
+ *
+ *  The failure this guards is a one-line mistake with a loud symptom: wire resetThemeForSignOut()
+ *  to the dialog opening (or to onClose, which Cancel shares) and a signed-in dark user who opens
+ *  «تسجيل الخروج», thinks better of it and taps إلغاء is dumped into a light app with their stored
+ *  preference erased — still signed in, having changed nothing. Dark is set through the REAL
+ *  control here, not by writing localStorage, so the journey also proves the appearance pane works. */
+JOURNEYS['appearance-cancel-keeps-dark'] = async (mobile) => withPage({ mobile, signedIn: true }, async (page, bag) => {
+  const name = `appearance-cancel-keeps-dark:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const openMenu = async () => {
+    if (!(await ensureSidebar(page, mobile))) return false;
+    const trig = page.locator('[data-testid="account-menu-trigger"]');
+    if (!(await trig.count())) return false;
+    await trig.first().click({ timeout: 15_000 }).catch(() => {});
+    await sleep(1200);
+    return (await page.locator('[data-testid="account-menu"]').count()) > 0;
+  };
+  const tap = async (tid) => {
+    const l = page.locator(`[data-testid="${tid}"]`);
+    if (!(await l.count())) return false;
+    try { await l.first().click({ timeout: 15_000 }); return true; } catch { return false; }
+  };
+
+  if (!(await openMenu())) { skip(name, 'account menu would not open'); return; }
+  if (!(await tap('account-menu-appearance'))) { skip(name, 'appearance row not in the menu'); return; }
+  await sleep(900);
+  if (!(await tap('appearance-dark'))) { skip(name, 'dark option not in the appearance pane'); return; }
+  await sleep(1800);
+  const dark = await themeState(page);
+  if (dark.attr !== 'dark' || dark.stored !== 'dark') {
+    defect(name, 'choosing Dark did not take effect', `data-theme=${dark.attr}, stored=«${dark.stored}» — expected both dark`);
+    return;                                          // nothing left to cancel-test meaningfully
+  }
+  pass(name, 'the appearance control applied and persisted Dark');
+
+  // Back to the menu ROOT, then into the sign-out confirmation. The menu is a stack, not a set of
+  // independent popups: after choosing Dark it is still showing the appearance pane, where
+  // «تسجيل الخروج» does not exist. Re-tapping the trigger does not help either — it reopens on the
+  // same pane. Walking back the way a person would (account-menu-back) is both the honest journey
+  // and the one that works; guessing at a reopen skipped this journey 4/4 on its first outing.
+  if (!(await tap('account-menu-back'))) { skip(name, 'back affordance not in the appearance pane'); return; }
+  await sleep(900);
+  if (!(await tap('account-menu-signout'))) { skip(name, 'sign-out row not in the menu root'); return; }
+  await sleep(900);
+  const opened = await themeState(page);
+  if (opened.attr !== 'dark' || opened.stored !== 'dark') {
+    defect(name, 'merely OPENING the sign-out popup reset the theme', `data-theme=${opened.attr}, stored=«${opened.stored}» — the owner rule resets only on a COMPLETED sign-out`);
+  }
+  if (!(await tap('logout-popup-cancel'))) { skip(name, 'إلغاء not found on the sign-out popup'); return; }
+  await sleep(2000);
+  const cancelled = await themeState(page);
+  if (cancelled.attr !== 'dark') {
+    defect(name, 'إلغاء dumped a still-signed-in user into a light app', `data-theme=${cancelled.attr} after cancel (was dark)`);
+  } else if (cancelled.stored !== 'dark') {
+    defect(name, 'إلغاء erased the stored appearance', `stored=«${cancelled.stored}» after cancel — the preference must survive a cancelled sign-out`);
+  } else {
+    pass(name, 'إلغاء left both the theme and the stored preference untouched');
+  }
+  if (bag.pageErrors.length) defect(name, 'page error on the cancel path', bag.pageErrors.join(' | '));
 });
 
 // ═══ RUNNER ═════════════════════════════════════════════════════════════════════════════════════
