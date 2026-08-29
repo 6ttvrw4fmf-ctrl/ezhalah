@@ -241,6 +241,33 @@ check(
     + 'flight, racing its own concurrency group',
 );
 
+// --- THE COUPLING THE CHAIN CREATED, added 2026-08-29 --------------------------------------------
+// Chaining the fast lane onto the sweep (20260828231336) was the right call, but it silently made
+// SWEEP DURATION a term in P0 delivery latency: alert_event.created_at defaults to now(), which is
+// TRANSACTION START, so a P0's 5-minute clock starts when the sweep starts and the sweep's whole
+// runtime is spent before dispatch begins. Nothing was updated to watch that.
+//
+// Measured 2026-08-29: the 04:29 sweep ran 185.3s and its P0s were filed at 204.0s -- ~19s of
+// overhead past the sweep, i.e. the sweep IS the delivery time. The slowest sweep in that 24h was
+// 332.1s => 351s forecast, a breach; 5 of 48 sweeps would have breached. The pre-existing budget
+// limb caught NONE of them, because it measures the same runtime against statement_timeout (900s)
+// and stays green until 540s. These two checks pin the fix so it cannot be quietly undone.
+check(
+  'the sweep is measured against the P0 SLO budget, not only its own statement_timeout',
+  /detector_sweep_vs_p0_slo/.test(corpus),
+  'without this limb the sweep can grow from 332s to 540s -- guaranteeing SLO breach the whole way '
+    + '-- while the only detector watching its duration reads a comfortable 37% of 900s',
+);
+check(
+  'the fast lane is front-loaded as well as trailing, so an ABORTED sweep cannot strand every P0',
+  /front-load|front_load|FRONT-LOAD/i.test(corpus)
+    && /mon_dispatch_p0_fast\(\);'\s*\|\|\s*chr\(10\)/.test(corpus),
+  'pg_cron runs the whole command in ONE transaction: when mon_run_all_detectors() hits '
+    + 'statement_timeout the rollback takes the trailing mon_dispatch_p0_fast() with it and NO P0 '
+    + 'is dispatched at all. Observed 2026-08-26: the 17:29 AND 17:59 sweeps both aborted, a full '
+    + 'hour with zero dispatch capability, and P0 1011 waited 2h47m for the Actions backstop.',
+);
+
 // --- the owner decision is recorded in the repo, not just in a migration -------------------------
 const spec = readFileSync(SPEC, 'utf8');
 check(
