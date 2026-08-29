@@ -1130,6 +1130,19 @@ const AR: Record<string, string> = {
   "Note: to change your {provider} account, you'll need to delete this account and sign up again with the new one.":
     'ملاحظة: لتغيير حساب {provider}، عليك حذف هذا الحساب وإنشاء حساب جديد بالحساب الآخر.',
 
+  // Sidebar-anchored account menu (owner 2026-08-28). Appearance/Language/Help/Account labels —
+  // the compact panel that replaced the centered Settings modal.
+  'Appearance': 'المظهر',
+  'System': 'النظام',
+  'Light': 'فاتح',
+  'Dark': 'داكن',
+  // ('Language' already lives in the general chrome section above.)
+  'Help': 'المساعدة',
+  'Manage account': 'إدارة الحساب',
+  'Account menu': 'قائمة الحساب',
+  // The Arabic-only contract (i18n setLocale guard): English is listed but not selectable.
+  'Not available yet': 'غير متاح بعد',
+
   // About Us — the long-form «من نحن» copy below is the OWNER'S EXACT wording (2026-07-09); never
   // rewrite or shorten it (still referenced by src/app/about.tsx). The modal now uses the compact
   // 2026-08-23 redesign strings further down, approved by the owner's premium-redesign brief.

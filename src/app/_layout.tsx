@@ -9,6 +9,7 @@ import { shouldAutoShowAuthPopup, AUTH_POPUP_DISMISSED_KEY } from '@/lib/authPop
 import { initObservability, reportError } from '@/lib/observability';
 import { LocaleProvider, useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
+import { ThemeProvider, useTheme } from '@/theme/theme';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
 import { markAppSessionStarted } from '@/lib/appSession';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -47,6 +48,10 @@ if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis a
 function Shell() {
   const docked = useDocked();
   const { isRTL } = useI18n();
+  // APPEARANCE (owner 2026-08-28): the status bar follows the resolved theme. Screen content is
+  // converted per-surface (Sidebar + account menu in this pass); the Stack's contentStyle stays the
+  // light paper until each screen's inks are converted — flipping it first would break readability.
+  const { resolved } = useTheme();
   const pathname = usePathname();
   const router = useRouter();
   // AUTO-SHOW SIGN-IN POPUP (owner 2026-08-28) — replaces the retired SignInDock side card: the
@@ -93,6 +98,7 @@ function Shell() {
   }, []);
   return (
     <View style={{ flex: 1, flexDirection: isRTL ? 'row-reverse' : 'row' }}>
+      <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
       {/* /auth is a focused full-screen moment — no docked sidebar there. */}
       {docked && pathname !== '/auth' && <Sidebar docked onClose={() => {}} />}
       {/* One-click Google sign-in prompt (web, signed-out only) — renders its own corner UI. */}
@@ -108,7 +114,8 @@ function Shell() {
           <Stack.Screen name="index" options={{ animation: 'fade' }} />
           <Stack.Screen name="agent" options={{ animation: 'none' }} />
           <Stack.Screen name="interview" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
-          <Stack.Screen name="settings" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
+          {/* The /settings route is GONE (owner 2026-08-28): account controls open as a compact
+              panel anchored to the sidebar's profile row — see components/AccountMenu.tsx. */}
           <Stack.Screen name="about" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
           <Stack.Screen name="support" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
           {/* Auth opens with a soft fade (not the abrupt slide-up-with-X) — the screen's own content
@@ -132,12 +139,13 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
+        <ThemeProvider>
         <LocaleProvider>
         <AppProvider>
-          <StatusBar style="dark" />
           <Shell />
         </AppProvider>
         </LocaleProvider>
+        </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
