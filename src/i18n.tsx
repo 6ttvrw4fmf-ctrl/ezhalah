@@ -1111,10 +1111,22 @@ const AR: Record<string, string> = {
     'ما قدرنا نحذف حسابك. تأكد من اتصالك وحاول مرة ثانية.',
   "To change it, you'll have to delete this account and make a new one.":
     'لتغييره، عليك حذف هذا الحساب وإنشاء حساب جديد.',
-  'Logged in device': 'الجهاز المسجَّل دخوله',
+  // Truthful device/browser row (owner 2026-08-29): values come from src/lib/deviceInfo.ts —
+  // detected, never derived from the login provider, never an exact model. Browser row is
+  // omitted entirely when detection isn't trustworthy.
+  'Logged in device': 'الجهاز المستخدم',
   'This device': 'هذا الجهاز',
-  'Android / Chrome': 'أندرويد / كروم',
+  'Browser': 'المتصفح',
   'iPhone': 'آيفون',
+  'iPad': 'آيباد',
+  'Android': 'أندرويد',
+  'Mac': 'ماك',
+  'Windows': 'ويندوز',
+  'Chrome': 'كروم',
+  'Safari': 'سفاري',
+  'Firefox': 'فايرفوكس',
+  'Edge': 'إيدج',
+  'Opera': 'أوبرا',
   'Saved': 'تم الحفظ',
   'Name saved': 'تم حفظ الاسم',
   'Log out?': 'تسجيل الخروج؟',

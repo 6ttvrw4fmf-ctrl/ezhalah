@@ -8,6 +8,7 @@ import { useTheme, type ThemeMode } from '@/theme/theme';
 import { useApp } from '@/store';
 
 import { useI18n } from '@/i18n';
+import { detectDevice, readDeviceEnv } from '@/lib/deviceInfo';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { pickName, buildSyncedName, scriptOf, initialsOf } from '@/lib/nameSync';
 import { COUNTRIES, type Country } from '@/data/countries';
@@ -204,7 +205,10 @@ export default function AccountMenu({
 
   if (!shown || !user) return null;
 
-  const loginDevice = m === 'google' ? t('Android / Chrome') : t('iPhone');
+  // TRUTHFUL device row (owner 2026-08-29): detected from the actual browser environment — never
+  // from the login provider (the old `m === 'google' ? Android : iPhone` fabrication), never an
+  // exact model. Unknowns stay unknown: device falls back to «هذا الجهاز», browser line is omitted.
+  const device = detectDevice(readDeviceEnv());
   const modeLabel = mode === 'system' ? t('System') : mode === 'light' ? t('Light') : t('Dark');
   const maxH = Math.max(260, Math.min(winH - 120, 520));
 
@@ -409,8 +413,17 @@ export default function AccountMenu({
                   <Text style={s.fieldLabel}>{t('Logged in device')}</Text>
                   <Text style={s.deviceCurrent}>{t('This device')}</Text>
                 </View>
-                <Text style={s.fieldValue}>{loginDevice}</Text>
+                <Text style={s.fieldValue}>{device.deviceClass ? t(device.deviceClass) : t('This device')}</Text>
               </View>
+
+              {device.browser ? (
+                <View style={s.field}>
+                  <View style={s.fieldHead}>
+                    <Text style={s.fieldLabel}>{t('Browser')}</Text>
+                  </View>
+                  <Text style={s.fieldValue}>{t(device.browser)}</Text>
+                </View>
+              ) : null}
 
               <View style={s.hairline} />
               {/* Destructive action lives HERE — inside the account area, quiet, at the end. */}
