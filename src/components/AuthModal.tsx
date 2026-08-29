@@ -10,6 +10,7 @@ import { useReducedMotion } from '@/lib/useReducedMotion';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { canDragAuthPopup, clampAuthPopupOffset, AUTH_POPUP_POS_KEY } from '@/lib/authPopupBehavior';
+import { attachCardDrag } from '@/lib/cardDrag';
 import {
   isBackendLive,
   sendPhoneOtp,
@@ -97,122 +98,26 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
     const node = popRef.current as unknown as HTMLElement | null;
     const grip = gripRef.current as unknown as HTMLElement | null;
     if (!node || !grip) return;
-
-    const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-    let off = { x: 0, y: 0 };
-    const paint = () => { node.style.transform = `translate3d(${off.x}px, ${off.y}px, 0)`; };
-    // The card's UNTRANSLATED rect — where flex centering put it — is the live rect minus the
-    // offset currently painted. Recomputed on demand so viewport resizes and content growth
-    // (error rows, the country list) are always measured fresh, never cached stale.
-    const baseRect = () => {
-      const r = node.getBoundingClientRect();
-      return { left: r.left - off.x, top: r.top - off.y, width: r.width, height: r.height };
+    // OFFSET MODE: the machinery (lib/cardDrag.ts — shared with the small SignInCard) paints an
+    // offset from wherever flex centering rests the card. The clamp derives the UNTRANSLATED base
+    // rect per call — live rect minus the currently painted offset — so viewport resizes and
+    // content growth (error rows, the country list) are always measured fresh, never cached stale.
+    const painted = () => {
+      const m = /translate3d\((-?[\d.]+)px, (-?[\d.]+)px/.exec(node.style.transform || '');
+      return m ? { x: +m[1], y: +m[2] } : { x: 0, y: 0 };
     };
-    const vp = () => ({ w: innerWidth, h: innerHeight });
-    const clamp = (p: { x: number; y: number }) => clampAuthPopupOffset(p, baseRect(), vp());
-
-    // Restore this session's moved position (owner: "preserve if safe/easy"), re-clamped so a
-    // narrower window since then can never restore the card off-screen.
-    try {
-      const saved = sessionStorage.getItem(AUTH_POPUP_POS_KEY);
-      if (saved) {
-        const p = JSON.parse(saved);
-        if (typeof p?.x === 'number' && typeof p?.y === 'number') { off = clamp(p); paint(); }
-      }
-    } catch { /* private mode / blocked storage — centered is always fine */ }
-
-    let raf = 0;
-    let safety: ReturnType<typeof setTimeout> | undefined;
-    let dragging = false, moved = false, id = -1;
-    let grabX = 0, grabY = 0;
-    let hist: Array<{ x: number; y: number; t: number }> = [];
-    const THRESHOLD = 6; // px before a press on the strip commits to a drag
-
-    const onDown = (e: PointerEvent) => {
-      if (e.button !== 0) return;
-      dragging = true; moved = false; id = e.pointerId;
-      grip.setPointerCapture(id);
-      cancelAnimationFrame(raf);
-      clearTimeout(safety);
-      grabX = e.clientX - off.x; grabY = e.clientY - off.y;   // respect WHERE they grabbed
-      hist = [{ x: e.clientX, y: e.clientY, t: performance.now() }];
-      grip.style.cursor = 'grabbing';
-    };
-
-    const onMove = (e: PointerEvent) => {
-      if (!dragging) return;
-      const nx = e.clientX - grabX, ny = e.clientY - grabY;
-      if (!moved && Math.hypot(nx - off.x, ny - off.y) > THRESHOLD) moved = true;
-      if (!moved) return;
-      // Rubber-band past the bounds: resistance, never a hard stop — and never fully off-screen.
-      const c = clamp({ x: nx, y: ny });
-      const band = (v: number, cl: number) => cl + (v - cl) * 0.35;
-      off = { x: band(nx, c.x), y: band(ny, c.y) };
-      paint();
-      hist.push({ x: e.clientX, y: e.clientY, t: performance.now() });
-      if (hist.length > 6) hist.shift();
-    };
-
-    const onUp = () => {
-      if (!dragging) return;
-      dragging = false;
-      grip.style.cursor = 'grab';
-      try { grip.releasePointerCapture(id); } catch { /* already released */ }
-      if (!moved) return;   // a press that never moved is nothing — the strip is not a button
-      // Velocity from the RECENT history only (last ~120ms), project the throw, settle INSIDE the
-      // bounds. The recency window matters: drag → pause → release must drop the card in place
-      // (velocity 0), while a live flick still throws it — old samples must not fake momentum.
-      const now = performance.now();
-      const recent = hist.filter((p2) => now - p2.t < 120);
-      let vx = 0, vy = 0;
-      if (recent.length >= 2) {
-        const a = recent[0], b = recent[recent.length - 1];
-        const dt = Math.max(1, b.t - a.t);
-        vx = ((b.x - a.x) / dt) * 1000; vy = ((b.y - a.y) / dt) * 1000;
-      }
-      const project = (v: number, rate = 0.998) => (v / 1000) * rate / (1 - rate);
-      const target = clamp({ x: off.x + project(vx), y: off.y + project(vy) });
-      try { sessionStorage.setItem(AUTH_POPUP_POS_KEY, JSON.stringify(target)); } catch { /* non-fatal */ }
-      if (reduced) { off = target; paint(); return; }
-      // SAFETY NET: rAF is fully suspended in a hidden/occluded tab, which would strand the card
-      // at its rubber-banded release position — possibly past the bounds — until the next grab.
-      // Timers still fire there, so if the spring hasn't settled shortly, snap to the clamped
-      // target. In a visible window the spring settles first and this clears without ever firing.
-      safety = setTimeout(() => { cancelAnimationFrame(raf); off = target; paint(); }, 1200);
-      // Critically damped spring (damping 1.0, response 0.4), seeded with the release velocity so
-      // there is no seam between the pointer and the animation.
-      const k = (2 * Math.PI / 0.4) ** 2, c2 = 2 * (2 * Math.PI / 0.4);
-      let px = off.x, py = off.y, vX = vx, vY = vy, last = performance.now();
-      const step = (now: number) => {
-        const h = Math.min(0.032, (now - last) / 1000); last = now;
-        vX += (-k * (px - target.x) - c2 * vX) * h; px += vX * h;
-        vY += (-k * (py - target.y) - c2 * vY) * h; py += vY * h;
-        off = { x: px, y: py }; paint();
-        if (Math.hypot(px - target.x, py - target.y) < 0.5 && Math.hypot(vX, vY) < 12) {
-          off = target; paint(); clearTimeout(safety); return;
-        }
-        raf = requestAnimationFrame(step);
-      };
-      raf = requestAnimationFrame(step);
-    };
-
-    // A resized window re-clamps: the card never ends up stranded outside the new viewport.
-    const onResize = () => { off = clamp(off); paint(); };
-
-    grip.addEventListener('pointerdown', onDown);
-    grip.addEventListener('pointermove', onMove);
-    grip.addEventListener('pointerup', onUp);
-    grip.addEventListener('pointercancel', onUp);
-    addEventListener('resize', onResize);
-    return () => {
-      cancelAnimationFrame(raf);
-      clearTimeout(safety);
-      grip.removeEventListener('pointerdown', onDown);
-      grip.removeEventListener('pointermove', onMove);
-      grip.removeEventListener('pointerup', onUp);
-      grip.removeEventListener('pointercancel', onUp);
-      removeEventListener('resize', onResize);
-    };
+    return attachCardDrag(node, grip, {
+      posKey: AUTH_POPUP_POS_KEY,
+      clamp: (p) => {
+        const r = node.getBoundingClientRect();
+        const o = painted();
+        return clampAuthPopupOffset(
+          p,
+          { left: r.left - o.x, top: r.top - o.y, width: r.width, height: r.height },
+          { w: innerWidth, h: innerHeight },
+        );
+      },
+    });
   }, [drag]);
 
   const progress = useSharedValue(0);
@@ -240,6 +145,65 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
     });
   };
 
+  // The form registers its own back() here so a press on the empty ground steps back exactly the
+  // way the in-card control does (country list → main → close), preserving the original semantics
+  // now that the step state lives inside AuthForm.
+  const backRef = useRef<() => void>(close);
+
+  return (
+    <View style={s.root}>
+      {/* Subtle dark/grey veil across the whole viewport (owner: "not so aggressive the Filter
+          disappears") — the Filter page underneath is never re-rendered, replaced, or unmounted;
+          this is purely a translucent paint on top of it. */}
+      <Animated.View style={[s.backdrop, backdropStyle]} pointerEvents="none" />
+      <ScrollView style={s.scrollHost} contentContainerStyle={s.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        {/* The outer Pressable fills the viewport — a press on the empty ground closes the popup.
+            The inner Pressable swallows presses so touching the card itself never dismisses it. */}
+        <Pressable style={s.center} onPress={() => backRef.current()}>
+          <Pressable
+            ref={popRef as never}
+            // @ts-expect-error web-only DOM props on the RNW host node
+            dataSet={{ testid: 'auth-popup' }}
+            style={[s.popWrap, drag && s.popWrapWide]}
+            onPress={() => {}}
+          >
+            <Animated.View style={[s.pop, drag && s.popWide, cardStyle]}>
+              {/* Desktop grab strip — a designated header region that picks the whole card up. It
+                  overlays the grabber pill + eagle area only (never the form), and the close X sits
+                  ABOVE it in the stack so closing never begins a drag. Mobile/native: not rendered. */}
+              {drag && (
+                <View
+                  ref={gripRef}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ testid: 'auth-popup-drag-handle' }}
+                  style={[s.grip, { cursor: 'grab', touchAction: 'none', userSelect: 'none' } as never]}
+                >
+                  <View style={s.gripPill} />
+                </View>
+              )}
+              <AuthForm onRequestClose={close} onSignedIn={onSignedIn} backRef={backRef} />
+            </Animated.View>
+          </Pressable>
+        </Pressable>
+      </ScrollView>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// THE ONE AUTH UI (owner 2026-08-29): every step of sign-in — Google, Apple, phone+WhatsApp OTP,
+// and the preview-only fallbacks — in a single component with two presentations. The centered
+// modal (Sheet above) renders it full-size; the small draggable SignInCard renders it `compact`.
+// Only STYLES differ between the two; state, handlers, providers and copy are this one code path,
+// so there is never a second auth system to drift.
+export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
+  onRequestClose: () => void;
+  onSignedIn: (u: AuthUser) => void;
+  compact?: boolean;
+  backRef?: { current: () => void };
+}) {
+  const { isRTL } = useI18n();
+  const cp = !!compact;
   const [cc, setCc] = useState<Country>(COUNTRIES[0]);
   const [ccOpen, setCcOpen] = useState(false);
   const [phone, setPhone] = useState('');
@@ -267,7 +231,7 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
 
   const done = (u: AuthUser) => {
     onSignedIn(u);
-    close();
+    onRequestClose();
   };
 
   // Apple Face ID: mirror the prototype's scan→verified beat, but on a native build we actually
@@ -369,48 +333,22 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
 
   const back = () => {
     if (ccOpen) return setCcOpen(false);
-    if (step === 'main') return close();
+    if (step === 'main') return onRequestClose();
     if (step === 'appleface') return setStep('apple');
     setStep('main');
     setOtp('');
   };
+  // Hand the live back() to the host so its ground-press steps back exactly like the in-card
+  // control. Assigned every render — cheap, and always current.
+  if (backRef) backRef.current = back;
 
   const appleEmail = hideEmail ? 'hide-my-email@privaterelay.appleid.com' : 'apple-user@icloud.com';
 
   return (
-    <View style={s.root}>
-      {/* Subtle dark/grey veil across the whole viewport (owner: "not so aggressive the Filter
-          disappears") — the Filter page underneath is never re-rendered, replaced, or unmounted; this
-          is purely a translucent paint on top of it. */}
-      <Animated.View style={[s.backdrop, backdropStyle]} pointerEvents="none" />
-      <ScrollView style={s.scrollHost} contentContainerStyle={s.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        {/* The outer Pressable fills the viewport — a press on the empty ground closes the popup. The
-            inner Pressable swallows presses so touching the card itself never dismisses it. */}
-        <Pressable style={s.center} onPress={back}>
-          <Pressable
-            ref={popRef as never}
-            // @ts-expect-error web-only DOM props on the RNW host node
-            dataSet={{ testid: 'auth-popup' }}
-            style={[s.popWrap, drag && s.popWrapWide]}
-            onPress={() => {}}
-          >
-            <Animated.View style={[s.pop, drag && s.popWide, cardStyle]}>
-              {/* Desktop grab strip — a designated header region that picks the whole card up. It
-                  overlays the grabber pill + eagle area only (never the form), and the close X sits
-                  ABOVE it in the stack so closing never begins a drag. Mobile/native: not rendered. */}
-              {drag && (
-                <View
-                  ref={gripRef}
-                  // @ts-expect-error web-only DOM props on the RNW host node
-                  dataSet={{ testid: 'auth-popup-drag-handle' }}
-                  style={[s.grip, { cursor: 'grab', touchAction: 'none', userSelect: 'none' } as never]}
-                >
-                  <View style={s.gripPill} />
-                </View>
-              )}
+    <>
               <Pressable
                 onPress={back}
-                style={s.popClose}
+                style={[s.popClose, cp && c.popClose]}
                 hitSlop={10}
                 accessibilityRole="button"
                 accessibilityLabel={t('Close')}
@@ -423,15 +361,15 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
                   color={colors.ink}
                 />
               </Pressable>
-              <RNImage source={LOGO} style={[s.popEagle, drag && s.popEagleWide]} resizeMode="contain" />
+              <RNImage source={LOGO} style={[s.popEagle, cp && c.popEagle]} resizeMode="contain" />
               {/* ── main ───────────────────────────────────────────────── */}
               {step === 'main' && (
                 <>
-                  <Text style={s.formHead}>{t('Sign in or create your account')}</Text>
-                  <Text style={s.agree}>{t("By continuing you agree to Ezhalah's Terms & Privacy Policy.")}</Text>
+                  <Text style={[s.formHead, cp && c.formHead]}>{t('Sign in or create your account')}</Text>
+                  <Text style={[s.agree, cp && c.agree]}>{t("By continuing you agree to Ezhalah's Terms & Privacy Policy.")}</Text>
 
                   <Pressable
-                    style={[s.oauth, s.google]}
+                    style={[s.oauth, cp && c.oauth, s.google]}
                     onPress={() =>
                       isBackendLive
                         ? onGoogle({ method: 'google', initials: 'U', name: 'User', sub: 'user@gmail.com' })
@@ -439,33 +377,33 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
                     }
                   >
                     <Ionicons name="logo-google" size={18} color="#fff" />
-                    <Text style={[s.oauthText, { color: '#fff' }]}>{t('Continue with Google')}</Text>
+                    <Text style={[s.oauthText, cp && c.oauthText, { color: '#fff' }]}>{t('Continue with Google')}</Text>
                   </Pressable>
                   <Pressable
-                    style={[s.oauth, s.apple]}
+                    style={[s.oauth, cp && c.oauth, s.apple]}
                     onPress={() => {
                       setOauthErr('');
                       isBackendLive ? onAppleContinue() : setStep('apple');
                     }}
                   >
                     <Ionicons name="logo-apple" size={20} color={colors.ink} />
-                    <Text style={s.oauthText}>{t('Continue with Apple')}</Text>
+                    <Text style={[s.oauthText, cp && c.oauthText]}>{t('Continue with Apple')}</Text>
                   </Pressable>
                   {!!oauthErr && <Text style={s.oauthErr}>{oauthErr}</Text>}
 
-                  <View style={s.orRow}>
+                  <View style={[s.orRow, cp && c.orRow]}>
                     <View style={s.orLine} />
                     <Text style={s.orText}>{t('or')}</Text>
                     <View style={s.orLine} />
                   </View>
 
                   <View ref={setLtr} style={s.phoneRow}>
-                    <View style={s.cc}>
+                    <View style={[s.cc, cp && c.cc]}>
                       <Text style={s.ccFlag}>{cc.flag}</Text>
                       <Text style={s.ccText}>{cc.code}</Text>
                     </View>
                     <TextInput
-                      style={s.phoneInput}
+                      style={[s.phoneInput, cp && c.phoneInput]}
                       placeholder={t('Phone number')}
                       placeholderTextColor={colors.muted}
                       textAlign="left"
@@ -504,8 +442,8 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
 
                   {!!(phoneError || otpError) && <Text style={s.err}>{phoneError || otpError}</Text>}
 
-                  <Pressable style={[s.continue, (!valid || busy) && s.continueOff]} disabled={!valid || busy} onPress={onContinuePhone}>
-                    {busy ? <Spinner tint="#fff" /> : <Text style={s.continueText}>{t('Continue')}</Text>}
+                  <Pressable style={[s.continue, cp && c.continueBtn, (!valid || busy) && s.continueOff]} disabled={!valid || busy} onPress={onContinuePhone}>
+                    {busy ? <Spinner tint="#fff" /> : <Text style={[s.continueText, cp && c.continueText]}>{t('Continue')}</Text>}
                   </Pressable>
                 </>
               )}
@@ -599,19 +537,19 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
               {/* ── WhatsApp OTP ───────────────────────────────────────── */}
               {step === 'otp' && (
                 <View style={s.otpWrap}>
-                  <View style={s.waBadge}>
+                  <View style={[s.waBadge, cp && c.waBadge]}>
                     <Ionicons name="logo-whatsapp" size={30} color="#fff" />
                   </View>
-                  <Text style={s.otpTitle}>{t('Enter the code')}</Text>
-                  <Text style={s.otpSub}>
+                  <Text style={[s.otpTitle, cp && c.otpTitle]}>{t('Enter the code')}</Text>
+                  <Text style={[s.otpSub, cp && c.otpSub]}>
                     {t('We sent a 6-digit code on WhatsApp to')}{'\n'}
                     <Text style={{ fontWeight: '700', color: colors.ink }}>{cc.code} {phone}</Text>
                   </Text>
 
-                  <Pressable style={s.otpBoxes} onPress={() => otpRef.current?.focus()}>
+                  <Pressable style={[s.otpBoxes, cp && c.otpBoxes]} onPress={() => otpRef.current?.focus()}>
                     {Array.from({ length: 6 }).map((_, i) => (
-                      <View key={i} style={[s.otpBox, otp.length === i && s.otpBoxActive]}>
-                        <Text style={s.otpDigit}>{otp[i] ?? ''}</Text>
+                      <View key={i} style={[s.otpBox, cp && c.otpBox, otp.length === i && s.otpBoxActive]}>
+                        <Text style={[s.otpDigit, cp && c.otpDigit]}>{otp[i] ?? ''}</Text>
                       </View>
                     ))}
                     <TextInput
@@ -637,13 +575,36 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
                   </Pressable>
                 </View>
               )}
-            </Animated.View>
-          </Pressable>
-        </Pressable>
-      </ScrollView>
-    </View>
+    </>
   );
 }
+
+// COMPACT overlays for the small SignInCard presentation (owner 2026-08-29: "full login,
+// shrunk"). Sizes only — colors/copy/logic are the shared form above. The phoneInput font size is
+// deliberately NOT overridden (16 on web — the iOS-zoom barrier's rule applies to the shared
+// style). The preview-only google/apple/appleface steps keep full-size styles: with a live
+// backend those steps are never reached (real OAuth redirects take over).
+const c = StyleSheet.create({
+  popClose: { top: 8, end: 8, width: 26, height: 26, borderRadius: 13 },
+  popEagle: { width: 52, height: 42, marginTop: 10, marginBottom: 6 },
+  formHead: { fontSize: 15.5, lineHeight: 22, marginBottom: 4, letterSpacing: 0 },
+  agree: { fontSize: 10.5, lineHeight: 15, marginBottom: 12, paddingHorizontal: 0 },
+  oauth: { height: 40, borderRadius: 11, marginTop: 8, gap: 7 },
+  oauthText: { fontSize: 12.5 },
+  orRow: { marginVertical: 7 },
+  cc: { height: 44, paddingHorizontal: 9, borderRadius: 11, gap: 4 },
+  // fontSize restated (same web-16 rule as the base style) so the iOS-zoom barrier's parser sees
+  // it on every referenced style of this input — the compact card never shrinks it below 16.
+  phoneInput: { height: 44, paddingHorizontal: 10, borderRadius: 11, fontSize: Platform.OS === 'web' ? 16 : 15 },
+  continueBtn: { height: 44, borderRadius: 11, marginTop: 8 },
+  continueText: { fontSize: 13.5 },
+  otpBoxes: { gap: 4, marginTop: 14 },
+  otpBox: { width: 26, height: 40, borderRadius: 8 },
+  otpDigit: { fontSize: 16 },
+  otpTitle: { fontSize: 16, marginTop: 12 },
+  otpSub: { fontSize: 11.5, lineHeight: 17, marginTop: 6 },
+  waBadge: { width: 42, height: 42, borderRadius: 12 },
+});
 
 const s = StyleSheet.create({
   // zIndex 200 — deliberately above every other root-level overlay in this app (Sidebar 40-50,

@@ -99,7 +99,7 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, locale, isRTL } = useI18n();
-  const { query, setQuery, user, openAuth } = useApp();
+  const { query, setQuery, user, openAuth, dismissSignInCard } = useApp();
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
   // CITY-ONLY FIELD (owner spec 2026-07-17): citySuggestions holds either the Top-6-by-listings
   // (focus, empty text) or the Arabic-matched typed results — never a mix, and never a
@@ -750,6 +750,10 @@ export default function Home() {
       () => {
         // Search is FREE, always (owner rule 2026-08-15): no auth gate may ever sit between the
         // Search button and results. verify-search-is-free.ts fails the build if one comes back.
+        // The user SENT something — the small sign-in card retires for the rest of this load
+        // (owner 2026-08-29). Placed on the successful path only: a blocked submit (no city
+        // picked) is not a send. Note the card never gated this search either way.
+        dismissSignInCard();
         router.push({ pathname: '/agent', params: { filter: JSON.stringify(q) } });
       },
       320,

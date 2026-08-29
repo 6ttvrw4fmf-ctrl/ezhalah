@@ -6,7 +6,7 @@ import { HOME_DEFAULT_QUERY, migrateGroups } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
 import { applyMove, applyStarMove } from '@/lib/sidebarReorder';
 import { autoTitleForQuery, autoTitleForPrompt, canAutoRetitle, type TitleSource } from '@/lib/chatTitle';
-import { AUTH_POPUP_DISMISSED_KEY, dismissalOutlivesTransition } from '@/lib/authPopupBehavior';
+import { dismissalOutlivesTransition } from '@/lib/authPopupBehavior';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
 import { resolveLocation, ensureLocationIndex } from '@/data/locations';
@@ -156,6 +156,11 @@ type AppState = {
   // null = the hasSeenIntro flag is still being read, false = the intro is pending/playing, true =
   // done. The popup may only auto-raise on `true`, so it never covers the intro film.
   introSeen: boolean | null;
+  // The small sign-in card's in-memory dismissal (owner 2026-08-29): true once this load's
+  // visitor sent something (Filter search / Agent message) or closed the card. Never persisted —
+  // a refresh brings the card back; an auth transition resets it (epoch effect above).
+  signInCardDismissed: boolean;
+  dismissSignInCard: () => void;
   // First-run cinematic intro (the eagle clip). Shows ONCE, only for a brand-new logged-out
   // visitor; persisted via a `hasSeenIntro` flag so it never replays. `showIntro` waits until both
   // the saved flag is read AND the auth session is resolved, so it never flashes for a returning
@@ -261,21 +266,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     themeWasSignedInRef.current = is;
   }, [authChecked, user]);
 
-  // AUTH EPOCH (owner 2026-08-29): a popup dismissal lives exactly as long as one continuous
+  // THE SMALL SIGN-IN CARD's dismissal (owner 2026-08-29): IN-MEMORY ONLY, deliberately never
+  // persisted — «it goes away once the user sends something» and comes back «when the user
+  // refresh». Set by the two send sites (Filter onSearch, Agent send — voice funnels into it) and
+  // by the card's own X; reset by construction on any fresh load.
+  const [signInCardDismissed, setSignInCardDismissed] = useState(false);
+
+  // AUTH EPOCH (owner 2026-08-29, #1214): a dismissal lives exactly as long as one continuous
   // signed-in-or-out stretch. This effect is the ONE writer that ends an epoch: on every change of
   // the signed-in boolean — sign-in, sign-out, account deletion, or a session dying in
   // onAuthStateChange — the stale dismissal is cleared, so the next logged-out state is the
-  // canonical one (popup eligible) instead of inheriting a flag stamped in a previous auth life.
-  // `null` start skips the mount pass: a refresh mid-epoch must NOT void a real dismissal.
+  // canonical one (card eligible) instead of inheriting a flag stamped in a previous auth life.
+  // `null` start skips the mount pass: state is fresh on mount anyway.
   const prevSignedInRef = useRef<boolean | null>(null);
   useEffect(() => {
     const now = !!user;
     const prev = prevSignedInRef.current;
     prevSignedInRef.current = now;
     if (prev === null || dismissalOutlivesTransition(prev, now)) return;
-    try {
-      if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(AUTH_POPUP_DISMISSED_KEY);
-    } catch { /* blocked storage — the flag could never have been stamped either */ }
+    setSignInCardDismissed(false);
   }, [user]);
 
   // Backfill the missing-script spelling of the user's name (once per name) so both stay synced.
@@ -948,17 +957,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       closeModal: () => setModal(null),
       authOpen,
       openAuth: () => setAuthOpen(true),
-      closeAuth: () => {
-        setAuthOpen(false);
-        // Dismissal is respected for the rest of the SESSION (owner 2026-08-28): once the popup is
-        // closed — by the X, the ground, or a completed sign-in — it never auto-raises again until
-        // a fresh session. Only an explicit login/signup control (openAuth) brings it back.
-        // sessionStorage is web-only and can be blocked (private mode); then the gate may simply
-        // fire again, which is safe — this stamp is a courtesy, not session logic.
-        try {
-          if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(AUTH_POPUP_DISMISSED_KEY, '1');
-        } catch { /* non-fatal */ }
-      },
+      // Plain close again (2026-08-29): the centered modal no longer auto-raises, so a close
+      // needs no memory — reopening is always an explicit control away.
+      closeAuth: () => setAuthOpen(false),
+      signInCardDismissed,
+      dismissSignInCard: () => setSignInCardDismissed(true),
       introSeen,
       showIntro: introSeen === false && authChecked && !user,
       dismissIntro: () => {
@@ -966,7 +969,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!INTRO_DEMO_MODE) AsyncStorage.setItem('hasSeenIntro', '1').catch(() => {});
       },
     }),
-    [query, dataSource, user, searchCount, history, modal, authOpen, introSeen, authChecked, pendingMessage, activeChatId, setActiveChatId],
+    [query, dataSource, user, searchCount, history, modal, authOpen, introSeen, signInCardDismissed, authChecked, pendingMessage, activeChatId, setActiveChatId],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

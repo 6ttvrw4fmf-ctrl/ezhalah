@@ -12,9 +12,11 @@
 // verify-auth-popup.ts owns the popup's own behaviour (when it raises, drag, dismissal). THIS file
 // owns the fleet-level invariant that no SECOND invitation surface exists or comes back:
 //
-//   invitation surfaces, by owner decision:
-//     • AuthModal        the ONE popup — raises itself via shouldAutoShowAuthPopup, reopened by
-//                        explicit sign-in controls. The only in-app invitation.
+//   invitation surfaces, by owner decision (LOCKED 2026-08-29):
+//     • SignInCard       the ONE unprompted invitation — the small draggable side card, raising
+//                        itself via shouldShowSignInCard for signed-out desktop visitors.
+//     • AuthModal        the ON-DEMAND presentation — opened only by explicit sign-in controls
+//                        (openAuth). It never raises itself; while open it SUPPRESSES the card.
 //     • GoogleOneTap     DELIBERATELY RETAINED alongside it (PR #1187 invested in it the same
 //                        week #1205 kept it mounted). It is Google-rendered browser chrome, not an
 //                        in-app card, and it is not this barrier's target — recorded here so its
@@ -66,25 +68,28 @@ check('its visibility module does not exist either', !existsSync(join(SRC, 'lib/
     titleRenders === 1, `got ${titleRenders}`);
 }
 
-// ── 3. EXACTLY ONE AUTO-RAISING IN-APP SURFACE — the AuthModal popup ─────────────────────────────
+// ── 3. EXACTLY ONE AUTO-RAISING IN-APP SURFACE — the small SignInCard (locked 2026-08-29) ────────
 {
   const layout = read('src/app/_layout.tsx');
-  check('the layout mounts exactly ONE <AuthModal />', (layout.match(/<AuthModal \/>/g) ?? []).length === 1);
-  const autoShowCallers = sources.filter((s) => /shouldAutoShowAuthPopup\(/.test(s.code) && s.path !== 'src/lib/authPopupBehavior.ts');
-  check('exactly ONE caller decides auto-show (the layout) — no second component can raise an invitation',
-    autoShowCallers.length === 1 && autoShowCallers[0].path === 'src/app/_layout.tsx',
-    `callers: ${autoShowCallers.map((c) => c.path).join(', ')}`);
-  // A resurrected fixed side card would need position:'fixed' plumbing in a component that also
-  // invites auth. Only AuthModal (the popup) may combine the two.
-  // Two components legitimately combine fixed positioning with auth wording, both by design:
-  // AuthModal IS the popup, and Sidebar is a fixed docked rail whose single CTA is an exempt entry
-  // CONTROL (checked to be exactly one above). Anything NEW that combines the two is a card
-  // sneaking back — the exact shape of the retired dock.
-  const FIXED_AUTH_ALLOWED = new Set(['src/components/AuthModal.tsx', 'src/components/Sidebar.tsx']);
+  check('the layout mounts exactly ONE <AuthModal /> (the on-demand presentation)', (layout.match(/<AuthModal \/>/g) ?? []).length === 1);
+  check('the layout mounts exactly ONE <SignInCard /> (the unprompted invitation)', (layout.match(/<SignInCard \/>/g) ?? []).length === 1);
+  const cardCallers = sources.filter((s) => /shouldShowSignInCard\(/.test(s.code) && s.path !== 'src/lib/authPopupBehavior.ts');
+  check('exactly ONE component decides the unprompted invitation (SignInCard) — no second can raise one',
+    cardCallers.length === 1 && cardCallers[0].path === 'src/components/SignInCard.tsx',
+    `callers: ${cardCallers.map((c) => c.path).join(', ')}`);
+  check('the RETIRED auto-show decision (shouldAutoShowAuthPopup) no longer exists anywhere',
+    !sources.some((s) => /shouldAutoShowAuthPopup/.test(s.code)));
+  check('the layout never CALLS openAuth — the modal opens only from explicit controls',
+    !/openAuth/.test(stripComments(read('src/app/_layout.tsx'))));
+  // A SECOND fixed side card would need position:'fixed' plumbing in a component that also
+  // invites auth. Three components legitimately combine the two: SignInCard IS the invitation,
+  // AuthModal is the on-demand popup, and Sidebar is a fixed docked rail whose single CTA is an
+  // exempt entry CONTROL (checked above). Anything NEW combining them is a duplicate sneaking in.
+  const FIXED_AUTH_ALLOWED = new Set(['src/components/SignInCard.tsx', 'src/components/AuthModal.tsx', 'src/components/Sidebar.tsx']);
   const fixedAuth = sources.filter((s) =>
     s.path.startsWith('src/components/') && !FIXED_AUTH_ALLOWED.has(s.path)
-    && /'fixed'/.test(s.code) && /openAuth|Sign up \/ Log in/.test(s.code));
-  check('no component beyond the two known-legit ones combines fixed positioning with an auth invitation',
+    && /'fixed'/.test(s.code) && /openAuth|Sign up \/ Log in|AuthForm/.test(s.code));
+  check('no component beyond the three known-legit ones combines fixed positioning with an auth invitation',
     fixedAuth.length === 0, `offenders: ${fixedAuth.map((f) => f.path).join(', ')}`);
 }
 
@@ -111,10 +116,10 @@ console.log('\n── mutation proofs ──');
   // M3: a second AuthModal mount.
   const dualModal = read('src/app/_layout.tsx').replace('<AuthModal />', '<AuthModal />\n      <AuthModal />');
   check('MUT-3 a second <AuthModal /> mount would be caught', (dualModal.match(/<AuthModal \/>/g) ?? []).length !== 1);
-  // M4: a second component starts deciding auto-show for itself.
-  const rogue = { path: 'src/components/Rogue.tsx', text: 'if (shouldAutoShowAuthPopup(g)) show();' };
-  const callers = [...sources.map((x) => ({ path: x.path, text: x.code })), rogue].filter((s) => /shouldAutoShowAuthPopup\(/.test(s.text) && s.path !== 'src/lib/authPopupBehavior.ts');
-  check('MUT-4 a second auto-show caller would be caught', callers.length !== 1);
+  // M4: a second component starts deciding the unprompted invitation for itself.
+  const rogue = { path: 'src/components/Rogue.tsx', text: 'if (shouldShowSignInCard(g)) show();' };
+  const callers = [...sources.map((x) => ({ path: x.path, text: x.code })), rogue].filter((s) => /shouldShowSignInCard\(/.test(s.text) && s.path !== 'src/lib/authPopupBehavior.ts');
+  check('MUT-4 a second invitation-deciding caller would be caught', callers.length !== 1);
   // M5: a fixed-position auth card outside AuthModal.
   const card = { path: 'src/components/NewCard.tsx', text: "style={{ position: 'fixed' }} onPress={openAuth}" };
   check('MUT-5 a new fixed-position auth card would be caught',
