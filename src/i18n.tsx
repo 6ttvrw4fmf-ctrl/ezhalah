@@ -1064,6 +1064,11 @@ const AR: Record<string, string> = {
   'No chat with that name': 'ما لقينا محادثة بهذا الاسم',
   'About Us': 'من نحن',
   'Trust & transparency': 'الثقة والشفافية',
+  // Said when a filter the user asked for cannot be applied to THIS search. Owner's own wording
+  // (2026-08-30): plain, short, no technical framing — never "Advanced Filter", never an error tone.
+  // We still show the best valid results; only the part we could not honour is mentioned.
+  'That option is not available in this search, so I showed the results without it.':
+    'هالخيار مو متوفر حالياً في هالبحث، فطلعت لك النتائج بدون هالشرط.',
   'Real-estate platforms, searched as one.': 'منصة عقارية تبحث فيها كأنها منصة واحدة.',
   'Sign up / Log in': 'إنشاء حساب / تسجيل الدخول',
   // Desktop sign-in dock subtitle (owner 2026-08-26) — why an account is worth it, in one line.

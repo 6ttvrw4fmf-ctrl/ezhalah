@@ -417,7 +417,10 @@ export default function AccountMenu({
               {/* Popup title — this is a centered dialog now, not a drill-in: no back chevron, the
                   × in the corner (and Escape / the backdrop) closes it. */}
               <Text style={s.centerTitle}>{t('Manage account')}</Text>
-              <View style={s.hairline} />
+              {/* Identity fields as ONE inset group (2026-08-30 visual refresh — the iOS grouped-
+                  list idiom): the group surface carries the boundary, so the fields inside stay
+                  the exact same Pressable/edit structures they were — only the wrapper is new. */}
+              <View style={s.fieldsGroup}>
               {/* Display name — tap to edit inline, explicit save (same contract as before). */}
               <Pressable
                 testID="account-menu-name"
@@ -459,6 +462,7 @@ export default function AccountMenu({
                 )}
               </Pressable>
 
+              <View style={s.groupDivider} />
               {m === 'phone' ? (
                 <View style={s.field}>
                   <View style={s.fieldHead}>
@@ -479,6 +483,7 @@ export default function AccountMenu({
                   <Text style={s.fieldNote}>{t("To change it, you'll have to delete this account and make a new one.")}</Text>
                 </View>
               )}
+              </View>
 
               {/* «الأجهزة المسجّل عليها الدخول» — the real session registry, current device first.
                   Loading = two shimmer cards; a failed fetch still shows the local current card
@@ -868,13 +873,18 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     centerRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, ...(Platform.OS === 'web' ? ({ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 } as any) : null) },
     centerBack: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: dark ? 'rgba(4,8,6,0.62)' : 'rgba(8,18,12,0.5)', ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' } as any) : null) },
     centerCard: { direction: 'rtl' as any, width: '100%', maxWidth: 360, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.fieldLine, padding: 22, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
-    centerCardWide: { direction: 'rtl' as any, width: '100%', maxWidth: 560, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.fieldLine, paddingVertical: 18, paddingHorizontal: 20, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
+    centerCardWide: { direction: 'rtl' as any, width: '100%', maxWidth: 560, backgroundColor: C.surface, borderRadius: 24, borderWidth: 1, borderColor: C.fieldLine, paddingVertical: 20, paddingHorizontal: 22, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 34, shadowOffset: { width: 0, height: 22 }, elevation: 14 },
     // PHYSICAL top-right (owner: «X always at the visual TOP-RIGHT»). Arabic forces app-wide RTL
     // (i18n.tsx: documentElement.dir + I18nManager.forceRTL), which makes RN flip `right:` to the
     // physical LEFT — so under RTL the physical right is spelled `left:`. Direction-aware so a
     // future LTR locale keeps the × on the same physical corner.
     centerClose: { position: 'absolute', top: 12, ...(I18nManager.isRTL ? { left: 12 } : { right: 12 }), zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-    centerTitle: { fontSize: 16.5, fontWeight: '700', color: C.ink, textAlign: 'right', writingDirection: 'auto' as any, paddingVertical: 6, paddingHorizontal: 8 },
+    centerTitle: { fontSize: 19, lineHeight: 26, fontWeight: '800', color: C.ink, textAlign: 'right', writingDirection: 'auto' as any, paddingTop: 4, paddingBottom: 14, paddingHorizontal: 8 },
+    // Identity fields live in ONE inset group (iOS grouped-list idiom, 2026-08-30 refresh): the
+    // group surface owns the boundary, an inset hairline separates the rows, and the fields keep
+    // their exact structures — the wrapper is the only new element.
+    fieldsGroup: { backgroundColor: dark ? C.surface2 : C.tint, borderRadius: 16, paddingVertical: 4, paddingHorizontal: 4 },
+    groupDivider: { height: 1, backgroundColor: dark ? C.line : C.tintLine ?? C.line, marginHorizontal: 12 },
 
     row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10 },
     rowHover: { backgroundColor: dark ? '#1d2a22' : '#f2f5f2' },
@@ -914,16 +924,16 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     // The account popup's own language (13px card radius, 10px gaps), not the settings-table look.
     // The current card is the one loud thing here: 1.5px primary border over the faint green wash
     // (C.tint is that wash in BOTH palettes — deep green under the dark layer by construction).
-    devicesWrap: { paddingVertical: 9, paddingHorizontal: 10 },
-    devicesList: { marginTop: 8, gap: 10 },
+    devicesWrap: { paddingTop: 16, paddingBottom: 9, paddingHorizontal: 10 },
+    devicesList: { marginTop: 10, gap: 10 },
     deviceCard: {
-      flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 62,
-      borderRadius: 13, borderWidth: 1, borderColor: C.fieldLine, backgroundColor: C.surface,
-      paddingVertical: 10, paddingHorizontal: 12,
+      flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64,
+      borderRadius: 16, borderWidth: 1, borderColor: C.line, backgroundColor: C.surface,
+      paddingVertical: 12, paddingHorizontal: 14,
     },
     deviceCardCurrent: { borderWidth: 1.5, borderColor: C.primary, backgroundColor: C.tint },
     deviceGlyph: {
-      width: 36, height: 36, borderRadius: 18, backgroundColor: C.surface2,
+      width: 38, height: 38, borderRadius: 19, backgroundColor: C.tint,
       alignItems: 'center', justifyContent: 'center',
     },
     deviceGlyphCurrent: { backgroundColor: C.surface },
@@ -947,8 +957,9 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     },
     deviceConfirmText: { fontSize: 11, fontWeight: '700', color: C.danger },
     deviceCancelText: { fontSize: 11, fontWeight: '500', color: C.muted },
-    devicesOthers: { marginTop: 10, alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 4, borderRadius: 8 },
-    devicesOthersText: { fontSize: 12.5, fontWeight: '600', color: C.primary },
+    // A real (quiet) chip, not a bare text link — the affordance reads as tappable at a glance.
+    devicesOthers: { marginTop: 12, alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, backgroundColor: C.tint, borderWidth: 1, borderColor: C.tintLine ?? C.line },
+    devicesOthersText: { fontSize: 12.5, fontWeight: '700', color: C.primary },
     devicesRetry: { paddingVertical: 6 },
     devicesRetryText: { fontSize: 11.5, color: C.muted, textAlign: 'right' },
     devicesRetryLink: { color: C.primary, fontWeight: '600' },

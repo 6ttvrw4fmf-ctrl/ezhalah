@@ -125,16 +125,51 @@ function Sheet({ kind, onClose }: { kind: 'support' | 'about'; onClose: () => vo
   );
 }
 
+// Support (owner visual refresh 2026-08-30): the last body in this dialog still wearing the
+// pre-redesign look — centered icon-over-text cards — now speaks the same artwork-led language the
+// 2026-08-29 «من نحن» redesign locked in: skyline hero melting into the surface, RTL rows led by a
+// distinct glyph per channel, and the response promise as a quiet tinted band instead of a third
+// boxed card. VISUAL ONLY — same two addresses, same strings, same non-interactive cards.
 function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => string }) {
+  // Literal palette for the hero gradient only (var() breaks inside parsed gradient colors —
+  // same rule as AboutBody); everything else keeps the theme-reactive tokens.
+  const pal = useThemePalette();
+  const dark = useResolvedTheme() === 'dark';
   return (
-    <View style={s.bodyPad}>
-      <Text style={s.h}>{t('Support')}</Text>
-      <SupCard email="support@ezhalah.com" desc={t('Questions about your account, searches, or technical issues.')} />
-      <SupCard email="info@ezhalah.com" desc={t('Business inquiries, partnerships, media requests, and general information.')} />
-      <View style={s.rt}>
-        <Text style={s.rtH}>{t('Response Time')}</Text>
-        <RtRow text={t('Typical response time: {h}.', { h: t('72 hours') })} />
-        <RtRow text={t('Some inquiries may take up to {d}.', { d: t('1 week') })} />
+    <View>
+      {/* The artwork hero — identical composition contract to «من نحن»: full-bleed skyline,
+          gradient melt into the surface, heading rising from the lower band. Style `h` keeps its
+          CLOSE_CLEAR physical-right padding so the title can never slide under the floating ×. */}
+      <View style={s.supHero}>
+        <RNImage source={HERO} style={[s.supHeroImg, { opacity: dark ? 0.22 : 0.5 }]} resizeMode="cover" />
+        {/* locations-first prop order is deliberate: verify-about-premium-contract locates the
+            ABOUT hero by the exact `LinearGradient colors={[alpha0(...)…` substring, and this
+            earlier Support occurrence must not shadow it. */}
+        <LinearGradient locations={[0.1, 0.94]} colors={[alpha0(pal.paper), pal.paper]} style={StyleSheet.absoluteFill} />
+        <View style={s.supHeroInner}>
+          <Text style={s.h}>{t('Support')}</Text>
+        </View>
+      </View>
+
+      <View style={s.bodyPad}>
+        <SupCard
+          icon="headset-outline"
+          email="support@ezhalah.com"
+          desc={t('Questions about your account, searches, or technical issues.')}
+        />
+        <SupCard
+          icon="business-outline"
+          email="info@ezhalah.com"
+          desc={t('Business inquiries, partnerships, media requests, and general information.')}
+        />
+        <View style={s.rt}>
+          <View style={s.rtHead}>
+            <Ionicons name="time-outline" size={15} color={colors.primary} />
+            <Text style={s.rtH}>{t('Response Time')}</Text>
+          </View>
+          <RtRow text={t('Typical response time: {h}.', { h: t('72 hours') })} />
+          <RtRow text={t('Some inquiries may take up to {d}.', { d: t('1 week') })} />
+        </View>
       </View>
     </View>
   );
@@ -274,12 +309,17 @@ function AboutBody({ t, reduced }: { t: Tr; reduced: boolean }) {
   );
 }
 
-function SupCard({ email, desc }: { email: string; desc: string }) {
+// One channel = one RTL row: a distinct glyph names the audience, the address is the hero line
+// (kept LTR internally — it's latin), the purpose sentence sits beneath. Rows, not centered
+// shrines — the reader scans down the right edge in one pass.
+function SupCard({ icon, email, desc }: { icon: keyof typeof Ionicons.glyphMap; email: string; desc: string }) {
   return (
     <View style={s.supCard}>
-      <View style={s.cardIc}><Ionicons name="mail-outline" size={20} color={colors.primary} /></View>
-      <Text style={s.mail}>{email}</Text>
-      <Text style={s.desc}>{desc}</Text>
+      <View style={s.cardIc}><Ionicons name={icon} size={19} color={colors.primary} /></View>
+      <View style={s.supBody}>
+        <Text style={s.mail}>{email}</Text>
+        <Text style={s.desc}>{desc}</Text>
+      </View>
     </View>
   );
 }
@@ -316,21 +356,35 @@ const s = StyleSheet.create({
   xBtnHover: { backgroundColor: colors.surface2, transform: [{ scale: 1.06 }] },
   scroll: { paddingTop: 0, paddingBottom: 0 },
   scrollFill: { flexGrow: 1 },
-  bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 26, paddingBottom: 8 },
+  bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 14, paddingBottom: 8 },
 
-  // ——— Support (shares the upgraded shell) ———
+  // ——— Support (2026-08-30 refresh — the «من نحن» artwork language) ———
+  // The skyline hero: full-bleed at the card's top, melting into the surface. The heading rises
+  // from its lower band; TOP_CLEAR-derived height keeps it under the floating × band, and style
+  // `h` STILL reserves CLOSE_CLEAR on the physical right (verify-info-modal-header-clearance
+  // pins that arithmetic — the clearance is belt-and-braces, not decoration).
+  supHero: { height: TOP_CLEAR + 66, overflow: 'hidden', justifyContent: 'flex-end' },
+  supHeroImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' },
+  supHeroInner: { paddingHorizontal: BODY_PAD, paddingBottom: 0 },
   // paddingRight keeps the heading out from under the close button (see CLOSE_CLEAR).
-  h: { fontSize: 23, fontWeight: '700', color: colors.ink, marginBottom: 16, paddingTop: 4, paddingRight: CLOSE_CLEAR },
-  supCard: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.fieldLine, padding: 18, alignItems: 'center', marginBottom: 12 },
-  cardIc: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
-  mail: { fontSize: 15.5, fontWeight: '700', color: colors.ink },
-  desc: { fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 6, lineHeight: 19 },
+  h: { fontSize: 24, lineHeight: 32, fontWeight: '800', color: colors.ink, textAlign: 'right', writingDirection: 'auto' as any, paddingRight: CLOSE_CLEAR },
+  supBody: { flex: 1, minWidth: 0 },
+  supCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.fieldLine,
+    paddingVertical: 15, paddingHorizontal: 16, marginBottom: 10,
+  },
+  cardIc: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center' },
+  mail: { fontSize: 15, fontWeight: '800', color: colors.ink, textAlign: 'right', writingDirection: 'ltr' as any },
+  desc: { fontSize: 12.5, color: colors.muted, textAlign: 'right', marginTop: 3, lineHeight: 19 },
 
-  rt: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.fieldLine, padding: 18, marginTop: 6, marginBottom: 18 },
-  rtH: { fontSize: 14, fontWeight: '700', color: colors.ink, marginBottom: 10 },
-  rtRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 5 },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.primary },
-  rtText: { flex: 1, fontSize: 13.5, color: colors.body, lineHeight: 19 },
+  // The response promise: a quiet tinted band, not a third boxed card competing with the channels.
+  rt: { backgroundColor: colors.tint, borderRadius: 18, padding: 16, marginTop: 8, marginBottom: 18 },
+  rtHead: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 8 },
+  rtH: { fontSize: 13.5, fontWeight: '800', color: colors.ink, textAlign: 'right' },
+  rtRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
+  rtText: { flex: 1, fontSize: 13, color: colors.body, lineHeight: 20, textAlign: 'right' },
 });
 
 // «من نحن» styles. Arabic typography rules: NO letterSpacing anywhere (Latin tracking mangles

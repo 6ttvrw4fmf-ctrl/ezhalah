@@ -596,6 +596,15 @@ def main() -> int:
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0][:74])
             return 0
 
+        # An ad whose category flipped this run is superseded in the table it LEFT. This runs
+        # before prune_unseen because it reasons from positive evidence (we parsed and classified
+        # the ad this run), not from absence — prune's guards protect an orphan rather than age it
+        # out, and verify_gone's 'live' verdict then makes it immortal. See db.retire_superseded_siblings.
+        superseded = db.retire_superseded_siblings(
+            res_table="sadin_residential_listings", com_table="sadin_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="Sadin")
+
         # Full run: prune listings active before but not seen this crawl.
         pruned = 0
         for tbl, rows_seen in (("sadin_residential_listings", res),
@@ -605,7 +614,8 @@ def main() -> int:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 pruned += n
-        print(f"✓ Sadin: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
+        print(f"✓ Sadin: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned, "
+              f"{superseded} cross-table superseded")
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["sadin_residential_listings", "sadin_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)

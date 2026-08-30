@@ -20,9 +20,18 @@
 // which proves the WORKFLOW is fast and the SCHEDULER is the defect — a manual run is never
 // evidence the SLO is met. Hence the database-side fast lane this file guards.
 //
+// THE ARCHITECTURE THIS NOW GUARDS (owner decision, 2026-08-30). The fast lane has its OWN
+// dedicated, slot-disciplined cron job (`mon-p0-fast-lane`, 24 minutes, max gap 3), so a slow
+// detector sweep can no longer eat the SLO budget before dispatch starts. The sweep is preserved
+// unchanged and still calls the lane as defence-in-depth. See the block at "THE FAST LANE HAS ITS
+// OWN DEDICATED SLOT" below for why the earlier "no polling schedule can work" conclusion was wrong.
+//
 // MUTATION-PROVEN offline (each turns this check RED):
 //   - c_sla_minutes raised above 5
-//   - the fast-dispatch cron job removed, or its schedule slowed below once a minute
+//   - the dedicated fast lane unscheduled entirely
+//   - the lane's cadence slowed so its worst gap no longer fits the SLO (the "delay" mutation)
+//   - the lane moved onto minute 0, which is reserved for the matview refresh
+//   - a return to per-minute polling ('* * * * *'), which trips cron_minute_collision
 //   - the retry cap removed (a down channel would POST every minute forever)
 //   - the detector's raise or resolve path dropped
 //   - the roster wiring replaced by a hand-pasted body instead of a pg_get_functiondef needle-edit
@@ -39,7 +48,8 @@ const SPEC = join(ROOT, 'docs', 'ops', 'SYSTEMS_SEAM_ENGINEER.md');
 const SLA_MINUTES = 5;
 const DETECTOR = 'mon_detect_p0_delivery_sla';
 const DISPATCHER = 'mon_dispatch_p0_fast';
-const CRON_JOB = 'mon-p0-fast-dispatch';
+const CRON_JOB = 'mon-p0-fast-dispatch';   // the retired per-minute poller; must stay unscheduled
+const FAST_LANE = 'mon-p0-fast-lane';      // the owner-approved dedicated slot (2026-08-30)
 
 let failures = 0;
 function check(label: string, ok: boolean, detail = ''): void {
@@ -93,6 +103,32 @@ const corpus = files
 // in this repo — once in verify-alert-delivery-coverage.ts, once in my own heartbeat barrier.)
 const code = sql.split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
 
+// A THIRD SCOPE, added 2026-08-30, because two were not enough.
+//
+// `code` is the newest migration defining the DETECTOR. Several checks below are about the
+// DISPATCHER (`mon_dispatch_p0_fast`) — retry cap, throttle, Vault, the channel row — and they were
+// reading `code` too. That worked only for as long as one migration happened to define both. The
+// moment a migration touched the detector alone (this one did, adding LIMB 3), four dispatcher
+// properties "vanished" and this barrier went red while production's dispatcher was untouched and
+// completely correct. A barrier that fails for a reason that isn't a defect is one people learn to
+// route around, which is the same failure the two-scope comment above was written to avoid.
+//
+// Worse, one check passed for the WRONG reason: `net._http_response` matched a mention inside the
+// detector's own `action` payload string. Comments are stripped before matching precisely so prose
+// cannot satisfy a behavioural check — but a payload string is code, not a comment, so it slipped
+// through the same trap one layer over. Scoping it to the dispatcher fixes that too.
+const dispatcherOwning = files
+  .map((f) => ({ f, sql: readFileSync(join(MIGRATIONS, f), 'utf8') }))
+  .filter((x) => new RegExp(`function\\s+public\\.${DISPATCHER}\\b`, 'i').test(x.sql))
+  .sort((a, b) => a.f.localeCompare(b.f));
+check(
+  `at least one migration defines ${DISPATCHER}()`,
+  dispatcherOwning.length >= 1,
+  'the fast lane has no migration at all',
+);
+const dispatcherCode = (dispatcherOwning[dispatcherOwning.length - 1]?.sql ?? '')
+  .split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+
 // --- the SLO number itself ----------------------------------------------------------------------
 const slaMatch = code.match(/c_sla_minutes\s+int\s*:=\s*(\d+)/);
 check(
@@ -107,28 +143,109 @@ check(
   `${DISPATCHER}() is defined`,
   new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${DISPATCHER}\\b`, 'i').test(corpus),
 );
-// THE FAST LANE MUST BE CHAINED TO THE SWEEP, NOT POLLING ON ITS OWN MINUTE SLOT.
+// THE FAST LANE HAS ITS OWN DEDICATED SLOT (OWNER DECISION, 2026-08-30) AND IS *ALSO* CHAINED.
 //
-// The first version of this scheduled `mon-p0-fast-dispatch` as '* * * * *'. That was wrong, and
-// mon_detect_cron_minute_collision() said so on the very next sweep — a job in every minute slot
-// collides with every other job, including the :00 slot reserved for the matview refresh, and cron
-// stampede is what wedged the database on 2026-08-10. Measured afterwards: exactly TWO minute-slots
+// History, because this reversed a previous conclusion and the reversal must not be re-reversed by
+// someone reading only the older comment. The first version scheduled `mon-p0-fast-dispatch` as
+// '* * * * *'. That was genuinely wrong — a job in every minute slot collides with everything,
+// including the :00 slot reserved for the matview refresh, and cron stampede is what wedged the
+// database on 2026-08-10. 20260828231336 unscheduled it and concluded that "exactly TWO minute-slots
 // in the hour are free (24 and 42), so NO polling schedule can satisfy both the 5-minute SLO and the
-// slot discipline. Polling was the wrong shape.
+// slot discipline."
 //
-// Every P0 is born inside the sweep (all five P0-raising detectors are on its roster; none has its
-// own cron), so the dispatcher runs chained to that sweep instead — zero new slots, no collision.
+// THAT CONCLUSION WAS WRONG, and measurably so. It read "free" as "zero jobs on that minute". The
+// gate does not say that. mon_detect_cron_minute_collision() raises only on
+//     having count(*) >= 3 or (minute = 0 and count(*) > 1)
+// so TWO hourly jobs per minute are permitted and only minute 0 is reserved; it also counts ONLY
+// jobs whose hour field is '*', so daily jobs are not counted at all. On the live roster, 49 of 60
+// minutes sit at <= 1 and can take one more. The design space was never two slots; it was 49.
+//
+// So chaining alone was load-bearing for the SLO, and that was the defect: alert_event.created_at is
+// TRANSACTION START, so the whole sweep runtime was spent before dispatch began (P0 1166: 371s,
+// a 71s breach). The owner's instruction on 2026-08-30 was to decouple the lane onto its own slot,
+// keep the 5-minute SLO exactly as it is, and preserve the full sweep. Both paths now exist: the
+// dedicated lane is what MEETS the SLO, and the sweep's leading call remains as defence-in-depth
+// (it is the one that survives a sweep aborting on statement_timeout and rolling its trailing call
+// back). Decoupled means the SLO no longer DEPENDS on the sweep, not that the sweep stops helping.
 check(
-  'the every-minute polling job is gone',
+  'the every-minute polling job is still gone',
   new RegExp(`cron\\.unschedule\\(\\s*'${CRON_JOB}'`).test(corpus)
-    && !new RegExp(`cron\\.schedule\\(\\s*'${CRON_JOB}'`).test(corpus.slice(corpus.lastIndexOf('cron.unschedule'))),
+    && !new RegExp(`cron\\.schedule\\(\\s*'${CRON_JOB}'`).test(corpus.slice(corpus.lastIndexOf(`cron.unschedule('${CRON_JOB}'`))),
   'a job in every minute slot collides with every other job and trips '
-    + 'mon_detect_cron_minute_collision — the 2026-08-10 stampede discipline',
+    + 'mon_detect_cron_minute_collision — the 2026-08-10 stampede discipline. The owner-approved '
+    + 'decoupling is a SLOT-DISCIPLINED schedule, never a return to per-minute polling.',
+);
+
+// --- THE DEDICATED FAST LANE (owner decision, 2026-08-30) ----------------------------------------
+const laneSchedule = corpus.match(
+  new RegExp(`cron\\.schedule\\(\\s*'${FAST_LANE}'\\s*,\\s*'([^']+)'`),
+)?.[1] ?? '';
+check(
+  `${FAST_LANE} is scheduled on its own cron slot`,
+  laneSchedule !== '',
+  'without a dedicated lane the SLO is once again hostage to however long the sweep takes',
 );
 check(
-  `${DISPATCHER}() is chained onto the detector sweep that raises every P0`,
+  `${FAST_LANE} runs ${DISPATCHER}()`,
+  new RegExp(`cron\\.schedule\\(\\s*'${FAST_LANE}'[\\s\\S]{0,400}?${DISPATCHER}\\(\\)`).test(corpus),
+  'a dedicated slot that calls something else delivers nothing',
+);
+
+// THE CHECK THAT ACTUALLY DEFENDS THE SLO. A lane that exists but fires every 10 minutes is worse
+// than useless: it looks like a fix and cannot deliver one. Parse the real minute list and measure
+// the WORST gap, including the wrap past the top of the hour — the wrap is the one a hand-edited
+// list silently breaks.
+const laneMinutes = (laneSchedule.split(/\s+/)[0] ?? '')
+  .split(',').map((m) => Number(m)).filter((m) => Number.isInteger(m) && m >= 0 && m <= 59)
+  .sort((a, b) => a - b);
+let worstGapMin = 60;
+if (laneMinutes.length > 1) {
+  worstGapMin = 0;
+  for (let i = 0; i < laneMinutes.length; i++) {
+    const next = i + 1 < laneMinutes.length ? laneMinutes[i + 1] : laneMinutes[0] + 60;
+    worstGapMin = Math.max(worstGapMin, next - laneMinutes[i]);
+  }
+}
+// WHAT THIS CHECK CAN AND CANNOT PROVE — corrected 2026-08-30 after measuring the real thing.
+//
+// An earlier version of this check allowed a flat 60s "filing budget" and asserted the whole SLO
+// from the schedule alone. That was wrong, and the error is worth naming so it is not repeated: it
+// read alert 1166's `settled_at - first_tried` (15s) as the filing cost. settled_at is only when
+// pg_net recorded the HTTP RESPONSE to the workflow-dispatch trigger; it says nothing about when a
+// GitHub issue appeared. The honest measure is `dispatched_at - first_tried`, and measured across
+// every P0 ever delivered it is:
+//     alert 1097  203s     alert 1098  204s     alert 1172  204s     alert 1166  371s
+// GitHub Actions queue+run latency is therefore 203-371s ON ITS OWN, against a 300s SLO. No cron
+// schedule can fix that, because it is not ours to fix.
+//
+// So this file asserts the half that IS ours: the DB-side wait the lane contributes. The remaining
+// budget belongs to the destination. Two things follow, and both are deliberate:
+//   * the SLO is NOT widened to accommodate a slow destination (the owner forbade exactly that on
+//     2026-08-30) — instead the destination is what has to change, and a real webhook channel
+//     (pg_net POST, 2xx in seconds) is an OWNER input that mon_detect_p0_delivery_sla() LIMB 1
+//     already raises about while alert-sink is the only non-GitHub channel;
+//   * the END-TO-END truth is measured at RUNTIME by LIMB 3 against real dispatched_at, not
+//     asserted offline here. An offline check cannot know what GitHub's queue will do today.
+const DB_SIDE_SHARE = 0.6;   // the lane may consume at most 60% of the SLO before handing off
+const dbSideBudgetS = SLA_MINUTES * 60 * DB_SIDE_SHARE;
+check(
+  `the lane's worst-case DB-side wait stays within its share of the SLO `
+    + `(worst gap ${worstGapMin}min = ${worstGapMin * 60}s of the ${dbSideBudgetS}s allowed)`,
+  laneMinutes.length > 1 && worstGapMin * 60 <= dbSideBudgetS,
+  `worst gap ${worstGapMin}min = ${worstGapMin * 60}s exceeds the ${dbSideBudgetS}s DB-side share of `
+    + `the ${SLA_MINUTES * 60}s SLO. Fix the SCHEDULE, never the SLO — widening c_sla_minutes to fit `
+    + 'a slow lane is the exact move the owner forbade on 2026-08-30.',
+);
+check(
+  'the lane does not occupy minute 0 (reserved for the matview refresh alone)',
+  laneMinutes.length > 1 && !laneMinutes.includes(0),
+  'mon_detect_cron_minute_collision() raises on ANY second job at minute 0',
+);
+check(
+  `${DISPATCHER}() is ALSO still chained onto the sweep, as defence-in-depth`,
   /mon_dispatch_alerts\(\);[\s\S]{0,80}mon_dispatch_p0_fast\(\)/.test(corpus),
-  'if it is reachable from no cron job at all, nothing ever delivers and the SLO is decorative',
+  'the dedicated lane is what meets the SLO, but the sweep\'s calls are what cover a lane that is '
+    + 'itself unscheduled or failing — removing them trades a belt-and-braces path for one',
 );
 check(
   'the chain does NOT change the sweep schedule (owner-only)',
@@ -137,13 +254,14 @@ check(
 );
 check(
   'the dispatcher caps retries',
-  /c_max_attempts\s+int\s*:=\s*\d+/.test(code) && /attempts\s*>=\s*c_max_attempts/.test(code),
+  /c_max_attempts\s+int\s*:=\s*\d+/.test(dispatcherCode)
+    && /attempts\s*>=\s*c_max_attempts/.test(dispatcherCode),
   'without a cap, one down channel becomes a POST every minute forever aimed at whoever is already '
     + 'having a bad day',
 );
 check(
   'the dispatcher reconciles net._http_response rather than trusting the enqueue',
-  /net\._http_response/.test(code),
+  /net\._http_response/.test(dispatcherCode),
   'net.http_post returns on ENQUEUE, not on response — a request_id alone proves nothing was '
     + 'delivered. That distinction is the entire reason this barrier exists.',
 );
@@ -151,7 +269,7 @@ check(
 // --- it must not become a second writer of dispatched_at -----------------------------------------
 check(
   'the fast lane never stamps alert_event.dispatched_at',
-  !/dispatched_at\s*=\s*now\(\)/.test(code),
+  !/dispatched_at\s*=\s*now\(\)/.test(dispatcherCode),
   'dispatched_at has exactly one writer (alert-dispatch.yml, meaning "a GitHub issue exists") and '
     + 'mon_detect_alert_delivery() BRANCH 3 raises P1 on any database function that stamps it. '
     + 'Receipts belong in ops_p0_delivery.',
@@ -207,13 +325,13 @@ check(
 // issue-filing and routing.
 check(
   'the canonical channel triggers the EXISTING alert-dispatch.yml workflow',
-  /actions\/workflows\/alert-dispatch\.yml\/dispatches/.test(code),
+  /actions\/workflows\/alert-dispatch\.yml\/dispatches/.test(dispatcherCode),
   'the P0 destination must be the existing workflow — a second issue-filer would be the parallel '
     + 'ownership system the owner forbade',
 );
 check(
   'the GitHub PAT is read from Vault at send time, never stored in ops_alert_channel',
-  /vault\.decrypted_secrets/.test(code) && !/ghp_[A-Za-z0-9]/.test(code),
+  /vault\.decrypted_secrets/.test(dispatcherCode) && !/ghp_[A-Za-z0-9]/.test(dispatcherCode),
   'a PAT written into a plain ops table is a worse secret posture than the Vault one already in use',
 );
 
@@ -235,8 +353,8 @@ check(
 // stayed green off the use site alone. Assert the throttle is actually applied in the skip test.
 check(
   'workflow re-triggering is throttled',
-  /c_retrigger_after\s+interval\s*:=/.test(code)
-    && /last_tried\s*>\s*now\(\)\s*-\s*c_retrigger_after/.test(code),
+  /c_retrigger_after\s+interval\s*:=/.test(dispatcherCode)
+    && /last_tried\s*>\s*now\(\)\s*-\s*c_retrigger_after/.test(dispatcherCode),
   'without a throttle the every-minute job would re-dispatch the workflow while a run is still in '
     + 'flight, racing its own concurrency group',
 );
@@ -266,6 +384,54 @@ check(
     + 'statement_timeout the rollback takes the trailing mon_dispatch_p0_fast() with it and NO P0 '
     + 'is dispatched at all. Observed 2026-08-26: the 17:29 AND 17:59 sweeps both aborted, a full '
     + 'hour with zero dispatch capability, and P0 1011 waited 2h47m for the Actions backstop.',
+);
+
+// --- LIMB 3: DELIVERED, BUT LATE, added 2026-08-30 -----------------------------------------------
+// THE HOLE THIS CLOSES. Limbs 1 and 2 both match only while `a.dispatched_at is null`. The instant
+// alert-dispatch.yml stamps that column, a breach becomes invisible to this detector forever — so a
+// path that delivers every single P0 late reads permanently GREEN. The SLO is defined on DELIVERY
+// LATENCY; limbs 1-2 measure only PENDING latency, and the gap between those two predicates is the
+// whole failure mode.
+//
+// Measured on production the day this shipped: alert 1166 (deleted_but_source_live:73) was created
+// 2026-08-30 05:29:00 and dispatched 05:35:11 — 371s end-to-end, a 71s breach of the 300s SLO, and
+// NOTHING raised, because by evaluation time dispatched_at was already stamped. The 05:29 sweep ran
+// 356.8s and created_at is transaction start, so the clock had expired before the fast lane began.
+check(
+  'LIMB 3 exists: a P0 that was DELIVERED but LATE still raises',
+  /mon_raise\(\s*'P1',\s*'p0_delivery_sla',\s*'monitoring',\s*'p0_delivery_sla_late'/.test(code),
+  'without it, a breach vanishes the moment the issue is filed and the SLO becomes unmeasurable',
+);
+// THE DISTINGUISHING PROPERTY, and the one a "simplifying" refactor is most likely to destroy.
+// Limb 3 must look at DELIVERED alerts. Reusing limbs 1-2's `dispatched_at is null` here would make
+// it dead code that can never fire while still looking present in review. Both the counting query
+// and the sample query must agree — the same lesson the github_workflow exclusion check above
+// learned the hard way, where mutating only the counting query left the barrier green.
+const deliveredFilters = (code.match(/a\.dispatched_at\s+is\s+not\s+null/g) ?? []).length;
+check(
+  'LIMB 3 matches DELIVERED alerts, in both its counting and sample queries',
+  deliveredFilters >= 2,
+  `found ${deliveredFilters}, expected the counting query AND the sample query. With `
+    + '`dispatched_at is null` instead, limb 3 is unreachable code: limb 2 already owns that set.',
+);
+check(
+  'LIMB 3 measures true end-to-end latency (dispatched_at - created_at) against the SLO',
+  /a\.dispatched_at\s*-\s*a\.created_at\s*>\s*make_interval\(mins\s*=>\s*c_sla_minutes\)/.test(code),
+  'dispatched_at is the only honest clock: one writer, stamped after `gh issue create` succeeds. A '
+    + 'github_workflow 204 receipt is a trigger accepted, not a delivery.',
+);
+check(
+  'LIMB 3 can go GREEN again on its own',
+  /mon_resolve_key\('p0_delivery_sla',\s*'p0_delivery_sla_late'\)/.test(code),
+  'a limb that can only ever raise corrupts open_alerts and suppresses its own future raises — '
+    + 'mon_raise() returns 0 on an already-open dedup key',
+);
+check(
+  'LIMB 3 uses a bounded rolling window, so a one-off ages out instead of pinning a permanent red',
+  /c_late_window\s+constant\s+interval\s*:=\s*interval\s*'24 hours'/.test(code)
+    && /a\.created_at\s*>\s*now\(\)\s*-\s*c_late_window/.test(code),
+  'unbounded, alert 1011 (10037s, 2026-08-26, from before the fast-lane fix) would hold this red '
+    + 'forever and train people to ignore the key',
 );
 
 // --- the owner decision is recorded in the repo, not just in a migration -------------------------

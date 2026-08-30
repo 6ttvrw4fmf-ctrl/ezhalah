@@ -154,10 +154,26 @@ export async function getCurrentUser(
   }
 }
 
+/**
+ * Sign out THIS device only — never the user's other devices.
+ *
+ * `scope: 'local'` is load-bearing and must not be dropped. supabase-js defaults `signOut()` to
+ * `scope: 'global'`, which revokes EVERY session the user has; its own JSDoc carries a "**Warning:**
+ * the default `scope` is `'global'`". Measured against production GoTrue 2026-08-30 with two real
+ * sessions: a plain `signOut()` on the Mac made the untouched iPhone's refresh token return
+ * `refresh_token_not_found` — i.e. logging out of one browser silently signed the user out
+ * everywhere. That is not what any mainstream app does (Google/Apple/Instagram all leave your other
+ * devices signed in), and here it also contradicted the «الأجهزة المسجّل عليها الدخول» UI directly:
+ * that list offers per-device revoke AND a separate «تسجيل الخروج من جميع الأجهزة الأخرى», so the
+ * plain sign-out quietly doing the "all devices" thing made both controls meaningless.
+ *
+ * The two deliberate multi-session paths stay explicit and are unaffected: `scope: 'others'`
+ * (devices.ts → signOutOtherDevices) and the per-session DELETE in the `devices` edge function.
+ */
 export async function signOutBackend(): Promise<void> {
   if (!supabase) return;
   try {
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: 'local' });
   } catch {
     /* ignore */
   }
@@ -186,7 +202,10 @@ export async function deleteAccountBackend(): Promise<boolean> {
   }
   if (!deleted) return false;
   try {
-    await supabase.auth.signOut();
+    // 'local' for the same reason as signOutBackend, and doubly so here: the account row is already
+    // deleted, so every one of its sessions is gone server-side and there is nothing left to revoke
+    // — all this call still has to do is clear the tokens held on THIS device.
+    await supabase.auth.signOut({ scope: 'local' });
   } catch {
     /* the account is already gone; the store clears local state regardless */
   }
