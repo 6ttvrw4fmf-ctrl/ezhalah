@@ -45,6 +45,7 @@ import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
+import { shouldAskLocationInsteadOfSearching } from '@/lib/agentQuestionBudget';
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
@@ -2249,22 +2250,23 @@ export default function Agent() {
       // (no city / a bare multi-city district) ASK in Arabic instead — accuracy over speed. After 2 asks
       // we stop pestering and search with whatever we have. (user: it MUST ask, not guess the location.)
       const clarifyQ = locationClarification(turn.query, v);
-      if (clarifyQ && askCountRef.current < 2) {
+      if (shouldAskLocationInsteadOfSearching(clarifyQ, askCountRef.current, history)) {
         askCountRef.current += 1;
         // Remember WHICH twin name this question is about, so the user's next message can commit their
         // pick even if the model answers with something else entirely.
         pendingScopeRef.current = regionOrCityTwin(turn.query.location);
         // …and, for the PLAIN-CITY question, which city — so its bare «المدينة كاملة» answer keeps that
         // city instead of re-resolving the generic noun «المدينة» into المدينة المنورة (2026-08-29).
-        pendingCityRef.current = wholeCityQuestionSubject(clarifyQ);
+        pendingCityRef.current = wholeCityQuestionSubject(clarifyQ!);
         setMsgs((m) =>
-          m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: clarifyQ, typing: true } : x)),
+          m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: clarifyQ!, typing: true } : x)),
         );
       } else {
-        // Bug-fix #10 (audit `agent-2ask-cap-silent-search`): when we hit the 2-question cap with an
-        // unusable location, the silent fallback search needs to TELL the user what scope was used so
-        // they're not surprised by broad results. (user directive: "explain the search scope used".)
-        const forcedBroad = !!clarifyQ && askCountRef.current >= 2;
+        // Bug-fix #10 (audit `agent-2ask-cap-silent-search`): when we hit the 2-question cap — OR the
+        // model has already spent ITS OWN question budget this chat (shouldAskLocationInsteadOfSearching
+        // above) — with an unusable location, the silent fallback search needs to TELL the user what
+        // scope was used so they're not surprised by broad results. (user: "explain the search scope used".)
+        const forcedBroad = !!clarifyQ;
         askCountRef.current = 0;
         saidRef.current = [];
         beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)

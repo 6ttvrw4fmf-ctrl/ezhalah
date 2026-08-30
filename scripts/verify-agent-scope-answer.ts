@@ -92,7 +92,14 @@ check('asking the question records WHICH twin it is about', /pendingScopeRef\.cu
 check('New Chat inherits no half-answered question', /setMsgs\(\[\]\);\s*\n\s*pendingScopeRef\.current = null;/.test(src));
 // The user-visible symptom of the 2-ask cap eating the answered location. The line itself is correct
 // behaviour for a genuinely unknown location — it just must no longer be reachable by answering.
-check('the Kingdom-wide «ما قدرت أحدد الموقع بدقة» note is still gated on the 2-ask cap only', /const forcedBroad = !!clarifyQ && askCountRef\.current >= 2;/.test(src));
+// Since 2026-08-30 (owner-reported "never showed listings" bug) forcedBroad also fires when the
+// MODEL already asked its own 2 questions this chat (shouldAskLocationInsteadOfSearching), not only
+// the client's own askCountRef cap — but the underlying invariant this check protects is unchanged
+// and still holds: forcedBroad can only be true when clarifyQ itself is non-null, i.e. the location
+// genuinely was never resolved. A user who correctly ANSWERED a twin/scope question makes clarifyQ
+// null (asserted above: "the region-vs-city branch STOPS asking..."), so forcedBroad still can never
+// fire for an answered question, regardless of which reason skipped the ask.
+check('the Kingdom-wide «ما قدرت أحدد الموقع بدقة» note only ever fires when the location is genuinely unresolved (clarifyQ)', /const forcedBroad = !!clarifyQ;/.test(src));
 
 console.log(
   failed === 0
