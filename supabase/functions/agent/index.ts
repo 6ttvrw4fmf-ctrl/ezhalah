@@ -1120,6 +1120,46 @@ Deno.serve(async (req: Request) => {
       // searching — never silently pick a region/city, never false-zero a real twin.
       // loc_classify is authoritative; the model only proposes the token. A follow-up
       // guard prevents re-asking a question the user just answered (no ask-loops).
+      // ── A CLARIFICATION MUST NOT ERASE WHAT WE ALREADY UNDERSTOOD ────────────────────────────
+      // Owner ruling 2026-08-30. Every `kind:"message"` return below is a QUESTION, and each one used
+      // to reply with prose and nothing else — so «شقة شهرية في الرياض تقييمها ٩.٥» followed by
+      // "city or region?" threw away Apartment + monthly + rating 9.5, and the answer «منطقة الرياض»
+      // had to rebuild the whole request from one word.
+      //
+      // This snapshots what THIS turn understood so a paused turn can advance the conversation's
+      // state without searching. Same field set the listings branch sends (minus the reply-derived
+      // sort/count, which describe a search we are not running). The client merges it under the
+      // conversation and certifies AF against the merged cohort — the identical pipeline a search
+      // uses, so a paused turn and a searching turn can never accumulate state by different rules.
+      //
+      // Read lazily, as a function: `location` is still being resolved below, and a snapshot taken
+      // too early would freeze the pre-resolution value.
+      const understoodState = () => ({
+        deal,
+        bothDeals,
+        priceIsAnnual,
+        rentPeriod,
+        location,
+        regionPin,
+        districtPin,
+        type: typeof out.type === "string" && out.type ? out.type : null,
+        detail: typeof out.detail === "string" && out.detail ? out.detail : null,
+        price,
+        priceOriginal: priceOriginal || undefined,
+        platforms: Array.isArray(out.platforms) ? out.platforms.filter((p: unknown) => typeof p === "string" && p) : [],
+        furnished: out.furnished === "yes" ? "yes" : out.furnished === "no" ? "no" : "none",
+        af: (out.af && typeof out.af === "object" && !Array.isArray(out.af)) ? out.af : {},
+        askAbout: Array.isArray(out.ask_about)
+          ? out.ask_about.filter((a: unknown) => typeof a === "string" && a).map((a: string) => a.trim().toLowerCase())
+          : [],
+        amenities: Array.isArray(out.amenities)
+          ? [...new Set(out.amenities
+              .filter((a: unknown) => typeof a === "string")
+              .map((a: string) => a.trim().toLowerCase())
+              .filter(Boolean))]
+          : [],
+      });
+
       let regionPin: string | undefined;   // region_ar to scope a twin city to one region
       let districtPin: string | undefined; // «حي …» to scope a twin district to one city
       if (location) {
@@ -1158,7 +1198,7 @@ Deno.serve(async (req: Request) => {
           if (wantsRegion && !wantsCity) location = `منطقة ${nm}`;
           else if (wantsCity && !wantsRegion) location = nm;
           else if (!wantsCity && !wantsRegion && !alreadyAsked) {
-            return json({ kind: "message", reply: `«${nm}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${nm} ولا منطقة ${nm} كاملة؟` });
+            return json({ kind: "message", reply: `«${nm}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${nm} ولا منطقة ${nm} كاملة؟`, query: understoodState() });
           }
         } else if (ck === "twin_city") {
           const regions = (Array.isArray(cls?.regions) ? cls!.regions : []) as Array<Record<string, unknown>>;
@@ -1166,7 +1206,7 @@ Deno.serve(async (req: Request) => {
           if (pick) regionPin = String(pick.region_ar);
           else if (!alreadyAsked && regions.length > 1) {
             const list = regions.map((r) => String(r.region_ar)).join("، ");
-            return json({ kind: "message", reply: `«${nm}» موجودة في أكثر من منطقة (${list}). أي منطقة تقصد؟` });
+            return json({ kind: "message", reply: `«${nm}» موجودة في أكثر من منطقة (${list}). أي منطقة تقصد؟`, query: understoodState() });
           }
         } else if (ck === "twin_district") {
           const cities = (Array.isArray(cls?.cities) ? cls!.cities : []) as Array<Record<string, unknown>>;
@@ -1176,7 +1216,7 @@ Deno.serve(async (req: Request) => {
             const top = cities.slice(0, 8);
             const lines = top.map((c) => `• ${c.city_ar}`).join("\n");
             const more = cities.length > top.length ? "\n• أو مدينة أخرى" : "";
-            return json({ kind: "message", reply: `حي ${nm} موجود في أكثر من مدينة. تقصد حي ${nm} في أي مدينة؟\n${lines}${more}` });
+            return json({ kind: "message", reply: `حي ${nm} موجود في أكثر من مدينة. تقصد حي ${nm} في أي مدينة؟\n${lines}${more}`, query: understoodState() });
           }
         }
       }
@@ -1224,7 +1264,7 @@ Deno.serve(async (req: Request) => {
         !detailStr && !(Array.isArray(out.amenities) && out.amenities.length) &&
         !(out.af && typeof out.af === "object" && Object.keys(out.af).length);
       if (nothingToSearchOn) {
-        return json({ kind: "message", reply: oneQuestionOnly(groundReply(lead(out.reply), locale)) });
+        return json({ kind: "message", reply: oneQuestionOnly(groundReply(lead(out.reply), locale)), query: understoodState() });
       }
       return json({
         kind: "listings",
@@ -1282,7 +1322,35 @@ Deno.serve(async (req: Request) => {
         },
       });
     }
-    return json({ kind: "message", reply: oneQuestionOnly(groundReply(lead(out.reply), locale)) });
+    // THE MODEL'S OWN QUESTION — the most common clarification of all, and the one that mattered most.
+    // This return sits outside the listings block, so the resolved search variables (deal, location,
+    // rentPeriod, price) do not exist here; only the model's raw reading does. Carry exactly that.
+    // The client merges it under the conversation, so a field the model omitted this turn is filled
+    // from history rather than lost, and a field it DID state wins — which is the same rule as
+    // everywhere else.
+    return json({
+      kind: "message",
+      reply: oneQuestionOnly(groundReply(lead(out.reply), locale)),
+      query: {
+        deal: out.deal === "Buy" ? "Buy" : out.deal === "Rent" ? "Rent" : undefined,
+        rentPeriod: out.rent_period === "monthly" || out.rent_period === "annual" ? out.rent_period : undefined,
+        type: typeof out.type === "string" && out.type ? out.type : null,
+        detail: typeof out.detail === "string" && out.detail ? out.detail : null,
+        location: typeof out.location === "string" ? out.location.trim() : "",
+        furnished: out.furnished === "yes" ? "yes" : out.furnished === "no" ? "no" : "none",
+        af: (out.af && typeof out.af === "object" && !Array.isArray(out.af)) ? out.af : {},
+        askAbout: Array.isArray(out.ask_about)
+          ? out.ask_about.filter((a: unknown) => typeof a === "string" && a).map((a: string) => a.trim().toLowerCase())
+          : [],
+        amenities: Array.isArray(out.amenities)
+          ? [...new Set(out.amenities
+              .filter((a: unknown) => typeof a === "string")
+              .map((a: string) => a.trim().toLowerCase())
+              .filter(Boolean))]
+          : [],
+        platforms: Array.isArray(out.platforms) ? out.platforms.filter((p: unknown) => typeof p === "string" && p) : [],
+      },
+    });
   } catch (e) {
     return json({ error: String(e?.message ?? e) }, 500);
   }

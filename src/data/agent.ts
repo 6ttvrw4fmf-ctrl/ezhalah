@@ -20,7 +20,9 @@ import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 
 export type AgentTurn =
   | { kind: 'listings'; reply: string; query: SearchQuery }
-  | { kind: 'message'; reply: string }
+  // `query` is the state the agent understood on a turn that did NOT search — a clarification.
+  // Optional because most message turns carry nothing; present, it MUST be remembered (see below).
+  | { kind: 'message'; reply: string; query?: SearchQuery }
   | { kind: 'interview' };
 
 // "ask me questions" → hand off to the guided interview.
@@ -759,7 +761,24 @@ async function callAgentBackend(
         ),
       };
     }
-    if (d.kind === 'message') return { kind: 'message', reply: String(d.reply ?? '') };
+    if (d.kind === 'message') {
+      // A CLARIFICATION MAY PAUSE THE SEARCH; IT MAY NOT ERASE WHAT WE ALREADY UNDERSTOOD
+      // (owner ruling 2026-08-30). «شقة شهرية في الرياض تقييمها ٩.٥» + a city-vs-region question used
+      // to discard Apartment + monthly + rating 9.5 outright: the edge answered kind:"message" with no
+      // query, and this line dropped whatever it did send. When the user then answered «منطقة الرياض»,
+      // the conversation had nothing to build on and started from zero.
+      //
+      // Same pipeline as a listings turn — deliberately, so a paused turn and a searching turn cannot
+      // accumulate state by different rules: build from this turn, merge the conversation under it,
+      // then certify AF against the MERGED cohort. No search runs; only the state advances.
+      const understood = d.query
+        ? certifyAfOnMergedState(
+            mergeConversationState(ctx.prevQuery ?? null, queryFromBackend(d.query, text, ctx.attemptTexts ?? [text]), statedKeys(d.query)),
+            d.query,
+          )
+        : undefined;
+      return { kind: 'message', reply: String(d.reply ?? ''), ...(understood ? { query: understood } : {}) };
+    }
     return null;
   } catch {
     return null;
@@ -1022,7 +1041,10 @@ export async function respond(text: string, opts?: { loggedIn?: boolean; history
     // caveat is a tail, not a headline. The search itself is untouched — everything we could apply
     // has been applied.
     const notice = rejectionNotice();
-    if (notice) backend.reply = `${String(backend.reply ?? '').trim()}\n${notice}`.trim();
+    // An interview turn has no reply to append to; every other kind does.
+    if (notice && backend.kind !== 'interview') {
+      backend.reply = `${String(backend.reply ?? '').trim()}\n${notice}`.trim();
+    }
     return backend;
   }
 

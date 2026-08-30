@@ -71,8 +71,12 @@ check("it neutralises rather than surgically editing Arabic prose",
 check("the LISTINGS reply is grounded", /reply: groundReply\(replyOut, locale\),/.test(edge));
 // Composed with oneQuestionOnly() since 2026-08-29 (one clarification question per turn). Still
 // grounded — groundReply runs FIRST, so the claim/widening guard applies before any truncation.
+// Assert the GROUNDING, not the punctuation that follows it. This pinned the exact `...) });` tail
+// and went red the moment a clarification return gained a `query:` field (2026-08-30) — a change
+// that strengthened the turn without touching the guard. The invariant is that a message reply
+// passes through groundReply; what else the JSON carries is not this barrier's business.
 check("the MESSAGE reply is grounded",
-  /kind: "message", reply: oneQuestionOnly\(groundReply\(lead\(out\.reply\), locale\)\) \}\);/.test(edge));
+  /kind: "message",\s*\n?\s*reply: oneQuestionOnly\(groundReply\(lead\(out\.reply\), locale\)\)/.test(edge));
 const paths = (edge.match(/reply: groundReply\(|reply: oneQuestionOnly\(groundReply\(/g) ?? []).length;
 check(`every reply path goes through it (${paths} found)`, paths >= 3,
   "listings + the empty-search clarification + the plain message turn");
