@@ -45,6 +45,7 @@ import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
+import { shouldAskLocationInsteadOfSearching } from '@/lib/agentQuestionBudget';
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
@@ -306,29 +307,6 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
     return wholeCityQuestion(cityDisplay(lm.city, 'ar'));
   }
   return null;
-}
-
-// GATE for the deterministic location backstop above. Owner-reported live bug 2026-08-30: a chat
-// gave real non-location signal (family of 5 → a large villa/apartment, open to either type) but
-// never showed a single listing. Root cause — TWO independent, unsynchronized "ask up to 2 times"
-// budgets: the model's own (server-enforced via priorQuestions in supabase/functions/agent) and
-// this client's own askCountRef, counted from zero regardless of how many questions the model had
-// already asked. Once the model has ALREADY spent its own budget (>=2 prior "?" replies this chat —
-// the exact threshold the backend uses to force a search), a resulting kind="listings" IS the model
-// searching with whatever it has, exactly as instructed; re-asking on top of that only re-litigates
-// a decision the model already made under instruction, and is why the user never reached results.
-// A city-less broad search is a legitimate query (never invent a city) — this returns FALSE (search
-// now) in that case rather than re-asking a 3rd/4th time. Pure and exported so it is unit-testable
-// without the component (scripts/verify-agent-broad-search-after-budget.ts).
-export function shouldAskLocationInsteadOfSearching(
-  clarifyQ: string | null,
-  askCount: number,
-  history: { role: 'user' | 'model'; text: string }[],
-): boolean {
-  if (!clarifyQ) return false;
-  const modelAlreadyAskedTwice =
-    history.filter((h) => h.role === 'model' && /[?؟]/.test(h.text)).length >= 2;
-  return askCount < 2 && !modelAlreadyAskedTwice;
 }
 
 function detectMsgLang(s: string): 'en' | 'ar' | null {
