@@ -107,7 +107,19 @@ const ui = readFileSync(new URL("../src/app/agent.tsx", import.meta.url), "utf8"
 }
 check("prevQuery is threaded through respond()", /prevQuery: opts\?\.prevQuery \?\? null/.test(data));
 check("the UI passes the conversation's last query", /prevQuery: lastQueryRef\.current/.test(ui));
-check("the UI records each executed query", /if \(turn\.kind === 'listings' && turn\.query\) lastQueryRef\.current = turn\.query;/.test(ui));
+// The invariant is "a turn that produced state gets recorded", not one exact line. It was pinned to
+// the listings-only shape, which went red on the change that BROADENED it to clarifications too.
+check("the UI records the state from any turn that produced it",
+  /turn\.query\) lastQueryRef\.current = turn\.query;/.test(ui));
+// A CLARIFICATION MAY PAUSE EXECUTION; IT MAY NEVER ERASE STATE (owner ruling 2026-08-30).
+check("a clarification turn is NOT excluded from being recorded",
+  !/turn\.kind === 'listings' && turn\.query\) lastQueryRef/.test(ui),
+  "listings-only recording is exactly how «مدينة ولا منطقة؟» threw away type, period and rating");
+check("a message turn can carry the state it understood",
+  /kind: 'message'; reply: string; query\?: SearchQuery/.test(data));
+check("a clarification's understanding goes through the SAME merge+certify pipeline as a search",
+  /d\.kind === 'message'[\s\S]{0,900}certifyAfOnMergedState\([\s\S]{0,200}mergeConversationState\(/.test(data),
+  "a paused turn and a searching turn must not accumulate state by different rules");
 // Owner rule (PR#832): New Chat inherits NOTHING.
 check("New Chat clears the accumulated state", /lastQueryRef\.current = null;\s*\/\/ …and not the previous conversation's accumulated filters/.test(ui));
 check("a Filter-originated search replaces it too",
