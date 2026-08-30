@@ -211,6 +211,25 @@ def verification_patch(decision: Decision, *, now_iso: str) -> dict:
     return {"last_verified_alive_at": now_iso} if decision.verified_alive else {}
 
 
+def direct_alive_patch(*, now_iso: str) -> dict:
+    """Same stamp, for a sweep that reads its own verdict instead of building a Decision.
+
+    aqar, gathern and wasalt each predate this contract and carry their own strike machinery, with
+    an explicit "alive" branch reached ONLY after a direct fetch of the listing's own URL returned
+    an affirmative live answer. Rewriting those three sweeps onto decide() is a bigger change than
+    the one they need, but hand-writing the column in each of them would put the rule that governs
+    it in four places — and the rule is the whole point: nothing stamps this column except a direct
+    affirmative read.
+
+    So the stamp keeps living here, and the branch that has already established DIRECT + ALIVE asks
+    for it. Call this ONLY from such a branch. A transient, blocked or unparsable read is UNKNOWN
+    and gets no stamp; crawler presence gets no stamp (see presence_patch). If a caller has a
+    Decision in hand, use verification_patch() instead — it derives the same answer from evidence
+    rather than trusting the call site.
+    """
+    return {"last_verified_alive_at": now_iso}
+
+
 def presence_patch(policy: LivenessPolicy, *, now_iso: str) -> dict:
     """What a mere crawler sighting may write. Normally nothing.
 
