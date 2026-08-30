@@ -20,9 +20,18 @@
 // which proves the WORKFLOW is fast and the SCHEDULER is the defect — a manual run is never
 // evidence the SLO is met. Hence the database-side fast lane this file guards.
 //
+// THE ARCHITECTURE THIS NOW GUARDS (owner decision, 2026-08-30). The fast lane has its OWN
+// dedicated, slot-disciplined cron job (`mon-p0-fast-lane`, 24 minutes, max gap 3), so a slow
+// detector sweep can no longer eat the SLO budget before dispatch starts. The sweep is preserved
+// unchanged and still calls the lane as defence-in-depth. See the block at "THE FAST LANE HAS ITS
+// OWN DEDICATED SLOT" below for why the earlier "no polling schedule can work" conclusion was wrong.
+//
 // MUTATION-PROVEN offline (each turns this check RED):
 //   - c_sla_minutes raised above 5
-//   - the fast-dispatch cron job removed, or its schedule slowed below once a minute
+//   - the dedicated fast lane unscheduled entirely
+//   - the lane's cadence slowed so its worst gap no longer fits the SLO (the "delay" mutation)
+//   - the lane moved onto minute 0, which is reserved for the matview refresh
+//   - a return to per-minute polling ('* * * * *'), which trips cron_minute_collision
 //   - the retry cap removed (a down channel would POST every minute forever)
 //   - the detector's raise or resolve path dropped
 //   - the roster wiring replaced by a hand-pasted body instead of a pg_get_functiondef needle-edit
@@ -39,7 +48,8 @@ const SPEC = join(ROOT, 'docs', 'ops', 'SYSTEMS_SEAM_ENGINEER.md');
 const SLA_MINUTES = 5;
 const DETECTOR = 'mon_detect_p0_delivery_sla';
 const DISPATCHER = 'mon_dispatch_p0_fast';
-const CRON_JOB = 'mon-p0-fast-dispatch';
+const CRON_JOB = 'mon-p0-fast-dispatch';   // the retired per-minute poller; must stay unscheduled
+const FAST_LANE = 'mon-p0-fast-lane';      // the owner-approved dedicated slot (2026-08-30)
 
 let failures = 0;
 function check(label: string, ok: boolean, detail = ''): void {
@@ -133,28 +143,91 @@ check(
   `${DISPATCHER}() is defined`,
   new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${DISPATCHER}\\b`, 'i').test(corpus),
 );
-// THE FAST LANE MUST BE CHAINED TO THE SWEEP, NOT POLLING ON ITS OWN MINUTE SLOT.
+// THE FAST LANE HAS ITS OWN DEDICATED SLOT (OWNER DECISION, 2026-08-30) AND IS *ALSO* CHAINED.
 //
-// The first version of this scheduled `mon-p0-fast-dispatch` as '* * * * *'. That was wrong, and
-// mon_detect_cron_minute_collision() said so on the very next sweep — a job in every minute slot
-// collides with every other job, including the :00 slot reserved for the matview refresh, and cron
-// stampede is what wedged the database on 2026-08-10. Measured afterwards: exactly TWO minute-slots
+// History, because this reversed a previous conclusion and the reversal must not be re-reversed by
+// someone reading only the older comment. The first version scheduled `mon-p0-fast-dispatch` as
+// '* * * * *'. That was genuinely wrong — a job in every minute slot collides with everything,
+// including the :00 slot reserved for the matview refresh, and cron stampede is what wedged the
+// database on 2026-08-10. 20260828231336 unscheduled it and concluded that "exactly TWO minute-slots
 // in the hour are free (24 and 42), so NO polling schedule can satisfy both the 5-minute SLO and the
-// slot discipline. Polling was the wrong shape.
+// slot discipline."
 //
-// Every P0 is born inside the sweep (all five P0-raising detectors are on its roster; none has its
-// own cron), so the dispatcher runs chained to that sweep instead — zero new slots, no collision.
+// THAT CONCLUSION WAS WRONG, and measurably so. It read "free" as "zero jobs on that minute". The
+// gate does not say that. mon_detect_cron_minute_collision() raises only on
+//     having count(*) >= 3 or (minute = 0 and count(*) > 1)
+// so TWO hourly jobs per minute are permitted and only minute 0 is reserved; it also counts ONLY
+// jobs whose hour field is '*', so daily jobs are not counted at all. On the live roster, 49 of 60
+// minutes sit at <= 1 and can take one more. The design space was never two slots; it was 49.
+//
+// So chaining alone was load-bearing for the SLO, and that was the defect: alert_event.created_at is
+// TRANSACTION START, so the whole sweep runtime was spent before dispatch began (P0 1166: 371s,
+// a 71s breach). The owner's instruction on 2026-08-30 was to decouple the lane onto its own slot,
+// keep the 5-minute SLO exactly as it is, and preserve the full sweep. Both paths now exist: the
+// dedicated lane is what MEETS the SLO, and the sweep's leading call remains as defence-in-depth
+// (it is the one that survives a sweep aborting on statement_timeout and rolling its trailing call
+// back). Decoupled means the SLO no longer DEPENDS on the sweep, not that the sweep stops helping.
 check(
-  'the every-minute polling job is gone',
+  'the every-minute polling job is still gone',
   new RegExp(`cron\\.unschedule\\(\\s*'${CRON_JOB}'`).test(corpus)
-    && !new RegExp(`cron\\.schedule\\(\\s*'${CRON_JOB}'`).test(corpus.slice(corpus.lastIndexOf('cron.unschedule'))),
+    && !new RegExp(`cron\\.schedule\\(\\s*'${CRON_JOB}'`).test(corpus.slice(corpus.lastIndexOf(`cron.unschedule('${CRON_JOB}'`))),
   'a job in every minute slot collides with every other job and trips '
-    + 'mon_detect_cron_minute_collision — the 2026-08-10 stampede discipline',
+    + 'mon_detect_cron_minute_collision — the 2026-08-10 stampede discipline. The owner-approved '
+    + 'decoupling is a SLOT-DISCIPLINED schedule, never a return to per-minute polling.',
+);
+
+// --- THE DEDICATED FAST LANE (owner decision, 2026-08-30) ----------------------------------------
+const laneSchedule = corpus.match(
+  new RegExp(`cron\\.schedule\\(\\s*'${FAST_LANE}'\\s*,\\s*'([^']+)'`),
+)?.[1] ?? '';
+check(
+  `${FAST_LANE} is scheduled on its own cron slot`,
+  laneSchedule !== '',
+  'without a dedicated lane the SLO is once again hostage to however long the sweep takes',
 );
 check(
-  `${DISPATCHER}() is chained onto the detector sweep that raises every P0`,
+  `${FAST_LANE} runs ${DISPATCHER}()`,
+  new RegExp(`cron\\.schedule\\(\\s*'${FAST_LANE}'[\\s\\S]{0,400}?${DISPATCHER}\\(\\)`).test(corpus),
+  'a dedicated slot that calls something else delivers nothing',
+);
+
+// THE CHECK THAT ACTUALLY DEFENDS THE SLO. A lane that exists but fires every 10 minutes is worse
+// than useless: it looks like a fix and cannot deliver one. Parse the real minute list and measure
+// the WORST gap, including the wrap past the top of the hour — the wrap is the one a hand-edited
+// list silently breaks.
+const laneMinutes = (laneSchedule.split(/\s+/)[0] ?? '')
+  .split(',').map((m) => Number(m)).filter((m) => Number.isInteger(m) && m >= 0 && m <= 59)
+  .sort((a, b) => a - b);
+let worstGapMin = 60;
+if (laneMinutes.length > 1) {
+  worstGapMin = 0;
+  for (let i = 0; i < laneMinutes.length; i++) {
+    const next = i + 1 < laneMinutes.length ? laneMinutes[i + 1] : laneMinutes[0] + 60;
+    worstGapMin = Math.max(worstGapMin, next - laneMinutes[i]);
+  }
+}
+// Measured filing cost, POST -> GitHub issue exists: alert 1166's fast-lane POST at 05:34:56 and its
+// issue at 05:35:11 = 15s. 60s is a deliberately pessimistic allowance over that.
+const FILING_BUDGET_S = 60;
+const worstDeliveryS = worstGapMin * 60 + FILING_BUDGET_S;
+check(
+  `the lane's worst-case wait + filing fits the ${SLA_MINUTES}-minute SLO `
+    + `(worst gap ${worstGapMin}min → ~${worstDeliveryS}s of ${SLA_MINUTES * 60}s)`,
+  laneMinutes.length > 1 && worstDeliveryS < SLA_MINUTES * 60,
+  `worst gap ${worstGapMin}min gives ~${worstDeliveryS}s against a ${SLA_MINUTES * 60}s budget. `
+    + 'Fix the SCHEDULE, never the SLO: widening c_sla_minutes to fit a slow lane is the exact move '
+    + 'the owner forbade on 2026-08-30.',
+);
+check(
+  'the lane does not occupy minute 0 (reserved for the matview refresh alone)',
+  laneMinutes.length > 1 && !laneMinutes.includes(0),
+  'mon_detect_cron_minute_collision() raises on ANY second job at minute 0',
+);
+check(
+  `${DISPATCHER}() is ALSO still chained onto the sweep, as defence-in-depth`,
   /mon_dispatch_alerts\(\);[\s\S]{0,80}mon_dispatch_p0_fast\(\)/.test(corpus),
-  'if it is reachable from no cron job at all, nothing ever delivers and the SLO is decorative',
+  'the dedicated lane is what meets the SLO, but the sweep\'s calls are what cover a lane that is '
+    + 'itself unscheduled or failing — removing them trades a belt-and-braces path for one',
 );
 check(
   'the chain does NOT change the sweep schedule (owner-only)',

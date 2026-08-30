@@ -177,6 +177,38 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   `:20`/`:50` before 2026-08-10). **`scripts/verify-p0-delivery-sla.ts` now asserts the per-minute
   job is GONE** — do not re-create it.
 
+  **DECOUPLED ONTO ITS OWN DEDICATED SLOT (OWNER DECISION, 2026-08-30). This reverses the
+  "chaining is the only option" half of the paragraph above, and the reversal must not be
+  re-reversed.** Chaining made SWEEP DURATION a term in P0 delivery latency, and that is not a
+  theoretical cost: P0 **1166** was created 05:29:00 and its issue filed 05:35:11 — **371 s, a 71 s
+  breach** — because the 05:29 sweep ran 356.8 s and `created_at` is transaction start. The owner's
+  instruction: decouple the lane, **keep the 5-minute SLO exactly as it is**, give the lane its own
+  cron slot so long-running detectors cannot consume the budget before dispatch starts, do **not**
+  widen the 300 s SLO to make the metric green, and **preserve the full sweep**.
+
+  **The "only two slots are free" premise was simply wrong**, and that error is why this went
+  unfixed for two days. It read "free" as "zero jobs on that minute". `mon_detect_cron_minute_collision()`
+  raises only on `count(*) >= 3 or (minute = 0 and count(*) > 1)` — so **two** hourly jobs per minute
+  are permitted, only minute 0 is reserved, and it counts **only** jobs whose hour field is `*`
+  (daily jobs like `30 2 * * *` are not counted at all). Measured on the live roster: **49 of 60
+  minutes sit at ≤ 1** and can accept one more. The design space was never two slots; it was 49.
+
+  So `mon-p0-fast-lane` (jobid 86) now runs `mon_dispatch_p0_fast()` on
+  `1,4,7,10,13,15,18,21,24,26,28,31,34,35,38,40,42,44,46,48,51,54,57,58 * * * *` — **24 slots, worst
+  gap 3 minutes including the wrap past the top of the hour**, avoiding minute 0, the ten minutes
+  already at 2, and the sweep's own `:29`/`:59`. Worst case ≈ 180 s wait + ~15-20 s filing ≈ 200 s of
+  the 300 s budget, with sweep duration no longer a term. It is **not** per-minute polling: measured
+  cost is **6 ms per run** (it early-exits on one count when no P0 is pending), and
+  `mon_detect_cron_minute_collision()` returns 0 with it scheduled. The sweep is untouched and still
+  calls the lane first and last — **defence-in-depth, not the SLO's load-bearing path**; the leading
+  call remains what survives a sweep aborting on `statement_timeout`.
+
+  `scripts/verify-p0-delivery-sla.ts` pins all of it and is mutation-proven 6/6 on this change:
+  it parses the lane's real minute list, computes the **worst gap including the wrap**, and fails if
+  `gap × 60 + 60 s` no longer fits the SLO — so the "delay" mutation (slowing the cadence) goes red,
+  including the subtle one where a single minute is removed and only the wrap-around gap breaks.
+  **Fix the SCHEDULE, never the SLO.**
+
   **What that chaining COSTS, and what watches it (2026-08-29).** `alert_event.created_at` defaults
   to `now()` = **transaction start**, so a P0's 5-minute clock starts when the *sweep* starts and the
   sweep's whole runtime is spent before dispatch begins — sweep duration is now the dominant term in
