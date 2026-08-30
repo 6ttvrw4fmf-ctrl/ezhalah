@@ -32,20 +32,30 @@
 // what production RAN"), not here. It is recorded in this comment so the next reader is not confused
 // by a file that offends in production and looks innocent in git.
 //
-// WHY THIS IS NOT MERELY BOOKKEEPING — READ BEFORE "JUST RUNNING THE REBUILD". The obvious repair for
-// that alert is to run `rebuild_af_filter_rpcs()`. TODAY THAT IS AN OUTAGE, not a repair:
-//   · the template was never updated, so it still describes the PRE-2026-08-29 function — rebuilding
-//     would silently REVERT the owner's PERMANENT controlled-rotation rule (2026-08-29, tier 4) and
-//     the photo-preference ranking folded in beside it;
-//   · worse, `p_rotation_seed text DEFAULT NULL::text` is in the LIVE signature and appears nowhere in
-//     the migration that seeded the templates. `rebuild_af_filter_rpcs()` DROPS EVERY OVERLOAD FIRST
-//     and re-creates from the template, so the parameter would DISAPPEAR — and PostgREST resolves
-//     named-parameter RPC calls by EXACT parameter-name match. Every search the app sends carries
-//     p_rotation_seed (observed on production 2026-08-30 on every journey), so every search would
-//     return "function not found". That is the 2026-07-16 PGRST203 outage shape, re-armed.
-// The repair is therefore: fold the ranking change INTO the template, THEN rebuild, and prove the
-// rebuild is a no-op by checking the resulting md5 still equals the live one. It needs database
-// write access this barrier does not have and must not be attempted blind.
+// WHY THIS WAS NOT MERELY BOOKKEEPING — the state this file was born into, kept because the lesson
+// is the reusable part. Between 2026-08-29 17:43 and 2026-08-30 13:43, the obvious repair for that
+// alert — running `rebuild_af_filter_rpcs()` — was an OUTAGE, not a repair:
+//   · the template was never updated, so it still described the PRE-2026-08-29 function; rebuilding
+//     would silently have REVERTED the owner's PERMANENT controlled-rotation rule (2026-08-29,
+//     tier 4) and the photo-preference ranking folded in beside it;
+//   · worse, `p_rotation_seed text DEFAULT NULL::text` was in the LIVE signature and appeared nowhere
+//     in the migration that seeded the templates. `rebuild_af_filter_rpcs()` DROPS EVERY OVERLOAD
+//     FIRST and re-creates from the template, so the parameter would have DISAPPEARED — and PostgREST
+//     resolves named-parameter RPC calls by EXACT parameter-name match. Every search the app sends
+//     carries p_rotation_seed, so every search would have returned "function not found": the
+//     2026-07-16 PGRST203 outage shape, re-armed.
+//
+// REPAIRED 2026-08-30 by 20260830134244_af_template_absorbs_2026_08_29_ranking_so_rebuild_is_a_noop.
+// The template is now the live definition with the single af_eligibility_clause() occurrence swapped
+// back out for the placeholder, so `replace(template, placeholder, clause)` equals
+// pg_get_functiondef() BYTE FOR BYTE (md5 aac854f1f4483863b142cb6cda9c1ae5 both sides) — the rebuild
+// it then performed was a provable no-op on all four RPCs, and af_parity_hand_edit resolved at
+// 13:43:00 because the condition genuinely cleared, not by hand.
+//
+// THE REUSABLE RULE, which is why this paragraph stays: before running a rebuild, never assume the
+// template matches live. Check. Fold any direct edit into the template FIRST, prove the round trip
+// is byte-exact, and only then rebuild — asserting inside the same transaction that every md5 is
+// unchanged, so a wrong port rolls back instead of shipping.
 //
 // WHAT THIS ASSERTS:
 //   §1  no migration at or after the template era touches one of the four RPCs without ALSO updating
@@ -54,7 +64,10 @@
 //       an entry cannot be added without a deliberate, reviewed edit to this file;
 //   §3  every allowlisted file still exists and still actually offends (so the allowlist cannot rot
 //       into permanent cover for a file that was since fixed or deleted);
-//   §4  the protected set is still exactly the four RPCs the rail names.
+//   §4  the protected set is still exactly the four RPCs the rail names;
+//   §5  a divergence claiming to be RECONCILED names a migration that really exists in this repo AND
+//       that itself went through the template path — so "this was repaired" is checkable, not a
+//       comment anyone can write.
 //
 //   node --experimental-strip-types scripts/verify-af-rpcs-not-hand-edited.ts   (in `npm test`)
 
@@ -84,19 +97,28 @@ const PROTECTED = [
 // the deliberate reconciliation era that followed, and are also below the baseline.
 const TEMPLATE_ERA_BASELINE = '20260816000000';
 
-// KNOWN DIVERGENCES — dated, reasoned, and finite. Each entry is a migration that DID hand-edit and
-// is already live; listing it keeps CI honest about the tree's real state instead of pretending the
-// rule was never broken, and keeps `npm test` from going red on every unrelated PR for a defect no
-// PR can fix (the repair needs database write access — see the header).
+// KNOWN DIVERGENCES — dated, reasoned, finite, and each pointing at the migration that RECONCILED
+// it. Every entry is a migration that DID hand-edit one of the four and is already live. A hand edit
+// is a permanent fact about history: the file will offend forever, because the remediation lands in
+// a LATER migration, not by editing the old one. So an entry is a RECORD, not a to-do item.
 //
-// TO REMOVE AN ENTRY: fold its change into af_rpc_templates, run rebuild_af_filter_rpcs(), confirm
-// the rebuilt md5 equals the live one and that af_parity_hand_edit has resolved — then delete the
-// line. Never delete a line to make this file green.
-const KNOWN_DIVERGENCES: Record<string, string> = {
-  '20260829172433_drop_old_location_search_candidates_ar_overload.sql':
-    'live 2026-08-29; emergency DROP of the stale 41-arg overload after the previous migration\'s CREATE OR REPLACE with a new trailing parameter created a SECOND overload and PGRST203-ed every live caller. Correct as an incident fix, still outside the template path.',
-  '20260829172838_ranking_photo_preference_fold_into_diversity_partition_order.sql':
-    'live 2026-08-29; CREATE OR REPLACE folding photo-preference + rotation into the diversity partition ORDER BY. This is the definition production runs today, and the one af_rpc_templates does not know about. OPEN as alert af_parity_hand_edit (P1) since 2026-08-29 17:43.',
+// DO NOT DELETE AN ENTRY once its migration exists — §1 would go red, because the file still
+// hand-edits and always will. What changes when a divergence is repaired is the `reconciledBy`
+// field, which §5 then forces to name a migration that actually exists in this repo. That is what
+// makes "this was fixed" a checkable claim rather than a comment.
+//
+// DO NOT raise TEMPLATE_ERA_BASELINE to make an entry disappear. That hides divergence rather than
+// recording it, and the mutation suite explicitly proves it turns this file red.
+type Divergence = { why: string; reconciledBy: string | null };
+const KNOWN_DIVERGENCES: Record<string, Divergence> = {
+  '20260829172433_drop_old_location_search_candidates_ar_overload.sql': {
+    why: 'live 2026-08-29; emergency DROP of the stale 41-arg overload after the previous migration\'s CREATE OR REPLACE with a new trailing parameter created a SECOND overload and PGRST203-ed every live caller. Correct as an incident fix, still outside the template path.',
+    reconciledBy: '20260830134244_af_template_absorbs_2026_08_29_ranking_so_rebuild_is_a_noop.sql',
+  },
+  '20260829172838_ranking_photo_preference_fold_into_diversity_partition_order.sql': {
+    why: 'live 2026-08-29; CREATE OR REPLACE folding photo-preference + rotation into the diversity partition ORDER BY. This is the definition production runs today, and the one af_rpc_templates did not know about. Raised af_parity_hand_edit (P1) 2026-08-29 17:43.',
+    reconciledBy: '20260830134244_af_template_absorbs_2026_08_29_ranking_so_rebuild_is_a_noop.sql',
+  },
 };
 
 const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
@@ -136,8 +158,30 @@ for (const file of files) {
   check('§2 the known-divergence allowlist holds exactly the 2 reviewed entries',
     expected.length === 2, `allowlist has ${expected.length} entr(ies) — growing it is a deliberate, reviewed act`);
   check('§2 every allowlist entry carries a stated reason',
-    expected.every((k) => (KNOWN_DIVERGENCES[k] ?? '').trim().length > 20),
+    expected.every((k) => (KNOWN_DIVERGENCES[k]?.why ?? '').trim().length > 20),
     'an entry with no reason is cover, not a record');
+}
+
+// ── §5 — a claimed reconciliation must name a migration that really exists ──────────────────────
+// Without this, "reconciledBy" would be a comment anyone could write. With it, the only way to mark
+// a divergence repaired is to have actually landed the migration that repaired it.
+{
+  const claimed = Object.entries(KNOWN_DIVERGENCES).filter(([, d]) => d.reconciledBy);
+  const missing = claimed.filter(([, d]) => !files.includes(d.reconciledBy!));
+  check('§5 every claimed reconciliation names a migration present in this repo',
+    missing.length === 0,
+    missing.map(([k, d]) => `${k} claims ${d.reconciledBy}, which is not in ${MIGRATIONS_DIR}`).join('; '));
+
+  // and the reconciling migration must be the sanctioned path: template + rebuild, together
+  const unsound = claimed
+    .filter(([, d]) => files.includes(d.reconciledBy!))
+    .filter(([, d]) => {
+      const src = readFileSync(`${MIGRATIONS_DIR}/${d.reconciledBy}`, 'utf8');
+      return !(/\baf_rpc_templates\b/i.test(src) && /\brebuild_af_filter_rpcs\b/i.test(src));
+    });
+  check('§5 every reconciling migration goes through af_rpc_templates AND rebuild_af_filter_rpcs()',
+    unsound.length === 0,
+    unsound.map(([k, d]) => `${k} claims ${d.reconciledBy}, which does not use the template path`).join('; '));
 }
 
 // ── §3 — the allowlist cannot rot ───────────────────────────────────────────────────────────────
@@ -158,12 +202,26 @@ for (const file of files) {
 }
 
 if (offences.length) {
-  console.log(`\n      STANDING DIVERGENCE — ${offences.length} migration(s) currently outside the template path:`);
-  for (const o of offences) console.log(`        · ${o.file} → [${o.fns.join(', ')}]`);
-  console.log('      Do NOT "repair" this by running rebuild_af_filter_rpcs(): the template predates');
-  console.log('      p_rotation_seed, and the rebuild DROPS every overload first — it would revert the');
-  console.log('      owner\'s 2026-08-29 rotation rule AND 404 every search. Fold the change into');
-  console.log('      af_rpc_templates first, then rebuild, then prove the md5 did not move.\n');
+  const open = offences.filter((o) => !KNOWN_DIVERGENCES[o.file]?.reconciledBy);
+  console.log(`\n      HISTORICAL HAND EDITS — ${offences.length} migration(s) that bypassed the template path:`);
+  for (const o of offences) {
+    const rec = KNOWN_DIVERGENCES[o.file]?.reconciledBy;
+    console.log(`        · ${o.file} → [${o.fns.join(', ')}]  ${rec ? `RECONCILED by ${rec}` : 'NOT YET RECONCILED'}`);
+  }
+  if (open.length) {
+    console.log('\n      One or more divergences are NOT yet reconciled. Before running');
+    console.log('      rebuild_af_filter_rpcs(), check what af_rpc_templates actually contains: if it');
+    console.log('      predates the live definition, the rebuild DROPS every overload first and would');
+    console.log('      revert live behaviour — and drop any parameter the template does not know about,');
+    console.log('      which 404s every caller that sends it. Fold the change into the template FIRST,');
+    console.log('      then rebuild, then prove md5(pg_get_functiondef) did not move.\n');
+  } else {
+    console.log('\n      All reconciled: af_rpc_templates now reproduces the live definitions, so a');
+    console.log('      rebuild is a proven no-op. That was NOT true before 20260830134244 — the template');
+    console.log('      predated p_rotation_seed, and a rebuild would have dropped it and 404\'d every');
+    console.log('      search. Re-verify the same way if you touch these RPCs again: the round trip');
+    console.log('      through the placeholder must equal pg_get_functiondef() byte for byte.\n');
+  }
 }
 
 console.log(failed === 0
