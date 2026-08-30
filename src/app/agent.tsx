@@ -308,6 +308,29 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
   return null;
 }
 
+// GATE for the deterministic location backstop above. Owner-reported live bug 2026-08-30: a chat
+// gave real non-location signal (family of 5 → a large villa/apartment, open to either type) but
+// never showed a single listing. Root cause — TWO independent, unsynchronized "ask up to 2 times"
+// budgets: the model's own (server-enforced via priorQuestions in supabase/functions/agent) and
+// this client's own askCountRef, counted from zero regardless of how many questions the model had
+// already asked. Once the model has ALREADY spent its own budget (>=2 prior "?" replies this chat —
+// the exact threshold the backend uses to force a search), a resulting kind="listings" IS the model
+// searching with whatever it has, exactly as instructed; re-asking on top of that only re-litigates
+// a decision the model already made under instruction, and is why the user never reached results.
+// A city-less broad search is a legitimate query (never invent a city) — this returns FALSE (search
+// now) in that case rather than re-asking a 3rd/4th time. Pure and exported so it is unit-testable
+// without the component (scripts/verify-agent-broad-search-after-budget.ts).
+export function shouldAskLocationInsteadOfSearching(
+  clarifyQ: string | null,
+  askCount: number,
+  history: { role: 'user' | 'model'; text: string }[],
+): boolean {
+  if (!clarifyQ) return false;
+  const modelAlreadyAskedTwice =
+    history.filter((h) => h.role === 'model' && /[?؟]/.test(h.text)).length >= 2;
+  return askCount < 2 && !modelAlreadyAskedTwice;
+}
+
 function detectMsgLang(s: string): 'en' | 'ar' | null {
   const words = s.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   let ar = 0, en = 0;
@@ -2249,22 +2272,23 @@ export default function Agent() {
       // (no city / a bare multi-city district) ASK in Arabic instead — accuracy over speed. After 2 asks
       // we stop pestering and search with whatever we have. (user: it MUST ask, not guess the location.)
       const clarifyQ = locationClarification(turn.query, v);
-      if (clarifyQ && askCountRef.current < 2) {
+      if (shouldAskLocationInsteadOfSearching(clarifyQ, askCountRef.current, history)) {
         askCountRef.current += 1;
         // Remember WHICH twin name this question is about, so the user's next message can commit their
         // pick even if the model answers with something else entirely.
         pendingScopeRef.current = regionOrCityTwin(turn.query.location);
         // …and, for the PLAIN-CITY question, which city — so its bare «المدينة كاملة» answer keeps that
         // city instead of re-resolving the generic noun «المدينة» into المدينة المنورة (2026-08-29).
-        pendingCityRef.current = wholeCityQuestionSubject(clarifyQ);
+        pendingCityRef.current = wholeCityQuestionSubject(clarifyQ!);
         setMsgs((m) =>
-          m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: clarifyQ, typing: true } : x)),
+          m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: clarifyQ!, typing: true } : x)),
         );
       } else {
-        // Bug-fix #10 (audit `agent-2ask-cap-silent-search`): when we hit the 2-question cap with an
-        // unusable location, the silent fallback search needs to TELL the user what scope was used so
-        // they're not surprised by broad results. (user directive: "explain the search scope used".)
-        const forcedBroad = !!clarifyQ && askCountRef.current >= 2;
+        // Bug-fix #10 (audit `agent-2ask-cap-silent-search`): when we hit the 2-question cap — OR the
+        // model has already spent ITS OWN question budget this chat (shouldAskLocationInsteadOfSearching
+        // above) — with an unusable location, the silent fallback search needs to TELL the user what
+        // scope was used so they're not surprised by broad results. (user: "explain the search scope used".)
+        const forcedBroad = !!clarifyQ;
         askCountRef.current = 0;
         saidRef.current = [];
         beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
