@@ -161,6 +161,54 @@ consumer to it is an owner decision, not a code change.
 Until then the ramp monitor is what keeps this honest: dealapp coverage will not increase, the
 monitor will say so, and nobody has to remember.
 
+### 5.2 The proxy was measured, not assumed — and it is not the answer
+
+The obvious repair is the Saudi residential proxy wasalt uses. Owner, 2026-08-30: *"I would not
+blindly give Dealapp the Saudi proxy yet because Wasalt already uses that shared limited resource.
+First measure whether there is enough headroom."* Both halves were measured.
+
+**Headroom (7 days of `scrape_runs`): safe.** Peak concurrent proxy runs 10 against a detector cap
+of 16 and the ~34-run cliff of 2026-08-17; mean 2.37; zero samples at ≥12. UTC hours 01–03 carried
+**zero** proxy runs on all 7 days, and dealapp liveness is scheduled 02:40 with a 6.5-minute run.
+`liveness_run.py` has no thread pool — a sequential loop behind a 0.35s throttle — so it adds
+exactly **one** concurrent session.
+
+Before measuring, one real blocker had to be fixed: `mon_detect_proxy_contention()` counted
+`wasalt%` and `souq24` only, so a dealapp proxy consumer would have been invisible to the one
+monitor guarding the pool. It now counts `dealapp_liveness_proxy` (migration `20260830215434`,
+cap unchanged at 16), and the runner uses that label when — and only when — it routes through the
+pool.
+
+**The bounded run, same limit and same cohort as the CI baseline:**
+
+| | CI egress | proxy |
+|---|---|---|
+| scanned | 300 | 300 |
+| alive | 37 (**12.3%**) | 71 (**23.7%**) |
+| unknown | 263 | 229 |
+| **dead** | **0** | **0** |
+| trusted? | no — quarantined | yes, 23.7% clears the 20% floor |
+| wasalt runs overlapping | — | 0 |
+| rows written | 0 | 0 |
+
+**Read it carefully, because it is not the win it looks like.** The verified rate roughly doubles
+and the run stops quarantining — but **across 600 probes on two different egress paths, dealapp
+has produced ZERO dead verdicts.** The cohort is ordered sitemap-absent first, so these 300 are
+drawn from the 3,244 rows dealapp's own sitemap no longer lists — the rows most likely to be gone.
+For 229 of them the source returned a shell rather than a 404. Dealapp does not appear to expose a
+death signal on the listing URL at all, on any egress.
+
+So the proxy buys **coverage**, not **discrimination**, and it buys a modest amount: at 23.7% it
+would take ~112 days to positively verify the population once at 600 probes/day. That is still far
+under the 50% SLA floor, and it costs a permanent slot on a shared capacity-limited resource.
+
+**Therefore: not attached to the schedule.** `--proxy` is dispatch-only and cannot be reached by
+the cron path. The 23.7% figure is a FLOOR, not a representative rate — it was measured on the
+worst cohort by construction — so the next measurement worth doing is the same bounded run against
+**sitemap-present** rows. If those verify at a high rate, the proxy becomes worth its slot; if they
+do not, dealapp needs a different signal entirely (an internal API, a status field, a feed) and no
+amount of egress will fix it.
+
 ## 6. Ezhalah must know its own liveness state without being asked
 
 A rule nothing measures is a wish. Migration `20260830191646`:
