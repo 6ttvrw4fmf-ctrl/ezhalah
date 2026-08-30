@@ -128,6 +128,39 @@ none of its deaths are believable.
 Related, and non-negotiable: **anomaly and kill caps stay.** A sweep that suddenly wants to
 deactivate far more than its trailing norm has more likely broken than found a mass delisting.
 
+### 5.1 A working contract does not make a platform verifiable — dealapp, measured
+
+The first production dealapp liveness run (2026-08-30, dry, 300 probes) reported:
+
+```
+DRY-RUN scanned=300 alive=37 dead=0 unknown=263 verified=0 sitemap_ids=56726
+       | QUARANTINED: verified-rate too low, no deactivation written
+```
+
+Read it in two halves.
+
+**The contract worked perfectly.** 263 shells classified `UNKNOWN`, not `DEAD`. Zero strikes, zero
+deactivations, zero verification stamps. A naive "it returned 200, so it's alive" rule would have
+manufactured 300 verifications out of nothing; a naive "we couldn't read it, so it's gone" rule
+would have killed 263 live listings. The trust gate then quarantined the whole run on its own,
+before any write, because 12.3% verified is not an environment whose 404s can be believed.
+
+**And dealapp is still not verifiable from CI.** ~88% shells matches the 78–83% measured
+2026-08-26: dealapp serves a listing-less page to GitHub Actions egress while an ordinary network
+gets the full schema for ~89% of the same ids at the same moment. At a 12% alive rate the job
+quarantines every run and covers ~36 of 15,899 rows per pass. Scheduling it was necessary and is
+not sufficient.
+
+**This is a coverage problem, and coverage problems are never solved by loosening the classifier.**
+Lowering `MIN_ALIVE_RATE_FOR_TRUST` so runs stop quarantining, or treating a shell as death, would
+convert a visible gap into invisible false deaths. The fix is egress: dealapp needs a route to the
+source that behaves like an ordinary network, as wasalt already has via `WASALT_PROXY_URL`. That
+proxy is a shared, capacity-limited resource (§20 rule 14 in `docs/ARCHITECTURE.md`), so adding a
+consumer to it is an owner decision, not a code change.
+
+Until then the ramp monitor is what keeps this honest: dealapp coverage will not increase, the
+monitor will say so, and nobody has to remember.
+
 ## 6. Ezhalah must know its own liveness state without being asked
 
 A rule nothing measures is a wish. Migration `20260830191646`:
