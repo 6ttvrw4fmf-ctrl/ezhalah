@@ -167,6 +167,23 @@ check('menu: the current card renders from LOCAL detection (self-correcting), se
 check('menu: revoking the CURRENT device routes through the existing sign-out flow, not the edge DELETE',
   /testID="device-signout-current"[\s\S]{0,200}?onPress=\{\(\) => go\('signout', 1\)\}/.test(menuSrc));
 
+// ── 5b. SIGN-OUT SCOPE: one device out ≠ every device out ────────────────────────────────────────
+// supabase-js defaults signOut() to scope 'global', which revokes EVERY session the user has.
+// Measured on production GoTrue 2026-08-30: a plain signOut() on one browser made a second, untouched
+// device's refresh token return refresh_token_not_found. That silently contradicts this very screen
+// (per-device revoke + «تسجيل الخروج من جميع الأجهزة الأخرى» both become meaningless if the ordinary
+// sign-out already nuked everything) and matches no mainstream app. All assertions run on
+// comment-stripped code — a comment mentioning the scope must never satisfy this barrier.
+const authCode = codeOnly(read('src/lib/auth.ts'));
+check("auth: signOutBackend signs out THIS device only (explicit scope 'local')",
+  /signOutBackend[\s\S]{0,400}?supabase\.auth\.signOut\(\s*\{[^}]*scope:\s*'local'[^}]*\}\s*\)/.test(authCode));
+check('auth: no argument-less supabase.auth.signOut() in src/ — the global-scope default is never taken implicitly',
+  !/supabase\.auth\.signOut\(\s*\)/.test(authCode) && !/supabase\.auth\.signOut\(\s*\)/.test(devicesLib));
+check("devices: «all other devices» stays the deliberate 'others' scope (current session survives)",
+  /signOutOtherDevices[\s\S]{0,300}?supabase\.auth\.signOut\(\s*\{\s*scope:\s*'others'\s*\}\s*\)/.test(devicesLib));
+check("auth: no signOut({ scope: 'global' }) anywhere — revoking every session is never the ordinary path",
+  !/scope:\s*'global'/.test(authCode) && !/scope:\s*'global'/.test(devicesLib));
+
 // ── 6. Honest Arabic activity buckets (executed) ─────────────────────────────────────────────────
 const NOW = Date.parse('2026-08-29T12:00:00Z');
 const ago = (mins: number) => new Date(NOW - mins * 60_000).toISOString();
