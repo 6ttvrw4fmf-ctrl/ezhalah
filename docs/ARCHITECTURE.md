@@ -852,7 +852,14 @@ migration-drift-guard rule in `AGENTS.md`).
    filter UI.
 8. **Gathern = rent-only monthly.** Never in Buy results; price already annualized.
 9. **Lifecycle:** accuracy over cleanup — never wrongly remove a real listing; confirmed-dead + multi-
-   strike + collapse guards only.
+   strike + collapse guards only. **Liveness is THREE-valued — ALIVE / DEAD / UNKNOWN — never two,
+   and UNKNOWN never deactivates anything** (owner, 2026-08-30). Timeout, 403, 429, 5xx, an
+   uninterpretable 200, and absence from our own crawl are all UNKNOWN. Only DIRECT evidence (a
+   fetch of the listing's own URL) can kill, and only at full grace. "Seen by the crawler"
+   (`last_seen_at`) and "proven alive" (`last_verified_alive_at`) are different facts in different
+   columns, and only `scrapers/common/liveness_contract.py` may write the second.
+   **`docs/ops/LISTING_LIVENESS.md` is canonical** — read it before touching any liveness,
+   cleanup, strike or deactivation path.
 10. **Regression prevention (#1 ops rule):** preserve work before risky git ops; never `git reset --hard`
     a dirty tree; before+after verify every deploy; deploy only to project `ezhalah-app`.
 11. **Compliance:** REGA FAL + PDPL (Saudi residency, no selling user data).

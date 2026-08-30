@@ -36,6 +36,7 @@ from typing import Callable, Optional
 
 from scrapers.common.db import begin_run, end_run, sb
 from scrapers.common.http import get
+from scrapers.common.liveness_contract import direct_alive_patch
 
 
 # Phrases Aqar puts on a removed/expired listing page (both languages).
@@ -418,7 +419,8 @@ def main() -> None:
                     if len(alive_ids) >= 200:
                         batch = list(alive_ids)
                         _run_with_retry(lambda ids=batch: client.table(table)
-                                        .update({"last_seen_at": now_iso, "missing_count": 0})
+                                        .update({"last_seen_at": now_iso, "missing_count": 0,
+                                                 **direct_alive_patch(now_iso=now_iso)})
                                         .in_("id", ids).execute())
                         alive_ids.clear()
                 else:
@@ -445,7 +447,8 @@ def main() -> None:
     # Flush any remaining batched "alive" refreshes.
     if alive_ids:
         _run_with_retry(lambda ids=list(alive_ids): client.table(table)
-                        .update({"last_seen_at": now_iso, "missing_count": 0})
+                        .update({"last_seen_at": now_iso, "missing_count": 0,
+                                 **direct_alive_patch(now_iso=now_iso)})
                         .in_("id", ids).execute())
 
     notes = (

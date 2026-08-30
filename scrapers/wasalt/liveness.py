@@ -59,6 +59,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db  # noqa: E402
+from scrapers.common.liveness_contract import direct_alive_patch
 
 BASE = "https://wasalt.sa"
 NEXT_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
@@ -258,7 +259,8 @@ def _flush_alive(tbl: str, ids: list[int], now_iso: str) -> None:
         chunk = ids[i:i + 200]
         if chunk:
             db._execute(
-                db.sb().table(tbl).update({"last_seen_at": now_iso, "missing_count": 0}).in_("id", chunk),
+                db.sb().table(tbl).update({"last_seen_at": now_iso, "missing_count": 0,
+                                           **direct_alive_patch(now_iso=now_iso)}).in_("id", chunk),
                 what=f"{tbl}.touch_alive",
             )
 
