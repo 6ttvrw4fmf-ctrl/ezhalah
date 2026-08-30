@@ -1,0 +1,33 @@
+# Loader roster must equal production's active-searchable platform set (owner rule 2026-08-29).
+#
+# The search-loading strip advertises one logo per platform Ezhalah currently searches. If a scraper
+# goes cold with zero reachable rows in `search_listings_ar`, its logo must not appear in the
+# strip — dishonest to users, unfair to the platform. The client filters at runtime via
+# `loader_active_platforms_ar()`. This job is the STATIC HALF: it queries production (anon REST)
+# and asserts `PLATFORM_META`, mapped through `SOURCE_TOKENS`, equals the current active set — so
+# the static list cannot silently drift from reality.
+#
+# Read-only (anon key, RLS-respecting) — never the service role. Excluded from `npm test` because
+# `npm test` is a required status check on every PR; wiring a live check there would fail unrelated
+# PRs whenever production momentarily disagreed with the shipped catalog.
+
+on:
+  schedule:
+    - cron: '29 */6 * * *' # every 6h, offset from the other live checks
+  workflow_dispatch:
+
+concurrency:
+  group: loader-active-platforms-check
+  cancel-in-progress: false
+
+jobs:
+  loader-active-set:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: PLATFORM_META must equal production active-searchable set
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-loader-platforms-match-active.ts

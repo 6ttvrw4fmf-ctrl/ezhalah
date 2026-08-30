@@ -36,7 +36,13 @@ import { useResolvedTheme } from '@/lib/appearance';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
-import { bumpRotation, currentRotation, pickLoaderPlatforms, type LoaderPlatform } from '@/data/loaderPlatforms';
+import {
+  bumpRotation,
+  currentRotation,
+  pickLoaderPlatforms,
+  type LoaderPlatform,
+} from '@/data/loaderPlatforms';
+import { fetchActivePlatformNames } from '@/data/loaderActivePlatforms';
 import type { SearchQuery } from '@/data/search';
 
 const IS_WEB = Platform.OS === 'web';
@@ -219,17 +225,34 @@ export default function SearchLoader({
   if (offsetRef.current == null) offsetRef.current = currentRotation();
   useEffect(() => { bumpRotation(); }, []);
 
-  // The COMPLETE 32-platform roster (LOCKED — always the full network, regardless of query), computed
-  // once and FROZEN — `resultSources` arriving later (as the query resolves) only reorders which
-  // pills lead; it must never reshuffle or hide pills already on screen. `query` just gates WHEN the
-  // strip mounts (a search is actually underway); its contents no longer affect WHICH platforms show.
+  // ACTIVE-ONLY roster (owner rule 2026-08-29): only platforms with reachable rows in
+  // `search_listings_ar` are advertised, so a scraper that goes cold stops showing without a
+  // deploy. `fetchActivePlatformNames()` resolves once and is cached at the module level via the
+  // usual React state; if it fails, `activeNames` stays null and pickLoaderPlatforms falls back to
+  // the full catalog (safe degradation — see loaderPlatforms.ts). The catalog itself is barrier-
+  // pinned equal to production's active set at CI time (verify-loader-platforms-match-active.ts).
+  const [activeNames, setActiveNames] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchActivePlatformNames().then((names) => {
+      if (!cancelled) setActiveNames(names);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Roster is computed once per (query, resultSources, activeNames) and FROZEN — `resultSources`
+  // arriving later (as the query resolves) only reorders which pills lead; it must never reshuffle
+  // or hide pills already on screen. `query` just gates WHEN the strip mounts (a search is actually
+  // underway); its contents do not affect WHICH platforms show. If the active-names fetch resolves
+  // AFTER the strip already mounted for THIS search, the frozen roster stays — the next search
+  // picks up the filtered set. That prevents mid-search jitter.
   const frozenRef = useRef<LoaderPlatform[] | null>(null);
   const platforms = useMemo<LoaderPlatform[]>(() => {
     if (frozenRef.current && frozenRef.current.length) return frozenRef.current;
-    const picked = query ? pickLoaderPlatforms(resultSources, offsetRef.current ?? 0) : [];
+    const picked = query ? pickLoaderPlatforms(resultSources, offsetRef.current ?? 0, activeNames) : [];
     if (picked.length) frozenRef.current = picked;
     return picked;
-  }, [query, resultSources]);
+  }, [query, resultSources, activeNames]);
 
   // Soft completion (owner v4): fade the whole block out gently before the results morph in —
   // the loader must never vanish in a single frame.
