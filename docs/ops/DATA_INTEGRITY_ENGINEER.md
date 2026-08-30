@@ -872,6 +872,52 @@ never proves on its own (§26: *an oracle needs a CONTROL before it is an oracle
 control returns the same «الإعلان غير موجود», so the discriminating half is the POSITIVE control, not
 the negative one. Re-run those two halves rather than re-deriving whether aqar's crawl is complete.
 
+## 28. Two adjudications from run 2026-08-30 — a 30× kill spike that was the source, and the oracle trap I nearly fell into
+
+**28a. §27d's aqar GraphQL oracle takes the AD NUMBER, not our row `id` — and only the POSITIVE
+control can tell you when you have got that wrong.** §27d recommends
+`sa.aqar.fm/graphql` → `Listing{ get(id:…){ id uri } }`. Passing `<platform>_listings.id` (our
+internal row id) instead of `ad_number` makes **every** probe return aqar's «الإعلان غير موجود» —
+killed rows, currently-active rows and bogus ids alike, because the ids simply do not exist on aqar.
+Read with only a negative control that is an immaculate *"6/6 confirmed gone"*, and on 2026-08-30 the
+conclusion it would have manufactured happened to be **true**, which is the worst possible outcome: a
+right answer with no evidence behind it, ready to be wrong the next time. §27d already says the
+discriminating half is the positive control. This is why. **A liveness probe whose active-row control
+does not come back PRESENT has told you about your query, not about the source.**
+
+**28b. A 30× inactivation spike is not evidence of a bug, and the way to settle it is to re-run the
+PRODUCTION predicate on live pages.** 12,363 `aqar_residential_listings` rows went inactive in one
+hour (2026-08-30 01:00–02:00, `gh-aqar-liveness` jobid 6) against a ~350/day norm — `missing_count`
+3–4, avg 3.0 days since last seen, most shards killing ~1,000–1,250 where the whole platform had
+killed 358 the night before. Every surface signal said "§26: a perfect crawl of an incomplete index".
+It was not. Importing `looks_dead()`/`looks_closed()` from `scrapers/aqar/liveness.py` and running
+them against live pages gave **6/6 killed = aqar's soft-closed «مغلق» badge with the `offers`/`price`
+JSON-LD node stripped, and 6/6 still-active controls = `offers` + `price` present** — same fetch path,
+same container, so the difference is per-listing, not a page-shape collapse. Per-row evidence is in
+`ops_stale_inactivation_probe`.
+
+The hypothesis that had to be excluded, because it is the one that would have been catastrophic:
+`looks_closed()`'s factor 2 is `'"offers"' in body or '"price"' in body`, a **page-shape** signal. If
+aqar ever moves those nodes client-side, factor 2 goes False for every page at once and the
+two-factor guard degenerates to "the word «مغلق» appears near markup" — which that function's own
+docstring measured at 7 of 77 *live* pages (~9%), suspiciously close to the 12.7% kill rate observed
+here. **The active-row control is what distinguishes the two, and it must be part of any future
+adjudication of this cohort.** Do not re-derive the 2026-08-30 spike; do re-run those two halves.
+
+**28c. The roster's second P0 could not go GREEN, and it took the P0's first-ever firing to reveal
+it.** `mon_detect_deleted_but_source_live()` called `mon_raise()` in both limbs and no resolver
+anywhere; `mon_detect_unresolvable_alert_kinds()` flagged it 30 minutes after the first raise. SQL
+cannot re-probe a URL (§26), so there is no honest self-heal — the close-out is
+`ops_deleted_but_source_live_adjudication`, a disposition plus ≥40 chars of real evidence, the
+`ops_price_source_verified` discipline. The gate is not weakened: an un-adjudicated finding still
+raises P0 and stays open. Live keys are derived from the **raising cohort**, never from the
+`not exists (alert)` guard — that is the §25a insta-resolve trap, which would resolve the alert in the
+transaction that created it. Migration `20260830071705`; both directions proven live, `insta_resolves = 0`.
+**Adjudicating is not restoring:** the finding (gathern unit 182286) turned out to be a correct,
+evidence-backed deletion — a genuine hard 404 on 2026-08-23, control-validated today because a valid
+property id with a bogus unit id also 404s — followed by the source republishing the same unit URL.
+1 of 40. The row was **not** rebuilt from the probe.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve
