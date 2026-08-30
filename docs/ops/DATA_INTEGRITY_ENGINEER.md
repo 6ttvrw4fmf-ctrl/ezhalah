@@ -7,6 +7,8 @@
 > original scope, daily 04:30 Arizona / 11:30 UTC): **Advanced Filter is out of scope for this routine** — it
 > belongs to the senior. See `docs/ops/ENGINEER_ROUTINES.md` for the three-engineer contract.
 
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+
 ## §0. Standing operating contract (owner-granted, 2026-08-12 — permanent)
 
 **This section is attached to THIS existing job and no other:** routine #3,

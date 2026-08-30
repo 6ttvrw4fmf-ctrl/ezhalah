@@ -65,6 +65,15 @@ outside the roster is decoration. Adjudicate every finding against source before
    cases, and prove both directions. (Run #15 assumed absence meant silence on 13 aqaratikom rows;
    the source published «سنوي» on all 13.)
 
+**GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds ALL SEVEN routines. Canonical text:
+`docs/ops/ENGINEER_ROUTINES.md` §G; the file wins over any routine prompt.** In one line each:
+fix first, report last (a found bug is not a finished job); exactly SIX legitimate reasons to stop
+without fixing (§G.2) and nothing else; if the blocker is ownership or permissions, ROUTE the
+defect to the write-authorized routine with reproduction and root cause rather than saying someone
+should look at it; effort scales with what you find; never manufacture a 10/10; read Sentry FIRST
+every run and resolve an issue only after the production fix is verified; and none of it weakens an
+existing guard. Every routine's live prompt carries a condensed copy — §G is the source of truth.
+
 **Owner-granted engineering/product decisions belong in this repo, not just in an agent's own memory.**
 When the owner gives you a permanent rule, architecture decision, or business/compliance decision:
 land it in `docs/ARCHITECTURE.md` (or the relevant `docs/ops/*.md`) in the same session, not only in

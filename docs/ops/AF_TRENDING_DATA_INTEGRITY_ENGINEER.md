@@ -4,6 +4,8 @@
 on any divergence** (same rule as `docs/ops/DATA_INTEGRITY_ENGINEER.md` and `docs/ops/
 SEARCH_MATCH_QA_ENGINEER.md`). If the two ever differ, update the routine to match this file.
 
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+
 ## §0.1 — READ FIRST, EVERY RUN (mandatory)
 
 **Before touching anything else, read these two files in this order:**
