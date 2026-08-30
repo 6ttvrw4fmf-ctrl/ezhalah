@@ -53,6 +53,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from scrapers.common.db import begin_run, end_run, sb
+from scrapers.common.liveness_contract import direct_alive_patch
 from scrapers.gathern.run import SOURCE, detail_session
 
 TABLE = "gathern_residential_listings"
@@ -263,6 +264,7 @@ def _recheck_dead(client, args, run_id: int, mode: str, now_iso: str,
                     client.table(TABLE).update({
                         "active": True, "missing_count": 0,
                         "last_seen_at": now_iso, "deactivated_at": None,
+                        **direct_alive_patch(now_iso=now_iso),
                     }).eq("id", row["id"]).execute()
             elif looks_dead(status):
                 still_dead += 1
@@ -429,7 +431,8 @@ def main() -> int:
     def _flush_alive() -> None:
         if args.apply and alive_ids:
             for i in range(0, len(alive_ids), 200):
-                client.table(TABLE).update({"last_seen_at": now_iso, "missing_count": 0}) \
+                client.table(TABLE).update({"last_seen_at": now_iso, "missing_count": 0,
+                                            **direct_alive_patch(now_iso=now_iso)}) \
                     .in_("id", alive_ids[i:i + 200]).execute()
         alive_ids.clear()
 
