@@ -58,6 +58,12 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ("never_verified_stops_counting_as_stale",
      "    if hours_since_verified is None:\n        return True",
      "    if hours_since_verified is None:\n        return False"),
+    ("verification_stamped_without_alive_evidence",
+     'return {"last_verified_alive_at": now_iso} if decision.verified_alive else {}',
+     'return {"last_verified_alive_at": now_iso}'),
+    ("crawler_presence_stamps_verification_by_default",
+     "return {\"last_verified_alive_at\": now_iso} if policy.presence_is_positive_evidence else {}",
+     'return {"last_verified_alive_at": now_iso}'),
 ]
 
 

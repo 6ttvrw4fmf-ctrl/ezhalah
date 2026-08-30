@@ -149,3 +149,48 @@ def test_staleness_alone_does_not_deactivate():
     decide(DEAD, direct, grace) — staleness is not an input to it at all."""
     assert is_stale(10_000, POLICY) is True
     assert decide(UNKNOWN, strikes=0, policy=POLICY).action == "none"
+
+
+# ── 6. last_verified_alive_at may ONLY be written on genuine ALIVE evidence ─────────────────────
+from scrapers.common.liveness_contract import presence_patch, verification_patch  # noqa: E402
+
+NOW = "2026-08-30T18:39:39+00:00"
+
+
+def test_alive_stamps_the_verification_timestamp():
+    patch = verification_patch(decide(ALIVE, strikes=2, policy=POLICY), now_iso=NOW)
+    assert patch == {"last_verified_alive_at": NOW}
+
+
+@pytest.mark.parametrize("status", [None, 403, 429, 500, 503])
+def test_a_failed_or_blocked_read_never_stamps_verification(status):
+    """The worst possible bug this column could have: a blocked crawl refreshing the timestamp and
+    making dead inventory look freshly checked."""
+    d = decide(classify_response(status), strikes=0, policy=POLICY)
+    assert verification_patch(d, now_iso=NOW) == {}
+
+
+def test_a_dead_verdict_never_stamps_verification():
+    assert verification_patch(decide(DEAD, strikes=0, policy=POLICY), now_iso=NOW) == {}
+
+
+def test_absence_never_stamps_verification():
+    d = decide(ALIVE, strikes=0, policy=POLICY, evidence=EvidenceKind.ABSENCE)
+    assert verification_patch(d, now_iso=NOW) == {}, (
+        "a sitemap or crawl sighting is not a verification, even when it looks positive")
+
+
+def test_an_unrecognised_200_never_stamps_verification():
+    v = classify_response(200, "<html>shell</html>", alive_marker=lambda b: "schema" in b)
+    assert verification_patch(decide(v, strikes=0, policy=POLICY), now_iso=NOW) == {}
+
+
+def test_crawler_presence_does_not_stamp_verification_by_default():
+    assert presence_patch(POLICY, now_iso=NOW) == {}
+
+
+def test_presence_stamps_verification_only_when_a_platform_explicitly_declares_it():
+    declared = LivenessPolicy(platform="feed_only_publishes_live",
+                              presence_is_positive_evidence=True)
+    assert presence_patch(declared, now_iso=NOW) == {"last_verified_alive_at": NOW}
+    assert POLICY.presence_is_positive_evidence is False, "the default must remain opt-in"

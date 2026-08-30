@@ -58,6 +58,8 @@ const RULES: Array<[string, RegExp]> = [
   ['a policy cannot opt out of the absence rule', /if not self\.absence_is_candidate_only:\s*\n\s*raise ValueError/],
   ['grace below 1 is rejected', /if self\.grace < 1:\s*\n\s*raise ValueError/],
   ['never-verified counts as stale', /if hours_since_verified is None:\s*\n\s*return True/],
+  ['verification is stamped only on ALIVE evidence', /if decision\.verified_alive else \{\}/],
+  ['crawler presence stamps verification only when explicitly declared', /if policy\.presence_is_positive_evidence else \{\}/],
 ];
 for (const [name, re] of RULES) check(name, re.test(contract));
 
@@ -103,6 +105,8 @@ const REQUIRED_MUTATIONS = [
   'alive_stops_resetting_strikes',
   'policy_may_opt_out_of_absence_rule',
   'never_verified_stops_counting_as_stale',
+  'verification_stamped_without_alive_evidence',
+  'crawler_presence_stamps_verification_by_default',
 ];
 if (mutationProof) {
   const absent = REQUIRED_MUTATIONS.filter((m) => !mutationProof.includes(m));
