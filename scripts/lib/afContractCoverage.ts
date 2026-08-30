@@ -39,7 +39,12 @@
 //
 // This is honest about its own limits, and the limits are the point:
 //   • It measures COVERAGE-WEIGHTED CONFORMANCE, not absence of unknown bugs. A rule nothing tests
-//     cannot be scored as passing, which is exactly why R2.1.2 and R5.6.1 drag the number down.
+//     cannot be scored as passing. R2.1.2 and R5.6.1 were the two N-grades that dragged the number
+//     down until 2026-08-30, when the barriers they were waiting for were built
+//     (verify-af-cohort-questions-certified, verify-af-salience-orders-only) and both moved to B.
+//     They are named here on purpose: a grade moves because a barrier now EXISTS and EXECUTES, and
+//     the coverage-map barrier below proves that for every cited barrier — never because a run
+//     wanted a higher number.
 //   • Trending is NOT in the Product Contract at all (T-rules below are sourced from this routine's
 //     own spec). That split is itself an open owner question — see AF_RATING_METHODOLOGY.md.
 
@@ -80,7 +85,7 @@ const S1: Entry[] = [
 // ── §2 QUESTION CERTIFICATION ────────────────────────────────────────────────────────────────────
 const S2: Entry[] = [
   { rule: 'R2.1.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-group-cohort-coverage'], evidence: 'every askable question resolved through COHORT_QUESTIONS' },
-  { rule: 'R2.1.2', dim: 'af', weight: 3, grade: 'N', barrier: [], evidence: 'GAP: "No question ships without a ledger entry" is enforced by NOTHING — no script cross-checks COHORT_QUESTIONS against docs/AF_COHORT_LEDGER.md' },
+  { rule: 'R2.1.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cohort-questions-certified'], evidence: 'every cohort shipping questions is proved to hold an ENABLED af_cohort_registry row, read from the byte-exact sql/mirrors/af_cohort_registry.sql (2026-08-30; was the map\'s only weight-3 N)' },
   { rule: 'R2.1.3', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-group-cohort-coverage'], evidence: '"uncertified = do not ask" is the contrapositive of R2.1.1' },
   { rule: 'R2.2.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-group-cohort-coverage'], evidence: 'live intersection across selected types: Villa+Duplex offered ONLY bathrooms, dropping street_width/direction/property_age/amenities that Villa alone allows' },
   { rule: 'R2.2.2', dim: 'af', weight: 1, grade: 'P', barrier: [], evidence: 'rationale for R2.2.1' },
@@ -133,7 +138,7 @@ const S5: Entry[] = [
   { rule: 'R5.4.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-two-option-survival'], evidence: 'lone surviving option asked as yes/no vs Skip' },
   { rule: 'R5.5.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-narrowing-gate'], evidence: 'CI bathrooms journey: rungs rendered per-rung, base 11,202 → ≥1 selected → 2,469' },
   { rule: 'R5.5.2', dim: 'af', weight: 1, grade: 'P', barrier: [], evidence: 'worked Example G' },
-  { rule: 'R5.6.1', dim: 'af', weight: 2, grade: 'N', barrier: [], evidence: 'GAP: no barrier asserts SALIENCE affects ASK ORDER ONLY and never inclusion — a weight leaking into inclusion would silently delete useful questions' },
+  { rule: 'R5.6.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-salience-orders-only'], evidence: 'scoreQuestion() executed across the whole salience range (0 to 1000): ask/skip verdict and surviving option set are invariant, score stays exactly proportional, and order still moves (2026-08-30)' },
   { rule: 'R5.6.2', dim: 'af', weight: 2, grade: 'P', barrier: ['verify-af-narrowing-gate'], evidence: 'ASK_FIRST_TIER reorders only; covered indirectly by the usefulness gate' },
 ];
 

@@ -201,8 +201,17 @@ check('floor backstops target a city proven reachable this run',
 check('the MOBILE floor has a backstop of its own',
   /done\.mobile\)/.test(runner) && /mobile floor/.test(runner),
   'mobile rode on `i === 0` and vanished whenever that one city was not offered');
-check('the trending-district journey also uses a reachable city',
-  /trendingDistrict\(\{ city: reachable\(\)/.test(runner));
+// STRENGTHENED 2026-08-30: a merely-"reachable" city is not enough. `reachable()` is deal-blind —
+// it returns whichever city was reached first, for whatever deal reached it — so a rent-only city
+// («المندق», 19 listings all إيجار) satisfied this check and was still handed to trending-district,
+// which runs on the app's DEFAULT deal «بيع». The journey was skipped and the floor lost. The city
+// must now be chosen for the deal the journey actually runs; that IMPLIES reachability, so this is
+// a tightening, not a relaxation. A raw pickCities[0] still fails, as before.
+check('the trending-district journey uses a DEAL-AWARE reachable city',
+  /trendingDistrict\(\{\s*city:\s*tdCity/.test(runner)
+  && /const tdCity = reachableFor\('بيع'\)/.test(runner)
+  && !/trendingDistrict\(\{\s*city:\s*pickCities\[0\]/.test(runner),
+  'a deal-blind city hands a بيع journey a rent-only city and silently deletes the floor');
 
 // «not offered» must mean the PRODUCT refused, never "the list had not rendered yet". A flat sleep
 // turned بريدة — a top-10 city with 4,850 listings — into a skipped journey and a missed floor.

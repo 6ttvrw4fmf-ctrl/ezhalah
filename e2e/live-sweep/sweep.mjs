@@ -54,6 +54,28 @@ writeFileSync(JOURNAL, '');
 
 // ── MINIMUM COVERAGE FLOORS (owner). A run that cannot meet these FAILS: silently shrinking
 // coverage is the failure mode a rotation system invites, so the floors are asserted, not hoped for.
+// ── DEAL-AWARE CITY CHOICE ───────────────────────────────────────────────────────────────────────
+// A journey's city must stock the DEAL that journey will actually run. Choosing a city by staleness
+// alone (`pickCities[0]`), or by "was reachable for some other deal" (a deal-blind `reachable()`),
+// hands a بيع-shaped journey a rent-only city; production then rightly declines to offer that city,
+// the journey is skipped, and its COVERAGE FLOOR is lost while production is perfectly healthy.
+//
+// Twice observed, same class, different journeys:
+//   2026-08-26  «الدليمية» (22 listings, ALL بيع) drew إيجار/سنوي → lost the non-Riyadh floor.
+//               Fixed for the normal-filter loop ONLY, via dealsOf.
+//   2026-08-30  «المندق» (19 listings, ALL إيجار) was handed to trending-district, honest-zero and
+//               card→back — all of which run on the app's DEFAULT deal «بيع» — losing three floors
+//               in one run. The 2026-08-26 fix had patched the example, not the class (§37).
+//
+// `have` is built from the LIVE index (livePool), never a hardcoded list (§1). Preference order:
+// a city already proven reachable this run → any rotated city that stocks the deal → الرياض, which
+// stocks every deal and is always offered. Returning الرياض is a last resort, not a free pass: it
+// never counts toward the non-Riyadh floor, which is computed from citiesTested minus الرياض.
+export function pickCityForDeal({ citiesTested = [], pickCities = [], dealsOf, deal, period = null, riyadh = 'الرياض' }) {
+  const stocks = (city) => dealsOf?.get?.(city)?.has?.(`${deal}/${period ?? '-'}`) ?? false;
+  return [...citiesTested].find(stocks) ?? [...pickCities].find(stocks) ?? riyadh;
+}
+
 export const FLOORS = {
   nonRiyadhCities: 3,
   mobileJourneys: 1,
