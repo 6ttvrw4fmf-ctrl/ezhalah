@@ -114,8 +114,19 @@ test('Filter mode — Apartment type filter returns results', async ({ page }) =
 // Pinned by scripts/verify-ai-spend-safety.ts.
 const ALLOW_PAID_AI = process.env.EZHALAH_ALLOW_PAID_AI === '1';
 
+// Label these two tests' real billed DeepSeek calls as CI traffic (owner audit, 2026-08-30): the
+// agent edge fn defaults ai_usage.source to "user" for any request missing this header, and this
+// nightly job is the deliberate home of paid live-model tests per the comment above — without this
+// they pollute the user/ci split every cost audit reads off ai_usage. Pinned by
+// scripts/verify-ai-spend-safety.ts.
+async function labelAgentCallsAsCI(page: Page) {
+  await page.route('**/functions/v1/agent', (route) =>
+    route.continue({ headers: { ...route.request().headers(), 'x-ezhalah-client': 'ci' } }));
+}
+
 test('AI mode — free-text query classifies correctly, replies in Arabic', async ({ page }) => {
   test.skip(!ALLOW_PAID_AI, 'paid live-model test — set EZHALAH_ALLOW_PAID_AI=1 to run');
+  await labelAgentCallsAsCI(page);
   await home(page);
   await page.getByText('الوكيل الذكي', { exact: true }).click(); // switch to AI mode
   // The composer's `placeholder` attribute is intentionally EMPTY on the clean intro-landing screen
@@ -144,6 +155,7 @@ test('AI mode — free-text query classifies correctly, replies in Arabic', asyn
 
 test('AI mode — a city that is also a region asks to disambiguate (no wrong guess)', async ({ page }) => {
   test.skip(!ALLOW_PAID_AI, 'paid live-model test — set EZHALAH_ALLOW_PAID_AI=1 to run');
+  await labelAgentCallsAsCI(page);
   await home(page);
   await page.getByText('الوكيل الذكي', { exact: true }).click();
   // Stable accessibilityLabel, not the transient placeholder — see the comment on the test above.

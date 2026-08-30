@@ -106,6 +106,13 @@ const run = async () => {
     const ctx = await browser.newContext(
       j.mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : {});
     const page = await ctx.newPage();
+    // Label this browser's real billed DeepSeek calls as CI traffic (owner audit, 2026-08-30): the
+    // agent edge fn defaults ai_usage.source to "user" for any request missing this header, and this
+    // script fires a real billed call on every journey/attempt, on a cron AND after every deploy —
+    // without this, those calls pollute the user/ci split every cost audit reads off ai_usage.
+    // Pinned by scripts/verify-ai-spend-safety.ts.
+    await page.route('**/functions/v1/agent', (route) =>
+      route.continue({ headers: { ...route.request().headers(), 'x-ezhalah-client': 'ci' } }));
     // A question that renders without the app ever asking the backend for its option counts would be
     // a FAKE question — the one failure mode "a card appeared" cannot distinguish on its own. Record
     // every AF count RPC that actually left the page, against the resolved project origin.

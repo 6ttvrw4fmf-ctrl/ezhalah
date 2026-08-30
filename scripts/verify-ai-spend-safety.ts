@@ -133,6 +133,11 @@ check('that budget is enforced on every billed send, including retries',
   /budgetedPaidCall\(\);\s*\n\s*await page\.keyboard\.press\('Enter'\)/.test(afLive));
 check('the AF live check runs a reduced journey set by default',
   /AF_LIVE_FULL[\s\S]{0,400}ALL_JOURNEYS\.slice\(0, 1\)/.test(afLive));
+// 2026-08-30 cost audit: this is a real, billed, browser-driven call — same class of mislabelling
+// the nightly live-agent check above is already pinned against — and it fires on a cron AND after
+// every production deploy, so an unlabelled run here quietly counts as "user" traffic in ai_usage.
+check('the AF live check labels its billed browser calls as CI traffic',
+  /page\.route\('\*\*\/functions\/v1\/agent'[\s\S]{0,200}'x-ezhalah-client':\s*'ci'/.test(afLive));
 
 const parity = readFileSync('e2e/ui-parity.spec.ts', 'utf8');
 const paidTests = (parity.match(/test\.skip\(!ALLOW_PAID_AI/g) ?? []).length;
@@ -140,6 +145,11 @@ check('every paid live-model e2e test is skipped unless explicitly enabled',
   paidTests >= 2, `${paidTests} gated`);
 check('paid e2e tests are OFF by default (opt-in via EZHALAH_ALLOW_PAID_AI)',
   /const ALLOW_PAID_AI = process\.env\.EZHALAH_ALLOW_PAID_AI === '1'/.test(parity));
+// Same mislabelling class as the AF live check above: this nightly job is the deliberate home of
+// paid live-model e2e tests, so an unlabelled run counts real CI spend as "user" traffic.
+check('both paid e2e tests label their billed calls as CI traffic',
+  (parity.match(/labelAgentCallsAsCI\(page\)/g) ?? []).length >= 2 &&
+  /page\.route\('\*\*\/functions\/v1\/agent'[\s\S]{0,200}'x-ezhalah-client':\s*'ci'/.test(parity));
 
 // ── 8. THE BREAKER ITSELF: config, state, gate, reset, self-test ───────────────
 const guardSql = sqlOf((f) => f.includes('ai_spend'));
