@@ -282,15 +282,55 @@ JOURNEYS['voice-control'] = async (mobile) => withPage({ mobile }, async (page, 
 /** Open a sidebar row's ⋯ menu (rename / add-to-favourites / delete).
  *  The affordance carries no testID, so it is located from the ROW's own rect — hover the row,
  *  then click just inside its trailing edge, in CSS pixel space (PART 9.2 (4)). */
+/**
+ * Open a history row's ⋯ menu.
+ *
+ * THE ⋯ IS FOUND STRUCTURALLY, NOT BY A PIXEL OFFSET. This used to click
+ * `label.x + label.width + 20` — "the sidebar panel's trailing edge sits ~20px right of the title's
+ * own box in this layout" — which is true for a row in الأخيرة and FALSE for a row in المفضلة.
+ * A starred row renders `{c.starred && <Ionicons name="star" .../>}` (Sidebar.tsx) between the
+ * label and the ⋯, so the offset lands on the gold star instead of the menu button. Measured on
+ * production 2026-08-30, desktop1440, starred row «فلل جدة»:
+ *
+ *     label box      x=47  w=175   →  offset locator clicks x=242
+ *     the gold star  x=232 w=13    →  242 is INSIDE the star
+ *     the real ⋯     x=253 w=32    →  centre x=269
+ *
+ * The cost was silent and exactly the shape PART 9.4 warns about: the menu simply never opened on
+ * a starred row, so PART 1's "Favorites: add, REMOVE" clause was untestable and no journey had
+ * ever unstarred anything. It did not fail loudly — `sidebar-row-actions` stars a row and stops,
+ * so nothing ever asked for the menu a second time and the gap read as coverage.
+ *
+ * The row host is the ancestor with exactly two element children whose SECOND child does not
+ * contain the label — child[0] is the label Pressable (which owns the chat icon, the text, and the
+ * star), child[1] is `s.dots`. That holds for both buckets regardless of how many icons sit inside
+ * the label, so it cannot rot the same way. The click is the element's own getBoundingClientRect
+ * centre in CSS pixel space (PART 9.2 (4)), never a position eyeballed off a screenshot.
+ */
+const dotsCentre = (page, title) => page.evaluate((t) => {
+  const lab = [...document.querySelectorAll('*')]
+    .find((e) => e.children.length === 0 && (e.textContent || '').trim() === t);
+  if (!lab) return null;
+  let n = lab;
+  for (let i = 0; i < 8 && n?.parentElement; i++) {
+    n = n.parentElement;
+    if (n.children.length === 2 && !n.children[1].contains(lab)
+        && getComputedStyle(n.children[1]).cursor === 'pointer') {
+      const r = n.children[1].getBoundingClientRect();
+      if (r.width > 0 && r.width < 60) return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }
+  }
+  return null;
+}, title);
+
 const openRowMenu = async (page, title) => {
   const row = page.getByText(title, { exact: true }).first();
   if (!(await row.count())) return false;
   await row.hover().catch(() => {});
   await sleep(700);
-  const box = await row.boundingBox();
-  if (!box) return false;
-  // The sidebar panel's trailing edge sits ~20px right of the title's own box in this layout.
-  await page.mouse.click(box.x + box.width + 20, box.y + box.height / 2).catch(() => {});
+  const dots = await dotsCentre(page, title);
+  if (!dots) return false;
+  await page.mouse.click(dots.x, dots.y).catch(() => {});
   await sleep(1200);
   return (await page.getByText('حذف', { exact: true }).count()) > 0;
 };
@@ -327,6 +367,39 @@ JOURNEYS['sidebar-row-actions'] = async (mobile) => withPage({ mobile, signedIn:
     defect(name, 'favourite did not survive a refresh', `[${flagged.join(',')}] → [${stillFlagged.join(',')}]`);
   } else if (flagged.length) {
     pass(name, 'favourite survived a refresh');
+  }
+
+  // ── UNFAVOURITE — the other half of PART 1's "Favorites: add, remove" ─────────────────────────
+  // Never covered before 2026-08-30: openRowMenu's old pixel offset landed on the gold star of a
+  // STARRED row, so the menu could not be reopened once a row had been favourited and the remove
+  // path was unreachable. A one-way favourite is a trap — the row is pinned to المفضلة forever —
+  // so both directions are asserted here, and the removal is re-checked after a reload because
+  // "unstarred in memory, still starred on disk" comes back on the next visit.
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'sidebar closed before unfavourite'); return; }
+  if (!(await openRowMenu(page, 'فلل جدة'))) { skip(name, 'row ⋯ menu would not open on a STARRED row'); return; }
+  if (!(await clickText(page, 'أزل من المفضلة'))) {
+    defect(name, 'a starred row offers no way to unfavourite it', `«أزل من المفضلة» absent from the ⋯ menu: ${clickReason()}`);
+    return;
+  }
+  await sleep(1800);
+  const unfav = await storedHistory(page);
+  const stillStarred = (unfav || []).filter((x) => x.starred || x.favorite || x.pinned).map((x) => x.id);
+  if (stillStarred.length) {
+    defect(name, 'unfavourite did not clear the star', `still flagged [${stillStarred.join(',')}]`);
+  } else if ((unfav || []).length !== 3) {
+    defect(name, 'unfavourite changed the chat set', `ids now [${ids(unfav)}], expected 3 chats`);
+  } else {
+    pass(name, 'unfavourite cleared the star and kept every chat');
+  }
+
+  await page.reload({ waitUntil: 'load' });
+  await settle(page);
+  const unfavReload = await storedHistory(page);
+  const resurrected = (unfavReload || []).filter((x) => x.starred || x.favorite || x.pinned).map((x) => x.id);
+  if (resurrected.length) {
+    defect(name, 'the favourite came back after a refresh', `[${resurrected.join(',')}] starred again — unfavourite did not reach disk`);
+  } else {
+    pass(name, 'unfavourite survived a refresh');
   }
 
   // ── delete ────────────────────────────────────────────────────────────────────────────────────
