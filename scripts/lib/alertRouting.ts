@@ -68,6 +68,14 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // Explicitly routed rather than left to the #2 fallback, so a cost alert arrives with an owner.
   { routine: 7, test: /^ai_cost_health$/ },
   { routine: 7, test: /^search_index_diverges_from_sync_source$/ },
+  // p0_delivery_sla — the 5-minute P0 delivery SLO and its dedicated fast lane (2026-08-30). This
+  // routine owns that mechanism end to end, yet the kind matched no rule and fell through to the
+  // #2 fallback: the alert saying "a P0 did not reach a human in time" was itself being filed to
+  // the triage router rather than to the routine that can fix the delivery path. That is precisely
+  // the "#2 inheriting the whole backlog by default" failure this file's own header warns about.
+  // Deliberately a prefix, so limb 3's `p0_delivery_sla_late` and any future p0_delivery_* key
+  // arrive with the same owner instead of silently re-opening this hole.
+  { routine: 7, test: /^p0_delivery/ },
 
   // 5 🎯 Advanced Filter + Trending — before #3/#4, whose patterns overlap AF field names.
   { routine: 5, test: /^(af_|monthly_af|trending_)/ },

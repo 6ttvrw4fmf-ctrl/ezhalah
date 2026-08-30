@@ -177,6 +177,65 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   `:20`/`:50` before 2026-08-10). **`scripts/verify-p0-delivery-sla.ts` now asserts the per-minute
   job is GONE** — do not re-create it.
 
+  **DECOUPLED ONTO ITS OWN DEDICATED SLOT (OWNER DECISION, 2026-08-30). This reverses the
+  "chaining is the only option" half of the paragraph above, and the reversal must not be
+  re-reversed.** Chaining made SWEEP DURATION a term in P0 delivery latency, and that is not a
+  theoretical cost: P0 **1166** was created 05:29:00 and its issue filed 05:35:11 — **371 s, a 71 s
+  breach** — because the 05:29 sweep ran 356.8 s and `created_at` is transaction start. The owner's
+  instruction: decouple the lane, **keep the 5-minute SLO exactly as it is**, give the lane its own
+  cron slot so long-running detectors cannot consume the budget before dispatch starts, do **not**
+  widen the 300 s SLO to make the metric green, and **preserve the full sweep**.
+
+  **The "only two slots are free" premise was simply wrong**, and that error is why this went
+  unfixed for two days. It read "free" as "zero jobs on that minute". `mon_detect_cron_minute_collision()`
+  raises only on `count(*) >= 3 or (minute = 0 and count(*) > 1)` — so **two** hourly jobs per minute
+  are permitted, only minute 0 is reserved, and it counts **only** jobs whose hour field is `*`
+  (daily jobs like `30 2 * * *` are not counted at all). Measured on the live roster: **49 of 60
+  minutes sit at ≤ 1** and can accept one more. The design space was never two slots; it was 49.
+
+  So `mon-p0-fast-lane` (jobid 86) now runs `mon_dispatch_p0_fast()` on
+  `1,4,7,10,13,15,18,21,24,26,28,31,34,35,38,40,42,44,46,48,51,54,57,58 * * * *` — **24 slots, worst
+  gap 3 minutes including the wrap past the top of the hour**, avoiding minute 0, the ten minutes
+  already at 2, and the sweep's own `:29`/`:59`, bounding the DB-side wait at 180 s — 60 % of the
+  SLO, with sweep duration no longer a term at all. It is **not** per-minute polling: measured
+  cost is **6 ms per run** (it early-exits on one count when no P0 is pending), and
+  `mon_detect_cron_minute_collision()` returns 0 with it scheduled. The sweep is untouched and still
+  calls the lane first and last — **defence-in-depth, not the SLO's load-bearing path**; the leading
+  call remains what survives a sweep aborting on `statement_timeout`.
+
+  `scripts/verify-p0-delivery-sla.ts` pins all of it and is mutation-proven 6/6 on this change:
+  it parses the lane's real minute list, computes the **worst gap including the wrap**, and fails if
+  `gap × 60 + 60 s` no longer fits the SLO — so the "delay" mutation (slowing the cadence) goes red,
+  including the subtle one where a single minute is removed and only the wrap-around gap breaks.
+  **Fix the SCHEDULE, never the SLO.**
+
+  **THE DECOUPLING IS NECESSARY BUT NOT SUFFICIENT — GitHub Actions latency is now the dominant
+  term, and it is not ours to fix (measured 2026-08-30).** Proving the lane end to end measured the
+  destination properly for the first time. The honest figure is `dispatched_at − first_tried` (POST
+  accepted → GitHub issue actually exists), not `settled_at − first_tried` (which is only when
+  `pg_net` recorded the HTTP response to the *trigger* and says nothing about an issue). Across every
+  P0 ever delivered:
+
+  | alert | raise → trigger | **Actions latency** | total |
+  |---|---|---|---|
+  | 1097 | 0 s | **203 s** | 203 s |
+  | 1098 | 0 s | **204 s** | 204 s |
+  | 1172 (synthetic, this run) | 45 s | **204 s** | 249 s |
+  | 1166 | 0 s | **371 s** | 371 s |
+
+  So the GitHub path costs **203–371 s on its own against a 300 s SLO**. The synthetic P0 passed at
+  **249 s** only because Actions was at its fast end that minute; worst case with this lane is
+  180 s + 371 s = **551 s**, a breach. **Do not respond by widening the SLO** — the owner forbade
+  exactly that. The only path that can meet 300 s reliably is a direct webhook channel
+  (`ops_alert_channel.kind='webhook'`, `pg_net` POST, 2xx in seconds), and **the destination is an
+  OWNER input**: `mon_detect_p0_delivery_sla()` LIMB 1 already raises while `alert-sink` (a proof
+  fixture reaching nobody) is the only non-GitHub channel. Until a real destination exists, LIMB 3
+  is what tells the truth, because it measures actual `dispatched_at` rather than assuming.
+
+  Note the migration `20260830134700`'s own header still carries the superseded ~15-20 s filing
+  figure. It is left byte-exact deliberately — it is the record of what production RAN, and drift
+  condition #5 compares the mirror against it. This section supersedes it.
+
   **What that chaining COSTS, and what watches it (2026-08-29).** `alert_event.created_at` defaults
   to `now()` = **transaction start**, so a P0's 5-minute clock starts when the *sweep* starts and the
   sweep's whole runtime is spent before dispatch begins — sweep duration is now the dominant term in
@@ -193,6 +252,21 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   `alert_event.dispatched_at` has exactly one writer (`alert-dispatch.yml`) and
   `mon_detect_alert_delivery()` BRANCH 3 raises P1 if any database function stamps it. Reading that
   column is fine; stamping it is not.
+
+  **LIMB 3 — DELIVERED, BUT LATE (added 2026-08-30). The SLO was unmeasurable before it.** Limbs 1
+  and 2 of `mon_detect_p0_delivery_sla()` both match only while `dispatched_at is null`, so a breach
+  became invisible the instant `alert-dispatch.yml` filed the issue: **a path that delivered every
+  single P0 late would have read permanently GREEN.** The SLO is defined on delivery *latency*;
+  those limbs measured only *pending* latency. Measured live the day this shipped: P0 alert **1166**
+  (`deleted_but_source_live:73`) was created 05:29:00 and dispatched 05:35:11 — **371 s, a 71 s
+  breach — and nothing raised, because nothing could.** Limb 3 reads the latency that actually
+  happened (`dispatched_at - created_at`, the one-writer clock, never a `github_workflow` 204
+  receipt) over a rolling 24 h window, and raises **P1**: the alert *did* reach a human, so this is
+  not limb 2's blackout class — it says the *path* is too slow. It is pinned by
+  `scripts/verify-p0-delivery-sla.ts`, including the property a refactor is most likely to destroy
+  (limb 3 must match `dispatched_at is not null`; reusing limbs 1-2's `is null` makes it unreachable
+  code that still looks present in review). **Never widen `c_sla_minutes` or shorten the window to
+  quiet it.**
 
   **The destination remains an OWNER input.** `ops_alert_channel` decides who is actually woken;
   the `alert-sink` edge function is a proof fixture with no side effects and reaches no human, so
