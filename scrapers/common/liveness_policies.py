@@ -82,7 +82,11 @@ POLICIES: dict[str, _P] = {
         "shell to GitHub Actions egress for ~88% of ids, matching the 78-83% measured 2026-08-26. "
         "The contract behaved exactly as designed (0 false deaths where a naive 200⇒alive rule "
         "would have manufactured 263), but from CI this platform cannot reach useful coverage. "
-        "It needs non-CI egress to verify; see docs/ops/LISTING_LIVENESS.md §5.1.",
+        "The Saudi residential proxy was then measured under a bounded run (2026-08-30, dry, 300 "
+        "probes, same cohort): alive rose 37 -> 71 (12.3% -> 23.7%, clearing the 20% trust floor) "
+        "but dead stayed 0. Across 600 probes on both egress paths dealapp has produced ZERO death "
+        "verdicts, so the proxy buys coverage, not discrimination. NOT attached to the schedule; "
+        "see docs/ops/LISTING_LIVENESS.md §5.1-5.2.",
     ),
     # ── Tier 3: known gaps — recorded honestly so monitoring can see them ───────────────────────
     **{
