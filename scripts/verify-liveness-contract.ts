@@ -7,27 +7,32 @@
 // WHY A BARRIER AND NOT JUST TESTS. Every failure this contract exists to prevent was silent and
 // was found by hand, months late:
 //   · aqar reported soft-closed ads healthy for weeks (13,139 retired in one day once fixed);
-//   · 26 of 29 platforms inferred liveness purely from crawl presence, with nobody having decided
-//     that — the question was never asked at onboarding;
+//   · 26 of 29 platforms inferred liveness purely from crawl presence — the question was never
+//     asked at onboarding, so nobody had decided it;
 //   · gathern's 19.5-day coverage cycle left ~1,260 confirmed-dead listings searchable;
 //   · dealapp serves an identical 200 shell for a real id AND a bogus one.
-// None of those tripped a test, because no test asserted the RULE — only the implementations. This
-// file asserts the rule, and mutation-proves that each protection actually fires when removed.
+// None of those tripped a test, because the tests asserted implementations. This asserts the RULE.
 //
-// It does two things npm test cannot do by running pytest alone:
-//   1. MUTATION PROOF — it edits a copy of liveness_contract.py to break each protection in turn
-//      and requires the suite to FAIL. A protection whose removal keeps the suite green is
-//      decoration, and this reports it as such.
-//   2. REGISTRY COMPLETENESS — every non-retired scraper directory must have a liveness policy.
-//      A new platform cannot reach production with its liveness question unanswered.
-import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+// SPLIT BY CAPABILITY, SO NEITHER HALF IS WEAKENED. The mutation proof needs to run pytest against
+// a deliberately broken contract; `npm test` has no Python toolchain, so hosting it here could
+// only fail closed (permanently red) or skip (vacuous — worse than nothing). It therefore lives in
+// scrapers/common/tests/test_liveness_contract_mutations.py, which runs in common-location-tests.yml
+// where pytest is installed. THIS file keeps the pure-JS half and — critically — asserts that the
+// mutation proof still exists and still covers every protection, so it cannot be quietly deleted
+// to make something green.
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
-const CONTRACT = join(ROOT, 'scrapers', 'common', 'liveness_contract.py');
-const TESTS = 'scrapers/common/tests/test_liveness_contract.py';
+const contract = readFileSync(join(ROOT, 'scrapers', 'common', 'liveness_contract.py'), 'utf8');
+const policiesSrc = readFileSync(join(ROOT, 'scrapers', 'common', 'liveness_policies.py'), 'utf8');
+const mutationProof = (() => {
+  try {
+    return readFileSync(join(ROOT, 'scrapers', 'common', 'tests', 'test_liveness_contract_mutations.py'), 'utf8');
+  } catch {
+    return '';
+  }
+})();
 
 let failures = 0;
 const check = (name: string, cond: boolean, detail = '') => {
@@ -37,110 +42,26 @@ const check = (name: string, cond: boolean, detail = '') => {
 
 console.log('verify-liveness-contract: active=true must mean verified-alive, not un-disproven.');
 
-// ── Part 1: the suite passes as shipped ─────────────────────────────────────────────────────────
-function runSuite(): boolean {
-  try {
-    execFileSync('python3', ['-m', 'pytest', TESTS, '-q'], { cwd: ROOT, stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
-}
+// ── Part 1: the contract's load-bearing rules are still present in the source ───────────────────
+// Static assertions only. They cannot replace the mutation proof (they check presence, not
+// behaviour) — which is exactly why Part 3 requires that proof to exist and stay complete.
+const RULES: Array<[string, RegExp]> = [
+  ['a network failure maps to UNKNOWN', /if status is None:\s*\n\s*return UNKNOWN/],
+  ['blocked/throttled statuses map to UNKNOWN', /if status in _BLOCKED_OR_THROTTLED:\s*\n\s*return UNKNOWN/],
+  ['5xx maps to UNKNOWN', /if 500 <= status <= 599:\s*\n\s*return UNKNOWN/],
+  ['403 and 429 are in the blocked set', /_BLOCKED_OR_THROTTLED[^\n]*=[\s\S]{0,120}?403[\s\S]{0,40}?429/],
+  ['an unrecognised 200 is UNKNOWN, not ALIVE', /if alive_marker is not None and not alive_marker\(body\):\s*\n\s*return UNKNOWN/],
+  ['absence evidence is refused as a death', /if evidence is EvidenceKind\.ABSENCE:/],
+  ['UNKNOWN neither strikes nor deactivates', /if verdict == UNKNOWN:\s*\n\s*return Decision\(action="none"/],
+  ['deactivation is gated on the grace window', /if new_strikes >= policy\.grace:/],
+  ['ALIVE resets strikes and records verification', /action="reset"[\s\S]{0,80}?verified_alive=True/],
+  ['a policy cannot opt out of the absence rule', /if not self\.absence_is_candidate_only:\s*\n\s*raise ValueError/],
+  ['grace below 1 is rejected', /if self\.grace < 1:\s*\n\s*raise ValueError/],
+  ['never-verified counts as stale', /if hours_since_verified is None:\s*\n\s*return True/],
+];
+for (const [name, re] of RULES) check(name, re.test(contract));
 
-const pythonAvailable = (() => {
-  try {
-    execFileSync('python3', ['-c', 'import pytest'], { cwd: ROOT, stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
-if (!pythonAvailable) {
-  // Fail CLOSED. A missing interpreter must never be reported as "the contract is fine".
-  check('python3 + pytest are available to prove the contract', false,
-    'cannot verify the liveness contract without them — refusing to pass vacuously');
-} else {
-  check('the contract suite passes as shipped', runSuite());
-
-  // ── Part 2: mutation proof, one per owner-named protection ───────────────────────────────────
-  const original = readFileSync(CONTRACT, 'utf8');
-  const backup = join(mkdtempSync(join(tmpdir(), 'liveness-')), 'liveness_contract.py');
-  copyFileSync(CONTRACT, backup);
-
-  const MUTATIONS: Array<{ name: string; from: string; to: string }> = [
-    {
-      name: 'a failed request (status None) can deactivate',
-      from: '    if status is None:\n        return UNKNOWN',
-      to: '    if status is None:\n        return DEAD',
-    },
-    {
-      name: '403/429 counts as death',
-      from: '    if status in _BLOCKED_OR_THROTTLED:\n        return UNKNOWN',
-      to: '    if status in _BLOCKED_OR_THROTTLED:\n        return DEAD',
-    },
-    {
-      name: '5xx counts as death',
-      from: '    if 500 <= status <= 599:\n        return UNKNOWN',
-      to: '    if 500 <= status <= 599:\n        return DEAD',
-    },
-    {
-      name: 'crawler/sitemap absence alone can deactivate',
-      from: '    if evidence is EvidenceKind.ABSENCE:',
-      to: '    if False:',
-    },
-    {
-      name: 'UNKNOWN accumulates a strike',
-      from: '    if verdict == UNKNOWN:\n        return Decision(action="none", reason="unknown_response_never_counts_as_death",\n                        strikes=strikes)',
-      to: '    if verdict == UNKNOWN:\n        return Decision(action="strike", reason="x", strikes=strikes + 1)',
-    },
-    {
-      name: 'an unrecognised 200 is treated as positive verification',
-      from: '        if alive_marker is not None and not alive_marker(body):\n            return UNKNOWN',
-      to: '        if False:\n            return UNKNOWN',
-    },
-    {
-      name: 'the grace window is bypassed (one reading retires a listing)',
-      from: '    if new_strikes >= policy.grace:',
-      to: '    if True:',
-    },
-    {
-      name: 'an ALIVE response stops resetting strikes / recording verification',
-      from: '        return Decision(action="reset", reason="source_confirmed_alive", strikes=0,\n                        verified_alive=True)',
-      to: '        return Decision(action="none", reason="source_confirmed_alive", strikes=strikes)',
-    },
-    {
-      name: 'a policy may opt out of the absence rule',
-      from: '        if not self.absence_is_candidate_only:',
-      to: '        if False:',
-    },
-    {
-      name: 'never-verified rows stop counting as stale',
-      from: '    if hours_since_verified is None:\n        return True',
-      to: '    if hours_since_verified is None:\n        return False',
-    },
-  ];
-
-  let caught = 0;
-  for (const m of MUTATIONS) {
-    if (!original.includes(m.from)) {
-      check(`mutation target present: ${m.name}`, false,
-        'the contract no longer contains this code — the barrier has drifted from the module');
-      continue;
-    }
-    writeFileSync(CONTRACT, original.replace(m.from, m.to));
-    const survived = runSuite();          // suite still green ⇒ the protection is decoration
-    copyFileSync(backup, CONTRACT);       // always restore
-    check(`mutation caught: ${m.name}`, !survived,
-      survived ? 'SURVIVED — no test fails when this protection is removed' : 'suite fails as required');
-    if (!survived) caught++;
-  }
-  console.log(`  ${caught}/${MUTATIONS.length} protections are mutation-proven`);
-  check('the contract is byte-identical after mutation testing', readFileSync(CONTRACT, 'utf8') === original);
-}
-
-// ── Part 3: registry completeness — no production platform without a declared strategy ─────────
-const policiesSrc = readFileSync(join(ROOT, 'scrapers', 'common', 'liveness_policies.py'), 'utf8');
+// ── Part 2: registry completeness — no production platform without a declared strategy ─────────
 const declared = new Set([...policiesSrc.matchAll(/"([a-z0-9_]+)":\s*_P\(/g)].map((m) => m[1]));
 for (const m of policiesSrc.matchAll(/for p in \(([\s\S]*?)\)\n/g)) {
   for (const q of m[1].matchAll(/"([a-z0-9_]+)"/g)) declared.add(q[1]);
@@ -149,7 +70,6 @@ const exempt = new Set(
   [...(/NOT_PRODUCTION_SEARCHABLE = frozenset\(\{([\s\S]*?)\}\)/.exec(policiesSrc)?.[1] ?? '')
     .matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]),
 );
-
 const scraperDirs = readdirSync(join(ROOT, 'scrapers'), { withFileTypes: true })
   .filter((d) => d.isDirectory() && !d.name.startsWith('__') && d.name !== 'tests')
   .map((d) => d.name);
@@ -157,13 +77,42 @@ const scraperDirs = readdirSync(join(ROOT, 'scrapers'), { withFileTypes: true })
 const missing = scraperDirs.filter((p) => !declared.has(p) && !exempt.has(p));
 check('every production-searchable platform has a registered liveness policy', missing.length === 0,
   missing.length
-    ? `NO POLICY: ${missing.join(', ')} — register in scrapers/common/liveness_policies.py before ` +
-      'making the platform production-searchable, or add it to NOT_PRODUCTION_SEARCHABLE'
+    ? `NO POLICY: ${missing.join(', ')} — register it in scrapers/common/liveness_policies.py before ` +
+      'the platform becomes production-searchable, or add it to NOT_PRODUCTION_SEARCHABLE'
     : `${declared.size} platforms declared, ${exempt.size} exempt`);
 
-// A platform must not be able to slip through by being declared AND exempt at once.
 const both = [...declared].filter((p) => exempt.has(p));
 check('no platform is both declared and exempt', both.length === 0, both.join(', '));
+check('policy_for() raises instead of returning a silent default',
+  /raise KeyError\(/.test(policiesSrc) && /has no liveness policy/.test(policiesSrc));
+
+// ── Part 3: the mutation proof must exist and still cover every protection ──────────────────────
+// This is what stops the split from becoming an escape hatch: delete or hollow out the proof and
+// this barrier — which DOES run in npm test — goes red.
+check('the mutation proof file exists', mutationProof.length > 0,
+  mutationProof ? '' : 'scrapers/common/tests/test_liveness_contract_mutations.py is missing');
+
+const REQUIRED_MUTATIONS = [
+  'failed_request_can_deactivate',
+  'blocked_or_throttled_counts_as_death',
+  '5xx_counts_as_death',
+  'absence_alone_can_deactivate',
+  'unknown_accumulates_a_strike',
+  'unrecognised_200_is_positive_verification',
+  'grace_window_bypassed',
+  'alive_stops_resetting_strikes',
+  'policy_may_opt_out_of_absence_rule',
+  'never_verified_stops_counting_as_stale',
+];
+if (mutationProof) {
+  const absent = REQUIRED_MUTATIONS.filter((m) => !mutationProof.includes(m));
+  check('the mutation proof covers every named protection', absent.length === 0,
+    absent.length ? `NOT MUTATION-PROVEN: ${absent.join(', ')}` : `${REQUIRED_MUTATIONS.length} protections`);
+  check('the mutation proof actually asserts survival is a failure',
+    /MUTATION SURVIVED/.test(mutationProof) && /assert not survived/.test(mutationProof));
+  check('the mutation proof restores the contract in a finally block',
+    /finally:\s*\n\s*shutil\.copyfile/.test(mutationProof));
+}
 
 console.log(
   failures === 0
