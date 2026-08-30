@@ -86,6 +86,31 @@ for (const consumer of [['recovery job', recover], ['inactivation monitor', grad
     `references ${direct.join(', ')} directly — that is exactly how the second ledger got missed`);
 }
 
+// ── The third consumer, fixed a migration later ────────────────────────────────────────────────
+// mon_detect_dealapp_deactivation_on_unreliable_fetch() counted every dealapp deactivation in 24h
+// and called them unsafe removals while dealapp's fetch is degraded. The only ones in the window
+// were the 3 res/com retractions — adjudicated, evidenced, and nothing to do with a bad fetch. It
+// raised a P1 that was pure false positive. Same shape, one migration later, which is why the rule
+// is "read the view", not "remember the ledgers".
+const DEALAPP_MIGRATION = '20260830193622';
+const dealappFile = readdirSync(MIGRATIONS).find((f) => f.startsWith(DEALAPP_MIGRATION));
+check('the dealapp detector fix is mirrored in the repo', Boolean(dealappFile),
+  `no file starting ${DEALAPP_MIGRATION}`);
+if (dealappFile) {
+  const dsql = readFileSync(join(MIGRATIONS, dealappFile), 'utf8');
+  check('the dealapp unsafe-deactivation detector excludes adjudicated rows',
+    (dsql.match(new RegExp(`not exists \\(select 1 from public\\.${VIEW}`, 'g')) ?? []).length >= 2,
+    'both the residential and commercial arms must exclude adjudicated rows, or the detector still ' +
+    'reports a recorded retraction as an unexplained removal');
+  const ddirect = LEDGERS.filter((l) => codeOnly(dsql).includes(l));
+  check('the dealapp detector does not reach past the view to a single ledger', ddirect.length === 0,
+    `references ${ddirect.join(', ')} directly`);
+  check('its floor and window are unchanged — this was a false-positive fix, not a loosening',
+    /c_shell_rate_floor numeric := 0\.30;/.test(dsql) && /interval '26 hours'/.test(dsql),
+    'excluding adjudicated rows must not become an excuse to raise the threshold that decides ' +
+    'whether dealapp fetches are trustworthy at all');
+}
+
 // ── The barrier that proves the exemption held ─────────────────────────────────────────────────
 check('a detector checks no adjudicated row came back active',
   /create or replace function public\.mon_detect_adjudicated_reactivation/.test(sql),
