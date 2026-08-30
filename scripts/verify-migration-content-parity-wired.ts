@@ -11,7 +11,7 @@
 //
 // Run: node --experimental-strip-types scripts/verify-migration-content-parity-wired.ts
 import { join } from 'node:path';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { npmTestRuns } from './lib/testRegistry.ts';
 import { findContentDivergence, normalizeMigrationSql, STRICT_ERA_BASELINE } from './lib/migrationDrift.ts';
 import { digestOf, readBaseline, BASELINE_FILE } from './verify-migration-content-parity.ts';
@@ -21,6 +21,7 @@ const LIVE_CHECK = 'scripts/verify-migration-content-parity.ts';
 const WORKFLOW = '.github/workflows/migration-drift-guard.yml';
 const EXCLUSIONS = 'scripts/test-exclusions.txt';
 const MIGRATION = 'supabase/migrations/20260830022719_migration_content_parity_condition_five_and_heartbeat.sql';
+const MIGRATIONS = join(ROOT, 'supabase', 'migrations');
 
 // THE RATCHET. 75 files already disagreed with production when this barrier was created; they are
 // enumerated in the baseline as known debt. The baseline is a FLOOR: reconciling a file means
@@ -82,14 +83,45 @@ check(
 );
 
 // ── 4. The digest must be computed the same way on both sides ─────────────────────────────────
-// The server does left(md5(array_to_string(statements, E'\n')), 10); digestOf must be md5 of the
-// trailing-whitespace-stripped text, truncated to 10. If these ever diverge, EVERY file reads as
-// divergent and the check gets disabled as noise — so pin the exact contract with a known vector.
+// If these ever diverge, files read as divergent and the check gets disabled as noise — so pin the
+// contract with known vectors.
+//
+// THIS SECTION USED TO CHECK ONLY THE CLIENT, AND THAT IS EXACTLY HOW THE ASYMMETRY SHIPPED.
+// Until 2026-08-30 the server hashed the applied text RAW — left(md5(array_to_string(statements,
+// E'\n')), 10) — while digestOf() hashed the repo file AFTER stripping trailing whitespace. Every
+// assertion below passed, because every assertion below is about the client. So any migration
+// applied WITH a trailing newline reported as diverged forever on a byte-perfect mirror: measured
+// on 20260830170548, whose file matched the applied text line for line (117 vs 117, zero differing
+// lines) and still failed. A one-sided contract check is not a contract check.
 check(digestOf('select 1;') === digestOf('select 1;\n\n  '), 'digestOf ignores trailing whitespace', 'digestOf is sensitive to trailing whitespace — a faithful mirror would read as diverged');
 check(digestOf('select 1;') !== digestOf('select 2;'), 'digestOf distinguishes different SQL', 'digestOf collides on different SQL');
 check(/^[0-9a-f]{10}$/.test(digestOf('select 1;')), 'digestOf returns the server-matching 10-hex-char prefix', 'digestOf does not return a 10-hex-char md5 prefix — it cannot match the server');
 check(normalizeMigrationSql('a\n\n') === 'a', 'normalizeMigrationSql strips only trailing whitespace', 'normalizeMigrationSql no longer strips exactly trailing whitespace');
 check(normalizeMigrationSql('  a  b') === '  a  b', 'normalizeMigrationSql leaves interior and leading text alone', 'normalizeMigrationSql is mutating more than trailing whitespace');
+
+// THE OTHER HALF OF THE CONTRACT: the SERVER must normalise too. Read the newest migration that
+// defines ops_migration_content_digests() and assert its md5 is taken over the statements with
+// trailing whitespace stripped, not over the raw text. Comments are removed first so the prose
+// above cannot satisfy the check — the trap this repo has hit twice before.
+const digestOwning = readdirSync(MIGRATIONS)
+  .filter((f) => f.endsWith('.sql'))
+  .map((f) => ({ f, sql: readFileSync(join(MIGRATIONS, f), 'utf8') }))
+  .filter((x) => /function\s+public\.ops_migration_content_digests\b/i.test(x.sql))
+  .sort((a, b) => a.f.localeCompare(b.f));
+const digestSql = (digestOwning[digestOwning.length - 1]?.sql ?? '')
+  .split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+check(
+  digestOwning.length >= 1,
+  'a migration defines ops_migration_content_digests()',
+  'the server side of the digest has no migration at all',
+);
+check(
+  /md5\(\s*regexp_replace\(\s*array_to_string\(statements[\s\S]{0,40}?'\\s\+\$'\s*,\s*''\s*\)\s*\)/.test(digestSql),
+  'the SERVER digest strips trailing whitespace too (symmetry with digestOf)',
+  'ops_migration_content_digests() hashes the applied text RAW while digestOf() normalises the repo '
+    + 'file. Every migration applied with a trailing newline then reads as diverged forever, on a '
+    + 'faithful mirror. Normalise both sides or neither — never one.',
+);
 
 // ── 5. The pure logic, and its MUTATION PROOF ─────────────────────────────────────────────────
 const V = '20260901000000'; // strict era
