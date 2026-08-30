@@ -1255,14 +1255,28 @@ Deno.serve(async (req: Request) => {
         replyOut = locale === "en" ? `${replyOut} (${detailStr} m²)` : `${replyOut} (${detailStr} م²)`;
       }
 
+      // Sanitized once, reused by both the gate below and the query.askAbout field — a single
+      // definition of "does ask_about actually carry anything" instead of two copies drifting.
+      const askAboutList = Array.isArray(out.ask_about)
+        ? out.ask_about.filter((a: unknown) => typeof a === "string" && a.trim()).map((a: string) => a.trim().toLowerCase())
+        : [];
+
       // DO NOT SEARCH TOO EARLY (owner ruling 2026-08-29). A "listings" turn that carries NOTHING
-      // searchable — no location, no type, no budget, no detail, no amenities, no AF intent — is not
-      // a search, it is a shrug rendered as one. Ask instead. A type-only or city-only query is still
-      // a useful search and is deliberately allowed through; only the genuinely empty one is blocked.
+      // searchable — no location, no type, no budget, no detail, no amenities, no AF intent, and no
+      // real ask_about signal — is not a search, it is a shrug rendered as one. Ask instead. A
+      // type-only or city-only query is still a useful search and is deliberately allowed through;
+      // only the genuinely empty one is blocked.
+      //
+      // ask_about counts too (owner ruling 2026-08-30): it is real signal ("كبير" → ask_about=
+      // ["size"]) that just doesn't map to a hard filter field. Once the model's own question budget
+      // is spent, a kind="listings" decision resting on that signal must not be silently downgraded
+      // back to a question — see ai_usage id 9575 (raw kind="listings", final response downgraded to
+      // "message" with an empty query) reproduced live against production 2026-08-30.
       const nothingToSearchOn =
         !location && !(typeof out.type === "string" && out.type) && !price &&
         !detailStr && !(Array.isArray(out.amenities) && out.amenities.length) &&
-        !(out.af && typeof out.af === "object" && Object.keys(out.af).length);
+        !(out.af && typeof out.af === "object" && Object.keys(out.af).length) &&
+        !askAboutList.length;
       if (nothingToSearchOn) {
         return json({ kind: "message", reply: oneQuestionOnly(groundReply(lead(out.reply), locale)), query: understoodState() });
       }
@@ -1310,9 +1324,7 @@ Deno.serve(async (req: Request) => {
           // which the Advanced Filter itself uses. A copy of that table in here is precisely how the
           // two surfaces drift. The model PROPOSES; the client DECIDES.
           af: (out.af && typeof out.af === "object" && !Array.isArray(out.af)) ? out.af : {},
-          askAbout: Array.isArray(out.ask_about)
-            ? out.ask_about.filter((a: unknown) => typeof a === "string" && a).map((a: string) => a.trim().toLowerCase())
-            : [],
+          askAbout: askAboutList,
           amenities: Array.isArray(out.amenities)
             ? [...new Set(out.amenities
                 .filter((a: unknown) => typeof a === "string")
