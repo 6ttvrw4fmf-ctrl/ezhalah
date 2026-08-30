@@ -163,6 +163,14 @@ export function applyAfIntents(
   for (const id of GENERIC_INTENT_IDS) {
     const raw = proposed?.[id];
     if (raw === undefined || raw === null || raw === '' || raw === 'none') continue;
+    // AN EMPTY ARRAY IS NOT A STATED INTENT. The model's contract says to omit a key the user did
+    // not mention, but it does not always: a live production turn for «فيها مصعد وموقف» came back
+    // carrying every unstated AF key as "" or [] (direction: []). The empty STRING was already
+    // skipped above; an empty ARRAY fell through to the certification check and was pushed onto
+    // `rejected`, which is surfaced to the user — so the reply could apologise for failing to apply
+    // a direction the user never asked for. Nothing was ever wrongly FILTERED (no value survives
+    // canonicalize), but a false "couldn't apply that" is still a lie about what we did.
+    if (Array.isArray(raw) && raw.length === 0) continue;
     const intent = AF_INTENTS[id];
     const values = Array.isArray(raw) ? raw : [raw];
     // Certification FIRST: an uncertified cohort must not even canonicalize, so a rejection can never
