@@ -29,7 +29,6 @@ jobs:
       - name: Run UI parity tests
         env:
           BASE_URL: ${{ github.event.inputs.base_url || 'https://ezhalah-app.vercel.app' }}
-        env:
           # This nightly job is the DELIBERATE home of the bounded paid live-model tests.
           # Every other runner leaves them skipped, so paid AI is never incidental.
           EZHALAH_ALLOW_PAID_AI: "1"
