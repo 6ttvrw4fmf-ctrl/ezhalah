@@ -1,0 +1,70 @@
+# Dealapp liveness — the first verification this platform has ever had.
+#
+# Dealapp shipped with no liveness mechanism at all: 15,899 active listings, 65% unseen by any
+# crawl in 48h, and nothing that could tell a live ad from a dead one. Its bare listing URL cannot
+# discriminate — measured 2026-08-30, a REAL id and a BOGUS id both return an identical ~131KB
+# Angular shell. So this job pairs two signals:
+#   CANDIDATES  dealapp's own sitemap (sitemap-5..16, ~56.5k ids, refreshed daily) chooses which
+#               rows to re-probe first. That is ABSENCE, and absence never deactivates anything.
+#   VERDICT     a direct per-listing fetch, classified by scrapers/dealapp/liveness.py, where a
+#               schema-less 200 is UNKNOWN — never DEAD.
+#
+# SAFETY, inherited from scrapers/common/liveness_contract.py and proven by 38 tests:
+#   · timeout / 401 / 403 / 429 / 5xx / unresolved 3xx / unreadable 200 → UNKNOWN: no strike, no
+#     deactivation, no verification stamp.
+#   · deactivation needs a DIRECT dead verdict on 3 consecutive runs (grace), never one reading.
+#   · environment_is_trustworthy() blocks ALL deactivation in a run whose verified rate collapses —
+#     if dealapp is serving us shells, that run's 404s are degraded too and none of its deaths are
+#     believable.
+#
+# FIRST RUN MUST BE A DRY RUN. The scheduled job passes --apply; a manual dispatch defaults to
+# dry-run so the report can be read before anything is written. Do not schedule this on until a
+# dry-run report has been reviewed.
+name: Dealapp liveness
+
+on:
+  schedule:
+    - cron: "40 2 * * *"   # daily 02:40 UTC — after the dealapp crawl, before the morning audits
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Write strikes/verifications/deactivations. FALSE = dry-run report only."
+        type: boolean
+        default: false
+      limit:
+        description: "Max candidates to probe this run"
+        required: false
+        default: "600"
+
+concurrency:
+  group: dealapp-liveness
+  cancel-in-progress: false   # never interrupt a sweep mid-run — let it finish and report
+
+jobs:
+  liveness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Run dealapp liveness sweep
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          # A scheduled run applies; a manual dispatch writes only when apply=true is passed
+          # explicitly. `github.event_name == 'schedule'` is what makes the cron path effective —
+          # a dispatch with no inputs must never silently become a writing run.
+          APPLY=""
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.apply }}" = "true" ]; then
+            APPLY="--apply"
+          fi
+          exec python -m scrapers.dealapp.liveness_run \
+            --limit "${{ inputs.limit || '600' }}" \
+            $APPLY
