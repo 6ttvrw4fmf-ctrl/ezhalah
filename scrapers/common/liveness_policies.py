@@ -76,7 +76,13 @@ POLICIES: dict[str, _P] = {
         "The bare listing URL cannot discriminate: a real id and a bogus id both return an "
         "identical ~131KB SPA shell, so a naive 200⇒alive rule manufactures verification out of "
         "nothing — hence the alive_marker requirement. The source publishes its live set across "
-        "sitemap-5..16 (~56.5k ids, refreshed daily).",
+        "sitemap-5..16 (~56.5k ids, refreshed daily). "
+        "EGRESS-LIMITED: the first production run (2026-08-30, dry, 300 probes) read alive=37 "
+        "(12.3%), unknown=263, dead=0 and QUARANTINED itself — dealapp serves the schema-less "
+        "shell to GitHub Actions egress for ~88% of ids, matching the 78-83% measured 2026-08-26. "
+        "The contract behaved exactly as designed (0 false deaths where a naive 200⇒alive rule "
+        "would have manufactured 263), but from CI this platform cannot reach useful coverage. "
+        "It needs non-CI egress to verify; see docs/ops/LISTING_LIVENESS.md §5.1.",
     ),
     # ── Tier 3: known gaps — recorded honestly so monitoring can see them ───────────────────────
     **{
