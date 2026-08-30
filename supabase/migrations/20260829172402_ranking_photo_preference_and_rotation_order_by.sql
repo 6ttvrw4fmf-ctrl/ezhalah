@@ -1,0 +1,26 @@
+-- MATCH -> PLATFORM DIVERSITY -> PHOTO PREFERENCE -> CONTROLLED ROTATION (owner PERMANENT rule,
+-- 2026-08-29). Adds tiers 3 and 4 to location_search_candidates_ar's existing ORDER BY, strictly
+-- ADDITIVE: the `matched` CTE (eligibility + total_count) is untouched byte-for-byte except for one
+-- new SELECTed column (s.has_photo, referenced in no WHERE predicate), so no search can gain, lose,
+-- or reorder its TRUE matched set or its honest count. Both existing branches (p_per_platform null/
+-- not null) get the same two new ORDER BY keys, inserted between the existing div_rank key and the
+-- existing recency_at/source_table/listing_id tiebreakers - which stay LAST and unconditional, so
+-- the standing total-order pagination guarantee (no duplicate/skip across Show More batches) holds
+-- regardless of what photo_rank/rot_key do. Both new keys are NULL (fall through untouched) under
+-- the 6 objective sorts (price/area/beds/oldest) - a user's explicit sort stays byte-identical.
+--
+-- photo_rank: 0 = confirmed real photo, 1 = UNKNOWN/unaudited platform (search_listings_ar.has_photo
+-- IS NULL - ranks strictly BETWEEN confirmed-yes and confirmed-no, never rewarded as "has a photo"
+-- and never punished as "confirmed no photo" - "UNKNOWN must remain UNKNOWN", owner's exact words),
+-- 2 = confirmed no real photo. Never filters - every row already passed `matched`.
+--
+-- rot_key: hashtext(source_table, listing_id, p_rotation_seed) - a new optional parameter, default
+-- NULL (100% backward compatible with every existing caller). hashtext() is a deterministic Postgres
+-- builtin, never random()/gen_random_*: the same (row, seed) always yields the same key, so a client
+-- that generates ONE seed per search (not per page - src/lib/rotationSeed.ts) gets one stable order
+-- for that whole browse walk. NULL seed -> rot_key NULL everywhere -> falls through, unused.
+--
+-- Verified against a live pre-change baseline (129-row villa/بيع/الرياض/الملقا scope): matched-set
+-- hash unchanged, total_count unchanged for 4 independent filter combos, price_asc order BYTE-
+-- IDENTICAL to before, and a 3-page (50/50/29) walk concatenates to exactly the full 129-row set
+-- with zero duplicates/gaps both before and after this change.

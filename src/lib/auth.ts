@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
+import { getLocale } from '@/i18n';
 import type { AuthUser } from '@/store';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -27,6 +28,16 @@ function initialsFrom(name: string, fallback: string): string {
 }
 
 // Build an AuthUser from whatever a real Supabase session gives us.
+// Persist a renamed display name to the auth backend so it SURVIVES a refresh — mapSupabaseUser
+// below rebuilds the user from user_metadata on every load, so a rename that only patches the
+// in-memory store dies with the tab (pre-existing gap, owner-ordered fix 2026-08-29). Both
+// full_name and name are written because mapSupabaseUser reads them in that order. Fire-and-forget:
+// the local rename must never be blocked by a slow/failed network write.
+export function persistDisplayName(v: string): void {
+  if (!supabase) return;
+  supabase.auth.updateUser({ data: { full_name: v, name: v } }).catch(() => {});
+}
+
 export function mapSupabaseUser(u: any, method: AuthUser['method']): AuthUser {
   const meta = u?.user_metadata ?? {};
   const name: string = meta.full_name || meta.name || u?.email?.split('@')[0] || u?.phone || 'User';
@@ -97,7 +108,13 @@ export async function signInWithProvider(
   if (!supabase) return {}; // preview: caller keeps the design-only chooser
   try {
     const redirectTo = Platform.OS === 'web' ? window.location.origin + '/auth' : undefined;
-    const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo } });
+    // Arabic-first (owner): Google's own consent screen defaults to the visitor's Google-account
+    // locale, then browser locale — neither is Ezhalah's own language choice. `hl` is Google's
+    // documented lever for the SCREEN's language, same mechanism GoogleOneTap.tsx uses for the
+    // One Tap prompt, so both Google entry points speak Ezhalah's current language consistently.
+    // Apple has no equivalent knob here, so it's a no-op for that provider.
+    const queryParams = provider === 'google' ? { hl: getLocale() } : undefined;
+    const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo, queryParams } });
     if (error) return { error: error.message };
     return { redirected: true };
   } catch (e: any) {

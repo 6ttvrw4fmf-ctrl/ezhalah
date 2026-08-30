@@ -273,12 +273,34 @@ def check_normal_filter_barrier(client) -> bool:
     return False
 
 
+# PAID-CALL BUDGET FOR THIS RUN. These two probes are the ONLY paid DeepSeek calls anywhere in CI,
+# and they are a genuine live-agent verification (they assert the real model still maps Arabic onto
+# the right deal/city/type — a deterministic test cannot prove that). The budget exists so the cost
+# of CI is a stated number rather than an emergent one: if someone adds cases, this refuses instead
+# of quietly multiplying the bill. Owner rule: CI must not call paid DeepSeek unless the test
+# explicitly requires it, and those calls must be bounded.
+# Pinned by scripts/verify-ai-spend-safety.ts.
+MAX_PAID_AGENT_CALLS_PER_RUN = 4
+_paid_agent_calls = 0
+
+
 def _call_agent(text: str) -> dict:
+    global _paid_agent_calls
+    if _paid_agent_calls >= MAX_PAID_AGENT_CALLS_PER_RUN:
+        raise RuntimeError(
+            f"paid-call budget exhausted ({MAX_PAID_AGENT_CALLS_PER_RUN}) - refusing another "
+            f"DeepSeek call. Raise MAX_PAID_AGENT_CALLS_PER_RUN deliberately if more live "
+            f"verification is genuinely needed."
+        )
+    _paid_agent_calls += 1
     body = json.dumps({"text": text, "locale": "ar", "loggedIn": False, "order": False, "history": []}).encode()
     req = urllib.request.Request(
         f"{SUPABASE_URL}/functions/v1/agent", data=body, method="POST",
         headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {PUBLISHABLE_KEY}",
-                 "Content-Type": "application/json"},
+                 "Content-Type": "application/json",
+                 # Attribution: keeps CI spend separable from real user spend in public.ai_usage,
+                 # so "is this traffic real?" is answerable from the cost data itself.
+                 "x-ezhalah-client": "ci"},
     )
     try:
         import certifi  # ships transitively via supabase → httpx

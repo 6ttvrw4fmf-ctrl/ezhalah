@@ -31,6 +31,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 };
 
 const sweep = read('e2e/live-sweep/sweep.mjs');
+const vstate = read('e2e/live-sweep/visibleState.mjs');
 const journeys = read('e2e/live-sweep/journeys.mjs');
 const runner = read('e2e/live-sweep/run.mjs');
 const wf = read('.github/workflows/live-search-sweep.yml');
@@ -63,9 +64,12 @@ check('journey «showMoreJourney» is actually run by the runner',
 check('the «عرض المزيد» journey asserts filter persistence across batches',
   /FILTER-PERSISTENCE/.test(showMore),
   'a pager journey that does not re-check the filters proves only that a button is clickable');
-check('the «عرض المزيد» journey asserts the cap message states the true total',
-  /TRUE-TOTAL/.test(showMore) && /وعرضنا لك/.test(showMore),
-  'the browse cap is only honest while the closing line quotes trueTotal, never the cap');
+// CONTRACT CHANGE (owner 2026-08-29): the lifetime cap is gone — the journey now asserts BOTH that
+// a missing pager while matches remain is a defect (PAGER-MISSING) and that any total the closing
+// line quotes is the search's true total (TRUE-TOTAL). Same honesty, new continuation shape.
+check('the «عرض المزيد» journey asserts continuation (pager present while matches remain) + true totals',
+  /TRUE-TOTAL/.test(showMore) && /PAGER-MISSING/.test(showMore),
+  'the continuation is only honest while a missing pager with matches remaining is a defect');
 
 // ── 2. the floors, at or above the values the owner set ─────────────────────────────────────────
 const REQUIRED_FLOORS: Record<string, number> = {
@@ -103,8 +107,14 @@ check('exact-city-never-rescoped is asserted on EVERY journey (INTENT→UI)',
   /exact city .* was re-scoped to district/.test(sweep) && /INTENT→UI/.test(sweep));
 check('true-total-never-page-cap is asserted against the 1,500 page limit',
   /rendered === 1500/.test(sweep));
+// The rendered-text watches live in the pure parser module (extracted 2026-08-28 so the summary
+// scoping could be unit-tested and mutation-proven offline — see visibleState.mjs). They are still
+// asserted by the sweep; assert them WHERE THEY ARE, so the extraction cannot quietly drop one.
 check('no-html-entities-rendered is asserted from the RENDERED text',
-  /entities/.test(sweep) && /&\(\?:bull\|quot/.test(sweep));
+  /entities/.test(sweep) && /&\(\?:bull\|quot/.test(vstate));
+check('the UI-state parse is the pure module the offline barrier can prove',
+  /from '\.\/visibleState\.mjs'/.test(sweep) && /parseVisibleState\(await page\.evaluate/.test(sweep),
+  'an in-page slice cannot be unit-tested, and the one that could not be tested read ad copy as app state');
 
 // ── 4. the six-layer comparison is what decides ─────────────────────────────────────────────────
 for (const pair of ['INTENT→UI', 'UI→REQUEST', 'RPC→DB', 'RPC→RENDERED']) {

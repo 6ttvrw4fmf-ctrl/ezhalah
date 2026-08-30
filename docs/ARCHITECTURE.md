@@ -51,7 +51,7 @@ across many partner platforms and shows them in one place. **It is a search engi
 | **Backend** | **Supabase** project `aannarbkwcymrotzwdbo` — Postgres + PostgREST (RPC) + Edge Functions (Deno) + `pg_cron` + Vault. Region **Tokyo** (PDPL residency is an open question). |
 | **Scraper repo** | GitHub **`6ttvrw4fmf-ctrl/ezhalah`**. All scrapers + GitHub Actions workflows live here. |
 | **Scraper dispatch** | `pg_cron` → `trigger_gh_workflow(wf)` → GitHub `workflow_dispatch`. **Every workflow is dispatch-only; all cadence is owned by Postgres** (so it is monitorable/pausable from the DB). PAT in Vault (exp 2027-06-22). |
-| **AI agent** | Supabase Edge Function named **`agent`** (Gemini 2.5 Flash-Lite primary + Flash fallback, via `GEMINI_MODEL` secret). Runtime behavior tunable via the `agent_notes` DB table (no redeploy). |
+| **AI agent** | Supabase Edge Function named **`agent`** (DeepSeek `deepseek-v4-flash`, via `DEEPSEEK_MODEL` secret; sole provider since 2026-08-28 — Gemini removed as a clean cutover). Runtime behavior tunable via the `agent_notes` DB table (no redeploy). |
 
 **Why Expo/React Native, not native SwiftUI (owner decision 2026-06-09):** the owner first said "decide
 for me" (→ SwiftUI), then pivoted: wanted web + iPhone + Android from one codebase, live-preview while
@@ -895,6 +895,64 @@ migration-drift-guard rule in `AGENTS.md`).
     kept**: a `live` verdict needs HTTP 200 plus no dead-marker, and restoring a wrongly-inactive
     listing is the fail-safe direction. Never widen the freeze to reactivations, and never key its
     rate on `stats["skipped"]` (that counter also holds rows with no URL, which never reach a probe).
+16. **Ranking hierarchy: MATCH → PLATFORM DIVERSITY → PHOTO PREFERENCE → CONTROLLED ROTATION.**
+    (owner PERMANENT rule, 2026-08-29.) "Never sacrifice correctness or eligibility for diversity,
+    photos, or rotation." All four tiers live in ONE place — `location_search_candidates_ar`'s
+    ORDER BY — and never change `matched` (eligibility) or `total_count`; a no-photo or unknown-photo
+    listing is exactly as reachable/counted as any other genuine match.
+    - **Tier 1, MATCH, is absolute.** Price/location/type/deal/period/bedrooms/AF predicates stay
+      exact; nothing below this tier can pull in an ineligible row.
+    - **Tier 2, PLATFORM DIVERSITY**, is unchanged from the 2026-08-05 `div_rank` mechanism (rule
+      #2's PR #331) — each platform's own eligible rows numbered 1..n, ordered by that number first.
+    - **Tier 3, PHOTO PREFERENCE**, is folded INTO `div_rank`'s own per-platform ordering (photo
+      status first, recency second) rather than sitting after it — computing `div_rank` on recency
+      alone let a platform's most-recent-but-no-photo listing outrank that SAME platform's
+      older-but-real-photo listing, exactly the "photo-less occupying the first 10" failure the
+      owner named; caught and fixed live, same session, before this rule was written down.
+      `search_listings_ar.has_photo` is the source of truth: `NULL` (unknown/unaudited platform, per
+      `ops_photo_capture_trust`) is NEVER treated as "has a photo" and NEVER demoted as "confirmed
+      no photo" — it ranks strictly between the two. **UNKNOWN must remain UNKNOWN** (mirrors the AF
+      probe rule, `afProbe.ts`, 2026-08-25). A platform only gets `has_photo` written once its
+      capture rate clears `ops_photo_capture_trust`'s bar (≥50 reachable rows, ≥70% real-photo rate,
+      both re-derived on every sync run — never a hand-picked, rot-prone allowlist).
+    - **Tier 4, CONTROLLED ROTATION**, is the LAST tie-break, strictly before the pre-existing
+      unconditional `(source_table, listing_id)` total-order tiebreaker — so total-order pagination
+      (no duplicate/skip across `عرض المزيد` batches, PR #1267) holds regardless of rotation.
+      `hashtext(source_table, listing_id, p_rotation_seed)` — a deterministic Postgres builtin,
+      **never `ORDER BY random()`**. `p_rotation_seed` is minted client-side, once per device (not
+      per visit — `src/lib/rotationSeed.ts`), combined with a coarse ISO-week bucket so a long-lived
+      device's exposure still drifts over time. REPLACED the old `ezh_rot` per-filter localStorage
+      revisit counter (2026-06-27): that counter started at 0 for every brand-new device, so two
+      different first-time visitors of the same cohort saw an identical top 10 — it never solved the
+      cross-user problem, only the same-device-returns-later one.
+    - **Tiers 3 and 4 are both NULL (inert) under every objective sort** (price/area/beds/oldest) —
+      an explicit user sort is a promise about literal order and always wins; verified byte-identical
+      live, with and without a rotation seed.
+    - **Barriers:** `scripts/verify-photo-preference-and-rotation-live.ts` (live production RPC
+      behavior — determinism, seed variation, count-honesty, zero-dup pagination, photo ordering,
+      sort immunity), `scripts/verify-rotation-seed-contract.ts` (pure module + wiring, `npm test`).
+      §40 of `docs/ops/SEARCH_MATCH_QA_ENGINEER.md` carries the full worked model as "Result
+      Rotation" — do not confuse it with that file's pre-existing, unrelated "Coverage Rotation"
+      section (QA-journey sampling, not result ordering).
+17. **«الأجهزة المسجّل عليها الدخول» shows ONLY the real session registry, under a locked privacy
+    contract.** (Owner Phase 2, 2026-08-29.) GoTrue's `auth.sessions` is the one truth (one row =
+    one device-login); there are NO fake/derived devices, NO fingerprinting, and NO parallel
+    device-tracking table (a per-session hints table — "Phase 3" — is explicitly forbidden). The
+    only bridge is the `devices` edge function (JWT → `auth.getUser` → act on that `user_id`,
+    delete-account's identity pattern): GET returns per session ONLY `{session_id, device_class,
+    browser|null, created_at, refreshed_at}` — the raw user-agent and IP NEVER leave the server;
+    the UA collapses server-side through the ONE truthful detector (`src/lib/deviceInfo.ts`,
+    byte-pinned copy in the function). DELETE revokes only caller-owned rows (`id AND user_id` in
+    the SQL). The client badges «هذا الجهاز» from its OWN JWT `session_id` claim (identity, never
+    list position) and removes a card ONLY after the backend confirms revocation. Honesty rules:
+    last-active = `COALESCE(refreshed_at, created_at)` (refreshed_at is written on ~hourly token
+    rotation — proven live), buckets never claim finer precision («نشط خلال الساعة الأخيرة» is the
+    freshest claim for another device), and revocation copy says sign-out completes within an hour
+    at most (issued access tokens live ≤1h). Known accepted limit: a stored UA cannot carry
+    maxTouchPoints, so ANOTHER device that is an iPad in desktop mode truthfully reads ماك; the
+    current device self-corrects locally. **Barrier:** `scripts/verify-devices-contract.ts`
+    (executes the mapper/JWT-reader/time-buckets; pins ownership SQL, endpoint shape, the client
+    confirmation gate — all anti-vacuous, mutation-proven ×5).
 
 ---
 

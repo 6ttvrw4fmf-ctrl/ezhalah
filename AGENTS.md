@@ -65,6 +65,15 @@ outside the roster is decoration. Adjudicate every finding against source before
    cases, and prove both directions. (Run #15 assumed absence meant silence on 13 aqaratikom rows;
    the source published «سنوي» on all 13.)
 
+**GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds ALL SEVEN routines. Canonical text:
+`docs/ops/ENGINEER_ROUTINES.md` §G; the file wins over any routine prompt.** In one line each:
+fix first, report last (a found bug is not a finished job); exactly SIX legitimate reasons to stop
+without fixing (§G.2) and nothing else; if the blocker is ownership or permissions, ROUTE the
+defect to the write-authorized routine with reproduction and root cause rather than saying someone
+should look at it; effort scales with what you find; never manufacture a 10/10; read Sentry FIRST
+every run and resolve an issue only after the production fix is verified; and none of it weakens an
+existing guard. Every routine's live prompt carries a condensed copy — §G is the source of truth.
+
 **Owner-granted engineering/product decisions belong in this repo, not just in an agent's own memory.**
 When the owner gives you a permanent rule, architecture decision, or business/compliance decision:
 land it in `docs/ARCHITECTURE.md` (or the relevant `docs/ops/*.md`) in the same session, not only in
@@ -356,3 +365,87 @@ handed only a flattened id set, so it can't see file pairs or filename collision
 `supabase_migrations.schema_migrations.statements` (matched by `version`) into
 `supabase/migrations/`, commit, and open a PR — this itself touches `supabase/migrations/`, so per
 the daily/senior routine rules it stays OPEN for review, never self-merged by an autonomous run.
+
+# How `npm test` finds its checks (owner-approved, 2026-08-28)
+
+**To add a barrier, create `scripts/verify-my-thing.ts`. That is the whole procedure — do not edit
+`package.json`.** A check runs BECAUSE IT EXISTS on disk; `scripts/lib/testRegistry.ts` discovers
+every `scripts/verify-*.{ts,mjs}` and `scripts/run-tests.mjs` runs them in sorted order, stopping at
+the first failure.
+
+This replaced a single 201-command `&&` chain on one line of `package.json`. Every routine adding a
+barrier edited that exact line, so two sessions adding a barrier in the same window conflicted
+essentially always — PR #1196 took five conflict/rebase rounds, #1177 three. Discovery removes the
+shared line rather than shortening it, so there is nothing left to conflict over.
+
+Discovery fails in the safe direction: **a new file nobody thought about RUNS.** The failure mode is
+a loud red, never a barrier that silently never executes — the direction this repo has been burned
+by before (nine dark detectors reading as a clean bill of health, §"Read this first").
+
+Three rules keep that safe, all enforced by `scripts/verify-test-registry-complete.ts` (in the suite):
+
+1. **`scripts/test-baseline.txt` is a FLOOR, not a list.** Every check the old chain ran must still
+   be discovered and run. Removing a test therefore takes a deliberate, reviewed edit to the
+   baseline — it cannot happen as a side effect of a rename, a bad glob, or a merge resolution.
+   Adding a test needs no baseline edit at all.
+2. **Every exclusion names a reason AND a home that exists.** `scripts/test-exclusions.txt` is
+   `name | where it DOES run | why`, and the "where" must be a workflow file that exists, an npm
+   script that exists, or an explicit `manual`. Live/browser checks that need production belong
+   here; so does `verify-migration-drift-vs-production.ts`, which §"Migration drift guard" pins OUT
+   of `npm test` deliberately. The file cannot become a graveyard, and cannot retire a check by
+   naming nowhere.
+3. **Never prove your own wiring by string-matching `package.json`.** Ask
+   `npmTestRuns(root, 'verify-my-thing')` from `scripts/lib/testRegistry.ts`. Sixteen barriers used
+   `pkg.includes('verify-me')` against the mega line; that predicate is false for every check now,
+   and the naive repair (match `run-tests` instead) is worse — it would pass for every file
+   including one nothing runs, i.e. a wiring check that cannot fail. The registry guard rejects the
+   pattern outright. Reading `package.json` for a real reason (a dependency, a script name) is fine.
+
+The runner fails closed three ways: a non-zero child fails the run; a **signal-killed child**
+(`status === null` — timeout, OOM) is a failure, not a skip; and an **empty run set** is itself a
+failure. `npm run test:list` prints the resolved run order; `npm run test:all` runs every check
+instead of stopping at the first failure.
+
+## SINGLE-WRITER RULE — `supabase/functions/agent/index.ts`
+
+**Only one active session may MODIFY the AI agent edge function at a time.** Other sessions may
+inspect it, run tests, investigate bugs, propose patches, and work on unrelated files — they must not
+write or merge overlapping changes to it while another session owns the surface.
+
+**Why.** That file is ~113KB of production code and several automation sessions edit it. On
+2026-08-29 two *individually correct* changes collided — the health heartbeat and the usage telemetry
+each added `const t0 = Date.now();` to the same scope in `runModel()` — and the function stopped
+booting. Every barrier was green, because they all read that file as TEXT.
+
+**Parse protection catches SYNTAX collisions. It does NOT catch two logically valid changes that
+overwrite or contradict each other.** That is why ownership and a final semantic diff both exist.
+
+### Before writing the agent function
+```bash
+scripts/agent-surface.sh claim "<session-id>" "<what you are changing>"   # fail-closed
+node scripts/agent-surface-preflight.mjs before                           # who else is in here?
+```
+`claim` refuses if another session owns it (TTL-bounded, so a crashed session cannot hold it
+forever). `before` lists open PRs touching the same file and the recent commits your work will land
+on top of.
+
+### Immediately before merge/deploy
+```bash
+git fetch origin main && git merge origin/main      # rebase FIRST
+node scripts/agent-surface-preflight.mjs final      # semantic diff + parse gate, fail-closed
+```
+`final` refuses if the branch is behind main, prints the merged file's diff against `origin/main`,
+and calls out **removed** lines — that is where a silent overwrite hides. Read them. Confirm every
+one is intentional before merging.
+
+### After deploy
+```bash
+scripts/agent-surface.sh smoke      # REAL boot + request against the live endpoint
+scripts/agent-surface.sh release "<session-id>"
+```
+**A successful deploy command is not production proof.** The 2026-08-29 outage reported a successful
+deploy and then returned `BOOT_ERROR` on every request. `smoke` asks the live function a real Arabic
+question and fails on `BOOT_ERROR` or on any response without a classification.
+
+The lock reuses `acquire_deploy_lock()` under the name `agent-edge-surface`. Only `^prod` names
+canonicalize to `production`, so claiming this surface never blocks a normal deploy.

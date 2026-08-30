@@ -1,13 +1,19 @@
 // ──────────────────────────────────────────────────────────────────────────────
-// agent — Ezhalah real AI Agent (PRD §7, §13) — Google Gemini
+// agent — Ezhalah real AI Agent (PRD §7, §13) — DeepSeek
 //
 // Turns a free-text message (Arabic-first) into a structured classification the
 // chat client already understands: { kind, reply, query }. The heavy lifting is
-// done by a real Gemini model, held to Ezhalah's hard product rule: it is
-// strictly NON-ADVISORY. It never recommends a property, never ranks, never says
+// done by a real LLM, held to Ezhalah's hard product rule: it is strictly
+// NON-ADVISORY. It never recommends a property, never ranks, never says
 // "best/better/good deal/worth it", and never gives financial, investment,
 // mortgage or legal advice. It only understands the request, extracts neutral
 // search parameters, and presents listings — the user decides.
+//
+// PROVIDER (owner 2026-08-28): DeepSeek. Gemini was removed in this same change
+// as an owner-ordered clean cutover — no coexistence layer, no fallback, no env
+// switch. The old GEMINI_* / AGENT_PROVIDER / GEMINI_MODEL / GEMINI_FALLBACK_MODEL
+// secrets, and the Google API key itself, should now be deleted from the
+// Supabase edge-function config; nothing in the app reads them any more.
 //
 // The API key lives ONLY here (a Supabase secret), never in the app bundle. The
 // client calls this function and falls back to its bundled heuristic if the
@@ -17,15 +23,35 @@
 // public project key; this endpoint does no privileged work and writes nothing.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
-// Default to the mid 2.5 tier (strong instruction-following + Saudi Arabic);
-// override with GEMINI_MODEL (e.g. gemini-2.5-flash-lite to cut cost, or -pro).
-const MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
-// When the primary model is rate-limited (503 "high demand"), fall back to the
-// lighter tier rather than dropping the user to the bundled client heuristic.
-const FALLBACK_MODEL = Deno.env.get("GEMINI_FALLBACK_MODEL") ?? "gemini-2.5-flash-lite";
-const urlFor = (m: string) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
+const DEEPSEEK_API_KEY = Deno.env.get("DEEPSEEK_API_KEY") ?? "";
+// "flash" = DeepSeek's fast/non-reasoning tier, the fit for a short classification task; override
+// with DEEPSEEK_MODEL.
+//
+// MODEL CHOICE — "deepseek-chat", NOT "deepseek-v4-flash". THIS IS LOAD-BEARING, DO NOT "UPGRADE" IT.
+// They are the same weights; the alias selects THINKING MODE:
+//   deepseek-chat      → non-reasoning. ~96 completion tokens for a classification turn.
+//   deepseek-v4-flash  → reasoning. ~2,591 reasoning tokens for the SAME turn, and reasoning tokens
+//                        are billed and counted against max_tokens.
+// Shipping v4-flash at max_tokens 800 broke production on 2026-08-28: reasoning consumed all 800
+// tokens, content came back EMPTY, finish_reason "length" — a 50% failure rate across a live Arabic
+// eval (proved via finish_reason + usage.completion_tokens_details.reasoning_tokens).
+// This is the same trap the previous Gemini integration defused with thinkingConfig.thinkingBudget=0;
+// DeepSeek has no such switch, so the ALIAS is the switch. Classification needs no chain-of-thought.
+// Pinned by scripts/verify-agent-nonreasoning-model.ts.
+const DEEPSEEK_MODEL = Deno.env.get("DEEPSEEK_MODEL") ?? "deepseek-chat";
+// Models we are willing to PAY for. The alias "deepseek-chat" currently bills as deepseek-v4-flash
+// ($0.48/1,000 messages measured); deepseek-v4-pro is 3x that on the identical call. This list is
+// the fail-closed half of the model guard: an unrecognised model is refused BEFORE the HTTP request,
+// so a config slip or an alias re-point cannot spend money once. The observability half — what
+// DeepSeek says it actually billed — is recorded per call in public.ai_usage.model and watched by
+// mon_detect_ai_cost_health(). Widening this list is an owner cost decision, not a fix for an alert.
+// Mirrors public.ai_spend_config.allowed_models; pinned by scripts/verify-ai-spend-safety.ts.
+const ALLOWED_MODELS = ["deepseek-chat", "deepseek-v4-flash"];
+const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
+
+// Deterministic post-model rules (owner ruling 2026-08-29). Pure functions, unit-tested and
+// mutation-proven by scripts/verify-agent-postmodel-rules.ts. The model proposes; these decide.
+import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWesternDigits, arabicWordAmounts } from "./postModel.ts";
 
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
@@ -34,6 +60,10 @@ const urlFor = (m: string) =>
 // to the last cached value (or nothing) — the baked-in SYSTEM prompt always still holds.
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+// Hard ceiling on the DB-driven prompt appendix. Today's 11 active rows total 19,854 chars, so this
+// is deliberately just above the current content: it is a RATCHET, not headroom to grow into. Raising
+// it is a code change that goes through a PR and the barrier — which is the entire point.
+const NOTES_CHAR_BUDGET = 21_000;
 let _notesCache: { text: string; at: number } = { text: "", at: 0 };
 async function liveNotes(): Promise<string> {
   const now = Date.now();
@@ -45,13 +75,170 @@ async function liveNotes(): Promise<string> {
     );
     if (r.ok) {
       const rows = await r.json();
-      const text = (rows as Array<{ title: string; content: string }>)
-        .map((n) => `• ${n.title}\n${n.content}`).join("\n\n");
+      // BUDGET CAP (owner ruling 2026-08-29). agent_notes is editable in the DB with no PR, no test
+      // and no review, and its content is appended to the system message labelled "authoritative".
+      // Uncapped, one long row silently raises the token cost of EVERY future chat for every user.
+      // The cost audit measured 11 active rows at 19,854 chars = 30% of every request.
+      //
+      // We drop WHOLE ROWS past the budget, lowest priority first (the query already orders by
+      // priority, so we keep the most important). We never truncate mid-row: half a behavioural rule
+      // is more dangerous than no rule — it can invert the meaning of the sentence it cuts.
+      const kept: string[] = [];
+      let used = 0, dropped = 0;
+      for (const n of rows as Array<{ title: string; content: string }>) {
+        const block = `• ${n.title}\n${n.content}`;
+        if (used + block.length > NOTES_CHAR_BUDGET) { dropped++; continue; }
+        kept.push(block);
+        used += block.length + 2; // + the "\n\n" join
+      }
+      if (dropped) {
+        // Visible in function_logs. A silently truncated authoritative rule set is exactly the kind of
+        // thing that must never be quiet.
+        console.warn(`agent_notes over budget: kept ${kept.length}, DROPPED ${dropped} row(s), ${used}/${NOTES_CHAR_BUDGET} chars`);
+      }
+      const text = kept.join("\n\n");
       _notesCache = { text, at: now };
       return text;
     }
   } catch { /* fall through to cached/empty */ }
   return _notesCache.text;
+}
+
+// ── THE REPLY MAY NOT CLAIM WHAT THE DATABASE HAS NOT SAID (owner ruling 2026-08-29) ─────────────
+// This function writes its reply BEFORE any search runs — the client executes the query afterwards.
+// So a past-tense inventory claim here («لقيت لك خيارات», «عندي نتائج») is, by construction, a claim
+// about data nobody has fetched. The owner's rule is exact: never say «عندي خيارات» unless we
+// actually queried and confirmed there are results. A grounded statement can only come AFTER the
+// search, from the client's honest total.
+//
+// Also caught: a promise to WIDEN or relax the search («راح أوسّع البحث»). The query is built
+// strictly and never widened, so that sentence describes something the product will not do —
+// the same reply/query drift class as promising "cheapest" without a sort.
+//
+// Deterministic and conservative: we cannot safely rewrite Arabic prose, so a violating reply is
+// replaced wholesale with a truthful searching lead rather than surgically edited.
+const CLAIMS_INVENTORY =
+  /(لقيت|لقينا|وجدت|وجدنا|عندي\s+(خيارات|نتائج|عروض)|عندنا\s+(خيارات|نتائج|عروض)|توفر لدي|متوفر عندي|\bi found\b|\bwe found\b|\bi have\s+(options|results|listings)\b)/i;
+const PROMISES_WIDENING =
+  /(أوسّع|أوسع|نوسّع|نوسع|بوسّع|بوسع|توسيع البحث|أخفف الشرط|نخفف الشروط|\bwiden\b|\bbroaden\b)/i;
+/**
+ * ONE QUESTION PER TURN — deterministically, not by asking the model nicely.
+ *
+ * The owner's rule: ask only the critical question, ideally one short clarification at a time. The
+ * prompt says exactly that and the model still stacked two: «وش نوع الشقة اللي تدور عليه؟ وهل تبيها
+ * إيجار أو تمليك؟». Prompt wording is a preference; this is the floor under it.
+ *
+ * Keeps everything up to and including the FIRST question mark, so the lead-in survives and only the
+ * extra questions are dropped. Applied to CLARIFICATION turns only — a search reply that ends with a
+ * friendly «تبيني أعرضها؟» is not an interrogation.
+ */
+function oneQuestionOnly(reply: string): string {
+  const r = String(reply ?? "");
+  const marks = r.match(/[?؟]/g);
+  if (!marks || marks.length < 2) return r;
+  const first = Math.min(...["?", "؟"].map((m) => { const i = r.indexOf(m); return i < 0 ? Infinity : i; }));
+  return Number.isFinite(first) ? r.slice(0, first + 1).trim() : r;
+}
+
+function groundReply(reply: string, locale: string): string {
+  const r = String(reply ?? "");
+  // AN EMPTY REPLY MUST NEVER SHIP. Found live 2026-08-29: «غرفتين» — a one-word answer continuing an
+  // established search — produced a turn with NO reply text, so the user saw silence. Why the model
+  // omitted it does not matter; silence is a product failure and this is the floor under it.
+  if (!r.trim()) return locale === "en" ? "Got it — searching now." : "تمام، أدوّر لك الحين.";
+  if (!CLAIMS_INVENTORY.test(r) && !PROMISES_WIDENING.test(r)) return r;
+  return locale === "en" ? "Got it — searching now." : "تمام، أدوّر لك الحين.";
+}
+
+// ── AGENT HEALTH HEARTBEAT ───────────────────────────────────────────────────
+// The client falls back to its bundled offline heuristic on ANY failure (src/data/agent.ts:571),
+// so a dead agent looks completely normal to the user — that is how the 2026-08-29 outage stayed
+// invisible for 14.5 hours across 213 failed calls. Postgres cannot read Supabase edge logs, so the
+// detector framework was structurally blind to this function. This is the heartbeat it reads:
+// mon_detect_agent_health() over public.agent_health_event.
+//
+// FIRE AND FORGET, ALWAYS. Telemetry must never break, slow, or fail a user turn — it is not awaited
+// and every error is swallowed. A monitoring write that can take down the thing it monitors is worse
+// than no monitoring.
+const CLIENT_TIMEOUT_MS = 20_000; // must track the client's race in src/data/agent.ts:569
+function recordHealth(outcome: string, latencyMs: number, detail: Record<string, unknown> = {}): void {
+  try {
+    if (!SUPABASE_URL || !SERVICE_KEY) return;
+    // A turn slower than the client's own race already reached the user as the offline heuristic,
+    // even if the model went on to answer correctly. That still counts as an AI failure.
+    const fallbackCertain = outcome !== "ok" || latencyMs > CLIENT_TIMEOUT_MS;
+    void fetch(`${SUPABASE_URL}/rest/v1/agent_health_event`, {
+      method: "POST",
+      headers: {
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+        "content-type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({ outcome, latency_ms: Math.round(latencyMs), fallback_certain: fallbackCertain, detail }),
+    }).catch(() => {});
+  } catch { /* telemetry must never throw into the request path */ }
+}
+
+// ── AI COST TELEMETRY (public.ai_usage) ───────────────────────────────────────
+// Owner 2026-08-29: the DeepSeek balance was dropping far faster than the earlier ~$1/1,000-message
+// estimate, and NOTHING recorded usage — data.usage was read only on the error path and thrown away
+// on every success. So the cost of a real turn was unknowable and the estimate could not be checked.
+//
+// Separate from recordHealth above on purpose: that one answers "is the agent alive", this one
+// answers "what did the turn cost". Same fire-and-forget discipline — never awaited, never throws
+// into the turn, and an outage degrades to "no row written", never to a failed user turn.
+// PRIVACY: counts only — no prompt, no user message, no reply, no user id. (PDPL; and the owner's
+// standing "no unnecessary raw chat transcripts" rule.) Pricing lives in public.ai_usage_costed,
+// NOT here, so a DeepSeek rate change never needs a redeploy of this 93KB function.
+function logUsage(row: Record<string, unknown>): void {
+  if (!SUPABASE_URL || !SERVICE_KEY) return;
+  try {
+    void fetch(`${SUPABASE_URL}/rest/v1/ai_usage`, {
+      method: "POST",
+      headers: {
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+        "content-type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify(row),
+    })
+      .then((r) => r.body?.cancel().catch(() => {}))
+      .catch(() => {});
+  } catch { /* telemetry must never break a turn */ }
+}
+
+// ── SPEND CIRCUIT BREAKER CLIENT ──────────────────────────────────────────────
+// Calls public.ai_spend_gate(), which owns the ceilings and the breaker state. Deliberately NOT
+// cached: a cached "allow" is exactly how a runaway keeps running for another window, and this is
+// one small RPC against a 1,800ms model call.
+//
+// FAIL CLOSED. Any failure — network, timeout, RLS, malformed body — returns allow:false. An
+// unreachable ceiling is an unbounded one. The product survives a denial (deterministic search and
+// the client's offline heuristic both keep working); the balance does not survive an unbounded one.
+const GATE_TIMEOUT_MS = 4000;
+async function spendGate(source: string): Promise<{ allow: boolean; reason?: string; state?: string }> {
+  if (!SUPABASE_URL || !SERVICE_KEY) {
+    return { allow: false, reason: "spend gate unreachable: no service credentials", state: "unknown" };
+  }
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), GATE_TIMEOUT_MS);
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/ai_spend_gate`, {
+      method: "POST",
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ p_source: source }),
+      signal: ac.signal,
+    }).finally(() => clearTimeout(timer));
+    if (!r.ok) return { allow: false, reason: `spend gate http ${r.status}`, state: "unknown" };
+    const g = await r.json();
+    // An unrecognised shape is not permission.
+    if (!g || typeof g.allow !== "boolean") return { allow: false, reason: "spend gate returned no verdict", state: "unknown" };
+    return { allow: g.allow, reason: g.reason, state: g.state };
+  } catch (e) {
+    return { allow: false, reason: `spend gate error: ${String((e as Error)?.message ?? e)}`, state: "unknown" };
+  }
 }
 
 // ── DETERMINISTIC CATALOG CLASSIFIER (loc_classify RPC) ───────────────────────
@@ -122,6 +309,11 @@ const CORS = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
+  // Without this the browser re-preflights on its short default cache, which doubled the request
+  // count in the logs (170 OPTIONS against 355 POSTs on 2026-08-29) and made the traffic look ~2x
+  // worse than it was during the cost audit. No model cost either way — this is so the numbers are
+  // readable. 24h is the Chromium ceiling.
+  "Access-Control-Max-Age": "86400",
 };
 
 // Canonical values the client search engine works in (English). The model maps
@@ -353,10 +545,14 @@ const AR_CURRENCY: Array<[RegExp, number]> = [
 const RANGE_RE = /(?<![\p{L}\p{N}])من(?![\p{L}\p{N}])[\s\S]{0,40}?(?<![\p{L}\p{N}])(?:الى|إلى)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])بين(?![\p{L}\p{N}])[\s\S]{0,60}?(?<![\p{L}\p{N}])و(?![\p{L}\p{N}])|\bfrom\b[\s\S]{0,40}?\bto\b|\bbetween\b[\s\S]{0,60}?\band\b|\d\s*-\s*\d/imu;
 
 function extractPrice(input: string): string {
-  const t = input.toLowerCase();
+  // Arabic numerals FIRST — JS \d is ASCII-only, so «٧٠ الف» was invisible here until 2026-08-29.
+  // See toWesternDigits() in ./postModel.ts for why this was a silent Arabic-first product bug.
+  const t = toWesternDigits(input).toLowerCase();
   const NUM_RE =
     /(\d[\d,.]*)\s*(?:(k|m|mn|million|thousand|bn|billion)(?![a-z]))?\s*(sar|sr|riyal|usd|\$|dollar|aed|dirham|dhm|dhs|dh|eur|€|euro|gbp|£|pound|kwd|kd|dinar|bhd|bd|qar|qr|omr|egp)?/gi;
-  const candidates: number[] = [];
+  // Candidates carry their text position so digit-written and WORD-written amounts can be merged in
+  // reading order — the range rule below depends on "first" meaning first in the sentence.
+  const candidates: Array<{ n: number; index: number }> = [];
   for (const mm of t.matchAll(NUM_RE)) {
     const after = t.slice(mm.index! + mm[0].length, mm.index! + mm[0].length + 24);
     // A number followed by a SIZE/area unit is a SIZE, not money — skip it. We tolerate up to ~16
@@ -377,8 +573,23 @@ function extractPrice(input: string): string {
     if (cur) rate = CURRENCY_RATES[cur] ?? 0;
     if (!rate) { for (const [re, r] of AR_CURRENCY) { if (re.test(after)) { rate = r; break; } } }
     if (rate && rate !== 1) n = Math.round(n * rate);
-    if (n >= 100) candidates.push(Math.round(n));
+    if (n >= 100) candidates.push({ n: Math.round(n), index: mm.index! });
   }
+  // AMOUNTS WRITTEN IN ARABIC WORDS — «مليون ونص», «نص مليون», «مليونين», «ثلاثة ملايين».
+  // NUM_RE above requires a LEADING ASCII DIGIT, so these produced no candidate at all. Live defect
+  // 2026-08-29: «من ٨٠٠ الف الى مليون ونص» yielded only [800000], the range-MAX rule could not fire
+  // with a single candidate, and the user's 1,500,000 ceiling silently became 800,000.
+  // Same guards as the digit path: a size unit disqualifies it, a currency word converts it.
+  for (const wa of arabicWordAmounts(t)) {
+    const after = t.slice(wa.index + wa.length, wa.index + wa.length + 24);
+    if (/^[^\d]{0,16}?(bed|bedroom|br\b|sqm|sq\.?\s*m|m2|m²|meter|metre|cm|centimeters?|centimetres?|square|sqft|sq\.?\s*ft|ft2|ft²|foot|feet|sq\b|متر|م٢|م2|غرف|غرفة|غرفه)/i.test(after)) continue;
+    let n = wa.value;
+    let rate = 0;
+    for (const [re, r] of AR_CURRENCY) { if (re.test(after)) { rate = r; break; } }
+    if (rate && rate !== 1) n = Math.round(n * rate);
+    if (n >= 100) candidates.push({ n, index: wa.index });
+  }
+  candidates.sort((a, b) => a.index - b.index);
   if (!candidates.length) return "";
   // This function's single price slot has no separate minimum — it's always applied as a CEILING (see
   // the SYSTEM prompt's `price` field docs and the client's agentPriceCapAnnual()). Historically this
@@ -389,8 +600,8 @@ function extractPrice(input: string): string {
   // HIGHEST one instead. A single number (the overwhelmingly common case) is unaffected; multiple
   // numbers with no range phrasing keep the original first-match behavior (unrelated figures elsewhere
   // in the message must not silently become the budget).
-  if (candidates.length > 1 && RANGE_RE.test(input)) return String(Math.max(...candidates));
-  return String(candidates[0]);
+  if (candidates.length > 1 && RANGE_RE.test(input)) return String(Math.max(...candidates.map((c) => c.n)));
+  return String(candidates[0].n);
 }
 
 // Detect a FOREIGN-currency budget and format it for display ("USD 100,000"), so the client can show
@@ -419,7 +630,8 @@ const AR_CUR_LABEL: Array<[RegExp, string]> = [
   [/جنيه/, "EGP"],
 ];
 function originalCurrency(input: string): string {
-  const t = input.toLowerCase();
+  // Same ASCII-only \d blindness as extractPrice — «١٠٠٠٠٠ دولار» must parse too.
+  const t = toWesternDigits(input).toLowerCase();
   const RE = /(\d[\d,.]*)\s*(k|m|mn|million|thousand|bn|billion)?\s*(usd|dollars?|aed|dirham|dhm|dhs|dh|eur|euro|gbp|pound|kwd|kd|dinar|bhd|bd|qar|qr|omr|egp)\b/i;
   const m = RE.exec(t);
   if (m) {
@@ -488,31 +700,12 @@ function stripFiller(s: string): string {
   return out || String(s ?? "").trim();
 }
 
-// Gemini structured-output schema (OpenAPI subset; uppercase types).
-const SCHEMA = {
-  type: "OBJECT",
-  properties: {
-    kind: { type: "STRING", enum: ["listings", "message", "interview"] },
-    reply: { type: "STRING" },
-    deal: { type: "STRING", enum: ["Rent", "Buy", "Both"] },
-    location: { type: "STRING" },
-    type: { type: "STRING" },
-    detail: { type: "STRING" },
-    price: { type: "STRING" },
-    pricing_basis: {
-      type: "STRING",
-      enum: ["daily_rent", "weekly_rent", "monthly_rent", "quarterly_rent", "annual_rent", "full_price", "price_per_sqm", "none"],
-    },
-    rent_period: { type: "STRING", enum: ["none", "monthly", "annual"] },
-    sort: {
-      type: "STRING",
-      enum: ["none", "newest", "oldest", "price_asc", "price_desc", "area_asc", "area_desc", "ppm_asc", "ppm_desc", "beds_desc"],
-    },
-    count: { type: "STRING" },
-    platforms: { type: "ARRAY", items: { type: "STRING" } },
-  },
-  required: ["kind", "reply", "deal", "location", "type", "detail", "price", "pricing_basis", "rent_period", "sort", "count", "platforms"],
-};
+// DeepSeek's response_format:{type:"json_object"} guarantees the reply parses as JSON but does NOT
+// constrain WHICH keys/values appear (there is no responseSchema analogue on the OpenAI-compatible
+// endpoint). Appended to the SYSTEM message as a belt-and-braces restatement of the shape and enum
+// values the SYSTEM prompt above already documents in prose — same list, machine-readable form, so
+// the model gets the contract from two directions.
+const JSON_SHAPE_HINT = `\n\nSTYLE: talk like a smart broker who knows the inventory, not a form. Adapt to obvious cues — if the user is brief or says «ورني»/«بس ورني»/"just show me", drop to ONE short critical question or simply search; if they are chatty, be a little more natural. Do not claim to read their emotions. NEVER say you have found or have options («لقيت لك», «عندي خيارات») — you write this reply BEFORE the search runs, so you cannot know; describe what you are about to search for instead. Never promise to widen or relax the search.\n\nCONVERSATION: when the user describes their SITUATION rather than a property («عندي عائلة من ٤ أشخاص», «أدور شي يناسبني أنا وزوجتي وطفلين», «مكان مناسب للعائلة», «مكان هادي»), that is CONTEXT, not filters. Never turn household size, lifestyle or a mood word into a bedroom count, an area, or any other value. Use kind="message" and ask the ONE next question that most narrows the search (usually property type, then Buy vs Rent, then city, then budget) — exactly ONE short question per turn — one question mark, never two questions stacked in a single reply, never a checklist. Once you have enough to search, search and stop asking.\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "ask_about" (array of the things the user expressed VAGUELY that you must NOT turn into a number — use "size" when they said big/large/wide/spacious/small («كبير»/«واسع»/«صغير») without any area figure, and "rating" when they praised the rating («تقييم عالي»/«ممتاز») without naming a number. Leave [] when nothing is vague. NEVER invent a bedroom count, an area, or a rating from a vague word), "furnished" (one of "yes"|"no"|"none" — "yes" only if the user asks for a FURNISHED place («مفروشة»), "no" only if they ask for an UNFURNISHED one («غير مفروشة»), "none" when they do not mention furnishing at all; never infer it from anything else), "af" (object of Advanced-Filter intents the user STATED; omit any key they did not state — never infer one. Keys and their ONLY allowed values: "property_age": "new"|"1_2"|"3_5"|"6_9"|"10p"; "street_width": a number in metres they asked for (e.g. "20"); "direction": array of "شمال"|"جنوب"|"شرق"|"غرب"|"شمال شرق"|"شمال غرب"|"جنوب شرق"|"جنوب غرب"; "bathrooms": the number of bathrooms they asked for; "rating": "9.5"|"9.0"|"9.0_rc10" ONLY if they named a NUMBER on the 0-10 scale — a stated 9 or ٩ (including «٩ فما فوق») is "9.0", a stated 9.5 or ٩.٥ is "9.5", and «مع ١٠ تقييمات» or more alongside 9 is "9.0_rc10". If they only praised it («تقييم عالي», «ممتاز») with NO number, OMIT it and put "rating" in ask_about instead; "rnpl": "rnpl" if they want instalments/تقسيط; "unit_subtype": "استديو"|"شقق مخدومة"|"شقة"), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -525,7 +718,8 @@ Deno.serve(async (req: Request) => {
     return json({ error: "unauthorized" }, 401);
   }
 
-  if (!GEMINI_API_KEY) {
+  if (!DEEPSEEK_API_KEY) {
+    recordHealth("model_not_configured", 0);
     // Tell the client to fall back to its bundled heuristic.
     return json({ error: "model not configured" }, 503);
   }
@@ -534,8 +728,17 @@ Deno.serve(async (req: Request) => {
   let locale = "ar";
   let loggedIn = false;
   let order = false;
+  let knownState = "";
   let lmHint = "";
   let history: Array<{ role?: string; text?: string }> = [];
+  // CALLER ATTRIBUTION. Without this a CI job and a real customer are indistinguishable in the cost
+  // data, so "is our spend real usage or a runaway test loop?" cannot be answered — and that was a
+  // live question: an audit found most agent traffic was automation, not people.
+  // Header-only and never trusted for AUTHORISATION — it is a label, not a permission — and it
+  // defaults to "user" so an unlabelled call is counted as the more important kind rather than
+  // silently excused. Only our own scripts set it.
+  const rawSource = (req.headers.get("x-ezhalah-client") ?? "").toLowerCase().trim();
+  const clientSource = ["ci", "selftest"].includes(rawSource) ? rawSource : "user";
   try {
     const body = await req.json();
     text = String(body?.text ?? "").slice(0, 1000);
@@ -546,6 +749,7 @@ Deno.serve(async (req: Request) => {
     // carries ~40 distilled anchors). Format: "Boulevard City = ... (Mall), Riyadh". We trust it
     // as a known-place signal so the model infers the city instead of asking which one.
     lmHint = String(body?.landmarkHint ?? "").slice(0, 400);
+    knownState = String(body?.knownState ?? "").slice(0, 600).trim();
     // Prior conversation turns so the model has MEMORY. The client sends recent turns; we cap here too.
     if (Array.isArray(body?.history)) history = body.history.slice(-12);
   } catch {
@@ -581,10 +785,6 @@ Deno.serve(async (req: Request) => {
   locale = replyLang ?? appLocale;
 
   try {
-    const headers = {
-      "x-goog-api-key": GEMINI_API_KEY, // key in header, never the URL
-      "content-type": "application/json",
-    };
     // Deterministic question-budget enforcement (confidence-based policy): the user may ask up to TWO
     // clarifying questions before the first search (high conf 0, medium 1, low 2). The model tends to
     // keep asking past that, so we count prior model questions ("?") and only once it has already asked
@@ -593,14 +793,21 @@ Deno.serve(async (req: Request) => {
     const budgetDirective = priorQuestions >= 2
       ? ` IMPORTANT: you have ALREADY asked TWO clarifying questions in this chat — do NOT ask a third. IF the user's latest message is continuing a PROPERTY SEARCH (an answer to your question, or more search detail), then SEARCH NOW (kind="listings") with whatever you have: infer the city from any landmark/geography/lifestyle clue, else leave location "" (all of Saudi Arabia), and deal="Both" if rent vs buy is unknown. BUT if the latest message is NOT a property search — a utility/explanation/currency-or-unit-conversion/brand/support/general-Ezhalah question, or small talk — just ANSWER it directly (kind="message"); do NOT force a search.`
       : "";
-    // Build a multi-turn conversation: prior turns (memory) + the current wrapped message. We
-    // sanitize so Gemini's rules hold — contents must START with a user turn and not repeat a role.
-    // The client already recognized any landmark from the full catalog — feed it in as a known-place
-    // signal so the model infers the CITY and searches it, never asking "which city?" for a landmark.
+    // Build a multi-turn conversation: prior turns (memory) + the current wrapped message. Contents
+    // must START with a user turn and not repeat a role — a rule DeepSeek shares with any chat API
+    // (an assistant-first messages[] rejects with 400). The client already recognized any landmark
+    // from the full catalog — feed it in as a known-place signal so the model infers the CITY and
+    // searches it, never asking "which city?" for a landmark.
     const lmLine = lmHint
       ? ` RECOGNIZED LANDMARKS (from Ezhalah's landmark database — treat each as a KNOWN place, infer its CITY and search that city; NEVER ask which city when a landmark is recognized): ${lmHint}.`
       : "";
-    const currentTurn = `REPLY LANGUAGE: ${locale === "en" ? "English" : "Arabic"} — the user's latest message is in this language, so reply 100% in it and never the other language. Auth: ${loggedIn ? "logged-in" : "guest"}. Direct search order: ${order}.${budgetDirective}${lmLine} Message: """${text}"""`;
+    // ALREADY ESTABLISHED — the single most effective way to stop the agent re-asking something the
+    // user already told it. Phrased as a hard instruction because a polite hint is not enough: the
+    // model previously had no structured view of its own accumulated state at all.
+    const knownLine = knownState
+      ? ` ALREADY ESTABLISHED IN THIS CONVERSATION (do NOT ask about any of these again — they are already set; only change one if the user's latest message explicitly changes it): ${knownState}.`
+      : "";
+    const currentTurn = `REPLY LANGUAGE: ${locale === "en" ? "English" : "Arabic"} — the user's latest message is in this language, so reply 100% in it and never the other language. Auth: ${loggedIn ? "logged-in" : "guest"}. Direct search order: ${order}.${budgetDirective}${knownLine}${lmLine} Message: """${text}"""`;
     const rawTurns = [
       ...history.map((h) => ({ role: h?.role === "model" ? "model" : "user", text: String(h?.text ?? "").slice(0, 2000).trim() })),
       { role: "user", text: currentTurn },
@@ -613,40 +820,161 @@ Deno.serve(async (req: Request) => {
       else contents.push({ role: tn.role, parts: [{ text: tn.text }] });
     }
 
-    const genConfig = {
-      temperature: 0.3,
-      // Gemini 2.5 Flash is a "thinking" model — reasoning tokens count against maxOutputTokens. We
-      // don't need chain-of-thought for classification, so we disable thinking and give JSON headroom.
-      thinkingConfig: { thinkingBudget: 0 },
-      maxOutputTokens: 800,
-      responseMimeType: "application/json",
-      responseSchema: SCHEMA,
-    };
-    const models = [MODEL, FALLBACK_MODEL].filter((m, i, a) => a.indexOf(m) === i);
-    // Call Gemini with the given contents and return the parsed JSON object, or { __err } with a ready
-    // Response on failure. Flash can return 503 during spikes — retry once, then fall back to lite.
-    const runModel = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = ""): Promise<any> => {
-      const payload = JSON.stringify({ system_instruction: { parts: [{ text: SYSTEM + sysExtra }] }, contents: cts, generationConfig: genConfig });
-      let res: Response | null = null;
-      outer: for (const m of models) {
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const r = await fetch(urlFor(m), { method: "POST", headers, body: payload });
-          if (r.ok) { res = r; break outer; }
-          res = r;
-          if (![429, 500, 502, 503].includes(r.status)) break outer;
-          await r.body?.cancel().catch(() => {});
-          if (attempt === 0) await new Promise((rs) => setTimeout(rs, 500));
-        }
+    // Call DeepSeek with the given contents and return the parsed JSON object, or { __err } with a
+    // ready Response on failure. `contents` keeps the internal shape the code above already builds
+    // (role "user"/"model", parts[{text}]); we translate to OpenAI's messages[] here — role "model"
+    // becomes "assistant" (OpenAI has no "model" role), parts are joined with newlines.
+    // Retry once per 429/5xx (parity with the prior Gemini retry).
+    const runModel = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = "", seq = 1): Promise<any> => {
+      // ── FAIL-CLOSED SPEND GUARD ───────────────────────────────────────────────────────────────
+      // Owner ruling 2026-08-29: "quality can fail soft, spending must fail closed." A bug may
+      // degrade the AI temporarily; no bug may silently drain the balance.
+      //
+      // THIS IS THE CHOKE POINT. Every paid DeepSeek request in this function goes through the
+      // fetch below, so both guards sit here and nothing can route around them.
+      //
+      // 1. MODEL ALLOWLIST — refuse BEFORE spending. DEEPSEEK_MODEL is an env-set ALIAS: a config
+      //    change (ours or the provider's) could point it at a reasoning/pro tier costing 3x, and
+      //    the first evidence would be the bill. An unrecognised model is not a call we are willing
+      //    to pay for, so we do not make it. Deterministic, no false positives.
+      if (!ALLOWED_MODELS.includes(DEEPSEEK_MODEL)) {
+        recordHealth("model_not_allowlisted", 0, { requested_model: DEEPSEEK_MODEL, allowed: ALLOWED_MODELS });
+        return { __err: json({ error: "model not allowlisted", requested_model: DEEPSEEK_MODEL }, 503) };
       }
-      if (!res || !res.ok) { const detail = res ? await res.text() : "no response"; return { __err: json({ error: `gemini ${res?.status ?? 0}`, detail }, 502) }; }
+
+      // 2. SPEND CIRCUIT BREAKER — authoritative, server-side, atomic. ai_spend_gate() checks the
+      //    breaker AND the rolling hourly/daily call+USD ceilings in one statement, so two
+      //    concurrent workers cannot both squeeze past a ceiling.
+      //
+      //    A gate that cannot be reached DENIES. That is deliberate: an unreachable ceiling is an
+      //    unbounded one, and the product survives it — the client falls back to its deterministic
+      //    offline heuristic, and Normal Filter, Advanced Filter, pagination and sort never call the
+      //    model at all. The AI degrades; the balance does not drain.
+      const headers = { Authorization: `Bearer ${DEEPSEEK_API_KEY}`, "content-type": "application/json" };
+      const messages = [
+        // CACHE PREFIX INVARIANT — do not reorder. SYSTEM must be the FIRST content in the FIRST
+        // message and byte-identical every request, because DeepSeek's prefix cache is what makes an
+        // 18k-token prompt affordable: 99% hit costs ~$0.00025/message, and losing the prefix costs
+        // $8.14 per 1,000 messages instead of $0.48 — 17x, with no visible change to the product.
+        // Anything per-request (a timestamp, a user id, a counter) placed before or inside SYSTEM
+        // breaks every cache entry. Per-turn text belongs in sysExtra, AFTER SYSTEM.
+        // Pinned by scripts/verify-ai-spend-safety.ts.
+        { role: "system", content: SYSTEM + sysExtra + JSON_SHAPE_HINT },
+        ...cts.map((c) => ({ role: c.role === "model" ? "assistant" : "user", content: c.parts.map((p) => p.text).join("\n") })),
+      ];
+      const payload = JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages,
+        temperature: 0.3,
+        // A non-reasoning turn spends ~100–250 tokens; 1500 is generous headroom for a long Arabic
+        // reply (Arabic tokenizes heavier than English) without inviting a truncated JSON body.
+        // A truncation here is NOT recoverable — a half-written object fails JSON.parse and the whole
+        // turn 502s, so the ceiling must never be tight. See the MODEL CHOICE note at the top.
+        max_tokens: 1500,
+        // Guarantees the reply parses as JSON; does NOT constrain keys/values (see JSON_SHAPE_HINT).
+        response_format: { type: "json_object" },
+      });
+      let res: Response | null = null;
+      const t0 = Date.now();
+      for (let attempt = 0; attempt < 2; attempt++) {
+        // RE-CHECK PER ATTEMPT, not once per runModel. The retry below re-sends the identical ~18k
+        // prompt at full price, so it is a second paid call — and a ceiling can be crossed between
+        // attempt 0 and attempt 1 (that is exactly what a runaway looks like). Checking only at the
+        // top of runModel would let attempt 1 through after the budget was already gone.
+        const g = await spendGate(clientSource);
+        if (!g.allow) {
+          recordHealth("spend_gate_blocked", Date.now() - t0, { reason: g.reason, state: g.state, attempt });
+          return { __err: json({ error: "ai spend guard", reason: g.reason, state: g.state }, 503) };
+        }
+        const r = await fetch(DEEPSEEK_URL, { method: "POST", headers, body: payload });
+        if (r.ok) { res = r; break; }
+        res = r;
+        // COUNT THE FAILED ATTEMPT. It was transmitted and may well have been billed; without this
+        // row ai_usage undercounts precisely when calls are failing — and the circuit breaker counts
+        // rows, so an undercount weakens the breaker at the worst possible moment.
+        logUsage({
+          source: clientSource, requested_model: DEEPSEEK_MODEL, model: null, kind: null,
+          locale, call_seq: seq, attempt: attempt + 1, http_status: r.status,
+          finish_reason: `http_${r.status}`, history_turns: history.length, latency_ms: Date.now() - t0,
+        });
+        if (![429, 500, 502, 503].includes(r.status)) break;
+        await r.body?.cancel().catch(() => {});
+        if (attempt === 0) await new Promise((rs) => setTimeout(rs, 500));
+      }
+      if (!res || !res.ok) {
+        const detail = res ? await res.text() : "no response";
+        recordHealth("model_http_error", Date.now() - t0, { status: res?.status ?? 0 });
+        return { __err: json({ error: `deepseek ${res?.status ?? 0}`, detail }, 502) };
+      }
       const data = await res.json();
-      const raw = (data?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p?.text ?? "").join("").trim();
-      if (!raw) return { __err: json({ error: "empty model output" }, 502) };
-      try { return JSON.parse(raw); } catch { return { __err: json({ error: "unparseable model output", raw }, 502) }; }
+      const choice = data?.choices?.[0];
+      const raw = String(choice?.message?.content ?? "").trim();
+      // finish_reason "length" means the ceiling was hit — the single most likely cause of both the
+      // empty and the unparseable case, and invisible without this. Carry it (plus the reasoning-token
+      // count, which is what silently ate the budget in the 2026-08-28 incident) into the error so the
+      // cause is readable straight off the response instead of needing a diagnostic deploy.
+      const why = {
+        finish_reason: choice?.finish_reason ?? null,
+        completion_tokens: data?.usage?.completion_tokens ?? null,
+        reasoning_tokens: data?.usage?.completion_tokens_details?.reasoning_tokens ?? null,
+        model: data?.model ?? null,
+      };
+      // COST OBSERVABILITY (owner ruling 2026-08-29). DeepSeek returns the cache split on EVERY
+      // response and we were discarding it, so the cache hit rate — the single biggest lever on the
+      // bill, since a cache hit is ~10x cheaper — was unmeasurable. Every cost figure in the audit is
+      // an estimate as a direct result. One log line makes all of it measurable.
+      // Emitted for SUCCESS as well as failure; the errors above only carry `why`.
+      console.log(JSON.stringify({
+        evt: "deepseek_usage",
+        prompt_tokens: data?.usage?.prompt_tokens ?? null,
+        completion_tokens: data?.usage?.completion_tokens ?? null,
+        cache_hit_tokens: data?.usage?.prompt_cache_hit_tokens ?? null,
+        cache_miss_tokens: data?.usage?.prompt_cache_miss_tokens ?? null,
+        finish_reason: choice?.finish_reason ?? null,
+        model: data?.model ?? null,
+      }));
+      // The console line above is readable in the edge logs but Postgres cannot query it, so it
+      // cannot answer "what did last week cost" or drive a dashboard. This writes the same usage —
+      // plus the requested-vs-billed model, which decides the tier and therefore the whole bill —
+      // to public.ai_usage, where it is costed by public.ai_usage_costed.
+      const u = data?.usage ?? {};
+      logUsage({
+        source: clientSource,
+        attempt: 1,
+        requested_model: DEEPSEEK_MODEL,
+        model: data?.model ?? null,
+        kind: /"kind"\s*:\s*"(listings|message|interview)"/.exec(raw)?.[1] ?? null,
+        locale,
+        call_seq: seq,
+        prompt_tokens: u.prompt_tokens ?? null,
+        completion_tokens: u.completion_tokens ?? null,
+        reasoning_tokens: u.completion_tokens_details?.reasoning_tokens ?? null,
+        cache_hit_tokens: u.prompt_cache_hit_tokens ?? null,
+        cache_miss_tokens: u.prompt_cache_miss_tokens ?? null,
+        total_tokens: u.total_tokens ?? null,
+        finish_reason: choice?.finish_reason ?? null,
+        history_turns: history.length,
+        latency_ms: Date.now() - t0,
+      });
+      if (!raw) {
+        recordHealth("empty_output", Date.now() - t0, why);
+        return { __err: json({ error: "empty model output", ...why }, 502) };
+      }
+      try {
+        const parsed = JSON.parse(raw);
+        recordHealth("ok", Date.now() - t0, {
+          cache_hit_tokens: data?.usage?.prompt_cache_hit_tokens ?? null,
+          cache_miss_tokens: data?.usage?.prompt_cache_miss_tokens ?? null,
+        });
+        return parsed;
+      } catch {
+        recordHealth("unparseable", Date.now() - t0, why);
+        return { __err: json({ error: "unparseable model output", raw, ...why }, 502) };
+      }
     };
 
-    // Force the reply language via system_instruction (Gemini weights it far more than a turn line) —
-    // the model otherwise slips to Arabic when an English message contains one Arabic word (a city).
+    // Force the reply language via the system message (weighted far higher than a turn line) — the
+    // model otherwise slips to Arabic when an English message contains one Arabic word (a city).
     const langName = locale === "en" ? "English" : "Arabic";
     const langLine = `\n\nREPLY LANGUAGE FOR THIS TURN: ${langName} ONLY. The "reply" field MUST be written 100% in ${langName} — every single word, no exceptions, even if the user's message contains a word in the other language.`;
     // DB-driven behavior notes (editable in the agent_notes table, no redeploy) — appended last so
@@ -657,16 +985,23 @@ Deno.serve(async (req: Request) => {
       : "";
     let out: any = await runModel(contents, langLine + notesBlock);
     if (out?.__err) return out.__err;
-    if (!out?.kind) return json({ error: "no classification" }, 502);
+    if (!out?.kind) { recordHealth("no_classification", 0); return json({ error: "no classification" }, 502); }
 
     // DETERMINISTIC LANGUAGE GUARD: detectLang already chose the correct reply language. If the reply
     // still came back in the WRONG language, regenerate ONCE with an even harder override. (user-reported.)
     const wrong = locale === "en" ? "ar" : "en";
     if (out.reply && detectLang(String(out.reply)) === wrong) {
-      const retry: any = await runModel(contents, langLine + ` The previous attempt WRONGLY replied in ${wrong === "ar" ? "Arabic" : "English"} — do not repeat that mistake; output the reply ONLY in ${langName}.`);
+      // CORRECTNESS (cost audit 2026-08-29): this retry used to pass `langLine` ONLY, dropping
+      // notesBlock — so whenever the language guard fired, the reply actually shown to the user was
+      // generated WITHOUT the live behaviour notes the code itself labels "authoritative — override
+      // anything above on conflict". The retry must carry exactly the same authority as the first call.
+      const retry: any = await runModel(contents, langLine + notesBlock + ` The previous attempt WRONGLY replied in ${wrong === "ar" ? "Arabic" : "English"} — do not repeat that mistake; output the reply ONLY in ${langName}.`, 2);
       if (retry && !retry.__err && retry.kind && detectLang(String(retry.reply ?? "")) !== wrong) out = retry;
     }
 
+    // NEVER SHIP AN EMPTY REPLY. Found live 2026-08-29: «غرفتين» (a one-word answer continuing a
+    // search) produced a turn with no reply text at all — the user saw silence. A missing reply is a
+    // product failure regardless of why the model omitted it, so there is a deterministic floor.
     const lead = (s: string) => {
       let body = stripFiller(String(s ?? "").trim());
       // Belt-and-braces on the no-language-mixing rule: if we're replying in English, strip a leading
@@ -692,11 +1027,15 @@ Deno.serve(async (req: Request) => {
       // message — and it must keep its currency conversion. So if THIS message has no figure, scan the
       // user's previous turns (newest → oldest) and re-extract the most recent one (extractPrice does
       // the BHD/USD/… → SAR math). (user-reported: foreign-currency budget dropped across turns.)
+      // RULE 1 (owner 2026-08-29) needs to know WHICH turn stated a carried budget, because a
+      // budget keeps the period it was stated with — see effectiveBasis() in ./postModel.ts.
+      const priceCameFromCurrentTurn = !!detPrice;
+      let carriedFromText = "";
       if (!detPrice) {
         for (let i = history.length - 1; i >= 0; i--) {
           if (history[i]?.role === "model") continue; // only the user states a budget
           const p = extractPrice(String(history[i]?.text ?? ""));
-          if (p) { detPrice = p; break; }
+          if (p) { detPrice = p; carriedFromText = String(history[i]?.text ?? ""); break; }
         }
       }
       let modelPrice = String(out.price ?? "").replace(/[^\d]/g, "");
@@ -734,9 +1073,25 @@ Deno.serve(async (req: Request) => {
       // weekly ×52, monthly ×12, quarterly ×4) so the client filters on an annual budget.
       let price = detPrice || modelPrice;
       let priceIsAnnual = false;
-      if (deal === "Rent" && price && basis in rentMult) {
+      // RULE 1 — "change only the rental period, change only the rental period."
+      // A budget carried from an earlier turn keeps the period it was STATED with; a message that
+      // only flips the period must never re-scale it. Live C2 (2026-08-29): «٧٠ الف» stated as
+      // ANNUAL in turn 1, then «لا خلها شهري» in turn 2, produced price 840,000 — a 12× inflation
+      // the user never asked for. effectiveBasis() is the deterministic decision; see ./postModel.ts.
+      const budgetBasis = effectiveBasis({
+        currentText: text,
+        priceCameFromCurrentTurn,
+        carriedFromText,
+        modelBasis: basis,
+      });
+      if (deal === "Rent" && price && budgetBasis in rentMult) {
         const n = parseInt(price, 10);
-        if (isFinite(n)) { price = String(n * rentMult[basis]); priceIsAnnual = true; }
+        if (isFinite(n)) { price = String(n * rentMult[budgetBasis]); priceIsAnnual = true; }
+      } else if (deal === "Rent" && price && !priceCameFromCurrentTurn && basis in rentMult) {
+        // The carried budget was NOT re-scaled. It was stated as an annual figure (or with no period
+        // at all), and `price` is the annual-equivalent field, so mark it annual rather than leaving
+        // the client to apply its own default to a number that already means "per year".
+        priceIsAnnual = true;
       }
       // The user's ORIGINAL foreign-currency budget (e.g. "USD 100,000") — current message first, else
       // the most recent prior user turn that carried it — so the client can show both it and the SAR.
@@ -750,7 +1105,7 @@ Deno.serve(async (req: Request) => {
       }
       // Bug-fix #7 (audit `agent-no-postmodel-catalog-guard`): defensive post-model location guard.
       // Pass through the model's location verbatim — the client resolver validates against the full
-      // catalog (4,581 cities). NEVER force into a CITIES-list member; if Gemini outputs Arabic
+      // catalog (4,581 cities). NEVER force into a CITIES-list member; if the model outputs Arabic
       // (e.g. "ذبحة" for the unknown Eastern-Province city), let it through unchanged so the client
       // can match it exactly. Just normalize whitespace and reject objects/arrays sneaking through.
       const rawLoc = typeof out.location === "string" ? out.location : "";
@@ -771,6 +1126,11 @@ Deno.serve(async (req: Request) => {
         const cls = await locClassify(location);
         const ck = String(cls?.kind ?? "");
         const nm = String(cls?.name ?? location);
+        // RULE 3 (owner 2026-08-29) — no English location leak in an Arabic conversation.
+        // Live F2 returned "Jeddah" while every sibling turn returned «جدة». Swap in the catalog's
+        // OWN canonical Arabic label — never a transliteration, never a guess. No Arabic canonical
+        // available ⇒ the original passes through untouched, so unknown places are still searched.
+        location = arabicCanonicalLocation({ location, canonicalArabic: nm, locale });
         const lastModel = [...history].reverse().find((h) => h?.role === "model")?.text ?? "";
         // markers of a clarification WE generated on the previous turn → this turn answers it
         const alreadyAsked = /أكثر من منطقة|أكثر من مدينة|اسم مدينة واسم منطقة|ولا منطقة/.test(String(lastModel));
@@ -827,6 +1187,27 @@ Deno.serve(async (req: Request) => {
       // "Size: 500 m²" in the summary while the reply sentence never said 500 at all). Same fix pattern as
       // extractPrice() above: don't trust the model to be exhaustive, backstop it deterministically. The
       // bedroom-shape regex mirrors the client's own detail-is-bedrooms-vs-size check (src/data/search.ts).
+      // ── VAGUE SIZE MUST NEVER BECOME A BEDROOM COUNT (owner ruling 2026-08-29) ──────────────────
+      // LIVE BUG: «أبي بيت كبير» returned detail "5+". The model read "big" as five-plus bedrooms —
+      // a number the user never said, on a dimension they never mentioned. "Big" is an AREA intent,
+      // not a bedroom count, and we have no product-approved threshold for it.
+      //
+      // Deterministic, not a prompt plea: if `detail` is BEDROOM-SHAPED (1-4 or 5+) while the user's
+      // own message contains no digit and no bedroom word, the model invented it. Drop it and ask.
+      // A stated «٣ غرف» carries a digit, and «خمس غرف» carries the bedroom word, so both survive.
+      // A BEDROOM COUNT REQUIRES A BEDROOM WORD — a bare digit is not evidence (owner 2026-08-29).
+      // The first version accepted any digit anywhere, which is a hole a CONVERSATIONAL agent walks
+      // straight into: «عندي عائلة من ٤ أشخاص» carries the digit ٤ and it counts PEOPLE, not
+      // bedrooms; a budget («بميزانية ٥٠٠٠٠٠») is a digit too. Household size is useful CONTEXT for
+      // the next question, never a database predicate. «٣ غرف», «غرفتين» and «3 bedrooms» all carry
+      // the word and survive.
+      const saidBedroomWord = /(غرف|غرفة|غرفه|غرفتين|حجرة|bed\s?room|bedroom|\brooms?\b|\bbr\b|استوديو|استديو)/i.test(text);
+      const bedroomShaped = (v: string) => /^([1-4]|5\+?)$/.test(v);
+      if (typeof out.detail === "string" && bedroomShaped(out.detail.trim()) && !saidBedroomWord) {
+        out.detail = "";
+        if (!Array.isArray(out.ask_about)) out.ask_about = [];
+        if (!out.ask_about.includes("size")) out.ask_about.push("size");
+      }
       const detailStr = typeof out.detail === "string" ? out.detail.trim() : "";
       const isSizeDetail = detailStr !== "" && !/^([1-4]|5\+?)$/.test(detailStr);
       let replyOut = lead(out.reply);
@@ -834,9 +1215,20 @@ Deno.serve(async (req: Request) => {
         replyOut = locale === "en" ? `${replyOut} (${detailStr} m²)` : `${replyOut} (${detailStr} م²)`;
       }
 
+      // DO NOT SEARCH TOO EARLY (owner ruling 2026-08-29). A "listings" turn that carries NOTHING
+      // searchable — no location, no type, no budget, no detail, no amenities, no AF intent — is not
+      // a search, it is a shrug rendered as one. Ask instead. A type-only or city-only query is still
+      // a useful search and is deliberately allowed through; only the genuinely empty one is blocked.
+      const nothingToSearchOn =
+        !location && !(typeof out.type === "string" && out.type) && !price &&
+        !detailStr && !(Array.isArray(out.amenities) && out.amenities.length) &&
+        !(out.af && typeof out.af === "object" && Object.keys(out.af).length);
+      if (nothingToSearchOn) {
+        return json({ kind: "message", reply: oneQuestionOnly(groundReply(lead(out.reply), locale)) });
+      }
       return json({
         kind: "listings",
-        reply: replyOut,
+        reply: groundReply(replyOut, locale),
         query: {
           deal,
           bothDeals,
@@ -849,16 +1241,48 @@ Deno.serve(async (req: Request) => {
           detail: typeof out.detail === "string" && out.detail ? out.detail : null,
           price,
           priceOriginal: priceOriginal || undefined,
-          sort: typeof out.sort === "string" && out.sort && out.sort !== "none" ? out.sort : undefined,
+          // RULE 2 (owner 2026-08-29) — the reply must not promise an ordering the query does not
+          // apply. Live N1 replied «أرخص القصور» with sort unset. Fills an ABSENT sort only; an
+          // explicit model sort is never overridden. See ./postModel.ts.
+          sort: enforceSortMatchesReply(replyOut, typeof out.sort === "string" ? out.sort : undefined),
           count: (() => {
             const n = parseInt(String(out.count ?? "").replace(/[^\d]/g, ""), 10);
             return isFinite(n) && n >= 1 ? Math.min(n, 15) : undefined;
           })(),
           platforms: Array.isArray(out.platforms) ? out.platforms.filter((p: unknown) => typeof p === "string" && p) : [],
+          // AMENITIES (owner ruling 2026-08-29). The model PROPOSES tokens from the closed vocabulary
+          // in JSON_SHAPE_HINT; it does NOT decide whether they may be applied. Certification is
+          // per-cohort and lives in src/lib/afCohorts.ts (certifiedAmenityKeys), which the Advanced
+          // Filter chips already use — the client gates these through that SAME function so the chat
+          // can never acquire a filter the AF path would refuse. Deliberately NOT validated here:
+          // a second copy of the cohort table in the edge function is exactly how the two paths drift.
+          // Shape-only sanitising: strings, trimmed, lowercased, de-duplicated.
+          // FURNISHED (owner ruling 2026-08-29). NOT an amenity token — it maps to q.furnishedPref,
+          // which is TRI-STATE: true = confirmed furnished only, false = confirmed unfurnished only,
+          // null/undefined = no preference. Carried through raw; the CLIENT decides whether the
+          // cohort is certified to apply it, via the same cohortAllows(q,'furnished') the AF question
+          // uses. Certification is coverage-driven and it matters: monthly-rent apartments are 0.0%
+          // known for furnished (5 of 30,544), so applying it there would turn UNKNOWN into No and
+          // collapse the result set to almost nothing.
+          furnished: out.furnished === "yes" ? "yes" : out.furnished === "no" ? "no" : "none",
+          // ADVANCED-FILTER INTENTS (owner 2026-08-29). Carried through RAW and unvalidated on
+          // purpose: certification is per-cohort and lives in src/lib/afIntents.ts + afCohorts.ts,
+          // which the Advanced Filter itself uses. A copy of that table in here is precisely how the
+          // two surfaces drift. The model PROPOSES; the client DECIDES.
+          af: (out.af && typeof out.af === "object" && !Array.isArray(out.af)) ? out.af : {},
+          askAbout: Array.isArray(out.ask_about)
+            ? out.ask_about.filter((a: unknown) => typeof a === "string" && a).map((a: string) => a.trim().toLowerCase())
+            : [],
+          amenities: Array.isArray(out.amenities)
+            ? [...new Set(out.amenities
+                .filter((a: unknown) => typeof a === "string")
+                .map((a: string) => a.trim().toLowerCase())
+                .filter(Boolean))]
+            : [],
         },
       });
     }
-    return json({ kind: "message", reply: lead(out.reply) });
+    return json({ kind: "message", reply: oneQuestionOnly(groundReply(lead(out.reply), locale)) });
   } catch (e) {
     return json({ error: String(e?.message ?? e) }, 500);
   }

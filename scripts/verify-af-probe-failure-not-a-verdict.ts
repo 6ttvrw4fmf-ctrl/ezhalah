@@ -78,8 +78,14 @@ check('WIRING …and no AF count fetcher still collapses a timeout to null',
 check('WIRING a transport error is also "never learned", not "nothing"', /if \(error\) return PROBE_FAILED;/.test(remote));
 check('WIRING an EMPTY RESULT SET still means the source answered nothing (null)',
   /length\) return null;\s+\/\/ the source answered: nothing/.test(remote));
+// `unknownCount` here must be `null`, not `0` (owner rule 2026-08-28, R7.1.3). A probe that never
+// completed knows nothing about how many listings stated the field, so claiming 0 would be the same
+// fabricated fact this file exists to prevent, one field over. Tightened, not loosened: the shape
+// assertion is unchanged and the value is now pinned to the only honest one.
 check('WIRING guidedOptions marks a failed probe instead of reporting an empty scope',
-  /isProbeFailure\(counts\)\) return \{ options: \[\], unknownCount: 0, total: 0, probeFailed: true \}/.test(af));
+  /isProbeFailure\(counts\)\) return \{ options: \[\], unknownCount: null, total: 0, probeFailed: true \}/.test(af));
+check('WIRING …and a failed probe claims no unknown count either (null, never a fabricated 0)',
+  !/isProbeFailure\(counts\)\) return \{ options: \[\], unknownCount: 0/.test(af));
 check('WIRING the age question guards its own probe too', af.split('isProbeFailure(counts)').length - 1 >= 2);
 check('WIRING rankQuestions records whether any probe in the batch failed', /const anyProbeFailed = probes\.some/.test(af));
 check('WIRING …and carries it to its callers', /probeFailed', \{ value: anyProbeFailed/.test(af));

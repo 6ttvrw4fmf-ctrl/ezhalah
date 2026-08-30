@@ -5,13 +5,16 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppProvider } from '@/store';
+import { initObservability, reportError } from '@/lib/observability';
 import { LocaleProvider, useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
+import { ForceLightTheme, ThemeProvider, useTheme } from '@/theme/theme';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
 import { markAppSessionStarted } from '@/lib/appSession';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
+import SignInCard from '@/components/SignInCard';
 import GoogleOneTap from '@/components/GoogleOneTap';
 import IntroVideo from '@/components/IntroVideo';
 
@@ -19,15 +22,21 @@ import IntroVideo from '@/components/IntroVideo';
 // rejections or uncaught errors, so an async turn that escaped its handler failed silently. Log every
 // one once, so a silent wedge becomes a visible, debuggable signal (and a future Batch-0 telemetry
 // sink can forward it). Web-only registration (the primary surface); harmless no-op elsewhere.
+// Observability: initialize BEFORE the global handlers register so the very first thrown error
+// during module evaluation still goes to Sentry. Safe-by-default — a build with no DSN is a
+// no-op, so this line is harmless in every dev/preview/PR environment (owner 2026-08-26).
+initObservability();
 if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis as any).__ezhalahGlobalHandlers) {
   (globalThis as any).__ezhalahGlobalHandlers = true;
   globalThis.addEventListener?.('unhandledrejection', (ev: any) => {
     // eslint-disable-next-line no-console
     console.error('[ezhalah] unhandled promise rejection:', ev?.reason);
+    reportError(ev?.reason ?? new Error('unhandledrejection'), { source: 'unhandledrejection' });
   });
   globalThis.addEventListener?.('error', (ev: any) => {
     // eslint-disable-next-line no-console
     console.error('[ezhalah] uncaught error:', ev?.error || ev?.message);
+    reportError(ev?.error ?? new Error(String(ev?.message ?? 'uncaught')), { source: 'window.error' });
   });
 }
 
@@ -39,8 +48,15 @@ if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis a
 function Shell() {
   const docked = useDocked();
   const { isRTL } = useI18n();
+  // APPEARANCE (owner 2026-08-28): the status bar follows the resolved theme. Screen content is
+  // converted per-surface (Sidebar + account menu in this pass); the Stack's contentStyle stays the
+  // light paper until each screen's inks are converted — flipping it first would break readability.
+  const { resolved } = useTheme();
   const pathname = usePathname();
   const router = useRouter();
+  // The AUTO-SHOWING centered popup (owner 2026-08-28) was RETIRED by the owner's 2026-08-29
+  // revision: the unprompted invitation is now the small draggable SignInCard mounted below, and
+  // the centered AuthModal opens ONLY on explicit sign-in controls via openAuth().
   // On the web, a hard refresh reloads whatever deep route the user was on (e.g. /agent, /settings) —
   // and for screens whose flow state lives in memory only, that screen would come back empty, so the
   // refresh is sent back to Home instead. Runs once on mount; client-side navigation afterwards is
@@ -67,8 +83,15 @@ function Shell() {
   }, []);
   return (
     <View style={{ flex: 1, flexDirection: isRTL ? 'row-reverse' : 'row' }}>
-      {/* /auth is a focused full-screen moment — no docked sidebar there. */}
-      {docked && pathname !== '/auth' && <Sidebar docked onClose={() => {}} />}
+      <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
+      {/* /auth is a focused full-screen moment — no docked sidebar there. On /agent the docked
+          sidebar joins the screen's light pin (owner 2026-08-29: the whole Agent experience —
+          sidebar included — keeps the white design even when the app appearance is dark). */}
+      {docked && pathname !== '/auth' && (
+        pathname === '/agent'
+          ? <ForceLightTheme container="bare"><Sidebar docked onClose={() => {}} /></ForceLightTheme>
+          : <Sidebar docked onClose={() => {}} />
+      )}
       {/* One-click Google sign-in prompt (web, signed-out only) — renders its own corner UI. */}
       <GoogleOneTap />
       <View style={{ flex: 1 }}>
@@ -82,7 +105,8 @@ function Shell() {
           <Stack.Screen name="index" options={{ animation: 'fade' }} />
           <Stack.Screen name="agent" options={{ animation: 'none' }} />
           <Stack.Screen name="interview" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
-          <Stack.Screen name="settings" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
+          {/* The /settings route is GONE (owner 2026-08-28): account controls open as a compact
+              panel anchored to the sidebar's profile row — see components/AccountMenu.tsx. */}
           <Stack.Screen name="about" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
           <Stack.Screen name="support" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
           {/* Auth opens with a soft fade (not the abrupt slide-up-with-X) — the screen's own content
@@ -91,10 +115,17 @@ function Shell() {
           <Stack.Screen name="browser" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         </Stack>
       </View>
+      {/* The small draggable sign-in card (owner 2026-08-29) — the UNPROMPTED invitation for
+          signed-out desktop-web visitors on Filter/Agent, in the retired dock's side slot.
+          Mounted AFTER the Stack deliberately: the card contains a phone <input>, and index-based
+          input targeting (tests, autofill heuristics) must keep finding the screens' own inputs
+          first. Visual layering is zIndex, not DOM order. */}
+      <SignInCard />
       {/* Support / About Us popups — rendered at the root so they overlay every screen. */}
       <InfoModal />
       {/* Sign-in popup — rendered at the root, same reason: a true overlay on top of whatever screen
-          is active (owner 2026-08-15), never a route the user navigates to. */}
+          is active (owner 2026-08-15), never a route the user navigates to. Since the 2026-08-29
+          revision it opens ONLY via explicit sign-in controls (openAuth) — it never auto-raises. */}
       <AuthModal />
       {/* First-run cinematic intro — overlays everything; shows once for new logged-out visitors. */}
       <IntroVideo />
@@ -106,12 +137,13 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
+        <ThemeProvider>
         <LocaleProvider>
         <AppProvider>
-          <StatusBar style="dark" />
           <Shell />
         </AppProvider>
         </LocaleProvider>
+        </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

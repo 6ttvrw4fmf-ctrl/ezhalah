@@ -197,8 +197,10 @@ check('ONE shared row template — no separate single/multi bodies',
   /function OptionRow/.test(cardSrc) && !/MultiChips/.test(cardSrc));
 
 // ── Same footer / skip / count / progress for EVERY question (rendered once, mode-independent) ───
-check('footer Continue-{N} primary + Skip + Skip-all render for every question',
-  /Continue · \{count\} results/.test(cardSrc) && /onSkip\b/.test(cardSrc) && /onSkipAll\b/.test(cardSrc) && /primaryBtn/.test(cardSrc));
+// CONTRACT CHANGE (owner 2026-08-28): the in-question «عرض النتائج» early-exit (onSkipAll) is GONE
+// — the footer is متابعة / تخطي / رجوع only, as real buttons (verify-af-footer-buttons.ts).
+check('footer Continue-{N} primary + Skip render for every question (and NO onSkipAll)',
+  /Continue · \{count\} results/.test(cardSrc) && /onSkip\b/.test(cardSrc) && !/onSkipAll\b/.test(cardSrc) && /primaryBtn/.test(cardSrc));
 check('a live count pill renders on EVERY option row (both modes)',
   /countPill/.test(cardSrc) && /grouped\(option\.count\)/.test(cardSrc));
 check('progress is animated and shared',
@@ -219,13 +221,13 @@ check('double tap on the same option confirms, via the SAME onPress path (no riv
   !/onDoubleClick|onLongPress|doubleTapHandler/.test(cardSrc));
 check('«رجوع» renders on the question card and rides onBack',
   /testID="af-back"/.test(cardSrc) && /onPress=\{onBack\}/.test(cardSrc) && /t\('Back'\)/.test(cardSrc));
-// CONTRACT CHANGE (owner 2026-08-16, conversational refresh): the always-available escape is a calm
-// «عرض النتائج» link — «The user must always be able to go straight to the properties … never feel
-// trapped in the interview.» No question-count arithmetic in the link anymore.
-// Since 2026-08-22 the escape carries the VISIBLE selection with it — leaving must not land the
-// user on a different count than the chip beside the link was just promising.
-check('the always-available escape link reads «عرض النتائج» and rides onSkipAll with the selection',
-  /onPress=\{\(\) => onSkipAll\(sel\)\}/.test(cardSrc) && /skipAllTxt/.test(cardSrc));
+// CONTRACT CHANGE (owner 2026-08-28, reversing 2026-08-16's escape-link rule): the in-question
+// «عرض النتائج» escape is REMOVED. "Never feel trapped" is now served by ✕ (abandon, always in the
+// title bar) and رجوع from question 1 (cancel the round); the intro card keeps its own decline
+// link. The 2026-08-22 commit-the-visible-selection hazard is gone WITH the control — there is no
+// early exit left that could discard a visible answer.
+check('the in-question «عرض النتائج» escape stays removed (no onSkipAll, no skipAllTxt)',
+  !/onSkipAll/.test(cardSrc) && !/skipAllTxt/.test(cardSrc) && !/testID="af-skip-all"/.test(cardSrc));
 // The primary commits via «متابعة · N نتيجة» with the LIVE count (owner 2026-08-16 §4) — for
 // SINGLE and MULTI alike since 2026-08-23, because the button advances one question in both cases
 // and the arity-branched «عرض N نتيجة» promised results it never delivered. Pinned in detail by
@@ -233,8 +235,13 @@ check('the always-available escape link reads «عرض النتائج» and ride
 check('the primary reads Continue · {count} results with the live count, for every arity',
   /Continue · \{count\} results/.test(cardSrc));
 // §11: one tiny plain-language availability line; the technical unknown-count phrasing is gone.
+// COPY CHANGE (owner 2026-08-29): TWO quiet lines now — (1) a listing not mentioning a detail is
+// never a «no» (unknown-data protection), (2) options/counts belong to the CURRENT result set and
+// follow the narrowing. Still natural language, still no database/unknown-count phrasing, and the
+// copy is NOT an excuse for a wrong number — the count-honesty barriers keep owning that.
 check('availability is explained naturally (no database language, no unknown-count phrasing)',
-  /Options reflect the information available for the current listings/.test(cardSrc)
+  /Some listings do not mention this detail, so the options reflect what the listings actually state/.test(cardSrc)
+  && /Options and counts are based on your current search results and update as you narrow down/.test(cardSrc)
   && !/Age unknown for \{count\}/.test(cardSrc));
 // §2: the opening state is its own calm card — count, invitation, soft supporting line, opt-in
 // begin + «عرض النتائج» — and it lives in the SAME shell as the questions (one visual language).

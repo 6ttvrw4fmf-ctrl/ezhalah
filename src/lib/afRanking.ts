@@ -9,7 +9,12 @@
 // directly except that re-export and this module's own barrier.
 
 export type AdvancedOption = { key: string; label: string; count: number };
-export type AdvancedQuestionResult = { options: AdvancedOption[]; unknownCount: number; total: number;
+export type AdvancedQuestionResult = { options: AdvancedOption[];
+  /** How many listings in scope whose SOURCE did not state this field — or `null` when no truthful
+   *  single unknown count exists for the question (owner rule 2026-08-28, R7.1.3). `null` is not a
+   *  zero: the card shows no caption at all rather than claiming "0 did not mention", which would be
+   *  a fabricated fact. See the guidedOptions() header in src/data/advancedFilters.ts. */
+  unknownCount: number | null; total: number;
   /** TRUE when this question's probe never completed: UNKNOWN, never "nothing useful here".
    *  Without it a 4s timeout returned the byte-identical value to an empty scope and AF silently
    *  declined to open — see src/lib/afProbe.ts for the full chain. */

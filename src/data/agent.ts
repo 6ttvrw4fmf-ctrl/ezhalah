@@ -12,6 +12,9 @@ import { parseProximity, proximityKeywords, type ProximityIntent } from './proxi
 import { type Category } from './taxonomy';
 import { t, getLocale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
+import { partitionRequestedAmenities, cohortAllows } from '@/lib/afCohorts';
+import { applyAfIntents } from '@/lib/afIntents';
+import { mergeConversationState, rescuedFields, describeKnownState } from '@/lib/conversationState';
 import { landmarkHint, ensureLandmarks } from './landmarks';
 import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 
@@ -216,7 +219,29 @@ type BackendQuery = {
   platforms?: string[]; // platform display names the user restricted to (carried across turns by the model)
   regionPin?: string;   // region_ar the edge catalog backstop pinned for a TWIN city (القصب → منطقة الرياض)
   districtPin?: string; // «حي …» the edge pinned for a TWIN district resolved to one city (حي الروضة → جدة)
+  amenities?: string[]; // amenity tokens the model READ OUT of the user's sentence — proposals only,
+                        // certified per-cohort below before any of them can reach q.amenities
+  furnished?: string;   // 'yes' | 'no' | 'none' — a PROPOSAL. NOT an amenity: it maps to the tri-state
+                        // q.furnishedPref, and only where the cohort certifies the furnished question.
+  af?: Record<string, unknown>; // Advanced-Filter intents the model READ OUT of the sentence, keyed by
+                        // canonical AF question id. Proposals only — applyAfIntents() runs each through
+                        // cohortAllows() before any of them can touch the query.
+  askAbout?: string[];  // things the user expressed VAGUELY ('size', 'rating') that must be ASKED, never
+                        // turned into a number. Surfaced on lastVagueIntents for the reply layer.
 };
+
+/**
+ * Vague intents the user expressed that we refuse to quantify («كبير» with no area, «تقييم عالي» with
+ * no number). Owner rule: understanding a word is not permission to invent a value — ask instead.
+ */
+export let lastVagueIntents: string[] = [];
+
+/**
+ * Amenity tokens the model proposed that this scope does NOT certify. Surfaced (not swallowed) so the
+ * chat can ASK rather than answer a narrower question than the user asked. Owner rule 2026-08-29:
+ * "if an amenity is not certified for that cohort, use the clarification path instead of guessing."
+ */
+export let lastRejectedFilters: string[] = [];
 
 // AREA NICKNAMES → known district lists. The engine filters by district when these are present, so
 // "north Riyadh" actually returns listings IN northern Riyadh districts (not just any Riyadh result).
@@ -410,8 +435,53 @@ function cityFromText(text: string): string | null {
   return null;
 }
 
-function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts?: string[]): SearchQuery {
-  const q = emptyQuery();
+// EXPORTED so barriers can execute the REAL function instead of a copy of it. Behaviour-neutral —
+// the only in-app caller is respond() below. (Repo rule: never test a stale verbatim copy; a copy
+// passes while production breaks.)
+/**
+ * The DEFAULTED_FIELDS this turn's backend payload actually stated. The edge omits a field it did
+ * not understand from the user's words, so presence here means "the user said it", while absence
+ * means "not mentioned" — which is exactly the distinction mergeConversationState needs and cannot
+ * make from the value alone.
+ */
+/**
+ * Re-run AF certification against the MERGED state.
+ *
+ * WHY THIS IS SEPARATE FROM the pass inside queryFromBackend. cohortAllows() reads type, category,
+ * deal and rentPeriod — and queryFromBackend only knows what THIS turn's model output carried. On a
+ * follow-up the model is explicitly told not to restate what is already established, so a turn that
+ * says only «خلي تقييمها ٩.٥» can arrive with no type at all; scopeCleanTypes() then returns [] and
+ * cohortAllows() rejects EVERY intent the user just stated. The conversation's accumulated context
+ * only exists after mergeConversationState, so certification has to happen again here, where the
+ * cohort is actually known.
+ *
+ * Safe to run twice: every AF intent applies through Math.max / Set-union, so re-applying an
+ * already-applied value is a no-op. Certification is still the ONLY gate — this widens the CONTEXT
+ * the gate sees, never the gate itself.
+ */
+function certifyAfOnMergedState(merged: SearchQuery, b: BackendQuery): SearchQuery {
+  const af = (b as { af?: unknown }).af;
+  if (!af || typeof af !== 'object') return merged;
+  const res = applyAfIntents(merged, af as Record<string, unknown>);
+  lastRejectedFilters = lastRejectedFilters.filter((f) => !res.rejected.includes(f));
+  lastRejectedFilters.push(...res.rejected);
+  return res.q;
+}
+
+export function statedKeys(b: BackendQuery): string[] {
+  const said: string[] = [];
+  if (b.deal === 'Buy' || b.deal === 'Rent') said.push('deal');
+  if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual' || b.rentPeriod === 'both') said.push('rentPeriod');
+  if (b.bothDeals === true) said.push('bothDeals', 'deal');
+  if (b.priceIsAnnual === true) said.push('priceIsAnnual');
+  // category is never sent by the edge; it is DERIVED from the type, so it is stated exactly when a
+  // type was stated.
+  if (typeof b.type === 'string' && b.type.trim()) said.push('category');
+  return said;
+}
+
+export function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts?: string[]): SearchQuery {
+  let q = emptyQuery();
   q.deal = b.deal === 'Buy' ? 'Buy' : 'Rent';
   if (b.bothDeals === true) q.bothDeals = true; // agent searched without knowing rent/buy → show both
   if (b.priceIsAnnual === true) q.priceIsAnnual = true; // agent annualized a daily/weekly/monthly rent
@@ -531,6 +601,62 @@ function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts
   }
   const kw = Array.from(new Set([...extractNearbyKeywords(userText), ...proximityKeywords(prox)]));
   if (kw.length) q.keywords = kw;
+
+  // ── AMENITIES: ONE SHARED CERTIFICATION GATE (owner ruling 2026-08-29) ──────────────────────────
+  // The AI chat may map amenities straight out of the user's sentence («فيها مصعد وموقف») without the
+  // user walking the Advanced Filter flow first — but only through the SAME per-cohort certification
+  // the AF chips obey. certifiedAmenityKeys() in @/lib/afCohorts is that single gate; the edge
+  // function deliberately does not validate these, because a second copy of the cohort table is
+  // exactly how the two paths drift.
+  //
+  // Placed LAST on purpose: certification depends on q.type / q.category / q.deal / q.rentPeriod, and
+  // every one of those is only final at this point (applySourceFilter can still flip rentPeriod for
+  // Gathern). Gating earlier would certify against a scope the search never runs.
+  //
+  // Uncertified ⇒ NOT applied and NOT silently dropped. Applying it would filter on semantics this
+  // cohort never certified — that is UNKNOWN quietly becoming No. It is recorded for the clarification
+  // path instead. AND semantics are the RPC's existing p_amenities behaviour: a listing must carry
+  // EVERY token, so nothing here can ever widen the result set.
+  lastRejectedFilters = [];
+  if (Array.isArray(b.amenities) && b.amenities.length) {
+    const { certified, rejected } = partitionRequestedAmenities(q, b.amenities);
+    if (certified.length) q.amenities = [...new Set([...(q.amenities ?? []), ...certified])];
+    lastRejectedFilters.push(...rejected);
+  }
+
+  // ── FURNISHED: SAME GATE, DIFFERENT FIELD (owner ruling 2026-08-29) ─────────────────────────────
+  // furnished is NOT an amenity. It maps to q.furnishedPref, which is TRI-STATE — true = confirmed
+  // furnished only, false = confirmed unfurnished only, null/undefined = no preference — and it is
+  // gated by cohortAllows(q, 'furnished'), the exact predicate the AF furnished question uses. No
+  // second certification system: this is that one.
+  //
+  // WHY THE GATE IS NOT A FORMALITY. Certification is coverage-driven. Annual-rent apartments are
+  // 46.4% known for furnished; MONTHLY-rent apartments are 0.0% (5 rows of 30,544). Applying
+  // furnishedPref there would turn UNKNOWN into No and collapse 30,544 listings to 4 — the exact
+  // failure the UNKNOWN-stays-UNKNOWN rule exists to prevent. So an uncertified cohort does not
+  // silently apply it; it goes to the clarification path with the rejected amenities.
+  if (b.furnished === 'yes' || b.furnished === 'no') {
+    if (cohortAllows(q, 'furnished')) q.furnishedPref = b.furnished === 'yes';
+    else lastRejectedFilters.push('furnished');
+  }
+
+  // ── ADVANCED FILTER, FROM THE FIRST MESSAGE (owner ruling 2026-08-29) ───────────────────────────
+  // One registry-driven loop over the canonical AF question ids — property_age, street_width,
+  // direction, bathrooms, rating, rnpl, unit_subtype — each gated by cohortAllows(q, id), the exact
+  // predicate its AF question uses. No AI-only filter system, no second vocabulary, no per-field
+  // branch to forget: verify-agent-af-intent-coverage.ts fails the build if a certified AF question
+  // has no registry entry, so the two surfaces cannot silently drift apart.
+  //
+  // Runs here, at the end, for the same reason furnished does: certification depends on
+  // type/category/deal/rentPeriod and applySourceFilter can still change rentPeriod.
+  if (b.af && typeof b.af === 'object') {
+    const res = applyAfIntents(q, b.af as Record<string, unknown>);
+    q = res.q;
+    lastRejectedFilters.push(...res.rejected);
+  }
+
+  // Vague intents are never quantified. They are carried so the reply can ask one short question.
+  lastVagueIntents = Array.isArray(b.askAbout) ? [...new Set(b.askAbout)] : [];
   return q;
 }
 
@@ -541,7 +667,7 @@ export type AgentHistoryTurn = { role: 'user' | 'model'; text: string };
 
 async function callAgentBackend(
   text: string,
-  ctx: { loggedIn: boolean; order: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[] },
+  ctx: { loggedIn: boolean; order: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[]; prevQuery?: SearchQuery | null },
 ): Promise<AgentTurn | null> {
   if (!supabase) return null;
   try {
@@ -564,6 +690,12 @@ async function callAgentBackend(
           order: ctx.order,
           history: ctx.history ?? [],
           landmarkHint: lmHint || undefined,
+          // WHAT THE CONVERSATION ALREADY ESTABLISHED (owner ruling 2026-08-29). Until now the model
+          // received only raw text and history, so it had to re-derive every field from prose each
+          // turn and could not tell what it already knew — which is how it asks a question whose
+          // answer is already in the search state. A MIRROR of state, never a source: the model may
+          // not edit it, it exists so the model can stop asking.
+          knownState: describeKnownState(ctx.prevQuery) || undefined,
         },
       }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('agent-timeout')), 20000)),
@@ -575,7 +707,25 @@ async function callAgentBackend(
       return {
         kind: 'listings',
         reply: String(d.reply ?? ''),
-        query: queryFromBackend(d.query ?? {}, text, ctx.attemptTexts ?? [text]),
+        // CLARIFICATION MUST NOT RESET THE CONVERSATION (owner-reported bug 2026-08-29).
+        // queryFromBackend builds a FRESH query from this turn's model output, so anything the model
+        // does not re-state would vanish — «شهرية» silently became RentAnnual and a 9.5 rating
+        // disappeared after one more clarifying question. The accumulated state fills the gaps; an
+        // explicit change in THIS turn always wins.
+        // A DEFAULT IS NOT AN ANSWER. emptyQuery() supplies deal:'Rent', rentPeriod:'annual',
+        // category:'Residential' — all non-empty, so the merge could not tell "the user said annual"
+        // from "nobody mentioned a period this turn". A follow-up that did not restate the period
+        // therefore flipped an established MONTHLY search to ANNUAL while carrying its
+        // monthly-only ratingMin along, producing a query that matches almost nothing.
+        // So we tell the merge exactly what this turn stated.
+        query: certifyAfOnMergedState(
+          mergeConversationState(
+            ctx.prevQuery ?? null,
+            queryFromBackend(d.query ?? {}, text, ctx.attemptTexts ?? [text]),
+            statedKeys(d.query ?? {}),
+          ),
+          d.query ?? {},
+        ),
       };
     }
     if (d.kind === 'message') return { kind: 'message', reply: String(d.reply ?? '') };
@@ -802,7 +952,7 @@ function maybeForcePlatformSearch(turn: AgentTurn, text: string): AgentTurn {
 // listings right away. A LOGGED-IN user gets a full conversational assistant — listings appear ONLY
 // when they give a direct search order ("I want…/show me…/أريد…"); otherwise Ezhalah just helps,
 // neutrally, like a normal assistant and invites them to say "show me" when ready.
-export async function respond(text: string, opts?: { loggedIn?: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[] }): Promise<AgentTurn> {
+export async function respond(text: string, opts?: { loggedIn?: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[]; prevQuery?: SearchQuery | null }): Promise<AgentTurn> {
   const v = text.trim();
   const loggedIn = !!opts?.loggedIn;
   if (!v) return { kind: 'message', reply: t("Tell me what you're looking for and I'll search for it.") };
@@ -823,7 +973,7 @@ export async function respond(text: string, opts?: { loggedIn?: boolean; history
   // Real LLM agent (Gemini edge function). It handles Arabic natively, applies the non-advisory
   // rules, and now also the auth-aware behavior (we pass loggedIn + order). If it's unavailable for
   // any reason, fall through to the bundled heuristic below so the app never hard-fails.
-  const backend = await callAgentBackend(v, { loggedIn, order, history: opts?.history, attemptTexts: opts?.attemptTexts });
+  const backend = await callAgentBackend(v, { loggedIn, order, history: opts?.history, attemptTexts: opts?.attemptTexts, prevQuery: opts?.prevQuery ?? null });
   if (backend) {
     // Named-platform filter safety net: if the user said "Aqar only" / "Gathern فقط" but the model
     // deflected, force the search. When we override, the reply is already final — return as-is.

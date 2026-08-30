@@ -14,8 +14,8 @@
 | 3 | 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) | `trig_01Tr6Rb6XPggFXqCf3EKG62y` | 05:00 | 12:00 | claude-opus-5 | Full scraped inventory / Normal Filter ONLY, **Advanced Filter explicitly out of scope (belongs to routine #5)** |
 | 4 | 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA | `trig_016eagxsMuB2cCbMe9DK7JJD` | 05:30 | 12:30 | claude-opus-5 | Live production Normal Filter USED AS A REAL USER: matching → diversity → «عرض المزيد» → card click-through, end to end |
 | 5 | 🎯 Senior Advanced Filter + Trending Data Integrity Engineer | `trig_01FmaKmMVJgT5VHFj8Mk9q13` | 04:00 | 11:00 | claude-opus-5 | Advanced Filter + Trending Cities/Districts + the data integrity behind every AF predicate, end to end |
-| 6 | 👣 Daily Journey & Persistence Engineer | *(pending — owner creates in routines UI)* | 03:00 | 10:00 | claude-opus-5 | Real-user journeys: state, navigation, sessions, sidebar/history/Favorites, cross-browser/device — never search matching itself |
-| 7 | 🧵 Daily Systems Seam Engineer | *(pending — owner creates in routines UI)* | 03:30 | 10:30 | claude-opus-5 | Cross-system integration integrity: cron→detector→alert, migration→mirror→prod, deploy-claim-vs-served-bundle, RLS, orphaned guarantees |
+| 6 | 👣 Daily Journey & Persistence Engineer | `trig_011mQL1FvMQiS8bwx2fp76QN` | 03:00 | 10:00 | claude-opus-5 | Real-user journeys: state, navigation, sessions, sidebar/history/Favorites, cross-browser/device — never search matching itself |
+| 7 | 🧵 Daily Systems Seam Engineer | `trig_01T5yuLGCj3yDqPDsVrPjNmd` | 03:30 | 10:30 | claude-opus-5 | Cross-system integration integrity: cron→detector→alert, migration→mirror→prod, deploy-claim-vs-served-bundle, RLS, orphaned guarantees |
 
 **Schedule note (2026-08-23):** routine #5 runs at the SAME 04:00 Arizona slot as routine #1
 (owner's explicit instruction), not staggered 30 minutes like #1–#4 are from each other. It does
@@ -71,6 +71,138 @@ schedule change is always an owner action, with this file recording the intended
 The 11:00–12:30 UTC block also sits clear of the heavy daily pipeline window (~03:00–07:00 UTC:
 scrapers 04:22/04:40, aqarmonthly 06:00, `sync-rich-attrs-wasalt` 06:47, the AF barriers 06:52), so
 each engineer audits settled data with that morning's detectors already run.
+
+## §S — SENTRY (mandatory every run, owner rule 2026-08-28) — applies to ALL SEVEN routines
+On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
+whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
+cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
+a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
+contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
+RUN: N` in your FINAL REPORT.
+
+If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
+owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
+Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
+doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
+
+## §G — GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds ALL SEVEN routines
+
+> Owner rule, 2026-08-29. This section binds **all seven** routines: ⚡ Junior Scraping (#1),
+> 🎖️ Senior Production (#2), 🛡️ Data Integrity (#3), 🧪 Search & Matching QA (#4), 🎯 AF + Trending
+> (#5), 👣 Journey & Persistence (#6), 🧵 Systems Seam (#7). Each live routine prompt carries a
+> condensed copy so a run that never opens this file still obeys — but **this file is the canonical
+> home and wins on any divergence**, the same rule every per-routine spec already states. Nothing
+> here replaces a routine's own spec; where a spec is stricter, the spec governs.
+
+### §G.1 — FIX FIRST, REPORT LAST
+
+Every routine follows one chain:
+
+```
+INVESTIGATE → REPRODUCE → ROOT CAUSE → FIX → REGRESSION → PERMANENT BARRIER → MUTATION-PROVE
+  → RELEVANT/FULL TESTS → MERGE → DEPLOY/APPLY IF ROLE-AUTHORIZED → PRODUCTION VERIFY → REPORT
+```
+
+**Finding a bug is NOT completion.** A safe, obvious, in-scope defect is fixed in the SAME run —
+never handed back to the owner as homework.
+
+### §G.2 — THE ONLY LEGITIMATE REASONS TO STOP WITHOUT FIXING (exactly six)
+
+- (a) destructive/high-risk operation requiring owner approval;
+- (b) genuine product / source-truth / taxonomy ambiguity;
+- (c) the fix would weaken a safety or security gate;
+- (d) another routine currently owns that protected surface;
+- (e) a role/permission boundary physically prevents this routine from writing or deploying;
+- (f) an external dependency/source outage where no truthful fix exists.
+
+**Nothing else qualifies.** "I ran out of time", "it seemed out of scope", "someone should look at
+this" do not. Widening this list is an OWNER decision, not an edit — and it is deliberately a list
+of six specific engineering judgments, never a general licence to escalate on a feeling of
+uncertainty.
+
+### §G.3 — AUTOMATIC CROSS-ROUTINE HANDOFF
+
+If (d) or (e) applies, **ROUTE** the defect to the write-authorized owner using the existing
+ownership system — file it in that routine's queue/coverage trail with reproduction and root cause,
+and name the owner in your report. **Never merely state that someone should fix it.**
+Senior/write-authorized routines remain responsible for what lower-permission routines cannot do.
+Respect single-writer locks (`ops_deploy_lock`) and never create cross-session collisions. The
+ownership tables already exist: §S and `docs/ops/SENTRY_ROUTING.md` for Sentry issues,
+`docs/ops/ALERT_ROUTING.md` for `[alert]` issues, and the Boundary rules below for surfaces.
+
+### §G.4 — ADAPTIVE EFFORT
+
+- **Clean surface** ⇒ normal verification, **SHORT report**, invent no work.
+- **Several genuine defects** ⇒ stay in the run and work through them systematically: P0/P1 and
+  correctness first, fix as many safe in-scope defects as possible, **do not stop after the first
+  few**.
+- **A defect exposing an architectural weakness** ⇒ fix the underlying **CLASS** and barrier it, not
+  just the one example.
+- Re-run the affected surface after fixing: **a red test turning green is not sufficient** —
+  production behavior must match wherever production verification applies.
+
+### §G.5 — THE REAL 10/10 STANDARD
+
+Keep fixing safe in-scope known defects until no actionable defect remains; only then report 10/10.
+**NEVER manufacture a 10/10.** A report of 9.2/10 listing five defects this routine had the
+permission and ability to fix is a **FAILED run**. If a true blocker remains, report
+`10/10 ACHIEVED: NO` with the exact blocker and its owner, citing which of §G.2's six categories
+applies.
+
+### §G.6 — SENTRY IS MANDATORY AND FIRST
+
+At the START of every run, read the unresolved/reopened Sentry issues in your ownership area (org
+`ezhalah`, project `react-native`). This is the same duty §S already carries and does not replace
+it — §S and `docs/ops/SENTRY_ROUTING.md` still govern **which** issues are yours and the
+claim-before-you-fix protocol. Sentry findings enter the SAME pipeline:
+
+```
+SENTRY ISSUE → CLAIM → REPRODUCE → ROOT CAUSE → FIX → BARRIER/MUTATION → TEST → MERGE
+  → DEPLOY → PRODUCTION VERIFY → RESOLVE
+```
+
+- **Do NOT resolve a Sentry issue because code merged — resolve ONLY after the production fix is
+  verified.**
+- A **REOPENED** issue is evidence the previous fix was incomplete: treat it as such and find what
+  the earlier fix missed.
+- Sentry does **NOT** replace deterministic QA — silent wrong-data, matching, AF, scraper, database,
+  UX, cron, deploy and persistence defects still need their normal checks.
+- **Prove the connection with a real read each run; a configured connector is not a working one.**
+  If the Sentry read fails, say so plainly in the report (`SENTRY CONNECTION WORKING: NO`) rather
+  than silently skipping it.
+
+### §G.7 — NOTHING ABOVE WEAKENS ANY EXISTING GUARD
+
+Source-truth rules, migration/deploy protections, cost protections, single-writer ownership, the
+deploy lock, the production-target lock, kill caps and coverage floors all remain in full force.
+**A gate that blocks you has found a real problem — never route around it to reach 10/10.**
+
+### §G.8 — THE REPORT IS SHORT AND ENDS WITH THIS BLOCK
+
+```
+BUGS FOUND: X
+BUGS FIXED: X
+BUGS REMAINING: X
+BARRIERS ADDED: X
+MUTATIONS KILLED: X/X
+TESTS: PASS/FAIL
+MERGED: YES/NO
+DEPLOYED/APPLIED: YES/NO/N/A
+PRODUCTION VERIFIED: YES/NO/N/A
+SENTRY CHECKED: YES/NO
+SENTRY CONNECTION WORKING: YES/NO
+OPEN P0/P1 IN SCOPE: X
+TRUE SCORE: X/10
+10/10 ACHIEVED: YES/NO
+```
+
+If 10/10 is NO, list ONLY genuine blockers (category + owner) — **never defects the routine chose
+not to fix**.
+
+Routines whose canonical spec already defines a richer domain report block **keep it, and append
+this block at the end**. The `Rating Before → Rating After` pair required by "Reporting rules"
+below is unaffected and still mandatory; `TRUE SCORE` does not replace it.
 
 ## 1. ⚡ Daily JUNIOR SCRAPING Engineer (original, unmodified)
 
@@ -190,9 +322,12 @@ received. Owns the **handoffs between otherwise-correct components** — the cro
 chain, deploy-claim-vs-actual-served-bundle reconciliation, migration→mirror→production parity in
 all four known directions, matview/sync ordering and cache staleness, auth-token→RLS enforcement
 traced on a real request, retry/timeout/partial-failure paths, and concurrent-session collisions.
-Runs a standing **orphaned-guarantee sweep** — for every data-repair migration in the last 90 days,
-confirms a detector still watches the invariant it fixed and that the invariant still holds today,
-not just at merge time. This is the exact class of bug that let a July district-suffix repair
+Runs a standing **orphaned-guarantee sweep** — for **every** important repair ever landed (no time
+window, per the spec's PART 1 rewrite of 2026-08-28), confirms a detector still watches the
+invariant it fixed and that the invariant still holds today, not just at merge time. The registry
+has a durable home in `public.ops_repair_guarantee_registry`, and each run re-verifies the
+**least-recently-verified** entries first, so coverage rotates across the whole history and nothing
+ages out. This is the exact class of bug that let a July district-suffix repair
 silently decay for a month with zero alerts, and no other routine was watching for that pattern
 across the *history* of past repairs rather than the correctness of the current one.
 
@@ -285,3 +420,11 @@ revert is reported as a revert rather than rediscovered by hand.
   gate's explicit-success requirement, cron minute-slot discipline (see AGENTS.md).
 - Changing any routine's schedule, scope, or prompt is an owner decision; record the change here in
   the same session.
+- **Your production-alert queue is addressable by label (2026-08-28).** Every open `[alert]` GitHub
+  issue now carries the `routine-N-…` label of the routine that owns it, per
+  `docs/ops/ALERT_ROUTING.md` — `gh issue list --label ezhalah-alert --label routine-3-data-integrity
+  --state open`. Same seven owners as the Sentry table below, keyed on the alert `kind` instead of a
+  stack frame, and total: an unrouted kind goes to #2 for triage, never to nobody. Before this,
+  delivery worked and ownership did not — 53 open alert issues with no owner named on any of them.
+  This is a pointer to your existing alert duties, **not** a new mandatory step: adding one is an
+  owner decision, and is deliberately left open.

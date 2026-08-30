@@ -1,0 +1,51 @@
+name: Region-scoped city resolution (live check)
+
+# A REGION+CITY SELECTION MUST RETURN EXACTLY THAT COMBINATION — asserted against PRODUCTION.
+#
+# Saudi place names repeat across regions legitimately: «القويعية» exists in منطقة الرياض AND in
+# منطقة المدينة المنورة, «البدائع» in القصيم AND حائل, «الهفوف» is city_id 12 in المنطقة الشرقية and
+# city_id 501 in منطقة الرياض. 290 city names are ambiguous. A globally-unique-name rule is therefore
+# wrong, and when run #29 found that rule in three implementations at once, nine live listings were
+# unreachable by every Filter combination.
+#
+# WHAT THIS RUNS, and why it needed a schedule (2026-08-29). scripts/verify-region-scoped-city-live.ts
+# pins BOTH sides: the production search RPC returns only the selected region's rows, and
+# ops_qa_search_differential — the QA oracle built to mirror that RPC's row gate — returns the same
+# answer. That equivalence is exactly what justifies ops_qa_search_differential's row in
+# ops_city_resolution_exempt (supabase/migrations/20260829081551_*.sql): the oracle is exempt from
+# mon_detect_city_resolution_ignores_region's structural lint BECAUSE it mirrors an already-exempt
+# RPC rather than deriving a canonical city from a name. An exemption whose justification is never
+# re-measured is a silenced barrier, so the proof runs on a schedule instead of by hand.
+#
+# Read-only, through the app's own anon key (repo rule: verify via the anon key, never the service
+# role — a privileged connection could mask an RLS or permission difference).
+#
+# WHEN THIS JOB IS RED: either production started returning off-region rows for an ambiguous city
+# (a real, user-visible matching defect), or the QA oracle drifted away from the RPC it certifies
+# (which would make every differential verdict untrustworthy in both directions). Neither is closed
+# by loosening this check — reproduce → root cause → fix → regression → barrier → deploy → re-test.
+
+on:
+  schedule:
+    - cron: '47 */6 * * *' # every 6 hours, offset off the hour and off the other live checks
+  workflow_dispatch:
+
+concurrency:
+  group: region-scoped-city-live-check
+  cancel-in-progress: false
+
+jobs:
+  region-scoped-city:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Live region+city resolution assertions (RPC and QA oracle must agree)
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-region-scoped-city-live.ts

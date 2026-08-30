@@ -12,7 +12,6 @@ import { normalizeArabic } from '../lib/chatSearch';
 import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { combinedBudgetParts } from '@/lib/combinedBudget';
-import { rediversifyByPlatform } from '@/lib/platformDiversity';
 import { bedroomTokensPure } from '@/lib/roomBedrooms';
 import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
@@ -1267,7 +1266,7 @@ function rankResults(listings: Listing[], q: SearchQuery, cap: number | null): L
   return out;
 }
 
-export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean; visitOffset?: number }): SearchResult {
+export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean }): SearchResult {
   let eligible = pickPool(q, pools)
     // bothDeals (agent searched without knowing rent/buy) or dealCombined (Filter شراء+إيجار both
     // selected) → show BOTH; otherwise filter to the single selected deal. supports() checks the
@@ -1400,32 +1399,14 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
   // Show-More-to-200 paging is a UI increment on top; the engine returns the ranked set.) (user.)
   // TOTAL matches (before any display cap) — drives the «more than 25» message + the show-all button.
   const total = listings.length;
-  // QUALITY-PRESERVING repeat-visit rotation (user 2026-06-27): on a repeat search of the SAME filter
-  // (visitOffset advances per visit, persisted by the caller), rotate a 25-window over the TOP-quality
-  // pool so a return visitor sees DIFFERENT high-quality listings — deterministic, never random, always
-  // inside the same filters. First visit (offset 0) shows the top 25 as usual.
-  // NEVER rotate an explicitly-sorted result set (bug-hunt 2026-07-30): sortListings just ordered the
-  // full set by the user's objective key (cheapest/newest/…), so a rotated window would show rank #26
-  // first under a «مرتبة حسب الأقل سعراً» note — a visible lie. Rotation is for the default relevance
-  // order only.
-  // ROTATION MUST NOT COST PLATFORM DIVERSITY (Search QA 2026-08-16). The incoming order is the
-  // platform round-robin from remote.ts's orderByScope, which necessarily ends in a single-platform TAIL
-  // once the smaller platforms run out (live: مستودع/بيع/الرياض — aqar 55, wasalt 10, aldarim 2, dealapp 2
-  // → positions ~20+ are all aqar). Rotating a 25-window by 25/50/… landed a RETURNING visitor squarely
-  // inside that tail and rendered a 100%-single-platform first page while 4 platforms had real matches —
-  // owner PERMANENT rule 2026-07-13 Rule 2 broken by a rule-2026-06-27 feature. Live-reproduced 2026-08-16:
-  // same filters, same session — visit 1 (off=0) 4 platforms, visits 2-3 (off=25/50) 1 platform, visit 4
-  // (off=6) 4 platforms. Fix: rotate as before (the returning visitor still gets DIFFERENT listings), then
-  // re-interleave ONLY the rotated window by platform so the mix survives. No listing is added, removed or
-  // re-filtered — every row here already passed every filter (MATCH FIRST, DIVERSIFY SECOND).
-  if (!q.sort && opts?.visitOffset && total > 25) {
-    const POOL = Math.min(total, 100);
-    const off = (opts.visitOffset * 25) % POOL;
-    if (off > 0) {
-      const rotated = [...listings.slice(off, POOL), ...listings.slice(0, off)];
-      listings = [...rediversifyByPlatform(rotated, (l) => l.source), ...listings.slice(POOL)];
-    }
-  }
+  // CONTROLLED ROTATION now lives entirely server-side (owner PERMANENT rule, 2026-08-29 — see
+  // src/lib/rotationSeed.ts + location_search_candidates_ar's p_rotation_seed). `listings` here is
+  // already in the RPC's final order (match → diversity → photo preference → rotation), so there is
+  // nothing left for runSearch to rotate — REMOVED the old client-side 25-window rotate-then-
+  // rediversify (2026-06-27, hardened 2026-08-16) that used to sit here, which windowed an
+  // ALREADY-FETCHED in-memory array under the old lifetime BROWSE_CAP=100 and could not stay correct
+  // once pagination went unbounded (PR #1267): a real "next 100" server page is a genuinely new
+  // fetch, not a slice of one fixed array.
   // Return up to the system max (200) so "show all" reveals beyond the first 25 with NO refetch; the UI
   // shows the first 25 and only reveals the rest when the user taps «عرض جميع النتائج». (user: first 25 + show-all.)
   // Reveal cap raised 200→1500 (owner 2026-07-08): with filter-first the fetched candidates are already

@@ -53,6 +53,36 @@ export function isSearchableQuery(text: string): boolean {
   return ARABIC_LETTER.test(text);
 }
 
+/**
+ * Does the sidebar still show the Arabic-only hint after this keystroke?
+ *
+ * Rule 1 above promises the hint appears "ONCE, not per key" — a calm nudge, not an error state.
+ * The first implementation latched it on the strip and cleared it only when the field went EMPTY,
+ * which quietly made "once" mean "for the rest of the search session": typing `villa` strips to an
+ * empty field, so the user's very next act — switching keyboard and typing a real Arabic query —
+ * never passes through an empty-text change, and the nudge stayed on screen while the list was
+ * already filtering correctly on that query. A correction that outlives what it corrects reads as
+ * "this is still wrong" over a screen where nothing is (found by journey `arabic-hint`, 2/2 fresh
+ * contexts on production, 2026-08-28).
+ *
+ * So the hint is tied to the CONDITION rather than latched by the event: it is shown while the
+ * user has not yet supplied a usable Arabic query, and it goes the moment they have.
+ *
+ * The three inputs are deliberately distinct, and the order matters:
+ *   - `hadLatin`  a strip happened on THIS keystroke → say so, even if Arabic came with it
+ *                 (`villaف` both strips and searches; the nudge is still the honest response).
+ *   - empty text  nothing to correct.
+ *   - searchable  a real Arabic query is now filtering the list → the nudge's job is done.
+ *   - otherwise   digits/punctuation alone: not yet a query, so neither raise nor clear — hold
+ *                 whatever the previous keystroke decided.
+ */
+export function arabicHintAfterInput(shown: boolean, { text, hadLatin }: SanitizedSearch): boolean {
+  if (hadLatin) return true;
+  if (!text) return false;
+  if (isSearchableQuery(text)) return false;
+  return shown;
+}
+
 /** Every substantive query token must appear in the haystack (AND semantics → typing more narrows
  *  further). Tokens with no letter or digit (stray punctuation) are ignored, never demanded. */
 export function matchesChat(haystack: string, query: string): boolean {

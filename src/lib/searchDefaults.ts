@@ -33,7 +33,8 @@ export const emptyQuery = (): SearchQuery => ({
 // `typeGroups` REPLACED the old single `typeGroup` string outright — there is no second live field
 // and no mirror to drift. Data written before the change (saved searches in storage, a `?filter=`
 // URL in flight) still carries the scalar, so it is migrated ON READ by migrateGroups() below, at
-// the two boundaries where old data can enter. Everything inside the app sees only `typeGroups`.
+// the boundaries where old data can enter (history hydration in store.tsx, the `?filter=` parse in
+// agent.tsx, sanitizeForFilterRestore). Everything inside the app sees only `typeGroups`.
 
 // The selected groups as a list. The twin of effectiveTypes(): one code path covers none/one/many,
 // so no call site has to branch on arity.
@@ -59,6 +60,15 @@ export function migrateGroups<T extends Partial<SearchQuery>>(raw: T): T {
   const legacy = (raw as { typeGroup?: unknown }).typeGroup;
   const out = { ...raw } as T & { typeGroup?: unknown; typeGroups?: string[] | null };
   delete out.typeGroup;                                   // never carried forward — one field only
+  // The two REQUIRED string fields every reader dereferences (`q.location.trim()`,
+  // `q.priceInput.match(...)` — 9 sites in src/data/search.ts alone). A payload persisted before a
+  // field existed simply lacks the key, and reopening such a saved chat crashed openStatic →
+  // filterToChat (2026-08-23). '' is exactly what "absent" means for both (countrywide / no typed
+  // price), so filling it cannot change what a replayed search does. Do NOT default any OTHER field
+  // here: filling e.g. rentPeriod or category would silently CHANGE a replayed legacy search
+  // (verify-legacy-query-defaults.ts pins both directions).
+  out.location ??= '';
+  out.priceInput ??= '';
   if (out.typeGroups && out.typeGroups.length) return out as T;
   out.typeGroups = typeof legacy === 'string' && legacy ? [legacy] : null;
   return out as T;
