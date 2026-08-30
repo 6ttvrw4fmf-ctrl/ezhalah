@@ -30,3 +30,4 @@ verify-taxonomy.ts                     | npm run verify:taxonomy                
 verify-trending-usable-under-narrowing.ts | .github/workflows/count-rpc-parity-live-check.yml | live anon-role check against production
 verify-unlocated-fallback-scope-live.ts| manual / live run                                    | live check against production; no scheduled workflow yet
 verify-web-runtime-smoke.mjs           | .github/workflows/full-verification-ci.yml          | drives a real browser; invoked directly by CI
+verify-loader-platforms-match-active.ts | .github/workflows/loader-active-platforms-check.yml | queries production for the distinct active platform set to prove the loader roster is not dishonest
