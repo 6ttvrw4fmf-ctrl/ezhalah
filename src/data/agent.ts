@@ -243,6 +243,37 @@ export let lastVagueIntents: string[] = [];
  */
 export let lastRejectedFilters: string[] = [];
 
+// ── SAYING SO WHEN WE COULD NOT APPLY SOMETHING (owner ruling 2026-08-30) ────────────────────────
+// lastRejectedFilters was written on every refusal and read by NOBODY, so a request we could not
+// honour was dropped in total silence: the search ran without it and the reply never mentioned it.
+// Silently ignoring part of what someone asked for is the same class of dishonesty as pretending we
+// applied it.
+//
+// THE SHAPE OF THE TELLING (owner): natural and short, never technical. Do not say "Advanced
+// Filter", do not name a certification, do not read like an error. One plain sentence, then carry on
+// and show the best valid results — an unsupported OPTIONAL filter must never block a search.
+//
+// SAY IT ONCE. Repeating the same caveat every turn is its own kind of noise, so a filter we have
+// already explained is not explained again; the set clears when a new conversation starts.
+const announcedRejections = new Set<string>();
+
+/** A new conversation explains itself from scratch. */
+export function resetRejectionNotices(): void { announcedRejections.clear(); }
+
+/**
+ * The one-sentence note for anything we refused THIS turn and have not mentioned before, or '' when
+ * there is nothing new to say. Keyed by the intent id, so «تقييم» explained once stays explained
+ * even as the conversation moves on.
+ */
+function rejectionNotice(): string {
+  const fresh = lastRejectedFilters
+    .map((f) => String(f).split(':')[0])           // 'rating:ممتاز' -> 'rating'
+    .filter((f) => f && !announcedRejections.has(f));
+  if (!fresh.length) return '';
+  for (const f of fresh) announcedRejections.add(f);
+  return t('That option is not available in this search, so I showed the results without it.');
+}
+
 // AREA NICKNAMES → known district lists. The engine filters by district when these are present, so
 // "north Riyadh" actually returns listings IN northern Riyadh districts (not just any Riyadh result).
 // District names are kept BARE (no "حي " prefix) — the runSearch filter strips both sides before
@@ -973,6 +1004,9 @@ export async function respond(text: string, opts?: { loggedIn?: boolean; history
   // Real LLM agent (Gemini edge function). It handles Arabic natively, applies the non-advisory
   // rules, and now also the auth-aware behavior (we pass loggedIn + order). If it's unavailable for
   // any reason, fall through to the bundled heuristic below so the app never hard-fails.
+  // A new chat starts blank (owner rule), so it arrives with no prior query — that is the signal to
+  // forget which caveats this conversation has already given.
+  if (!opts?.prevQuery) resetRejectionNotices();
   const backend = await callAgentBackend(v, { loggedIn, order, history: opts?.history, attemptTexts: opts?.attemptTexts, prevQuery: opts?.prevQuery ?? null });
   if (backend) {
     // Named-platform filter safety net: if the user said "Aqar only" / "Gathern فقط" but the model
@@ -984,6 +1018,11 @@ export async function respond(text: string, opts?: { loggedIn?: boolean; history
     // LOGGED-IN user the model already returns its own structured read-back ("Here is what I have for
     // you: …" — user's prompt spec), so we show that verbatim and DON'T prepend a second restatement.
     if (backend.kind === 'listings' && !loggedIn) backend.reply = withRestate(v, backend.reply);
+    // Append AFTER the restatement so the reply still leads with what we ARE searching for; the
+    // caveat is a tail, not a headline. The search itself is untouched — everything we could apply
+    // has been applied.
+    const notice = rejectionNotice();
+    if (notice) backend.reply = `${String(backend.reply ?? '').trim()}\n${notice}`.trim();
     return backend;
   }
 
