@@ -69,9 +69,13 @@ check("the model is TOLD exactly one question per turn",
 check("a DETERMINISTIC floor enforces it", /function oneQuestionOnly\(reply: string\): string/.test(edge));
 check("it keeps the lead-in and drops only the extra questions",
   /return Number\.isFinite\(first\) \? r\.slice\(0, first \+ 1\)\.trim\(\) : r;/.test(edge));
-check("it is applied to BOTH clarification paths",
-  (edge.match(/oneQuestionOnly\(groundReply\(/g) ?? []).length === 2,
-  "the empty-search path and the plain message path must both be floored");
+// UPDATED (owner-approved unified-agent-search-authority consolidation, 2026-08-30): the empty-
+// search clarification and the plain message path used to be two separate return sites, each
+// spelling out its own oneQuestionOnly(groundReply(...)). decideAgentTurn() now decides ONCE whether
+// a turn is a clarification at all, so both collapsed into the SAME return — one path, still floored.
+check("the one remaining clarification path is floored",
+  (edge.match(/oneQuestionOnly\(groundReply\(/g) ?? []).length === 1,
+  "the empty-search case and the plain-message case are now the SAME return statement");
 check("a single question is left untouched", /if \(!marks \|\| marks\.length < 2\) return r;/.test(edge));
 
 if (failed) {

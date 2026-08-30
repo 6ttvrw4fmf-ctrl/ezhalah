@@ -45,7 +45,6 @@ import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
-import { shouldAskLocationInsteadOfSearching } from '@/lib/agentQuestionBudget';
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
@@ -2146,9 +2145,14 @@ export default function Agent() {
     saidRef.current = [...saidRef.current, v];
 
     const startedAt = Date.now();
+    // Stamped once per SEND (owner-approved consolidation, 2026-08-30) — shared by this call and any
+    // server-side language-mismatch retry it triggers, so ai_usage rows from this one turn can be
+    // told apart from a genuine second message (mon_detect_agent_calls_per_message()). Same id shape
+    // every chat message already uses (uid() below), so no new dependency.
+    const userMessageId = uid();
     // Build the conversation MEMORY from prior turns (before this new message) so the agent can
     // reason across the chat and never re-ask what was already said. The greeting (text:'') drops out.
-    const history = msgs
+    const historyAll = msgs
       .filter((m) => m.role === 'user' || m.role === 'agent' || m.role === 'results')
       .map((m) => {
         const role = m.role === 'user' ? ('user' as const) : ('model' as const);
@@ -2172,15 +2176,30 @@ export default function Agent() {
         }
         return { role, text: (m as { text?: string }).text ?? '' };
       })
-      .filter((h) => !!h.text.trim())
-      .slice(-10);
+      .filter((h) => !!h.text.trim());
+    // HISTORY TRIMMING (owner-approved consolidation, 2026-08-30). describeKnownState()'s ~150-token
+    // knownState snapshot (built from lastQueryRef.current below) already carries every FACT from
+    // older turns, so sending the full window a second time as raw prose was pure token cost with no
+    // new information. Trimmed to the last 2 raw entries — in this alternating user/model list that
+    // is always the immediately-preceding user message and the model's immediately-preceding reply,
+    // KEPT VERBATIM (never paraphrased): pronoun resolution ("that one") and exact-phrase-triggered
+    // behavior (e.g. «خلها شهري» flipping the rent period) both depend on the model seeing the
+    // literal prior exchange, not a summary of it.
+    const history = historyAll.slice(-2);
     // Pass auth state: a guest searches on any property query; a logged-in user only gets listings
     // when their message is a direct order, otherwise Ezhalah replies conversationally. (user request.)
     // The conversation's accumulated canonical state. Without it a clarification turn resets
     // everything the user already said — «شهرية» came back as RentAnnual and a 9.5 rating vanished
     // after one more question (owner-reported 2026-08-29). Explicit changes in the new turn still win.
-    let turn = await respond(v, { loggedIn: !!user, history, attemptTexts: saidRef.current, prevQuery: lastQueryRef.current });
+    let turn = await respond(v, {
+      loggedIn: !!user, history, attemptTexts: saidRef.current, prevQuery: lastQueryRef.current,
+      askCount: askCountRef.current, userMessageId, historyTurnsRaw: historyAll.length,
+    });
     if (run.cancelled) return;
+    // The server is the single decision authority for askCount too (decide.ts) — store whatever it
+    // last echoed back. Never reset mid-chat by the client (owner-confirmed default); a brand new
+    // chat starts askCountRef at 0 by construction (a fresh screen mount / New Chat, not a reset here).
+    if (typeof turn.askCount === 'number') askCountRef.current = turn.askCount;
 
     // ── The user NAMED a scope: «مدينة الرياض» / «منطقة الرياض» ────────────────────────────────────
     // Either answering our own «تقصد مدينة X ولا منطقة X كاملة؟» question or saying it up front. Either
@@ -2250,40 +2269,24 @@ export default function Agent() {
     }
 
     if (turn.kind === 'listings') {
-      // DETERMINISTIC backstop: even though the model chose to search, if the location is not usable
-      // (no city / a bare multi-city district) ASK in Arabic instead — accuracy over speed. After 2 asks
-      // we stop pestering and search with whatever we have. (user: it MUST ask, not guess the location.)
-      const clarifyQ = locationClarification(turn.query, v);
-      if (shouldAskLocationInsteadOfSearching(clarifyQ, askCountRef.current, history)) {
-        askCountRef.current += 1;
-        // Remember WHICH twin name this question is about, so the user's next message can commit their
-        // pick even if the model answers with something else entirely.
-        pendingScopeRef.current = regionOrCityTwin(turn.query.location);
-        // …and, for the PLAIN-CITY question, which city — so its bare «المدينة كاملة» answer keeps that
-        // city instead of re-resolving the generic noun «المدينة» into المدينة المنورة (2026-08-29).
-        pendingCityRef.current = wholeCityQuestionSubject(clarifyQ!);
-        setMsgs((m) =>
-          m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: clarifyQ!, typing: true } : x)),
-        );
-      } else {
-        // Bug-fix #10 (audit `agent-2ask-cap-silent-search`): when we hit the 2-question cap — OR the
-        // model has already spent ITS OWN question budget this chat (shouldAskLocationInsteadOfSearching
-        // above) — with an unusable location, the silent fallback search needs to TELL the user what
-        // scope was used so they're not surprised by broad results. (user: "explain the search scope used".)
-        const forcedBroad = !!clarifyQ;
-        askCountRef.current = 0;
-        saidRef.current = [];
-        beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
-        const result = await runQuery(turn.query, true, run.ac.signal, ensureChatId());
-        const reply = forcedBroad
-          ? `${getLocale() !== 'en'
-              ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
-              : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query)}`
-          : buildScrapeIntro(result.query ?? turn.query);
-        await playListings(run, statusId, reply, result, v);
-        if (run.cancelled) return;
-        void promptSignupSoon(run);
-      }
+      // THE SERVER IS THE SINGLE DECISION AUTHORITY (owner-approved consolidation, 2026-08-30).
+      // decideAgentTurn() in supabase/functions/agent/decide.ts already decided this turn should
+      // search — including deciding that broadly, with no city, is fine when nothing better is
+      // known. The client no longer re-litigates that with its own clarifyQ/askCountRef gate
+      // (deleted: src/lib/agentQuestionBudget.ts's shouldAskLocationInsteadOfSearching and its call
+      // site here) — trust it unconditionally and render, never ask instead.
+      const forcedBroad = !turn.query.location;
+      saidRef.current = [];
+      beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
+      const result = await runQuery(turn.query, true, run.ac.signal, ensureChatId());
+      const reply = forcedBroad
+        ? `${getLocale() !== 'en'
+            ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
+            : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query)}`
+        : buildScrapeIntro(result.query ?? turn.query);
+      await playListings(run, statusId, reply, result, v);
+      if (run.cancelled) return;
+      void promptSignupSoon(run);
     } else {
       const attemptText = saidRef.current.join(' ');
       const combined = parseQuery(attemptText);

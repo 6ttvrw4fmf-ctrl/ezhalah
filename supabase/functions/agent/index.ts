@@ -52,6 +52,11 @@ const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 // Deterministic post-model rules (owner ruling 2026-08-29). Pure functions, unit-tested and
 // mutation-proven by scripts/verify-agent-postmodel-rules.ts. The model proposes; these decide.
 import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWesternDigits, arabicWordAmounts } from "./postModel.ts";
+// THE SINGLE DECISION AUTHORITY for kind (owner-approved architecture consolidation, 2026-08-30).
+// See decide.ts's header for the full rationale. The model's own `kind` field is read ONLY to
+// decide whether to retry for wrong language; it is never trusted as the final answer again after
+// that — decideAgentTurn() is the one place that assigns kind.
+import { decideAgentTurn, wantsGuidedInterview, type EstablishedState } from "./decide.ts";
 
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
@@ -501,10 +506,10 @@ HUMAN / SUPPORT: if the user wants a human, wants to report a problem, dispute a
 5. STAY IN SCOPE — but DON'T over-deflect. A real property request is ALWAYS a search, never a deflection: if the user names a property type, a budget, or a place (e.g. "I want a commercial land for 200,000 in Saudi Arabia", "land 500 sqm", "villa under 2m"), classify it as kind="listings" (ask at most the ONE missing field, e.g. the city) — NEVER reply "I can only help you find properties". A CATEGORY answer is also a valid property answer, NEVER out-of-scope: "residential" / "commercial" (or typos like "resideintal", "residental", "resedintial", "comercial", or Arabic سكني / تجاري) → treat it as the category and SEARCH (leave type="" to show a mix of that category); do NOT reply "I can only help you find properties". Understand misspelled property words generally (house/apartment/villa/land/office and their typos) — never deflect a real property term just because it's misspelled. Questions ABOUT Ezhalah (what it is, how it works, platforms, free/cost, who owns the listings, data/privacy/PDPL, is it safe) are ALSO in scope — answer them (see WHAT EZHALAH IS). ONLY a genuinely unrelated topic (weather, coding, recipes, math, general chit-chat with no property intent) → kind="message": (English) "I can only help you find properties in Saudi Arabia. What type of property are you looking for?" / (Arabic) "أنا أقدر أساعدك ببحث العقارات في السعودية بس. أي نوع عقار تدور عليه؟"
 6. CLARIFYING QUESTIONS ARE CONFIDENCE-BASED, NOT BANNED (see QUESTION POLICY): high confidence → 0, medium → 1, low → at most 2; never more than two before the first search; after searching you may ask follow-ups that refine. For a HIGH-confidence place (a clear city/district or a recognized landmark) infer the city and search without asking (e.g. near Aramco → Dhahran). A bare geography/proximity cue (near the sea, near a road) is NOT high-confidence for a city — never infer one from it. NEVER guess a city on LOW confidence, and NEVER claim a place does not exist just because it is not a landmark. If after your allowed questions the city is still unknown, leave location "" and search ALL of Saudi Arabia (never a random/default city). If rent vs buy is still unknown, deal="Both". "NEAR ME" / "close to my work" / "within X km" — you have NO live GPS or device location: infer the city/district from any landmark, area, or workplace they name and search immediately; if they named nothing locatable, that is a clarifying question (ask which city/area); if still unknown, search ALL of Saudi Arabia. Never claim to know where the user physically is.
 7. NEUTRAL SEARCH ENGINE. You are a search engine — NOT a recommendation engine, personalization engine, advisor, or broker. NEVER personalize results, learn a user's favourite cities/districts/types, or carry preferences across chats — the SAME search returns the SAME results for everyone (given the same listings). Ranking is neutral (freshness → relevance → active listing), never by clicks, popularity, or sponsored placement. You only: Search → Understand → Display. The user decides.
-8. WHEN UNSURE, ASK. If YOU are not sure of what the user wants — what they mean, which option they're picking, which place/landmark they referred to, which budget figure, rent vs buy, anything material — ASK. If THEY were not clear, tell them gently and ASK ("I want to get this right — did you mean X or Y?", "I'm not 100% sure I caught that — could you rephrase?"). Never silently guess on a material detail; never invent or assume to avoid asking. This RULE OVERRIDES the QUESTION POLICY count limits: a genuine clarification you need to do the search correctly is always allowed even if you've already asked two questions, and is preferred over inventing a guess. When in doubt, the answer is always to ask the user. (user request.)
+8. WHEN UNSURE, ASK. If YOU are not sure of what the user wants — what they mean, which option they're picking, which place/landmark they referred to, which budget figure, rent vs buy, anything material — ASK. If THEY were not clear, tell them gently and ASK ("I want to get this right — did you mean X or Y?", "I'm not 100% sure I caught that — could you rephrase?"). Never silently guess on a material detail; never invent or assume to avoid asking. When in doubt, the answer is always to ask the user.
 
-CLASSIFY into exactly one kind:
-- "listings": a direct order, OR you have at least type + city (this message or earlier in the chat), OR you already have real non-location signal (a type, a size/bedroom cue, a purpose, or a budget) and have already asked your allowed clarifying question(s) this chat — search broadly NOW (location "" = all of Saudi Arabia) rather than asking yet again; owner rule: never keep chatting when you could already show useful results. Fill the fields you can infer; leave a field "" when unknown.
+CLASSIFY into exactly one kind. This is a PROPOSAL — the platform re-checks it deterministically against the whole conversation's understood state and the question budget, and may override it, so classify honestly rather than trying to game a limit you cannot see from here:
+- "listings": a direct order, OR you have at least type + city (this message or earlier in the chat), OR you already have real non-location signal (a type, a size/bedroom cue, a purpose, or a budget).
 - "interview": ONLY if the user explicitly asks to be guided step by step.
 - "message": everything else — asking the ONE missing field, declines, geographic corrections, unrelated questions, small talk.
 
@@ -731,6 +736,19 @@ Deno.serve(async (req: Request) => {
   let knownState = "";
   let lmHint = "";
   let history: Array<{ role?: string; text?: string }> = [];
+  // CONVERSATION-SCOPED DECISION STATE (owner-approved consolidation, 2026-08-30). The client is
+  // the only thing that persists across HTTP calls, so it sends back exactly what it was last told:
+  // the merged query so far (prevQuery) and the running question count (askCount). Neither is ever
+  // re-derived server-side by scanning history text — that regex approach (the old `priorQuestions`
+  // count) is exactly the kind of second, contradicting budget this consolidation deletes.
+  let prevQuery: Record<string, unknown> | null = null;
+  let askCount = 0;
+  // Stamped ONCE per user SEND by the client (src/app/agent.tsx), shared by this call and any
+  // language-mismatch retry it triggers, so ai_usage rows from the SAME user turn can be told apart
+  // from a genuine second message (mon_detect_agent_calls_per_message()).
+  let userMessageId: string | null = null;
+  // TRUE pre-cap turn count — see the history_turns_raw comment at its logUsage call site below.
+  let historyTurnsRaw: number | null = null;
   // CALLER ATTRIBUTION. Without this a CI job and a real customer are indistinguishable in the cost
   // data, so "is our spend real usage or a runaway test loop?" cannot be answered — and that was a
   // live question: an audit found most agent traffic was automation, not people.
@@ -752,10 +770,23 @@ Deno.serve(async (req: Request) => {
     knownState = String(body?.knownState ?? "").slice(0, 600).trim();
     // Prior conversation turns so the model has MEMORY. The client sends recent turns; we cap here too.
     if (Array.isArray(body?.history)) history = body.history.slice(-12);
+    if (body?.prevQuery && typeof body.prevQuery === "object" && !Array.isArray(body.prevQuery)) {
+      prevQuery = body.prevQuery as Record<string, unknown>;
+    }
+    const ac = Number(body?.askCount);
+    askCount = Number.isFinite(ac) && ac > 0 ? Math.floor(ac) : 0;
+    userMessageId = typeof body?.userMessageId === "string" && body.userMessageId ? body.userMessageId.slice(0, 100) : null;
+    const htr = Number(body?.historyTurnsRaw);
+    historyTurnsRaw = Number.isFinite(htr) && htr >= 0 ? Math.floor(htr) : null;
   } catch {
     return json({ error: "bad request" }, 400);
   }
   if (!text.trim()) return json({ error: "empty" }, 400);
+
+  // DETERMINISTIC INTERVIEW GATE, checked before ever paying for a model call — the raw text is
+  // all this needs, and "quality can fail soft, spending must fail closed" applies here too: there
+  // is no reason to spend a DeepSeek call on a turn whose kind is already fully determined.
+  if (wantsGuidedInterview(text)) return json({ kind: "interview", askCount });
 
   // REPLY LANGUAGE = the language of the user's LATEST message, never the app's UI locale.
   // If this message is letters-free (e.g. just "4000"), keep the conversation going in the
@@ -785,12 +816,12 @@ Deno.serve(async (req: Request) => {
   locale = replyLang ?? appLocale;
 
   try {
-    // Deterministic question-budget enforcement (confidence-based policy): the user may ask up to TWO
-    // clarifying questions before the first search (high conf 0, medium 1, low 2). The model tends to
-    // keep asking past that, so we count prior model questions ("?") and only once it has already asked
-    // TWO do we inject a hard directive to stop and search now. (user: never more than 2 before first search.)
-    const priorQuestions = history.filter((h) => h?.role === "model" && /[?؟]/.test(String(h?.text ?? ""))).length;
-    const budgetDirective = priorQuestions >= 2
+    // Deterministic question-budget hint (confidence-based policy): the user may ask up to TWO
+    // clarifying questions before the first search (high conf 0, medium 1, low 2). This is a PROMPT
+    // HINT only, to save a wasted round-trip — decideAgentTurn() in ./decide.ts is what actually
+    // enforces the ceiling afterward, reading the structured askCount the client sent, never by
+    // regex-scanning history text (the old `priorQuestions` scan this replaces).
+    const budgetDirective = askCount >= 2
       ? ` IMPORTANT: you have ALREADY asked TWO clarifying questions in this chat — do NOT ask a third. IF the user's latest message is continuing a PROPERTY SEARCH (an answer to your question, or more search detail), then SEARCH NOW (kind="listings") with whatever you have: infer the city from any landmark/geography/lifestyle clue, else leave location "" (all of Saudi Arabia), and deal="Both" if rent vs buy is unknown. BUT if the latest message is NOT a property search — a utility/explanation/currency-or-unit-conversion/brand/support/general-Ezhalah question, or small talk — just ANSWER it directly (kind="message"); do NOT force a search.`
       : "";
     // Build a multi-turn conversation: prior turns (memory) + the current wrapped message. Contents
@@ -825,7 +856,12 @@ Deno.serve(async (req: Request) => {
     // (role "user"/"model", parts[{text}]); we translate to OpenAI's messages[] here — role "model"
     // becomes "assistant" (OpenAI has no "model" role), parts are joined with newlines.
     // Retry once per 429/5xx (parity with the prior Gemini retry).
-    const runModel = async (cts: Array<{ role: string; parts: Array<{ text: string }> }>, sysExtra = "", seq = 1): Promise<any> => {
+    const runModel = async (
+      cts: Array<{ role: string; parts: Array<{ text: string }> }>,
+      sysExtra = "",
+      seq = 1,
+      callReason: "primary" | "language_retry" = "primary",
+    ): Promise<any> => {
       // ── FAIL-CLOSED SPEND GUARD ───────────────────────────────────────────────────────────────
       // Owner ruling 2026-08-29: "quality can fail soft, spending must fail closed." A bug may
       // degrade the AI temporarily; no bug may silently drain the balance.
@@ -896,6 +932,7 @@ Deno.serve(async (req: Request) => {
           source: clientSource, requested_model: DEEPSEEK_MODEL, model: null, kind: null,
           locale, call_seq: seq, attempt: attempt + 1, http_status: r.status,
           finish_reason: `http_${r.status}`, history_turns: history.length, latency_ms: Date.now() - t0,
+          user_message_id: userMessageId, call_reason: "http_retry",
         });
         if (![429, 500, 502, 503].includes(r.status)) break;
         await r.body?.cancel().catch(() => {});
@@ -954,7 +991,15 @@ Deno.serve(async (req: Request) => {
         total_tokens: u.total_tokens ?? null,
         finish_reason: choice?.finish_reason ?? null,
         history_turns: history.length,
+        // TRUE pre-cap conversation length (owner ruling 2026-08-30) — src/app/agent.tsx sends this
+        // as `historyTurnsRaw` (its msgs.length BEFORE its own slice(-10)/slice(-2)). Without it a
+        // 7-genuine-message conversation and a duplicate-call runaway both show the same capped
+        // `history_turns` and are visually indistinguishable — exactly what made 7 real messages
+        // look suspicious during the 2026-08-29 DeepSeek cost audit.
+        history_turns_raw: historyTurnsRaw,
         latency_ms: Date.now() - t0,
+        user_message_id: userMessageId,
+        call_reason: callReason,
       });
       if (!raw) {
         recordHealth("empty_output", Date.now() - t0, why);
@@ -995,7 +1040,12 @@ Deno.serve(async (req: Request) => {
       // notesBlock — so whenever the language guard fired, the reply actually shown to the user was
       // generated WITHOUT the live behaviour notes the code itself labels "authoritative — override
       // anything above on conflict". The retry must carry exactly the same authority as the first call.
-      const retry: any = await runModel(contents, langLine + notesBlock + ` The previous attempt WRONGLY replied in ${wrong === "ar" ? "Arabic" : "English"} — do not repeat that mistake; output the reply ONLY in ${langName}.`, 2);
+      const retry: any = await runModel(contents, langLine + notesBlock + ` The previous attempt WRONGLY replied in ${wrong === "ar" ? "Arabic" : "English"} — do not repeat that mistake; output the reply ONLY in ${langName}.`, 2, "language_retry");
+      // Swapping `out` wholesale here used to mean the retry's `kind` replaced the original's with
+      // ZERO re-validation. That is now harmless by construction, not by discipline: whichever `out`
+      // survives this block is the ONLY one that ever reaches decideAgentTurn() below, and its own
+      // `kind` is advisory there regardless — there is no second path a retry could sneak a kind
+      // through unchecked.
       if (retry && !retry.__err && retry.kind && detectLang(String(retry.reply ?? "")) !== wrong) out = retry;
     }
 
@@ -1017,8 +1067,13 @@ Deno.serve(async (req: Request) => {
       return body;
     };
 
-    if (out.kind === "interview") return json({ kind: "interview" });
-    if (out.kind === "listings") {
+    // UNCONDITIONAL FROM HERE ON (owner-approved consolidation, 2026-08-30). out.kind is never read
+    // again — every field below is resolved regardless of what the model classified itself as, so
+    // decideAgentTurn() downstream always sees the SAME fully-resolved state whether the model said
+    // "listings", "message", or "interview". This is also what makes the bedroom-word-without-word
+    // guard and the ask_about sanitizing apply to EVERY turn now, not only the ones the model itself
+    // already decided to search on (previously a "message"-classified turn skipped both).
+    {
       // Trust our deterministic conversion of the user's own text over the model's arithmetic;
       // only fall back to the model's price when we couldn't detect a figure ourselves.
       let detPrice = extractPrice(text);
@@ -1162,6 +1217,12 @@ Deno.serve(async (req: Request) => {
 
       let regionPin: string | undefined;   // region_ar to scope a twin city to one region
       let districtPin: string | undefined; // «حي …» to scope a twin district to one city
+      // A genuine DB-confirmed ambiguity (loc_classify) the user has NOT resolved this turn. Feeds
+      // decideAgentTurn()'s ladder step 1 below — see decide.ts's header for why this always wins
+      // regardless of askCount or any other signal. Kept as a reply string (not re-derived later)
+      // because the exact wording differs by ambiguity shape; the ladder itself only needs to know
+      // THAT one exists, never which one.
+      let ambiguityReply: string | null = null;
       if (location) {
         const cls = await locClassify(location);
         const ck = String(cls?.kind ?? "");
@@ -1198,7 +1259,7 @@ Deno.serve(async (req: Request) => {
           if (wantsRegion && !wantsCity) location = `منطقة ${nm}`;
           else if (wantsCity && !wantsRegion) location = nm;
           else if (!wantsCity && !wantsRegion && !alreadyAsked) {
-            return json({ kind: "message", reply: `«${nm}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${nm} ولا منطقة ${nm} كاملة؟`, query: understoodState() });
+            ambiguityReply = `«${nm}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${nm} ولا منطقة ${nm} كاملة؟`;
           }
         } else if (ck === "twin_city") {
           const regions = (Array.isArray(cls?.regions) ? cls!.regions : []) as Array<Record<string, unknown>>;
@@ -1206,7 +1267,7 @@ Deno.serve(async (req: Request) => {
           if (pick) regionPin = String(pick.region_ar);
           else if (!alreadyAsked && regions.length > 1) {
             const list = regions.map((r) => String(r.region_ar)).join("، ");
-            return json({ kind: "message", reply: `«${nm}» موجودة في أكثر من منطقة (${list}). أي منطقة تقصد؟`, query: understoodState() });
+            ambiguityReply = `«${nm}» موجودة في أكثر من منطقة (${list}). أي منطقة تقصد؟`;
           }
         } else if (ck === "twin_district") {
           const cities = (Array.isArray(cls?.cities) ? cls!.cities : []) as Array<Record<string, unknown>>;
@@ -1216,7 +1277,7 @@ Deno.serve(async (req: Request) => {
             const top = cities.slice(0, 8);
             const lines = top.map((c) => `• ${c.city_ar}`).join("\n");
             const more = cities.length > top.length ? "\n• أو مدينة أخرى" : "";
-            return json({ kind: "message", reply: `حي ${nm} موجود في أكثر من مدينة. تقصد حي ${nm} في أي مدينة؟\n${lines}${more}`, query: understoodState() });
+            ambiguityReply = `حي ${nm} موجود في أكثر من مدينة. تقصد حي ${nm} في أي مدينة؟\n${lines}${more}`;
           }
         }
       }
@@ -1261,28 +1322,56 @@ Deno.serve(async (req: Request) => {
         ? out.ask_about.filter((a: unknown) => typeof a === "string" && a.trim()).map((a: string) => a.trim().toLowerCase())
         : [];
 
-      // DO NOT SEARCH TOO EARLY (owner ruling 2026-08-29). A "listings" turn that carries NOTHING
-      // searchable — no location, no type, no budget, no detail, no amenities, no AF intent, and no
-      // real ask_about signal — is not a search, it is a shrug rendered as one. Ask instead. A
-      // type-only or city-only query is still a useful search and is deliberately allowed through;
-      // only the genuinely empty one is blocked.
+      // ── THE SINGLE DECISION AUTHORITY (owner-approved consolidation, 2026-08-30) ─────────────────
+      // Everything above resolved THIS turn's fields regardless of what the model itself classified
+      // itself as. Below, decideAgentTurn() is the ONLY place that assigns a final kind — out.kind
+      // is not read again past this point anywhere in this function.
       //
-      // ask_about counts too (owner ruling 2026-08-30): it is real signal ("كبير" → ask_about=
-      // ["size"]) that just doesn't map to a hard filter field. Once the model's own question budget
-      // is spent, a kind="listings" decision resting on that signal must not be silently downgraded
-      // back to a question — see ai_usage id 9575 (raw kind="listings", final response downgraded to
-      // "message" with an empty query) reproduced live against production 2026-08-30.
-      const nothingToSearchOn =
-        !location && !(typeof out.type === "string" && out.type) && !price &&
-        !detailStr && !(Array.isArray(out.amenities) && out.amenities.length) &&
-        !(out.af && typeof out.af === "object" && Object.keys(out.af).length) &&
-        !askAboutList.length;
-      if (nothingToSearchOn) {
-        return json({ kind: "message", reply: oneQuestionOnly(groundReply(lead(out.reply), locale)), query: understoodState() });
+      // establishedState is the FULL MERGED state (this turn OR the client-sent prevQuery — the
+      // identical "established(next) || established(prev)" rule mergeConversationState.ts applies
+      // to every non-defaulted STICKY_FIELD; none of these seven are DEFAULTED_FIELDS, so the OR is
+      // behaviourally identical to running the real merge for gate purposes without needing to pull
+      // that module — which only carries a TYPE import — into this Deno function).
+      //
+      // priorAskAbout is the one deliberate exception: see EstablishedState's own doc in decide.ts
+      // for the mandatory regression case this narrowing exists for.
+      const prevAf = (prevQuery?.af && typeof prevQuery.af === "object" && !Array.isArray(prevQuery.af))
+        ? (prevQuery.af as Record<string, unknown>) : null;
+      const thisAf = (out.af && typeof out.af === "object" && !Array.isArray(out.af)) ? out.af as Record<string, unknown> : {};
+      const establishedState: EstablishedState = {
+        location: location || (typeof prevQuery?.location === "string" ? prevQuery.location : null),
+        type: (typeof out.type === "string" && out.type) || (typeof prevQuery?.type === "string" ? prevQuery.type : null),
+        price: price || (typeof prevQuery?.price === "string" || typeof prevQuery?.price === "number" ? prevQuery.price : null),
+        detail: detailStr || (typeof prevQuery?.detail === "string" ? prevQuery.detail : null),
+        amenities: (Array.isArray(out.amenities) && out.amenities.length)
+          ? out.amenities : (Array.isArray(prevQuery?.amenities) ? prevQuery!.amenities as string[] : null),
+        af: (thisAf && Object.keys(thisAf).length) ? thisAf : prevAf,
+        priorAskAbout: Array.isArray(prevQuery?.askAbout) ? prevQuery!.askAbout as string[] : null,
+      };
+      const decision = decideAgentTurn({
+        rawText: text,
+        locationAmbiguous: ambiguityReply !== null,
+        establishedState,
+        askCount,
+      });
+
+      if (decision.kind === "interview") {
+        return json({ kind: "interview", askCount: decision.askCount });
       }
+
+      if (decision.kind === "message") {
+        // A genuine loc_classify ambiguity has a specific, pre-built question; otherwise fall back
+        // to the model's own reply text/phrasing (owner-confirmed: the platform enforces THAT this
+        // turn is a clarification, never WHAT it asks about).
+        const reply = ambiguityReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale));
+        return json({ kind: "message", reply, query: understoodState(), askCount: decision.askCount });
+      }
+
+      // decision.kind === "listings"
       return json({
         kind: "listings",
         reply: groundReply(replyOut, locale),
+        askCount: decision.askCount,
         query: {
           deal,
           bothDeals,
@@ -1334,35 +1423,6 @@ Deno.serve(async (req: Request) => {
         },
       });
     }
-    // THE MODEL'S OWN QUESTION — the most common clarification of all, and the one that mattered most.
-    // This return sits outside the listings block, so the resolved search variables (deal, location,
-    // rentPeriod, price) do not exist here; only the model's raw reading does. Carry exactly that.
-    // The client merges it under the conversation, so a field the model omitted this turn is filled
-    // from history rather than lost, and a field it DID state wins — which is the same rule as
-    // everywhere else.
-    return json({
-      kind: "message",
-      reply: oneQuestionOnly(groundReply(lead(out.reply), locale)),
-      query: {
-        deal: out.deal === "Buy" ? "Buy" : out.deal === "Rent" ? "Rent" : undefined,
-        rentPeriod: out.rent_period === "monthly" || out.rent_period === "annual" ? out.rent_period : undefined,
-        type: typeof out.type === "string" && out.type ? out.type : null,
-        detail: typeof out.detail === "string" && out.detail ? out.detail : null,
-        location: typeof out.location === "string" ? out.location.trim() : "",
-        furnished: out.furnished === "yes" ? "yes" : out.furnished === "no" ? "no" : "none",
-        af: (out.af && typeof out.af === "object" && !Array.isArray(out.af)) ? out.af : {},
-        askAbout: Array.isArray(out.ask_about)
-          ? out.ask_about.filter((a: unknown) => typeof a === "string" && a).map((a: string) => a.trim().toLowerCase())
-          : [],
-        amenities: Array.isArray(out.amenities)
-          ? [...new Set(out.amenities
-              .filter((a: unknown) => typeof a === "string")
-              .map((a: string) => a.trim().toLowerCase())
-              .filter(Boolean))]
-          : [],
-        platforms: Array.isArray(out.platforms) ? out.platforms.filter((p: unknown) => typeof p === "string" && p) : [],
-      },
-    });
   } catch (e) {
     return json({ error: String(e?.message ?? e) }, 500);
   }

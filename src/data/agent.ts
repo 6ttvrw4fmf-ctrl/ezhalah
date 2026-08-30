@@ -18,12 +18,16 @@ import { mergeConversationState, rescuedFields, describeKnownState } from '@/lib
 import { landmarkHint, ensureLandmarks } from './landmarks';
 import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 
+// askCount (owner-approved consolidation, 2026-08-30): the SERVER's own running clarifying-question
+// count for this chat, echoed back on every turn. Conversation-scoped and never reset mid-chat by
+// the client — src/app/agent.tsx just stores whatever the server last said. Optional because the
+// bundled offline heuristic (backend unavailable) has no such concept and never sets it.
 export type AgentTurn =
-  | { kind: 'listings'; reply: string; query: SearchQuery }
+  | { kind: 'listings'; reply: string; query: SearchQuery; askCount?: number }
   // `query` is the state the agent understood on a turn that did NOT search — a clarification.
   // Optional because most message turns carry nothing; present, it MUST be remembered (see below).
-  | { kind: 'message'; reply: string; query?: SearchQuery }
-  | { kind: 'interview' };
+  | { kind: 'message'; reply: string; query?: SearchQuery; askCount?: number }
+  | { kind: 'interview'; askCount?: number };
 
 // "ask me questions" → hand off to the guided interview.
 const INTERVIEW_RE =
@@ -700,7 +704,20 @@ export type AgentHistoryTurn = { role: 'user' | 'model'; text: string };
 
 async function callAgentBackend(
   text: string,
-  ctx: { loggedIn: boolean; order: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[]; prevQuery?: SearchQuery | null },
+  ctx: {
+    loggedIn: boolean; order: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[];
+    prevQuery?: SearchQuery | null;
+    // Conversation-scoped decision state (owner-approved consolidation, 2026-08-30) — the server is
+    // the single decision authority (supabase/functions/agent/decide.ts) but has no memory of its
+    // own between HTTP calls, so the client sends back exactly what it was last told.
+    askCount?: number;
+    // Stamped once per user SEND (src/app/agent.tsx's send()), shared by this call and any retry it
+    // triggers server-side, so ai_usage rows from the same turn can be told apart from a genuine
+    // second message (mon_detect_agent_calls_per_message()).
+    userMessageId?: string;
+    // TRUE pre-cap conversation length (this screen's msgs.length before its own history slice).
+    historyTurnsRaw?: number;
+  },
 ): Promise<AgentTurn | null> {
   if (!supabase) return null;
   try {
@@ -729,17 +746,27 @@ async function callAgentBackend(
           // answer is already in the search state. A MIRROR of state, never a source: the model may
           // not edit it, it exists so the model can stop asking.
           knownState: describeKnownState(ctx.prevQuery) || undefined,
+          // The merged conversation state so far — decideAgentTurn() reads this server-side to
+          // evaluate hasEnoughToSearch() against the FULL conversation, not just this turn's own
+          // model output. Sent raw (the server only reads the 7 gate fields off it); the client's
+          // own merge-and-certify pipeline below (mergeConversationState + certifyAfOnMergedState) is unaffected.
+          prevQuery: ctx.prevQuery ?? undefined,
+          askCount: ctx.askCount ?? 0,
+          userMessageId: ctx.userMessageId,
+          historyTurnsRaw: ctx.historyTurnsRaw,
         },
       }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('agent-timeout')), 20000)),
     ])) as { data: any; error: any };
     if (error || !data || (data as any).error || !(data as any).kind) return null;
     const d = data as any;
-    if (d.kind === 'interview') return { kind: 'interview' };
+    const askCountOut = typeof d.askCount === 'number' && isFinite(d.askCount) ? d.askCount : undefined;
+    if (d.kind === 'interview') return { kind: 'interview', askCount: askCountOut };
     if (d.kind === 'listings') {
       return {
         kind: 'listings',
         reply: String(d.reply ?? ''),
+        askCount: askCountOut,
         // CLARIFICATION MUST NOT RESET THE CONVERSATION (owner-reported bug 2026-08-29).
         // queryFromBackend builds a FRESH query from this turn's model output, so anything the model
         // does not re-state would vanish — «شهرية» silently became RentAnnual and a 9.5 rating
@@ -777,7 +804,7 @@ async function callAgentBackend(
             d.query,
           )
         : undefined;
-      return { kind: 'message', reply: String(d.reply ?? ''), ...(understood ? { query: understood } : {}) };
+      return { kind: 'message', reply: String(d.reply ?? ''), askCount: askCountOut, ...(understood ? { query: understood } : {}) };
     }
     return null;
   } catch {
@@ -1002,7 +1029,10 @@ function maybeForcePlatformSearch(turn: AgentTurn, text: string): AgentTurn {
 // listings right away. A LOGGED-IN user gets a full conversational assistant — listings appear ONLY
 // when they give a direct search order ("I want…/show me…/أريد…"); otherwise Ezhalah just helps,
 // neutrally, like a normal assistant and invites them to say "show me" when ready.
-export async function respond(text: string, opts?: { loggedIn?: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[]; prevQuery?: SearchQuery | null }): Promise<AgentTurn> {
+export async function respond(text: string, opts?: {
+  loggedIn?: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[]; prevQuery?: SearchQuery | null;
+  askCount?: number; userMessageId?: string; historyTurnsRaw?: number;
+}): Promise<AgentTurn> {
   const v = text.trim();
   const loggedIn = !!opts?.loggedIn;
   if (!v) return { kind: 'message', reply: t("Tell me what you're looking for and I'll search for it.") };
@@ -1026,7 +1056,10 @@ export async function respond(text: string, opts?: { loggedIn?: boolean; history
   // A new chat starts blank (owner rule), so it arrives with no prior query — that is the signal to
   // forget which caveats this conversation has already given.
   if (!opts?.prevQuery) resetRejectionNotices();
-  const backend = await callAgentBackend(v, { loggedIn, order, history: opts?.history, attemptTexts: opts?.attemptTexts, prevQuery: opts?.prevQuery ?? null });
+  const backend = await callAgentBackend(v, {
+    loggedIn, order, history: opts?.history, attemptTexts: opts?.attemptTexts, prevQuery: opts?.prevQuery ?? null,
+    askCount: opts?.askCount, userMessageId: opts?.userMessageId, historyTurnsRaw: opts?.historyTurnsRaw,
+  });
   if (backend) {
     // Named-platform filter safety net: if the user said "Aqar only" / "Gathern فقط" but the model
     // deflected, force the search. When we override, the reply is already final — return as-is.

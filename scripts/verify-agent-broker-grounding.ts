@@ -75,25 +75,42 @@ check("the LISTINGS reply is grounded", /reply: groundReply\(replyOut, locale\),
 // and went red the moment a clarification return gained a `query:` field (2026-08-30) — a change
 // that strengthened the turn without touching the guard. The invariant is that a message reply
 // passes through groundReply; what else the JSON carries is not this barrier's business.
+// UPDATED (owner-approved unified-agent-search-authority consolidation, 2026-08-30): the empty-
+// search clarification and the model's-own-question clarification used to be two separate `return
+// json({ kind: "message", ... })` sites, each spelling out its own
+// `reply: oneQuestionOnly(groundReply(...))`. decideAgentTurn() (supabase/functions/agent/decide.ts)
+// is now the ONE place that decides a turn is a clarification, so both collapsed into a single
+// return building a local `reply` const first — same grounding, one fewer path to keep in sync, not
+// a weakening. The regex below tracks that real code shape rather than the pre-consolidation one.
 check("the MESSAGE reply is grounded",
-  /kind: "message",\s*\n?\s*reply: oneQuestionOnly\(groundReply\(lead\(out\.reply\), locale\)\)/.test(edge));
-const paths = (edge.match(/reply: groundReply\(|reply: oneQuestionOnly\(groundReply\(/g) ?? []).length;
-check(`every reply path goes through it (${paths} found)`, paths >= 3,
-  "listings + the empty-search clarification + the plain message turn");
+  /const reply = ambiguityReply \?\? oneQuestionOnly\(groundReply\(lead\(out\.reply\), locale\)\);/.test(edge));
+const paths = (edge.match(/reply: groundReply\(|reply: oneQuestionOnly\(groundReply\(|const reply = ambiguityReply \?\? oneQuestionOnly\(groundReply\(/g) ?? []).length;
+check(`every reply path goes through it (${paths} found)`, paths >= 2,
+  "listings + the one unified clarification path (empty-search and the model's-own-question cases are now the SAME return)");
 check("no reply path bypasses the guard",
   !/reply: replyOut,/.test(edge) && !/reply: lead\(out\.reply\) \}\)/.test(edge),
   "an ungrounded path would let the claim straight through");
 
 console.log("\n── do not search too early ──");
-// M6 escaped: `const nothingToSearchOn = false &&` still matched a bare `const nothingToSearchOn =`.
-// Pin the real expression so a constant cannot disable the block.
-check("a genuinely empty listings turn becomes a question",
-  /const nothingToSearchOn =\s*\n\s*!location &&/.test(edge)
-  && /if \(nothingToSearchOn\) \{\s*\n\s*return json\(\{ kind: "message"/.test(edge),
-  "the condition must start from !location — a constant here disables the block silently");
-check("...but a type-only or city-only search is still allowed through",
-  /!location && !\(typeof out\.type === "string" && out\.type\) && !price/.test(edge),
-  "the condition must require ALL signals absent — an AND of negations, not an OR");
+// SUPERSEDED (owner-approved consolidation, 2026-08-30): the empty-search gate used to be a bare
+// `nothingToSearchOn` boolean re-derived inline here. It is now hasEnoughToSearch() in
+// supabase/functions/agent/decide.ts — the SAME test, extracted so decideAgentTurn() can also apply
+// it to the FULL merged conversation state, not just this turn's raw fields (see decide.ts's own
+// mutation-proven suite, scripts/verify-agent-decide-turn.ts, for the "type-only/city-only still
+// searches" and "genuinely empty still asks" cases this section used to pin here). What THIS barrier
+// still owns: that index.ts actually WIRES its resolved fields into the ladder instead of silently
+// keeping its own second copy of the decision.
+check("index.ts imports the single decision authority from ./decide.ts",
+  /import \{ decideAgentTurn, wantsGuidedInterview, type EstablishedState \} from "\.\/decide\.ts";/.test(edge));
+check("index.ts calls decideAgentTurn() exactly once, after resolving this turn's fields",
+  (edge.match(/const decision = decideAgentTurn\(\{/g) ?? []).length === 1);
+check("establishedState is built from THIS turn's resolved fields, not the model's raw kind",
+  /const establishedState: EstablishedState = \{/.test(edge)
+  && /location: location \|\|/.test(edge) && /priorAskAbout: Array\.isArray\(prevQuery\?\.askAbout\)/.test(edge),
+  "the seven gate fields must come from the resolved location/type/price/detail/amenities/af/ask_about, OR'd with prevQuery");
+check("a bare nothingToSearchOn re-derivation has NOT been reintroduced",
+  !/const nothingToSearchOn =/.test(edge),
+  "a second, local copy of the gate is exactly how the server, model and client end up with three contradicting budgets again");
 
 console.log("\n── the model is told the rule, not just guarded ──");
 check("told it cannot know results yet", /you write this reply BEFORE the search runs, so you cannot know/.test(edge));

@@ -135,11 +135,13 @@ check('agent.tsx imports isGenericWholeAreaAnswer',
   /import \{[^}]*isGenericWholeAreaAnswer[^}]*\} from '@\/lib\/regionOrCityAnswer'/.test(agentSrc));
 check('a pendingCityRef holds the city the plain-city question was about',
   /const pendingCityRef = useRef<string \| null>\(null\)/.test(agentSrc));
-check('the ref is ARMED from the question the app just asked',
-  // clarifyQ! (non-null assertion) since 2026-08-30: shouldAskLocationInsteadOfSearching() narrows
-  // truthiness through an opaque function call, which TS can't see through the way it sees through
-  // a bare `if (clarifyQ && ...)` — same clarifyQ value, still armed from the same question.
-  /pendingCityRef\.current = wholeCityQuestionSubject\(clarifyQ!?\)/.test(agentSrc));
+// RETIRED (owner-approved unified-agent-search-authority consolidation, 2026-08-30): the client's
+// own clarify-or-search gate — the only call site that ever armed pendingCityRef — is deleted along
+// with src/lib/agentQuestionBudget.ts. The plain-city question is now decided server-side by
+// decideAgentTurn() in supabase/functions/agent/decide.ts; asserting the ref stays UNARMED from that
+// retired path is the correct invariant now, not asserting it fires.
+check('the client no longer arms pendingCityRef from its own retired clarify-or-search gate',
+  !/pendingCityRef\.current = wholeCityQuestionSubject\(/.test(agentSrc));
 check('the ref is READ AND CLEARED once per turn (one question, one answer)',
   /const askedCity = pendingCityRef\.current;\s*pendingCityRef\.current = null;/.test(agentSrc),
   'leaving it armed would let a later, unrelated message be treated as the answer');
