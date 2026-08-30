@@ -194,6 +194,21 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   `mon_detect_alert_delivery()` BRANCH 3 raises P1 if any database function stamps it. Reading that
   column is fine; stamping it is not.
 
+  **LIMB 3 — DELIVERED, BUT LATE (added 2026-08-30). The SLO was unmeasurable before it.** Limbs 1
+  and 2 of `mon_detect_p0_delivery_sla()` both match only while `dispatched_at is null`, so a breach
+  became invisible the instant `alert-dispatch.yml` filed the issue: **a path that delivered every
+  single P0 late would have read permanently GREEN.** The SLO is defined on delivery *latency*;
+  those limbs measured only *pending* latency. Measured live the day this shipped: P0 alert **1166**
+  (`deleted_but_source_live:73`) was created 05:29:00 and dispatched 05:35:11 — **371 s, a 71 s
+  breach — and nothing raised, because nothing could.** Limb 3 reads the latency that actually
+  happened (`dispatched_at - created_at`, the one-writer clock, never a `github_workflow` 204
+  receipt) over a rolling 24 h window, and raises **P1**: the alert *did* reach a human, so this is
+  not limb 2's blackout class — it says the *path* is too slow. It is pinned by
+  `scripts/verify-p0-delivery-sla.ts`, including the property a refactor is most likely to destroy
+  (limb 3 must match `dispatched_at is not null`; reusing limbs 1-2's `is null` makes it unreachable
+  code that still looks present in review). **Never widen `c_sla_minutes` or shorten the window to
+  quiet it.**
+
   **The destination remains an OWNER input.** `ops_alert_channel` decides who is actually woken;
   the `alert-sink` edge function is a proof fixture with no side effects and reaches no human, so
   `mon_detect_p0_delivery_sla()` raises if it is the only channel configured. A mechanism that meets

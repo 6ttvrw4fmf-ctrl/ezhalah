@@ -93,6 +93,32 @@ const corpus = files
 // in this repo — once in verify-alert-delivery-coverage.ts, once in my own heartbeat barrier.)
 const code = sql.split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
 
+// A THIRD SCOPE, added 2026-08-30, because two were not enough.
+//
+// `code` is the newest migration defining the DETECTOR. Several checks below are about the
+// DISPATCHER (`mon_dispatch_p0_fast`) — retry cap, throttle, Vault, the channel row — and they were
+// reading `code` too. That worked only for as long as one migration happened to define both. The
+// moment a migration touched the detector alone (this one did, adding LIMB 3), four dispatcher
+// properties "vanished" and this barrier went red while production's dispatcher was untouched and
+// completely correct. A barrier that fails for a reason that isn't a defect is one people learn to
+// route around, which is the same failure the two-scope comment above was written to avoid.
+//
+// Worse, one check passed for the WRONG reason: `net._http_response` matched a mention inside the
+// detector's own `action` payload string. Comments are stripped before matching precisely so prose
+// cannot satisfy a behavioural check — but a payload string is code, not a comment, so it slipped
+// through the same trap one layer over. Scoping it to the dispatcher fixes that too.
+const dispatcherOwning = files
+  .map((f) => ({ f, sql: readFileSync(join(MIGRATIONS, f), 'utf8') }))
+  .filter((x) => new RegExp(`function\\s+public\\.${DISPATCHER}\\b`, 'i').test(x.sql))
+  .sort((a, b) => a.f.localeCompare(b.f));
+check(
+  `at least one migration defines ${DISPATCHER}()`,
+  dispatcherOwning.length >= 1,
+  'the fast lane has no migration at all',
+);
+const dispatcherCode = (dispatcherOwning[dispatcherOwning.length - 1]?.sql ?? '')
+  .split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+
 // --- the SLO number itself ----------------------------------------------------------------------
 const slaMatch = code.match(/c_sla_minutes\s+int\s*:=\s*(\d+)/);
 check(
@@ -137,13 +163,14 @@ check(
 );
 check(
   'the dispatcher caps retries',
-  /c_max_attempts\s+int\s*:=\s*\d+/.test(code) && /attempts\s*>=\s*c_max_attempts/.test(code),
+  /c_max_attempts\s+int\s*:=\s*\d+/.test(dispatcherCode)
+    && /attempts\s*>=\s*c_max_attempts/.test(dispatcherCode),
   'without a cap, one down channel becomes a POST every minute forever aimed at whoever is already '
     + 'having a bad day',
 );
 check(
   'the dispatcher reconciles net._http_response rather than trusting the enqueue',
-  /net\._http_response/.test(code),
+  /net\._http_response/.test(dispatcherCode),
   'net.http_post returns on ENQUEUE, not on response — a request_id alone proves nothing was '
     + 'delivered. That distinction is the entire reason this barrier exists.',
 );
@@ -151,7 +178,7 @@ check(
 // --- it must not become a second writer of dispatched_at -----------------------------------------
 check(
   'the fast lane never stamps alert_event.dispatched_at',
-  !/dispatched_at\s*=\s*now\(\)/.test(code),
+  !/dispatched_at\s*=\s*now\(\)/.test(dispatcherCode),
   'dispatched_at has exactly one writer (alert-dispatch.yml, meaning "a GitHub issue exists") and '
     + 'mon_detect_alert_delivery() BRANCH 3 raises P1 on any database function that stamps it. '
     + 'Receipts belong in ops_p0_delivery.',
@@ -207,13 +234,13 @@ check(
 // issue-filing and routing.
 check(
   'the canonical channel triggers the EXISTING alert-dispatch.yml workflow',
-  /actions\/workflows\/alert-dispatch\.yml\/dispatches/.test(code),
+  /actions\/workflows\/alert-dispatch\.yml\/dispatches/.test(dispatcherCode),
   'the P0 destination must be the existing workflow — a second issue-filer would be the parallel '
     + 'ownership system the owner forbade',
 );
 check(
   'the GitHub PAT is read from Vault at send time, never stored in ops_alert_channel',
-  /vault\.decrypted_secrets/.test(code) && !/ghp_[A-Za-z0-9]/.test(code),
+  /vault\.decrypted_secrets/.test(dispatcherCode) && !/ghp_[A-Za-z0-9]/.test(dispatcherCode),
   'a PAT written into a plain ops table is a worse secret posture than the Vault one already in use',
 );
 
@@ -235,8 +262,8 @@ check(
 // stayed green off the use site alone. Assert the throttle is actually applied in the skip test.
 check(
   'workflow re-triggering is throttled',
-  /c_retrigger_after\s+interval\s*:=/.test(code)
-    && /last_tried\s*>\s*now\(\)\s*-\s*c_retrigger_after/.test(code),
+  /c_retrigger_after\s+interval\s*:=/.test(dispatcherCode)
+    && /last_tried\s*>\s*now\(\)\s*-\s*c_retrigger_after/.test(dispatcherCode),
   'without a throttle the every-minute job would re-dispatch the workflow while a run is still in '
     + 'flight, racing its own concurrency group',
 );
@@ -266,6 +293,54 @@ check(
     + 'statement_timeout the rollback takes the trailing mon_dispatch_p0_fast() with it and NO P0 '
     + 'is dispatched at all. Observed 2026-08-26: the 17:29 AND 17:59 sweeps both aborted, a full '
     + 'hour with zero dispatch capability, and P0 1011 waited 2h47m for the Actions backstop.',
+);
+
+// --- LIMB 3: DELIVERED, BUT LATE, added 2026-08-30 -----------------------------------------------
+// THE HOLE THIS CLOSES. Limbs 1 and 2 both match only while `a.dispatched_at is null`. The instant
+// alert-dispatch.yml stamps that column, a breach becomes invisible to this detector forever — so a
+// path that delivers every single P0 late reads permanently GREEN. The SLO is defined on DELIVERY
+// LATENCY; limbs 1-2 measure only PENDING latency, and the gap between those two predicates is the
+// whole failure mode.
+//
+// Measured on production the day this shipped: alert 1166 (deleted_but_source_live:73) was created
+// 2026-08-30 05:29:00 and dispatched 05:35:11 — 371s end-to-end, a 71s breach of the 300s SLO, and
+// NOTHING raised, because by evaluation time dispatched_at was already stamped. The 05:29 sweep ran
+// 356.8s and created_at is transaction start, so the clock had expired before the fast lane began.
+check(
+  'LIMB 3 exists: a P0 that was DELIVERED but LATE still raises',
+  /mon_raise\(\s*'P1',\s*'p0_delivery_sla',\s*'monitoring',\s*'p0_delivery_sla_late'/.test(code),
+  'without it, a breach vanishes the moment the issue is filed and the SLO becomes unmeasurable',
+);
+// THE DISTINGUISHING PROPERTY, and the one a "simplifying" refactor is most likely to destroy.
+// Limb 3 must look at DELIVERED alerts. Reusing limbs 1-2's `dispatched_at is null` here would make
+// it dead code that can never fire while still looking present in review. Both the counting query
+// and the sample query must agree — the same lesson the github_workflow exclusion check above
+// learned the hard way, where mutating only the counting query left the barrier green.
+const deliveredFilters = (code.match(/a\.dispatched_at\s+is\s+not\s+null/g) ?? []).length;
+check(
+  'LIMB 3 matches DELIVERED alerts, in both its counting and sample queries',
+  deliveredFilters >= 2,
+  `found ${deliveredFilters}, expected the counting query AND the sample query. With `
+    + '`dispatched_at is null` instead, limb 3 is unreachable code: limb 2 already owns that set.',
+);
+check(
+  'LIMB 3 measures true end-to-end latency (dispatched_at - created_at) against the SLO',
+  /a\.dispatched_at\s*-\s*a\.created_at\s*>\s*make_interval\(mins\s*=>\s*c_sla_minutes\)/.test(code),
+  'dispatched_at is the only honest clock: one writer, stamped after `gh issue create` succeeds. A '
+    + 'github_workflow 204 receipt is a trigger accepted, not a delivery.',
+);
+check(
+  'LIMB 3 can go GREEN again on its own',
+  /mon_resolve_key\('p0_delivery_sla',\s*'p0_delivery_sla_late'\)/.test(code),
+  'a limb that can only ever raise corrupts open_alerts and suppresses its own future raises — '
+    + 'mon_raise() returns 0 on an already-open dedup key',
+);
+check(
+  'LIMB 3 uses a bounded rolling window, so a one-off ages out instead of pinning a permanent red',
+  /c_late_window\s+constant\s+interval\s*:=\s*interval\s*'24 hours'/.test(code)
+    && /a\.created_at\s*>\s*now\(\)\s*-\s*c_late_window/.test(code),
+  'unbounded, alert 1011 (10037s, 2026-08-26, from before the fast-lane fix) would hold this red '
+    + 'forever and train people to ignore the key',
 );
 
 // --- the owner decision is recorded in the repo, not just in a migration -------------------------
