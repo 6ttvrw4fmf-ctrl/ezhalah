@@ -86,6 +86,124 @@ owner take it on their next run. Ambiguous or multi-owner issues escalate to rou
 Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
 doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
 
+## §G — GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds ALL SEVEN routines
+
+> Owner rule, 2026-08-29. This section binds **all seven** routines: ⚡ Junior Scraping (#1),
+> 🎖️ Senior Production (#2), 🛡️ Data Integrity (#3), 🧪 Search & Matching QA (#4), 🎯 AF + Trending
+> (#5), 👣 Journey & Persistence (#6), 🧵 Systems Seam (#7). Each live routine prompt carries a
+> condensed copy so a run that never opens this file still obeys — but **this file is the canonical
+> home and wins on any divergence**, the same rule every per-routine spec already states. Nothing
+> here replaces a routine's own spec; where a spec is stricter, the spec governs.
+
+### §G.1 — FIX FIRST, REPORT LAST
+
+Every routine follows one chain:
+
+```
+INVESTIGATE → REPRODUCE → ROOT CAUSE → FIX → REGRESSION → PERMANENT BARRIER → MUTATION-PROVE
+  → RELEVANT/FULL TESTS → MERGE → DEPLOY/APPLY IF ROLE-AUTHORIZED → PRODUCTION VERIFY → REPORT
+```
+
+**Finding a bug is NOT completion.** A safe, obvious, in-scope defect is fixed in the SAME run —
+never handed back to the owner as homework.
+
+### §G.2 — THE ONLY LEGITIMATE REASONS TO STOP WITHOUT FIXING (exactly six)
+
+- (a) destructive/high-risk operation requiring owner approval;
+- (b) genuine product / source-truth / taxonomy ambiguity;
+- (c) the fix would weaken a safety or security gate;
+- (d) another routine currently owns that protected surface;
+- (e) a role/permission boundary physically prevents this routine from writing or deploying;
+- (f) an external dependency/source outage where no truthful fix exists.
+
+**Nothing else qualifies.** "I ran out of time", "it seemed out of scope", "someone should look at
+this" do not. Widening this list is an OWNER decision, not an edit — and it is deliberately a list
+of six specific engineering judgments, never a general licence to escalate on a feeling of
+uncertainty.
+
+### §G.3 — AUTOMATIC CROSS-ROUTINE HANDOFF
+
+If (d) or (e) applies, **ROUTE** the defect to the write-authorized owner using the existing
+ownership system — file it in that routine's queue/coverage trail with reproduction and root cause,
+and name the owner in your report. **Never merely state that someone should fix it.**
+Senior/write-authorized routines remain responsible for what lower-permission routines cannot do.
+Respect single-writer locks (`ops_deploy_lock`) and never create cross-session collisions. The
+ownership tables already exist: §S and `docs/ops/SENTRY_ROUTING.md` for Sentry issues,
+`docs/ops/ALERT_ROUTING.md` for `[alert]` issues, and the Boundary rules below for surfaces.
+
+### §G.4 — ADAPTIVE EFFORT
+
+- **Clean surface** ⇒ normal verification, **SHORT report**, invent no work.
+- **Several genuine defects** ⇒ stay in the run and work through them systematically: P0/P1 and
+  correctness first, fix as many safe in-scope defects as possible, **do not stop after the first
+  few**.
+- **A defect exposing an architectural weakness** ⇒ fix the underlying **CLASS** and barrier it, not
+  just the one example.
+- Re-run the affected surface after fixing: **a red test turning green is not sufficient** —
+  production behavior must match wherever production verification applies.
+
+### §G.5 — THE REAL 10/10 STANDARD
+
+Keep fixing safe in-scope known defects until no actionable defect remains; only then report 10/10.
+**NEVER manufacture a 10/10.** A report of 9.2/10 listing five defects this routine had the
+permission and ability to fix is a **FAILED run**. If a true blocker remains, report
+`10/10 ACHIEVED: NO` with the exact blocker and its owner, citing which of §G.2's six categories
+applies.
+
+### §G.6 — SENTRY IS MANDATORY AND FIRST
+
+At the START of every run, read the unresolved/reopened Sentry issues in your ownership area (org
+`ezhalah`, project `react-native`). This is the same duty §S already carries and does not replace
+it — §S and `docs/ops/SENTRY_ROUTING.md` still govern **which** issues are yours and the
+claim-before-you-fix protocol. Sentry findings enter the SAME pipeline:
+
+```
+SENTRY ISSUE → CLAIM → REPRODUCE → ROOT CAUSE → FIX → BARRIER/MUTATION → TEST → MERGE
+  → DEPLOY → PRODUCTION VERIFY → RESOLVE
+```
+
+- **Do NOT resolve a Sentry issue because code merged — resolve ONLY after the production fix is
+  verified.**
+- A **REOPENED** issue is evidence the previous fix was incomplete: treat it as such and find what
+  the earlier fix missed.
+- Sentry does **NOT** replace deterministic QA — silent wrong-data, matching, AF, scraper, database,
+  UX, cron, deploy and persistence defects still need their normal checks.
+- **Prove the connection with a real read each run; a configured connector is not a working one.**
+  If the Sentry read fails, say so plainly in the report (`SENTRY CONNECTION WORKING: NO`) rather
+  than silently skipping it.
+
+### §G.7 — NOTHING ABOVE WEAKENS ANY EXISTING GUARD
+
+Source-truth rules, migration/deploy protections, cost protections, single-writer ownership, the
+deploy lock, the production-target lock, kill caps and coverage floors all remain in full force.
+**A gate that blocks you has found a real problem — never route around it to reach 10/10.**
+
+### §G.8 — THE REPORT IS SHORT AND ENDS WITH THIS BLOCK
+
+```
+BUGS FOUND: X
+BUGS FIXED: X
+BUGS REMAINING: X
+BARRIERS ADDED: X
+MUTATIONS KILLED: X/X
+TESTS: PASS/FAIL
+MERGED: YES/NO
+DEPLOYED/APPLIED: YES/NO/N/A
+PRODUCTION VERIFIED: YES/NO/N/A
+SENTRY CHECKED: YES/NO
+SENTRY CONNECTION WORKING: YES/NO
+OPEN P0/P1 IN SCOPE: X
+TRUE SCORE: X/10
+10/10 ACHIEVED: YES/NO
+```
+
+If 10/10 is NO, list ONLY genuine blockers (category + owner) — **never defects the routine chose
+not to fix**.
+
+Routines whose canonical spec already defines a richer domain report block **keep it, and append
+this block at the end**. The `Rating Before → Rating After` pair required by "Reporting rules"
+below is unaffected and still mandatory; `TRUE SCORE` does not replace it.
+
 ## 1. ⚡ Daily JUNIOR SCRAPING Engineer (original, unmodified)
 
 Original owner prompt (9,971 chars), untouched since creation. Runs on branch `ops/daily-engineer`,

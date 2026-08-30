@@ -21,6 +21,8 @@ The daily question:
 على العقار، هل يوصل لنفس العقار الصحيح؟» — If not, because of a fixable Ezhalah-side bug: fix it.
 Do not ask first.
 
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+
 ## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
 
 On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
