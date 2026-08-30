@@ -109,6 +109,11 @@ class LivenessPolicy:
     grace: int = 3
     max_verification_age_hours: int = 72
     absence_is_candidate_only: bool = True
+    # Whether merely appearing in this platform's feed counts as PROOF OF LIFE. Defaults to False
+    # and must stay False unless a platform's source is documented to publish only live ads — the
+    # burden is on the claim, not on the doubt. When False (the norm), crawler presence updates
+    # last_seen_at and nothing else; only a DIRECT ALIVE verdict stamps last_verified_alive_at.
+    presence_is_positive_evidence: bool = False
 
     def __post_init__(self) -> None:
         if self.grace < 1:
@@ -191,3 +196,29 @@ def is_stale(hours_since_verified: Optional[float], policy: LivenessPolicy) -> b
     if hours_since_verified is None:
         return True
     return hours_since_verified > policy.max_verification_age_hours
+
+
+def verification_patch(decision: Decision, *, now_iso: str) -> dict:
+    """The ONLY sanctioned way to write `last_verified_alive_at`.
+
+    Callers must never set that column by hand. It is stamped exactly when the source affirmatively
+    said ALIVE on DIRECT evidence — which is the single case where `Decision.verified_alive` is
+    True. An UNKNOWN read (timeout, 403, 429, 5xx, unrecognised 200) and an ABSENCE signal both
+    return an EMPTY patch, so a blocked crawl can never refresh a verification timestamp and make
+    dead inventory look freshly checked. That failure would be worse than the one this column was
+    added to fix: it would put a confident, recent-looking timestamp on a listing nobody verified.
+    """
+    return {"last_verified_alive_at": now_iso} if decision.verified_alive else {}
+
+
+def presence_patch(policy: LivenessPolicy, *, now_iso: str) -> dict:
+    """What a mere crawler sighting may write. Normally nothing.
+
+    Appearing in a feed is not proof a listing is live — a source can keep serving closed ads in
+    its browse pages (aqar does exactly this, which is how 13,139 dead rows stayed 'healthy'). So
+    presence stamps `last_verified_alive_at` ONLY for a platform that has explicitly declared
+    `presence_is_positive_evidence=True` in the registry, i.e. its source is documented to publish
+    live ads only. Every other platform gets an empty patch and keeps `last_seen_at` as the sole
+    record of the sighting.
+    """
+    return {"last_verified_alive_at": now_iso} if policy.presence_is_positive_evidence else {}
