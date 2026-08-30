@@ -2188,7 +2188,11 @@ export default function Agent() {
     // region, «مدينة X» the city — instead of re-asking it or falling through to the 2-ask cap's
     // Kingdom-wide «ما قدرت أحدد الموقع بدقة» (defect `agent-clarify-loop`, found live 2026-08-23:
     // answering «مدينة الرياض» never produced a search in 7/7 fresh runs).
-    if (turn.kind === 'listings' && turn.query) lastQueryRef.current = turn.query;
+    // Remember the accumulated state from a CLARIFICATION too, not only from a search. A question
+    // pauses execution; it must never roll the conversation back to nothing (owner ruling
+    // 2026-08-30). Without this the answer to «مدينة ولا منطقة؟» rebuilt the query from scratch and
+    // silently dropped the property type, the rental period and every AF value already given.
+    if (turn.kind !== 'interview' && turn.query) lastQueryRef.current = turn.query;
     const askedTwin = pendingScopeRef.current;
     pendingScopeRef.current = null;
     // The plain-city question we asked last turn, and whether this message is the bare «المدينة كاملة»
