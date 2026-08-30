@@ -39,6 +39,27 @@ export const STICKY_FIELDS = [
   'isNewConstruction', 'streetWidthMin', 'directions', 'unitSubtypes',
 ] as const;
 
+/**
+ * Fields whose EMPTY state is a non-empty default, so `established()` alone cannot tell "the user
+ * said this" from "nobody said anything".
+ *
+ * THE BUG THIS EXISTS FOR (found 2026-08-30 by executing the real merge, not by reading it):
+ *   T1 «ابغى شقة شهرية في الرياض تقييمها ٩.٥»  → monthly · Apartment · ratingMin 9.5   ✅
+ *   T2 anything that does not restate the period → emptyQuery() supplies rentPeriod:'annual',
+ *      which is a non-empty string, so established() said TRUE and the carry-forward never fired.
+ *   Result: the period silently flipped monthly → ANNUAL while ratingMin 9.5 — a Gathern
+ *   MONTHLY-ONLY signal — was faithfully carried into it. The executed search then matched almost
+ *   nothing, and the reply said «سنوي». Both halves looked individually reasonable; together they
+ *   were a query the user never asked for.
+ *
+ * So for these fields the merge needs the caller to say what the turn EXPLICITLY stated. Absence of
+ * a statement is "not mentioned", never "reset to the default".
+ *
+ * furnishedPref is deliberately NOT here: it is only ever set when the user states it, so its
+ * `false` is a real answer ("unfurnished"), not a default.
+ */
+export const DEFAULTED_FIELDS = ['deal', 'rentPeriod', 'category', 'bothDeals', 'priceIsAnnual'] as const;
+
 /** Has this turn actually established a value for the field? Empty string/array/null mean "no". */
 function established(v: unknown): boolean {
   if (v === undefined || v === null) return false;
@@ -57,12 +78,23 @@ function established(v: unknown): boolean {
  */
 export function mergeConversationState(
   prev: SearchQuery | null | undefined, next: SearchQuery,
+  /**
+   * The keys this turn EXPLICITLY stated. Required to carry a defaulted field (see
+   * DEFAULTED_FIELDS) correctly — without it a default is indistinguishable from an answer.
+   * Omitted (legacy callers): defaulted fields fall back to the value-shape test, which is the
+   * pre-2026-08-30 behaviour.
+   */
+  stated?: Iterable<string>,
 ): SearchQuery {
   if (!prev) return next;
+  const said = stated ? new Set(stated) : null;
   const out: Record<string, unknown> = { ...(next as unknown as Record<string, unknown>) };
   const p = prev as unknown as Record<string, unknown>;
+  const defaulted = new Set<string>(DEFAULTED_FIELDS as readonly string[]);
   for (const key of STICKY_FIELDS) {
-    if (!established(out[key]) && established(p[key])) out[key] = p[key];
+    // A defaulted field counts as established ONLY if this turn actually said it.
+    const establishedNow = said && defaulted.has(key) ? said.has(key) : established(out[key]);
+    if (!establishedNow && established(p[key])) out[key] = p[key];
   }
   return out as unknown as SearchQuery;
 }

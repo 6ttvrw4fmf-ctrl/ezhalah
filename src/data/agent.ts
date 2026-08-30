@@ -438,6 +438,48 @@ function cityFromText(text: string): string | null {
 // EXPORTED so barriers can execute the REAL function instead of a copy of it. Behaviour-neutral —
 // the only in-app caller is respond() below. (Repo rule: never test a stale verbatim copy; a copy
 // passes while production breaks.)
+/**
+ * The DEFAULTED_FIELDS this turn's backend payload actually stated. The edge omits a field it did
+ * not understand from the user's words, so presence here means "the user said it", while absence
+ * means "not mentioned" — which is exactly the distinction mergeConversationState needs and cannot
+ * make from the value alone.
+ */
+/**
+ * Re-run AF certification against the MERGED state.
+ *
+ * WHY THIS IS SEPARATE FROM the pass inside queryFromBackend. cohortAllows() reads type, category,
+ * deal and rentPeriod — and queryFromBackend only knows what THIS turn's model output carried. On a
+ * follow-up the model is explicitly told not to restate what is already established, so a turn that
+ * says only «خلي تقييمها ٩.٥» can arrive with no type at all; scopeCleanTypes() then returns [] and
+ * cohortAllows() rejects EVERY intent the user just stated. The conversation's accumulated context
+ * only exists after mergeConversationState, so certification has to happen again here, where the
+ * cohort is actually known.
+ *
+ * Safe to run twice: every AF intent applies through Math.max / Set-union, so re-applying an
+ * already-applied value is a no-op. Certification is still the ONLY gate — this widens the CONTEXT
+ * the gate sees, never the gate itself.
+ */
+function certifyAfOnMergedState(merged: SearchQuery, b: BackendQuery): SearchQuery {
+  const af = (b as { af?: unknown }).af;
+  if (!af || typeof af !== 'object') return merged;
+  const res = applyAfIntents(merged, af as Record<string, unknown>);
+  lastRejectedFilters = lastRejectedFilters.filter((f) => !res.rejected.includes(f));
+  lastRejectedFilters.push(...res.rejected);
+  return res.q;
+}
+
+export function statedKeys(b: BackendQuery): string[] {
+  const said: string[] = [];
+  if (b.deal === 'Buy' || b.deal === 'Rent') said.push('deal');
+  if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual' || b.rentPeriod === 'both') said.push('rentPeriod');
+  if (b.bothDeals === true) said.push('bothDeals', 'deal');
+  if (b.priceIsAnnual === true) said.push('priceIsAnnual');
+  // category is never sent by the edge; it is DERIVED from the type, so it is stated exactly when a
+  // type was stated.
+  if (typeof b.type === 'string' && b.type.trim()) said.push('category');
+  return said;
+}
+
 export function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts?: string[]): SearchQuery {
   let q = emptyQuery();
   q.deal = b.deal === 'Buy' ? 'Buy' : 'Rent';
@@ -670,7 +712,20 @@ async function callAgentBackend(
         // does not re-state would vanish — «شهرية» silently became RentAnnual and a 9.5 rating
         // disappeared after one more clarifying question. The accumulated state fills the gaps; an
         // explicit change in THIS turn always wins.
-        query: mergeConversationState(ctx.prevQuery ?? null, queryFromBackend(d.query ?? {}, text, ctx.attemptTexts ?? [text])),
+        // A DEFAULT IS NOT AN ANSWER. emptyQuery() supplies deal:'Rent', rentPeriod:'annual',
+        // category:'Residential' — all non-empty, so the merge could not tell "the user said annual"
+        // from "nobody mentioned a period this turn". A follow-up that did not restate the period
+        // therefore flipped an established MONTHLY search to ANNUAL while carrying its
+        // monthly-only ratingMin along, producing a query that matches almost nothing.
+        // So we tell the merge exactly what this turn stated.
+        query: certifyAfOnMergedState(
+          mergeConversationState(
+            ctx.prevQuery ?? null,
+            queryFromBackend(d.query ?? {}, text, ctx.attemptTexts ?? [text]),
+            statedKeys(d.query ?? {}),
+          ),
+          d.query ?? {},
+        ),
       };
     }
     if (d.kind === 'message') return { kind: 'message', reply: String(d.reply ?? '') };

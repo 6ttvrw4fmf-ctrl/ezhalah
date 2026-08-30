@@ -77,7 +77,34 @@ for (const [k, v] of Object.entries(rich as Record<string, unknown>)) {
 console.log("\n── wiring ──");
 const data = readFileSync(new URL("../src/data/agent.ts", import.meta.url), "utf8");
 const ui = readFileSync(new URL("../src/app/agent.tsx", import.meta.url), "utf8");
-check("the merge wraps queryFromBackend", /query: mergeConversationState\(ctx\.prevQuery \?\? null, queryFromBackend\(/.test(data));
+// Structure, not formatting: the invariant is that the merge WRAPS the fresh per-turn query with
+// the accumulated state, whatever else wraps that in turn. (2026-08-30: AF re-certification now
+// wraps the merge, and the call spans several lines — a one-line regex failed on a change that
+// strengthened the very thing it guards.)
+{
+  const mergeIdx = data.indexOf("mergeConversationState(");
+  const inner = mergeIdx > -1 ? data.slice(mergeIdx, mergeIdx + 400) : "";
+  check("the merge wraps queryFromBackend",
+    mergeIdx > -1 && /ctx\.prevQuery \?\? null/.test(inner) && /queryFromBackend\(/.test(inner));
+  // A defaulted field (rentPeriod/deal/category) must be carried by what the turn STATED, not by the
+  // shape of its value — emptyQuery()'s 'annual' is non-empty and silently beat the carry-forward.
+  // Assert the CALL SITE, not the declaration: a bare /statedKeys\(/ also matches the function's own
+  // definition, so removing the argument from the merge would leave the check green.
+  const cs = readFileSync(new URL("../src/lib/conversationState.ts", import.meta.url), "utf8");
+  check("the merge is told which fields this turn actually stated",
+    /mergeConversationState\([\s\S]{0,400}?statedKeys\(/.test(data)
+    && /stated\?: Iterable<string>/.test(cs) && /DEFAULTED_FIELDS/.test(cs));
+  check("a defaulted field is only 'established' when the turn stated it",
+    /said && defaulted\.has\(key\) \? said\.has\(key\)/.test(cs),
+    "otherwise emptyQuery()'s rentPeriod:'annual' silently beats an established monthly");
+  check("DEFAULTED_FIELDS actually covers the defaulted normal-filter fields",
+    /'deal'/.test(cs) && /'rentPeriod'/.test(cs) && /'category'/.test(cs));
+  // Certification must see the MERGED cohort: a follow-up that states only an AF value arrives with
+  // no type, and cohortAllows() would reject every intent the user just stated.
+  check("AF certification runs against the merged state",
+    /certifyAfOnMergedState\(\s*\n?\s*mergeConversationState\(/.test(data),
+    "the re-certification must WRAP the merge, not sit beside it");
+}
 check("prevQuery is threaded through respond()", /prevQuery: opts\?\.prevQuery \?\? null/.test(data));
 check("the UI passes the conversation's last query", /prevQuery: lastQueryRef\.current/.test(ui));
 check("the UI records each executed query", /if \(turn\.kind === 'listings' && turn\.query\) lastQueryRef\.current = turn\.query;/.test(ui));
