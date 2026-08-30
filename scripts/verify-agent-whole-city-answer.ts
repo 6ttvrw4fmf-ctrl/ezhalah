@@ -136,7 +136,10 @@ check('agent.tsx imports isGenericWholeAreaAnswer',
 check('a pendingCityRef holds the city the plain-city question was about',
   /const pendingCityRef = useRef<string \| null>\(null\)/.test(agentSrc));
 check('the ref is ARMED from the question the app just asked',
-  /pendingCityRef\.current = wholeCityQuestionSubject\(clarifyQ\)/.test(agentSrc));
+  // clarifyQ! (non-null assertion) since 2026-08-30: shouldAskLocationInsteadOfSearching() narrows
+  // truthiness through an opaque function call, which TS can't see through the way it sees through
+  // a bare `if (clarifyQ && ...)` — same clarifyQ value, still armed from the same question.
+  /pendingCityRef\.current = wholeCityQuestionSubject\(clarifyQ!?\)/.test(agentSrc));
 check('the ref is READ AND CLEARED once per turn (one question, one answer)',
   /const askedCity = pendingCityRef\.current;\s*pendingCityRef\.current = null;/.test(agentSrc),
   'leaving it armed would let a later, unrelated message be treated as the answer');
