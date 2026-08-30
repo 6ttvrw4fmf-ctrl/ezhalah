@@ -435,7 +435,10 @@ function cityFromText(text: string): string | null {
   return null;
 }
 
-function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts?: string[]): SearchQuery {
+// EXPORTED so barriers can execute the REAL function instead of a copy of it. Behaviour-neutral —
+// the only in-app caller is respond() below. (Repo rule: never test a stale verbatim copy; a copy
+// passes while production breaks.)
+export function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts?: string[]): SearchQuery {
   let q = emptyQuery();
   q.deal = b.deal === 'Buy' ? 'Buy' : 'Rent';
   if (b.bothDeals === true) q.bothDeals = true; // agent searched without knowing rent/buy → show both
