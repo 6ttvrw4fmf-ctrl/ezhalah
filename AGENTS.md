@@ -15,6 +15,17 @@ ADVANCED_FILTER_SOURCE_TRUTH.md`, or `docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md
 question, cite it — do not re-read a giant old report to re-derive the same fact, and do not restate a
 settled rule at length in a chat reply; a one-line citation is enough.
 
+**Listing liveness is an architectural rule, not a per-platform habit — `docs/ops/LISTING_LIVENESS.md`
+is canonical (owner, 2026-08-30).** Read it before touching any liveness, cleanup, strike or
+deactivation path, and before adding a platform. In one line: liveness is THREE-valued
+(ALIVE / DEAD / **UNKNOWN**), UNKNOWN never deactivates anything, only a DIRECT fetch of the
+listing's own URL can kill and only at full grace, absence from our crawl is a candidate signal and
+never a verdict, and "seen by the crawler" (`last_seen_at`) is a different fact from "proven alive"
+(`last_verified_alive_at` — writable only through `scrapers/common/liveness_contract.py`). Every
+production-searchable platform must declare a strategy in `scrapers/common/liveness_policies.py` or
+CI fails. `select * from ops_platform_liveness_coverage;` is the standing answer to "do we have dead
+listings?" — do not re-derive it by hand.
+
 **The daily integrity routine's spec is `docs/ops/DATA_INTEGRITY_ENGINEER.md` — that FILE is the
 source of truth, not the cloud routine's prompt text.** If the two ever differ, update the routine to
 match the file. Read it before any data-fidelity, price, area, location, searchability or Normal
