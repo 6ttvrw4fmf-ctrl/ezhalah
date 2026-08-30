@@ -49,16 +49,25 @@ def _row(i, strikes=0):
 @pytest.fixture()
 def wire(monkeypatch):
     """Neutralise all I/O; return a helper that runs main() against scripted probe responses."""
+    run_name: list[str] = []
+
     def run(rows, responses, argv, sitemap=frozenset()):
         client = _Client(rows)
         monkeypatch.setattr(R, "sb", lambda: client)
-        monkeypatch.setattr(R, "begin_run", lambda name: 1)
+        monkeypatch.setattr(R, "begin_run", lambda name: (run_name.append(name), 1)[1])
         monkeypatch.setattr(R, "end_run", lambda *a, **k: None)
-        monkeypatch.setattr(R, "_session", lambda: object())
-        monkeypatch.setattr(R, "harvest_sitemap_ids", lambda s: sitemap)
-        monkeypatch.setattr(R, "probe", lambda s, url: responses[url])
+        monkeypatch.setattr(R, "_session", lambda *a, **k: object())
+        monkeypatch.setattr(R, "harvest_sitemap_ids", lambda s, budget=None: sitemap)
+        # The real probe charges every attempt to the budget; the fake must too, or a budget test
+        # would pass by never spending anything.
+        def _probe(s, url, budget=None):
+            if budget is not None and not budget.spend():
+                return None, "", ""
+            return responses[url]
+        monkeypatch.setattr(R, "probe", _probe)
         monkeypatch.setattr("sys.argv", ["liveness_run", *argv])
         R.main()
+        client.run_name = run_name[-1] if run_name else None
         return client
     return run
 
@@ -137,3 +146,63 @@ def test_sitemap_absence_alone_never_deactivates(wire):
     responses = {REQ.format(i): (200, "<html>shell</html>", REQ.format(i)) for i in range(1, 41)}
     client = wire(rows, responses, ["--limit", "40", "--apply"], sitemap=frozenset())
     assert client.writes == []
+
+
+# ── The bounded proxy experiment ───────────────────────────────────────────────────────────────
+# The Saudi residential proxy is ONE capacity-limited pool shared with wasalt (ARCHITECTURE.md §20
+# rule 14). Exceeding it does not fail cleanly — requests plateau at a ~204s connect timeout while
+# neighbours succeed in seconds, which reads as a per-slug source block and is not one. So the
+# proxy path has to be opt-in, hard-capped, and visible to the contention detector.
+
+def test_proxy_is_opt_in_and_never_the_default(wire, monkeypatch):
+    """The secret being present in the environment must not be enough. A scheduled run that
+    silently started consuming the shared pool is precisely the un-tuned new consumer that
+    ARCHITECTURE.md §20 rule 14 exists to prevent."""
+    monkeypatch.setenv("WASALT_PROXY_URL", "http://should-not-be-used.example")
+    client = wire([_row(1)], {REQ.format(1): (200, SCHEMA.format(1), REQ.format(1))}, ["--limit", "1"])
+    assert client.run_name == R.RUN_NAME_CI, \
+        "without --proxy the run must use CI egress and log under the CI label"
+
+
+def test_a_proxy_run_records_itself_under_a_name_the_contention_detector_can_see(monkeypatch):
+    """A proxy consumer the contention detector cannot count is the blind spot its own text warns
+    about. The two egress paths therefore log under different platform labels."""
+    assert R.RUN_NAME_PROXY != R.RUN_NAME_CI
+    assert R.RUN_NAME_PROXY == "dealapp_liveness_proxy"
+
+
+def test_proxy_without_the_secret_fails_loudly_instead_of_falling_back(monkeypatch, capsys):
+    """Silently using CI egress and reporting it as a proxy result would make the experiment
+    unreadable — the whole point is comparing the two."""
+    monkeypatch.delenv("WASALT_PROXY_URL", raising=False)
+    monkeypatch.setattr("sys.argv", ["liveness_run", "--proxy"])
+    assert R.main() == 2
+
+
+def test_the_budget_caps_total_requests_including_retries():
+    b = R.RequestBudget(3)
+    assert [b.spend() for _ in range(5)] == [True, True, True, False, False]
+    assert b.used == 3 and b.exhausted
+
+
+def test_an_unset_budget_is_unlimited():
+    b = R.RequestBudget(0)
+    assert all(b.spend() for _ in range(1000))
+    assert not b.exhausted
+
+
+def test_the_budget_stops_the_sweep_and_writes_nothing_extra(wire):
+    """A bounded run is a PARTIAL run, not a broken one: it stops on the boundary, and the rows it
+    never reached are simply not evidence about anything."""
+    rows = [_row(i, strikes=2) for i in range(1, 41)]
+    responses = {REQ.format(i): (404, "", REQ.format(i)) for i in range(1, 41)}
+    client = wire(rows, responses, ["--limit", "40", "--apply", "--max-requests", "5"])
+    assert all(p.get("active") is not False for _i, p in client.writes), \
+        "a budget-truncated run must not deactivate — it verified almost nothing, so it is quarantined"
+
+
+def test_running_out_of_budget_reads_as_UNKNOWN_never_as_death():
+    """The one that matters: a request we could not afford is a request we did not make."""
+    b = R.RequestBudget(1)
+    b.spend()
+    assert R.probe(object(), "https://dealapp.sa/ar/ad-details/1", b) == (None, "", "")
