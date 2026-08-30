@@ -77,6 +77,14 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // arrive with the same owner instead of silently re-opening this hole.
   { routine: 7, test: /^p0_delivery/ },
 
+  // routine_sentry_silent — Layer 2 heartbeat missing (owner rule 2026-08-30). Kind is uniform;
+  // the specific silent routine slug lives in `platform`/`dedup_key`. Routes to #2 (Senior
+  // Production) as triage — the silent routine itself, on its next daily run, is the one that
+  // fixes the silence (its §S is now §0/§1, so the FIRST thing it does is call the MCP + record
+  // the heartbeat). Explicit rule rather than falling through so a future edit that widens #3's
+  // catch-alls doesn't accidentally swallow it.
+  { routine: 2, test: /^routine_sentry_silent$/ },
+
   // 5 🎯 Advanced Filter + Trending — before #3/#4, whose patterns overlap AF field names.
   { routine: 5, test: /^(af_|monthly_af|trending_)/ },
 

@@ -51,7 +51,7 @@ This section describes the shape; read the file for the table.
 | routine | kinds | examples |
 |---|---:|---|
 | 1 ⚡ Junior Scraping | 19 | `silent_scraper_death`, `run_killed_by_timeout`, `proxy_contention` |
-| 2 🎖️ Senior Production (**fallback**) | 1 | `duplicate_card_surface_routed` — genuinely spans two surfaces, so it triages |
+| 2 🎖️ Senior Production (**fallback**) | 2 | `duplicate_card_surface_routed` — genuinely spans two surfaces, so it triages; and `routine_sentry_silent` — Layer 2 heartbeat says a routine hasn't called the Sentry MCP in 30h; the alert carries the specific routine slug in `platform`/`dedup_key` (e.g. `routine_sentry_silent:af-trending`) and Senior Production nudges the silent routine itself — the silent routine, not #2, is the one that fixes its own silence on its next daily run |
 | 3 🛡️ Data Integrity | 45 | `price_source_mismatch`, `rent_period_contract`, `quarantine_growth` |
 | 4 🧪 Search & Matching QA | 8 | `searchability_collapse`, `card_link_identity` |
 | 5 🎯 AF + Trending | 6 | `af_null_to_false_conversion`, `trending_district` |

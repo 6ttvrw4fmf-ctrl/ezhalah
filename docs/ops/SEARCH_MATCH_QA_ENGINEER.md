@@ -38,6 +38,17 @@ owner take it on their next run. Ambiguous or multi-owner issues escalate to rou
 Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
 doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
 
+**Layer 2 — Sentry-check heartbeat (owner rule 2026-08-30).** Right after reading your scoped
+queue, call `ops_record_sentry_heartbeat('<routine>', <seen>, <claimed>, <resolved>)` via the
+Supabase MCP. `<routine>` is the short slug for your row in `docs/ops/SENTRY_ROUTING.md` §2:
+`junior-scraping` / `senior-production` / `data-integrity` / `search-matching-qa` / `af-trending`
+/ `journey-persistence` / `systems-seam`. `docs/ops/ENGINEER_ROUTINES.md` owns two of those (its
+own routine slug and `senior-production`) and records BOTH per run. This stamps
+`ops_routine_sentry_heartbeat.ran_at`. If any routine skips this call for 30 hours,
+`mon_detect_routine_sentry_silent()` raises P1 and routes back to that routine — the next run
+then MUST call the Sentry MCP and this heartbeat before any other work. Silence is observed, not
+trusted.
+
 ## 1. Test the ACTUAL Arabic filter — live, not a stale list
 Use the real production UI at https://ezhalah-app.vercel.app. Refer to user-facing controls by
 their actual Arabic names: «شراء» · «إيجار» · «سنوي» · «شهري» · المنطقة · المدينة · الحي ·
