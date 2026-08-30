@@ -206,17 +206,35 @@ if (laneMinutes.length > 1) {
     worstGapMin = Math.max(worstGapMin, next - laneMinutes[i]);
   }
 }
-// Measured filing cost, POST -> GitHub issue exists: alert 1166's fast-lane POST at 05:34:56 and its
-// issue at 05:35:11 = 15s. 60s is a deliberately pessimistic allowance over that.
-const FILING_BUDGET_S = 60;
-const worstDeliveryS = worstGapMin * 60 + FILING_BUDGET_S;
+// WHAT THIS CHECK CAN AND CANNOT PROVE — corrected 2026-08-30 after measuring the real thing.
+//
+// An earlier version of this check allowed a flat 60s "filing budget" and asserted the whole SLO
+// from the schedule alone. That was wrong, and the error is worth naming so it is not repeated: it
+// read alert 1166's `settled_at - first_tried` (15s) as the filing cost. settled_at is only when
+// pg_net recorded the HTTP RESPONSE to the workflow-dispatch trigger; it says nothing about when a
+// GitHub issue appeared. The honest measure is `dispatched_at - first_tried`, and measured across
+// every P0 ever delivered it is:
+//     alert 1097  203s     alert 1098  204s     alert 1172  204s     alert 1166  371s
+// GitHub Actions queue+run latency is therefore 203-371s ON ITS OWN, against a 300s SLO. No cron
+// schedule can fix that, because it is not ours to fix.
+//
+// So this file asserts the half that IS ours: the DB-side wait the lane contributes. The remaining
+// budget belongs to the destination. Two things follow, and both are deliberate:
+//   * the SLO is NOT widened to accommodate a slow destination (the owner forbade exactly that on
+//     2026-08-30) — instead the destination is what has to change, and a real webhook channel
+//     (pg_net POST, 2xx in seconds) is an OWNER input that mon_detect_p0_delivery_sla() LIMB 1
+//     already raises about while alert-sink is the only non-GitHub channel;
+//   * the END-TO-END truth is measured at RUNTIME by LIMB 3 against real dispatched_at, not
+//     asserted offline here. An offline check cannot know what GitHub's queue will do today.
+const DB_SIDE_SHARE = 0.6;   // the lane may consume at most 60% of the SLO before handing off
+const dbSideBudgetS = SLA_MINUTES * 60 * DB_SIDE_SHARE;
 check(
-  `the lane's worst-case wait + filing fits the ${SLA_MINUTES}-minute SLO `
-    + `(worst gap ${worstGapMin}min → ~${worstDeliveryS}s of ${SLA_MINUTES * 60}s)`,
-  laneMinutes.length > 1 && worstDeliveryS < SLA_MINUTES * 60,
-  `worst gap ${worstGapMin}min gives ~${worstDeliveryS}s against a ${SLA_MINUTES * 60}s budget. `
-    + 'Fix the SCHEDULE, never the SLO: widening c_sla_minutes to fit a slow lane is the exact move '
-    + 'the owner forbade on 2026-08-30.',
+  `the lane's worst-case DB-side wait stays within its share of the SLO `
+    + `(worst gap ${worstGapMin}min = ${worstGapMin * 60}s of the ${dbSideBudgetS}s allowed)`,
+  laneMinutes.length > 1 && worstGapMin * 60 <= dbSideBudgetS,
+  `worst gap ${worstGapMin}min = ${worstGapMin * 60}s exceeds the ${dbSideBudgetS}s DB-side share of `
+    + `the ${SLA_MINUTES * 60}s SLO. Fix the SCHEDULE, never the SLO — widening c_sla_minutes to fit `
+    + 'a slow lane is the exact move the owner forbade on 2026-08-30.',
 );
 check(
   'the lane does not occupy minute 0 (reserved for the matview refresh alone)',

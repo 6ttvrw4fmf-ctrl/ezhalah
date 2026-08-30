@@ -196,8 +196,8 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   So `mon-p0-fast-lane` (jobid 86) now runs `mon_dispatch_p0_fast()` on
   `1,4,7,10,13,15,18,21,24,26,28,31,34,35,38,40,42,44,46,48,51,54,57,58 * * * *` — **24 slots, worst
   gap 3 minutes including the wrap past the top of the hour**, avoiding minute 0, the ten minutes
-  already at 2, and the sweep's own `:29`/`:59`. Worst case ≈ 180 s wait + ~15-20 s filing ≈ 200 s of
-  the 300 s budget, with sweep duration no longer a term. It is **not** per-minute polling: measured
+  already at 2, and the sweep's own `:29`/`:59`, bounding the DB-side wait at 180 s — 60 % of the
+  SLO, with sweep duration no longer a term at all. It is **not** per-minute polling: measured
   cost is **6 ms per run** (it early-exits on one count when no P0 is pending), and
   `mon_detect_cron_minute_collision()` returns 0 with it scheduled. The sweep is untouched and still
   calls the lane first and last — **defence-in-depth, not the SLO's load-bearing path**; the leading
@@ -208,6 +208,33 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   `gap × 60 + 60 s` no longer fits the SLO — so the "delay" mutation (slowing the cadence) goes red,
   including the subtle one where a single minute is removed and only the wrap-around gap breaks.
   **Fix the SCHEDULE, never the SLO.**
+
+  **THE DECOUPLING IS NECESSARY BUT NOT SUFFICIENT — GitHub Actions latency is now the dominant
+  term, and it is not ours to fix (measured 2026-08-30).** Proving the lane end to end measured the
+  destination properly for the first time. The honest figure is `dispatched_at − first_tried` (POST
+  accepted → GitHub issue actually exists), not `settled_at − first_tried` (which is only when
+  `pg_net` recorded the HTTP response to the *trigger* and says nothing about an issue). Across every
+  P0 ever delivered:
+
+  | alert | raise → trigger | **Actions latency** | total |
+  |---|---|---|---|
+  | 1097 | 0 s | **203 s** | 203 s |
+  | 1098 | 0 s | **204 s** | 204 s |
+  | 1172 (synthetic, this run) | 45 s | **204 s** | 249 s |
+  | 1166 | 0 s | **371 s** | 371 s |
+
+  So the GitHub path costs **203–371 s on its own against a 300 s SLO**. The synthetic P0 passed at
+  **249 s** only because Actions was at its fast end that minute; worst case with this lane is
+  180 s + 371 s = **551 s**, a breach. **Do not respond by widening the SLO** — the owner forbade
+  exactly that. The only path that can meet 300 s reliably is a direct webhook channel
+  (`ops_alert_channel.kind='webhook'`, `pg_net` POST, 2xx in seconds), and **the destination is an
+  OWNER input**: `mon_detect_p0_delivery_sla()` LIMB 1 already raises while `alert-sink` (a proof
+  fixture reaching nobody) is the only non-GitHub channel. Until a real destination exists, LIMB 3
+  is what tells the truth, because it measures actual `dispatched_at` rather than assuming.
+
+  Note the migration `20260830134700`'s own header still carries the superseded ~15-20 s filing
+  figure. It is left byte-exact deliberately — it is the record of what production RAN, and drift
+  condition #5 compares the mirror against it. This section supersedes it.
 
   **What that chaining COSTS, and what watches it (2026-08-29).** `alert_event.created_at` defaults
   to `now()` = **transaction start**, so a P0's 5-minute clock starts when the *sweep* starts and the
