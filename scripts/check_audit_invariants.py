@@ -284,7 +284,7 @@ MAX_PAID_AGENT_CALLS_PER_RUN = 4
 _paid_agent_calls = 0
 
 
-def _call_agent(text: str) -> dict:
+def _call_agent(text: str, history: list | None = None) -> dict:
     global _paid_agent_calls
     if _paid_agent_calls >= MAX_PAID_AGENT_CALLS_PER_RUN:
         raise RuntimeError(
@@ -293,7 +293,8 @@ def _call_agent(text: str) -> dict:
             f"verification is genuinely needed."
         )
     _paid_agent_calls += 1
-    body = json.dumps({"text": text, "locale": "ar", "loggedIn": False, "order": False, "history": []}).encode()
+    body = json.dumps({"text": text, "locale": "ar", "loggedIn": False, "order": False,
+                        "history": history or []}).encode()
     req = urllib.request.Request(
         f"{SUPABASE_URL}/functions/v1/agent", data=body, method="POST",
         headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {PUBLISHABLE_KEY}",
@@ -335,15 +336,65 @@ def check_agent(client=None) -> bool:
     return ok
 
 
+# BROAD-SEARCH-AFTER-BUDGET (owner-reported live bug, 2026-08-30): "family of 5, a large
+# villa/apartment, either type is fine" never showed a single listing. supabase/functions/agent
+# forces kind="listings" once its own priorQuestions count hits 2, even with no city — this fabricates
+# that same history state directly (the server only reads history text/role, not how it was produced,
+# and this is 1 paid call instead of replaying the whole conversation) and asserts the model actually
+# complies: a SEARCHABLE, executable query (real non-location signal), not a 3rd/4th question.
+# NON-DETERMINISTIC: this is a live DeepSeek call, not a pure assertion — the model can occasionally
+# still choose to ask (see the real production replay, where it asked a 3rd question at turn 3 before
+# complying at turn 4). It is still a meaningful guard because it pins the STRUCTURAL contract this bug
+# broke: given the budget is already spent, a city-less broad search must be an ACCEPTED, executable
+# outcome, not something the pipeline treats as insufficient to search. The deterministic, mutation-proven
+# regression guard is scripts/verify-agent-broad-search-after-budget.ts (the client-side gate itself);
+# this is the live companion proving the server side of the same contract still holds against the real
+# model.
+AGENT_BROAD_SEARCH_HISTORY = [
+    {"role": "user", "text": "ماعرف عندك شيء حلو عندي 5 عيال"},
+    {"role": "model", "text": "أبشر! وش تدور عليه بالضبط؟"},
+    {"role": "user", "text": "عادي الاثنين ماعندي مشكلة"},
+    {"role": "model", "text": "طيب، إيجار ولا تمليك؟"},
+]
+AGENT_BROAD_SEARCH_TEXT = "بس ودي شي كبير، ماعندي مانع الاثنين"
+
+
+def check_agent_broad_search_after_budget(client=None) -> bool:
+    try:
+        d = _call_agent(AGENT_BROAD_SEARCH_TEXT, history=AGENT_BROAD_SEARCH_HISTORY)
+    except Exception as e:
+        print(f"FAIL agent-broad-search-after-budget: request failed ({e})"); return False
+    q = d.get("query") or {}
+    problems = []
+    if d.get("kind") != "listings":
+        problems.append(f"kind={d.get('kind')} (expected listings once the question budget is spent)")
+    # Never invent a city — location "" here is the HONEST, correct outcome. The regression this
+    # guards is the opposite failure: getting stuck asking forever instead of searching with the real
+    # signal already given (a type, and/or the vague-size ask_about captured from "كبير").
+    if not (q.get("type") or (q.get("askAbout") or [])):
+        problems.append(f"no usable non-location signal captured: query={q}")
+    if problems:
+        detail = "agent-broad-search-after-budget: " + "; ".join(problems)
+        print(f"FAIL {detail}")
+        if client is not None: _alert(client, "ai_agent_regression", len(problems), detail)
+        return False
+    print(f"OK  agent-broad-search-after-budget: kind=listings, location={q.get('location')!r}, "
+          f"type={q.get('type')}, askAbout={q.get('askAbout')}")
+    return True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", choices=["agent", "not_ready", "awal", "stale_index", "unverified_kill",
-                                       "aqar_licence_price", "deletion_spike_no_rereise", "normal_filter_barrier"],
+    ap.add_argument("--only", choices=["agent", "agent_broad_search_after_budget", "not_ready", "awal",
+                                       "stale_index", "unverified_kill", "aqar_licence_price",
+                                       "deletion_spike_no_rereise", "normal_filter_barrier"],
                     help="run one check")
     args = ap.parse_args()
 
     if args.only == "agent":
         return 0 if check_agent(None) else 1
+    if args.only == "agent_broad_search_after_budget":
+        return 0 if check_agent_broad_search_after_budget(None) else 1
 
     from scrapers.common import db  # lazy: needs SUPABASE_SERVICE_ROLE_KEY (CI only)
     client = db.sb()
@@ -365,6 +416,7 @@ def main() -> int:
     if args.only in (None, "deletion_spike_no_rereise"): results.append(check_deletion_spike_no_rereise(client))
     if args.only in (None, "normal_filter_barrier"): results.append(check_normal_filter_barrier(client))
     if args.only is None:                  results.append(check_agent(client))
+    if args.only is None:                  results.append(check_agent_broad_search_after_budget(client))
     return 0 if all(results) else 1
 
 
