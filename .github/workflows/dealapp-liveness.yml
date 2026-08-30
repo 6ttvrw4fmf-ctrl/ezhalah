@@ -35,6 +35,17 @@ on:
         description: "Max candidates to probe this run"
         required: false
         default: "600"
+      proxy:
+        description: >-
+          EXPERIMENT ONLY. Route through the shared Saudi residential proxy. That pool is
+          capacity-limited and shared with wasalt (ARCHITECTURE.md §20 rule 14) — always pair
+          with max_requests. Scheduled runs NEVER take this path.
+        type: boolean
+        default: false
+      max_requests:
+        description: "Hard ceiling on TOTAL requests (sitemap + probes + retries). 0 = unlimited."
+        required: false
+        default: "0"
 
 concurrency:
   group: dealapp-liveness
@@ -57,6 +68,9 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Present but INERT unless --proxy is passed: the runner reads this only when the flag is
+          # set, and a test pins that the secret's mere presence is not enough.
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
         run: |
           # A scheduled run applies; a manual dispatch writes only when apply=true is passed
           # explicitly. `github.event_name == 'schedule'` is what makes the cron path effective —
@@ -65,6 +79,17 @@ jobs:
           if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.apply }}" = "true" ]; then
             APPLY="--apply"
           fi
+
+          # PROXY IS DISPATCH-ONLY, BY CONSTRUCTION. The condition tests inputs.proxy, which is
+          # empty on a schedule event, so the cron path cannot reach the shared pool however the
+          # inputs are defaulted. Routing a daily job onto a capacity-limited resource is an owner
+          # decision; this flag exists to MEASURE whether that decision is worth making.
+          PROXY=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.proxy }}" = "true" ]; then
+            PROXY="--proxy"
+          fi
+
           exec python -m scrapers.dealapp.liveness_run \
             --limit "${{ inputs.limit || '600' }}" \
-            $APPLY
+            --max-requests "${{ inputs.max_requests || '0' }}" \
+            $PROXY $APPLY

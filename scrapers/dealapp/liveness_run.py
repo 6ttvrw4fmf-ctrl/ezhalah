@@ -32,6 +32,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 import time
@@ -54,10 +55,45 @@ TABLE = "dealapp_residential_listings"
 SITEMAP_INDEX = f"{BASE}/sitemap.xml"
 MIN_INTERVAL = 0.35
 
+# The shared Saudi residential proxy is ONE capacity-limited pool (ARCHITECTURE.md §20 rule 14).
+# When this runner uses it, it records itself under a DIFFERENT platform label so
+# mon_detect_proxy_contention() can see it. A proxy consumer that the contention detector cannot
+# count is exactly the blind spot that detector's own text warns about, and the 2026-08-17 wasalt
+# incident (failure 0.1% -> 66.7%) is what it costs.
+RUN_NAME_CI = "dealapp_liveness"
+RUN_NAME_PROXY = "dealapp_liveness_proxy"
 
-def _session() -> cc.Session:
+
+class RequestBudget:
+    """A hard ceiling on requests, counted across sitemap AND probes.
+
+    The proxy is shared, so a bounded experiment has to be bounded by the thing the pool actually
+    feels — requests — not by `--limit`, which counts only listings and ignores the 16 sitemap
+    fetches. spend() returns False once the budget is gone; callers stop cleanly rather than
+    truncating mid-write.
+    """
+
+    def __init__(self, cap: int = 0):
+        self.cap, self.used = cap, 0
+
+    def spend(self) -> bool:
+        if self.cap and self.used >= self.cap:
+            return False
+        self.used += 1
+        return True
+
+    @property
+    def exhausted(self) -> bool:
+        return bool(self.cap) and self.used >= self.cap
+
+
+def _session(proxy_url: str = "") -> cc.Session:
     s = cc.Session(impersonate="chrome")
     s.headers.update({"Accept-Language": "ar,en;q=0.8"})
+    if proxy_url:
+        # Single session, sequential loop, MIN_INTERVAL throttle => exactly ONE concurrent proxy
+        # session. That is the smallest consumer the pool can have, and it is deliberate.
+        s.proxies = {"http": proxy_url, "https": proxy_url}
     return s
 
 
@@ -68,10 +104,12 @@ def _throttle(_last: list[float] = [0.0]) -> None:
     _last[0] = time.time()
 
 
-def harvest_sitemap_ids(s: cc.Session) -> frozenset[str]:
+def harvest_sitemap_ids(s: cc.Session, budget: Optional[RequestBudget] = None) -> frozenset[str]:
     """Every /ad-details/{id} dealapp currently publishes. Empty set on failure — and an empty set
     is handled by the caller as 'no candidate signal', never as 'everything is absent/dead'."""
     ids: set[str] = set()
+    if budget is not None and not budget.spend():
+        return frozenset()
     try:
         idx = s.get(SITEMAP_INDEX, timeout=45).text or ""
     except Exception:
@@ -79,6 +117,8 @@ def harvest_sitemap_ids(s: cc.Session) -> frozenset[str]:
     for loc in re.findall(r"<loc>([^<]+)</loc>", idx):
         if not loc.endswith(".xml"):
             continue
+        if budget is not None and not budget.spend():
+            break   # budget gone: a PARTIAL sitemap is a weaker candidate signal, never a verdict
         try:
             _throttle()
             body = s.get(loc, timeout=90).text or ""
@@ -105,9 +145,15 @@ def _collect_candidates(client, limit: int) -> list[dict]:
     return [r for r in rows if (r.get("listing_url") or "").strip()]
 
 
-def probe(s: cc.Session, url: str) -> tuple[Optional[int], str, str]:
-    """(status, body, final_url). An exception is (None, '', '') → UNKNOWN, never a death."""
+def probe(s: cc.Session, url: str, budget: Optional[RequestBudget] = None
+          ) -> tuple[Optional[int], str, str]:
+    """(status, body, final_url). An exception is (None, '', '') → UNKNOWN, never a death.
+
+    A retry costs the pool another request, so retries are charged to the budget too.
+    """
     for attempt in range(3):
+        if budget is not None and not budget.spend():
+            return None, "", ""      # out of budget => UNKNOWN, which writes nothing
         try:
             _throttle()
             r = s.get(url, timeout=45, allow_redirects=True)
@@ -122,18 +168,33 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=300, help="probe at most N candidates")
     ap.add_argument("--apply", action="store_true",
                     help="write strikes/verifications/deactivations (default: dry run, writes nothing)")
+    ap.add_argument("--proxy", action="store_true",
+                    help="route through the shared Saudi residential proxy (WASALT_PROXY_URL). "
+                         "OPT-IN ONLY. That pool is capacity-limited and shared with wasalt "
+                         "(ARCHITECTURE.md §20 rule 14) — pair it with --max-requests.")
+    ap.add_argument("--max-requests", type=int, default=0,
+                    help="hard ceiling on TOTAL requests (sitemap + probes + retries). "
+                         "0 = unlimited. Required in practice for any proxy run.")
     args = ap.parse_args()
 
+    proxy_url = os.environ.get("WASALT_PROXY_URL", "").strip() if args.proxy else ""
+    if args.proxy and not proxy_url:
+        # Fail loudly rather than silently falling back to CI egress and reporting the result as
+        # if it came from the proxy — that would make the experiment unreadable.
+        print("✗ --proxy requested but WASALT_PROXY_URL is empty", flush=True)
+        return 2
+
+    budget = RequestBudget(args.max_requests)
     policy = policy_for("dealapp")
     client = sb()
-    run_id = begin_run("dealapp_liveness")
-    s = _session()
+    run_id = begin_run(RUN_NAME_PROXY if proxy_url else RUN_NAME_CI)
+    s = _session(proxy_url)
     now_iso = datetime.now(timezone.utc).isoformat()
 
     stats = {"scanned": 0, "alive": 0, "dead": 0, "unknown": 0,
              "verified": 0, "struck": 0, "deactivated": 0, "sitemap_ids": 0, "quarantined": False}
     try:
-        sitemap = harvest_sitemap_ids(s)
+        sitemap = harvest_sitemap_ids(s, budget)
         stats["sitemap_ids"] = len(sitemap)
 
         cands = _collect_candidates(client, args.limit)
@@ -145,7 +206,9 @@ def main() -> int:
         pending: list[tuple[dict, str, int]] = []   # (row, action, strikes)
         for row in cands:
             adid = _adid(row["listing_url"])
-            status, body, final_url = probe(s, row["listing_url"])
+            if budget.exhausted:
+                break        # stop cleanly on the boundary; a partial sweep is a normal outcome
+            status, body, final_url = probe(s, row["listing_url"], budget)
             verdict = classify_dealapp(status, body=body, adid=adid,
                                        final_url=final_url, requested_url=row["listing_url"])
             stats["scanned"] += 1
@@ -175,7 +238,10 @@ def main() -> int:
                         {"missing_count": strikes, "active": False}).eq("id", row["id"]).execute()
                     stats["deactivated"] += 1
 
-        note = (f"{'APPLY' if args.apply else 'DRY-RUN'} scanned={stats['scanned']} "
+        note = (f"{'APPLY' if args.apply else 'DRY-RUN'} "
+                f"egress={'proxy' if proxy_url else 'ci'} "
+                f"requests={budget.used}{f'/{budget.cap}' if budget.cap else ''} "
+                f"scanned={stats['scanned']} "
                 f"alive={stats['alive']} dead={stats['dead']} unknown={stats['unknown']} "
                 f"verified={stats['verified']} strike={stats['struck']} "
                 f"inactivated={stats['deactivated']} sitemap_ids={stats['sitemap_ids']}"
