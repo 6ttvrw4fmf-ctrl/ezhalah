@@ -164,6 +164,32 @@ export async function withPage(opts, fn) {
     }
   }, [sessionObj(), history, SUB, signedIn]);
 
+  // A SEEDED SESSION MUST NOT SUMMON A PROMPT A REAL SIGNED-IN USER NEVER SEES.
+  //
+  // GoogleOneTap.tsx gates on `supabase.auth.getUser()` — SERVER-validated, deliberately, so that a
+  // deleted account or revoked token still gets prompted (owner rule; the comment there records
+  // that gating on the local `user` produced 0 prompt attempts for the deleted-account case). Our
+  // seeded token is a fake JWT, so the server rejects it, the component correctly concludes "signed
+  // out", and One Tap prompts. That is the product behaving as specified — for a state no real
+  // signed-in visitor is ever in.
+  //
+  // The damage was measured, not theorised. At 375px GIS renders `ui_mode=bottom_sheet`, and its
+  // `credential_picker_iframe` sits over the sidebar's account row (trigger box y=739 h=59 in an
+  // 812px viewport). Playwright reports «<iframe id="credential_picker_iframe" …> intercepts
+  // pointer events», the account menu never opens, and `appearance-cancel-keeps-dark` skipped
+  // «account menu would not open» 2/2 on mobile in the 2026-08-31 sweep — an entire owner rule
+  // (إلغاء must not touch the theme) going untested behind a tidy skip. Desktop never saw it: there
+  // the same trigger sits at y=927 of a 1000px viewport and the prompt renders in the corner.
+  //
+  // So GIS is blocked ONLY for seeded-signed-in contexts, which restores the state the journey
+  // means to test. Guest contexts are untouched: One Tap legitimately belongs there, and blocking
+  // it everywhere would hide the real thing. This is the harness's own "a fixture that is not
+  // shaped like real data manufactures its own bugs" lesson (see DEFAULT_QUERY above), applied to
+  // auth state rather than to a query.
+  if (signedIn) {
+    await ctx.route(/accounts\.google\.com|\/gsi\//, (route) => route.abort().catch(() => {}));
+  }
+
   const page = await ctx.newPage();
   const bag = { pageErrors: [], failedRequests: [], rpc: [], consoleErrors: [] };
   page.on('pageerror', (e) => bag.pageErrors.push(String(e).slice(0, 300)));
