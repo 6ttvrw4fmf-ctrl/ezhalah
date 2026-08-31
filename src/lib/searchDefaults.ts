@@ -103,9 +103,27 @@ export function toggleGroup(q: SearchQuery, group: string): SearchQuery {
 // `typeGroup: null`, which silently became a no-op the moment that field was replaced by typeGroups,
 // and the compiler could not catch it through an object spread. (owner 2026-08-20)
 export function setCategory(q: SearchQuery, category: string | null): SearchQuery {
+  // A SEARCH ALWAYS LANDS ON EXACTLY ONE CATEGORY (owner ruling 2026-08-30). Re-tapping the active
+  // category used to DESELECT it (`q.category === category ? null : category`), so the UI could sit
+  // in a no-category state. Two reasons that is wrong, one product and one data:
+  //
+  //   Product: the user asked for a category switch, not a category toggle. Residential and
+  //   Commercial are the two worlds the catalogue is divided into; "neither" is not a search anyone
+  //   means to run.
+  //
+  //   Data: that exact null state caused a measured production leak on 2026-07-17 — deselecting sent
+  //   p_category:null, which turned the RPC's purity predicate `(p_category IS NULL OR …)` into a
+  //   no-op AND short-circuited matchesType() client-side, so BOTH isolation layers were off at once
+  //   and 1,202 Commercial-macro rows leaked into a realistic Residential search
+  //   (scripts/verify-null-category-purity.ts). impliedCategory() was added to defend against it;
+  //   this removes the way to reach it. Defence in depth stays — that barrier is untouched.
+  //
+  // Re-tap is now a NO-OP rather than a re-select, so an accidental second tap cannot silently wipe
+  // the group/type/price scope the user has already built underneath it.
+  if (category !== null && q.category === category) return q;
   return {
     ...q,
-    category: (q.category === category ? null : category) as SearchQuery['category'],
+    category: category as SearchQuery['category'],
     typeGroups: null,
     type: null,
     types: null,
