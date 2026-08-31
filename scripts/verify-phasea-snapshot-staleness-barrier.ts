@@ -39,10 +39,14 @@ const check = (label: string, ok: boolean) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`);
 };
 
+// Must match the migration that DEFINES the detector, not merely one that MENTIONS it — the
+// derived-store registry migration names it in a seed value, and an any-mention filter would
+// silently retarget this whole check at the wrong file. (Same any-mention trap the sql-mirror
+// staleness checker documents; it bit this file on 2026-08-31.)
 const defining = readdirSync(MIG_DIR)
   .filter((f) => f.endsWith('.sql'))
-  .filter((f) => readFileSync(join(MIG_DIR, f), 'utf8')
-    .includes('mon_detect_phasea_snapshot_stale_vs_source'))
+  .filter((f) => /create\s+or\s+replace\s+function\s+public\.mon_detect_phasea_snapshot_stale_vs_source/i
+    .test(readFileSync(join(MIG_DIR, f), 'utf8')))
   .sort();
 
 check('a migration defines the phasea snapshot staleness detector', defining.length > 0);
