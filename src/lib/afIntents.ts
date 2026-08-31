@@ -64,6 +64,27 @@ const AGE_APPLY: Record<string, Partial<SearchQuery>> = {
   '10p': { isNewConstruction: null, ageMin: 10, ageMax: null },
 };
 const AGE_KEYS = Object.keys(AGE_APPLY);
+
+// "Less than/under/up to N years" (live bug, 2026-08-30): NONE of the 5 named buckets alone
+// truthfully means "under 5" — "1_2" excludes 3-5, "3_5" excludes new+1_2 — so the model must never
+// guess the closest-sounding bucket for a threshold that doesn't match one exactly. Confirmed against
+// the live RPC (location_search_candidates_ar): p_age_min/p_age_max are independent numeric bounds
+// applied as `property_age between coalesce(p_age_min,0) and coalesce(p_age_max,32767)`, and "new" IS
+// `property_age = 0` server-side — so an ageMax-only range with no ageMin ALREADY includes "new" for
+// free. property_age is therefore a genuine integer field, not a fixed 5-way tag, and a plain number
+// of years is just as certified a use of it as any named bucket (same source field, different
+// threshold). MAX_AGE_YEARS is a sanity bound on the input, not a business rule.
+const MAX_AGE_YEARS = 60;
+const canonicalizeAge = (raw: string): string | null => {
+  const exact = oneOf(AGE_KEYS)(raw);
+  if (exact !== null) return exact;
+  const n = num(raw);
+  return n !== null && n >= 1 && n <= MAX_AGE_YEARS ? `max:${Math.floor(n)}` : null;
+};
+const applyAge = (q: SearchQuery, key: string): SearchQuery => {
+  const m = /^max:(\d+)$/.exec(key);
+  return m ? { ...q, isNewConstruction: null, ageMin: null, ageMax: Number(m[1]) } : { ...q, ...AGE_APPLY[key] };
+};
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب', 'شمال شرق', 'شمال غرب', 'جنوب شرق', 'جنوب غرب'] as const;
 const UNIT_SUBTYPES = ['استديو', 'شقق مخدومة', 'شقة'] as const;
 // RATING IS A 0–10 SCALE, NOT 0–5. «تقييم عالي» must never silently become 4.0/4.5 — that is not
@@ -73,9 +94,9 @@ const RATING_KEYS = ['9.5', '9.0', '9.0_rc10'] as const;
 export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
   property_age: {
     id: 'property_age',
-    vocabulary: AGE_KEYS,
-    canonicalize: oneOf(AGE_KEYS),
-    apply: (q, key) => ({ ...q, ...AGE_APPLY[key] }),
+    vocabulary: AGE_KEYS, // canonicalizeAge ALSO accepts a plain integer "N" ("less than N years")
+    canonicalize: canonicalizeAge,
+    apply: applyAge,
   },
   street_width: {
     id: 'street_width',
