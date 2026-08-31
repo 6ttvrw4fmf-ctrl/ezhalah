@@ -55,6 +55,7 @@
     "verify": "npm run verify:taxonomy && npm run verify:location-index",
     "verify:taxonomy": "tsx scripts/verify-taxonomy.ts",
     "verify:location-index": "tsx scripts/verify-location-index-source.ts",
+    "verify:loc-classify-latency": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-loc-classify-postgrest-latency.ts",
     "verify:emit-sql": "tsx scripts/verify-taxonomy.ts --emit-sql",
     "build": "npm run verify && expo export --platform web",
     "e2e": "playwright test e2e/selector.spec.ts",

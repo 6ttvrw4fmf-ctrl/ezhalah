@@ -258,19 +258,49 @@ async function spendGate(source: string): Promise<{ allow: boolean; reason?: str
 // place is a twin city (same name, ≥2 regions), a twin district (same «حي», ≥2
 // cities), a region-or-city same-name (الرياض/جازان/…), a single city, or unknown.
 // We use it as a POST-MODEL backstop so twin disambiguation + honest-zero are
-// guaranteed regardless of model drift. Best-effort: any failure → null → normal path.
-async function locClassify(token: string): Promise<Record<string, unknown> | null> {
-  const t = (token || "").trim();
-  if (!t) return null;
+// guaranteed regardless of model drift.
+//
+// FAIL CLOSED, NOT OPEN (production incident, 2026-08-31). loc_classify()'s own candidate
+// subqueries were timing out on the real PostgREST path (measured live: HTTP 500 "canceling
+// statement due to statement timeout" at ~20s for the simplest possible case) because they scanned
+// an unindexed view per candidate row — fixed DB-side (now ~0.3-2.7s live for the three known
+// ambiguity shapes, backed by the indexed search_listings_ar table). This function used to fail
+// OPEN on any error (`return null`, no timeout at all) — the caller then proceeded with the
+// model's raw location string as if it had been confirmed unambiguous, which can silently guess
+// between two real, different cities/regions/districts. It must fail CLOSED instead: a bounded
+// timeout with real headroom over the fixed cost, one retry, and — only after that retry is also
+// exhausted — a distinct LOC_CLASSIFY_FAILED sentinel (never plain `null`, which already means
+// "empty token" and must not be overloaded to also mean "we don't know") so the caller can clear
+// the location term rather than guess. See scripts/verify-agent-loc-classify-fails-closed.ts.
+const LOC_CLASSIFY_TIMEOUT_MS = 6000;
+const LOC_CLASSIFY_FAILED = Symbol("loc_classify_failed");
+async function locClassifyOnce(t: string): Promise<Record<string, unknown> | null> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), LOC_CLASSIFY_TIMEOUT_MS);
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/loc_classify`, {
       method: "POST",
       headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" },
       body: JSON.stringify({ p_token: t }),
+      signal: ac.signal,
     });
-    if (!r.ok) return null;
+    if (!r.ok) throw new Error(`loc_classify http ${r.status}`);
     return await r.json();
-  } catch { return null; }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function locClassify(token: string): Promise<Record<string, unknown> | null | typeof LOC_CLASSIFY_FAILED> {
+  const t = (token || "").trim();
+  if (!t) return null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await locClassifyOnce(t);
+    } catch {
+      // network error, abort/timeout, non-OK status, bad JSON — one retry, then report failure.
+    }
+  }
+  return LOC_CLASSIFY_FAILED;
 }
 
 // Arabic fold mirroring SQL normalize_ar: unify alef/ta-marbuta/alef-maqsura, drop
@@ -1239,6 +1269,15 @@ Deno.serve(async (req: Request) => {
       const alreadyAsked = /أكثر من منطقة|أكثر من مدينة|اسم مدينة واسم منطقة|ولا منطقة|كاملة، أو مدينة معيّنة|أي مدينة تبحث عن عقار|أي مدينة أو منطقة/.test(String(lastModel));
       if (location) {
         const cls = await locClassify(location);
+        if (cls === LOC_CLASSIFY_FAILED) {
+          // Genuine unresolved classification failure after a bounded retry (owner incident,
+          // 2026-08-31) — never guess between city/region/twin candidates on an unverified
+          // string. Clear the term so the search broadens, exactly like any other missing
+          // optional field, instead of silently treating it as confirmed unambiguous. This is
+          // the ONLY branch that can set `location` to "" here; every kind below is an actual
+          // DB answer and is untouched.
+          location = "";
+        } else {
         const ck = String(cls?.kind ?? "");
         const nm = String(cls?.name ?? location);
         // RULE 3 (owner 2026-08-29) — no English location leak in an Arabic conversation.
@@ -1296,6 +1335,7 @@ Deno.serve(async (req: Request) => {
           // same-name-as-a-city twins like الرياض/جازان). See ./locationAmbiguity.ts for the ported
           // logic and scripts/verify-agent-location-ambiguity.ts for its tests.
           ambiguityReply = plainRegionQuestion(nm, text);
+        }
         }
       } else if (!alreadyAsked) {
         // RESTORED CASES (round 2, LOST LOCATION-AMBIGUITY CASES) — the model correctly left location
