@@ -2,7 +2,7 @@
 // six-layer comparison (see sweep.mjs) — clicking the control is never the assertion.
 import {
   BASE, dbCount, assertChain, withPage, setDeal, setPeriod, pickCity, runSearch,
-  visibleState, defect, note, num, lastCount, sleep, SETTLED_RE,
+  visibleState, defect, note, num, lastCount, sleep, SETTLED_RE, observeWatch,
 } from './sweep.mjs';
 
 const enc = encodeURIComponent;
@@ -193,6 +193,7 @@ export async function advancedFilter(plan) {
     // R7.1.2 — the Continue button shows the count for the current tentative selection.
     const afterPick = await readCard();
     const footAfter = num((afterPick?.confirm || '').match(/([\d,٬]+)/)?.[1]);
+    if (promised != null && footAfter != null) observeWatch('monthly-af-counts-update');
     if (promised != null && footAfter != null && footAfter !== promised) {
       defect(name, 'UI→UI', `chip «${pick.key}» promised ${promised} but «متابعة» reads ${footAfter}`
         + `${footBefore != null ? ` (was ${footBefore})` : ''} (monthly-af-counts-update)`);
@@ -290,6 +291,7 @@ export async function tabHistory() {
     }
     const h1 = await page.evaluate(() => history.length);
     const forms = await page.locator('[data-testid="city-input"]').count();
+    observeWatch('tab-switch-no-junk-history');   // reached only if the round trips actually ran
     if (h1 - h0 > 1) defect(name, 'NAVIGATION', `3 round trips added ${h1 - h0} history entries (tab-switch-no-junk-history)`);
     if (forms > 1) defect(name, 'NAVIGATION', `${forms} Filter forms mounted at once — screens are leaking`);
     return { name, ok: h1 - h0 <= 1 && forms <= 1, historyGrowth: h1 - h0, forms };
@@ -321,6 +323,7 @@ export async function typedDistrict(plan) {
     // for a barrier to be wrong.
     const searchRan = SETTLED_RE.test(body);
     // Holding the search while the district is uncommitted is a correct outcome too.
+    observeWatch('typed-district-not-dropped');   // the city was offered and the flow completed
     if (stillShown && !searchedDistrict && !warned && searchRan) {
       defect(name, 'UI→REQUEST', `field still shows «${stillShown}» but the search ran city-wide with no warning (typed-district-not-dropped)`);
     }
