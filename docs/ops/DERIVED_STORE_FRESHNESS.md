@@ -142,6 +142,31 @@ Repairs stay per-row and evidence-backed, using the adjudication-ledger pattern 
 `ops_res_com_collision_adjudication` — **no broad re-resolution or mass rewrite without source
 proof.**
 
+## 4b. Implementation status — owner approved phases 1–3 on 2026-08-31
+
+**Shipped: phases 1 and 3.** `ops_derived_store_registry` (migration `20260831164144`) holding the
+three stores the resolver actually reads; `mon_detect_unwatched_derived_store()` rostered in the
+same migration; `scripts/verify-derived-store-registry.ts` enforcing completeness offline by
+parsing the committed resolver mirror, so a newly-wired unregistered store fails CI. The detector
+was proven live in both directions: pointed at a non-existent watcher it raised P1 at `16:42:02`
+and self-healed at `16:42:15` once restored. Nothing about what users are served changed.
+
+Each registry row must name a watcher detector that exists, **or** an explicit `unwatched_reason`.
+`aqar_shadow_resolved` carries a reason rather than a watcher — it has no valid source oracle yet
+(§3) — so it stays visible without creating an alert nobody can clear.
+
+**Phase 2 (`captured_at` + `source_fingerprint`) is NOT shipped, and should not be as specified.**
+The flaw surfaced at implementation. A fingerprint records *what the source said when the row was
+captured*. We do not have that for any existing row — so backfilling it from **today's** source
+would stamp every stale row as freshly verified, **destroying the exact signal the column exists to
+provide** and hiding the bug class this document is about. Without a backfill the columns stay NULL
+until the writers populate them, and changing writers is a behaviour change, outside the
+observability-only scope approved.
+
+Phase 3 does not need phase 2: the detectors compare against the **live source payload** directly,
+which is stronger evidence than a stored fingerprint. Phase 2 is worth revisiting only as part of a
+writer change, and its value there is mostly cost (avoiding a re-read), not correctness.
+
 ## 5. Suggested phasing
 
 | phase | change | risk | reversible |
