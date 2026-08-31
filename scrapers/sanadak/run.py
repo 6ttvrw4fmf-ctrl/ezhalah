@@ -138,9 +138,32 @@ def _int(v: Any) -> Optional[int]:
         return None
 
 
-def sitemap_urls(s: cc.Session) -> list[str]:
-    r = s.get(SITEMAP, timeout=30)
-    return re.findall(r"<loc>([^<]*property-details[^<]*)</loc>", r.text)
+def sitemap_urls(s: cc.Session) -> tuple[list[str], Optional[str]]:
+    """Return (urls, failure_reason). `failure_reason` is None only when the sitemap answered a
+    parseable 200; otherwise it is the CONCRETE reason, never a guess.
+
+    Why this returns a reason at all (senior run 2026-08-31): this function used to read `r.text`
+    and drop `r.status_code` on the floor, so an HTTP 500 with an empty body produced exactly the
+    same `[]` as a healthy 200 whose sitemap listed nothing. main() then wrote the generic
+    RC-B note "0-row run (blocked/empty source?)" — a QUESTION MARK persisted as our only record.
+    Measured that morning: sanadak.sa/sitemap.xml returned 500 with a 0-byte body 3/3 from an
+    independent egress while the homepage served 200, i.e. the source's own endpoint was down and
+    nothing about it was ours. Monitoring could not say so, because the status was never captured.
+    Same defect class as the erapulse fetch-reason fix (PR #1398) and the verify_deletions
+    "0-row run (blocked/empty source?)" fix in run #71: rows_seen alone can never separate
+    "the source served nothing" from "we never got an answer we can believe".
+    """
+    try:
+        r = s.get(SITEMAP, timeout=30)
+    except Exception as e:                      # transport: never reached the source at all
+        return [], f"{type(e).__name__}: {e}"[:200]
+    if r.status_code != 200:
+        return [], f"sitemap HTTP {r.status_code} ({len(r.content)} byte body)"
+    urls = re.findall(r"<loc>([^<]*property-details[^<]*)</loc>", r.text)
+    if not urls:
+        # A 200 we cannot interpret is still not evidence the catalogue is empty.
+        return [], f"sitemap HTTP 200 but 0 property-details <loc> entries ({len(r.content)} bytes)"
+    return urls, None
 
 
 def _url_ad_number(url: str) -> Optional[str]:
@@ -407,11 +430,25 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
-    urls = sitemap_urls(s)
+    # begin_run() BEFORE the first source call, deliberately (same reasoning the erapulse leg
+    # carries): if the sitemap fetch is the thing that fails, the row has to already exist for the
+    # concrete reason to have somewhere to land. Otherwise "the source stopped answering" and "the
+    # job never ran" are the same observation to every count/ok-based barrier.
+    run_id = None if args.limit_test else db.begin_run("sanadak")
+    urls, sitemap_err = sitemap_urls(s)
+    if sitemap_err:
+        # SOURCE-SIDE / UNREACHED, not an empty catalogue. Report the reason verbatim and stop
+        # WITHOUT touching listing state — prune_unseen is never reached, so nothing is
+        # deactivated on an answer we could not believe (docs/ops/LISTING_LIVENESS.md §1: a
+        # non-answer is UNKNOWN, and UNKNOWN never deactivates anything).
+        msg = f"sitemap returned no listings — {sitemap_err}"
+        print(f"✗ Sanadak: {msg}")
+        if run_id:
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=msg[:300])
+        return 1
     if args.limit_test:
         urls = urls[:max(args.limit_test * 2, 12)]
     print(f"Sanadak: {len(urls)} listings from sitemap ({WORKERS} workers)")
-    run_id = None if args.limit_test else db.begin_run("sanadak")
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
