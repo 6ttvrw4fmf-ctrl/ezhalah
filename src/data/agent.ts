@@ -992,6 +992,21 @@ function normalizeForReadback(original: string): string {
   return s.replace(/\s+/g, ' ').trim();
 }
 
+// Bug fix (live-tested 2026-08-30): the edge system prompt's "WHEN YOU SEARCH" rule tells the model
+// to restate what it understood on EVERY listings reply, guest included — so before we unconditionally
+// prepend withRestate()'s own canned line below, check whether the model's reply already opens with
+// equivalent restate language. Without this a guest turn could read "تمام، فهمت أنك تبحث عن «...».
+// تمام، فهمت أنك تبحث عن «...». أبشر..." — the same sentence twice. Checked against the opening only
+// (a restate is always the lead, never buried mid-reply); deliberately NOT using `\b` around the
+// Arabic alternatives — JS regex word boundaries are ASCII-`\w`-based and never match around
+// Arabic letters, so a `\b` there would silently never fire.
+const RESTATE_OPENER_AR = /^\s*(?:تمام|حسنا|حسناً|طيب)?[\s,،]*(?:فهمت|فاهم|أفهم)[^.!؟\n]{0,24}?(?:تبحث|تدور)/;
+const RESTATE_OPENER_EN = /^\s*(?:got it|okay|ok|understood|i understand)\b[^.!\n]{0,24}?(?:looking for|searching for)/i;
+function alreadyRestates(reply: string): boolean {
+  const head = reply.slice(0, 140);
+  return RESTATE_OPENER_AR.test(head) || RESTATE_OPENER_EN.test(head);
+}
+
 // Lead every listings reply with a clean restatement of what the user wrote — corrected for typos,
 // with currencies/measurements normalised and shown with Western digits — so Ezhalah always "reads
 // back" the request before the cards appear. (user request: "always retype as an AI what the user
@@ -1069,7 +1084,9 @@ export async function respond(text: string, opts?: {
     // looking for …" with currencies/measurements fixed), keeping the fast search-first feel. For a
     // LOGGED-IN user the model already returns its own structured read-back ("Here is what I have for
     // you: …" — user's prompt spec), so we show that verbatim and DON'T prepend a second restatement.
-    if (backend.kind === 'listings' && !loggedIn) backend.reply = withRestate(v, backend.reply);
+    if (backend.kind === 'listings' && !loggedIn && !alreadyRestates(backend.reply)) {
+      backend.reply = withRestate(v, backend.reply);
+    }
     // Append AFTER the restatement so the reply still leads with what we ARE searching for; the
     // caveat is a tail, not a headline. The search itself is untouched — everything we could apply
     // has been applied.
