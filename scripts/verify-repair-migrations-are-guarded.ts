@@ -76,6 +76,20 @@ const WAIVED: Record<string, string> = {
     'watched by its companion 20260830140831_res_com_collision_repair_regression_detector.sql, '
     + 'which ships + rosters + mutation-proves mon_detect_res_com_collision_repair_regression() — a '
     + 'detector that watches THIS repair (the adjudication ledger it wrote), not just its class',
+  // A different shape from the three above: this one is NOT A REPAIR AT ALL. Its statement is
+  // `update search_listings_ar set city_id = city_id where city_id in (3677, 12)` — a self
+  // assignment. It writes each row's existing value back over itself and therefore cannot change,
+  // correct or destroy any listing data; there is no repaired state for a detector to watch decay.
+  // Its only purpose is to fire the BEFORE INSERT OR UPDATE trigger set_match_city_ids so
+  // composite_match_city_ids() recomputes match_city_ids for the two clustered cities. The real
+  // change in that migration is two rows inserted into loc_city_cluster, which is catalog/config,
+  // not listing data — the classifier's own "bookkeeping and config writes are not repairs" rule.
+  // Verify by reading the statement: if it ever stops being `city_id = city_id`, this waiver is
+  // wrong and must be replaced by a detector.
+  '20260831195108_cluster_al_ahsa_hofuf_so_each_name_finds_the_other.sql':
+    'not a repair — the UPDATE is a self-assignment (city_id = city_id) that exists solely to fire '
+    + 'the set_match_city_ids trigger; it writes each row its own existing value, so no listing '
+    + 'data changes and there is no repaired state to decay',
 };
 
 // Enforcement starts here — the day this rule landed.
