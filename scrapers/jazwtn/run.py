@@ -268,6 +268,83 @@ def _parse_sitemap(body: str) -> list[tuple[str, Optional[str]]]:
     return out
 
 
+FEED = f"{BASE}/projects/feed/"
+# 108 listings at 12-13 per page ≈ 9 pages. The cap is a runaway stop, not a coverage limit —
+# enumeration ends on the 404 below, never on this number (a run that hits it is INCOMPLETE
+# and returns nothing, per the contract in feed_entries).
+_FEED_MAX_PAGES = 40
+
+
+def _parse_feed(body: str) -> list[str]:
+    """Distinct /projects/ item links from one WP RSS page, in document order."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in re.finditer(r"<link>\s*(" + re.escape(BASE) + r"/projects/[^<\s]+?)\s*</link>", body):
+        url = m.group(1).strip()
+        if url.rstrip("/").rsplit("/", 1)[-1] == "projects" or url in seen:
+            continue
+        seen.add(url)
+        out.append(url)
+    return out
+
+
+def feed_entries(s: cc.Session) -> list[tuple[str, Optional[str]]]:
+    """FALLBACK discovery via the paginated WordPress RSS feed. [] means "could not enumerate".
+
+    Why this exists (senior run, 2026-08-31): jazwtn's WAF serves GitHub Actions egress a ~7KB
+    decoy body for /projects-sitemap.xml — HTTP 200, zero <loc> entries — on ALL FIVE TLS
+    fingerprints including no-impersonation, so it is IP-shaped, not fingerprint-shaped, and no
+    amount of retrying the same path can win. But the block is PATH-dependent, not blanket: from
+    an unrelated datacenter egress the same host returns 403 on `/` while serving the real
+    53,865-byte sitemap and this feed. So a second, independent entry point is worth having.
+
+    Measured against the live source, 2026-08-31: pages 1-9 return HTTP 200 (12 then 13 items
+    each), page 10+ returns HTTP 404. The 116 distinct URLs are a strict SUPERSET of the
+    sitemap's 108 — sitemap-only entries: 0. So this is a complete catalogue, not a recent-items
+    window.
+
+    THE COMPLETENESS CONTRACT, which is the whole safety story: this returns entries ONLY when
+    enumeration ended on the natural HTTP 404 terminator. Any other ending — a transport error, a
+    non-200/non-404 status, a 200 that parses to zero new items (i.e. a decoy served mid-walk), or
+    running into the page cap — returns [] instead of what it collected so far. A truncated
+    catalogue must never reach prune_unseen: absence from a partial crawl is not evidence a
+    listing is gone (docs/ops/LISTING_LIVENESS.md §3). Returning half the site would look exactly
+    like half the site being delisted.
+
+    Featured image is None here — the sitemap's <image:loc> has no feed equivalent, and _images()
+    already merges the detail page's own uploads gallery, so nothing is fabricated or lost.
+    """
+    urls: list[str] = []
+    seen: set[str] = set()
+    for page in range(1, _FEED_MAX_PAGES + 1):
+        url = FEED if page == 1 else f"{FEED}?paged={page}"
+        try:
+            r = s.get(url, timeout=30)
+        except Exception as e:
+            print(f"  feed page {page} failed: {e} — enumeration INCOMPLETE, discarding {len(urls)}")
+            return []
+        if r.status_code == 404:
+            # Natural end of pagination: WP 404s past the last page. THE only success terminator.
+            print(f"  feed enumerated {len(urls)} listings across {page - 1} page(s)")
+            return [(u, None) for u in urls]
+        if r.status_code != 200:
+            print(f"  feed page {page}: HTTP {r.status_code} — enumeration INCOMPLETE, "
+                  f"discarding {len(urls)}")
+            return []
+        new = [u for u in _parse_feed(r.text) if u not in seen]
+        if not new:
+            # 200 with nothing new = a decoy body or an unexpected shape. NOT a natural end —
+            # the natural end is the 404 above — so this is incomplete by definition.
+            print(f"  feed page {page}: HTTP 200, {len(r.text)} bytes, 0 new items — decoy or "
+                  f"shape change, enumeration INCOMPLETE, discarding {len(urls)}")
+            return []
+        seen.update(new)
+        urls.extend(new)
+    print(f"  feed hit the {_FEED_MAX_PAGES}-page cap without a 404 — enumeration INCOMPLETE, "
+          f"discarding {len(urls)}")
+    return []
+
+
 def sitemap_entries(s: cc.Session) -> list[tuple[str, Optional[str]]]:
     """Return [(listing_url, featured_image|None)] for every /projects/<slug>/ except the
     archive-root /projects/ URL. Retries across TLS fingerprints with backoff; raises after
@@ -540,14 +617,33 @@ def main() -> int:
     seen = 0
     try:
         entries: list[tuple[str, Optional[str]]] = []
+        sitemap_exc: Optional[Exception] = None
         for attempt in range(3):  # same 3-attempt policy fetch_one already has
             try:
                 entries = sitemap_entries(s)
                 break
-            except Exception:
+            except Exception as e:
+                sitemap_exc = e
                 if attempt == 2:
-                    raise
+                    break
                 time.sleep(5 * (attempt + 1))
+        if not entries:
+            # The sitemap path is exhausted (15 fingerprint attempts across 3 rounds). Try the
+            # INDEPENDENT feed entry point before giving up — the WAF's decoy is path-dependent,
+            # so a second path is a real second chance rather than a retry in disguise.
+            print(f"  sitemap discovery failed ({sitemap_exc}) — trying the RSS feed fallback")
+            entries = feed_entries(s)
+            if entries:
+                print(f"✓ jazwtn: recovered via the RSS feed after the sitemap was decoyed "
+                      f"({len(entries)} listings)")
+            else:
+                # BOTH independent paths failed. Raise so the run is marked failed and the prune
+                # guard keeps existing stock — never proceed on an empty catalogue.
+                raise RuntimeError(
+                    "jazwtn discovery failed on BOTH paths: sitemap "
+                    f"({sitemap_exc}) and the RSS feed. The host is refusing this egress on every "
+                    "known entry point — this is the datacenter-IP block, and per AGENTS.md the "
+                    "remediation is an explicit JAZWTN_PROXY_URL, which is an owner decision.")
         if args.limit:
             entries = entries[: max(args.limit * 2, 30)]
         print(f"Jazwtn: {len(entries)} candidate listings ({WORKERS} workers)"
