@@ -209,6 +209,54 @@ worst cohort by construction — so the next measurement worth doing is the same
 do not, dealapp needs a different signal entirely (an internal API, a status field, a feed) and no
 amount of egress will fix it.
 
+### 5.3 Wasalt's oracle ran for the first time — and found nothing dead
+
+Wasalt's `served_after_source_gone` alert has read *"3,367 rows carry the full strike grace"* for
+weeks, and it is easy to misread that as 3,367 confirmed-gone listings still being served. It is
+not. On 2026-08-31 the sweep was run for the first time in the platform's history — GitHub Actions
+reported `run_number: 1`, which is itself the proof that the oracle had never once executed, so
+`last_verified_alive_at` was NULL on all ~54k active rows and those strikes came from **crawl
+absence alone**.
+
+Dispatched `only_struck=true, report_only=true` (~1.3 GB against the struck cohort, not the ~22 GB
+full sweep). Seven of eight residential shards, 2,947 rows probed by direct fetch:
+
+| | total |
+|---|---:|
+| scanned | 2,947 |
+| proven alive | 82 refreshes / **80 distinct rows** |
+| **dead verdicts** | **0** |
+| transient | 2,865 (**97%**) |
+| rows deactivated | **0** |
+
+**Zero dead verdicts is the finding.** `--report-only` suppresses the *write* but still increments
+`killed`/`pending_kill` with the verdict it would have reached, so `killed=0 pending_kill=0` on
+every shard means zero rows were *classified* dead — not merely zero written. Nothing in that
+backlog has been shown to be gone. The 80 alive rows are the first direct-fetch verifications
+wasalt has ever carried, and they came out of the cohort most assumed to be dead.
+
+**Read the 97% before drawing any conclusion from the 2.8%.** By §5's own standard this run is not
+a trustworthy oracle — dealapp quarantines below a 20% verified rate and this is far under it.
+Shard 7 reached 15% while the other six reached 0–2%, and shard 7 also finished first. That spread
+tracks proxy capacity, not listing state: eight shards were hammering one shared metered residential
+proxy simultaneously. **The next run should use 1–2 shards, not 8.** The cohort is identical, so it
+costs no more bandwidth — it just stops the sweep from competing with itself.
+
+Two things this does NOT license. It is not evidence the backlog is alive either — 3,287 rows
+remain honestly **UNKNOWN**, which is the correct state and still forbids deactivation. And it does
+not retire the alert: `served_after_source_gone` is doing its job by staying loud about rows nothing
+has verified.
+
+One gap this surfaced, recorded rather than fixed: `scrapers/aqar/liveness.py` — the runner shared
+by aqar **and** wasalt — has no trust gate and no kill cap, unlike
+`dealapp/liveness.py::environment_is_trustworthy()`. §5 states the rule ("a run that cannot be
+trusted may not kill") but only dealapp implements it, and the deactivation is a direct PostgREST
+`update({"active": False})` with no guarding RPC or trigger behind it. This is defence-in-depth
+rather than an active bug — a transient read never strikes, which is why a 97%-degraded run still
+killed nothing — but a source that answers misleadingly under degradation (dealapp's shells are the
+known shape) would not be caught. Choosing the threshold needs aqar's baseline verified rate and
+changes deactivation semantics, so it is an owner decision, not a drive-by.
+
 ## 6. Ezhalah must know its own liveness state without being asked
 
 A rule nothing measures is a wish. Migration `20260830191646`:
