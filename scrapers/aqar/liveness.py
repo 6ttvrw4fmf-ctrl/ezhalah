@@ -283,6 +283,22 @@ def main() -> None:
                          "shard 0 81%% of aqar_residential and it was timeout-killed daily.")
     ap.add_argument("--shard", type=int, default=0,
                     help="Which 0-indexed bucket THIS job handles (0 .. shards-1).")
+    ap.add_argument("--only-struck", action="store_true",
+                    help="Examine ONLY rows already at full strike grace (missing_count >= --grace) "
+                         "instead of every active row. Strictly NARROWING: it can only look at "
+                         "fewer listings, never more, so it cannot cause a kill the default sweep "
+                         "would not also have made. Exists because wasalt's full sweep fetches "
+                         "~400KB per listing through a METERED Saudi proxy — ~22 GB over 54k rows, "
+                         "which is why wasalt-liveness.yml is unscheduled (cost guard, 2026-06). "
+                         "The struck backlog is ~3.4k rows, roughly 1.3 GB, which answers 'are "
+                         "these actually dead?' without the full sweep's cost.")
+    ap.add_argument("--report-only", action="store_true",
+                    help="VERIFY without deactivating. Suppresses the dead path entirely — no "
+                         "active=false, no missing_count increment — and reports the verdicts it "
+                         "would have reached. The ALIVE path still runs: a listing the source "
+                         "proves is live is recorded via the sanctioned direct_alive_patch(), "
+                         "which is purely restorative. So this can only ever move a row from "
+                         "UNKNOWN toward ALIVE, never toward DEAD.")
     args = ap.parse_args()
 
     table = args.table
@@ -298,13 +314,20 @@ def main() -> None:
     # One count + at most two single-row offset probes. The probes run on the same
     # (active, id) access path the keyset loop below uses — live-verified as an Index Only Scan
     # on idx_aqar_active_id, ~40 ms at the worst-case mid-table offset.
+    # --only-struck narrows the cohort. The count probe, the offset probes and the keyset loop
+    # below must ALL apply the identical filter, or the shard windows are computed over one
+    # population and walked over another — the exact class of bug B1 above.
+    def _cohort(q):
+        q = q.eq("active", True)
+        return q.gte("missing_count", args.grace) if args.only_struck else q
+
     count_res = _run_with_retry(
-        lambda: client.table(table).select("id", count="exact").eq("active", True).limit(1).execute())
+        lambda: _cohort(client.table(table).select("id", count="exact")).limit(1).execute())
     total_rows = int(count_res.count or 0)
 
     def _id_at(offset: int) -> Optional[int]:
         res = _run_with_retry(
-            lambda: client.table(table).select("id").eq("active", True)
+            lambda: _cohort(client.table(table).select("id"))
             .order("id", desc=False).range(offset, offset).execute())
         return int(res.data[0]["id"]) if res.data else None
 
@@ -343,10 +366,9 @@ def main() -> None:
         last_id = lo - 1  # start the cursor at the bottom of this shard's ID window
         while window is not None:
             q = (
-                client.table(table)
-                .select("id, ad_number, listing_url, missing_count, transaction_type, price_total,"
-                        " area_m2, price_per_meter")
-                .eq("active", True)
+                _cohort(client.table(table)
+                        .select("id, ad_number, listing_url, missing_count, transaction_type,"
+                                " price_total, area_m2, price_per_meter"))
                 .gt("id", last_id)
                 .order("id", desc=False)
                 .limit(page_size)
@@ -371,14 +393,24 @@ def main() -> None:
 
                 if r is not None and looks_dead(status, body):
                     new_missing = (row.get("missing_count") or 0) + 1
-                    upd: dict = {"missing_count": new_missing}
-                    if new_missing >= args.grace:
-                        upd["active"] = False
-                        killed += 1
+                    if args.report_only:
+                        # VERIFY, don't act. Count the verdict we WOULD have reached and write
+                        # nothing: no active=false, no missing_count increment. The row keeps the
+                        # exact state it had. Only the alive path below still writes, and that is
+                        # restorative.
+                        if new_missing >= args.grace:
+                            killed += 1
+                        else:
+                            pending_kill += 1
                     else:
-                        pending_kill += 1
-                    _run_with_retry(lambda u=upd, i=row["id"]:
-                                    client.table(table).update(u).eq("id", i).execute())
+                        upd: dict = {"missing_count": new_missing}
+                        if new_missing >= args.grace:
+                            upd["active"] = False
+                            killed += 1
+                        else:
+                            pending_kill += 1
+                        _run_with_retry(lambda u=upd, i=row["id"]:
+                                        client.table(table).update(u).eq("id", i).execute())
                 elif r is not None and status == 200:
                     # Alive — BATCH the refresh. Every alive row gets the same values, so collect ids
                     # and flush one `UPDATE … WHERE id IN (…)` per 200 rows instead of 84k single-row
