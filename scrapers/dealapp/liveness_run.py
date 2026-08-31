@@ -191,6 +191,20 @@ def main() -> int:
     s = _session(proxy_url)
     now_iso = datetime.now(timezone.utc).isoformat()
 
+    # Buffered per-row audit trail. A logging failure must never abort a sweep or alter a verdict:
+    # the record is OF the decision, never part of making it.
+    detail_buf: list[dict] = []
+
+    def _flush_detail() -> None:
+        if not detail_buf:
+            return
+        batch, detail_buf[:] = list(detail_buf), []
+        try:
+            client.table("dealapp_liveness_detail").insert(batch).execute()
+        except Exception as exc:  # noqa: BLE001
+            print(f"⚠ liveness detail insert failed (non-fatal, {len(batch)} rows): "
+                  f"{str(exc)[:160]}", flush=True)
+
     stats = {"scanned": 0, "alive": 0, "dead": 0, "unknown": 0,
              "verified": 0, "struck": 0, "deactivated": 0, "sitemap_ids": 0, "quarantined": False}
     try:
@@ -214,9 +228,23 @@ def main() -> int:
             stats["scanned"] += 1
             stats[{ALIVE: "alive", DEAD: "dead", UNKNOWN: "unknown"}[verdict]] += 1
 
-            d = decide(verdict, strikes=int(row.get("missing_count") or 0),
-                       policy=policy, evidence=EvidenceKind.DIRECT)
+            mc_before = int(row.get("missing_count") or 0)
+            d = decide(verdict, strikes=mc_before, policy=policy, evidence=EvidenceKind.DIRECT)
             pending.append((row, d.action, d.strikes))
+
+            # AUDIT. Everything except a confirmed ALIVE, which last_verified_alive_at records.
+            # On this platform UNKNOWN is the dominant outcome AND the open question, so it is a
+            # first-class record here rather than a silent skip — 600 probes across two egress
+            # paths produced zero dead verdicts, and that fact should be queryable, not re-measured.
+            if d.action != "reset":
+                detail_buf.append({
+                    "source_table": TABLE, "listing_id": row["id"], "http_status": status,
+                    "verdict": {"strike": "strike", "deactivate": "kill"}.get(d.action, "unknown"),
+                    "reason": d.reason, "missing_count_before": mc_before,
+                    "missing_count_after": d.strikes, "applied": bool(args.apply),
+                })
+                if len(detail_buf) >= 200:
+                    _flush_detail()
 
             if args.apply and d.action == "reset":
                 patch = {"missing_count": 0, **verification_patch(d, now_iso=now_iso)}
@@ -237,6 +265,8 @@ def main() -> int:
                     client.table(TABLE).update(
                         {"missing_count": strikes, "active": False}).eq("id", row["id"]).execute()
                     stats["deactivated"] += 1
+
+        _flush_detail()   # the audit must survive the run, including a quarantined one
 
         note = (f"{'APPLY' if args.apply else 'DRY-RUN'} "
                 f"egress={'proxy' if proxy_url else 'ci'} "
