@@ -117,8 +117,16 @@ async function post(path, body, tries = 4) {
         method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
         body: JSON.stringify(body), signal: AbortSignal.timeout(60000),
       });
-      const j = await r.json().catch(() => null);
-      if (j && !j.message) return j;
+      // A VOID rpc (ops_qa_record_coverage) answers 2xx with an EMPTY body. Judging success by
+      // "did we get a JSON object back" therefore read every successful coverage write as a
+      // failure and retried it: measured 2026-08-31, times_tested was climbing ~4 per run and the
+      // 4-step backoff (1.5+3+4.5+6s) sat between consecutive writes — about half the sweep's
+      // 739s runtime spent re-sending writes that had already landed. Judge the HTTP STATUS, and
+      // treat an empty 2xx body as the success it is. PostgREST reports real errors as a JSON
+      // object carrying `message`, which is still a failure even on a 2xx.
+      const text = await r.text();
+      const j = text ? JSON.parse(text) : null;
+      if (r.ok && !(j && j.message)) return j ?? {};
     } catch { /* retry */ }
     await sleep(1500 * (a + 1));
   }
@@ -238,8 +246,16 @@ const rpcIds = async (body, cap) => {
 };
 
 const ledgerPlan = (dimension, limit) => post('/rpc/ops_qa_sweep_plan', { p_dimension: dimension, p_limit: limit });
-const ledgerRecord = (dimension, key, result, notes) =>
-  post('/rpc/ops_qa_record_coverage', { p_dimension: dimension, p_key: key, p_result: result, p_notes: (notes ?? '').slice(0, 480) });
+// A coverage write that fails must never pass unnoticed: post() retries and then returns null, so a
+// rejected write used to leave the PREVIOUS run's result standing while this run reported success.
+// That is how three watches kept a stale `pass` on 2026-08-31 after the result vocabulary was
+// widened past what the RPC accepts (pass | fail | skip). Say so loudly instead.
+const ledgerRecord = async (dimension, key, result, notes) => {
+  const r = await post('/rpc/ops_qa_record_coverage',
+    { p_dimension: dimension, p_key: key, p_result: result, p_notes: (notes ?? '').slice(0, 480) });
+  if (r === null) note(`LEDGER WRITE FAILED — ${dimension}/${key} = ${result} (the previous result still stands)`);
+  return r;
+};
 
 // ── findings ─────────────────────────────────────────────────────────────────────────────────────
 const findings = [];

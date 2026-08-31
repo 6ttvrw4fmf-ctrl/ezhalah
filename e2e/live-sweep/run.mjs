@@ -220,9 +220,14 @@ async function main() {
   // A watch records `pass` ONLY with positive evidence it was evaluated (watchStatus, sweep.mjs).
   // Absence of a finding is not evidence: a harness error, a skipped journey, or a watch nothing
   // asserts all produce no finding, and all three used to be written to the ledger as `pass`.
+  // ops_qa_record_coverage accepts ONLY pass | fail | skip and raises on anything else, so the
+  // internal `offline_barrier` status is written as `skip` — which is exactly what it is from the
+  // browser's point of view — with the notes naming the barrier that does evaluate it. Writing an
+  // out-of-vocabulary value made the RPC throw, and post() swallowed it: the three rows silently
+  // kept the previous run's stale `pass`. Same bug class as the one this PR fixes, one layer down.
   for (const w of WATCHES) {
     const st = watchStatus(w);
-    await ledgerRecord('live_watch', w, st,
+    await ledgerRecord('live_watch', w, st === 'offline_barrier' ? 'skip' : st,
       st === 'offline_barrier' ? `not browser-evaluated; covered by ${WATCH_OFFLINE_COVER[w]}` : 'live browser sweep');
   }
 
