@@ -136,7 +136,12 @@ check("the registry gates on cohortAllows — the AF predicate itself",
   "certification must come BEFORE canonicalization, so a refusal can never look applied");
 check("the edge declares no cohort tables", !/const\s+COHORT_QUESTIONS|const\s+COHORT_CHIPS/.test(edge));
 check("the edge never calls a certification predicate", !/^\s*(?:if\s*\()?\s*cohortAllows\(/m.test(edge));
-check("the edge carries af through raw", /af: \(out\.af && typeof out\.af === "object"/.test(edge));
+// 2026-08-31: af now passes through fillBathroomsIfAbsent() (a fill-absent-only deterministic
+// backstop, postModel.ts) instead of the bare passthrough — it still carries af RAW/uncertified:
+// postModel.ts is dependency-free (no afCohorts import, no cohortAllows call) by construction, so
+// it cannot certify anything even accidentally; it only fills a gap the model left empty.
+check("the edge carries af through raw (fill-absent-only backstop, never certification)",
+  /af: fillBathroomsIfAbsent\(out\.af, text\)/.test(edge));
 
 if (failed) {
   console.error(`\n✗ ${failed} check(s) FAILED — AI/AF coverage or certification is not intact`);

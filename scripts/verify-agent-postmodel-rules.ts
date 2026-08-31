@@ -22,6 +22,8 @@ import {
   periodFromText,
   hasDigits,
   toWesternDigits,
+  arabicBathroomCount,
+  fillBathroomsIfAbsent,
 } from "../supabase/functions/agent/postModel.ts";
 
 let failed = 0;
@@ -142,6 +144,60 @@ eq("empty location stays empty (whole-of-Saudi search)",
 eq("mixed Arabic+Latin district resolves to the canonical Arabic",
   arabicCanonicalLocation({ location: "حي Al Narjis", canonicalArabic: "حي النرجس", locale: "ar" }), "حي النرجس");
 
+// ── RULE 4 ───────────────────────────────────────────────────────────────────
+// Measured live (12 reps/phrasing against production, 2026-08-31) BEFORE this backstop:
+//   «...نادي وحمامين» 1/12, «...حمامين» alone 9/12, «...مصعد وحمامين» (OLD certified token) 1/12,
+//   EN "gym and two bathrooms" 12/12, mixed "gym وحمامين" 3/12. The elevator control proves this
+//   is a pre-existing model-reliability gap, not caused by the gym/amenity certification work.
+console.log("\n── RULE 4: af.bathrooms backstop fills an absent value, never a bare numeral ──");
+eq("REPRO 1: «...نادي وحمامين» (gym + dual)", arabicBathroomCount("أبي شقة فيها نادي وحمامين"), "2");
+eq("REPRO 2: «...حمامين» alone (dual, no digit anywhere)", arabicBathroomCount("أبي شقة فيها حمامين"), "2");
+eq("REPRO 3: «...مصعد وحمامين» (OLD certified elevator token + dual)",
+  arabicBathroomCount("أبي شقة فيها مصعد وحمامين"), "2");
+eq("REPRO 4: English word count", arabicBathroomCount("I want an apartment with a gym and two bathrooms"), "2");
+eq("REPRO 5: mixed-script «gym وحمامين»", arabicBathroomCount("أبي شقة فيها gym وحمامين"), "2");
+eq("dual «حمامان»", arabicBathroomCount("شقة فيها حمامان"), "2");
+eq("دورة مياه dual «دورتين مياه»", arabicBathroomCount("شقة فيها دورتين مياه"), "2");
+eq("Arabic digit + plural «٣ حمامات»", arabicBathroomCount("أبي شقة فيها ٣ حمامات"), "3");
+eq("Arabic count-word + plural «ثلاث حمامات»", arabicBathroomCount("أبي شقة فيها ثلاث حمامات"), "3");
+eq("count-word «واحد» + singular «حمام واحد» → 1", arabicBathroomCount("أبي فيلا فيها حمام واحد"), "1");
+eq("English digit form «3 bathrooms»", arabicBathroomCount("I need 3 bathrooms please"), "3");
+eq("English «baths»", arabicBathroomCount("looking for a place with 2 baths"), "2");
+eq("NEVER A BARE NUMERAL: a digit with no bathroom word stays null (bedroom-count rule mirror)",
+  arabicBathroomCount("ابغى شقة فيها ٢ غرف"), null);
+eq("NEVER A BARE COUNT-WORD: no bathroom noun present stays null",
+  arabicBathroomCount("عندي عائلة من ٤ أشخاص"), null);
+eq("POOL GUARD: «حمام سباحة» (swimming pool) must not become '1 bathroom'",
+  arabicBathroomCount("شقة فيها حمام سباحة"), null);
+// The case above alone is a WEAK assertion — it passes even with the pool guard deleted, because
+// there is no digit/count-word adjacent to «حمام» for the digit/word-count branches to misfire on
+// in the first place. THIS is the actually-discriminating repro: a digit sits directly next to
+// «حمام سباحة», so removing the guard makes the digit-count branch mistake "2 pools" for "2
+// bathrooms" — confirmed by deliberately deleting the guard during development (it returned "2").
+eq("POOL GUARD (discriminating): a digit directly beside «حمام سباحة» must still not count as bathrooms",
+  arabicBathroomCount("شقة فيها ٢ حمام سباحة"), null);
+eq("vague word never becomes a count (mirrors «كبير» never becomes bedrooms)",
+  arabicBathroomCount("بيت جميل وكبير"), null);
+eq("unrelated amenity, no bathroom mention at all → null",
+  arabicBathroomCount("شقة فيها مصعد وموقف"), null);
+
+console.log("\n── RULE 4: fillBathroomsIfAbsent — fill-absent-only (RULE 2's precedent) ──");
+eq("an EXPLICIT model value is NEVER overridden, even when the text also says «حمامين»",
+  fillBathroomsIfAbsent({ bathrooms: "3" }, "أبي شقة فيها حمامين").bathrooms, "3");
+eq("absent af.bathrooms + extractable text → filled",
+  fillBathroomsIfAbsent({}, "أبي شقة فيها حمامين").bathrooms, "2");
+eq("absent af.bathrooms + nothing extractable → stays absent (never invented)",
+  fillBathroomsIfAbsent({}, "شقة عادية في جدة").bathrooms, undefined);
+eq("other af keys pass through untouched",
+  fillBathroomsIfAbsent({ rating: "9.0" }, "شقة فيها حمامين").rating, "9.0");
+eq("non-object af (model sent something malformed) is sanitized to {} before filling",
+  fillBathroomsIfAbsent(null, "شقة فيها حمامين").bathrooms, "2");
+// null/undefined spread to {} even without a guard (JS quirk), so the case above alone would not
+// catch a deleted !Array.isArray check. An array is the case that ACTUALLY discriminates it: naive
+// `{...af}` on an array produces numeric-keyed junk ({0: "x"}) instead of {}.
+eq("array af (malformed) is sanitized to {} too, not spread into numeric keys",
+  fillBathroomsIfAbsent(["x"], "شقة فيها حمامين").bathrooms, "2");
+
 // ── WIRING: the rules must actually be LOAD-BEARING in the edge function ─────
 console.log("\n── wiring (pure tests alone cannot prove the edge function calls these) ──");
 const edge = readFileSync(new URL("../supabase/functions/agent/index.ts", import.meta.url), "utf8");
@@ -163,9 +219,17 @@ check("extractPrice normalizes Arabic numerals BEFORE parsing (else Arabic budge
   /function extractPrice[\s\S]{0,400}?const t = toWesternDigits\(input\)\.toLowerCase\(\)/.test(edge));
 check("originalCurrency normalizes Arabic numerals too (same ASCII-only flaw)",
   /function originalCurrency[\s\S]{0,400}?const t = toWesternDigits\(input\)\.toLowerCase\(\)/.test(edge));
+check("RULE 4 wired: edge imports fillBathroomsIfAbsent",
+  /import\s*\{[^}]*fillBathroomsIfAbsent[^}]*\}\s*from\s*"\.\/postModel\.ts"/.test(edge));
+check("RULE 4 wired: applied on BOTH the listings response AND the message/clarification path "
+  + "(understoodState()) — a clarification turn must not silently drop what the backstop filled, "
+  + "same invariant as the 'clarification may pause, never erase' rule",
+  (edge.match(/af:\s*fillBathroomsIfAbsent\(out\.af,\s*text\)/g) ?? []).length === 2);
+check("RULE 4: no leftover unvalidated af pass-through remains (the old inline check is fully replaced)",
+  !edge.includes('af: (out.af && typeof out.af === "object" && !Array.isArray(out.af)) ? out.af : {}'));
 
 if (failed) {
   console.error(`\n✗ ${failed} check(s) FAILED — a post-model rule the owner ruled on is not holding`);
   process.exit(1);
 }
-console.log("\nOK — all three deterministic post-model rules hold and are wired into the agent");
+console.log("\nOK — all four deterministic post-model rules hold and are wired into the agent");
