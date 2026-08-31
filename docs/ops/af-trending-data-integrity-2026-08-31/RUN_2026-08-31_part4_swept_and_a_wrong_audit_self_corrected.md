@@ -109,6 +109,33 @@ rows `rows_without_count = 0` in both cities (no false fallback counts). J3's re
 «الوكيل الذكي» flow and its count RPCs (`apartment_guided_counts_ar`,
 `property_age_option_counts_ar`) carried the full state.
 
+## 5b. Merge and the drift guard
+
+Merged as PR #1410 through the mandated gate (`scripts/safe-pr-merge.ts 1410 --expect-files …`):
+all three required checks SUCCESS (Full verification suite, Production-target lock + no-bypass,
+Taxonomy + location index), `mergeable=MERGEABLE`, `mergeStateStatus=clean`, file list unchanged
+since creation. Merge commit `9792c6d`.
+
+**Why it was merged rather than left open.** Applying `20260831113443` to production put this
+routine's own name on the main-branch migration drift guard — run 763 (2026-08-31 11:42) reported
+`1 migration(s) applied to prod but MISSING FROM GIT: 20260831113443`. The mirror files existed, but
+on the branch; the guard measures `main`. `AGENTS.md` makes mirroring the applying engineer's
+responsibility, and this routine's authority covers self-merging "migrations recording already-
+applied operational changes" on green CI. Verified cleared afterwards on `main`:
+
+```
+✓ migration-drift-vs-production: 0 missing_in_git, 0 missing_in_prod,
+  0 duplicate versions, 0 duplicate overloads (873 live migrations)
+```
+
+The drift workflow is still red on a DIFFERENT condition that is not this routine's:
+`verify-migration-content-parity` on three 2026-08-30 seam-authored migrations
+(`ai_cost_health_reasoning_token_detector`, `ai_usage_costed_source_column_drift_fix`,
+`agent_calls_per_message_telemetry_and_detector`), all classified **0 CODE-level, 3 comment-only
+(P2, benign)** by the class-split PR #1407 shipped the same day. Already alerted as
+`migration_content_parity` P2 and owned by routine #7 (systems seam). Recovering their files
+verbatim is theirs to do, not mine to guess at.
+
 ## 6. Harness notes (additive to 2026-08-30)
 
 1. **Playwright is NOT in the repo** — this container has no `node_modules`. Import it from
@@ -170,7 +197,7 @@ BUGS FIXED: 0 data defects; 1 barrier gap closed
 BUGS REMAINING: 2 (both source-truth decisions)
 BARRIERS ADDED/STRENGTHENED: 1 (mon_detect_age_resolver_platform_gap, rostered)
 MUTATION-PROVEN: YES (0 → 1 → 0, rolled back)
-MERGED: NO (open for review — touches supabase/migrations/)
+MERGED: YES (PR #1410, merge commit 9792c6d, via scripts/safe-pr-merge.ts)
 DEPLOYED: N/A (no frontend change)
 PRODUCTION VERIFIED: YES
 
@@ -180,7 +207,7 @@ BUGS REMAINING: 2
 BARRIERS ADDED: 1
 MUTATIONS KILLED: 1/1
 TESTS: PASS (targeted; npm test blocked in-container by a missing Python dep, unrelated)
-MERGED: NO
+MERGED: YES
 DEPLOYED/APPLIED: YES (2 migrations applied; net production state = designed state)
 PRODUCTION VERIFIED: YES
 SENTRY CHECKED: YES
