@@ -35,8 +35,44 @@ check(
   /const realGet:[\s\S]{0,120}nav\.credentials\?\.get\?\.bind\(nav\.credentials\)/.test(startBody),
 );
 check(
-  'the patch is one-shot — restored to the real function BEFORE the call even settles, so nothing else on the page is ever affected by it',
-  /nav\.credentials\.get = realGet; \/\/ one-shot: restore immediately/.test(startBody),
+  'the patch is one-shot — restore() runs BEFORE the call even settles, so nothing else on the page is ever affected by it',
+  /restore\(\); \/\/ one-shot: restore immediately/.test(startBody),
+);
+
+// ── RESTORATION IS THE PATCH'S OTHER HALF (added 2026-08-31 after code review of this PR) ─────────
+// Patching a global is only safe if it is provably undone on EVERY exit. There are two, and the
+// second was missing when this PR was first reviewed: GIS may simply never call credentials.get —
+// exactly the case the ceiling timer exists for — in which case nothing inside the patched function
+// ever runs and the patch survived on the global `navigator.credentials` for the page's lifetime,
+// outliving unmount. A later caller (a passkey/WebAuthn flow) would then enter our patched function
+// and trigger fireFallback → run(false) → GIS re-initialize: the exact interrupted-mid-flow bug this
+// PR exists to remove, resurrected by the fix's own scaffolding.
+check(
+  'the restore helper is IDENTITY-CHECKED — it puts realGet back only if the currently installed function is still OURS, so a later foreign patch is never clobbered',
+  /if \(nav\.credentials\?\.get === patched\) nav\.credentials\.get = realGet;/.test(startBody),
+);
+check(
+  'the restore helper is published to effect scope (restoreCredentialsGet) so cleanup can reach it',
+  /restoreCredentialsGet = restore;/.test(startBody) && /let restoreCredentialsGet: \(\(\) => void\) \| null = null;/.test(src),
+);
+check(
+  'EFFECT CLEANUP restores navigator.credentials.get — the only path that takes the patch back off the global when GIS never calls it',
+  /return \(\) => \{[^}]*restoreCredentialsGet\?\.\(\);[^}]*\};/.test(src),
+  'without this the patch outlives the component and a later credentials.get caller trips fireFallback',
+);
+
+// ── NO UNHANDLED REJECTION (added 2026-08-31 after code review of this PR) ────────────────────────
+// `p.then(onOk, onErr)` returns a NEW promise that nothing awaits. If either handler throws —
+// fireFallback calls run(false), which re-initializes GIS and can throw exactly like run()'s own
+// try/catch anticipates — that rejection is unobserved. An unhandled rejection is both a console
+// error and a Sentry event, on the one page whose job is to look clean during sign-in.
+check(
+  'the derived promise from .then(onOk, onErr) is terminated with a .catch so a throwing handler can never surface as an unhandled rejection',
+  /\}, \(\) => fireFallback\('FedCM request rejected\/dismissed'\)\)\.catch\(\(\) => \{\}\);/.test(startBody),
+);
+check(
+  'the ORIGINAL promise `p` is still returned to GIS untouched — the .catch is on the derived promise only, so GIS\'s own rejection handling is unaffected',
+  /\.catch\(\(\) => \{\}\);\s*\n\s*return p;/.test(startBody),
 );
 check(
   'a genuine RESOLUTION with a real credential NEVER fires the fallback — it DISARMS the ceiling timer outright instead, so a successful sign-in can never be raced by a spurious later run(false)',
@@ -198,6 +234,109 @@ async function main() {
       h.runs.length === 1,
     );
     h.cleanup();
+  }
+
+  // ── EXECUTED: the PATCH LIFECYCLE, against a real navigator-shaped object ──────────────────────
+  // Source pins prove the lines are present; these prove the global actually ends up clean on both
+  // exits, which is the property that matters. Mirrors the production install/restore exactly.
+  {
+    const patchHarness = (getPromise: Promise<unknown> | null, throwOnFallback = false) => {
+      const runs: RunCall[] = [];
+      let fallbackStarted = false, cancelled = false, momentSeen = false;
+      let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+      let restoreCredentialsGet: (() => void) | null = null;
+      const realGet = () => getPromise ?? new Promise<unknown>(() => {});
+      const nav: any = { credentials: { get: realGet } };
+      const run = (useFedCM: boolean) => {
+        runs.push({ useFedCM });
+        // Models run()'s real failure mode: re-initializing GIS can throw.
+        if (throwOnFallback && !useFedCM) throw new Error('GIS initialize threw');
+      };
+      const fireFallback = () => {
+        if (cancelled || momentSeen || fallbackStarted) return;
+        fallbackStarted = true;
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+        run(false);
+      };
+      const patched = (...args: unknown[]) => {
+        restore();
+        const p = (realGet as any)(...args);
+        p.then((cred: unknown) => {
+          if (cred) { if (fallbackTimer) clearTimeout(fallbackTimer); } else fireFallback();
+        }, () => fireFallback()).catch(() => {});
+        return p;
+      };
+      const restore = () => {
+        if (nav.credentials?.get === patched) nav.credentials.get = realGet;
+        restoreCredentialsGet = null;
+      };
+      restoreCredentialsGet = restore;
+      nav.credentials.get = patched;
+      run(true);
+      fallbackTimer = setTimeout(() => fireFallback(), 400);
+      return {
+        nav, realGet, patched, runs,
+        cleanup: () => { cancelled = true; if (fallbackTimer) clearTimeout(fallbackTimer); restoreCredentialsGet?.(); },
+      };
+    };
+
+    // (1) GIS DOES call it → the patched function restores itself one-shot, before settlement.
+    {
+      const h = patchHarness(new Promise<unknown>(() => {}));
+      check('the patch is installed on navigator.credentials.get', h.nav.credentials.get === h.patched);
+      h.nav.credentials.get();
+      check(
+        'calling the patched function restores the real navigator.credentials.get IMMEDIATELY (one-shot), before the call settles',
+        h.nav.credentials.get === h.realGet,
+      );
+      h.cleanup();
+    }
+
+    // (2) GIS NEVER calls it → cleanup is the only path that can take the patch off. This is the
+    //     case the ceiling timer exists for, and the one the original PR left leaking.
+    {
+      const h = patchHarness(new Promise<unknown>(() => {}));
+      check('with GIS never calling it, the patch is still installed before cleanup', h.nav.credentials.get === h.patched);
+      h.cleanup();
+      check(
+        'EFFECT CLEANUP restores navigator.credentials.get when GIS never called it — the patch never outlives the component',
+        h.nav.credentials.get === h.realGet,
+      );
+    }
+
+    // (3) Someone else patched AFTER us → cleanup must not clobber their patch.
+    {
+      const h = patchHarness(new Promise<unknown>(() => {}));
+      const foreign = () => new Promise<unknown>(() => {});
+      h.nav.credentials.get = foreign;          // a later, unrelated patch layers on top
+      h.cleanup();
+      check(
+        'cleanup leaves a LATER foreign patch alone (identity-checked) instead of silently clobbering it with realGet',
+        h.nav.credentials.get === foreign,
+      );
+    }
+
+    // (4) A throwing fallback must not produce an unhandled rejection. This is the whole point of the
+    //     trailing .catch: run(false) re-initializes GIS and can throw, and the promise that throw
+    //     lands on is one nothing awaits.
+    {
+      const unhandled: unknown[] = [];
+      const onUnhandled = (r: unknown) => unhandled.push(r);
+      process.on('unhandledRejection', onUnhandled);
+      const rejects = Promise.reject(new Error('nothing to offer'));
+      rejects.catch(() => {});                  // the harness's own source promise, not the derived one
+      const h = patchHarness(rejects, /* throwOnFallback */ true);
+      h.nav.credentials.get();
+      await wait(120);                          // well past the turn Node reports unhandled rejections on
+      process.off('unhandledRejection', onUnhandled);
+      check(
+        'a THROWING fallback handler produces NO unhandled rejection — the derived promise is terminated with .catch',
+        unhandled.length === 0,
+        `saw ${unhandled.length} unhandled rejection(s): ${unhandled.map(String).join(' | ')}`,
+      );
+      check('…and the fallback still actually ran despite throwing', h.runs.length === 2 && h.runs[1].useFedCM === false);
+      h.cleanup();
+    }
   }
 
   console.log('');

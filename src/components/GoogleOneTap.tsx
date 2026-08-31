@@ -127,6 +127,12 @@ export default function GoogleOneTap() {
     let cancelled = false;
     let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
     let momentSeen = false;
+    // Undoes the one-shot navigator.credentials.get patch installed in start(). Held at EFFECT scope,
+    // not inside start(), because the case it exists for is the one where start()'s own restore never
+    // runs: GIS never calls credentials.get at all, so the patched function is never entered and the
+    // patch would otherwise outlive the component on the global `navigator.credentials` (see the
+    // patch site below). Null whenever there is nothing installed, so cleanup is idempotent.
+    let restoreCredentialsGet: (() => void) | null = null;
 
     const fedcmSupported = 'IdentityCredential' in window;
     const diag: Diag = { fedcmSupported, attempts: [], moments: [], fallbackFired: false, signedOut: true };
@@ -239,9 +245,24 @@ export default function GoogleOneTap() {
       const nav = navigator as any;
       const realGet: ((...a: unknown[]) => Promise<unknown>) | undefined = nav.credentials?.get?.bind(nav.credentials);
       if (realGet) {
-        nav.credentials.get = (...args: unknown[]) => {
-          nav.credentials.get = realGet; // one-shot: restore immediately, before the call even settles,
-          // so nothing else on the page can ever observe or be affected by the patched version.
+        // RESTORATION IS IDENTITY-CHECKED, AND HAPPENS ON BOTH EXITS.
+        //
+        // Patching a global is only safe if it is provably undone on every path out. There are two,
+        // and the second was missing: (1) GIS calls credentials.get, so the patched function runs and
+        // restores itself one-shot; (2) GIS NEVER calls it — precisely the case the ceiling timer
+        // below exists for — in which case nothing inside the patch ever executes and the patch would
+        // survive on the global `navigator.credentials` for the page's lifetime, outliving even this
+        // component's unmount. A later caller (a passkey/WebAuthn flow, say) would then enter our
+        // patched function and trigger fireFallback → run(false) → GIS re-initialize: the exact
+        // interrupted-mid-flow bug this whole fix exists to remove, resurrected by the fix's own
+        // scaffolding. Effect cleanup now closes that path.
+        //
+        // The identity check is not ceremony. If anything else patched credentials.get AFTER us,
+        // assigning realGet back would silently clobber THEIR patch; we restore only if the function
+        // currently installed is still ours, and otherwise leave the chain alone.
+        const patched = (...args: unknown[]) => {
+          restore(); // one-shot: restore immediately, before the call even settles, so nothing else
+          // on the page can ever observe or be affected by the patched version.
           const p = realGet(...args);
           // Settlement is the real, event-driven trigger — not a guess. A quick "nothing to offer"
           // rejection now falls back immediately instead of waiting out the old flat delay, AND a
@@ -259,17 +280,53 @@ export default function GoogleOneTap() {
           // sign-in would still eat a spurious run(false) once the ceiling later elapsed, because
           // nothing else cancels that timer. Only an empty/falsy resolution (no account actually
           // offered) or an outright rejection means there is genuinely nothing left to wait for.
+          //
+          // THE TRAILING .catch IS NOT DECORATION. `p.then(onOk, onErr)` returns a NEW promise that
+          // nothing awaits: if either handler throws — fireFallback calls run(false), which
+          // re-initializes GIS and can throw exactly like the try/catch in run() already anticipates —
+          // that rejection is unobserved, and an unhandled rejection is both a console error and a
+          // Sentry event on a page whose whole job is to look clean during sign-in. It is swallowed
+          // here rather than rethrown because the failure is already handled where it matters:
+          // run() logs its own throw, and there is no second recovery to attempt. Note this catch is
+          // on the DERIVED promise only — `p` itself is returned untouched below, so GIS's own
+          // rejection handling is completely unaffected.
           p.then((cred) => {
             if (cred) { if (fallbackTimer) clearTimeout(fallbackTimer); } // success: disarm the ceiling too, permanently — not just "not now"
             else fireFallback('FedCM resolved with no credential');
-          }, () => fireFallback('FedCM request rejected/dismissed'));
+          }, () => fireFallback('FedCM request rejected/dismissed')).catch(() => {});
           return p;
         };
+        const restore = () => {
+          if (nav.credentials?.get === patched) nav.credentials.get = realGet;
+          restoreCredentialsGet = null;
+        };
+        restoreCredentialsGet = restore;
+        nav.credentials.get = patched;
       }
 
       run(true);
-      // Absolute worst-case ceiling only — covers GIS never touching credentials.get at all (some
-      // unforeseen internal short-circuit). The everyday trigger is the real settlement above.
+      // ── THE CEILING IS A BOUNDED FAILSAFE, NOT THE TRIGGER ───────────────────────────────────────
+      // It covers exactly one case: GIS never touches navigator.credentials.get at all (an unforeseen
+      // internal short-circuit), so no settlement signal can ever arrive and, without this, the
+      // visitor would sit on a page that silently never retries.
+      //
+      // WHAT HAPPENS WHEN IT FIRES, precisely: fireFallback() runs the same single legacy retry the
+      // settlement path would have run — latched by fallbackStarted, so it can happen at most once
+      // across BOTH triggers — logging 'hit the absolute fallback ceiling with no FedCM signal' and
+      // calling run(false), which re-initializes GIS with use_fedcm_for_prompt off and prompts once
+      // more. It is skipped entirely if the effect was cancelled, if a moment already arrived
+      // (momentSeen), or if the fallback already started.
+      //
+      // WHEN IT DOES NOT FIRE: any real settlement beats it — a resolution WITH a credential clears
+      // this timer outright (a successful sign-in must never be followed by a retry), and an empty
+      // resolution or a rejection fires the fallback early and clears it. So the only way to reach
+      // the ceiling is genuine silence from credentials.get.
+      //
+      // WHY 12s AND NOT 4s: the ceiling must outlast a human deciding whether to tap a small corner
+      // bubble, because firing while that bubble is still up is the original bug. FEDCM_FALLBACK_MS
+      // (4s) is far too short for that and survives only for browsers with no credentials.get to
+      // observe, where the timer IS the only available signal. The cost is bounded and one-sided: on
+      // the silent path a visitor waits up to 12s for a retry that Google may well suppress anyway.
       fallbackTimer = setTimeout(
         () => fireFallback(realGet ? 'hit the absolute fallback ceiling with no FedCM signal' : `no FedCM prompt within ${FEDCM_FALLBACK_MS}ms`),
         realGet ? Math.max(FEDCM_FALLBACK_MS, 12000) : FEDCM_FALLBACK_MS,
@@ -291,7 +348,9 @@ export default function GoogleOneTap() {
 
     // NEVER call google.accounts.id.cancel() here. Google treats it as a USER dismissal and starts the
     // exponential cooldown (2h → 1d → 7d → 30d) — that alone can make One Tap "disappear" for days.
-    return () => { cancelled = true; if (fallbackTimer) clearTimeout(fallbackTimer); };
+    // The credentials.get restore is the second half of the patch's contract: if GIS never called it,
+    // the patched function never ran, so this is the only path that takes it back off the global.
+    return () => { cancelled = true; if (fallbackTimer) clearTimeout(fallbackTimer); restoreCredentialsGet?.(); };
     // DEPS: signedOut ONLY. `user` must not be here — it is no longer read in this effect, and with a
     // stale/deleted-account token the store flips it mid-flight, which re-runs the effect: the cleanup
     // sets cancelled = true on the in-flight start(), and the re-run bails on startedRef. Net effect,
