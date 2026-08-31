@@ -7,7 +7,11 @@
 --   view's final SELECT falls back to a frozen snapshot table for district_ar/city — but neither
 --   redefines it: one creates a view + detector over phasea_src_arabic, the other UPDATEs
 --   listings_arabic_locations and creates a detector. Re-ran
---   DO NOT "FIX" THE CANDIDATE ORDERING WHILE READING THIS (data-integrity run, PR #1403). The
+--   md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against live
+--   production: still 31036a9c8b92fddc5293b700985b869d (14127 chars) — unchanged since 2026-08-20,
+--   so the body below is current; only the re-verification date advances.
+--
+-- DO NOT "FIX" THE CANDIDATE ORDERING WHILE READING THIS (data-integrity run, PR #1403). The
 --   ordering inside phasea_shadow_resolution that prefers the frozen city_ar_src over shadow_city
 --   looks like an obvious bug and is deliberately LEFT AS IT IS: flipping it moves 49 listings
 --   between genuinely different cities, and only 2 of those were provably wrong. 29 are the
@@ -16,9 +20,6 @@
 --   so the current ordering is right for them. The 2026-08-31 repair was three snapshot DATA rows
 --   (gathern 726509/725383, sadin 597777), never a resolver change. See
 --   docs/ops/DERIVED_STORE_FRESHNESS.md for the proposed permanent architecture.
---   md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against live
---   production: still 31036a9c8b92fddc5293b700985b869d (14127 chars) — unchanged since 2026-08-20,
---   so the body below is current; only the re-verification date advances.
 --
 -- Re-verified 2026-08-21 (migration-drift recovery, PR #874): UNCHANGED. The recovered phasea
 --   migrations 20260821153734 / 20260821154150 / 20260821154316 MENTION listing_native_location_v1
