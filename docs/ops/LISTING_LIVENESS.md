@@ -219,20 +219,26 @@ reported `run_number: 1`, which is itself the proof that the oracle had never on
 absence alone**.
 
 Dispatched `only_struck=true, report_only=true` (~1.3 GB against the struck cohort, not the ~22 GB
-full sweep). Seven of eight residential shards, 2,947 rows probed by direct fetch:
+full sweep). All eight residential shards, the **entire** struck backlog probed by direct fetch:
 
 | | total |
 |---|---:|
-| scanned | 2,947 |
-| proven alive | 82 refreshes / **80 distinct rows** |
+| scanned | **3,367** — exactly the struck cohort |
+| proven alive | **94** |
 | **dead verdicts** | **0** |
-| transient | 2,865 (**97%**) |
+| transient | 3,273 (**97.2%**) |
 | rows deactivated | **0** |
+
+The counts reconcile independently, which is worth stating because it is what makes them
+believable: `scanned` equals the struck cohort exactly, the runner's `refreshed=94` equals the 94
+distinct rows the database now shows with a non-NULL `last_verified_alive_at`, the struck count fell
+by exactly 94 (3,367 → 3,273), and `active`/`inactive` ended at 53,025/12,165 — identical to the
+pre-run baseline.
 
 **Zero dead verdicts is the finding.** `--report-only` suppresses the *write* but still increments
 `killed`/`pending_kill` with the verdict it would have reached, so `killed=0 pending_kill=0` on
 every shard means zero rows were *classified* dead — not merely zero written. Nothing in that
-backlog has been shown to be gone. The 80 alive rows are the first direct-fetch verifications
+backlog has been shown to be gone. The 94 alive rows are the first direct-fetch verifications
 wasalt has ever carried, and they came out of the cohort most assumed to be dead.
 
 **Read the 97% before drawing any conclusion from the 2.8%.** By §5's own standard this run is not
@@ -242,7 +248,7 @@ tracks proxy capacity, not listing state: eight shards were hammering one shared
 proxy simultaneously. **The next run should use 1–2 shards, not 8.** The cohort is identical, so it
 costs no more bandwidth — it just stops the sweep from competing with itself.
 
-Two things this does NOT license. It is not evidence the backlog is alive either — 3,287 rows
+Two things this does NOT license. It is not evidence the backlog is alive either — 3,273 rows
 remain honestly **UNKNOWN**, which is the correct state and still forbids deactivation. And it does
 not retire the alert: `served_after_source_gone` is doing its job by staying loud about rows nothing
 has verified.
