@@ -54,20 +54,27 @@ eq("a numeric 0 is a real value, not an absence",
   (mergeConversationState({ bathMin: 3 } as never, { bathMin: 0 } as never) as Record<string, unknown>).bathMin, 0);
 
 console.log("\n── every canonical dimension is sticky ──");
-for (const f of ["rentPeriod", "type", "location", "price", "priceIsAnnual", "amenities", "furnishedPref",
+// 'price' deliberately dropped (round-2 fix, 2026-08-31) — SearchQuery has no such field (the real
+// budget carry-forward is priceInput/priceMin/priceMax/priceBand), so it was a silent no-op entry in
+// STICKY_FIELDS; see conversationState.ts's own note at its removal.
+for (const f of ["rentPeriod", "type", "location", "priceInput", "priceIsAnnual", "amenities", "furnishedPref",
                  "ratingMin", "reviewsMin", "bathMin", "ageMin", "ageMax", "streetWidthMin",
                  "directions", "unitSubtypes", "isNewConstruction", "detail"]) {
   check(`sticky: ${f}`, (STICKY_FIELDS as readonly string[]).includes(f));
 }
+check("NOT a real field: the phantom 'price' key was removed from STICKY_FIELDS",
+  !(STICKY_FIELDS as readonly string[]).includes("price"));
 // Per-utterance intents describe THIS request, not a standing constraint.
 for (const f of ["sort", "count", "keywords"]) {
   check(`NOT sticky (per-utterance): ${f}`, !(STICKY_FIELDS as readonly string[]).includes(f));
 }
 
 console.log("\n── nothing unrelated is disturbed ──");
+// 'price' dropped from this mock (round-2 fix, 2026-08-31) — it is not a real SearchQuery field (see
+// STICKY_FIELDS's own note); priceInput already covers the real budget carry-forward below.
 const rich = { type: "Villa", rentPeriod: "annual", ratingMin: 9, bathMin: 3, ageMin: 1, ageMax: 2,
   streetWidthMin: 20, directions: ["شمال"], amenities: ["elevator"], furnishedPref: true,
-  unitSubtypes: ["شقة"], price: "80000", priceInput: "80000" } as never;
+  unitSubtypes: ["شقة"], priceInput: "80000" } as never;
 const afterAsk = mergeConversationState(rich, { location: "جدة", priceInput: "" } as never) as Record<string, unknown>;
 for (const [k, v] of Object.entries(rich as Record<string, unknown>)) {
   if (k === "priceInput") continue;

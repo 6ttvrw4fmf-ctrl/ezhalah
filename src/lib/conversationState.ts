@@ -31,8 +31,16 @@ import type { SearchQuery } from '@/data/search';
  */
 export const STICKY_FIELDS = [
   // normal filter
+  // NOTE (round-2 fix, 2026-08-31): 'price' was removed here — SearchQuery (src/data/search.ts) has
+  // no such field (never did, post the priceInput/priceMin/priceMax/priceBand refactor) and no code
+  // anywhere in the app reads or writes `.price` on a SearchQuery, so this entry was a silent no-op:
+  // `established(out['price'])` and `established(p['price'])` were always both false, the loop
+  // iteration never rescued anything. Found alongside the identical field-name bug in
+  // supabase/functions/agent/index.ts's establishedState construction (both read a `.price`/`.af`
+  // shape that only ever existed on the edge's OWN wire format, never on this type). The real budget
+  // fields — priceInput/priceMin/priceMax/priceBand — are already listed below and unaffected.
   'deal', 'bothDeals', 'rentPeriod', 'type', 'category', 'location', 'regionPin', 'districtPin',
-  'districts', 'detail', 'contextSize', 'price', 'priceInput', 'priceIsAnnual', 'priceOriginal',
+  'districts', 'detail', 'contextSize', 'priceInput', 'priceIsAnnual', 'priceOriginal',
   'priceMin', 'priceMax', 'priceBand', 'areaMin', 'areaMax', 'sources',
   // advanced filter (the canonical AF question outputs)
   'amenities', 'furnishedPref', 'ratingMin', 'reviewsMin', 'bathMin', 'ageMin', 'ageMax',

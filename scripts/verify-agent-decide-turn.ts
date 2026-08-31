@@ -90,18 +90,32 @@ console.log('\n(e) askCount at the ceiling with EVERYTHING empty too -> listings
   check('(e) one question short of the ceiling, nothing known -> still asks', under.kind === 'message');
 }
 
-console.log('\n(f) a DB-confirmed twin-city/region/district ambiguity -> message regardless of askCount or other signal\n');
+console.log('\n(f) a DB-confirmed twin-city/region/district ambiguity -> message while budget remains\n');
 {
   const withSignal = decideAgentTurn({
     rawText: 'الهفوف', locationAmbiguous: true,
     establishedState: { ...empty, location: 'الهفوف', type: 'Villa', price: '900000' }, askCount: 0,
   });
-  check('(f) ambiguity wins even with real signal present', withSignal.kind === 'message' && withSignal.askCount === 1, JSON.stringify(withSignal));
+  check('(f) ambiguity wins even with real signal present, while budget remains', withSignal.kind === 'message' && withSignal.askCount === 1, JSON.stringify(withSignal));
+}
 
-  const atCeiling = decideAgentTurn({
-    rawText: 'الهفوف', locationAmbiguous: true, establishedState: empty, askCount: QUESTION_BUDGET_CEILING,
-  });
-  check('(f) ambiguity wins even at the question-budget ceiling', atCeiling.kind === 'message', JSON.stringify(atCeiling));
+console.log('\n(f2) UNBOUNDED LOCATION-AMBIGUITY LOOP (round 2 fix) — the ambiguity must respect the SAME budget ceiling every other clarification does, not ask forever\n');
+{
+  // Round 1 proved this returned kind="message" at askCount 0, 1, 2, 5, AND 50 — unbounded. The fix:
+  // once askCount reaches the ceiling, an unresolved ambiguity falls through to steps 2/3 like any
+  // other missing field, converging on "listings" instead of asking forever. (index.ts's own
+  // buildTurnDecision() — scripts/verify-agent-turn-wiring.ts — is what then treats the STILL-
+  // unresolved location term as absent rather than guessing it; this decide.ts-level test only
+  // proves the ladder itself converges.)
+  for (const askCount of [0, 1]) {
+    const r = decideAgentTurn({ rawText: 'الهفوف', locationAmbiguous: true, establishedState: empty, askCount });
+    check(`(f2) askCount=${askCount} (under the ceiling) -> still asks`, r.kind === 'message' && r.askCount === askCount + 1, JSON.stringify(r));
+  }
+  for (const askCount of [QUESTION_BUDGET_CEILING, QUESTION_BUDGET_CEILING + 3, 50]) {
+    const r = decideAgentTurn({ rawText: 'الهفوف', locationAmbiguous: true, establishedState: empty, askCount });
+    check(`(f2) askCount=${askCount} (at/past the ceiling) -> converges to listings, not an infinite ask`,
+      r.kind === 'listings' && r.askCount === askCount, JSON.stringify(r));
+  }
 }
 
 console.log('\n(g) the interview phrase gate is deterministic, not a trusted model claim\n');

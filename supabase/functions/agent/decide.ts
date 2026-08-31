@@ -28,8 +28,13 @@
 // never a hand-typed copy of this logic (standing rule).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Has this turn (or the conversation) actually established a value? Empty string/array/null = no. */
-function established(v: unknown): boolean {
+/**
+ * Has this turn (or the conversation) actually established a value? Empty string/array/null = no.
+ * Exported so callers building an EstablishedState (index.ts's prevQuery scan) use the identical
+ * truthiness rule this file's own hasEnoughToSearch() does, instead of a second copy that could
+ * drift — the same "never a hand-typed copy" standing rule this file's header already documents.
+ */
+export function established(v: unknown): boolean {
   if (v === undefined || v === null) return false;
   if (typeof v === "string") return v.trim() !== "";
   if (Array.isArray(v)) return v.length > 0;
@@ -129,9 +134,17 @@ export function decideAgentTurn(input: DecideInput): DecideResult {
     return { kind: "interview", askCount };
   }
 
-  // 1. A real, DB-confirmed ambiguity the user has not yet resolved always wins — regardless of
-  // askCount or how much other signal exists.
-  if (locationAmbiguous) {
+  // 1. A real, DB-confirmed ambiguity the user has not yet resolved wins over any other signal —
+  // BUT, like every other clarification, it still respects the question-budget ceiling (round 2
+  // fix). Without this bound, round 1 proved decideAgentTurn() could return kind="message" forever
+  // on an ambiguity the user never resolves — tested at askCount 0, 1, 2, 5, 50, unbounded every
+  // time. Once the budget is spent, fall through to steps 2/3 like any other unresolved field:
+  // step 3's "missing optional information must not block it" takes over and searches anyway. This
+  // function never picks a side of the ambiguity itself (never invent a location) — the caller
+  // (index.ts) is responsible for treating the still-ambiguous location term as ABSENT rather than
+  // passing the unresolved token through to the search once the ladder reaches "listings" this way;
+  // see index.ts's own comment at its `decideAgentTurn()` call site for that half of the fix.
+  if (locationAmbiguous && askCount < QUESTION_BUDGET_CEILING) {
     return { kind: "message", askCount: askCount + 1 };
   }
 

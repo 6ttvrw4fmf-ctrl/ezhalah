@@ -55,8 +55,14 @@ import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWes
 // THE SINGLE DECISION AUTHORITY for kind (owner-approved architecture consolidation, 2026-08-30).
 // See decide.ts's header for the full rationale. The model's own `kind` field is read ONLY to
 // decide whether to retry for wrong language; it is never trusted as the final answer again after
-// that — decideAgentTurn() is the one place that assigns kind.
-import { decideAgentTurn, wantsGuidedInterview, type EstablishedState } from "./decide.ts";
+// that — decideAgentTurn() (called from ./turnWiring.ts, below) is the one place that assigns kind.
+import { wantsGuidedInterview } from "./decide.ts";
+// The establishedState-construction + decideAgentTurn() call site, extracted so it is Node-importable
+// and unit-testable end-to-end (round 2 fix, "untested wiring / foolable regex") — see its own header.
+import { buildTurnDecision } from "./turnWiring.ts";
+// The three location-ambiguity cases restored from the deleted client-side locationClarification()
+// (round 2 fix, "lost location-ambiguity cases") — see its own header.
+import { plainRegionQuestion, emptyLocationQuestion } from "./locationAmbiguity.ts";
 
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
@@ -1223,6 +1229,14 @@ Deno.serve(async (req: Request) => {
       // because the exact wording differs by ambiguity shape; the ladder itself only needs to know
       // THAT one exists, never which one.
       let ambiguityReply: string | null = null;
+      // Hoisted above the `location`-only branch (round-2 fix, LOST LOCATION-AMBIGUITY CASES) so the
+      // empty-location cases below can reuse the same "did we already ask this?" guard instead of a
+      // second, drifting copy of the regex.
+      const lastModel = [...history].reverse().find((h) => h?.role === "model")?.text ?? "";
+      // markers of a clarification WE generated on the previous turn → this turn answers it. Extended
+      // (round 2) with the three restored questions' own distinctive fragments — see the deleted
+      // src/app/agent.tsx locationClarification() this ports, git-shown at dd303cb~1.
+      const alreadyAsked = /أكثر من منطقة|أكثر من مدينة|اسم مدينة واسم منطقة|ولا منطقة|كاملة، أو مدينة معيّنة|أي مدينة تبحث عن عقار|أي مدينة أو منطقة/.test(String(lastModel));
       if (location) {
         const cls = await locClassify(location);
         const ck = String(cls?.kind ?? "");
@@ -1232,9 +1246,6 @@ Deno.serve(async (req: Request) => {
         // OWN canonical Arabic label — never a transliteration, never a guess. No Arabic canonical
         // available ⇒ the original passes through untouched, so unknown places are still searched.
         location = arabicCanonicalLocation({ location, canonicalArabic: nm, locale });
-        const lastModel = [...history].reverse().find((h) => h?.role === "model")?.text ?? "";
-        // markers of a clarification WE generated on the previous turn → this turn answers it
-        const alreadyAsked = /أكثر من منطقة|أكثر من مدينة|اسم مدينة واسم منطقة|ولا منطقة/.test(String(lastModel));
         const hay = arNorm(`${text} ${history.map((h) => String(h?.text ?? "")).join(" ")}`);
         const said = (s: string) => !!s && hay.includes(arNorm(s));
 
@@ -1279,7 +1290,23 @@ Deno.serve(async (req: Request) => {
             const more = cities.length > top.length ? "\n• أو مدينة أخرى" : "";
             ambiguityReply = `حي ${nm} موجود في أكثر من مدينة. تقصد حي ${nm} في أي مدينة؟\n${lines}${more}`;
           }
+        } else if (ck === "region" && !alreadyAsked) {
+          // RESTORED CASE (round 2, LOST LOCATION-AMBIGUITY CASES) — a plain region with no
+          // same-named city (e.g. «عسير», «المنطقة الشرقية»; region_or_city above already handles the
+          // same-name-as-a-city twins like الرياض/جازان). See ./locationAmbiguity.ts for the ported
+          // logic and scripts/verify-agent-location-ambiguity.ts for its tests.
+          ambiguityReply = plainRegionQuestion(nm, text);
         }
+      } else if (!alreadyAsked) {
+        // RESTORED CASES (round 2, LOST LOCATION-AMBIGUITY CASES) — the model correctly left location
+        // "" (per its own prompt instructions for a geography/proximity cue with no city), but the
+        // deleted client-side locationClarification() still asked a SPECIFIC question for these two
+        // shapes rather than falling through to the model's generic reply. See ./locationAmbiguity.ts
+        // for the ported logic and scripts/verify-agent-location-ambiguity.ts for its tests. The old
+        // KINGDOM_WIDE early-return there needs no port — an explicit "everywhere in the Kingdom"
+        // statement already leaves `ambiguityReply` unset here, which is exactly "no ambiguity,
+        // proceed" (decideAgentTurn's ladder takes it from there).
+        ambiguityReply = emptyLocationQuestion(text);
       }
 
       // The model's own reply SENTENCE is free-form and inconsistently mentions a SIZE the user gave —
@@ -1316,44 +1343,29 @@ Deno.serve(async (req: Request) => {
         replyOut = locale === "en" ? `${replyOut} (${detailStr} m²)` : `${replyOut} (${detailStr} م²)`;
       }
 
-      // Sanitized once, reused by both the gate below and the query.askAbout field — a single
-      // definition of "does ask_about actually carry anything" instead of two copies drifting.
+      // Sanitized once, reused by both the response's query.askAbout field and (indirectly, via
+      // prevQuery on a LATER turn) the priorAskAbout narrowing inside buildTurnDecision().
       const askAboutList = Array.isArray(out.ask_about)
         ? out.ask_about.filter((a: unknown) => typeof a === "string" && a.trim()).map((a: string) => a.trim().toLowerCase())
         : [];
 
       // ── THE SINGLE DECISION AUTHORITY (owner-approved consolidation, 2026-08-30) ─────────────────
       // Everything above resolved THIS turn's fields regardless of what the model itself classified
-      // itself as. Below, decideAgentTurn() is the ONLY place that assigns a final kind — out.kind
-      // is not read again past this point anywhere in this function.
+      // itself as. buildTurnDecision() (./turnWiring.ts) folds them with prevQuery, applies the
+      // noise-guard and the ambiguity-budget escape, and calls decideAgentTurn() — the ONLY place
+      // that assigns a final kind — exactly once. out.kind is never read again past this point.
       //
-      // establishedState is the FULL MERGED state (this turn OR the client-sent prevQuery — the
-      // identical "established(next) || established(prev)" rule mergeConversationState.ts applies
-      // to every non-defaulted STICKY_FIELD; none of these seven are DEFAULTED_FIELDS, so the OR is
-      // behaviourally identical to running the real merge for gate purposes without needing to pull
-      // that module — which only carries a TYPE import — into this Deno function).
-      //
-      // priorAskAbout is the one deliberate exception: see EstablishedState's own doc in decide.ts
-      // for the mandatory regression case this narrowing exists for.
-      const prevAf = (prevQuery?.af && typeof prevQuery.af === "object" && !Array.isArray(prevQuery.af))
-        ? (prevQuery.af as Record<string, unknown>) : null;
-      const thisAf = (out.af && typeof out.af === "object" && !Array.isArray(out.af)) ? out.af as Record<string, unknown> : {};
-      const establishedState: EstablishedState = {
-        location: location || (typeof prevQuery?.location === "string" ? prevQuery.location : null),
-        type: (typeof out.type === "string" && out.type) || (typeof prevQuery?.type === "string" ? prevQuery.type : null),
-        price: price || (typeof prevQuery?.price === "string" || typeof prevQuery?.price === "number" ? prevQuery.price : null),
-        detail: detailStr || (typeof prevQuery?.detail === "string" ? prevQuery.detail : null),
-        amenities: (Array.isArray(out.amenities) && out.amenities.length)
-          ? out.amenities : (Array.isArray(prevQuery?.amenities) ? prevQuery!.amenities as string[] : null),
-        af: (thisAf && Object.keys(thisAf).length) ? thisAf : prevAf,
-        priorAskAbout: Array.isArray(prevQuery?.askAbout) ? prevQuery!.askAbout as string[] : null,
-      };
-      const decision = decideAgentTurn({
-        rawText: text,
-        locationAmbiguous: ambiguityReply !== null,
-        establishedState,
-        askCount,
+      // EXTRACTED (round 2 fix, "untested wiring / foolable regex") from what used to be ~60 lines
+      // inline here, so scripts/verify-agent-turn-wiring.ts can import and EXECUTE this exact glue
+      // end-to-end with a mocked model response and assert the resulting kind — round 1 proved the
+      // mandatory case (c)'s real protection lived in one line of untested inline wiring, guarded
+      // only by a source-regex a plausible mutation could pass while reintroducing the bug.
+      const wired = buildTurnDecision({
+        text, out, prevQuery, location, regionPin, districtPin, ambiguityReply, askCount,
+        price, detPrice, detailStr,
       });
+      const decision = wired.decision;
+      ({ location, regionPin, districtPin } = wired);
 
       if (decision.kind === "interview") {
         return json({ kind: "interview", askCount: decision.askCount });

@@ -21,6 +21,7 @@ const check = (label: string, ok: boolean, detail = "") => {
 };
 
 const edge = readFileSync(new URL("../supabase/functions/agent/index.ts", import.meta.url), "utf8");
+const wiring = readFileSync(new URL("../supabase/functions/agent/turnWiring.ts", import.meta.url), "utf8");
 
 // Extract the REAL patterns from the deployed source and exercise them, rather than re-typing them
 // (a copy would drift; see feedback_never-test-a-copy-of-production-code).
@@ -100,16 +101,41 @@ console.log("\n── do not search too early ──");
 // searches" and "genuinely empty still asks" cases this section used to pin here). What THIS barrier
 // still owns: that index.ts actually WIRES its resolved fields into the ladder instead of silently
 // keeping its own second copy of the decision.
-check("index.ts imports the single decision authority from ./decide.ts",
-  /import \{ decideAgentTurn, wantsGuidedInterview, type EstablishedState \} from "\.\/decide\.ts";/.test(edge));
-check("index.ts calls decideAgentTurn() exactly once, after resolving this turn's fields",
-  (edge.match(/const decision = decideAgentTurn\(\{/g) ?? []).length === 1);
+check("index.ts imports wantsGuidedInterview from ./decide.ts",
+  /import \{ wantsGuidedInterview \} from "\.\/decide\.ts";/.test(edge));
+// EXTRACTED (round 2, "UNTESTED WIRING / FOOLABLE REGEX"): the establishedState-construction +
+// decideAgentTurn() call site used to live inline in index.ts, guarded only by the source-regexes
+// below — which round 1 proved a plausible mutation could pass. It is now buildTurnDecision() in
+// ./turnWiring.ts, a plain function scripts/verify-agent-turn-wiring.ts imports and EXECUTES
+// end-to-end. These checks stay as defense in depth (see the tightened priorAskAbout check below),
+// not the primary guard.
+check("index.ts imports the wiring function instead of re-deriving establishedState inline",
+  /import \{ buildTurnDecision \} from "\.\/turnWiring\.ts";/.test(edge));
+check("index.ts itself no longer calls decideAgentTurn() directly (single call site in turnWiring.ts)",
+  !/decideAgentTurn\(\{/.test(edge),
+  "prose mentions of decideAgentTurn() in comments are fine; an actual call site here would be the second copy this consolidation removed");
+check("turnWiring.ts calls decideAgentTurn() exactly once, after resolving this turn's fields",
+  (wiring.match(/const decision = decideAgentTurn\(\{/g) ?? []).length === 1);
 check("establishedState is built from THIS turn's resolved fields, not the model's raw kind",
-  /const establishedState: EstablishedState = \{/.test(edge)
-  && /location: location \|\|/.test(edge) && /priorAskAbout: Array\.isArray\(prevQuery\?\.askAbout\)/.test(edge),
+  /const establishedState: EstablishedState = \{/.test(wiring)
+  && /location: location \|\|/.test(wiring),
   "the seven gate fields must come from the resolved location/type/price/detail/amenities/af/ask_about, OR'd with prevQuery");
+// TIGHTENED (round 2, finding 5b): anchor the FULL right-hand-side expression, not just the callee
+// prefix. Round 1 demonstrated a plausible "consistency fix" mutation that merges THIS turn's
+// askAboutList into priorAskAbout (`Array.isArray(prevQuery?.askAbout) ? [...prevQuery!.askAbout as
+// string[], ...askAboutList] : askAboutList`) — the OLD prefix-only regex
+// `/priorAskAbout: Array\.isArray\(prevQuery\?\.askAbout\)/` still matches that mutated line (it's a
+// literal substring of it), so the barrier stayed green while the mandatory case (c) regression came
+// back. Anchoring the exact null-branch through the line's own trailing comma closes that hole.
+// Proven live (round 2): applying that exact mutation to turnWiring.ts made
+// scripts/verify-agent-turn-wiring.ts's case (c) fail while this loosened check would have stayed
+// green — this anchored version now fails on the mutation too (checked by hand, not asserted here,
+// since asserting "the wrong regex would have passed" would require shipping the wrong regex).
+check("priorAskAbout reads ONLY prevQuery's survived value — the exact expression, not a mutable prefix",
+  /priorAskAbout: Array\.isArray\(prevQuery\?\.askAbout\) \? prevQuery!\.askAbout as string\[\] : null,/.test(wiring),
+  "a mutation merging this turn's askAboutList into priorAskAbout must fail this check");
 check("a bare nothingToSearchOn re-derivation has NOT been reintroduced",
-  !/const nothingToSearchOn =/.test(edge),
+  !/const nothingToSearchOn =/.test(edge) && !/const nothingToSearchOn =/.test(wiring),
   "a second, local copy of the gate is exactly how the server, model and client end up with three contradicting budgets again");
 
 console.log("\n── the model is told the rule, not just guarded ──");
