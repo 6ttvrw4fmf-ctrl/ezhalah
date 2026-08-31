@@ -236,3 +236,76 @@ export function arabicWordAmounts(text: string): WordAmount[] {
   }
   return out;
 }
+
+/**
+ * RULE 4 (owner 2026-08-31) — deterministic af.bathrooms backstop.
+ *
+ * WHY THIS EXISTS. af.bathrooms is model-proposed-only (JSON_SHAPE_HINT). Live replay against
+ * production (12 reps/phrasing) measured the model missing it inconsistently on multi-entity turns
+ * — and the effect is NOT specific to any one amenity word: «...فيها مصعد وحمامين» (the OLD,
+ * already-certified "elevator" token, unrelated to any new amenity) missed 11 of 12 replays, almost
+ * identical to «...فيها نادي وحمامين» (11/12 missed). Bathrooms alone («...فيها حمامين», no other
+ * amenity) still only lands 9/12. The value is never WRONG when it does arrive — canonicalize()/
+ * rung() in src/lib/afIntents.ts already cap it sanely — the failure is a clean miss, so a
+ * deterministic backstop that FILLS THE GAP is the right shape: same fill-absent-only precedent as
+ * RULE 2 (enforceSortMatchesReply) above. An explicit model value is never touched.
+ *
+ * THE ARABIC DUAL. «حمامين»/«حمامان» IS "two bathrooms" and carries NO DIGIT anywhere in it —
+ * exactly the worst-repro phrasing. A parser that only looks for a numeral would still miss it.
+ * «دورتين مياه» is the same dual pattern on the «دورة مياه» (restroom) synonym.
+ *
+ * NEVER A BARE NUMERAL. Same rule as bedrooms («كبير» never becomes a bedroom count): a digit or
+ * count-word alone must never become a bathroom count. Every branch below requires an actual
+ * bathroom-noun match; a lone "٢" in the message is not enough and is not matched here. The
+ * singular «حمام» is explicitly barred from swallowing «حمام سباحة» (swimming pool) as "1 bathroom".
+ */
+const BATH_DUAL_RE = /حمامين|حمامان|دورتين\s*مياه|دورتان\s*مياه/;
+// NOTE: matched against foldAlef()'d text (ة→ه already applied), so the guard word is spelled
+// "سباحه", not "سباحة" — matching the unfolded spelling here would silently never fire.
+const BATH_NOUN = "(?:حمامات|حمام(?!\\s*سباحه)|دورات\\s*مياه|دوره\\s*مياه)";
+const BATH_WORD_NUM_RE = new RegExp(`(?:(${COUNT_ALT})\\s+${BATH_NOUN}|${BATH_NOUN}\\s+(${COUNT_ALT}))`);
+const BATH_DIGIT_NUM_RE = new RegExp(`(?:(\\d+)\\s*${BATH_NOUN}|${BATH_NOUN}\\s*(\\d+))`);
+const EN_BATH_COUNT: Record<string, number> = { one: 1, two: 2, three: 3, four: 4 };
+const EN_BATH_WORD_RE = /\b(one|two|three|four)\s+(?:baths?|bathrooms?)\b/i;
+const EN_BATH_DIGIT_RE = /\b(\d+)\s*(?:baths?|bathrooms?)\b/i;
+
+/** The bathroom count this message states IN ITS OWN WORDS, or null when it states none. */
+export function arabicBathroomCount(text: string): string | null {
+  const t = foldAlef(toWesternDigits(String(text ?? "")));
+  if (BATH_DUAL_RE.test(t)) return "2";
+  const wm = t.match(BATH_WORD_NUM_RE);
+  if (wm) {
+    const n = AR_COUNT[(wm[1] ?? wm[2]) as string];
+    if (n) return String(n);
+  }
+  const dm = t.match(BATH_DIGIT_NUM_RE);
+  if (dm) {
+    const n = parseInt((dm[1] ?? dm[2]) as string, 10);
+    if (n > 0) return String(n);
+  }
+  const ew = t.match(EN_BATH_WORD_RE);
+  if (ew) return String(EN_BATH_COUNT[ew[1].toLowerCase()]);
+  const ed = t.match(EN_BATH_DIGIT_RE);
+  if (ed) {
+    const n = parseInt(ed[1], 10);
+    if (n > 0) return String(n);
+  }
+  return null;
+}
+
+/**
+ * Fills af.bathrooms from the raw message ONLY when the model left it absent — mirrors
+ * enforceSortMatchesReply's fill-absent-only shape exactly. An explicit model-proposed value
+ * (including one this function itself would not have derived) is returned untouched: the model
+ * PROPOSES, this only covers the gap when it proposed nothing at all. The result flows into the
+ * SAME af object the model would have produced, so it goes through the identical downstream
+ * cohortAllows('bathrooms') certification gate as any model-proposed value — nothing bypasses it.
+ */
+export function fillBathroomsIfAbsent(af: unknown, text: string): Record<string, unknown> {
+  const base: Record<string, unknown> =
+    (af && typeof af === "object" && !Array.isArray(af)) ? { ...(af as Record<string, unknown>) } : {};
+  if (base.bathrooms !== undefined && base.bathrooms !== null && base.bathrooms !== "") return base;
+  const n = arabicBathroomCount(text);
+  if (n !== null) base.bathrooms = n;
+  return base;
+}
