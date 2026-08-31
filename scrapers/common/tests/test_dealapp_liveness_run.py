@@ -28,6 +28,7 @@ class _Table:
     def order(self, *a, **k): return self
     def limit(self, n): return self
     def update(self, payload): self._payload = payload; return self
+    def insert(self, rows): self.sink.inserts.extend(rows); return self
     def execute(self):
         if self._payload is not None:
             self.sink.writes.append((self._filters.get("id"), dict(self._payload)))
@@ -37,7 +38,7 @@ class _Table:
 
 class _Client:
     def __init__(self, rows):
-        self.rows, self.writes = rows, []
+        self.rows, self.writes, self.inserts = rows, [], []
     def table(self, name): return _Table(self, name)
 
 
@@ -206,3 +207,47 @@ def test_running_out_of_budget_reads_as_UNKNOWN_never_as_death():
     b = R.RequestBudget(1)
     b.spend()
     assert R.probe(object(), "https://dealapp.sa/ar/ad-details/1", b) == (None, "", "")
+
+
+# ── The audit trail ────────────────────────────────────────────────────────────────────────────
+# aqar deactivated 13,139 listings on 2026-08-30 and could not say why about any single one. The
+# same gap existed here. These pin that the record is written, is honest about dry runs, and can
+# never itself change a verdict.
+
+def test_every_non_alive_reading_is_recorded(wire):
+    rows = [_row(i, strikes=2) for i in range(1, 41)]
+    responses = {REQ.format(i): (200, "<html>shell</html>", REQ.format(i)) for i in range(1, 41)}
+    client = wire(rows, responses, ["--limit", "40", "--apply"])
+    assert len(client.inserts) == 40, "every UNKNOWN must be recorded — it is the open question"
+    assert {r["verdict"] for r in client.inserts} == {"unknown"}
+    assert all(r["reason"] for r in client.inserts), "the contract's own reason must be stored"
+
+
+def test_an_alive_reading_is_not_logged_to_the_detail_table(wire):
+    """last_verified_alive_at already records it, per row. Logging ~97k alive probes a day would
+    bury the readings that actually moved a listing toward removal."""
+    rows = [_row(1, strikes=2)]
+    client = wire(rows, {REQ.format(1): (200, SCHEMA.format(1), REQ.format(1))},
+                  ["--limit", "1", "--apply"])
+    assert client.inserts == []
+
+
+def test_a_dry_run_marks_the_audit_as_not_applied(wire):
+    """A dry run still records what it SAW — it just must not claim the reading was acted on."""
+    rows = [_row(i, strikes=2) for i in range(1, 41)]
+    responses = {REQ.format(i): (404, "", REQ.format(i)) for i in range(1, 41)}
+    client = wire(rows, responses, ["--limit", "40"])          # no --apply
+    assert client.inserts, "a dry run must still leave a record of what it read"
+    assert all(r["applied"] is False for r in client.inserts)
+
+
+def test_a_confirmed_death_is_recorded_as_a_kill_with_its_strike_counts(wire):
+    alive = {i: _row(i, strikes=0) for i in range(1, 36)}
+    dead = {i: _row(i, strikes=2) for i in range(36, 41)}
+    responses = {REQ.format(i): (200, SCHEMA.format(i), REQ.format(i)) for i in alive}
+    responses.update({REQ.format(i): (404, "", REQ.format(i)) for i in dead})
+    client = wire([*alive.values(), *dead.values()], responses, ["--limit", "40", "--apply"])
+    kills = [r for r in client.inserts if r["verdict"] == "kill"]
+    assert len(kills) == 5
+    assert all(r["missing_count_before"] == 2 and r["missing_count_after"] == 3 for r in kills)
+    assert all(r["http_status"] == 404 for r in kills)

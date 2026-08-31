@@ -323,6 +323,33 @@ def main() -> None:
     transient = 0
     pending_kill = 0  # missing this run but not yet past grace
     alive_ids: list[int] = []  # batched "still alive" ids → one UPDATE per 200 (see flush below)
+
+    # PER-ROW AUDIT TRAIL (2026-08-31). Buffered like alive_ids: one insert per 200 readings rather
+    # than a round-trip per probe. Failure to log must never abort a sweep or change a verdict —
+    # the audit is a record OF the decision, never part of making it.
+    detail_buf: list[dict] = []
+
+    def _flush_detail() -> None:
+        if not detail_buf:
+            return
+        batch, detail_buf[:] = list(detail_buf), []
+        try:
+            client.table("aqar_liveness_detail").insert(batch).execute()
+        except Exception as exc:  # noqa: BLE001
+            print(f"⚠ liveness detail insert failed (non-fatal, {len(batch)} rows): "
+                  f"{str(exc)[:160]}", flush=True)
+
+    def _detail(listing_id: int, http_status, verdict: str, mc_before: int, mc_after: int) -> None:
+        detail_buf.append({
+            "source_table": table, "listing_id": listing_id, "http_status": http_status,
+            "verdict": verdict, "missing_count_before": mc_before,
+            # This runner has no dry-run mode — it always writes — so the reading recorded here is
+            # always the reading that was acted on. The column exists to match gathern's log shape,
+            # where a dry run is possible.
+            "missing_count_after": mc_after, "applied": True,
+        })
+        if len(detail_buf) >= 200:
+            _flush_detail()
     price_updated = 0   # prices re-read from the page we already fetched (owner-approved 2026-08-04)
     price_capped = 0    # changes seen past PRICE_REFRESH_CAP — next sweep picks them up
     price_artifact_rejected = 0  # refresh matched a proven artifact class (P1 2026-08-11) — skipped
@@ -370,7 +397,8 @@ def main() -> None:
                 body = r.text if r is not None else ""
 
                 if r is not None and looks_dead(status, body):
-                    new_missing = (row.get("missing_count") or 0) + 1
+                    mc_before = row.get("missing_count") or 0
+                    new_missing = mc_before + 1
                     upd: dict = {"missing_count": new_missing}
                     if new_missing >= args.grace:
                         upd["active"] = False
@@ -379,6 +407,11 @@ def main() -> None:
                         pending_kill += 1
                     _run_with_retry(lambda u=upd, i=row["id"]:
                                     client.table(table).update(u).eq("id", i).execute())
+                    # AUDIT. On 2026-08-30 aqar deactivated 13,139 rows and nothing recorded which
+                    # ones, or what the source returned for each. Aggregate counts in the run notes
+                    # cannot answer "why was THIS listing removed" -- so record it here, per row.
+                    _detail(row["id"], status, "kill" if new_missing >= args.grace else "strike",
+                            mc_before, new_missing)
                 elif r is not None and status == 200:
                     # Alive — BATCH the refresh. Every alive row gets the same values, so collect ids
                     # and flush one `UPDATE … WHERE id IN (…)` per 200 rows instead of 84k single-row
@@ -425,6 +458,10 @@ def main() -> None:
                         alive_ids.clear()
                 else:
                     transient += 1
+                    # A read we could not believe is the one thing that must NEVER be mistaken for
+                    # a death later. Recording it makes that auditable rather than assumed.
+                    _detail(row["id"], status or None, "transient",
+                            row.get("missing_count") or 0, row.get("missing_count") or 0)
 
                 if seen % 50 == 0:
                     elapsed = time.time() - started
@@ -443,6 +480,8 @@ def main() -> None:
         pass
     except KeyboardInterrupt:
         print("\nInterrupted — finalizing run row.")
+
+    _flush_detail()   # the audit must survive the run, including an interrupted one
 
     # Flush any remaining batched "alive" refreshes.
     if alive_ids:
