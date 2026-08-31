@@ -603,11 +603,17 @@ JOURNEYS['adv-favorite-survives-navigation'] = async (mobile) => withPage({ mobi
  *  trip added a junk history entry and leaked another mounted Filter screen — "the Back button then
  *  just re-showed the same page N times before leaving the site."
  *
- *  Routine #4's live sweep already watches this as `tab-switch-no-junk-history`, and this does NOT
- *  duplicate it: that watch is desktop-only (`withPage(false, …)`) and asserts history.length. This
- *  is the SYMPTOM half that is mine (PART 2: I test what the user feels, #4/#7 test the mechanism)
- *  — that ONE Back after three round trips actually leaves, instead of re-showing the same screen —
- *  and it runs at 375px too, where the toggle has never been exercised.
+ *  TWO BARRIERS ALREADY TOUCH THIS RULE, AND NEITHER EXECUTES IT AT 375px (PART 5: check for an
+ *  existing barrier before adding one, and a journey barrier is "a real-browser barrier, never a
+ *  unit test standing in for the click"):
+ *    · scripts/verify-mode-switch-costs-no-history.ts — a STATIC source pin (readFileSync only, no
+ *      browser): it proves both halves still SAY router.replace. It cannot see what a real Back
+ *      does, and it would stay green if the toggle broke anywhere between the source and the user.
+ *    · routine #4's live sweep watch `tab-switch-no-junk-history` — a real browser, but desktop
+ *      only (`withPage(false, …)`) and oracled on history.length.
+ *  This is the third leg: the SYMPTOM half that is mine (PART 2 — I test what the user feels,
+ *  #4/#7 test the mechanism), that ONE Back after three round trips actually leaves instead of
+ *  re-showing the same screen, driven on production at BOTH viewports.
  *
  *  The oracle is history GROWTH plus where a single Back lands, never `about:blank` on its own: a
  *  fresh Playwright context starts there, so leaving the app origin is CORRECT and is reported as
