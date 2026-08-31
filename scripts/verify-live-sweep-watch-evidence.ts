@@ -104,6 +104,24 @@ for (const w of WATCHES) {
   }
 }
 
+// ── E. the ledger only ever receives the vocabulary its RPC accepts ──────────────────────────────
+// ops_qa_record_coverage RAISES on any p_result outside pass | fail | skip. The internal
+// `offline_barrier` status must therefore be mapped before it is written — the first attempt wrote
+// it raw, the RPC threw, post() swallowed the error, and the three rows silently kept the PREVIOUS
+// run's stale `pass` while the report claimed they were offline-covered.
+check('the internal offline_barrier status is mapped to `skip` before the ledger write',
+  /offline_barrier'\s*\?\s*'skip'\s*:/.test(run));
+check('the offline-covered ledger note names the barrier that does evaluate it',
+  /not browser-evaluated; covered by \$\{WATCH_OFFLINE_COVER\[w\]\}/.test(run));
+
+// ── F. a failed coverage write is never silent, and a void RPC is not read as a failure ──────────
+check('a failed ledger write is reported, not swallowed',
+  /LEDGER WRITE FAILED/.test(sweep));
+check('post() judges the HTTP status, not whether a body came back',
+  /if \(r\.ok && !\(j && j\.message\)\) return j \?\? \{\};/.test(sweep));
+check('post() no longer treats an empty 2xx body as a failure to retry',
+  !/const j = await r\.json\(\)\.catch\(\(\) => null\);\s*\n\s*if \(j && !j\.message\) return j;/.test(sweep));
+
 // ── C. a dark watch fails a coverage floor (not merely logged) ───────────────────────────────────
 check('unobserved watches are pushed onto floorMisses', /floorMisses\.push\(`permanent watches never evaluated/.test(run));
 check('floor misses still fail the run', /process\.exit\(findings\.length \|\| floorMisses\.length \? 1 : 0\)/.test(run));
@@ -132,6 +150,18 @@ mut('a watch is declared with no observeWatch call site and no offline cover',
     const w = [...(s.match(/export const WATCHES = \[([\s\S]*?)\];/)?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
     return w.every((n) => new RegExp(`observeWatch\\('${n}'\\)`).test(allSweepSrc) || OFFLINE.has(n));
   });
+
+mut('the raw offline_barrier status is written straight to the ledger (the RPC would raise)',
+  `await ledgerRecord('live_watch', w, st, 'x');`,
+  (s) => /offline_barrier'\s*\?\s*'skip'\s*:/.test(s));
+
+mut('post() goes back to reading an empty 2xx void-RPC body as a failure',
+  `const j = await r.json().catch(() => null);\n      if (j && !j.message) return j;`,
+  (s) => /if \(r\.ok && !\(j && j\.message\)\) return j \?\? \{\};/.test(s));
+
+mut('a failed ledger write goes silent again',
+  `const ledgerRecord = (d, k, r, n) => post('/rpc/ops_qa_record_coverage', {});`,
+  (s) => /LEDGER WRITE FAILED/.test(s));
 
 mut('an offline cover entry names a file that does not exist',
   `const WATCH_OFFLINE_COVER = { 'x': 'scripts/verify-this-does-not-exist.ts' };`,
