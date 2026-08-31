@@ -1,6 +1,19 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-08-31 (data-integrity run, PR #1403): UNCHANGED. Migration
+--   20260831080856_detect_phasea_snapshot_contradicts_live_source_city MENTIONS this view heavily
+--   in prose — it is the consumer that made the frozen phasea_src_arabic snapshot user-visible, by
+--   resolving city_id/region_id through phasea_shadow_resolution — but it does NOT redefine it.
+--   That migration adds a monitoring view + detector only; the repair was three snapshot DATA rows
+--   (gathern 726509/725383, sadin 597777), not a resolver change. The candidate ordering that
+--   prefers city_ar_src over shadow_city is deliberately LEFT AS IT IS here: flipping it would move
+--   49 listings between genuinely different cities, and 17 of those are rows where the snapshot's
+--   Arabic value is the more specific and correct city. Re-ran
+--   md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against live
+--   production: still 31036a9c8b92fddc5293b700985b869d (14127 chars) — unchanged since 2026-08-20,
+--   so the body below is current; only the re-verification date advances.
+--
 -- Re-verified 2026-08-21 (migration-drift recovery, PR #874): UNCHANGED. The recovered phasea
 --   migrations 20260821153734 / 20260821154150 / 20260821154316 MENTION listing_native_location_v1
 --   in prose comments (154316's detector reads the resolver's OUTPUT, listing_native_location_v2),
