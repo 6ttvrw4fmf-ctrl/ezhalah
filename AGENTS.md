@@ -110,6 +110,29 @@ concurrent sessions with no per-session isolation — a background `gh pr create
 silently pick up whatever branch another session has checked out and open/merge the wrong PR (this
 happened once). Always pass `--head <exact-branch> --base main` explicitly.
 
+**`safe-pr-merge.ts` IS A MERGE ACTION. IT IS NEVER A READINESS OR DRY-RUN COMMAND (owner rule,
+2026-08-31, permanent).** Running it with a PR number verifies **and then merges**. There is no
+inspect-only mode, no `--check`, and no flag that stops it after the verification step. If you want
+to know whether a PR is ready — required checks, `mergeable`, `mergeStateStatus`, whether the branch
+is BEHIND — **read that state, do not run this tool**: the GitHub API, `pull_request_read` /
+`get_status`, or the Actions run list all answer it without side effects.
+
+**Therefore: any PR class that repo policy requires to stay OPEN for human review must never invoke
+this command unless the authorized owner has explicitly approved that specific merge.** The standing
+example is the one immediately below — a `migration_drift` repair PR touching `supabase/migrations/`,
+which this file already says is "never self-merged by an autonomous run". Before typing the command,
+answer one question: *is this a PR I am allowed to merge right now, without a human?* If the answer
+is anything but a clear yes, do not run it.
+
+How this rule was earned: on 2026-08-31 an autonomous seam run invoked
+`scripts/safe-pr-merge.ts 1407` intending only to *read* the PR's readiness after clearing a `behind`
+state, and merged a drift-repair PR that the rule below says must stay open for review (PR #1407,
+merge `f08f9b4`). The tool behaved exactly as documented; the mistake was treating a merge verb as a
+query. Nothing reached production — no workflow applies migrations on merge and no deploy workflow
+runs on push to `main` — and the owner directed that it not be reverted, since the merged state was
+green, production-aligned and drift-free. The lesson is recorded here rather than in any one agent's
+memory so the next session cannot repeat it.
+
 **Merge gate — use `scripts/safe-pr-merge.ts`, never a bare `gh pr merge` (permanent, 2026-08-24):**
 `gh pr checks --watch` returning means "nothing is still running" — NOT "safe to merge." PR #1046
 merged on 2026-08-24 while its required checks had been CANCELLED by a rebase/force-push race; the
