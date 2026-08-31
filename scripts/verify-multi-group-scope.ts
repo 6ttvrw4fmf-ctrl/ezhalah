@@ -121,9 +121,12 @@ check('changing category clears groups, types and every type-derived field', (()
     && after.typeGroups === null && after.types === null
     && after.type === null && after.detail === null && after.contextBedsList === null;
 })(), 'a Residential group must never survive a switch to Commercial');
-check('re-tapping the active category deselects it and still clears the scope', (() => {
-  const after = setCategory(q({ category: 'Residential', typeGroups: [APTS] }), 'Residential');
-  return after.category === null && after.typeGroups === null;
+// Owner ruling 2026-08-30: a search always lands on exactly one category, so a re-tap is a NO-OP
+// rather than a deselect — and it must not wipe the groups the user has already chosen underneath.
+check('re-tapping the active category keeps it selected and preserves the scope', (() => {
+  const before = q({ category: 'Residential', typeGroups: [APTS] });
+  const after = setCategory(before, 'Residential');
+  return after.category === 'Residential' && after.typeGroups === before.typeGroups;
 })());
 
 // ── 4. M2 — AF QUESTIONS INTERSECT ACROSS TYPES (never union) ────────────────────────────────────
