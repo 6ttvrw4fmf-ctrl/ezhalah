@@ -136,6 +136,56 @@ The drift workflow is still red on a DIFFERENT condition that is not this routin
 `migration_content_parity` P2 and owned by routine #7 (systems seam). Recovering their files
 verbatim is theirs to do, not mine to guess at.
 
+
+## 5c. Round 2 — owner approved acting on the parked items (2026-08-31)
+
+**Why the score could not simply be raised.** Measured first, so effort went where it was worth
+something: adding barriers to the two testable weight-2 `P` rules is worth **+0.04** overall; even
+moving *every* `P` to `B` (impossible — most are rationale/cross-reference lines) reaches only
+9.109. The mass sits in **B → L**: 71 rules the code asserts that no journey had proved in
+production *this run*. Live-testing 10 reaches 8.99, 20 reaches 9.13, 40 reaches 9.38. That is what
+Part 5 mandates, so that is what was done.
+
+**`erapulse_commercial` age — adjudicated by live probe.** erapulse.sa is reachable from this
+container (eastabha.com, jurash.com and satel.sa are not). Listing 648093 publishes «العمر (سنة)»
+as a structured stat beside «المساحة (م²)», payload `"age":1`; our stored `property_age = 1` matches
+exactly, re-confirming for the commercial half the block cleared for erapulse_residential on
+2026-07-29. Registered `trusted`. **Changes nothing served today, deliberately** — `age_source_health()`
+still scores it `too_small` (n_aged=1) and the generator admits only at `verdict='ok'`. The registry
+records the ADJUDICATION; the health gate keeps deciding ADMISSION. The detector now names only
+`eastabha_residential`, which is genuinely undecided because its source is unreachable.
+
+**`jurash floor_number` — un-trapped.** jurash publishes `pt_floor` natively; `run.py` captures it
+verbatim with real variance (2, 2, 3, 3); `listing_extra_attrs` hard-coded `NULL::integer` for both
+jurash branches. This time the FIRST question asked was whether the view is generated — it is not
+(only `rebuild_af_filter_rpcs` and `rebuild_age_producer` exist), so a direct edit is correct. That
+is §2's lesson applied. Scoped to the two jurash branches, using the view's own regex-guarded idiom.
+Measured: rows unchanged at 197,768, `floor_number` 11,509 → 11,513, all four **in the index and
+production_ready**.
+
+**Ten rules B → L, proved in a real browser.** A full AF round, with the narrowing chain measured:
+
+| step | question | picked | AF projected count |
+|---|---|---|---|
+| Q1 | تفضل تدفع الإيجار على دفعات؟ | يقبل التقسيط | 10,316 → **3,193** |
+| Q2 | كم عمر العقار تقريباً؟ | ١٠ سنوات فأكثر (356) | 3,193 → **356** |
+| Q3 | كم دورة مياه تفضل؟ | +٤ (8) | 356 → **8** |
+| end | — | round closed after 3 questions | «كل النتائج المطابقة (**8 إعلان**)» |
+
+Each option's advertised count became the next projected count, and the final count equalled the
+listings actually delivered. Moved to L: R13.4 (all three halves — no auto-open, no auto-advance,
+no popup), R4.1.2, R8.3.1, R8.1.3, R13.7, R9.3.1, R8.2.3, R8.3.2, R1.6.2, R14.2.2.
+
+The age question's options also summed exactly to the cohort: 1,604 + 393 + 590 + 234 + 356 = 3,177,
+plus «16 إعلان لم يذكر هذه المعلومة» = **3,193**. Unknown is reported, never folded into an option.
+
+**Deliberately NOT claimed.** R9.1.1 / R6.3.2 / R6.3.3 (pill rendering) stay at B — the predicate
+demonstrably commits (the count moves and holds) but the harness could not positively identify a
+removable-pill affordance, and two labels failed to match on a leading-space bug of my own.
+Mid-round absence proves nothing: §6.3 describes what the round's END renders. R5.4.3 stays B: it
+"passed" on loose evidence (the scraper caught listing cards, not options). Both recorded OPEN in
+the ledger for a targeted pill journey next run.
+
 ## 6. Harness notes (additive to 2026-08-30)
 
 1. **Playwright is NOT in the repo** — this container has no `node_modules`. Import it from
@@ -165,19 +215,19 @@ AF SYSTEM RATING: 9/10                     (judgement, not a measurement)
 ENGINEER PERFORMANCE RATING: 7/10          (judgement: the sweep and the self-correction were
                                             right; shipping a wrong root cause and a false-alarm
                                             barrier before checking for a generator was not)
-ADVANCED FILTER HEALTH: 8.8/10 → 8.8/10
-TRENDING CITIES HEALTH: 9.2/10 → 9.2/10
-TRENDING DISTRICTS HEALTH: 9.2/10 → 9.2/10
+ADVANCED FILTER HEALTH: 8.8/10 → 8.9/10
+TRENDING CITIES HEALTH: 9.2/10 → 9.3/10
+TRENDING DISTRICTS HEALTH: 9.2/10 → 9.3/10
 AF DATA INTEGRITY: 8.9/10 → 9.4/10
-OVERALL AF + TRENDING HEALTH: 8.8/10 → 8.9/10
+OVERALL AF + TRENDING HEALTH: 8.8/10 → 9.0/10
 
 NEW PRODUCT CONTRACT USED FOR RATING: YES
-RULES LIVE-TESTED THIS RUN: 46/135       (grade L)
-RULES BARRIER-PROTECTED: 71/135          (grade B)
+RULES LIVE-TESTED THIS RUN: 56/135       (grade L)
+RULES BARRIER-PROTECTED: 61/135          (grade B)
 RULES WITH INSUFFICIENT COVERAGE: 18/135 (grades P + N)
 
-REAL BROWSER JOURNEYS: 5
-AF JOURNEYS: 1
+REAL BROWSER JOURNEYS: 8
+AF JOURNEYS: 4 (recon + interview + pill probe + full round)
 TRENDING CITY JOURNEYS: 3
 TRENDING DISTRICT JOURNEYS: 2
 CITIES TESTED: 4 (الرياض · جدة · الدمام · الخبر observed)
@@ -193,8 +243,8 @@ INELIGIBLE RESULTS: 0
 DUPLICATES: 0
 UNKNOWN/FALSE VIOLATIONS: 0
 BUGS FOUND: 2 genuine (registry silence · jurash floor_number) + 1 retracted
-BUGS FIXED: 0 data defects; 1 barrier gap closed
-BUGS REMAINING: 2 (both source-truth decisions)
+BUGS FIXED: 1 data defect (jurash floor_number, production-verified); 1 barrier gap closed; 1 source adjudicated by live probe
+BUGS REMAINING: 1 (eastabha — source unreachable)
 BARRIERS ADDED/STRENGTHENED: 1 (mon_detect_age_resolver_platform_gap, rostered)
 MUTATION-PROVEN: YES (0 → 1 → 0, rolled back)
 MERGED: YES (PR #1410, merge commit 9792c6d, via scripts/safe-pr-merge.ts)
@@ -202,8 +252,8 @@ DEPLOYED: N/A (no frontend change)
 PRODUCTION VERIFIED: YES
 
 BUGS FOUND: 2
-BUGS FIXED: 0
-BUGS REMAINING: 2
+BUGS FIXED: 1
+BUGS REMAINING: 1
 BARRIERS ADDED: 1
 MUTATIONS KILLED: 1/1
 TESTS: PASS (targeted; npm test blocked in-container by a missing Python dep, unrelated)
@@ -213,18 +263,20 @@ PRODUCTION VERIFIED: YES
 SENTRY CHECKED: YES
 SENTRY CONNECTION WORKING: YES
 OPEN P0/P1 IN SCOPE: 0
-TRUE SCORE: 8.9/10
+TRUE SCORE: 9.0/10
 10/10 ACHIEVED: NO
 
 ALL GOOD: NO
 ```
 
-**Blockers to 10/10 — both category (b), genuine source-truth ambiguity, owner / routine #3:**
+**Blocker to 10/10 after round 2 — one, category (f), external dependency:**
 
-1. `age_resolver_platform_gap` P2 — eastabha_residential + erapulse_commercial publish ages and
-   have never been adjudicated. Needs a live source read to decide `trusted`.
-2. `jurash.floor_number` — 4 rows trapped behind a hard-coded NULL in `listing_extra_attrs`.
-   Needs its generator identified before any edit (today's lesson), then the same adjudication.
+1. `age_resolver_platform_gap` P2 — `eastabha_residential_listings` publishes 2 ages and has never
+   been adjudicated. eastabha.com is egress-blocked from this container (probed: HTTP 000), and
+   `AGENTS.md` permanent rule #2 forbids deciding it without a live read. Its sibling
+   `erapulse_commercial` was closed this run precisely because erapulse.sa *was* reachable.
 
-Neither is a defect this routine may fix by fiat: both turn on what the source actually publishes,
-which `AGENTS.md` permanent rule #2 forbids asserting without a live probe.
+The remaining distance to 10/10 is not defects — it is coverage. 61 rules are B (code-asserted) and
+18 are P, and most of those P grades are rationale or cross-reference lines that are P by nature.
+Each B rule is worth +0.15 when a journey proves it live; the honest path is more production
+journeys, not a larger number.
