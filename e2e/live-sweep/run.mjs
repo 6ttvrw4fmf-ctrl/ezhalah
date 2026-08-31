@@ -8,7 +8,8 @@
 // covers less than the floor is itself a failure — that is the way a rotation system rots.
 //
 //   node e2e/live-sweep/run.mjs
-import { FLOORS, WATCHES, findings, journeys, ledgerPlan, ledgerRecord, note, dbCount, pickCityForDeal, sleep } from './sweep.mjs';
+import { FLOORS, WATCHES, findings, journeys, ledgerPlan, ledgerRecord, note, dbCount, pickCityForDeal, sleep,
+         watchStatus, unobservedWatches, WATCH_OFFLINE_COVER } from './sweep.mjs';
 import { normalFilter, trendingCity, trendingDistrict, advancedFilter, zeroResult,
          cardClickBack, tabHistory, typedDistrict, clearAll } from './journeys.mjs';
 import { showMoreJourney } from './showmore.mjs';
@@ -216,7 +217,19 @@ async function main() {
     () => typedDistrict({ city: RIYADH, districtText: 'النرجس' }));
   // exact-city-never-rescoped is asserted inside EVERY assertChain (INTENT→UI), so it is covered by
   // every journey above rather than by one probe.
-  for (const w of WATCHES) await ledgerRecord('live_watch', w, findings.some((f) => f.detail.includes(w)) ? 'fail' : 'pass', 'live browser sweep');
+  // A watch records `pass` ONLY with positive evidence it was evaluated (watchStatus, sweep.mjs).
+  // Absence of a finding is not evidence: a harness error, a skipped journey, or a watch nothing
+  // asserts all produce no finding, and all three used to be written to the ledger as `pass`.
+  // ops_qa_record_coverage accepts ONLY pass | fail | skip and raises on anything else, so the
+  // internal `offline_barrier` status is written as `skip` — which is exactly what it is from the
+  // browser's point of view — with the notes naming the barrier that does evaluate it. Writing an
+  // out-of-vocabulary value made the RPC throw, and post() swallowed it: the three rows silently
+  // kept the previous run's stale `pass`. Same bug class as the one this PR fixes, one layer down.
+  for (const w of WATCHES) {
+    const st = watchStatus(w);
+    await ledgerRecord('live_watch', w, st === 'offline_barrier' ? 'skip' : st,
+      st === 'offline_barrier' ? `not browser-evaluated; covered by ${WATCH_OFFLINE_COVER[w]}` : 'live browser sweep');
+  }
 
   // ── floors ─────────────────────────────────────────────────────────────────────────────────────
   const nonRiyadhCount = [...citiesTested].filter((c) => c !== RIYADH).length;
@@ -232,6 +245,11 @@ async function main() {
   floor('honest-zero journeys', done.zero, FLOORS.zeroResultJourneys);
   floor('card→back journeys', done.cardBack, FLOORS.cardClickBackJourneys);
   floor('«عرض المزيد» journeys', done.showMore, FLOORS.showMoreJourneys);
+  // A permanent watch that did not actually run is a floor miss, not a pass. §40 says deleting a
+  // watch fails the barrier; a watch that silently never executes is deletion at runtime, and it
+  // used to leave the run green.
+  const dark = unobservedWatches();
+  if (dark.length) floorMisses.push(`permanent watches never evaluated: ${dark.join(', ')}`);
 
   // ── the recurring report ───────────────────────────────────────────────────────────────────────
   const byPair = (p) => findings.filter((f) => f.layerPair === p).length;
@@ -266,8 +284,16 @@ async function main() {
   line('BUGS FOUND', findings.length);
   line('BUGS FIXED', 0);
   line('BARRIERS ADDED/STRENGTHENED', 0);
+  // Watch evidence, stated as counts rather than inferred from silence (2026-08-31).
+  line('WATCHES BROWSER-EVALUATED', `${WATCHES.filter((w) => watchStatus(w) === 'pass' || watchStatus(w) === 'fail').length}/${WATCHES.length}`);
+  line('WATCHES COVERED OFFLINE', WATCHES.filter((w) => watchStatus(w) === 'offline_barrier').length);
+  line('WATCHES NOT EVALUATED AT ALL', unobservedWatches().length);
   line('PRODUCTION VERIFIED', findings.length === 0 ? 'YES' : 'NO');
   line('SEARCH & MATCHING HEALTH', `${health}/10`);
+  if (dark.length) {
+    console.error('\nPERMANENT WATCHES NOT EVALUATED (recorded `skip`, never `pass`):');
+    dark.forEach((w) => console.error(`  ⚠ ${w}`));
+  }
   if (floorMisses.length) { console.error('\nCOVERAGE FLOORS MISSED:'); floorMisses.forEach((m) => console.error(`  ✗ ${m}`)); }
   if (findings.length) {
     console.error('\nDEFECTS (each must be fixed → barriered → deployed → re-tested, never reported and left):');

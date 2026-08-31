@@ -39,7 +39,9 @@ import {
   findContentDivergence,
   normalizeMigrationSql,
   parseMigrationFilename,
+  stripSqlCommentsAndBlanks,
   type AppliedDigest,
+  type ContentDivergence,
   type RepoMigrationContent,
 } from './lib/migrationDrift.ts';
 
@@ -49,13 +51,28 @@ const ROOT = path.join(import.meta.dirname, '..');
 const MIGRATIONS_DIR = path.join(ROOT, 'supabase', 'migrations');
 export const BASELINE_FILE = path.join(ROOT, 'scripts', 'migration-content-parity-baseline.txt');
 const KIND = 'migration_content_parity';
-const DEDUP_KEY = 'migration_content_parity_diverged';
+// One key per class — see the raise block below and 20260831105431. These MUST stay distinct:
+// mon_raise() suppresses dispatch on an already-open key, so a shared key let a standing benign
+// divergence hide a new dangerous one. verify-migration-parity-class-split.ts pins the split.
+export const CODE_DEDUP_KEY = 'migration_content_parity_diverged:code';
+export const COMMENT_DEDUP_KEY = 'migration_content_parity_diverged:comments';
 
 // The digest must be computed identically on both sides or every file reads as diverged. Server:
 // left(md5(array_to_string(statements, E'\n')), 10). Here: the same md5 over the file's bytes with
 // trailing whitespace stripped. Exported so the offline barrier can prove the two agree.
 export function digestOf(sql: string): string {
   return crypto.createHash('md5').update(normalizeMigrationSql(sql), 'utf8').digest('hex').slice(0, 10);
+}
+
+// The CLASSIFYING digest (2026-08-31). Server: code_md5 in ops_migration_content_digests(). Never
+// decides whether a file diverges — digestOf() above still does that, byte-exactly — only whether
+// an already-found divergence is code-level or comment-only, so the two get distinct dedup keys.
+export function codeDigestOf(sql: string): string {
+  return crypto
+    .createHash('md5')
+    .update(stripSqlCommentsAndBlanks(sql), 'utf8')
+    .digest('hex')
+    .slice(0, 10);
 }
 
 // `<version>  <name>` lines; # comments and blanks ignored. Only the version is load-bearing.
@@ -75,11 +92,13 @@ export function readRepoMigrationContent(dir: string = MIGRATIONS_DIR): RepoMigr
   for (const f of listMigrationFiles(dir)) {
     const parsed = parseMigrationFilename(f);
     if (!parsed) continue;
+    const sql = fs.readFileSync(path.join(dir, f), 'utf8');
     out.push({
       version: parsed.version,
       name: parsed.name,
       file: f,
-      md5: digestOf(fs.readFileSync(path.join(dir, f), 'utf8')),
+      md5: digestOf(sql),
+      codeMd5: codeDigestOf(sql),
     });
   }
   return out;
@@ -101,7 +120,19 @@ async function callRpc(url: string, apikey: string, body: unknown, timeoutMs = 2
 if (import.meta.filename === process.argv[1]) {
   let applied: AppliedDigest[];
   try {
-    applied = await callRpc(`${URL_BASE}/rest/v1/rpc/ops_migration_content_digests`, ANON_KEY, {});
+    const raw: Array<Record<string, string>> = await callRpc(
+      `${URL_BASE}/rest/v1/rpc/ops_migration_content_digests`,
+      ANON_KEY,
+      {},
+    );
+    // The RPC speaks snake_case. A row without code_md5 (an older server, a rollback) keeps
+    // codeMd5 undefined, and classifyDivergence() then fails CLOSED to the 'code' class.
+    applied = raw.map((d) => ({
+      version: d.version,
+      name: d.name,
+      md5: d.md5,
+      codeMd5: d.code_md5,
+    }));
   } catch (e) {
     // Same posture as the drift checker: a container with no network must not silently pass in CI,
     // but must not fail a developer's local run either. CI runs it with network.
@@ -113,6 +144,9 @@ if (import.meta.filename === process.argv[1]) {
   const repo = readRepoMigrationContent();
   const diverged = findContentDivergence(repo, applied, baseline);
 
+  const codeDiverged = diverged.filter((d) => d.kind === 'code');
+  const commentDiverged = diverged.filter((d) => d.kind === 'comments');
+
   if (SERVICE_ROLE_KEY) {
     try {
       await callRpc(`${URL_BASE}/rest/v1/rpc/ops_record_content_parity_check`, SERVICE_ROLE_KEY, {
@@ -120,24 +154,55 @@ if (import.meta.filename === process.argv[1]) {
         p_baseline_entries: baseline.size,
         p_checker: 'migration-drift-guard.yml',
       });
-      if (diverged.length) {
-        await callRpc(`${URL_BASE}/rest/v1/rpc/mon_raise`, SERVICE_ROLE_KEY, {
-          p_sev: 'P2',
-          p_kind: KIND,
-          p_platform: null,
-          p_dedup: DEDUP_KEY,
-          p_detail: {
-            why: 'a committed migration file disagrees with the statements production actually executed, beyond the enumerated baseline',
-            divergences: diverged.slice(0, 25),
-            baseline_entries: baseline.size,
-          },
-        });
-      } else {
-        await callRpc(`${URL_BASE}/rest/v1/rpc/mon_resolve_key`, SERVICE_ROLE_KEY, {
-          p_kind: KIND,
-          p_dedup: DEDUP_KEY,
-        });
-      }
+
+      // ONE DEDUP KEY PER CLASS (2026-08-31). Previously both classes shared
+      // 'migration_content_parity_diverged', and because mon_raise() returns 0 and leaves
+      // dispatched_at set on an already-open key, a standing benign divergence meant a NEW
+      // code-level one was never dispatched — it only rewrote the open alert's payload. Keying
+      // them apart is what makes the dangerous class reach a human while the benign one stands.
+      const raiseOrResolve = async (
+        dedup: string,
+        sev: 'P1' | 'P2',
+        rows: ContentDivergence[],
+        why: string,
+      ) => {
+        if (rows.length) {
+          await callRpc(`${URL_BASE}/rest/v1/rpc/mon_raise`, SERVICE_ROLE_KEY, {
+            p_sev: sev,
+            p_kind: KIND,
+            p_platform: null,
+            p_dedup: dedup,
+            p_detail: { why, divergences: rows.slice(0, 25), baseline_entries: baseline.size },
+          });
+        } else {
+          await callRpc(`${URL_BASE}/rest/v1/rpc/mon_resolve_key`, SERVICE_ROLE_KEY, {
+            p_kind: KIND,
+            p_dedup: dedup,
+          });
+        }
+      };
+
+      await raiseOrResolve(
+        CODE_DEDUP_KEY,
+        'P1',
+        codeDiverged,
+        'the EXECUTABLE SQL of a committed migration file differs from what production actually ran. ' +
+          'This is the dangerous class: SQL — or a detector registration — living only in git or only in ' +
+          'production (the dark-detector shape). Reconcile the file against ' +
+          'supabase_migrations.schema_migrations.statements, or apply the part production never got. ' +
+          'Never baseline it.',
+      );
+      await raiseOrResolve(
+        COMMENT_DEDUP_KEY,
+        'P2',
+        commentDiverged,
+        'a committed migration file differs from what production ran in whole-line COMMENTS or blank ' +
+          'lines only — the executable SQL is byte-identical, so production is not missing anything. ' +
+          'Usually rationale written into the file after the migration was applied. Benign, but the repo ' +
+          'is not a faithful mirror, which the documented "recover verbatim from statements" repair path ' +
+          'assumes. Reconcile the file when convenient. Kept on its OWN dedup key so it can never ' +
+          'suppress the P1 code-level class.',
+      );
     } catch (e) {
       console.warn(`⚠ could not record heartbeat/alert (non-fatal, exit code is unaffected): ${e}`);
     }
@@ -146,8 +211,9 @@ if (import.meta.filename === process.argv[1]) {
   if (diverged.length) {
     console.error(`✗ migration content parity: ${diverged.length} file(s) differ from what production executed`);
     console.error(`  (${baseline.size} pre-existing divergences are exempted by scripts/migration-content-parity-baseline.txt)`);
+    console.error(`  ${codeDiverged.length} CODE-level (P1, dangerous), ${commentDiverged.length} comment-only (P2, benign)`);
     for (const d of diverged) {
-      console.error(`    ${d.file}`);
+      console.error(`    [${d.kind === 'code' ? 'CODE' : 'comments'}] ${d.file}`);
       console.error(`      repo md5 ${d.repoMd5} vs applied ${d.appliedMd5} at version ${d.appliedVersion} (matched by ${d.matchedBy})`);
     }
     console.error(`  Fix by making the file match what production ran — recover it verbatim from`);
