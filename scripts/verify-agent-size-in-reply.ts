@@ -27,9 +27,12 @@ check('isSizeDetail excludes bedroom-shaped values (1-4, 5+)', /const isSizeDeta
 check('appends the size only when the reply does not already mention it', /if \(isSizeDetail && !replyOut\.includes\(detailStr\)\)/.test(src));
 check('the listings reply now uses replyOut, not the raw lead(out.reply)',
   // replyOut is now wrapped by groundReply() (a reply may not claim inventory the DB has not
-  // confirmed — verify-agent-broker-grounding.ts). The intent here is unchanged: the listings
-  // reply is built from replyOut, never from the raw lead().
-  /reply: groundReply\(replyOut, locale\),/.test(src) && !/reply: lead\(out\.reply\),/.test(src));
+  // confirmed, nor an amenity the query does not carry — verify-agent-broker-grounding.ts). The
+  // intent here is unchanged: the listings reply is built from replyOut, never from the raw lead().
+  // groundReply() gained a third (amenities) argument 2026-08-31 — match the call prefix, not the
+  // full argument list, so this stays about "replyOut vs raw lead()" and not groundReply's own
+  // signature (that is verify-agent-broker-grounding.ts's job).
+  /reply: groundReply\(replyOut, locale\b/.test(src) && !/reply: lead\(out\.reply\),/.test(src));
 
 // Verbatim copy of the fixed logic — executed against real cases.
 function appendSizeIfMissing(reply: string, detail: string, locale: 'ar' | 'en'): string {

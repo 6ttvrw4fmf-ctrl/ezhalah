@@ -46,6 +46,25 @@ eq("Rest House/RentAnnual certifies its kitchen + utilities",
   [...certifiedAmenityKeys(Q({ type: "Rest House" }))].sort(),
   ["electricity", "kitchen", "sanitation", "water_supply"]);
 
+console.log("\n── gym-bug-class sweep (owner 2026-08-31): 8 rich columns that existed but were never wired ──");
+// "أبي شقة فيها نادي وحمامين" applied nothing because "gym" was not in the model's vocabulary, not in
+// afCohorts.ts, and not in the RPC whitelist, even though search_listings_ar.gym already carried real
+// data. Same shape found in 7 siblings; all 8 pin here so none can silently regress back out.
+const RICH_TOKENS = [
+  "gym", "pool", "garden", "balcony", "laundry_room",
+  "optical_fibers", "separate_electricity_meter", "separate_water_meter",
+];
+for (const tok of RICH_TOKENS) {
+  check(`Apartment/RentAnnual certifies "${tok}"`, aptAnnual.includes(tok), `got ${JSON.stringify(aptAnnual)}`);
+  check(`"${tok}" is NOT certified for Office (residential-only token)`, !office.includes(tok));
+}
+// "bathrooms" is a separate AF intent (afIntents.ts + applyAfIntents), never an amenities-array
+// token — it is deliberately NOT passed here; partitionRequestedAmenities only knows the amenity
+// vocabulary, so mixing it in would test a rejection this function is SUPPOSED to produce.
+const gymReq = partitionRequestedAmenities(Q({ type: "Apartment" }), ["gym"]);
+eq("the owner's own reproduction case: gym certifies for Apartment/RentAnnual", gymReq.certified, ["gym"]);
+eq("...and nothing is rejected", gymReq.rejected, []);
+
 console.log("\n── UNKNOWN stays UNKNOWN: an uncertified cohort is EMPTY, never 'no constraint' ──");
 // These cohorts genuinely do not list 'amenities' in COHORT_QUESTIONS — confirmed by executing the
 // gate. (An earlier version of this test used Apartment/RentMonthly on the strength of a stale header
@@ -107,6 +126,9 @@ check("the edge does NOT declare its own cohort tables (that is how paths drift)
 check("the edge does not import the client cohort module either",
   !/from\s+["'][^"']*afCohorts/.test(edge));
 check("the edge contract offers a CLOSED amenity vocabulary", /"amenities" \(array; ONLY these exact tokens/.test(edge));
+for (const tok of RICH_TOKENS) {
+  check(`the edge's JSON_SHAPE_HINT enum includes "${tok}"`, new RegExp(`"${tok}"`).test(edge));
+}
 check("the edge tells the model to omit rather than guess", /never invent one, never map a word you are unsure of/.test(edge));
 
 if (failed) {

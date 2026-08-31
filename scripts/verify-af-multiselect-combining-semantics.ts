@@ -132,7 +132,10 @@ for (const tok of clauseTokens) {
 }
 // …and the reverse direction: a token the clause REJECTS must not be silently filtered by the
 // oracle, or the oracle disagrees with a fail-closed RPC and reports a phantom mismatch.
-for (const bogus of ['pool', 'gym', 'garden', 'balcony', 'not_a_real_amenity']) {
+// pool/gym/garden/balcony moved OUT of this list 2026-08-31 — they are now genuinely certified
+// (see AMENITY_TOKEN_COL's own history comment) and are exercised in the clauseTokens loop above
+// instead. Replaced with other still-uncertified concepts so this direction keeps real coverage.
+for (const bogus of ['view', 'security', 'storage_room', 'not_a_real_amenity']) {
   const { unhandled } = buildOracleQS({ p_amenities: [bogus] });
   check(`the oracle refuses '${bogus}' (not in the clause vocabulary) instead of inventing a filter`,
     unhandled.some((u) => u.includes(bogus)));

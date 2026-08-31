@@ -49,6 +49,18 @@ const AMENITY_TOKEN_COL: Record<string, string> = {
   sanitation: 'sanitation',
   electricity: 'electricity',
   water_supply: 'water_supply',
+  // Added 2026-08-31: these 8 were the exact tokens the 2026-08-24 header comment above names as
+  // "the clause REJECTS fail-closed" at the time — now genuinely certified
+  // (20260831205347_af_amenity_tokens_residential_rich_set.sql), so the oracle catching up here
+  // closes the loop this file's own history describes, rather than reopening the old drift.
+  gym: 'gym',
+  pool: 'pool',
+  garden: 'garden',
+  balcony: 'balcony',
+  laundry_room: 'laundry_room',
+  optical_fibers: 'optical_fibers',
+  separate_electricity_meter: 'separate_electricity_meter',
+  separate_water_meter: 'separate_water_meter',
   furnished: 'furnished',
   rnpl: 'rent_now_pay_later',
   rent_now_pay_later: 'rent_now_pay_later',

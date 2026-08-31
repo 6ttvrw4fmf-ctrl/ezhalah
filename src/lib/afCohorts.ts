@@ -295,6 +295,15 @@ export function cohortAllows(q: SearchQuery, id: string): boolean {
 // caller asks the user instead — guessing an uncertified attribute is how UNKNOWN silently becomes No.
 const RESIDENTIAL_AMENITY_BASE = [
   'kitchen', 'parking', 'elevator', 'ac', 'private_entrance', 'maid_room', 'driver_room',
+  // Added 2026-08-31 (owner, gym-bug class sweep): these columns already existed on
+  // search_listings_ar (2026-08-10/11 rich-canonical-columns + car_entrance/optical_fibers
+  // migrations) with real, populated data, but were never wired past the ALTER TABLE — the exact
+  // same situation "gym" was in. Live counts checked 2026-08-31 (fleet-wide true/941 total 197,768):
+  // gym 13, pool 44, garden 49, balcony 1,476, laundry_room 1,959, optical_fibers 2,911,
+  // separate_electricity_meter 52,652, separate_water_meter 46,474. See
+  // supabase/migrations/20260831205347_af_amenity_tokens_residential_rich_set.sql for the RPC side.
+  'gym', 'pool', 'garden', 'balcony', 'laundry_room', 'optical_fibers',
+  'separate_electricity_meter', 'separate_water_meter',
 ] as const;
 // aqar villa ads carry مدخل سيارة / صرف صحي checkboxes the apartment forms do not (2026-08-16).
 const VILLA_ONLY_AMENITIES = ['car_entrance', 'sanitation'] as const;
