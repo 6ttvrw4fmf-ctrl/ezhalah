@@ -7,25 +7,23 @@
 --   which an offline barrier and a CI job cannot do. That is how the oracle-vocabulary drift fixed
 --   in this same change survived: nothing in the tree stated what tokens the clause accepts.
 --   Re-derived verbatim from pg_get_functiondef (base64 round-trip), never hand-transcribed.
--- Verified byte-exact; md5 of everything below this header block: ea24a98d22674dad6398cdff5e2b5e56
---   equals md5(pg_get_functiondef) in production, 8,574 octets both sides, checked 2026-08-28.
--- Re-verified 2026-08-29, unchanged: live md5(pg_get_functiondef) is still
---   ea24a98d22674dad6398cdff5e2b5e56 (length() reports 8,501 characters — the header's octet figure
---   counts bytes, and the body carries multi-byte Arabic literals; the md5 is the equality that
---   matters and it is identical). The re-check was prompted by
---   20260829152534_af_coverage_cliff_watches_real_predicates_with_an_evidence_floor.sql, which
---   READS this clause to derive the columns af_coverage_cliff monitors but does not redefine it.
---   That migration is why the staleness barrier flagged this file: it names the clause, and the
---   barrier deliberately cannot tell "mentions" from "replaces" — so the answer is to re-verify the
---   mirror against production, which is what happened here, never to loosen the barrier.
--- Re-verified 2026-08-30, unchanged again: live md5(pg_get_functiondef) is still
---   ea24a98d22674dad6398cdff5e2b5e56 at 8,501 characters. Flagged for the same reason as the
---   2026-08-29 re-check, by a migration that READS the clause without redefining it:
---   20260830134244_af_template_absorbs_2026_08_29_ranking_so_rebuild_is_a_noop.sql calls
---   af_eligibility_clause() to swap it back out of the live location_search_candidates_ar definition
---   for the __AF_ELIGIBILITY_WHERE__ placeholder, repairing af_rpc_templates so a rebuild is a
---   provable no-op (see docs/ops/af-trending-data-integrity-2026-08-30/). The clause itself is
---   untouched by that work — which is precisely what re-verifying, rather than re-dating, proves.
+--   Original capture was byte-exact at 8,574 octets (length() reported 8,501 characters — the
+--   difference is multi-byte Arabic literals). Confirmed unchanged (same content) on 2026-08-29 and
+--   2026-08-30, each time because a migration READ this clause (to derive monitored columns, and to
+--   swap the __AF_ELIGIBILITY_WHERE__ placeholder back in after a template repair) without
+--   redefining it — the staleness barrier cannot tell "mentions" from "replaces", so both dates were
+--   honest re-verifications against production, never re-dates without a check.
+-- Re-verified 2026-08-31 — CHANGED (this time a real redefinition, not a mention).
+--   20260831205347_af_amenity_tokens_residential_rich_set.sql needle-edited the amenity whitelist +
+--   predicate block to add gym, pool, garden, balcony, laundry_room, optical_fibers,
+--   separate_electricity_meter and separate_water_meter (owner ruling, gym-bug-class sweep — see
+--   that migration's own header for the full rationale and live counts).
+--   Re-derived via a PostgREST RPC call to the live function this time, not pg_get_functiondef —
+--   same non-hand-transcribed principle: the executed VALUE was fetched byte-exact over HTTP, then
+--   the E'' source literal was reconstructed by doubling every backslash and single quote, and the
+--   result verified to match production's md5(pg_get_functiondef) exactly before being written here.
+-- Verified byte-exact; md5 of everything below this header block: 681da577d8e10df55e30c345d284e139
+--   (9,376 characters), checked 2026-08-31.
 CREATE OR REPLACE FUNCTION public.af_eligibility_clause()
  RETURNS text
  LANGUAGE sql
@@ -116,7 +114,7 @@ AS $function$ select E'
       and (p_has_license is null or (s.license_number is not null) = p_has_license)
       and (p_amenities is null or (
                not exists (select 1 from unnest(p_amenities) tok
-                           where tok not in (''elevator'',''parking'',''kitchen'',''ac'',''maid_room'',''driver_room'',''private_entrance'',''car_entrance'',''sanitation'',''electricity'',''water_supply'',''furnished'',''rnpl'',''rent_now_pay_later''))
+                           where tok not in (''elevator'',''parking'',''kitchen'',''ac'',''maid_room'',''driver_room'',''private_entrance'',''car_entrance'',''sanitation'',''electricity'',''water_supply'',''gym'',''pool'',''garden'',''balcony'',''laundry_room'',''optical_fibers'',''separate_electricity_meter'',''separate_water_meter'',''furnished'',''rnpl'',''rent_now_pay_later''))
            and (not (''elevator''         = any(p_amenities)) or s.elevator)
            and (not (''parking''          = any(p_amenities)) or s.parking)
            and (not (''kitchen''          = any(p_amenities)) or s.kitchen)
@@ -128,6 +126,14 @@ AS $function$ select E'
            and (not (''sanitation''       = any(p_amenities)) or s.sanitation)
            and (not (''electricity''      = any(p_amenities)) or s.electricity)
            and (not (''water_supply''     = any(p_amenities)) or s.water_supply)
+           and (not (''gym''                          = any(p_amenities)) or s.gym)
+           and (not (''pool''                         = any(p_amenities)) or s.pool)
+           and (not (''garden''                       = any(p_amenities)) or s.garden)
+           and (not (''balcony''                      = any(p_amenities)) or s.balcony)
+           and (not (''laundry_room''                 = any(p_amenities)) or s.laundry_room)
+           and (not (''optical_fibers''                = any(p_amenities)) or s.optical_fibers)
+           and (not (''separate_electricity_meter''    = any(p_amenities)) or s.separate_electricity_meter)
+           and (not (''separate_water_meter''          = any(p_amenities)) or s.separate_water_meter)
            and (not (''furnished''        = any(p_amenities)) or s.furnished)
            and (not (''rnpl''             = any(p_amenities) or ''rent_now_pay_later'' = any(p_amenities)) or s.rent_now_pay_later)))
       and ((p_street_width_min is null and p_street_width_max is null)
