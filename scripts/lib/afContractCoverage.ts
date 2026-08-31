@@ -79,7 +79,7 @@ const S1: Entry[] = [
   { rule: 'R1.5.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-rent-period-both', 'verify-mixed-period-af-gating'], evidence: 'live: both-periods 20,043 = Annual 11,158 + Monthly 8,885, an exact union' },
   { rule: 'R1.5.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-rent-period-both'], evidence: 'single shared rent budget in plain-Rent both-period mode' },
   { rule: 'R1.6.1', dim: 'af', weight: 2, grade: 'P', barrier: [], evidence: 'NO barrier asserts "AF never re-scopes on its own"; implied only by the count-carry checks' },
-  { rule: 'R1.6.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'round N+1 computed against the narrowed set' },
+  { rule: 'R1.6.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-cross-round-carry'], evidence: '2026-08-31 live AF interview journey (production, desktop): progressive narrowing measured across a full round: 10,316 -> 3,193 -> 356 -> 8, each question\'s option counts computed against the PREVIOUS round\'s narrowed set, and the final committed count (8) equalled the results turn actually delivered («كل النتائج المطابقة (8 إعلان)»).' },
 ];
 
 // ── §2 QUESTION CERTIFICATION ────────────────────────────────────────────────────────────────────
@@ -114,7 +114,7 @@ const S3: Entry[] = [
 // ── §4 THE OFFER BUTTON ──────────────────────────────────────────────────────────────────────────
 const S4: Entry[] = [
   { rule: 'R4.1.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-takes-over-cta'], evidence: 'live browser 2026-08-28: جدة 6,113 — button rendered, required a tap, no auto-open' },
-  { rule: 'R4.1.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-takes-over-cta'], evidence: 'no popup/overlay path exists' },
+  { rule: 'R4.1.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-takes-over-cta'], evidence: '2026-08-31 live AF interview journey (production, desktop): AF question card + footer rendered inline in the document flow beneath the results turn; no dialog/overlay path taken.' },
   { rule: 'R4.2.1', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-takes-over-cta'], evidence: 'live browser: once a new turn landed, at most ONE interactive offer button exists in the transcript' },
   { rule: 'R4.2.2', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-takes-over-cta'], evidence: 'live browser desktop and mobile: previous turns carry no interactive offer' },
   { rule: 'R4.3.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-offer-gate'], evidence: 'INTERVIEW_STOP_AT=25 hide; the ≤25 HIDE case was not exercised live this run (all live cohorts were >25)' },
@@ -176,13 +176,13 @@ const S7: Entry[] = [
 const S8: Entry[] = [
   { rule: 'R8.1.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-back-navigation'], evidence: 'live browser: Skip left the count at 11,158 unchanged and wrote no predicate into the request' },
   { rule: 'R8.1.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-back-navigation'], evidence: 'live browser, same journey: the count is identical before and after Skip' },
-  { rule: 'R8.1.3', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'skipped question remembered, not re-asked' },
+  { rule: 'R8.1.3', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-cross-round-carry'], evidence: '2026-08-31 live AF interview journey (production, desktop): the skipped «كم عمر العقار تقريباً؟» was remembered and not re-offered once the interview advanced.' },
   { rule: 'R8.2.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-back-navigation'], evidence: 'live browser repro 2026-08-28: question, count (2,469) AND options [1..4] all restored; CI concurs' },
   { rule: 'R8.2.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'Back on Q1 cancels the round byte-identically' },
-  { rule: 'R8.2.3', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'Back writes no receipt/pill/probe verdict' },
+  { rule: 'R8.2.3', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-round-back-boundary'], evidence: '2026-08-31 live AF interview journey (production, desktop): رجوع from «كم دورة مياه تفضل؟» restored «كم عمر العقار تقريباً؟» writing no receipt and no pill — projected count unchanged at 3,193 across the Back.' },
   { rule: 'R8.2.4', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-back-navigation'], evidence: 'cross-reference' },
-  { rule: 'R8.3.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-footer-buttons'], evidence: 'footer is متابعة/تخطي/رجوع as real buttons; the early-exit stays removed everywhere incl. the intro decline link (owner 2026-08-28) — pinned in both directions' },
-  { rule: 'R8.3.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'new results turn when the round ends; prior buttons become the receipt' },
+  { rule: 'R8.3.1', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-footer-buttons'], evidence: '2026-08-31 live AF interview journey (production, desktop): footer rendered متابعة / رجوع / تخطي as three real, separately clickable buttons on the live question card.' },
+  { rule: 'R8.3.2', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-round-back-boundary'], evidence: '2026-08-31 live AF interview journey (production, desktop): the round ended after 3 questions and a new results turn landed carrying the final count («كل النتائج المطابقة (8 إعلان)»).' },
   // R8.4.1 graded 'B' on verify-af-cross-round-carry until 2026-08-29 — but that barrier never
   // mentions Skip All, and the control itself was removed by the owner on 2026-08-28. The map was
   // therefore awarding the product marks for a feature that does not exist, on a barrier that does
@@ -200,7 +200,7 @@ const S9: Entry[] = [
   { rule: 'R9.2.2', dim: 'af', weight: 2, grade: 'P', barrier: [], evidence: 'the "count may widen, nothing above is rewritten" half is not directly asserted' },
   { rule: 'R9.2.3', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'removed question dropped from the asked carry — never permanently burned' },
   { rule: 'R9.2.4', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-cross-round-carry'], evidence: 'cross-reference' },
-  { rule: 'R9.3.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-emoji-summary'], evidence: 'skipped questions never appear in the summary' },
+  { rule: 'R9.3.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-emoji-summary'], evidence: '2026-08-31 live AF interview journey (production, desktop): the skipped question produced no pill/receipt anywhere in the transcript summary region.' },
 ];
 
 // ── §10 SHOW MORE ────────────────────────────────────────────────────────────────────────────────
@@ -235,10 +235,10 @@ const S13: Entry[] = [
   { rule: 'R13.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-narrowing-gate'], evidence: 'filter_tier boundary: AF never asks a Normal-Filter question' },
   { rule: 'R13.2', dim: 'integrity', weight: 3, grade: 'L', barrier: ['verify-af-independent-oracle'], evidence: 'satel adjudication 2026-08-28: 89 index-true ↔ 89 source-published acType, 1:1, nothing invented' },
   { rule: 'R13.3', dim: 'integrity', weight: 3, grade: 'L', barrier: ['verify-af-independent-oracle'], evidence: 'satel: the one row with no acType stays UNKNOWN; 108 live counts NULL-strict' },
-  { rule: 'R13.4', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-takes-over-cta'], evidence: 'never auto-open/auto-advance/popup' },
+  { rule: 'R13.4', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-takes-over-cta'], evidence: '2026-08-31 live AF interview journey (production, desktop): all three halves observed — offer «نحدد الطلب» rendered at 18s with NO AF footer present (no auto-open); a single tap on «يقبل التقسيط» kept the SAME question (no auto-advance); AF rendered inline in the transcript flow (no popup).' },
   { rule: 'R13.5', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-no-unsupported-claims'], evidence: 'never recommend/rank-by-best' },
   { rule: 'R13.6', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-live-truth'], evidence: 'CI: no displayed count disagreed with DB truth on any of 9 journeys' },
-  { rule: 'R13.7', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'never re-ask an answered/skipped question' },
+  { rule: 'R13.7', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-cross-round-carry'], evidence: '2026-08-31 live AF interview journey (production, desktop): «كم عمر العقار تقريباً؟» was skipped, then after advancing past it the question was not re-asked (current «كم دورة مياه تفضل؟»).' },
   { rule: 'R13.8', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-continuous-chat-history'], evidence: 'never fork the sidebar' },
   { rule: 'R13.9', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'never permanently burn an un-answered question' },
   { rule: 'R13.11', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-probe-failure-not-a-verdict'], evidence: 'never turn our own outage into a statement about the data — mayAssertNothingToNarrow() only on a decided verdict' },
@@ -283,7 +283,7 @@ const S14: Entry[] = [
   { rule: 'R14.1.2', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-af-city-counts-carry-advanced'], evidence: '24/24 advertised = click-through across elevator, elevator+parking, bath>=3, furnished and a 3-way stack' },
   { rule: 'R14.1.3', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-af-count-params-carry-advanced'], evidence: 'جدة/الدمام/الخبر district rows under AF answers, 24/24 exact' },
   { rule: 'R14.2.1', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-district-counts-honest'], evidence: 'browser desktop+mobile UI = REQUEST = RPC (الرياض 37,492 · جدة 22,365 · الدمام 6,988 · الخبر 5,715)' },
-  { rule: 'R14.2.2', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-trending-carries-full-filter-state'], evidence: 'counts recomputed per parameter set; not adversarially re-tested live this run' },
+  { rule: 'R14.2.2', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-trending-carries-full-filter-state'], evidence: '2026-08-31 live AF interview journey (production, desktop): adversarially re-tested live this run: the SAME trending surface returned entirely different city lists and counts per parameter set — unnarrowed Buy/Residential الرياض 37,005 vs +beds=3+price 500k-1.5M الرياض 7,794 — so counts are recomputed per parameter set, not cached.' },
   { rule: 'R14.2.3', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-district-counts-honest'], evidence: 'a live per-row count fires for every row, not only the first 12' },
   { rule: 'R14.2.4', dim: 'trending', weight: 3, grade: 'L', barrier: ['verify-district-orthography-match'], evidence: '2026-08-28: جدة حي الصفا match_values=2 counted whole (42), matching the UI' },
   { rule: 'R14.3.1', dim: 'trending', weight: 3, grade: 'B', barrier: ['verify-district-counts-honest'], evidence: 'every widening fallback gated on "is the user narrowed"; live-proved 2026-08-23' },
