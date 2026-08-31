@@ -5,7 +5,9 @@ name: UI parity (Playwright)
 
 on:
   schedule:
-    - cron: '30 3 * * *'   # nightly, just after audit-invariants (03:00)
+    # 05:10 UTC — off-peak, and still after audit-invariants (04:40) so the ordering that made
+    # 03:00/03:30 useful is preserved. See that file for why peak hours are avoided.
+    - cron: '10 5 * * *'   # nightly 05:10 UTC — off-peak, after audit-invariants
   workflow_dispatch:
     inputs:
       base_url:
