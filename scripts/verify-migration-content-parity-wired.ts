@@ -82,7 +82,9 @@ check(
 );
 
 // ── 4. The digest must be computed the same way on both sides ─────────────────────────────────
-// The server does left(md5(array_to_string(statements, E'\n')), 10); digestOf must be md5 of the
+// The server does left(md5(regexp_replace(array_to_string(statements, E'\n'), '\s+$', '')), 10) —
+// it normalizes trailing whitespace too, since 2026-08-30 closed the asymmetric-normalization
+// false-positive class (issue #1357). digestOf must be md5 of the
 // trailing-whitespace-stripped text, truncated to 10. If these ever diverge, EVERY file reads as
 // divergent and the check gets disabled as noise — so pin the exact contract with a known vector.
 check(digestOf('select 1;') === digestOf('select 1;\n\n  '), 'digestOf ignores trailing whitespace', 'digestOf is sensitive to trailing whitespace — a faithful mirror would read as diverged');

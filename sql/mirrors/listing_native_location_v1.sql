@@ -1,6 +1,16 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-08-31 (migration-drift recovery, routine #7 seam run): UNCHANGED. The recovered
+--   migrations 20260831080856 (phasea snapshot vs live source city) and 20260831092750 (district
+--   contradicts source) both MENTION listing_native_location_v1 in prose — each explains that the
+--   view's final SELECT falls back to a frozen snapshot table for district_ar/city — but neither
+--   redefines it: one creates a view + detector over phasea_src_arabic, the other UPDATEs
+--   listings_arabic_locations and creates a detector. Re-ran
+--   md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against live
+--   production: still 31036a9c8b92fddc5293b700985b869d (14127 chars) — unchanged since 2026-08-20,
+--   so the body below is current; only the re-verification date advances.
+--
 -- Re-verified 2026-08-21 (migration-drift recovery, PR #874): UNCHANGED. The recovered phasea
 --   migrations 20260821153734 / 20260821154150 / 20260821154316 MENTION listing_native_location_v1
 --   in prose comments (154316's detector reads the resolver's OUTPUT, listing_native_location_v2),
