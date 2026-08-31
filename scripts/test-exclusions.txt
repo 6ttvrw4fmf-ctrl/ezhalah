@@ -18,6 +18,7 @@ verify-count-rpc-parity-live.ts        | .github/workflows/count-rpc-parity-live
 verify-district-source-truth-live.ts   | manual / live run                                    | live check against production; no scheduled workflow yet
 verify-district-suggestion-parity-live.ts | .github/workflows/district-suggestion-parity-live-check.yml | live production RPC parity
 verify-live-hydration.mjs              | .github/workflows/deploy-frontend.yml                | post-deploy check against the served bundle
+verify-loc-classify-postgrest-latency.ts | npm run verify:loc-classify-latency                | live PostgREST-path check (2026-08-31 loc_classify timeout incident); no scheduled workflow yet
 verify-location-index-source.ts        | npm run verify:location-index                        | needs the location index source; run by the taxonomy/index suite
 verify-migration-content-parity.ts     | .github/workflows/migration-drift-guard.yml          | drift condition #5, live against production; same reason as the drift checker below - content divergence anywhere would fail every unrelated PR
 verify-migration-drift-vs-production.ts| .github/workflows/migration-drift-guard.yml          | AGENTS.md pins it OUT of npm test: drift anywhere in production would fail every unrelated PR
