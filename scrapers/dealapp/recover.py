@@ -32,6 +32,59 @@ from scrapers.dealapp.run import _listing_schema, fetch_one
 TABLES = ["dealapp_residential_listings", "dealapp_commercial_listings"]
 PAGE = 1000          # supabase select page size
 UPDATE_CHUNK = 100   # reactivations per update round-trip
+SELECT_CHUNK = 200   # ad_numbers per protection-lookup round-trip
+
+# A dual-table platform routes each ad to exactly ONE of these; the other is its sibling.
+SIBLING = {TABLES[0]: TABLES[1], TABLES[1]: TABLES[0]}
+
+
+def _protected(table: str, rows: list[dict]) -> set[int]:
+    """Row ids this sweep must NEVER reactivate, whatever the live page says.
+
+    THE ORACLE CANNOT ANSWER THIS QUESTION. `_classify` asks "is this URL still live?" — but a
+    res/com collision is two of OUR rows sharing ONE source URL, so the page is live for both and
+    'live' is returned for the superseded row just as confidently as for the surviving one. That
+    verdict then sets active=true, and the orphan is back as a second Normal Filter card clicking
+    through to the same ad. This is the exact self-healing failure `retire_superseded_siblings`
+    documents for verify_gone, in a second code path that was left unguarded.
+
+    Measured live 2026-08-31: run 38444 reported `recovered=2` and those two rows were dealapp
+    DA499170 + DA549199 — retired by the 2026-08-30 collision repair with recorded source evidence
+    («محطة وقود», «أرض تجارية») and reactivated by this sweep the next night.
+
+    Two independent protections, because they cover different rows:
+      • ADJUDICATED — a decision is on record for this row (ops_adjudicated_listing). The SQL
+        recovery path auto_recover_false_inactive() grew exactly this guard on 2026-08-30; this
+        job is the other half of the same net and must agree with it, or a nightly sweep simply
+        undoes what the adjudication settled.
+      • SIBLING-ACTIVE — the same ad_number is live in the sibling table. Structural and needs no
+        prior decision, so it also protects a collision nobody has adjudicated yet.
+    """
+    if not rows:
+        return set()
+    by_ad = {(r.get("ad_number") or ""): r["id"] for r in rows if r.get("ad_number")}
+    ids = {r["id"] for r in rows}
+
+    adjudicated = {
+        r["listing_id"]
+        for r in (sb().table("ops_adjudicated_listing").select("listing_id")
+                  .eq("tbl", table).execute().data or [])
+    } & ids
+
+    sibling_live: set[int] = set()
+    ads = sorted(by_ad)
+    for i in range(0, len(ads), SELECT_CHUNK):
+        chunk = ads[i:i + SELECT_CHUNK]
+        live = (sb().table(SIBLING[table]).select("ad_number")
+                .in_("ad_number", chunk).eq("active", True).execute().data or [])
+        sibling_live |= {by_ad[r["ad_number"]] for r in live if r.get("ad_number") in by_ad}
+
+    blocked = adjudicated | sibling_live
+    if blocked:
+        print(f"   ⛔ {table}: {len(blocked)} row(s) protected from recovery "
+              f"({len(adjudicated)} adjudicated, {len(sibling_live)} live in "
+              f"{SIBLING[table]}) — a shared URL cannot prove which row is the live one", flush=True)
+    return blocked
 
 
 def _inactive_rows(table: str, limit: int) -> list[dict]:
@@ -50,6 +103,10 @@ def _inactive_rows(table: str, limit: int) -> list[dict]:
         if len(page) < PAGE or (limit and len(rows) >= limit):
             break
         lo += PAGE
+    # Filter BEFORE --limit so a protected row can never consume a slot, and before any fetch so
+    # the sweep does not spend a request deciding something it is not allowed to act on.
+    blocked = _protected(table, rows)
+    rows = [r for r in rows if r["id"] not in blocked]
     return rows[:limit] if limit else rows
 
 
