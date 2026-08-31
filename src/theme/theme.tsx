@@ -161,9 +161,12 @@ export function useThemeColors(): typeof darkColors {
   return useTheme().colors;
 }
 
-// A subtree pinned to the LIGHT design regardless of the user's appearance (owner 2026-08-29: the
-// Agent/chat screen is white/light by design — dark mode continues elsewhere). Two halves, one
-// wrapper: the data-ez-light attribute re-resolves every var() token to light (palette.ts), and the
+// A subtree pinned to the LIGHT design regardless of the user's appearance. Used on the Agent/chat
+// screen from 2026-08-29 to 2026-08-30 ("white by design"); the owner reversed that decision
+// 2026-08-30 ("dark means everything dark and forever, until the user changes it manually") — the
+// component is kept as a general-purpose utility (no current callers), not currently applied
+// anywhere. Two halves, one wrapper: the data-ez-light attribute re-resolves every var() token to
+// light (palette.ts), and the
 // overridden context makes the resolved-theme consumers inside (useTheme/useThemeColors and the
 // parser-site hooks in lib/appearance.ts — hero asset, gradients, interpolations, the sidebar's
 // dark overrides) agree with what the CSS is painting. mode/setMode pass through untouched, so the

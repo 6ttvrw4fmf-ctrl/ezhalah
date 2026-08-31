@@ -11,7 +11,10 @@
 //     expo-linear-gradient) use resolved-palette LITERALS (useThemePalette), never var() tokens;
 //   • the hero sketch swaps to a pre-rendered chalk-on-night asset — no CSS filter hacks;
 //   • the account menu is CLEAN (owner reversal 2026-08-29: no banner artwork) and fully RTL;
-//   • the Agent/chat screen is pinned to the LIGHT design via ForceLightTheme + [data-ez-light].
+//   • dark mode is GLOBAL AND STICKY (owner 2026-08-30, reverses an earlier 2026-08-29 decision):
+//     the Agent/chat screen no longer force-pins light via ForceLightTheme — every screen,
+//     /agent included, follows the signed-in user's real preference, and stays that way across
+//     navigation (a search routes through /agent, which used to silently drop it back to light).
 //
 // Interaction/menu behavior itself is pinned by scripts/verify-account-menu-contract.ts (PR#1206);
 // this file owns the RENDERING architecture. Mutation-proven:
@@ -106,9 +109,9 @@ check('persistName routes the rename through persistDisplayName', /const persist
 check('the close × lands physical top-right under RTL (direction-aware)',
   /centerClose: \{ position: 'absolute', top: 12, \.\.\.\(I18nManager\.isRTL \? \{ left: 12 \} : \{ right: 12 \}\)/.test(menu));
 
-// ── 7. the Agent/chat screen is WHITE BY DESIGN (owner 2026-08-29) ──────────────────────────────
-// EXECUTED: the real buildThemeCss() must emit the [data-ez-light] subtree block that re-resolves
-// every token to light inside a pinned surface — in BOTH dark paths (explicit and OS-preference).
+// ── 7. ForceLightTheme the UTILITY still works, in case something needs it later ────────────────
+// EXECUTED: the real buildThemeCss() still emits the [data-ez-light] subtree block, and the
+// component's own mechanics are correct — but (see section 8) nothing currently calls it.
 const css2 = buildThemeCss();
 const lightBlock = css2.split('[data-ez-light]')[1] ?? '';
 check('buildThemeCss emits the [data-ez-light] light-pin block', css2.includes('[data-ez-light]'));
@@ -119,11 +122,24 @@ const themeSrc = read('src/theme/theme.tsx');
 check('ForceLightTheme overrides resolved to light with light literals', /ForceLightTheme[\s\S]{0,600}resolved: 'light', colors: themeColors\('light'\)/.test(themeSrc));
 check('ForceLightTheme renders the data-ez-light attribute container', themeSrc.includes("dataSet: { ezLight: '1' }"));
 check('ForceLightTheme passes mode/setMode through (controls inside still change the real preference)', /ForceLightTheme[\s\S]{0,700}\.\.\.parent/.test(themeSrc));
+
+// ── 8. DARK MODE IS GLOBAL AND STICKY (owner 2026-08-30) ─────────────────────────────────────────
+// Reverses section 7's original 2026-08-29 decision: "dark means everything dark and forever —
+// until the user changes it manually, even if he leaves the page and re-enters." A signed-in
+// user's dark preference must survive navigating to /agent (which every search routes through) —
+// the exact bug this pins: search silently dropped dark because the Agent screen force-pinned
+// light on every render. Every color there already flows through the dark-reactive `colors.*` CSS
+// var tokens (tokens.ts), so this needed no new dark styling — only removing the override.
 const agentSrc = read('src/app/agent.tsx');
-check('agent screen wraps its main return in ForceLightTheme', agentSrc.includes('<ForceLightTheme>') && agentSrc.includes('</ForceLightTheme>'));
-check('the docked sidebar joins the light pin on /agent (and only there)',
-  /pathname === '\/agent'\s*\?\s*<ForceLightTheme container="bare"><Sidebar docked/.test(read('src/app/_layout.tsx')));
-check('agent pre-session placeholder is pinned light too', /isAppSessionStarted\(\)\) \{\s*return <ForceLightTheme>/.test(agentSrc));
+// Scoped to the import/JSX usage, not bare mentions — the file's own history comments legitimately
+// name ForceLightTheme in prose (repo rule: a comment is not a code path, so don't ban the word).
+check('agent screen does NOT import ForceLightTheme', !/import\s*\{[^}]*ForceLightTheme/.test(agentSrc));
+check('agent screen main return is not wrapped in a light pin', !agentSrc.includes('<ForceLightTheme>'));
+const layoutSrc = read('src/app/_layout.tsx');
+check('the docked sidebar does not import ForceLightTheme',
+  !/import\s*\{[^}]*ForceLightTheme/.test(layoutSrc));
+check('the docked sidebar no longer special-cases /agent into a light pin',
+  !layoutSrc.includes('<ForceLightTheme') && !/pathname === '\/agent'/.test(layoutSrc));
 
 console.log(failed === 0 ? '\n✅ full-app theme contract holds.' : `\n❌ ${failed} check(s) failed.`);
 process.exit(failed === 0 ? 0 : 1);
