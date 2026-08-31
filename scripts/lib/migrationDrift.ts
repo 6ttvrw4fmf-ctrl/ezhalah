@@ -113,8 +113,45 @@ export function normalizeMigrationSql(sql: string): string {
   return sql.replace(/\s+$/, '');
 }
 
-export type AppliedDigest = { version: string; name: string; md5: string };
-export type RepoMigrationContent = { version: string; name: string; file: string; md5: string };
+// ── DIVERGENCE CLASSIFICATION (routine #7, 2026-08-31) ────────────────────────────────────────
+//
+// ADDITIVE. This does NOT relax the comparison above — `normalizeMigrationSql` still decides
+// WHETHER a file diverges, byte-exactly, and the "no comment-stripping" rule stated above still
+// governs that decision. What follows only CLASSIFIES a divergence the exact comparison has
+// already found, so the alert can carry a dedup key per class.
+//
+// WHY IT EXISTS. Condition #5 raised on ONE constant dedup key. mon_raise() returns 0 and leaves
+// dispatched_at SET on an already-open key that has not escalated, so with any divergence standing
+// open, a NEW one only rewrote the open alert's payload — no dispatch, no GitHub issue, nobody
+// told. Measured 2026-08-31: the three standing divergences were all COMMENT-ONLY (rationale
+// written into the file after the migration was applied — an ordinary workflow that will recur),
+// and they were occupying the key that the dark-detector shape this barrier exists for would need.
+//
+// Only WHOLE-LINE comments are stripped. A line starting with `--` cannot be executable SQL; a
+// trailing `-- ...` on a code line is deliberately kept, so real SQL can never be reclassified as
+// a comment. Must stay byte-symmetric with ops_migration_content_digests().code_md5 — the
+// 2026-08-30 asymmetric-normalisation class (issue #1357) is what happens when the two sides drift.
+export function stripSqlCommentsAndBlanks(sql: string): string {
+  return sql
+    .split('\n')
+    .filter((l) => l.trim() !== '' && !/^\s*--/.test(l))
+    .map((l) => l.replace(/\s+$/, ''))
+    .join('\n');
+}
+
+export type AppliedDigest = { version: string; name: string; md5: string; codeMd5?: string };
+export type RepoMigrationContent = {
+  version: string;
+  name: string;
+  file: string;
+  md5: string;
+  codeMd5?: string;
+};
+// 'code' — the executable SQL differs: the dangerous class (SQL, or a detector registration,
+//          living only in git or only in production). Always P1.
+// 'comments' — only whole-line comments/blank lines differ: benign, and separately keyed so it can
+//          never suppress a 'code' finding.
+export type DivergenceKind = 'code' | 'comments';
 export type ContentDivergence = {
   file: string;
   version: string;
@@ -122,7 +159,17 @@ export type ContentDivergence = {
   appliedVersion: string;
   repoMd5: string;
   appliedMd5: string;
+  kind: DivergenceKind;
 };
+
+// FAILS CLOSED. A divergence is only ever downgraded to 'comments' on positive proof that both
+// code digests are present AND equal. A missing digest on either side (an older server that does
+// not return code_md5 yet, a rollback, a malformed payload) classifies as 'code' — the class that
+// alerts at P1 — rather than silently reading as benign.
+export function classifyDivergence(repoCodeMd5?: string, appliedCodeMd5?: string): DivergenceKind {
+  if (!repoCodeMd5 || !appliedCodeMd5) return 'code';
+  return repoCodeMd5 === appliedCodeMd5 ? 'comments' : 'code';
+}
 
 // #5: committed files whose content differs from the statements production actually executed.
 //
@@ -168,6 +215,7 @@ export function findContentDivergence(
       appliedVersion: applied.version,
       repoMd5: f.md5,
       appliedMd5: applied.md5,
+      kind: classifyDivergence(f.codeMd5, applied.codeMd5),
     });
   }
   return out.sort((a, b) => a.file.localeCompare(b.file));
