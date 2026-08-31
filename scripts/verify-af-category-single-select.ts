@@ -44,9 +44,26 @@ check('contextBeds cleared on switch', swapped.contextBeds === null);
 check('contextBedsList cleared on switch', swapped.contextBedsList === null);
 check('contextSize cleared on switch', swapped.contextSize === null);
 
-const toggledOff = setCategory(seed, 'Residential');
-check('tapping the SAME category clears it (null, not the same value)', toggledOff.category === null);
-check('toggling off also clears typeGroups/type/types/detail', toggledOff.typeGroups === null && toggledOff.type === null && toggledOff.types === null && toggledOff.detail === null);
+// RE-TAP NO LONGER DESELECTS (owner ruling 2026-08-30). A search always lands on exactly one
+// category. The old contract let a re-tap set category=null, which is both a product oddity ("neither"
+// is not a search anyone means to run) and the precondition of a measured data leak: with p_category
+// null the RPC's purity predicate and matchesType() were BOTH disabled and 1,202 Commercial rows
+// reached a Residential search on 2026-07-17 (verify-null-category-purity.ts). This asserts the way
+// into that state is gone; that barrier still defends the state itself, in depth.
+const reTapped = setCategory(seed, 'Residential');
+check('re-tapping the SAME category keeps it selected (never null)', reTapped.category === 'Residential');
+check('re-tapping is a NO-OP — it must not wipe the scope the user already built',
+  reTapped.typeGroups === seed.typeGroups && reTapped.type === seed.type
+  && reTapped.types === seed.types && reTapped.detail === seed.detail);
+// The invariant itself, stated once: no tap sequence can produce a category-less query.
+check('no sequence of taps can reach a null category', (() => {
+  let q: any = HOME_DEFAULT_QUERY();
+  for (const c of ['Residential','Residential','Commercial','Commercial','Residential']) {
+    q = setCategory(q, c);
+    if (!q.category) return false;
+  }
+  return true;
+})());
 
 // ── 2. cohortAllows returns FALSE for a cross-category scope even if one is constructed ─────────
 // A Residential-category scope with a Commercial type must yield zero AF questions — cohortAllows
