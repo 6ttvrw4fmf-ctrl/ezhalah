@@ -9,8 +9,8 @@
 // corollary: `… | tail` reports tail's status) — redirect to a file and read $?.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
-         findings, skips, skip, ledgerRecord, engineAvailable, openMobileSidebar,
-         THREE_CHATS, SUB, BASE } from './harness.mjs';
+         findings, skips, skip, ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
+         closeMobileSidebar, THREE_CHATS, SUB, BASE } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -538,6 +538,130 @@ JOURNEYS['adv-background-tab'] = async (mobile) => withPage({ mobile, signedIn: 
   await other.close().catch(() => {});
 });
 
+/** J16 — PART 1's Favorites clause IN FULL: "add, remove, and the favorited state surviving
+ *  NAVIGATION and refresh." `sidebar-row-actions` proves add, remove, and the refresh half. The
+ *  navigation half had no committed journey — it was covered once, on 2026-08-30, by an ad-hoc
+ *  script that was never committed and died with its container, leaving a ledger row asserting
+ *  coverage that nothing could reproduce (see verify-journey-ledger-reachable.ts).
+ *
+ *  REFRESH AND NAVIGATION FAIL DIFFERENTLY, which is why one does not stand in for the other. A
+ *  refresh re-reads localStorage from scratch, so it proves the write REACHED DISK. Navigation
+ *  keeps the same JS context alive and re-mounts the sidebar against the in-memory store, so it
+ *  proves the star survives a REMOUNT — a star written to disk but dropped from context state comes
+ *  back on reload and vanishes on navigation, and only this half sees that.
+ *
+ *  The trip is the real mode toggle (تصفية ↔ الوكيل الذكي), both halves of which router.replace()
+ *  by owner rule (index.tsx, defect fix 2026-08-23) — so this journey also walks the exact path
+ *  J17 asserts costs no history. */
+JOURNEYS['adv-favorite-survives-navigation'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
+  const name = `adv-favorite-survives-navigation:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const starredIds = async () => ((await storedHistory(page)) || [])
+    .filter((x) => x.starred || x.favorite || x.pinned).map((x) => x.id).join(',');
+
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'mobile sidebar drawer would not open'); return; }
+  if (!(await openRowMenu(page, 'فلل جدة'))) { skip(name, 'row ⋯ menu would not open'); return; }
+  if (!(await clickText(page, 'أضف إلى المفضلة'))) { skip(name, 'favourite action not in the menu'); return; }
+  await sleep(1800);
+  // Whether the star LANDS is sidebar-row-actions' assertion, not this one's. If it did not land
+  // there is nothing here to navigate away from, so this skips rather than filing a second, noisier
+  // copy of a defect another journey already owns.
+  const before = await starredIds();
+  if (before !== 'h2') { skip(name, `favourite did not land (flagged [${before}]) — sidebar-row-actions owns that assertion`); return; }
+
+  // At 375px the drawer covers the ModeSwitch (panel w=307.5 of 375, «الوكيل الذكي» at x=217), so
+  // the tap would be intercepted. Close it the way a person does — the exposed backdrop strip.
+  if (mobile && !(await closeMobileSidebar(page))) { skip(name, 'mobile drawer would not close'); return; }
+  if (!(await clickText(page, 'الوكيل الذكي'))) { skip(name, `mode switch to agent: ${clickReason()}`); return; }
+  await sleep(3500);
+  if (!(await clickText(page, 'تصفية'))) { skip(name, `mode switch back to filter: ${clickReason()}`); return; }
+  await sleep(3500);
+
+  const after = await starredIds();
+  if (after !== before) {
+    defect(name, 'the favourite did not survive navigation',
+      `starred [${before}] before the تصفية↔الوكيل الذكي round trip, [${after}] after — the star was dropped by a screen change, not by a refresh`);
+    return;
+  }
+  pass(name, `favourite survived a mode-switch round trip (still [${after}])`);
+
+  // ON DISK IS NOT ON SCREEN. A star the store still holds but the remounted sidebar no longer
+  // renders is the same bug to the user, so the row is required back in المفضلة visually too.
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'sidebar would not reopen after navigation'); return; }
+  const starHeader = await page.getByText('المفضلة', { exact: true }).count();
+  const row = await page.getByText('فلل جدة', { exact: true }).count();
+  if (!row) defect(name, 'the favourited chat vanished from the sidebar after navigation', '«فلل جدة» is not rendered at all');
+  else if (!starHeader) defect(name, 'the favourited chat is no longer in المفضلة after navigation', 'the row is present but the Starred bucket is gone');
+  else pass(name, 'the row is still rendered under المفضلة after navigation');
+  if (bag.pageErrors.length) defect(name, 'page error during the favourite navigation trip', bag.pageErrors.join(' | '));
+});
+
+/** J17 — THE MODE TOGGLE COSTS NO HISTORY, from the user's side (PART 5 shape 9).
+ *
+ *  Owner rule (src/app/index.tsx, defect fix 2026-08-23): the Filter/Agent pill is a MODE TOGGLE
+ *  between two peer screens, so BOTH halves router.replace(). Pushing on the way out while
+ *  replacing on the way back left the pushed /agent slot holding a duplicate '/', so every round
+ *  trip added a junk history entry and leaked another mounted Filter screen — "the Back button then
+ *  just re-showed the same page N times before leaving the site."
+ *
+ *  Routine #4's live sweep already watches this as `tab-switch-no-junk-history`, and this does NOT
+ *  duplicate it: that watch is desktop-only (`withPage(false, …)`) and asserts history.length. This
+ *  is the SYMPTOM half that is mine (PART 2: I test what the user feels, #4/#7 test the mechanism)
+ *  — that ONE Back after three round trips actually leaves, instead of re-showing the same screen —
+ *  and it runs at 375px too, where the toggle has never been exercised.
+ *
+ *  The oracle is history GROWTH plus where a single Back lands, never `about:blank` on its own: a
+ *  fresh Playwright context starts there, so leaving the app origin is CORRECT and is reported as
+ *  leaving, never as stranding (the trap J7 was rewritten for). */
+JOURNEYS['adv-modeswitch-back-push-vs-replace'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `adv-modeswitch-back-push-vs-replace:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const depth = () => page.evaluate(() => history.length);
+  const h0 = await depth();
+
+  const ROUND_TRIPS = 3;
+  for (let i = 0; i < ROUND_TRIPS; i++) {
+    if (!(await clickText(page, 'الوكيل الذكي'))) { skip(name, `mode switch to agent on trip ${i + 1}: ${clickReason()}`); return; }
+    await sleep(2600);
+    if (!(await clickText(page, 'تصفية'))) { skip(name, `mode switch back to filter on trip ${i + 1}: ${clickReason()}`); return; }
+    await sleep(2600);
+  }
+  const h1 = await depth();
+  // Both halves replace, so N round trips must cost nothing. One entry of slack absorbs the app's
+  // own param-rewriting on the first mount; three round trips costing three entries cannot.
+  if (h1 - h0 > 1) {
+    defect(name, 'the mode toggle pushes junk history',
+      `${ROUND_TRIPS} تصفية↔الوكيل الذكي round trips added ${h1 - h0} history entries (owner rule: both halves router.replace, so this must be 0)`);
+  } else {
+    pass(name, `${ROUND_TRIPS} round trips added ${h1 - h0} history entries`);
+  }
+
+  // Only ONE Filter form may be mounted — the leak half of the same 2026-08-23 defect.
+  const forms = await page.locator('[data-testid="city-input"]').count();
+  if (forms > 1) defect(name, 'the mode toggle leaks mounted screens', `${forms} Filter forms mounted at once after ${ROUND_TRIPS} round trips`);
+  else pass(name, `exactly ${forms} Filter form mounted after ${ROUND_TRIPS} round trips`);
+
+  // THE SYMPTOM: one Back must not re-show the app for a fourth time.
+  await page.goBack({ waitUntil: 'load' }).catch(() => {});
+  await sleep(2500);
+  const url = page.url();
+  if (!url.startsWith(BASE)) {
+    pass(name, `one Back left the site (${url}) — the toggle left nothing to unwind`);
+  } else {
+    // Still on the app: legitimate ONLY if the toggle cost no history (h1-h0 <= 1), in which case
+    // this is the app's own single entry unwinding. If it pushed, this is the reported symptom.
+    await settle(page);
+    const text = await bodyText(page);
+    if (h1 - h0 > 1) {
+      defect(name, 'Back re-shows the same screen instead of leaving',
+        `after ${ROUND_TRIPS} round trips one Back is still on ${url} with ${h1 - h0} entries left to unwind`);
+    } else if (text.length < 200) {
+      defect(name, 'Back stranded the user', `body is ${text.length} chars at ${url}`);
+    } else {
+      pass(name, `one Back landed on a usable in-app screen (${url})`);
+    }
+  }
+  if (bag.pageErrors.length) defect(name, 'page error during the mode-switch round trips', bag.pageErrors.join(' | '));
+});
+
 // ── appearance: the auth gate, in a REAL browser ────────────────────────────────────────────────
 // scripts/verify-appearance-lifecycle.ts already owns this rule, but it executes the pure resolver
 // and STRING-PINS the provider/boot wiring. PART 5 is explicit that a barrier for a journey bug is
@@ -678,6 +802,11 @@ console.log(`SKIPPED (never executed — not a pass): ${skips.length}`);
 for (const sk of skips) console.log(`  · [${sk.journey}] ${sk.why}`);
 console.log(`DEFECTS: ${findings.length}`);
 for (const f of findings) console.log(`  · [${f.journey}] ${f.what}: ${f.detail}`);
+
+// Declare what this runner OWNS before writing a single row. ledgerRecord() refuses any key not in
+// this set, so a probe script that never registers cannot mint permanent coverage for itself — see
+// harness.mjs's registerJourneys() header for the three orphan rows that made this necessary.
+console.log(`LEDGER KEYS OWNED BY THIS RUNNER: ${registerJourneys(Object.keys(JOURNEYS))}`);
 
 // A journey that never executed is recorded as `skip`, never as `pass`.
 for (const [k, v] of Object.entries(perJourney)) {

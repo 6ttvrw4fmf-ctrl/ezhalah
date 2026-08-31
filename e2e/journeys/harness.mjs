@@ -142,7 +142,18 @@ export async function withPage(opts, fn) {
     ...(engine === 'chromium' ? {} : { userAgent: undefined }),
   });
   await ctx.addInitScript(([sess, hist, sub, wantAuth]) => {
-    localStorage.setItem('hasSeenIntro', '1');
+    // AN INIT SCRIPT RUNS ON EVERY DOCUMENT, INCLUDING about:blank — where touching localStorage
+    // throws `SecurityError: Access is denied for this document`. Playwright reports that as a
+    // PAGE ERROR on the page object, so it lands in `bag.pageErrors` and every journey that checks
+    // them files it as a production defect. `adv-modeswitch-back-push-vs-replace` hit exactly that
+    // on its first run (2/2, desktop and mobile): all three product assertions passed and the
+    // journey still went red, blaming the app for the harness's own throw on the about:blank the
+    // fresh context starts at and goBack() returns to. That is PART 9's first expensive error —
+    // a harness artifact filed as an Ezhalah bug — reaching the report from inside the harness
+    // itself. `back-after-search` never saw it only because it returns early when Back leaves the
+    // origin, before its pageErrors check.
+    if (!location.protocol.startsWith('http')) return;
+    try { localStorage.setItem('hasSeenIntro', '1'); } catch { return; }
     if (!wantAuth) return;
     localStorage.setItem('sb-aannarbkwcymrotzwdbo-auth-token', JSON.stringify(sess));
     // Seed ONCE per context: this init script re-runs on every navigation, and re-seeding on a
@@ -251,9 +262,52 @@ const H = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'applic
  * that fails silently is worse than one that does not happen.
  */
 export const LEDGER_RESULTS = ['pass', 'fail', 'skip'];
+
+/**
+ * A LEDGER ROW MAY ONLY EXIST FOR A JOURNEY THE COMMITTED RUNNER CAN RE-RUN.
+ *
+ * PART 3 item 7 gives the ledger one job: make "have we tried this exact sequence before" a QUERY
+ * rather than a memory, so coverage rotates toward whatever has gone longest untested. A row whose
+ * journey exists in no committed file breaks exactly that: it reads as coverage forever and can
+ * never be reproduced, re-run, or rotated to.
+ *
+ * THIS IS NOT HYPOTHETICAL. On 2026-08-30 an ad-hoc probe script wrote three rows —
+ * `adv-favorites-remove`, `adv-favorite-survives-navigation`, `adv-modeswitch-back-push-vs-replace`
+ * — and was never committed, so it died with its container. On 2026-08-31 nothing in the repo could
+ * produce those keys (`grep -rl` across the tree: no match), yet two of them claimed coverage for
+ * PART 1 mandate clauses no committed journey actually tested: "the favorited state surviving
+ * NAVIGATION" and the mode toggle's push-vs-replace Back behaviour. The ledger was asserting a
+ * clean bill of health over a hole — the same shape AGENTS.md records for the nine dark detectors
+ * and `mon_detect_orphaned_detectors()`, which exists because "a detector nothing reaches is
+ * decoration."
+ *
+ * So the guard is at the WRITE POINT, where it fails closed: an unregistered writer records
+ * nothing. Exploration stays free — an adversarial probe can drive any journey it likes — but it
+ * cannot mint PERMANENT COVERAGE for itself. To claim a ledger row, land the journey in
+ * `run.mjs` first, which is PART 5's rule ("add a permanent regression barrier") already.
+ */
+let ownedLedgerKeys = null;
+
+/** Both viewport rows the runner emits for a journey. The single source of the key shape. */
+export const ledgerKeysFor = (names) => names.flatMap((n) => [`${n}:desktop`, `${n}:mobile`]);
+
+/** Called by the runner with its own `Object.keys(JOURNEYS)` before any row is written. */
+export function registerJourneys(names) {
+  ownedLedgerKeys = new Set(ledgerKeysFor(names));
+  return ownedLedgerKeys.size;
+}
+
+/** Unregistered ⇒ nothing is owned. Fails CLOSED: a writer that never registered records nothing. */
+export const isOwnedLedgerKey = (key) => !!ownedLedgerKeys && ownedLedgerKeys.has(key);
+
 export async function ledgerRecord(key, result, notesText) {
   if (!LEDGER_RESULTS.includes(result)) {
     console.log(`  ledger  REFUSED «${result}» for ${key} — must be one of ${LEDGER_RESULTS.join('|')}`);
+    return false;
+  }
+  if (!isOwnedLedgerKey(key)) {
+    console.log(`  ledger  REFUSED «${key}» — no committed journey in run.mjs produces this key, so `
+      + `the row could never be re-run (PART 3 item 7). Land the journey first, then record it.`);
     return false;
   }
   try {
@@ -284,6 +338,46 @@ export async function ledgerRecord(key, result, notesText) {
  * cursor:pointer box in the top bar — and then clicked as a REAL element handle, never as bare
  * viewport coordinates (PART 9.2 (4)).
  */
+/**
+ * Close the 375px drawer so the screen underneath can be driven.
+ *
+ * NEEDED BECAUSE THE DRAWER COVERS THE MODE SWITCH. Measured on production 2026-08-31, mobile375:
+ * the drawer panel is x=0 w=307.5 of a 375px viewport, and «الوكيل الذكي» sits at x=217 — INSIDE
+ * the panel's span, so any tap on it while the drawer is open is intercepted. That is the exact
+ * failure `new-chat-blank` was rewritten to dodge by re-ordering its steps; a journey that must
+ * open the drawer FIRST (star a row) and navigate SECOND cannot dodge it and needs a real close.
+ *
+ * The backdrop (`s.backdrop` in Sidebar.tsx: position absolute, inset 0, rgba(8,18,12,0.42),
+ * `onPress={close}`) is rendered UNDER the panel, so the strip from the panel's right edge to the
+ * viewport edge is the one place a tap reaches it. Both rects are read at runtime and the hit is
+ * confirmed with elementFromPoint before clicking — never a hard-coded x, which would rot the day
+ * the panel width changes (PART 9.2 (4): the element's own geometry in CSS pixel space).
+ */
+export async function closeMobileSidebar(page) {
+  if (!(await page.locator('[data-testid="sidebar-search-btn"]').count())) return true;
+  const pt = await page.evaluate(() => {
+    const btn = document.querySelector('[data-testid="sidebar-search-btn"]');
+    if (!btn) return null;
+    let panel = null;
+    for (let n = btn, i = 0; i < 12 && n; i++, n = n.parentElement) {
+      const r = n.getBoundingClientRect();
+      if (r.width > 100 && r.width < innerWidth) panel = r;
+    }
+    if (!panel) return null;
+    const x = (panel.x + panel.width + innerWidth) / 2;   // midpoint of the exposed strip
+    const y = innerHeight / 2;
+    const hit = document.elementFromPoint(x, y);
+    // Only click if the backdrop really is the topmost element there. If the panel has grown to
+    // full width there is no strip, and clicking anyway would hit a sidebar row instead.
+    if (!hit || !getComputedStyle(hit).backgroundColor.includes('8, 18, 12')) return null;
+    return { x, y };
+  });
+  if (!pt) return false;
+  await page.mouse.click(pt.x, pt.y).catch(() => {});
+  await sleep(1200);
+  return (await page.locator('[data-testid="sidebar-search-btn"]').count()) === 0;
+}
+
 export async function openMobileSidebar(page) {
   if (await page.locator('[data-testid="sidebar-search-btn"]').count()) return true;
   for (let attempt = 0; attempt < 3; attempt++) {
