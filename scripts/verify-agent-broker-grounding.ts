@@ -60,16 +60,52 @@ for (const r of ["بدل ما أدور قصر راح أوسّع البحث",
   check(`widening promise: «${r.slice(0, 40)}»`, WIDENS.test(r));
 }
 
+console.log("\n── the reply may not claim an amenity the final query does not carry (owner 2026-08-31, gym class) ──");
+// «أدور لك شقة... فيها نادي» while amenities carries no gym token is the exact reply/query drift class
+// this file already pins for inventory claims and widening promises — generalized, not gym-specific:
+// one regex per certified token. Extract the REAL map + function from the deployed source (not a
+// hand copy) so a future edit to the regex content, not just its wiring, is caught here too.
+const grabAmenityChecker = (): ((reply: string, amenities: string[]) => boolean) => {
+  const mapM = edge.match(/const AMENITY_MENTION_RE: Record<string, RegExp> = (\{[\s\S]*?\n\});/);
+  if (!mapM) throw new Error("AMENITY_MENTION_RE not found in the deployed source");
+  const fnM = edge.match(/function replyClaimsUnlistedAmenity\(reply: string, amenities: string\[\]\): boolean \{([\s\S]*?)\n\}/);
+  if (!fnM) throw new Error("replyClaimsUnlistedAmenity not found in the deployed source");
+  // eslint-disable-next-line no-eval
+  return eval(`(function(reply, amenities) {\n  const AMENITY_MENTION_RE = ${mapM[1].replace(/;$/, "")};\n${fnM[1]}\n})`);
+};
+const claimsUnlistedAmenity = grabAmenityChecker();
+
+check("the owner's own example: reply claims a gym the query does not carry",
+  claimsUnlistedAmenity("أبشر، أدور لك شقة فيها نادي وحمامين", []));
+check("...but is CLEAN once gym is actually in the query",
+  !claimsUnlistedAmenity("أبشر، أدور لك شقة فيها نادي وحمامين", ["gym"]));
+check("English phrasing of the same claim is also caught",
+  claimsUnlistedAmenity("Looking for an apartment with a gym for you", []));
+check("a reply naming NO amenity at all is never flagged",
+  !claimsUnlistedAmenity("تمام، أدور لك شقة ٣ غرف في الرياض", []));
+check("a DIFFERENT already-certified amenity mentioned truthfully is not flagged",
+  !claimsUnlistedAmenity("أدور لك شقة فيها مصعد وموقف", ["elevator", "parking"]));
+check("claiming elevator while the query only carries parking is still caught (not just gym)",
+  claimsUnlistedAmenity("أدور لك شقة فيها مصعد وموقف", ["parking"]));
+check("a sibling rich token (pool) is covered generically, not just gym",
+  claimsUnlistedAmenity("أبحث لك عن فيلا فيها مسبح", []) && !claimsUnlistedAmenity("أبحث لك عن فيلا فيها مسبح", ["pool"]));
+check("groundReply neutralises the owner's exact reproduction case end-to-end",
+  !CLAIMS.test("أبشر، أدور لك شقة فيها نادي وحمامين") && !WIDENS.test("أبشر، أدور لك شقة فيها نادي وحمامين")
+  && claimsUnlistedAmenity("أبشر، أدور لك شقة فيها نادي وحمامين", []),
+  "groundReply's neutral fallback only fires when SOME check trips; confirms the amenity check is the one catching this reply, not CLAIMS/WIDENS by coincidence");
+
 console.log("\n── the guard is WIRED on every reply path ──");
-check("groundReply() exists", /function groundReply\(reply: string, locale: string\): string/.test(edge));
+check("groundReply() exists, now amenity-aware",
+  /function groundReply\(reply: string, locale: string, amenities: string\[\] = \[\]\): string/.test(edge));
 // M3 escaped the first version: the barrier proved the PATTERNS matched and the guard was WIRED, but
 // never that groundReply actually ACTS. Turning its body into `return r;` left every check green.
 check("groundReply actually neutralises — it is not a pass-through",
-  edge.includes("if (!CLAIMS_INVENTORY.test(r) && !PROMISES_WIDENING.test(r)) return r;"),
+  edge.includes("if (!CLAIMS_INVENTORY.test(r) && !PROMISES_WIDENING.test(r) && !replyClaimsUnlistedAmenity(r, amenities)) return r;"),
   "without this early-return-ONLY-when-clean line the function returns every reply untouched");
 check("it neutralises rather than surgically editing Arabic prose",
   /return locale === "en" \? "Got it — searching now\." : "تمام، أدوّر لك الحين\.";/.test(edge));
-check("the LISTINGS reply is grounded", /reply: groundReply\(replyOut, locale\),/.test(edge));
+check("the LISTINGS reply is grounded, now with the amenities it will actually carry",
+  /reply: groundReply\(replyOut, locale, outAmenities\),/.test(edge));
 // Composed with oneQuestionOnly() since 2026-08-29 (one clarification question per turn). Still
 // grounded — groundReply runs FIRST, so the claim/widening guard applies before any truncation.
 // Assert the GROUNDING, not the punctuation that follows it. This pinned the exact `...) });` tail
@@ -83,8 +119,8 @@ check("the LISTINGS reply is grounded", /reply: groundReply\(replyOut, locale\),
 // is now the ONE place that decides a turn is a clarification, so both collapsed into a single
 // return building a local `reply` const first — same grounding, one fewer path to keep in sync, not
 // a weakening. The regex below tracks that real code shape rather than the pre-consolidation one.
-check("the MESSAGE reply is grounded",
-  /const reply = ambiguityReply \?\? oneQuestionOnly\(groundReply\(lead\(out\.reply\), locale\)\);/.test(edge));
+check("the MESSAGE reply is grounded, also amenity-aware",
+  /const reply = ambiguityReply \?\? oneQuestionOnly\(groundReply\(lead\(out\.reply\), locale, outAmenities\)\);/.test(edge));
 const paths = (edge.match(/reply: groundReply\(|reply: oneQuestionOnly\(groundReply\(|const reply = ambiguityReply \?\? oneQuestionOnly\(groundReply\(/g) ?? []).length;
 check(`every reply path goes through it (${paths} found)`, paths >= 2,
   "listings + the one unified clarification path (empty-search and the model's-own-question cases are now the SAME return)");

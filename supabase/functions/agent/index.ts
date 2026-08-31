@@ -151,13 +151,53 @@ function oneQuestionOnly(reply: string): string {
   return Number.isFinite(first) ? r.slice(0, first + 1).trim() : r;
 }
 
-function groundReply(reply: string, locale: string): string {
+// AMENITY-CLAIM SELF-CONSISTENCY (owner 2026-08-31, generalized from the gym incident): "gym" used
+// to be outside the certified vocabulary entirely, so the model could still write «...فيها نادي» in
+// the reply while `amenities` carried nothing — the reply claimed a filter the query never captured.
+// Adding gym (and 7 sibling tokens) to the vocabulary fixes THAT specific case, but the owner's rule
+// is general: the reply must never claim ANY certified amenity the model's own `amenities` array
+// omits. One regex per certified token, checked uniformly — not a gym special case, so the next
+// token this vocabulary gains is covered automatically instead of needing its own patch. Best
+// effort by construction (a missed synonym just means a caught claim gets through) — the floor under
+// it is groundReply() below, which strips the whole reply rather than leaving a false claim in.
+const AMENITY_MENTION_RE: Record<string, RegExp> = {
+  kitchen: /مطبخ|\bkitchen\b/i,
+  parking: /موقف|مواقف|\bparking\b/i,
+  elevator: /مصعد|\belevator\b|\blift\b/i,
+  ac: /تكييف|مكيف|air.?condition|\bA\/?C\b/i,
+  private_entrance: /مدخل\s*خاص|private\s*entrance/i,
+  maid_room: /غرفة\s*خادمة|maid'?s?\s*room/i,
+  driver_room: /غرفة\s*سائق|driver'?s?\s*room/i,
+  car_entrance: /مدخل\s*سيارة|car\s*entrance/i,
+  sanitation: /صرف\s*صحي|\bsanitation\b|\bsewage\b/i,
+  electricity: /كهرباء|\belectricity\b/i,
+  water_supply: /مياه|water\s*supply/i,
+  gym: /نادي|صالة\s*رياضية|جيم|\bgym\b/i,
+  pool: /مسبح|حمام\s*سباحة|\bpool\b|\bswimming\b/i,
+  garden: /حديقة|\bgarden\b/i,
+  balcony: /شرفة|بلكونة|تراس|\bbalcony\b|\bterrace\b/i,
+  laundry_room: /غرفة\s*غسيل|\blaundry\b/i,
+  optical_fibers: /ألياف\s*بصرية|فايبر|\bfib(?:er|re)\b/i,
+  separate_electricity_meter: /عداد\s*(?:كهرباء)?\s*(?:منفصل|مستقل)|(?:separate|own|independent)\s*electric\w*\s*meter/i,
+  separate_water_meter: /عداد\s*(?:ماء|مياه)\s*(?:منفصل|مستقل)|(?:separate|own|independent)\s*water\s*meter/i,
+};
+
+/** True when the reply names a certified amenity that `amenities` does not carry. */
+function replyClaimsUnlistedAmenity(reply: string, amenities: string[]): boolean {
+  const has = new Set(amenities.map((a) => String(a).toLowerCase()));
+  for (const [token, re] of Object.entries(AMENITY_MENTION_RE)) {
+    if (!has.has(token) && re.test(reply)) return true;
+  }
+  return false;
+}
+
+function groundReply(reply: string, locale: string, amenities: string[] = []): string {
   const r = String(reply ?? "");
   // AN EMPTY REPLY MUST NEVER SHIP. Found live 2026-08-29: «غرفتين» — a one-word answer continuing an
   // established search — produced a turn with NO reply text, so the user saw silence. Why the model
   // omitted it does not matter; silence is a product failure and this is the floor under it.
   if (!r.trim()) return locale === "en" ? "Got it — searching now." : "تمام، أدوّر لك الحين.";
-  if (!CLAIMS_INVENTORY.test(r) && !PROMISES_WIDENING.test(r)) return r;
+  if (!CLAIMS_INVENTORY.test(r) && !PROMISES_WIDENING.test(r) && !replyClaimsUnlistedAmenity(r, amenities)) return r;
   return locale === "en" ? "Got it — searching now." : "تمام، أدوّر لك الحين.";
 }
 
@@ -746,7 +786,7 @@ function stripFiller(s: string): string {
 // endpoint). Appended to the SYSTEM message as a belt-and-braces restatement of the shape and enum
 // values the SYSTEM prompt above already documents in prose — same list, machine-readable form, so
 // the model gets the contract from two directions.
-const JSON_SHAPE_HINT = `\n\nSTYLE: talk like a smart broker who knows the inventory, not a form. Adapt to obvious cues — if the user is brief or says «ورني»/«بس ورني»/"just show me", drop to ONE short critical question or simply search; if they are chatty, be a little more natural. Do not claim to read their emotions. NEVER say you have found or have options («لقيت لك», «عندي خيارات») — you write this reply BEFORE the search runs, so you cannot know; describe what you are about to search for instead. Never promise to widen or relax the search.\n\nCONVERSATION: when the user describes their SITUATION rather than a property («عندي عائلة من ٤ أشخاص», «أدور شي يناسبني أنا وزوجتي وطفلين», «مكان مناسب للعائلة», «مكان هادي»), that is CONTEXT, not filters. Never turn household size, lifestyle or a mood word into a bedroom count, an area, or any other value. Use kind="message" and ask the ONE next question that most narrows the search (usually property type, then Buy vs Rent, then city, then budget) — exactly ONE short question per turn — one question mark, never two questions stacked in a single reply, never a checklist. Once you have enough to search, search and stop asking.\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "ask_about" (array of the things the user expressed VAGUELY that you must NOT turn into a number — use "size" when they said big/large/wide/spacious/small («كبير»/«واسع»/«صغير») without any area figure, and "rating" when they praised the rating («تقييم عالي»/«ممتاز») without naming a number. Leave [] when nothing is vague. NEVER invent a bedroom count, an area, or a rating from a vague word), "furnished" (one of "yes"|"no"|"none" — "yes" only if the user asks for a FURNISHED place («مفروشة»), "no" only if they ask for an UNFURNISHED one («غير مفروشة»), "none" when they do not mention furnishing at all; never infer it from anything else), "af" (object of Advanced-Filter intents the user STATED; omit any key they did not state — never infer one. Keys and their ONLY allowed values: "property_age": "new"|"1_2"|"3_5"|"6_9"|"10p" (an EXACT named bucket ONLY when the user's own wording matches one) OR a plain number of years as a string (e.g. "5") for "less than/under/up to N years" whenever N does not exactly match one named bucket's own span — send the NUMBER so Ezhalah covers every age truthfully under it; NEVER guess the closest-sounding named bucket instead (e.g. "less than 5 years" is NOT "1_2" and NOT "3_5" alone — send "5" so new+1_2+3_5 are all truthfully included); "street_width": a number in metres they asked for (e.g. "20"); "direction": array of "شمال"|"جنوب"|"شرق"|"غرب"|"شمال شرق"|"شمال غرب"|"جنوب شرق"|"جنوب غرب"; "bathrooms": the number of bathrooms they asked for; "rating": "9.5"|"9.0"|"9.0_rc10" ONLY if they named a NUMBER on the 0-10 scale — a stated 9 or ٩ (including «٩ فما فوق») is "9.0", a stated 9.5 or ٩.٥ is "9.5", and «مع ١٠ تقييمات» or more alongside 9 is "9.0_rc10". If they only praised it («تقييم عالي», «ممتاز») with NO number, OMIT it and put "rating" in ask_about instead; "rnpl": "rnpl" if they want instalments/تقسيط; "unit_subtype": "استديو"|"شقق مخدومة"|"شقة"), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
+const JSON_SHAPE_HINT = `\n\nSTYLE: talk like a smart broker who knows the inventory, not a form. Adapt to obvious cues — if the user is brief or says «ورني»/«بس ورني»/"just show me", drop to ONE short critical question or simply search; if they are chatty, be a little more natural. Do not claim to read their emotions. NEVER say you have found or have options («لقيت لك», «عندي خيارات») — you write this reply BEFORE the search runs, so you cannot know; describe what you are about to search for instead. Never promise to widen or relax the search. Never claim in the reply that you are including, applying, or searching for a feature/amenity/filter unless that exact concept also appears in the structured fields below THIS SAME TURN (amenities, af, furnished, etc.) — if something the user asked for is outside your allowed vocabulary, acknowledge it neutrally without claiming to filter for it.\n\nCONVERSATION: when the user describes their SITUATION rather than a property («عندي عائلة من ٤ أشخاص», «أدور شي يناسبني أنا وزوجتي وطفلين», «مكان مناسب للعائلة», «مكان هادي»), that is CONTEXT, not filters. Never turn household size, lifestyle or a mood word into a bedroom count, an area, or any other value. Use kind="message" and ask the ONE next question that most narrows the search (usually property type, then Buy vs Rent, then city, then budget) — exactly ONE short question per turn — one question mark, never two questions stacked in a single reply, never a checklist. Once you have enough to search, search and stop asking.\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "ask_about" (array of the things the user expressed VAGUELY that you must NOT turn into a number — use "size" when they said big/large/wide/spacious/small («كبير»/«واسع»/«صغير») without any area figure, and "rating" when they praised the rating («تقييم عالي»/«ممتاز») without naming a number. Leave [] when nothing is vague. NEVER invent a bedroom count, an area, or a rating from a vague word), "furnished" (one of "yes"|"no"|"none" — "yes" only if the user asks for a FURNISHED place («مفروشة»), "no" only if they ask for an UNFURNISHED one («غير مفروشة»), "none" when they do not mention furnishing at all; never infer it from anything else), "af" (object of Advanced-Filter intents the user STATED; omit any key they did not state — never infer one. Keys and their ONLY allowed values: "property_age": "new"|"1_2"|"3_5"|"6_9"|"10p" (an EXACT named bucket ONLY when the user's own wording matches one) OR a plain number of years as a string (e.g. "5") for "less than/under/up to N years" whenever N does not exactly match one named bucket's own span — send the NUMBER so Ezhalah covers every age truthfully under it; NEVER guess the closest-sounding named bucket instead (e.g. "less than 5 years" is NOT "1_2" and NOT "3_5" alone — send "5" so new+1_2+3_5 are all truthfully included); "street_width": a number in metres they asked for (e.g. "20"); "direction": array of "شمال"|"جنوب"|"شرق"|"غرب"|"شمال شرق"|"شمال غرب"|"جنوب شرق"|"جنوب غرب"; "bathrooms": the number of bathrooms they asked for; "rating": "9.5"|"9.0"|"9.0_rc10" ONLY if they named a NUMBER on the 0-10 scale — a stated 9 or ٩ (including «٩ فما فوق») is "9.0", a stated 9.5 or ٩.٥ is "9.5", and «مع ١٠ تقييمات» or more alongside 9 is "9.0_rc10". If they only praised it («تقييم عالي», «ممتاز») with NO number, OMIT it and put "rating" in ask_about instead; "rnpl": "rnpl" if they want instalments/تقسيط; "unit_subtype": "استديو"|"شقق مخدومة"|"شقة"), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply"|"gym"|"pool"|"garden"|"balcony"|"laundry_room"|"optical_fibers"|"separate_electricity_meter"|"separate_water_meter" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -1225,6 +1265,18 @@ Deno.serve(async (req: Request) => {
       //
       // Read lazily, as a function: `location` is still being resolved below, and a snapshot taken
       // too early would freeze the pre-resolution value.
+      // Extracted once (owner 2026-08-31): understoodState() below, the listings query further
+      // down, AND groundReply()'s reply-honesty check all need this SAME sanitized array — computing
+      // it once means the three can never quietly drift apart. Safe to read eagerly (unlike
+      // location/regionPin/districtPin above): out.amenities is the raw model JSON and is never
+      // reassigned after this point, so there is no pre-resolution value to freeze early.
+      const outAmenities: string[] = Array.isArray(out.amenities)
+        ? [...new Set(out.amenities
+            .filter((a: unknown) => typeof a === "string")
+            .map((a: string) => a.trim().toLowerCase())
+            .filter(Boolean))]
+        : [];
+
       const understoodState = () => ({
         deal,
         bothDeals,
@@ -1243,12 +1295,7 @@ Deno.serve(async (req: Request) => {
         askAbout: Array.isArray(out.ask_about)
           ? out.ask_about.filter((a: unknown) => typeof a === "string" && a).map((a: string) => a.trim().toLowerCase())
           : [],
-        amenities: Array.isArray(out.amenities)
-          ? [...new Set(out.amenities
-              .filter((a: unknown) => typeof a === "string")
-              .map((a: string) => a.trim().toLowerCase())
-              .filter(Boolean))]
-          : [],
+        amenities: outAmenities,
       });
 
       let regionPin: string | undefined;   // region_ar to scope a twin city to one region
@@ -1415,14 +1462,14 @@ Deno.serve(async (req: Request) => {
         // A genuine loc_classify ambiguity has a specific, pre-built question; otherwise fall back
         // to the model's own reply text/phrasing (owner-confirmed: the platform enforces THAT this
         // turn is a clarification, never WHAT it asks about).
-        const reply = ambiguityReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale));
+        const reply = ambiguityReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale, outAmenities));
         return json({ kind: "message", reply, query: understoodState(), askCount: decision.askCount });
       }
 
       // decision.kind === "listings"
       return json({
         kind: "listings",
-        reply: groundReply(replyOut, locale),
+        reply: groundReply(replyOut, locale, outAmenities),
         askCount: decision.askCount,
         query: {
           deal,
@@ -1466,12 +1513,7 @@ Deno.serve(async (req: Request) => {
           // two surfaces drift. The model PROPOSES; the client DECIDES.
           af: (out.af && typeof out.af === "object" && !Array.isArray(out.af)) ? out.af : {},
           askAbout: askAboutList,
-          amenities: Array.isArray(out.amenities)
-            ? [...new Set(out.amenities
-                .filter((a: unknown) => typeof a === "string")
-                .map((a: string) => a.trim().toLowerCase())
-                .filter(Boolean))]
-            : [],
+          amenities: outAmenities,
         },
       });
     }
