@@ -250,6 +250,44 @@ const defect = (journey, layerPair, detail) => {
 };
 const note = (msg) => console.error(`    ${msg}`);
 
+// ── WATCH OBSERVATION — a watch is green only with POSITIVE evidence it ran (2026-08-31) ─────────
+// The ledger used to derive a watch's result as `findings.some(...) ? 'fail' : 'pass'`, i.e. it read
+// the ABSENCE of a finding as proof of a pass. Three different ways a watch can produce no finding
+// while never having been evaluated at all:
+//   • its journey threw a harness error (the egress proxy timed out two watch journeys on
+//     2026-08-31 — both were stamped `pass` with a fresh last_tested_at);
+//   • its journey returned null on purpose (`city not offered — skipped`);
+//   • nothing in the tree ever asserted it (buyrent-summary-both-budgets, unknown-period-stays-
+//     unknown and clarification-answer-commits were declared watches that no code evaluated, so
+//     they had been recorded `pass` on every run since they were added).
+// That is the failure shape AGENTS.md names outright — a monitor that cannot fire reads as a clean
+// bill of health. A watch now records `pass` ONLY if observeWatch() was reached at the point the
+// assertion is actually made; anything else records `skip`, never `pass`, and trips a floor.
+const watchesObserved = new Set();
+const observeWatch = (name) => { watchesObserved.add(name); };
+
+// Three watches are NOT evaluated by the browser at all, and saying so is the point. Each names the
+// OFFLINE barrier that does evaluate it, in `npm test`. This is the same discipline
+// scripts/test-exclusions.txt already applies to skipped tests: an entry naming nowhere is a check
+// that runs nowhere, so the named file must exist AND actually run — both asserted by
+// scripts/verify-live-sweep-watch-evidence.ts, which also forbids adding an entry here for a watch
+// the sweep really does evaluate (that would retire live coverage by paperwork).
+// They are recorded `offline_barrier`, never `pass`: the sweep did not earn browser evidence for
+// them, and the ledger must not imply it did.
+const WATCH_OFFLINE_COVER = {
+  'buyrent-summary-both-budgets': 'scripts/verify-combined-budget-summary.ts',
+  'unknown-period-stays-unknown': 'scripts/verify-unknown-rent-period-not-annual.ts',
+  'clarification-answer-commits': 'scripts/verify-agent-scope-answer.ts',
+};
+
+const watchStatus = (name) =>
+  findings.some((f) => f.detail.includes(name)) ? 'fail'
+    : watchesObserved.has(name) ? 'pass'
+      : WATCH_OFFLINE_COVER[name] ? 'offline_barrier'
+        : 'skip';
+// Only a watch that is neither observed live nor covered offline is DARK — that is the floor miss.
+const unobservedWatches = () => WATCHES.filter((w) => watchStatus(w) === 'skip');
+
 // ── UI driving ───────────────────────────────────────────────────────────────────────────────────
 // The deal and period rows are INDEPENDENT TOGGLES, not radios: clicking the other one turns BOTH
 // on (combined). Selecting exactly one means clicking it, then clicking its partner off.
@@ -542,7 +580,9 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
   if (intent.city && ui.city && !ui.city.includes(intent.city) && !intent.city.includes(ui.city)) {
     defect(name, 'INTENT→UI', `asked for city «${intent.city}», summary shows «${ui.city}»`); j.ok = false;
   }
-  // THE أبها WATCH: an exact city must never come back scoped to a neighbourhood.
+  // THE أبها WATCH: an exact city must never come back scoped to a neighbourhood. Observed only
+  // when an exact city was actually asked for — a journey with no city cannot evaluate it.
+  if (intent.city && !intent.district) observeWatch('exact-city-never-rescoped');
   if (intent.city && !intent.district && ui.district) {
     defect(name, 'INTENT→UI', `exact city «${intent.city}» was re-scoped to district «${ui.district}» (exact-city-never-rescoped)`); j.ok = false;
   }
@@ -602,10 +642,13 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
     defect(name, 'RPC→RENDERED', `page shows ${rendered}, RPC returned ${j.rpc}`); j.ok = false;
   }
   // THE PAGE-CAP WATCH: 1,500 is the RPC page limit and must never be quoted as a match total.
+  // Only a journey that actually rendered a total can judge it.
+  if (rendered != null && j.rpc != null) observeWatch('true-total-never-page-cap');
   if (rendered === 1500 && j.rpc !== 1500) {
     defect(name, 'RPC→RENDERED', 'page quoted 1,500 — the RPC page cap — as the match total (true-total-never-page-cap)'); j.ok = false;
   }
-  // Arabic rendering watches
+  // Arabic rendering watches — observed whenever a rendered screen was actually scraped.
+  if (ui.entities) observeWatch('no-html-entities-rendered');
   if (ui.entities.length) { defect(name, 'RENDERED', `raw HTML entities on screen: ${ui.entities.join(' ')} (no-html-entities-rendered)`); j.ok = false; }
   if (ui.latinInCards.length) { defect(name, 'RENDERED', `placeholder junk on screen: ${ui.latinInCards.join(' ')}`); j.ok = false; }
 
@@ -651,4 +694,5 @@ async function withPage(mobile, fn) {
 }
 
 export { BASE, dbCount, rpcTotal, assertChain, dbFilterFromRequest, withPage, setDeal, setPeriod, pickCity, runSearch,
-         visibleState, ledgerPlan, ledgerRecord, findings, journeys, defect, note, num, lastCount, sleep };
+         visibleState, ledgerPlan, ledgerRecord, findings, journeys, defect, note, num, lastCount, sleep,
+         observeWatch, watchStatus, unobservedWatches, WATCH_OFFLINE_COVER };
