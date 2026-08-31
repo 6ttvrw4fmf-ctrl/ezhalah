@@ -472,6 +472,103 @@ JOURNEYS['sidebar-row-actions'] = async (mobile) => withPage({ mobile, signedIn:
   if (bag.pageErrors.length) defect(name, 'page error during row actions', bag.pageErrors.join(' | '));
 });
 
+/** Locate the rename TextInput. It carries no testID, and RN-web renders it as a plain <input>
+ *  alongside the sidebar search field and the Filter home's city box — so it is identified by the
+ *  one thing that is unambiguously true of it: `beginRename` seeds `draft` with the row's current
+ *  title, so the editing input is the one whose VALUE is that title. */
+const renameInputFor = async (page, currentTitle) => {
+  const inputs = page.locator('input');
+  for (let i = 0, n = await inputs.count(); i < n; i++) {
+    if ((await inputs.nth(i).inputValue().catch(() => null)) === currentTitle) return inputs.nth(i);
+  }
+  return null;
+};
+
+/** J13 — SIDEBAR RENAME (PART 3 item 3, PART 5 shape 3), in a real browser for the first time.
+ *
+ *  WHY THIS WAS MISSING AND WORTH ADDING. PART 3 item 3 lists rename in the sidebar sweep and
+ *  PART 5 shape 3 names it explicitly, but `sidebar-row-actions` covers star, unstar and delete
+ *  only. The sole rename barrier, `scripts/verify-sidebar-rename-isolation.ts`, is a STATIC source
+ *  pin — it never opens a browser, so it cannot see the two things that actually go wrong here.
+ *
+ *  Both assertions come from rules the product states about ITSELF:
+ *
+ *  1. ESCAPE CANCELS, AND THE BLUR IT CAUSES MUST NOT SAVE. Sidebar.tsx: "blur saves, Escape
+ *     cancels and restores. `cancelledRef` is what makes Escape survive the blur that follows it —
+ *     [otherwise the blur would save] the very text Escape was meant to discard." That is a race
+ *     between two handlers on one element; a static pin cannot execute it, and getting it wrong
+ *     silently saves a title the user explicitly abandoned.
+ *  2. A RENAME MUST NOT REORDER THE SIDEBAR. store.tsx deliberately does not bump `ts` on rename:
+ *     "bumping it would silently reorder the sidebar on a rename." So the ID ORDER is asserted, not
+ *     just the set — a rename that quietly floats a chat to the top loses the user's place in a
+ *     list they navigate by position.
+ */
+JOURNEYS['sidebar-rename'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
+  const name = `sidebar-rename:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const ORIGINAL = 'فلل جدة';
+  const RENAMED = 'شاليهات أبها';
+  const ids = (h) => (h || []).map((x) => x.id).join(',');
+  const titleOf = (h, id) => ((h || []).find((x) => x.id === id) || {}).title;
+
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'mobile sidebar drawer would not open'); return; }
+  const before = await storedHistory(page);
+
+  // ── ESCAPE MUST CANCEL ───────────────────────────────────────────────────────────────────────
+  if (!(await openRowMenu(page, ORIGINAL))) { skip(name, 'row ⋯ menu would not open'); return; }
+  if (!(await clickText(page, 'إعادة تسمية'))) { skip(name, `rename action: ${clickReason()}`); return; }
+  await sleep(1200);
+  const escInput = await renameInputFor(page, ORIGINAL);
+  if (!escInput) { skip(name, `no rename input carrying «${ORIGINAL}» appeared`); return; }
+  await escInput.fill('اسم مهجور');
+  await escInput.press('Escape');
+  await sleep(1500);
+  const afterEsc = await storedHistory(page);
+  if (titleOf(afterEsc, 'h2') !== ORIGINAL) {
+    defect(name, 'Escape saved the abandoned title instead of discarding it',
+      `«${ORIGINAL}» → «${titleOf(afterEsc, 'h2')}» — the blur that Escape itself triggers committed the draft `
+      + `(Sidebar.tsx keeps cancelledRef precisely to stop this)`);
+    return;
+  }
+  pass(name, 'Escape cancelled the rename and the blur it caused saved nothing');
+
+  // ── ENTER MUST COMMIT, TO EXACTLY ONE CHAT, WITHOUT REORDERING ───────────────────────────────
+  if (!(await openRowMenu(page, ORIGINAL))) { skip(name, 'row ⋯ menu would not reopen after Escape'); return; }
+  if (!(await clickText(page, 'إعادة تسمية'))) { skip(name, `rename action second time: ${clickReason()}`); return; }
+  await sleep(1200);
+  const input = await renameInputFor(page, ORIGINAL);
+  if (!input) { skip(name, 'rename input did not reappear'); return; }
+  await input.fill(RENAMED);
+  await input.press('Enter');
+  await sleep(1800);
+
+  const after = await storedHistory(page);
+  if (titleOf(after, 'h2') !== RENAMED) {
+    defect(name, 'rename did not take', `h2 title is «${titleOf(after, 'h2')}», expected «${RENAMED}»`);
+  } else if (titleOf(after, 'h1') !== titleOf(before, 'h1') || titleOf(after, 'h3') !== titleOf(before, 'h3')) {
+    defect(name, 'rename changed a chat it was not applied to',
+      `h1 «${titleOf(before, 'h1')}»→«${titleOf(after, 'h1')}», h3 «${titleOf(before, 'h3')}»→«${titleOf(after, 'h3')}»`);
+  } else if (ids(after) !== ids(before)) {
+    // store.tsx does NOT bump `ts` on rename, for exactly this reason.
+    defect(name, 'rename reordered the sidebar', `order [${ids(before)}] → [${ids(after)}] — a rename must not move the row`);
+  } else {
+    pass(name, `rename applied to exactly h2, order preserved [${ids(after)}]`);
+  }
+
+  // ── AND IT MUST REACH DISK ───────────────────────────────────────────────────────────────────
+  await page.reload({ waitUntil: 'load' });
+  await settle(page);
+  const reloaded = await storedHistory(page);
+  if (titleOf(reloaded, 'h2') !== RENAMED) {
+    defect(name, 'the rename did not survive a refresh',
+      `h2 is «${titleOf(reloaded, 'h2')}» after reload, expected «${RENAMED}» — renamed in memory only`);
+  } else if (ids(reloaded) !== ids(before)) {
+    defect(name, 'the reload reordered the renamed sidebar', `order [${ids(before)}] → [${ids(reloaded)}]`);
+  } else {
+    pass(name, 'the rename survived a refresh with the order intact');
+  }
+  if (bag.pageErrors.length) defect(name, 'page error during rename', bag.pageErrors.join(' | '));
+});
+
 /** J9–J11 — THE ADVERSARIAL SET (PART 4). A fixed checklist only ever catches bugs someone already
  *  imagined, so these do the things the UI assumes nobody does: repeat an action it treats as
  *  once-only, interrupt a flow halfway, and leave the tab alone long enough for the browser to
