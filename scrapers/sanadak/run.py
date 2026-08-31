@@ -33,6 +33,7 @@ import re
 import sys
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
@@ -116,18 +117,56 @@ def session() -> cc.Session:
     return cc.Session(impersonate="chrome124")
 
 
+# Detail-fetch failure tally. Same reasoning as the sitemap reason capture (PR #1420) and the
+# dealapp breakdown: a 0-row run must say WHY, and "why" has to be recorded where it happens.
+# 2026-08-31: sanadak's sitemap recovered (200, 1,093 URLs) while EVERY listing page stayed down —
+# property-details answered HTTP 500 under RSC:1 and 504 plain, ~30s each, 3/3 on random listings.
+# fetch_one() read `.text` without ever looking at `.status_code`, so a 500 with an empty body was
+# indistinguishable from "page loaded, no listing object in it", and the run ended on the generic
+# RC-B note "0-row run (blocked/empty source?)" — the same question mark #1420 removed one layer up.
+_fetch_fail_reasons: "Counter[str]" = Counter()
+_fetch_fail_lock = threading.Lock()
+
+
+def _record_fetch_failure(reason: str) -> None:
+    with _fetch_fail_lock:
+        _fetch_fail_reasons[reason] += 1
+
+
+def fetch_failure_summary() -> str:
+    """Compact 'reason=count' breakdown, most common first. '' when nothing failed."""
+    with _fetch_fail_lock:
+        if not _fetch_fail_reasons:
+            return ""
+        return ", ".join(f"{r}={n}" for r, n in _fetch_fail_reasons.most_common(6))
+
+
 def fetch_one(url: str) -> Optional[tuple[dict, str, str]]:
-    """Fetch + parse one listing. Returns (obj, body, url) or None. Thread-safe (thread-local session)."""
+    """Fetch + parse one listing. Returns (obj, body, url) or None. Thread-safe (thread-local session).
+
+    Every None return now records a CONCRETE reason in `_fetch_fail_reasons` first, so a run that
+    captures nothing can name the cause instead of guessing at it.
+    """
     s = _session()
+    last: str = "no_attempt"
     for attempt in range(3):
         try:
-            body = s.get(url, timeout=45, headers={"RSC": "1"}).text
-        except Exception:
+            r = s.get(url, timeout=45, headers={"RSC": "1"})
+        except Exception as e:
+            last = f"transport_{type(e).__name__}"
             time.sleep(2.0 * (attempt + 1)); continue
-        o = _extract_obj_for_url(body, url)
+        if r.status_code != 200:
+            # A non-200 is the source refusing/failing — retry, but never let it look like an
+            # empty page. This is the branch that was invisible before.
+            last = f"http_{r.status_code}"
+            time.sleep(2.0 * (attempt + 1)); continue
+        o = _extract_obj_for_url(r.text, url)
         if o:
-            return o, body, url
+            return o, r.text, url
+        # A real 200 we could not parse is a DIFFERENT fact from a 500 — keep them apart.
+        _record_fetch_failure("http_200_no_listing_object")
         return None
+    _record_fetch_failure(last)
     return None
 
 
@@ -510,7 +549,16 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Sanadak: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["sanadak_residential_listings", "sanadak_commercial_listings"])
+        # Carry the detail-fetch breakdown into the run row. Without it a run where the sitemap
+        # listed 1,093 URLs and every single page 500'd is recorded identically to a run where the
+        # catalogue was genuinely empty — RC-B demotes both with "0-row run (blocked/empty source?)".
+        fail_summary = fetch_failure_summary()
+        if fail_summary:
+            print(f"  detail-fetch failures: {fail_summary}", flush=True)
+        notes = f"pruned={pruned}"
+        if fail_summary:
+            notes += f" | detail-fetch failures ({len(urls) - seen}/{len(urls)}): {fail_summary}"
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=notes[:300], check_tables=["sanadak_residential_listings", "sanadak_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1
