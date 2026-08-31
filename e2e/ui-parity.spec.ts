@@ -103,10 +103,39 @@ test('Filter mode — Apartment type filter returns results', async ({ page }) =
   await expect(page.getByText(FOUND).first()).toBeVisible();
 });
 
+// PAID LIVE-MODEL TESTS (owner rule 2026-08-29: bounded, explicitly-labelled paid AI only).
+// The two tests below type into the chat composer, so each Enter is a BILLED DeepSeek call — and
+// playwright.config.ts sets `retries: 2`, so a flaky night bills each of them three times over.
+//
+// They are real live-agent verification and worth keeping, but they must be a DELIBERATE cost, not
+// an incidental one: `npx playwright test` runs the whole e2e/ directory, so without this gate any
+// future workflow that runs the suite silently starts paying. Enabled in the nightly ui-parity
+// workflow via EZHALAH_ALLOW_PAID_AI=1; skipped everywhere else.
+// Pinned by scripts/verify-ai-spend-safety.ts.
+const ALLOW_PAID_AI = process.env.EZHALAH_ALLOW_PAID_AI === '1';
+
+// Label these two tests' real billed DeepSeek calls as CI traffic (owner audit, 2026-08-30): the
+// agent edge fn defaults ai_usage.source to "user" for any request missing this header, and this
+// nightly job is the deliberate home of paid live-model tests per the comment above — without this
+// they pollute the user/ci split every cost audit reads off ai_usage. Pinned by
+// scripts/verify-ai-spend-safety.ts.
+async function labelAgentCallsAsCI(page: Page) {
+  await page.route('**/functions/v1/agent', (route) =>
+    route.continue({ headers: { ...route.request().headers(), 'x-ezhalah-client': 'ci' } }));
+}
+
 test('AI mode — free-text query classifies correctly, replies in Arabic', async ({ page }) => {
+  test.skip(!ALLOW_PAID_AI, 'paid live-model test — set EZHALAH_ALLOW_PAID_AI=1 to run');
+  await labelAgentCallsAsCI(page);
   await home(page);
   await page.getByText('الوكيل الذكي', { exact: true }).click(); // switch to AI mode
-  const composer = page.getByPlaceholder('اكتب العقار اللي تبحث عنه في السعودية...');
+  // The composer's `placeholder` attribute is intentionally EMPTY on the clean intro-landing screen
+  // (PR#1008, 2026-08-24): rotating example queries occupy that slot instead, and the static
+  // placeholder only returns after the user interacts. getByPlaceholder(...) therefore matches ZERO
+  // elements here and every AI-mode test failed from that commit onward (2026-08-24 through
+  // 2026-08-28, unnoticed). The accessibilityLabel is stable across BOTH states by design (owner
+  // brief §11: "a screen reader always hears this one sentence for the field") — use that instead.
+  const composer = page.getByLabel('اكتب وصف العقار اللي تبحث عنه');
   await expect(composer).toBeVisible();
   // District-qualified so the agent resolves directly to a search (a bare city that is ALSO a region
   // — e.g. الرياض — correctly triggers a city-vs-region clarification instead; see the clarification
@@ -125,9 +154,12 @@ test('AI mode — free-text query classifies correctly, replies in Arabic', asyn
 });
 
 test('AI mode — a city that is also a region asks to disambiguate (no wrong guess)', async ({ page }) => {
+  test.skip(!ALLOW_PAID_AI, 'paid live-model test — set EZHALAH_ALLOW_PAID_AI=1 to run');
+  await labelAgentCallsAsCI(page);
   await home(page);
   await page.getByText('الوكيل الذكي', { exact: true }).click();
-  const composer = page.getByPlaceholder('اكتب العقار اللي تبحث عنه في السعودية...');
+  // Stable accessibilityLabel, not the transient placeholder — see the comment on the test above.
+  const composer = page.getByLabel('اكتب وصف العقار اللي تبحث عنه');
   await composer.fill('شقة للإيجار في الرياض');
   await composer.press('Enter');
   // «الرياض» is both a city and a region → the agent must ASK, not silently pick one (anti-guess).

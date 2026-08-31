@@ -380,6 +380,17 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
     fails in BOTH directions (an amenity chain turned disjunctive, or a value domain turned
     conjunctive).
 
+  **SETTLED — this rule is closed, not open (owner, 2026-08-29).** R7.2.2 was carried as an open
+  owner question in the 2026-08-27 and 2026-08-28 run reports on the grounds that the sentence
+  described only the union shape. That was already fixed by PR #1177; the owner has now confirmed
+  the two-shape wording above as the canonical decision, in these words:
+
+  > same-field value choices = UNION (North OR South) · different boolean amenities = INTERSECTION
+  > (AC AND Elevator)
+
+  **No production behaviour changes with this confirmation** — both shapes were already implemented
+  and barriered. A future run must not re-open R7.2.2 as an owner question.
+
 ### 7.3 No stale counts
 
 - **R7.3.1** — While an RPC is in flight, the count MUST NOT show a previous scope's value.
@@ -423,15 +434,37 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 - **R8.2.3** — Back writes NO receipt, NO pill, NO probed-canNarrow verdict, ever.
 - **R8.2.4** — Enforced by `verify-af-back-navigation.ts` + `verify-af-round-back-boundary.ts`.
 
-### 8.3 Show Results («عرض النتائج»)
+### 8.3 The question footer (owner decision, 2026-08-28)
 
-- **R8.3.1** — Commits everything selected so far in the current round and ends the round early.
-- **R8.3.2** — A new results turn lands; the previous turn's buttons become the receipt (§6.3).
+- **R8.3.1** — The question footer offers exactly THREE controls — متابعة (primary), تخطي and
+  رجوع as real buttons — and NO in-question «عرض النتائج» early-exit. (Owner, 2026-08-28,
+  reversing the 2026-08-16 escape-link rule: the removed control used to commit the round early;
+  a round now ends by walking its questions, by Back from question 1, or by ✕. A same-day
+  follow-up removed the intro card's «عرض النتائج» decline link as well — ✕ declines the intro;
+  no عرض النتائج action exists anywhere inside the AF flow.)
+- **R8.3.2** — When a round ends, a new results turn lands; the previous turn's buttons become
+  the receipt (§6.3).
 
-### 8.4 Skip All («تخطي الباقي»)
+### 8.4 ~~Skip All («تخطي الباقي»)~~ — REMOVED FROM THE PRODUCT (owner, 2026-08-28)
 
-- **R8.4.1** — Skips every remaining question in the current round. Skipped questions are
-  remembered per R8.1.3.
+- **R8.4.1** — ~~Skips every remaining question in the current round. Skipped questions are
+  remembered per R8.1.3.~~ **THE CONTROL NO LONGER EXISTS.** The owner removed it on 2026-08-28
+  in the same decision that removed the in-question «عرض النتائج» early-exit — see R8.3.1, which
+  is the live rule. The `skipAll` prop is gone from `AdvancedQuestionCard`; the footer is
+  متابعة / تخطي / رجوع and nothing else, and a round now ends by walking its questions, by Back
+  from question 1, or by ✕.
+
+  Kept struck-through rather than deleted, per this document's own convention for a rule that has
+  moved (see R5.4.1 and R5.4.3), so a future reader can see both positions instead of trusting
+  whichever paragraph they read first.
+
+  **This paragraph was stale for one day** (2026-08-28 → 2026-08-29): the change that rewrote
+  R8.3.1 did not also retire §8.4 or R11.4, leaving the canonical contract describing a control
+  production does not have — and the coverage map scoring the product for it. Found by routine #5
+  on 2026-08-29 and confirmed live: no such control renders in any AF round on
+  `ezhalah-app.vercel.app`, desktop or mobile. `scripts/verify-af-footer-buttons.ts` now pins the
+  contract prose against the card's real controls so this cannot drift again — a retired control's
+  name must appear only inside `~~strikethrough~~`, which is what makes "retired" machine-readable.
 
 ---
 
@@ -489,8 +522,11 @@ AF stops (offer button hidden, round refuses to open) when ANY of:
   `optionNarrowsMeaningfully(count, N)`.
 - **R11.3** — The certified cohort intersection for the current scope is empty (multi-type or
   multi-period/deal with no shared cohort).
-- **R11.4** — User taps Skip All in the middle of a round (the round ends; future rounds may
-  still open if a useful question remains and R11.1/R11.2 haven't triggered).
+- **R11.4** — ~~User taps Skip All in the middle of a round (the round ends; future rounds may
+  still open if a useful question remains and R11.1/R11.2 haven't triggered).~~ **REMOVED with the
+  control itself (owner, 2026-08-28 — see §8.4).** The user-initiated ways to end a round early are
+  now Back from question 1 (R8.2.2) and ✕; both leave R11.1/R11.2 to decide whether a future round
+  may open, exactly as this rule described.
 
 **AF does NOT keep asking to hit a numeric target.** 80 listings remaining with no useful question
 is a valid, correct stop.
@@ -622,6 +658,7 @@ Performed 2026-08-26 against `main@11cfd2f`.
 | R6.2 Carry answered+skipped | ✅ `afCarryRef.asked` | `verify-af-cross-round-carry.ts` |
 | R6.3 Receipt on prior turn | ✅ `afReceipt[m.id]` + `buildAfSummary()` | `verify-af-round-back-boundary.ts` |
 | R7.1 Live counts = current selection | ✅ `resolveOptions` per-scope | `verify-af-count-belongs-to-selection.ts` |
+| R7.2 Marginal chips vs combined footer, both shapes | ✅ per-chip `cnt_*`; footer = `cnt_selected` recomputed | `verify-af-multiselect-combining-semantics.ts` |
 | R7.3 No stale count | ✅ blank while pending | `verify-af-count-belongs-to-selection.ts` |
 | R7.4 Headline = true total | ✅ `matchTotal` | `feedback_result-cap-min-true-100-rule.md` + `verify-result-cap-honesty.ts` |
 | R7.5 Count = DB oracle | ✅ shared `af_eligibility_clause()` | `verify-af-live-truth.ts`, `verify-af-independent-oracle.ts` |

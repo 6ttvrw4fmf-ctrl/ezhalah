@@ -19,7 +19,8 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sanitizeArabicSearch, isSearchableQuery, matchesChat, filterChats, normalizeArabic } from '../src/lib/chatSearch.ts';
+import { sanitizeArabicSearch, isSearchableQuery, matchesChat, filterChats, normalizeArabic,
+         arabicHintAfterInput } from '../src/lib/chatSearch.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -114,11 +115,43 @@ check('search mode is an in-place morph — input + close carry stable testIDs, 
 // ── 8. every keystroke routes through the sanitiser (the ONLY input path) ───────────────────────
 check('the input’s onChangeText goes through sanitizeArabicSearch',
   /onChangeText=\{onSearchChange\}/.test(sidebar)
-  && /const \{ text, hadLatin: stripped \} = sanitizeArabicSearch\(raw\)/.test(sidebar));
-check('the Latin hint is calm: shown from a flag, cleared on empty/close — never per keystroke',
-  /if \(stripped\) setHadLatin\(true\);/.test(sidebar)
-  && /else if \(!text\) setHadLatin\(false\);/.test(sidebar)
-  && /searching && hadLatin \?/.test(sidebar));
+  && /const sanitized = sanitizeArabicSearch\(raw\)/.test(sidebar)
+  && /setSearchText\(sanitized\.text\)/.test(sidebar));
+check('the hint decision is the pure rule, not re-implemented in the component',
+  /setHadLatin\(\(shown\) => arabicHintAfterInput\(shown, sanitized\)\)/.test(sidebar)
+  && /searching && hadLatin \?/.test(sidebar)
+  // The old shape latched the flag on and cleared it only when the field went empty. It must not
+  // come back: stripping Latin already empties the field, so "clear on empty" never fires for the
+  // one user who needs it — the one who just corrected themselves.
+  && !/else if \(!text\) setHadLatin\(false\);/.test(sidebar));
+
+// ── 8b. THE HINT'S LIFECYCLE, EXECUTED (not grepped) ────────────────────────────────────────────
+// Regression: the «type in Arabic» nudge stayed on screen for the whole search session once any
+// Latin had been typed — including while a valid Arabic query was actively filtering the list, so
+// the sidebar told the user to do the thing they had just done. Found on production by journey
+// `arabic-hint` (e2e/journeys/run.mjs), 2/2 fresh contexts, 2026-08-28.
+//
+// The previous version of this section asserted the buggy shape by regex and passed throughout —
+// which is exactly why the rule is now EXECUTED here: a barrier that pins an implementation
+// ratifies whatever that implementation happens to do.
+{
+  const step = (shown: boolean, raw: string) => arabicHintAfterInput(shown, sanitizeArabicSearch(raw));
+
+  check('8b.1 typing Latin raises the hint', step(false, 'villa') === true);
+  check('8b.2 the hint SURVIVES while the field is still unusable (digits only)',
+    step(true, '123') === true);
+  check('8b.3 THE REGRESSION: a real Arabic query clears the hint',
+    step(true, 'فلل') === false);
+  check('8b.4 the full user path — «villa» → hint → «فلل» → gone',
+    step(step(false, 'villa'), 'فلل') === false);
+  check('8b.5 clearing the field clears the hint', step(true, '') === false);
+  check('8b.6 a keystroke that BOTH strips and searches still nudges («villaف»)',
+    step(false, 'villaف') === true);
+  check('8b.7 no Latin, no query, no change — the flag is held, not invented',
+    step(false, '؟') === false && step(true, '؟') === true);
+  check('8b.8 the hint never appears out of nowhere on a clean Arabic session',
+    step(false, 'ف') === false && step(false, 'فلل جدة') === false);
+}
 
 // ── 9. close/escape restores the normal list ────────────────────────────────────────────────────
 check('closeSearch clears text + flag + mode in one place; Escape and × both ride it',

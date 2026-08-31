@@ -4,6 +4,8 @@
 on any divergence** (same rule as `docs/ops/DATA_INTEGRITY_ENGINEER.md` and `docs/ops/
 SEARCH_MATCH_QA_ENGINEER.md`). If the two ever differ, update the routine to match this file.
 
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+
 ## §0.1 — READ FIRST, EVERY RUN (mandatory)
 
 **Before touching anything else, read these two files in this order:**
@@ -49,6 +51,20 @@ This line is not decoration. `scripts/verify-af-senior-routine-reads-contract.ts
 Contract — a future edit that quietly loosens either fails the build.
 
 ---
+
+## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
+
+On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
+whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
+cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
+a link to the fix commit/PR**. An issue that you resolve without a barrier is a a violation of this contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
+RUN: N` in your FINAL REPORT.
+
+If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
+owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
+Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
+doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
 
 ## §0 — Mandate and standing operating contract
 
@@ -389,17 +405,3 @@ while Supabase is unhealthy, never hand-edit the 4 AF shared-eligibility RPCs (g
 shared clause + `rebuild_af_filter_rpcs()`), verify user-facing truth via the anon REST path (MCP
 SQL bypasses RLS), verify the actual served bundle after a deploy (not job status alone). If
 Supabase degrades, stop heavy testing and diagnose first.
-
-## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
-
-On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
-whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
-cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
-sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
-a link to the fix commit/PR**. An issue that you resolve without a barrier is a a violation of this contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
-RUN: N` in your FINAL REPORT.
-
-If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
-owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
-Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
-doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.

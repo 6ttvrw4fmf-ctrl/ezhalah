@@ -9,6 +9,23 @@
 --   Re-derived verbatim from pg_get_functiondef (base64 round-trip), never hand-transcribed.
 -- Verified byte-exact; md5 of everything below this header block: ea24a98d22674dad6398cdff5e2b5e56
 --   equals md5(pg_get_functiondef) in production, 8,574 octets both sides, checked 2026-08-28.
+-- Re-verified 2026-08-29, unchanged: live md5(pg_get_functiondef) is still
+--   ea24a98d22674dad6398cdff5e2b5e56 (length() reports 8,501 characters — the header's octet figure
+--   counts bytes, and the body carries multi-byte Arabic literals; the md5 is the equality that
+--   matters and it is identical). The re-check was prompted by
+--   20260829152534_af_coverage_cliff_watches_real_predicates_with_an_evidence_floor.sql, which
+--   READS this clause to derive the columns af_coverage_cliff monitors but does not redefine it.
+--   That migration is why the staleness barrier flagged this file: it names the clause, and the
+--   barrier deliberately cannot tell "mentions" from "replaces" — so the answer is to re-verify the
+--   mirror against production, which is what happened here, never to loosen the barrier.
+-- Re-verified 2026-08-30, unchanged again: live md5(pg_get_functiondef) is still
+--   ea24a98d22674dad6398cdff5e2b5e56 at 8,501 characters. Flagged for the same reason as the
+--   2026-08-29 re-check, by a migration that READS the clause without redefining it:
+--   20260830134244_af_template_absorbs_2026_08_29_ranking_so_rebuild_is_a_noop.sql calls
+--   af_eligibility_clause() to swap it back out of the live location_search_candidates_ar definition
+--   for the __AF_ELIGIBILITY_WHERE__ placeholder, repairing af_rpc_templates so a rebuild is a
+--   provable no-op (see docs/ops/af-trending-data-integrity-2026-08-30/). The clause itself is
+--   untouched by that work — which is precisely what re-verifying, rather than re-dating, proves.
 CREATE OR REPLACE FUNCTION public.af_eligibility_clause()
  RETURNS text
  LANGUAGE sql

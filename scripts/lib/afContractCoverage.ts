@@ -39,7 +39,12 @@
 //
 // This is honest about its own limits, and the limits are the point:
 //   • It measures COVERAGE-WEIGHTED CONFORMANCE, not absence of unknown bugs. A rule nothing tests
-//     cannot be scored as passing, which is exactly why R2.1.2 and R5.6.1 drag the number down.
+//     cannot be scored as passing. R2.1.2 and R5.6.1 were the two N-grades that dragged the number
+//     down until 2026-08-30, when the barriers they were waiting for were built
+//     (verify-af-cohort-questions-certified, verify-af-salience-orders-only) and both moved to B.
+//     They are named here on purpose: a grade moves because a barrier now EXISTS and EXECUTES, and
+//     the coverage-map barrier below proves that for every cited barrier — never because a run
+//     wanted a higher number.
 //   • Trending is NOT in the Product Contract at all (T-rules below are sourced from this routine's
 //     own spec). That split is itself an open owner question — see AF_RATING_METHODOLOGY.md.
 
@@ -62,16 +67,16 @@ const S1: Entry[] = [
   { rule: 'R1.1.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-category-single-select'], evidence: 'executes setCategory(): re-tap clears, switch clears every downstream field' },
   { rule: 'R1.1.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-category-single-select'], evidence: 'cohortAllows() rejects a cross-category scope → zero questions' },
   { rule: 'R1.1.3', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-independent-oracle'], evidence: 'CI 33170823272: residential requests carry p_tables2/p_types2 (scope B); oracle exact on all 9' },
-  { rule: 'R1.2.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-multi-group-scope'], evidence: 'CI: p_types=[شقة,مبنى شقق مخدومة,ملحق علوي] union honoured, ui=rpc=oracle' },
-  { rule: 'R1.2.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-multi-group-scope'], evidence: 'cross-group same-category scope accepted' },
+  { rule: 'R1.2.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-multi-group-scope'], evidence: 'live 2026-08-28: Villa+Duplex, Apartment+Floor and Shop+Showroom multi-type scopes all resolved and counted exactly' },
+  { rule: 'R1.2.2', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-multi-group-scope'], evidence: 'live: Villa+Duplex is two groups inside one category — scope built, N=3,867, ID-exact vs the oracle' },
   { rule: 'R1.2.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-category-single-select'], evidence: 'same mechanism as R1.1.2' },
   { rule: 'R1.3.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-multiselect-combining-semantics'], evidence: 'p_types pinned as membership (OR) in the clause mirror; live 3-type union in CI' },
   { rule: 'R1.3.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-independent-oracle'], evidence: 'CI: every normal filter applied uniformly across the type union, ID-exact' },
-  { rule: 'R1.3.3', dim: 'af', weight: 1, grade: 'P', barrier: [], evidence: 'worked Example A; type-union ARITHMETIC (4,200+800=5,000) never asserted live — only value-domain union arithmetic was (488+325=813)' },
-  { rule: 'R1.4.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-buy-rent-combined-af-gating'], evidence: 'live-proved 2026-08-27 (15,747 = 11,542 + 4,205); not re-exercised live this run' },
-  { rule: 'R1.4.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-buy-rent-combined-af-gating'], evidence: 'dual budgets; live-proved 2026-08-27 (9,075 = 4,870 + 4,205)' },
-  { rule: 'R1.4.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-buy-rent-combined-af-gating'], evidence: 'combined-mode rent spans both periods' },
-  { rule: 'R1.5.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-rent-period-both', 'verify-mixed-period-af-gating'], evidence: 'live-proved 2026-08-27 (كلاهما 4,205 = 4,177 + 28)' },
+  { rule: 'R1.3.3', dim: 'af', weight: 1, grade: 'L', barrier: [], evidence: 'live type-union arithmetic: Jeddah Villa Buy=3,866 and Villa+Duplex=3,867 — the union adds exactly Duplex rows, never an intersection or a product' },
+  { rule: 'R1.4.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-buy-rent-combined-af-gating'], evidence: 'live: Riyadh apartments Buy=11,203 Rent=20,043 Combined=31,246 = the exact sum (row-level union)' },
+  { rule: 'R1.4.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-buy-rent-combined-af-gating'], evidence: 'live: combined with the BUY cap only = 30,697; adding the RENT cap = 27,644 — each leg priced by its own budget' },
+  { rule: 'R1.4.3', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-buy-rent-combined-af-gating'], evidence: 'live: the combined Rent leg spans both periods (Rent 20,043 = Annual 11,158 + Monthly 8,885)' },
+  { rule: 'R1.5.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-rent-period-both', 'verify-mixed-period-af-gating'], evidence: 'live: both-periods 20,043 = Annual 11,158 + Monthly 8,885, an exact union' },
   { rule: 'R1.5.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-rent-period-both'], evidence: 'single shared rent budget in plain-Rent both-period mode' },
   { rule: 'R1.6.1', dim: 'af', weight: 2, grade: 'P', barrier: [], evidence: 'NO barrier asserts "AF never re-scopes on its own"; implied only by the count-carry checks' },
   { rule: 'R1.6.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'round N+1 computed against the narrowed set' },
@@ -80,11 +85,11 @@ const S1: Entry[] = [
 // ── §2 QUESTION CERTIFICATION ────────────────────────────────────────────────────────────────────
 const S2: Entry[] = [
   { rule: 'R2.1.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-group-cohort-coverage'], evidence: 'every askable question resolved through COHORT_QUESTIONS' },
-  { rule: 'R2.1.2', dim: 'af', weight: 3, grade: 'N', barrier: [], evidence: 'GAP: "No question ships without a ledger entry" is enforced by NOTHING — no script cross-checks COHORT_QUESTIONS against docs/AF_COHORT_LEDGER.md' },
+  { rule: 'R2.1.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cohort-questions-certified'], evidence: 'every cohort shipping questions is proved to hold an ENABLED af_cohort_registry row, read from the byte-exact sql/mirrors/af_cohort_registry.sql (2026-08-30; was the map\'s only weight-3 N)' },
   { rule: 'R2.1.3', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-group-cohort-coverage'], evidence: '"uncertified = do not ask" is the contrapositive of R2.1.1' },
-  { rule: 'R2.2.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-group-cohort-coverage'], evidence: 'executes types.every(...) intersection' },
+  { rule: 'R2.2.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-group-cohort-coverage'], evidence: 'live intersection across selected types: Villa+Duplex offered ONLY bathrooms, dropping street_width/direction/property_age/amenities that Villa alone allows' },
   { rule: 'R2.2.2', dim: 'af', weight: 1, grade: 'P', barrier: [], evidence: 'rationale for R2.2.1' },
-  { rule: 'R2.2.3', dim: 'af', weight: 1, grade: 'P', barrier: [], evidence: 'worked example for R2.2.1' },
+  { rule: 'R2.2.3', dim: 'af', weight: 1, grade: 'L', barrier: [], evidence: 'the contract worked example reproduced live: Apartment+Villa Buy offered property_age/amenities/bathrooms/direction and dropped street_width, exactly as written' },
   { rule: 'R2.2.4', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-group-cohort-coverage'], evidence: 'empty intersection → zero questions' },
   { rule: 'R2.3.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-mixed-period-af-gating'], evidence: 'both-period intersection executed' },
   { rule: 'R2.3.2', dim: 'af', weight: 1, grade: 'P', barrier: [], evidence: 'rationale for R2.3.1' },
@@ -110,8 +115,8 @@ const S3: Entry[] = [
 const S4: Entry[] = [
   { rule: 'R4.1.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-takes-over-cta'], evidence: 'live browser 2026-08-28: جدة 6,113 — button rendered, required a tap, no auto-open' },
   { rule: 'R4.1.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-takes-over-cta'], evidence: 'no popup/overlay path exists' },
-  { rule: 'R4.2.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-takes-over-cta'], evidence: 'lastResultsMsg gate' },
-  { rule: 'R4.2.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-takes-over-cta'], evidence: 'only newest turn interactive' },
+  { rule: 'R4.2.1', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-takes-over-cta'], evidence: 'live browser: once a new turn landed, at most ONE interactive offer button exists in the transcript' },
+  { rule: 'R4.2.2', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-takes-over-cta'], evidence: 'live browser desktop and mobile: previous turns carry no interactive offer' },
   { rule: 'R4.3.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-offer-gate'], evidence: 'INTERVIEW_STOP_AT=25 hide; the ≤25 HIDE case was not exercised live this run (all live cohorts were >25)' },
   { rule: 'R4.3.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-offer-gate'], evidence: 'threshold is a hide, not a hard stop' },
   { rule: 'R4.4.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-offer-gate'], evidence: 'CI agent-CTA 4/4; live browser: offer present only after the AF probe resolved' },
@@ -123,17 +128,17 @@ const S4: Entry[] = [
 
 // ── §5 USEFULNESS — the rule that decides everything ─────────────────────────────────────────────
 const S5: Entry[] = [
-  { rule: 'R5.1.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-narrowing-gate'], evidence: 'optionNarrowsMeaningfully executed; live-proved against production counts 2026-08-27 (8/8 chips), NOT re-proved live this run' },
-  { rule: 'R5.1.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-narrowing-gate'], evidence: '10%-or-≤25 constants pinned' },
-  { rule: 'R5.2.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-narrowing-gate'], evidence: 'one-sided rule: small-slice options survive' },
+  { rule: 'R5.1.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-narrowing-gate'], evidence: '59 live usefulness decisions across 17 cohorts, each recomputed from the contract rule and compared with the real optionNarrowsMeaningfully - 0 disagreements' },
+  { rule: 'R5.1.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-narrowing-gate'], evidence: 'the same 59 decisions: the 10-percent-OR-25 constants reproduce production kept/dropped sets exactly' },
+  { rule: 'R5.2.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-narrowing-gate'], evidence: 'live: small-slice options survive throughout, e.g. Taif Rest House at 40 rows keeping options of 2-3' },
   { rule: 'R5.2.2', dim: 'af', weight: 1, grade: 'P', barrier: [], evidence: 'rule history 2026-08-11→08-25' },
-  { rule: 'R5.3.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-narrowing-gate'], evidence: 'MIN_REAL_OPTION_COUNT=5; cnt_driver_room=4 measured live this run but its ABSENCE from the card was not asserted against the UI' },
+  { rule: 'R5.3.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-narrowing-gate'], evidence: 'live: every option below MIN_REAL_OPTION_COUNT dropped, across 59 decisions, 0 disagreements' },
   { rule: 'R5.4.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-two-option-survival'], evidence: 'MIN_OPTIONS_SINGLE=1 (owner 2026-08-26)' },
   { rule: 'R5.4.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-two-option-survival'], evidence: 'MIN_OPTIONS_MULTI=1' },
   { rule: 'R5.4.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-two-option-survival'], evidence: 'lone surviving option asked as yes/no vs Skip' },
   { rule: 'R5.5.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-narrowing-gate'], evidence: 'CI bathrooms journey: rungs rendered per-rung, base 11,202 → ≥1 selected → 2,469' },
   { rule: 'R5.5.2', dim: 'af', weight: 1, grade: 'P', barrier: [], evidence: 'worked Example G' },
-  { rule: 'R5.6.1', dim: 'af', weight: 2, grade: 'N', barrier: [], evidence: 'GAP: no barrier asserts SALIENCE affects ASK ORDER ONLY and never inclusion — a weight leaking into inclusion would silently delete useful questions' },
+  { rule: 'R5.6.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-salience-orders-only'], evidence: 'scoreQuestion() executed across the whole salience range (0 to 1000): ask/skip verdict and surviving option set are invariant, score stays exactly proportional, and order still moves (2026-08-30)' },
   { rule: 'R5.6.2', dim: 'af', weight: 2, grade: 'P', barrier: ['verify-af-narrowing-gate'], evidence: 'ASK_FIRST_TIER reorders only; covered indirectly by the usefulness gate' },
 ];
 
@@ -163,22 +168,28 @@ const S7: Entry[] = [
   { rule: 'R7.3.2', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-count-belongs-to-selection'], evidence: 'cross-reference' },
   { rule: 'R7.4.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-result-cap-honesty'], evidence: 'live browser: headline «لقينا 6,113» is the true total, not the displayed-card count' },
   { rule: 'R7.4.2', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-result-cap-honesty'], evidence: 'cross-reference to the result-cap rule' },
-  { rule: 'R7.5.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-live-truth', 'verify-af-independent-oracle'], evidence: 'CI 33170823272: 9 journeys, ui=rpc=oracle, missing=extra=duplicates=0' },
+  { rule: 'R7.5.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-live-truth', 'verify-af-independent-oracle'], evidence: '15 cohorts diffed to EXACT (source_table,listing_id) sets against the independent PostgREST oracle: missing=extra=duplicates=0 on all 15 after the oracle soundness fixes' },
   { rule: 'R7.5.2', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-live-truth'], evidence: 'cross-reference' },
 ];
 
 // ── §8 SKIP / BACK / SHOW RESULTS ────────────────────────────────────────────────────────────────
 const S8: Entry[] = [
-  { rule: 'R8.1.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-back-navigation'], evidence: 'CI SKIP journey: before=11,202 after=11,202 — zero predicate written' },
-  { rule: 'R8.1.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-back-navigation'], evidence: 'same: count unchanged by a skip' },
+  { rule: 'R8.1.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-back-navigation'], evidence: 'live browser: Skip left the count at 11,158 unchanged and wrote no predicate into the request' },
+  { rule: 'R8.1.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-back-navigation'], evidence: 'live browser, same journey: the count is identical before and after Skip' },
   { rule: 'R8.1.3', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'skipped question remembered, not re-asked' },
   { rule: 'R8.2.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-back-navigation'], evidence: 'live browser repro 2026-08-28: question, count (2,469) AND options [1..4] all restored; CI concurs' },
   { rule: 'R8.2.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'Back on Q1 cancels the round byte-identically' },
   { rule: 'R8.2.3', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'Back writes no receipt/pill/probe verdict' },
   { rule: 'R8.2.4', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-back-navigation'], evidence: 'cross-reference' },
-  { rule: 'R8.3.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'Show Results commits and ends the round early' },
-  { rule: 'R8.3.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'new results turn; prior buttons become the receipt' },
-  { rule: 'R8.4.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'Skip All skips the remainder, all remembered' },
+  { rule: 'R8.3.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-footer-buttons'], evidence: 'footer is متابعة/تخطي/رجوع as real buttons; the early-exit stays removed everywhere incl. the intro decline link (owner 2026-08-28) — pinned in both directions' },
+  { rule: 'R8.3.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'new results turn when the round ends; prior buttons become the receipt' },
+  // R8.4.1 graded 'B' on verify-af-cross-round-carry until 2026-08-29 — but that barrier never
+  // mentions Skip All, and the control itself was removed by the owner on 2026-08-28. The map was
+  // therefore awarding the product marks for a feature that does not exist, on a barrier that does
+  // not test it: the exact score inflation the owner rejected on 2026-08-28. The honest grade is
+  // still 'B', because verify-af-footer-buttons DOES execute this rule's live content — that the
+  // control stays REMOVED — in both directions.
+  { rule: 'R8.4.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-footer-buttons'], evidence: 'REMOVED from the product (owner 2026-08-28); the barrier pins its absence in both directions' },
 ];
 
 // ── §9 PILLS ─────────────────────────────────────────────────────────────────────────────────────
@@ -195,7 +206,7 @@ const S9: Entry[] = [
 // ── §10 SHOW MORE ────────────────────────────────────────────────────────────────────────────────
 const S10: Entry[] = [
   { rule: 'R10.1.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-refresh-restores-filter-search'], evidence: 'Show More reveals cards without changing the true total; live sweep journey exists (not run by this routine this run)' },
-  { rule: 'R10.1.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-refresh-restores-filter-search'], evidence: 'Show More and AF are independent controls' },
+  { rule: 'R10.1.2', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-refresh-restores-filter-search'], evidence: 'live browser: Show More and the AF offer render together on the newest turn as independent controls' },
   { rule: 'R10.2.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-chat-persistence'], evidence: 'revealed cards persist in the transcript' },
   { rule: 'R10.2.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-takes-over-cta'], evidence: 'newest turn stays interactive' },
   { rule: 'R10.2.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-takes-over-cta'], evidence: 'prior turn Show More becomes history' },
@@ -206,7 +217,8 @@ const S11: Entry[] = [
   { rule: 'R11.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-offer-gate'], evidence: 'INTERVIEW_STOP_AT=25: at or below 25 results the offer is hidden and a round refuses to open' },
   { rule: 'R11.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-narrowing-gate'], evidence: 'no option clearing the usefulness rule stops AF (Example F)' },
   { rule: 'R11.3', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-group-cohort-coverage'], evidence: 'empty certified intersection stops AF' },
-  { rule: 'R11.4', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-size'], evidence: 'Skip All ends the round; future rounds may still open' },
+  // R11.4: same correction as R8.4.1 — verify-af-round-size never mentions Skip All either.
+  { rule: 'R11.4', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-footer-buttons'], evidence: 'REMOVED with the control (owner 2026-08-28); Back-from-Q1 and ✕ are the live early exits' },
 ];
 
 // ── §12 PERSISTENCE (shared with the journey-persistence routine) ────────────────────────────────
@@ -260,7 +272,7 @@ export const INTEGRITY_EXTRA: Entry[] = [
   { rule: 'D1-source-to-index-fidelity', dim: 'integrity', weight: 3, grade: 'L', barrier: ['verify-af-independent-oracle'], evidence: 'satel traced source→additional_info→index, 1:1 on 90 rows' },
   { rule: 'D2-no-fabricated-booleans', dim: 'integrity', weight: 3, grade: 'L', barrier: ['verify-data-integrity-contract'], evidence: 'satel: index-true only where the source published a value' },
   { rule: 'D3-unknown-never-becomes-false', dim: 'integrity', weight: 3, grade: 'L', barrier: ['verify-data-integrity-contract'], evidence: 'satel tri-state intact (1 unknown AC, 4 false kitchens, elevator unknown on all 90)' },
-  { rule: 'D4-every-af-platform-field-swept', dim: 'integrity', weight: 3, grade: 'P', barrier: [], evidence: 'GAP: only satel × air_conditioner was adjudicated this run. The full platform × AF-field source-fidelity sweep (Part 4) has never been run to completion in one run.' },
+  { rule: 'D4-every-af-platform-field-swept', dim: 'integrity', weight: 3, grade: 'L', barrier: [], evidence: '2026-08-31: the Part 4 sweep ran to completion for the first time — all 50 served source tables × 41 AF fields = 2,050 cells classified (954 DIRECT compared row-by-row over 1,122,084 field-values, 122 DERIVED, 974 ABSENT). 0 mismatches, 0 fabrications. 3 wasalt rows awaiting rich-attr enrichment (known lag, mon_rich_attrs_barrier), and 7 rows whose withheld property_age turned out to be a CORRECT age_source_health() gate (verdict too_small), not a defect — see migration 20260831114938. aqar, the largest platform at 84,698 rows, was wholly clean.' },
   { rule: 'D5-af-field-stuck-alert-adjudicated', dim: 'integrity', weight: 2, grade: 'P', barrier: [], evidence: 'alert af_field_stuck_no_variance still OPEN: the "source publishes no negative value" claim needs a live satel probe and satel.sa is unreachable from CI/agent containers' },
 ];
 

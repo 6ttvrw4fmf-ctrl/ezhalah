@@ -4,6 +4,8 @@
 on any divergence** (same rule as every other engineer's canonical spec). If the two ever differ,
 update the routine to match this file.
 
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+
 ## §0 — Mandate and standing operating contract
 
 Trust nothing that says "done" without checking what the next layer actually received. You own the
@@ -41,6 +43,21 @@ Only stop and ask the owner when:
 
 Otherwise: fix it. Same authority grant as `docs/ops/AGENT_AUTHORITY.md`, which overrides any
 more-timid wording anywhere, including in this file.
+
+## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
+
+On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
+whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
+cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
+a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
+contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
+RUN: N` in your FINAL REPORT.
+
+If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
+owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
+Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
+doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
 
 ## PART 1 — WHAT YOU OWN
 
@@ -125,6 +142,136 @@ more-timid wording anywhere, including in this file.
   Never hand-stamp `dispatched_at` to clear this. And note the recursive trap the detector states
   about itself: **if the channel is down, this alert cannot be delivered either** — which is exactly
   why `open_alerts` must be read directly and never inferred from a quiet inbox.
+
+- **THE P0 DELIVERY SLO — 5 MINUTES (owner decision, 2026-08-28).** **A P0 alert must be delivered
+  to its destination within 5 minutes of detection**, measured from `alert_event.created_at` to a
+  confirmed delivery (a 2xx recorded in `net._http_response`, or the GitHub issue existing). The
+  owner set this in response to the measurement below; it is not negotiable by an agent.
+
+  **Do NOT loosen a detector to match a slower reality.** If the delivery path cannot meet the SLO,
+  the path is what changes — investigate and fix the mechanism, then prove it end to end with a safe
+  synthetic P0. Widening a grace window, raising a threshold, or redefining "delivered" to fit the
+  current cadence is the exact move the hard safety rails forbid.
+
+  **Why the GitHub Actions *schedule* structurally cannot meet it, so nobody re-derives this.**
+  `alert-dispatch.yml` is scheduled `9,39 * * * *`. Even if GitHub honoured that perfectly, an alert
+  raised at :29 waits until :39 — **10 minutes, twice the SLO, on paper**. It does not honour it:
+  measured over the 61.6h to 2026-08-28T11:12Z it ran 30 times against 288 scheduled (11.7/day vs
+  48/day), essentially never at :09 or :39, with gaps of 11.3h / 11.1h / 9.4h. Observed cost: P0
+  alert 1011 took 2h47m to reach a human; P1 1058 took 6h14m. A hand-triggered `workflow_dispatch`
+  delivers in ~30s (alert 1070, 2026-08-28 21:49), which proves the *workflow* is fast and that the
+  *scheduler* is the defect — do not mistake a manual run for evidence the SLO is met.
+
+  **Therefore delivery must be pushed from inside the database**, where cadence is ours: `pg_net`
+  can POST and `pg_cron` controls when. That is what `mon_dispatch_p0_fast()` exists for, with
+  `mon_detect_p0_delivery_sla()` enforcing the 5 minutes and `ops_p0_delivery` holding the receipts.
+
+  **It is NOT a per-minute job, and must not become one again (2026-08-28/29).** The original
+  `mon-p0-fast-dispatch` job was scheduled `* * * * *` and
+  `mon_detect_cron_minute_collision()` raised P1 1073 naming it in ELEVEN collisions, including the
+  `:00` slot reserved for the matview refresh; only two minute-slots in the whole hour are free (24
+  and 42), and gaps of 18/42 min cannot serve a 5-minute SLO. So `20260828231336` **unscheduled it**
+  and chained the fast lane onto the `mon-detectors-and-dispatch` command instead — sound, because
+  every P0 is born in that sweep (re-verified 2026-08-29: 51 of 56 P0s ever raised landed on an
+  exact cron boundary; the `:20`/`:50` ones only look off-slot because the sweep itself ran at
+  `:20`/`:50` before 2026-08-10). **`scripts/verify-p0-delivery-sla.ts` now asserts the per-minute
+  job is GONE** — do not re-create it.
+
+  **DECOUPLED ONTO ITS OWN DEDICATED SLOT (OWNER DECISION, 2026-08-30). This reverses the
+  "chaining is the only option" half of the paragraph above, and the reversal must not be
+  re-reversed.** Chaining made SWEEP DURATION a term in P0 delivery latency, and that is not a
+  theoretical cost: P0 **1166** was created 05:29:00 and its issue filed 05:35:11 — **371 s, a 71 s
+  breach** — because the 05:29 sweep ran 356.8 s and `created_at` is transaction start. The owner's
+  instruction: decouple the lane, **keep the 5-minute SLO exactly as it is**, give the lane its own
+  cron slot so long-running detectors cannot consume the budget before dispatch starts, do **not**
+  widen the 300 s SLO to make the metric green, and **preserve the full sweep**.
+
+  **The "only two slots are free" premise was simply wrong**, and that error is why this went
+  unfixed for two days. It read "free" as "zero jobs on that minute". `mon_detect_cron_minute_collision()`
+  raises only on `count(*) >= 3 or (minute = 0 and count(*) > 1)` — so **two** hourly jobs per minute
+  are permitted, only minute 0 is reserved, and it counts **only** jobs whose hour field is `*`
+  (daily jobs like `30 2 * * *` are not counted at all). Measured on the live roster: **49 of 60
+  minutes sit at ≤ 1** and can accept one more. The design space was never two slots; it was 49.
+
+  So `mon-p0-fast-lane` (jobid 86) now runs `mon_dispatch_p0_fast()` on
+  `1,4,7,10,13,15,18,21,24,26,28,31,34,35,38,40,42,44,46,48,51,54,57,58 * * * *` — **24 slots, worst
+  gap 3 minutes including the wrap past the top of the hour**, avoiding minute 0, the ten minutes
+  already at 2, and the sweep's own `:29`/`:59`, bounding the DB-side wait at 180 s — 60 % of the
+  SLO, with sweep duration no longer a term at all. It is **not** per-minute polling: measured
+  cost is **6 ms per run** (it early-exits on one count when no P0 is pending), and
+  `mon_detect_cron_minute_collision()` returns 0 with it scheduled. The sweep is untouched and still
+  calls the lane first and last — **defence-in-depth, not the SLO's load-bearing path**; the leading
+  call remains what survives a sweep aborting on `statement_timeout`.
+
+  `scripts/verify-p0-delivery-sla.ts` pins all of it and is mutation-proven 6/6 on this change:
+  it parses the lane's real minute list, computes the **worst gap including the wrap**, and fails if
+  `gap × 60 + 60 s` no longer fits the SLO — so the "delay" mutation (slowing the cadence) goes red,
+  including the subtle one where a single minute is removed and only the wrap-around gap breaks.
+  **Fix the SCHEDULE, never the SLO.**
+
+  **THE DECOUPLING IS NECESSARY BUT NOT SUFFICIENT — GitHub Actions latency is now the dominant
+  term, and it is not ours to fix (measured 2026-08-30).** Proving the lane end to end measured the
+  destination properly for the first time. The honest figure is `dispatched_at − first_tried` (POST
+  accepted → GitHub issue actually exists), not `settled_at − first_tried` (which is only when
+  `pg_net` recorded the HTTP response to the *trigger* and says nothing about an issue). Across every
+  P0 ever delivered:
+
+  | alert | raise → trigger | **Actions latency** | total |
+  |---|---|---|---|
+  | 1097 | 0 s | **203 s** | 203 s |
+  | 1098 | 0 s | **204 s** | 204 s |
+  | 1172 (synthetic, this run) | 45 s | **204 s** | 249 s |
+  | 1166 | 0 s | **371 s** | 371 s |
+
+  So the GitHub path costs **203–371 s on its own against a 300 s SLO**. The synthetic P0 passed at
+  **249 s** only because Actions was at its fast end that minute; worst case with this lane is
+  180 s + 371 s = **551 s**, a breach. **Do not respond by widening the SLO** — the owner forbade
+  exactly that. The only path that can meet 300 s reliably is a direct webhook channel
+  (`ops_alert_channel.kind='webhook'`, `pg_net` POST, 2xx in seconds), and **the destination is an
+  OWNER input**: `mon_detect_p0_delivery_sla()` LIMB 1 already raises while `alert-sink` (a proof
+  fixture reaching nobody) is the only non-GitHub channel. Until a real destination exists, LIMB 3
+  is what tells the truth, because it measures actual `dispatched_at` rather than assuming.
+
+  Note the migration `20260830134700`'s own header still carries the superseded ~15-20 s filing
+  figure. It is left byte-exact deliberately — it is the record of what production RAN, and drift
+  condition #5 compares the mirror against it. This section supersedes it.
+
+  **What that chaining COSTS, and what watches it (2026-08-29).** `alert_event.created_at` defaults
+  to `now()` = **transaction start**, so a P0's 5-minute clock starts when the *sweep* starts and the
+  sweep's whole runtime is spent before dispatch begins — sweep duration is now the dominant term in
+  delivery latency. Measured: the 04:29 sweep ran 185.3 s and its P0s were filed at 204.0 s (~19 s of
+  overhead past the sweep); the slowest sweep that day was 332.1 s → 351 s forecast, **a breach**, and
+  5 of 48 sweeps would have breached. `mon_detect_detector_sweep_budget()` LIMB 3 caught **none** of
+  them — it measures the same runtime against `statement_timeout` (900 s) and reads a comfortable
+  37 %. **LIMB 4 (`detector_sweep_vs_p0_slo`) exists to measure the sweep against the 300 s budget it
+  actually gates.** If it raises, make the SWEEP faster or ask the owner for a minute-slot — never
+  widen the SLO. And because pg_cron runs the whole command in ONE transaction, a sweep that hits
+  `statement_timeout` rolls the trailing dispatch back with it (observed 2026-08-26: the 17:29 *and*
+  17:59 sweeps both aborted — an hour with zero dispatch capability, and P0 1011 waited 2h47m), so
+  `mon_dispatch_p0_fast()` is also called **first** in that command; both calls are barrier-pinned. **The receipts are a separate ledger on purpose:**
+  `alert_event.dispatched_at` has exactly one writer (`alert-dispatch.yml`) and
+  `mon_detect_alert_delivery()` BRANCH 3 raises P1 if any database function stamps it. Reading that
+  column is fine; stamping it is not.
+
+  **LIMB 3 — DELIVERED, BUT LATE (added 2026-08-30). The SLO was unmeasurable before it.** Limbs 1
+  and 2 of `mon_detect_p0_delivery_sla()` both match only while `dispatched_at is null`, so a breach
+  became invisible the instant `alert-dispatch.yml` filed the issue: **a path that delivered every
+  single P0 late would have read permanently GREEN.** The SLO is defined on delivery *latency*;
+  those limbs measured only *pending* latency. Measured live the day this shipped: P0 alert **1166**
+  (`deleted_but_source_live:73`) was created 05:29:00 and dispatched 05:35:11 — **371 s, a 71 s
+  breach — and nothing raised, because nothing could.** Limb 3 reads the latency that actually
+  happened (`dispatched_at - created_at`, the one-writer clock, never a `github_workflow` 204
+  receipt) over a rolling 24 h window, and raises **P1**: the alert *did* reach a human, so this is
+  not limb 2's blackout class — it says the *path* is too slow. It is pinned by
+  `scripts/verify-p0-delivery-sla.ts`, including the property a refactor is most likely to destroy
+  (limb 3 must match `dispatched_at is not null`; reusing limbs 1-2's `is null` makes it unreachable
+  code that still looks present in review). **Never widen `c_sla_minutes` or shorten the window to
+  quiet it.**
+
+  **The destination remains an OWNER input.** `ops_alert_channel` decides who is actually woken;
+  the `alert-sink` edge function is a proof fixture with no side effects and reaches no human, so
+  `mon_detect_p0_delivery_sla()` raises if it is the only channel configured. A mechanism that meets
+  the SLO into a sink is not the SLO being met.
 
 - **Acknowledgment → detector self-clear (added 2026-08-28).** **An acknowledged or resolved alert
   must actually clear, and the detector must be able to RE-RAISE it if the condition returns.** A
@@ -320,18 +467,3 @@ argument list is a NEW overload, not a replacement — drop the old signature ex
 user-facing truth via the anon/public path, never privileged MCP access standing in for what RLS
 actually allows a real user. If Supabase or the frontend is degraded, stop and diagnose first —
 never route around a gate that is doing its job.
-
-## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
-
-On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
-whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
-cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
-sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
-a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
-contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
-RUN: N` in your FINAL REPORT.
-
-If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
-owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
-Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
-doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.

@@ -56,6 +56,9 @@ def _run_main_capturing_end_run_notes(monkeypatch, *, ids, fetch_one) -> str:
     monkeypatch.setattr(run, "fetch_one", fetch_one)
     monkeypatch.setattr(run.db, "begin_run", lambda platform: 999)
     monkeypatch.setattr(run.db, "prune_unseen", lambda tbl, seen, source: 0)
+    # main() also retires cross-table orphans (db.retire_superseded_siblings) — stub it here for
+    # the same reason as every other db call: this test is about main()'s exit/notes contract.
+    monkeypatch.setattr(run.db, "retire_superseded_siblings", lambda **kw: 0)
     monkeypatch.setattr(run.db, "upsert_dealapp_residential_batch", lambda rows: None)
     monkeypatch.setattr(run.db, "upsert_dealapp_commercial_batch", lambda rows: None)
     monkeypatch.setattr(run.db, "end_run", _end_run)

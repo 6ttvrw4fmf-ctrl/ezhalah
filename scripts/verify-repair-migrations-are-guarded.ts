@@ -46,6 +46,36 @@ const WAIVED: Record<string, string> = {
   '20260824114314_defabricate_probed_aqar_non_villa_maid_driver.sql':
     'watched by its companion 20260824115704_defabrication_reruns_its_watching_detector.sql, which '
     + 're-asserts the same UPDATE and re-runs mon_detect_fabricated_unpublished_amenity()',
+  // Same two-migrations-minutes-apart shape, recovered from production during the 2026-08-29 drift
+  // sweep. The un-gate repair (an UPDATE flipping production_ready for archive-proven prices) was
+  // caught by THIS barrier on PR #1198, and its author shipped the guard as the companion migration:
+  // 20260828230419 creates mon_detect_price_source_evidence_stale(), needle-edits it into the
+  // mon_run_all_detectors() roster, RE-ASSERTS this exact UPDATE idempotently, and runs the detector
+  // in the same migration. The companion's own header says all of this — open it to check this
+  // reason rather than taking it on trust.
+  '20260828225740_ungate_the_archive_proven_extreme_price_rows.sql':
+    'watched by its companion 20260828230419_price_source_evidence_must_keep_holding_and_reassert_'
+    + 'the_ungate.sql, which re-asserts the same UPDATE and ships + rosters + runs '
+    + 'mon_detect_price_source_evidence_stale()',
+  // Third instance of the two-migrations-minutes-apart shape. The repair retires the residential
+  // half of 8 res/com URL collisions (one source ad, two production_ready rows, two cards, one
+  // destination URL); its companion 20260830140831 ships the detector seven minutes later, so the
+  // repair file itself never reaches a mon_detect_* in executed SQL.
+  //
+  // Unlike the two waivers above, the companion does NOT re-assert the repair's UPDATE — and
+  // deliberately so. Those repairs needed re-assertion because their detectors watch a CLASS
+  // (fabricated amenities, stale price evidence) and so cannot tell whether that particular repair
+  // still holds. This companion's detector watches THIS REPAIR SPECIFICALLY: it reads the
+  // ops_res_com_collision_adjudication ledger the repair wrote and fires the moment any row that
+  // repair retired is active again while its commercial sibling still is. That is strictly stronger
+  // than a re-assertion, which would only correct drift at deploy time; this runs twice an hour.
+  // It is rostered into mon_run_all_detectors and mutation-proved inside its own migration (it
+  // reactivates a retired row, asserts the detector fires, then puts the row back). Open that
+  // companion to check this reason rather than taking it on trust.
+  '20260830140110_res_com_url_collision_repair.sql':
+    'watched by its companion 20260830140831_res_com_collision_repair_regression_detector.sql, '
+    + 'which ships + rosters + mutation-proves mon_detect_res_com_collision_repair_regression() — a '
+    + 'detector that watches THIS repair (the adjudication ledger it wrote), not just its class',
 };
 
 // Enforcement starts here — the day this rule landed.

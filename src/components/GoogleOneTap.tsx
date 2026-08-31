@@ -51,9 +51,15 @@ import { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import { useApp } from '@/store';
+import { useI18n } from '@/i18n';
 
 const GOOGLE_WEB_CLIENT_ID = '39473044808-06l9dgmb4jsta05h4c5hqdglbsoaqrb5.apps.googleusercontent.com';
-const GIS_SRC = 'https://accounts.google.com/gsi/client';
+// `hl` is GIS's own documented lever for the PROMPT's language — the account-chooser text, "Continue
+// as", the fine print — independent of which Google account it lists. Without it the prompt falls
+// back to signals we don't control (the visitor's Google account locale, then browser locale), which
+// is not the same guarantee as "Arabic-first" for a guest whose browser happens to be in English.
+// Keyed to the SAME `hl` value on every load for a given locale, so it's still one cacheable script.
+const gisSrc = (hl: 'ar' | 'en') => `https://accounts.google.com/gsi/client?hl=${hl}`;
 // FedCM resolves well under a second when it works; generous enough not to race a slow network.
 const FEDCM_FALLBACK_MS = 4000;
 // getUser() must never be able to stall the prompt indefinitely (see the bounded race below).
@@ -69,11 +75,18 @@ type Diag = {
 };
 
 export default function GoogleOneTap() {
-  const { user } = useApp();
+  const { user, openAuth } = useApp();
+  const { locale } = useI18n();
   // Authoritative logged-out check. The store's `user` is null during session restore, so trusting it
   // alone would prompt signed-in visitors. null = not resolved yet.
   const [signedOut, setSignedOut] = useState<boolean | null>(null);
   const startedRef = useRef(false); // prompt() runs at most once per page load
+  // Read once, at the moment this run actually starts (below) — GIS's own script tag pins the
+  // prompt's language for the page's lifetime, so a mid-session language toggle correctly does not
+  // reload/re-language an already-showing or already-loaded prompt; it matches every other
+  // once-per-page-load guarantee in this file.
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
 
   useEffect(() => {
     if (Platform.OS !== 'web' || !supabase) return;
@@ -136,10 +149,24 @@ export default function GoogleOneTap() {
             // it" unless we say so. Record it in the diagnostics and the console.
             try {
               const { error } = await supabase.auth.signInWithIdToken({ provider: 'google', token: resp.credential });
-              if (error) { diag.exchangeError = String(error.message ?? error); log('token exchange FAILED', error.message ?? error); }
+              if (error) {
+                diag.exchangeError = String(error.message ?? error);
+                log('token exchange FAILED', error.message ?? error);
+                // Google's half of this worked — the visitor picked an account and consented. Leaving
+                // it there is worse than any other suppression case this file handles: they SAW
+                // "Continue as ___", tapped it, and the app quietly did nothing. Open the normal
+                // sign-in sheet so the flow the owner asked for ("fall back cleanly to the normal
+                // login/signup UI") covers an EXCHANGE failure too, not only a prompt Google itself
+                // never showed. `openAuth` is a stable `() => setAuthOpen(true)` (store.tsx), so
+                // closing over whatever copy existed when this effect last ran is safe — it always
+                // sets the CURRENT auth-modal state, same reason `user` is deliberately not a dep
+                // of this effect either (see the DEPS note at the bottom of this file).
+                openAuth();
+              }
               else log('signed in via One Tap');
             } catch (e) {
               diag.exchangeError = String(e); log('token exchange threw', String(e));
+              openAuth();
             }
           },
           // auto_select:true silently signs a RETURNING visitor in and NEVER renders the prompt —
@@ -249,13 +276,14 @@ export default function GoogleOneTap() {
       );
     };
 
-    const existing = document.querySelector(`script[src="${GIS_SRC}"]`) as HTMLScriptElement | null;
+    const src = gisSrc(localeRef.current);
+    const existing = document.querySelector(`script[src="${src}"]`) as HTMLScriptElement | null;
     if (existing) {
       if ((globalThis as any).google?.accounts?.id) start();
       else existing.addEventListener('load', start, { once: true });
     } else {
       const s = document.createElement('script');
-      s.src = GIS_SRC; s.async = true; s.defer = true;
+      s.src = src; s.async = true; s.defer = true;
       s.addEventListener('load', start, { once: true });
       s.addEventListener('error', () => log('GIS script failed to load'), { once: true });
       document.head.appendChild(s);
@@ -268,6 +296,11 @@ export default function GoogleOneTap() {
     // stale/deleted-account token the store flips it mid-flight, which re-runs the effect: the cleanup
     // sets cancelled = true on the in-flight start(), and the re-run bails on startedRef. Net effect,
     // measured live 2026-08-18: GIS loaded and ready, gate passed, and STILL zero prompt attempts.
+    // `openAuth` and `locale` are deliberately omitted too: `openAuth` is a stable state-setter
+    // closure (calling any render's copy is equivalent — see the exchange-failure comment above),
+    // and `locale` is read once via `localeRef` at the moment this run starts, matching every other
+    // once-per-page-load guarantee here — the prompt's language should not reload/re-language itself
+    // out from under a visitor mid-session just because they toggled the app's language.
   }, [signedOut]);
 
   // The one legitimate cancel: the visitor signed in WHILE the prompt was up, so it is moot.

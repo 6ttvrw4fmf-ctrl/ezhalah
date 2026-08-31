@@ -8,12 +8,13 @@ import { AppProvider } from '@/store';
 import { initObservability, reportError } from '@/lib/observability';
 import { LocaleProvider, useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
+import { ThemeProvider, useTheme } from '@/theme/theme';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
 import { markAppSessionStarted } from '@/lib/appSession';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
-import SignInDock from '@/components/SignInDock';
+import SignInCard from '@/components/SignInCard';
 import GoogleOneTap from '@/components/GoogleOneTap';
 import IntroVideo from '@/components/IntroVideo';
 
@@ -47,8 +48,15 @@ if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis a
 function Shell() {
   const docked = useDocked();
   const { isRTL } = useI18n();
+  // APPEARANCE (owner 2026-08-28): the status bar follows the resolved theme. Screen content is
+  // converted per-surface (Sidebar + account menu in this pass); the Stack's contentStyle stays the
+  // light paper until each screen's inks are converted — flipping it first would break readability.
+  const { resolved } = useTheme();
   const pathname = usePathname();
   const router = useRouter();
+  // The AUTO-SHOWING centered popup (owner 2026-08-28) was RETIRED by the owner's 2026-08-29
+  // revision: the unprompted invitation is now the small draggable SignInCard mounted below, and
+  // the centered AuthModal opens ONLY on explicit sign-in controls via openAuth().
   // On the web, a hard refresh reloads whatever deep route the user was on (e.g. /agent, /settings) —
   // and for screens whose flow state lives in memory only, that screen would come back empty, so the
   // refresh is sent back to Home instead. Runs once on mount; client-side navigation afterwards is
@@ -75,14 +83,13 @@ function Shell() {
   }, []);
   return (
     <View style={{ flex: 1, flexDirection: isRTL ? 'row-reverse' : 'row' }}>
-      {/* /auth is a focused full-screen moment — no docked sidebar there. */}
+      <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
+      {/* /auth is a focused full-screen moment — no docked sidebar there. The /agent light-pin
+          special-case (owner 2026-08-29) was reversed 2026-08-30: dark mode is global and sticky,
+          so the docked sidebar now respects the app-wide theme on every route, /agent included. */}
       {docked && pathname !== '/auth' && <Sidebar docked onClose={() => {}} />}
       {/* One-click Google sign-in prompt (web, signed-out only) — renders its own corner UI. */}
       <GoogleOneTap />
-      {/* Desktop-only floating sign-in prompt for signed-out visitors on the filter home. Gated on
-          existing state only (useDocked + authChecked/user + activeChatId + route); it removes
-          itself the moment a search lands and returns on a fresh «محادثة جديدة». */}
-      <SignInDock />
       <View style={{ flex: 1 }}>
         <Stack
           screenOptions={{
@@ -94,7 +101,8 @@ function Shell() {
           <Stack.Screen name="index" options={{ animation: 'fade' }} />
           <Stack.Screen name="agent" options={{ animation: 'none' }} />
           <Stack.Screen name="interview" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
-          <Stack.Screen name="settings" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
+          {/* The /settings route is GONE (owner 2026-08-28): account controls open as a compact
+              panel anchored to the sidebar's profile row — see components/AccountMenu.tsx. */}
           <Stack.Screen name="about" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
           <Stack.Screen name="support" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
           {/* Auth opens with a soft fade (not the abrupt slide-up-with-X) — the screen's own content
@@ -103,10 +111,17 @@ function Shell() {
           <Stack.Screen name="browser" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         </Stack>
       </View>
+      {/* The small draggable sign-in card (owner 2026-08-29) — the UNPROMPTED invitation for
+          signed-out desktop-web visitors on Filter/Agent, in the retired dock's side slot.
+          Mounted AFTER the Stack deliberately: the card contains a phone <input>, and index-based
+          input targeting (tests, autofill heuristics) must keep finding the screens' own inputs
+          first. Visual layering is zIndex, not DOM order. */}
+      <SignInCard />
       {/* Support / About Us popups — rendered at the root so they overlay every screen. */}
       <InfoModal />
       {/* Sign-in popup — rendered at the root, same reason: a true overlay on top of whatever screen
-          is active (owner 2026-08-15), never a route the user navigates to. */}
+          is active (owner 2026-08-15), never a route the user navigates to. Since the 2026-08-29
+          revision it opens ONLY via explicit sign-in controls (openAuth) — it never auto-raises. */}
       <AuthModal />
       {/* First-run cinematic intro — overlays everything; shows once for new logged-out visitors. */}
       <IntroVideo />
@@ -118,12 +133,13 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
+        <ThemeProvider>
         <LocaleProvider>
         <AppProvider>
-          <StatusBar style="dark" />
           <Shell />
         </AppProvider>
         </LocaleProvider>
+        </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

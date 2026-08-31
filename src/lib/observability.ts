@@ -121,10 +121,25 @@ let SentryImpl: SentryLike | null = null;
 let initialized = false;
 let hadDsn = false;
 
-function readEnv(name: string): string | undefined {
-  // process.env for web (Metro inlines EXPO_PUBLIC_*), globalThis for native
-  const p = typeof process !== 'undefined' && process.env ? process.env[name] : undefined;
-  return p ?? undefined;
+// STATIC env reads — Metro/Expo inline `process.env.EXPO_PUBLIC_*` ONLY when the property access
+// is a literal identifier. `process.env[name]` with a dynamic key is a runtime lookup, and on web
+// `process.env` is an empty polyfill — so a dynamic-key reader returns undefined even when the var
+// is set in Vercel. That was the SECOND root cause of the 2026-08-29 certification finding: the
+// first fix made the SDK branch to @sentry/browser, but init still returned early because the DSN
+// read was dynamic and never inlined. Each var MUST be read by literal identifier here, never via
+// a helper that takes a name string, or Metro will not inline it and web will silently degrade to
+// "no DSN → no-op".
+function readSentryDsn(): string | undefined {
+  const v = process.env.EXPO_PUBLIC_SENTRY_DSN;
+  return typeof v === 'string' && v.length ? v : undefined;
+}
+function readSentryEnv(): string | undefined {
+  const v = process.env.EXPO_PUBLIC_SENTRY_ENV;
+  return typeof v === 'string' && v.length ? v : undefined;
+}
+function readSentryRelease(): string | undefined {
+  const v = process.env.EXPO_PUBLIC_SENTRY_RELEASE;
+  return typeof v === 'string' && v.length ? v : undefined;
 }
 
 /**
@@ -134,20 +149,33 @@ function readEnv(name: string): string | undefined {
 export function initObservability(): void {
   if (initialized) return;
   initialized = true;
-  const dsn = readEnv('EXPO_PUBLIC_SENTRY_DSN');
+  const dsn = readSentryDsn();
   hadDsn = !!(dsn && dsn.trim());
   if (!hadDsn) return; // no DSN → total no-op, the whole point of "safe-by-default"
 
-  // Lazy require so builds that do not have the package installed do not fail — the wrapper stays
-  // a no-op instead. Once `@sentry/react-native` is added to package.json this branch executes.
+  // Platform-branch: `@sentry/react-native` only initializes cleanly on native (iOS/Android). On
+  // Expo web, requiring it silently no-oped every event we tried to report (root cause of the
+  // 2026-08-29 certification finding — SDK-in-bundle string check passed, ingest POST never
+  // happened). Web uses `@sentry/browser` directly, which is what Sentry docs recommend for React
+  // web apps and works out of the box on Metro-web. Native falls back to `@sentry/react-native`.
+  //
+  // Failure is now LOUD: a swallowed exception in this block was how the web integration passed
+  // every check while doing nothing in production. Any init error is logged and stashed on
+  // `globalThis.__EZH_SENTRY_INIT_ERROR__` so a browser-side probe can see it.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-    const mod = require('@sentry/react-native');
+    let mod: any;
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+      mod = require('@sentry/browser');
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+      mod = require('@sentry/react-native');
+    }
     SentryImpl = mod as SentryLike;
     SentryImpl.init({
       dsn: dsn!.trim(),
-      environment: readEnv('EXPO_PUBLIC_SENTRY_ENV') ?? 'production',
-      release: readEnv('EXPO_PUBLIC_SENTRY_RELEASE'),
+      environment: readSentryEnv() ?? 'production',
+      release: readSentryRelease(),
       // ERRORS ONLY. Enabling any of these later is a deliberate, PDPL-reviewed change.
       tracesSampleRate: 0,
       replaysSessionSampleRate: 0,
@@ -161,8 +189,16 @@ export function initObservability(): void {
         return crumb;
       },
     });
-  } catch {
-    // Package not installed yet (typical during initial rollout). Stay a no-op.
+    // Runtime probe — visible from the browser DevTools + deploy-verify scripts. If this flag is
+    // missing after page load, the SDK didn't initialize (however green the code checks look).
+    try { (globalThis as any).__EZH_SENTRY_LIVE__ = true; } catch {}
+  } catch (err) {
+    // LOUD failure — never swallow silently again. Two paths: console.error so a live debugging
+    // session sees it immediately, and a globalThis stash so a scripted browser probe can prove
+    // whether init crashed vs never ran.
+    // eslint-disable-next-line no-console
+    console.error('[ezhalah] Sentry init failed:', err);
+    try { (globalThis as any).__EZH_SENTRY_INIT_ERROR__ = String((err as Error)?.stack ?? err); } catch {}
     SentryImpl = null;
   }
 }

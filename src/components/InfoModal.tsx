@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { I18nManager, Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated, {
   Easing,
   interpolate,
@@ -11,6 +11,8 @@ import Animated, {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useResolvedTheme, useThemePalette } from '@/lib/appearance';
+import { alpha0 } from '@/theme/palette';
 import { colors, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { useApp } from '@/store';
@@ -46,12 +48,8 @@ const CLOSE_CLEAR = CLOSE_INSET + CLOSE_SIZE + CLOSE_GAP - BODY_PAD;
 // BELOW the button, derived from the same constants.
 const TOP_CLEAR = CLOSE_INSET + CLOSE_SIZE + CLOSE_GAP;
 
-// The About dialog widens into a two-panel composition on desktop (hero + map panel side by side);
-// Support keeps the classic 560 column. The floor is 900, NOT the app's 768 desktop breakpoint:
-// at 768 the 340px map panel squeezes the hero to ~300px — value cells collapse to one column and
-// the legal strip clips (measured on tablet portrait, 2026-08-23). Below 900 the stacked flow is
-// simply the better composition.
-const ABOUT_WIDE_MIN_W = 900;
+// (The 2026-08-24 two-panel desktop composition and its ABOUT_WIDE_MIN_W breakpoint were retired by
+// the owner's 2026-08-29 redesign — one artwork-led column now serves every breakpoint.)
 
 const EAGLE = require('../../assets/images/eagle-mark.png');
 const HERO = require('../../assets/images/hero-bg.png');
@@ -96,18 +94,18 @@ function Sheet({ kind, onClose }: { kind: 'support' | 'about'; onClose: () => vo
     });
   };
 
-  // «من نحن» on desktop is a single-screen composition (800×580, zero scroll); everything else
-  // keeps the classic 560×680 column.
-  const aboutWide = kind === 'about' && width >= ABOUT_WIDE_MIN_W;
+  // «من نحن» (owner redesign 2026-08-29, supersedes the 2026-08-24 two-panel composition): ONE
+  // artwork-led column serves every breakpoint — 640 wide on desktop, edge-inset on mobile. The
+  // desktop map panel is gone; the Ezhalah artwork now leads the page itself.
   const availH = height - insets.top - insets.bottom - 48;
-  const maxH = Math.min(availH, kind === 'about' ? (aboutWide ? 580 : 620) : 680);
+  const maxH = Math.min(availH, kind === 'about' ? 660 : 680);
 
   return (
     <View style={s.overlay}>
       {/* Blurred + softly darkened page behind the dialog — the popup is the single clear focus.
           (owner: keep the blur, increase it slightly, add a subtle dark overlay.) */}
       <AnimatedPressable style={[s.backdrop, backdropStyle]} onPress={close} />
-      <Animated.View style={[s.card, { maxWidth: Math.min(width - 32, aboutWide ? 800 : 560), maxHeight: maxH }, cardStyle]}>
+      <Animated.View style={[s.card, { maxWidth: Math.min(width - 32, kind === 'about' ? 640 : 560), maxHeight: maxH }, cardStyle]}>
         {/* Close — a circular button pinned to the PHYSICAL top-right (owner: right side, premium,
             subtle shadow, gentle hover — like modern Apple/Notion dialogs). */}
         <Pressable
@@ -119,24 +117,59 @@ function Sheet({ kind, onClose }: { kind: 'support' | 'about'; onClose: () => vo
         >
           <Ionicons name="close" size={18} color="#4c5a52" />
         </Pressable>
-        <ScrollView contentContainerStyle={[s.scroll, aboutWide && s.scrollFill]} showsVerticalScrollIndicator={false}>
-          {kind === 'support' ? <SupportBody t={t} /> : <AboutBody t={t} desktop={aboutWide} reduced={reduced} />}
+        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+          {kind === 'support' ? <SupportBody t={t} /> : <AboutBody t={t} reduced={reduced} />}
         </ScrollView>
       </Animated.View>
     </View>
   );
 }
 
+// Support (owner visual refresh 2026-08-30): the last body in this dialog still wearing the
+// pre-redesign look — centered icon-over-text cards — now speaks the same artwork-led language the
+// 2026-08-29 «من نحن» redesign locked in: skyline hero melting into the surface, RTL rows led by a
+// distinct glyph per channel, and the response promise as a quiet tinted band instead of a third
+// boxed card. VISUAL ONLY — same two addresses, same strings, same non-interactive cards.
 function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => string }) {
+  // Literal palette for the hero gradient only (var() breaks inside parsed gradient colors —
+  // same rule as AboutBody); everything else keeps the theme-reactive tokens.
+  const pal = useThemePalette();
+  const dark = useResolvedTheme() === 'dark';
   return (
-    <View style={s.bodyPad}>
-      <Text style={s.h}>{t('Support')}</Text>
-      <SupCard email="support@ezhalah.com" desc={t('Questions about your account, searches, or technical issues.')} />
-      <SupCard email="info@ezhalah.com" desc={t('Business inquiries, partnerships, media requests, and general information.')} />
-      <View style={s.rt}>
-        <Text style={s.rtH}>{t('Response Time')}</Text>
-        <RtRow text={t('Typical response time: {h}.', { h: t('72 hours') })} />
-        <RtRow text={t('Some inquiries may take up to {d}.', { d: t('1 week') })} />
+    <View>
+      {/* The artwork hero — identical composition contract to «من نحن»: full-bleed skyline,
+          gradient melt into the surface, heading rising from the lower band. Style `h` keeps its
+          CLOSE_CLEAR physical-right padding so the title can never slide under the floating ×. */}
+      <View style={s.supHero}>
+        <RNImage source={HERO} style={[s.supHeroImg, { opacity: dark ? 0.22 : 0.5 }]} resizeMode="cover" />
+        {/* locations-first prop order is deliberate: verify-about-premium-contract locates the
+            ABOUT hero by the exact `LinearGradient colors={[alpha0(...)…` substring, and this
+            earlier Support occurrence must not shadow it. */}
+        <LinearGradient locations={[0.1, 0.94]} colors={[alpha0(pal.paper), pal.paper]} style={StyleSheet.absoluteFill} />
+        <View style={s.supHeroInner}>
+          <Text style={s.h}>{t('Support')}</Text>
+        </View>
+      </View>
+
+      <View style={s.bodyPad}>
+        <SupCard
+          icon="headset-outline"
+          email="support@ezhalah.com"
+          desc={t('Questions about your account, searches, or technical issues.')}
+        />
+        <SupCard
+          icon="business-outline"
+          email="info@ezhalah.com"
+          desc={t('Business inquiries, partnerships, media requests, and general information.')}
+        />
+        <View style={s.rt}>
+          <View style={s.rtHead}>
+            <Ionicons name="time-outline" size={15} color={colors.primary} />
+            <Text style={s.rtH}>{t('Response Time')}</Text>
+          </View>
+          <RtRow text={t('Typical response time: {h}.', { h: t('72 hours') })} />
+          <RtRow text={t('Some inquiries may take up to {d}.', { d: t('1 week') })} />
+        </View>
       </View>
     </View>
   );
@@ -191,162 +224,102 @@ function Reveal({ shown, animate, delay, fadeOnly, style, children }: {
   );
 }
 
-function AboutBody({ t, desktop, reduced }: { t: Tr; desktop: boolean; reduced: boolean }) {
+function AboutBody({ t, reduced }: { t: Tr; reduced: boolean }) {
+  // Literal palette for gradients/surfaces — gradient colors are parsed, var() breaks.
+  const pal = useThemePalette();
+  const dark = useResolvedTheme() === 'dark';
   const animate = IS_WEB && !reduced;
   const shown = useShown(!animate);
   const rev = { shown, animate };
+  const a = useMemo(() => makeAbout(pal, dark), [pal, dark]);
 
-  const values: { label: string; line: string; chip?: string }[] = [
-    { label: t('We gather'), line: t('Property listings from the licensed platforms in the Kingdom, in one place.'), chip: t('+{n} platforms', { n: String(PLATFORM_COUNT) }) },
-    { label: t('We organize'), line: t('One organized screen that makes comparing fast and easy.') },
-    { label: t('We help'), line: t('AI-powered search instead of browsing dozens of sites.') },
-    { label: t('We point you to the source'), line: t('We take you to the listing so you contact its original platform directly.') },
+  const values: { icon: keyof typeof Ionicons.glyphMap; label: string; line: string }[] = [
+    { icon: 'albums-outline', label: t('We gather'), line: t('Property listings from the licensed platforms in the Kingdom, in one place.') },
+    { icon: 'grid-outline', label: t('We organize'), line: t('One organized screen that makes comparing fast and easy.') },
+    { icon: 'sparkles-outline', label: t('We help'), line: t('AI-powered search instead of browsing dozens of sites.') },
+    { icon: 'open-outline', label: t('We point you to the source'), line: t('We take you to the listing so you contact its original platform directly.') },
   ];
-  const legal: { label: string; text: string }[] = [
-    { label: t('Our role'), text: t('Ezhalah is a search platform only. We do not own, list, sell, or rent properties, and we run no transactions and take no commission.') },
-    { label: t('Listing licensing'), text: t('Every listing is published by its source platform and remains subject to its licensing. Ezhalah does not issue or own listings.') },
-    { label: t('Disclaimer'), text: t('Listings come from external platforms and we do not verify them. Confirm the details with the original platform before any decision.') },
-    { label: t('Data & privacy'), text: t('We collect only what the service needs, and we do not sell user data.') },
+  const legal: { icon: keyof typeof Ionicons.glyphMap; label: string; text: string }[] = [
+    { icon: 'compass-outline', label: t('Our role'), text: t('Ezhalah is a search platform only. We do not own, list, sell, or rent properties, and we run no transactions and take no commission.') },
+    { icon: 'document-text-outline', label: t('Listing licensing'), text: t('Every listing is published by its source platform and remains subject to its licensing. Ezhalah does not issue or own listings.') },
+    { icon: 'alert-circle-outline', label: t('Disclaimer'), text: t('Listings come from external platforms and we do not verify them. Confirm the details with the original platform before any decision.') },
+    { icon: 'lock-closed-outline', label: t('Data & privacy'), text: t('We collect only what the service needs, and we do not sell user data.') },
   ];
 
-  const hero = (
-    <Reveal {...rev} delay={40}>
-      <Text style={[a.eyebrow, desktop ? a.eyebrowGapD : a.eyebrowGapM]}>{t('About Us')}</Text>
-      {/* Reading-order row: eagle → wordmark → the bright-green full stop (the only saturated
-          accent on the text side). Auto-mirrors: first child = physical right in Arabic. */}
-      <View style={[a.lockup, desktop ? a.lockupGapD : a.lockupGapM]}>
-        <RNImage source={EAGLE} style={desktop ? a.eagle : a.eagleM} resizeMode="contain" />
-        <Text style={desktop ? a.wordmark : a.wordmarkM}>{t('Ezhalah')}</Text>
-        <View style={desktop ? a.wordDot : a.wordDotM} />
-      </View>
-      <Text style={desktop ? [a.heroLine, a.heroLineGapD] : a.heroLineM}>
-        {t('Smarter property search, bringing the Saudi market together in one place.')}
-      </Text>
-    </Reveal>
-  );
-
-  const cells = values.map((v, i) => (
-    <Reveal key={v.label} {...rev} delay={110 + i * 30} style={desktop ? a.valueCell : undefined}>
-      <View style={a.valueLabelRow}>
-        <View style={a.valueMarker} />
-        <Text style={desktop ? a.valueLabel : a.valueLabelM}>{v.label}</Text>
-        {v.chip ? (
-          <View style={a.statChip}>
-            <Text style={a.statChipText}>{v.chip}</Text>
+  return (
+    <View>
+      {/* ── The artwork IS the hero (owner 2026-08-29): the hand-drawn Saudi skyline bleeds the
+          card's full width and melts downward into the surface through a gradient — part of the
+          composition, never an image in a box. The lockup rises out of its lower band; TOP_CLEAR
+          keeps everything under the floating ×. ── */}
+      <Reveal {...rev} delay={40} fadeOnly style={a.heroArt}>
+        <RNImage source={HERO} style={a.heroImg} resizeMode="cover" />
+        <LinearGradient colors={[alpha0(pal.paper), pal.paper]} locations={[0.15, 0.96]} style={StyleSheet.absoluteFill} />
+        <View style={a.heroInner}>
+          <Text style={a.eyebrow}>{t('About Us')}</Text>
+          <View style={a.lockup}>
+            <RNImage source={EAGLE} style={a.eagle} resizeMode="contain" />
+            <Text style={a.wordmark}>{t('Ezhalah')}</Text>
+            <View style={a.wordDot} />
           </View>
-        ) : null}
-      </View>
-      <Text style={desktop ? a.valueLine : a.valueLineM}>{v.line}</Text>
-    </Reveal>
-  ));
-
-  if (desktop) {
-    return (
-      <View style={a.aboutRoot}>
-        <View style={a.aboutMain}>
-          <View style={a.heroCol}>
-            {hero}
-            <View style={a.valueGrid}>{cells}</View>
-          </View>
-          <Reveal {...rev} delay={80} fadeOnly style={a.panel}>
-            <VisualPanel t={t} />
-          </Reveal>
         </View>
-        {/* The colophon: four columns of small print. Present and scannable, never hidden. */}
-        <Reveal {...rev} delay={230} fadeOnly style={a.legalStrip}>
+      </Reveal>
+
+      <View style={a.body}>
+        <Reveal {...rev} delay={90}>
+          <Text style={a.heroLine}>{t('Smarter property search, bringing the Saudi market together in one place.')}</Text>
+        </Reveal>
+
+        {/* One quiet stat — the number leads, the sentence explains. */}
+        <Reveal {...rev} delay={130} style={a.statBand}>
+          <Text style={a.statNum}>+{String(PLATFORM_COUNT)}</Text>
+          <Text style={a.statLabel}>{t('Real-estate platforms, searched as one.')}</Text>
+        </Reveal>
+
+        {/* The four verbs as a 2×2 of soft cards — short, scannable, never a wall of text. */}
+        <View style={a.vGrid}>
+          {values.map((v, i) => (
+            <Reveal key={v.label} {...rev} delay={170 + i * 30} style={a.vCard}>
+              <View style={a.vIcon}><Ionicons name={v.icon} size={15} color={pal.primary} /></View>
+              <Text style={a.vLabel}>{v.label}</Text>
+              <Text style={a.vLine}>{v.line}</Text>
+            </Reveal>
+          ))}
+        </View>
+
+        {/* Trust — present, readable, designed: one quiet card, four icon-led rows. */}
+        <Reveal {...rev} delay={310} fadeOnly style={a.trustCard}>
+          <Text style={a.trustTitle}>{t('Trust & transparency')}</Text>
           {legal.map((l) => (
-            <View key={l.label} style={a.legalCol}>
-              <Text style={a.legalLabel}>{l.label}</Text>
-              <Text style={a.legalText}>{l.text}</Text>
+            <View key={l.label} style={a.trustRow}>
+              <View style={a.trustIcon}><Ionicons name={l.icon} size={13} color={pal.primary} /></View>
+              <Text style={a.trustText}>
+                <Text style={a.trustLead}>{l.label + ': '}</Text>
+                {l.text}
+              </Text>
             </View>
           ))}
         </Reveal>
-      </View>
-    );
-  }
 
-  return (
-    <>
-      <View style={a.bodyPadM}>
-        {hero}
-        <View style={a.valueListM}>{cells}</View>
+        <Reveal {...rev} delay={360} fadeOnly style={a.footer}>
+          <Text style={a.brandLine}>{t('Ezhalah, and may your luck be good.')}</Text>
+        </Reveal>
       </View>
-      <Reveal {...rev} delay={230} fadeOnly style={a.legalCardM}>
-        {legal.map((l) => (
-          <Text key={l.label} style={a.legalTextM}>
-            <Text style={a.legalLeadM}>{l.label + ': '}</Text>
-            {l.text}
-          </Text>
-        ))}
-      </Reveal>
-      {/* The hand-drawn skyline closes the sheet with the brand line — the current beloved footer,
-          kept verbatim as the mobile visual. */}
-      <Reveal {...rev} delay={230} fadeOnly style={a.footerM}>
-        <RNImage source={HERO} style={a.footerArtM} resizeMode="cover" />
-        <LinearGradient colors={[colors.paper, 'rgba(251,251,250,0)']} locations={[0, 0.75]} style={StyleSheet.absoluteFill} />
-        <Text style={a.brandLineM}>{t('Ezhalah, and may your luck be good.')}</Text>
-      </Reveal>
-    </>
-  );
-}
-
-// The desktop signature: an abstract Saudi map — faint street grid over a light wash, two arterial
-// diagonals, two tinted parcels, two listing abstractions pinned to markers, one saturated location
-// pin, and the hand-drawn skyline rising out of the wash at the base. Deliberately still: no
-// ambient motion, nothing interactive. Coordinates are physical (the panel is its own canvas).
-function VisualPanel({ t }: { t: Tr }) {
-  return (
-    <>
-      <LinearGradient colors={['#f6faf7', '#ecf5ef']} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={StyleSheet.absoluteFill} />
-      {Array.from({ length: 6 }, (_, i) => (
-        <View key={'v' + i} style={[a.gridV, { left: 20 + i * 50 }]} />
-      ))}
-      {Array.from({ length: 10 }, (_, i) => (
-        <View key={'h' + i} style={[a.gridH, { top: 24 + i * 50 }]} />
-      ))}
-      <View style={[a.diagonal, { left: 90, top: -60, transform: [{ rotate: '18deg' }] }]} />
-      <View style={[a.diagonal, { left: 230, top: -80, transform: [{ rotate: '-24deg' }] }]} />
-      <View style={[a.parcel, { left: 38, top: 96, width: 64, height: 46 }]} />
-      <View style={[a.parcel, { left: 216, top: 236, width: 52, height: 64 }]} />
-      <View style={[a.marker, { left: 150, top: 130 }]} />
-      <View style={[a.connector, { left: 153.5, top: 138 }]} />
-      <MiniCard left={96} top={150} width={132} bars={[64, 88, 46]} />
-      <View style={[a.marker, { left: 246, top: 218 }]} />
-      <View style={[a.connector, { left: 249.5, top: 226 }]} />
-      <MiniCard left={190} top={238} width={116} bars={[56, 78]} />
-      <View style={a.pin}>
-        <Ionicons name="location-sharp" size={13} color="#ffffff" />
-      </View>
-      <RNImage source={HERO} style={a.skyline} resizeMode="cover" />
-      <LinearGradient colors={['rgba(236,245,239,1)', 'rgba(236,245,239,0)']} locations={[0, 0.7]} style={a.skylineMelt} />
-      <Text style={a.brandLine}>{t('Ezhalah, and may your luck be good.')}</Text>
-    </>
-  );
-}
-
-// A listing ABSTRACTION: a green dot and gray bars. Bars only — never fake prices, districts, or
-// any listing-like text; fabricated data anywhere in this product is banned.
-function MiniCard({ left, top, width, bars }: { left: number; top: number; width: number; bars: number[] }) {
-  const [first, ...rest] = bars;
-  return (
-    <View style={[a.miniCard, { left, top, width }]}>
-      <View style={a.miniCardTopRow}>
-        <View style={a.miniDot} />
-        <View style={[a.barDark, { width: first }]} />
-      </View>
-      {rest.map((w, i) => (
-        <View key={i} style={[a.barLight, { width: w }]} />
-      ))}
     </View>
   );
 }
 
-function SupCard({ email, desc }: { email: string; desc: string }) {
+// One channel = one RTL row: a distinct glyph names the audience, the address is the hero line
+// (kept LTR internally — it's latin), the purpose sentence sits beneath. Rows, not centered
+// shrines — the reader scans down the right edge in one pass.
+function SupCard({ icon, email, desc }: { icon: keyof typeof Ionicons.glyphMap; email: string; desc: string }) {
   return (
     <View style={s.supCard}>
-      <View style={s.cardIc}><Ionicons name="mail-outline" size={20} color={colors.primary} /></View>
-      <Text style={s.mail}>{email}</Text>
-      <Text style={s.desc}>{desc}</Text>
+      <View style={s.cardIc}><Ionicons name={icon} size={19} color={colors.primary} /></View>
+      <View style={s.supBody}>
+        <Text style={s.mail}>{email}</Text>
+        <Text style={s.desc}>{desc}</Text>
+      </View>
     </View>
   );
 }
@@ -371,105 +344,95 @@ const s = StyleSheet.create({
   card: { width: '100%', backgroundColor: colors.paper, borderRadius: 24, overflow: 'hidden', ...cardShadow, shadowOpacity: 0.26, shadowRadius: 32 },
   // Circular close pinned to the PHYSICAL top-right (RN `right` is physical — RTL never flips it).
   xBtn: {
-    position: 'absolute', top: CLOSE_INSET, right: CLOSE_INSET, zIndex: 5,
+    // Physical top-right under BOTH directions: RTL (forced app-wide for Arabic) flips `right:` to
+    // the physical left, so the physical right is spelled `left:` there. (owner 2026-08-29)
+    position: 'absolute', top: CLOSE_INSET, ...(I18nManager.isRTL ? { left: CLOSE_INSET } : { right: CLOSE_INSET }), zIndex: 5,
     width: CLOSE_SIZE, height: CLOSE_SIZE, borderRadius: CLOSE_SIZE / 2,
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine,
     alignItems: 'center', justifyContent: 'center',
     shadowColor: 'rgba(20,40,30,1)', shadowOpacity: 0.14, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 3,
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
   },
-  xBtnHover: { backgroundColor: '#eef3ef', transform: [{ scale: 1.06 }] },
+  xBtnHover: { backgroundColor: colors.surface2, transform: [{ scale: 1.06 }] },
   scroll: { paddingTop: 0, paddingBottom: 0 },
   scrollFill: { flexGrow: 1 },
-  bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 26, paddingBottom: 8 },
+  bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 14, paddingBottom: 8 },
 
-  // ——— Support (shares the upgraded shell) ———
+  // ——— Support (2026-08-30 refresh — the «من نحن» artwork language) ———
+  // The skyline hero: full-bleed at the card's top, melting into the surface. The heading rises
+  // from its lower band; TOP_CLEAR-derived height keeps it under the floating × band, and style
+  // `h` STILL reserves CLOSE_CLEAR on the physical right (verify-info-modal-header-clearance
+  // pins that arithmetic — the clearance is belt-and-braces, not decoration).
+  supHero: { height: TOP_CLEAR + 66, overflow: 'hidden', justifyContent: 'flex-end' },
+  supHeroImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' },
+  supHeroInner: { paddingHorizontal: BODY_PAD, paddingBottom: 0 },
   // paddingRight keeps the heading out from under the close button (see CLOSE_CLEAR).
-  h: { fontSize: 23, fontWeight: '700', color: colors.ink, marginBottom: 16, paddingTop: 4, paddingRight: CLOSE_CLEAR },
-  supCard: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.fieldLine, padding: 18, alignItems: 'center', marginBottom: 12 },
-  cardIc: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
-  mail: { fontSize: 15.5, fontWeight: '700', color: colors.ink },
-  desc: { fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 6, lineHeight: 19 },
+  h: { fontSize: 24, lineHeight: 32, fontWeight: '800', color: colors.ink, textAlign: 'right', writingDirection: 'auto' as any, paddingRight: CLOSE_CLEAR },
+  supBody: { flex: 1, minWidth: 0 },
+  supCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.fieldLine,
+    paddingVertical: 15, paddingHorizontal: 16, marginBottom: 10,
+  },
+  cardIc: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center' },
+  mail: { fontSize: 15, fontWeight: '800', color: colors.ink, textAlign: 'right', writingDirection: 'ltr' as any },
+  desc: { fontSize: 12.5, color: colors.muted, textAlign: 'right', marginTop: 3, lineHeight: 19 },
 
-  rt: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.fieldLine, padding: 18, marginTop: 6, marginBottom: 18 },
-  rtH: { fontSize: 14, fontWeight: '700', color: colors.ink, marginBottom: 10 },
-  rtRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 5 },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.primary },
-  rtText: { flex: 1, fontSize: 13.5, color: colors.body, lineHeight: 19 },
+  // The response promise: a quiet tinted band, not a third boxed card competing with the channels.
+  rt: { backgroundColor: colors.tint, borderRadius: 18, padding: 16, marginTop: 8, marginBottom: 18 },
+  rtHead: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 8 },
+  rtH: { fontSize: 13.5, fontWeight: '800', color: colors.ink, textAlign: 'right' },
+  rtRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
+  rtText: { flex: 1, fontSize: 13, color: colors.body, lineHeight: 20, textAlign: 'right' },
 });
 
 // «من نحن» styles. Arabic typography rules: NO letterSpacing anywhere (Latin tracking mangles
 // Arabic script), weights carry the hierarchy, body leading stays generous (~1.7).
+// Palette-driven About styles (owner redesign 2026-08-29): the dialog now themes fully — dark mode
+// gets a real dark composition, not a light card in a dark app. No letterSpacing anywhere (Latin
+// tracking mangles Arabic script — pinned by verify-about-premium-contract).
+function makeAbout(pal: Record<string, string>, dark: boolean) {
+  return StyleSheet.create({
+    // The artwork hero: full-bleed at the card's top, melting into the surface. paddingTop derives
+    // from TOP_CLEAR so the lockup can never collide with the floating × (same arithmetic contract
+    // as before — verify-info-modal-header-clearance pins it).
+    heroArt: { height: TOP_CLEAR + 128, overflow: 'hidden', justifyContent: 'flex-end' },
+    heroImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', opacity: dark ? 0.22 : 0.55 },
+    heroInner: { paddingHorizontal: 24, paddingTop: TOP_CLEAR, paddingBottom: 2 },
+    eyebrow: { fontSize: 12, lineHeight: 18, fontWeight: '700', color: pal.muted, marginBottom: 6 },
+    lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    eagle: { width: 30, height: 30, opacity: 0.9 },
+    wordmark: { fontSize: 36, lineHeight: 44, fontWeight: '800', color: pal.ink },
+    wordDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: pal.accentLeaf ?? pal.primary, alignSelf: 'flex-end', marginBottom: 8 },
+
+    body: { paddingHorizontal: 24, paddingBottom: 18 },
+    heroLine: { fontSize: 16.5, lineHeight: 27, fontWeight: '500', color: pal.body, marginTop: 8 },
+
+    statBand: { flexDirection: 'row', alignItems: 'baseline', gap: 10, marginTop: 18, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: pal.line },
+    statNum: { fontSize: 30, lineHeight: 34, fontWeight: '800', color: pal.primary, fontVariant: ['tabular-nums'] },
+    statLabel: { flex: 1, fontSize: 13.5, lineHeight: 20, fontWeight: '600', color: pal.ink },
+
+    vGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 18 },
+    vCard: { flexGrow: 1, flexBasis: '44%', minWidth: 200, backgroundColor: dark ? pal.surface : pal.tint, borderRadius: 16, borderWidth: 1, borderColor: dark ? pal.line : pal.tintLine, padding: 14 },
+    vIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: dark ? pal.tint : pal.surface, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+    vLabel: { fontSize: 14.5, lineHeight: 21, fontWeight: '800', color: pal.ink },
+    vLine: { fontSize: 12.5, lineHeight: 20, fontWeight: '400', color: pal.body, marginTop: 4 },
+
+    trustCard: { backgroundColor: pal.surface, borderRadius: 16, borderWidth: 1, borderColor: pal.line, padding: 16, marginTop: 18, gap: 12 },
+    trustTitle: { fontSize: 13.5, lineHeight: 20, fontWeight: '800', color: pal.dark ?? pal.ink },
+    trustRow: { flexDirection: 'row', gap: 10 },
+    trustIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: pal.tint, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+    trustText: { flex: 1, fontSize: 12, lineHeight: 19, fontWeight: '400', color: pal.body },
+    trustLead: { fontWeight: '800', color: pal.dark ?? pal.ink },
+
+    footer: { alignItems: 'center', marginTop: 18 },
+    brandLine: { fontSize: 13, fontWeight: '700', color: pal.dark ?? pal.ink },
+  });
+}
+
+// ——— stagger (web only) ———
 const a = StyleSheet.create({
-  // ——— shared ———
-  aboutRoot: { flex: 1 },
-  eyebrow: { fontSize: 12, lineHeight: 18, fontWeight: '700', color: colors.muted },
-  lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  eagle: { width: 30, height: 30, opacity: 0.9 },
-  wordmark: { fontSize: 38, lineHeight: 46, fontWeight: '800', color: colors.ink },
-  wordDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: colors.accentLeaf, alignSelf: 'flex-end', marginBottom: 8 },
-  heroLine: { fontSize: 17, lineHeight: 28, fontWeight: '500', color: colors.body },
-  valueMarker: { width: 6, height: 6, borderRadius: 2, backgroundColor: colors.primary },
-  valueLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  valueLabel: { fontSize: 14.5, lineHeight: 22, fontWeight: '800', color: colors.ink },
-  valueLine: { fontSize: 13, lineHeight: 22, fontWeight: '400', color: colors.body, marginTop: 6 },
-  statChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine, borderRadius: 999, paddingVertical: 3, paddingHorizontal: 10, marginHorizontal: 8 },
-  statChipText: { fontSize: 12, lineHeight: 16, fontWeight: '800', color: colors.dark },
-  brandLine: { position: 'absolute', bottom: 16, left: 0, right: 0, textAlign: 'center', fontSize: 13, fontWeight: '700', color: colors.dark },
-
-  // ——— desktop ———
-  aboutMain: { flexDirection: 'row', flex: 1, minHeight: 0 },
-  // TOP_CLEAR (not plain padding) so the hero's first line — whose RTL reading edge is the physical
-  // right, under the × — always starts below the button.
-  heroCol: { flex: 1, justifyContent: 'center', paddingHorizontal: 36, paddingTop: TOP_CLEAR, paddingBottom: 32 },
-  eyebrowGapD: { marginBottom: 8 },
-  lockupGapD: { marginBottom: 14 },
-  heroLineGapD: { marginBottom: 20 },
-  valueGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 20, rowGap: 18 },
-  valueCell: { width: '46%', minWidth: 170 },
-
-  // ——— visual panel (desktop only) ———
-  panel: { width: 320, alignSelf: 'stretch', overflow: 'hidden' },
-  gridV: { position: 'absolute', top: 0, bottom: 0, width: 1, backgroundColor: 'rgba(47,114,71,0.07)' },
-  gridH: { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: 'rgba(47,114,71,0.07)' },
-  diagonal: { position: 'absolute', width: 1.5, height: 700, backgroundColor: 'rgba(47,114,71,0.10)' },
-  parcel: { position: 'absolute', backgroundColor: 'rgba(223,240,228,0.55)', borderRadius: 6 },
-  marker: { position: 'absolute', width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
-  connector: { position: 'absolute', width: 1, height: 12, backgroundColor: '#bcd9c6' },
-  miniCard: { position: 'absolute', backgroundColor: colors.surface, borderRadius: 10, borderWidth: 1, borderColor: colors.tintLine, padding: 10, shadowColor: 'rgba(20,40,30,1)', shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 1 },
-  miniCardTopRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  miniDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
-  barDark: { height: 6, borderRadius: 3, backgroundColor: '#dfe7e2' },
-  barLight: { height: 6, borderRadius: 3, backgroundColor: '#ecf1ee', marginTop: 6 },
-  pin: { position: 'absolute', left: 60, top: 252, width: 24, height: 24, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: 'rgba(20,40,30,1)', shadowOpacity: 0.28, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
-  skyline: { position: 'absolute', left: 0, right: 0, bottom: 28, height: 120, opacity: 0.35 },
-  skylineMelt: { position: 'absolute', left: 0, right: 0, bottom: 88, height: 60 },
-
-  // ——— legal (desktop strip) ———
-  legalStrip: { borderTopWidth: 1, borderTopColor: colors.line, paddingHorizontal: 24, paddingTop: 14, paddingBottom: 12, flexDirection: 'row', columnGap: 20 },
-  legalCol: { flex: 1 },
-  legalLabel: { fontSize: 11.5, lineHeight: 16, fontWeight: '800', color: colors.dark, marginBottom: 6 },
-  legalText: { fontSize: 11.5, lineHeight: 19, fontWeight: '400', color: '#5f6d65' },
-
-  // ——— mobile ———
-  bodyPadM: { paddingHorizontal: 22, paddingTop: TOP_CLEAR },
-  wordmarkM: { fontSize: 34, lineHeight: 42, fontWeight: '800', color: colors.ink },
-  wordDotM: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accentLeaf, alignSelf: 'flex-end', marginBottom: 7 },
-  eagleM: { width: 26, height: 26, opacity: 0.9 },
-  eyebrowGapM: { marginBottom: 8 },
-  lockupGapM: { marginBottom: 12 },
-  heroLineM: { fontSize: 16, lineHeight: 26, fontWeight: '500', color: colors.body, marginBottom: 22 },
-  valueListM: { gap: 16, marginBottom: 24 },
-  valueLabelM: { fontSize: 14, lineHeight: 20, fontWeight: '800', color: colors.ink },
-  valueLineM: { fontSize: 13, lineHeight: 22, fontWeight: '400', color: colors.body, marginTop: 4 },
-  legalCardM: { backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.fieldLine, paddingHorizontal: 16, paddingVertical: 14, gap: 10, marginHorizontal: 22, marginBottom: 8 },
-  legalTextM: { fontSize: 11.5, lineHeight: 19, fontWeight: '400', color: '#5f6d65' },
-  legalLeadM: { fontWeight: '800', color: colors.dark },
-  footerM: { height: 96, justifyContent: 'flex-end', alignItems: 'center', overflow: 'hidden', marginTop: 8 },
-  footerArtM: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', opacity: 0.35 },
-  brandLineM: { fontSize: 13, fontWeight: '700', color: colors.dark, marginBottom: 14 },
-
-  // ——— stagger (web only) ———
   rev: { opacity: 0, transform: [{ translateY: 8 }] },
   revFadeOnly: { opacity: 0 },
   revIn: { opacity: 1, transform: [{ translateY: 0 }] },

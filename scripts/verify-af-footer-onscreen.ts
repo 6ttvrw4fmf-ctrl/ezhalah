@@ -33,7 +33,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 
 const src = readFileSync(new URL('../src/components/AdvancedQuestionCard.tsx', import.meta.url), 'utf8');
 // Strip every comment — block, JSX (`{/* … */}`) and line — so a guarantee that exists only in prose
-// can never satisfy a check below. The prose in this very file names both `ScrollView` and all four
+// can never satisfy a check below. The prose in this very file names both `ScrollView` and all the
 // footer testIDs, so an unstripped parse would pass no matter where the JSX actually sits.
 const code = src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
 
@@ -44,13 +44,16 @@ check('0. the card still has exactly one body ScrollView',
   'the checks below locate the footer relative to this element');
 
 // ── 1. THE INVARIANT: every footer control lives OUTSIDE the scroller ────────────────────────────
-const FOOTER_CONTROLS = ['af-confirm', 'af-back', 'af-skip', 'af-skip-all'];
+// af-skip-all removed from this list 2026-08-28: the owner removed the in-question «عرض النتائج»
+// early-exit entirely — the footer is متابعة / تخطي / رجوع (verify-af-footer-buttons.ts pins both
+// the removal and the new button treatment).
+const FOOTER_CONTROLS = ['af-confirm', 'af-back', 'af-skip'];
 for (const id of FOOTER_CONTROLS) {
   const at = code.indexOf(`testID="${id}"`);
   check(`1. «${id}» is rendered OUTSIDE the body ScrollView (pinned, cannot scroll off screen)`,
     at > -1 && at > svClose,
     at === -1
-      ? `testID="${id}" is gone — the AF footer must keep all four controls (contract §4/§7)`
+      ? `testID="${id}" is gone — the AF footer must keep all three controls (contract §4/§7; owner removed af-skip-all 2026-08-28)`
       : `testID="${id}" sits at index ${at}, inside the ScrollView (ends at ${svClose}). ` +
         'On a 664pt phone the tallest question pushes it past the bottom edge — the 2026-08-23 defect.');
 }

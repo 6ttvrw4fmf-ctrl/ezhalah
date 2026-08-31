@@ -4,6 +4,8 @@
 on any divergence** (same rule as every other engineer's canonical spec). If the two ever differ,
 update the routine to match this file.
 
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+
 ## §0 — Mandate and standing operating contract
 
 You are the most demanding real user Ezhalah has. You own the correctness of **everything that
@@ -42,6 +44,21 @@ Only stop and ask the owner when:
 
 Otherwise: fix it. Same authority grant as `docs/ops/AGENT_AUTHORITY.md`, which overrides any
 more-timid wording anywhere, including in this file.
+
+## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
+
+On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
+whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
+cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
+a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
+contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
+RUN: N` in your FINAL REPORT.
+
+If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
+owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
+Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
+doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
 
 ## PART 1 — WHAT YOU OWN
 
@@ -462,6 +479,9 @@ Four rules that come from real failures on this exact surface:
 | Five Villa/Buy AF questions, server-side only, quiet DB | **3,433 ms** | PR #1146 |
 | One param-fidelity browser journey | ~16 s | §40.2 |
 | One full browser journey | ~26 s | §40.2 |
+| **One #6 journey, this routine's own mix** | **~14.4 s** | measured 2026-08-28: `e2e/journeys/run.mjs`, 32 journeys in 460 s against production, Chromium, strictly serial, a fresh browser + context per journey (so launch/teardown is INSIDE the figure, not additional) |
+| Engines installed in the agent image | **Chromium only** | measured 2026-08-28: `/opt/pw-browsers` holds `chromium-1194`, its headless shell and `ffmpeg-1011` — no `webkit-*`, no `firefox-*` |
+| One «بحث» press → search RPCs | **6** `location_search_candidates_ar` calls | measured 2026-08-28: single click → 6, double click → 6 (identical). A double-click oracle must compare against a measured single-click baseline, never against 1 |
 
 **The consequence you must actually apply:** `rankQuestions` fires one `af_eligible_count` **per
 eligible question, concurrently** — so a five-question cohort is already past the concurrency knee
@@ -473,14 +493,31 @@ load.
 
 **NOT ESTABLISHED — do not cite a number for these until one is measured:**
 
-- Per-journey cost for #6's *own* mix (auth/One Tap, sidebar rename/delete/star/reorder, favorites,
-  chat restore, voice, read-aloud). §40.2's 16 s / 26 s are *search* journeys and are the closest
-  available proxy, not a measurement of yours.
-- WebKit and Firefox timings. Every figure above was measured on Chromium.
-- Browser launch/teardown cost in this container, and how many parallel contexts it tolerates.
+- WebKit and Firefox timings. Every figure above was measured on Chromium, and neither engine is
+  installed in the agent image (see the table), so this cannot be measured here at all today.
+- How many parallel contexts this container tolerates. The ~14.4 s figure above is strictly
+  SERIAL; nothing about concurrent journeys has been measured, and PART 11.3's concurrency knee of
+  3 is a constraint on the shared production instance regardless.
 - A total journey count for a #6 run. **#6 has no §40-style mandated scale and this part does not
   invent one** — PART 3's coverage requirements plus the ledger's oldest-first rotation define the
   run, and the report states the count actually achieved.
+
+### 11.5 What this container CANNOT reach (measured 2026-08-28, re-check every run)
+
+Stated here so no run scores a surface it never touched, and so the gaps are visible as
+infrastructure asks rather than rediscovered each time:
+
+- **WebKit and Firefox are not installed** and PART 11.1 forbids `playwright install`. Every run in
+  this image is Chromium-only, which bounds PART 3 item 6's rotation and PART 5 item 10 outright.
+  This is a COVERAGE LIMIT to report, never a surface to score. `engineAvailable()` in
+  `e2e/journeys/harness.mjs` detects it and the runner prints the limit.
+- **Google One Tap cannot be exercised**: the egress proxy denies CONNECT to `www.google.com` and
+  `android.clients.google.com` (observed as ~600 rejected connections during the 2026-08-28 sweep),
+  so GIS never loads. One Tap's *code* contract stays covered by the static barriers
+  (`verify-google-onetap.ts`, `verify-google-one-tap.ts`); its *behaviour* is unreachable here.
+- **Real Google sign-in is unavailable**, so signed-in journeys seed the session client-side (see
+  the harness header). That is the real client code path for sidebar/persistence — which is
+  purely client-side — but it is NOT evidence about server sync, RLS, or a real token.
 
 When you do measure one of these, land it in this table with its date and method, exactly as §40.1
 did — and delete it from this list in the same change.
@@ -552,18 +589,3 @@ deploys while Supabase is unhealthy, verify user-facing truth via the anon/publi
 privileged access standing in for what a real signed-in or guest user actually gets), verify the
 actual served bundle after a deploy (not job status alone). If Supabase or the frontend is
 degraded, stop heavy testing and diagnose first.
-
-## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
-
-On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
-whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
-cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
-sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
-a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
-contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
-RUN: N` in your FINAL REPORT.
-
-If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
-owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
-Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
-doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.

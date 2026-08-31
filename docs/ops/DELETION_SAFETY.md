@@ -111,3 +111,50 @@ The rules for reading it, which apply to any future back-audit:
   currently live first. An un-calibrated built URL that 404s produces a confident "correctly
   deleted" about a listing that is still on the market — the same manufactured certainty the legacy
   deleter had.
+
+## 6. The standing aqar/wasalt cleanup-engine backlog — owner decision (2026-08-30)
+
+`cleanup:aqar` and `cleanup:wasalt` (the unified engine, §2) have aborted on their anomaly breaker
+every run since the engine went live for these two platforms on 2026-08-22/23: ~4,921 eligible rows
+for aqar, ~4,416 for wasalt, both far past the anomaly floor of 300. Neither platform has hard-deleted
+a single row through the engine — `cleanup_deletion_log` holds only `aqarcity` and `gathern`. Both the
+Daily Engineer (2026-08-30 heartbeat) and Senior Production (run #71, 2026-08-30) independently
+classified this as `OWNER DECISION` and left it untouched. The owner's decision, given 2026-08-30, is
+now explicit and permanent:
+
+**Do not raise or weaken the anomaly floor merely to let the backlog through.** Deletion on these two
+platforms stays fail-closed. The anomaly/fraction breaker (§2.2) is not a bug to route around here —
+raising a destructive-operation threshold to make a blocked run go green is exactly the kind of
+"weaken a gate to reach 10/10" this repo's engineering policy forbids (`AGENTS.md`,
+`docs/ops/AGENT_AUTHORITY.md` RED list #4/#6).
+
+**The sanctioned path is a controlled, source-confirmed drain, not a threshold change.** Whoever
+implements it (Senior Production Engineer owns this surface; the daily scraping-layer routine does
+not have write authority for it) must build it to this spec:
+
+1. **Re-probe every one of the ~4,921 / ~4,416 candidates against the live source** — the same
+   per-row re-probe §2.3 already requires, run explicitly over this backlog rather than skipped
+   because the row is already "eligible."
+2. **`live` (HTTP 200, no dead marker) → preserve.** Reactivate if currently marked inactive. Never
+   delete a row the source still serves.
+3. **`inconclusive` (403/429/5xx/timeout/parser failure/anything ambiguous) → preserve.** Per §1,
+   inconclusive is not permission to delete. **Scraper/crawl absence alone is never evidence of
+   death** — a listing missing from a crawl only becomes eligible once its own URL has been
+   individually re-probed and returned an authoritative dead signal, never from strike/age counters
+   alone.
+4. **Only rows that come back authoritatively dead (404/410, or the platform's registered dead
+   marker) on that fresh per-row probe are eligible for deletion.**
+5. **Drain in bounded batches, not one pass over the whole backlog** — a `max_delete_per_run`-style
+   cap per run (§2.5), sized and owner-visible, so a mistake in the drain logic itself has a small,
+   auditable blast radius rather than touching thousands of rows at once.
+6. **The anomaly/fraction breaker (§2.2) stays fully active during and after the drain.** A drain run
+   is not exempted from it — it is bounded specifically so it never needs to be.
+7. **Every deletion still goes through `cleanup_deletion_log` (§2.6) and barrier 14's archive
+   (§3)** — the drain uses the sanctioned engine path and its full audit trail, not a one-off script
+   that bypasses it. `scripts/verify-no-unguarded-deleter.ts` continues to apply.
+8. **No arbitrary threshold increase to make the job report green.** If, after the source re-probe,
+   the confirmed-dead count is still large, that is a finding to report with evidence — not a reason
+   to loosen anomaly_floor so the run stops aborting.
+
+Until this drain is built and run, the correct, expected state is: both platforms keep aborting on
+this backlog, deleting nothing. That is the gate working, not a defect to clear.

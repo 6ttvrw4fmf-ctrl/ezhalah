@@ -179,10 +179,25 @@ check('MUTATION: an UNKNOWN amenity token refuses the comparison, never guesses'
 
 // The AF question set must be DISCOVERED, not hardcoded (§1) — a fixed title list made every
 // Commercial AF journey report "no question rendered" while production rendered one.
+//
+// WHAT THIS PINS IS THE INTENT, NOT ONE MECHANISM (widened 2026-08-29). It used to require the
+// literal `endsWith('؟')` body-text scan, which was the only discovery the journey had. That scan
+// reads the WHOLE page, so on a results screen it also picks up the cards behind the AF overlay —
+// measured live, a text reader on that screen returned «رقم رخصة الإعلان / 7100249846» and
+// «عمر العقار / 2025» as if they were the question's options. Reading the title from the card's own
+// `af-question-title` testID is discovery too, and strictly better scoped. Pinning the old
+// expression would have forced the harness to keep the worse of the two.
+//
+// Both halves still hold: no hardcoded title may appear, AND the title must come from the live DOM.
 const jrn = read('e2e/live-sweep/journeys.mjs');
+const HARDCODED_TITLE = /['"`][^'"`]{6,}؟['"`]/;          // any Arabic question literal in the harness
+const discoversByText = jrn.includes("endsWith('؟')");
+const discoversByTestId = /data-testid="af-question-title"/.test(jrn);
 check('AF questions are discovered from the page, not a hardcoded title list',
-  !jrn.includes("'كم عرض الشارع تفضل؟'") && jrn.includes("endsWith('؟')"),
-  'a hardcoded AF title list goes blind the moment a question is added or reworded');
+  !HARDCODED_TITLE.test(jrn.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*(\/\/|\*).*$/gm, ''))
+  && (discoversByText || discoversByTestId),
+  'a hardcoded AF title list goes blind the moment a question is added or reworded; the title must '
+  + `be read from the live DOM (body-text scan: ${discoversByText}, af-question-title: ${discoversByTestId})`);
 
 // ── 4. independence: the oracle must NOT reimplement the RPC's normalisation ─────────────────────
 const sweep = read('e2e/live-sweep/sweep.mjs');

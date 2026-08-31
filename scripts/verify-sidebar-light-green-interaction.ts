@@ -21,7 +21,10 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8');
 const stripComments = (src: string) =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/^\s*\/\/.*$/gm, '');
 const sidebar = stripComments(read('src/components/Sidebar.tsx'));
-const tokens = read('src/theme/tokens.ts');
+// Token VALUES live in palette.ts since full-app theming (tokens.ts serves CSS variables on web);
+// the lightColors block comes first, so the first regex match is the light literal these
+// light-mode contrast floors were written against.
+const tokens = read('src/theme/palette.ts');
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -75,8 +78,11 @@ check('web hover reverts on mouseleave; touch press ALWAYS clears on pressOut (n
   /onMouseEnter: \(\) => setHotRowId\(c\.id\)/.test(sidebar)
   && /onMouseLeave: \(\) => setHotRowId\(\(h\) => \(h === c\.id \? null : h\)\)/.test(sidebar)
   && /onPressOut=\{\(\) => \{ if \(Platform\.OS !== 'web'\) setHotRowId\(\(h\) => \(h === c\.id \? null : h\)\); \}\}/.test(sidebar));
+// 2026-08-29: the expression evolved with route-aware active state — the guarantee is identical
+// wherever the selected highlight actually renders (the agent screen): a visually-selected row
+// never takes the hover fill. On the Filter home no row is selected, so hover may darken freely.
 check('the SELECTED chat never takes the hover fill (current ≠ hovered, structurally)',
-  /hotRowId === c\.id && activeChatId !== c\.id/.test(sidebar)
+  /!\(onAgentScreen && activeChatId === c\.id\)/.test(sidebar)
   && /histRowActive: \{ backgroundColor: '#dcefe1' \}/.test(sidebar));
 check('selected and hover are different colors entirely (light persistent vs dark interactive)',
   SELECTED.toLowerCase() !== DARK.toLowerCase());
@@ -133,8 +139,8 @@ mustCatch('a sticky mobile press (pressOut no longer clearing)',
     mut(sidebar, "onPressOut={() => { if (Platform.OS !== 'web') setHotRowId((h) => (h === c.id ? null : h)); }}",
                  'onPressOut={() => {}}')));
 mustCatch('the selected row taking the hover fill (current == hovered confusion)',
-  !/hotRowId === c\.id && activeChatId !== c\.id/.test(
-    mut(sidebar, 'hotRowId === c.id && activeChatId !== c.id', 'hotRowId === c.id')));
+  !/!\(onAgentScreen && activeChatId === c\.id\)/.test(
+    mut(sidebar, '!(onAgentScreen && activeChatId === c.id)', 'true')));
 mustCatch('an unreadable pair slipping past the contrast math (tint-on-tint)',
   contrast(TINT, SELECTED) < 4.5);
 mustCatch('the contrast function itself being broken (white-on-dark must be high, not ~1)',

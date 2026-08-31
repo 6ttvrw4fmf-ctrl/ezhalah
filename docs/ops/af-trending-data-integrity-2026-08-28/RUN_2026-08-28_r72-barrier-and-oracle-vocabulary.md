@@ -179,12 +179,19 @@ forbids asserting one without a live probe. **satel.sa is unreachable from this 
 | R8.2 Back semantics | live browser §4c | question, count and options all restored |
 | Trending full-state inheritance | live, 24+24 | cities and districts both carry AF answers exactly |
 
-### Still open for the owner (raised 2026-08-27, unchanged — not acted on)
+### ~~Still open for the owner (raised 2026-08-27, unchanged — not acted on)~~ — CLOSED 2026-08-29
 
 **R7.2.2** says a multi-select footer count "reflects the **union** of the ticked chips". Production
 has two shapes and both are right (§1). The contract sentence is **incomplete, not wrong**. Per §0.1
 a contract rule is not edited without owner authorisation, so nothing was changed. The behaviour is
 now barriered either way, so whichever wording the owner picks, the code is pinned.
+
+> **CORRECTION (2026-08-29).** This item was already stale when it was written here: PR #1177 had
+> replaced the union-only sentence with the two-shape wording. The owner confirmed that wording as
+> canonical on 2026-08-29 — same-field value choices UNION, different boolean amenities INTERSECT —
+> and the contract now says so explicitly, with an R7.2 row added to its §16 audit table pointing at
+> `verify-af-multiselect-combining-semantics.ts`. **R7.2.2 is closed. Do not carry it forward as an
+> open owner question.**
 
 ## 7. Harness notes for the next run
 

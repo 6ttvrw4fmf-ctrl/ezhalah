@@ -64,9 +64,12 @@ check('journey «showMoreJourney» is actually run by the runner',
 check('the «عرض المزيد» journey asserts filter persistence across batches',
   /FILTER-PERSISTENCE/.test(showMore),
   'a pager journey that does not re-check the filters proves only that a button is clickable');
-check('the «عرض المزيد» journey asserts the cap message states the true total',
-  /TRUE-TOTAL/.test(showMore) && /وعرضنا لك/.test(showMore),
-  'the browse cap is only honest while the closing line quotes trueTotal, never the cap');
+// CONTRACT CHANGE (owner 2026-08-29): the lifetime cap is gone — the journey now asserts BOTH that
+// a missing pager while matches remain is a defect (PAGER-MISSING) and that any total the closing
+// line quotes is the search's true total (TRUE-TOTAL). Same honesty, new continuation shape.
+check('the «عرض المزيد» journey asserts continuation (pager present while matches remain) + true totals',
+  /TRUE-TOTAL/.test(showMore) && /PAGER-MISSING/.test(showMore),
+  'the continuation is only honest while a missing pager with matches remaining is a defect');
 
 // ── 2. the floors, at or above the values the owner set ─────────────────────────────────────────
 const REQUIRED_FLOORS: Record<string, number> = {
@@ -198,8 +201,17 @@ check('floor backstops target a city proven reachable this run',
 check('the MOBILE floor has a backstop of its own',
   /done\.mobile\)/.test(runner) && /mobile floor/.test(runner),
   'mobile rode on `i === 0` and vanished whenever that one city was not offered');
-check('the trending-district journey also uses a reachable city',
-  /trendingDistrict\(\{ city: reachable\(\)/.test(runner));
+// STRENGTHENED 2026-08-30: a merely-"reachable" city is not enough. `reachable()` is deal-blind —
+// it returns whichever city was reached first, for whatever deal reached it — so a rent-only city
+// («المندق», 19 listings all إيجار) satisfied this check and was still handed to trending-district,
+// which runs on the app's DEFAULT deal «بيع». The journey was skipped and the floor lost. The city
+// must now be chosen for the deal the journey actually runs; that IMPLIES reachability, so this is
+// a tightening, not a relaxation. A raw pickCities[0] still fails, as before.
+check('the trending-district journey uses a DEAL-AWARE reachable city',
+  /trendingDistrict\(\{\s*city:\s*tdCity/.test(runner)
+  && /const tdCity = reachableFor\('بيع'\)/.test(runner)
+  && !/trendingDistrict\(\{\s*city:\s*pickCities\[0\]/.test(runner),
+  'a deal-blind city hands a بيع journey a rent-only city and silently deletes the floor');
 
 // «not offered» must mean the PRODUCT refused, never "the list had not rendered yet". A flat sleep
 // turned بريدة — a top-10 city with 4,850 listings — into a skipped journey and a missed floor.

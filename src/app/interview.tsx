@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { colors } from '@/theme/tokens';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, isCleanType, type Macro } from '@/data/propertyTypes';
@@ -423,16 +424,16 @@ export default function Interview() {
           <View style={s.barLeft}>
             {curQ && order.length > 0 ? (
               <Pressable onPress={back} style={s.backBtn} hitSlop={6}>
-                <Ionicons name="chevron-back" size={16} color="#1d4a37" />
+                <Ionicons name="chevron-back" size={16} color={colors.dark} />
               </Pressable>
             ) : null}
             <View style={s.titleWrap}>
-              <Ionicons name="sparkles" size={16} color="#2f7247" />
+              <Ionicons name="sparkles" size={16} color={colors.primary} />
               <Text style={s.title} numberOfLines={1}>{t('Ezhalah AI Agent')}</Text>
             </View>
           </View>
           <Pressable onPress={() => router.back()} style={s.xBtn} hitSlop={6}>
-            <Ionicons name="close" size={18} color="#56635c" />
+            <Ionicons name="close" size={18} color={colors.body} />
           </Pressable>
         </View>
 
@@ -477,14 +478,14 @@ export default function Interview() {
                           <Text style={s.lbl}>{optMain(curQ.key, o)}</Text>
                           {sub ? <Text style={s.sub2}>{sub}</Text> : null}
                         </View>
-                        {on ? <Ionicons name="checkmark" size={17} color="#1d4a37" /> : null}
+                        {on ? <Ionicons name="checkmark" size={17} color={colors.dark} /> : null}
                       </Pressable>
                     );
                   })}
 
                 <View style={[s.opt, customMode && s.optOn]}>
                   <View style={[s.num, s.numCustom]}>
-                    <Ionicons name="pencil" size={13} color="#2f7247" />
+                    <Ionicons name="pencil" size={13} color={colors.primary} />
                   </View>
                   {customMode ? (
                     <TextInput
@@ -495,7 +496,7 @@ export default function Interview() {
                       onChangeText={onCustomChange}
                       onSubmitEditing={goNext}
                       placeholder={t(curQ.key === 'budget' ? 'Type any amount (e.g. 7500)' : 'Type your own answer')}
-                      placeholderTextColor="#9aa6a0"
+                      placeholderTextColor={colors.muted}
                     />
                   ) : (
                     <Pressable style={s.lblWrap} onPress={() => { setCustomMode(true); setSelected(null); setCustomErr(''); }}>
@@ -541,11 +542,11 @@ const s = StyleSheet.create({
     width: '100%',
     maxWidth: 360,
     maxHeight: '100%',
-    backgroundColor: '#fbfbfa',
+    backgroundColor: colors.paper,
     borderRadius: 20,
     overflow: 'hidden',
     borderLeftWidth: 6,
-    borderLeftColor: '#1d4a37',
+    borderLeftColor: colors.dark,
     shadowColor: '#000',
     shadowOpacity: 0.35,
     shadowRadius: 40,
@@ -555,50 +556,50 @@ const s = StyleSheet.create({
 
   bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 10 },
   barLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
-  backBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#f1f3f1', alignItems: 'center', justifyContent: 'center' },
+  backBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' },
   titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1 },
-  title: { fontSize: 14, fontWeight: '700', color: '#1d4a37' },
-  xBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#f1f3f1', alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 14, fontWeight: '700', color: colors.dark },
+  xBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' },
 
-  progTrack: { height: 3, backgroundColor: '#e9ece9', marginHorizontal: 16, marginBottom: 4, borderRadius: 3, overflow: 'hidden' },
-  progFill: { height: '100%', backgroundColor: '#1d4a37', borderRadius: 3 },
+  progTrack: { height: 3, backgroundColor: colors.line, marginHorizontal: 16, marginBottom: 4, borderRadius: 3, overflow: 'hidden' },
+  progFill: { height: '100%', backgroundColor: colors.dark, borderRadius: 3 },
 
   body: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 18 },
 
   crumbs: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
-  crumb: { borderWidth: 1, borderColor: '#d6e8db', backgroundColor: '#eef6f0', borderRadius: 999, paddingVertical: 5, paddingHorizontal: 11 },
-  crumbText: { color: '#1d4a37', fontSize: 11.5, fontWeight: '600' },
+  crumb: { borderWidth: 1, borderColor: colors.chipLine, backgroundColor: colors.chipFill, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 11 },
+  crumbText: { color: colors.dark, fontSize: 11.5, fontWeight: '600' },
 
   qhead: { paddingHorizontal: 2, paddingTop: 6, paddingBottom: 10 },
-  lead: { fontSize: 12.5, fontWeight: '600', color: '#2f7247', marginBottom: 4 },
-  qt: { fontSize: 18, fontWeight: '700', color: '#15201b', lineHeight: 24 },
-  qsub: { fontSize: 12.5, color: '#7b8a82', marginTop: 5, lineHeight: 18 },
+  lead: { fontSize: 12.5, fontWeight: '600', color: colors.primary, marginBottom: 4 },
+  qt: { fontSize: 18, fontWeight: '700', color: colors.ink, lineHeight: 24 },
+  qsub: { fontSize: 12.5, color: colors.muted, marginTop: 5, lineHeight: 18 },
 
-  list: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e7ebe8', borderRadius: 14, overflow: 'hidden' },
-  opt: { flexDirection: 'row', alignItems: 'center', gap: 13, paddingVertical: 12, paddingHorizontal: 14, borderTopWidth: 1, borderTopColor: '#f0f2f0' },
+  list: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 14, overflow: 'hidden' },
+  opt: { flexDirection: 'row', alignItems: 'center', gap: 13, paddingVertical: 12, paddingHorizontal: 14, borderTopWidth: 1, borderTopColor: colors.line },
   optFirst: { borderTopWidth: 0 },
-  optOn: { backgroundColor: '#eef6f0' },
+  optOn: { backgroundColor: colors.tint },
   lblWrap: { flex: 1 },
-  num: { width: 26, height: 26, borderRadius: 8, backgroundColor: '#f1f3f1', alignItems: 'center', justifyContent: 'center' },
-  numFirst: { backgroundColor: '#e6efe9' },
-  numOn: { backgroundColor: '#1d4a37' },
-  numCustom: { backgroundColor: '#e6efe9' },
-  numText: { fontSize: 12.5, fontWeight: '700', color: '#6b7a72' },
-  numTextFirst: { color: '#2f7247' },
+  num: { width: 26, height: 26, borderRadius: 8, backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' },
+  numFirst: { backgroundColor: colors.tintFill },
+  numOn: { backgroundColor: colors.dark },
+  numCustom: { backgroundColor: colors.tintFill },
+  numText: { fontSize: 12.5, fontWeight: '700', color: colors.muted },
+  numTextFirst: { color: colors.primary },
   numTextOn: { color: '#fff' },
-  lbl: { fontSize: 14.5, fontWeight: '500', color: '#15201b' },
-  lblMuted: { color: '#9aa6a0' },
-  sub2: { fontSize: 11.5, fontWeight: '500', color: '#8a978f', marginTop: 2 },
+  lbl: { fontSize: 14.5, fontWeight: '500', color: colors.ink },
+  lblMuted: { color: colors.muted },
+  sub2: { fontSize: 11.5, fontWeight: '500', color: colors.muted, marginTop: 2 },
   // >= 16 on web or mobile Safari zooms on focus and never zooms back (scripts/verify-input-font-no-ios-zoom.ts).
   // Measured: the row is sized by the 26px number badge, so the option list height is unchanged (50px).
   // minWidth: 0 pairs with the 16px web bump — see the note on AuthModal.phoneInput.
-  customInput: { flex: 1, minWidth: 0, fontSize: Platform.OS === 'web' ? 16 : 14.5, color: '#15201b', padding: 0 },
+  customInput: { flex: 1, minWidth: 0, fontSize: Platform.OS === 'web' ? 16 : 14.5, color: colors.ink, padding: 0 },
 
-  note: { marginTop: 10, marginHorizontal: 2, fontSize: 12, color: '#b06a1f', backgroundColor: '#fdf6ec', borderWidth: 1, borderColor: '#f3e2c6', borderRadius: 10, paddingVertical: 9, paddingHorizontal: 11, lineHeight: 17 },
+  note: { marginTop: 10, marginHorizontal: 2, fontSize: 12, color: colors.amberInk, backgroundColor: colors.amberBg, borderWidth: 1, borderColor: colors.amberBg, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 11, lineHeight: 17 },
 
   foot: { marginTop: 16, gap: 10 },
-  nextBtn: { backgroundColor: '#1d4a37', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  nextBtn: { backgroundColor: colors.dark, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
   nextText: { color: '#fff', fontSize: 14.5, fontWeight: '700' },
-  skipLink: { borderWidth: 1, borderColor: '#d6e8db', backgroundColor: '#eef6f0', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  skipText: { color: '#1d4a37', fontSize: 14, fontWeight: '700' },
+  skipLink: { borderWidth: 1, borderColor: colors.chipLine, backgroundColor: colors.chipFill, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  skipText: { color: colors.dark, fontSize: 14, fontWeight: '700' },
 });

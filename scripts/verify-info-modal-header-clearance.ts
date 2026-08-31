@@ -134,13 +134,16 @@ check(
   Number.isFinite(topClear) && (topClear as number) >= footprint + (CLOSE_GAP ?? 0),
   `expr: ${topClearExpr || '(missing)'} → ${topClear}`,
 );
+// REDESIGN (owner 2026-08-29): the artwork hero replaced bodyPadM/heroCol. The SAME arithmetic
+// contract holds — the hero band's height AND its inner text clearance both derive from TOP_CLEAR,
+// so the lockup starts below the floating × on every screen, never via a re-hardcoded literal.
 check(
-  'the About mobile body (`bodyPadM`) takes its paddingTop from TOP_CLEAR (no re-hardcoded literal)',
-  /bodyPadM:\s*\{[^}]*paddingTop:\s*TOP_CLEAR/.test(src),
+  'the About hero band derives its height from TOP_CLEAR (no re-hardcoded literal)',
+  /heroArt:\s*\{\s*height:\s*TOP_CLEAR \+ \d+/.test(src),
 );
 check(
-  'the About desktop hero column (`heroCol`) takes its paddingTop from TOP_CLEAR (no re-hardcoded literal)',
-  /heroCol:\s*\{[^}]*paddingTop:\s*TOP_CLEAR/.test(src),
+  'the About hero inner content derives its paddingTop from TOP_CLEAR (lockup clears the ×)',
+  /heroInner:\s*\{[^}]*paddingTop:\s*TOP_CLEAR/.test(src),
 );
 
 console.log(

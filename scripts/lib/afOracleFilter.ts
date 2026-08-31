@@ -54,7 +54,13 @@ const AMENITY_TOKEN_COL: Record<string, string> = {
   rent_now_pay_later: 'rent_now_pay_later',
 };
 
-export function buildOracleQS(reqBody: RpcBody): { qs: string; unhandled: string[] } {
+export type OracleOpts = {
+  /** type_ar → macro ('Residential' | 'Commercial' | 'both'), read from the same `known_type_ar`
+   *  reference table the RPC's category-purity clause reads. Required whenever p_category is set. */
+  typeMacros?: Record<string, string>;
+};
+
+export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string; unhandled: string[] } {
   const parts = ['production_ready=is.true'];
   const unhandled: string[] = [];
   const enc = (s: unknown) => encodeURIComponent(String(s));
@@ -68,12 +74,58 @@ export function buildOracleQS(reqBody: RpcBody): { qs: string; unhandled: string
   const tables2 = reqBody.p_tables2 as string[] | undefined;
   const types2 = reqBody.p_types2 as string[] | undefined;
   const hasScopeB = Array.isArray(tables2) && tables2.length > 0 && Array.isArray(types2) && types2.length > 0;
+
+  // CATEGORY PURITY IS A REAL PREDICATE, NOT PAGING METADATA (found live 2026-08-28).
+  //
+  // `p_category` used to sit in the "genuinely irrelevant … always safe" list below and was simply
+  // `break`-ed past. It is not irrelevant: af_eligibility_clause() carries
+  //
+  //   and (p_category is null or exists (select 1 from known_type_ar k where k.type_ar = s.type_ar
+  //        and (k.macro = p_category
+  //             or (k.macro = 'both' and (case p_category
+  //                   when 'Residential' then s.source_table like '%\_residential\_listings' …)))))
+  //
+  // so a `both`-macro type is eligible ONLY from the table matching the requested category. Ignoring
+  // that had two costs, and the second is the serious one:
+  //   1. FALSE DIFFERENTIALS. المدينة المنورة / Residential Building / Buy reported oracle 708 vs
+  //      RPC 707, stable across two passes. The one row was dealapp_commercial_listings:8218315,
+  //      type_ar «عمارة», macro `both`, in a COMMERCIAL table on a RESIDENTIAL search — production
+  //      correctly excluded it; the oracle wrongly kept it.
+  //   2. IT COULD NOT CATCH THE REGRESSION IT EXISTS FOR. If production ever started leaking
+  //      commercial-table rows into a Residential search, the oracle would have agreed with the
+  //      leak instead of flagging it — the check would be green over the exact defect
+  //      verify-null-category-purity.ts was written about.
+  //
+  // The fix is exact rather than approximate, because the two arms have different table sets:
+  //   • scope A reads the category's OWN tables, so `macro === category` AND `macro === 'both'` both
+  //     survive purity there;
+  //   • scope B reads the OTHER category's tables, so ONLY `macro === category` survives — a `both`
+  //     type in the wrong table is precisely what the clause removes.
+  // Callers pass `typeMacros` (type_ar → macro) read from the same `known_type_ar` the RPC reads.
+  // Without it, `p_category` is reported UNHANDLED rather than silently dropped: an oracle that goes
+  // quiet on a predicate it does not understand is the thing this module's header forbids.
+  const category = reqBody.p_category as string | undefined;
+  const macros = opts?.typeMacros;
+  const keepFor = (type: string, arm: 'A' | 'B'): boolean => {
+    if (!category || !macros) return true;
+    const m = macros[type];
+    if (m === undefined) return true;              // unknown to the reference table → leave as-is
+    if (m === category) return true;
+    return m === 'both' && arm === 'A';
+  };
+  if (category && !macros) unhandled.push(`p_category=${category} (no typeMacros supplied — category purity cannot be applied)`);
+
   if (hasScopeB) {
     const tables = (reqBody.p_tables as string[] | undefined) ?? [];
-    const types = (reqBody.p_types as string[] | undefined) ?? [];
+    const types = ((reqBody.p_types as string[] | undefined) ?? []).filter((t) => keepFor(t, 'A'));
+    const t2 = (types2 as string[]).filter((t) => keepFor(t, 'B'));
     const a = `and(source_table.in.(${tables.map((x) => enc(x)).join(',')}),type_ar.in.(${types.map((x) => enc(`"${x}"`)).join(',')}))`;
-    const b = `and(source_table.in.(${(tables2 as string[]).map((x) => enc(x)).join(',')}),type_ar.in.(${(types2 as string[]).map((x) => enc(`"${x}"`)).join(',')}))`;
-    parts.push(`or=(${a},${b})`);
+    // Scope B can legitimately empty out — every requested type being `both`-macro means the
+    // commercial arm contributes nothing, which is what production computes too.
+    const b = t2.length
+      ? `and(source_table.in.(${(tables2 as string[]).map((x) => enc(x)).join(',')}),type_ar.in.(${t2.map((x) => enc(`"${x}"`)).join(',')}))`
+      : null;
+    parts.push(b ? `or=(${a},${b})` : a);
   }
 
   for (const [k, v] of Object.entries(reqBody)) {
@@ -81,7 +133,7 @@ export function buildOracleQS(reqBody: RpcBody): { qs: string; unhandled: string
     switch (k) {
       case 'p_deal': parts.push(`deal_ar=eq.${enc(v)}`); break;
       case 'p_tables': if (!hasScopeB) parts.push(`source_table=in.(${(v as string[]).map((x) => enc(x)).join(',')})`); break;
-      case 'p_types': if (!hasScopeB) parts.push(`type_ar=in.${inList(v as string[])}`); break;
+      case 'p_types': if (!hasScopeB) parts.push(`type_ar=in.${inList((v as string[]).filter((t) => keepFor(t, 'A')))}`); break;
       case 'p_tables2': case 'p_types2': break; // folded into the or=() above when hasScopeB
       case 'p_region_ids': parts.push(`region_id=in.(${(v as number[]).join(',')})`); break;
       case 'p_cities': parts.push(`city_ar=in.${inList(v as string[])}`); break;
@@ -114,8 +166,10 @@ export function buildOracleQS(reqBody: RpcBody): { qs: string; unhandled: string
         break;
       // genuinely irrelevant to the WHERE clause (paging/sorting/informational), always safe:
       case 'p_platforms': case 'p_per_platform': case 'p_limit': case 'p_offset':
-      case 'p_sort_by': case 'p_category':
+      case 'p_sort_by':
         break;
+      // handled above, as a real predicate — never as paging metadata
+      case 'p_category': break;
       // NOT verified — a real value here fails loud rather than being silently ignored.
       default: unhandled.push(`${k}=${JSON.stringify(v)}`);
     }

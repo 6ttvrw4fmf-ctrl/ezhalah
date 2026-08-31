@@ -111,7 +111,12 @@ if (canonical('Gathern_Liveness_Apply') === canonical('gathern_liveness_apply'))
 //    A new caller inventing a fresh alias fails here, before it can reach production.
 // ---------------------------------------------------------------------------
 console.log('\n4) repo callers use a canonical identity');
-const REGISTERED_DISTINCT = new Set(['gathern_liveness_apply']);
+// 'agent-edge-surface' (registered 2026-08-29): single-writer ownership of
+// supabase/functions/agent/index.ts. A GENUINELY separate resource — it guards who may EDIT that
+// ~113KB function, not who may deploy — so claiming it must never block a production deploy.
+// deploy_lock_canonical() leaves it distinct because it does not start with 'prod'. Registered in
+// mon_detect_deploy_lock_misuse's known list in the same change.
+const REGISTERED_DISTINCT = new Set(['gathern_liveness_apply', 'agent-edge-surface']);
 const scan: string[] = [];
 for (const dir of ['scripts', 'scrapers']) {
   const walk = (u: URL, rel: string) => {
@@ -179,9 +184,24 @@ for (const rel of allFiles) {
   if (isSelftestMigration) continue;
   scanned++;
   const src = readFileSync(new URL(rel, root), 'utf8');
+  // A shell wrapper passes its own LOCK_NAME variable rather than a literal. RESOLVE it from the same
+  // file instead of exempting the file — an unresolvable variable stays a FAILURE, so this cannot be
+  // used to smuggle an alias past the scan, and a variable pointing at an alias is still caught by the
+  // production-alias branch below. (deploy-lock.sh and agent-surface.sh both define LOCK_NAME; check 4
+  // above already reads it exactly this way.)
+  const shellLockName = (src.match(/^LOCK_NAME=["']?([A-Za-z0-9_-]+)["']?/m) ?? [])[1];
   for (const m of src.matchAll(CALL_LITERAL)) {
-    const name = m[1];
-    if (name.startsWith('<')) continue; // documentation placeholder like '<holder>'
+    let name = m[1];
+    if (name.startsWith('<')) continue; // documentation placeholder
+    if (name === '$LOCK_NAME' || name === '${LOCK_NAME}') {
+      if (!shellLockName) {
+        aliasCalls++;
+        bad(`${rel}: ${m[0].slice(0, 60)}…`,
+            `passes $LOCK_NAME but the file defines no LOCK_NAME — the identity cannot be verified.`);
+        continue;
+      }
+      name = shellLockName;
+    }
     if (canonical(name) === 'production' && name !== 'production') {
       aliasCalls++;
       bad(`${rel}: ${m[0].slice(0, 60)}…`,

@@ -62,9 +62,11 @@ visual and behavioural below is owned by the shared component.
 │  {unknown-count caption, when > 0}          │
 │                                             │
 │  ┌─────────────────────────────────────┐   │
-│  │            Show {N}                  │   │  Footer primary — live count (§4)
+│  │      متابعة · {N} نتيجة              │   │  Footer primary — live count (§4)
 │  └─────────────────────────────────────┘   │
-│   Skip       Skip remaining ({n}) & search  │  Footer secondary (§7)
+│  ┌───────────────┐  ┌──────────────────┐   │
+│  │     تخطي       │  │     رجوع  ›      │   │  Footer secondary — two real buttons (§7)
+│  └───────────────┘  └──────────────────┘   │
 └───────────────────────────────────────────┘
 ```
 
@@ -82,9 +84,10 @@ visual and behavioural below is owned by the shared component.
   question's `eligibility` + a cheap options probe once at flow start), **not** the static array length.
 - **Numerator = the 1-based ordinal among the questions that will actually show.**
 - The bar **animates** its width between steps.
-- **Numeric caption** (owner 2026-07-21): `Question {cur} of {total}` renders beside the bar on every
-  card, and the skip-all link discloses the remaining count — `Skip remaining ({n}) and search now` —
-  so the user always sees how many questions are left. English digits, tabular-nums (§8 locale rule).
+- ~~Numeric caption~~ — SUPERSEDED (owner 2026-08-11): NO `Question {cur} of {total}` caption and no
+  remaining-count disclosure — with contextual re-ranking the denominator legitimately moves between
+  steps, and the owner wants no questionnaire pressure. The thin animated bar is the only progress
+  signal. (The skip-all link this bullet referenced was itself removed 2026-08-28 — see §7.)
 - Hidden entirely when only one question is eligible.
 - Never shows a fraction that can't reach 100% (the current `2/4` bug is banned by this section).
 
@@ -96,7 +99,8 @@ Every card (single and multi) has the **same footer**:
 - **Primary button — `Show {N}`** where `N` is the **live** result count for the current selection
   (§8). Always present. Pressing it **commits the selection and advances** (or searches, if last).
 - The primary is the single canonical "commit" affordance for **both** modes — see §9 (no auto-advance).
-- Secondary row: **Skip** (this question) and, when >1 question remains, **Skip all & search now** (§7).
+- Secondary row (owner redesign 2026-08-28): **رجوع** and **تخطي** as two equal-width real buttons —
+  no other footer action exists (§7).
 
 ---
 
@@ -125,13 +129,14 @@ Shared, token-timed transitions applied by the card (never per question):
 
 ## 7. Skip behaviour — identical
 
-Three exits on **every** card (single and multi):
-- **Skip** → advance to the next eligible question, no change to the query.
-- **Skip all & search now** → commit whatever is accumulated and run the search immediately.
+Three exits on **every** card, single and multi (owner redesign 2026-08-28 — the skip-all /
+«عرض النتائج» early-exit is REMOVED everywhere in the flow, intro included):
+- **تخطي (Skip)** → advance to the next eligible question, no predicate written, count unchanged.
+- **رجوع (Back)** → one question back with its recorded answer restored; from question 1, out of the
+  round entirely (byte-identical previous state, nothing written).
 - **Close (✕)** → abandon the flow, no search.
 
-The current gap — multi cards missing "Skip all" — is banned. The two skip actions must be visually
-distinct and consistently styled across both modes (Skip = secondary button; Skip-all = tertiary link).
+Both تخطي and رجوع are equal-width real buttons (§4); رجوع carries the RTL-aware back chevron.
 
 ---
 
@@ -249,15 +254,21 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
 - **The narrowing is always visible.** A live «N نتيجة» chip sits in the card bar and follows every
   tentative selection; the primary commits via «متابعة · N نتيجة» with the same live number. All
   numbers come from the production count RPCs — never placeholders, never unknown-as-no.
-- **The escape is always one tap.** «عرض النتائج» replaces the question-count skip-all arithmetic.
-- **The primary ADVANCES; «عرض النتائج» TERMINATES** (owner 2026-08-23, corrects a shipped defect).
-  The primary reads «متابعة · N نتيجة» on single AND multi, because `onConfirm` is
-  `commitGuidedStep(keys)` in both cases: it records the answer and presents the next question.
-  Until this correction the label branched on ARITY and a single-select read «عرض N نتيجة» — a
-  button that promised results and delivered the next question instead. Arity was never a proxy for
-  terminality, and neither is ordinality: the pool is re-ranked after every answer, so the card
-  cannot know whether another question is coming. The one terminal control is the «عرض النتائج»
-  link (`af-skip-all` → `commitGuidedStep(keys, true)` → `finishGuided`). Pinned by
+- **The footer is three real buttons** (owner redesign, 2026-08-28). «متابعة · N نتيجة» stays the
+  full-width primary; «رجوع» (with an RTL-aware back chevron) and «تخطي» are equal-width secondary
+  BUTTONS below it — the option rows' surface+fieldLine border idiom at the primary's chip radius,
+  ≥44pt targets, instant hover/press/keyboard-focus states — never footnote-sized text links. The
+  same owner decision REMOVED the in-question «عرض النتائج» early-exit (`af-skip-all`) entirely: a
+  round ends by walking its questions, by «رجوع» from question 1, or by ✕. A same-day owner follow-up removed the intro card's «عرض النتائج» decline
+  link as well — no عرض النتائج action exists anywhere inside the AF flow; ✕ declines the intro
+  (it always ran the identical handler). Pinned by `scripts/verify-af-footer-buttons.ts`.
+- **The primary ADVANCES** (owner 2026-08-23, corrects a shipped defect). It reads «متابعة · N
+  نتيجة» on single AND multi, because `onConfirm` is `commitGuidedStep(keys)` in both cases: it
+  records the answer and presents the next question. Until this correction the label branched on
+  ARITY and a single-select read «عرض N نتيجة» — a button that promised results and delivered the
+  next question instead. Arity was never a proxy for terminality, and neither is ordinality: the
+  pool is re-ranked after every answer, so the card cannot know whether another question is coming.
+  With the early-exit removed there is no terminal control in the question footer at all. Pinned by
   `scripts/verify-af-primary-advances-not-shows.ts`.
 - **Availability is explained naturally.** One tiny line — «الخيارات تعتمد على المعلومات المتوفرة
   للإعلانات الحالية» — replaces the technical unknown-count phrasing. No coverage/NULL/backend

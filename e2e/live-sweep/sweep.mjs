@@ -54,6 +54,28 @@ writeFileSync(JOURNAL, '');
 
 // ── MINIMUM COVERAGE FLOORS (owner). A run that cannot meet these FAILS: silently shrinking
 // coverage is the failure mode a rotation system invites, so the floors are asserted, not hoped for.
+// ── DEAL-AWARE CITY CHOICE ───────────────────────────────────────────────────────────────────────
+// A journey's city must stock the DEAL that journey will actually run. Choosing a city by staleness
+// alone (`pickCities[0]`), or by "was reachable for some other deal" (a deal-blind `reachable()`),
+// hands a بيع-shaped journey a rent-only city; production then rightly declines to offer that city,
+// the journey is skipped, and its COVERAGE FLOOR is lost while production is perfectly healthy.
+//
+// Twice observed, same class, different journeys:
+//   2026-08-26  «الدليمية» (22 listings, ALL بيع) drew إيجار/سنوي → lost the non-Riyadh floor.
+//               Fixed for the normal-filter loop ONLY, via dealsOf.
+//   2026-08-30  «المندق» (19 listings, ALL إيجار) was handed to trending-district, honest-zero and
+//               card→back — all of which run on the app's DEFAULT deal «بيع» — losing three floors
+//               in one run. The 2026-08-26 fix had patched the example, not the class (§37).
+//
+// `have` is built from the LIVE index (livePool), never a hardcoded list (§1). Preference order:
+// a city already proven reachable this run → any rotated city that stocks the deal → الرياض, which
+// stocks every deal and is always offered. Returning الرياض is a last resort, not a free pass: it
+// never counts toward the non-Riyadh floor, which is computed from citiesTested minus الرياض.
+export function pickCityForDeal({ citiesTested = [], pickCities = [], dealsOf, deal, period = null, riyadh = 'الرياض' }) {
+  const stocks = (city) => dealsOf?.get?.(city)?.has?.(`${deal}/${period ?? '-'}`) ?? false;
+  return [...citiesTested].find(stocks) ?? [...pickCities].find(stocks) ?? riyadh;
+}
+
 export const FLOORS = {
   nonRiyadhCities: 3,
   mobileJourneys: 1,
@@ -95,8 +117,16 @@ async function post(path, body, tries = 4) {
         method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
         body: JSON.stringify(body), signal: AbortSignal.timeout(60000),
       });
-      const j = await r.json().catch(() => null);
-      if (j && !j.message) return j;
+      // A VOID rpc (ops_qa_record_coverage) answers 2xx with an EMPTY body. Judging success by
+      // "did we get a JSON object back" therefore read every successful coverage write as a
+      // failure and retried it: measured 2026-08-31, times_tested was climbing ~4 per run and the
+      // 4-step backoff (1.5+3+4.5+6s) sat between consecutive writes — about half the sweep's
+      // 739s runtime spent re-sending writes that had already landed. Judge the HTTP STATUS, and
+      // treat an empty 2xx body as the success it is. PostgREST reports real errors as a JSON
+      // object carrying `message`, which is still a failure even on a 2xx.
+      const text = await r.text();
+      const j = text ? JSON.parse(text) : null;
+      if (r.ok && !(j && j.message)) return j ?? {};
     } catch { /* retry */ }
     await sleep(1500 * (a + 1));
   }
@@ -216,8 +246,16 @@ const rpcIds = async (body, cap) => {
 };
 
 const ledgerPlan = (dimension, limit) => post('/rpc/ops_qa_sweep_plan', { p_dimension: dimension, p_limit: limit });
-const ledgerRecord = (dimension, key, result, notes) =>
-  post('/rpc/ops_qa_record_coverage', { p_dimension: dimension, p_key: key, p_result: result, p_notes: (notes ?? '').slice(0, 480) });
+// A coverage write that fails must never pass unnoticed: post() retries and then returns null, so a
+// rejected write used to leave the PREVIOUS run's result standing while this run reported success.
+// That is how three watches kept a stale `pass` on 2026-08-31 after the result vocabulary was
+// widened past what the RPC accepts (pass | fail | skip). Say so loudly instead.
+const ledgerRecord = async (dimension, key, result, notes) => {
+  const r = await post('/rpc/ops_qa_record_coverage',
+    { p_dimension: dimension, p_key: key, p_result: result, p_notes: (notes ?? '').slice(0, 480) });
+  if (r === null) note(`LEDGER WRITE FAILED — ${dimension}/${key} = ${result} (the previous result still stands)`);
+  return r;
+};
 
 // ── findings ─────────────────────────────────────────────────────────────────────────────────────
 const findings = [];
@@ -227,6 +265,44 @@ const defect = (journey, layerPair, detail) => {
   console.error(`  ✗ DEFECT [${journey}] ${layerPair}: ${detail}`);
 };
 const note = (msg) => console.error(`    ${msg}`);
+
+// ── WATCH OBSERVATION — a watch is green only with POSITIVE evidence it ran (2026-08-31) ─────────
+// The ledger used to derive a watch's result as `findings.some(...) ? 'fail' : 'pass'`, i.e. it read
+// the ABSENCE of a finding as proof of a pass. Three different ways a watch can produce no finding
+// while never having been evaluated at all:
+//   • its journey threw a harness error (the egress proxy timed out two watch journeys on
+//     2026-08-31 — both were stamped `pass` with a fresh last_tested_at);
+//   • its journey returned null on purpose (`city not offered — skipped`);
+//   • nothing in the tree ever asserted it (buyrent-summary-both-budgets, unknown-period-stays-
+//     unknown and clarification-answer-commits were declared watches that no code evaluated, so
+//     they had been recorded `pass` on every run since they were added).
+// That is the failure shape AGENTS.md names outright — a monitor that cannot fire reads as a clean
+// bill of health. A watch now records `pass` ONLY if observeWatch() was reached at the point the
+// assertion is actually made; anything else records `skip`, never `pass`, and trips a floor.
+const watchesObserved = new Set();
+const observeWatch = (name) => { watchesObserved.add(name); };
+
+// Three watches are NOT evaluated by the browser at all, and saying so is the point. Each names the
+// OFFLINE barrier that does evaluate it, in `npm test`. This is the same discipline
+// scripts/test-exclusions.txt already applies to skipped tests: an entry naming nowhere is a check
+// that runs nowhere, so the named file must exist AND actually run — both asserted by
+// scripts/verify-live-sweep-watch-evidence.ts, which also forbids adding an entry here for a watch
+// the sweep really does evaluate (that would retire live coverage by paperwork).
+// They are recorded `offline_barrier`, never `pass`: the sweep did not earn browser evidence for
+// them, and the ledger must not imply it did.
+const WATCH_OFFLINE_COVER = {
+  'buyrent-summary-both-budgets': 'scripts/verify-combined-budget-summary.ts',
+  'unknown-period-stays-unknown': 'scripts/verify-unknown-rent-period-not-annual.ts',
+  'clarification-answer-commits': 'scripts/verify-agent-scope-answer.ts',
+};
+
+const watchStatus = (name) =>
+  findings.some((f) => f.detail.includes(name)) ? 'fail'
+    : watchesObserved.has(name) ? 'pass'
+      : WATCH_OFFLINE_COVER[name] ? 'offline_barrier'
+        : 'skip';
+// Only a watch that is neither observed live nor covered offline is DARK — that is the floor miss.
+const unobservedWatches = () => WATCHES.filter((w) => watchStatus(w) === 'skip');
 
 // ── UI driving ───────────────────────────────────────────────────────────────────────────────────
 // The deal and period rows are INDEPENDENT TOGGLES, not radios: clicking the other one turns BOTH
@@ -520,7 +596,9 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
   if (intent.city && ui.city && !ui.city.includes(intent.city) && !intent.city.includes(ui.city)) {
     defect(name, 'INTENT→UI', `asked for city «${intent.city}», summary shows «${ui.city}»`); j.ok = false;
   }
-  // THE أبها WATCH: an exact city must never come back scoped to a neighbourhood.
+  // THE أبها WATCH: an exact city must never come back scoped to a neighbourhood. Observed only
+  // when an exact city was actually asked for — a journey with no city cannot evaluate it.
+  if (intent.city && !intent.district) observeWatch('exact-city-never-rescoped');
   if (intent.city && !intent.district && ui.district) {
     defect(name, 'INTENT→UI', `exact city «${intent.city}» was re-scoped to district «${ui.district}» (exact-city-never-rescoped)`); j.ok = false;
   }
@@ -580,10 +658,13 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
     defect(name, 'RPC→RENDERED', `page shows ${rendered}, RPC returned ${j.rpc}`); j.ok = false;
   }
   // THE PAGE-CAP WATCH: 1,500 is the RPC page limit and must never be quoted as a match total.
+  // Only a journey that actually rendered a total can judge it.
+  if (rendered != null && j.rpc != null) observeWatch('true-total-never-page-cap');
   if (rendered === 1500 && j.rpc !== 1500) {
     defect(name, 'RPC→RENDERED', 'page quoted 1,500 — the RPC page cap — as the match total (true-total-never-page-cap)'); j.ok = false;
   }
-  // Arabic rendering watches
+  // Arabic rendering watches — observed whenever a rendered screen was actually scraped.
+  if (ui.entities) observeWatch('no-html-entities-rendered');
   if (ui.entities.length) { defect(name, 'RENDERED', `raw HTML entities on screen: ${ui.entities.join(' ')} (no-html-entities-rendered)`); j.ok = false; }
   if (ui.latinInCards.length) { defect(name, 'RENDERED', `placeholder junk on screen: ${ui.latinInCards.join(' ')}`); j.ok = false; }
 
@@ -629,4 +710,5 @@ async function withPage(mobile, fn) {
 }
 
 export { BASE, dbCount, rpcTotal, assertChain, dbFilterFromRequest, withPage, setDeal, setPeriod, pickCity, runSearch,
-         visibleState, ledgerPlan, ledgerRecord, findings, journeys, defect, note, num, lastCount, sleep };
+         visibleState, ledgerPlan, ledgerRecord, findings, journeys, defect, note, num, lastCount, sleep,
+         observeWatch, watchStatus, unobservedWatches, WATCH_OFFLINE_COVER };
