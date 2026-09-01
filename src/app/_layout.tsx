@@ -11,6 +11,7 @@ import { colors } from '@/theme/tokens';
 import { ThemeProvider, useTheme } from '@/theme/theme';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
 import { markAppSessionStarted } from '@/lib/appSession';
+import { useBottomPromptInset } from '@/lib/bottomPromptInset';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
@@ -48,6 +49,12 @@ if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis a
 function Shell() {
   const docked = useDocked();
   const { isRTL } = useI18n();
+  // Space occupied by a bottom-docked third-party prompt (Google One Tap's legacy bottom sheet on a
+  // phone). 0 whenever nothing is docked there — see src/lib/bottomPromptInset.ts for the measured
+  // bug this prevents: the sheet is `position:fixed; z-index:9999; pointer-events:auto` across the
+  // bottom 144px, and without this the app laid «بحث» and the Agent composer out underneath it,
+  // where every real tap landed on Google's iframe instead of the control.
+  const bottomPromptInset = useBottomPromptInset();
   // APPEARANCE (owner 2026-08-28): the status bar follows the resolved theme. Screen content is
   // converted per-surface (Sidebar + account menu in this pass); the Stack's contentStyle stays the
   // light paper until each screen's inks are converted — flipping it first would break readability.
@@ -82,7 +89,7 @@ function Shell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
-    <View style={{ flex: 1, flexDirection: isRTL ? 'row-reverse' : 'row' }}>
+    <View style={{ flex: 1, flexDirection: isRTL ? 'row-reverse' : 'row', paddingBottom: bottomPromptInset }}>
       <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
       {/* /auth is a focused full-screen moment — no docked sidebar there. The /agent light-pin
           special-case (owner 2026-08-29) was reversed 2026-08-30: dark mode is global and sticky,
