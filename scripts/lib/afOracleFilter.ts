@@ -70,6 +70,9 @@ export type OracleOpts = {
   /** type_ar → macro ('Residential' | 'Commercial' | 'both'), read from the same `known_type_ar`
    *  reference table the RPC's category-purity clause reads. Required whenever p_category is set. */
   typeMacros?: Record<string, string>;
+  /** The literal `district_ar` values present in the index. Required whenever p_districts is set —
+   *  see the p_districts case for why a literal match alone is not sound. */
+  knownDistricts?: Iterable<string>;
 };
 
 export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string; unhandled: string[] } {
@@ -235,7 +238,35 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_tables2': case 'p_types2': break; // folded into the or=() above when hasScopeB
       case 'p_region_ids': parts.push(`region_id=in.(${(v as number[]).join(',')})`); break;
       case 'p_cities': parts.push(`city_ar=in.${inList(v as string[])}`); break;
-      case 'p_districts': parts.push(`district_ar=in.${inList(v as string[])}`); break;
+      // DISTRICTS ARE NOT MATCHED LITERALLY BY PRODUCTION (found live 2026-09-01).
+      //
+      // The clause matches `norm_district_tok(s.district_ar) = any(district_tokens)`, where
+      // district_tokens is norm_district_tok() over p_districts PLUS a guarded alias expansion. A
+      // plain `district_ar=in.(…)` therefore agrees only when every requested name happens to be
+      // stored verbatim. Measured on a live Trending click-through: the request carried
+      // «حي المهدية», the index stores «المهدية», and the naive filter returned 0 against the RPC's
+      // 1,796 — a false differential on a healthy production search.
+      //
+      // The normalisation cannot be reproduced through PostgREST (no normalised column is exposed),
+      // and re-implementing norm_district_tok here would make the "independent" oracle depend on a
+      // guess about our own SQL — the one thing this module must never do. So it takes the same
+      // route p_category already takes: read the REFERENCE DATA (the district_ar values actually in
+      // the index) and refuse when a requested name is not among them, rather than silently
+      // emitting a filter that undercounts.
+      case 'p_districts': {
+        const known = opts?.knownDistricts ? new Set(opts.knownDistricts) : null;
+        if (!known) {
+          unhandled.push('p_districts (no knownDistricts supplied — the RPC normalises district names, so a literal match cannot be trusted)');
+          break;
+        }
+        const missing = (v as string[]).filter((d) => !known.has(d));
+        if (missing.length) {
+          unhandled.push(`p_districts:${missing.join('|')} (not stored verbatim — needs the RPC's norm_district_tok/alias resolution)`);
+          break;
+        }
+        parts.push(`district_ar=in.${inList(v as string[])}`);
+        break;
+      }
       case 'p_rent_period':
         if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`);
         else if (v === 'شهري') parts.push(`payment_monthly=is.true&rent_now_pay_later=not.is.true`);

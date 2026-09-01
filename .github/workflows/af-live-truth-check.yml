@@ -73,3 +73,14 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-agent-cta-live.ts
+
+      # TRENDING, THE WHOLE WAY DOWN (added 2026-09-01). The steps above certify Advanced Filter;
+      # nothing certified that the number a user SEES in a Trending row survives the click into a
+      # search and still agrees with the database. Runs even if the AF steps fail, so one red
+      # surface never hides the other.
+      - name: Trending rows must equal the RPC, the click-through, and independent DB truth
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-live-four-way-truth.ts
