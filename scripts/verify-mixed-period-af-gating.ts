@@ -39,7 +39,6 @@ const check = (label: string, ok: boolean, detail = '') => {
 console.log('\nMixed-period (كلاهما) Advanced Filter gating — intersection-only, never union\n');
 
 const af = codeOnly(read('src/lib/afCohorts.ts'));
-const ageGate = codeOnly(read('src/lib/ageFilterTypes.ts'));
 
 // The REAL gate + the REAL certified config.
 const Q = (over: Record<string, unknown>) =>
@@ -91,10 +90,16 @@ check('Apartment RentAnnual config includes rnpl (Annual-only signal, unchanged 
 check('Apartment RentAnnual and RentMonthly share amenities+bathrooms (the actual both-mode surface)',
   ['amenities', 'bathrooms'].every((id) => (apt.RentAnnual ?? []).includes(id) && (apt.RentMonthly ?? []).includes(id)));
 
-// ── property_age (AGE_QUESTION) bypasses cohortAllows entirely via its own gate — must be fixed too ─
-check("AGE_QUESTION's eligibility gate (isAgeFilterScope) excludes Monthly AND both, not just Monthly",
-  /q\.deal === 'Rent' && \(q\.rentPeriod === 'monthly' \|\| q\.rentPeriod === 'both'\)\) return false/.test(ageGate),
-  'this gate is SEPARATE from cohortAllows (property_age has its own eligibility fn) — fixing cohortAllows alone would have left this leak open');
+// ── property_age (AGE_QUESTION) UNIFIED 2026-09-01: it used to bypass cohortAllows entirely via its
+// own gate (src/lib/ageFilterTypes.ts, deleted) — that gate had its OWN period exclusion, so fixing
+// cohortAllows alone would have left it unaffected either way. Now AGE_QUESTION's eligibility IS
+// cohortAllows(q, 'property_age') directly, so the SAME assertions above already cover it — this
+// just proves that directly, executed, rather than trusting the wiring.
+check("EXECUTED — property_age (property_age is never in any RentMonthly list) excludes Monthly and both",
+  cohortAllows(Q({ rentPeriod: 'monthly', types: ['Apartment'] }), 'property_age') === false
+  && cohortAllows(Q({ rentPeriod: 'both', types: ['Apartment'] }), 'property_age') === false
+  && cohortAllows(Q({ rentPeriod: 'annual', types: ['Apartment'] }), 'property_age') === true,
+  'property_age must route through the SAME cohortAllows gate as every other question, with no separate exclusion left over');
 
 console.log(failures === 0
   ? '\n✓ mixed-period AF gating intact: intersection-only, no period-specific leak in either direction\n'

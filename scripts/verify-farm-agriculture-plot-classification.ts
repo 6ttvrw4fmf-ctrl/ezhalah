@@ -59,12 +59,24 @@ check(
 );
 
 // The real production LLM prompt (supabase/functions/agent/index.ts) must still list Agriculture
-// Plot as a distinct COMMERCIAL_TYPES entry AND carry an explicit synonym line distinguishing it
-// from Farm — otherwise the model silently defaults agricultural-land requests back to Farm.
+// Plot as a distinct type entry AND carry an explicit synonym line distinguishing it from Farm —
+// otherwise the model silently defaults agricultural-land requests back to Farm.
+//
+// RESIDENTIAL, not COMMERCIAL (fixed 2026-09-01): this check used to require Agriculture Plot inside
+// COMMERCIAL_TYPES — which locked in the exact taxonomy-mismatch bug the owner's bug-class fix closed
+// (CLEAN_MACRO has always classified Farm and Agriculture Plot 'Residential'; they sit in the
+// Residential 'Vacation & Rural' group in HIERARCHY). The distinctness this test protects (never
+// re-merge the two) is unrelated to which list holds them, so the check now asserts the type is
+// listed at all, not which array. scripts/verify-deepseek-taxonomy-matches-clean-macro.ts is the
+// barrier for the macro placement itself.
 const edgeFnSrc = readFileSync(new URL('../supabase/functions/agent/index.ts', import.meta.url), 'utf8');
 check(
-  "supabase/functions/agent/index.ts COMMERCIAL_TYPES still lists 'Agriculture Plot'",
-  /COMMERCIAL_TYPES\s*=\s*\[[\s\S]{0,400}?"Agriculture Plot"/.test(edgeFnSrc),
+  "supabase/functions/agent/index.ts still lists 'Agriculture Plot' as a distinct type entry",
+  /"Agriculture Plot"/.test(edgeFnSrc),
+);
+check(
+  "supabase/functions/agent/index.ts lists Agriculture Plot under RESIDENTIAL_TYPES, matching CLEAN_MACRO",
+  /RESIDENTIAL_TYPES\s*=\s*\[[\s\S]{0,400}?"Agriculture Plot"/.test(edgeFnSrc),
 );
 check(
   'supabase/functions/agent/index.ts SYNONYMS still distinguish Agriculture Plot from Farm',

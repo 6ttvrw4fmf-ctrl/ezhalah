@@ -140,9 +140,10 @@ check('RNPL + amenities are multi; age + bathrooms are single',
   && /BATHROOMS_QUESTION[\s\S]{0,400}selection:\s*'single'/.test(advSrc));
 
 // ── Unified gates + floors (age gate moved INTO its config; ONE per-option floor) ────────────────
-check("age's eligibility lives in its own config, and agent.tsx no longer holds the age gate",
-  /AGE_QUESTION[\s\S]{0,400}eligibility:\s*\(q\)\s*=>\s*isAgeFilterScopeFor/.test(advSrc)
-  && !/isAgeFilterScope/.test(agentSrc));
+check("age's eligibility lives in its own config, driven DIRECTLY by cohortAllows (2026-09-01: no separate isAgeFilterScope gate anywhere)",
+  /id:\s*'property_age'[\s\S]{0,1200}eligibility:\s*\(q\)\s*=>\s*cohortAllows\(q,\s*'property_age'\)/.test(advSrc)
+  && !/isAgeFilterScope/.test(agentSrc)
+  && !/isAgeFilterScope/.test(advSrc));
 check('one shared per-option floor (MIN_REAL_OPTION_COUNT via meaningful()); the >0-chips vs >=5-buckets split is banned',
   // Definition moved to afRanking.ts (2026-08-22); advancedFilters.ts imports+re-exports the constant
   // and imports meaningful() (checked separately below), so this only needs to prove the definition
