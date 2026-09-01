@@ -323,20 +323,28 @@ check('the result-intro count comes from matchTotal via quotableTotal(), never a
     /priceIsAnnual \|\| hasClientOnlyNarrowing\(r\.query\)\)\) return null/.test(fn));
 }
 
-// ── Mining transition (owner 2026-08-16 §9) ─────────────────────────────────────────────────────
-// The «digging through the market» beat is DECORATION: its dismissal is driven by plain setTimeout
-// latches in finishGuided (never an animation callback — src/lib/afterAnimation.ts's rule), it uses
-// the REAL from/to counts, and a hard failsafe dismisses it even if the search turn dies.
+// ── Deep-search transition (owner 2026-08-16 §9, redesigned 2026-08-31) ─────────────────────────
+// The deep-search beat is DECORATION: its dismissal is driven by plain setTimeout latches in
+// finishGuided (never an animation callback — src/lib/afterAnimation.ts's rule), a hard failsafe
+// dismisses it even if the search turn dies, and per the 2026-08-31 redesign it carries NO success
+// beat: the «لقينا N عقار أقرب لطلبك» claim is GONE (the overlay hands off directly to the results),
+// the headline is the dynamic «إزهله يدقّق في …» sentence built from the user's OWN committed
+// selections (src/lib/afDeepSearchCopy.ts), and the only number spoken is the honest from-count.
 const miningSrc = readFileSync(join(root, 'src/components/MiningTransition.tsx'), 'utf8');
-check('mining dismissal is setTimeout-driven with a hard failsafe (never an animation callback)',
+check('deep-search dismissal is setTimeout-driven with a hard failsafe (never an animation callback)',
   /phase: 'mining'/.test(agentSrc)
   && /timers\.push\(setTimeout\(/.test(agentSrc)
   && /15000/.test(agentSrc)
   && !/\.start\(\s*\(/.test(miningSrc));
-check('mining shows real numbers and respects reduced motion',
+check('deep-search speaks the user\'s selections, claims no completion count, respects reduced motion',
   /Going through \{count\} properties/.test(miningSrc)
-  && /We found \{count\} properties closest to your request/.test(miningSrc)
+  && /deepSearchLine\(/.test(miningSrc)
+  && !/We found \{count\} properties closest to your request/.test(miningSrc)
   && /useReducedMotion/.test(miningSrc));
+check('the overlay sentence and the results pills are fed by the SAME deduped facet set',
+  /const dedupedFacets = dedupeFacetsByLabel\(/.test(agentSrc)
+  && /labels: dedupedFacets\.flatMap\(\(f\) => f\.labels\)/.test(agentSrc)
+  && /facets: dedupedFacets,/.test(agentSrc));
 
 // ── Results summary + removable pills (owner 2026-08-16 §10) ────────────────────────────────────
 // Removal is PURE recomputation — rebuild from the interview's baseQ by re-applying the remaining

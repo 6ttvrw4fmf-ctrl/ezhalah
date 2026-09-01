@@ -890,10 +890,13 @@ export default function Agent() {
     // the intro's «عرض النتائج» link was removed by the owner 2026-08-28, same day as the footer's.
     | { phase: 'intro'; total: number | null }
     | { phase: 'asking'; stepIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; initialKeys: string[]; progressCur: number; progressTotal: number }
-    // The «digging through the market» beat (owner 2026-08-16): shown once after the interview
-    // finishes while the final search runs behind it. Dismissal is driven by plain setTimeout
-    // latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts rule).
-    | { phase: 'mining'; from: number | null; to: number | null }
+    // The DEEP-SEARCH beat (owner redesign 2026-08-31, supersedes the 2026-08-16 «digging» card):
+    // shown once after the interview finishes while the final search runs behind it. `labels` +
+    // `type` feed the dynamic «إزهله يدقّق في …» sentence and the criteria chips (the user's OWN
+    // committed selections — deduped carry included); there is no success beat and no count claim
+    // on completion — the overlay hands off directly to the results. Dismissal is driven by plain
+    // setTimeout latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts).
+    | { phase: 'mining'; from: number | null; to: number | null; labels: string[]; type: string | null }
     | null
   >(null);
   // The query accumulates answers as the flow advances; `token` supersedes a stale async fetch when a
@@ -1931,7 +1934,7 @@ export default function Agent() {
   // TIMING (all plain setTimeout — never an animation callback, per src/lib/afterAnimation.ts):
   //   finish → mining overlay (from = last known narrowed total) + the search starts immediately
   //   search resolves → hold until ≥ 1.4s total has played (never artificially longer)
-  //   → swap copy to «لقينا N عقار أقرب لطلبك» → ~1.1s beat → dismiss, revealing the result cards.
+  //   → the pipeline seals (no copy swap, no count claim) → ~0.45s → dismiss into the results.
   // A 15s failsafe (and a catch on the search itself) dismisses the overlay even if the turn dies,
   // so the user can never be trapped behind a stuck animation.
   const finishGuided = (token: number) => {
@@ -1939,10 +1942,6 @@ export default function Agent() {
     const q = ageFlowQueryRef.current;
     if (!(q && ageFlowChangedRef.current)) { setAgeFlow(null); return; }
     const startedAt = Date.now();
-    setAgeFlow({ phase: 'mining', from: ageFlowTotalRef.current, to: null });
-    const timers = miningTimersRef.current;
-    const stillMining = () => ageFlowTokenRef.current === token;
-    timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, 15000));
     // CUMULATIVE, ANCHORED TO THE TRUE PRE-AF ORIGIN (owner 2026-08-24). `ageFlowBaseQRef` stays the
     // ROUND's own start — deriveGuided rebuilds this round's query from it, and anchoring it to the
     // origin instead would silently drop the earlier rounds' predicates. The PILLS anchor one level
@@ -1950,13 +1949,23 @@ export default function Agent() {
     // an answer given in round 1 is still visible and removable after round 2 and removing it rebuilds
     // from the origin through everything that survived.
     const carry = afCarryRef.current;
+    // Deduped across rounds (owner audit, 2026-08-27), not a raw concatenation — a carried round's
+    // facet and this round's facet can never both be kept if they resolve to the same displayed
+    // label, whatever question id produced either one. Computed ONCE here: the same committed set
+    // feeds the results pills (guided.facets) AND the deep-search overlay's sentence + chips, so
+    // the transition can never speak a selection the pills don't carry.
+    const dedupedFacets = dedupeFacetsByLabel([...(carry?.facets ?? []), ...ageFlowFacetsRef.current]);
+    setAgeFlow({
+      phase: 'mining', from: ageFlowTotalRef.current, to: null,
+      labels: dedupedFacets.flatMap((f) => f.labels), type: q.type ?? null,
+    });
+    const timers = miningTimersRef.current;
+    const stillMining = () => ageFlowTokenRef.current === token;
+    timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, 15000));
     const guided = ageFlowBaseQRef.current
       ? {
           baseQ: carry?.originQ ?? ageFlowBaseQRef.current,
-          // Deduped across rounds (owner audit, 2026-08-27), not a raw concatenation — a carried
-          // round's facet and this round's facet can never both be kept if they resolve to the same
-          // displayed label, whatever question id produced either one.
-          facets: dedupeFacetsByLabel([...(carry?.facets ?? []), ...ageFlowFacetsRef.current]),
+          facets: dedupedFacets,
           asked: [...ageFlowAskedRef.current],   // already unioned with the carry by syncGuidedFromSteps
         }
       : undefined;
@@ -1995,9 +2004,14 @@ export default function Agent() {
         }
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
         timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
+        // DIRECT hand-off (owner redesign 2026-08-31): `to` landing only settles the pipeline —
+        // there is no found-count beat to read anymore, so the overlay dismisses after a short
+        // 450ms seal instead of the old 1100ms reading pause, revealing the results immediately.
+        timers.push(setTimeout(() => {
+          if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f));
+        }, wait + 450));
         timers.push(setTimeout(() => {
           if (!stillMining()) return;
-          setAgeFlow((f) => (f?.phase === 'mining' ? null : f));
           // LAND ON THE NEW TURN (owner 2026-08-24): the old cards stay exactly where they are, and the
           // thread eases down so the user reads their selection receipt → the new count → the new
           // cards. Never a jump to the bottom.
@@ -3562,7 +3576,7 @@ export default function Agent() {
               onClose={onIntroShowResults}
             />
           ) : ageFlow.phase === 'mining' ? (
-            <MiningTransition from={ageFlow.from} to={ageFlow.to} />
+            <MiningTransition from={ageFlow.from} to={ageFlow.to} type={ageFlow.type} labels={ageFlow.labels} />
           ) : (
             <AdvancedQuestionCard
               titleKey={ageFlow.question.titleKey}
