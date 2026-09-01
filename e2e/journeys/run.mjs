@@ -868,6 +868,115 @@ JOURNEYS['appearance-cancel-keeps-dark'] = async (mobile) => withPage({ mobile, 
   if (bag.pageErrors.length) defect(name, 'page error on the cancel path', bag.pageErrors.join(' | '));
 });
 
+/** J19 — GOOGLE ONE TAP MUST NOT SIT ON TOP OF THE APP'S OWN CONTROLS (PART 5 shapes 6 and 11).
+ *
+ *  THE BUG THIS BARRIERS (measured live 2026-09-01, production, 3/3 fresh contexts). One Tap's
+ *  LEGACY prompt — GIS's path whenever FedCM is unavailable or fails, which is every iOS Safari
+ *  visitor — renders on a phone as a bottom sheet: `#credential_picker_iframe`, `position: fixed`,
+ *  `z-index: 9999`, `pointer-events: auto`, across the bottom 144 px. The app laid its own content
+ *  out underneath it, so for a logged-out visitor on a phone «بحث» (y 583–602 in a 664 px viewport,
+ *  at MAXIMUM scroll — it could not be scrolled clear) and the Agent composer (y 553–575) were both
+ *  hit-tested to Google's iframe. Real taps went to the iframe; `cancel_on_tap_outside: false` meant
+ *  tapping did not even dismiss it, so both controls stayed dead until the visitor found the ✕.
+ *
+ *  WHY IT NEEDED A JOURNEY AND NOT ONLY A UNIT TEST. The geometry is proven offline in
+ *  `scripts/verify-bottom-prompt-inset.ts`; only a real browser can prove that the element the
+ *  BROWSER hands the tap to is the control. So the oracle here is `elementFromPoint` at the
+ *  control's own centre, plus a real click — never a coordinate, never a dispatched event (PART
+ *  9.2 (4)).
+ *
+ *  WHY IT IS A GUEST CONTEXT. harness.mjs blocks GIS for SEEDED-signed-in contexts only, because a
+ *  fake token makes the app correctly prompt a "signed-out" visitor who is not real. Guests are
+ *  left untouched on purpose — "blocking it everywhere would hide the real thing", and this is
+ *  precisely the real thing it would have hidden.
+ *
+ *  NO PROMPT ⇒ SKIP, NEVER PASS. Google suppresses One Tap for its own reasons (cooldown, no
+ *  Google session, FedCM taking over, egress blocked). A run that never saw the sheet has not
+ *  proved the app clears it, and recording that as a pass is how this barrier would go dark. */
+JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
+  const name = `onetap-clear-of-controls:${mobile ? 'mobile375' : 'desktop1440'}`;
+
+  // Wait for the sheet to ARRIVE and finish GROWING: it is inserted ~1.3s after load at height 0 and
+  // animates up to 144px. Measuring once at load reads 0 and would judge a covered control clear.
+  const waitForSheet = async (page) => {
+    for (let i = 0; i < 40; i++) {
+      const r = await page.evaluate(() => {
+        const f = document.querySelector('#credential_picker_iframe');
+        if (!f) return null;
+        const q = f.getBoundingClientRect();
+        return q.height > 0 ? { top: Math.round(q.top), bottom: Math.round(q.bottom), h: Math.round(q.height) } : null;
+      });
+      if (r) return r;
+      await sleep(500);
+    }
+    return null;
+  };
+
+  // What does the BROWSER hand a tap at this control's centre to? The control, or the iframe?
+  const winnerAt = (page, sel) => page.evaluate((s) => {
+    const el = s === 'cta'
+      ? [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && (e.textContent || '').trim() === 'بحث')
+      : document.querySelector('textarea');
+    if (!el) return { missing: true };
+    const r = el.getBoundingClientRect();
+    const t = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return { top: Math.round(r.top), bottom: Math.round(r.bottom),
+             winner: t ? `${t.tagName}${t.id ? '#' + t.id : ''}` : null,
+             isSelf: !!t && (t === el || t.contains(el) || el.contains(t)) };
+  }, sel);
+
+  await withPage({ mobile }, async (page, bag) => {
+    const sheet = await waitForSheet(page);
+    if (!sheet) { skip(name, 'Google never showed the One Tap prompt this run — nothing to clear'); return; }
+    // Desktop renders the prompt in a corner, not docked to the bottom; there is nothing to reserve.
+    if (sheet.bottom < 660 && !mobile) { pass(name, `desktop prompt is not bottom-docked (${sheet.top}-${sheet.bottom})`); return; }
+
+    // Scroll the filter form as far as a person can — the worst case, where «بحث» comes to rest.
+    await page.evaluate(() => {
+      const cta = [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && (e.textContent || '').trim() === 'بحث');
+      let p = cta?.parentElement, sc = null;
+      while (p) { if (p.scrollHeight > p.clientHeight + 4) { sc = p; break; } p = p.parentElement; }
+      if (sc) sc.scrollTop = sc.scrollHeight;
+    });
+    await sleep(1200);
+
+    const cta = await winnerAt(page, 'cta');
+    if (cta.missing) { skip(name, '«بحث» not rendered'); return; }
+    if (!cta.isSelf) {
+      defect(name, 'the One Tap prompt is covering «بحث»',
+        `sheet ${sheet.top}-${sheet.bottom} (${sheet.h}px); «بحث» ${cta.top}-${cta.bottom}; a tap at its centre goes to ${cta.winner}`);
+    } else {
+      // Not just the hit test — a REAL click must land (PART 9.2 (4)).
+      let err = null;
+      await page.getByText('بحث', { exact: true }).first().click({ timeout: 10_000 })
+        .catch((e) => { err = String(e).split('\n')[0]; });
+      if (err) defect(name, '«بحث» hit-tests clear but a real click still does not land', err);
+      else pass(name, `«بحث» (${cta.top}-${cta.bottom}) is clear of the prompt (${sheet.top}-${sheet.bottom}) and clickable`);
+    }
+    if (bag.pageErrors.length) defect(name, 'page error while the prompt was up', bag.pageErrors.join(' | '));
+  });
+
+  // The same class on the OTHER busy screen: the Agent composer is bottom-anchored, so padding the
+  // scroll form would not have saved it — which is why the inset is applied at the app ROOT.
+  // Reached by TAPPING the pill, the way a person gets there — not by deep-linking to /agent, which
+  // renders no composer for a guest and made this half skip on its own downstream symptom.
+  await withPage({ mobile }, async (page) => {
+    if (!(await clickText(page, 'الوكيل الذكي'))) { skip(`${name}/composer`, `agent tab: ${clickReason()}`); return; }
+    await sleep(3500);
+    const sheet = await waitForSheet(page);
+    if (!sheet) { skip(`${name}/composer`, 'Google never showed the One Tap prompt this run'); return; }
+    if (sheet.bottom < 660 && !mobile) { pass(`${name}/composer`, 'desktop prompt is not bottom-docked'); return; }
+    const comp = await winnerAt(page, 'composer');
+    if (comp.missing) { skip(`${name}/composer`, 'no composer on this screen'); return; }
+    if (!comp.isSelf) {
+      defect(`${name}/composer`, 'the One Tap prompt is covering the AI Agent composer',
+        `sheet ${sheet.top}-${sheet.bottom}; composer ${comp.top}-${comp.bottom}; a tap at its centre goes to ${comp.winner}`);
+    } else {
+      pass(`${name}/composer`, `composer (${comp.top}-${comp.bottom}) is clear of the prompt (${sheet.top}-${sheet.bottom})`);
+    }
+  });
+};
+
 // ═══ RUNNER ═════════════════════════════════════════════════════════════════════════════════════
 const t0 = Date.now();
 console.log(`JOURNEY SWEEP — ${new Date().toISOString()}`);
