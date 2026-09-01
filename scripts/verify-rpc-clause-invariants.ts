@@ -26,44 +26,56 @@ const RPC = 'location_search_candidates_ar';
 
 // Each invariant = a clause that MUST appear in the effective (last) definition of the RPC.
 // `marker` is matched case-insensitively against the migration body.
-const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
+// `where` says WHICH HALF of the live function the marker lives in, and it is a STATIC declaration on
+// purpose. Classifying at runtime ("does it match the clause?") would be circular: deleting a clause
+// invariant would make it look template-resident and get checked against the stale replayed body,
+// which is the very hole this fixes. Declared here, a deletion has nowhere to hide.
+const REQUIRED: { name: string; marker: RegExp; why: string; where: 'clause' | 'template' }[] = [
   {
     name: 'rent-period buckets on payment_monthly (payment SCHEDULE, not lease length)',
+    where: 'clause' as const,
     marker: /payment_monthly/i,
     why: 'Owner permanent rule: Monthly = source explicitly offers monthly payment; Yearly = must pay annually. Reverted once by PR#120 (15,221 listings in the wrong bucket).',
   },
   {
     name: 'category purity via known_type_ar',
+    where: 'clause' as const,
     marker: /known_type_ar/i,
     why: 'Residential/Commercial purity — without it ~14k Commercial-macro rows leak into Residential results.',
   },
   {
     name: 'newest-first ordering uses NULLS LAST',
+    where: 'template' as const,
     marker: /nulls\s+last/i,
     why: 'PR#120: unknown-date rows must sort LAST, not first.',
   },
   {
     name: 'furnished filter is NULL-strict (consistent with the amenities furnished token)',
+    where: 'clause' as const,
     marker: /p_furnished\s+is null or s\.furnished\s*=\s*p_furnished/i,
     why: 'Bug C (2026-07-23): p_furnished must exclude furnished-unknown rows like every other strict boolean and the amenities path (both return 31,394). NULL-permissive returned 72,483 (furnished IS NOT FALSE).',
   },
   {
     name: 'tenant filter is NULL-strict',
+    where: 'clause' as const,
     marker: /p_tenant\s+is null or s\.tenant_ar\s*=\s*p_tenant/i,
     why: '2026-07-27 audit: the permissive form returned 75,014 rows for p_tenant=>عوائل instead of the strict 5,751 — tenant-unknown rows must not pass an explicit tenant filter.',
   },
   {
     name: 'directions filter is NULL-strict and vocabulary-canonicalized (norm_direction_ar on BOTH sides)',
+    where: 'clause' as const,
     marker: /norm_direction_ar\(s\.direction_ar\)\s+in\s*\(select norm_direction_ar\(d\)/i,
     why: '2026-07-27 audit: direction_ar holds two vocabulary families (شمال 14,869 vs شمالية 40); a literal match makes one family unreachable, and the old NULL-permissive clause returned 67,439 instead of 14,869.',
   },
   {
     name: 'street-width filter is NULL-strict (street_width_m IS NOT NULL required)',
+    where: 'clause' as const,
     marker: /s\.street_width_m is not null/i,
     why: '2026-07-27 audit: NULL-permissive returned 89,819 for p_street_width_min=>20 instead of the strict 20,112.',
   },
   {
     name: 'floor filter is NULL-strict (floor_number IS NOT NULL required)',
+    where: 'clause' as const,
     marker: /s\.floor_number is not null/i,
     why: '2026-07-27 audit: NULL-permissive returned 108,880 for p_floor_min=>3 instead of the strict 3,661 (96.6% false positives — floor coverage is only 4.9%).',
   },
@@ -74,16 +86,24 @@ const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
   },
   {
     name: 'unknown amenity tokens fail CLOSED (vocabulary guard present)',
-    marker: /not exists \(select 1 from unnest\(p_amenities\) tok/i,
+    where: 'clause' as const,
+    // The VOCABULARY, not just its wrapper. Matching only `not exists (select 1 from unnest(...))`
+    // passed on `... tok where false`, which inverts the guard: with no token list the subquery is
+    // empty, `not exists` is always true, and every unknown token sails through — fail-OPEN, the
+    // precise opposite of what this invariant is named for. Require the `tok not in (...)` list and at
+    // least a dozen quoted tokens, so emptying or truncating it is caught.
+    marker: /not exists \(select 1 from unnest\(p_amenities\) tok\s+where tok not in \((?:\s*'[a-z_]+'\s*,){11,}/i,
     why: 'An unrecognized amenity token must never silently widen a search to "no filter" — it must match nothing, so the mistake is visible the first time it ships.',
   },
   {
     name: 'bedrooms filter is the guarded tri-arm union (no-filter / exact-any / min), exact ∪ min DELIBERATE',
+    where: 'clause' as const,
     marker: /\(\(coalesce\(cardinality\(p_beds_exact\),0\) = 0 and p_beds_min is null\) or \(coalesce\(cardinality\(p_beds_exact\),0\) > 0 and s\.bedrooms = any\(p_beds_exact\)\) or \(p_beds_min is not null and s\.bedrooms >= p_beds_min\)\)/i,
     why: 'SEMANTICS CHANGED DELIBERATELY (20260809161258 + 20260811125918 shared-eligibility layer), certified live 2026-08-15: the app’s bedrooms multi-select sends p_beds_exact=[1,2,3,4] AND p_beds_min=5 together for a 1–4 ∪ 5+ selection — the union IS the correct result (verified [1,2,3,4]∪≥5 = 8,254, chip == results == referee == direct SQL). The 2026-07-28 CASE-exclusive form would silently drop every 5+ listing from that selection.',
   },
   {
     name: 'per-platform total_count is computed pre-cap (same window pass as row_number, before rn <= p_per_platform)',
+    where: 'template' as const,
     // Widened 2026-08-29 (PHOTO PREFERENCE + CONTROLLED ROTATION): m.has_photo is now selected right
     // before count(*) over() in this same window pass — an optional, bounded gap tolerates that new
     // column without loosening the actual invariant (count(*) over() must still sit directly before
@@ -93,11 +113,13 @@ const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
   },
   {
     name: 'p_limit is clamped non-negative (greatest(p_limit, 0)), matching the existing p_offset guard',
+    where: 'template' as const,
     marker: /limit greatest\(p_limit,\s*0\) offset greatest\(p_offset,\s*0\)/i,
     why: "2026-07-28 audit: p_offset already guards itself but p_limit didn't — a negative p_limit raised a hard 'LIMIT must not be negative' Postgres error instead of degrading like p_limit:=0 already does (0 rows, no error).",
   },
   {
     name: 'PLATFORM DIVERSITY: the default branch computes a per-platform round-robin rank (div_rank)',
+    where: 'template' as const,
     // Widened 2026-08-29 (PHOTO PREFERENCE, owner PERMANENT rule): div_rank's own row_number() now
     // orders by photo status FIRST, recency second — folding photo preference INTO diversity's own
     // per-platform ordering (a platform's #1 round-robin slot is its own best real-photo, most-recent
@@ -111,6 +133,7 @@ const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
   },
   {
     name: 'PLATFORM DIVERSITY: div_rank leads the tie-break in the default branch (before recency)',
+    where: 'template' as const,
     // Widened 2026-08-29: PHOTO PREFERENCE (photo_rank) and CONTROLLED ROTATION (rot_key) now sit
     // BETWEEN div_rank and recency, per the owner's MATCH -> DIVERSITY -> PHOTO -> ROTATION hierarchy
     // — the bounded gap tolerates those two new intervening keys while still requiring div_rank to
@@ -120,6 +143,7 @@ const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
   },
   {
     name: 'PLATFORM DIVERSITY: the outer union ORDER BY honours div_rank too',
+    where: 'template' as const,
     // Widened 2026-08-29, same reason as the check above — u.photo_rank/u.rot_key now sit between
     // u.div_rank and u.recency_at in the outer (post-union) ORDER BY too.
     marker: /u\.div_rank asc nulls last,[\s\S]{0,120}?u\.recency_at desc nulls last, u\.source_table, u\.listing_id/i,
@@ -127,6 +151,7 @@ const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
   },
   {
     name: 'PLATFORM DIVERSITY: objective sorts are excluded from diversification',
+    where: 'template' as const,
     marker: /coalesce\(p_sort_by,''\) not in \('price_asc','price_desc','area_asc','area_desc','beds_desc','oldest'\)/i,
     why: "Owner requirement: price/area/bedrooms/oldest must retain their exact intended semantics. div_rank must be NULL for those 6 sorts (verified: 0 mismatched positions over 300 rows x 6 sorts).",
   },
@@ -333,8 +358,46 @@ for (const f of definers) {
 }
 
 const effective = definers[definers.length - 1];
+
+// ── THE REPLAY IS NOT THE WHOLE STORY ANY MORE (2026-09-01) ─────────────────────────────────────
+// Since the AF RPCs became template-generated, a migration can change the live function WITHOUT
+// writing a body this replay can see: it calls rebuild_af_filter_rpcs(), which re-renders the
+// function from af_rpc_templates + af_eligibility_clause(). 20260831205347 did exactly that, adding
+// eight amenity tokens. The replay's last *body-writing* definer was then a 08-29 file that predates
+// them, so `body` was BEHIND PRODUCTION and this barrier passed 26/26 while checking a stale string.
+// A clause invariant deleted from the live clause would not have been caught.
+//
+// Fix: check the invariants against the replayed body AND the byte-exact clause mirror. The clause
+// half of the live function IS that mirror (verify-sql-mirrors-not-stale.ts keeps it honest), and the
+// template half — ranking, diversity, total_count, the p_limit clamp — still comes from the replay.
+// Stays fully offline, which is deliberate: npm test must not need a live DB (see AGENTS.md).
+const MIRROR = 'sql/mirrors/af_eligibility_clause.sql';
+let clauseMirror = '';
+try {
+  clauseMirror = readFileSync(join(MIGRATIONS_DIR, '..', '..', MIRROR), 'utf8');
+} catch {
+  clauseMirror = '';
+}
+// FAIL CLOSED. If the mirror is missing or unreadable, this check has no view of the clause at all —
+// which is the exact blind spot being fixed. Deleting the file must not quietly disarm it.
+check(`${MIRROR} is readable (the clause half of the live function)`, clauseMirror.length > 200);
+if (clauseMirror.length <= 200) {
+  console.error(`   ↳ Without the mirror this barrier can only see the template half, and a clause invariant could be deleted unnoticed.`);
+  process.exit(1);
+}
+// The mirror stores the clause as a SQL string literal, so every quote is doubled. Undouble it so the
+// markers below — written against a real function body — match the same way in both halves.
+const clauseBody = clauseMirror.replace(/''/g, "'");
+const rebuilt = definers.filter((f) => /rebuild_af_filter_rpcs\s*\(/.test(readFileSync(join(MIGRATIONS_DIR, f), 'utf8')));
+
 console.log(`\n→ effective ${RPC} definition after replay: ${effective}`);
 console.log(`  (${definers.length} migration(s) define/patch it: ${definers.join(', ')})`);
+if (rebuilt.length) {
+  console.log(`  NOTE: ${rebuilt.length} migration(s) rebuild it from the TEMPLATE (${rebuilt.join(', ')}),`);
+  console.log(`        so the live clause is not in any replayed body — clause invariants are checked against ${MIRROR}.`);
+}
+// What the invariants are actually tested against: replayed template body + real clause.
+const corpus = `${body}\n${clauseBody}`;
 if (!replayOk) {
   console.error(`\n✗ Dynamic-migration replay failed partway — invariant results below may be checked against a WRONG body. Fix the replay (or the migration) before trusting this run.\n`);
 } else {
@@ -342,12 +405,15 @@ if (!replayOk) {
 }
 
 for (const inv of REQUIRED) {
-  const ok = inv.marker.test(body);
+  // Clause invariants are checked against the MIRROR, never the replayed body: the body can be behind
+  // production whenever a migration rebuilds the function from the template instead of writing SQL.
+  const ok = inv.marker.test(inv.where === 'clause' ? clauseBody : body);
   check(`effective RPC keeps: ${inv.name}`, ok);
   if (!ok) console.error(`   ↳ WHY IT MATTERS: ${inv.why}\n   ↳ ${effective} re-issues ${RPC} but DROPS this clause. Do not copy an older body — start from the CURRENT live definition (pg_get_functiondef) and change only what you intend.`);
 }
+// FORBIDDEN is an ABSENCE claim, so it must hold in BOTH halves — the corpus is right here.
 for (const bad of FORBIDDEN) {
-  const present = bad.marker.test(body);
+  const present = bad.marker.test(corpus);
   check(`effective RPC does NOT reintroduce: ${bad.name}`, !present);
   if (present) console.error(`   ↳ WHY IT MATTERS: ${bad.why}`);
 }

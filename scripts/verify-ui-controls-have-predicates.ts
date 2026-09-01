@@ -41,18 +41,29 @@ const advanced  = read('src/data/advancedFilters.ts');
 const remote    = read('src/data/remote.ts');
 const interview = read('src/app/interview.tsx');
 
-// ── the authoritative slug vocabulary, copied from location_search_candidates_ar ────────────────
+// ── the authoritative slug vocabulary, DERIVED from the clause ────────────────────────────────
 // An UNKNOWN token matches nothing by design, so a guessed slug silently zeroes every result.
-const RESULTS_SLUGS = new Set([
-  'elevator', 'parking', 'kitchen', 'ac', 'maid_room', 'driver_room',
-  'private_entrance', 'furnished', 'rnpl', 'rent_now_pay_later',
-  // Villa cohort 2026-08-16: villa-form chips (migration 20260815223500 added both tokens to all
-  // 4 shared surfaces; chips == direct SQL == referee asserted in-transaction).
-  'car_entrance', 'sanitation',
-  // Commercial expansion 2026-08-16: utility chips (migration 20260815234444, same in-transaction
-  // chips == direct SQL == referee proof).
-  'electricity', 'water_supply',
-]);
+//
+// This used to be a hand-maintained literal "copied from location_search_candidates_ar". Copies go
+// stale: by 2026-09-01 production certified 22 tokens and this list still held 14, so the eight
+// added on 08-31 (gym, pool, garden, balcony, laundry_room, optical_fibers,
+// separate_electricity_meter, separate_water_meter) were outside the vocabulary this check enforces
+// — a chip using one would have been reported as an invented slug. Read the real thing instead.
+//
+// sql/mirrors/af_eligibility_clause.sql is byte-exact with the deployed clause and is kept fresh by
+// verify-sql-mirrors-not-stale.ts, so this stays offline. Same parsing idiom as
+// verify-af-multiselect-combining-semantics.ts, which already proved it.
+const clauseSql = read('sql/mirrors/af_eligibility_clause.sql');
+const vocabMatch = clauseSql.match(/where tok not in \(([^)]*)\)/);
+if (!vocabMatch) {
+  console.log('  FAIL  could not read the amenity vocabulary from sql/mirrors/af_eligibility_clause.sql');
+  process.exit(1);                       // FAIL CLOSED: deleting the mirror must not disarm the check
+}
+const RESULTS_SLUGS = new Set([...vocabMatch[1].matchAll(/''([a-z_]+)''/g)].map((m) => m[1]));
+if (RESULTS_SLUGS.size < 12) {
+  console.log(`  FAIL  amenity vocabulary parsed as only ${RESULTS_SLUGS.size} tokens — parse miss, not a real shrink`);
+  process.exit(1);                       // a silently-empty Set would make every slug check vacuous
+}
 
 // Only the AMENITY-bearing questions carry p_amenities slugs. The age question's keys
 // ('new', '1_2', …) are age buckets applied via p_age_min/p_age_max, and the bathroom rungs are
@@ -115,11 +126,22 @@ if (amenityOptsMatch) {
 }
 
 // ── 4. controls we deliberately retired must not creep back ──────────────────────────────────────
+// THE REASON CHANGED, THE RULE DID NOT (restated 2026-09-01 — the old wording had become false).
+// It used to read "no such column exists / only an explicit NO is published, so the chip can only
+// ever return zero". Production now contradicts both halves: the columns are populated (pool 40 true
+// of 932 known, gym 12 of 923) and BOTH tokens are certified in the live p_amenities vocabulary.
+//
+// The chip still must not appear, for a different and still-binding reason: apartment_guided_counts_ar
+// exposes no cnt_pool / cnt_gym, so an offered chip could not carry a count — and this repo's
+// count-honesty contract says an option's number must equal what tapping it returns. That is exactly
+// the state ac / private_entrance / maid_room / driver_room were in before their count columns landed.
+// Re-expose each one when its count path does, not before.
 for (const dead of ['Pool', 'Gym']) {
   const offeredAgain = amenityOptsMatch ? new RegExp(`'${dead}'`).test(amenityOptsMatch[1]) : false;
   check(`'${dead}' is not offered as an amenity option`, !offeredAgain,
-    `only sanadak publishes it and publishes an explicit NO on 184/184 listings, so the chip can only ever return zero results. ` +
-    `The data is still stored (search_listings_ar.${dead.toLowerCase()}); re-expose it only when a platform publishes a yes.`);
+    `the token is certified and search_listings_ar.${dead.toLowerCase()} is populated, but ` +
+    `apartment_guided_counts_ar has no cnt_${dead.toLowerCase()} — so the chip could not show a truthful count. ` +
+    `Add the count column first, then the chip.`);
 }
 
 // ── 5. THE INVERSE RULE: backend-only fields must STAY backend-only ─────────────────────────────
