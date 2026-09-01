@@ -224,6 +224,37 @@ async function taxonomy() {
  * without it. Memoized like taxonomy(); null on failure, which makes the oracle REFUSE a
  * city-scoped comparison rather than fall back to a label-only filter (§41.15).
  */
+/**
+ * A LOOKUP-ONLY fold of the request's city label onto `loc_catalog_city.city_norm`.
+ *
+ * READ THIS BEFORE CALLING IT A NORMALISER. The rule this file obeys elsewhere — "the oracle does
+ * not reimplement the RPC's normaliser, because then agreement is self-confirmation" — is about the
+ * MATCHING predicate (norm_district_tok). This is not that. It never decides whether a row matches;
+ * it only turns a city NAME into the `city_id` the RPC's own `city_ids` CTE would resolve it to, and
+ * the eligible set is still expressed in PostgREST over stored columns. If the fold fails, the
+ * oracle REFUSES exactly as before — it never falls back to a label match.
+ *
+ * WHY IT IS NEEDED. The first version compared the request's label to `city_ar`/`city_norm` by exact
+ * string equality. That is right for every label the INDEX serves — measured 2026-09-01: all 362
+ * served (city_ar, region) pairs resolve exactly — but the label the REQUEST carries comes from the
+ * app's picker, which can render the same city with hamza. «أبو عريش» (request) vs «ابو عريش»
+ * (catalog) failed to resolve and skipped the DB-truth layer on a healthy journey. A skipped layer
+ * contributes zero mismatches, which reads exactly like agreement — the very failure mode this
+ * file's header warns about — so over-refusing is not a safe default either.
+ *
+ * It mirrors `normalize_ar()` exactly (read from prosrc 2026-09-01):
+ *   lower(btrim(t)) → translate 'أإآٱةىـ'+bidi marks onto 'ااااهي'+delete → collapse whitespace runs.
+ * `scripts/verify-live-sweep-db-oracle-scope.ts` §5d pins each rule and the deletions; the live
+ * equivalence against the database's own stored `city_norm` over the WHOLE catalog is what proves
+ * the mirror is faithful rather than assumed.
+ */
+const cityLookupKey = (s) => String(s ?? '').trim().toLowerCase()
+  .replace(/[أإآٱ]/g, 'ا')
+  .replace(/ة/g, 'ه')
+  .replace(/ى/g, 'ي')
+  .replace(/[ـ‎‏‌‍‪‫‬‭‮]/g, '')
+  .replace(/\s+/g, ' ');
+
 let _cityCatalog = null;
 async function cityCatalog() {
   if (_cityCatalog) return _cityCatalog;
@@ -397,8 +428,92 @@ async function pickCity(page, city) {
 // scripts/verify-live-sweep-coverage-contract.ts, so a new zero-state phrasing cannot silently
 // reintroduce the hang. «ما لقينا» needs no branch of its own — it contains «لقينا».
 export const SETTLED_RE = /لقينا|ما لقيت|ما فيه/;
+/**
+ * Tap a control by its exact Arabic label, scrolling the inner ScrollView to it first.
+ *
+ * Same class as the «بحث» defect below (§37: fix the class, not the example). The filter form's
+ * group and نوع chips sit below the fold on a phone exactly as «بحث» does, and their call sites
+ * swallow the failure with `.catch(() => {})` — so on mobile they silently did not select, and the
+ * journey went on believing it had chosen a نوع it never chose. That is worse than a crash: it is
+ * the §40.4 failure the sweep exists to prevent, inside the sweep itself.
+ *
+ * Returns whether the element was actually found, so a caller can tell "tapped" from "absent"
+ * instead of treating both as success.
+ */
+export async function tapByText(page, label, timeout = 15000) {
+  const el = page.getByText(label, { exact: true }).first();
+  const there = await el.waitFor({ state: 'attached', timeout }).then(() => true).catch(() => false);
+  if (!there) return false;
+  await page.evaluate((t) => {                     // FIRST match only — `.first()` is what we click
+    for (const e of document.querySelectorAll('*'))
+      if (e.children.length === 0 && (e.textContent || '').trim() === t) { e.scrollIntoView({ block: 'center' }); return; }
+  }, label).catch(() => {});
+  await sleep(500);
+  return el.click({ timeout }).then(() => true).catch(() => false);
+}
+
 const runSearch = async (page) => {
-  await page.getByText('بحث', { exact: true }).first().click();
+  // «بحث» IS BELOW THE FOLD ON A PHONE — scroll it in before clicking (§41.2, applied to the one
+  // control that still clicked blind). The pager already learned this lesson; the search button had
+  // not, and it is the same shape of bug: on the 390 px viewport the expanded filter form pushes
+  // «بحث» past the visible area, Playwright's actionability wait never settles, and the journey dies
+  // with `locator.click: Timeout 30000ms exceeded — waiting for getByText('بحث')`.
+  //
+  // Measured 2026-09-01, and this is why it is worth fixing rather than dismissing as CI noise:
+  // the scheduled sweep failed on runs #10 and #11 with `mobile journeys: 0 < 1` — ALL THREE mobile
+  // journeys (صفوى, بقعاء and الرياض, the last-resort fallback) timed out on exactly this locator,
+  // while EVERY desktop journey in both runs passed. The non-Riyadh floor miss was a downstream
+  // consequence: صفوى's only journey was the mobile one that died. So the owner-mandated §34 mobile
+  // floor has not actually been exercised in CI, and the workflow is red daily — a standing red
+  // trains people to stop reading it.
+  //
+  // ROOT CAUSE, measured on production at 390 px (iPhone 13) with the DEFAULT deal «بيع»:
+  //   • «بحث» renders at y≈1030 while the viewport is 664 px tall — below the fold;
+  //   • document.body does NOT scroll (scrollHeight === innerHeight === 664). The form lives in an
+  //     inner react-native-web ScrollView — one DIV with scrollHeight 1547 / clientHeight 664 — and
+  //     that container is the only thing that can move.
+  //   • **Playwright's scrollIntoViewIfNeeded() does not move it.** That is why the first attempt at
+  //     this fix changed nothing and the failure survived it.
+  //   • A DOM-level `el.scrollIntoView({block:'center'})` DOES move it, where Playwright's helper
+  //     does not: in a probe that went straight from load → pick city → search, «بحث» moved
+  //     y 1030 → 583 and the search really ran («لقينا 1,025 إعلان», تبوك/بيع/سكني).
+  //
+  // NOT A PRODUCTION DEFECT — measured, not assumed. Driving the inner container to its maximum
+  // scroll (866 of 866) puts «بحث» at y=583, fully inside the 664 px viewport, `reachable: true`.
+  // A human scrolling the form on a phone reaches the button normally. §40.7: harness, not product.
+  //
+  // ⚠️ STILL OPEN, and this comment must not be read as a fix. In the FULL journey — which calls
+  // setDeal() and setPeriod() before picking the city — the click still times out even with the
+  // scroll above. Verified against sweeps #4, #5 and #6: mobile journeys 0, floor missed. What is
+  // narrowed: it is not the below-the-fold position alone (the scroll demonstrably resolves that in
+  // isolation), not "two «بحث» nodes" (there is exactly 1), and not the environment (it reproduces
+  // locally every time on the default «بيع»). What is NOT isolated: what setDeal/setPeriod leave on
+  // the page that keeps the click from landing. Owned by this routine; next run continues here.
+  //
+  // Cost of the bug: ALL THREE mobile journeys die on every «بيع» rotation (CI runs #10 and #11,
+  // local sweeps #3–#6), so the owner-mandated §34 mobile floor is not actually being exercised and
+  // the workflow is red on those runs — the same wound as a dark detector.
+  const search = page.getByText('بحث', { exact: true }).first();
+  // Wait for it to EXIST first — scrolling to an element that has not mounted is a silent no-op, and
+  // then the click just waits out its timeout below the fold exactly as before.
+  await search.waitFor({ state: 'attached', timeout: 30000 }).catch(() => {});
+  // Scroll the INNER container, from the DOM. Playwright's own scrollIntoViewIfNeeded() does NOT
+  // move a react-native-web ScrollView — that is measured, and is why the first attempt at this fix
+  // changed nothing. Settle afterwards: the scroll is not instantaneous and clicking mid-scroll
+  // fails actionability for the same reason being below the fold does.
+  // Scroll the FIRST match, because `.first()` is what gets clicked. An earlier version looped over
+  // every match and therefore scrolled to the LAST one — so on a page carrying two «بحث» nodes the
+  // harness centred one element and clicked a different, still-offscreen one, and the timeout
+  // survived the "fix" untouched.
+  await page.evaluate(() => {
+    for (const e of document.querySelectorAll('*'))
+      if (e.children.length === 0 && (e.textContent || '').trim() === 'بحث') {
+        e.scrollIntoView({ block: 'center' });
+        return;
+      }
+  }).catch(() => {});
+  await sleep(800);
+  await search.click();
   await page.waitForFunction((src) => new RegExp(src).test(document.body.innerText),
     SETTLED_RE.source, { timeout: 70000 });
   await sleep(2600);
@@ -504,7 +619,7 @@ function dbFilterFromRequest(req, tax, cities) {
     const wantRegions = req.p_region_ids?.length ? new Set(req.p_region_ids.map(Number)) : null;
     const ids = new Set();
     for (const name of req.p_cities) {
-      const hits = cities.filter((c) => (c.city_ar === name || c.city_norm === name)
+      const hits = cities.filter((c) => (c.city_ar === name || c.city_norm === cityLookupKey(name))
                                      && (!wantRegions || wantRegions.has(Number(c.region_id))));
       if (!hits.length) {
         return { comparable: false,
@@ -773,6 +888,6 @@ async function withPage(mobile, fn) {
   } finally { await browser.close(); }
 }
 
-export { BASE, dbCount, rpcTotal, assertChain, dbFilterFromRequest, cityCatalog, withPage, setDeal, setPeriod, pickCity, runSearch,
+export { BASE, dbCount, rpcTotal, assertChain, dbFilterFromRequest, cityCatalog, cityLookupKey, withPage, setDeal, setPeriod, pickCity, runSearch,
          visibleState, ledgerPlan, ledgerRecord, findings, journeys, defect, note, num, lastCount, sleep,
          observeWatch, watchStatus, unobservedWatches, WATCH_OFFLINE_COVER };
