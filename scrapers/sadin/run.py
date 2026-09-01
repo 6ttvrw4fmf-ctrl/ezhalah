@@ -258,12 +258,17 @@ def _pages(s: cc.Session, url: str, max_pages: int = 40):
             # sandboxed egress can't reach directly (sadin.com.sa is proxy-blocked here). Remove
             # before any real fix lands.
             print(f"DEBUG final_url={getattr(r, 'url', '?')!r}", flush=True)
-            print(f"DEBUG title={re.search(r'<title>(.*?)</title>', html, re.S)}", flush=True)
             print(f"DEBUG len(html)={len(html)} article_count={html.count('<article')} "
                   f"property_card_count={html.count('property-card')} "
                   f"href_property_count={html.count('/property/')}", flush=True)
-            print("DEBUG body[0:4000]=" + html[:4000], flush=True)
-            print("DEBUG body[4000:8000]=" + html[4000:8000], flush=True)
+            all_hrefs = sorted(set(re.findall(r'href="([^"]*propert[^"]*)"', html)))
+            print(f"DEBUG distinct propert*-hrefs ({len(all_hrefs)}):", flush=True)
+            for h in all_hrefs[:40]:
+                print("  DEBUG href=" + h, flush=True)
+            am = re.search(r'<article\b[^>]*>', html)
+            if am:
+                start = am.start()
+                print("DEBUG first_article_block=" + html[start:start + 2500], flush=True)
             return
         if p > 1 and not (ids - seen):
             return
