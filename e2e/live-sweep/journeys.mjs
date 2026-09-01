@@ -1,7 +1,7 @@
 // The journeys the live sweep drives. Each one is a REAL user path on production and ends in the
 // six-layer comparison (see sweep.mjs) — clicking the control is never the assertion.
 import {
-  BASE, dbCount, assertChain, withPage, setDeal, setPeriod, pickCity, runSearch,
+  BASE, dbCount, assertChain, withPage, setDeal, setPeriod, pickCity, runSearch, tapByText,
   visibleState, defect, note, num, lastCount, sleep, SETTLED_RE, observeWatch,
 } from './sweep.mjs';
 
@@ -23,8 +23,10 @@ export async function normalFilter(plan) {
     await setDeal(page, plan.deal);
     await setPeriod(page, plan.period);
     if (!await pickCity(page, plan.city)) { note(`${name}: city «${plan.city}» not offered — skipped`); return null; }
-    if (plan.group) { await page.getByText(plan.group, { exact: true }).first().click().catch(() => {}); await sleep(1200); }
-    if (plan.typeLabel) { await page.getByText(plan.typeLabel, { exact: true }).first().click().catch(() => {}); await sleep(1000); }
+    // tapByText scrolls the inner ScrollView first: on mobile these chips are below the fold and
+    // the old `.catch(() => {})` swallowed the miss, so the journey searched a نوع it never selected.
+    if (plan.group) { await tapByText(page, plan.group); await sleep(1200); }
+    if (plan.typeLabel) { await tapByText(page, plan.typeLabel); await sleep(1000); }
     await runSearch(page);
     return assertChain(name, {
       intent: { city: plan.city, deal: plan.deal, period: plan.period, type: plan.typeLabel },
@@ -144,8 +146,10 @@ export async function advancedFilter(plan) {
     await setDeal(page, plan.deal);
     await setPeriod(page, plan.period);
     if (!await pickCity(page, plan.city)) { note(`${name}: city not offered — skipped`); return null; }
-    if (plan.group) { await page.getByText(plan.group, { exact: true }).first().click().catch(() => {}); await sleep(1200); }
-    if (plan.typeLabel) { await page.getByText(plan.typeLabel, { exact: true }).first().click().catch(() => {}); await sleep(1000); }
+    // tapByText scrolls the inner ScrollView first: on mobile these chips are below the fold and
+    // the old `.catch(() => {})` swallowed the miss, so the journey searched a نوع it never selected.
+    if (plan.group) { await tapByText(page, plan.group); await sleep(1200); }
+    if (plan.typeLabel) { await tapByText(page, plan.typeLabel); await sleep(1000); }
     await runSearch(page);
     const before = lastCount(await page.evaluate(() => document.body.innerText));
 
