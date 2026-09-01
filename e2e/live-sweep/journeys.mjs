@@ -100,11 +100,13 @@ export async function trendingDistrict(plan) {
     if (!rows.length) { note(`${name}: no numbered district rows — skipped`); return null; }
     const [districtName, countText] = rows[0];
     const advertised = num(countText);
-    const hit = await page.evaluate((d) => {
-      const el = [...document.querySelectorAll('div')].filter((e) => (e.innerText || '').trim().startsWith(d) && (e.innerText || '').length < 60).pop();
-      if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-    }, districtName);
-    if (hit) await page.mouse.click(hit.x, hit.y);
+    // §41.2: take the ELEMENT, never bare viewport coordinates. The same shape of click in
+    // pickCity() left the mobile «بحث» permanently unclickable and took out the §34 mobile floor
+    // on every «بيع» rotation; this was the only other one left in the harness.
+    const dh = await page.evaluateHandle((d) => [...document.querySelectorAll('div')]
+      .filter((e) => (e.innerText || '').trim().startsWith(d) && (e.innerText || '').length < 60).pop(), districtName);
+    const drow = dh.asElement();
+    if (drow) { await drow.scrollIntoViewIfNeeded().catch(() => {}); await drow.click().catch(() => {}); }
     await sleep(1400);
     await runSearch(page);
     const landed = lastCount(await page.evaluate(() => document.body.innerText));
