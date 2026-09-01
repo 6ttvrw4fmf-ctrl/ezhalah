@@ -218,6 +218,25 @@ async function taxonomy() {
   return _taxonomy;
 }
 
+/**
+ * The city catalog, as data — the RPC resolves `p_cities` through it (`city_norm = tok`) to build
+ * the `city_ids` its second and third city arms match on, so layer 5 cannot express those arms
+ * without it. Memoized like taxonomy(); null on failure, which makes the oracle REFUSE a
+ * city-scoped comparison rather than fall back to a label-only filter (§41.15).
+ */
+let _cityCatalog = null;
+async function cityCatalog() {
+  if (_cityCatalog) return _cityCatalog;
+  try {
+    const r = await fetch(`${SUPA}/rest/v1/loc_catalog_city?select=city_id,city_ar,city_norm,region_id&limit=20000`,
+                          { headers: H, signal: AbortSignal.timeout(30000) });
+    const rows = await r.json();
+    if (!Array.isArray(rows) || !rows.length) return null;
+    _cityCatalog = rows;
+  } catch { return null; }
+  return _cityCatalog;
+}
+
 /** LAYER 5b — the DB's own ID SET, so a count that matches by coincidence cannot pass. */
 async function dbIds(filters, cap) {
   const q = `${SUPA}/rest/v1/search_listings_ar`
@@ -407,7 +426,7 @@ const visibleState = async (page) => parseVisibleState(await page.evaluate(() =>
  * "found" three defects that were purely the oracle's own imprecision. A sweep that accuses the
  * product for its own missing predicate is worse than one that stays quiet: skip, and say why.
  */
-function dbFilterFromRequest(req, tax) {
+function dbFilterFromRequest(req, tax, cities) {
   const enc = encodeURIComponent;
   const unsupported = [];
   // What STAYS unexpressible, and why — each is a deliberate refusal, not an oversight:
@@ -454,7 +473,52 @@ function dbFilterFromRequest(req, tax) {
   if (req.p_deal) f += `&deal_ar=eq.${enc(req.p_deal)}`;
   if (req.p_rent_period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`;
   if (req.p_rent_period === 'شهري') f += '&payment_monthly=is.true&rent_now_pay_later=not.is.true';
-  if (req.p_cities?.length) f += `&city_ar=in.(${enc(req.p_cities.map((c) => `"${c}"`).join(','))})`;
+  // ── المدينة: mirror the RPC's THREE arms, never the label alone ───────────────────────────────
+  // The RPC's city predicate is (read from prosrc 2026-09-01, and what §42.2 describes):
+  //     normalize_ar(s.city_ar) = any(city_tokens)      ← the LABEL arm
+  //  OR s.city_id               = any(city_ids)         ← the row's own city
+  //  OR s.match_city_ids       && city_ids              ← the row's match SET (aliases + clusters)
+  //
+  // This oracle expressed only the first arm, as a literal label match. That was exact for as long
+  // as `loc_city_cluster` was EMPTY: a row's match_city_ids then held just its own city, so all
+  // three arms coincided and the label alone was a faithful stand-in. The owner-approved
+  // الأحساء/الهفوف cluster (migration 20260831195108, 2026-08-31) populated that table, and the arms
+  // separated — a search for «الاحساء» now correctly also returns its الهفوف siblings, exactly as
+  // intended, while a label-only oracle sees only one half of the union.
+  //
+  // On 2026-09-01 that produced ELEVEN false COUNT MISMATCHes across six independent cohorts, each
+  // one an accusation against a perfectly healthy product. The proof that production was right and
+  // the oracle wrong: every الاحساء/الهفوف pair summed EXACTLY to the RPC's own total, from both
+  // directions — 39+18=57 · 28+26=54 · 6+5=11 · 26+16=42 · 6+6=12 · 5+4=9. This is §41.15's rule
+  // again: when the oracle and the product disagree over a whole slice of the result set, suspect
+  // the oracle's ability to NAME the scope before the product's ability to find the rows.
+  //
+  // So resolve the requested names the way the RPC does — through the catalog, region-constrained
+  // (§41.16: a city NAME is not an identity; 290 of them repeat across regions) — and REFUSE when a
+  // name does not resolve, rather than silently falling back to the label that caused this.
+  if (req.p_cities?.length) {
+    if (!Array.isArray(cities) || !cities.length) {
+      return { comparable: false,
+               reason: 'city catalog unavailable: the RPC\'s city_id / match_city_ids arms cannot be expressed' };
+    }
+    const wantRegions = req.p_region_ids?.length ? new Set(req.p_region_ids.map(Number)) : null;
+    const ids = new Set();
+    for (const name of req.p_cities) {
+      const hits = cities.filter((c) => (c.city_ar === name || c.city_norm === name)
+                                     && (!wantRegions || wantRegions.has(Number(c.region_id))));
+      if (!hits.length) {
+        return { comparable: false,
+                 reason: `city «${name}» does not resolve in loc_catalog_city${wantRegions ? ' for the requested region' : ''}` };
+      }
+      for (const h of hits) ids.add(Number(h.city_id));
+    }
+    const idList = [...ids].sort((a, b) => a - b).join(',');
+    // Repeated `or=` params are ANDed by PostgREST (verified live 2026-09-01: `or=deal` + `or=region`
+    // returned 17,524, byte-identical to the same two as plain ANDed predicates), so this composes
+    // safely alongside the «سنوي» disjunction above.
+    f += `&or=(city_ar.in.(${enc(req.p_cities.map((c) => `"${c}"`).join(','))})`
+       + `,city_id.in.(${idList}),match_city_ids.ov.{${idList}})`;
+  }
 
   // ── the SCOPE arm: (tables ∧ types) OR (tables2 ∧ types2) ─────────────────────────────────────
   // p_tables IS the category scope (residential vs commercial source tables) — omitting it was the
@@ -630,7 +694,7 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
       dbReq = { ...req, p_districts: r.labels };
     }
   }
-  const dbf = dbReq ? dbFilterFromRequest(dbReq, await taxonomy()) : { comparable: false, reason: j.dbSkipped };
+  const dbf = dbReq ? dbFilterFromRequest(dbReq, await taxonomy(), await cityCatalog()) : { comparable: false, reason: j.dbSkipped };
   if (dbf.comparable) {
     j.db = await dbCount(dbf.filter);
     if (j.db != null && j.db !== j.rpc) { defect(name, 'RPC→DB', `RPC ${j.rpc} vs independent DB ${j.db}`); j.ok = false; }
@@ -709,6 +773,6 @@ async function withPage(mobile, fn) {
   } finally { await browser.close(); }
 }
 
-export { BASE, dbCount, rpcTotal, assertChain, dbFilterFromRequest, withPage, setDeal, setPeriod, pickCity, runSearch,
+export { BASE, dbCount, rpcTotal, assertChain, dbFilterFromRequest, cityCatalog, withPage, setDeal, setPeriod, pickCity, runSearch,
          visibleState, ledgerPlan, ledgerRecord, findings, journeys, defect, note, num, lastCount, sleep,
          observeWatch, watchStatus, unobservedWatches, WATCH_OFFLINE_COVER };

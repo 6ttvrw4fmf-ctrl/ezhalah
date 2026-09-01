@@ -11,7 +11,7 @@
 // into one "searches" figure, because a request count is not a coverage claim.
 import { createHash } from 'node:crypto';
 import { buildRequest, cohortKey, PAGE_LIMIT } from './request.mjs';
-import { dbCount, dbFilterFromRequest } from '../live-sweep/sweep.mjs';
+import { dbCount, dbFilterFromRequest, cityCatalog } from '../live-sweep/sweep.mjs';
 import { planCells, SHAPES, DAILY_BUDGET } from './plan.mjs';
 
 const SUPA = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';
@@ -46,6 +46,12 @@ for (const c of catalog) for (const t of c.types_ar) if (!TYPE2UI.has(t)) TYPE2U
 
 // known_type_ar feeds the oracle's category-purity clause; without it the oracle refuses (never guesses).
 const tax = await rest('known_type_ar?select=type_ar,macro');
+
+// The city catalog the oracle needs to express the RPC's city_id / match_city_ids arms. Without it
+// a city-scoped comparison REFUSES rather than degrading to a label-only filter — the label-only
+// form is exactly what produced 12 false COUNT MISMATCHes on 2026-09-01 (see sweep.mjs).
+const cityCat = await cityCatalog();
+if (!cityCat) { console.error('loc_catalog_city unreadable — the oracle would have to guess the city scope; refusing'); process.exit(1); }
 
 // City → its OWN region (§41.16: never a name-keyed dict; 290 city names repeat across regions).
 const CITY = new Map();
@@ -124,7 +130,7 @@ async function worker() {
     // implementation from the RPC's SQL (and §41.15-hardened: it REFUSES rather than guessing when
     // a scope is not faithfully expressible). A count that nothing checked is not evidence.
     let db = null, refused = null;
-    const f = dbFilterFromRequest(body, tax);
+    const f = dbFilterFromRequest(body, tax, cityCat);
     if (!f.comparable) refused = f.reason;
     else { db = await dbCount(f.filter); if (db == null) refused = 'db unreachable'; }
     out.push({ s, body, total, rows: rows.length, ids, dupes: ids.length - new Set(ids).size,
