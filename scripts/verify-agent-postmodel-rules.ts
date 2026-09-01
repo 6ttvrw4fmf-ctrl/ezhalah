@@ -176,6 +176,21 @@ eq("POOL GUARD: «حمام سباحة» (swimming pool) must not become '1 bathr
 // bathrooms" — confirmed by deliberately deleting the guard during development (it returned "2").
 eq("POOL GUARD (discriminating): a digit directly beside «حمام سباحة» must still not count as bathrooms",
   arabicBathroomCount("شقة فيها ٢ حمام سباحة"), null);
+// The singular was guarded; the PLURAL and the DUAL were not, and both were live on production
+// 2026-09-01 — «حمامين سباحة» returned "2" and «٣ حمامات سباحة» returned "3", i.e. swimming pools
+// counted as bathrooms and filtered the search on a number the user never gave. The guard is now a
+// single strip at the top of arabicBathroomCount rather than a lookahead per alternative, so these
+// three cases pin every shape of the noun.
+eq("POOL GUARD (dual): «حمامين سباحة» is two POOLS, not two bathrooms",
+  arabicBathroomCount("ابغى فيلا فيها حمامين سباحة"), null);
+eq("POOL GUARD (dual, second form): «حمامان سباحة» likewise",
+  arabicBathroomCount("ابغى فيلا فيها حمامان سباحة"), null);
+eq("POOL GUARD (plural): «٣ حمامات سباحة» is three POOLS, not three bathrooms",
+  arabicBathroomCount("ابغى شقة فيها ٣ حمامات سباحة"), null);
+// The companion that keeps the strip HONEST: it must remove the pool phrase, not eat real counts.
+// Without this, deleting the whole bathroom parser would pass every assertion above.
+eq("a real bathroom count beside a pool still reads",
+  arabicBathroomCount("فيلا فيها حمام سباحة و٣ حمامات"), "3");
 eq("vague word never becomes a count (mirrors «كبير» never becomes bedrooms)",
   arabicBathroomCount("بيت جميل وكبير"), null);
 eq("unrelated amenity, no bathroom mention at all → null",
