@@ -48,6 +48,7 @@ import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
+import { toLatinDigits } from '@/lib/inputHygiene';
 import { BROWSE_BATCH, nextBatchTarget, resultCounts } from '@/data/resultCount';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
@@ -58,7 +59,7 @@ import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples'
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard } from '@/components/AdvancedQuestionCard';
 import MiningTransition from '@/components/MiningTransition';
 import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
-import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
@@ -1424,7 +1425,8 @@ export default function Agent() {
     } else if (dim === 'budget') {
       refined.priceInput = a;
     } else if (dim === 'beds') {
-      const n = (a.match(/\d+/) || [])[0]; if (n) refined.detail = n;
+      // Same root as parseQuery: JS \d never matches ٠-٩, so «٣» silently set no bedroom count.
+      const n = (toLatinDigits(a).match(/\d+/) || [])[0]; if (n) refined.detail = n;
     } else if (dim === 'type') {
       const p = parseQuery(a);
       if (p.type) refined.type = p.type;
@@ -1842,11 +1844,20 @@ export default function Agent() {
         ? st.keys.every((k) => scopeCandidates(st.question.id as ScopeTier, q!).includes(k))
         : eligibleQuestions(q).some((x) => x.id === st.question.id);
       if (!stillInScope) continue;                    // out of scope now
-      const n = await liveResultCount(st.question.apply(q, st.keys));
+      // UNKNOWN IS NOT NO. liveResultCount() collapses two different answers into null — "the source
+      // said zero" and "the probe never completed" — and its own comment explains that the collapse is
+      // safe for its OTHER caller, the live footer, where null means "keep showing the last good
+      // number". Here it meant the opposite: a timeout or a network blip silently DELETED an answer
+      // the user had already given, and syncGuidedFromSteps then rebuilds the query without it, so the
+      // filter disappears from the search AND from the receipt with nothing said. Ask the probe
+      // directly and keep the two apart.
+      const nextQ = st.question.apply(q, st.keys);
+      const n = await liveResultCountOrUnknown(nextQ);
       if (ageFlowTokenRef.current !== token) return;
-      if (n == null || n <= 0) continue;                // incompatible: it would select nothing
+      if (n === 'unknown') { kept.push(st); q = nextQ; continue; }   // never learned it — keep the answer
+      if (n <= 0) continue;                                          // the source ANSWERED zero: incompatible
       kept.push(st);
-      q = st.question.apply(q, st.keys);
+      q = nextQ;
     }
     ageFlowStepsRef.current = [...steps.slice(0, from + 1), ...kept];
   };

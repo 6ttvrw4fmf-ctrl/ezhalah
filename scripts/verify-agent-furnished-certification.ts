@@ -76,18 +76,25 @@ check("Apartment/Buy must CLARIFY, not apply",
   !cohortAllows({ type: "Apartment", category: "Residential", deal: "Buy" } as never, "furnished"));
 
 console.log("\n── wiring: same gate, tri-state, never an amenity ──");
-const client = readFileSync(new URL("../src/data/agent.ts", import.meta.url), "utf8");
+// "the client" is TWO files since 2026-09-01: AF certification moved out of agent.ts into the pure
+// leaf module src/lib/afCertify.ts, precisely so a barrier can EXECUTE it instead of grepping it
+// (see scripts/verify-af-certified-on-merged-state.ts, which runs the real pipeline). These text
+// assertions still hold — they are about what the client DOES, not which file it lives in — so they
+// read both halves. A grep-only check could not have caught the defect that forced the move.
+const client = readFileSync(new URL("../src/data/agent.ts", import.meta.url), "utf8")
+  + "\n" + readFileSync(new URL("../src/lib/afCertify.ts", import.meta.url), "utf8");
 const edge = readFileSync(new URL("../supabase/functions/agent/index.ts", import.meta.url), "utf8");
 // STRUCTURAL, not a substring: the assignment must sit INSIDE the gate. A prose comment naming
 // cohortAllows satisfied the old regex even after the gate was deleted — that mutation escaped, and
 // it is the third time in this workstream a comment has masqueraded as a code path.
 check("the client gates furnished through cohortAllows — the AF predicate itself",
-  /if \(cohortAllows\(q, 'furnished'\)\)\s*q\.furnishedPref = /.test(client),
+  /if \(cohortAllows\(q, 'furnished'\)\)\s*q = \{ \.\.\.q, furnishedPref: /.test(client),
   "the furnishedPref assignment must be guarded BY the gate, not merely near it");
 check("certified ⇒ sets the TRI-STATE furnishedPref (not an amenity token)",
-  /q\.furnishedPref = b\.furnished === 'yes'/.test(client));
+  /furnishedPref: b\.furnished === 'yes'/.test(client));
+// Still one shared list; it is now accumulated locally and assigned once by agent.ts.
 check("uncertified ⇒ routed to the SAME clarification list as rejected amenities",
-  /else lastRejectedFilters\.push\('furnished'\)/.test(client));
+  /else rejected\.push\('furnished'\)/.test(client) && /lastRejectedFilters = res\.rejected;/.test(client));
 check("'none' never sets a preference (absence must stay absence)",
   /if \(b\.furnished === 'yes' \|\| b\.furnished === 'no'\)/.test(client));
 check("furnished is NOT in the amenity vocabulary any more",

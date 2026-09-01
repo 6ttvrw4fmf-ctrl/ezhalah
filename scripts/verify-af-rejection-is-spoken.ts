@@ -50,8 +50,15 @@ check('rejections have a runtime reader, not just a writer',
 check('the notice is built from lastRejectedFilters',
   /rejectionNotice[\s\S]{0,400}lastRejectedFilters/.test(code));
 check('the notice is appended to the reply the user sees',
-  /const notice = rejectionNotice\(\);[\s\S]{0,200}backend\.reply = /.test(code),
+  /const notice = [^;]*rejectionNotice\(\)[^;]*;[\s\S]{0,900}backend\.reply = /.test(code),
   'computing a notice and not attaching it would be the same silence in a new place');
+// …and it is spent on a turn that actually shows results. The sentence says «so I showed the results
+// without it», which is false on a clarification turn — and because rejectionNotice() MUTATES the
+// say-it-once set, spending it there silenced the listings turn that really did search without the
+// filter. The CALL must be gated, not just the append.
+check('the notice is only computed on a listings turn',
+  /const notice = backend\.kind === 'listings' \? rejectionNotice\(\) : '';/.test(code),
+  'gating only the append would still burn the once-per-conversation budget on a turn that showed nothing');
 check('the notice is a TAIL, so the reply still leads with what we ARE searching for',
   /\$\{String\(backend\.reply[\s\S]{0,40}\}\\n\$\{notice\}/.test(code));
 

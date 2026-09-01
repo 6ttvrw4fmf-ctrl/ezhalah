@@ -126,11 +126,18 @@ check("'none'/empty are no-ops, never a filter",
 
 // ── 5. WIRING ─────────────────────────────────────────────────────────────────────────────────────
 console.log("\n── wiring: one loop, real gate, edge owns no certification ──");
-const client = readFileSync(new URL("../src/data/agent.ts", import.meta.url), "utf8");
+// "the client" is TWO files since 2026-09-01: AF certification moved out of agent.ts into the pure
+// leaf module src/lib/afCertify.ts, precisely so a barrier can EXECUTE it instead of grepping it
+// (see scripts/verify-af-certified-on-merged-state.ts, which runs the real pipeline). These text
+// assertions still hold — they are about what the client DOES, not which file it lives in — so they
+// read both halves. A grep-only check could not have caught the defect that forced the move.
+const client = readFileSync(new URL("../src/data/agent.ts", import.meta.url), "utf8")
+  + "\n" + readFileSync(new URL("../src/lib/afCertify.ts", import.meta.url), "utf8");
 const edge = readFileSync(new URL("../supabase/functions/agent/index.ts", import.meta.url), "utf8");
 const reg = readFileSync(new URL("../src/lib/afIntents.ts", import.meta.url), "utf8");
-check("the client runs the registry loop", /const res = applyAfIntents\(q, b\.af as Record<string, unknown>\);/.test(client));
-check("rejected AF intents join the shared clarification list", /lastRejectedFilters\.push\(\.\.\.res\.rejected\);/.test(client));
+check("the client runs the registry loop", /applyAfIntents\(q, af as Record<string, unknown>\)/.test(client));
+check("rejected AF intents join the shared clarification list",
+  /rejected\.push\(\.\.\.res\.rejected\);/.test(client) && /lastRejectedFilters = res\.rejected;/.test(client));
 check("the registry gates on cohortAllows — the AF predicate itself",
   /if \(!cohortAllows\(out, id\)\) \{ rejected\.push\(id\); continue; \}/.test(reg),
   "certification must come BEFORE canonicalization, so a refusal can never look applied");
