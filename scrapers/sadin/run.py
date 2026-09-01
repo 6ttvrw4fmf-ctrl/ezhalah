@@ -8,7 +8,8 @@ initial server-rendered HTML.
 Data path (HTML parse, NO API — "v4" redesign live since ~2026-07-26, scraper updated 2026-07-30):
   • GET /properties (+?page=N pagination; the pager carries NO rel="next" as of 2026-08-04 — the
     crawl stops when a page yields no NEW /property/{ID} links) → `<article class="property-card">` cards:
-    title (h3), href="/property/{ID}" (5-char alnum id), deal badge (للبيع/للإيجار),
+    title (h3), href="/property/{ID}" or href="/ar/property/{ID}" (site added the /ar/ locale
+    prefix to list-page hrefs 2026-09-01; the 5-char alnum id itself is unchanged), deal badge (للبيع/للإيجار),
     `property-facts` chips as `<b>VALUE</b><span>LABEL</span>` pairs (م² area, غرف, حمامات), and
     the `property-location` line "CITY · DISTRICT" — now the ONLY structured city/district on the
     site (the old detail-page المدينة/الحي rows are gone).
@@ -59,6 +60,15 @@ LIST_ALL = f"{BASE}/properties"
 LIST_SALE = f"{BASE}/properties?purpose=sale"
 LIST_RENT = f"{BASE}/properties?purpose=rent"
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
+
+# Site added an `/ar/` locale prefix to every list-page property href (found live 2026-09-01 via a
+# GitHub-Actions debug probe, after two consecutive 0-row days: page 1 of /properties now links
+# `/ar/property/{ID}` exclusively — zero bare `/property/{ID}` hrefs present — while the 5-char
+# alnum ID scheme is unchanged. A direct GET of the bare, unprefixed detail URL still resolves
+# (200, identical og:title) — confirmed for both the bare and `/ar/`-prefixed forms, and for both
+# the `www.` and apex host (which 301s to apex either way) — so ONLY the href-extraction regex
+# needs the prefix made optional; BASE/detail-url construction is untouched and still correct.
+_PROPERTY_HREF_RE = re.compile(r'href="(?:/ar)?/property/([A-Za-z0-9]{4,8})"')
 
 # Arabic property-kind word (from the card/og title or description) → canonical English type.
 # Order matters: more specific multi-word forms are checked first in _map_type().
@@ -247,7 +257,7 @@ def _pages(s: cc.Session, url: str, max_pages: int = 40):
             _record_list_fetch_failure(f"http_{r.status_code}")
             return
         html = r.text
-        ids = set(re.findall(r'href="/property/([A-Za-z0-9]{4,8})"', html))
+        ids = set(_PROPERTY_HREF_RE.findall(html))
         if p == 1 and not ids:
             # A real 200 we extracted nothing from is a DIFFERENT fact from the source blocking
             # us — most likely the markup changed under us again (the 2026-07 redesign already
@@ -263,7 +273,7 @@ def _pages(s: cc.Session, url: str, max_pages: int = 40):
 def _ids(s: cc.Session, url: str) -> list[str]:
     out: list[str] = []
     for html in _pages(s, url):
-        for pid in re.findall(r'href="/property/([A-Za-z0-9]{4,8})"', html):
+        for pid in _PROPERTY_HREF_RE.findall(html):
             if pid not in out:
                 out.append(pid)
     return out
@@ -277,7 +287,7 @@ def parse_catalog_cards(html: str, cards: dict[str, dict]) -> None:
     `property-location` line ("المدينة المنورة · حي العريض") is now the ONLY structured
     city/district on the site (the old detail-page المدينة/الحي rows are gone)."""
     for b in re.split(r'(?=<article class="property-card)', html):
-        m = re.search(r'href="/property/([A-Za-z0-9]{4,8})"', b)
+        m = _PROPERTY_HREF_RE.search(b)
         if not m or not b.startswith('<article'):
             continue
         pid = m.group(1)
