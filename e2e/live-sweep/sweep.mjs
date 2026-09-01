@@ -224,6 +224,37 @@ async function taxonomy() {
  * without it. Memoized like taxonomy(); null on failure, which makes the oracle REFUSE a
  * city-scoped comparison rather than fall back to a label-only filter (§41.15).
  */
+/**
+ * A LOOKUP-ONLY fold of the request's city label onto `loc_catalog_city.city_norm`.
+ *
+ * READ THIS BEFORE CALLING IT A NORMALISER. The rule this file obeys elsewhere — "the oracle does
+ * not reimplement the RPC's normaliser, because then agreement is self-confirmation" — is about the
+ * MATCHING predicate (norm_district_tok). This is not that. It never decides whether a row matches;
+ * it only turns a city NAME into the `city_id` the RPC's own `city_ids` CTE would resolve it to, and
+ * the eligible set is still expressed in PostgREST over stored columns. If the fold fails, the
+ * oracle REFUSES exactly as before — it never falls back to a label match.
+ *
+ * WHY IT IS NEEDED. The first version compared the request's label to `city_ar`/`city_norm` by exact
+ * string equality. That is right for every label the INDEX serves — measured 2026-09-01: all 362
+ * served (city_ar, region) pairs resolve exactly — but the label the REQUEST carries comes from the
+ * app's picker, which can render the same city with hamza. «أبو عريش» (request) vs «ابو عريش»
+ * (catalog) failed to resolve and skipped the DB-truth layer on a healthy journey. A skipped layer
+ * contributes zero mismatches, which reads exactly like agreement — the very failure mode this
+ * file's header warns about — so over-refusing is not a safe default either.
+ *
+ * It mirrors `normalize_ar()` exactly (read from prosrc 2026-09-01):
+ *   lower(btrim(t)) → translate 'أإآٱةىـ'+bidi marks onto 'ااااهي'+delete → collapse whitespace runs.
+ * `scripts/verify-live-sweep-db-oracle-scope.ts` §5d pins each rule and the deletions; the live
+ * equivalence against the database's own stored `city_norm` over the WHOLE catalog is what proves
+ * the mirror is faithful rather than assumed.
+ */
+const cityLookupKey = (s) => String(s ?? '').trim().toLowerCase()
+  .replace(/[أإآٱ]/g, 'ا')
+  .replace(/ة/g, 'ه')
+  .replace(/ى/g, 'ي')
+  .replace(/[ـ‎‏‌‍‪‫‬‭‮]/g, '')
+  .replace(/\s+/g, ' ');
+
 let _cityCatalog = null;
 async function cityCatalog() {
   if (_cityCatalog) return _cityCatalog;
@@ -504,7 +535,7 @@ function dbFilterFromRequest(req, tax, cities) {
     const wantRegions = req.p_region_ids?.length ? new Set(req.p_region_ids.map(Number)) : null;
     const ids = new Set();
     for (const name of req.p_cities) {
-      const hits = cities.filter((c) => (c.city_ar === name || c.city_norm === name)
+      const hits = cities.filter((c) => (c.city_ar === name || c.city_norm === cityLookupKey(name))
                                      && (!wantRegions || wantRegions.has(Number(c.region_id))));
       if (!hits.length) {
         return { comparable: false,
@@ -773,6 +804,6 @@ async function withPage(mobile, fn) {
   } finally { await browser.close(); }
 }
 
-export { BASE, dbCount, rpcTotal, assertChain, dbFilterFromRequest, cityCatalog, withPage, setDeal, setPeriod, pickCity, runSearch,
+export { BASE, dbCount, rpcTotal, assertChain, dbFilterFromRequest, cityCatalog, cityLookupKey, withPage, setDeal, setPeriod, pickCity, runSearch,
          visibleState, ledgerPlan, ledgerRecord, findings, journeys, defect, note, num, lastCount, sleep,
          observeWatch, watchStatus, unobservedWatches, WATCH_OFFLINE_COVER };

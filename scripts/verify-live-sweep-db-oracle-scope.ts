@@ -27,7 +27,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { dbFilterFromRequest, districtLabelVariants } from '../e2e/live-sweep/sweep.mjs';
+import { dbFilterFromRequest, districtLabelVariants, cityLookupKey } from '../e2e/live-sweep/sweep.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -329,6 +329,42 @@ check('MUTATION: the label-only `city_ar=in.(…)` city predicate is gone from t
 check('the oracle reads loc_catalog_city to resolve p_cities into the RPC\'s own city_ids',
   sweepSrc.includes('loc_catalog_city?select=city_id,city_ar,city_norm,region_id'),
   'the city_id / match_city_ids arms cannot be expressed without the catalog');
+
+// ── 5d. THE CITY LOOKUP FOLD — resolve the request's spelling, or refuse; never over-refuse ─────
+// §5c's first version compared the request's city label to the catalog by EXACT string equality.
+// That resolves every label the INDEX serves (measured 2026-09-01: 362/362 served (city, region)
+// pairs), but the label the REQUEST carries comes from the app's picker and can render the same city
+// with hamza. «أبو عريش» vs the catalog's «ابو عريش» failed to resolve, and the sweep SKIPPED the
+// DB-truth layer on a perfectly healthy journey. A skipped layer contributes zero mismatches, which
+// reads exactly like agreement — this file's opening paragraph is about precisely that failure — so
+// over-refusing is not the safe direction either. Both errors are now pinned.
+//
+// The fold mirrors normalize_ar() (prosrc, 2026-09-01) and is LOOKUP-ONLY: it turns a name into a
+// city_id and never decides whether a row matches. Verified live against the database's own stored
+// city_norm over the WHOLE catalog: 4,582 rows, 0 divergences.
+check('the fold maps hamza-alef forms onto bare alef (أ إ آ ٱ → ا)',
+  ['أبو عريش', 'إبو عريش', 'آبو عريش', 'ٱبو عريش'].every((s) => cityLookupKey(s) === 'ابو عريش'),
+  ['أبو عريش', 'إبو عريش', 'آبو عريش', 'ٱبو عريش'].map(cityLookupKey).join(' | '));
+check('the fold maps ة→ه and ى→ي', cityLookupKey('مكة') === 'مكه' && cityLookupKey('المرتضى') === 'المرتضي',
+  `${cityLookupKey('مكة')} | ${cityLookupKey('المرتضى')}`);
+check('the fold DELETES tatweel and bidi marks rather than mapping them',
+  cityLookupKey('بـريدة') === 'بريده' && cityLookupKey('‏جدة‎') === 'جده',
+  `${cityLookupKey('بـريدة')} | ${cityLookupKey('‏جدة‎')}`);
+check('the fold trims and collapses whitespace runs', cityLookupKey('  ابو   عريش ') === 'ابو عريش',
+  JSON.stringify(cityLookupKey('  ابو   عريش ')));
+
+// The whole point: a hamza-spelled request must now COMPARE, not skip.
+const hamza = dbFilterFromRequest({ p_deal: 'بيع', p_cities: ['أبو عريش'], p_region_ids: [10] }, TAX,
+  [{ city_id: 4242, city_ar: 'ابو عريش', city_norm: 'ابو عريش', region_id: 10 }]);
+check('MUTATION: a hamza-spelled request RESOLVES instead of skipping the DB-truth layer',
+  hamza.comparable === true && dec(hamza.filter).includes('match_city_ids.ov.{4242}'),
+  hamza.comparable ? dec(hamza.filter) : hamza.reason);
+// …and a genuinely unknown city STILL refuses. Recovering variants must not become "accept anything".
+const stillRefuses = dbFilterFromRequest({ p_deal: 'بيع', p_cities: ['مدينة لا وجود لها'], p_region_ids: [10] }, TAX,
+  [{ city_id: 4242, city_ar: 'ابو عريش', city_norm: 'ابو عريش', region_id: 10 }]);
+check('MUTATION: the fold did NOT turn refusal into accept-anything',
+  stillRefuses.comparable === false && /does not resolve/.test(stillRefuses.reason),
+  `got comparable=${stillRefuses.comparable} reason=${stillRefuses.reason}`);
 
 // ── 6. a skipped layer can never read as a pass ─────────────────────────────────────────────────
 const runner = read('e2e/live-sweep/run.mjs');
