@@ -16,6 +16,7 @@ import { normalizeSource } from '@/data/loaderPlatforms';
  * smaller than reality.
  */
 export async function fetchActivePlatformNames(): Promise<Set<string> | null> {
+  if (!supabase) return null;
   try {
     const { data, error } = await supabase.rpc('loader_active_platforms_ar');
     if (error || !Array.isArray(data)) return null;
