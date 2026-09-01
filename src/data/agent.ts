@@ -1062,9 +1062,17 @@ export async function respond(text: string, opts?: {
     // Append AFTER the restatement so the reply still leads with what we ARE searching for; the
     // caveat is a tail, not a headline. The search itself is untouched — everything we could apply
     // has been applied.
-    const notice = rejectionNotice();
-    // An interview turn has no reply to append to; every other kind does.
-    if (notice && backend.kind !== 'interview') {
+    // LISTINGS ONLY, and the call itself is gated — not just its output. The sentence is «…so I
+    // showed the results without it», which is simply untrue on a clarification turn where no results
+    // are shown. Worse, rejectionNotice() MUTATES announcedRejections: saying it on a message turn
+    // spent the once-per-conversation budget on a turn that showed nothing, so the listings turn that
+    // really did search without the filter then stayed silent about it.
+    //
+    // Nothing is lost by waiting. lastRejectedFilters is rebuilt every turn from the merged state, so
+    // if the filter is still uncertified when the search runs it is announced there — and if the
+    // user's answer made it certifiable, it gets APPLIED and there was never anything to announce.
+    const notice = backend.kind === 'listings' ? rejectionNotice() : '';
+    if (notice && backend.kind === 'listings') {
       backend.reply = `${String(backend.reply ?? '').trim()}\n${notice}`.trim();
     }
     return backend;
