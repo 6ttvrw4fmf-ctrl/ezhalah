@@ -1,0 +1,41 @@
+name: Sadin zero-IDs source probe (read-only)
+
+# ONE question, answered against the source itself: sadin.com.sa/properties answers HTTP 200 but
+# yields zero /property/{ID} links, so every run since 2026-08-30 04:22Z has captured 0 rows
+# (P0 silent_scraper_death:sadin, alert 1244). Is the detail-URL shape different now, is the
+# `<article class="property-card">` wrapper renamed, or is the list JS-rendered? Each has a
+# different fix, and none of the three can be told apart from the database.
+#
+# It runs here because the audit/agent container's egress policy hard-403s sadin.com.sa, while
+# Actions reaches it every day (this is where the production scraper runs). Same curl_cffi fetch
+# path, so it sees exactly what the scraper sees.
+#
+# READ-ONLY BY CONSTRUCTION: no Supabase secrets are passed to this job, so it cannot write to the
+# database even if it wanted to — it only prints evidence to the log. PDPL: list pages only; the
+# script prints class/attribute names and redacts phone-shaped digit runs from its one snippet.
+#
+# Dispatch-only — the daily scraper already covers the scheduled path; this answers the one-off
+# "what did the markup become?" question.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: sadin-zero-ids-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Probe the source (no DB credentials in this job)
+        run: python scripts/diagnose_sadin_zero_ids.py
