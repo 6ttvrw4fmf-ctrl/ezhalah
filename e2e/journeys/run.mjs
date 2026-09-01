@@ -913,14 +913,24 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
   };
 
   // What does the BROWSER hand a tap at this control's centre to? The control, or the iframe?
+  //
+  // The sheet's rect is re-read HERE, in the same evaluate as the control — never reused from
+  // waitForSheet(). That earlier reading is the FIRST non-zero one, taken mid-slide-in, and it goes
+  // stale as Google finishes animating: reporting it alongside a later control position produced the
+  // self-contradictory pass line «(587-606) is clear of the prompt (558-812)». The verdict was always
+  // sound (elementFromPoint + a real click decide it), but a message whose numbers disagree with its
+  // own conclusion is how a future reader talks themselves out of a real finding.
   const winnerAt = (page, sel) => page.evaluate((s) => {
     const el = s === 'cta'
       ? [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && (e.textContent || '').trim() === 'بحث')
       : document.querySelector('textarea');
-    if (!el) return { missing: true };
+    const f = document.querySelector('#credential_picker_iframe');
+    const q = f && f.getBoundingClientRect();
+    const sheetNow = q && q.height > 0 ? `${Math.round(q.top)}-${Math.round(q.bottom)}` : 'gone';
+    if (!el) return { missing: true, sheetNow };
     const r = el.getBoundingClientRect();
     const t = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    return { top: Math.round(r.top), bottom: Math.round(r.bottom),
+    return { top: Math.round(r.top), bottom: Math.round(r.bottom), sheetNow,
              winner: t ? `${t.tagName}${t.id ? '#' + t.id : ''}` : null,
              isSelf: !!t && (t === el || t.contains(el) || el.contains(t)) };
   }, sel);
@@ -944,14 +954,14 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     if (cta.missing) { skip(name, '«بحث» not rendered'); return; }
     if (!cta.isSelf) {
       defect(name, 'the One Tap prompt is covering «بحث»',
-        `sheet ${sheet.top}-${sheet.bottom} (${sheet.h}px); «بحث» ${cta.top}-${cta.bottom}; a tap at its centre goes to ${cta.winner}`);
+        `sheet now ${cta.sheetNow}; «بحث» ${cta.top}-${cta.bottom}; a tap at its centre goes to ${cta.winner}`);
     } else {
       // Not just the hit test — a REAL click must land (PART 9.2 (4)).
       let err = null;
       await page.getByText('بحث', { exact: true }).first().click({ timeout: 10_000 })
         .catch((e) => { err = String(e).split('\n')[0]; });
       if (err) defect(name, '«بحث» hit-tests clear but a real click still does not land', err);
-      else pass(name, `«بحث» (${cta.top}-${cta.bottom}) is clear of the prompt (${sheet.top}-${sheet.bottom}) and clickable`);
+      else pass(name, `«بحث» (${cta.top}-${cta.bottom}) is clear of the prompt (now ${cta.sheetNow}) and clickable`);
     }
     if (bag.pageErrors.length) defect(name, 'page error while the prompt was up', bag.pageErrors.join(' | '));
   });
@@ -970,9 +980,9 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     if (comp.missing) { skip(`${name}/composer`, 'no composer on this screen'); return; }
     if (!comp.isSelf) {
       defect(`${name}/composer`, 'the One Tap prompt is covering the AI Agent composer',
-        `sheet ${sheet.top}-${sheet.bottom}; composer ${comp.top}-${comp.bottom}; a tap at its centre goes to ${comp.winner}`);
+        `sheet now ${comp.sheetNow}; composer ${comp.top}-${comp.bottom}; a tap at its centre goes to ${comp.winner}`);
     } else {
-      pass(`${name}/composer`, `composer (${comp.top}-${comp.bottom}) is clear of the prompt (${sheet.top}-${sheet.bottom})`);
+      pass(`${name}/composer`, `composer (${comp.top}-${comp.bottom}) is clear of the prompt (now ${comp.sheetNow})`);
     }
   });
 };
