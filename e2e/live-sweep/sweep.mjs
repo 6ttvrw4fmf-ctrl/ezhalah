@@ -401,9 +401,23 @@ async function pickCity(page, city) {
       return !!el;
     }, city, { timeout: CITY_OPTION_TIMEOUT_MS }).then(() => true).catch(() => false);
   if (!appeared) return false;
-  const hit = await page.evaluate(optionAt, city);
-  if (!hit) return false;
-  await page.mouse.click(hit.x, hit.y); await sleep(1300);
+  // §41.2: never click bare viewport coordinates. `page.mouse.click(x, y)` from a
+  // getBoundingClientRect() was the LAST such click in this harness, and on a 390 px phone it is
+  // exactly the trap that section describes — the coordinate lands, the city commits, and the page
+  // is left in a state where the subsequent «بحث» click never becomes actionable. Take the ELEMENT
+  // and click it, so Playwright does its own scrolling and actionability checks.
+  const handle = await page.evaluateHandle((c) => [...document.querySelectorAll('div')].filter((e) => {
+    const t = (e.innerText || '').trim();
+    return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
+  }).pop(), city);
+  const option = handle.asElement();
+  if (!option) return false;
+  await option.scrollIntoViewIfNeeded().catch(() => {});
+  await option.click().catch(async () => {
+    const hit = await page.evaluate(optionAt, city);        // last-resort fallback, still recorded
+    if (hit) await page.mouse.click(hit.x, hit.y);
+  });
+  await sleep(1300);
   // The commit is the assertion, not the click (§41.13): a click that missed leaves the field empty
   // and the search would later be REFUSED, which reads as a broken product instead of a harness miss.
   const committed = await input.inputValue().catch(() => '');

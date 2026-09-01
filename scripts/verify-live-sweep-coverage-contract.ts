@@ -233,6 +233,30 @@ check('rotation is driven by the coverage ledger, not a hardcoded city list',
 check('the city pool is discovered LIVE (a hardcoded list would go stale)',
   /search_listings_ar\?select=city_ar,region_ar/.test(runner));
 
+// ── §41.2 — NO BARE VIEWPORT-COORDINATE CLICKS ─────────────────────────────────────────────────
+// «Never click bare viewport coordinates» is the repo's own rule, and the harness broke it in two
+// places. `pickCity()` clicked a getBoundingClientRect() centre via page.mouse.click(x, y); on a
+// 390 px phone that left the page in a state where the following «بحث» click NEVER became
+// actionable, so ALL THREE mobile journeys died on every «بيع» rotation (CI runs #10/#11, local
+// sweeps #3-#6) and the owner-mandated §34 mobile floor was never actually exercised while the
+// workflow sat red. Replacing it with a real element click fixed it: mobile «لقينا 1,026 إعلان»,
+// desktop byte-identical, sweep back to 10/10 with MOBILE JOURNEYS: 1.
+//
+// Only ONE coordinate click may remain: the explicitly-commented last-resort fallback inside
+// pickCity, which runs only after a real element click has already been attempted and failed.
+// Count CODE, not prose: these comments quote `page.mouse.click(x, y)` when explaining the bug,
+// and a barrier that counts its own explanation can never be satisfied.
+const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '')
+  .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+const coordClicks = ['e2e/live-sweep/sweep.mjs', 'e2e/live-sweep/journeys.mjs', 'e2e/live-sweep/showmore.mjs']
+  .flatMap((f) => [...stripComments(read(f)).matchAll(/page\.mouse\.click\(/g)]);
+check('no bare viewport-coordinate clicks beyond the single documented fallback (§41.2)',
+  coordClicks.length <= 1,
+  `${coordClicks.length} page.mouse.click( call(s) — a coordinate click silently misses off-screen controls`);
+check('pickCity clicks the ELEMENT, so Playwright scrolls and checks actionability',
+  /const option = handle\.asElement\(\)/.test(sweep) && /option\.click\(\)/.test(sweep),
+  'the mobile floor died for weeks on a coordinate click here');
+
 console.log(failures === 0
   ? '\n✓ the live sweep still covers everything it promises, and still fails on a real mismatch\n'
   : `\n✗ ${failures} check(s) FAILED — the live sweep has been narrowed; restore the coverage\n`);
