@@ -47,7 +47,7 @@ import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeName
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
-import { migrateGroups } from '@/lib/searchDefaults';
+import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { BROWSE_BATCH, nextBatchTarget, resultCounts } from '@/data/resultCount';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
@@ -1181,8 +1181,10 @@ export default function Agent() {
       lastFilterRef.current = undefined;
       lastSeedRef.current = undefined;
       // The submitted Filter state already lives in the shared query context — the param-consuming
-      // effect wrote it verbatim from `?filter=` before this search began (setQuery(() => q)), and
-      // nothing between then and here ever touches query context again. router.replace('/') is the
+      // effect wrote it from `?filter=` before this search began, through the Filter-UI allowlist, and
+      // nothing between then and here ever touches query context again. (The write is sanitized, not
+      // verbatim: on the filter-form path the two are identical, and on the sidebar path the allowlist
+      // is what keeps a reopened chat's AF answers out of the next filter search.) router.replace('/') is the
       // exact navigation «تصفية» already uses to leave this screen (ModeSwitch's onSwitch below), which
       // is what lets the Filter form's own rehydration (city/district catalog matching against query
       // context) and — when the screen never unmounted — its still-live local state (price/area inputs,
@@ -2592,7 +2594,20 @@ export default function Agent() {
         // the payload is not — the reload/bookmark/share case. The existing city/district rehydration
         // effects in index.tsx then restore the picked المدينة/الأحياء from the catalog exactly as
         // they already do on the no-reload round-trip.
-        setQuery(() => q);
+        //
+        // SANITIZED, because "identity write" above holds only when the payload came from the filter
+        // form. The sidebar breaks that assumption: Sidebar.tsx writes sanitizeForFilterRestore(query)
+        // to the store and then navigates with the UNSANITIZED query in `?filter=`, so this line used
+        // to overwrite the sanitized write with the full agent query — parking every AF predicate
+        // (ratingMin, amenities, bathMin, streetWidthMin, directions, …) in the store the Filter home
+        // binds to, with no control on screen representing any of them. Measured on production: after
+        // reopening a monthly-rent chat that had answered «التقييم ٩.٠+», an unrelated
+        // الرياض/شراء/فيلا search returns 0 of 11,552 (بيع inventory has zero rated rows); an
+        // annual-rent chat carrying amenities=[elevator]+bathMin=3 returns 574 of 11,552.
+        // The allowlist is exactly the set of fields the Filter UI can show, so this stays an identity
+        // write on the filter-form path it was written for. `openSaved`/`sendFilter` below keep the
+        // FULL q — the replay needs the AF predicates to reproduce the conversation.
+        setQuery(() => sanitizeForFilterRestore(q));
         const override = chatBubble && chatSub ? { bubble: chatBubble, sub: chatSub } : undefined;
         startFresh();
         if (replay === '0') void openSaved(hid, q, override);

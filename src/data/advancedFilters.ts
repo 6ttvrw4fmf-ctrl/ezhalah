@@ -364,7 +364,16 @@ const DIRECTION_QUESTION: AdvancedQuestion = {
   titleKey: 'Which direction do you prefer?',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
-  eligibility: (q) => cohortAllows(q, 'direction'),
+  // Not asked once directions are already committed — the same guard unit_subtype carries, for the
+  // same reason. cnt_dir_* is computed INSIDE a scope that already applies p_directions, while
+  // apply() UNIONS the new key: so every direction outside the committed set counts 0 while tapping
+  // it WIDENS the result set. Measured on production (Buy/الرياض/عمارة with شمال+غرب committed):
+  // current set 484, chips شمال 282 / غرب 202 / جنوب 0 / شرق 0 — and tapping the جنوب chip that
+  // advertises 0 returns 804. The count is not merely stale, it is inverted, so the honest move is
+  // not to re-ask a question whose options cannot be counted against the state they would produce.
+  // Keyed on committed STATE, not on the round's asked-set, so it also covers directions arriving
+  // from the chat intent path, which never passes through rankQuestions.
+  eligibility: (q) => cohortAllows(q, 'direction') && !(q.directions?.length),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), DIRECTION_DEFS,
       // Sound ONLY because norm_direction_ar's range is exactly these 8 buckets (verified across the
