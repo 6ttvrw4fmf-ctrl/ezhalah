@@ -141,6 +141,31 @@ def fetch_failure_summary() -> str:
         return ", ".join(f"{r}={n}" for r, n in _fetch_fail_reasons.most_common(6))
 
 
+# Fast fail-closed circuit breaker (2026-09-01, daily engineer). The 2026-08-31 fix above made a
+# whole-source 5xx outage NAMEABLE; it did not make the run stop causing one. 2026-09-01 confirmed
+# the SAME outage still live (3/3 property-details pages 500 from an independent egress) and the
+# scraper still had no way to notice short of exhausting all ~1,164 URLs x 3 retries each — which
+# guarantees the CI job blows its 90-minute timeout, gets SIGINT-killed before end_run(), and lands
+# as exactly the dangling/0-row run docs/ops/DATA_INTEGRITY_ENGINEER.md and
+# mon_detect_run_duration_explosion / mon_detect_run_killed_by_timeout warn about. A source that is
+# down for every listing announces itself in the first handful of fetches; there is no reason to
+# keep paying the retry ladder 1,164 more times to learn the same fact.
+_SOURCE_DOWN_SAMPLE = 8  # yesterday's incident hit 3/3 sampled listings — 8 is a cheap, safe margin
+
+
+def _source_looks_down(attempted: int, captured: int) -> bool:
+    """True once there is enough evidence the SOURCE is answering every fetch with a 5xx, not
+    that a handful of individual listings happen to be gone or unparseable. Requires: (1) a
+    minimum sample so one or two stray 500s can't trip it, (2) zero rows captured so far, and
+    (3) every DISTINCT failure reason seen so far is 5xx-class — a mix that also includes
+    transport errors or unparseable-200s is a less certain signal and must not fast-abort."""
+    if attempted < _SOURCE_DOWN_SAMPLE or captured > 0:
+        return False
+    with _fetch_fail_lock:
+        reasons = list(_fetch_fail_reasons)
+    return bool(reasons) and all(r.startswith("http_5") for r in reasons)
+
+
 def fetch_one(url: str) -> Optional[tuple[dict, str, str]]:
     """Fetch + parse one listing. Returns (obj, body, url) or None. Thread-safe (thread-local session).
 
@@ -512,10 +537,18 @@ def main() -> int:
                 all_com_ads.update(r["ad_number"] for r in com_buf)
                 com_buf = []
 
+        source_down = False
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
             for result in ex.map(fetch_one, urls):
                 done += 1
                 if not result:
+                    if _source_looks_down(done, seen):
+                        # Stop feeding the executor more guaranteed-failing work; cancel_futures
+                        # drops whatever hasn't started yet instead of waiting out their full
+                        # retry ladders on __exit__.
+                        source_down = True
+                        ex.shutdown(wait=False, cancel_futures=True)
+                        break
                     continue
                 o, body, u = result
                 row, cat = map_listing(o, body, u)
@@ -532,6 +565,17 @@ def main() -> int:
                     flush()
                     print(f"  …{seen}/{len(urls)} upserted", flush=True)
         flush()
+
+        if source_down:
+            # Never touch listing state on an unreachable source — same contract as sitemap_err
+            # above, one layer down (docs/ops/LISTING_LIVENESS.md §1: a non-answer is UNKNOWN, and
+            # UNKNOWN never deactivates anything). prune_unseen is never reached.
+            msg = (f"aborted after {done}/{len(urls)} detail fetches — every one failed with a "
+                   f"5xx (source is down, not us): {fetch_failure_summary()}")
+            print(f"✗ Sanadak: {msg}", flush=True)
+            if run_id:
+                db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=msg[:300])
+            return 1
 
         if args.limit_test:
             print(f"DRY RUN — {len(res)} residential + {len(com)} commercial")
