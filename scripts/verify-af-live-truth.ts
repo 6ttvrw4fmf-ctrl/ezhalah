@@ -72,32 +72,38 @@ const TYPE_MACROS = await (async () => {
   if (!r.ok) throw new Error(`known_type_ar unreadable (${r.status}) — the oracle cannot apply category purity`);
   return Object.fromEntries((await r.json()).map((x) => [x.type_ar, x.macro]));
 })();
-// DISTRICTS NEED THEIR REFERENCE SET FOR THE SAME REASON CATEGORY PURITY NEEDS known_type_ar
-// (2026-09-01): production matches districts through norm_district_tok() + a guarded alias
-// expansion, so a literal `district_ar=in.(…)` agrees only when every requested name is stored
-// verbatim. Reading the district_ar values actually in the index keeps the oracle independent of
-// our SQL while letting it refuse, rather than undercount, on a name it cannot match.
-const KNOWN_DISTRICTS = await (async () => {
+// RESOLVE ONLY THE NAMES THE REQUEST ACTUALLY USES (2026-09-01, second pass).
+//
+// The first version of this read the WHOLE district reference set: 192,125 rows paged 1,000 at a
+// time, each page carrying an `order=` over the full index, to learn 2,069 distinct values. It was
+// correct and unusably slow — 193 ordered round-trips turned a ~2-minute live suite into a
+// 30-minute one, which in CI is a timeout waiting to happen, i.e. another way for this check to go
+// quiet. A barrier that is too slow to finish protects nothing.
+//
+// A request carries one to three district names, so ask about exactly those: one count-only probe
+// per name (Range 0-0, no rows returned). Cost is O(names in the request), not O(rows in the index),
+// and the fact being established is identical — "is this name stored verbatim in search_listings_ar".
+const districtCache = new Map();
+async function knownDistrictsFor(names) {
   const out = new Set();
-  for (let off = 0; ; off += 1000) {
-    // ORDERED PAGING IS MANDATORY (verify-af-oracle-soundness.ts caught this one on the way in):
-    // a Range-paged PostgREST query with no `order=` has no defined row order, so pages can drop or
-    // repeat rows — here that would silently yield an INCOMPLETE district reference set, and every
-    // missing name would turn into a spurious refusal. (source_table, listing_id) is unique, so it
-    // is a total order.
-    const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=district_ar&district_ar=not.is.null&order=source_table,listing_id`,
-      { headers: { ...H, Range: `${off}-${off + 999}` } });
-    if (!r.ok) throw new Error(`district_ar reference set unreadable (${r.status})`);
-    const rows = await r.json();
-    for (const x of rows) out.add(x.district_ar);
-    if (rows.length < 1000 || off > 400000) break;
+  for (const n of new Set(names)) {
+    if (!districtCache.has(n)) {
+      const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=listing_id&district_ar=eq.${encodeURIComponent(n)}`,
+        { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } });
+      if (!r.ok) throw new Error(`district probe failed for ${n} (${r.status}) — refusing to guess`);
+      districtCache.set(n, Number((r.headers.get('content-range') || '').split('/')[1] ?? 0) > 0);
+    }
+    if (districtCache.get(n)) out.add(n);
   }
   return out;
-})();
-const ORACLE_OPTS = { typeMacros: TYPE_MACROS, knownDistricts: KNOWN_DISTRICTS };
+}
+
+const ORACLE_OPTS = { typeMacros: TYPE_MACROS };
+
 
 async function oracleCount(reqBody) {
-  const { qs, unhandled } = buildOracleQS(reqBody, ORACLE_OPTS);
+  const opts = { ...ORACLE_OPTS, knownDistricts: await knownDistrictsFor(reqBody.p_districts ?? []) };
+  const { qs, unhandled } = buildOracleQS(reqBody, opts);
   if (unhandled.length) return { count: null, unhandled };
   const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=listing_id&${qs}`,
     { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } });
@@ -106,7 +112,10 @@ async function oracleCount(reqBody) {
 }
 
 async function oracleIds(reqBody, cap = 30000) {
-  const { qs, unhandled } = buildOracleQS(reqBody, ORACLE_OPTS);
+  // Both oracle entry points must resolve districts the same way — an ids-diff that silently used a
+  // different district predicate than the count would compare two different questions.
+  const opts = { ...ORACLE_OPTS, knownDistricts: await knownDistrictsFor(reqBody.p_districts ?? []) };
+  const { qs, unhandled } = buildOracleQS(reqBody, opts);
   if (unhandled.length) return { ids: null, unhandled };
   const ids = new Set();
   const PAGE = 1000;

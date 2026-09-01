@@ -65,29 +65,36 @@ const TYPE_MACROS = await (async () => {
   return Object.fromEntries((await r.json()).map((x: any) => [x.type_ar, x.macro]));
 })();
 
-// See afOracleFilter.ts's p_districts case: production normalises district names, so the oracle
-// needs the reference set to know when a literal match is trustworthy.
-const KNOWN_DISTRICTS = await (async () => {
-  const out = new Set<string>();
-  for (let off = 0; ; off += 1000) {
-    // ORDERED PAGING IS MANDATORY (verify-af-oracle-soundness.ts caught this one on the way in):
-    // a Range-paged PostgREST query with no `order=` has no defined row order, so pages can drop or
-    // repeat rows — here that would silently yield an INCOMPLETE district reference set, and every
-    // missing name would turn into a spurious refusal. (source_table, listing_id) is unique, so it
-    // is a total order.
-    const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=district_ar&district_ar=not.is.null&order=source_table,listing_id`,
-      { headers: { ...H, Range: `${off}-${off + 999}` } as any });
-    if (!r.ok) throw new Error(`district_ar reference set unreadable (${r.status})`);
-    const rows = await r.json();
-    for (const x of rows) out.add(x.district_ar);
-    if (rows.length < 1000 || off > 400000) break;
+// RESOLVE ONLY THE NAMES THE REQUEST ACTUALLY USES (2026-09-01, second pass).
+//
+// The first version of this read the WHOLE district reference set: 192,125 rows paged 1,000 at a
+// time, each page carrying an `order=` over the full index, to learn 2,069 distinct values. It was
+// correct and unusably slow — 193 ordered round-trips turned a ~2-minute live suite into a
+// 30-minute one, which in CI is a timeout waiting to happen, i.e. another way for this check to go
+// quiet. A barrier that is too slow to finish protects nothing.
+//
+// A request carries one to three district names, so ask about exactly those: one count-only probe
+// per name (Range 0-0, no rows returned). Cost is O(names in the request), not O(rows in the index),
+// and the fact being established is identical — "is this name stored verbatim in search_listings_ar".
+const districtCache = new Map();
+async function knownDistrictsFor(names) {
+  const out = new Set();
+  for (const n of new Set(names)) {
+    if (!districtCache.has(n)) {
+      const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=listing_id&district_ar=eq.${encodeURIComponent(n)}`,
+        { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } });
+      if (!r.ok) throw new Error(`district probe failed for ${n} (${r.status}) — refusing to guess`);
+      districtCache.set(n, Number((r.headers.get('content-range') || '').split('/')[1] ?? 0) > 0);
+    }
+    if (districtCache.get(n)) out.add(n);
   }
   return out;
-})();
+}
 
 /** Independent count straight through PostgREST — never by re-calling our own RPC. */
 async function oracleCount(body: any): Promise<{ count: number | null; unhandled: string[] }> {
-  const { qs, unhandled } = buildOracleQS(body, { typeMacros: TYPE_MACROS, knownDistricts: KNOWN_DISTRICTS });
+  const knownDistricts = await knownDistrictsFor(body.p_districts ?? []);
+  const { qs, unhandled } = buildOracleQS(body, { typeMacros: TYPE_MACROS, knownDistricts });
   if (unhandled.length) return { count: null, unhandled };
   const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=listing_id&${qs}`, {
     headers: { ...H, Prefer: 'count=exact', Range: '0-0' },

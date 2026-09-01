@@ -104,9 +104,25 @@ check('a wrong-category type never enters a scope at all',
 // certification would silently stop certifying anything.
 check('the live check reads known_type_ar — the same reference table the RPC joins',
   /known_type_ar\?select=type_ar,macro/.test(live));
-check('…and passes it to BOTH oracle entry points (count and ids)',
-  (live.match(/buildOracleQS\([^)]*ORACLE_OPTS\)/g) ?? []).length >= 2,
-  `${(live.match(/buildOracleQS\([^)]*ORACLE_OPTS\)/g) ?? []).length} call site(s)`);
+// THE PROPERTY IS "every entry point gets the map", NOT "every entry point spells it ORACLE_OPTS".
+// This used to match `buildOracleQS(…ORACLE_OPTS)` literally, which broke the moment a call site
+// legitimately needed to ADD to the options (2026-09-01: per-request district resolution, passed as
+// `{ ...ORACLE_OPTS, knownDistricts }`). A guard that fails on a correct refactor gets loosened by
+// the next person in a hurry, so it now checks the thing that matters: every buildOracleQS call in
+// the live check passes a second argument that carries ORACLE_OPTS — directly, or via a local that
+// spreads it. Dropping the map at either entry point still fails.
+{
+  const calls = [...live.matchAll(/buildOracleQS\(\s*[A-Za-z_$][\w$]*\s*,\s*([A-Za-z_$][\w$]*)\s*\)/g)].map((m) => m[1]);
+  const carriesMap = (ident: string) =>
+    ident === 'ORACLE_OPTS' ||
+    new RegExp(`(const|let)\\s+${ident}\\s*=\\s*\\{[^}]*\\.\\.\\.ORACLE_OPTS`).test(live);
+  const bare = (live.match(/buildOracleQS\(\s*[A-Za-z_$][\w$]*\s*\)/g) ?? []).length;
+  check('…and passes it to BOTH oracle entry points (count and ids)',
+    calls.length >= 2 && calls.every(carriesMap) && bare === 0,
+    `${calls.length} call site(s) [${calls.join(', ')}]` +
+    `${bare ? `; ${bare} call(s) pass NO options at all` : ''}` +
+    `${calls.some((c) => !carriesMap(c)) ? `; not carrying ORACLE_OPTS: ${calls.filter((c) => !carriesMap(c)).join(', ')}` : ''}`);
+}
 check('an unreadable reference table stops the run instead of degrading to "no purity"',
   /known_type_ar unreadable/.test(live));
 
