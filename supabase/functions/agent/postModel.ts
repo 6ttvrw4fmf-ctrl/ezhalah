@@ -262,7 +262,19 @@ export function arabicWordAmounts(text: string): WordAmount[] {
 const BATH_DUAL_RE = /حمامين|حمامان|دورتين\s*مياه|دورتان\s*مياه/;
 // NOTE: matched against foldAlef()'d text (ة→ه already applied), so the guard word is spelled
 // "سباحه", not "سباحة" — matching the unfolded spelling here would silently never fire.
-const BATH_NOUN = "(?:حمامات|حمام(?!\\s*سباحه)|دورات\\s*مياه|دوره\\s*مياه)";
+//
+// A POOL IS NEVER A BATHROOM, and the guard belongs in ONE place. It used to be a lookahead on the
+// SINGULAR only — «حمام(?!\s*سباحه)» — which left the plural and the dual wide open:
+//   «ابغى فيلا فيها حمامين سباحة»  -> "2"   (two swimming POOLS read as two bathrooms)
+//   «ابغى شقة فيها ٣ حمامات سباحة» -> "3"
+// both measured on this very parser. Three lookaheads that must stay in sync is how the next
+// alternative gets added without one. POOL_RE below strips the phrase once, at the top of
+// arabicBathroomCount, so every branch — singular, plural, dual, and anything added later —
+// inherits the guard for free, and BATH_NOUN needs no lookahead at all.
+const BATH_NOUN = "(?:حمامات|حمام|دورات\\s*مياه|دوره\\s*مياه)";
+// Longest alternatives first so «حمامات سباحه» is consumed whole rather than leaving a stray tail.
+// Replaced with a SPACE, not "", so «حمام سباحة و٣ حمامات» still reads 3 real bathrooms.
+const POOL_RE = /(?:حمامات|حمامين|حمامان|حمام)\s*سباحه/g;
 const BATH_WORD_NUM_RE = new RegExp(`(?:(${COUNT_ALT})\\s+${BATH_NOUN}|${BATH_NOUN}\\s+(${COUNT_ALT}))`);
 const BATH_DIGIT_NUM_RE = new RegExp(`(?:(\\d+)\\s*${BATH_NOUN}|${BATH_NOUN}\\s*(\\d+))`);
 const EN_BATH_COUNT: Record<string, number> = { one: 1, two: 2, three: 3, four: 4 };
@@ -271,7 +283,7 @@ const EN_BATH_DIGIT_RE = /\b(\d+)\s*(?:baths?|bathrooms?)\b/i;
 
 /** The bathroom count this message states IN ITS OWN WORDS, or null when it states none. */
 export function arabicBathroomCount(text: string): string | null {
-  const t = foldAlef(toWesternDigits(String(text ?? "")));
+  const t = foldAlef(toWesternDigits(String(text ?? ""))).replace(POOL_RE, " ");
   if (BATH_DUAL_RE.test(t)) return "2";
   const wm = t.match(BATH_WORD_NUM_RE);
   if (wm) {
