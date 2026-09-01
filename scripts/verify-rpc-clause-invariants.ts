@@ -84,7 +84,11 @@ const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
   },
   {
     name: 'per-platform total_count is computed pre-cap (same window pass as row_number, before rn <= p_per_platform)',
-    marker: /m\.bedrooms,\s*count\(\*\) over \(\) as total_count,\s*row_number\(\) over \(/i,
+    // Widened 2026-08-29 (PHOTO PREFERENCE + CONTROLLED ROTATION): m.has_photo is now selected right
+    // before count(*) over() in this same window pass — an optional, bounded gap tolerates that new
+    // column without loosening the actual invariant (count(*) over() must still sit directly before
+    // row_number(), i.e. still the SAME window pass, still pre-cap).
+    marker: /m\.bedrooms,\s*(?:m\.has_photo,\s*)?count\(\*\) over \(\) as total_count,\s*row_number\(\) over \(/i,
     why: '2026-07-28 audit: total_count in the p_per_platform branch was computed AFTER the diversification cap — live-verified 54 instead of the true 35,535 for the same filter (Riyadh/Residential/بيع, p_per_platform:=5).',
   },
   {
@@ -94,17 +98,31 @@ const REQUIRED: { name: string; marker: RegExp; why: string }[] = [
   },
   {
     name: 'PLATFORM DIVERSITY: the default branch computes a per-platform round-robin rank (div_rank)',
-    marker: /then row_number\(\) over \(\s*partition by m\.platform\s*order by m\.recency_at desc nulls last, m\.source_table, m\.listing_id\s*\)\s*end as div_rank/i,
+    // Widened 2026-08-29 (PHOTO PREFERENCE, owner PERMANENT rule): div_rank's own row_number() now
+    // orders by photo status FIRST, recency second — folding photo preference INTO diversity's own
+    // per-platform ordering (a platform's #1 round-robin slot is its own best real-photo, most-recent
+    // listing) rather than layering photo as a separate key after div_rank, which let a no-photo row
+    // outrank a same-platform photo row (caught+fixed live, same session). The bounded, non-greedy gap
+    // tolerates that new ordering clause while still requiring recency+id as the row_number's own
+    // secondary tiebreak and "end as div_rank" — div_rank is still computed, still partitioned by
+    // platform, still ends in the unique (source_table, listing_id).
+    marker: /then row_number\(\) over \(\s*partition by m\.platform[\s\S]{0,1300}?order by[\s\S]{0,240}?m\.recency_at desc nulls last, m\.source_table, m\.listing_id\s*\)\s*end as div_rank/i,
     why: 'Owner PERMANENT rule 2026-08-05 (MATCH FIRST -> DIVERSIFY SECOND). Without this, ordering is pure recency and one platform saturates every window — live-measured 65-row single-platform streak with 11 qualifying platforms and 9,257 eligible rows.',
   },
   {
     name: 'PLATFORM DIVERSITY: div_rank leads the tie-break in the default branch (before recency)',
-    marker: /a\.div_rank asc nulls last,\s*a\.recency_at desc nulls last, a\.source_table, a\.listing_id/i,
+    // Widened 2026-08-29: PHOTO PREFERENCE (photo_rank) and CONTROLLED ROTATION (rot_key) now sit
+    // BETWEEN div_rank and recency, per the owner's MATCH -> DIVERSITY -> PHOTO -> ROTATION hierarchy
+    // — the bounded gap tolerates those two new intervening keys while still requiring div_rank to
+    // lead and the sequence to still end in the same unique (source_table, listing_id) total order.
+    marker: /a\.div_rank asc nulls last,[\s\S]{0,120}?a\.recency_at desc nulls last, a\.source_table, a\.listing_id/i,
     why: 'The rank must be APPLIED, and must sit BEFORE recency — otherwise it is computed and ignored. Ending in the unique (source_table, listing_id) keeps the sort a TOTAL order, which is what makes paging deterministic and duplicate-free.',
   },
   {
     name: 'PLATFORM DIVERSITY: the outer union ORDER BY honours div_rank too',
-    marker: /u\.div_rank asc nulls last,\s*u\.recency_at desc nulls last, u\.source_table, u\.listing_id/i,
+    // Widened 2026-08-29, same reason as the check above — u.photo_rank/u.rot_key now sit between
+    // u.div_rank and u.recency_at in the outer (post-union) ORDER BY too.
+    marker: /u\.div_rank asc nulls last,[\s\S]{0,120}?u\.recency_at desc nulls last, u\.source_table, u\.listing_id/i,
     why: 'The outer ORDER BY re-sorts the page after the union. If it ignores div_rank it silently reverts the page to recency order, undoing the diversification the inner branch just computed.',
   },
   {

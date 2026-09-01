@@ -84,41 +84,6 @@ export function interleaveRanked<L extends { cleanType?: string | null; rentPeri
   return out;
 }
 
-// Stable platform round-robin over an ALREADY-ORDERED list: take each platform's #1, then each
-// platform's #2, … preserving every platform's own relative order. Densest platform leads, matching
-// interleaveRanked's tie-break so both paths front the same platform.
-//
-// WHY THIS EXISTS (Search QA run 2026-08-16). orderByScope's round-robin necessarily DEGENERATES into a
-// single-platform tail: once the smaller platforms are exhausted, everything after that point belongs to
-// the one platform that still has rows (live: مستودع/بيع/الرياض = aqar 55, wasalt 10, aldarim 2, dealapp 2
-// → positions ~20-69 are 100% aqar). Any consumer that then takes a WINDOW at an arbitrary offset — the
-// repeat-visit rotation in runSearch — lands inside that tail and shows a returning user a
-// single-platform first page, silently breaking owner PERMANENT rule 2026-07-13 Rule 2 ("a platform with
-// more matches must never be invisible just because another platform's rows dominate"). Re-interleaving
-// the window restores the mix WITHOUT re-sorting it: the rotation still decides WHICH listings the
-// returning visitor sees (owner rule 2026-06-27), this only decides the ORDER they are shown in.
-// MATCH FIRST, DIVERSIFY SECOND still holds — this only reorders rows the filters already matched.
-export function rediversifyByPlatform<T>(rows: T[], platformOf: (row: T) => string): T[] {
-  if (rows.length < 2) return [...rows];
-  const groups = new Map<string, T[]>();
-  for (const r of rows) {
-    const k = platformOf(r) || '∅';
-    let a = groups.get(k);
-    if (!a) { a = []; groups.set(k, a); }
-    a.push(r);
-  }
-  if (groups.size < 2) return [...rows];           // one platform → nothing to interleave
-  const lists = [...groups.values()];
-  lists.sort((a, b) => b.length - a.length);       // densest leads (mirrors interleaveRanked)
-  const out: T[] = [];
-  for (let i = 0; out.length < rows.length; i++) {
-    let progressed = false;
-    for (const g of lists) { if (i < g.length) { out.push(g[i]); progressed = true; } }
-    if (!progressed) break;
-  }
-  return out;
-}
-
 export function orderByScope<L extends { cleanType?: string | null; rentPeriod?: string | null }>(rows: RankedRow<L>[], scope: Scope, multiType = false, mixPeriods = false): RankedRow<L>[] {
   // Diversity hierarchy per scope — SUPERSEDES the 2026-06-27 geography-first order (Region → cities →
   // districts → platforms) per owner PERMANENT rule 2026-07-13: "Rule 1 filters always win; Rule 2,

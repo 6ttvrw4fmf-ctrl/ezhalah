@@ -21,7 +21,12 @@ name: AF backend-truth live check
 
 on:
   schedule:
-    - cron: '23 */6 * * *' # every 6 hours, offset from the sibling live-check jobs
+    # COST (owner ruling 2026-08-29): this job drives 11 REAL messages through the paid production
+    # AI agent per run. At every-6-hours that was 44 paid agent messages a day against ~6 from actual
+    # users — CI was ~98% of the DeepSeek bill. Daily still catches a live regression within 24h, and
+    # the workflow_run trigger below keeps IMMEDIATE post-deploy verification, which is the run that
+    # actually matters. 44 -> 11 messages/day with no loss of deploy-time coverage.
+    - cron: '23 4 * * *' # daily, offset from the sibling live-check jobs
   workflow_dispatch:
   workflow_run:
     workflows: ['Deploy frontend (production)']

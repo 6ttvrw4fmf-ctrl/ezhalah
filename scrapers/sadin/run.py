@@ -37,6 +37,7 @@ import os
 import re
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
 
@@ -195,6 +196,26 @@ def _page_url(url: str, page: int) -> str:
     return f"{url}{'&' if '?' in url else '?'}page={page}"
 
 
+# List-page failure tally (daily engineer, 2026-09-01). Same defect class already fixed for
+# sanadak/erapulse/abeea: _pages() used to read `.text` and drop `.status_code` on the floor, and
+# swallowed every exception with a bare `except Exception: return`. A block page, a 5xx, or a
+# transport failure on page 1 then looks EXACTLY like "the catalogue is genuinely this small" —
+# the same "0-row run (blocked/empty source?)" question mark, one layer down. Confirmed pattern:
+# sadin recorded 2 consecutive 0-row days (08-31, 09-01) with no concrete reason in scrape_runs.
+_list_fetch_fail_reasons: list[str] = []
+
+
+def _record_list_fetch_failure(reason: str) -> None:
+    _list_fetch_fail_reasons.append(reason)
+
+
+def list_fetch_failure_summary() -> str:
+    """Compact 'reason=count' breakdown, most common first. '' when nothing failed."""
+    if not _list_fetch_fail_reasons:
+        return ""
+    return ", ".join(f"{r}={n}" for r, n in Counter(_list_fetch_fail_reasons).most_common(6))
+
+
 def _pages(s: cc.Session, url: str, max_pages: int = 40):
     """Yield each list page's HTML, following the redesign's server-side ?page=N pagination.
 
@@ -207,15 +228,32 @@ def _pages(s: cc.Session, url: str, max_pages: int = 40):
     run still recorded as ok=true. The remaining condition is site-agnostic and terminates correctly
     on today's markup: pages 1/2 share 0 ids (9 unique each), and page 11 yields 0 links, which ends
     the loop. Do not re-add a stop that depends on a specific pager marker — the catalogue itself is
-    the only reliable signal that there is nothing left to read."""
+    the only reliable signal that there is nothing left to read.
+
+    Every early return now records a CONCRETE reason first (transport exception, non-200 status,
+    or a real 200 whose first page carries zero property links — a markup/parser-drift signal, not
+    proof the catalogue is empty) so a run that captures nothing can name the cause."""
     seen: set[str] = set()
     for p in range(1, max_pages + 1):
         _throttle()
         try:
-            html = s.get(_page_url(url, p), timeout=40).text
-        except Exception:
+            r = s.get(_page_url(url, p), timeout=40)
+        except Exception as e:
+            _record_list_fetch_failure(f"transport_{type(e).__name__}")
             return
+        if r.status_code != 200:
+            # A non-200 is the source refusing/blocking us — never let it look like "no more
+            # pages left to read".
+            _record_list_fetch_failure(f"http_{r.status_code}")
+            return
+        html = r.text
         ids = set(re.findall(r'href="/property/([A-Za-z0-9]{4,8})"', html))
+        if p == 1 and not ids:
+            # A real 200 we extracted nothing from is a DIFFERENT fact from the source blocking
+            # us — most likely the markup changed under us again (the 2026-07 redesign already
+            # did this once). Keep the two buckets apart, same as sanadak's http_200_no_listing.
+            _record_list_fetch_failure("http_200_zero_ids_page1")
+            return
         if p > 1 and not (ids - seen):
             return
         seen |= ids
@@ -596,6 +634,15 @@ def main() -> int:
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0][:74])
             return 0
 
+        # An ad whose category flipped this run is superseded in the table it LEFT. This runs
+        # before prune_unseen because it reasons from positive evidence (we parsed and classified
+        # the ad this run), not from absence — prune's guards protect an orphan rather than age it
+        # out, and verify_gone's 'live' verdict then makes it immortal. See db.retire_superseded_siblings.
+        superseded = db.retire_superseded_siblings(
+            res_table="sadin_residential_listings", com_table="sadin_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="Sadin")
+
         # Full run: prune listings active before but not seen this crawl.
         pruned = 0
         for tbl, rows_seen in (("sadin_residential_listings", res),
@@ -605,8 +652,18 @@ def main() -> int:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 pruned += n
-        print(f"✓ Sadin: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["sadin_residential_listings", "sadin_commercial_listings"])
+        print(f"✓ Sadin: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned, "
+              f"{superseded} cross-table superseded")
+        # Carry the list-page failure breakdown into the run row. Without it a run where every
+        # list page 500'd/blocked is recorded identically to one whose catalogue was genuinely
+        # this small — see _pages()'s docstring.
+        fail_summary = list_fetch_failure_summary()
+        if fail_summary:
+            print(f"  list-fetch failures: {fail_summary}", flush=True)
+        notes = f"pruned={pruned}"
+        if fail_summary:
+            notes += f" | list-fetch failures: {fail_summary}"
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=notes[:300], check_tables=["sadin_residential_listings", "sadin_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

@@ -153,7 +153,7 @@ check('the card restores the recorded answer instead of clearing on every questi
 // one, and (b) the token handed to that walk is a freshly BUMPED one. Pinning the old exact spelling
 // `presentGuided(stepIndex - 1, ageFlowTokenRef.current)` made this guard fail on the 2026-08-23
 // token-bump fix even though the cursor semantics never changed.
-const backBody = (src: string) => src.slice(src.indexOf('const onAgeBack = () => {'), src.indexOf('const onAgeSkipAll'));
+const backBody = (src: string) => src.slice(src.indexOf('const onAgeBack = () => {'), src.indexOf('const onAgeClose'));
 const backWalk = (src: string) => {
   const b = backBody(src);
   return b.slice(b.lastIndexOf('}', b.indexOf('presentGuided(')) + 1); // past the stepIndex<=0 exit
@@ -218,13 +218,15 @@ check('re-validation keeps a skip, and drops only ineligible or zero-yield later
 check('a re-presented question re-resolves its option counts against the CURRENT scope',
   /fresh = await st\.question\.resolveOptions\(q0\)/.test(agentSrc)
   && /const options = fresh\?\.options\.length \? fresh\.options : st\.options;/.test(agentSrc));
-// Found live on production 2026-08-22: with the auto-advance gone, a user can sit on a SELECTED but
-// uncommitted option and leave via «عرض النتائج». That exit used to run finishGuided directly, so it
-// discarded the visible answer and landed on a different count than the chip had just promised
-// (10,945 delivered against a chip reading 2,488). Every exit now runs the ONE commit path.
-check('«عرض النتائج» commits the visible selection instead of discarding it',
-  /onPress=\{\(\) => onSkipAll\(sel\)\}/.test(cardSrc)
-  && /const onAgeSkipAll = \(keys: string\[\]\) => \{ void commitGuidedStep\(keys, true\); \}/.test(agentSrc)
+// Found live on production 2026-08-22: with the auto-advance gone, a user could sit on a SELECTED
+// but uncommitted option and leave via «عرض النتائج», which ran finishGuided directly and discarded
+// the visible answer (10,945 delivered against a chip reading 2,488). The fix routed every exit
+// through the ONE commit path. UPDATE (owner, 2026-08-28): that exit was then REMOVED entirely —
+// the discard-a-visible-answer hazard is now closed structurally, not just routed correctly, and
+// this check pins that no such exit (nor a direct finishGuided footer control) creeps back.
+check('no in-question early-exit exists that could discard a visible selection',
+  !/onSkipAll/.test(cardSrc)
+  && !/onAgeSkipAll/.test(agentSrc)
   && !/const onAgeSkipAll = \(\) => finishGuided/.test(agentSrc));
 // EXTENDED for progressive rounds (owner 2026-08-24). `ageFlowBaseQRef` used to have one possible
 // meaning — the pre-AF query — so pinning the rebuild call was the whole invariant. Under rounds it
@@ -348,10 +350,12 @@ mustCatch('a handler mutating the query in place again',
 mustCatch('a re-presented step showing stale per-option counts',
   !/fresh = await st\.question\.resolveOptions\(q0\)/.test(
     mut(agentSrc, 'fresh = await st.question.resolveOptions(q0)', 'fresh = null')));
-mustCatch('«عرض النتائج» going back to discarding the visible selection',
-  /const onAgeSkipAll = \(\) => finishGuided/.test(
-    mut(agentSrc, /const onAgeSkipAll = \(keys: string\[\]\) => \{ void commitGuidedStep\(keys, true\); \}/,
-      'const onAgeSkipAll = () => finishGuided(ageFlowTokenRef.current);')));
+// The early-exit was REMOVED entirely (owner 2026-08-28); the modern defect shape is it CREEPING
+// BACK — including in its worst historical form, the direct-finishGuided variant that discarded
+// the visible selection. Appending either form must trip the absence check above.
+mustCatch('a skip-all early-exit creeping back into the card or agent',
+  /onSkipAll/.test(cardSrc + "\n<Pressable testID=\"af-skip-all\" onPress={() => onSkipAll(sel)} />")
+  && /onAgeSkipAll/.test(agentSrc + '\nconst onAgeSkipAll = () => finishGuided(ageFlowTokenRef.current);'));
 mustCatch('the restored answer no longer reaching the card',
   !/initialKeys=\{ageFlow\.initialKeys\}/.test(mut(agentSrc, 'initialKeys={ageFlow.initialKeys}', '')));
 mustCatch('the reentrancy guard check being removed from commitGuidedStep',

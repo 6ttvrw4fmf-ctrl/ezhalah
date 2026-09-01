@@ -4,6 +4,8 @@
 on any divergence** (same rule as `docs/ops/DATA_INTEGRITY_ENGINEER.md` and `docs/ops/
 SEARCH_MATCH_QA_ENGINEER.md`). If the two ever differ, update the routine to match this file.
 
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+
 ## §0.1 — READ FIRST, EVERY RUN (mandatory)
 
 **Before touching anything else, read these two files in this order:**
@@ -49,6 +51,20 @@ This line is not decoration. `scripts/verify-af-senior-routine-reads-contract.ts
 Contract — a future edit that quietly loosens either fails the build.
 
 ---
+
+## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
+
+On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
+whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
+cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
+a link to the fix commit/PR**. An issue that you resolve without a barrier is a a violation of this contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
+RUN: N` in your FINAL REPORT.
+
+If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
+owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
+Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
+doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
 
 ## §0 — Mandate and standing operating contract
 
@@ -311,6 +327,29 @@ Per the standing reporting rule shared by all engineers (`docs/ops/ENGINEER_ROUT
 "Reporting rules"), each health line is `Before → After`, never a single number: production's state
 as the run FOUND it, then the state as the run LEAVES it, counting only changes actually verified
 in production.
+
+**Every health number is DERIVED, never estimated (owner rule 2026-08-28).** Read
+`docs/ops/AF_RATING_METHODOLOGY.md`, grade this run's work in
+`scripts/lib/afContractCoverage.ts`, and take the numbers from what
+`scripts/verify-af-contract-coverage-map.ts` prints. **Do not type a health number the tool did not
+print, do not carry one forward from a previous run, and do not "calibrate" against last run's
+figure** — that is exactly what produced the inflated 9.5/10 the owner rejected on 2026-08-28 (the
+same production state measured 8.4 once every contract rule was actually in the denominator). The
+barrier is in `npm test` and fails if any of the contract's rules is missing from the map, if a
+grade cites a barrier that does not exist or never executes, or if the grade ordering is loosened.
+
+Two rating lines are NOT coverage scores and must be stated as judgements, not measurements:
+`AF SYSTEM RATING` (how close the product AS SPECIFIED is to §0's philosophy) and
+`ENGINEER PERFORMANCE RATING` (how well the run executed the 12 steps).
+
+The report must also carry, straight from the tool:
+
+```
+NEW PRODUCT CONTRACT USED FOR RATING: YES/NO
+RULES LIVE-TESTED THIS RUN: X/Y          (grade L)
+RULES BARRIER-PROTECTED: X/Y             (grade B)
+RULES WITH INSUFFICIENT COVERAGE: X/Y    (grades P + N)
+```
 
 For every bug found, include: what the user experienced; root cause; exact fix; barrier added;
 mutation proof; production verification.

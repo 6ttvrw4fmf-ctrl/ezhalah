@@ -1020,6 +1020,15 @@ def main() -> int:
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0][:80], f"({len(r['photo_urls'])} imgs)")
             return 0
 
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs before
+        # prune_unseen and needs none of its guards: this reasons from positive evidence (parsed
+        # and classified from the source page THIS run), never from absence. Shard-safe — it can
+        # only act on ad_numbers this shard actually classified. See db.retire_superseded_siblings.
+        superseded = db.retire_superseded_siblings(
+            res_table="dealapp_residential_listings", com_table="dealapp_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source=SOURCE)
+
         # Sold rows were already upserted with active=False + pinned missing_count=3 above;
         # prune_unseen never touches them (it only reads active=true rows and only updates ids
         # missing from the seen set), so passing their ad_numbers here is harmless.
@@ -1035,7 +1044,7 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Deal App: {len(res)} residential + {len(com)} commercial upserted, "
-              f"{sold_ct} sold (inactive), {pruned} stale pruned")
+              f"{sold_ct} sold (inactive), {pruned} stale pruned, {superseded} cross-table superseded")
         # end_run's RC-B guard returns the EFFECTIVE ok it wrote (see scrapers/common/db.py) —
         # a 0-row "success" or an integrity trip gets demoted to False. Every scraper in the fleet
         # discards that return value and always `return 0`, so a demoted run still shows green in

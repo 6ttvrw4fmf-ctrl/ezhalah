@@ -30,6 +30,14 @@
 //
 // Run: node --experimental-strip-types scripts/verify-liveness-kill-cap-denominator.ts
 import { readFileSync } from 'node:fs';
+import { join as __join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
+
+// "Is this guard actually wired in?" — asked of the test registry, which is what `npm test`
+// resolves its run set from (scripts/lib/testRegistry.ts). String-matching package.json used to
+// answer it; since the 201-command chain became one runner invocation, that match would read
+// "not wired" for every barrier in the suite.
+const REPO_ROOT = __join(import.meta.dirname, '..');
 
 const SRC = 'scrapers/gathern/liveness.py';
 const src = readFileSync(SRC, 'utf8');
@@ -95,10 +103,9 @@ if (m) {
 }
 
 // 6. Worthless if nothing runs it.
-const pkg = readFileSync('package.json', 'utf8');
-check(pkg.includes('verify-liveness-kill-cap-denominator'),
+check(npmTestRuns(REPO_ROOT, 'verify-liveness-kill-cap-denominator'),
   'npm test runs this guard',
-  'package.json no longer runs verify-liveness-kill-cap-denominator.ts — the guard is inert');
+  '`npm test` no longer runs verify-liveness-kill-cap-denominator.ts (see scripts/test-exclusions.txt) — the guard is inert');
 
 console.log('liveness-kill-cap-denominator: a destructive cap must know its own denominator\n');
 for (const o of ok) console.log(`  ✓ ${o}`);

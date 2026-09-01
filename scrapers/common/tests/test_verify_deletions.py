@@ -244,3 +244,55 @@ def test_legacy_never_reopens_a_settled_row(monkeypatch):
             _ba_row(3, verdict="live"), _ba_row(4, verdict="inconclusive")]
     stats, _ = _run_legacy(monkeypatch, rows, lambda url: (404, ""), "valid")
     assert stats["candidates"] == 1          # only the 'inconclusive' one is retried
+
+
+# ── "sampled 0" is two different facts (2026-08-30) ─────────────────────────────────────────────
+# verify_deletions:aqar and verify_deletions:wasalt reported ok=False every week with
+# "RC-B demoted ok=False: 0-row run (blocked/empty source?)". Nothing was blocked: cleanup:aqar and
+# cleanup:wasalt were (correctly) aborting on their anomaly gate, so neither platform had EVER
+# hard-deleted a row, so there was nothing to verify. RC-B cannot see that difference from
+# rows_seen alone, and a job whose healthy state is indistinguishable from its broken state is
+# decoration. These tests pin BOTH directions of the distinction.
+
+def _run_with_log(monkeypatch, log_rows, platform="testp"):
+    C.PLATFORMS.setdefault(platform, {"dead_marker": lambda b: b == "DEAD"})
+    client = _Client({"cleanup_deletion_log": log_rows})
+    calls = []
+    monkeypatch.setattr(V, "sb", lambda: client)
+    monkeypatch.setattr(V, "begin_run", lambda name: 1)
+    monkeypatch.setattr(V, "end_run", lambda *a, **k: calls.append(k))
+    monkeypatch.setattr(V, "classify", lambda rows, dm, probe=None:
+                        [{**r, "verify_verdict": "dead", "http_status": 404} for r in rows])
+    return V.run(platform), calls
+
+
+def test_empty_deletion_window_is_healthy_not_a_blocked_source(monkeypatch):
+    """No deletions logged → nothing to verify → the safest state this job can report. It must
+    finalize ok=True AND opt out of RC-B explicitly, or rows_seen=0 demotes it right back."""
+    stats, calls = _run_with_log(monkeypatch, [])
+    assert stats["sampled"] == 0 and stats["window_total"] == 0
+    assert calls[0]["ok"] is True
+    assert calls[0]["allow_empty"] is True          # fails on the old code: RC-B demoted this run
+    assert "nothing to verify" in calls[0]["notes"]
+    assert "blocked" not in calls[0]["notes"]
+
+
+def test_deletions_with_no_listing_url_stay_red_and_cannot_borrow_the_exemption(monkeypatch):
+    """The other 'sampled 0': rows WERE deleted but none carries a listing_url, so none can ever
+    be probed. That is a real defect and must NOT inherit the empty-window pass."""
+    stats, calls = _run_with_log(monkeypatch, [_log_row(1, url=""), _log_row(2, url="   ")])
+    assert stats["sampled"] == 0 and stats["window_total"] == 2
+    assert calls[0]["ok"] is False
+    assert calls[0].get("allow_empty") in (None, False)
+    assert "unverifiable" in calls[0]["notes"]
+
+
+def test_unverifiable_rows_are_counted_exactly_even_when_the_sample_caps(monkeypatch):
+    """The url-less count is taken BEFORE sampling, so capping the sample can never make
+    unverifiable deletions look like rows the sample merely didn't draw."""
+    log = [_log_row(i) for i in range(100)] + [_log_row(500 + i, url="") for i in range(7)]
+    stats, calls = _run_with_log(monkeypatch, log)
+    assert stats["window_total"] == 107
+    assert stats["sampled"] == 40                  # capped by the default sample size
+    assert stats["unverifiable"] == 7              # exact, not 107 - 40
+    assert calls[0]["ok"] is True and "unverifiable=7" in calls[0]["notes"]

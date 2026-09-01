@@ -1,6 +1,30 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-08-31 (migration-drift recovery, routine #7 seam run): UNCHANGED. The recovered
+--   migrations 20260831080856 (phasea snapshot vs live source city) and 20260831092750 (district
+--   contradicts source) both MENTION listing_native_location_v1 in prose — each explains that the
+--   view's final SELECT falls back to a frozen snapshot table for district_ar/city — but neither
+--   redefines it: one creates a view + detector over phasea_src_arabic, the other UPDATEs
+--   listings_arabic_locations and creates a detector. Re-ran
+--   md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against live
+--   production: still 31036a9c8b92fddc5293b700985b869d (14127 chars) — unchanged since 2026-08-20,
+--   so the body below is current; only the re-verification date advances.
+--
+-- DO NOT "FIX" THE CANDIDATE ORDERING WHILE READING THIS (data-integrity run, PR #1403). The
+--   ordering inside phasea_shadow_resolution that prefers the frozen city_ar_src over shadow_city
+--   looks like an obvious bug and is deliberately LEFT AS IT IS: flipping it moves 49 listings
+--   between genuinely different cities, and only 2 of those were provably wrong. 29 are the
+--   الاحساء/الهفوف pair and 17 are rows where the snapshot's Arabic value is the MORE specific and
+--   correct city (حقل is its own city, not تبوك), so the current ordering is right for them. The
+--   2026-08-31 repair was three snapshot DATA rows (gathern 726509/725383, sadin 597777), never a
+--   resolver change. See docs/ops/DERIVED_STORE_FRESHNESS.md for the permanent architecture.
+--   UPDATE (owner decision, 2026-08-31): الاحساء/الهفوف was SETTLED by CLUSTERING, not relabelling
+--   — migration 20260831195108 puts city_id 3677 and 12 in one loc_city_cluster key so each name
+--   finds the other through match_city_ids, while every listing keeps the city its source
+--   published. That decision does NOT license flipping this ordering; the 17 rows above are still
+--   correct as they stand.
+--
 -- Re-verified 2026-08-21 (migration-drift recovery, PR #874): UNCHANGED. The recovered phasea
 --   migrations 20260821153734 / 20260821154150 / 20260821154316 MENTION listing_native_location_v1
 --   in prose comments (154316's detector reads the resolver's OUTPUT, listing_native_location_v2),

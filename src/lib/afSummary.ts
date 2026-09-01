@@ -54,6 +54,14 @@ export function buildAfSummary(facets: Array<{ id: string; keys: string[]; label
         for (const l of f.labels) items.push(l);
     }
   }
-  if (items.length === 1) return items[0];
-  return items.slice(0, -1).join('، ') + '، و' + items[items.length - 1];
+  // Facet-level dedup (afSteps.ts's dedupeFacetsByLabel) collapses two facets that are IDENTICAL
+  // bundles, but this loop explodes multi-select facets (amenities/direction/property_group/type)
+  // into one item PER KEY — two facets that only PARTIALLY overlap (e.g. a future second amenities-
+  // style question that also offers "Gym") would each survive facet dedup as distinct bundles, yet
+  // still push the identical finished item ("Gym ✅") twice into this sentence. Dedupe at the final,
+  // fully-rendered item text — the actual thing the user reads — so no upstream shape of overlap can
+  // slip through (owner audit, 2026-08-27).
+  const dedupedItems = [...new Set(items)];
+  if (dedupedItems.length === 1) return dedupedItems[0];
+  return dedupedItems.slice(0, -1).join('، ') + '، و' + dedupedItems[dedupedItems.length - 1];
 }

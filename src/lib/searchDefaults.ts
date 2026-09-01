@@ -33,7 +33,8 @@ export const emptyQuery = (): SearchQuery => ({
 // `typeGroups` REPLACED the old single `typeGroup` string outright — there is no second live field
 // and no mirror to drift. Data written before the change (saved searches in storage, a `?filter=`
 // URL in flight) still carries the scalar, so it is migrated ON READ by migrateGroups() below, at
-// the two boundaries where old data can enter. Everything inside the app sees only `typeGroups`.
+// the boundaries where old data can enter (history hydration in store.tsx, the `?filter=` parse in
+// agent.tsx, sanitizeForFilterRestore). Everything inside the app sees only `typeGroups`.
 
 // The selected groups as a list. The twin of effectiveTypes(): one code path covers none/one/many,
 // so no call site has to branch on arity.
@@ -59,6 +60,15 @@ export function migrateGroups<T extends Partial<SearchQuery>>(raw: T): T {
   const legacy = (raw as { typeGroup?: unknown }).typeGroup;
   const out = { ...raw } as T & { typeGroup?: unknown; typeGroups?: string[] | null };
   delete out.typeGroup;                                   // never carried forward — one field only
+  // The two REQUIRED string fields every reader dereferences (`q.location.trim()`,
+  // `q.priceInput.match(...)` — 9 sites in src/data/search.ts alone). A payload persisted before a
+  // field existed simply lacks the key, and reopening such a saved chat crashed openStatic →
+  // filterToChat (2026-08-23). '' is exactly what "absent" means for both (countrywide / no typed
+  // price), so filling it cannot change what a replayed search does. Do NOT default any OTHER field
+  // here: filling e.g. rentPeriod or category would silently CHANGE a replayed legacy search
+  // (verify-legacy-query-defaults.ts pins both directions).
+  out.location ??= '';
+  out.priceInput ??= '';
   if (out.typeGroups && out.typeGroups.length) return out as T;
   out.typeGroups = typeof legacy === 'string' && legacy ? [legacy] : null;
   return out as T;
@@ -93,9 +103,27 @@ export function toggleGroup(q: SearchQuery, group: string): SearchQuery {
 // `typeGroup: null`, which silently became a no-op the moment that field was replaced by typeGroups,
 // and the compiler could not catch it through an object spread. (owner 2026-08-20)
 export function setCategory(q: SearchQuery, category: string | null): SearchQuery {
+  // A SEARCH ALWAYS LANDS ON EXACTLY ONE CATEGORY (owner ruling 2026-08-30). Re-tapping the active
+  // category used to DESELECT it (`q.category === category ? null : category`), so the UI could sit
+  // in a no-category state. Two reasons that is wrong, one product and one data:
+  //
+  //   Product: the user asked for a category switch, not a category toggle. Residential and
+  //   Commercial are the two worlds the catalogue is divided into; "neither" is not a search anyone
+  //   means to run.
+  //
+  //   Data: that exact null state caused a measured production leak on 2026-07-17 — deselecting sent
+  //   p_category:null, which turned the RPC's purity predicate `(p_category IS NULL OR …)` into a
+  //   no-op AND short-circuited matchesType() client-side, so BOTH isolation layers were off at once
+  //   and 1,202 Commercial-macro rows leaked into a realistic Residential search
+  //   (scripts/verify-null-category-purity.ts). impliedCategory() was added to defend against it;
+  //   this removes the way to reach it. Defence in depth stays — that barrier is untouched.
+  //
+  // Re-tap is now a NO-OP rather than a re-select, so an accidental second tap cannot silently wipe
+  // the group/type/price scope the user has already built underneath it.
+  if (category !== null && q.category === category) return q;
   return {
     ...q,
-    category: (q.category === category ? null : category) as SearchQuery['category'],
+    category: category as SearchQuery['category'],
     typeGroups: null,
     type: null,
     types: null,

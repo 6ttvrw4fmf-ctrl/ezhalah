@@ -29,6 +29,10 @@
 #   - dispatched_at is stamped per-row ONLY after the gh call succeeds, so a mid-loop failure
 #     leaves the remainder undispatched for the next run.
 #   - The issue title "[alert] <dedup_key>" IS the identity — do not rename issues.
+#   - Every issue is labelled with the daily engineer routine that OWNS it (`routine-N-...`), per
+#     docs/ops/ALERT_ROUTING.md. Routing is total: an unmatched kind goes to routine #2, the
+#     standing triage router, never to nobody. Added 2026-08-28 — until then delivery worked and
+#     ownership did not, and 18 open P1s sat unacknowledged with nobody named on them.
 #   - Closing an issue by hand does NOT resolve the alert; a persisting condition re-raises and
 #     files a fresh issue. Resolution lives in the database (mon_resolve_key / detector self-heal).
 #   - mon_dispatch_alerts() stays untouched and remains a no-op while 0 webhook channels exist;
@@ -72,9 +76,27 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
     steps:
+      # Needed by the routing step below, which EXECUTES scripts/lib/alertRouting.ts rather than
+      # restating its table here. No `npm ci` — the routing lib has no dependencies, and installing
+      # the app's toolchain just to print a label would put the delivery channel behind the
+      # dependency graph of the thing it is supposed to report on.
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
       - name: Ensure labels exist (idempotent)
         run: |
+          set -euo pipefail
           gh label create ezhalah-alert --repo "$REPO" --force --color D93F0B --description "Auto-filed from alert_event by alert-dispatch.yml" >/dev/null
+          # One label per daily engineer routine. Generated from scripts/lib/alertRouting.ts so a
+          # routine renamed there cannot leave the label it routes to uncreated -- which would make
+          # `gh issue edit --add-label` fail and the issue stay unowned.
+          node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+            -e 'import("./scripts/lib/alertRouting.ts").then(m=>console.log(m.ALERT_ROUTINE_LABELS.join("\n")))' \
+            | while read -r l; do
+              gh label create "$l" --repo "$REPO" --force --color 1D76DB --description "Owning daily engineer routine (docs/ops/ALERT_ROUTING.md)" >/dev/null
+            done
           # P0 must exist or `gh issue create --label P0` fails and the row is never stamped.
           gh label create P0 --repo "$REPO" --force --color 5319E7 --description "Highest-severity production alert" >/dev/null
           gh label create P1 --repo "$REPO" --force --color B60205 --description "Critical production alert" >/dev/null
@@ -129,6 +151,42 @@ jobs:
               -d "{\"dispatched_at\":\"$(date -u +%FT%TZ)\"}"
           done
 
+      - name: Route each alert issue to its owning engineer routine
+        run: |
+          set -euo pipefail
+          # DELIVERED IS NOT OWNED. Measured 2026-08-28, after delivery itself had been working for
+          # two days: 55 open `[alert]` issues, every one carrying only `ezhalah-alert` + a severity
+          # label, and 18 open P1s with acknowledged_at still NULL, oldest since 2026-08-11. An
+          # issue with no owner is the same silence as an alert with no channel, one step later.
+          #
+          # Deliberately a SEPARATE, IDEMPOTENT sweep rather than a `--label` on the create call:
+          #   * it backfills every issue filed before routing existed, with no migration;
+          #   * it self-heals an issue whose label a human removed, or one filed by a run that died
+          #     between `gh issue create` and here;
+          #   * it is one mechanism instead of two, so there is no create-path/backfill-path skew.
+          # Only issues with NO routine-* label are touched, so a human re-routing an issue by hand
+          # is respected and never fought over on the next tick.
+          gh issue list --repo "$REPO" --label ezhalah-alert --state open --limit 200 --json number,title,labels \
+            | jq -c '.[] | select(([.labels[].name] | map(startswith("routine-")) | any) | not)' | while read -r issue; do
+            num=$(jq -r .number <<<"$issue")
+            dedup=$(jq -r '.title | sub("^\\[alert\\] "; "")' <<<"$issue")
+            enc=$(jq -rn --arg s "$dedup" '$s|@uri')
+            # Route on the alert's KIND, not its dedup_key: the key carries the instance (platform,
+            # id, table) while the kind is what names the failing surface, and ownership is a
+            # property of the surface.
+            kind=$(curl -sf "$SUPABASE_URL/rest/v1/alert_event?select=kind&dedup_key=eq.${enc}&order=created_at.desc&limit=1" \
+              -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | jq -r '.[0].kind // empty')
+            # An issue can outlive its row (hard-deleted alert_event, hand-filed issue). Fall back to
+            # the title text so it still gets AN owner. Never `continue` here: skipping is precisely
+            # how an alert ends up owned by nobody, and routineForKind() is total — worst case it
+            # lands on routine #2, which holds the triage mandate.
+            if [ -z "$kind" ]; then kind="$dedup"; fi
+            label=$(node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+              scripts/alert-routing-label.ts "$kind")
+            gh issue edit "$num" --repo "$REPO" --add-label "$label"
+            echo "routed #${num} (${kind}) -> ${label}"
+          done
+
       - name: Close issues whose alerts resolved
         run: |
           set -euo pipefail
@@ -144,6 +202,27 @@ jobs:
               echo "closed #${num} (${dedup})"
             fi
           done
+
+      - name: Heartbeat — tell the database this channel is alive
+        if: always()
+        run: |
+          set -euo pipefail
+          # THE CHANNEL REPORTS ITS OWN LIVENESS. mon_detect_alert_delivery can only see undelivered
+          # ALERT ROWS, so if this workflow stops running during a quiet spell it reads green while
+          # nothing is being delivered -- the 41-day-blackout shape moved one layer out.
+          # mon_detect_alert_dispatch_silent() watches this row and raises P1 after 24h of silence.
+          #
+          # if: always() is load-bearing. A run that files some issues and then fails still proves the
+          # channel is alive; skipping the stamp on failure would report "dead" for a channel that is
+          # merely erroring, and send whoever reads it hunting the wrong problem.
+          #
+          # Do not stamp this by hand to clear an alert -- the whole point is that only a real run
+          # writes it.
+          curl -sf -X POST "$SUPABASE_URL/rest/v1/ops_alert_dispatch_heartbeat" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates,return=minimal" \
+            -d "{\"id\":true,\"last_run_at\":\"$(date -u +%FT%TZ)\",\"run_url\":\"${GITHUB_SERVER_URL}/${REPO}/actions/runs/${GITHUB_RUN_ID}\"}"
 
       - name: Acknowledge alerts whose issue has an assignee
         run: |

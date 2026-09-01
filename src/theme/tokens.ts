@@ -1,35 +1,30 @@
 // Design tokens — single source of truth. Ported from the handoff (README "Design Tokens"
 // + prototype css block). Never hard-code hex/sizes in components.
+//
+// FULL-APP THEMING (owner 2026-08-28): color VALUES live in src/theme/palette.ts (lightColors +
+// darkColors — PR#1206's dark palette, extended with the sweep's semantic keys). On web, every
+// entry of `colors` is a live `var(--ez-*)` reference — +html.tsx defines both palettes as CSS
+// custom properties and a pre-hydration boot script applies the persisted appearance — so ALL
+// module-scope StyleSheets re-skin instantly on theme change with zero re-render and no
+// SSR/hydration divergence (Platform.OS === 'web' is also true during static render, so server and
+// client bake identical var() strings). Native keeps light literals (no shipped native app).
+// Converted surfaces may still read the literal palette per render via useThemeColors().
+//
+// Two rules the app-wide sweep relies on:
+//   • colors.surface is a BACKGROUND. Text/icons on solid green fills use colors.onFill.
+//   • Anything that PARSES a color (Animated interpolation, reanimated interpolateColor,
+//     expo-linear-gradient) cannot digest var() — those sites use literals via useThemePalette().
 
-export const colors = {
-  primary: '#2f7247', // primary green
-  dark: '#1d4a37', // dark green
-  tint: '#eef6f0', // light-green tint
-  tintFill: '#e9f4ec', // agent box fill
-  userBubble: '#d7eede', // user chat bubble — light green
-  userBubbleText: '#1d4a37', // user chat bubble text — dark green (legible on light green)
-  tintLine: '#d8ebdd', // tint border
-  ink: '#15201b', // primary text
-  body: '#34403a', // body text
-  muted: '#7b8a82', // muted text
-  mutedBlue: '#6b7a86', // hero subtitle
-  line: '#e2e8e4', // hairline
-  fieldLine: '#e7ebe8', // field/card border
-  pickLine: '#dde6e0', // pick-box border (unselected)
-  chipFill: '#eef6f0', // start-here suggestion chip fill
-  chipLine: '#d6e8db', // start-here chip border
-  chipIcon: '#16432f', // chip icon glyph
-  exFill: '#1d4a37', // ai-empty example chip fill (dark green)
-  exIcon: '#79c79c', // ai-empty example chip icon
-  paper: '#fbfbfa', // screen background
-  surface: '#ffffff', // cards / sheets
-  segTrack: '#f1f3f1', // segmented-control track
-  accentLeaf: '#2fb672', // bright "AI" accent
-  amberBg: '#fdf6ec',
-  amberInk: '#92591a',
-  whatsApp: '#25d366',
-  scrim: 'rgba(8,18,12,0.45)', // modal/overlay backdrop
-} as const;
+import { Platform } from 'react-native';
+import { cssVar, darkColors, lightColors, type PaletteKey } from './palette';
+
+export { darkColors, lightColors };
+
+export const colors: Record<PaletteKey, string> = Platform.OS === 'web'
+  ? (Object.fromEntries(
+      (Object.keys(lightColors) as PaletteKey[]).map((k) => [k, `var(${cssVar(k)}, ${lightColors[k]})`]),
+    ) as Record<PaletteKey, string>)
+  : lightColors;
 
 // Per-platform brand colors. Keys match Platform.name. (PRD §8.1)
 export const platformColors: Record<string, string> = {

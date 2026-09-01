@@ -42,40 +42,39 @@ check(
   '1a. the old five-card About stack is gone (no secCard/secIc icon-circle rhythm)',
   !/secCard|secIc|secHead|secTitle/.test(modal),
 );
+// REDESIGN (owner 2026-08-29): one artwork-led column replaces the 2026-08-24 hero/panel row.
 check(
-  '1b. the single-screen composition exists (aboutMain hero/panel row + legalStrip colophon)',
-  /aboutMain:\s*\{\s*flexDirection:\s*'row'/.test(modal) && /legalStrip:\s*\{/.test(modal),
+  '1b. the artwork-led composition exists (full-bleed hero art melting into the surface + trust card)',
+  /heroArt:\s*\{/.test(modal) && /heroImg:\s*\{/.test(modal) && /trustCard:\s*\{/.test(modal)
+  && /LinearGradient colors=\{\[alpha0\(pal\.paper\), pal\.paper\]\}/.test(modal),
+);
+check(
+  '1c. the artwork is INTEGRATED, not pasted: the hero image sits under a melt gradient and the '
+  + 'lockup rises out of its lower band',
+  modal.indexOf('a.heroImg') < modal.indexOf('LinearGradient colors={[alpha0(pal.paper), pal.paper]}')
+  && modal.indexOf('LinearGradient colors={[alpha0(pal.paper), pal.paper]}') < modal.indexOf('a.heroInner'),
 );
 
 // ── 2. Desktop about is a capped single screen ──────────────────────────────────────────────────
-const aboutCap = Number(modal.match(/aboutWide \? (\d+) : \d+\)/)?.[1] ?? NaN);
+const aboutCap = Number(modal.match(/kind === 'about' \? (\d+) : \d+\)/)?.[1] ?? NaN);
 check(
-  `2a. the desktop About height cap exists and stays single-screen (${aboutCap} ≤ 648)`,
-  Number.isFinite(aboutCap) && aboutCap <= 648,
+  `2a. the About height cap exists and stays a dialog, not a screen takeover (${aboutCap} ≤ 680)`,
+  Number.isFinite(aboutCap) && aboutCap <= 680,
 );
 check(
-  '2b. the about scroll container fills the card (scrollFill/flexGrow) so the layout can center',
-  /scrollFill:\s*\{\s*flexGrow:\s*1\s*\}/.test(modal) && /aboutWide && s\.scrollFill/.test(modal),
+  '2b. ONE column serves every breakpoint — the retired two-panel machinery is gone',
+  !/aboutWide/.test(modal) && !/ABOUT_WIDE_MIN_W = \d/.test(modal) && !/VisualPanel|MiniCard/.test(modal),
 );
 
-// ── 3. Panel art never overflows its 340px canvas ───────────────────────────────────────────────
-const panelW = Number(modal.match(/panel:\s*\{\s*width:\s*(\d+)/)?.[1] ?? NaN);
-check(`3a. the visual panel declares its canvas width (${panelW}) and clips it (overflow hidden)`,
-  Number.isFinite(panelW) && /panel:\s*\{[^}]*overflow:\s*'hidden'/.test(modal));
-// Every placed art element: left + width must fit the canvas. MiniCards carry their geometry as
-// props; parcels inline theirs. Evaluate from source, not by trusting the designer's arithmetic.
-const placed: { what: string; left: number; width: number }[] = [];
-for (const m of modal.matchAll(/<MiniCard left=\{(\d+)\} top=\{\d+\} width=\{(\d+)\}/g)) {
-  placed.push({ what: 'MiniCard', left: Number(m[1]), width: Number(m[2]) });
-}
-for (const m of modal.matchAll(/a\.parcel,\s*\{\s*left:\s*(\d+),\s*top:\s*\d+,\s*width:\s*(\d+)/g)) {
-  placed.push({ what: 'parcel', left: Number(m[1]), width: Number(m[2]) });
-}
-check(
-  `3b. all ${placed.length} placed art elements fit inside the ${panelW}px panel (≥2 mini-cards, ≥2 parcels)`,
-  placed.length >= 4 && placed.every((p) => p.left + p.width <= panelW),
-  placed.map((p) => `${p.what} ${p.left}+${p.width}=${p.left + p.width}`).join(', '),
-);
+// ── 3. The redesign themes fully — dark mode is a real dark composition ─────────────────────────
+check('3a. About styles are palette-driven (makeAbout factory), never the static light tokens',
+  /function makeAbout\(pal: Record<string, string>, dark: boolean\)/.test(modal)
+  && /useMemo\(\(\) => makeAbout\(pal, dark\), \[pal, dark\]\)/.test(modal));
+check('3b. the hero artwork dims for dark mode instead of glowing through it',
+  /opacity: dark \? 0\.22 : 0\.55/.test(modal));
+check('3c. the hero art clips and derives its text clearance from TOP_CLEAR (× can never collide)',
+  /heroArt: \{ height: TOP_CLEAR \+ \d+, overflow: 'hidden'/.test(modal)
+  && /heroInner: \{[^}]*paddingTop: TOP_CLEAR/.test(modal));
 
 // ── 4. Arabic typography: no letterSpacing anywhere in the About styles ─────────────────────────
 const aBlock = modal.slice(modal.indexOf('const a = StyleSheet.create'));
@@ -101,12 +100,11 @@ check(`5. every string InfoModal displays has an Arabic dictionary entry (${new 
 check('6. no Arabic dash separator («—») in any string the About/Support dialog displays',
   dashed.length === 0, dashed.length ? `dashed: ${dashed.join(' | ')}` : undefined);
 
-// ── 7. The map panel stays desktop-only (mobile gets the skyline footer instead) ────────────────
-const mobileReturn = modal.slice(modal.indexOf('return (\n    <>\n      <View style={a.bodyPadM}>'));
+// ── 7. The trust content is designed, not a document: icon-led rows inside one quiet card ───────
 check(
-  '7. the visual panel renders only in the desktop branch; the mobile branch keeps the skyline footer',
-  mobileReturn.length > 100 && !mobileReturn.slice(0, modal.length).split('function VisualPanel')[0].includes('<VisualPanel') &&
-    /footerM/.test(mobileReturn.split('function VisualPanel')[0]),
+  '7. legal facts render as icon-led trust rows under the «الثثقة والشفافية» title'.replace('الثثقة','الثقة'),
+  /trustRow/.test(modal) && /trustIcon/.test(modal) && /Trust & transparency/.test(modal)
+  && (modal.match(/trustRow/g) ?? []).length >= 2,
 );
 
 // ── 8. Required content survives: four legal facts + labels + brand line + hero ─────────────────
@@ -150,8 +148,8 @@ check(
 check(
   'honesty: the platform count is PLATFORM_META.length at compile time, never a hardcoded digit',
   /const PLATFORM_COUNT = PLATFORM_META\.length/.test(modal) &&
-    /n: String\(PLATFORM_COUNT\)/.test(modal) &&
-    !/'\+\{n\} platforms', \{ n: '\d/.test(modal) && !/\+\d+ منصة/.test(modal),
+    /\+\{String\(PLATFORM_COUNT\)\}/.test(modal) &&
+    !/statNum>\s*\+\d/.test(modal) && !/\+\d+ منصة/.test(modal),
 );
 
 console.log(

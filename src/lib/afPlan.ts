@@ -72,7 +72,14 @@ export function scopeCandidates(tier: ScopeTier, q: SearchQuery): string[] {
   const macro = macroOf(q);
   if (tier === SCOPE_GROUP_ID) return groupsFor(macro).map((g) => g.group);
   const groups = effectiveGroups(q);
-  return groups.length ? groupsMembers(groups) : groupsFor(macro).flatMap((g) => g.types);
+  // Both branches route through the Set-deduped groupsMembers() (owner audit, 2026-08-27) — no type
+  // in today's HIERARCHY sits in two groups of the same macro, so the raw .flatMap() this replaced
+  // never actually produced a duplicate, but nothing enforced that: a future taxonomy edit that put
+  // one type under two groups would have rendered it as two identical chips the moment the group
+  // step was skipped, with no test catching it (verify-interview-hierarchy.ts uses the same
+  // unguarded pattern and only ever calls .includes() on the result). One list-building path, always
+  // deduped, closes the class for every current and future type — not one named example.
+  return groupsMembers(groups.length ? groups : groupsFor(macro).map((g) => g.group));
 }
 
 // Merge a scope answer into the query.

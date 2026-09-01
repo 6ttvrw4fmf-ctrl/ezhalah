@@ -177,7 +177,9 @@ def test_erapulse_dark_source_records_a_failed_run(monkeypatch) -> None:
 
     monkeypatch.setattr(era, "session", lambda: object())
     # The source answers nothing — exactly what fetch_page returns after its ladder is exhausted.
-    monkeypatch.setattr(era, "fetch_page", lambda s, page: ([], {}))
+    # Third element (added 2026-08-31) is the captured last-attempt diagnostic — see
+    # test_erapulse_fetch_error_diagnostics.py.
+    monkeypatch.setattr(era, "fetch_page", lambda s, page: ([], {}, "HTTP 403: 'Forbidden'"))
     def _begin_run(platform):
         calls["begin"] = platform
         return 4242
@@ -213,7 +215,7 @@ def test_erapulse_limit_run_opens_no_scrape_run(monkeypatch) -> None:
 
     opened: list[str] = []
     monkeypatch.setattr(era, "session", lambda: object())
-    monkeypatch.setattr(era, "fetch_page", lambda s, page: ([], {}))
+    monkeypatch.setattr(era, "fetch_page", lambda s, page: ([], {}, "HTTP 403: 'Forbidden'"))
     monkeypatch.setattr(era.db, "begin_run", lambda platform: opened.append(platform) or 1)
     monkeypatch.setattr(sys, "argv", ["run.py", "--type", "all", "--limit", "5"])
 
