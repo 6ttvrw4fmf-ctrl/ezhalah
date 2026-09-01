@@ -249,11 +249,10 @@ TESTS: PASS (npm test 278/278)
 MERGED: YES (PR #1464, f23f7fa)
 DEPLOYED/APPLIED: N/A — scripts-only, no src/ change; a deploy would have been a
   deploy-to-test-the-pipeline, which the rules forbid. Deployments: 0.
-PRODUCTION VERIFIED: YES — verify-af-live-truth.ts re-run green from MERGED main (f23f7fa)
-  against ezhalah-app.vercel.app. verify-trending-live-four-way-truth.ts: 45/45 green twice
-  pre-merge on byte-identical code (the merge fast-forwarded these same commits); its
-  post-merge re-run and the dispatched af-live-truth-check.yml run on f23f7fa were still
-  executing when this report was written, and are NOT counted as evidence here.
+PRODUCTION VERIFIED: YES — af-live-truth-check.yml dispatched on MERGED main (f23f7fa) and
+  SUCCEEDED, all three live steps green against ezhalah-app.vercel.app: the 9 AF journeys
+  (7m43s), the agent-flow check, and the new Trending four-way step (3m16s). This workflow
+  had been RED since 2026-08-30T18:33Z; run 33509869183 is the first green one.
 SENTRY CHECKED: YES
 SENTRY CONNECTION WORKING: YES (real read; 0 unresolved in react-native, 5 resolved E2E probes visible)
 SENTRY ISSUES CLAIMED THIS RUN: 0
@@ -274,3 +273,21 @@ Remaining blockers, all genuine and none of them defects this run chose to skip:
    Adjudication requires a live source read; all four hosts are egress-blocked from this container.
 3. The rating-methodology gap in §8 — a grade may cite a live barrier that runs but has been failing
    for days. Recorded, not fixed; closing it needs the offline map to learn CI state.
+
+## 11. Postscript — a defect this run introduced, and corrected
+
+The district reference set in #1464 was read in bulk: 192,125 rows paged 1,000 at a time with an
+`order=` over the full index, to learn 2,069 distinct values. PR #1466 replaces it with one
+count-only probe per requested name (O(names), not O(rows)) — 30+ min to 2m34s in this container.
+
+Two honesty notes on that PR, because the first version of its description was wrong:
+
+- I claimed it was "a CI timeout waiting to happen." **It was not.** The dispatched workflow ran the
+  new Trending step in 3m16s with the bulk fetch still in place. The real cost was 30+ minutes in an
+  agent container, where every request crosses the egress proxy. The claim was corrected in the PR
+  body rather than left standing.
+- `verify-af-oracle-soundness.ts` had to change to accept the new call shape. It was
+  STRENGTHENED, not loosened: it used to match the literal text `buildOracleQS(…ORACLE_OPTS)`, which
+  fails on a correct refactor that adds to the options; it now checks the property (every call
+  passes options carrying ORACLE_OPTS, and a call with no options fails outright). Mutation-proven
+  3/3. A guard that fails on correct code is one the next person in a hurry deletes.
