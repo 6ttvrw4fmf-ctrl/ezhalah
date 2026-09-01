@@ -429,7 +429,29 @@ async function pickCity(page, city) {
 // reintroduce the hang. «ما لقينا» needs no branch of its own — it contains «لقينا».
 export const SETTLED_RE = /لقينا|ما لقيت|ما فيه/;
 const runSearch = async (page) => {
-  await page.getByText('بحث', { exact: true }).first().click();
+  // «بحث» IS BELOW THE FOLD ON A PHONE — scroll it in before clicking (§41.2, applied to the one
+  // control that still clicked blind). The pager already learned this lesson; the search button had
+  // not, and it is the same shape of bug: on the 390 px viewport the expanded filter form pushes
+  // «بحث» past the visible area, Playwright's actionability wait never settles, and the journey dies
+  // with `locator.click: Timeout 30000ms exceeded — waiting for getByText('بحث')`.
+  //
+  // Measured 2026-09-01, and this is why it is worth fixing rather than dismissing as CI noise:
+  // the scheduled sweep failed on runs #10 and #11 with `mobile journeys: 0 < 1` — ALL THREE mobile
+  // journeys (صفوى, بقعاء and الرياض, the last-resort fallback) timed out on exactly this locator,
+  // while EVERY desktop journey in both runs passed. The non-Riyadh floor miss was a downstream
+  // consequence: صفوى's only journey was the mobile one that died. So the owner-mandated §34 mobile
+  // floor has not actually been exercised in CI, and the workflow is red daily — a standing red
+  // trains people to stop reading it.
+  //
+  // It does NOT reproduce in the agent container (2/2 local sweeps got mobile=1), which is what
+  // makes it a HARNESS defect and not a production one: production's mobile «بحث» is reachable, and
+  // the desktop journeys prove the site is healthy. Do not read the CI red as a product outage
+  // (§40.7). Scrolling a control into view cannot break one that was already clickable, so this is
+  // safe in both environments; `scrollIntoViewIfNeeded` is a no-op when the button is already
+  // visible, which is exactly why the container run never needed it.
+  const search = page.getByText('بحث', { exact: true }).first();
+  await search.scrollIntoViewIfNeeded().catch(() => {});
+  await search.click();
   await page.waitForFunction((src) => new RegExp(src).test(document.body.innerText),
     SETTLED_RE.source, { timeout: 70000 });
   await sleep(2600);
