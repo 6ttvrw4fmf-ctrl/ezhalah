@@ -294,10 +294,11 @@ For the 3 certified Monthly cohorts this yields a SMALLER but fully-safe combine
 Any type with no certified Monthly cohort (Floor, Residential Building, Studio, every commercial/
 rural type) correctly offers ZERO Advanced Filter questions on a 'both' search — an empty
 intersection, because there is no evidence a mixed scope is meaningfully populated for that type
-either. `property_age` (AGE_QUESTION) has its OWN separate eligibility gate
-(`src/lib/ageFilterTypes.ts`, does not route through `cohortAllows` at all) — it needed the identical
-period exclusion added directly, since the ledger already treats age as Monthly-fresh-dead but
-nothing previously enforced that for `isAgeFilterScope`.
+either. `property_age` (AGE_QUESTION) used to have its OWN separate eligibility gate
+(`src/lib/ageFilterTypes.ts`, did not route through `cohortAllows` at all) — as of 2026-09-01 that
+gate is deleted and `AGE_QUESTION`'s eligibility is `cohortAllows(q, 'property_age')` directly, so it
+gets this same period exclusion (and the multi-type/group intersection below) for free, with nothing
+second to keep in sync.
 
 This is a CLIENT-SIDE-ONLY gate, same as every other cohort decision in this file — the shared SQL
 `af_eligibility_clause()` / `rebuild_af_filter_rpcs()` 4-surface generator is completely untouched;
@@ -328,9 +329,12 @@ Measured against TODAY's production inventory, then adjudicated against the LIVE
 | Staff Housing | Rent ×2 | 3 / 1 | 1 | — | no inventory | 0 | n/a |
 | Service Facilities | — | **40 total** | — | — | six unrelated raw types (bank 11 / parking 10 / telecom tower 9 / school 6 / health centre 4); largest 11 | 0 | n/a |
 
-`property_age` is source-verified 10/10 for Factory but deliberately **not** listed: `AGE_FILTER_TYPES`
-has no Factory entry and that gate's own floor is 150 rows (Factory has 72/34), so the question could
-never be offered. Listing it would be availability for a question the type can never be asked.
+`property_age` is source-verified 10/10 for Factory but deliberately **not** listed in
+`COHORT_QUESTIONS`: Factory's own inventory (72/34) is under the 150-row `MIN_TOTAL_TO_SHOW` floor
+for age specifically, so the question could never be offered. Listing it would be availability for a
+question the type can never be asked. (`property_age` eligibility is `cohortAllows(q, 'property_age')`
+against this same table directly, 2026-09-01 — there is no second type list to omit Factory from
+any more.)
 
 **Certifying these does NOT open Advanced Filter for any group, and that is the audit's main finding.**
 Every group's best case is the intersection of its ALREADY-CERTIFIED members, and `property_age` cannot

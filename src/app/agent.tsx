@@ -62,17 +62,15 @@ import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_A
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
-// below a results block — NEVER before first results — and ONLY for a strict single-type Residential
-// scope whose property_age data has been live-verified sufficient (owner rollout Building→Room→Floor,
-// 2026-07-16). Apartment is the reference (gold standard). A multi-type selection or any type not in
-// this set never triggers it. Add a new type ONLY after live-verifying its data quality + counts==
-// search parity, per docs/ADVANCED_FILTER_PATTERN.md. Do not widen without an explicit owner instruction.
-//
-// effectiveTypes() returns canonical ENGLISH keys (propertyTypes.ts), e.g. 'Apartment'/'Residential
-// Building' — NOT the Arabic label (that conversion happens later at RPC-call time via typeArForTypes()).
-// Comparing against Arabic here always evaluated false — caught live, 2026-07-15.
-// The Property Age eligibility gate lives in src/lib/ageFilterTypes.ts (zero-dep, so `npm test` can
-// assert its macros against CLEAN_MACRO — agent.tsx itself can't be imported by a plain node runner).
+// below a results block — NEVER before first results. Its gate is cohortAllows(q, 'property_age')
+// (src/lib/afCohorts.ts), the same canonical registry every other Advanced Filter question uses — a
+// type/deal/period fires only when COHORT_QUESTIONS has live-verified evidence for it (see
+// docs/ADVANCED_FILTER_PATTERN.md). This used to be a second, hand-maintained type→macro map
+// (src/lib/ageFilterTypes.ts, deleted 2026-09-01) that required a single selected type and silently
+// left out any type certified later in COHORT_QUESTIONS but never added to the second map — 5 real
+// types (Shop, Workshop, Commercial Building, Farm, Rest House) were unreachable this way. Add a new
+// type ONLY after live-verifying its data quality + counts==search parity, same as always — the entry
+// point for that is now COHORT_QUESTIONS alone, not a second list.
 // The guided flow is offered when ANY advanced question is eligible for the scope — each question owns
 // its own eligibility gate now (see docs/ADVANCED_FILTER_DESIGN_CONTRACT.md). Otherwise the tap falls
 // through to the pre-existing plain refine chips.

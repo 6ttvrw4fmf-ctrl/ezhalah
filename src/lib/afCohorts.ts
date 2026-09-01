@@ -104,9 +104,11 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
   //                   monoculture (94%), flagged like Shop/IndLand before it. street_width verified
   //                   10/10 EXACT against aqar's own structured `street_width` payload key, with one
   //                   correct UNKNOWN where the source is silent. property_age is ALSO source-verified
-  //                   (10/10) but is deliberately NOT listed: AGE_FILTER_TYPES has no Factory entry and
-  //                   that gate's floor is 150 rows, so the question could never be offered — listing
-  //                   it would be availability for a question this type can never be asked.
+  //                   (10/10) but is deliberately NOT listed below: Factory's n is under the 150-row
+  //                   MIN_TOTAL_TO_SHOW floor for age specifically, so the question could never be
+  //                   offered — listing it here would be availability for a question this type can
+  //                   never be asked. (Property age eligibility is cohortAllows(q, 'property_age')
+  //                   against this table directly — 2026-09-01, no longer a second hand-kept map.)
   //   Chalet          NOT certified. It passes every DB-side gate (rent-annual n=61: age 53, bath 54,
   //                   street width 56) — but of 24 rows adjudicated against source, HALF (12) now have
   //                   both structured keys null on the live page. Counts built on values the source no

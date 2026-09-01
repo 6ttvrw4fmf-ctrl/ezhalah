@@ -10,8 +10,8 @@
 // pressed) happens to still hold — silently offering a Buy-only question (dropping every Rent row
 // the moment it's answered) or a Rent-only question like rnpl/rating (dropping every Buy row), or
 // a Monthly-only signal (dropping every Annual row) — while the search still claims to cover
-// Buy ∪ Annual Rent ∪ Monthly Rent. property_age has its OWN separate eligibility gate
-// (isAgeFilterScope, never profiled against Monthly for any type) that must be fixed independently.
+// Buy ∪ Annual Rent ∪ Monthly Rent. property_age (2026-09-01: unified onto cohortAllows, see below)
+// inherits this same 3-way intersection automatically now that it has no separate gate of its own.
 //
 // EXECUTED ASSERTIONS (mirrors verify-mixed-period-af-gating.ts's 2026-08-20 upgrade): cohortAllows
 // lives in src/lib/afCohorts.ts, a PURE module with no runtime imports beyond other pure modules,
@@ -41,7 +41,6 @@ const check = (label: string, ok: boolean, detail = '') => {
 console.log('\nBuy+Rent combined (شراء+إيجار) Advanced Filter gating — 3-way intersection, never union\n');
 
 const af = codeOnly(read('src/lib/afCohorts.ts'));
-const ageGate = codeOnly(read('src/lib/ageFilterTypes.ts'));
 
 // The REAL gate + the REAL certified config.
 const Q = (over: Record<string, unknown>) =>
@@ -111,12 +110,17 @@ check('Room has no Buy entry in COHORT_QUESTIONS (so combined mode mechanically 
 check('EXECUTED — combined mode on Room offers nothing, even for a question in its RentAnnual list',
   cohortAllows(Q({ dealCombined: true, types: ['Room'] }), 'amenities') === false);
 
-// ── property_age (AGE_QUESTION) bypasses cohortAllows entirely via its own gate — must be fixed too ─
-check("AGE_QUESTION's eligibility gate (isAgeFilterScope) also excludes dealCombined, unconditionally",
-  /if\s*\(q\.dealCombined\)\s*return\s*false;/.test(ageGate),
-  'this gate is SEPARATE from cohortAllows (property_age has its own eligibility fn) — fixing cohortAllows alone would have left this leak open, exactly like the mixed-period fix needed the same second fix');
-check('isAgeFilterScope\'s dealCombined check runs BEFORE the single-type/category checks (fails closed, not open)',
-  /if\s*\(effectiveTypes\.length\s*!==\s*1\)\s*return\s*false;\s*if\s*\(q\.dealCombined\)\s*return\s*false;/.test(ageGate));
+// ── property_age (AGE_QUESTION) UNIFIED 2026-09-01: it used to bypass cohortAllows entirely via its
+// own gate (src/lib/ageFilterTypes.ts, deleted). Now AGE_QUESTION's eligibility IS
+// cohortAllows(q, 'property_age') directly (src/data/advancedFilters.ts), so it inherits
+// cohortAllowsCombined()'s 3-way intersection automatically — proved here EXECUTED, not by reading
+// a second file's source, because there is no longer a second file to read.
+check('EXECUTED — property_age also excludes dealCombined (never certified for RentMonthly, so the 3-way intersection is empty)',
+  cohortAllows(Q({ dealCombined: true, types: ['Apartment'] }), 'property_age') === false
+  && cohortAllows(Q({ dealCombined: true, types: ['Shop'], category: 'Commercial' }), 'property_age') === false);
+check('EXECUTED — property_age still fires on plain Buy and plain Annual Rent once dealCombined is false',
+  cohortAllows(Q({ deal: 'Buy', dealCombined: false, types: ['Apartment'] }), 'property_age') === true
+  && cohortAllows(Q({ deal: 'Rent', rentPeriod: 'annual', dealCombined: false, types: ['Apartment'] }), 'property_age') === true);
 
 console.log(failures === 0
   ? '\n✓ Buy+Rent combined AF gating intact: 3-way intersection, no Buy-only/Rent-only/Monthly-only leak\n'

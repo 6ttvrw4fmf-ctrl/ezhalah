@@ -140,14 +140,22 @@ console.log('\n4) every workflow-scheduled live check can obtain an endpoint wit
     try { src = readFileSync(new URL(`../scripts/${script}`, import.meta.url), 'utf8'); }
     catch { bad(script, 'referenced by a workflow but missing from scripts/'); continue; }
 
-    if (!/resolvePublicSupabase\s*\(/.test(src)) {
-      bad(script, 'does not use resolvePublicSupabase() — it can only run if a repo secret happens to be set, which is exactly how both barriers silently never ran');
+    // A script needs resolvePublicSupabase() only if it talks to Supabase at all — that is the
+    // ONLY way an unset repo secret can silently gate it (2026-09-01: verify-frontend-bundle-
+    // matches-source-live.ts hits nothing but the public production website over plain HTTPS; it
+    // cannot be affected by a missing SUPABASE secret because it never reads one, so requiring the
+    // resolver from it would be a dead import satisfying a check it has nothing to do with — the
+    // same shape §4a's "de-LIVE-ry" fix already rejected for the discovery regex).
+    const touchesSupabase = /supabase/i.test(src);
+    if (touchesSupabase && !/resolvePublicSupabase\s*\(/.test(src)) {
+      bad(script, 'talks to Supabase but does not use resolvePublicSupabase() — it can only run if a repo secret happens to be set, which is exactly how both barriers silently never ran');
       continue;
     }
     // The old shape: bail out when the env is missing. Any surviving copy re-opens the hole.
     const skipFail = src.match(/^.*SKIP-FAIL.*$/m);
     if (skipFail) bad(script, `still has a SKIP-FAIL bail-out: ${skipFail[0].trim().slice(0, 120)}`);
-    else ok(`${script} resolves its endpoint without depending on a repo secret`);
+    else if (touchesSupabase) ok(`${script} resolves its endpoint without depending on a repo secret`);
+    else ok(`${script} needs no Supabase secret at all — cannot be gated by one being unset`);
   }
 }
 

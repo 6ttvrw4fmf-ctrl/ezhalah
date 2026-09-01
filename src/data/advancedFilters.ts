@@ -1,11 +1,10 @@
 import type { SearchQuery } from './search';
-import { effectiveTypes, hasClientOnlyNarrowing } from './search';
+import { hasClientOnlyNarrowing } from './search';
 import { isProbeFailure } from '@/lib/afProbe';
 import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, fetchScopeOptionCounts, type AgeOptionCounts, type GuidedCounts } from './remote';
 import {
   SCOPE_GROUP_ID, SCOPE_TYPE_ID, scopeCandidates, applyScopeAnswer, unresolvedScopeTiers, type ScopeTier,
 } from '@/lib/afPlan';
-import { isAgeFilterScope as isAgeFilterScopeFor } from '@/lib/ageFilterTypes';
 import { CLEAN_MACRO } from './propertyTypes';
 import { t } from '@/i18n';
 // Pure ranking/gating engine (2026-08-22 extraction — see src/lib/afRanking.ts header): re-exported
@@ -55,8 +54,8 @@ export type AdvancedQuestion = {
 
 // Minimum USEFUL questions to open the interview at all (owner 2026-08-22; REVISED owner 2026-08-24
 // — supersedes the original ">=2" brief). "Useful" = passes scoreQuestion() above — real narrowing
-// power over the CURRENT eligible set, not merely structurally eligible (cohortAllows/
-// isAgeFilterScope). The rule is now: 0 useful questions closes cleanly (nothing worth asking); 1
+// power over the CURRENT eligible set, not merely structurally eligible (cohortAllows()). The rule
+// is now: 0 useful questions closes cleanly (nothing worth asking); 1
 // or more useful questions opens and asks every one of them, down to the last. A single genuinely
 // useful question is still a real, honest narrowing step for the user — it is not "a tax on their
 // attention" to ask the one question that actually moves their result set; withholding it was the
@@ -80,8 +79,8 @@ export async function liveResultCount(q: SearchQuery): Promise<number | null> {
 
 // ── Questions ────────────────────────────────────────────────────────────────────────────────────
 
-// Property age — eligible for the 7 age-supported types (its gate now lives HERE, per the contract,
-// not at the agent.tsx call site). 5 strict buckets; each is exactly what Search returns if picked.
+// Property age — eligible for every type/deal/period COHORT_QUESTIONS certifies for 'property_age'
+// (see cohortAllows() below). 5 strict buckets; each is exactly what Search returns if picked.
 const AGE_BUCKETS: Array<{ key: string; labelKey: string; count: (c: AgeOptionCounts) => number }> = [
   { key: 'new', labelKey: 'New construction', count: (c) => c.cnt_new },
   { key: '1_2', labelKey: '1–2 years', count: (c) => c.cnt_1_2 },
@@ -94,7 +93,16 @@ const AGE_QUESTION: AdvancedQuestion = {
   id: 'property_age',
   titleKey: 'How old is the property?',
   selection: 'single',
-  eligibility: (q) => isAgeFilterScopeFor(q, effectiveTypes(q)),
+  // Was its own hand-maintained type→macro map (src/lib/ageFilterTypes.ts, deleted 2026-09-01) that
+  // duplicated COHORT_QUESTIONS and drifted from it — 5 types with real, chat-certified property_age
+  // data (Shop, Workshop, Commercial Building, Farm, Rest House) were unreachable from the manual
+  // card because that second map never learned about them. cohortAllows() IS the certified registry;
+  // deriving eligibility from it directly (like every other question below) makes a second map
+  // impossible to grow stale again. This also lets property_age fire on a multi-type/group scope
+  // when every selected type certifies it — cohortAllows() already intersects safely for that, the
+  // same rule every other cohort-gated question here already relies on (see cohortAllows() in
+  // afCohorts.ts). See scripts/verify-age-filter-gate.ts.
+  eligibility: (q) => cohortAllows(q, 'property_age'),
   async resolveOptions(q) {
     const counts = await fetchPropertyAgeOptionCounts(q);
     if (isProbeFailure(counts)) return { options: [], unknownCount: null, total: 0, probeFailed: true };

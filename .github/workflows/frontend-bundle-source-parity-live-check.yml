@@ -1,0 +1,41 @@
+name: Frontend bundle vs main — undeployed certification drift (live check)
+
+# Compares the LIVE production bundle at https://ezhalah-app.vercel.app against a FRESH checkout of
+# current main's certifiedAmenityKeys() (src/lib/afCohorts.ts). Catches the exact incident this
+# barrier is named for: commit 618875e certified 8 new amenity tokens and merged to main, but
+# `deploy-frontend.yml` is workflow_dispatch-only BY DESIGN (never auto-deploy-on-push — see that
+# file's header), so the certification sat live in git and invisible to every real user until someone
+# remembered to run a deploy. Nothing else catches this class of gap: `npm test` only proves the
+# SOURCE is correct, and deploy-frontend.yml's own post-deploy checks only run DURING a deploy and by
+# construction pass once one happens — neither notices that no deploy happened at all. This runs on
+# its OWN schedule, independent of whether a deploy is in flight, so a merge that never got shipped
+# goes red within the window below instead of waiting for someone to notice.
+#
+# If this goes red, GitHub notifies the repo per its normal scheduled-workflow-failure notifications
+# (same pattern as diversity-live-check.yml / district-suggestion-parity-live-check.yml). Fix is
+# almost always the same: run `deploy-frontend.yml` to ship current main.
+#
+# Public bundle + public source — no secrets needed.
+
+on:
+  schedule:
+    - cron: '13 */6 * * *' # every 6 hours (offset from the other live checks)
+  workflow_dispatch:
+
+concurrency:
+  group: frontend-bundle-source-parity-live-check
+  cancel-in-progress: false
+
+jobs:
+  bundle-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Live bundle vs main certification parity
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-frontend-bundle-matches-source-live.ts
