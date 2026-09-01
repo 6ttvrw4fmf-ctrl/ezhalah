@@ -68,6 +68,22 @@ export const MIN_USEFUL_QUESTIONS_TO_SHOW = 1;
 // Engine-level LIVE result count for a query — the footer «Show {N}» on every card. Generic: the count
 // RPC applies whatever the query carries (types/scope/amenities/bath/age), so this works for every
 // question and type. null on error → the card holds the last good number rather than flashing.
+/**
+ * Like liveResultCount(), but keeps the two answers APART: 'unknown' means the probe never completed,
+ * a number means the source actually answered.
+ *
+ * liveResultCount() folds both into null, which is right for the live footer (null = "keep showing
+ * the last good number", a claim about nothing). It was WRONG for step revalidation, where null was
+ * read as "this answer selects nothing" and silently deleted a filter the user had already given,
+ * because a request timed out. UNKNOWN IS NOT NO — the same rule the tri-state data law states, in
+ * the control flow rather than the data.
+ */
+export async function liveResultCountOrUnknown(q: SearchQuery): Promise<number | 'unknown'> {
+  const c = await fetchApartmentGuidedCounts(q);
+  if (isProbeFailure(c)) return 'unknown';
+  return c ? c.cnt_selected : 0;      // a real answer, including an honest zero
+}
+
 export async function liveResultCount(q: SearchQuery): Promise<number | null> {
   const c = await fetchApartmentGuidedCounts(q);
   // A failed probe is null HERE too, but for a different and already-correct reason: this is the

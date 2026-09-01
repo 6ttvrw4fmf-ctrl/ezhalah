@@ -209,10 +209,16 @@ check('the recorded answer is handed back to the card on Back',
 check('a CHANGED earlier answer triggers re-validation of everything after it',
   /const changedAnswer = prev != null && !sameKeys\(prev, keys\)/.test(agentSrc)
   && /if \(changedAnswer\) await revalidateStepsAfter\(stepIndex, token\)/.test(agentSrc));
+// "zero-yield" means the source ANSWERED zero. It used to be spelled `n == null || n <= 0`, which
+// also dropped the step when the probe never completed — a timeout silently deleted a committed
+// answer. The null branch is now a separate 'unknown' that KEEPS the step
+// (verify-af-unknown-is-not-no-and-digits-are-script-blind.ts owns that half); this assertion keeps
+// the other three properties it was written for.
 check('re-validation keeps a skip, and drops only ineligible or zero-yield later answers',
   /if \(!st\.keys\.length\) \{ kept\.push\(st\); continue; \}/.test(agentSrc)
   && /eligibleQuestions\(q\)\.some\(\(x\) => x\.id === st\.question\.id\)/.test(agentSrc)
-  && /if \(n == null \|\| n <= 0\) continue;/.test(agentSrc));
+  && /if \(n <= 0\) continue;/.test(agentSrc)
+  && !/if \(n == null \|\| n <= 0\) continue;/.test(agentSrc));
 // Count honesty applies to the option pills too: a step re-shown after an EARLIER answer changed
 // would otherwise display the counts captured under the old scope.
 check('a re-presented question re-resolves its option counts against the CURRENT scope',

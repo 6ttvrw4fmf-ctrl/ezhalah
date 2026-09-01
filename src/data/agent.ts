@@ -7,7 +7,9 @@
 // LLM endpoint slots in later (PRD §13 open question on the agent backend); the classification
 // contract (AgentTurn) stays the same so the chat UI never changes.
 
-import { emptyQuery, toLatinDigits, grouped, type SearchQuery } from './search';
+import { emptyQuery, digitsOnly, grouped, type SearchQuery } from './search';
+// The text-preserving latinizer. NOT './search' — that one keeps only the digits (see digitsOnly).
+import { toLatinDigits } from '@/lib/inputHygiene';
 import { parseProximity, proximityKeywords, type ProximityIntent } from './proximity';
 import { type Category } from './taxonomy';
 import { t, getLocale } from '@/i18n';
@@ -779,11 +781,17 @@ async function callAgentBackend(
 // Parse a free-text message into a full SearchQuery. Unstated fields stay at their empty defaults
 // so the search broadens rather than dead-ends (PRD §6.1).
 export function parseQuery(text: string): SearchQuery {
-  const t = text.toLowerCase();
+  // Latinize ONCE, at the door. Arabic-Indic digits are ordinary input here — «٣ غرف» and
+  // «٧٠٠٠٠ ريال» must parse exactly like «3 غرف» / «70000 ريال». JS \d is ASCII-only, so every
+  // numeric read below (bedrooms, NUM_RE budget scan) was blind to them and silently produced a
+  // query with no bedrooms and no budget. toLatinDigits keeps the Arabic letters, so the city and
+  // type dictionaries below still match — this is the text-preserving one, not digitsOnly.
+  const src = toLatinDigits(text);
+  const t = src.toLowerCase();
   const q = emptyQuery();
 
-  if (/\b(buy|sale|for sale|purchase|buying)\b/.test(t) || AR_BUY.test(text)) q.deal = 'Buy';
-  else if (/\b(rent|lease|rental|renting|to let)\b/.test(t) || AR_RENT.test(text)) q.deal = 'Rent';
+  if (/\b(buy|sale|for sale|purchase|buying)\b/.test(t) || AR_BUY.test(src)) q.deal = 'Buy';
+  else if (/\b(rent|lease|rental|renting|to let)\b/.test(t) || AR_RENT.test(src)) q.deal = 'Rent';
 
   for (const city of CITIES) {
     if (t.includes(city.toLowerCase())) {
@@ -793,7 +801,7 @@ export function parseQuery(text: string): SearchQuery {
   }
   if (!q.location) {
     for (const [ar, en] of Object.entries(AR_CITY)) {
-      if (text.includes(ar)) {
+      if (src.includes(ar)) {
         q.location = en;
         break;
       }
@@ -811,7 +819,7 @@ export function parseQuery(text: string): SearchQuery {
   }
   if (!foundType) {
     for (const [ar, en] of Object.entries(AR_TYPE)) {
-      if (text.includes(ar)) {
+      if (src.includes(ar)) {
         foundType = en;
         foundCat = RES_TYPES.has(en) ? 'Residential' : 'Commercial';
         break;
@@ -847,7 +855,7 @@ export function parseQuery(text: string): SearchQuery {
     }
   }
 
-  const beds = t.match(/(\d+)\s*(?:bed|bedroom|br)\b/) ?? text.match(/(\d+)\s*(?:غرف|غرفة|غرفه)/);
+  const beds = t.match(/(\d+)\s*(?:bed|bedroom|br)\b/) ?? src.match(/(\d+)\s*(?:غرف|غرفة|غرفه)/);
   if (beds) q.detail = parseInt(beds[1], 10) >= 5 ? '5+' : beds[1];
 
   // Pick the budget figure. Scan every number and skip the ones that are clearly bedroom counts or
@@ -875,8 +883,8 @@ export function parseQuery(text: string): SearchQuery {
     }
   }
 
-  applySourceFilter(q, text);
-  const kw = extractNearbyKeywords(text);
+  applySourceFilter(q, src);
+  const kw = extractNearbyKeywords(src);
   if (kw.length) q.keywords = kw;
   return q;
 }
@@ -904,7 +912,7 @@ function normalizeForReadback(original: string): string {
     .replace(/(\d)\s*(?:sq\.?\s*m|sqms?|m2|square\s*met(?:er|re)s?)\b/gi, '$1 m²')
     .replace(/\bsquare\s*met(?:er|re)s?\b/gi, 'm²')
     .replace(/(\d)\s*(?:قدم\s*مربع|قدم)/g, (whole: string, num: string) => {
-      const n = parseFloat(toLatinDigits(num));
+      const n = parseFloat(digitsOnly(num));
       return isFinite(n) ? `${grouped(Math.round(n * 0.092903))} م²` : whole;
     })
     .replace(/(\d)\s*(?:متر\s*مربع|م2|متر)/g, '$1 م²');
