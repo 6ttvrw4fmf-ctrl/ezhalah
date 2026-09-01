@@ -95,10 +95,18 @@ const BASE = { p_deal: 'بيع', p_tables: ['aqar_residential_listings'], p_type
 {
   check('an unmapped amenity token is UNHANDLED, never silently dropped',
     buildOracleQS({ ...BASE, p_amenities: ['not_a_real_amenity'] }).unhandled.some((u) => u.includes('not_a_real_amenity')));
-  check('an unverified param (e.g. price) with a REAL value is UNHANDLED',
-    buildOracleQS({ ...BASE, p_price_min: 500000 }).unhandled.some((u) => u.includes('p_price_min')));
+  // NOTE (2026-09-01): this pair used to name p_price_min as its example of an unverified param.
+  // Price is now translated and proven against production (27/27 exact, see verify-af-live-truth),
+  // so the example moved to p_rent_period='كلاهما' — still genuinely unverified, so the property
+  // being pinned (a real value for an unverified param must be UNHANDLED, while its ABSENCE must
+  // not trip anything) is unchanged. The expectation was updated because the code became more
+  // capable, never to accommodate a weaker translator.
+  check('an unverified param with a REAL value is UNHANDLED',
+    buildOracleQS({ ...BASE, p_rent_period: 'كلاهما' }).unhandled.some((u) => u.includes('p_rent_period')));
   check('the SAME unverified param, absent (null), does not falsely trip unhandled',
-    buildOracleQS({ ...BASE, p_price_min: null }).unhandled.length === 0);
+    buildOracleQS({ ...BASE, p_rent_period: null }).unhandled.length === 0);
+  check('a param that is now VERIFIED no longer reports unhandled (price was, until 2026-09-01)',
+    buildOracleQS({ ...BASE, p_price_min: 500000 }).unhandled.length === 0);
   check('an entirely unknown future param name is UNHANDLED (default case), not ignored',
     buildOracleQS({ ...BASE, p_some_future_param: 42 }).unhandled.some((u) => u.includes('p_some_future_param')));
 }
@@ -139,6 +147,60 @@ const BASE = { p_deal: 'بيع', p_tables: ['aqar_residential_listings'], p_type
   check('a Commercial-only type is dropped from a Residential scope entirely', !q.includes('محل'));
 }
 
+// ── NUMERIC NARROWING (added 2026-09-01, alongside the translations themselves) ──────────────────
+//
+// price / area / beds / exact-bathrooms / floor / age-unknown / new-construction / tenant / licence
+// were ALL unclassified until 2026-09-01, so the oracle refused every narrowed search and AF's
+// stacked-state journeys could never be independently certified. These pin the translations against
+// af_eligibility_clause()'s actual semantics; the live differential that proved them (27/27 exact
+// against production, incl. all three cities) lives in verify-af-live-truth.ts.
+{
+  const BUY = { ...BASE, p_deal: 'بيع' };
+  const qs = (b: Record<string, unknown>) => buildOracleQS(b).qs;
+
+  check('a Buy budget reads price_total and excludes the priceless rows the clause excludes',
+    qs({ ...BUY, p_price_min: 500000, p_price_max: 1500000 })
+      .includes('price_total=gt.0') &&
+    qs({ ...BUY, p_price_min: 500000 }).includes('price_total=gte.500000'));
+
+  // The clause compares a MONTHLY budget against the ANNUAL column scaled by 12 (L78/79). Reading
+  // a monthly figure straight off price_annual would silently return ~1/12th of the right band.
+  check('a MONTHLY rent budget is scaled x12 onto price_annual, not compared raw',
+    qs({ ...BASE, p_deal: 'إيجار', p_rent_period: 'شهري', p_price_min: 2000, p_price_max: 8000 })
+      .includes('price_annual=gte.24000'));
+  check('an ANNUAL rent budget is NOT scaled',
+    qs({ ...BASE, p_deal: 'إيجار', p_rent_period: 'سنوي', p_price_min: 24000 })
+      .includes('price_annual=gte.24000'));
+
+  check('beds_exact becomes a set membership, beds_min a threshold',
+    qs({ ...BUY, p_beds_exact: [2, 3] }).includes('bedrooms=in.(2,3)') &&
+    qs({ ...BUY, p_beds_min: 3 }).includes('bedrooms=gte.3'));
+
+  check('area min/max map to area_m2 in the right direction',
+    qs({ ...BUY, p_area_min: 100, p_area_max: 300 }).includes('area_m2=gte.100') &&
+    qs({ ...BUY, p_area_min: 100, p_area_max: 300 }).includes('area_m2=lte.300'));
+
+  // A budget of 0 is the UI's "unset", and the clause wraps every budget in nullif(x,0). Treating a
+  // 0 as a real bound would exclude every priceless row from an unfiltered search.
+  check('a 0 budget is treated as unset (nullif semantics), not as a real bound',
+    !qs({ ...BUY, p_price_min: 0, p_price_max: 0 }).includes('price_total'));
+
+  // Genuine unions stay refusals — an approximation here would make the oracle agree with a wrong
+  // RPC, the one failure mode this whole module exists to prevent.
+  // p_deal null IS the combined Buy+Rent search (both buttons lit) — BASE carries a deal, so it
+  // must be stripped, not merely omitted from the spread.
+  check('a budget under a COMBINED Buy+Rent search is refused, not approximated',
+    buildOracleQS({ ...BASE, p_deal: undefined, p_price_min: 100000 }).unhandled.length > 0);
+  check('beds_exact and beds_min together (a real OR of two arms) is refused, not silently narrowed',
+    buildOracleQS({ ...BUY, p_beds_exact: [3], p_beds_min: 2 }).unhandled.length > 0);
+
+  // Ordering-only params must not narrow anything — p_rotation_seed is sent on EVERY search, so a
+  // predicate here would corrupt every single oracle count.
+  check('p_rotation_seed changes nothing about the predicate (ordering-only)',
+    qs({ ...BUY, p_rotation_seed: 'seed|2026-W36' }) === qs(BUY) &&
+    buildOracleQS({ ...BUY, p_rotation_seed: 'seed|2026-W36' }).unhandled.length === 0);
+}
+
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
 console.log('\n  mutation proof — each guard must FAIL on its own defect\n');
 let mutFail = 0;
@@ -167,6 +229,18 @@ mustCatch('"both" period silently resolving to "no filter" (would over-match any
   buildOracleQS({ ...BASE, p_deal: 'إيجار', p_rent_period: 'كلاهما' }).unhandled.length > 0);
 mustCatch('rnpl amenity resolving to a nonexistent "rnpl" column instead of rent_now_pay_later',
   !buildOracleQS({ ...BASE, p_amenities: ['rnpl'] }).qs.includes('rnpl=is.true'));
+mustCatch('a monthly rent budget compared raw against the annual column (would return ~1/12th the band)',
+  buildOracleQS({ ...BASE, p_deal: 'إيجار', p_rent_period: 'شهري', p_price_min: 2000 }).qs
+    .includes('price_annual=gte.24000'));
+mustCatch('an ordering-only param leaking into the predicate (p_rotation_seed rides every search)',
+  buildOracleQS({ ...BASE, p_deal: 'بيع', p_rotation_seed: 'z' }).qs
+    === buildOracleQS({ ...BASE, p_deal: 'بيع' }).qs);
+mustCatch('new-construction true/false collapsing to one filter (would ignore the answer entirely)',
+  buildOracleQS({ ...BASE, p_is_new_construction: true }).qs
+    !== buildOracleQS({ ...BASE, p_is_new_construction: false }).qs);
+mustCatch('age_unknown inverted — UNKNOWN and KNOWN must never resolve to the same predicate',
+  buildOracleQS({ ...BASE, p_age_unknown: true }).qs.includes('property_age=is.null')
+    && buildOracleQS({ ...BASE, p_age_unknown: false }).qs.includes('property_age=not.is.null'));
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }

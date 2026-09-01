@@ -72,7 +72,29 @@ const TYPE_MACROS = await (async () => {
   if (!r.ok) throw new Error(`known_type_ar unreadable (${r.status}) — the oracle cannot apply category purity`);
   return Object.fromEntries((await r.json()).map((x) => [x.type_ar, x.macro]));
 })();
-const ORACLE_OPTS = { typeMacros: TYPE_MACROS };
+// DISTRICTS NEED THEIR REFERENCE SET FOR THE SAME REASON CATEGORY PURITY NEEDS known_type_ar
+// (2026-09-01): production matches districts through norm_district_tok() + a guarded alias
+// expansion, so a literal `district_ar=in.(…)` agrees only when every requested name is stored
+// verbatim. Reading the district_ar values actually in the index keeps the oracle independent of
+// our SQL while letting it refuse, rather than undercount, on a name it cannot match.
+const KNOWN_DISTRICTS = await (async () => {
+  const out = new Set();
+  for (let off = 0; ; off += 1000) {
+    // ORDERED PAGING IS MANDATORY (verify-af-oracle-soundness.ts caught this one on the way in):
+    // a Range-paged PostgREST query with no `order=` has no defined row order, so pages can drop or
+    // repeat rows — here that would silently yield an INCOMPLETE district reference set, and every
+    // missing name would turn into a spurious refusal. (source_table, listing_id) is unique, so it
+    // is a total order.
+    const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=district_ar&district_ar=not.is.null&order=source_table,listing_id`,
+      { headers: { ...H, Range: `${off}-${off + 999}` } });
+    if (!r.ok) throw new Error(`district_ar reference set unreadable (${r.status})`);
+    const rows = await r.json();
+    for (const x of rows) out.add(x.district_ar);
+    if (rows.length < 1000 || off > 400000) break;
+  }
+  return out;
+})();
+const ORACLE_OPTS = { typeMacros: TYPE_MACROS, knownDistricts: KNOWN_DISTRICTS };
 
 async function oracleCount(reqBody) {
   const { qs, unhandled } = buildOracleQS(reqBody, ORACLE_OPTS);

@@ -70,6 +70,9 @@ export type OracleOpts = {
   /** type_ar → macro ('Residential' | 'Commercial' | 'both'), read from the same `known_type_ar`
    *  reference table the RPC's category-purity clause reads. Required whenever p_category is set. */
   typeMacros?: Record<string, string>;
+  /** The literal `district_ar` values present in the index. Required whenever p_districts is set —
+   *  see the p_districts case for why a literal match alone is not sound. */
+  knownDistricts?: Iterable<string>;
 };
 
 export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string; unhandled: string[] } {
@@ -140,6 +143,92 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
     parts.push(b ? `or=(${a},${b})` : a);
   }
 
+  // ── NUMERIC NARROWING, TRANSLATED VERBATIM FROM af_eligibility_clause() (2026-09-01) ────────────
+  //
+  // Until today NONE of price / area / bedrooms / exact-bathrooms / floor / age-unknown /
+  // new-construction / tenant / licence was classified here, so every one of them fell to the
+  // `default:` arm and reported UNHANDLED. Fail-closed is the right posture for an unknown param,
+  // but the consequence was that the independent oracle could never certify a NARROWED search —
+  // exactly the journeys AF exists for. The ledger's stacked-state proofs had to be hand-rolled in
+  // SQL precisely because the oracle refused them.
+  //
+  // Each translation below is taken from the live clause body, not inferred (line numbers are
+  // af_eligibility_clause()'s own):
+  //   L56/57  area  : nullif(p_area_*,0) is null or (area_m2 is not null and area_m2 >=/<= …)
+  //   L58-60  bath  : exact wins when non-empty; p_bath_min applies ONLY when exact is empty
+  //   L61     beds  : same shape — exact when non-empty, min otherwise
+  //   L62-79  price : see the price block below
+  //   L84     age_unknown        : (property_age is null) = p_age_unknown
+  //   L85     new construction   : (property_age = 0)      = p_is_new_construction
+  //   L86     tenant             : tenant_ar = p_tenant
+  //   L88     licence            : (license_number is not null) = p_has_license
+  //   L116-118 floor             : floor_number between coalesce(min,0) and coalesce(max,maxint)
+  //
+  // Anything whose SQL is a genuine UNION of arms (beds exact AND min together; price under a
+  // combined Buy+Rent search) stays UNHANDLED rather than being approximated — a wrong translation
+  // is worse than a refusal, because it makes the oracle agree with a wrong RPC.
+  const nz = (x: unknown): number | null => {
+    const n = Number(x);                                   // mirrors SQL nullif(x, 0)
+    return Number.isFinite(n) && n !== 0 ? n : null;
+  };
+  const nonEmpty = (x: unknown): unknown[] | null =>
+    (Array.isArray(x) && x.length > 0 ? x : null);
+
+  // beds / bathrooms — exact and min are alternative arms of one OR, never both at once in practice.
+  for (const [exactKey, minKey, col] of [
+    ['p_beds_exact', 'p_beds_min', 'bedrooms'],
+    ['p_bath_exact', 'p_bath_min', 'bathrooms'],
+  ] as const) {
+    const exact = nonEmpty(reqBody[exactKey]);
+    const min = reqBody[minKey];
+    if (exact && min != null) {
+      unhandled.push(`${exactKey}+${minKey} together (clause unions the two arms — not translated)`);
+    } else if (exact) {
+      parts.push(`${col}=in.(${(exact as (number | string)[]).map((x) => enc(x)).join(',')})`);
+    } else if (min != null) {
+      parts.push(`${col}=gte.${enc(min)}`);                // gte already excludes NULL, as the clause does
+    }
+  }
+
+  // price — the clause has two regimes (L62-79). Under a SINGLE deal the budget reads the column
+  // for that deal, and p_price_min_rent/p_price_max_rent are not referenced at all. Under a
+  // COMBINED Buy+Rent search (p_deal null) it is a union of two differently-parameterised arms;
+  // that is NOT translated here and is reported honestly instead.
+  {
+    const deal = reqBody.p_deal as string | undefined;
+    const pMin = nz(reqBody.p_price_min);
+    const pMax = nz(reqBody.p_price_max);
+    const rMin = nz(reqBody.p_price_min_rent);
+    const rMax = nz(reqBody.p_price_max_rent);
+    const anyBudget = pMin != null || pMax != null || rMin != null || rMax != null;
+    if (deal == null) {
+      if (anyBudget) unhandled.push('price budget under a combined Buy+Rent search (p_deal null) — clause unions two arms, not translated');
+    } else if (pMin != null || pMax != null) {
+      if (deal === 'بيع') {
+        parts.push('price_total=gt.0');
+        if (pMin != null) parts.push(`price_total=gte.${pMin}`);
+        if (pMax != null) parts.push(`price_total=lte.${pMax}`);
+      } else if (deal === 'إيجار') {
+        // L78/79: a MONTHLY budget is compared against the ANNUAL column, scaled by 12.
+        const mult = reqBody.p_rent_period === 'شهري' ? 12 : 1;
+        parts.push('price_annual=gt.0');
+        if (pMin != null) parts.push(`price_annual=gte.${pMin * mult}`);
+        if (pMax != null) parts.push(`price_annual=lte.${pMax * mult}`);
+      } else {
+        unhandled.push(`price budget under p_deal=${deal} (unrecognised deal)`);
+      }
+    }
+  }
+
+  // floor — one range over a NOT NULL floor_number (L116-118).
+  {
+    const fMin = reqBody.p_floor_min;
+    const fMax = reqBody.p_floor_max;
+    if (fMin != null) parts.push(`floor_number=gte.${enc(fMin)}`);
+    if (fMax != null) parts.push(`floor_number=lte.${enc(fMax)}`);
+    if (fMin == null && fMax != null) parts.push('floor_number=gte.0');   // clause's coalesce(p_floor_min, 0)
+  }
+
   for (const [k, v] of Object.entries(reqBody)) {
     if (v == null || (Array.isArray(v) && v.length === 0)) continue;
     switch (k) {
@@ -149,13 +238,56 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_tables2': case 'p_types2': break; // folded into the or=() above when hasScopeB
       case 'p_region_ids': parts.push(`region_id=in.(${(v as number[]).join(',')})`); break;
       case 'p_cities': parts.push(`city_ar=in.${inList(v as string[])}`); break;
-      case 'p_districts': parts.push(`district_ar=in.${inList(v as string[])}`); break;
+      // DISTRICTS ARE NOT MATCHED LITERALLY BY PRODUCTION (found live 2026-09-01).
+      //
+      // The clause matches `norm_district_tok(s.district_ar) = any(district_tokens)`, where
+      // district_tokens is norm_district_tok() over p_districts PLUS a guarded alias expansion. A
+      // plain `district_ar=in.(…)` therefore agrees only when every requested name happens to be
+      // stored verbatim. Measured on a live Trending click-through: the request carried
+      // «حي المهدية», the index stores «المهدية», and the naive filter returned 0 against the RPC's
+      // 1,796 — a false differential on a healthy production search.
+      //
+      // The normalisation cannot be reproduced through PostgREST (no normalised column is exposed),
+      // and re-implementing norm_district_tok here would make the "independent" oracle depend on a
+      // guess about our own SQL — the one thing this module must never do. So it takes the same
+      // route p_category already takes: read the REFERENCE DATA (the district_ar values actually in
+      // the index) and refuse when a requested name is not among them, rather than silently
+      // emitting a filter that undercounts.
+      case 'p_districts': {
+        const known = opts?.knownDistricts ? new Set(opts.knownDistricts) : null;
+        if (!known) {
+          unhandled.push('p_districts (no knownDistricts supplied — the RPC normalises district names, so a literal match cannot be trusted)');
+          break;
+        }
+        const missing = (v as string[]).filter((d) => !known.has(d));
+        if (missing.length) {
+          unhandled.push(`p_districts:${missing.join('|')} (not stored verbatim — needs the RPC's norm_district_tok/alias resolution)`);
+          break;
+        }
+        parts.push(`district_ar=in.${inList(v as string[])}`);
+        break;
+      }
       case 'p_rent_period':
         if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`);
         else if (v === 'شهري') parts.push(`payment_monthly=is.true&rent_now_pay_later=not.is.true`);
         else unhandled.push(`p_rent_period=${v}`); // includes 'كلاهما' (both) — not yet verified
         break;
-      case 'p_bath_min': parts.push(`bathrooms=gte.${v}`); break;
+      // beds/bath/price/floor are handled ABOVE, where the clause's exact-vs-min and
+      // single-vs-combined-deal interactions are visible; here they must not be re-applied.
+      case 'p_beds_exact': case 'p_beds_min': case 'p_bath_exact': case 'p_bath_min':
+      case 'p_price_min': case 'p_price_max': case 'p_price_min_rent': case 'p_price_max_rent':
+      case 'p_floor_min': case 'p_floor_max':
+        break;
+      case 'p_area_min': parts.push(`area_m2=gte.${enc(v)}`); break;
+      case 'p_area_max': parts.push(`area_m2=lte.${enc(v)}`); break;
+      // L84: (property_age is null) = p_age_unknown
+      case 'p_age_unknown': parts.push(v === true ? 'property_age=is.null' : 'property_age=not.is.null'); break;
+      // L85: (property_age = 0) = p_is_new_construction. `neq.0` excludes NULL ages exactly as the
+      // SQL does — (NULL = 0) is NULL, which is not `false`, so a NULL-age row fails either arm.
+      case 'p_is_new_construction': parts.push(v === true ? 'property_age=eq.0' : 'property_age=neq.0'); break;
+      case 'p_tenant': parts.push(`tenant_ar=eq.${enc(v)}`); break;
+      // L88: (license_number is not null) = p_has_license
+      case 'p_has_license': parts.push(v === true ? 'license_number=not.is.null' : 'license_number=is.null'); break;
       case 'p_furnished': parts.push(`furnished=is.${v}`); break;
       case 'p_age_min': parts.push(`property_age=gte.${v}`); break;
       case 'p_age_max': parts.push(`property_age=lte.${v}`); break;
@@ -179,6 +311,17 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       // genuinely irrelevant to the WHERE clause (paging/sorting/informational), always safe:
       case 'p_platforms': case 'p_per_platform': case 'p_limit': case 'p_offset':
       case 'p_sort_by':
+      // ORDERING-ONLY, PROVEN AGAINST THE LIVE RPC BODY (2026-09-01). p_rotation_seed shipped in
+      // PR #1361 (2026-08-30) and, being sent on EVERY search, immediately made this oracle refuse
+      // 100% of requests — verify-af-live-truth.ts and its scheduled workflow went red on
+      // 2026-08-30T18:33Z and stayed red, so AF's deepest correctness check produced no verdict at
+      // all for three days. It is safe to skip because it is not a predicate: in
+      // location_search_candidates_ar it occurs exactly twice outside the signature, both times
+      // inside `case when …sort… and p_rotation_seed is not null then hashtext(source_table||':'||
+      // listing_id||':'||p_rotation_seed) end as rot_key` — a PROJECTED ORDER BY key. It appears in
+      // no WHERE clause and cannot move total_count. (Verified by reading pg_get_functiondef on
+      // production, not from the client-side comment in src/lib/rotationSeed.ts.)
+      case 'p_rotation_seed':
         break;
       // handled above, as a real predicate — never as paging metadata
       case 'p_category': break;
