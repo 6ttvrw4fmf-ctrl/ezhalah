@@ -274,7 +274,10 @@ const BATH_DUAL_RE = /حمامين|حمامان|دورتين\s*مياه|دورت
 const BATH_NOUN = "(?:حمامات|حمام|دورات\\s*مياه|دوره\\s*مياه)";
 // Longest alternatives first so «حمامات سباحه» is consumed whole rather than leaving a stray tail.
 // Replaced with a SPACE, not "", so «حمام سباحة و٣ حمامات» still reads 3 real bathrooms.
-const POOL_RE = /(?:حمامات|حمامين|حمامان|حمام)\s*سباحه/g;
+// NON-GLOBAL for .test() and a separate /g copy for .replace(): a shared /g regex carries lastIndex
+// between calls, so alternating test/replace on one instance silently skips matches.
+const POOL_RE = /(?:حمامات|حمامين|حمامان|حمام)\s*سباحه/;
+const POOL_RE_G = new RegExp(POOL_RE.source, "g");
 const BATH_WORD_NUM_RE = new RegExp(`(?:(${COUNT_ALT})\\s+${BATH_NOUN}|${BATH_NOUN}\\s+(${COUNT_ALT}))`);
 const BATH_DIGIT_NUM_RE = new RegExp(`(?:(\\d+)\\s*${BATH_NOUN}|${BATH_NOUN}\\s*(\\d+))`);
 const EN_BATH_COUNT: Record<string, number> = { one: 1, two: 2, three: 3, four: 4 };
@@ -283,7 +286,7 @@ const EN_BATH_DIGIT_RE = /\b(\d+)\s*(?:baths?|bathrooms?)\b/i;
 
 /** The bathroom count this message states IN ITS OWN WORDS, or null when it states none. */
 export function arabicBathroomCount(text: string): string | null {
-  const t = foldAlef(toWesternDigits(String(text ?? ""))).replace(POOL_RE, " ");
+  const t = foldAlef(toWesternDigits(String(text ?? ""))).replace(POOL_RE_G, " ");
   if (BATH_DUAL_RE.test(t)) return "2";
   const wm = t.match(BATH_WORD_NUM_RE);
   if (wm) {
@@ -316,8 +319,23 @@ export function arabicBathroomCount(text: string): string | null {
 export function fillBathroomsIfAbsent(af: unknown, text: string): Record<string, unknown> {
   const base: Record<string, unknown> =
     (af && typeof af === "object" && !Array.isArray(af)) ? { ...(af as Record<string, unknown>) } : {};
+  // A POOL IS NEVER A BATHROOM — INCLUDING WHEN THE MODEL SAYS IT IS.
+  // Guarding only the parser was not enough, and the live function proved it: after the parser fix
+  // shipped, «ابغى فيلا للبيع في الرياض فيها حمامين سباحة» still came back with af.bathrooms = 2 —
+  // a NUMBER, where this parser returns strings, so it was the model's own proposal sailing past a
+  // fill-absent-only helper. The user asked about swimming pools and would have had the search
+  // filtered on a bathroom count they never gave.
+  //
+  // Scoped as narrowly as the evidence allows: drop it ONLY when the message mentions a pool AND
+  // states no bathroom count of its own. «فيها مسبح و٣ حمامات» keeps its 3, and a message with no
+  // pool at all is untouched — the model still PROPOSES, this only refuses a number the text cannot
+  // support. Same rule as «كبير» never becoming a bedroom count: never invent a number.
+  const stated = arabicBathroomCount(text);
+  if (stated === null && POOL_RE.test(foldAlef(toWesternDigits(String(text ?? ""))))) {
+    delete base.bathrooms;
+    return base;
+  }
   if (base.bathrooms !== undefined && base.bathrooms !== null && base.bathrooms !== "") return base;
-  const n = arabicBathroomCount(text);
-  if (n !== null) base.bathrooms = n;
+  if (stated !== null) base.bathrooms = stated;
   return base;
 }
