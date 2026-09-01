@@ -13,7 +13,7 @@ import { type Category } from './taxonomy';
 import { t, getLocale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
 import { partitionRequestedAmenities, cohortAllows } from '@/lib/afCohorts';
-import { applyAfIntents } from '@/lib/afIntents';
+import { certifyAfOnMergedState as certifyAf, type CertifiableBackendQuery } from '@/lib/afCertify';
 import { mergeConversationState, rescuedFields, describeKnownState } from '@/lib/conversationState';
 import { landmarkHint, ensureLandmarks } from './landmarks';
 import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
@@ -482,29 +482,35 @@ function cityFromText(text: string): string | null {
  * make from the value alone.
  */
 /**
- * Re-run AF certification against the MERGED state.
+ * THE Advanced-Filter certification pass. Runs on the MERGED state, and is the only one.
  *
- * WHY THIS IS SEPARATE FROM the pass inside queryFromBackend. cohortAllows() reads type, category,
- * deal and rentPeriod — and queryFromBackend only knows what THIS turn's model output carried. On a
- * follow-up the model is explicitly told not to restate what is already established, so a turn that
- * says only «خلي تقييمها ٩.٥» can arrive with no type at all; scopeCleanTypes() then returns [] and
- * cohortAllows() rejects EVERY intent the user just stated. The conversation's accumulated context
- * only exists after mergeConversationState, so certification has to happen again here, where the
- * cohort is actually known.
+ * WHY IT CANNOT LIVE IN queryFromBackend. cohortAllows() reads type, category, deal and rentPeriod —
+ * and queryFromBackend only knows what THIS turn's model output carried. On a follow-up the model is
+ * explicitly told not to restate what is already established, so a turn that says only «خلي تقييمها
+ * ٩.٥» can arrive with no type at all; scopeCleanTypes() then returns [] and cohortAllows() rejects
+ * EVERY intent the user just stated. The conversation's accumulated context only exists after
+ * mergeConversationState, so certification has to happen where the cohort is actually known.
  *
- * Safe to run twice: every AF intent applies through Math.max / Set-union, so re-applying an
- * already-applied value is a no-op. Certification is still the ONLY gate — this widens the CONTEXT
- * the gate sees, never the gate itself.
+ * It used to certify only the `af` family here, leaving amenities and furnished behind in
+ * queryFromBackend — so those two kept the exact bug this function was written to fix. Both moved in
+ * (2026-09-01), and the fresh pass was deleted rather than left to be corrected: two writers is how a
+ * verdict reached against an empty cohort rode out to the user as «that option is not available in
+ * this search» for a filter the merged pass had just applied.
+ *
+ * FOUR THINGS IT OWNS, in order:
+ *   1-3. this turn's af / amenities / furnished, judged on the merged cohort;
+ *   4.   the CARRIED state — a sticky answer whose cohort has since changed;
+ *   5.   lastRejectedFilters, rewritten so the receipt matches the predicates that actually ran.
+ *
+ * Certification is still the ONLY gate. This widens the CONTEXT the gate sees, never the gate itself.
  */
 function certifyAfOnMergedState(merged: SearchQuery, b: BackendQuery): SearchQuery {
-  const af = (b as { af?: unknown }).af;
-  if (!af || typeof af !== 'object') return merged;
-  const res = applyAfIntents(merged, af as Record<string, unknown>);
-  lastRejectedFilters = lastRejectedFilters.filter((f) => !res.rejected.includes(f));
-  lastRejectedFilters.push(...res.rejected);
+  // ASSIGN, never push. This is the single writer of lastRejectedFilters after queryFromBackend's
+  // per-turn reset, and verify-af-certified-on-merged-state.ts fails if a second writer appears.
+  const res = certifyAf(merged, b as CertifiableBackendQuery);
+  lastRejectedFilters = res.rejected;
   return res.q;
 }
-
 export function statedKeys(b: BackendQuery): string[] {
   const said: string[] = [];
   if (b.deal === 'Buy' || b.deal === 'Rent') said.push('deal');
@@ -638,61 +644,19 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   }
   const kw = Array.from(new Set([...extractNearbyKeywords(userText), ...proximityKeywords(prox)]));
   if (kw.length) q.keywords = kw;
-
-  // ── AMENITIES: ONE SHARED CERTIFICATION GATE (owner ruling 2026-08-29) ──────────────────────────
-  // The AI chat may map amenities straight out of the user's sentence («فيها مصعد وموقف») without the
-  // user walking the Advanced Filter flow first — but only through the SAME per-cohort certification
-  // the AF chips obey. certifiedAmenityKeys() in @/lib/afCohorts is that single gate; the edge
-  // function deliberately does not validate these, because a second copy of the cohort table is
-  // exactly how the two paths drift.
+  // ── AF CERTIFICATION HAPPENS ONCE, AND NOT HERE (2026-09-01) ───────────────────────────────────
+  // The amenity / furnished / af gates used to run at this point, against the query built from THIS
+  // turn's model output alone. That is the wrong cohort: on a follow-up the model is told not to
+  // restate what is established, so «وتكون فيها مصعد» arrives with no type, scopeCleanTypes() is []
+  // and cohortAllows() refuses a filter the conversation plainly certifies. certifyAfOnMergedState()
+  // is now the SINGLE certification point — it runs after mergeConversationState, where the cohort is
+  // actually known, and it owns lastRejectedFilters. Two writers is how the fresh pass's verdict rode
+  // out to the user as «that option is not available» for a filter the merged pass then applied.
   //
-  // Placed LAST on purpose: certification depends on q.type / q.category / q.deal / q.rentPeriod, and
-  // every one of those is only final at this point (applySourceFilter can still flip rentPeriod for
-  // Gathern). Gating earlier would certify against a scope the search never runs.
-  //
-  // Uncertified ⇒ NOT applied and NOT silently dropped. Applying it would filter on semantics this
-  // cohort never certified — that is UNKNOWN quietly becoming No. It is recorded for the clarification
-  // path instead. AND semantics are the RPC's existing p_amenities behaviour: a listing must carry
-  // EVERY token, so nothing here can ever widen the result set.
+  // The per-turn RESET stays here: this function starts every turn, and the list must not accumulate
+  // across turns.
   lastRejectedFilters = [];
-  if (Array.isArray(b.amenities) && b.amenities.length) {
-    const { certified, rejected } = partitionRequestedAmenities(q, b.amenities);
-    if (certified.length) q.amenities = [...new Set([...(q.amenities ?? []), ...certified])];
-    lastRejectedFilters.push(...rejected);
-  }
 
-  // ── FURNISHED: SAME GATE, DIFFERENT FIELD (owner ruling 2026-08-29) ─────────────────────────────
-  // furnished is NOT an amenity. It maps to q.furnishedPref, which is TRI-STATE — true = confirmed
-  // furnished only, false = confirmed unfurnished only, null/undefined = no preference — and it is
-  // gated by cohortAllows(q, 'furnished'), the exact predicate the AF furnished question uses. No
-  // second certification system: this is that one.
-  //
-  // WHY THE GATE IS NOT A FORMALITY. Certification is coverage-driven. Annual-rent apartments are
-  // 46.4% known for furnished; MONTHLY-rent apartments are 0.0% (5 rows of 30,544). Applying
-  // furnishedPref there would turn UNKNOWN into No and collapse 30,544 listings to 4 — the exact
-  // failure the UNKNOWN-stays-UNKNOWN rule exists to prevent. So an uncertified cohort does not
-  // silently apply it; it goes to the clarification path with the rejected amenities.
-  if (b.furnished === 'yes' || b.furnished === 'no') {
-    if (cohortAllows(q, 'furnished')) q.furnishedPref = b.furnished === 'yes';
-    else lastRejectedFilters.push('furnished');
-  }
-
-  // ── ADVANCED FILTER, FROM THE FIRST MESSAGE (owner ruling 2026-08-29) ───────────────────────────
-  // One registry-driven loop over the canonical AF question ids — property_age, street_width,
-  // direction, bathrooms, rating, rnpl, unit_subtype — each gated by cohortAllows(q, id), the exact
-  // predicate its AF question uses. No AI-only filter system, no second vocabulary, no per-field
-  // branch to forget: verify-agent-af-intent-coverage.ts fails the build if a certified AF question
-  // has no registry entry, so the two surfaces cannot silently drift apart.
-  //
-  // Runs here, at the end, for the same reason furnished does: certification depends on
-  // type/category/deal/rentPeriod and applySourceFilter can still change rentPeriod.
-  if (b.af && typeof b.af === 'object') {
-    const res = applyAfIntents(q, b.af as Record<string, unknown>);
-    q = res.q;
-    lastRejectedFilters.push(...res.rejected);
-  }
-
-  // Vague intents are never quantified. They are carried so the reply can ask one short question.
   lastVagueIntents = Array.isArray(b.askAbout) ? [...new Set(b.askAbout)] : [];
   return q;
 }

@@ -104,16 +104,28 @@ for (const req of [["elevator", "parking", "ac"], ["car_entrance"], ["bogus", "e
 }
 
 console.log("\n── wiring: one shared gate, and the edge must NOT own certification ──");
-const client = readFileSync(new URL("../src/data/agent.ts", import.meta.url), "utf8");
+// "the client" is TWO files since 2026-09-01: AF certification moved out of agent.ts into the pure
+// leaf module src/lib/afCertify.ts, precisely so a barrier can EXECUTE it instead of grepping it
+// (see scripts/verify-af-certified-on-merged-state.ts, which runs the real pipeline). These text
+// assertions still hold — they are about what the client DOES, not which file it lives in — so they
+// read both halves. A grep-only check could not have caught the defect that forced the move.
+const client = readFileSync(new URL("../src/data/agent.ts", import.meta.url), "utf8")
+  + "\n" + readFileSync(new URL("../src/lib/afCertify.ts", import.meta.url), "utf8");
 const edge = readFileSync(new URL("../supabase/functions/agent/index.ts", import.meta.url), "utf8");
 check("the client gates amenities through the SHARED afCohorts function",
   /partitionRequestedAmenities\(q, b\.amenities\)/.test(client));
+// Behaviour, not spelling: only `certified` may be unioned in. Pinning the exact mutable
+// assignment made this fail when the pass moved into a pure module and became immutable — an
+// assertion that breaks on a refactor it should not care about protects nothing.
 check("only CERTIFIED tokens reach q.amenities",
-  /if \(certified\.length\) q\.amenities = \[\.\.\.new Set\(\[\.\.\.\(q\.amenities \?\? \[\]\), \.\.\.certified\]\)\]/.test(client));
+  /amenities:\s*\[\.\.\.new Set\(\[\.\.\.\(q\.amenities \?\? \[\]\), \.\.\.certified\]\)\]/.test(client));
 // Now push(), because furnished shares this one clarification list (owner: "the same
 // clarification/rejection pattern").
+// The certification pass now RETURNS its rejections and agent.ts assigns the whole list once, so
+// there is a single writer (verify-af-certified-on-merged-state.ts §7 pins that). What matters here
+// is unchanged: a refused token is recorded, never dropped on the floor.
 check("rejected tokens are recorded for clarification, not discarded",
-  /lastRejectedFilters\.push\(\.\.\.rejected\);/.test(client));
+  /rejected\.push\(\.\.\.rej\);/.test(client) && /lastRejectedFilters = res\.rejected;/.test(client));
 // The gate reads q.type/q.category/q.deal/q.rentPeriod — all of which applySourceFilter can still
 // change. Certifying before that would certify against a scope the search never runs.
 const gateIdx = client.indexOf("partitionRequestedAmenities(q, b.amenities)");
