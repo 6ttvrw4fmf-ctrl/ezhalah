@@ -443,12 +443,29 @@ const runSearch = async (page) => {
   // floor has not actually been exercised in CI, and the workflow is red daily — a standing red
   // trains people to stop reading it.
   //
-  // It does NOT reproduce in the agent container (2/2 local sweeps got mobile=1), which is what
-  // makes it a HARNESS defect and not a production one: production's mobile «بحث» is reachable, and
-  // the desktop journeys prove the site is healthy. Do not read the CI red as a product outage
-  // (§40.7). Scrolling a control into view cannot break one that was already clickable, so this is
-  // safe in both environments; `scrollIntoViewIfNeeded` is a no-op when the button is already
-  // visible, which is exactly why the container run never needed it.
+  // HARDENING, NOT A PROVEN FIX — and the first draft of this comment was WRONG, so read the
+  // correction rather than the hypothesis. It recorded "does not reproduce in the agent container
+  // (2/2 local sweeps got mobile=1), therefore CI-environment-specific, therefore not a production
+  // defect". The very next local sweep reproduced it — تبوك/بيع/شقة, same locator, same 30 s
+  // timeout — WITH this scrollIntoViewIfNeeded already in place. So it is INTERMITTENT and
+  // environment-INdependent, and this call did not prevent it. Do not cite it as the fix.
+  //
+  // What IS established, measured on the 390 px viewport (iPhone 13), production:
+  //   • «بحث» renders at y≈1424 while the viewport is 664 px tall — far below the fold;
+  //   • document.body.scrollHeight === innerHeight === 664, i.e. the BODY does not scroll at all:
+  //     the form lives in an inner react-native-web ScrollView, so "scroll the page" never reaches
+  //     the button, and only scrolling that inner container does;
+  //   • every failure so far is on the DEFAULT deal «بيع»; the two mobile journeys that PASSED had
+  //     changed the deal first (both, إيجار/سنوي). Suggestive, NOT proven.
+  //
+  // What is NOT established: whether a human on a phone is blocked. The control exists and its
+  // container is scrollable, so the evidence does not support calling this a production mobile
+  // defect — and §40.7 forbids reporting it as one without proof. It equally does not yet support
+  // calling it purely a harness bug. It stays OPEN, owned by this routine.
+  //
+  // scrollIntoViewIfNeeded() is kept because it is strictly safe (a no-op on an already-visible
+  // control) and is correct for a below-the-fold button per §41.2 — not because it is known to
+  // resolve the timeout.
   const search = page.getByText('بحث', { exact: true }).first();
   await search.scrollIntoViewIfNeeded().catch(() => {});
   await search.click();
