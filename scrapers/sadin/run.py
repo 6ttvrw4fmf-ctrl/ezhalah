@@ -253,6 +253,17 @@ def _pages(s: cc.Session, url: str, max_pages: int = 40):
             # us — most likely the markup changed under us again (the 2026-07 redesign already
             # did this once). Keep the two buckets apart, same as sanadak's http_200_no_listing.
             _record_list_fetch_failure("http_200_zero_ids_page1")
+            # TEMPORARY DEBUG PROBE (2026-09-01) — daily engineer markup investigation. This branch
+            # is never merged; it exists only to get the real markup into a CI log this session's
+            # sandboxed egress can't reach directly (sadin.com.sa is proxy-blocked here). Remove
+            # before any real fix lands.
+            print(f"DEBUG final_url={getattr(r, 'url', '?')!r}", flush=True)
+            print(f"DEBUG title={re.search(r'<title>(.*?)</title>', html, re.S)}", flush=True)
+            print(f"DEBUG len(html)={len(html)} article_count={html.count('<article')} "
+                  f"property_card_count={html.count('property-card')} "
+                  f"href_property_count={html.count('/property/')}", flush=True)
+            print("DEBUG body[0:4000]=" + html[:4000], flush=True)
+            print("DEBUG body[4000:8000]=" + html[4000:8000], flush=True)
             return
         if p > 1 and not (ids - seen):
             return
