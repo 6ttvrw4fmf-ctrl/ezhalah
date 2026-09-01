@@ -590,6 +590,23 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
+    # TEMPORARY DEBUG PROBE (daily engineer, 2026-09-01) — must not be merged. Checking whether
+    # the bare (non-/ar/-prefixed) detail URL still resolves after the site's /ar/ locale-prefix
+    # change to list-page hrefs, before deciding whether to change BASE/detail-url construction.
+    for test_url in (
+        "https://sadin.com.sa/property/86PGD",
+        "https://sadin.com.sa/ar/property/86PGD",
+        "https://www.sadin.com.sa/property/86PGD",
+        "https://www.sadin.com.sa/ar/property/86PGD",
+    ):
+        try:
+            r = s.get(test_url, timeout=40)
+            og = re.search(r'property="og:title"\s+content="([^"]+)"', r.text)
+            print(f"DEBUG url={test_url!r} status={r.status_code} final_url={getattr(r, 'url', '?')!r} "
+                  f"len={len(r.text)} og_title={og.group(1) if og else None!r}", flush=True)
+        except Exception as e:
+            print(f"DEBUG url={test_url!r} EXC={type(e).__name__}: {e}", flush=True)
+    return 0
     cards, sale_ids, rent_ids = fetch_catalog(s)
     ids = list(cards.keys())
     if args.limit:
