@@ -109,6 +109,18 @@ jobs:
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-filter-state-live.ts
 
+      # COMBINED شراء+إيجار in a REAL browser (added 2026-09-02). The Filter offers two independent
+      # budgets and the RPC splits them by the row's own deal; until 2026-09-02 the client re-applied
+      # the BUY pair to every returned row, so a Buy floor deleted every rent card the server had
+      # correctly returned — measured on the live bundle at 1,166 rent rows handed to the app and 0
+      # rent cards on screen. Its offline twin is verify-combined-deal-budget-split.ts.
+      - name: A combined Buy+Rent search must show BOTH sides
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-combined-budget-live.ts
+
       # A REAL type change in a REAL browser: answer Advanced Filter on شقة, switch the type to
       # أرض سكنية, and prove not one uncertified predicate is on the request the browser sends.
       - name: No stale AF predicate crosses a property-type change
