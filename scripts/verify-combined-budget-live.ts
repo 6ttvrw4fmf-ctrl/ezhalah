@@ -26,6 +26,7 @@
 // LIVE CHECK — excluded from `npm test`, runs in .github/workflows/af-live-truth-check.yml.
 
 import { chromium } from 'playwright';
+import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
@@ -112,7 +113,7 @@ const tap = async (txt: string, timeoutMs = 10000) => {
 };
 
 try {
-  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await gotoLive(page, `${BASE}/`, { timeout: 60000 });
   await page.waitForTimeout(5000);
 
   // ── 1. city + category + type ─────────────────────────────────────────────────────────────────

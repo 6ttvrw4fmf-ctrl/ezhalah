@@ -15,6 +15,7 @@
 //    precedent as every other live check here: `npm test` is hermetic and runs in seconds.)
 
 import { chromium } from 'playwright';
+import { gotoLive } from './lib/liveNav.ts';
 import { judgeAfCta, type AfCtaObservation } from './lib/afOfferAgreement.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
@@ -122,7 +123,7 @@ const run = async () => {
       if (u.startsWith(RPC_ORIGIN) && u.includes('/rest/v1/rpc/')) afRpcs.push(u.split('/rpc/')[1].split('?')[0]);
     });
     try {
-      await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+      await gotoLive(page, BASE, { timeout: 90_000 });
       await page.waitForTimeout(2500);
       await page.click('text=الوكيل الذكي', { timeout: 30_000 });
       await page.waitForTimeout(1500);
