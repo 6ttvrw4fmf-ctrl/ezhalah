@@ -48,6 +48,7 @@ import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
+import { stripCommittedAf } from '@/lib/afCarry';
 import { toLatinDigits } from '@/lib/inputHygiene';
 import { BROWSE_BATCH, nextBatchTarget, resultCounts } from '@/data/resultCount';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
@@ -545,6 +546,17 @@ export default function Agent() {
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
   const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
+  // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
+  // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,
+  // which counts the `setQuery(` calls in this file precisely so a second, unsanitized writer cannot
+  // reopen the leak while an assertion on the first still passes.
+  //
+  // Two callers, both writing the search that is ON SCREEN: the `?filter=` arrival effect (the
+  // Normal Filter query this chat started from) and runRefine's guided branch (that same query once
+  // the Advanced Filter round has committed its answers). The second used to not exist, which is the
+  // whole owner-reported P0: the AF answers lived only in this component, so returning to the Filter
+  // screen and pressing «بحث» — through Trending or not — silently re-ran the PRE-AF search.
+  const writeFilterStore = (q: SearchQuery) => setQuery(() => sanitizeForFilterRestore(q));
   // Per-message "Load More" in flight, so a double-tap can't double-fetch the same page.
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -1620,7 +1632,24 @@ export default function Agent() {
     // while the results headline behind it stated the real match total. ONE total for both.
     const honestTotal = quotableTotal(result);
     opts?.onFetched?.(honestTotal);
-    if (opts?.guided) setGuidedPills({ msgId: statusId, baseQ: opts.guided.baseQ, facets: opts.guided.facets, asked: opts.guided.asked, total: honestTotal });
+    if (opts?.guided) {
+      setGuidedPills({ msgId: statusId, baseQ: opts.guided.baseQ, facets: opts.guided.facets, asked: opts.guided.asked, total: honestTotal });
+      // THE MISSING WRITE (owner P0 2026-09-01). An Advanced Filter round mutated only this
+      // component's state, so the shared store the Filter home reads still held the PRE-AF query.
+      // Returning to the Filter screen and pressing «بحث» — through a Trending city card, a Trending
+      // district card, or with Trending never touched at all — therefore re-ran the search WITHOUT
+      // the user's committed answers, and Trending's own row counts were computed from the same
+      // stripped query, so they advertised exactly the wrong number they then delivered. Measured
+      // live: الرياض / إيجار / سنوي / تجاري / محل + «جديد» committed 243, re-entry returned 566 with
+      // `p_is_new_construction` simply absent from the request body.
+      //
+      // `refined` IS the query these results came from, and the facets ride WITH it — which is what
+      // licenses sanitizeForFilterRestore to carry the AF predicates at all (they render as
+      // removable chips on the Filter screen; see @/lib/afCarry). Written here rather than at each
+      // commit site because every guided answer, every Skip and every pill removal already funnels
+      // through this one call — one writer, so the store can never hold a round this screen never ran.
+      writeFilterStore({ ...refined, afFacets: opts.guided.facets });
+    }
     await playListings(run, statusId, buildScrapeIntro(result.query ?? refined), result, label);
     if (run.cancelled) return;
     void promptSignupSoon(run);
@@ -1954,6 +1983,26 @@ export default function Agent() {
     // with «جديد» sitting at 100% of the set, an option that could not move anything because the
     // answer was already applied. Skips ride in this set too: they leave no facet, so it is the only
     // record that the user was already asked.
+    // SEEDED FROM THE QUERY'S OWN RECEIPT when the conversation had none to hand over (owner P0
+    // 2026-09-01). A Filter search can now arrive with Advanced Filter answers already committed —
+    // the user answered them, went back to «تصفية», and pressed «بحث» again. Round 1 of THIS chat
+    // then had an empty carry, which broke three things at once: the interview re-asked a question
+    // whose predicate was already applied (its options are counted INSIDE that scope, so they read 0
+    // and tapping one WIDENS — the exact inversion verify-af-state-never-leaks-into-filter pins for
+    // direction); the carried answers vanished from the pills, leaving predicates on screen with no
+    // chip to remove them; and the pills' origin was a query that already contained them, so removing
+    // one did nothing. stripCommittedAf() reconstructs the true pre-AF origin by removing exactly the
+    // fields the AF writes — no second copy of the query to drift. A carry handed over by «تحديد
+    // أكثر» in this same chat always wins; this only fills a genuinely empty one.
+    const inboundAf = q.afFacets ?? [];
+    if (!afCarryRef.current?.facets.length && inboundAf.length) {
+      afCarryRef.current = {
+        msgId: afCarryRef.current?.msgId ?? '',
+        originQ: stripCommittedAf(q),
+        facets: inboundAf,
+        asked: [...new Set([...(afCarryRef.current?.asked ?? []), ...inboundAf.map((f) => f.id)])],
+      };
+    }
     ageFlowAskedRef.current = new Set(afCarryRef.current?.asked ?? []);
     // SCOPE PREFIX SHORT-CIRCUIT (owner 2026-08-23): when CATEGORY→GROUP→TYPE is not yet resolved,
     // the interview opens on the hierarchy and there is nothing to rank yet — ranking the advanced
@@ -2567,6 +2616,12 @@ export default function Agent() {
       setBusy(false);
       setMsgs([]);                                         // new search = a clean chat view
       chatIdRef.current = null;                            // new conversation → new sidebar chat (a restore re-sets it)
+      // The Advanced Filter carry belongs to the conversation being left. It is only ever WRITTEN on
+      // a «تحديد أكثر» tap, so without this a brand-new search inherited the previous chat's answered
+      // set and opened its first round already believing those questions were resolved — and, since
+      // startAgeFlow now also seeds from the incoming query's own receipt, a stale carry would beat
+      // the receipt that actually describes this search.
+      afCarryRef.current = null;
     };
     // THE GATE (owner 2026-08-16). Params that were in the URL when the DOCUMENT loaded — a refresh,
     // a restored tab, a pasted link — are not a user action, so they must not execute anything. Drop
@@ -2618,7 +2673,7 @@ export default function Agent() {
         // The allowlist is exactly the set of fields the Filter UI can show, so this stays an identity
         // write on the filter-form path it was written for. `openSaved`/`sendFilter` below keep the
         // FULL q — the replay needs the AF predicates to reproduce the conversation.
-        setQuery(() => sanitizeForFilterRestore(q));
+        writeFilterStore(q);
         const override = chatBubble && chatSub ? { bubble: chatBubble, sub: chatSub } : undefined;
         startFresh();
         if (replay === '0') void openSaved(hid, q, override);

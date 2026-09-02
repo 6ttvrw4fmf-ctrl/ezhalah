@@ -519,6 +519,14 @@ const TYPE_QUESTION: AdvancedQuestion = {
 };
 
 export const SCOPE_QUESTIONS: AdvancedQuestion[] = [GROUP_QUESTION, TYPE_QUESTION];
+
+// BOTH POOLS, as one list. Anything that rebuilds a query from committed facets must span the scope
+// questions as well as the advanced ones — a surviving group/type facet whose question could not be
+// resolved would be silently dropped from the rebuild and quietly widen the search (owner
+// 2026-08-23). removeGuidedFacet in agent.tsx already learned that the hard way with a hand-written
+// `?? SCOPE_QUESTIONS.find(...)`; this is the same union, named once so the Filter screen's carry
+// (@/lib/afCarry) cannot be given half of it.
+export const AF_ALL_QUESTIONS: AdvancedQuestion[] = [...ADVANCED_QUESTIONS, ...SCOPE_QUESTIONS];
 export const scopeQuestionFor = (tier: ScopeTier): AdvancedQuestion =>
   tier === SCOPE_GROUP_ID ? GROUP_QUESTION : TYPE_QUESTION;
 

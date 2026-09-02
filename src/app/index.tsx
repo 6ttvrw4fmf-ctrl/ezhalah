@@ -15,9 +15,12 @@ import { CATEGORIES, detailFor, detailForContext, priceTabsFor, type Category } 
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
-import { grouped, type SearchQuery } from '@/data/search';
+import { buildAfSummary, grouped, type SearchQuery } from '@/data/search';
 import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
+import { AF_ALL_QUESTIONS } from '@/data/advancedFilters';
+import { reconcileCommittedAf, withoutFacet } from '@/lib/afCarry';
+import { isScopeQuestionId } from '@/lib/afPlan';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { noTranslateRef } from '@/noTranslate';
@@ -99,7 +102,30 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, locale, isRTL } = useI18n();
-  const { query, setQuery, user, openAuth, dismissSignInCard } = useApp();
+  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard } = useApp();
+  // THE ONE QUERY THIS SCREEN DERIVES EVERYTHING FROM (owner P0 2026-09-01).
+  //
+  // The store may now carry Advanced Filter answers committed in the chat — that is the whole fix:
+  // before it, returning here and pressing «بحث» (through a Trending card or not) silently re-ran
+  // the PRE-AF search, and the Trending row counts, built from the same stripped query, advertised
+  // exactly the wrong number they then delivered. Measured live: الرياض/إيجار/سنوي/تجاري/محل +
+  // «جديد» committed 243, re-entry returned 566 with p_is_new_construction absent from the request.
+  //
+  // Reconciled, not raw, because THIS screen can move the cohort under a carried answer — change
+  // فئة, drop the group, pick a different نوع, switch شراء/إيجار or شهري/سنوي. reconcileCommittedAf
+  // re-checks every carried facet against the CURRENT cohort with cohortAllows() (the same gate that
+  // decided the question could be asked) and re-applies only the survivors through each question's
+  // OWN apply(), spanning BOTH pools so a scope facet is never silently dropped. Applying an
+  // uncertified answer would not narrow honestly — the AF's SQL predicates are strict-NULL-excluding,
+  // so it would delete every row that never stated the attribute, turning UNKNOWN into No.
+  //
+  // Derived ONCE, here, and read by the Trending city params, the district live counts, the AF chips
+  // and buildFilterBaseQuery alike — so what is counted, what is shown and what is searched cannot
+  // disagree, by construction rather than by four call sites remembering to agree.
+  const query = useMemo(
+    () => reconcileCommittedAf(storeQuery, AF_ALL_QUESTIONS),
+    [storeQuery],
+  );
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
   // CITY-ONLY FIELD (owner spec 2026-07-17): citySuggestions holds either the Top-6-by-listings
   // (focus, empty text) or the Arabic-matched typed results — never a mix, and never a
@@ -1008,6 +1034,45 @@ export default function Home() {
                 </Pressable>
               </Reveal>
             )}
+            {/* THE ADVANCED FILTER ANSWERS CARRIED IN FROM THE CHAT (owner P0 2026-09-01).
+                THIS IS NOT DECORATION — it is what licenses the carry to exist at all.
+                sanitizeForFilterRestore is a strict allowlist of "what the Filter UI can actually
+                show", written for a measured P1: an AF predicate active with no on-screen control
+                silently amputated an unrelated search (a leaked ratingMin returned 0 of 11,552 on
+                الرياض/شراء/فيلا). The owner's requirement — every committed AF predicate must survive
+                a return to this screen — is only reconcilable with that rule by SHOWING them here and
+                letting the user remove any of them. Removing one rebuilds the query from the
+                remaining facets through each question's own apply(), exactly like the chat's pills.
+                Same «بناءً على» summary text the user already read in the chat, so the two screens
+                describe one search in one voice.
+                SCOPE facets (group/type) are deliberately absent: the group boxes and type boxes
+                below already ARE their visible control, and a «×» here would widen a specific
+                property type back out to its group — the direction the owner's rule forbids. */}
+            {query.afFacets?.length ? (
+              <Reveal>
+                <View style={s.afCarryWrap}>
+                  <Text style={[s.afCarryLead, { textAlign: isRTL ? 'right' : 'left' }]}>{buildAfSummary(query.afFacets)}</Text>
+                  <View style={[s.afCarryRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                    {query.afFacets.map((f, i) => (isScopeQuestionId(f.id) ? null : (
+                      <Pressable
+                        key={`${f.id}-${i}`}
+                        testID={`filter-af-chip-${i}`}
+                        style={s.afCarryChip}
+                        hitSlop={6}
+                        // Removed from the RECONCILED list this row is rendered from, never from the
+                        // raw store list — a facet the cohort already retired would otherwise shift
+                        // the indexes and a «×» would delete somebody else's answer. Writing the
+                        // reconciled query back is the same commit the user just made on screen.
+                        onPress={() => setQuery(() => withoutFacet(query, i, AF_ALL_QUESTIONS))}
+                      >
+                        <Text style={s.afCarryChipTx}>{f.labels.join('، ')}</Text>
+                        <Ionicons name="close" size={13} color={colors.primary} />
+                      </Pressable>
+                    )))}
+                  </View>
+                </View>
+              </Reveal>
+            ) : null}
             {/* شراء / إيجار — TWO independent toggle buttons, not a radio (owner feature 2026-08-20,
                 mirrors the already-shipped سنوي+شهري pattern exactly): both can be on at once, which
                 means "match either Buy or Rent — Rent side accepts both Annual and Monthly." No third
@@ -1856,6 +1921,16 @@ const s = StyleSheet.create({
   // clear icon, which is likewise conditional on query.location.length > 0).
   clearAllBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end', marginBottom: 10 },
   clearAllText: { fontSize: 13, color: colors.muted, fontWeight: '600' },
+  // Carried Advanced Filter answers — same tinted pill the chat's removable pills use, so one
+  // committed answer looks like itself on whichever screen the user is standing on.
+  afCarryWrap: { alignSelf: 'stretch', gap: 7, marginBottom: 12 },
+  afCarryLead: { fontSize: 12.5, fontWeight: '500', color: colors.muted },
+  afCarryRow: { flexWrap: 'wrap', gap: 8, alignItems: 'center' },
+  afCarryChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint,
+    borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
+  },
+  afCarryChipTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
   field: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 52, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, paddingHorizontal: 14, backgroundColor: colors.surface, ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
   sizeField: { marginTop: 8, height: 46 },
   sizeFieldOn: { borderColor: colors.primary },
