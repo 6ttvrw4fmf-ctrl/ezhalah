@@ -50,32 +50,49 @@ every multi-type scope. With the map gone, `cohortAllows()`'s own safe intersect
 So `afQuestionAllowed()` is gone from this branch. What survives is the **barrier**, rewritten onto
 the surviving architecture — because its value was never which fix won.
 
-## Defect 2 — eleven AF answers survived every scope change (this branch's own fix)
+## Defect 2 — `bothDeals` certified against one leg while searching both (this branch's fix)
 
-`SearchQuery` carries 11 AF answer fields. Nothing re-validated any of them against the new cohort
-on a scope change.
+Same bug class as Defect 1, found by the fleet's AI-handoff dimension:
 
-**Where that is reachable is not where reading the code suggested**, and this is worth recording:
+```
+src/data/remote.ts:653   p_deal: (q.bothDeals || q.dealCombined) ? null : …
+src/lib/afCohorts.ts     if (q.dealCombined) return cohortAllowsCombined(...)
+```
 
-- **NOT the manual Filter home.** `setCategory()` resets 13 fields and none of the 11; the type
-  toggle resets six and none of the 11 — which reads exactly like a leak. A real browser journey on
-  production proved otherwise: the Apartment answers `p_bath_min` / `p_is_new_construction` /
-  `p_amenities` all **die** on the way to a أرض سكنية search, on the un-deployed bundle, with no
-  prune involved. The reason is structural — the AF-refined query is handed to `runQuery()` per
-  search and never written back into the store query `index.tsx` edits. **Reported as safe, not as
-  fixed.**
-- **THE CHAT is where it reaches a user.** `mergeConversationState()` carries every established
-  `STICKY_FIELD` forward, and all 11 AF answer fields are on that list right beside `type` and
-  `category`, with no cohort re-validation in the merge. «ابغى شقة بثلاث دورات مياه» then «خلها أرض»
-  keeps `bathMin: 3` on a land search. Land rows have NULL bathrooms against a strict-NULL-excluding
-  clause, so the result set is silently amputated.
+The **request boundary** treats the two fields as one concept — `af_eligibility_clause()` reads
+`p_deal IS NULL` as Buy ∪ Rent(any period) — while the **certification gate** treated them as two.
+So the AI-chat fallback (`bothDeals`: the agent could not tell Buy from Rent from free text)
+certified questions against a SINGLE leg while the search spanned both. Strict-NULL-excluding
+predicates then amputate the leg the question was never validated against. Exactly R2.2.2.
 
-**Fix:** `pruneUncertifiedAdvanced()` drops every answer the new scope does not certify — token by
-token for amenities (a chip can go stale while the question stays certified), with `rnpl` judged by
-its own gate since it writes into the same array. It runs in `rpcFilterParams()` **and**
-`rpcCountFilterParams()`: the one choke point every search, count, Trending click-through and
-Load-More page shares, so the manual, chat, sidebar-reopen and pagination paths are covered at once
-instead of each having to remember.
+One condition, a pure narrowing (Buy ∩ RentAnnual ∩ RentMonthly ⊆ any single leg). Measured on
+Apartment: a `bothDeals` scope now withholds property_age / direction / furnished / rnpl and keeps
+amenities / bathrooms — identical to `dealCombined`. Mutation-proven.
+
+## The fix I withdrew, and why
+
+I first built `pruneUncertifiedAdvanced()` — a sweep at the request boundary dropping every answer
+the new scope does not certify. **It was withdrawn before merge.** Three things, in the order I
+learned them:
+
+1. **The manual Filter home does not leak.** `setCategory()` clears 13 fields and none of the 11 AF
+   answers, which reads like a defect — but a real browser journey on production showed the
+   Apartment answers dying anyway on the way to a أرض سكنية search, with no prune involved. The
+   AF-refined query is handed to `runQuery()` per search and never written back into the store query
+   `index.tsx` edits. **The browser disproved my code reading.**
+2. **My own fix was inert on the search path**, and the fleet caught it, not me. All eleven AF params
+   are spread onto `baseRpcParams` at the call site off `fetchListingsForQuery`'s own `q`;
+   `rpcFilterParams()` contributes none of them. My barrier passed because it asserted the prune was
+   *called*, not that the params derived from it — the protects-nothing shape this whole audit is
+   about.
+3. **It was redundant, and worse than what already existed.** PR #1477 had already shipped
+   `certifyAfOnMergedState()`, whose step 4 does exactly the same sweep, wired into both chat merge
+   sites with a 201-line barrier. It also **announces** each dropped filter through `rejected`, where
+   mine binned them silently — its own comment argues the point against my approach: *"Trading a
+   silent wrong filter for a silent missing one would be no better."*
+
+Keeping it would have added a second certification authority at the request boundary — the precise
+antipattern this audit exists to remove, and the one that produced the `property_age` divergence.
 
 ## What the audit confirmed as CORRECT (equally important)
 
