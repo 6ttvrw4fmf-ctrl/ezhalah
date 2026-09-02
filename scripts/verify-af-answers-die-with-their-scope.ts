@@ -196,12 +196,31 @@ check(`every generated cohort transition is clean (${pairs} ordered pairs swept)
 
 // ── 4. the prune is actually WIRED at the request boundary ───────────────────────────────────────
 const remote = readFileSync(join(ROOT, 'src/data/remote.ts'), 'utf8');
-check('rpcFilterParams() prunes before building the search request',
-  /function rpcFilterParams\(qRaw: SearchQuery\) \{[\s\S]{0,900}?const q = pruneUncertifiedAdvanced\(qRaw\);/.test(remote),
-  'the search path must prune, or a stale answer reaches the RPC from whichever surface set it');
-check('rpcCountFilterParams() prunes too (counts and results must agree)',
-  /function rpcCountFilterParams\(qRaw: SearchQuery\) \{[\s\S]{0,400}?const q = pruneUncertifiedAdvanced\(qRaw\);/.test(remote),
-  'a count over a predicate the search will not apply is the count-vs-results lie the contract forbids');
+// WIRING, CHECKED BY WHERE THE AF PARAMS COME FROM — not by whether the prune is called.
+//
+// The first version of this barrier asserted only that rpcFilterParams() calls the prune. It did,
+// and the fix was still INERT on the search path: all eleven AF params are spread onto
+// baseRpcParams inside fetchListingsForQuery() off ITS OWN `q`, and rpcFilterParams() contributes
+// none of them. A check that a function calls a sanitiser, without checking that the tainted reads
+// go through it, is the protects-nothing shape this whole audit is about.
+//
+// So the property pinned now is: every AF param spread in remote.ts reads `q.`, and in each
+// enclosing function `q` is DERIVED from a raw parameter by the prune — meaning the raw object is
+// unreachable from any AF spread.
+const AF_SPREAD = /\.\.\.\((q|qRaw)\.(ageMin|ageMax|isNewConstruction|amenities|bathMin|furnishedPref|streetWidthMin|directions|ratingMin|reviewsMin|unitSubtypes)\b/g;
+const spreads = [...remote.matchAll(AF_SPREAD)];
+check('remote.ts still spreads AF answers onto the request (the premise of this check)',
+  spreads.length >= 11, `found ${spreads.length}`);
+check('NO AF param is ever read off the RAW, unpruned query object',
+  spreads.every((m) => m[1] === 'q'),
+  `these read qRaw directly: ${spreads.filter((m) => m[1] === 'qRaw').map((m) => m[2]).join(', ')}`);
+
+for (const [fn, cap] of [['rpcFilterParams', 900], ['rpcCountFilterParams', 400], ['fetchListingsForQuery', 1600]] as const) {
+  const re = new RegExp(`function ${fn}\\(\\s*qRaw: SearchQuery[\\s\\S]{0,${cap}}?const q = pruneUncertifiedAdvanced\\(qRaw\\);`);
+  check(`${fn}() derives its q from the prune, so nothing downstream can read the raw query`,
+    re.test(remote),
+    `${fn} must take qRaw and immediately shadow it with the pruned object`);
+}
 
 console.log(failures
   ? `\n✗ verify-af-answers-die-with-their-scope: ${failures} check(s) failed.\n`

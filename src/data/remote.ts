@@ -1389,9 +1389,23 @@ async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[], signal?
 // Returns null on a backend error (UI shows retry), [] when the location genuinely has no listings.
 // (user spec: route rent→rent_location_index, buy→buy_location_index, then fetch details from raw.)
 export async function fetchListingsForQuery(
-  q: SearchQuery,
+  qRaw: SearchQuery,
   opts?: { offset?: number; limit?: number; signal?: AbortSignal },
 ): Promise<FetchListingsResult> {
+  // THE PRUNE HAS TO BE HERE, NOT ONLY INSIDE rpcFilterParams() (corrected 2026-09-02).
+  //
+  // Eleven AF answer fields are spread onto baseRpcParams BELOW, at this call site, straight off
+  // this function's own `q` — NOT by rpcFilterParams(), which contributes none of them. Pruning
+  // only inside that helper therefore sanitised a set of params that never carried a stale AF
+  // answer in the first place: the fix was inert on the search path while looking wired, and its
+  // barrier passed because it asserted the prune was CALLED rather than that the AF params derive
+  // from the pruned object. (The count path was genuinely covered — rpcCountFilterParams() builds
+  // its AF spreads inside itself.)
+  //
+  // Taking the raw query as `qRaw` and shadowing it immediately means every downstream read —
+  // resolveSearchScope(), rpcFilterParams(), and the eleven spreads below — sees the pruned object,
+  // and a future AF param added at this call site is covered without anyone remembering.
+  const q = pruneUncertifiedAdvanced(qRaw);
   let pageCandidates = 0;
   let pageTotal = 0;
   const pageOffset = Math.max(0, opts?.offset ?? 0);
