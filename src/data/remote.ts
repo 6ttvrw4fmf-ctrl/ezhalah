@@ -5,6 +5,7 @@ import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
+import { pruneUncertifiedAdvanced } from '@/lib/afPrune';
 import { normalizeType, queryForSelection, queryForTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
 import { effectiveTypes, effectiveGroups, bedroomTokens } from './search';
 import { scoreListingProximity } from './proximity';
@@ -354,7 +355,13 @@ export function cohortTypesAr(q: SearchQuery): string[] | null {
   return groups.length ? typeArForTypes(groups) : null;   // OR across groups — union of their types
 }
 
-function rpcFilterParams(q: SearchQuery) {
+function rpcFilterParams(qRaw: SearchQuery) {
+  // STALE ADVANCED ANSWERS DIE HERE (2026-09-01). Nothing cleared the 11 AF answer fields when the
+  // user changed category/type/deal/period, so e.g. bathMin:3 from an Apartment interview rode into
+  // an أرض تجارية search and silently amputated it (land has NULL bathrooms; the clause is
+  // strict-NULL-excluding). This is the ONE choke point every search, count, Trending click-through
+  // and Load-More page passes through, so pruning here covers every path at once. See afPrune.ts.
+  const q = pruneUncertifiedAdvanced(qRaw);
   const p_types = cohortTypesAr(q);
   const toks = bedroomTokens(q);
   const exact = toks.filter((d) => /^[1-4]$/.test(d)).map((d) => parseInt(d, 10));
@@ -397,7 +404,10 @@ function rpcFilterParams(q: SearchQuery) {
 // Neither accepts p_sort_by — counts have no ordering — and PostgREST resolves named-param RPC calls
 // by EXACT parameter-name match, so leaking it made BOTH counts calls 404 (PGRST202) the moment the
 // user had an explicit sort active, silently killing the whole guided flow (bug-hunt 2026-07-30).
-function rpcCountFilterParams(q: SearchQuery) {
+function rpcCountFilterParams(qRaw: SearchQuery) {
+  // Same prune as the search path — a count computed over a predicate the search will not apply
+  // (or vice versa) is exactly the count-vs-results lie the contract forbids.
+  const q = pruneUncertifiedAdvanced(qRaw);
   const { p_sort_by: _drop, ...rest } = rpcFilterParams(q) as ReturnType<typeof rpcFilterParams> & { p_sort_by?: string };
   return rest;
 }

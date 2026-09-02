@@ -9,6 +9,7 @@
 import type { SearchQuery } from '@/data/search';
 import { CLEAN_MACRO, groupsMembers } from '../data/propertyTypes.ts';
 import { effectiveTypes, effectiveGroups } from './searchDefaults.ts';
+import { isAgeFilterScope } from './ageFilterTypes.ts';
 
 // Which amenity chips are safe for a MULTI-TYPE scope: the intersection of every selected type's
 // certified chip list. Returns null when no selected type has a cohort chip list (the caller then
@@ -272,6 +273,43 @@ export function cohortAllows(q: SearchQuery, id: string): boolean {
     if (q.rentPeriod === 'both') return (cfg.RentAnnual ?? []).includes(id) && (cfg.RentMonthly ?? []).includes(id);
     return (cfg.RentAnnual ?? []).includes(id); // plain Annual Rent (rentPeriod undefined or 'annual')
   });
+}
+
+// ── THE ONE GATE BOTH AF SURFACES MUST ASK (owner priority, 2026-09-01) ─────────────────────────
+//
+// Eight of the nine AF questions gate on `cohortAllows(q, id)`. `property_age` did not: its
+// question in advancedFilters.ts gated on `isAgeFilterScope()` ALONE, while the AI-chat surface
+// (afIntents.ts → applyAfIntents) gated the SAME id on `cohortAllows()` alone. Two different
+// predicates for one question is two different products, and executing both over the full
+// 51-type × {Buy, RentAnnual, RentMonthly} matrix showed they disagree on 16 cells:
+//
+//   • Room/Buy — the manual UI OFFERS the age question, but COHORT_QUESTIONS.Room has no `Buy`
+//     list at all ("Room/Buy (n=1) … genuinely not applicable"). That is a flat violation of
+//     R2.1.1: "Every AF question must appear in COHORT_QUESTIONS for a given
+//     (clean_type × deal × period) triple, or it can never be asked for that scope."
+//   • 15 cohorts — Studio/RentAnnual, Rest House ×2, Farm/Buy, Shop ×2, Showroom ×2, Workshop ×2,
+//     Commercial Building ×2, Hotel/Buy, Gas Station ×2 — certify `property_age`, so the AI chat
+//     APPLIES an age filter there, while the manual UI can never offer it because AGE_FILTER_TYPES
+//     does not list those types. Same user, same cohort, two different answerable question sets.
+//
+// The two gates encode DIFFERENT, both-legitimate facts — cohort certification (is this question
+// evidenced for this type/deal/period?) and the age gate's own data-quality floor (150 rows, with
+// counts==search parity verified per type). Neither is redundant, so the correct predicate is the
+// INTERSECTION, exactly as R2.2.2 argues for multi-type and R2.3.1 for multi-period: the shared SQL
+// predicates are strict-NULL-excluding, so asking a question that one gate has no evidence for
+// silently amputates rows the moment it is answered. Intersecting NARROWS only — it can never make
+// a question askable where it was not already.
+//
+// Both surfaces now call THIS function, so they cannot drift again; the id-specific extra gate
+// lives here rather than at either call site.
+export function afQuestionAllowed(q: SearchQuery, id: string): boolean {
+  if (!cohortAllows(q, id)) return false;
+  // effectiveTypes(q), NOT scopeCleanTypes(q): the age gate is single-type-only by construction
+  // (`effectiveTypes.length !== 1` returns false), and passing group members instead would change
+  // its answer on a group-only scope. This keeps the age half byte-identical to what the UI already
+  // computed — the ONLY behavioural change here is the added cohort requirement.
+  if (id === 'property_age') return isAgeFilterScope(q, effectiveTypes(q));
+  return true;
 }
 
 

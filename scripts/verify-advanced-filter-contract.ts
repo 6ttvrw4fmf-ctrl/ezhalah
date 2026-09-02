@@ -140,8 +140,18 @@ check('RNPL + amenities are multi; age + bathrooms are single',
   && /BATHROOMS_QUESTION[\s\S]{0,400}selection:\s*'single'/.test(advSrc));
 
 // ── Unified gates + floors (age gate moved INTO its config; ONE per-option floor) ────────────────
-check("age's eligibility lives in its own config, and agent.tsx no longer holds the age gate",
-  /AGE_QUESTION[\s\S]{0,400}eligibility:\s*\(q\)\s*=>\s*isAgeFilterScopeFor/.test(advSrc)
+// UPDATED 2026-09-01. This used to require the literal
+// `eligibility: (q) => isAgeFilterScopeFor(...)`. That exact expression WAS the defect: it made
+// property_age the only AF question whose gate skipped cohort certification, so the manual UI
+// offered an age question on Room/Buy that COHORT_QUESTIONS does not certify (R2.1.1), while the AI
+// chat — gating the same id on cohortAllows() alone — applied age on 15 cohorts the UI can never
+// offer. The age gate now runs INSIDE the shared afQuestionAllowed() predicate, which both surfaces
+// call. The intent of this assertion is unchanged and in fact stronger: the gate lives in the
+// question's own config (not at a call site) and agent.tsx still does not hold it. What moved is
+// only WHERE the age-specific half is expressed. See
+// scripts/verify-af-question-gate-is-one-predicate.ts for the full-matrix proof.
+check("age's eligibility lives in its own config via the SHARED gate, and agent.tsx no longer holds the age gate",
+  /AGE_QUESTION[\s\S]{0,600}eligibility:\s*\(q\)\s*=>\s*afQuestionAllowed\(q,\s*'property_age'\)/.test(advSrc)
   && !/isAgeFilterScope/.test(agentSrc));
 check('one shared per-option floor (MIN_REAL_OPTION_COUNT via meaningful()); the >0-chips vs >=5-buckets split is banned',
   // Definition moved to afRanking.ts (2026-08-22); advancedFilters.ts imports+re-exports the constant

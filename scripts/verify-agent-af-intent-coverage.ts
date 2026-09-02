@@ -131,9 +131,19 @@ const edge = readFileSync(new URL("../supabase/functions/agent/index.ts", import
 const reg = readFileSync(new URL("../src/lib/afIntents.ts", import.meta.url), "utf8");
 check("the client runs the registry loop", /const res = applyAfIntents\(q, b\.af as Record<string, unknown>\);/.test(client));
 check("rejected AF intents join the shared clarification list", /lastRejectedFilters\.push\(\.\.\.res\.rejected\);/.test(client));
-check("the registry gates on cohortAllows — the AF predicate itself",
-  /if \(!cohortAllows\(out, id\)\) \{ rejected\.push\(id\); continue; \}/.test(reg),
-  "certification must come BEFORE canonicalization, so a refusal can never look applied");
+// UPDATED 2026-09-01. This asserted the literal `cohortAllows(out, id)` and called it "the AF
+// predicate itself". For eight of the nine questions that was true; for property_age it was not —
+// the AF question gated on isAgeFilterScope() instead, so this surface applied an age filter on 15
+// cohorts where the manual UI can never offer one, and the UI offered it on Room/Buy where
+// COHORT_QUESTIONS certifies nothing (R2.1.1). afQuestionAllowed() IS now the AF predicate itself:
+// it calls cohortAllows() and adds each question's own extra gate, and both surfaces call it.
+// The intent here — certification BEFORE canonicalization, so a refusal can never look applied —
+// is unchanged; the assertion now names the stronger predicate so it cannot regress to the weaker
+// one. Full-matrix proof: scripts/verify-af-question-gate-is-one-predicate.ts.
+check("the registry gates on afQuestionAllowed — the AF predicate itself, shared with the manual UI",
+  /if \(!afQuestionAllowed\(out, id\)\) \{ rejected\.push\(id\); continue; \}/.test(reg),
+  "certification must come BEFORE canonicalization, so a refusal can never look applied — and it " +
+  "must be the SAME predicate the manual AF question uses, or the two surfaces drift");
 check("the edge declares no cohort tables", !/const\s+COHORT_QUESTIONS|const\s+COHORT_CHIPS/.test(edge));
 check("the edge never calls a certification predicate", !/^\s*(?:if\s*\()?\s*cohortAllows\(/m.test(edge));
 // 2026-08-31: af now passes through fillBathroomsIfAbsent() (a fill-absent-only deterministic

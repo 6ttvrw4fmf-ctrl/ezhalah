@@ -94,7 +94,10 @@ const AGE_QUESTION: AdvancedQuestion = {
   id: 'property_age',
   titleKey: 'How old is the property?',
   selection: 'single',
-  eligibility: (q) => isAgeFilterScopeFor(q, effectiveTypes(q)),
+  // BOTH gates, via the one shared predicate (2026-09-01). This used to be isAgeFilterScopeFor()
+  // alone — the only AF question that skipped cohort certification — which let Room/Buy offer an
+  // age question COHORT_QUESTIONS does not certify, violating R2.1.1. See afQuestionAllowed().
+  eligibility: (q) => afQuestionAllowed(q, 'property_age'),
   async resolveOptions(q) {
     const counts = await fetchPropertyAgeOptionCounts(q);
     if (isProbeFailure(counts)) return { options: [], unknownCount: null, total: 0, probeFailed: true };
@@ -119,7 +122,7 @@ const AGE_QUESTION: AdvancedQuestion = {
 // multi-type intersection mutation-provable. The cohort DATA moved with it, unchanged. Buy+Rent
 // combined gating (q.dealCombined — owner feature 2026-08-20) lives there too, intersecting with
 // the multi-type/multi-period dimensions rather than being bolted on separately — see afCohorts.ts.
-import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips } from '@/lib/afCohorts';
+import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips, afQuestionAllowed } from '@/lib/afCohorts';
 // Merge picked strict amenity tokens (kitchen/parking/elevator/furnished/rnpl) into q.amenities.
 function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
   return keys.length ? { ...q, amenities: [...new Set([...(q.amenities ?? []), ...keys])] } : q;

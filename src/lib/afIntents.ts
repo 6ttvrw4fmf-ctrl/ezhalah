@@ -22,7 +22,7 @@
 // is NEVER guessed — it is rejected and the caller asks. UNKNOWN stays UNKNOWN; missing data never
 // becomes No/false/0.
 import type { SearchQuery } from '@/data/search';
-import { cohortAllows } from './afCohorts.ts';
+import { afQuestionAllowed } from './afCohorts.ts';
 
 export type AfIntentId =
   | 'property_age' | 'street_width' | 'direction' | 'bathrooms'
@@ -196,7 +196,10 @@ export function applyAfIntents(
     const values = Array.isArray(raw) ? raw : [raw];
     // Certification FIRST: an uncertified cohort must not even canonicalize, so a rejection can never
     // be mistaken for "applied".
-    if (!cohortAllows(out, id)) { rejected.push(id); continue; }
+    // afQuestionAllowed(), not cohortAllows(): for property_age the AF question carries a SECOND
+    // gate (AGE_FILTER_TYPES) that this surface used to ignore, so the chat applied an age filter on
+    // 15 cohorts where the manual UI can never offer one. One predicate, both surfaces.
+    if (!afQuestionAllowed(out, id)) { rejected.push(id); continue; }
     for (const v of values) {
       const key = intent.canonicalize(String(v));
       if (key === null) { rejected.push(`${id}:${String(v)}`); continue; }

@@ -113,6 +113,14 @@ for (const u of UNION_PARAMS) {
 // The UI half: every amenity key src/data/advancedFilters.ts can put into q.amenities.
 const af = read('src/data/advancedFilters.ts');
 const amenitiesBlock = af.slice(af.indexOf('const AMENITIES_QUESTION'), af.indexOf('const BATHROOMS_QUESTION'));
+// A LOCATION IS PART OF EVERY PROBE (2026-09-01). These bodies exist to introspect the translator's
+// VOCABULARY — "does 'ac' become s.air_conditioner?" — not to count anything. buildOracleQS now
+// refuses a body with NO location narrowing, because af_eligibility_clause() then also admits
+// UNLOCATED non-production_ready rows (a carve-out the oracle deliberately does not model). That
+// refusal is correct for a counting oracle and irrelevant here, so each probe carries a city and
+// the vocabulary assertions below are unchanged.
+const PROBE_LOC = { p_cities: ['الرياض'] };
+
 const uiTokens = [...amenitiesBlock.matchAll(/key: '([a-z_]+)'/g)].map((m) => m[1]);
 check('the UI amenity question offers a plausible number of chips', uiTokens.length >= 10,
   `${uiTokens.length}: ${uiTokens.join(',')}`);
@@ -124,7 +132,7 @@ check('every chip the UI can send is in the clause vocabulary (else the clause f
 // each clause token, buildOracleQS must emit a filter on the SAME column the clause guards with,
 // and must report nothing unhandled. This is what was broken for 'ac' and 'furnished'.
 for (const tok of clauseTokens) {
-  const { qs, unhandled } = buildOracleQS({ p_amenities: [tok] });
+  const { qs, unhandled } = buildOracleQS({ ...PROBE_LOC, p_amenities: [tok] });
   const col = guards.get(tok)!;
   check(`the independent oracle understands '${tok}' and filters s.${col}`,
     unhandled.length === 0 && qs.includes(`${col}=is.true`),
@@ -136,13 +144,13 @@ for (const tok of clauseTokens) {
 // (see AMENITY_TOKEN_COL's own history comment) and are exercised in the clauseTokens loop above
 // instead. Replaced with other still-uncertified concepts so this direction keeps real coverage.
 for (const bogus of ['view', 'security', 'storage_room', 'not_a_real_amenity']) {
-  const { unhandled } = buildOracleQS({ p_amenities: [bogus] });
+  const { unhandled } = buildOracleQS({ ...PROBE_LOC, p_amenities: [bogus] });
   check(`the oracle refuses '${bogus}' (not in the clause vocabulary) instead of inventing a filter`,
     unhandled.some((u) => u.includes(bogus)));
 }
 
 // ── R7.2.2 behaviour, on the oracle: AND for amenities, OR for a value domain ────────────────────
-const multiAmenity = buildOracleQS({ p_amenities: ['kitchen', 'parking', 'ac'] });
+const multiAmenity = buildOracleQS({ ...PROBE_LOC, p_amenities: ['kitchen', 'parking', 'ac'] });
 check('three amenity chips produce three separate conjunctive filters (AND), not one or-list',
   multiAmenity.unhandled.length === 0
   && multiAmenity.qs.includes('kitchen=is.true')
@@ -150,7 +158,7 @@ check('three amenity chips produce three separate conjunctive filters (AND), not
   && multiAmenity.qs.includes('air_conditioner=is.true')
   && !multiAmenity.qs.includes('or='),
   multiAmenity.qs);
-const multiDir = buildOracleQS({ p_directions: ['شمال', 'جنوب'] });
+const multiDir = buildOracleQS({ ...PROBE_LOC, p_directions: ['شمال', 'جنوب'] });
 check('two direction chips produce ONE membership filter (OR/union), not two conjunctive ones',
   (multiDir.qs.match(/direction_ar=in\./g) ?? []).length === 1,
   multiDir.qs);
