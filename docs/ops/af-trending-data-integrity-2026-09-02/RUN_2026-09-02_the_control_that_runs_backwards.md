@@ -80,6 +80,21 @@ because it is the exact shape of the thing this file exists to prevent, found by
 | `verify-af-contract-coverage-map` | 135 rules graded, every cited barrier real and executing |
 | `npm test` | **290/290** |
 
+## One intermittent, deliberately not called a flake
+
+`verify-trending-live-four-way-truth` was executed **five** times this run. Four were 55/55 clean;
+**one failed exactly one check**, and the label was lost to a `tail` of the log — the journey emits
+~55 PASS lines, so a single FAIL far up the scroll never reaches the reader. Four subsequent runs
+could not reproduce it.
+
+"Flake" is not a root cause and this repo's rules say so — but a cause you cannot name is one you
+cannot fix. So the fix is the one that makes the next occurrence diagnosable: **the closing summary
+now lists every failed label**, in this journey and in the new pill-removal one, which has the same
+shape. Behaviour is otherwise unchanged — same checks, same exit code, same inline lines.
+
+Recorded in the ledger as `trending_live / four_way_truth.intermittent_2026-09-02` (OPEN) so the next
+run looks for it rather than rediscovering it.
+
 ## Sentry
 
 Queue read live (org `ezhalah`, project `react-native`): **1 unresolved issue**, `REACT-NATIVE-7`
