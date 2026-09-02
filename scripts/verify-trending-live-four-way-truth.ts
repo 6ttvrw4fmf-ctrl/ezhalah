@@ -27,6 +27,7 @@
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
+import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
@@ -99,10 +100,14 @@ async function knownDistrictsFor(names) {
   return out;
 }
 
+// Directions (2026-09-02): observed «…ي» spellings, so a direction answer carried into Trending can
+// be translated rather than refused (see afOracleLive.ts).
+const DIRECTION_VARIANTS = (await loadDirectionVariants(REST_URL, H)).map;
+
 /** Independent count straight through PostgREST — never by re-calling our own RPC. */
 async function oracleCount(body: any): Promise<{ count: number | null; unhandled: string[] }> {
   const knownDistricts = await knownDistrictsFor(body.p_districts ?? []);
-  const { qs, unhandled } = buildOracleQS(body, { typeMacros: TYPE_MACROS, knownDistricts });
+  const { qs, unhandled } = buildOracleQS(body, { typeMacros: TYPE_MACROS, knownDistricts, ...(DIRECTION_VARIANTS ? { directionVariants: DIRECTION_VARIANTS } : {}) });
   if (unhandled.length) return { count: null, unhandled };
   const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=listing_id&${qs}`, {
     headers: { ...H, Prefer: 'count=exact', Range: '0-0' },

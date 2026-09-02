@@ -388,6 +388,24 @@ Things that cost a previous run real time, and are NOT product defects:
    only the row's displayed label will disagree with the UI wherever `match_values` merges name
    variants (live 2026-08-25: جدة «الصفاء» = `['الصفاء','حي الصفا']` = 304 + 105 = the advertised 409).
    Count over the whole `match_values` set.
+6. **Directions are stored with the nisba «ي» and the oracle must know it** (2026-09-02). The index
+   holds «شمال شرقي», never «شمال شرق» — the key the chip sends — and the RPC normalises both sides.
+   A literal `direction_ar=in.(key)` therefore undercounts every compound direction and reports a
+   phantom EXTRA against a correct search. `buildOracleQS` now REFUSES `p_directions` unless given a
+   `directionVariants` map; build it with `loadDirectionVariants()` (`scripts/lib/afOracleLive.ts`),
+   which reads the observed spellings from the index and refuses on any unclassified spelling.
+7. **Discover distinct values with a "next value strictly greater" walk, never by paging the whole
+   index.** `order=<col>&limit=1&<col>=gt.<last>` finds all 50 source tables in 50 requests (~30 s);
+   paging 200k rows by 1,000 took ~200 ordered requests. PostgREST has no DISTINCT.
+8. **`npm test` auto-discovers every `scripts/verify-*.ts`.** A new live browser journey dropped into
+   `scripts/` runs INSIDE `npm test` — and fails it — until its `scripts/test-exclusions.txt` row
+   names its workflow home. Add the row in the same change as the file.
+9. **`p_tables` is period-DERIVED, not scope-stable** (2026-09-02). `resTables()` in
+   `src/data/remote.ts` appends the two monthly-only sources (`gathern_*`, `aqarmonthly_*`) exactly
+   when the period scope includes Monthly (شهري or كلاهما, or combined deal). A "no non-AF key moved
+   under a deal/period change" rule must assert that derivation, not equality — asserting equality
+   reports a phantom regression on a correct production (`verify-af-scope-change-live.ts`
+   `tablesFollowPeriod`).
 5. **Advanced Filter lives in the «الوكيل الذكي» (agent) flow, not the Normal Filter «بحث» flow.**
    Reaching it: send an Arabic request, answer the agent's disambiguation (a city that is also a
    region needs «مدينة …»; «تقصد المدينة كاملة، أو حي معيّن؟» needs «المدينة كاملة»), then click

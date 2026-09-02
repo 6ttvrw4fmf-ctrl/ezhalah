@@ -148,6 +148,63 @@ jobs:
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-pill-removal-live.ts
 
+      # THE WHOLE CERTIFIED SURFACE, EVERY OPTION (added 2026-09-02, owner requirement). The
+      # property-type differential above proves ONE answer per certified question; this proves
+      # EVERY option the card can render — every rung, direction, age bucket, amenity chip, both
+      # furnished answers, every rating cut, every unit subtype — with five witnesses per option
+      # (card chip = af_eligible_count = search total_count = paged ID set = independent PostgREST
+      # truth, rows re-evaluated in JS), plus same-field OR, cross-field AND with the round-2 chip,
+      # boundaries, UNKNOWN never becoming a value, zero-count options, multi-type pairs, combined
+      # Buy∪Rent and both-period scopes. Its verdict logic is mutation-proven offline by
+      # scripts/verify-af-surface-judge.ts (in npm test). Riyadh region daily; cities rotate below.
+      - name: Every option of every certified cohort shows DB truth and clicks to exactly that set
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          AF_FSD_SCOPES: region:1
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-full-surface-differential.ts
+
+      - name: …and the same option surface inside a CITY scope (جدة), single-type stages
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          AF_FSD_SCOPES: city:جدة
+          AF_FSD_SKIP_MULTI: '1'
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-full-surface-differential.ts
+
+      # THE CARD ITSELF, EVERY NUMBER ON IT (added 2026-09-02). The sweep above talks to the RPCs
+      # the card talks to; this reads the numbers a human SEES on the rendered card — every option's
+      # count — and carries each to the captured count RPC and to independent DB truth, clicks one,
+      # walks «عرض المزيد» to the end asserting every page carries the same predicate with no
+      # duplicates, then commits a second round and proves the AND.
+      - name: Every number on the rendered AF card is DB truth, clicks to that set, and pages cleanly
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-option-card-truth-live.ts
+
+      # Removing the LAST pill must return byte-exactly to the pre-AF search — zero AF predicates,
+      # the same count, and the removed question askable again (added 2026-09-02).
+      - name: Removing the last AF pill returns exactly to the pre-AF search
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-remove-last-pill-live.ts
+
+      # Changing DEAL or RENT PERIOD after committing answers keeps exactly what the new cohort
+      # certifies — cohortAllows() executed live against the request body — and resurrects nothing
+      # (added 2026-09-02; the type-change half is verify-af-stale-predicate-live.ts above).
+      - name: Changing deal or period after AF keeps exactly the certified answers
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-scope-change-live.ts
+
       - name: …and the same, on a mobile viewport in a non-Riyadh city
         if: ${{ !cancelled() }}
         env:

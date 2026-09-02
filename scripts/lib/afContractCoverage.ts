@@ -78,7 +78,7 @@ const S1: Entry[] = [
   { rule: 'R1.4.3', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-buy-rent-combined-af-gating'], evidence: 'live: the combined Rent leg spans both periods (Rent 20,043 = Annual 11,158 + Monthly 8,885)' },
   { rule: 'R1.5.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-rent-period-both', 'verify-mixed-period-af-gating'], evidence: 'live: both-periods 20,043 = Annual 11,158 + Monthly 8,885, an exact union' },
   { rule: 'R1.5.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-rent-period-both'], evidence: 'single shared rent budget in plain-Rent both-period mode' },
-  { rule: 'R1.6.1', dim: 'af', weight: 2, grade: 'P', barrier: [], evidence: 'NO barrier asserts "AF never re-scopes on its own"; implied only by the count-carry checks' },
+  { rule: 'R1.6.1', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-af-surface-judge'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): every option count was computed against exactly the current search body; 150 cross-field AND cases priced the second option INSIDE the first answer and matched the oracle for the conjunction — AF never re-scoped on its own' },
   { rule: 'R1.6.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-cross-round-carry'], evidence: '2026-08-31 live AF interview journey (production, desktop): progressive narrowing measured across a full round: 10,316 -> 3,193 -> 356 -> 8, each question\'s option counts computed against the PREVIOUS round\'s narrowed set, and the final committed count (8) equalled the results turn actually delivered («كل النتائج المطابقة (8 إعلان)»).' },
 ];
 
@@ -90,13 +90,13 @@ const S2: Entry[] = [
   { rule: 'R2.2.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-group-cohort-coverage'], evidence: 'live intersection across selected types: Villa+Duplex offered ONLY bathrooms, dropping street_width/direction/property_age/amenities that Villa alone allows' },
   { rule: 'R2.2.2', dim: 'af', weight: 1, grade: 'P', barrier: [], evidence: 'rationale for R2.2.1' },
   { rule: 'R2.2.3', dim: 'af', weight: 1, grade: 'L', barrier: [], evidence: 'the contract worked example reproduced live: Apartment+Villa Buy offered property_age/amenities/bathrooms/direction and dropped street_width, exactly as written' },
-  { rule: 'R2.2.4', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-group-cohort-coverage'], evidence: 'empty intersection → zero questions' },
-  { rule: 'R2.3.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-mixed-period-af-gating'], evidence: 'both-period intersection executed' },
+  { rule: 'R2.2.4', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-af-group-cohort-coverage'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): 150 multi-type pairs walked; every empty certified intersection offered nothing and every surviving question\'s option matched DB truth on the type-union scope' },
+  { rule: 'R2.3.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-mixed-period-af-gating'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): 31 both-period (كلاهما) options across the cohorts certified for BOTH Annual and Monthly: chip = search total = oracle (verbatim clause translation), 0 mismatches' },
   { rule: 'R2.3.2', dim: 'af', weight: 1, grade: 'P', barrier: [], evidence: 'rationale for R2.3.1' },
-  { rule: 'R2.4.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-buy-rent-combined-af-gating'], evidence: 'cohortAllowsCombined() executed' },
-  { rule: 'R2.4.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-buy-rent-combined-af-gating'], evidence: 'buy-only/rent-only/monthly-only correctly excluded' },
-  { rule: 'R2.5.1', dim: 'integrity', weight: 3, grade: 'L', barrier: ['verify-af-independent-oracle', 'verify-af-unknown-count-truthful'], evidence: 'BOTH halves production-verified 2026-08-28: unknown is never rolled into a chip, AND the user is now shown it — «382 إعلان لم يذكر» on the age question, no caption where no truthful count exists.' },
-  { rule: 'R2.5.2', dim: 'integrity', weight: 3, grade: 'L', barrier: ['verify-rpc-clause-invariants', 'verify-af-multiselect-combining-semantics'], evidence: '108 live option counts = search RPC across 3 cohorts; clause predicates pinned NULL-strict' },
+  { rule: 'R2.4.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-buy-rent-combined-af-gating'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): 24 combined Buy∪Rent options on the questions certified for all three legs: chip = search total = oracle, 0 mismatches' },
+  { rule: 'R2.4.2', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-buy-rent-combined-af-gating'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): only bathrooms/amenities survived into the combined scope (rnpl, furnished, rating, age, direction, street width excluded), each verified exact' },
+  { rule: 'R2.5.1', dim: 'integrity', weight: 3, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-af-independent-oracle', 'verify-af-unknown-count-truthful'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): 105 unknown captions (age / furnished / direction) = the DB\'s NULL count exactly; no unknown folded into a chip' },
+  { rule: 'R2.5.2', dim: 'integrity', weight: 3, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-af-surface-judge', 'verify-rpc-clause-invariants'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): every oracle row re-evaluated in JS: 0 NULL→value leaks and 0 predicate violations across every strict option' },
   { rule: 'R2.5.3', dim: 'integrity', weight: 1, grade: 'P', barrier: [], evidence: 'cross-reference to ops/ADVANCED_FILTER_SOURCE_TRUTH.md' },
   { rule: 'R2.5.4', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-probe-failure-not-a-verdict'], evidence: 'was X1 (uncontracted); made canonical by the owner 2026-08-28. probeVerdict() executed: failed probe -> unknown, retry once, never known-empty' },
 ];
@@ -137,7 +137,7 @@ const S5: Entry[] = [
   { rule: 'R5.4.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-two-option-survival'], evidence: 'MIN_OPTIONS_MULTI=1' },
   { rule: 'R5.4.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-two-option-survival'], evidence: 'lone surviving option asked as yes/no vs Skip' },
   { rule: 'R5.5.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-narrowing-gate'], evidence: 'CI bathrooms journey: rungs rendered per-rung, base 11,202 → ≥1 selected → 2,469' },
-  { rule: 'R5.5.2', dim: 'af', weight: 1, grade: 'P', barrier: [], evidence: 'worked Example G' },
+  { rule: 'R5.5.2', dim: 'af', weight: 1, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-af-surface-judge'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): every bathroom/street-width rung and every age bucket verified per rung: 337 boundaries exercised (a row ON the threshold present), ≥N includes N, buckets closed at both ends, 0 violations' },
   { rule: 'R5.6.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-salience-orders-only'], evidence: 'scoreQuestion() executed across the whole salience range (0 to 1000): ask/skip verdict and surviving option set are invariant, score stays exactly proportional, and order still moves (2026-08-30)' },
   { rule: 'R5.6.2', dim: 'af', weight: 2, grade: 'P', barrier: ['verify-af-narrowing-gate'], evidence: 'ASK_FIRST_TIER reorders only; covered indirectly by the usefulness gate' },
 ];
@@ -159,17 +159,17 @@ const S6: Entry[] = [
 
 // ── §7 LIVE COUNTS ───────────────────────────────────────────────────────────────────────────────
 const S7: Entry[] = [
-  { rule: 'R7.1.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-independent-oracle'], evidence: '108 live option counts = search RPC, 3 cohorts, 0 mismatches (2026-08-28)' },
+  { rule: 'R7.1.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-af-surface-judge', 'verify-af-option-card-truth-live'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): 1,508 option chips (931 region + 577 city) = af_eligible_count = search total_count = paged ID set = independent oracle; 0 count mismatches; plus the rendered card read in a real browser (every pill = cnt_* = oracle)' },
   { rule: 'R7.1.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-count-belongs-to-selection'], evidence: 'CI: Continue count = result-RPC total on all 9 journeys' },
   { rule: 'R7.1.3', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-unknown-count-truthful'], evidence: 'PRODUCTION VERIFIED 2026-08-28: الرياض/إيجار/سنوي/شقة — the age question shows «382 إعلان لم يذكر هذه المعلومة» (= cnt_unknown in the DB), while rnpl, bathrooms and amenities correctly show NO caption. Derivations exact on 2 cohorts (furnished 7,434/2,191; direction 9,521/345).' },
-  { rule: 'R7.2.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-multiselect-combining-semantics'], evidence: 'each chip reads its own cnt_*; live marginals kitchen/parking/elevator exact' },
-  { rule: 'R7.2.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-multiselect-combining-semantics'], evidence: 'AND ac+elevator=1,619; OR شمال+جنوب=813=488+325. Contract WORDING incomplete (names only the union shape) — owner question open.' },
+  { rule: 'R7.2.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-af-multiselect-combining-semantics'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): each chip\'s marginal count verified per chip; the footer (cnt_selected) verified as the combined set on 35 same-field unions' },
+  { rule: 'R7.2.2', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-af-surface-judge', 'verify-af-multiselect-combining-semantics'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): 35 same-field OR combos = exact set union, 284 cross-field AND combos = exact set intersection, judged on ID sets — both shapes, 0 violations' },
   { rule: 'R7.3.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-count-belongs-to-selection'], evidence: 'pending window blanks rather than showing a stale value' },
   { rule: 'R7.3.2', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-count-belongs-to-selection'], evidence: 'cross-reference' },
   { rule: 'R7.4.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-result-cap-honesty'], evidence: 'live browser: headline «لقينا 6,113» is the true total, not the displayed-card count' },
   { rule: 'R7.4.2', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-result-cap-honesty'], evidence: 'cross-reference to the result-cap rule' },
-  { rule: 'R7.5.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-live-truth', 'verify-af-independent-oracle'], evidence: '15 cohorts diffed to EXACT (source_table,listing_id) sets against the independent PostgREST oracle: missing=extra=duplicates=0 on all 15 after the oracle soundness fixes' },
-  { rule: 'R7.5.2', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-live-truth'], evidence: 'cross-reference' },
+  { rule: 'R7.5.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-af-live-truth', 'verify-af-independent-oracle'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): 2,371 live cases diffed to exact (source_table,listing_id) sets against PostgREST: MISSING 0, EXTRA 0, DUPLICATES 0' },
+  { rule: 'R7.5.2', dim: 'af', weight: 1, grade: 'B', barrier: ['verify-af-full-surface-differential', 'verify-af-live-truth'], evidence: 'the daily workflow now runs the full-surface sweep (region + city) beside the 9 journeys' },
 ];
 
 // ── §8 SKIP / BACK / SHOW RESULTS ────────────────────────────────────────────────────────────────
@@ -216,7 +216,7 @@ const S10: Entry[] = [
 const S11: Entry[] = [
   { rule: 'R11.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-offer-gate'], evidence: 'INTERVIEW_STOP_AT=25: at or below 25 results the offer is hidden and a round refuses to open' },
   { rule: 'R11.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-narrowing-gate'], evidence: 'no option clearing the usefulness rule stops AF (Example F)' },
-  { rule: 'R11.3', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-group-cohort-coverage'], evidence: 'empty certified intersection stops AF' },
+  { rule: 'R11.3', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-af-group-cohort-coverage'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): multi-type pairs with an empty certified intersection offered no question (observed on the 150-pair walk)' },
   // R11.4: same correction as R8.4.1 — verify-af-round-size never mentions Skip All either.
   { rule: 'R11.4', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-footer-buttons'], evidence: 'REMOVED with the control (owner 2026-08-28); Back-from-Q1 and ✕ are the live early exits' },
 ];
@@ -234,10 +234,10 @@ const S12: Entry[] = [
 const S13: Entry[] = [
   { rule: 'R13.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-narrowing-gate'], evidence: 'filter_tier boundary: AF never asks a Normal-Filter question' },
   { rule: 'R13.2', dim: 'integrity', weight: 3, grade: 'L', barrier: ['verify-af-independent-oracle'], evidence: 'satel adjudication 2026-08-28: 89 index-true ↔ 89 source-published acType, 1:1, nothing invented' },
-  { rule: 'R13.3', dim: 'integrity', weight: 3, grade: 'L', barrier: ['verify-af-independent-oracle'], evidence: 'satel: the one row with no acType stays UNKNOWN; 108 live counts NULL-strict' },
+  { rule: 'R13.3', dim: 'integrity', weight: 3, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-af-surface-judge'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): 0 rows with NULL in a strict column reached any returned set, on every option of every certified cohort' },
   { rule: 'R13.4', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-takes-over-cta'], evidence: '2026-08-31 live AF interview journey (production, desktop): all three halves observed — offer «نحدد الطلب» rendered at 18s with NO AF footer present (no auto-open); a single tap on «يقبل التقسيط» kept the SAME question (no auto-advance); AF rendered inline in the transcript flow (no popup).' },
   { rule: 'R13.5', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-no-unsupported-claims'], evidence: 'never recommend/rank-by-best' },
-  { rule: 'R13.6', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-live-truth'], evidence: 'CI: no displayed count disagreed with DB truth on any of 9 journeys' },
+  { rule: 'R13.6', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-af-option-card-truth-live'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): 0 displayed counts disagreed with DB truth across 1,508 option chips, 105 captions and every combo; the rendered card agreed in the browser' },
   { rule: 'R13.7', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-cross-round-carry'], evidence: '2026-08-31 live AF interview journey (production, desktop): «كم عمر العقار تقريباً؟» was skipped, then after advancing past it the question was not re-asked (current «كم دورة مياه تفضل؟»).' },
   { rule: 'R13.8', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-continuous-chat-history'], evidence: 'never fork the sidebar' },
   { rule: 'R13.9', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'never permanently burn an un-answered question' },

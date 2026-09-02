@@ -10,6 +10,7 @@
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
+import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
@@ -99,7 +100,10 @@ async function knownDistrictsFor(names) {
   return out;
 }
 
-const ORACLE_OPTS = { typeMacros: TYPE_MACROS };
+// Directions (2026-09-02): the index stores «…ي» spellings the RPC normalises; the oracle needs the
+// OBSERVED spellings or it refuses to translate p_directions (see afOracleLive.ts).
+const DIRECTION_VARIANTS = (await loadDirectionVariants(REST_URL, H)).map;
+const ORACLE_OPTS = { typeMacros: TYPE_MACROS, ...(DIRECTION_VARIANTS ? { directionVariants: DIRECTION_VARIANTS } : {}) };
 
 
 async function oracleCount(reqBody) {
