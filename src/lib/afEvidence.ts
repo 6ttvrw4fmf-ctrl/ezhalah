@@ -183,7 +183,9 @@ export const AF_EVIDENCE: Record<string, EvidenceDef> = {
   },
   rating: {
     fields: ['ratingMin', 'reviewsMin'],
-    active: (q) => (q.ratingMin == null ? null : [q.reviewsMin != null ? `${q.ratingMin}_rc${q.reviewsMin}` : String(q.ratingMin)]),
+    // Key = the AF's own option keys ('9.5' | '9.0' | '9.0_rc10'): one decimal, so a query built by
+    // RATING_QUESTION.apply() round-trips exactly (the barrier asserts apply → active → [key]).
+    active: (q) => (q.ratingMin == null ? null : [q.reviewsMin != null ? `${q.ratingMin.toFixed(1)}_rc${q.reviewsMin}` : q.ratingMin.toFixed(1)]),
     reads: (k) => (k[0].includes('_rc') ? ['rating', 'reviews_count'] : ['rating']),
     ok: (k, r) => {
       const [min, rc] = k[0].split('_rc');
