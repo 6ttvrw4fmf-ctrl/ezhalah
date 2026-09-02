@@ -195,7 +195,10 @@ State clearly: **⚠️ I NEED YOUR APPROVAL**, with the evidence and the exact 
 4. **Bulk or destructive listing operations** — mass activate/inactivate, bulk field rewrites,
    hard deletion beyond the documented policy, retention-policy changes.
 5. **New search/product semantics** — changing what a filter *means*, or materially changing result
-   sets by design rather than by defect repair.
+   sets by design rather than by defect repair. (Making an existing rule hold where it currently
+   leaks is **defect repair, not new semantics** — see "A displayed number that disagrees with its
+   own click-through is a bug" below. Extending an RPC signature so a surface can obey a rule the
+   product already has is GREEN.)
 6. **Destructive or high-risk schema changes** — drops, irreversible rewrites, anything without a
    clean rollback.
 7. **Anything not easily reversible**, or whose blast radius cannot be confidently bounded.
@@ -450,3 +453,42 @@ the whole change collapsed to one nullable column plus an ORDER BY expression.
 **The 10/10 must be real.** Never reach it by weakening a destructive-operation gate, bypassing a
 deploy/concurrency lock, inventing source truth, or lowering a coverage/safety threshold to make an
 alert go quiet. A rating held down by a genuine external or source limitation is the correct rating.
+
+### A displayed number that disagrees with its own click-through is a bug (owner-granted, 2026-08-22)
+
+**The permanent product rule already exists:**
+
+> **number shown = the number the user can actually get under the exact current filter state** —
+> the same category, group, type, deal, rent period, city, district, price/area/beds **and Advanced
+> Filter answers.** No pre-AF count is allowed once AF answers exist.
+
+A surface that violates it is **broken**, not undecided. `count shown = click-through result count =
+RPC truth = DB truth` is an invariant; a Trending chip reading 4,449 when clicking it yields 592 is
+a correctness defect on the GREEN list, to be fixed → barriered → mutation-proven → merged →
+deployed → production-verified without asking.
+
+This was added after a Senior run proved the district AF count defect live in production, confirmed
+the fix already existed in an open PR with green CI and a mutation-proven barrier, and *still*
+returned it to the owner as an approval request. The owner's answer:
+
+> *"A count saying 4,449 when click-through truth is 592 is not a product decision. That is a
+> correctness bug. If the permanent product rule is already `number shown = number the user can
+> actually get under the exact current filter state`, then making city counts AF-aware is not a new
+> product decision either — it is implementing the existing rule correctly. I do not want to approve
+> obvious engineering correctness fixes one by one."*
+
+**None of these makes a count defect escalable:** the fix needs a new backend parameter or an
+extended RPC signature; it spans frontend and database; it affects a headline surface; the surface
+"was always like that"; the count is an aggregate rather than a result set; you are unsure whether
+counts count as "product". **Implementing an existing rule correctly is never a new product
+decision.** What stays RED is genuinely *changing* the rule — redefining what a filter means, or
+deciding a count should deliberately show something other than the achievable result count.
+
+**Two design constraints these fixes obey** (both from the 2026-08-22 city/district work):
+
+- **One server-side aggregate, not N per-surface calls,** where a single RPC can compute it
+  correctly.
+- **Never hand-copy the eligibility predicate.** Generate it from `af_eligibility_clause()` so it is
+  inlined byte-identically into every surface — a hand-copied fourth copy is a drift bug waiting to
+  happen. `mon_detect_af_count_surfaces_carry_af()` enforces this, and any new count surface must be
+  added to it in the same migration.
