@@ -112,6 +112,34 @@ rent budget, **zero** returned.
 Same shape as Defects 1 and 2: two layers holding different opinions about one concept, with the
 divergence invisible from any single search's results.
 
+### Defect 3, proven and re-proven in a real browser
+
+The offline barrier proves the predicate. It cannot prove what the owner actually asked about, so a
+live journey does — Riyadh · شقة · both deals · a 500,000 Buy floor typed in, Rent box left empty.
+Same journey, same cohort, run twice against `https://ezhalah-app.vercel.app`:
+
+| | bundle | rent rows handed to the app | of those, under the Buy floor | rent cards on screen |
+|---|---|---|---|---|
+| before | `entry-974d0d5d…` | 1,166 of 1,500 | 1,155 | **0** |
+| after | `entry-2880b17a…` | 1,166 of 1,500 | 1,155 | **6** (3 «/سنوياً» + 3 «/شهرياً») |
+
+The backend never changed between those two runs. Only the client's price net did.
+
+Two harness notes, both cases of the test being wrong before production was — the same lesson the
+711 phantom commercial "leaks" taught below:
+
+- the candidate RPC returns KEYS ONLY (`source_table, listing_id, platform, …`) with **no deal
+  column**. A first draft filtered its rows on `deal_ar` and "found" 0 rent rows in a 1,500-row
+  response. The rows the app will actually render arrive in the hydration GETs, which carry
+  `transaction_type` and `rent_period`; those are what the journey counts.
+- the "some are priced BELOW the Buy floor" assertion is not decoration. Without such a row the
+  floor would not bite, and the journey could not tell fixed code from broken code.
+
+Also checked and clean: all four count/search RPCs (`location_search_candidates_ar`,
+`top_cities_by_deal_ar`, `apartment_guided_counts_ar`, `property_age_option_counts_ar`) already
+accept `p_price_min_rent`/`p_price_max_rent`, so the defect was the client net alone — no second
+instance on the Trending or option-count surfaces.
+
 ## What the audit confirmed as CORRECT (equally important)
 
 - **AND/OR semantics — all six hold exactly, zero row-level violations.** Multi-amenity is AND (one
@@ -170,3 +198,55 @@ None blocking. One worth knowing: with `ageFilterTypes.ts` deleted, `property_ag
 floor had never cleared. That is main's deliberate choice and it satisfies R2.1.2 (cohort entries
 are added only after profiling). Flagging it only because the two gates encoded genuinely different
 facts and one of them is now gone.
+
+## Ratings
+
+```
+ADVANCED FILTER HEALTH:        8.9/10 (89%) → 8.9/10 (89%)
+TRENDING CITIES HEALTH:        9.3/10 (93%) → 9.6/10 (96%)
+TRENDING DISTRICTS HEALTH:     9.3/10 (93%) → 9.6/10 (96%)
+AF DATA INTEGRITY:             9.4/10 (94%) → 9.4/10 (94%)
+OVERALL AF + TRENDING HEALTH:  9.0/10 (90%) → 9.0/10 (90%)
+```
+
+Derived by `scripts/verify-af-contract-coverage-map.ts` over 135 graded contract rules
+(L 58 · B 59 · P 18 · N 0), not asserted.
+
+**Three defects fixed and deployed, and OVERALL did not move.** That is the honest reading, not a
+failure to report one. The map grades `ADVANCED_FILTER_PRODUCT_CONTRACT.md` rules, and the combined
+Buy+Rent budget is a NORMAL-filter field with no rule of its own; the two certification-gate fixes
+landed on rules already graded B. Writing new contract rules for surfaces I had just fixed would
+have raised my own score by editing the ruler — AGENTS.md forbids manufacturing a 10/10, and this is
+the shape that would do it.
+
+## Post-deploy production verification
+
+Deployed `c5918ae`; served bundle moved `entry-974d0d5d…` → `entry-2880b17a…`, read by direct
+`curl` rather than believed from job status. All five suites green against that bundle:
+
+| suite | result |
+|---|---|
+| `verify-af-live-truth` | 9 journeys, exact ID diffs — all checks passed |
+| `verify-af-stale-predicate-live` | no stale AF predicate crosses a property-type change |
+| `verify-af-property-type-differential` | every certified cohort returns only its own type, satisfying every AF answer |
+| `verify-trending-filter-state-live` | 22 live assertions + 3 mutation proofs |
+| `verify-combined-budget-live` | a combined Buy+Rent search shows both sides |
+
+## Still open at end of run
+
+- **`migration_drift` (P1) is red at 11 migrations, and it is an UNMERGED-PR backlog, not unmirrored
+  SQL.** Verified: PR #1426 carries 4 of the 11, PR #1455 carries 2, and #1462's title names a
+  seventh. The four `20260902*_af_option_*` were applied ~2h before this run by a concurrent
+  session, which owns mirroring them. Opening a twelfth mirror PR would only deepen the pile —
+  #1399, #1386, #956 and #858 are all still open. Policy says these stay open for human review, so
+  clearing the barrier is an owner merge decision.
+- **P1 gathern studio labelling** — 9,076 rows the source labels «استديو» served as شقة. Needs
+  source adjudication; routine #3's territory.
+- **P2 alert 781 `af_field_stuck_no_variance`** — triaged this run and routed, not fixed. Its four
+  stuck pairs are two different shapes and the alert text does not distinguish them: wasalt
+  driver_room 0/74 is unremarkable against a 5.9% platform-wide base rate, while satel
+  air_conditioner 42/0, satel kitchen 42/0 and sanadak maid_room 35/0 are all-TRUE and cannot
+  manufacture a No. Deciding either needs the source page, and the source hosts are egress-blocked
+  from this container.
+- **P2 sidebar chat-reopen** may carry the previous conversation's type + AF answers forward;
+  unverified against `certifyAfOnMergedState()` coverage.
