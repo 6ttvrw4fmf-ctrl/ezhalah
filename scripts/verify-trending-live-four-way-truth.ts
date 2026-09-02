@@ -409,6 +409,16 @@ async function runAfReentryJourney(j: {
     // By testID, never by label: the copy on this button is being reworked in a parallel PR, and a
     // barrier that silently stops finding its own entry point reports green on an untested journey —
     // which is precisely what the first run of this journey did.
+    //
+    // WATCH THE TRENDING CALLS FROM HERE, not from after goBack(). Measured on production
+    // 2026-09-02, every RPC of one session logged in order: the AF-carrying top_cities_by_deal_ar
+    // fires DURING the round, in the same breath as the committed search — the Filter home is still
+    // mounted, so the moment the answer lands its reconciled query re-derives the Trending pool.
+    // Coming back then focuses the city field on a pool key that is ALREADY in locations.ts's
+    // CITY_FIELD_POOLS, so no second, byte-identical request is made, and correctly so. Marking the
+    // window after goBack() asserted "a cache miss happened", which is not a product property; the
+    // product property is that the pool the user is shown was computed WITH the committed answer.
+    const beforeTrending = cityCalls.length;
     await page.waitForSelector('[data-testid="results-narrow"]', { timeout: 30000 });
     await page.click('[data-testid="results-narrow"]');
     await page.waitForSelector('[data-testid="af-card"]', { timeout: 20000 });
@@ -437,7 +447,6 @@ async function runAfReentryJourney(j: {
       !!base && !!committed && committed.total < base.total, `base=${base?.total} committed=${committed?.total}`);
 
     // ── back to the Filter screen, re-open Trending, search again ───────────────────────────────
-    const before = cityCalls.length;
     await page.goBack({ waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(4000);
     await page.fill('[data-testid="city-input"]', '');           // clearing re-opens the Trending Top-6
@@ -447,16 +456,19 @@ async function runAfReentryJourney(j: {
     check(`${name}: Trending re-rendered on the way back`, rows.length > 0,
       rows.map((r) => `${r.label} ${r.count}`).join(' · ') || '(none)');
     // R14.1.2: Trending is the location breakdown of the EXACT current eligible set — which now
-    // includes the committed Advanced Filter answer.
-    // A committed answer CHANGES the pool's narrowing signature, so a fresh top_cities_by_deal_ar
-    // must fire on the way back. No new call at all is therefore a failure in its own right, not a
-    // harness gap: it means the screen still believes it is looking at the pre-AF filter state.
-    const trendingCall = cityCalls.slice(before).pop() ?? null;
+    // includes the committed Advanced Filter answer. So the MOST RECENT city-pool request made
+    // since the answer was committed must carry it: that request is the one whose numbers the rows
+    // above are rendering, whether it was served fresh or from the in-session pool cache. Zero
+    // requests since the commit IS a failure — it would mean the pool the user is looking at was
+    // computed before the answer existed, which is exactly the defect (pre-fix, every call in the
+    // window carried af={} while the committed search carried p_is_new_construction, and this check
+    // was RED).
+    const trendingCall = cityCalls.slice(beforeTrending).pop() ?? null;
     check(`${name}: the Trending request carries the committed Advanced Filter answer`,
       !!trendingCall && JSON.stringify(afOf(trendingCall.body)) === JSON.stringify(committedAf),
       trendingCall
         ? `trending af=${JSON.stringify(afOf(trendingCall.body))} committed af=${JSON.stringify(committedAf)}`
-        : `no fresh Trending request fired at all — the pool signature never learned about the AF answer`);
+        : `no Trending request at all since the answer was committed — the pool predates the answer`);
 
     const advertised = rows.find((r) => r.label === city)?.count ?? null;
     await tap(city).catch(async () => { await page.fill('[data-testid="city-input"]', city); await tap(city); });
