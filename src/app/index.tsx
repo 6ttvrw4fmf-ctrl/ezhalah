@@ -19,7 +19,7 @@ import { buildAfSummary, grouped, type SearchQuery } from '@/data/search';
 import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { AF_ALL_QUESTIONS } from '@/data/advancedFilters';
-import { reconcileCommittedAf, withoutFacet } from '@/lib/afCarry';
+import { reconcileCommittedAf, withoutFacet, AF_PREDICATE_FIELDS } from '@/lib/afCarry';
 import { isScopeQuestionId } from '@/lib/afPlan';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -589,9 +589,12 @@ export default function Home() {
   const districtNarrowingSig = JSON.stringify([query.type, query.typeGroups, query.types, query.detail,
     query.contextBeds, query.contextBedsList, query.contextSize, query.priceInput, query.priceBand,
     query.priceMin, query.priceMax, query.priceMinRent, query.priceMaxRent, query.areaMin, query.areaMax,
-    query.amenities, query.bathMin, query.furnishedPref, query.streetWidthMin, query.directions,
-    query.ratingMin, query.reviewsMin, query.unitSubtypes, query.ageMin, query.ageMax,
-    query.isNewConstruction]);
+    // The Advanced-Filter half is ITERATED from the one list, never re-typed here. Hand-listing the
+    // 11 fields meant a 12th AF predicate would silently stop invalidating these live counts — the
+    // exact "advertised count disagrees with the delivered result set" class this signature exists
+    // to close, re-opened by omission. AF_PREDICATE_FIELDS is pinned against the real RPC builder by
+    // verify-af-survives-filter-reentry.ts, so one list stays honest for both.
+    ...AF_PREDICATE_FIELDS.map((f) => query[f])]);
   const hasDistrictNarrowing = useMemo(
     () => (JSON.parse(districtNarrowingSig) as unknown[]).some((v) =>
       Array.isArray(v) ? v.length > 0 : v != null && v !== ''),

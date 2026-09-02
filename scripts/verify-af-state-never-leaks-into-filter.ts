@@ -42,6 +42,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sanitizeForFilterRestore, hasActiveFilters, AF_PREDICATE_FIELDS } from '../src/lib/searchDefaults.ts';
+import { certifiedFacets, withoutFacet } from '../src/lib/afCarry.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -121,7 +122,11 @@ assert(read('src/data/search.ts').includes('afFacets?:'), 'afFacets is a declare
 // leak above was, only reached down a different path.
 const indexTsx = read('src/app/index.tsx');
 assert(/query\.afFacets/.test(indexTsx), 'the Filter screen renders the carried facets');
-assert(/withoutFacet\(/.test(indexTsx), 'the Filter screen can REMOVE a carried facet (withoutFacet)');
+// The «×» must be wired to withoutFacet on the RECONCILED list — a bare `/withoutFacet\(/` would
+// have been satisfied by the identifier appearing anywhere on the screen, including an import it no
+// longer calls. Asserted as a code SHAPE here (JSX cannot be executed from Node) and EXECUTED below.
+assert(/onPress=\{\(\) => setQuery\(\(\) => withoutFacet\(query, i, AF_ALL_QUESTIONS\)\)\}/.test(indexTsx),
+  'the chip «×» commits withoutFacet() on the reconciled query (not the raw store list)');
 assert(/testID=\{`filter-af-chip-/.test(indexTsx), 'each carried facet gets its own removable chip (testID: filter-af-chip-N)');
 // «مسح الكل» is the other half of "clearable": it is only rendered when hasActiveFilters() is true,
 // so an AF-only narrowing must count as an active filter or the user gets chips with no reset.
@@ -133,7 +138,28 @@ assert(hasActiveFilters({ ...AF_LOADED, afFacets: [{ id: 'property_age', keys: [
 // the new cohort never certified deletes every row that did not state the attribute — UNKNOWN
 // becoming No, which is worse than the bug being fixed.
 assert(/reconcileCommittedAf\(/.test(indexTsx), 'the Filter screen reconciles the carry against the CURRENT cohort');
-assert(/cohortAllows\(/.test(read('src/lib/afCarry.ts')), 'the reconciliation gate is cohortAllows(), the same gate that decided the question could be asked');
+// EXECUTED, not grepped. This was `/cohortAllows\(/.test(read('src/lib/afCarry.ts'))`, and afCarry.ts
+// carries a COMMENT containing that call — deleting both the import and the only call while leaving
+// the comment kept this barrier green on a completely gutted gate. «A comment is not a code path» is
+// a permanent rule in this repo, and a barrier rewritten on the grounds that its predecessor was «a
+// weak assertion by construction» is the last place it may be broken. certifiedFacets is pure and
+// exported, so the gate is exercised directly: «rating» is Gathern/Monthly-only and is certified for
+// no Commercial-Rent-Annual cohort, so it must be refused there and kept where it IS certified.
+const ratingFacet = [{ id: 'rating', keys: ['9.0'], labels: ['٩.٠+'] }];
+const SHOP_SCOPE: SearchQuery = { ...AF_LOADED, types: ['Shop'], typeGroups: ['Retail & Workspace'] };
+const APT_MONTHLY: SearchQuery = { ...AF_LOADED, category: 'Residential', types: ['Apartment'],
+  typeGroups: ['Apartments & Co-living'], rentPeriod: 'monthly' };
+assert(certifiedFacets(SHOP_SCOPE, ratingFacet).length === 0,
+  'certifiedFacets() REFUSES an answer the current cohort never certified (executed, not grepped)');
+assert(certifiedFacets(APT_MONTHLY, ratingFacet).length === 1,
+  '…and keeps the same answer on the cohort that DID certify it — the gate narrows, it is not a blanket drop');
+// The other half of «visible AND removable»: clearing the last chip must kill its predicate too, or
+// the carry parks exactly the invisible filter this file's (a) case measures.
+const oneChip: SearchQuery = { ...SHOP_SCOPE, isNewConstruction: true,
+  afFacets: [{ id: 'property_age', keys: ['new'], labels: ['جديد'] }] };
+const cleared = withoutFacet(oneChip, 0, [{ id: 'property_age', apply: (q) => q }]);
+assert(cleared.afFacets?.length === 0 && cleared.isNewConstruction === undefined,
+  'clearing the LAST chip removes its predicate as well as its control (executed withoutFacet)');
 
 // ── 2. direction is not re-asked once committed ──────────────────────────────────────────────────
 const advanced = read('src/data/advancedFilters.ts');

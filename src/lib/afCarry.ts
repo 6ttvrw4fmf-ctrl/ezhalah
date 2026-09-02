@@ -20,7 +20,7 @@
 // THIS MODULE IS PURE (no ./remote, no React) so a barrier can EXECUTE it instead of grepping for
 // it — the same reason afCohorts/afPlan/afRanking were extracted.
 import type { SearchQuery } from '@/data/search';
-import { cohortAllows } from './afCohorts.ts';
+import { cohortAllows, certifiedAmenityKeys } from './afCohorts.ts';
 import { isScopeQuestionId } from './afPlan.ts';
 import { AF_PREDICATE_FIELDS } from './searchDefaults.ts';
 
@@ -49,7 +49,41 @@ type Applier = { id: string; apply: (q: SearchQuery, keys: string[]) => SearchQu
  * counted and what is on screen are all derived from this one call, so they cannot disagree.
  */
 export function certifiedFacets(q: SearchQuery, facets: readonly CommittedFacet[]): CommittedFacet[] {
-  return facets.filter((f) => isScopeQuestionId(f.id) || cohortAllows(q, f.id));
+  return facets
+    .filter((f) => isScopeQuestionId(f.id) || cohortAllows(q, f.id))
+    .map((f) => (f.id === AMENITY_TOKEN_QUESTION_ID ? certifiedAmenityFacet(q, f) : f))
+    .filter((f): f is CommittedFacet => f !== null);
+}
+
+/**
+ * The «amenities» question is the ONE question whose certification is per-ANSWER, not per-question.
+ *
+ * cohortAllows(q,'amenities') answers "may this cohort be asked about amenities at all"; it does not
+ * answer "is THIS token certified here". Production already draws that finer line — afCertify.ts
+ * step 4 runs partitionRequestedAmenities() over chat-requested tokens for exactly this reason: a
+ * `car_entrance` committed on فيلا must go when the scope stops being pure-Villa, even though the
+ * amenities question itself is still certified for شقة. Without this the carry replayed it, and the
+ * shared predicate is strict-NULL-excluding, so every Apartment row that never stated car_entrance
+ * was deleted — UNKNOWN turned into No, which is the failure this whole module refuses.
+ *
+ * Only this question: certifiedAmenityKeys() is the token authority for the amenities question's own
+ * option list, and «rnpl» is deliberately NOT in it. rnpl writes an amenity token too, but it has a
+ * 1:1 question-level gate (cohortAllows(q,'rnpl')) which IS its per-token gate — it has exactly one
+ * token — so running it through this list would drop a certified answer and WIDEN the search. The
+ * pair is pinned by verify-af-survives-filter-reentry.ts, which executes every question's apply()
+ * and fails if a third one learns to write `amenities`.
+ *
+ * A chip and its predicate always die together: if no token survives the facet goes, and if the
+ * labels are not index-parallel to the keys (so the chip cannot be split honestly) the whole facet
+ * goes rather than leave a control that overstates what is actually being filtered.
+ */
+const AMENITY_TOKEN_QUESTION_ID = 'amenities';
+function certifiedAmenityFacet(q: SearchQuery, f: CommittedFacet): CommittedFacet | null {
+  const allowed = new Set(certifiedAmenityKeys(q));
+  const keep = f.keys.map((_, i) => i).filter((i) => allowed.has(String(f.keys[i] ?? '').trim().toLowerCase()));
+  if (keep.length === f.keys.length) return f;
+  if (!keep.length || f.keys.length !== f.labels.length) return null;
+  return { ...f, keys: keep.map((i) => f.keys[i]), labels: keep.map((i) => f.labels[i]) };
 }
 
 /**
@@ -61,13 +95,22 @@ export function certifiedFacets(q: SearchQuery, facets: readonly CommittedFacet[
  * dropped and quietly widen the search. That is byte-for-byte the rebuild removeGuidedFacet already
  * performs in agent.tsx, so removing a chip on either screen means the same thing.
  *
- * A query with no facets is returned UNTOUCHED (identity), so nothing in the app changes shape until
- * an Advanced Filter round has actually committed something.
+ * A query that NEVER HAD an Advanced Filter round is returned UNTOUCHED (identity), so a plain
+ * Normal-Filter search is never forced through a strip that could disturb it.
+ *
+ * "Never had one" is `q.afFacets` being ABSENT — not being empty. The distinction is the whole
+ * defect: clearing the LAST chip leaves `afFacets: []`, and an `if (!facets.length) return q` shortcut
+ * skipped the branch where stripCommittedAf() runs, so the cleared predicate stayed live with no
+ * control left on screen to see or remove it (measured: `{ afFacets: [], isNewConstruction: true }`
+ * still sending p_is_new_construction, and surviving a Trending tap). That is verbatim the
+ * invisible-filter P1 sanitizeForFilterRestore exists to prevent, reached through the very chip row
+ * this module added. Removing an INTERMEDIATE chip always worked; only the transition to zero failed,
+ * which is exactly why every barrier stayed green. An empty array now means "had answers, has none
+ * now" and takes the strip — one predicate-clearing path for the first chip and the last.
  */
 export function reconcileCommittedAf(q: SearchQuery, questions: readonly Applier[]): SearchQuery {
-  const facets = q.afFacets ?? [];
-  if (!facets.length) return q;
-  const kept = certifiedFacets(q, facets);
+  if (!q.afFacets) return q;
+  const kept = certifiedFacets(q, q.afFacets);
   const out: SearchQuery = { ...stripCommittedAf(q), afFacets: kept };
   return kept.reduce((acc, f) => {
     const question = questions.find((x) => x.id === f.id);
@@ -96,7 +139,13 @@ export function stripCommittedAf(q: SearchQuery): SearchQuery {
   return out;
 }
 
-/** Drop one committed facet by index — the Filter screen's chip «×», same semantics as the agent's pills. */
+/**
+ * Drop one committed facet by index — the Filter screen's chip «×», same semantics as the agent's pills.
+ *
+ * Always hands reconcileCommittedAf an ARRAY, empty included: an empty one is what tells it "this
+ * query had answers and has none now", so removing the last chip strips its predicate exactly the
+ * way removing an intermediate one does.
+ */
 export function withoutFacet(q: SearchQuery, index: number, questions: readonly Applier[]): SearchQuery {
   const facets = q.afFacets ?? [];
   return reconcileCommittedAf({ ...q, afFacets: facets.filter((_, i) => i !== index) }, questions);

@@ -32,8 +32,8 @@ import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { liftSymbols } from './lib/liftSymbols.ts';
 import { sanitizeForFilterRestore, AF_PREDICATE_FIELDS } from '../src/lib/searchDefaults.ts';
-import { reconcileCommittedAf, certifiedFacets, stripCommittedAf } from '../src/lib/afCarry.ts';
-import { COHORT_QUESTIONS } from '../src/lib/afCohorts.ts';
+import { reconcileCommittedAf, certifiedFacets, stripCommittedAf, withoutFacet } from '../src/lib/afCarry.ts';
+import { COHORT_QUESTIONS, certifiedAmenityKeys, cohortAllows } from '../src/lib/afCohorts.ts';
 import { CLEAN_MACRO, groupsOf } from '../src/data/propertyTypes.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 
@@ -92,7 +92,31 @@ const LOADED: SearchQuery = {
   streetWidthMin: 20, directions: ['شمال', 'غرب'],
 };
 const loadedParams = rpcAdvancedFilterParams(LOADED);
-assert(Object.keys(loadedParams).length === 11, `every AF predicate reaches the RPC (${Object.keys(loadedParams).length} params)`);
+// THE SET IS DERIVED FROM THE BUILDER, NOT COUNTED OFF A FIXTURE. This used to be
+// `Object.keys(loadedParams).length === 11` over the hand-written LOADED above, which only fires if
+// whoever adds a 12th predicate also remembers to add it to that fixture — the "remembering" this
+// repo's rules exist to delete. Proven blind: adding poolMin → p_pool_min to remote.ts and search.ts
+// and leaving AF_PREDICATE_FIELDS alone kept BOTH barriers 100% green, while in production that
+// field is dropped at the sanitizer's allowlist AND left stale by stripCommittedAf.
+//
+// rpcAdvancedFilterParams reads exactly one SearchQuery field per predicate it can send, so the set
+// of fields it TOUCHES is the AF surface. A recording Proxy reports that set from the real builder
+// at run time; a new predicate therefore enters this assertion the moment remote.ts learns to send
+// it, with nothing to update by hand.
+const touched = new Set<string>();
+rpcAdvancedFilterParams(new Proxy({ ...LOADED } as Record<string, unknown>, {
+  get(t, k) { if (typeof k === 'string') touched.add(k); return t[k]; },
+}) as unknown as SearchQuery);
+const listed = new Set<string>(AF_PREDICATE_FIELDS);
+const unlisted = [...touched].filter((k) => !listed.has(k));
+const stale = [...listed].filter((f) => !touched.has(f));
+assert(touched.size > 0, `the recording probe actually reached the real builder (${touched.size} fields read)`);
+assert(unlisted.length === 0,
+  `AF_PREDICATE_FIELDS covers EVERY field rpcAdvancedFilterParams reads — unlisted: [${unlisted.join(', ')}]`);
+assert(stale.length === 0,
+  `…and lists nothing the builder no longer sends — stale: [${stale.join(', ')}]`);
+assert(Object.keys(loadedParams).length === AF_PREDICATE_FIELDS.length,
+  `every listed AF predicate reaches the RPC (${Object.keys(loadedParams).length} params for ${AF_PREDICATE_FIELDS.length} fields)`);
 assert(same(rpcAdvancedFilterParams(stripCommittedAf(LOADED)), {}),
   'stripCommittedAf() removes EVERY field rpcAdvancedFilterParams can send — no AF predicate outlives the strip');
 // furnishedPref:false is a REAL answer (confirmed unfurnished). A strip/carry that only handled
@@ -226,6 +250,12 @@ assert(/const \{ query: storeQuery,/.test(indexTsx),
   'the raw store value is renamed, so a consumer cannot reach the un-reconciled query by accident');
 assert(/rpcAllNarrowingParams\(query\)/.test(indexTsx), 'the Trending city counts read the reconciled query');
 assert(/const districtNarrowingSig = JSON\.stringify\(\[query\./.test(indexTsx), 'the district live counts read the reconciled query');
+// …and they must read ALL of it. The AF half of that signature used to be 11 hand-typed `query.x`
+// entries, so a 12th predicate would silently stop invalidating the cached district counts — the
+// «advertised count disagrees with the delivered set» class this screen keeps closing, re-opened by
+// omission. Iterating the one list is what makes the fix above load-bearing for every future field.
+assert(/districtNarrowingSig[\s\S]{0,900}\.\.\.AF_PREDICATE_FIELDS\.map\(\(f\) => query\[f\]\)/.test(indexTsx),
+  'the district signature ITERATES AF_PREDICATE_FIELDS instead of re-typing the AF fields');
 assert(/const buildFilterBaseQuery[\s\S]{0,400}\.\.\.query,/.test(indexTsx), '«بحث» is built from the reconciled query');
 // rpcAllNarrowingParams is what turns that object into the Trending request; it must keep spreading
 // the AF half, or the reconciliation above would be feeding a builder that throws the answers away.
@@ -246,6 +276,127 @@ assert(/afCarryRef\.current = null;/.test(agentTsx),
   'a new search clears the interview carry — a stale one would outrank the receipt describing THIS search');
 assert(/if \(!afCarryRef\.current\?\.facets\.length && inboundAf\.length\)/.test(agentTsx),
   'a Filter search arriving WITH committed answers seeds the round from them (so they are not re-asked, lost from the pills, or unremovable)');
+
+console.log('\n── 9. REMOVING A CHIP REALLY REMOVES ITS PREDICATE — the LAST one included ──────');
+// withoutFacet() is the entire legal basis for the carry: the reason a carried predicate is allowed
+// past sanitizeForFilterRestore's allowlist at all is that it is VISIBLE and REMOVABLE. It had zero
+// executed coverage — the only assertion anywhere was that the identifier `withoutFacet(` appears in
+// index.tsx, which stayed green when the index arithmetic was mutated to delete somebody else's chip.
+// It is pure and exported, so it is EXECUTED here, on every arity that matters.
+const ageFacet = { id: 'property_age', keys: ['new'], labels: ['جديد'] };
+const rnplFacet = { id: 'rnpl', keys: ['rnpl'], labels: ['أقساط'] };
+const rnplQ = ADVANCED.find((x) => x.id === 'rnpl')!;
+// A cohort that certifies BOTH, so neither chip can be dropped for a cohort reason mid-test.
+const TWO_SCOPE = certifiedScopeFor('rnpl')!;
+assert(certifiedFacets(TWO_SCOPE, [ageFacet, rnplFacet]).length === 2,
+  'the two-chip fixture is certified for both answers (so any drop below is the removal, not the cohort)');
+const twoUp = reconcileCommittedAf(
+  { ...rnplQ.apply(ageQ.apply(TWO_SCOPE, ['new']), ['rnpl']), afFacets: [ageFacet, rnplFacet] }, ALL);
+const twoParams = rpcAdvancedFilterParams(twoUp);
+assert(Object.keys(twoParams).length === 2, `both answers are live before any removal (${JSON.stringify(twoParams)})`);
+
+// (a) REMOVE THE FIRST OF TWO — the one that already worked. Kept so a fix for (b) that broke this
+//     cannot pass: the two must behave identically, which is the whole point.
+const afterFirst = withoutFacet(twoUp, 0, ALL);
+assert(afterFirst.afFacets?.length === 1 && afterFirst.afFacets[0].id === 'rnpl',
+  'removing an intermediate chip leaves exactly the OTHER chip (index arithmetic removes the tapped one)');
+assert(afterFirst.isNewConstruction === undefined, 'and the removed answer\'s predicate is gone');
+assert(same(rpcAdvancedFilterParams(afterFirst), rpcAdvancedFilterParams(rnplQ.apply(TWO_SCOPE, ['rnpl']))),
+  'while the surviving answer still sends exactly its own predicate');
+
+// (b) REMOVE THE LAST CHIP — the transition to ZERO facets. This is the case that was broken:
+//     reconcileCommittedAf's `if (!facets.length) return q` shortcut skipped the branch that runs
+//     stripCommittedAf, so the store kept { afFacets: [], isNewConstruction: true } — an ACTIVE
+//     predicate with no chip left to see or clear it, verbatim the invisible-filter P1 the sanitizer
+//     exists to prevent, and it survived a Trending tap. Every previous barrier was green because
+//     none of them ever removed the last chip.
+const afterLast = withoutFacet(afterFirst, 0, ALL);
+assert(afterLast.afFacets?.length === 0, 'removing the last chip leaves no chip on screen');
+assert(same(rpcAdvancedFilterParams(afterLast), {}),
+  `…and NO predicate either — the cleared answer really dies (sent: ${JSON.stringify(rpcAdvancedFilterParams(afterLast))})`);
+for (const f of AF_PREDICATE_FIELDS) {
+  if ((afterLast as Record<string, unknown>)[f] !== undefined) assert(false, `"${f}" is cleared with the last chip`);
+}
+assert(true, 'every AF_PREDICATE_FIELD is cleared when the last chip goes');
+// …and it stays dead across the store round-trip a Trending tap performs.
+assert(same(rpcAdvancedFilterParams(reconcileCommittedAf({ ...sanitizeForFilterRestore(afterLast), location: 'جدة' }, ALL)), {}),
+  'the cleared predicate does not come back through a Trending tap');
+// One-chip case directly, not only via the two-chip chain.
+const oneUp = reconcileCommittedAf({ ...ageQ.apply(TWO_SCOPE, ['new']), afFacets: [ageFacet] }, ALL);
+assert(rpcAdvancedFilterParams(oneUp).p_is_new_construction === true, 'a single committed chip is live');
+assert(same(rpcAdvancedFilterParams(withoutFacet(oneUp, 0, ALL)), {}), 'clearing the ONLY chip clears its predicate');
+
+// THE COUNTER-CASE the shortcut existed for: a query that NEVER had an AF round must be returned
+// untouched, so a plain Normal-Filter search is not forced through a strip that could disturb it.
+// "Never had one" is afFacets ABSENT; "had answers, has none now" is afFacets EMPTY. Both directions
+// are asserted, or a fix for (b) could be "delete the shortcut" and quietly rewrite normal searches.
+const normalOnly: SearchQuery = { ...SHOP, priceMin: 500000, contextBeds: 3, areaMin: 120 };
+assert(reconcileCommittedAf(normalOnly, ALL) === normalOnly,
+  'a query that never had an AF round is returned by IDENTITY — the Normal Filter is not rewritten');
+assert(same(reconcileCommittedAf({ ...normalOnly, afFacets: [] }, ALL).priceMin, 500000),
+  'and an emptied-out AF query keeps its Normal Filter state while losing only the AF predicates');
+
+console.log('\n── 10. THE AGENT SHAPE: a chat writes `type`, never `types` ─────────────────────');
+// Every fixture above is the FILTER shape (`types: [...]`). src/data/agent.ts queryFromBackend is the
+// only property-type writer on the free-text chat path and it sets the SINGULAR `q.type`; afPlan's
+// unresolvedScopeTiers() returns [] once effectiveTypes(q) is non-empty, so such a chat never mints a
+// scope facet to rescue it either. Reading only `q.types` at the store boundary stored
+// type=null types=null typeGroups=null, cohortAllows refused the carried answer on that type-less
+// query, and the predicate AND its chip were dropped while «شقة» widened to the whole سكني category.
+// The barrier could not see it because it never constructed this shape.
+for (const q of ADVANCED) {
+  const scope = certifiedScopeFor(q.id);
+  if (!scope) continue;
+  // Same cohort, expressed the way the chat expresses it: one singular type, no plural, no group.
+  const agentShape: SearchQuery = { ...scope, type: scope.types![0], types: null, typeGroups: null };
+  const keys = ANSWER_KEYS[q.id];
+  const facet = [{ id: q.id, keys, labels: ['x'] }];
+  const wanted = rpcAdvancedFilterParams(q.apply(agentShape, keys));
+  const back = reconcileCommittedAf(
+    { ...sanitizeForFilterRestore({ ...q.apply(agentShape, keys), afFacets: facet }), location: 'جدة' }, ALL);
+  assert(same(rpcAdvancedFilterParams(back), wanted), `"${q.id}" survives re-entry from the AGENT shape (\`type\`, not \`types\`)`);
+  assert(same(back.types, scope.types), `"${q.id}" agent-shape re-entry keeps the SPECIFIC type — never widened to its group`);
+  assert(back.afFacets?.length === 1, `"${q.id}" agent-shape re-entry keeps its chip, so the answer is still removable`);
+}
+
+console.log('\n── 11. AMENITIES ARE CERTIFIED PER TOKEN, NOT PER QUESTION ──────────────────────');
+// cohortAllows(q,'amenities') answers "may this cohort be asked about amenities", not "is THIS token
+// certified here". The Filter screen can move the type under a carried answer, and the shared SQL
+// predicate is strict-NULL-excluding — so replaying a Villa-only token onto شقة deletes every
+// Apartment row that never stated it: UNKNOWN turned into No, on a screen that still shows the chip.
+const amenQ = ADVANCED.find((x) => x.id === 'amenities')!;
+const VILLA: SearchQuery = { ...SHOP, deal: 'Buy', category: 'Residential', typeGroups: groupsOf(['Villa']), types: ['Villa'] };
+const APT: SearchQuery = { ...VILLA, typeGroups: groupsOf(['Apartment']), types: ['Apartment'] };
+assert(certifiedAmenityKeys(VILLA).includes('car_entrance'), '«مدخل سيارة» IS certified for فيلا (so committing it there is legitimate)');
+assert(!certifiedAmenityKeys(APT).includes('car_entrance'), '…and is NOT certified for شقة');
+assert(cohortAllows(APT, 'amenities'), '…while the amenities QUESTION itself still is — which is why a question-level gate cannot catch this');
+const villaOnly = [{ id: 'amenities', keys: ['car_entrance'], labels: ['مدخل سيارة'] }];
+const movedType = reconcileCommittedAf({ ...amenQ.apply(VILLA, ['car_entrance']), ...APT, afFacets: villaOnly }, ALL);
+assert(same(rpcAdvancedFilterParams(movedType), {}), 'the Villa-only token is DROPPED when the type moves to شقة, not replayed');
+assert(movedType.afFacets?.length === 0, 'and its chip goes with it — no control without a predicate');
+// A MIXED facet must lose only the uncertified token; dropping the certified one too would widen.
+const mixed = [{ id: 'amenities', keys: ['elevator', 'car_entrance'], labels: ['مصعد', 'مدخل سيارة'] }];
+const split = reconcileCommittedAf({ ...amenQ.apply(VILLA, ['elevator', 'car_entrance']), ...APT, afFacets: mixed }, ALL);
+assert(same(split.amenities, ['elevator']), 'a mixed answer keeps the token شقة DOES certify — the carry narrows, never widens');
+assert(same(split.afFacets?.[0]?.labels, ['مصعد']), 'and the chip is re-labelled to exactly what is still being filtered');
+// The cohort that certified it must be untouched: a blanket drop would be a different bug in disguise.
+assert(same(reconcileCommittedAf({ ...amenQ.apply(VILLA, ['car_entrance']), afFacets: villaOnly }, ALL).amenities, ['car_entrance']),
+  'the same answer on فيلا itself still survives — only the token the NEW cohort refuses is removed');
+// DRIFT GUARD for the "only the amenities question is token-filtered" decision. rnpl writes an
+// amenity token too but is deliberately NOT run through certifiedAmenityKeys(): «rnpl» is not in that
+// list, so filtering it would drop a certified answer and WIDEN. Its own 1:1 question gate is its
+// per-token gate. A THIRD question learning to write `amenities` must force that decision again,
+// so the writers are discovered by EXECUTING every apply(), never assumed.
+const amenityWriters = ADVANCED.filter((q) => {
+  const probe: SearchQuery = { ...SHOP };
+  return !same(q.apply(probe, ANSWER_KEYS[q.id]).amenities, probe.amenities);
+}).map((q) => q.id).sort();
+assert(same(amenityWriters, ['amenities', 'rnpl']),
+  `exactly two questions write amenity tokens, and afCarry handles both by name (found: ${amenityWriters.join(', ')})`);
+assert(!certifiedAmenityKeys(certifiedScopeFor('rnpl')!).includes('rnpl'),
+  '«rnpl» is deliberately absent from certifiedAmenityKeys — token-filtering it would drop a certified answer');
+assert(certifiedFacets(certifiedScopeFor('rnpl')!, [rnplFacet]).length === 1,
+  'so an rnpl answer survives the carry on the cohort that certified it');
 
 console.log(failed === 0
   ? '\n✅ verify-af-survives-filter-reentry: all checks passed.'

@@ -193,7 +193,16 @@ export function sanitizeForFilterRestore(raw: SearchQuery): SearchQuery {
   // visible group box"; deriving the group the types already imply SATISFIES that rule, where
   // deleting the type satisfied its letter by widening the search instead. groupsOf() is the same
   // backfill applyScopeAnswer() already performs, for the same reason.
-  const groups = q.typeGroups?.length ? q.typeGroups : groupsOf(q.types ?? []);
+  // …and read the type through effectiveTypes(), not `q.types` alone. The AI-chat path never writes
+  // `q.types`: src/data/agent.ts queryFromBackend is its ONLY property-type writer and it sets the
+  // SINGULAR `q.type` (verified — zero `types:` assignments in agent.ts or agent.tsx). Reading only
+  // the plural meant every guided round started from a free-text chat stored type=null types=null
+  // typeGroups=null — cohortAllows() then refused the carried answer on that type-less query, the
+  // predicate AND its chip were both dropped (so the loss was invisible), and «شقة» widened to the
+  // whole سكني category. That widening is reachable ONLY through the store write this change added,
+  // so it had to be closed here. effectiveTypes() is the existing one-line union of the two fields.
+  const typesIn = effectiveTypes(q);
+  const groups = q.typeGroups?.length ? q.typeGroups : groupsOf(typesIn);
   // THE ADVANCED FILTER RIDES IF AND ONLY IF ITS FACETS RIDE (owner P0 2026-09-01). The facets are
   // what the Filter home renders as removable chips, so a carried predicate always has a control on
   // screen to see and clear it — the rule this whole allowlist exists for, satisfied rather than
@@ -218,7 +227,7 @@ export function sanitizeForFilterRestore(raw: SearchQuery): SearchQuery {
     category: q.category ?? base.category,        // visible: سكني/تجاري
     typeGroups: groups.length ? groups : null,    // visible: group boxes (multi-select)
     // Never restore a type whose group is not also restored — it would be an invisible active filter.
-    types: pruneTypesToGroups(q.types, groups),
+    types: pruneTypesToGroups(typesIn, groups),
     contextBeds: q.contextBeds,                   // visible: bedroom chips
     contextBedsList: q.contextBedsList,
     contextSize: q.contextSize,                   // visible: area context
