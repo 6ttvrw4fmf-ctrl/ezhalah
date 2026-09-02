@@ -141,6 +141,51 @@ check(!isAbsent(1, 0), 'a daily job (expected 1) is never judged on attendance',
 // MUTATION: widening the floor to 0.5 must stop catching the real case this exists for.
 check(!isAbsent(24, 20, 0.5), 'MUTATION: widening the floor to 50% stops catching jobid 17 — the floor is load-bearing', 'the floor is not load-bearing: the predicate ignores it');
 
+// ── 7b. THE ROOT-CAUSE FIX MUST NOT BE SILENTLY REVERTED ──────────────────────────────────────
+// LIMB 5 measured the symptom; 20260902162113 fixed the cause. The cause was NOT top-of-hour
+// congestion — that was the first hypothesis and it was wrong. It was the ':59'/':29' detector
+// sweep overrunning its slot and starving whatever fell due next. Measured over 24h the separation
+// was total: the sweep ran 167-354 s on all 21 hours jobid 17 started, and 362/440/655 s on the
+// three it did not.
+//
+// The LIVE regression guard is LIMB 5 itself — move either job back into a sweep shadow and its
+// attendance drops below the floor within 24h. What THIS section pins is the schedules and the
+// reasoning, so reverting them takes a reviewed diff rather than an accident.
+const FIX_MIGRATION = 'supabase/migrations/20260902162113_stagger_jobs_out_of_detector_sweep_shadow.sql';
+check(
+  existsSync(join(ROOT, FIX_MIGRATION)),
+  `${FIX_MIGRATION} exists`,
+  `${FIX_MIGRATION} is missing — the attendance root-cause fix is unmirrored`,
+);
+const fixCode = codeOf(existsSync(join(ROOT, FIX_MIGRATION)) ? readFileSync(join(ROOT, FIX_MIGRATION), 'utf8') : '');
+check(
+  fixCode.includes("job_id => 17, schedule => '20 * * * *'"),
+  'jobid 17 is moved to :20, clear of both sweep shadows',
+  'jobid 17 is no longer scheduled at :20 — check it has not been moved back into the sweep shadow',
+);
+check(
+  fixCode.includes("job_id => 50, schedule => '22,52 * * * *'"),
+  'jobid 50 is moved to :22/:52, clear of both sweep shadows',
+  'jobid 50 is no longer scheduled at :22,:52 — check it has not been moved back into the sweep shadow',
+);
+// FREQUENCY IS WHAT MUST NOT CHANGE. The constraint was explicit: stagger the schedules, never
+// skip work to make the detector green. Counting the minute-list proves phase moved, cadence did
+// not — 1 run/hour and 2 runs/hour, before and after.
+const slotsPerHour = (minuteField: string) => minuteField.split(',').length;
+check(
+  slotsPerHour('20') === slotsPerHour('0') && slotsPerHour('22,52') === slotsPerHour('2,32'),
+  'the new schedules preserve frequency exactly (1/hour and 2/hour, unchanged)',
+  'the new schedules changed how OFTEN a job runs — that is skipping work, not staggering it',
+);
+// Rescheduling a jobid whose NAME no longer matches would move somebody else's job.
+check(
+  fixCode.includes("jobname = 'refresh_listing_native_location_v1'") &&
+    fixCode.includes("jobname = 'refresh-mon-audit-counts'") &&
+    /raise exception/.test(fixCode),
+  'the reschedule fails closed if a jobid no longer carries its expected name',
+  'the reschedule no longer verifies jobname before altering — it could move a different job',
+);
+
 // ── 8. Wiring. Never string-match package.json — ask the registry ─────────────────────────────
 check(
   npmTestRuns(ROOT, 'verify-cron-attendance-guard'),
