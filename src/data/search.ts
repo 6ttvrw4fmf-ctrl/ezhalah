@@ -757,17 +757,52 @@ function listingPriceValue(price: string): number {
   return num;
 }
 
+// A rent row's ANNUAL value — the unit the «Rent budget (yearly basis)» box and the RPC's
+// price_annual bound both speak. listingPriceString() renders a rent row AT price_annual, except a
+// source-published MONTHLY one, which it divides by 12 for the /mo card line; ×12 puts that back. No
+// period is ever guessed: a row whose source published none never took the ÷12 branch, so its
+// displayed figure already IS price_annual. (owner rule: period = source.)
+function rentAnnualValue(l: Listing): number {
+  const v = listingPriceValue(l.price);
+  return l.rentPeriod === 'monthly' ? v * 12 : v;
+}
+
 // A predicate deciding whether a listing fits the query's budget — or null when there's no usable
 // price filter (broaden). Mirrors interpretPrice's magnitude logic and handles three Buy modes:
 //   • a fixed total ceiling (large Buy figure, or per-m² × a known exact size);
 //   • a per-m² price with NO fixed size → compare each listing by its OWN area (total ÷ area ≤ rate),
 //     which is what lets "villa at SAR 1,000/m²" filter correctly without an entered area;
 //   • Rent → annual ceiling (monthly ×12, or a large figure as-is). (PRD §6.2)
+// …and, under COMBINED شراء+إيجار, a fourth mode: two independent budgets split by the row's own
+// deal, exactly as the RPC splits them. See the block inside.
 function priceFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
   // Explicit price RANGE (filter UI): min only → ≥, max only → ≤, both → between. The bounds are in the
   // SAME unit as the displayed price (Buy total; Rent annual or monthly per the chosen period), so they
   // compare directly. Wins over the legacy band / single ceiling. HARD (enforced in runSearch).
   const lo = numOrNull(q.priceMin), hi = numOrNull(q.priceMax);
+  // COMBINED شراء+إيجار (owner 2026-08-20) carries TWO independent budgets — «Buy budget»
+  // (priceMin/priceMax) and «Rent budget (yearly basis)» (priceMinRent/priceMaxRent) — and the RPC
+  // splits them by the ROW's deal exactly that way (location_search_candidates_ar, p_deal IS NULL
+  // branch: 'بيع' bounded by p_price_min/max on price_total, 'إيجار' by p_price_min_rent/max_rent on
+  // price_annual). This net used to apply the BUY pair to every row, rent included, so a Buy floor of
+  // 500,000 deleted every rent card the server had correctly returned — while the headline count,
+  // which comes from the RPC, still counted them. Split it the same way the server does.
+  // (found 2026-09-02; scripts/verify-combined-deal-budget-split.ts)
+  const rentLo = q.dealCombined ? numOrNull(q.priceMinRent) : null;
+  const rentHi = q.dealCombined ? numOrNull(q.priceMaxRent) : null;
+  if (q.dealCombined && (lo != null || hi != null || rentLo != null || rentHi != null)) {
+    return (l) => {
+      if (l.deal === 'Buy') {
+        return lo == null && hi == null ? true : withinValue(l.price, lo ?? 0, hi ?? Infinity);
+      }
+      if (rentLo == null && rentHi == null) return true;   // empty box = no opinion, never a 0 bound
+      // An unreadable price («Price on request») is NaN, and every NaN comparison is false — so a row
+      // we cannot price is excluded by a STATED budget without needing a guard, and kept by the
+      // early return above when none was stated. Both directions are pinned by the barrier.
+      const annual = rentAnnualValue(l);
+      return annual >= (rentLo ?? 0) && annual <= (rentHi ?? Infinity);
+    };
+  }
   if (lo != null || hi != null) {
     const min = lo ?? 0, max = hi ?? Infinity;
     return (l) => withinValue(l.price, min, max);
@@ -1459,6 +1494,7 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
   // asked — i.e. no other relaxable filter is active. Otherwise fall through to the honest generic
   // fallback below rather than assert a specific cause this check cannot actually verify.
   const hasOtherFilters = !!(q.priceInput || q.priceBand || q.priceMin != null || q.priceMax != null
+    || q.priceMinRent != null || q.priceMaxRent != null   // the combined-mode rent budget narrows too
     || (q.districts && q.districts.length) || q.detail || q.contextBeds || (q.contextBedsList && q.contextBedsList.length)
     || q.contextSize || q.areaMin != null || q.areaMax != null || q.type || (q.types && q.types.length) || effectiveGroups(q).length);
   if (explicitPlace && !hasOtherFilters && countWith({ priceInput: '', priceBand: null, priceMin: null, priceMax: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, type: null, types: null, typeGroups: null }) === 0) {
@@ -1504,7 +1540,11 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
       return t("No matches for that property type here — other types are available. Want me to broaden the type?");
     }
   }
-  if ((q.priceInput || q.priceMin || q.priceMax) && countWith({ priceInput: '', priceMin: null, priceMax: null }) > 0) {
+  // "Remove the price filter" must remove ALL of it. Under dealCombined the budget is TWO pairs, and
+  // clearing only the Buy one leaves the rent half still biting — which would make this probe count
+  // zero and silently decline a relaxation the user could genuinely use. (2026-09-02, same fix.)
+  if ((q.priceInput || q.priceMin || q.priceMax || q.priceMinRent || q.priceMaxRent)
+      && countWith({ priceInput: '', priceMin: null, priceMax: null, priceMinRent: null, priceMaxRent: null }) > 0) {
     return t("No listings in that price range — there are matches outside it. Want me to remove the price filter?");
   }
   if (q.districts?.length && countWith({ districts: undefined }) > 0) {

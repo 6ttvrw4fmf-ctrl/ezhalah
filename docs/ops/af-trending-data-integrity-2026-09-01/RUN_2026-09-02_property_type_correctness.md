@@ -94,6 +94,24 @@ learned them:
 Keeping it would have added a second certification authority at the request boundary — the precise
 antipattern this audit exists to remove, and the one that produced the `property_age` divergence.
 
+## Defect 3 — a Buy floor deleted every rent card the server had correctly returned
+
+PR [#1485](https://github.com/6ttvrw4fmf-ctrl/ezhalah/pull/1485), found in the follow-up pass over the
+findings #1481 recorded but did not fix. Not an AF predicate — a NORMAL-filter one — but the same
+question the owner's brief asks: does the user get what they selected?
+
+Combined شراء+إيجار carries TWO budgets, and the RPC splits them by the row's own deal
+(`location_search_candidates_ar`, `p_deal IS NULL`: 'بيع' → `p_price_min/max` on `price_total`,
+'إيجار' → `p_price_min_rent/max_rent` on `price_annual`). `priceFilter()` applied the **Buy** pair to
+every row, rent included, and never read the rent pair at all. `Buy 500k–2M + Rent 20k–60k` returned
+a correct server set and then deleted every rent card in it. The headline count, which comes from the
+RPC, still counted them — and `hasClientOnlyNarrowing()` never declared this narrower, so the count
+was not suppressed either. Reproduced against the real predicate: three rent rows inside the stated
+rent budget, **zero** returned.
+
+Same shape as Defects 1 and 2: two layers holding different opinions about one concept, with the
+divergence invisible from any single search's results.
+
 ## What the audit confirmed as CORRECT (equally important)
 
 - **AND/OR semantics — all six hold exactly, zero row-level violations.** Multi-amenity is AND (one
@@ -118,6 +136,7 @@ antipattern this audit exists to remove, and the one that produced the `property
 | `verify-af-question-gate-is-one-predicate.ts` | R2.1.1 executed over 93 cells × 9 ids; no question may carry a private gate; a second type→macro map can never grow back; **and `bothDeals` certifies exactly like `dealCombined`** | 6/6 |
 | `verify-af-property-type-differential.ts` | 157/157 certified cohorts, exact ID sets, self-configuring from the live catalog | live |
 | `verify-af-stale-predicate-live.ts` | a real browser type change, asserting the request body | live |
+| `verify-combined-deal-budget-split.ts` | each combined-mode budget binds only its own deal; an empty box is never a 0 bound; single-deal search unchanged. Lifts the REAL predicate, never a copy | 7/7 |
 
 Two existing barriers caught defects in **my own** work on the way in — `verify-af-oracle-soundness`
 rejected an unordered `Range` page in the district reference fetch, and
