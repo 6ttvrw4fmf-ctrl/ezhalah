@@ -8,6 +8,7 @@
 // captured request actually carried. Diffs exact (source_table,listing_id) sets: missing / extra /
 // duplicate, not just counts.
 import { chromium } from 'playwright';
+import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
@@ -226,7 +227,7 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
   };
 
   try {
-    await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await gotoLive(page, `${BASE}/`, { timeout: 60000 });
     await page.waitForTimeout(5000);
     for (const d of deal) await tap(d);
     if (category) await tap(category);
